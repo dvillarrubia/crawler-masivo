@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SEO Crawler</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="/static/app.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+
+<div class="app">
+
+  <!-- ===== BARRA SUPERIOR ===== -->
+  <header class="topbar">
+    <h1 data-tip="Panel de control del rastreador SEO"><span>&#9670;</span> SEO Crawler</h1>
+    <div class="topbar-actions">
+      <template x-if="view === 'url-detail'">
+        <button class="btn btn-sm" @click="backToDetail()" data-tip="Volver al trabajo">&larr; Trabajo</button>
+      </template>
+      <template x-if="view === 'detail'">
+        <button class="btn btn-sm" @click="backToJobs()" data-tip="Volver a la lista de trabajos">&larr; Trabajos</button>
+      </template>
+      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo SEO de un sitio web">+ Nuevo rastreo</button>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- ===== BANNER DE ERROR ===== -->
+    <template x-if="error">
+      <div class="card mb-2" style="border-color:var(--red);color:var(--red);display:flex;align-items:center;justify-content:space-between">
+        <span x-text="error"></span>
+        <button class="btn-icon" @click="error=null">&times;</button>
+      </div>
+    </template>
+
+    <!-- ============================================================ -->
+    <!--                  VISTA: LISTA DE TRABAJOS                    -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'jobs'">
+      <div>
+        <!-- Filtros -->
+        <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
+          <span class="text-dim text-sm" style="margin-right:.25rem" data-tip="Filtra los trabajos por su estado actual">Filtrar:</span>
+          <template x-for="s in ['pending','running','completed','failed','cancelled']">
+            <button class="btn btn-sm"
+              :class="jobsFilter === s ? 'btn-primary' : ''"
+              :data-tip="({
+                pending:   'Trabajos en cola esperando a ser procesados por un worker',
+                running:   'Trabajos que se estan rastreando ahora mismo',
+                completed: 'Trabajos que terminaron correctamente con analisis SEO',
+                failed:    'Trabajos que fallaron por error de red, timeout u otro problema',
+                cancelled: 'Trabajos cancelados manualmente por el usuario'
+              })[s]"
+              @click="filterJobs(s)" x-text="fmt.status(s)"></button>
+          </template>
+          <template x-if="jobsFilter">
+            <button class="btn btn-sm" @click="filterJobs('')" data-tip="Quitar el filtro y mostrar todos los trabajos">Limpiar</button>
+          </template>
+          <span class="text-dim text-sm" style="margin-left:auto" x-text="jobsTotal + ' trabajos'"></span>
+        </div>
+
+        <!-- Cargando -->
+        <template x-if="loading && jobs.length === 0">
+          <div class="loading-overlay"><div class="spinner"></div> Cargando trabajos...</div>
+        </template>
+
+        <!-- Vacio -->
+        <template x-if="!loading && jobs.length === 0">
+          <div class="empty">
+            <div class="empty-icon">&#128269;</div>
+            <h3>No hay trabajos de rastreo</h3>
+            <p class="text-dim">Crea tu primer rastreo para empezar a auditar un sitio web</p>
+            <button class="btn btn-primary mt-2" @click="openCreate()">+ Nuevo rastreo</button>
+          </div>
+        </template>
+
+        <!-- Tabla de trabajos -->
+        <template x-if="jobs.length > 0">
+          <div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-tip="Nombre identificativo del trabajo de rastreo">Nombre</th>
+                    <th data-tip="Estado actual: pendiente, en curso, completado, fallido o cancelado">Estado</th>
+                    <th data-tip="Numero de URLs semilla desde las que empieza el rastreo">Semillas</th>
+                    <th data-tip="URLs rastreadas con exito hasta ahora">Rastreadas</th>
+                    <th data-tip="URLs que dieron error (timeout, DNS, conexion rechazada, etc.)">Fallidas</th>
+                    <th data-tip="Cuando se creo el trabajo">Creado</th>
+                    <th data-tip="Tiempo total desde el inicio hasta la finalizacion del rastreo">Duracion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="j in jobs" :key="j.id">
+                    <tr @click="openJob(j.id)" style="cursor:pointer">
+                      <td>
+                        <div style="font-weight:500" x-text="j.name"></div>
+                        <div class="text-dim text-sm truncate" style="max-width:250px" x-text="j.seeds?.[0] || ''"></div>
+                      </td>
+                      <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
+                      <td x-text="j.seeds?.length || 0"></td>
+                      <td x-text="fmt.num(j.total_urls_crawled)"></td>
+                      <td x-text="fmt.num(j.total_urls_failed)"></td>
+                      <td x-text="fmt.ago(j.created_at)"></td>
+                      <td>
+                        <template x-if="j.started_at && j.completed_at">
+                          <span x-text="fmt.ms(new Date(j.completed_at) - new Date(j.started_at))"></span>
+                        </template>
+                        <template x-if="j.started_at && !j.completed_at">
+                          <span class="text-dim">en curso...</span>
+                        </template>
+                        <template x-if="!j.started_at">
+                          <span class="text-dim">—</span>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Paginacion -->
+            <div class="pagination">
+              <span>Pagina <strong x-text="jobsPage"></strong> de <strong x-text="jobsPages"></strong></span>
+              <div class="pagination-buttons">
+                <button class="btn btn-sm" :disabled="jobsPage <= 1" @click="setJobsPage(jobsPage - 1)">&laquo; Anterior</button>
+                <button class="btn btn-sm" :disabled="jobsPage >= jobsPages" @click="setJobsPage(jobsPage + 1)">Siguiente &raquo;</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+
+    <!-- ============================================================ -->
+    <!--                  VISTA: DETALLE DEL TRABAJO                  -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'detail' && job">
+      <div>
+        <!-- Cabecera -->
+        <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:.5rem">
+          <div>
+            <h2 style="font-size:1.2rem;font-weight:700" x-text="job.name"></h2>
+            <div class="text-dim text-sm flex items-center gap-1 mt-1">
+              <span class="badge" :class="statusColor(job.status)" x-text="fmt.status(job.status)"></span>
+              <span>&middot;</span>
+              <span x-text="'Creado ' + fmt.ago(job.created_at)"></span>
+            </div>
+          </div>
+          <div class="flex gap-1">
+            <template x-if="['pending','running'].includes(job.status)">
+              <button class="btn btn-sm btn-danger" @click="cancelJob()">Cancelar</button>
+            </template>
+            <button class="btn btn-sm" @click="exportCSV()">&#8615; Exportar CSV</button>
+            <button class="btn btn-sm btn-danger" @click="deleteJob()">Eliminar</button>
+          </div>
+        </div>
+
+        <!-- Barra de progreso para trabajos en curso -->
+        <template x-if="progress && ['pending','running'].includes(job.status)">
+          <div class="card mb-2">
+            <div class="flex items-center justify-between text-sm">
+              <span>Rastreo en curso...</span>
+              <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" :style="'width:' + crawledPercent() + '%'"></div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Tarjetas de estadisticas -->
+        <template x-if="stats">
+          <div class="stats-grid">
+            <div class="stat-card" data-tip="Numero total de URLs unicas almacenadas">
+              <div class="stat-value" x-text="fmt.num(stats.total_urls)"></div>
+              <div class="stat-label">URLs totales</div>
+            </div>
+            <div class="stat-card" data-tip="URLs procesadas por el crawler">
+              <div class="stat-value green" x-text="fmt.num(stats.total_urls_crawled)"></div>
+              <div class="stat-label">Procesadas</div>
+            </div>
+            <div class="stat-card" data-tip="URLs con error: timeouts, DNS, conexion rechazada, 5xx">
+              <div class="stat-value red" x-text="fmt.num(stats.total_urls_failed)"></div>
+              <div class="stat-label">Fallidas</div>
+            </div>
+            <div class="stat-card" data-tip="Problemas SEO detectados por el analizador">
+              <div class="stat-value orange"
+                x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0))"></div>
+              <div class="stat-label">Problemas</div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Pestanas -->
+        <div class="tabs">
+          <div class="tab" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')">Resumen</div>
+          <div class="tab" :class="detailTab === 'urls' && 'active'" @click="switchTab('urls')">
+            URLs <span class="count" x-text="urlsTotal || (stats?.total_urls || '')"></span>
+          </div>
+          <div class="tab" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')">
+            Problemas <span class="count" x-text="issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : '') || ''"></span>
+          </div>
+          <div class="tab" :class="detailTab === 'links' && 'active'" @click="switchTab('links')">
+            Enlaces <span class="count" x-text="linksTotal || ''"></span>
+          </div>
+          <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones">
+            Informe SEO
+          </div>
+        </div>
+
+        <!-- ===== PESTANA: RESUMEN ===== -->
+        <template x-if="detailTab === 'overview' && stats">
+          <div class="overview-grid">
+            <div class="card">
+              <div class="card-header"><h2>Codigos de estado</h2></div>
+              <template x-if="stats.urls_by_status_group.length === 0">
+                <div class="text-dim text-sm">Sin datos todavia</div>
+              </template>
+              <div class="bar-chart">
+                <template x-for="s in stats.urls_by_status_group" :key="s.status_group">
+                  <div class="bar-row">
+                    <div class="bar-label" x-text="s.status_group"></div>
+                    <div class="bar-track">
+                      <div class="bar-fill" :style="'width:' + (s.count / maxStatusCount() * 100) + '%;background:' + barColor(s.status_group)"></div>
+                    </div>
+                    <div class="bar-count" x-text="fmt.num(s.count)"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header"><h2>Principales problemas</h2></div>
+              <template x-if="stats.issues_by_type.length === 0">
+                <div class="text-dim text-sm">No se encontraron problemas</div>
+              </template>
+              <div class="bar-chart">
+                <template x-for="i in issuesSorted.slice(0, 10)" :key="i.issue_type + i.severity">
+                  <div class="bar-row">
+                    <div class="bar-label" :title="fmt.issue(i.issue_type)" x-text="fmt.issue(i.issue_type)"></div>
+                    <div class="bar-track">
+                      <div class="bar-fill" :style="'width:' + (i.count / maxIssueCount() * 100) + '%;background:' + issueBarColor(i.severity)"></div>
+                    </div>
+                    <div class="bar-count" x-text="fmt.num(i.count)"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="card" style="grid-column:1/-1">
+              <div class="card-header"><h2>Hosts mas frecuentes</h2></div>
+              <template x-if="stats.top_hosts.length === 0">
+                <div class="text-dim text-sm">Sin datos todavia</div>
+              </template>
+              <div class="bar-chart">
+                <template x-for="h in stats.top_hosts.slice(0, 10)" :key="h.host">
+                  <div class="bar-row">
+                    <div class="bar-label" :title="h.host" x-text="h.host"></div>
+                    <div class="bar-track">
+                      <div class="bar-fill" :style="'width:' + (h.count / (stats.top_hosts[0]?.count || 1) * 100) + '%;background:var(--accent)'"></div>
+                    </div>
+                    <div class="bar-count" x-text="fmt.num(h.count)"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="card" style="grid-column:1/-1">
+              <div class="card-header"><h2>Configuracion</h2></div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;font-size:.85rem">
+                <div><span class="text-dim">Semillas:</span> <span x-text="job.seeds?.join(', ')"></span></div>
+                <div><span class="text-dim">Prof. maxima:</span> <span x-text="job.config?.max_depth"></span></div>
+                <div><span class="text-dim">Max URLs:</span> <span x-text="fmt.num(job.config?.max_urls)"></span></div>
+                <div><span class="text-dim">Concurrencia:</span> <span x-text="job.config?.concurrent_requests"></span></div>
+                <div><span class="text-dim">Por dominio:</span> <span x-text="job.config?.concurrent_requests_per_domain"></span></div>
+                <div><span class="text-dim">Seguir externos:</span> <span x-text="job.config?.follow_external ? 'Si' : 'No'"></span></div>
+                <div><span class="text-dim">Respetar robots.txt:</span> <span x-text="job.config?.respect_robots ? 'Si' : 'No'"></span></div>
+                <div><span class="text-dim">Renderizar JS:</span> <span x-text="job.config?.render_js ? 'Si' : 'No'"></span></div>
+                <div><span class="text-dim">User Agent:</span> <span x-text="job.config?.user_agent"></span></div>
+                <div><span class="text-dim">Iniciado:</span> <span x-text="fmt.date(job.started_at)"></span></div>
+                <div><span class="text-dim">Finalizado:</span> <span x-text="fmt.date(job.completed_at)"></span></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: URLs ===== -->
+        <template x-if="detailTab === 'urls'">
+          <div>
+            <div class="flex gap-1 mb-2" style="flex-wrap:wrap">
+              <select @change="urlFilters.status_group = $el.value; applyUrlFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                <option value="">Todos los estados</option>
+                <option value="2xx">2xx - Exito</option>
+                <option value="3xx">3xx - Redireccion</option>
+                <option value="4xx">4xx - No encontrado</option>
+                <option value="5xx">5xx - Error servidor</option>
+              </select>
+              <select @change="urlFilters.is_internal = $el.value; applyUrlFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                <option value="">Internas / Externas</option>
+                <option value="true">Internas</option>
+                <option value="false">Externas</option>
+              </select>
+              <span class="text-dim text-sm" style="margin-left:auto;align-self:center" x-text="fmt.num(urlsTotal) + ' URLs'"></span>
+            </div>
+
+            <template x-if="loading">
+              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
+            </template>
+
+            <template x-if="!loading && urls.length === 0">
+              <div class="empty"><h3>No se encontraron URLs</h3></div>
+            </template>
+
+            <template x-if="urls.length > 0">
+              <div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th data-tip="Direccion completa de la pagina rastreada">URL</th>
+                        <th data-tip="Codigo de respuesta HTTP (200, 301, 404, 500, etc.)">Estado</th>
+                        <th data-tip="Etiqueta title de la pagina">Titulo</th>
+                        <th data-tip="Numero de palabras visibles en la pagina">Palabras</th>
+                        <th data-tip="Tiempo de respuesta del servidor">Tiempo</th>
+                        <th data-tip="Tamano de la respuesta HTTP">Tamano</th>
+                        <th data-tip="Nivel de profundidad desde la URL semilla">Prof.</th>
+                        <th data-tip="Inlinks: enlaces internos que apuntan a esta URL">In</th>
+                        <th data-tip="Outlinks: enlaces que salen de esta URL">Out</th>
+                        <th data-tip="Problemas SEO detectados en esta URL">Issues</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="u in urls" :key="u.id">
+                        <tr @click="openUrlDetail(u.id)" style="cursor:pointer">
+                          <td style="max-width:350px" :title="u.url">
+                            <div class="truncate" x-text="u.url"></div>
+                          </td>
+                          <td>
+                            <span :class="{'severity-error': u.status_group === '5xx' || u.status_group === '4xx', 'severity-warning': u.status_group === '3xx'}"
+                              x-text="u.status_code || u.status_group || '—'"></span>
+                          </td>
+                          <td style="max-width:200px" :title="u.html_meta?.title || ''">
+                            <div class="truncate" x-text="u.html_meta?.title || '—'"></div>
+                          </td>
+                          <td x-text="fmt.num(u.word_count)"></td>
+                          <td x-text="fmt.ms(u.response_time_ms)"></td>
+                          <td x-text="fmt.bytes(u.content_length)"></td>
+                          <td x-text="u.crawl_depth ?? '—'"></td>
+                          <td x-text="fmt.num(u.inlinks_count)"></td>
+                          <td x-text="fmt.num(u.outlinks_count)"></td>
+                          <td>
+                            <span class="text-dim" x-text="'—'"></span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="pagination">
+                  <span>Pagina <strong x-text="urlsPage"></strong> de <strong x-text="urlsPages"></strong> &middot; <span x-text="fmt.num(urlsTotal)"></span> en total</span>
+                  <div class="pagination-buttons">
+                    <button class="btn btn-sm" :disabled="urlsPage <= 1" @click="setUrlsPage(urlsPage - 1)">&laquo;</button>
+                    <button class="btn btn-sm" :disabled="urlsPage >= urlsPages" @click="setUrlsPage(urlsPage + 1)">&raquo;</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: PROBLEMAS ===== -->
+        <template x-if="detailTab === 'issues'">
+          <div>
+            <div class="flex gap-1 mb-2" style="flex-wrap:wrap">
+              <select @change="issueFilters.severity = $el.value; applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                <option value="">Todas las gravedades</option>
+                <option value="error">Error</option>
+                <option value="warning">Aviso</option>
+                <option value="info">Info</option>
+              </select>
+              <select @change="issueFilters.issue_type = $el.value; applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                <option value="">Todos los tipos</option>
+                <template x-for="t in issueTypes" :key="t">
+                  <option :value="t" x-text="fmt.issue(t)"></option>
+                </template>
+              </select>
+              <span class="text-dim text-sm" style="margin-left:auto;align-self:center" x-text="fmt.num(issuesTotal) + ' problemas'"></span>
+            </div>
+
+            <template x-if="loading">
+              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
+            </template>
+
+            <template x-if="!loading && issues.length === 0">
+              <div class="empty"><h3>No se encontraron problemas</h3></div>
+            </template>
+
+            <template x-if="issues.length > 0">
+              <div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Gravedad</th>
+                        <th>Tipo</th>
+                        <th>URL</th>
+                        <th>Detalles</th>
+                        <th>Detectado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="i in issues" :key="i.id">
+                        <tr>
+                          <td>
+                            <span :class="'severity-' + i.severity" style="font-weight:500;text-transform:uppercase;font-size:.75rem"
+                              x-text="fmt.severity(i.severity)"></span>
+                          </td>
+                          <td style="white-space:nowrap" x-text="fmt.issue(i.issue_type)"></td>
+                          <td style="max-width:350px" :title="i.url || ''">
+                            <div class="truncate" x-text="i.url || '—'"></div>
+                          </td>
+                          <td style="max-width:350px">
+                            <div class="truncate text-sm" :title="JSON.stringify(i.details)"
+                              x-text="i.details ? Object.entries(i.details).map(([k,v]) => k + ': ' + v).join(' | ') : '—'"></div>
+                          </td>
+                          <td class="text-dim" style="white-space:nowrap" x-text="fmt.ago(i.detected_at)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="pagination">
+                  <span>Pagina <strong x-text="issuesPage"></strong> de <strong x-text="issuesPages"></strong></span>
+                  <div class="pagination-buttons">
+                    <button class="btn btn-sm" :disabled="issuesPage <= 1" @click="setIssuesPage(issuesPage - 1)">&laquo;</button>
+                    <button class="btn btn-sm" :disabled="issuesPage >= issuesPages" @click="setIssuesPage(issuesPage + 1)">&raquo;</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: ENLACES ===== -->
+        <template x-if="detailTab === 'links'">
+          <div>
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-dim text-sm" x-text="fmt.num(linksTotal) + ' enlaces'"></span>
+            </div>
+
+            <template x-if="loading">
+              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
+            </template>
+
+            <template x-if="!loading && links.length === 0">
+              <div class="empty"><h3>No se encontraron enlaces</h3></div>
+            </template>
+
+            <template x-if="links.length > 0">
+              <div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>URL Origen</th>
+                        <th>URL Destino</th>
+                        <th>Texto ancla</th>
+                        <th>Posicion</th>
+                        <th>Interno</th>
+                        <th>Follow</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="l in links" :key="l.id">
+                        <tr>
+                          <td style="max-width:300px" :title="l.from_url || ''">
+                            <div class="truncate" x-text="l.from_url || '—'"></div>
+                          </td>
+                          <td style="max-width:300px" :title="l.to_url">
+                            <div class="truncate" x-text="l.to_url"></div>
+                          </td>
+                          <td style="max-width:200px" :title="l.anchor_text || ''">
+                            <div class="truncate" x-text="l.anchor_text || '—'"></div>
+                          </td>
+                          <td x-text="fmt.position(l.link_position)"></td>
+                          <td x-text="l.is_internal ? 'Si' : 'No'"></td>
+                          <td x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="pagination">
+                  <span>Pagina <strong x-text="linksPage"></strong> de <strong x-text="linksPages"></strong></span>
+                  <div class="pagination-buttons">
+                    <button class="btn btn-sm" :disabled="linksPage <= 1" @click="setLinksPage(linksPage - 1)">&laquo;</button>
+                    <button class="btn btn-sm" :disabled="linksPage >= linksPages" @click="setLinksPage(linksPage + 1)">&raquo;</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: INFORME SEO ===== -->
+        <template x-if="detailTab === 'insights'">
+          <div>
+            <!-- Loading -->
+            <template x-if="insightsLoading">
+              <div class="loading-overlay"><div class="spinner"></div> Generando informe SEO...</div>
+            </template>
+
+            <template x-if="!insightsLoading && insights">
+              <div>
+                <!-- Puntuacion global -->
+                <div class="insights-header">
+                  <div class="score-ring-wrap">
+                    <svg class="score-ring" viewBox="0 0 120 120">
+                      <circle cx="60" cy="60" r="52" fill="none" stroke="var(--border)" stroke-width="8"/>
+                      <circle cx="60" cy="60" r="52" fill="none" :stroke="scoreColor(insights.overall_score)" stroke-width="8"
+                        stroke-linecap="round"
+                        :stroke-dasharray="ringDash(insights.overall_score, 52)"
+                        stroke-dashoffset="0"
+                        transform="rotate(-90 60 60)"/>
+                      <text x="60" y="55" text-anchor="middle" fill="var(--text)" font-size="28" font-weight="700" x-text="insights.overall_score"></text>
+                      <text x="60" y="73" text-anchor="middle" fill="var(--text-dim)" font-size="11" x-text="scoreLabel(insights.overall_score)"></text>
+                    </svg>
+                  </div>
+                  <div class="insights-header-text">
+                    <h2>Puntuacion SEO Global</h2>
+                    <p class="text-dim text-sm">Basado en el analisis de 6 categorias SEO del rastreo completado. Puntuacion ponderada: Rastreabilidad 25%, Contenido 25%, Enlaces 20%, Seguridad 15%, Datos Estructurados 10%, i18n 5%.</p>
+                  </div>
+                </div>
+
+                <!-- Categorias -->
+                <div class="insights-categories">
+                  <template x-for="cat in insights.categories" :key="cat.key">
+                    <div class="insight-card" :style="'border-left-color:' + scoreColor(cat.score)">
+                      <!-- Cabecera de categoria -->
+                      <div class="insight-card-header" @click="toggleCategory(cat.key)">
+                        <div class="flex items-center gap-1">
+                          <span class="insight-icon" x-text="cat.icon"></span>
+                          <span class="insight-name" x-text="cat.name"></span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <div class="insight-score-bar">
+                            <div class="insight-score-fill" :style="'width:' + cat.score + '%;background:' + scoreColor(cat.score)"></div>
+                          </div>
+                          <span class="insight-score-num" :style="'color:' + scoreColor(cat.score)" x-text="cat.score"></span>
+                          <span class="insight-toggle" x-text="isCategoryExpanded(cat.key) ? '&#9650;' : '&#9660;'"></span>
+                        </div>
+                      </div>
+
+                      <!-- Cuerpo expandible -->
+                      <div class="insight-card-body" x-show="isCategoryExpanded(cat.key)" x-transition.duration.200ms>
+                        <!-- Metricas -->
+                        <div class="metric-grid">
+                          <!-- Crawlability metrics -->
+                          <template x-if="cat.key === 'crawlability'">
+                            <template x-for="m in [
+                              {l:'URLs internas', v:fmt.num(cat.metrics.total_internal)},
+                              {l:'% respuesta 2xx', v:fmt.pct(cat.metrics.pct_2xx)},
+                              {l:'% indexables', v:fmt.pct(cat.metrics.pct_indexable)},
+                              {l:'% redirecciones', v:fmt.pct(cat.metrics.pct_redirects)},
+                              {l:'Errores 4xx', v:fmt.num(cat.metrics.errors_4xx)},
+                              {l:'Errores 5xx', v:fmt.num(cat.metrics.errors_5xx)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                          <!-- Content metrics -->
+                          <template x-if="cat.key === 'content'">
+                            <template x-for="m in [
+                              {l:'Paginas HTML', v:fmt.num(cat.metrics.total_html)},
+                              {l:'% titulos OK', v:fmt.pct(cat.metrics.pct_title_ok)},
+                              {l:'% descripciones OK', v:fmt.pct(cat.metrics.pct_desc_ok)},
+                              {l:'% H1 OK', v:fmt.pct(cat.metrics.pct_h1_ok)},
+                              {l:'Media palabras', v:fmt.num(cat.metrics.avg_word_count)},
+                              {l:'Contenido delgado', v:fmt.num(cat.metrics.thin_count)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                          <!-- Links metrics -->
+                          <template x-if="cat.key === 'links'">
+                            <template x-for="m in [
+                              {l:'Paginas internas', v:fmt.num(cat.metrics.total_internal_pages)},
+                              {l:'Paginas huerfanas', v:fmt.num(cat.metrics.orphan_count)},
+                              {l:'Media inlinks', v:cat.metrics.avg_inlinks},
+                              {l:'Enlaces nofollow', v:fmt.num(cat.metrics.nofollow_links)},
+                              {l:'Paginas con errores', v:fmt.num(cat.metrics.broken_link_issues)},
+                              {l:'Exceso de enlaces', v:fmt.num(cat.metrics.high_outlinks)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                          <!-- Security metrics -->
+                          <template x-if="cat.key === 'security'">
+                            <template x-for="m in [
+                              {l:'Paginas analizadas', v:fmt.num(cat.metrics.total_checked)},
+                              {l:'% HTTPS', v:fmt.pct(cat.metrics.pct_https)},
+                              {l:'% HSTS', v:fmt.pct(cat.metrics.pct_hsts)},
+                              {l:'% CSP', v:fmt.pct(cat.metrics.pct_csp)},
+                              {l:'% contenido mixto', v:fmt.pct(cat.metrics.pct_mixed)},
+                              {l:'Con contenido mixto', v:fmt.num(cat.metrics.mixed_count)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                          <!-- Structured Data metrics -->
+                          <template x-if="cat.key === 'structured_data'">
+                            <template x-for="m in [
+                              {l:'Paginas HTML', v:fmt.num(cat.metrics.total_html)},
+                              {l:'Con datos estructurados', v:fmt.num(cat.metrics.pages_with_sd)},
+                              {l:'% con SD', v:fmt.pct(cat.metrics.pct_with_sd)},
+                              {l:'Bloques totales', v:fmt.num(cat.metrics.total_sd_blocks)},
+                              {l:'Errores validacion', v:fmt.num(cat.metrics.sd_errors)},
+                              {l:'% errores', v:fmt.pct(cat.metrics.pct_errors)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                          <!-- i18n metrics -->
+                          <template x-if="cat.key === 'i18n'">
+                            <template x-for="m in [
+                              {l:'Etiquetas hreflang', v:fmt.num(cat.metrics.total_hreflang)},
+                              {l:'Idiomas', v:cat.metrics.languages?.join(', ') || '—'},
+                              {l:'% retorno OK', v:fmt.pct(cat.metrics.pct_return_ok)},
+                              {l:'% idioma valido', v:fmt.pct(cat.metrics.pct_lang_valid)},
+                            ]">
+                              <div class="metric-item">
+                                <div class="metric-value" x-text="m.v"></div>
+                                <div class="metric-label" x-text="m.l"></div>
+                              </div>
+                            </template>
+                          </template>
+                        </div>
+
+                        <!-- Recomendaciones -->
+                        <template x-if="cat.recommendations.length > 0">
+                          <div class="recommendations-section">
+                            <h4 class="text-dim text-sm mb-1" style="text-transform:uppercase;letter-spacing:.05em">Recomendaciones</h4>
+                            <template x-for="rec in cat.recommendations" :key="rec.title">
+                              <div class="recommendation">
+                                <div class="recommendation-header">
+                                  <span class="priority-badge" :class="priorityClass(rec.priority)" x-text="priorityLabel(rec.priority)"></span>
+                                  <span class="recommendation-title" x-text="rec.title"></span>
+                                  <span class="recommendation-count" x-text="rec.affected_count + ' URLs'" x-show="rec.affected_count > 0"></span>
+                                </div>
+                                <p class="recommendation-desc" x-text="rec.description"></p>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="cat.recommendations.length === 0">
+                          <p class="text-dim text-sm" style="padding:.5rem 0">Sin problemas detectados en esta categoria.</p>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+      </div>
+    </template>
+
+
+    <!-- ============================================================ -->
+    <!--            VISTA: DETALLE COMPLETO DE UNA URL                -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'url-detail'">
+      <div>
+        <!-- Cargando -->
+        <template x-if="urlDetailLoading">
+          <div class="loading-overlay"><div class="spinner"></div> Cargando datos de la URL...</div>
+        </template>
+
+        <template x-if="!urlDetailLoading && urlDetail">
+          <div>
+            <!-- Cabecera de URL -->
+            <div class="url-header-card card mb-2">
+              <div class="flex items-center justify-between" style="gap:.75rem;flex-wrap:wrap">
+                <div style="flex:1;min-width:0">
+                  <div class="flex items-center gap-1 mb-1">
+                    <span class="badge" :class="{
+                      'badge-completed': urlDetail.status_group === '2xx',
+                      'badge-running': urlDetail.status_group === '3xx',
+                      'badge-cancelled': urlDetail.status_group === '4xx',
+                      'badge-failed': urlDetail.status_group === '5xx'
+                    }" x-text="(urlDetail.status_code || '—') + ' ' + (urlDetail.status_text || '')"></span>
+                    <span class="badge" :class="urlDetail.indexable ? 'badge-completed' : 'badge-cancelled'"
+                      x-text="urlDetail.indexability_status || (urlDetail.indexable ? 'Indexable' : 'No indexable')"></span>
+                    <template x-if="urlDetail.is_internal !== null">
+                      <span class="badge badge-pending" x-text="urlDetail.is_internal ? 'Interna' : 'Externa'"></span>
+                    </template>
+                  </div>
+                  <div class="url-full-display" x-text="urlDetail.url" :title="urlDetail.url"></div>
+                </div>
+                <button class="btn btn-sm" @click="backToDetail()">&larr; Volver</button>
+              </div>
+            </div>
+
+            <!-- Mini stats de la URL -->
+            <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" x-text="fmt.ms(urlDetail.response_time_ms)"></div>
+                <div class="stat-label">Tiempo</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" x-text="fmt.bytes(urlDetail.transfer_size || urlDetail.content_length)"></div>
+                <div class="stat-label">Tamano</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" x-text="fmt.num(urlDetail.word_count)"></div>
+                <div class="stat-label">Palabras</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" x-text="fmt.num(urlDetail.inlinks_count)"></div>
+                <div class="stat-label">Inlinks</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" x-text="fmt.num(urlDetail.outlinks_count)"></div>
+                <div class="stat-label">Outlinks</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem" :class="urlDetail.issues?.length > 0 ? 'orange' : 'green'"
+                  x-text="urlDetail.issues?.length || 0"></div>
+                <div class="stat-label">Problemas</div>
+              </div>
+            </div>
+
+            <!-- Pestanas del detalle de URL -->
+            <div class="tabs">
+              <div class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">General</div>
+              <div class="tab" :class="urlDetailTab === 'seo' && 'active'" @click="urlDetailTab = 'seo'">SEO</div>
+              <div class="tab" :class="urlDetailTab === 'content' && 'active'" @click="urlDetailTab = 'content'">
+                Contenido <span class="count" x-text="urlDetail.page_content ? fmt.num(urlDetail.page_content.content_length) : '—'"></span>
+              </div>
+              <div class="tab" :class="urlDetailTab === 'headings' && 'active'" @click="urlDetailTab = 'headings'">
+                Encabezados <span class="count" x-text="urlDetail.headings?.length || 0"></span>
+              </div>
+              <div class="tab" :class="urlDetailTab === 'links' && 'active'" @click="urlDetailTab = 'links'">
+                Enlaces <span class="count" x-text="(urlDetail.inlinks?.length || 0) + (urlDetail.outlinks?.length || 0)"></span>
+              </div>
+              <div class="tab" :class="urlDetailTab === 'resources' && 'active'" @click="urlDetailTab = 'resources'">
+                Recursos <span class="count" x-text="urlDetail.resources?.length || 0"></span>
+              </div>
+              <div class="tab" :class="urlDetailTab === 'issues' && 'active'" @click="urlDetailTab = 'issues'">
+                Problemas <span class="count" x-text="urlDetail.issues?.length || 0"></span>
+              </div>
+              <div class="tab" :class="urlDetailTab === 'security' && 'active'" @click="urlDetailTab = 'security'">Seguridad</div>
+              <div class="tab" :class="urlDetailTab === 'structured' && 'active'" @click="urlDetailTab = 'structured'">
+                Datos estr. <span class="count" x-text="urlDetail.structured_data?.length || 0"></span>
+              </div>
+            </div>
+
+            <!-- ===== TAB: GENERAL ===== -->
+            <template x-if="urlDetailTab === 'general'">
+              <div class="card">
+                <div class="detail-grid">
+                  <div class="detail-row"><span class="detail-label">URL</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.url"></span></div>
+                  <div class="detail-row"><span class="detail-label">Host</span><span class="detail-value" x-text="urlDetail.host || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Path</span><span class="detail-value" x-text="urlDetail.path || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Scheme</span><span class="detail-value" x-text="urlDetail.scheme || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Interna</span><span class="detail-value" x-text="urlDetail.is_internal ? 'Si' : 'No'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Profundidad</span><span class="detail-value" x-text="urlDetail.crawl_depth ?? '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Codigo estado</span><span class="detail-value" x-text="(urlDetail.status_code || '—') + ' ' + (urlDetail.status_text || '')"></span></div>
+                  <div class="detail-row"><span class="detail-label">Grupo estado</span><span class="detail-value" x-text="urlDetail.status_group || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Content-Type</span><span class="detail-value" x-text="urlDetail.content_type || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tamano contenido</span><span class="detail-value" x-text="fmt.bytes(urlDetail.content_length)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tamano transferencia</span><span class="detail-value" x-text="fmt.bytes(urlDetail.transfer_size)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tiempo respuesta</span><span class="detail-value" x-text="fmt.ms(urlDetail.response_time_ms)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Version HTTP</span><span class="detail-value" x-text="urlDetail.http_version || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Es HTML</span><span class="detail-value" x-text="urlDetail.is_html ? 'Si' : 'No'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tipo recurso</span><span class="detail-value" x-text="urlDetail.resource_type || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Indexable</span><span class="detail-value" x-text="urlDetail.indexable ? 'Si' : 'No'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Estado indexabilidad</span><span class="detail-value" x-text="urlDetail.indexability_status || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Longitud URL</span><span class="detail-value" x-text="urlDetail.url_length || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Prof. carpetas</span><span class="detail-value" x-text="urlDetail.folder_depth ?? '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Palabras</span><span class="detail-value" x-text="fmt.num(urlDetail.word_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Ratio texto</span><span class="detail-value" x-text="urlDetail.text_ratio != null ? urlDetail.text_ratio.toFixed(1) + '%' : '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Redireccion a</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.redirect_url || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tipo redireccion</span><span class="detail-value" x-text="urlDetail.redirect_type || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Last-Modified</span><span class="detail-value" x-text="urlDetail.last_modified || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Inlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.inlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Inlinks unicos</span><span class="detail-value" x-text="fmt.num(urlDetail.unique_inlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Outlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.outlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Outlinks externos</span><span class="detail-value" x-text="fmt.num(urlDetail.external_outlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Primera vez</span><span class="detail-value" x-text="fmt.date(urlDetail.first_seen_at)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Ultimo rastreo</span><span class="detail-value" x-text="fmt.date(urlDetail.last_crawled_at)"></span></div>
+                </div>
+              </div>
+            </template>
+
+            <!-- ===== TAB: SEO ===== -->
+            <template x-if="urlDetailTab === 'seo'">
+              <div>
+                <template x-if="!urlDetail.html_meta">
+                  <div class="empty"><h3>Sin metadatos HTML</h3><p class="text-dim">Esta URL no es HTML o no se pudieron extraer los metadatos</p></div>
+                </template>
+
+                <template x-if="urlDetail.html_meta">
+                  <div class="seo-sections">
+                    <!-- Title -->
+                    <div class="card mb-2">
+                      <h3 class="seo-section-title">Title</h3>
+                      <div class="seo-value-box" x-text="urlDetail.html_meta.title || '(vacio)'"></div>
+                      <div class="seo-meta-row mt-1">
+                        <span class="badge badge-pending" x-text="(urlDetail.html_meta.title_len || 0) + ' caracteres'"></span>
+                        <span class="badge badge-pending" x-text="(urlDetail.html_meta.title_pixel_width || 0) + 'px SERP'"></span>
+                        <template x-if="urlDetail.html_meta.title_len > 60">
+                          <span class="badge badge-cancelled">Demasiado largo</span>
+                        </template>
+                        <template x-if="urlDetail.html_meta.title_len && urlDetail.html_meta.title_len < 30">
+                          <span class="badge badge-cancelled">Demasiado corto</span>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Meta Description -->
+                    <div class="card mb-2">
+                      <h3 class="seo-section-title">Meta Description</h3>
+                      <div class="seo-value-box" x-text="urlDetail.html_meta.meta_description || '(vacio)'"></div>
+                      <div class="seo-meta-row mt-1">
+                        <span class="badge badge-pending" x-text="(urlDetail.html_meta.meta_description_len || 0) + ' caracteres'"></span>
+                        <span class="badge badge-pending" x-text="(urlDetail.html_meta.meta_description_pixel_width || 0) + 'px SERP'"></span>
+                      </div>
+                    </div>
+
+                    <!-- Meta Keywords -->
+                    <template x-if="urlDetail.html_meta.meta_keywords">
+                      <div class="card mb-2">
+                        <h3 class="seo-section-title">Meta Keywords</h3>
+                        <div class="seo-value-box" x-text="urlDetail.html_meta.meta_keywords"></div>
+                      </div>
+                    </template>
+
+                    <!-- Directivas -->
+                    <div class="card mb-2">
+                      <h3 class="seo-section-title">Directivas</h3>
+                      <div class="detail-grid" style="grid-template-columns:1fr 1fr">
+                        <div class="detail-row"><span class="detail-label">Meta Robots</span><span class="detail-value" x-text="urlDetail.html_meta.meta_robots || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">X-Robots-Tag</span><span class="detail-value" x-text="urlDetail.html_meta.x_robots_tag || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">Canonical</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.html_meta.canonical_href || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">Canonical (header)</span><span class="detail-value" x-text="urlDetail.html_meta.canonical_header || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">Meta Refresh</span><span class="detail-value" x-text="urlDetail.html_meta.meta_refresh || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">Meta fuera de head</span><span class="detail-value" x-text="urlDetail.html_meta.has_meta_outside_head ? 'Si' : 'No'"></span></div>
+                        <div class="detail-row"><span class="detail-label">rel=next</span><span class="detail-value" x-text="urlDetail.html_meta.rel_next || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">rel=prev</span><span class="detail-value" x-text="urlDetail.html_meta.rel_prev || '—'"></span></div>
+                      </div>
+                    </div>
+
+                    <!-- Open Graph -->
+                    <div class="card mb-2">
+                      <h3 class="seo-section-title">Open Graph</h3>
+                      <div class="detail-grid" style="grid-template-columns:1fr 1fr">
+                        <div class="detail-row"><span class="detail-label">og:title</span><span class="detail-value" x-text="urlDetail.html_meta.og_title || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">og:description</span><span class="detail-value" x-text="urlDetail.html_meta.og_description || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">og:image</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.html_meta.og_image || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">og:url</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.html_meta.og_url || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">og:type</span><span class="detail-value" x-text="urlDetail.html_meta.og_type || '—'"></span></div>
+                      </div>
+                    </div>
+
+                    <!-- Twitter Cards -->
+                    <div class="card mb-2">
+                      <h3 class="seo-section-title">Twitter Cards</h3>
+                      <div class="detail-grid" style="grid-template-columns:1fr 1fr">
+                        <div class="detail-row"><span class="detail-label">twitter:card</span><span class="detail-value" x-text="urlDetail.html_meta.twitter_card || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">twitter:title</span><span class="detail-value" x-text="urlDetail.html_meta.twitter_title || '—'"></span></div>
+                        <div class="detail-row"><span class="detail-label">twitter:description</span><span class="detail-value" x-text="urlDetail.html_meta.twitter_description || '—'"></span></div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: CONTENIDO ===== -->
+            <template x-if="urlDetailTab === 'content'">
+              <div class="card">
+                <template x-if="urlDetail.page_content">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Contenido principal extraido</h3>
+                      <div class="flex items-center gap-1">
+                        <span class="badge badge-pending" x-text="fmt.num(urlDetail.page_content.content_length) + ' caracteres'"></span>
+                        <button class="btn btn-sm" :class="contentViewMode === 'markdown' ? 'btn-primary' : ''"
+                          @click="contentViewMode = contentViewMode === 'markdown' ? 'text' : 'markdown'"
+                          x-text="contentViewMode === 'markdown' ? 'Ver texto plano' : 'Ver Markdown'"></button>
+                      </div>
+                    </div>
+                    <!-- Markdown rendered view -->
+                    <template x-if="contentViewMode === 'markdown' && urlDetail.page_content.content_markdown">
+                      <div class="markdown-body" style="max-height:600px;overflow-y:auto"
+                        x-html="renderMarkdown(urlDetail.page_content.content_markdown)"></div>
+                    </template>
+                    <!-- Plain text fallback -->
+                    <template x-if="contentViewMode !== 'markdown' || !urlDetail.page_content.content_markdown">
+                      <div class="content-preview" style="max-height:600px" x-text="urlDetail.page_content.content_text"></div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.page_content">
+                  <div class="empty">
+                    <h3>Sin contenido</h3>
+                    <p class="text-dim">No se pudo extraer el contenido principal de esta pagina</p>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: ENCABEZADOS ===== -->
+            <template x-if="urlDetailTab === 'headings'">
+              <div class="card">
+                <template x-if="urlDetail.headings && urlDetail.headings.length > 0">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Jerarquia de encabezados</h3>
+                      <span class="text-dim text-sm" x-text="urlDetail.headings.length + ' encabezados'"></span>
+                    </div>
+                    <div class="heading-tree">
+                      <template x-for="h in urlDetail.headings" :key="h.id">
+                        <div class="heading-item" :style="'padding-left:' + headingIndent(h.tag) + 'rem'">
+                          <span class="heading-tag" :style="'color:' + headingColor(h.tag)" x-text="h.tag.toUpperCase()"></span>
+                          <span class="heading-text" x-text="h.text || '(vacio)'"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.headings || urlDetail.headings.length === 0">
+                  <div class="empty"><h3>Sin encabezados</h3></div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: ENLACES ===== -->
+            <template x-if="urlDetailTab === 'links'">
+              <div>
+                <!-- Outlinks -->
+                <div class="card mb-2">
+                  <div class="card-header">
+                    <h2>Outlinks (enlaces salientes)</h2>
+                    <span class="badge badge-pending" x-text="(urlDetail.outlinks?.length || 0) + ' enlaces'"></span>
+                  </div>
+                  <template x-if="urlDetail.outlinks && urlDetail.outlinks.length > 0">
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>URL Destino</th>
+                            <th>Texto ancla</th>
+                            <th>Posicion</th>
+                            <th>Tipo</th>
+                            <th>Follow</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="l in urlDetail.outlinks" :key="l.id">
+                            <tr>
+                              <td style="max-width:350px" :title="l.to_url"><div class="truncate" x-text="l.to_url"></div></td>
+                              <td style="max-width:200px" :title="l.anchor_text || ''"><div class="truncate" x-text="l.anchor_text || '—'"></div></td>
+                              <td x-text="fmt.position(l.link_position)"></td>
+                              <td x-text="l.link_type || '—'"></td>
+                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                  <template x-if="!urlDetail.outlinks || urlDetail.outlinks.length === 0">
+                    <div class="text-dim text-sm" style="padding:.5rem 0">Sin outlinks</div>
+                  </template>
+                </div>
+
+                <!-- Inlinks -->
+                <div class="card">
+                  <div class="card-header">
+                    <h2>Inlinks (enlaces entrantes)</h2>
+                    <span class="badge badge-pending" x-text="(urlDetail.inlinks?.length || 0) + ' enlaces'"></span>
+                  </div>
+                  <template x-if="urlDetail.inlinks && urlDetail.inlinks.length > 0">
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>URL Origen</th>
+                            <th>Texto ancla</th>
+                            <th>Posicion</th>
+                            <th>Tipo</th>
+                            <th>Follow</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="l in urlDetail.inlinks" :key="l.id">
+                            <tr>
+                              <td style="max-width:350px" :title="l.from_url || ''"><div class="truncate" x-text="l.from_url || '—'"></div></td>
+                              <td style="max-width:200px" :title="l.anchor_text || ''"><div class="truncate" x-text="l.anchor_text || '—'"></div></td>
+                              <td x-text="fmt.position(l.link_position)"></td>
+                              <td x-text="l.link_type || '—'"></td>
+                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                  <template x-if="!urlDetail.inlinks || urlDetail.inlinks.length === 0">
+                    <div class="text-dim text-sm" style="padding:.5rem 0">Sin inlinks</div>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- ===== TAB: RECURSOS ===== -->
+            <template x-if="urlDetailTab === 'resources'">
+              <div class="card">
+                <template x-if="urlDetail.resources && urlDetail.resources.length > 0">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Recursos de la pagina</h3>
+                      <span class="text-dim text-sm" x-text="urlDetail.resources.length + ' recursos'"></span>
+                    </div>
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Tipo</th>
+                            <th>URL</th>
+                            <th>Alt</th>
+                            <th>Tamano</th>
+                            <th>Dimensiones</th>
+                            <th>Mixto</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="r in urlDetail.resources" :key="r.id">
+                            <tr>
+                              <td><span class="badge badge-pending" x-text="r.resource_type"></span></td>
+                              <td style="max-width:400px" :title="r.resource_url"><div class="truncate" x-text="r.resource_url"></div></td>
+                              <td style="max-width:150px" :title="r.alt_text || ''"><div class="truncate" x-text="r.alt_text || '—'"></div></td>
+                              <td x-text="fmt.bytes(r.size_bytes)"></td>
+                              <td x-text="r.width && r.height ? r.width + 'x' + r.height : '—'"></td>
+                              <td :class="r.is_mixed_content ? 'severity-error' : ''" x-text="r.is_mixed_content ? 'Si' : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.resources || urlDetail.resources.length === 0">
+                  <div class="empty"><h3>Sin recursos</h3><p class="text-dim">No se encontraron imagenes, CSS, JS u otros recursos en esta pagina</p></div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: PROBLEMAS ===== -->
+            <template x-if="urlDetailTab === 'issues'">
+              <div class="card">
+                <template x-if="urlDetail.issues && urlDetail.issues.length > 0">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Problemas detectados</h3>
+                      <span class="text-dim text-sm" x-text="urlDetail.issues.length + ' problemas'"></span>
+                    </div>
+                    <div class="issues-list">
+                      <template x-for="i in urlDetail.issues" :key="i.id">
+                        <div class="issue-item" :class="'issue-' + i.severity">
+                          <div class="issue-header">
+                            <span :class="'severity-' + i.severity" style="font-weight:600;text-transform:uppercase;font-size:.75rem"
+                              x-text="fmt.severity(i.severity)"></span>
+                            <span style="font-weight:500" x-text="fmt.issue(i.issue_type)"></span>
+                          </div>
+                          <template x-if="i.details">
+                            <div class="issue-details">
+                              <template x-for="[k, v] in Object.entries(i.details)" :key="k">
+                                <span class="issue-detail-item"><span class="text-dim" x-text="k + ':'"></span> <span x-text="v"></span></span>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.issues || urlDetail.issues.length === 0">
+                  <div class="empty">
+                    <div style="font-size:2rem;margin-bottom:.5rem">&#10003;</div>
+                    <h3 style="color:var(--green)">Sin problemas</h3>
+                    <p class="text-dim">No se detectaron problemas SEO en esta pagina</p>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: SEGURIDAD ===== -->
+            <template x-if="urlDetailTab === 'security'">
+              <div class="card">
+                <template x-if="urlDetail.security">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Cabeceras de seguridad</h3>
+                      <template x-if="securityScore()">
+                        <span class="badge" :class="securityScore().pct >= 70 ? 'badge-completed' : securityScore().pct >= 40 ? 'badge-cancelled' : 'badge-failed'"
+                          x-text="securityScore().score + '/' + securityScore().total + ' (' + securityScore().pct + '%)'"></span>
+                      </template>
+                    </div>
+                    <div class="security-checks">
+                      <div class="security-item" :class="urlDetail.security.is_https ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="urlDetail.security.is_https ? '&#10003;' : '&#10007;'"></span>
+                        <span>HTTPS</span>
+                      </div>
+                      <div class="security-item" :class="!urlDetail.security.has_mixed_content ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="!urlDetail.security.has_mixed_content ? '&#10003;' : '&#10007;'"></span>
+                        <span>Sin contenido mixto</span>
+                      </div>
+                      <div class="security-item" :class="urlDetail.security.has_hsts ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="urlDetail.security.has_hsts ? '&#10003;' : '&#10007;'"></span>
+                        <span>Strict-Transport-Security (HSTS)</span>
+                      </div>
+                      <div class="security-item" :class="urlDetail.security.has_csp ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="urlDetail.security.has_csp ? '&#10003;' : '&#10007;'"></span>
+                        <span>Content-Security-Policy (CSP)</span>
+                      </div>
+                      <div class="security-item" :class="urlDetail.security.has_x_content_type_options ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="urlDetail.security.has_x_content_type_options ? '&#10003;' : '&#10007;'"></span>
+                        <span>X-Content-Type-Options</span>
+                      </div>
+                      <div class="security-item" :class="urlDetail.security.has_x_frame_options ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="urlDetail.security.has_x_frame_options ? '&#10003;' : '&#10007;'"></span>
+                        <span>X-Frame-Options</span>
+                      </div>
+                      <div class="security-item" :class="!urlDetail.security.has_unsafe_crossorigin ? 'check-pass' : 'check-fail'">
+                        <span class="check-icon" x-text="!urlDetail.security.has_unsafe_crossorigin ? '&#10003;' : '&#10007;'"></span>
+                        <span>Sin crossorigin inseguro</span>
+                      </div>
+                      <template x-if="urlDetail.security.referrer_policy">
+                        <div class="security-item check-pass">
+                          <span class="check-icon">&#10003;</span>
+                          <span>Referrer-Policy: <strong x-text="urlDetail.security.referrer_policy"></strong></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.security">
+                  <div class="empty"><h3>Sin datos de seguridad</h3></div>
+                </template>
+              </div>
+            </template>
+
+            <!-- ===== TAB: DATOS ESTRUCTURADOS ===== -->
+            <template x-if="urlDetailTab === 'structured'">
+              <div class="card">
+                <template x-if="urlDetail.structured_data && urlDetail.structured_data.length > 0">
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <h3 class="seo-section-title" style="margin:0">Datos estructurados</h3>
+                      <span class="text-dim text-sm" x-text="urlDetail.structured_data.length + ' bloques'"></span>
+                    </div>
+                    <div class="structured-list">
+                      <template x-for="s in urlDetail.structured_data" :key="s.id">
+                        <div class="structured-item card mb-1" style="padding:.75rem">
+                          <div class="flex items-center gap-1 mb-1">
+                            <span class="badge badge-pending" x-text="s.format"></span>
+                            <span class="badge" :class="s.validation_status === 'ok' ? 'badge-completed' : s.validation_status === 'error' ? 'badge-failed' : 'badge-cancelled'"
+                              x-text="s.validation_status || '—'"></span>
+                            <template x-if="s.schema_type">
+                              <span style="font-weight:500" x-text="s.schema_type"></span>
+                            </template>
+                          </div>
+                          <template x-if="s.raw">
+                            <div class="content-preview" style="max-height:200px;font-size:.75rem" x-text="JSON.stringify(s.raw, null, 2)"></div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!urlDetail.structured_data || urlDetail.structured_data.length === 0">
+                  <div class="empty"><h3>Sin datos estructurados</h3><p class="text-dim">No se encontraron JSON-LD, Microdata ni RDFa en esta pagina</p></div>
+                </template>
+              </div>
+            </template>
+
+          </div>
+        </template>
+      </div>
+    </template>
+
+  </main>
+</div>
+
+
+<!-- ===== MODAL: CREAR NUEVO RASTREO ===== -->
+<template x-if="showCreate">
+  <div class="modal-backdrop" @click.self="showCreate = false" @keydown.escape.window="showCreate = false">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Nuevo rastreo</h3>
+        <button class="btn-icon" @click="showCreate = false" style="font-size:1.25rem">&times;</button>
+      </div>
+      <div class="modal-body">
+        <template x-if="createError">
+          <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="createError"></div>
+        </template>
+
+        <div class="form-group">
+          <label>Nombre del trabajo *</label>
+          <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
+        </div>
+
+        <div class="form-group">
+          <label>URLs semilla * (una por linea)</label>
+          <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>ID de cliente</label>
+          <input type="text" x-model="createForm.client_id" placeholder="Identificador opcional">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Profundidad maxima</label>
+            <input type="number" x-model="createForm.max_depth" min="1" max="50">
+          </div>
+          <div class="form-group">
+            <label>Maximo de URLs</label>
+            <input type="number" x-model="createForm.max_urls" min="1" max="5000000">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Peticiones concurrentes</label>
+            <input type="number" x-model="createForm.concurrent_requests" min="1" max="256">
+          </div>
+          <div class="form-group">
+            <label>Por dominio</label>
+            <input type="number" x-model="createForm.concurrent_requests_per_domain" min="1" max="64">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>User Agent</label>
+          <input type="text" x-model="createForm.user_agent">
+        </div>
+
+        <div style="display:flex;gap:1.5rem;margin-bottom:1rem;flex-wrap:wrap">
+          <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
+          <label class="checkbox-label"><input type="checkbox" x-model="createForm.respect_robots"> Respetar robots.txt</label>
+          <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
+        </div>
+
+        <div class="form-group">
+          <label>Patrones de exclusion (uno por linea)</label>
+          <textarea x-model="createForm.exclude_patterns" rows="2" placeholder="Ej: /admin/*&#10;*.pdf"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Patrones de inclusion (uno por linea)</label>
+          <textarea x-model="createForm.include_patterns" rows="2" placeholder="Ej: /blog/*"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="showCreate = false">Cancelar</button>
+        <button class="btn btn-primary" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds">
+          <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
+          Iniciar rastreo
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+</body>
+</html>

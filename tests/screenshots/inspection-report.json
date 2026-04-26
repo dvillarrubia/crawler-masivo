@@ -1,0 +1,111 @@
+{
+  "timestamp": "2026-04-26T14:09:06.581Z",
+  "consoleMessages": [],
+  "networkErrors": [],
+  "allRequests": [
+    {
+      "url": "http://localhost:8000/",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "document"
+    },
+    {
+      "url": "http://localhost:8000/static/style.css",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "stylesheet"
+    },
+    {
+      "url": "http://localhost:8000/static/app.js",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "stylesheet"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs?page=1&page_size=20",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs?page=1&page_size=20",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "font"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs",
+      "status": 201,
+      "method": "POST",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs?page=1&page_size=20",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs/89ef3352-3c4a-4e98-97b3-c62fdbc49e2c",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs/89ef3352-3c4a-4e98-97b3-c62fdbc49e2c/stats",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs/89ef3352-3c4a-4e98-97b3-c62fdbc49e2c/urls?page=1&page_size=50",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs/89ef3352-3c4a-4e98-97b3-c62fdbc49e2c/issues?page=1&page_size=50",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs/89ef3352-3c4a-4e98-97b3-c62fdbc49e2c/links?page=1&page_size=50",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    },
+    {
+      "url": "http://localhost:8000/api/jobs?page=1&page_size=20",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "fetch"
+    }
+  ],
+  "summary": {
+    "totalConsoleErrors": 0,
+    "totalConsoleWarnings": 0,
+    "totalFailedAPICalls": 0,
+    "totalFailedResources": 0,
+    "totalNetworkErrors": 0,
+    "totalRequests": 16
+  }
+}
