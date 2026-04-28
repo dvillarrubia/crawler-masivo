@@ -46,6 +46,73 @@ class InsightsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Job configuration — sub-models
+# ---------------------------------------------------------------------------
+class ResourceTypeConfig(BaseModel):
+    """Which resource types to crawl."""
+
+    crawl_images: bool = True
+    crawl_css: bool = True
+    crawl_js: bool = True
+    crawl_pdfs: bool = True
+    crawl_fonts: bool = False
+    crawl_svg: bool = True
+    crawl_other: bool = True
+    check_external_resources: bool = False
+
+
+class CrawlBehaviorConfig(BaseModel):
+    """Speed and behavior tuning."""
+
+    download_timeout: int = Field(default=30, ge=5, le=120)
+    retry_count: int = Field(default=2, ge=0, le=10)
+    request_delay: float = Field(default=0.0, ge=0.0, le=30.0)
+    autothrottle_enabled: bool = True
+    autothrottle_target_concurrency: float = Field(default=8.0, ge=1.0, le=100.0)
+    follow_nofollow: bool = False
+    crawl_subdomains: bool = False
+
+
+class UrlFilterConfig(BaseModel):
+    """URL-level filtering rules."""
+
+    max_url_length: int = Field(default=0, ge=0, le=10000)
+    max_folder_depth: int = Field(default=0, ge=0, le=100)
+
+
+class ExtractionConfig(BaseModel):
+    """Toggle extraction of optional data."""
+
+    extract_structured_data: bool = True
+    extract_hreflang: bool = True
+    extract_security_headers: bool = True
+    extract_page_content: bool = True
+    store_raw_html: bool = False
+
+
+class HttpConfig(BaseModel):
+    """Custom HTTP settings sent with every request."""
+
+    custom_headers: dict[str, str] = Field(default_factory=dict)
+    accept_language: str = ""
+    cookies: dict[str, str] = Field(default_factory=dict)
+    basic_auth_user: str = ""
+    basic_auth_password: str = ""
+
+
+class AnalysisThresholdsConfig(BaseModel):
+    """Per-job thresholds for SEO analysis."""
+
+    title_min_length: int = Field(default=10, ge=0, le=200)
+    title_max_length: int = Field(default=60, ge=1, le=500)
+    description_min_length: int = Field(default=50, ge=0, le=500)
+    description_max_length: int = Field(default=160, ge=1, le=1000)
+    min_word_count: int = Field(default=200, ge=0, le=10000)
+    max_redirect_chain_length: int = Field(default=2, ge=1, le=20)
+    max_outlinks: int = Field(default=100, ge=1, le=10000)
+
+
+# ---------------------------------------------------------------------------
 # Job configuration
 # ---------------------------------------------------------------------------
 class JobConfig(BaseModel):
@@ -63,6 +130,14 @@ class JobConfig(BaseModel):
     render_js: bool = False
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
+
+    # Advanced configuration sub-models
+    resource_types: ResourceTypeConfig = Field(default_factory=ResourceTypeConfig)
+    crawl_behavior: CrawlBehaviorConfig = Field(default_factory=CrawlBehaviorConfig)
+    url_filters: UrlFilterConfig = Field(default_factory=UrlFilterConfig)
+    extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
+    http: HttpConfig = Field(default_factory=HttpConfig)
+    analysis_thresholds: AnalysisThresholdsConfig = Field(default_factory=AnalysisThresholdsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +322,7 @@ class UrlResponse(BaseModel):
     outlinks_count: int | None = None
     external_outlinks_count: int | None = None
     unique_inlinks_count: int | None = None
+    pagerank: float | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 

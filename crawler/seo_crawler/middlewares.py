@@ -113,3 +113,42 @@ class JobConfigMiddleware:
         if job_config and "job_config" not in request.meta:
             request.meta["job_config"] = job_config
         return None
+
+
+class HttpConfigMiddleware:
+    """
+    Apply per-job HTTP configuration (custom headers, cookies, auth)
+    to every outgoing request.
+
+    Reads ``spider._http_config`` which is populated from the job's
+    ``http`` configuration block.
+    """
+
+    def process_request(self, request: Request, spider):
+        http_config = getattr(spider, "_http_config", None)
+        if not http_config:
+            return None
+
+        # Custom headers
+        for key, value in http_config.get("custom_headers", {}).items():
+            request.headers[key.encode()] = value.encode()
+
+        # Accept-Language
+        accept_lang = http_config.get("accept_language", "")
+        if accept_lang:
+            request.headers[b"Accept-Language"] = accept_lang.encode()
+
+        # Cookies
+        for name, val in http_config.get("cookies", {}).items():
+            request.cookies[name] = val
+
+        # Basic Auth
+        basic_user = http_config.get("basic_auth_user", "")
+        if basic_user:
+            import base64
+
+            password = http_config.get("basic_auth_password", "")
+            cred = base64.b64encode(f"{basic_user}:{password}".encode()).decode()
+            request.headers[b"Authorization"] = f"Basic {cred}".encode()
+
+        return None

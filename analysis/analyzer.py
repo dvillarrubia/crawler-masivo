@@ -87,6 +87,19 @@ class SEOAnalyzer:
         self.job_id = job_id
         self._pending_issues: list[dict[str, Any]] = []
 
+        # Per-job thresholds (fallback to module-level constants)
+        from shared.models import Job
+
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        t = (job.config or {}).get("analysis_thresholds", {}) if job else {}
+        self.title_min_len = t.get("title_min_length", TITLE_MIN_LEN)
+        self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
+        self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
+        self.desc_max_len = t.get("description_max_length", DESCRIPTION_MAX_LEN)
+        self.min_word_count = t.get("min_word_count", LOW_WORD_COUNT_THRESHOLD)
+        self.max_redirect_chain = t.get("max_redirect_chain_length", 2)
+        self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+
     # -- public interface ---------------------------------------------------
 
     def run_all(self) -> None:
@@ -110,6 +123,7 @@ class SEOAnalyzer:
         self.analyze_content()
         self.analyze_url_issues()
         self.compute_link_counts()
+        self.compute_pagerank()
         self.analyze_links()
 
         # Flush any remaining buffered issues.
@@ -264,19 +278,19 @@ class SEOAnalyzer:
             clean_title = title.strip()
             effective_len = title_len if title_len is not None else len(clean_title)
 
-            if effective_len < TITLE_MIN_LEN:
+            if effective_len < self.title_min_len:
                 self._add_issue(
                     url_id,
                     "title_too_short",
                     "warning",
-                    {"length": effective_len, "min": TITLE_MIN_LEN},
+                    {"length": effective_len, "min": self.title_min_len},
                 )
-            elif effective_len > TITLE_MAX_LEN:
+            elif effective_len > self.title_max_len:
                 self._add_issue(
                     url_id,
                     "title_too_long",
                     "warning",
-                    {"length": effective_len, "max": TITLE_MAX_LEN},
+                    {"length": effective_len, "max": self.title_max_len},
                 )
 
             title_to_url_ids[clean_title.lower()].append(url_id)
@@ -319,19 +333,19 @@ class SEOAnalyzer:
             clean_desc = description.strip()
             effective_len = desc_len if desc_len is not None else len(clean_desc)
 
-            if effective_len < DESCRIPTION_MIN_LEN:
+            if effective_len < self.desc_min_len:
                 self._add_issue(
                     url_id,
                     "description_too_short",
                     "warning",
-                    {"length": effective_len, "min": DESCRIPTION_MIN_LEN},
+                    {"length": effective_len, "min": self.desc_min_len},
                 )
-            elif effective_len > DESCRIPTION_MAX_LEN:
+            elif effective_len > self.desc_max_len:
                 self._add_issue(
                     url_id,
                     "description_too_long",
                     "warning",
-                    {"length": effective_len, "max": DESCRIPTION_MAX_LEN},
+                    {"length": effective_len, "max": self.desc_max_len},
                 )
 
             desc_to_url_ids[clean_desc.lower()].append(url_id)
@@ -753,7 +767,7 @@ class SEOAnalyzer:
                     "error",
                     {"chain": visited + [redirect_map[current]]},
                 )
-            elif hops > 2:
+            elif hops > self.max_redirect_chain:
                 self._add_issue(
                     origin_id,
                     "redirect_chain",
@@ -869,7 +883,7 @@ class SEOAnalyzer:
 
         for url_id, word_count, text_ratio in rows:
             # Low word count.
-            if word_count is not None and word_count < LOW_WORD_COUNT_THRESHOLD:
+            if word_count is not None and word_count < self.min_word_count:
                 self._add_issue(
                     url_id,
                     "low_word_count",
@@ -1035,6 +1049,121 @@ class SEOAnalyzer:
 
         self.session.flush()
 
+    # -- PageRank -----------------------------------------------------------
+
+    # Weights for link_position: content links carry more SEO value than
+    # boilerplate navigation/footer links that repeat on every page.
+    _POSITION_WEIGHT: dict[str | None, float] = {
+        "content": 1.0,
+        "header": 0.3,
+        "footer": 0.2,
+        None: 0.5,
+    }
+
+    def compute_pagerank(
+        self,
+        damping: float = 0.85,
+        max_iter: int = 100,
+        tol: float = 1e-6,
+    ) -> None:
+        """Compute weighted internal PageRank for all URLs in this job.
+
+        Links from the main content area are weighted higher than
+        boilerplate nav/footer links that repeat on every page.
+        """
+        logger.debug("Computing PageRank ...")
+
+        # 1. Get all internal URL IDs for this job
+        url_rows = (
+            self.session.execute(
+                select(Url.id).where(
+                    Url.job_id == self.job_id,
+                    Url.is_internal.is_(True),
+                )
+            ).all()
+        )
+        if not url_rows:
+            return
+
+        url_ids = [r[0] for r in url_rows]
+        id_to_idx = {uid: i for i, uid in enumerate(url_ids)}
+        n = len(url_ids)
+
+        # 2. Build weighted adjacency from internal dofollow links
+        link_rows = (
+            self.session.execute(
+                select(Link.from_url_id, Url.id, Link.link_position)
+                .join(Url, and_(
+                    Link.to_url_hash == Url.url_hash,
+                    Link.job_id == Url.job_id,
+                ))
+                .where(
+                    Link.job_id == self.job_id,
+                    Link.is_internal.is_(True),
+                    Link.follow.is_(True),
+                )
+            ).all()
+        )
+
+        # Per edge: accumulate the max weight (deduplicate src->dst,
+        # keeping the highest-weight position if multiple links exist).
+        edge_weight: dict[tuple[int, int], float] = {}
+        for from_id, to_id, position in link_rows:
+            src = id_to_idx.get(from_id)
+            dst = id_to_idx.get(to_id)
+            if src is not None and dst is not None and src != dst:
+                w = self._POSITION_WEIGHT.get(position, 0.5)
+                key = (src, dst)
+                if key not in edge_weight or w > edge_weight[key]:
+                    edge_weight[key] = w
+
+        # Build outlinks and total weight per source node
+        outlinks: dict[int, dict[int, float]] = defaultdict(dict)  # src -> {dst: weight}
+        out_total_weight: dict[int, float] = defaultdict(float)
+        for (src, dst), w in edge_weight.items():
+            outlinks[src][dst] = w
+            out_total_weight[src] += w
+
+        # 3. Weighted iterative power method
+        pr = [1.0 / n] * n
+
+        for _ in range(max_iter):
+            new_pr = [(1.0 - damping) / n] * n
+
+            for i in range(n):
+                total_w = out_total_weight.get(i, 0.0)
+                if total_w > 0:
+                    for j, w in outlinks[i].items():
+                        new_pr[j] += damping * pr[i] * (w / total_w)
+
+            # Handle dangling nodes (no outlinks): redistribute
+            dangling_sum = sum(
+                pr[i] for i in range(n) if out_total_weight.get(i, 0.0) == 0
+            )
+            dangling_add = damping * dangling_sum / n
+            new_pr = [p + dangling_add for p in new_pr]
+
+            # Check convergence
+            diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
+            pr = new_pr
+            if diff < tol:
+                break
+
+        # 4. Normalize to 0-10 scale
+        max_pr = max(pr) if pr else 1.0
+        if max_pr > 0:
+            pr = [p / max_pr * 10.0 for p in pr]
+
+        # 5. Bulk update
+        for i, uid in enumerate(url_ids):
+            self.session.execute(
+                update(Url)
+                .where(Url.id == uid)
+                .values(pagerank=round(pr[i], 4))
+            )
+        self.session.flush()
+        logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
+
     # -- Link Analysis ------------------------------------------------------
 
     def analyze_links(self) -> None:
@@ -1055,12 +1184,12 @@ class SEOAnalyzer:
         for (url_id,) in rows:
             self._add_issue(url_id, "orphan_page", "warning")
 
-        # Pages with very high outlinks (> HIGH_OUTLINK_THRESHOLD).
+        # Pages with very high outlinks (> threshold).
         stmt = (
             select(Url.id, Url.outlinks_count)
             .where(
                 Url.job_id == self.job_id,
-                Url.outlinks_count > HIGH_OUTLINK_THRESHOLD,
+                Url.outlinks_count > self.max_outlinks,
             )
         )
         rows = self.session.execute(stmt).all()

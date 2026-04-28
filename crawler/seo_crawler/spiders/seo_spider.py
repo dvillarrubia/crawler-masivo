@@ -129,6 +129,48 @@ class SeoSpider(scrapy.Spider):
             if self.job_config.get("user_agent"):
                 self.custom_user_agent = self.job_config["user_agent"]
 
+            # -- Advanced config: Resource types --
+            rt = self.job_config.get("resource_types", {})
+            self._allowed_resource_types = {"html", "redirect"}
+            if rt.get("crawl_images", True):
+                self._allowed_resource_types.add("image")
+            if rt.get("crawl_css", True):
+                self._allowed_resource_types.add("css")
+            if rt.get("crawl_js", True):
+                self._allowed_resource_types.add("js")
+            if rt.get("crawl_pdfs", True):
+                self._allowed_resource_types.add("pdf")
+            if rt.get("crawl_fonts", False):
+                self._allowed_resource_types.add("font")
+            if rt.get("crawl_svg", True):
+                self._allowed_resource_types.add("svg")
+            if rt.get("crawl_other", True):
+                self._allowed_resource_types.add("other")
+
+            # -- Advanced config: Crawl behavior --
+            cb = self.job_config.get("crawl_behavior", {})
+            self._follow_nofollow = cb.get("follow_nofollow", False)
+            self._crawl_subdomains = cb.get("crawl_subdomains", False)
+
+            # -- Advanced config: URL filters --
+            uf = self.job_config.get("url_filters", {})
+            self._max_url_length = uf.get("max_url_length", 0)
+            self._max_folder_depth = uf.get("max_folder_depth", 0)
+
+            # -- Advanced config: Extraction toggles --
+            self._extraction = self.job_config.get("extraction", {})
+
+            # -- Advanced config: HTTP config (for middleware) --
+            self._http_config = self.job_config.get("http", {})
+
+            # -- Subdomain crawling: expand allowed hosts --
+            if self._crawl_subdomains:
+                self._root_domains: set[str] = set()
+                for host in list(self.allowed_hosts):
+                    parts = host.split(".")
+                    if len(parts) >= 2:
+                        self._root_domains.add(".".join(parts[-2:]))
+
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%d, hosts=%s",
                 self.job_id,
@@ -202,8 +244,16 @@ class SeoSpider(scrapy.Spider):
     # ------------------------------------------------------------------
     # URL filtering
     # ------------------------------------------------------------------
+    def _is_internal(self, url: str) -> bool:
+        """Check if URL is internal, with subdomain support."""
+        internal = is_internal_url(url, self.allowed_hosts)
+        if not internal and self._crawl_subdomains and hasattr(self, "_root_domains"):
+            host = urlparse(url).hostname or ""
+            internal = any(host.endswith(rd) or host == rd for rd in self._root_domains)
+        return internal
+
     def _should_follow(self, url: str) -> bool:
-        """Check exclude/include patterns for a URL."""
+        """Check exclude/include patterns and URL filters."""
         if self._exclude_patterns:
             for pattern in self._exclude_patterns:
                 if fnmatch.fnmatch(url, pattern) or re.search(pattern, url):
@@ -213,6 +263,12 @@ class SeoSpider(scrapy.Spider):
                 if fnmatch.fnmatch(url, pattern) or re.search(pattern, url):
                     return True
             return False  # include patterns defined but none matched
+        # URL length filter
+        if self._max_url_length > 0 and len(url) > self._max_url_length:
+            return False
+        # Folder depth filter
+        if self._max_folder_depth > 0 and compute_folder_depth(url) > self._max_folder_depth:
+            return False
         return True
 
     # ------------------------------------------------------------------
@@ -243,7 +299,11 @@ class SeoSpider(scrapy.Spider):
         response_time_ms = response.meta.get("download_latency", 0) * 1000
         is_html = isinstance(response, HtmlResponse)
         resource_type = classify_resource_type(content_type, url)
-        internal = is_internal_url(url, self.allowed_hosts)
+        internal = self._is_internal(url)
+
+        # Resource type filter: skip types not enabled in config
+        if resource_type not in self._allowed_resource_types:
+            return
 
         # Detect redirect: store where this page redirects TO
         # Also yield separate PageItems for each intermediate redirect hop.
@@ -274,7 +334,7 @@ class SeoSpider(scrapy.Spider):
                     host=hop_parsed.hostname or "",
                     path=hop_parsed.path or "/",
                     scheme=hop_parsed.scheme or "https",
-                    is_internal=is_internal_url(hop_url, self.allowed_hosts),
+                    is_internal=self._is_internal(hop_url),
                     crawl_depth=depth,
                     content_type=content_type,
                     content_length=0,
@@ -388,7 +448,7 @@ class SeoSpider(scrapy.Spider):
             host=final_parsed.hostname or "",
             path=final_parsed.path or "/",
             scheme=final_parsed.scheme or "https",
-            is_internal=is_internal_url(final_url, self.allowed_hosts),
+            is_internal=self._is_internal(final_url),
             crawl_depth=depth,
             content_type=content_type,
             content_length=content_length or len(response.body),
@@ -487,28 +547,30 @@ class SeoSpider(scrapy.Spider):
             )
 
         # Hreflang
-        for hreflang in extract_hreflang(selector):
-            yield HreflangItem(
-                url_hash=final_hash,
-                job_id=self.job_id,
-                lang=hreflang["lang"],
-                href=hreflang["href"],
-            )
+        if self._extraction.get("extract_hreflang", True):
+            for hreflang in extract_hreflang(selector):
+                yield HreflangItem(
+                    url_hash=final_hash,
+                    job_id=self.job_id,
+                    lang=hreflang["lang"],
+                    href=hreflang["href"],
+                )
 
         # Structured data
-        try:
-            sd_items = extract_structured_data(response.text, response.url)
-        except Exception as exc:
-            logger.debug("Structured data extraction failed for %s: %s", response.url, exc)
-            sd_items = []
-        for sd in sd_items:
-            yield StructuredDataItem(
-                url_hash=final_hash,
-                job_id=self.job_id,
-                raw=sd["raw"],
-                format=sd["format"],
-                schema_type=sd["schema_type"],
-            )
+        if self._extraction.get("extract_structured_data", True):
+            try:
+                sd_items = extract_structured_data(response.text, response.url)
+            except Exception as exc:
+                logger.debug("Structured data extraction failed for %s: %s", response.url, exc)
+                sd_items = []
+            for sd in sd_items:
+                yield StructuredDataItem(
+                    url_hash=final_hash,
+                    job_id=self.job_id,
+                    raw=sd["raw"],
+                    format=sd["format"],
+                    schema_type=sd["schema_type"],
+                )
 
         # Resources (extract_resources already returns width, height,
         # is_mixed_content)
@@ -526,66 +588,69 @@ class SeoSpider(scrapy.Spider):
             )
 
         # -- SecurityItem -------------------------------------------------
-        # Build a plain-string header dict for extract_security_headers.
-        # Scrapy headers: keys are bytes, values are lists of bytes.
-        header_dict: dict[str, str] = {}
-        for key, values in response.headers.items():
-            if not values:
-                continue
-            header_name = (
-                key.decode("utf-8", errors="ignore") if isinstance(key, bytes) else key
-            )
-            header_value = (
-                values[-1].decode("utf-8", errors="ignore")
-                if isinstance(values[-1], bytes)
-                else str(values[-1])
-            )
-            header_dict[header_name] = header_value
+        if self._extraction.get("extract_security_headers", True):
+            # Build a plain-string header dict for extract_security_headers.
+            # Scrapy headers: keys are bytes, values are lists of bytes.
+            header_dict: dict[str, str] = {}
+            for key, values in response.headers.items():
+                if not values:
+                    continue
+                header_name = (
+                    key.decode("utf-8", errors="ignore") if isinstance(key, bytes) else key
+                )
+                header_value = (
+                    values[-1].decode("utf-8", errors="ignore")
+                    if isinstance(values[-1], bytes)
+                    else str(values[-1])
+                )
+                header_dict[header_name] = header_value
 
-        sec = extract_security_headers(header_dict)
-        mixed_content_urls = detect_mixed_content(selector, response.url)
+            sec = extract_security_headers(header_dict)
+            mixed_content_urls = detect_mixed_content(selector, response.url)
 
-        # Detect unsafe crossorigin: target="_blank" without rel="noopener"
-        has_unsafe_crossorigin = False
-        for link in links:
-            target = (link.get("target") or "").lower()
-            if target == "_blank":
-                rel_val = link.get("rel") or ""
-                rel_tokens = {t.strip().lower() for t in rel_val.split()}
-                if "noopener" not in rel_tokens and "noreferrer" not in rel_tokens:
-                    has_unsafe_crossorigin = True
-                    break
+            # Detect unsafe crossorigin: target="_blank" without rel="noopener"
+            has_unsafe_crossorigin = False
+            for link in links:
+                target = (link.get("target") or "").lower()
+                if target == "_blank":
+                    rel_val = link.get("rel") or ""
+                    rel_tokens = {t.strip().lower() for t in rel_val.split()}
+                    if "noopener" not in rel_tokens and "noreferrer" not in rel_tokens:
+                        has_unsafe_crossorigin = True
+                        break
 
-        yield SecurityItem(
-            url_hash=final_hash,
-            job_id=self.job_id,
-            is_https=final_parsed.scheme == "https",
-            has_mixed_content=len(mixed_content_urls) > 0,
-            has_hsts=sec["has_hsts"],
-            has_csp=sec["has_csp"],
-            has_x_content_type_options=sec["has_x_content_type_options"],
-            has_x_frame_options=sec["has_x_frame_options"],
-            referrer_policy=sec["referrer_policy"],
-            has_unsafe_crossorigin=has_unsafe_crossorigin,
-        )
-
-        # -- ContentItem (main page text + markdown) -----------------------
-        main_content = extract_main_content(selector)
-        if main_content:
-            content_md = extract_main_content_markdown(selector)
-            yield ContentItem(
+            yield SecurityItem(
                 url_hash=final_hash,
                 job_id=self.job_id,
-                content_text=main_content,
-                content_length=len(main_content),
-                content_markdown=content_md,
+                is_https=final_parsed.scheme == "https",
+                has_mixed_content=len(mixed_content_urls) > 0,
+                has_hsts=sec["has_hsts"],
+                has_csp=sec["has_csp"],
+                has_x_content_type_options=sec["has_x_content_type_options"],
+                has_x_frame_options=sec["has_x_frame_options"],
+                referrer_policy=sec["referrer_policy"],
+                has_unsafe_crossorigin=has_unsafe_crossorigin,
             )
+
+        # -- ContentItem (main page text + markdown) -----------------------
+        if self._extraction.get("extract_page_content", True):
+            main_content = extract_main_content(selector)
+            if main_content:
+                content_md = extract_main_content_markdown(selector)
+                yield ContentItem(
+                    url_hash=final_hash,
+                    job_id=self.job_id,
+                    content_text=main_content,
+                    content_length=len(main_content),
+                    content_markdown=content_md,
+                )
 
         # -- Follow links (BFS) -----------------------------------------
         if depth < self.max_depth:
             for link in links:
-                should_follow = link["is_internal"] or self.follow_external
-                if should_follow and link.get("follow", True):
+                link_internal = self._is_internal(link["url"]) if self._crawl_subdomains else link["is_internal"]
+                should_follow = link_internal or self.follow_external
+                if should_follow and (link.get("follow", True) or self._follow_nofollow):
                     if self._should_follow(link["url"]):
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js:
@@ -637,7 +702,7 @@ class SeoSpider(scrapy.Spider):
             host=parsed.hostname or "",
             path=parsed.path or "/",
             scheme=parsed.scheme or "https",
-            is_internal=is_internal_url(url, self.allowed_hosts),
+            is_internal=self._is_internal(url),
             crawl_depth=depth,
             content_type=None,
             content_length=0,

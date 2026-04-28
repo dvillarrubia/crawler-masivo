@@ -271,6 +271,10 @@ class PostgresPipeline:
             ResourceItem: self._make_resource,
         }
 
+        # Collect url_ids per child type so we can delete stale rows
+        # before inserting (prevents duplicates on re-crawl).
+        url_ids_by_type: dict[type, set[int]] = {}
+
         objects: list = []
         for item_cls, data in self._buffer:
             factory = item_type_map.get(item_cls)
@@ -278,6 +282,13 @@ class PostgresPipeline:
                 obj = factory(data)
                 if obj is not None:
                     objects.append(obj)
+                    # Track url_id for pre-insert cleanup
+                    if item_cls == LinkItem:
+                        uid = getattr(obj, "from_url_id", None)
+                    else:
+                        uid = getattr(obj, "url_id", None)
+                    if uid is not None:
+                        url_ids_by_type.setdefault(item_cls, set()).add(uid)
 
         self._buffer.clear()
 
@@ -285,6 +296,23 @@ class PostgresPipeline:
             return
 
         try:
+            # Delete existing child rows for the same url_ids to avoid
+            # duplicates when a URL is re-crawled (e.g. via redirect).
+            _child_model_map = {
+                HeadingItem: (Heading, "url_id"),
+                HreflangItem: (Hreflang, "url_id"),
+                StructuredDataItem: (StructuredData, "url_id"),
+                ResourceItem: (Resource, "url_id"),
+                LinkItem: (Link, "from_url_id"),
+            }
+            for item_cls, uid_set in url_ids_by_type.items():
+                entry = _child_model_map.get(item_cls)
+                if entry and uid_set:
+                    model, fk_col = entry
+                    self.session.query(model).filter(
+                        getattr(model, fk_col).in_(uid_set)
+                    ).delete(synchronize_session=False)
+
             self.session.bulk_save_objects(objects)
             self.session.commit()
             logger.debug("Flushed %d child items to database", len(objects))

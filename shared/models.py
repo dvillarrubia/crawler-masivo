@@ -96,6 +96,7 @@ class Url(Base):
     outlinks_count = Column(Integer, default=0)              # total outlinks from this URL
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
+    pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
 
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")

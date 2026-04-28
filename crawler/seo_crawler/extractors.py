@@ -167,10 +167,18 @@ def extract_meta(selector) -> dict[str, Any]:
 
 
 def extract_headings(selector) -> list[dict[str, Any]]:
-    """Return an ordered list of heading dicts ``{tag, position, text}`` in document order."""
+    """Return an ordered list of heading dicts ``{tag, position, text}`` in document order.
+
+    Headings inside ``<template>``, ``<noscript>``, and ``<svg>`` elements
+    are excluded because they are not visible to users and would otherwise
+    duplicate headings rendered by JavaScript frameworks or SSR.
+    """
     results: list[dict[str, Any]] = []
     pos = 0
     for node in selector.css("h1, h2, h3, h4, h5, h6"):
+        # Skip headings inside invisible / framework-duplicated elements
+        if node.xpath("ancestor::template | ancestor::noscript | ancestor::svg"):
+            continue
         tag_name = node.xpath("name()").get()
         if tag_name and tag_name.lower().startswith("h"):
             inner = " ".join(node.css("::text").getall())
@@ -705,22 +713,54 @@ def http_status_text(status_code: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Indexability analysis
+# Content extraction — using trafilatura for site-agnostic boilerplate removal
 # ---------------------------------------------------------------------------
 
-def extract_main_content(selector) -> str | None:
-    """Extract the main textual content of a page.
+def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
+    """Use trafilatura to extract clean text and markdown from raw HTML.
 
-    Strategy with fallback:
-    1. Look for ``<main>``, ``<article>``, or ``[role="main"]`` container.
-    2. If not found, take body nodes between the first ``<h1>`` and the first
-       ``<footer>`` (or end of body).
-    3. Final fallback: entire ``<body>``.
+    Trafilatura uses heuristics (text density, DOM structure, link ratio)
+    to isolate editorial content — works on any website without
+    site-specific selectors.
 
-    Script, style, noscript, nav, and header elements are excluded from the
-    extracted text.  Whitespace is collapsed.
+    Returns (plain_text, markdown) — either may be None.
     """
-    # Try semantic containers first
+    try:
+        import trafilatura
+
+        text = trafilatura.extract(
+            html,
+            include_links=False,
+            include_images=False,
+            include_tables=True,
+            include_comments=False,
+            include_formatting=False,
+            favor_recall=True,
+        )
+
+        md = trafilatura.extract(
+            html,
+            include_links=True,
+            include_images=True,
+            include_tables=True,
+            include_comments=False,
+            include_formatting=True,
+            output_format="markdown",
+            favor_recall=True,
+        )
+
+        return (text or None, md or None)
+    except Exception:
+        return (None, None)
+
+
+def _fallback_extract_text(selector) -> str | None:
+    """Fallback text extraction when trafilatura returns nothing.
+
+    Looks for ``<main>``, ``<article>``, or ``[role="main"]``, then
+    falls back to body content between the first ``<h1>`` and ``<footer>``.
+    Strips script/style/nav/header/footer nodes via XPath.
+    """
     container = selector.css('main, article, [role="main"]')
     if container:
         container = container[0]
@@ -728,77 +768,48 @@ def extract_main_content(selector) -> str | None:
         body = selector.css("body")
         if not body:
             return None
-        body = body[0]
+        container = body[0]
 
-        # Try to scope from first <h1> to first <footer>
-        h1 = body.css("h1")
-        if h1:
-            # XPath: all body children/descendants from h1 onward, stopping
-            # before footer.  We grab sibling nodes that follow the h1's
-            # ancestor-or-self direct child of body.
-            container_nodes = body.xpath(
-                ".//h1[1]/ancestor-or-self::*[parent::body]"
-                "/following-sibling::*[not(self::footer) and "
-                "not(preceding-sibling::footer)]"
-            )
-            # Include the h1 container itself
-            h1_ancestor = body.xpath(
-                ".//h1[1]/ancestor-or-self::*[parent::body][1]"
-            )
-
-            if h1_ancestor:
-                # Collect text from h1 block + following siblings before footer
-                parts: list[str] = []
-                for node in h1_ancestor:
-                    parts.extend(
-                        node.xpath(
-                            ".//text()[not(ancestor::script)"
-                            " and not(ancestor::style)"
-                            " and not(ancestor::noscript)"
-                            " and not(ancestor::nav)"
-                            " and not(ancestor::header)]"
-                        ).getall()
-                    )
-                for node in container_nodes:
-                    parts.extend(
-                        node.xpath(
-                            ".//text()[not(ancestor::script)"
-                            " and not(ancestor::style)"
-                            " and not(ancestor::noscript)"
-                            " and not(ancestor::nav)"
-                            " and not(ancestor::header)]"
-                        ).getall()
-                    )
-                text = _WHITESPACE.sub(" ", " ".join(parts)).strip()
-                return text or None
-        # Fallback: entire body
-        container = body
-
-    # Extract text from chosen container, excluding invisible/nav/header tags
     parts = container.xpath(
         ".//text()[not(ancestor::script)"
         " and not(ancestor::style)"
         " and not(ancestor::noscript)"
         " and not(ancestor::nav)"
-        " and not(ancestor::header)]"
+        " and not(ancestor::header)"
+        " and not(ancestor::footer)"
+        " and not(ancestor::form)]"
     ).getall()
     text = _WHITESPACE.sub(" ", " ".join(parts)).strip()
     return text or None
 
 
+# ---------------------------------------------------------------------------
+# Indexability analysis
+# ---------------------------------------------------------------------------
+
+def extract_main_content(selector) -> str | None:
+    """Extract the main textual content of a page.
+
+    Uses trafilatura for site-agnostic content extraction with
+    fallback to semantic-container + XPath filtering.
+    """
+    raw_html = selector.get()
+    if not raw_html:
+        return None
+
+    text, _ = _trafilatura_extract(raw_html)
+    if text and len(text) > 50:
+        return text
+
+    # Fallback
+    return _fallback_extract_text(selector)
+
+
 def _get_main_container_html(selector) -> str | None:
     """Return the inner HTML of the main content container.
 
-    Uses the same fallback strategy as ``extract_main_content``:
-    1. ``<main>``, ``<article>``, ``[role="main"]``
-    2. Body nodes from first ``<h1>`` to first ``<footer>``
-    3. Entire ``<body>``
-
-    Strips ``<script>``, ``<style>``, ``<noscript>``, ``<nav>``, ``<header>``
-    elements from the result before returning.
+    Used only as fallback for markdown extraction.
     """
-    import lxml.etree as etree
-
     container = selector.css('main, article, [role="main"]')
     if container:
         node = container[0]
@@ -806,40 +817,29 @@ def _get_main_container_html(selector) -> str | None:
         body = selector.css("body")
         if not body:
             return None
-        body_node = body[0]
-
-        h1 = body_node.css("h1")
-        if h1:
-            # Collect from h1 ancestor through siblings before footer
-            h1_ancestor = body_node.xpath(
-                ".//h1[1]/ancestor-or-self::*[parent::body][1]"
-            )
-            following = body_node.xpath(
-                ".//h1[1]/ancestor-or-self::*[parent::body]"
-                "/following-sibling::*[not(self::footer) and "
-                "not(preceding-sibling::footer)]"
-            )
-            parts = []
-            for n in list(h1_ancestor) + list(following):
-                parts.append(n.get())
-            html = "\n".join(p for p in parts if p)
-            if html.strip():
-                return html
-        node = body_node
-
-    # Get HTML of the chosen container
+        node = body[0]
     html = node.get()
     return html if html and html.strip() else None
 
 
 def extract_main_content_markdown(selector) -> str | None:
-    """Extract the main content and convert it to Markdown.
+    """Extract the main content as clean Markdown.
 
-    Uses ``html2text`` for the conversion.  Returns *None* when no
-    meaningful content can be extracted.
+    Uses trafilatura's markdown output for site-agnostic extraction.
+    Falls back to html2text on the main container if trafilatura
+    returns nothing.
     """
-    raw_html = _get_main_container_html(selector)
+    raw_html = selector.get()
     if not raw_html:
+        return None
+
+    _, md = _trafilatura_extract(raw_html)
+    if md and len(md) > 50:
+        return md
+
+    # Fallback: html2text on the main container
+    container_html = _get_main_container_html(selector)
+    if not container_html:
         return None
 
     try:
@@ -849,16 +849,14 @@ def extract_main_content_markdown(selector) -> str | None:
         h.ignore_links = False
         h.ignore_images = False
         h.ignore_emphasis = False
-        h.body_width = 0            # no wrapping
+        h.body_width = 0
         h.skip_internal_links = False
         h.inline_links = True
         h.protect_links = True
         h.ignore_tables = False
         h.single_line_break = False
 
-        md = h.handle(raw_html)
-        # Collapse excessive blank lines
-        import re
+        md = h.handle(container_html)
         md = re.sub(r'\n{3,}', '\n\n', md).strip()
         return md or None
     except Exception:

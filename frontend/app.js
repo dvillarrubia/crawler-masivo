@@ -114,6 +114,9 @@ function app() {
     loading: false,
     error: null,
 
+    // Toast notifications
+    toasts: [],
+
     // Lista de trabajos
     jobs: [],
     jobsPage: 1,
@@ -159,6 +162,22 @@ function app() {
     // ------- Init -------
     init() {
       this.loadJobs();
+
+      // Keyboard shortcut: 'n' to open create modal
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'n' && !this.showCreate && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
+          this.openCreate();
+        }
+      });
+
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    // ------- Toast notifications -------
+    showToast(msg, type = 'success') {
+      const id = Date.now();
+      this.toasts.push({ id, msg, type });
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 3500);
     },
 
     // ------- Lista de trabajos -------
@@ -192,39 +211,85 @@ function app() {
       this.createForm = _freshForm();
       this.createError = null;
       this.showCreate = true;
+      this.$nextTick(() => lucide.createIcons());
     },
 
     async submitCreate() {
       this.creating = true;
       this.createError = null;
       try {
-        const seeds = this.createForm.seeds
-          .split('\n')
-          .map(s => s.trim())
-          .filter(Boolean);
+        const f = this.createForm;
+        const seeds = f.seeds.split('\n').map(s => s.trim()).filter(Boolean);
 
         const payload = {
-          name: this.createForm.name,
+          name: f.name,
           seeds,
           config: {
-            max_depth:     parseInt(this.createForm.max_depth)     || 3,
-            max_urls:      parseInt(this.createForm.max_urls)      || 50000,
-            concurrent_requests:            parseInt(this.createForm.concurrent_requests)            || 32,
-            concurrent_requests_per_domain: parseInt(this.createForm.concurrent_requests_per_domain) || 8,
-            follow_external: this.createForm.follow_external,
-            respect_robots:  this.createForm.respect_robots,
-            render_js:       this.createForm.render_js,
-            user_agent:      this.createForm.user_agent || 'SEOCrawler/1.0',
-            exclude_patterns: this.createForm.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
-            include_patterns: this.createForm.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+            max_depth:     parseInt(f.max_depth)     || 3,
+            max_urls:      parseInt(f.max_urls)      || 50000,
+            concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
+            concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
+            follow_external: f.follow_external,
+            respect_robots:  f.respect_robots,
+            render_js:       f.render_js,
+            user_agent:      f.user_agent || 'SEOCrawler/1.0',
+            exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+            include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+            resource_types: {
+              crawl_images: f.crawl_images,
+              crawl_css: f.crawl_css,
+              crawl_js: f.crawl_js,
+              crawl_pdfs: f.crawl_pdfs,
+              crawl_fonts: f.crawl_fonts,
+              crawl_svg: f.crawl_svg,
+              crawl_other: f.crawl_other,
+              check_external_resources: f.check_external_resources,
+            },
+            crawl_behavior: {
+              download_timeout: parseInt(f.download_timeout) || 30,
+              retry_count: parseInt(f.retry_count) || 2,
+              request_delay: parseFloat(f.request_delay) || 0,
+              autothrottle_enabled: f.autothrottle_enabled,
+              autothrottle_target_concurrency: parseFloat(f.autothrottle_target_concurrency) || 8,
+              follow_nofollow: f.follow_nofollow,
+              crawl_subdomains: f.crawl_subdomains,
+            },
+            url_filters: {
+              max_url_length: parseInt(f.max_url_length) || 0,
+              max_folder_depth: parseInt(f.max_folder_depth) || 0,
+            },
+            extraction: {
+              extract_structured_data: f.extract_structured_data,
+              extract_hreflang: f.extract_hreflang,
+              extract_security_headers: f.extract_security_headers,
+              extract_page_content: f.extract_page_content,
+              store_raw_html: f.store_raw_html,
+            },
+            http: {
+              custom_headers: _parseKV(f.custom_headers, ':'),
+              accept_language: f.accept_language,
+              cookies: _parseKV(f.cookies, '='),
+              basic_auth_user: f.basic_auth_user,
+              basic_auth_password: f.basic_auth_password,
+            },
+            analysis_thresholds: {
+              title_min_length: parseInt(f.title_min_length) || 10,
+              title_max_length: parseInt(f.title_max_length) || 60,
+              description_min_length: parseInt(f.description_min_length) || 50,
+              description_max_length: parseInt(f.description_max_length) || 160,
+              min_word_count: parseInt(f.min_word_count) || 200,
+              max_redirect_chain_length: parseInt(f.max_redirect_chain_length) || 2,
+              max_outlinks: parseInt(f.max_outlinks) || 100,
+            },
           }
         };
-        if (this.createForm.client_id) payload.client_id = this.createForm.client_id;
+        if (f.client_id) payload.client_id = f.client_id;
 
         await api('/jobs', { method: 'POST', body: JSON.stringify(payload) });
         this.showCreate = false;
         this.jobsPage = 1;
         await this.loadJobs();
+        this.showToast('Rastreo iniciado correctamente');
       } catch (e) { this.createError = e.message; }
       this.creating = false;
     },
@@ -246,6 +311,8 @@ function app() {
         this._startProgress();
       } catch (e) { this.error = e.message; }
       this.loading = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      this.$nextTick(() => lucide.createIcons());
     },
 
     backToJobs() {
@@ -253,6 +320,7 @@ function app() {
       this.view = 'jobs';
       this.job = null;
       this.loadJobs();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
     async loadStats() {
@@ -300,6 +368,7 @@ function app() {
       if (!this.job || !confirm('¿Eliminar este trabajo y todos sus datos? Esta acción no se puede deshacer.')) return;
       try {
         await api(`/jobs/${this.job.id}`, { method: 'DELETE' });
+        this.showToast('Trabajo eliminado', 'info');
         this.backToJobs();
       } catch (e) { alert(e.message); }
     },
@@ -311,6 +380,7 @@ function app() {
       if (tab === 'issues' && this.issues.length === 0) this.loadIssues();
       if (tab === 'links' && this.links.length === 0) this.loadLinks();
       if (tab === 'insights' && !this.insights) this.loadInsights();
+      this.$nextTick(() => lucide.createIcons());
     },
 
     // ------- Informe SEO -------
@@ -392,11 +462,14 @@ function app() {
         this.urlDetail = await api(`/jobs/${this.job.id}/urls/${urlId}`);
       } catch (e) { this.error = e.message; }
       this.urlDetailLoading = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      this.$nextTick(() => lucide.createIcons());
     },
 
     backToDetail() {
       this.view = 'detail';
       this.urlDetail = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
     // ------- Problemas -------
@@ -510,6 +583,11 @@ function app() {
     },
 
     fmt,
+
+    // ------- Reinit Lucide icons -------
+    reinitIcons() {
+      this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
+    },
   };
 }
 
@@ -518,6 +596,8 @@ function _freshForm() {
     name: '',
     seeds: '',
     client_id: '',
+    configTab: 'general',
+    // General
     max_depth: 3,
     max_urls: 50000,
     concurrent_requests: 32,
@@ -526,7 +606,62 @@ function _freshForm() {
     respect_robots: true,
     render_js: false,
     user_agent: 'SEOCrawler/1.0',
+    // Spider — resource types
+    crawl_images: true,
+    crawl_css: true,
+    crawl_js: true,
+    crawl_pdfs: true,
+    crawl_fonts: false,
+    crawl_svg: true,
+    crawl_other: true,
+    check_external_resources: false,
+    // Spider — behavior
+    crawl_subdomains: false,
+    follow_nofollow: false,
     exclude_patterns: '',
     include_patterns: '',
+    max_url_length: 0,
+    max_folder_depth: 0,
+    // Extraction (Contenido)
+    extract_structured_data: true,
+    extract_hreflang: true,
+    extract_security_headers: true,
+    extract_page_content: true,
+    store_raw_html: false,
+    // Velocidad
+    download_timeout: 30,
+    retry_count: 2,
+    request_delay: 0,
+    autothrottle_enabled: true,
+    autothrottle_target_concurrency: 8,
+    // HTTP
+    custom_headers: '',
+    accept_language: '',
+    cookies: '',
+    basic_auth_user: '',
+    basic_auth_password: '',
+    // Analisis
+    title_min_length: 10,
+    title_max_length: 60,
+    description_min_length: 50,
+    description_max_length: 160,
+    min_word_count: 200,
+    max_redirect_chain_length: 2,
+    max_outlinks: 100,
   };
+}
+
+function _parseKV(text, separator) {
+  const obj = {};
+  if (!text) return obj;
+  text.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const idx = line.indexOf(separator);
+    if (idx < 1) return;
+    const key = line.substring(0, idx).trim();
+    const val = line.substring(idx + separator.length).trim();
+    if (key) obj[key] = val;
+  });
+  return obj;
 }

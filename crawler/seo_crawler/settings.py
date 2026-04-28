@@ -71,6 +71,7 @@ DOWNLOADER_MIDDLEWARES = {
     "seo_crawler.middlewares.UserAgentMiddleware": 400,
     "seo_crawler.middlewares.ProxyMiddleware": 410,
     "seo_crawler.middlewares.JobConfigMiddleware": 100,
+    "seo_crawler.middlewares.HttpConfigMiddleware": 420,
 }
 
 # ---------------------------------------------------------------------------

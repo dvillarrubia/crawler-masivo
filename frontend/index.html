@@ -7,25 +7,35 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/app.js"></script>
 </head>
-<body x-data="app()" x-init="init()">
+<body x-data="app()" x-init="init()" x-effect="$nextTick(() => lucide.createIcons())">
 
 <div class="app">
 
   <!-- ===== BARRA SUPERIOR ===== -->
-  <header class="topbar">
-    <h1 data-tip="Panel de control del rastreador SEO"><span>&#9670;</span> SEO Crawler</h1>
+  <header class="topbar" style="border-top: 3px solid; border-image: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7) 1;">
+    <h1 data-tip="Panel de control del rastreador SEO" style="display:flex;align-items:center;gap:.5rem">
+      <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#8b5cf6"></i>
+      <span style="background:linear-gradient(135deg,#6366f1,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">SEO Crawler</span>
+    </h1>
     <div class="topbar-actions">
       <template x-if="view === 'url-detail'">
-        <button class="btn btn-sm" @click="backToDetail()" data-tip="Volver al trabajo">&larr; Trabajo</button>
+        <button class="btn btn-sm" @click="backToDetail()" data-tip="Volver al trabajo" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajo
+        </button>
       </template>
       <template x-if="view === 'detail'">
-        <button class="btn btn-sm" @click="backToJobs()" data-tip="Volver a la lista de trabajos">&larr; Trabajos</button>
+        <button class="btn btn-sm" @click="backToJobs()" data-tip="Volver a la lista de trabajos" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajos
+        </button>
       </template>
-      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo SEO de un sitio web">+ Nuevo rastreo</button>
+      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo SEO de un sitio web" style="display:flex;align-items:center;gap:.35rem">
+        <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
+      </button>
     </div>
   </header>
 
@@ -46,7 +56,9 @@
       <div>
         <!-- Filtros -->
         <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
-          <span class="text-dim text-sm" style="margin-right:.25rem" data-tip="Filtra los trabajos por su estado actual">Filtrar:</span>
+          <span class="text-dim text-sm" style="margin-right:.25rem;display:flex;align-items:center;gap:.25rem" data-tip="Filtra los trabajos por su estado actual">
+            <i data-lucide="filter" style="width:13px;height:13px"></i> Filtrar:
+          </span>
           <template x-for="s in ['pending','running','completed','failed','cancelled']">
             <button class="btn btn-sm"
               :class="jobsFilter === s ? 'btn-primary' : ''"
@@ -72,11 +84,15 @@
 
         <!-- Vacio -->
         <template x-if="!loading && jobs.length === 0">
-          <div class="empty">
-            <div class="empty-icon">&#128269;</div>
-            <h3>No hay trabajos de rastreo</h3>
-            <p class="text-dim">Crea tu primer rastreo para empezar a auditar un sitio web</p>
-            <button class="btn btn-primary mt-2" @click="openCreate()">+ Nuevo rastreo</button>
+          <div class="empty" style="padding:3rem 1.5rem">
+            <div class="empty-icon" style="margin-bottom:1rem;opacity:.6">
+              <i data-lucide="search" style="width:48px;height:48px;color:var(--accent)"></i>
+            </div>
+            <h3 style="margin-bottom:.5rem;font-size:1.1rem">No hay trabajos de rastreo</h3>
+            <p class="text-dim" style="margin-bottom:1.25rem;max-width:340px;line-height:1.5">Crea tu primer rastreo para empezar a auditar un sitio web y detectar problemas SEO automaticamente.</p>
+            <button class="btn btn-primary mt-2" @click="openCreate()" style="display:flex;align-items:center;gap:.4rem;padding:.6rem 1.2rem">
+              <i data-lucide="plus-circle" style="width:16px;height:16px"></i> Nuevo rastreo
+            </button>
           </div>
         </template>
 
@@ -116,7 +132,7 @@
                           <span class="text-dim">en curso...</span>
                         </template>
                         <template x-if="!j.started_at">
-                          <span class="text-dim">—</span>
+                          <span class="text-dim">&mdash;</span>
                         </template>
                       </td>
                     </tr>
@@ -144,22 +160,31 @@
     <!-- ============================================================ -->
     <template x-if="view === 'detail' && job">
       <div>
-        <!-- Cabecera -->
-        <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:.5rem">
-          <div>
-            <h2 style="font-size:1.2rem;font-weight:700" x-text="job.name"></h2>
-            <div class="text-dim text-sm flex items-center gap-1 mt-1">
-              <span class="badge" :class="statusColor(job.status)" x-text="fmt.status(job.status)"></span>
-              <span>&middot;</span>
-              <span x-text="'Creado ' + fmt.ago(job.created_at)"></span>
+        <!-- Hero gradient header -->
+        <div style="margin:-1.5rem -1.5rem 1.5rem -1.5rem;padding:1.5rem 1.5rem 1rem;background:linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.06) 50%, rgba(168,85,247,0.04) 100%);border-bottom:1px solid var(--border)">
+          <!-- Cabecera -->
+          <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
+            <div>
+              <h2 style="font-size:1.2rem;font-weight:700" x-text="job.name"></h2>
+              <div class="text-dim text-sm flex items-center gap-1 mt-1">
+                <span class="badge" :class="statusColor(job.status)" x-text="fmt.status(job.status)"></span>
+                <span>&middot;</span>
+                <span x-text="'Creado ' + fmt.ago(job.created_at)"></span>
+              </div>
             </div>
-          </div>
-          <div class="flex gap-1">
-            <template x-if="['pending','running'].includes(job.status)">
-              <button class="btn btn-sm btn-danger" @click="cancelJob()">Cancelar</button>
-            </template>
-            <button class="btn btn-sm" @click="exportCSV()">&#8615; Exportar CSV</button>
-            <button class="btn btn-sm btn-danger" @click="deleteJob()">Eliminar</button>
+            <div class="flex gap-1">
+              <template x-if="['pending','running'].includes(job.status)">
+                <button class="btn btn-sm btn-danger" @click="cancelJob()" style="display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
+                </button>
+              </template>
+              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem">
+                <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
+              </button>
+              <button class="btn btn-sm btn-danger" @click="deleteJob()" style="display:flex;align-items:center;gap:.3rem">
+                <i data-lucide="trash-2" style="width:13px;height:13px"></i> Eliminar
+              </button>
+            </div>
           </div>
         </div>
 
@@ -180,20 +205,32 @@
         <template x-if="stats">
           <div class="stats-grid">
             <div class="stat-card" data-tip="Numero total de URLs unicas almacenadas">
-              <div class="stat-value" x-text="fmt.num(stats.total_urls)"></div>
+              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+                <i data-lucide="link" style="width:16px;height:16px;color:var(--accent);opacity:.7"></i>
+                <div class="stat-value" x-text="fmt.num(stats.total_urls)"></div>
+              </div>
               <div class="stat-label">URLs totales</div>
             </div>
             <div class="stat-card" data-tip="URLs procesadas por el crawler">
-              <div class="stat-value green" x-text="fmt.num(stats.total_urls_crawled)"></div>
+              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+                <i data-lucide="check-circle" style="width:16px;height:16px;color:var(--green);opacity:.7"></i>
+                <div class="stat-value green" x-text="fmt.num(stats.total_urls_crawled)"></div>
+              </div>
               <div class="stat-label">Procesadas</div>
             </div>
             <div class="stat-card" data-tip="URLs con error: timeouts, DNS, conexion rechazada, 5xx">
-              <div class="stat-value red" x-text="fmt.num(stats.total_urls_failed)"></div>
+              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+                <i data-lucide="alert-triangle" style="width:16px;height:16px;color:var(--red);opacity:.7"></i>
+                <div class="stat-value red" x-text="fmt.num(stats.total_urls_failed)"></div>
+              </div>
               <div class="stat-label">Fallidas</div>
             </div>
             <div class="stat-card" data-tip="Problemas SEO detectados por el analizador">
-              <div class="stat-value orange"
-                x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0))"></div>
+              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+                <i data-lucide="alert-circle" style="width:16px;height:16px;color:var(--orange);opacity:.7"></i>
+                <div class="stat-value orange"
+                  x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0))"></div>
+              </div>
               <div class="stat-label">Problemas</div>
             </div>
           </div>
@@ -201,18 +238,20 @@
 
         <!-- Pestanas -->
         <div class="tabs">
-          <div class="tab" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')">Resumen</div>
-          <div class="tab" :class="detailTab === 'urls' && 'active'" @click="switchTab('urls')">
-            URLs <span class="count" x-text="urlsTotal || (stats?.total_urls || '')"></span>
+          <div class="tab" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="layout-dashboard" style="width:14px;height:14px"></i> Resumen
           </div>
-          <div class="tab" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')">
-            Problemas <span class="count" x-text="issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : '') || ''"></span>
+          <div class="tab" :class="detailTab === 'urls' && 'active'" @click="switchTab('urls')" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="link" style="width:14px;height:14px"></i> URLs <span class="count" x-text="urlsTotal || (stats?.total_urls || '')"></span>
           </div>
-          <div class="tab" :class="detailTab === 'links' && 'active'" @click="switchTab('links')">
-            Enlaces <span class="count" x-text="linksTotal || ''"></span>
+          <div class="tab" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : '') || ''"></span>
           </div>
-          <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones">
-            Informe SEO
+          <div class="tab" :class="detailTab === 'links' && 'active'" @click="switchTab('links')" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal || ''"></span>
+          </div>
+          <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
           </div>
         </div>
 
@@ -334,6 +373,7 @@
                         <th data-tip="Nivel de profundidad desde la URL semilla">Prof.</th>
                         <th data-tip="Inlinks: enlaces internos que apuntan a esta URL">In</th>
                         <th data-tip="Outlinks: enlaces que salen de esta URL">Out</th>
+                        <th data-tip="PageRank interno: importancia de la pagina segun enlaces internos (0-10)">PR</th>
                         <th data-tip="Problemas SEO detectados en esta URL">Issues</th>
                       </tr>
                     </thead>
@@ -356,6 +396,14 @@
                           <td x-text="u.crawl_depth ?? '—'"></td>
                           <td x-text="fmt.num(u.inlinks_count)"></td>
                           <td x-text="fmt.num(u.outlinks_count)"></td>
+                          <td>
+                            <div style="display:flex;align-items:center;gap:6px">
+                              <div style="width:40px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+                                <div :style="'width:' + (u.pagerank ? u.pagerank*10 : 0) + '%;background:var(--accent);height:100%;border-radius:3px'"></div>
+                              </div>
+                              <span x-text="u.pagerank ? u.pagerank.toFixed(1) : '—'" style="font-size:.75rem;min-width:24px"></span>
+                            </div>
+                          </td>
                           <td>
                             <span class="text-dim" x-text="'—'"></span>
                           </td>
@@ -723,7 +771,9 @@
                   </div>
                   <div class="url-full-display" x-text="urlDetail.url" :title="urlDetail.url"></div>
                 </div>
-                <button class="btn btn-sm" @click="backToDetail()">&larr; Volver</button>
+                <button class="btn btn-sm" @click="backToDetail()" style="display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Volver
+                </button>
               </div>
             </div>
 
@@ -748,6 +798,10 @@
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" x-text="fmt.num(urlDetail.outlinks_count)"></div>
                 <div class="stat-label">Outlinks</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value" style="font-size:1.3rem;color:var(--accent)" x-text="urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—'"></div>
+                <div class="stat-label">PageRank</div>
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" :class="urlDetail.issues?.length > 0 ? 'orange' : 'green'"
@@ -813,6 +867,7 @@
                   <div class="detail-row"><span class="detail-label">Inlinks unicos</span><span class="detail-value" x-text="fmt.num(urlDetail.unique_inlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks externos</span><span class="detail-value" x-text="fmt.num(urlDetail.external_outlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">PageRank</span><span class="detail-value" x-text="urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Primera vez</span><span class="detail-value" x-text="fmt.date(urlDetail.first_seen_at)"></span></div>
                   <div class="detail-row"><span class="detail-label">Ultimo rastreo</span><span class="detail-value" x-text="fmt.date(urlDetail.last_crawled_at)"></span></div>
                 </div>
@@ -1225,9 +1280,14 @@
 <!-- ===== MODAL: CREAR NUEVO RASTREO ===== -->
 <template x-if="showCreate">
   <div class="modal-backdrop" @click.self="showCreate = false" @keydown.escape.window="showCreate = false">
-    <div class="modal">
+    <div class="modal modal--wide">
       <div class="modal-header">
-        <h3>Nuevo rastreo</h3>
+        <div>
+          <h3 style="display:flex;align-items:center;gap:.4rem">
+            <i data-lucide="radar" style="width:18px;height:18px;color:#8b5cf6"></i> Nuevo rastreo
+          </h3>
+          <p class="text-dim text-sm" style="margin-top:.25rem">Configura y lanza un rastreo SEO completo de un sitio web</p>
+        </div>
         <button class="btn-icon" @click="showCreate = false" style="font-size:1.25rem">&times;</button>
       </div>
       <div class="modal-body">
@@ -1235,68 +1295,272 @@
           <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="createError"></div>
         </template>
 
+        <!-- Campos siempre visibles -->
         <div class="form-group">
           <label>Nombre del trabajo *</label>
           <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
         </div>
-
         <div class="form-group">
           <label>URLs semilla * (una por linea)</label>
           <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
         </div>
-
         <div class="form-group">
           <label>ID de cliente</label>
           <input type="text" x-model="createForm.client_id" placeholder="Identificador opcional">
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label>Profundidad maxima</label>
-            <input type="number" x-model="createForm.max_depth" min="1" max="50">
+        <!-- Barra de pestanas -->
+        <div class="config-tabs">
+          <div class="tab" :class="createForm.configTab === 'general' && 'active'" @click="createForm.configTab = 'general'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="settings" style="width:13px;height:13px"></i> General
+          </div>
+          <div class="tab" :class="createForm.configTab === 'spider' && 'active'" @click="createForm.configTab = 'spider'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="bug" style="width:13px;height:13px"></i> Spider
+          </div>
+          <div class="tab" :class="createForm.configTab === 'content' && 'active'" @click="createForm.configTab = 'content'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido
+          </div>
+          <div class="tab" :class="createForm.configTab === 'speed' && 'active'" @click="createForm.configTab = 'speed'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="gauge" style="width:13px;height:13px"></i> Velocidad
+          </div>
+          <div class="tab" :class="createForm.configTab === 'http' && 'active'" @click="createForm.configTab = 'http'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="globe" style="width:13px;height:13px"></i> HTTP
+          </div>
+          <div class="tab" :class="createForm.configTab === 'analysis' && 'active'" @click="createForm.configTab = 'analysis'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="bar-chart-2" style="width:13px;height:13px"></i> Analisis
+          </div>
+        </div>
+
+        <!-- ===== TAB: General ===== -->
+        <div x-show="createForm.configTab === 'general'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="sliders-horizontal" style="width:14px;height:14px;opacity:.6"></i> Limites de rastreo
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Profundidad maxima</label>
+              <input type="number" x-model="createForm.max_depth" min="1" max="50">
+            </div>
+            <div class="form-group">
+              <label>Maximo de URLs</label>
+              <input type="number" x-model="createForm.max_urls" min="1" max="5000000">
+            </div>
+          </div>
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="zap" style="width:14px;height:14px;opacity:.6"></i> Concurrencia
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Peticiones concurrentes</label>
+              <input type="number" x-model="createForm.concurrent_requests" min="1" max="256">
+            </div>
+            <div class="form-group">
+              <label>Por dominio</label>
+              <input type="number" x-model="createForm.concurrent_requests_per_domain" min="1" max="64">
+            </div>
           </div>
           <div class="form-group">
-            <label>Maximo de URLs</label>
-            <input type="number" x-model="createForm.max_urls" min="1" max="5000000">
+            <label>User Agent</label>
+            <input type="text" x-model="createForm.user_agent">
+          </div>
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.respect_robots"> Respetar robots.txt</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
           </div>
         </div>
 
-        <div class="form-row">
+        <!-- ===== TAB: Spider ===== -->
+        <div x-show="createForm.configTab === 'spider'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="layers" style="width:14px;height:14px;opacity:.6"></i> Tipos de recurso
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem .75rem;margin-bottom:1rem">
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_images"> Imagenes</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_css"> CSS</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_js"> JavaScript</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_pdfs"> PDFs</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_fonts"> Fuentes</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_svg"> SVG</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_other"> Otros</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.check_external_resources"> Verificar recursos ext.</label>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="compass" style="width:14px;height:14px;opacity:.6"></i> Comportamiento
+          </div>
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_subdomains"> Rastrear subdominios</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_nofollow"> Seguir nofollow</label>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="filter" style="width:14px;height:14px;opacity:.6"></i> Filtros de URL
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Longitud maxima URL (0 = sin limite)</label>
+              <input type="number" x-model="createForm.max_url_length" min="0" max="10000">
+            </div>
+            <div class="form-group">
+              <label>Profundidad de carpetas max (0 = sin limite)</label>
+              <input type="number" x-model="createForm.max_folder_depth" min="0" max="100">
+            </div>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="regex" style="width:14px;height:14px;opacity:.6"></i> Patrones
+          </div>
           <div class="form-group">
-            <label>Peticiones concurrentes</label>
-            <input type="number" x-model="createForm.concurrent_requests" min="1" max="256">
+            <label>Patrones de exclusion (uno por linea)</label>
+            <textarea x-model="createForm.exclude_patterns" rows="2" placeholder="Ej: /admin/*&#10;*.pdf"></textarea>
           </div>
           <div class="form-group">
-            <label>Por dominio</label>
-            <input type="number" x-model="createForm.concurrent_requests_per_domain" min="1" max="64">
+            <label>Patrones de inclusion (uno por linea)</label>
+            <textarea x-model="createForm.include_patterns" rows="2" placeholder="Ej: /blog/*"></textarea>
           </div>
         </div>
 
-        <div class="form-group">
-          <label>User Agent</label>
-          <input type="text" x-model="createForm.user_agent">
+        <!-- ===== TAB: Contenido ===== -->
+        <div x-show="createForm.configTab === 'content'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="database" style="width:14px;height:14px;opacity:.6"></i> Extraccion de datos
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.5rem">
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_structured_data"> Datos estructurados (JSON-LD, Microdata)</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_hreflang"> Etiquetas hreflang</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_security_headers"> Cabeceras de seguridad</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_page_content"> Contenido de pagina (texto + markdown)</label>
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.store_raw_html"> Almacenar HTML crudo</label>
+          </div>
         </div>
 
-        <div style="display:flex;gap:1.5rem;margin-bottom:1rem;flex-wrap:wrap">
-          <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
-          <label class="checkbox-label"><input type="checkbox" x-model="createForm.respect_robots"> Respetar robots.txt</label>
-          <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
+        <!-- ===== TAB: Velocidad ===== -->
+        <div x-show="createForm.configTab === 'speed'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="timer" style="width:14px;height:14px;opacity:.6"></i> Tiempos y reintentos
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>Timeout descarga (s)</label>
+              <input type="number" x-model="createForm.download_timeout" min="5" max="120">
+            </div>
+            <div class="form-group">
+              <label>Reintentos</label>
+              <input type="number" x-model="createForm.retry_count" min="0" max="10">
+            </div>
+            <div class="form-group">
+              <label>Delay entre peticiones (s)</label>
+              <input type="number" x-model="createForm.request_delay" min="0" max="30" step="0.5">
+            </div>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="activity" style="width:14px;height:14px;opacity:.6"></i> AutoThrottle
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.5rem">
+            <label class="checkbox-label"><input type="checkbox" x-model="createForm.autothrottle_enabled"> Habilitar autothrottle</label>
+          </div>
+          <div class="form-group" style="margin-top:.75rem" x-show="createForm.autothrottle_enabled">
+            <label>Concurrencia objetivo</label>
+            <input type="number" x-model="createForm.autothrottle_target_concurrency" min="1" max="100" step="0.5">
+            <div class="form-hint">Numero de peticiones simultaneas que el autothrottle intentara mantener</div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label>Patrones de exclusion (uno por linea)</label>
-          <textarea x-model="createForm.exclude_patterns" rows="2" placeholder="Ej: /admin/*&#10;*.pdf"></textarea>
+        <!-- ===== TAB: HTTP ===== -->
+        <div x-show="createForm.configTab === 'http'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="file-code" style="width:14px;height:14px;opacity:.6"></i> Cabeceras personalizadas
+          </div>
+          <div class="form-group">
+            <label>Headers (uno por linea, formato "Nombre: Valor")</label>
+            <textarea x-model="createForm.custom_headers" rows="3" placeholder="X-Custom-Header: valor&#10;Cache-Control: no-cache"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Accept-Language</label>
+            <input type="text" x-model="createForm.accept_language" placeholder="Ej: es-ES,es;q=0.9,en;q=0.8">
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="cookie" style="width:14px;height:14px;opacity:.6"></i> Cookies
+          </div>
+          <div class="form-group">
+            <label>Cookies (una por linea, formato "nombre=valor")</label>
+            <textarea x-model="createForm.cookies" rows="3" placeholder="session_id=abc123&#10;lang=es"></textarea>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="lock" style="width:14px;height:14px;opacity:.6"></i> Autenticacion basica
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Usuario</label>
+              <input type="text" x-model="createForm.basic_auth_user" placeholder="usuario">
+            </div>
+            <div class="form-group">
+              <label>Contrasena</label>
+              <input type="text" x-model="createForm.basic_auth_password" placeholder="contrasena">
+            </div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label>Patrones de inclusion (uno por linea)</label>
-          <textarea x-model="createForm.include_patterns" rows="2" placeholder="Ej: /blog/*"></textarea>
+        <!-- ===== TAB: Analisis ===== -->
+        <div x-show="createForm.configTab === 'analysis'" style="margin-top:1rem">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="type" style="width:14px;height:14px;opacity:.6"></i> Titulo
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Longitud minima</label>
+              <input type="number" x-model="createForm.title_min_length" min="0" max="200">
+            </div>
+            <div class="form-group">
+              <label>Longitud maxima</label>
+              <input type="number" x-model="createForm.title_max_length" min="1" max="500">
+            </div>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="align-left" style="width:14px;height:14px;opacity:.6"></i> Meta descripcion
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Longitud minima</label>
+              <input type="number" x-model="createForm.description_min_length" min="0" max="500">
+            </div>
+            <div class="form-group">
+              <label>Longitud maxima</label>
+              <input type="number" x-model="createForm.description_max_length" min="1" max="1000">
+            </div>
+          </div>
+
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="text-cursor-input" style="width:14px;height:14px;opacity:.6"></i> Contenido y enlaces
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>Palabras minimas</label>
+              <input type="number" x-model="createForm.min_word_count" min="0" max="10000">
+            </div>
+            <div class="form-group">
+              <label>Max cadena redirecciones</label>
+              <input type="number" x-model="createForm.max_redirect_chain_length" min="1" max="20">
+            </div>
+            <div class="form-group">
+              <label>Max enlaces salientes</label>
+              <input type="number" x-model="createForm.max_outlinks" min="1" max="10000">
+            </div>
+          </div>
         </div>
+
       </div>
       <div class="modal-footer">
         <button class="btn" @click="showCreate = false">Cancelar</button>
-        <button class="btn btn-primary" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds">
+        <button class="btn btn-primary" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds" style="display:flex;align-items:center;gap:.4rem">
           <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
+          <i data-lucide="rocket" style="width:14px;height:14px" x-show="!creating"></i>
           Iniciar rastreo
         </button>
       </div>

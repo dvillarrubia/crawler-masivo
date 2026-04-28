@@ -122,6 +122,19 @@ def _run_job(job_id: str) -> None:
         if job_config.get("user_agent"):
             cmd += ["-s", f"USER_AGENT={job_config['user_agent']}"]
 
+        # Advanced crawl behavior settings
+        crawl_behavior = job_config.get("crawl_behavior", {})
+        if crawl_behavior.get("download_timeout", 30) != 30:
+            cmd += ["-s", f"DOWNLOAD_TIMEOUT={crawl_behavior['download_timeout']}"]
+        if crawl_behavior.get("retry_count", 2) != 2:
+            cmd += ["-s", f"RETRY_TIMES={crawl_behavior['retry_count']}"]
+        if crawl_behavior.get("request_delay", 0) > 0:
+            cmd += ["-s", f"DOWNLOAD_DELAY={crawl_behavior['request_delay']}"]
+        if not crawl_behavior.get("autothrottle_enabled", True):
+            cmd += ["-s", "AUTOTHROTTLE_ENABLED=False"]
+        elif crawl_behavior.get("autothrottle_target_concurrency", 8.0) != 8.0:
+            cmd += ["-s", f"AUTOTHROTTLE_TARGET_CONCURRENCY={crawl_behavior['autothrottle_target_concurrency']}"]
+
         result = subprocess.run(
             cmd,
             cwd=_CRAWLER_DIR,
