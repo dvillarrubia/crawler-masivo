@@ -129,6 +129,16 @@ PLAYWRIGHT_CONTEXTS = {
         "java_script_enabled": True,
     },
 }
+# Abort requests for resources we don't need for SEO analysis.
+# This dramatically speeds up JS rendering by skipping images, fonts,
+# media, and tracking pixels — only HTML/CSS/JS reach the browser.
+PLAYWRIGHT_ABORT_REQUEST = lambda req: req.resource_type in (
+    "image", "media", "font", "texttrack", "eventsource",
+    "websocket", "manifest", "other",
+)
+PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = int(
+    os.getenv("PLAYWRIGHT_NAV_TIMEOUT", "15000")  # 15s instead of 30s
+)
 
 # ---------------------------------------------------------------------------
 # Misc

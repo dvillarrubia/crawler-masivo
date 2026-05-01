@@ -214,6 +214,10 @@ class SeoSpider(scrapy.Spider):
         meta: dict[str, Any] = {
             "playwright": True,
             "playwright_include_page": False,
+            # Don't wait for images/fonts/analytics — just the DOM + JS execution.
+            "playwright_page_goto_kwargs": {
+                "wait_until": "domcontentloaded",
+            },
         }
         # Pass user-agent to a named browser context so Chromium sends the
         # configured UA instead of the default headless-shell identifier.
