@@ -55,6 +55,8 @@ const ISSUE_LABEL = {
   'url_underscores': 'URL con guiones bajos',
   'url_multiple_slashes': 'URL con barras multiples',
   'url_has_parameters': 'URL con parametros',
+  'url_non_seo_friendly': 'URL no SEO-friendly',
+  'url_cms_faceted': 'URL de filtro/CMS (crawl budget)',
   'orphan_page': 'Pagina huerfana',
   'high_outlink_count': 'Demasiados enlaces salientes',
 };

@@ -67,6 +67,25 @@ _NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 # Regex to detect multiple consecutive slashes in a path (not the scheme://).
 _MULTIPLE_SLASHES_RE = re.compile(r"(?<!:)//+")
 
+# Patterns that indicate non-SEO-friendly URLs exposed to crawlers.
+# These waste crawl budget and pollute the index when discoverable.
+_NON_SEO_FRIENDLY_RE = re.compile(
+    r";jsessionid="                 # Java session IDs leaked into URLs
+    r"|%5Cu\d{4}"                   # un-decoded JS unicode escapes (%5Cu002F)
+    r"|\\u[0-9a-fA-F]{4}"          # raw JS unicode escapes
+    r"|%00"                         # null bytes in URL
+    , re.IGNORECASE,
+)
+
+# Heuristic: path segments that look like CMS internal/faceted navigation.
+# Matches paths containing encoded semicolons, pipe chars, or long
+# percent-encoded sequences typical of filter/tag pages.
+_CMS_FACETED_RE = re.compile(
+    r"[.;|](?:categorias|categories|tags|labels|filters?|facets?|taxonomy)/"
+    r"|/ELEM_ENTRY|/BP_Categories/"   # Liferay-specific
+    , re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Analyzer
@@ -955,6 +974,15 @@ class SEOAnalyzer:
             # URL contains query parameters.
             if url_str and "?" in url_str:
                 self._add_issue(url_id, "url_has_parameters", "info")
+
+            # Non-SEO-friendly URL (malformed patterns discoverable by bots).
+            if url_str and _NON_SEO_FRIENDLY_RE.search(url_str):
+                self._add_issue(url_id, "url_non_seo_friendly", "error")
+
+            # CMS faceted/filter URL (wastes crawl budget, index bloat).
+            if url_str and _CMS_FACETED_RE.search(url_str):
+                self._add_issue(url_id, "url_cms_faceted", "warning",
+                                {"hint": "Crawl budget waste — consider blocking with robots.txt or noindex"})
 
         self._flush_issues()
 

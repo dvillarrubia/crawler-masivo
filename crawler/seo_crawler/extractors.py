@@ -191,6 +191,7 @@ def extract_headings(selector) -> list[dict[str, Any]]:
     return results
 
 
+
 def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict[str, Any]]:
     """
     Extract all ``<a>`` links from the page.
