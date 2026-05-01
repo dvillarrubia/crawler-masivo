@@ -112,6 +112,17 @@ def _run_job(job_id: str) -> None:
             "-a", f"job_id={job_id}",
         ]
 
+        # When JS rendering is active and no explicit concurrency override,
+        # cap concurrent requests to avoid Chromium memory exhaustion.
+        js_rendering = job_config.get("render_js", False)
+        if js_rendering:
+            js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "8"))
+            js_concurrent_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
+            if "concurrent_requests" not in job_config:
+                cmd += ["-s", f"CONCURRENT_REQUESTS={js_concurrent}"]
+            if "concurrent_requests_per_domain" not in job_config:
+                cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={js_concurrent_per_domain}"]
+
         # Apply job-level Scrapy settings overrides
         if "concurrent_requests" in job_config:
             cmd += ["-s", f"CONCURRENT_REQUESTS={job_config['concurrent_requests']}"]

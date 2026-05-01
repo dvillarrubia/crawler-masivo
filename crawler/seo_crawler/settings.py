@@ -107,12 +107,24 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
         "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
+        "--disable-gpu",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--mute-audio",
+        "--no-first-run",
+        "--single-process",
     ],
 }
-# Default context options — real-looking viewport and locale
+# Limit concurrent browser pages to avoid memory exhaustion
+PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = int(
+    os.getenv("PLAYWRIGHT_MAX_PAGES", "4")
+)
+# Default context options — compact viewport to save memory
 PLAYWRIGHT_CONTEXTS = {
     "default": {
-        "viewport": {"width": 1920, "height": 1080},
+        "viewport": {"width": 1280, "height": 720},
         "locale": "es-ES",
         "java_script_enabled": True,
     },

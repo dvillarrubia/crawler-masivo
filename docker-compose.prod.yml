@@ -1,0 +1,14 @@
+services:
+  crawler:
+    shm_size: '2gb'
+    environment:
+      - PYTHONPATH=/app
+      - JS_CONCURRENT_REQUESTS=16
+      - JS_CONCURRENT_PER_DOMAIN=8
+      - PLAYWRIGHT_MAX_PAGES=8
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 4g
+          cpus: '4'

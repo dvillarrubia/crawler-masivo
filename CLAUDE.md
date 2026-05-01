@@ -34,26 +34,83 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 - **postgres** — PostgreSQL 16 Alpine, port 5432, healthcheck via `pg_isready`
 - **redis** — Redis 7 Alpine, port 6379, healthcheck via `redis-cli ping`
 - **api** — FastAPI app, port 8000, depends on postgres + redis
-- **crawler** — Scrapy worker, 2 replicas by default, `shm_size: 2gb` (for Playwright)
+- **crawler** — Scrapy worker, 1 replica by default (local), resource-limited (2GB RAM, 2 CPUs)
+
+## Deployment: Local vs VPS (Production)
+
+The crawler uses **Playwright (headless Chromium)** for JS rendering, which is very resource-intensive. The project ships with two Docker Compose configs:
+
+- **`docker-compose.yml`** — Conservative defaults for **local development** (your PC)
+- **`docker-compose.prod.yml`** — Higher limits for **VPS / production servers**
+
+### Local (your PC)
+
+```bash
+docker compose up -d
+```
+
+Default crawler limits: 1 replica, 2GB RAM, 2 CPUs, 8 concurrent JS requests, 4 max browser tabs.
+
+### VPS / Production
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Production crawler limits: 2 replicas, 4GB RAM, 4 CPUs, 16 concurrent JS requests, 8 max browser tabs.
+
+Adjust `docker-compose.prod.yml` values based on your VPS specs. Examples:
+
+| VPS RAM | Replicas | Memory limit | `JS_CONCURRENT_REQUESTS` | `PLAYWRIGHT_MAX_PAGES` |
+|---------|----------|--------------|--------------------------|------------------------|
+| 4 GB    | 1        | 2g           | 8                        | 4                      |
+| 8 GB    | 2        | 4g           | 16                       | 8                      |
+| 16 GB   | 4        | 4g           | 16                       | 8                      |
+| 32 GB+  | 4-8      | 8g           | 32                       | 16                     |
+
+### JS Rendering Resource Variables
+
+These env vars control Playwright/Chromium resource usage. Set them in `.env` or in `docker-compose.prod.yml`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JS_CONCURRENT_REQUESTS` | 8 | Max concurrent Scrapy requests when `render_js=true` (auto-cap, ignored if job sets `concurrent_requests`) |
+| `JS_CONCURRENT_PER_DOMAIN` | 4 | Max concurrent requests per domain when `render_js=true` |
+| `PLAYWRIGHT_MAX_PAGES` | 4 | Max browser tabs open simultaneously per context |
+
+**Important:** These caps only apply to jobs with `render_js=true`. Jobs without JS rendering use the standard `CONCURRENT_REQUESTS=32` and are not resource-constrained by Playwright.
+
+### Scaling crawlers at runtime
+
+```bash
+# Scale up (e.g., for a big crawl on a VPS)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --scale crawler=4
+
+# Scale back down
+docker compose up -d --scale crawler=1
+```
 
 ## Key Commands
 
 ```bash
-# Start all services
-docker-compose up -d
+# Start all services (local)
+docker compose up -d
+
+# Start all services (production VPS)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # Rebuild after code changes
-docker-compose up -d --build
+docker compose up -d --build
 
 # Init database tables
-docker-compose exec api python scripts/init_db.py
+docker compose exec api python scripts/init_db.py
 
 # View logs
-docker-compose logs -f api
-docker-compose logs -f crawler
+docker compose logs -f api
+docker compose logs -f crawler
 
 # Scale crawlers
-docker-compose up -d --scale crawler=4
+docker compose up -d --scale crawler=4
 
 # Direct DB access
 docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
@@ -187,6 +244,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `DEPTH_PRIORITY` | 1 | BFS scheduling |
 | `PIPELINE_BATCH_SIZE` | 200 | Child items buffered then bulk-inserted |
 | Playwright | chromium, headless | JS rendering via `scrapy-playwright` |
+| `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 4 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
+| JS auto-cap | 8 / 4 | When `render_js=true`, worker auto-caps concurrency (env-overridable) |
 
 ## Critical Design Decisions
 
@@ -197,6 +256,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 5. **Streaming CSV** — New DB session per 1000-row window to avoid long transactions.
 6. **Headings dedup** — `extract_headings` skips headings inside `<template>`, `<noscript>`, `<svg>` to avoid SSR/framework duplicates.
 7. **URL issues as SEO problems** — Junk/malformed URLs are crawled and reported as SEO issues (not filtered), because if a crawler finds them, Google can too.
+8. **JS rendering auto-cap** — When a job has `render_js=true`, the worker automatically caps `CONCURRENT_REQUESTS` and `CONCURRENT_REQUESTS_PER_DOMAIN` to lower values (env-configurable) to prevent Chromium memory exhaustion. Jobs without JS are unaffected. See "Deployment: Local vs VPS" section.
 
 ## Environment Variables
 
@@ -215,6 +275,11 @@ DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN=8
 DEFAULT_USER_AGENT=SEOCrawler/1.0
 API_HOST=0.0.0.0
 API_PORT=8000
+
+# Playwright / JS rendering resource caps (only apply when render_js=true)
+JS_CONCURRENT_REQUESTS=8
+JS_CONCURRENT_PER_DOMAIN=4
+PLAYWRIGHT_MAX_PAGES=4
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)

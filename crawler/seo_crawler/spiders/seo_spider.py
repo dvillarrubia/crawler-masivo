@@ -222,7 +222,7 @@ class SeoSpider(scrapy.Spider):
             meta["playwright_context"] = "custom"
             meta["playwright_context_kwargs"] = {
                 "user_agent": ua,
-                "viewport": {"width": 1920, "height": 1080},
+                "viewport": {"width": 1280, "height": 720},
                 "locale": "es-ES",
             }
         return meta

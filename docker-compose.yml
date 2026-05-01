@@ -50,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: crawler/Dockerfile
-    shm_size: '2gb'
+    shm_size: '512mb'
     env_file: .env
     environment:
       - PYTHONPATH=/app
@@ -61,7 +61,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     deploy:
-      replicas: 2
+      replicas: 1
+      resources:
+        limits:
+          memory: 2g
+          cpus: '2'
 
   # ---------- Analysis (runs inside crawler, but can also be standalone) ----------
   # Analysis is triggered by the crawler worker after each job completes.
