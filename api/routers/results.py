@@ -11,8 +11,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import case, func
+from pydantic import BaseModel
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, joinedload, subqueryload
+
+from api.backup import stream_backup_zip
 
 from shared.database import get_session
 from shared.models import (
@@ -33,6 +36,7 @@ from api.schemas import (
     PaginatedResponse,
     Recommendation,
     ResourceResponse,
+    ResourceTypeCount,
     SecurityHeadersResponse,
     StatusGroupCount,
     StructuredDataResponse,
@@ -71,6 +75,21 @@ def _paginate(
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls
 # ---------------------------------------------------------------------------
+SORT_COLUMNS = {
+    "url": Url.url,
+    "status_code": Url.status_code,
+    "word_count": Url.word_count,
+    "response_time_ms": Url.response_time_ms,
+    "content_length": Url.content_length,
+    "crawl_depth": Url.crawl_depth,
+    "inlinks_count": Url.inlinks_count,
+    "outlinks_count": Url.outlinks_count,
+    "pagerank": Url.pagerank,
+    "url_length": Url.url_length,
+    "text_ratio": Url.text_ratio,
+}
+
+
 @router.get("/urls", response_model=PaginatedResponse[UrlResponse])
 def list_urls(
     job_id: uuid.UUID,
@@ -79,6 +98,10 @@ def list_urls(
     status_group: str | None = Query(None),
     is_internal: bool | None = Query(None),
     resource_type: str | None = Query(None),
+    search: str | None = Query(None),
+    sort_by: str | None = Query(None),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
+    indexable: bool | None = Query(None),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -91,12 +114,30 @@ def list_urls(
         q = q.filter(Url.is_internal == is_internal)
     if resource_type is not None:
         q = q.filter(Url.resource_type == resource_type)
+    if indexable is not None:
+        q = q.filter(Url.indexable == indexable)
+
+    # Search across url and title
+    if search:
+        pattern = f"%{search}%"
+        q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id).filter(
+            or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern))
+        )
 
     total = q.count()
 
+    # Sorting
+    if sort_by and sort_by in SORT_COLUMNS:
+        col = SORT_COLUMNS[sort_by]
+        if sort_dir == "desc":
+            q = q.order_by(col.desc().nullslast())
+        else:
+            q = q.order_by(col.asc().nullsfirst())
+    else:
+        q = q.order_by(Url.id)
+
     rows = (
         q.options(joinedload(Url.html_meta), joinedload(Url.page_content))
-        .order_by(Url.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -235,6 +276,37 @@ def list_issues(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/issues/urls — URLs affected by specific issue types
+# ---------------------------------------------------------------------------
+class _AffectedUrl(BaseModel):
+    id: int
+    url: str
+    status_code: int | None = None
+
+
+@router.get("/issues/urls", response_model=list[_AffectedUrl])
+def list_issue_urls(
+    job_id: uuid.UUID,
+    issue_type: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """Return distinct URLs affected by a given issue type."""
+    _get_job_or_404(job_id, db)
+
+    rows = (
+        db.query(Url.id, Url.url, Url.status_code)
+        .join(Issue, Issue.url_id == Url.id)
+        .filter(Issue.job_id == job_id, Issue.issue_type == issue_type)
+        .distinct()
+        .order_by(Url.id)
+        .limit(limit)
+        .all()
+    )
+    return [_AffectedUrl(id=r.id, url=r.url, status_code=r.status_code) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/links
 # ---------------------------------------------------------------------------
 @router.get("/links", response_model=PaginatedResponse[LinkResponse])
@@ -320,6 +392,23 @@ def get_stats(
     )
     top_hosts = [HostCount(host=h, count=c) for h, c in host_rows]
 
+    # URLs by resource_type
+    rt_rows = (
+        db.query(Url.resource_type, func.count(Url.id))
+        .filter(Url.job_id == job_id, Url.resource_type.isnot(None))
+        .group_by(Url.resource_type)
+        .all()
+    )
+    urls_by_rt = [
+        ResourceTypeCount(resource_type=rt, count=c) for rt, c in rt_rows
+    ]
+
+    # Internal / external counts
+    internal_count = db.query(func.count(Url.id)).filter(
+        Url.job_id == job_id, Url.is_internal == True,
+    ).scalar() or 0
+    external_count = total_urls - internal_count
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -328,6 +417,9 @@ def get_stats(
         urls_by_status_group=urls_by_status,
         issues_by_type=issues_by_type,
         top_hosts=top_hosts,
+        urls_by_resource_type=urls_by_rt,
+        internal_count=internal_count,
+        external_count=external_count,
     )
 
 
@@ -502,6 +594,32 @@ def export_csv(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/backup  --  full backup as ZIP with NDJSON
+# ---------------------------------------------------------------------------
+@router.get("/backup")
+def export_backup(
+    job_id: uuid.UUID,
+    include_content: bool = Query(True),
+    db: Session = Depends(get_session),
+):
+    job = _get_job_or_404(job_id, db)
+
+    if job.status in ("pending", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede exportar un job que aun esta en ejecucion",
+        )
+
+    return StreamingResponse(
+        stream_backup_zip(job_id, include_content),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="backup_{job_id}.zip"',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/insights  --  SEO insights report
 # ---------------------------------------------------------------------------
 def _safe_pct(numerator: int, denominator: int) -> float:
@@ -554,18 +672,21 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Corregir errores 4xx",
             description=f"Hay {errors_4xx} URLs internas que devuelven errores 4xx (no encontrado). Revisa los enlaces rotos y corrige o elimina las referencias.",
             affected_count=errors_4xx,
+            url_filter={"status_group": "4xx", "is_internal": "true"},
         ))
     if errors_5xx > 0:
         recs.append(Recommendation(
             priority="alta", title="Corregir errores 5xx",
             description=f"Hay {errors_5xx} URLs internas con errores de servidor (5xx). Investiga los problemas del servidor para estas paginas.",
             affected_count=errors_5xx,
+            url_filter={"status_group": "5xx", "is_internal": "true"},
         ))
     if pct_redirects > 10:
         recs.append(Recommendation(
             priority="media", title="Reducir redirecciones",
             description=f"El {pct_redirects}% de las URLs internas son redirecciones. Actualiza los enlaces para apuntar directamente a las URLs finales.",
             affected_count=redirects_3xx,
+            url_filter={"status_group": "3xx", "is_internal": "true"},
         ))
     non_indexable = total - indexable_count
     if total > 0 and pct_indexable < 80:
@@ -573,6 +694,7 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="media", title="Mejorar indexabilidad",
             description=f"Solo el {pct_indexable}% de las URLs internas son indexables. Revisa las directivas noindex y canonicals para asegurar que las paginas importantes sean rastreables.",
             affected_count=non_indexable,
+            url_filter={"indexable": "false", "is_internal": "true"},
         ))
 
     return CategoryInsight(
@@ -616,9 +738,9 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     thin_content = sum(issue_map.get(k, 0) for k in ["low_word_count", "very_low_text_ratio", "low_text_ratio"])
 
     # Average word count
-    avg_wc = db.query(func.avg(Url.word_count)).filter(
+    avg_wc = float(db.query(func.avg(Url.word_count)).filter(
         Url.job_id == job_id, Url.is_internal == True, Url.is_html == True, Url.word_count.isnot(None),
-    ).scalar() or 0
+    ).scalar() or 0)
 
     pct_title_ok = _safe_pct(max(0, total_html - title_problems), total_html)
     pct_desc_ok = _safe_pct(max(0, total_html - desc_problems), total_html)
@@ -633,30 +755,35 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Agregar titulos faltantes",
             description=f"Hay {title_missing} paginas sin etiqueta title. El titulo es crucial para el posicionamiento y el CTR en los resultados de busqueda.",
             affected_count=title_missing,
+            issue_types=["title_missing"],
         ))
     if title_problems - title_missing > 0:
         recs.append(Recommendation(
             priority="media", title="Optimizar titulos",
             description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico y tenga entre 30-60 caracteres.",
             affected_count=title_problems - title_missing,
+            issue_types=["title_too_short", "title_too_long", "title_duplicate"],
         ))
     if desc_missing > 0:
         recs.append(Recommendation(
             priority="alta", title="Agregar meta descripciones",
             description=f"Hay {desc_missing} paginas sin meta descripcion. Las descripciones ayudan a mejorar el CTR en los resultados de busqueda.",
             affected_count=desc_missing,
+            issue_types=["description_missing"],
         ))
     if h1_problems > 0:
         recs.append(Recommendation(
             priority="media", title="Corregir encabezados H1",
             description=f"Hay {h1_problems} paginas con problemas en el H1 (faltante, multiples o duplicados). Cada pagina debe tener exactamente un H1 unico.",
             affected_count=h1_problems,
+            issue_types=["h1_missing", "h1_multiple", "h1_duplicate"],
         ))
     if thin_content > 0:
         recs.append(Recommendation(
             priority="media", title="Mejorar contenido delgado",
             description=f"Hay {thin_content} paginas con contenido escaso (pocas palabras o ratio de texto bajo). Amplia el contenido de estas paginas para aportar mas valor.",
             affected_count=thin_content,
+            issue_types=["low_word_count", "very_low_text_ratio", "low_text_ratio"],
         ))
 
     return CategoryInsight(
@@ -684,9 +811,9 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     ).scalar() or 0
 
     # Average inlinks
-    avg_inlinks = db.query(func.avg(Url.inlinks_count)).filter(
+    avg_inlinks = float(db.query(func.avg(Url.inlinks_count)).filter(
         Url.job_id == job_id, Url.is_internal == True, Url.is_html == True,
-    ).scalar() or 0
+    ).scalar() or 0)
 
     # Nofollow internal links
     total_internal_links = db.query(func.count(Link.id)).filter(
@@ -722,18 +849,21 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Enlazar paginas huerfanas",
             description=f"Hay {orphan_count} paginas sin enlaces internos que apunten a ellas. Agrega enlaces desde paginas relevantes para que los buscadores las descubran.",
             affected_count=orphan_count,
+            issue_types=["orphan_page"],
         ))
     if broken_link_issues > 0:
         recs.append(Recommendation(
             priority="alta", title="Corregir enlaces rotos",
             description=f"Se detectaron {broken_link_issues} paginas con errores HTTP. Corrige o elimina los enlaces que apuntan a estas paginas.",
             affected_count=broken_link_issues,
+            issue_types=["4xx_error", "5xx_error"],
         ))
     if high_outlinks > 0:
         recs.append(Recommendation(
             priority="baja", title="Reducir enlaces salientes excesivos",
             description=f"Hay {high_outlinks} paginas con demasiados enlaces salientes, lo que puede diluir la autoridad de enlace.",
             affected_count=high_outlinks,
+            issue_types=["high_outlink_count"],
         ))
 
     return CategoryInsight(
@@ -800,12 +930,14 @@ def _calc_security(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Migrar a HTTPS",
             description=f"Hay {non_https} paginas servidas sin HTTPS. HTTPS es fundamental para la seguridad y es un factor de posicionamiento.",
             affected_count=non_https,
+            issue_types=["http_url"],
         ))
     if mixed_count > 0:
         recs.append(Recommendation(
             priority="alta", title="Eliminar contenido mixto",
             description=f"Hay {mixed_count} paginas con contenido mixto (recursos HTTP en paginas HTTPS). Actualiza todas las referencias a HTTPS.",
             affected_count=mixed_count,
+            issue_types=["mixed_content"],
         ))
     non_hsts = total_with_sec - hsts_count
     if non_hsts > 0 and https_count > 0:
@@ -813,6 +945,7 @@ def _calc_security(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="media", title="Implementar HSTS",
             description=f"Hay {non_hsts} paginas sin la cabecera HSTS. HSTS fuerza conexiones seguras y previene ataques de downgrade.",
             affected_count=non_hsts,
+            issue_types=["missing_hsts"],
         ))
     non_csp = total_with_sec - csp_count
     if non_csp > 0:
@@ -820,6 +953,7 @@ def _calc_security(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="baja", title="Agregar Content-Security-Policy",
             description=f"Hay {non_csp} paginas sin politica CSP. CSP protege contra ataques XSS e inyeccion de datos.",
             affected_count=non_csp,
+            issue_types=["missing_csp"],
         ))
 
     return CategoryInsight(
@@ -886,6 +1020,7 @@ def _calc_structured_data(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Corregir errores de validacion",
             description=f"Hay {sd_errors} bloques de datos estructurados con errores de validacion. Corrigelos para que los buscadores los interpreten correctamente.",
             affected_count=sd_errors,
+            issue_types=["structured_data_error"],
         ))
 
     return CategoryInsight(
@@ -944,6 +1079,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="alta", title="Corregir etiquetas hreflang sin retorno",
             description=f"Hay {missing_return} etiquetas hreflang sin una etiqueta de retorno confirmada. Cada hreflang debe tener una referencia reciproca.",
             affected_count=missing_return,
+            issue_types=["hreflang_missing_return"],
         ))
     invalid_lang = total_hreflang - lang_valid
     if invalid_lang > 0:
@@ -951,6 +1087,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             priority="media", title="Corregir codigos de idioma invalidos",
             description=f"Hay {invalid_lang} etiquetas hreflang con codigos de idioma no validos. Usa codigos ISO 639-1 (ej: es, en, fr).",
             affected_count=invalid_lang,
+            issue_types=["hreflang_invalid_lang"],
         ))
 
     return CategoryInsight(

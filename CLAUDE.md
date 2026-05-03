@@ -76,7 +76,7 @@ These env vars control Playwright/Chromium resource usage. Set them in `.env` or
 |----------|---------|-------------|
 | `JS_CONCURRENT_REQUESTS` | 8 | Max concurrent Scrapy requests when `render_js=true` (auto-cap, ignored if job sets `concurrent_requests`) |
 | `JS_CONCURRENT_PER_DOMAIN` | 4 | Max concurrent requests per domain when `render_js=true` |
-| `PLAYWRIGHT_MAX_PAGES` | 4 | Max browser tabs open simultaneously per context |
+| `PLAYWRIGHT_MAX_PAGES` | 8 | Max browser tabs open simultaneously per context |
 
 **Important:** These caps only apply to jobs with `render_js=true`. Jobs without JS rendering use the standard `CONCURRENT_REQUESTS=32` and are not resource-constrained by Playwright.
 
@@ -244,7 +244,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `DEPTH_PRIORITY` | 1 | BFS scheduling |
 | `PIPELINE_BATCH_SIZE` | 200 | Child items buffered then bulk-inserted |
 | Playwright | chromium, headless | JS rendering via `scrapy-playwright` |
-| `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 4 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
+| `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 8 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
+| `PLAYWRIGHT_MAX_CONTEXTS` | 3 | Safety cap on browser contexts (env-overridable) |
 | JS auto-cap | 8 / 4 | When `render_js=true`, worker auto-caps concurrency (env-overridable) |
 
 ## Critical Design Decisions
@@ -279,7 +280,7 @@ API_PORT=8000
 # Playwright / JS rendering resource caps (only apply when render_js=true)
 JS_CONCURRENT_REQUESTS=8
 JS_CONCURRENT_PER_DOMAIN=4
-PLAYWRIGHT_MAX_PAGES=4
+PLAYWRIGHT_MAX_PAGES=8
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)

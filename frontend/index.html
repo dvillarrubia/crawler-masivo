@@ -17,12 +17,17 @@
 <div class="app">
 
   <!-- ===== BARRA SUPERIOR ===== -->
-  <header class="topbar" style="border-top: 3px solid; border-image: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7) 1;">
+  <header class="topbar" style="border-top: 3px solid #5BAE23;">
     <h1 data-tip="Panel de control del rastreador SEO" style="display:flex;align-items:center;gap:.5rem">
-      <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#8b5cf6"></i>
-      <span style="background:linear-gradient(135deg,#6366f1,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">SEO Crawler</span>
+      <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#5BAE23"></i>
+      <span style="color:#5BAE23;font-weight:800;">SEO Crawler</span>
     </h1>
     <div class="topbar-actions">
+      <template x-if="view === 'explorer'">
+        <button class="btn btn-sm" @click="backFromExplorer()" data-tip="Volver al detalle del trabajo" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajo
+        </button>
+      </template>
       <template x-if="view === 'url-detail'">
         <button class="btn btn-sm" @click="backToDetail()" data-tip="Volver al trabajo" style="display:flex;align-items:center;gap:.35rem">
           <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajo
@@ -33,6 +38,9 @@
           <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajos
         </button>
       </template>
+      <button class="btn btn-sm" @click="showImportModal = true" data-tip="Importar un backup ZIP de un rastreo" style="display:flex;align-items:center;gap:.35rem">
+        <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup
+      </button>
       <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo SEO de un sitio web" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
       </button>
@@ -161,7 +169,7 @@
     <template x-if="view === 'detail' && job">
       <div>
         <!-- Hero gradient header -->
-        <div style="margin:-1.5rem -1.5rem 1.5rem -1.5rem;padding:1.5rem 1.5rem 1rem;background:linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.06) 50%, rgba(168,85,247,0.04) 100%);border-bottom:1px solid var(--border)">
+        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:#f0f1f3;border-bottom:1px solid var(--border)">
           <!-- Cabecera -->
           <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
             <div>
@@ -178,9 +186,17 @@
                   <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
                 </button>
               </template>
+              <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
+                <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
+              </button>
               <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
               </button>
+              <template x-if="['completed','failed','cancelled'].includes(job.status)">
+                <button class="btn btn-sm" @click="exportBackup()" style="display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="archive" style="width:13px;height:13px"></i> Backup
+                </button>
+              </template>
               <button class="btn btn-sm btn-danger" @click="deleteJob()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="trash-2" style="width:13px;height:13px"></i> Eliminar
               </button>
@@ -323,7 +339,8 @@
                 <div><span class="text-dim">Seguir externos:</span> <span x-text="job.config?.follow_external ? 'Si' : 'No'"></span></div>
                 <div><span class="text-dim">Respetar robots.txt:</span> <span x-text="job.config?.respect_robots ? 'Si' : 'No'"></span></div>
                 <div><span class="text-dim">Renderizar JS:</span> <span x-text="job.config?.render_js ? 'Si' : 'No'"></span></div>
-                <div><span class="text-dim">User Agent:</span> <span x-text="job.config?.user_agent"></span></div>
+                <div><span class="text-dim">Huella TLS:</span> <span x-text="({'chrome124':'Chrome','safari17_0':'Safari','edge101':'Edge'})[job.config?.impersonate] || job.config?.impersonate || 'Chrome'"></span></div>
+                <div style="grid-column:1/-1"><span class="text-dim">User Agent:</span> <span class="text-sm" x-text="job.config?.user_agent" style="word-break:break-all"></span></div>
                 <div><span class="text-dim">Iniciado:</span> <span x-text="fmt.date(job.started_at)"></span></div>
                 <div><span class="text-dim">Finalizado:</span> <span x-text="fmt.date(job.completed_at)"></span></div>
               </div>
@@ -717,9 +734,46 @@
                                 <div class="recommendation-header">
                                   <span class="priority-badge" :class="priorityClass(rec.priority)" x-text="priorityLabel(rec.priority)"></span>
                                   <span class="recommendation-title" x-text="rec.title"></span>
+                                  <template x-if="recHasUrls(rec)">
+                                    <button class="btn-icon" @click.stop="toggleRecUrls(rec)"
+                                      style="margin-left:.25rem;font-size:.72rem;padding:.15rem .4rem;border:1px solid var(--border);border-radius:3px;display:inline-flex;align-items:center;gap:.25rem;color:var(--accent);background:rgba(91,174,35,.06);cursor:pointer">
+                                      <i data-lucide="list" style="width:11px;height:11px"></i>
+                                      <span x-text="recUrlsOpen[rec.title] ? 'Ocultar URLs' : 'Ver URLs'"></span>
+                                    </button>
+                                  </template>
                                   <span class="recommendation-count" x-text="rec.affected_count + ' URLs'" x-show="rec.affected_count > 0"></span>
                                 </div>
                                 <p class="recommendation-desc" x-text="rec.description"></p>
+
+                                <!-- URL list expandable -->
+                                <template x-if="recUrlsOpen[rec.title]">
+                                  <div style="margin-top:.5rem;padding:.5rem .65rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;animation:fadeInUp .2s ease">
+                                    <template x-if="recUrls[rec.title]?.loading">
+                                      <div class="loading-overlay" style="padding:.35rem;justify-content:flex-start"><div class="spinner" style="width:14px;height:14px"></div> <span class="text-dim text-sm">Cargando URLs...</span></div>
+                                    </template>
+                                    <template x-if="recUrls[rec.title]?.loaded && recUrls[rec.title].urls.length === 0">
+                                      <p class="text-dim text-sm">No se encontraron URLs afectadas.</p>
+                                    </template>
+                                    <template x-if="recUrls[rec.title]?.loaded && recUrls[rec.title].urls.length > 0">
+                                      <div>
+                                        <div style="display:flex;flex-direction:column;gap:.15rem;max-height:240px;overflow-y:auto">
+                                          <template x-for="u in recUrls[rec.title].urls" :key="u.id">
+                                            <div @click="openUrlDetail(u.id)" style="display:flex;align-items:center;gap:.5rem;padding:.25rem .4rem;border-radius:4px;cursor:pointer;font-size:.8rem;transition:background .15s" class="rec-url-row">
+                                              <span class="exp-status" :class="expStatusClass(u.status_code)" x-text="u.status_code" style="font-size:.7rem;padding:.05rem .3rem"></span>
+                                              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)" :title="u.url" x-text="u.url"></span>
+                                            </div>
+                                          </template>
+                                        </div>
+                                        <div style="margin-top:.4rem;display:flex;align-items:center;gap:.5rem;padding-top:.35rem;border-top:1px solid var(--border)">
+                                          <span class="text-dim" style="font-size:.72rem" x-text="recUrls[rec.title].urls.length + ' de ' + rec.affected_count + ' URLs'"></span>
+                                          <button class="btn btn-sm" @click.stop="openRecInExplorer(rec)" style="margin-left:auto;font-size:.7rem;padding:.2rem .5rem;display:flex;align-items:center;gap:.25rem">
+                                            <i data-lucide="external-link" style="width:10px;height:10px"></i> Ver todas
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
                               </div>
                             </template>
                           </div>
@@ -1273,6 +1327,257 @@
       </div>
     </template>
 
+
+    <!-- ============================================================ -->
+    <!--                  VISTA: EXPLORER (Screaming Frog)            -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'explorer' && job">
+      <div class="explorer">
+
+        <!-- Sidebar -->
+        <div class="exp-sidebar">
+          <div class="exp-sidebar-header">
+            <i data-lucide="table-2" style="width:14px;height:14px;color:var(--accent)"></i>
+            Explorador
+          </div>
+          <div class="exp-sidebar-group">
+            <template x-for="tab in EXP_TABS" :key="tab.key">
+              <div>
+                <template x-if="tab.divider">
+                  <div class="exp-divider"></div>
+                </template>
+                <template x-if="!tab.divider">
+                  <div class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
+                    <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
+                    <span x-text="tab.label"></span>
+                    <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Main area -->
+        <div class="exp-main">
+
+          <!-- Toolbar -->
+          <div class="exp-toolbar">
+            <button class="exp-back" @click="backFromExplorer()">
+              <i data-lucide="arrow-left" style="width:13px;height:13px"></i>
+              <span x-text="job.name" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+            </button>
+            <div class="exp-search-wrap">
+              <i data-lucide="search"></i>
+              <input type="text" class="exp-search" placeholder="Buscar URL o titulo..." x-model="expSearch" @input="explorerSearchInput()">
+            </div>
+            <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
+            <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.25rem;margin-left:auto">
+              <i data-lucide="download" style="width:12px;height:12px"></i> CSV
+            </button>
+          </div>
+
+          <!-- Table -->
+          <div class="exp-table-wrap">
+            <template x-if="expLoading && expUrls.length === 0">
+              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
+            </template>
+            <template x-if="!expLoading && expUrls.length === 0">
+              <div class="empty" style="padding:2rem">
+                <p class="text-dim">No se encontraron URLs con estos filtros.</p>
+              </div>
+            </template>
+            <template x-if="expUrls.length > 0">
+              <table class="exp-table">
+                <thead>
+                  <tr>
+                    <template x-for="col in getExpColumns()" :key="col">
+                      <th :class="expSort === col && 'sorted'"
+                          @click="EXP_COLUMN_DEFS[col]?.sortable && explorerSort(col)">
+                        <span x-text="EXP_COLUMN_DEFS[col]?.label || col"></span>
+                        <template x-if="expSort === col">
+                          <span class="exp-sort-icon" x-text="expSortDir === 'asc' ? ' ▲' : ' ▼'"></span>
+                        </template>
+                      </th>
+                    </template>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in expUrls" :key="row.id">
+                    <tr :class="expSelectedUrl?.id === row.id && 'exp-row-selected'"
+                        @click="selectExplorerUrl(row)"
+                        @dblclick="openUrlFromExplorer(row.id)">
+                      <template x-for="col in getExpColumns()" :key="row.id + '_' + col">
+                        <td>
+                          <template x-if="col === 'status_code'">
+                            <span class="exp-status" :class="expStatusClass(row.status_code)" x-text="row.status_code || ''"></span>
+                          </template>
+                          <template x-if="col === 'url'">
+                            <span :title="row.url" x-text="getExpCellValue(row, col)"></span>
+                          </template>
+                          <template x-if="col !== 'status_code' && col !== 'url'">
+                            <span x-text="getExpCellValue(row, col)"></span>
+                          </template>
+                        </td>
+                      </template>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+          </div>
+
+          <!-- Detail panel -->
+          <template x-if="expDetailOpen && expSelectedUrl">
+            <div class="exp-detail">
+              <div class="exp-detail-header">
+                <span class="exp-status" :class="expStatusClass(expSelectedUrl.status_code)" x-text="expSelectedUrl.status_code"></span>
+                <span class="exp-detail-url" :title="expSelectedUrl.url" x-text="expSelectedUrl.url"></span>
+                <button class="btn btn-sm" @click="openUrlFromExplorer(expSelectedUrl.id)" style="font-size:.72rem;padding:.2rem .5rem">
+                  Abrir completo
+                </button>
+                <button class="exp-detail-close" @click="closeExplorerDetail()">&times;</button>
+              </div>
+              <div class="exp-detail-tabs">
+                <div class="exp-detail-tab" :class="expDetailTab === 'general' && 'active'" @click="expDetailTab = 'general'">General</div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'seo' && 'active'" @click="expDetailTab = 'seo'">SEO</div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">Contenido</div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'links' && 'active'" @click="expDetailTab = 'links'">Links</div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">Issues</div>
+              </div>
+              <div class="exp-detail-body">
+                <!-- Loading -->
+                <template x-if="!expUrlDetail">
+                  <div class="loading-overlay" style="padding:.5rem"><div class="spinner"></div></div>
+                </template>
+                <template x-if="expUrlDetail">
+                  <div>
+                    <!-- General tab -->
+                    <template x-if="expDetailTab === 'general'">
+                      <div class="exp-detail-grid">
+                        <div class="exp-detail-row"><span class="exp-detail-label">URL</span><span class="exp-detail-value" x-text="expUrlDetail.url"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Estado</span><span class="exp-detail-value" x-text="expUrlDetail.status_code + ' ' + (expUrlDetail.status_text || '')"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Tipo</span><span class="exp-detail-value" x-text="expUrlDetail.content_type || ''"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Tamano</span><span class="exp-detail-value" x-text="fmt.bytes(expUrlDetail.content_length)"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Tiempo</span><span class="exp-detail-value" x-text="fmt.ms(expUrlDetail.response_time_ms)"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Profundidad</span><span class="exp-detail-value" x-text="expUrlDetail.crawl_depth ?? ''"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Interna</span><span class="exp-detail-value" x-text="expUrlDetail.is_internal ? 'Si' : 'No'"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Indexable</span><span class="exp-detail-value" x-text="expUrlDetail.indexable ? 'Si' : 'No'"></span></div>
+                        <template x-if="expUrlDetail.redirect_url">
+                          <div class="exp-detail-row"><span class="exp-detail-label">Redirige a</span><span class="exp-detail-value" x-text="expUrlDetail.redirect_url"></span></div>
+                        </template>
+                      </div>
+                    </template>
+                    <!-- SEO tab -->
+                    <template x-if="expDetailTab === 'seo'">
+                      <div class="exp-detail-grid">
+                        <div class="exp-detail-row"><span class="exp-detail-label">Title</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.title || '(vacio)'"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Title len</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.title_len ?? ''"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Description</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_description || '(vacio)'"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Desc len</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_description_len ?? ''"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Canonical</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.canonical_href || ''"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Robots</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_robots || ''"></span></div>
+                        <template x-if="expUrlDetail.headings && expUrlDetail.headings.length > 0">
+                          <div class="exp-detail-row" style="grid-column:1/-1">
+                            <span class="exp-detail-label">H1</span>
+                            <span class="exp-detail-value" x-text="expUrlDetail.headings.filter(h => h.tag === 'h1').map(h => h.text).join(' | ') || '(sin H1)'"></span>
+                          </div>
+                        </template>
+                        <div class="exp-detail-row"><span class="exp-detail-label">Palabras</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.word_count)"></span></div>
+                        <div class="exp-detail-row"><span class="exp-detail-label">PageRank</span><span class="exp-detail-value" x-text="expUrlDetail.pagerank != null ? expUrlDetail.pagerank.toFixed(4) : ''"></span></div>
+                      </div>
+                    </template>
+                    <!-- Content tab -->
+                    <template x-if="expDetailTab === 'content'">
+                      <div>
+                        <template x-if="expUrlDetail.headings && expUrlDetail.headings.length > 0">
+                          <div style="margin-bottom:.75rem">
+                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.35rem">Encabezados</div>
+                            <div class="heading-tree">
+                              <template x-for="h in expUrlDetail.headings" :key="h.id">
+                                <div class="heading-item" :style="'padding-left:' + headingIndent(h.tag) + 'rem'">
+                                  <span class="heading-tag" :style="'color:' + headingColor(h.tag)" x-text="h.tag"></span>
+                                  <span class="heading-text" x-text="h.text || '(vacio)'"></span>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                        <template x-if="expUrlDetail.page_content?.content_text">
+                          <div>
+                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.35rem">Texto extraido (primeros 500 car.)</div>
+                            <div class="content-preview" x-text="expUrlDetail.page_content.content_text.substring(0, 500)"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <!-- Links tab -->
+                    <template x-if="expDetailTab === 'links'">
+                      <div>
+                        <div class="exp-detail-grid" style="margin-bottom:.5rem">
+                          <div class="exp-detail-row"><span class="exp-detail-label">Inlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.inlinks_count)"></span></div>
+                          <div class="exp-detail-row"><span class="exp-detail-label">Outlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.outlinks_count)"></span></div>
+                          <div class="exp-detail-row"><span class="exp-detail-label">Ext. outlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.external_outlinks_count)"></span></div>
+                        </div>
+                        <template x-if="expUrlDetail.inlinks && expUrlDetail.inlinks.length > 0">
+                          <div style="margin-bottom:.5rem">
+                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.25rem">Inlinks (top <span x-text="expUrlDetail.inlinks.length"></span>)</div>
+                            <template x-for="l in expUrlDetail.inlinks.slice(0, 20)" :key="l.id">
+                              <div class="exp-link-item" x-text="l.from_url || l.to_url"></div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="expUrlDetail.outlinks && expUrlDetail.outlinks.length > 0">
+                          <div>
+                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.25rem">Outlinks (top <span x-text="expUrlDetail.outlinks.length"></span>)</div>
+                            <template x-for="l in expUrlDetail.outlinks.slice(0, 20)" :key="l.id">
+                              <div class="exp-link-item" x-text="l.to_url"></div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <!-- Issues tab -->
+                    <template x-if="expDetailTab === 'issues'">
+                      <div>
+                        <template x-if="!expUrlDetail.issues || expUrlDetail.issues.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Sin problemas detectados.</div>
+                        </template>
+                        <template x-if="expUrlDetail.issues && expUrlDetail.issues.length > 0">
+                          <div class="issues-list">
+                            <template x-for="iss in expUrlDetail.issues" :key="iss.id">
+                              <div class="issue-item" :class="'issue-' + iss.severity">
+                                <div class="issue-header">
+                                  <span class="badge" :class="'severity-' + iss.severity" x-text="fmt.severity(iss.severity)" style="font-size:.68rem"></span>
+                                  <span style="font-weight:600;font-size:.8rem" x-text="fmt.issue(iss.issue_type)"></span>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Status bar -->
+          <div class="exp-statusbar">
+            <span x-text="'Pag. ' + expPage + ' de ' + expPages"></span>
+            <div class="exp-pager">
+              <button :disabled="expPage <= 1" @click="setExpPage(1)">&#171;</button>
+              <button :disabled="expPage <= 1" @click="setExpPage(expPage - 1)">&#8249;</button>
+              <button :disabled="expPage >= expPages" @click="setExpPage(expPage + 1)">&#8250;</button>
+              <button :disabled="expPage >= expPages" @click="setExpPage(expPages)">&#187;</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </template>
+
   </main>
 </div>
 
@@ -1284,7 +1589,7 @@
       <div class="modal-header">
         <div>
           <h3 style="display:flex;align-items:center;gap:.4rem">
-            <i data-lucide="radar" style="width:18px;height:18px;color:#8b5cf6"></i> Nuevo rastreo
+            <i data-lucide="radar" style="width:18px;height:18px;color:#5BAE23"></i> Nuevo rastreo
           </h3>
           <p class="text-dim text-sm" style="margin-top:.25rem">Configura y lanza un rastreo SEO completo de un sitio web</p>
         </div>
@@ -1359,10 +1664,36 @@
               <input type="number" x-model="createForm.concurrent_requests_per_domain" min="1" max="64">
             </div>
           </div>
-          <div class="form-group">
-            <label>User Agent</label>
-            <input type="text" x-model="createForm.user_agent">
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="shield" style="width:14px;height:14px;opacity:.6"></i> Identidad del crawler
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>User Agent</label>
+              <select x-model="createForm.user_agent_preset">
+                <option value="chrome_win">Chrome - Windows (recomendado)</option>
+                <option value="chrome_mac">Chrome - macOS</option>
+                <option value="safari_mac">Safari - macOS</option>
+                <option value="firefox_win">Firefox - Windows</option>
+                <option value="edge_win">Edge - Windows</option>
+                <option value="googlebot">Googlebot</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Huella TLS (anti-WAF)</label>
+              <select x-model="createForm.impersonate">
+                <option value="chrome124">Chrome (recomendado)</option>
+                <option value="safari17_0">Safari</option>
+                <option value="edge101">Edge</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" x-show="createForm.user_agent_preset === 'custom'">
+            <label>User Agent personalizado</label>
+            <input type="text" x-model="createForm.user_agent_custom" placeholder="Mozilla/5.0 ...">
+          </div>
+          <div class="form-hint" style="margin-bottom:.75rem">El User Agent y la huella TLS se envian juntos. Para maxima eficacia, usa el mismo navegador en ambos (ej: Chrome + Chrome)</div>
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.respect_robots"> Respetar robots.txt</label>
@@ -1562,6 +1893,68 @@
           <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="rocket" style="width:14px;height:14px" x-show="!creating"></i>
           Iniciar rastreo
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== MODAL: IMPORTAR BACKUP ===== -->
+<template x-if="showImportModal">
+  <div class="modal-backdrop" @click.self="showImportModal = false" @keydown.escape.window="showImportModal = false">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3 style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="upload" style="width:18px;height:18px;color:var(--accent)"></i>
+          Importar backup
+        </h3>
+        <button class="btn-icon" @click="showImportModal = false" style="font-size:1.25rem">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1.25rem">
+        <p class="text-dim text-sm" style="margin-bottom:1rem">
+          Selecciona un archivo ZIP generado con la funcion "Backup" para restaurar un rastreo completo con todos sus datos.
+        </p>
+
+        <label class="form-label">Archivo ZIP</label>
+        <input type="file" accept=".zip" @change="importFile = $event.target.files[0]"
+               class="form-input" style="padding:.4rem">
+
+        <label class="form-label mt-2" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+          <input type="checkbox" x-model="importPreserveId">
+          Conservar el ID original del job
+        </label>
+        <p class="text-dim text-sm" style="margin-top:.25rem">
+          Si esta activo y ya existe un job con el mismo ID, la importacion fallara (409).
+        </p>
+
+        <template x-if="importError">
+          <div class="text-sm mt-2" style="color:var(--red)" x-text="importError"></div>
+        </template>
+
+        <template x-if="importResult">
+          <div class="card mt-2" style="background:var(--green-bg);border-color:var(--green);padding:.75rem">
+            <p style="font-weight:600;color:var(--green);margin-bottom:.5rem">Importacion completada</p>
+            <p class="text-sm">URLs importadas: <strong x-text="importResult.rows_imported.urls || 0"></strong></p>
+            <template x-if="importResult.warnings && importResult.warnings.length > 0">
+              <details class="mt-1">
+                <summary class="text-sm text-dim" style="cursor:pointer" x-text="importResult.warnings.length + ' advertencias'"></summary>
+                <ul class="text-sm" style="margin-top:.25rem;padding-left:1rem">
+                  <template x-for="w in importResult.warnings.slice(0, 20)">
+                    <li x-text="w" class="text-dim"></li>
+                  </template>
+                </ul>
+              </details>
+            </template>
+          </div>
+        </template>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="closeImportModal()">Cerrar</button>
+        <button class="btn btn-primary" @click="submitImport()" :disabled="importing || !importFile || importResult"
+                style="display:flex;align-items:center;gap:.4rem">
+          <template x-if="importing"><span class="spinner" style="width:14px;height:14px"></span></template>
+          <i data-lucide="upload" style="width:14px;height:14px" x-show="!importing"></i>
+          Importar
         </button>
       </div>
     </div>

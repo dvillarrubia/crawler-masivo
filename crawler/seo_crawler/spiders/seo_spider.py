@@ -22,6 +22,7 @@ import redis
 import scrapy
 from scrapy import Request, signals
 from scrapy.http import HtmlResponse, Response
+from scrapy_playwright.page import PageMethod
 
 from seo_crawler.extractors import (
     classify_resource_type,
@@ -62,6 +63,96 @@ from seo_crawler.items import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Extensions that never need JS rendering — skip Playwright for these URLs.
+_NON_HTML_EXTENSIONS = frozenset({
+    # Images
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp", ".tiff", ".avif",
+    # Documents
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    # Styles / scripts / fonts
+    ".css", ".js", ".mjs", ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    # Media
+    ".mp3", ".mp4", ".avi", ".mov", ".webm", ".ogg", ".wav",
+    # Archives
+    ".zip", ".tar", ".gz", ".rar", ".7z",
+    # Data / config
+    ".json", ".xml", ".rss", ".yaml", ".yml", ".map", ".wasm",
+    # Other binary
+    ".exe", ".dmg",
+    # Plain text
+    ".txt", ".csv", ".rtf",
+})
+
+
+def _url_likely_html(url: str) -> bool:
+    """Return True if the URL probably points to an HTML page.
+
+    Checks the last segment of the path for a file extension.
+    No extension or an extension not in _NON_HTML_EXTENSIONS → probably HTML.
+    """
+    path = urlparse(url).path
+    # Get last segment, ignore trailing slash
+    segment = path.rstrip("/").rsplit("/", 1)[-1] if path else ""
+    dot_pos = segment.rfind(".")
+    if dot_pos == -1:
+        return True  # no extension → likely HTML
+    ext = segment[dot_pos:].lower()
+    return ext not in _NON_HTML_EXTENSIONS
+
+
+# ---------------------------------------------------------------------------
+# Boilerplate DOM cleanup — runs inside Chromium via PageMethod("evaluate")
+# after page load, BEFORE Scrapy captures the HTML.  Removes cookie banners,
+# consent overlays, chat widgets, and ARIA modals so extractors only see
+# real page content.
+# ---------------------------------------------------------------------------
+_BOILERPLATE_REMOVAL_JS = """
+() => {
+    const r = (s) => { try { document.querySelectorAll(s).forEach(e => e.remove()); } catch(_) {} };
+
+    // ---- Known consent-management libraries ----
+    ['#CybotCookiebotDialog', '#CybotCookiebotDialogBodyUnderlay',
+     '#onetrust-banner-sdk', '#onetrust-consent-sdk',
+     '.osano-cm-window', '.cc-window', '.cc-banner', '.cc-revoke',
+     '#tarteaucitronRoot', '#usercentrics-root', '#sp-consent-message',
+     '#ez-cookie-dialog', '#catapult-cookie-bar', '#moove_gdpr_cookie_info_bar'
+    ].forEach(r);
+
+    // ---- Pattern-based: id/class contains these substrings ----
+    ['cookie-consent', 'cookie-banner', 'cookie-notice', 'cookie-bar',
+     'cookie-popup', 'cookie-modal', 'cookie-wall', 'cookie-law',
+     'cookie-policy', 'cookie-message', 'cookie-alert', 'cookie-overlay',
+     'cookieconsent', 'cookiebanner', 'cookienotice', 'cookiebar',
+     'cookies-eu', 'cookies-modal', 'cookies-overlay',
+     'gdpr-banner', 'gdpr-notice', 'gdpr-popup', 'gdpr-overlay', 'gdpr-consent',
+     'consent-banner', 'consent-modal', 'consent-popup', 'consent-overlay',
+     'privacy-banner', 'privacy-notice', 'privacy-popup'
+    ].forEach(p => {
+        r('[id*="' + p + '" i]');
+        r('[class*="' + p + '" i]');
+    });
+
+    // ---- Chat widgets ----
+    ['#hubspot-messages-iframe-container',
+     '#intercom-container', '#intercom-frame',
+     '.crisp-client', '#crisp-chatbox',
+     '#drift-widget-container', '#drift-frame-chat',
+     '#tawk-bubble-container',
+     '[class*="chat-widget" i]', '[id*="chat-widget" i]',
+     '[class*="livechat" i]', '[id*="livechat" i]'
+    ].forEach(r);
+
+    // ---- Structural non-content elements ----
+    ['form', 'nav', 'aside', 'footer', 'header'].forEach(tag => {
+        r(tag);
+    });
+
+    // ---- ARIA modals / HTML5 dialogs ----
+    r('[aria-modal="true"]');
+    r('dialog[open]');
+}
+"""
 
 
 class SeoSpider(scrapy.Spider):
@@ -210,32 +301,36 @@ class SeoSpider(scrapy.Spider):
     # Seed requests
     # ------------------------------------------------------------------
     def _playwright_meta(self) -> dict[str, Any]:
-        """Build playwright request meta when JS rendering is enabled."""
-        meta: dict[str, Any] = {
+        """Build playwright request meta when JS rendering is enabled.
+
+        Uses the pre-configured "custom" context from PLAYWRIGHT_CONTEXTS
+        (settings.py) so the browser context is reused across requests
+        instead of creating a new one each time.
+
+        After page load, runs ``_BOILERPLATE_REMOVAL_JS`` to strip cookie
+        banners, consent overlays, chat widgets, and ARIA modals from the
+        DOM before Scrapy captures the HTML.
+        """
+        return {
             "playwright": True,
             "playwright_include_page": False,
-            # Don't wait for images/fonts/analytics — just the DOM + JS execution.
+            "playwright_context": "custom",
             "playwright_page_goto_kwargs": {
                 "wait_until": "domcontentloaded",
             },
+            "playwright_page_methods": [
+                # Brief wait for consent-management scripts to inject their
+                # banners (they typically fire on DOMContentLoaded / load).
+                PageMethod("wait_for_timeout", 2000),
+                PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
+            ],
         }
-        # Pass user-agent to a named browser context so Chromium sends the
-        # configured UA instead of the default headless-shell identifier.
-        ua = getattr(self, "custom_user_agent", None) or self.settings.get("USER_AGENT")
-        if ua:
-            meta["playwright_context"] = "custom"
-            meta["playwright_context_kwargs"] = {
-                "user_agent": ua,
-                "viewport": {"width": 1280, "height": 720},
-                "locale": "es-ES",
-            }
-        return meta
 
     def start_requests(self) -> Generator[Request, None, None]:
         for url in self.seed_urls:
             normalized = normalize_url(url)
             req_meta: dict[str, Any] = {"depth": 0}
-            if self.render_js:
+            if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
             yield scrapy.Request(
                 url=normalized,
@@ -638,9 +733,9 @@ class SeoSpider(scrapy.Spider):
 
         # -- ContentItem (main page text + markdown) -----------------------
         if self._extraction.get("extract_page_content", True):
-            main_content = extract_main_content(selector)
+            main_content = extract_main_content(selector, word_count=word_count_val)
             if main_content:
-                content_md = extract_main_content_markdown(selector)
+                content_md = extract_main_content_markdown(selector, word_count=word_count_val)
                 yield ContentItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
@@ -657,7 +752,7 @@ class SeoSpider(scrapy.Spider):
                 if should_follow and (link.get("follow", True) or self._follow_nofollow):
                     if self._should_follow(link["url"]):
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
-                        if self.render_js:
+                        if self.render_js and _url_likely_html(link["url"]):
                             follow_meta.update(self._playwright_meta())
                         yield scrapy.Request(
                             url=link["url"],

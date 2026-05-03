@@ -2,6 +2,25 @@
 
 const API = '/api';
 
+/* ===== User-Agent presets ===== */
+const UA_PRESETS = {
+  chrome_win:  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  chrome_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  safari_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  firefox_win: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+  edge_win:    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
+  googlebot:   'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+};
+const UA_LABELS = {
+  chrome_win:  'Chrome - Windows',
+  chrome_mac:  'Chrome - macOS',
+  safari_mac:  'Safari - macOS',
+  firefox_win: 'Firefox - Windows',
+  edge_win:    'Edge - Windows',
+  googlebot:   'Googlebot',
+  custom:      'Personalizado',
+};
+
 /* ===== Traducciones ===== */
 const STATUS_LABEL = {
   pending:   'Pendiente',
@@ -143,6 +162,8 @@ function app() {
     insights: null,
     insightsLoading: false,
     expandedCategories: {},
+    recUrls: {},      // { "rec-title": { loading, urls, loaded } }
+    recUrlsOpen: {},  // { "rec-title": bool }
 
     // Pestana URLs
     urls: [], urlsPage: 1, urlsPages: 1, urlsTotal: 0,
@@ -234,7 +255,8 @@ function app() {
             follow_external: f.follow_external,
             respect_robots:  f.respect_robots,
             render_js:       f.render_js,
-            user_agent:      f.user_agent || 'SEOCrawler/1.0',
+            user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
+            impersonate:     f.impersonate || 'chrome124',
             exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
             include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
             resource_types: {
@@ -429,6 +451,61 @@ function app() {
       return { alta: 'Alta', media: 'Media', baja: 'Baja' }[p] || p;
     },
 
+    // ------- Recommendation URL drill-down -------
+    async toggleRecUrls(rec) {
+      const key = rec.title;
+      this.recUrlsOpen[key] = !this.recUrlsOpen[key];
+      // Already loaded? Just toggle visibility
+      if (this.recUrls[key]?.loaded) return;
+      // Load URLs
+      this.recUrls[key] = { loading: true, urls: [], loaded: false };
+      try {
+        if (rec.issue_types && rec.issue_types.length > 0) {
+          // Fetch from issue_types (merge results from each type)
+          let all = [];
+          for (const it of rec.issue_types) {
+            const data = await api(`/jobs/${this.job.id}/issues/urls?issue_type=${encodeURIComponent(it)}&limit=50`);
+            all = all.concat(data);
+          }
+          // Dedup by url id
+          const seen = new Set();
+          this.recUrls[key].urls = all.filter(u => { if (seen.has(u.id)) return false; seen.add(u.id); return true; });
+        } else if (rec.url_filter && Object.keys(rec.url_filter).length > 0) {
+          // Fetch from urls endpoint with filters
+          let params = 'page=1&page_size=50';
+          for (const [k, v] of Object.entries(rec.url_filter)) params += `&${k}=${v}`;
+          const data = await api(`/jobs/${this.job.id}/urls?${params}`);
+          this.recUrls[key].urls = data.items.map(u => ({ id: u.id, url: u.url, status_code: u.status_code }));
+        }
+        this.recUrls[key].loaded = true;
+      } catch (e) { this.error = e.message; }
+      this.recUrls[key].loading = false;
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    recHasUrls(rec) {
+      return (rec.issue_types && rec.issue_types.length > 0) || (rec.url_filter && Object.keys(rec.url_filter).length > 0);
+    },
+
+    openRecInExplorer(rec) {
+      if (rec.url_filter && Object.keys(rec.url_filter).length > 0) {
+        // Find matching explorer tab or use 'all' with manual filter
+        this.openExplorer();
+        // Apply the filter by finding the right tab
+        const f = rec.url_filter;
+        let matched = EXP_TABS.find(t => t.filter && JSON.stringify(t.filter) === JSON.stringify(f));
+        if (matched) {
+          this.setExplorerTab(matched.key);
+        }
+      } else if (rec.issue_types && rec.issue_types.length > 0) {
+        // Navigate to issues tab filtered by issue type
+        this.detailTab = 'issues';
+        this.issueFilters.issue_type = rec.issue_types[0];
+        this.issuesPage = 1;
+        this.loadIssues();
+      }
+    },
+
     // SVG ring dasharray for score circle
     ringDash(score, radius) {
       const circ = 2 * Math.PI * radius;
@@ -512,6 +589,56 @@ function app() {
       window.open(`${API}/jobs/${this.job.id}/export`, '_blank');
     },
 
+    exportBackup() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/backup`, '_blank');
+    },
+
+    // ------- Importar backup -------
+    showImportModal: false,
+    importFile: null,
+    importing: false,
+    importError: null,
+    importResult: null,
+    importPreserveId: false,
+
+    closeImportModal() {
+      this.showImportModal = false;
+      this.importFile = null;
+      this.importError = null;
+      this.importResult = null;
+      this.importPreserveId = false;
+      // Refresh jobs list if we imported something
+      if (this.view === 'jobs') this.loadJobs();
+    },
+
+    async submitImport() {
+      if (!this.importFile) return;
+      this.importing = true;
+      this.importError = null;
+      this.importResult = null;
+      try {
+        const formData = new FormData();
+        formData.append('file', this.importFile);
+        const params = this.importPreserveId ? '?preserve_job_id=true' : '';
+        const res = await fetch(`${API}/jobs/import${params}`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || 'Error al importar');
+        }
+        this.importResult = await res.json();
+        this.showToast('Backup importado correctamente');
+        // Refresh jobs list
+        if (this.view === 'jobs') this.loadJobs();
+      } catch (e) {
+        this.importError = e.message;
+      }
+      this.importing = false;
+    },
+
     // ------- Helpers -------
     statusColor(s) {
       return { pending:'badge-pending', running:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
@@ -590,8 +717,203 @@ function app() {
     reinitIcons() {
       this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
     },
+
+    // ===================================================================
+    //                         EXPLORER VIEW
+    // ===================================================================
+    expTab: 'all',
+    expSearch: '',
+    expSort: null,
+    expSortDir: 'asc',
+    expUrls: [],
+    expPage: 1,
+    expPages: 1,
+    expTotal: 0,
+    expPageSize: 100,
+    expLoading: false,
+    expSelectedUrl: null,
+    expUrlDetail: null,
+    expDetailTab: 'general',
+    expDetailOpen: false,
+    expBadgeCounts: {},
+    _expSearchTimer: null,
+
+    openExplorer() {
+      this.view = 'explorer';
+      this.expTab = 'all';
+      this.expSearch = '';
+      this.expSort = null;
+      this.expSortDir = 'asc';
+      this.expPage = 1;
+      this.expDetailOpen = false;
+      this.expSelectedUrl = null;
+      this.expUrlDetail = null;
+      this.loadExplorerBadges();
+      this.loadExplorerUrls();
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    backFromExplorer() {
+      this.view = 'detail';
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    loadExplorerBadges() {
+      if (!this.stats) return;
+      const b = {};
+      b.all = this.stats.total_urls;
+      // Resource types
+      for (const rt of this.stats.urls_by_resource_type || []) {
+        b[rt.resource_type] = rt.count;
+      }
+      // Internal / external
+      b.internal = this.stats.internal_count || 0;
+      b.external = this.stats.external_count || 0;
+      // Status groups
+      for (const sg of this.stats.urls_by_status_group || []) {
+        b[sg.status_group] = sg.count;
+      }
+      this.expBadgeCounts = b;
+    },
+
+    setExplorerTab(tab) {
+      this.expTab = tab;
+      this.expPage = 1;
+      this.expSearch = '';
+      this.expDetailOpen = false;
+      this.expSelectedUrl = null;
+      this.loadExplorerUrls();
+    },
+
+    explorerSort(col) {
+      if (this.expSort === col) {
+        this.expSortDir = this.expSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.expSort = col;
+        this.expSortDir = 'asc';
+      }
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    explorerSearchInput() {
+      clearTimeout(this._expSearchTimer);
+      this._expSearchTimer = setTimeout(() => {
+        this.expPage = 1;
+        this.loadExplorerUrls();
+      }, 400);
+    },
+
+    async loadExplorerUrls() {
+      if (!this.job) return;
+      this.expLoading = true;
+      try {
+        const tabCfg = EXP_TABS.find(t => t.key === this.expTab) || EXP_TABS[0];
+        let params = `page=${this.expPage}&page_size=${this.expPageSize}`;
+        if (tabCfg.filter) {
+          for (const [k, v] of Object.entries(tabCfg.filter)) {
+            params += `&${k}=${v}`;
+          }
+        }
+        if (this.expSearch) params += `&search=${encodeURIComponent(this.expSearch)}`;
+        if (this.expSort) params += `&sort_by=${this.expSort}&sort_dir=${this.expSortDir}`;
+        const data = await api(`/jobs/${this.job.id}/urls?${params}`);
+        this.expUrls = data.items;
+        this.expPages = data.pages;
+        this.expTotal = data.total;
+      } catch (e) { this.error = e.message; }
+      this.expLoading = false;
+    },
+
+    async selectExplorerUrl(u) {
+      this.expSelectedUrl = u;
+      this.expDetailOpen = true;
+      this.expDetailTab = 'general';
+      this.expUrlDetail = null;
+      try {
+        this.expUrlDetail = await api(`/jobs/${this.job.id}/urls/${u.id}`);
+      } catch (e) { this.error = e.message; }
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    closeExplorerDetail() {
+      this.expDetailOpen = false;
+      this.expSelectedUrl = null;
+      this.expUrlDetail = null;
+    },
+
+    setExpPage(p) {
+      if (p < 1 || p > this.expPages) return;
+      this.expPage = p;
+      this.loadExplorerUrls();
+    },
+
+    getExpColumns() {
+      const tabCfg = EXP_TABS.find(t => t.key === this.expTab);
+      return (tabCfg && tabCfg.columns) || EXP_DEFAULT_COLUMNS;
+    },
+
+    getExpCellValue(row, col) {
+      const def = EXP_COLUMN_DEFS[col];
+      if (!def) return '';
+      return def.fmt(row);
+    },
+
+    expStatusClass(code) {
+      if (!code) return '';
+      if (code < 300) return 'exp-status-2xx';
+      if (code < 400) return 'exp-status-3xx';
+      if (code < 500) return 'exp-status-4xx';
+      return 'exp-status-5xx';
+    },
+
+    openUrlFromExplorer(urlId) {
+      this.openUrlDetail(urlId);
+    },
   };
 }
+
+
+/* ===== Explorer Constants ===== */
+const EXP_DEFAULT_COLUMNS = ['url', 'status_code', 'content_type', 'response_time_ms', 'content_length', 'crawl_depth'];
+
+const EXP_TABS = [
+  { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                         columns: EXP_DEFAULT_COLUMNS },
+  { key: 'html',       label: 'HTML',        icon: 'file-text',   filter: { resource_type: 'html' },                    columns: ['url','status_code','title','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank'] },
+  { key: 'js',         label: 'JavaScript',  icon: 'file-code',   filter: { resource_type: 'js' },                      columns: ['url','status_code','content_length','response_time_ms'] },
+  { key: 'css',        label: 'CSS',         icon: 'palette',     filter: { resource_type: 'css' },                     columns: ['url','status_code','content_length','response_time_ms'] },
+  { key: 'image',      label: 'Imagenes',    icon: 'image',       filter: { resource_type: 'image' },                   columns: ['url','status_code','content_length','response_time_ms'] },
+  { key: 'pdf',        label: 'PDFs',        icon: 'file',        filter: { resource_type: 'pdf' },                     columns: ['url','status_code','content_length','response_time_ms'] },
+  { key: '_div1', divider: true },
+  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                        columns: ['url','status_code','title','word_count','inlinks_count','outlinks_count','pagerank'] },
+  { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },                     columns: ['url','status_code','content_type','response_time_ms'] },
+  { key: '_div2', divider: true },
+  { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },                     columns: ['url','title','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank'] },
+  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                      columns: ['url','status_code','redirect_url','response_time_ms'] },
+  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },                   columns: ['url','status_code','inlinks_count','crawl_depth'] },
+  { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },                    columns: ['url','status_code','response_time_ms','crawl_depth'] },
+  { key: '_div3', divider: true },
+  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true },        columns: ['url','status_code','title','word_count','inlinks_count','pagerank'] },
+  { key: 'noindex',    label: 'No index.',   icon: 'eye-off',     filter: { indexable: false, is_internal: true },       columns: ['url','status_code','indexability_status','title'] },
+];
+
+const EXP_COLUMN_DEFS = {
+  url:                  { label: 'URL',           sortable: true,  fmt: r => { try { return new URL(r.url).pathname; } catch { return r.url; } } },
+  status_code:          { label: 'Estado',        sortable: true,  fmt: r => r.status_code ?? '' },
+  title:                { label: 'Titulo',        sortable: false, fmt: r => r.html_meta?.title ?? '' },
+  word_count:           { label: 'Palabras',      sortable: true,  fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
+  response_time_ms:     { label: 'Tiempo',        sortable: true,  fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
+  content_length:       { label: 'Tamano',        sortable: true,  fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
+  content_type:         { label: 'Tipo',          sortable: false, fmt: r => r.content_type ? r.content_type.split(';')[0] : '' },
+  crawl_depth:          { label: 'Prof.',         sortable: true,  fmt: r => r.crawl_depth ?? '' },
+  inlinks_count:        { label: 'Inlinks',       sortable: true,  fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },
+  outlinks_count:       { label: 'Outlinks',      sortable: true,  fmt: r => r.outlinks_count != null ? r.outlinks_count.toLocaleString('es-ES') : '' },
+  pagerank:             { label: 'PageRank',      sortable: true,  fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
+  redirect_url:         { label: 'Redirige a',    sortable: false, fmt: r => r.redirect_url ?? '' },
+  indexability_status:  { label: 'Razon noindex', sortable: false, fmt: r => r.indexability_status ?? '' },
+  url_length:           { label: 'Long. URL',     sortable: true,  fmt: r => r.url_length ?? '' },
+  text_ratio:           { label: '% texto',       sortable: true,  fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
+};
 
 function _freshForm() {
   return {
@@ -607,7 +929,9 @@ function _freshForm() {
     follow_external: false,
     respect_robots: true,
     render_js: false,
-    user_agent: 'SEOCrawler/1.0',
+    user_agent_preset: 'chrome_win',
+    user_agent_custom: '',
+    impersonate: 'chrome124',
     // Spider — resource types
     crawl_images: true,
     crawl_css: true,

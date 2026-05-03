@@ -50,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: crawler/Dockerfile
-    shm_size: '512mb'
+    shm_size: '1gb'
     env_file: .env
     environment:
       - PYTHONPATH=/app

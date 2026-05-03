@@ -27,6 +27,8 @@ class Recommendation(BaseModel):
     title: str
     description: str
     affected_count: int
+    issue_types: list[str] = []
+    url_filter: dict[str, Any] = {}
 
 
 class CategoryInsight(BaseModel):
@@ -128,6 +130,7 @@ class JobConfig(BaseModel):
     )
     user_agent: str = DEFAULT_USER_AGENT
     render_js: bool = False
+    impersonate: str = "chrome124"
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
 
@@ -397,6 +400,11 @@ class HostCount(BaseModel):
     count: int
 
 
+class ResourceTypeCount(BaseModel):
+    resource_type: str
+    count: int
+
+
 class JobStats(BaseModel):
     job_id: uuid.UUID
     total_urls: int
@@ -405,6 +413,9 @@ class JobStats(BaseModel):
     urls_by_status_group: list[StatusGroupCount]
     issues_by_type: list[IssueTypeCount]
     top_hosts: list[HostCount]
+    urls_by_resource_type: list[ResourceTypeCount] = []
+    internal_count: int = 0
+    external_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -416,3 +427,24 @@ class PaginatedResponse(BaseModel, Generic[T]):
     page: int
     page_size: int
     pages: int
+
+
+# ---------------------------------------------------------------------------
+# Backup / Import
+# ---------------------------------------------------------------------------
+class BackupManifest(BaseModel):
+    format_version: str
+    export_timestamp: datetime
+    job_id: uuid.UUID
+    job_name: str
+    job_status: str
+    row_counts: dict[str, int]
+    has_page_content: bool
+
+
+class ImportResponse(BaseModel):
+    new_job_id: uuid.UUID
+    original_job_id: uuid.UUID
+    rows_imported: dict[str, int]
+    rows_skipped: dict[str, int]
+    warnings: list[str]

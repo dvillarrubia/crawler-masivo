@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
 from shared.models import Job, Url, Issue, Link
 
+from api.backup import ConflictError, import_backup_zip
 from api.dependencies import get_redis
 from api.schemas import (
+    ImportResponse,
     JobCreate,
     JobResponse,
     PaginatedResponse,
@@ -178,3 +180,30 @@ def delete_job(
     db.commit()
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/import  --  import a backup ZIP
+# ---------------------------------------------------------------------------
+@router.post("/import", response_model=ImportResponse, status_code=201)
+async def import_job(
+    file: UploadFile = File(...),
+    preserve_job_id: bool = Query(False),
+    db: Session = Depends(get_session),
+):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=422, detail="Se requiere un archivo .zip")
+
+    try:
+        result = import_backup_zip(file.file, preserve_job_id, db)
+    except ConflictError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al importar: {exc}")
+
+    return result

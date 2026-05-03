@@ -40,7 +40,7 @@ DOWNLOAD_DELAY = 0  # autothrottle takes over
 
 USER_AGENT = os.getenv(
     "USER_AGENT",
-    "SEOCrawler/1.0 (+https://github.com/seo-crawler)",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 )
 
 # ---------------------------------------------------------------------------
@@ -96,10 +96,14 @@ PIPELINE_BATCH_SIZE = int(os.getenv("PIPELINE_BATCH_SIZE", "200"))
 # ---------------------------------------------------------------------------
 # Playwright (JS rendering — activated per-request via meta["playwright"])
 # ---------------------------------------------------------------------------
+# Composite handler: curl_cffi (browser TLS fingerprint) for normal requests,
+# Playwright for JS-rendered pages.  WAF bypass via JA3/JA4 impersonation.
 DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "http": "seo_crawler.handlers.CompositeDownloadHandler",
+    "https": "seo_crawler.handlers.CompositeDownloadHandler",
 }
+# Browser TLS profile for non-Playwright requests (curl_cffi impersonation)
+IMPERSONATE = os.getenv("IMPERSONATE", "chrome124")
 PLAYWRIGHT_BROWSER_TYPE = "chromium"
 PLAYWRIGHT_LAUNCH_OPTIONS = {
     "headless": True,
@@ -114,16 +118,25 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
         "--disable-translate",
         "--mute-audio",
         "--no-first-run",
-        "--single-process",
     ],
 }
 # Limit concurrent browser pages to avoid memory exhaustion
 PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = int(
-    os.getenv("PLAYWRIGHT_MAX_PAGES", "4")
+    os.getenv("PLAYWRIGHT_MAX_PAGES", "8")
 )
-# Default context options — compact viewport to save memory
+# Safety cap on total browser contexts (default + custom + margin)
+PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "3"))
+# Named browser contexts — reused across requests to avoid creating a new
+# context per page.  The "custom" context carries the configured user-agent
+# and is referenced by the spider's _playwright_meta().
 PLAYWRIGHT_CONTEXTS = {
     "default": {
+        "viewport": {"width": 1280, "height": 720},
+        "locale": "es-ES",
+        "java_script_enabled": True,
+    },
+    "custom": {
+        "user_agent": USER_AGENT,
         "viewport": {"width": 1280, "height": 720},
         "locale": "es-ES",
         "java_script_enabled": True,

@@ -717,8 +717,106 @@ def http_status_text(status_code: int) -> str:
 # Content extraction — using trafilatura for site-agnostic boilerplate removal
 # ---------------------------------------------------------------------------
 
+# Boilerplate CSS selectors stripped from HTML *before* trafilatura runs.
+# Covers cookie-consent libraries, chat widgets, ARIA modals, and common
+# non-content structural elements.  Uses lxml.cssselect (always available
+# via parsel/Scrapy).
+_BOILERPLATE_CSS_SELECTORS: list[str] = [
+    # ---- Known consent-management libraries ----
+    "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay",
+    "#onetrust-banner-sdk", "#onetrust-consent-sdk",
+    ".osano-cm-window", ".cc-window", ".cc-banner", ".cc-revoke",
+    "#tarteaucitronRoot", "#usercentrics-root", "#sp-consent-message",
+    "#ez-cookie-dialog", "#catapult-cookie-bar", "#moove_gdpr_cookie_info_bar",
+    # ---- Chat widgets ----
+    "#hubspot-messages-iframe-container",
+    "#intercom-container", "#intercom-frame",
+    "#crisp-chatbox",
+    "#drift-widget-container", "#drift-frame-chat",
+    "#tawk-bubble-container",
+    # ---- ARIA modals / HTML5 dialogs ----
+    "[aria-modal='true']",
+    "dialog[open]", "dialog",
+]
+
+# Substrings matched against element id and class attributes (case-insensitive).
+# An element is removed if ANY of its id/class tokens contains one of these.
+_BOILERPLATE_STRUCTURAL_TAGS: frozenset[str] = frozenset({
+    "form", "nav", "aside", "footer", "header",
+})
+
+_BOILERPLATE_ID_CLASS_PATTERNS: list[str] = [
+    # Cookie / consent / GDPR / privacy
+    "cookie-consent", "cookie-banner", "cookie-notice", "cookie-bar",
+    "cookie-popup", "cookie-modal", "cookie-wall", "cookie-law",
+    "cookie-policy", "cookie-message", "cookie-alert", "cookie-overlay",
+    "cookieconsent", "cookiebanner", "cookienotice", "cookiebar",
+    "cookies-eu", "cookies-modal", "cookies-overlay",
+    "gdpr-banner", "gdpr-notice", "gdpr-popup", "gdpr-overlay", "gdpr-consent",
+    "consent-banner", "consent-modal", "consent-popup", "consent-overlay",
+    "privacy-banner", "privacy-notice", "privacy-popup",
+    # Chat widgets
+    "chat-widget", "livechat",
+]
+
+
+def _strip_boilerplate_html(html: str) -> str:
+    """Remove cookie banners, chat widgets, overlays, and structural
+    non-content elements (form, nav, aside, footer, header) from raw HTML.
+
+    Uses lxml to parse and strip elements matching known boilerplate
+    patterns, then serialises back to a string.  The cleaned HTML is
+    suitable for passing to trafilatura or html2text.
+    """
+    try:
+        from lxml import html as lxml_html
+        from lxml.cssselect import CSSSelector
+
+        doc = lxml_html.fromstring(html)
+
+        # 1) Remove by exact CSS selector
+        for css in _BOILERPLATE_CSS_SELECTORS:
+            try:
+                sel = CSSSelector(css)
+                for el in sel(doc):
+                    el.getparent().remove(el)
+            except Exception:
+                pass
+
+        # 2) Remove by id/class substring pattern
+        for el in doc.iter():
+            el_id = (el.get("id") or "").lower()
+            el_class = (el.get("class") or "").lower()
+            if not el_id and not el_class:
+                continue
+            for pattern in _BOILERPLATE_ID_CLASS_PATTERNS:
+                if pattern in el_id or pattern in el_class:
+                    parent = el.getparent()
+                    if parent is not None:
+                        parent.remove(el)
+                    break  # element already removed
+
+        # 3) Remove structural non-content elements
+        structural = [
+            el for el in doc.iter()
+            if isinstance(el.tag, str) and el.tag in _BOILERPLATE_STRUCTURAL_TAGS
+        ]
+        for el in structural:
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+
+        return lxml_html.tostring(doc, encoding="unicode")
+    except Exception:
+        return html  # on any failure, return original HTML unchanged
+
+
 def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
     """Use trafilatura to extract clean text and markdown from raw HTML.
+
+    Before running trafilatura, strips known boilerplate elements (cookie
+    banners, chat widgets, consent overlays) via ``_strip_boilerplate_html``
+    so they never pollute the extracted content.
 
     Trafilatura uses heuristics (text density, DOM structure, link ratio)
     to isolate editorial content — works on any website without
@@ -729,8 +827,10 @@ def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
     try:
         import trafilatura
 
+        clean = _strip_boilerplate_html(html)
+
         text = trafilatura.extract(
-            html,
+            clean,
             include_links=False,
             include_images=False,
             include_tables=True,
@@ -740,7 +840,7 @@ def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
         )
 
         md = trafilatura.extract(
-            html,
+            clean,
             include_links=True,
             include_images=True,
             include_tables=True,
@@ -778,7 +878,13 @@ def _fallback_extract_text(selector) -> str | None:
         " and not(ancestor::nav)"
         " and not(ancestor::header)"
         " and not(ancestor::footer)"
-        " and not(ancestor::form)]"
+        " and not(ancestor::form)"
+        " and not(ancestor::aside)"
+        " and not(ancestor::dialog)"
+        " and not(ancestor::*[@aria-modal='true'])"
+        " and not(ancestor::*[@role='dialog'])"
+        " and not(ancestor::*[@role='alertdialog'])"
+        " and not(ancestor::*[@role='complementary'])]"
     ).getall()
     text = _WHITESPACE.sub(" ", " ".join(parts)).strip()
     return text or None
@@ -788,28 +894,45 @@ def _fallback_extract_text(selector) -> str | None:
 # Indexability analysis
 # ---------------------------------------------------------------------------
 
-def extract_main_content(selector) -> str | None:
+def extract_main_content(selector, *, word_count: int | None = None) -> str | None:
     """Extract the main textual content of a page.
 
-    Uses trafilatura for site-agnostic content extraction with
-    fallback to semantic-container + XPath filtering.
+    Uses trafilatura for site-agnostic content extraction.  When the page
+    has a known *word_count* (total visible words), we can detect cases
+    where trafilatura discards too much (hub/landing pages with cards,
+    grids, or accordions) and fall back to a simpler full-text extractor.
     """
     raw_html = selector.get()
     if not raw_html:
         return None
 
     text, _ = _trafilatura_extract(raw_html)
-    if text and len(text) > 50:
-        return text
+    traf_len = len(text) if text else 0
 
-    # Fallback
-    return _fallback_extract_text(selector)
+    if traf_len == 0:
+        return _fallback_extract_text(selector)
+
+    # Estimate how many words trafilatura captured vs page total.
+    # avg ~5 chars/word in Spanish/English (including spaces).
+    traf_words = traf_len / 5 if traf_len else 0
+    page_words = word_count or 0
+
+    # If trafilatura captured a decent share of the page, trust it.
+    # Threshold: at least 20% of the visible words — below that it is
+    # likely discarding real content (cards, grids, accordions, FAQs).
+    if page_words > 200 and traf_words < page_words * 0.20:
+        fallback = _fallback_extract_text(selector)
+        if fallback and len(fallback) > traf_len:
+            return fallback
+
+    return text
 
 
 def _get_main_container_html(selector) -> str | None:
     """Return the inner HTML of the main content container.
 
-    Used only as fallback for markdown extraction.
+    Used only as fallback for markdown extraction.  Strips boilerplate
+    (cookie banners, chat widgets, etc.) before returning.
     """
     container = selector.css('main, article, [role="main"]')
     if container:
@@ -820,29 +943,16 @@ def _get_main_container_html(selector) -> str | None:
             return None
         node = body[0]
     html = node.get()
-    return html if html and html.strip() else None
-
-
-def extract_main_content_markdown(selector) -> str | None:
-    """Extract the main content as clean Markdown.
-
-    Uses trafilatura's markdown output for site-agnostic extraction.
-    Falls back to html2text on the main container if trafilatura
-    returns nothing.
-    """
-    raw_html = selector.get()
-    if not raw_html:
+    if not html or not html.strip():
         return None
+    return _strip_boilerplate_html(html)
 
-    _, md = _trafilatura_extract(raw_html)
-    if md and len(md) > 50:
-        return md
 
-    # Fallback: html2text on the main container
+def _fallback_extract_markdown(selector) -> str | None:
+    """Fallback markdown extraction via html2text on the main container."""
     container_html = _get_main_container_html(selector)
     if not container_html:
         return None
-
     try:
         import html2text
 
@@ -862,6 +972,34 @@ def extract_main_content_markdown(selector) -> str | None:
         return md or None
     except Exception:
         return None
+
+
+def extract_main_content_markdown(selector, *, word_count: int | None = None) -> str | None:
+    """Extract the main content as clean Markdown.
+
+    Uses trafilatura's markdown output for site-agnostic extraction.
+    Like ``extract_main_content``, uses *word_count* to detect when
+    trafilatura is too aggressive and falls back to html2text.
+    """
+    raw_html = selector.get()
+    if not raw_html:
+        return None
+
+    _, md = _trafilatura_extract(raw_html)
+    traf_len = len(md) if md else 0
+
+    if traf_len == 0:
+        return _fallback_extract_markdown(selector)
+
+    traf_words = traf_len / 5 if traf_len else 0
+    page_words = word_count or 0
+
+    if page_words > 200 and traf_words < page_words * 0.20:
+        fallback_md = _fallback_extract_markdown(selector)
+        if fallback_md and len(fallback_md) > traf_len:
+            return fallback_md
+
+    return md
 
 
 def compute_indexability_status(

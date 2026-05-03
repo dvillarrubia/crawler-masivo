@@ -132,6 +132,8 @@ def _run_job(job_id: str) -> None:
             cmd += ["-s", "ROBOTSTXT_OBEY=False"]
         if job_config.get("user_agent"):
             cmd += ["-s", f"USER_AGENT={job_config['user_agent']}"]
+        if job_config.get("impersonate"):
+            cmd += ["-s", f"IMPERSONATE={job_config['impersonate']}"]
 
         # Advanced crawl behavior settings
         crawl_behavior = job_config.get("crawl_behavior", {})
@@ -154,6 +156,14 @@ def _run_job(job_id: str) -> None:
             text=True,
             timeout=3600 * 6,  # 6 hour max per job
         )
+
+        # Always log last portion of stderr for debugging
+        if result.stderr:
+            logger.debug(
+                "Scrapy stderr for job %s:\n%s",
+                job_id,
+                result.stderr[-3000:],
+            )
 
         if result.returncode != 0:
             logger.error(
