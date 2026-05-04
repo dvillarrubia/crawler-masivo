@@ -140,7 +140,6 @@ class RobotsAuditMiddleware(RobotsTxtMiddleware):
         self._parsers = {}
         self._parserimpl = load_object(crawler.settings.get("ROBOTSTXT_PARSER"))
         self._parserimpl.from_crawler(crawler, b"")
-        crawler.signals.connect(self.spider_closed, signal=signals.spider_closed)
 
     @classmethod
     def from_crawler(cls, crawler: Crawler):
