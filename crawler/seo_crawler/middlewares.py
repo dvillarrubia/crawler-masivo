@@ -147,7 +147,8 @@ class RobotsAuditMiddleware(RobotsTxtMiddleware):
             raise NotConfigured
         return cls(crawler)
 
-    def process_request_2(self, rp, request, spider):
+    def process_request_2(self, rp, request):
+        # Signature aligned with Scrapy 2.13+ (spider arg dropped).
         if rp is None:
             return
         useragent = self._robotstxt_useragent
