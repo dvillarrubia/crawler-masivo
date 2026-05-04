@@ -570,6 +570,7 @@ class SeoSpider(scrapy.Spider):
             http_version=http_version_val,
             transfer_size=len(response.body),
             indexability_status=indexability_status_val,
+            blocked_by_robots=response.meta.get("blocked_by_robots"),
         )
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------

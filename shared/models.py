@@ -92,6 +92,7 @@ class Url(Base):
     http_version = Column(String(16), nullable=True)         # "HTTP/1.1", "HTTP/2"
     transfer_size = Column(BigInteger, nullable=True)        # compressed transfer size
     indexability_status = Column(String(64), nullable=True)  # reason: "Canonicalised", "Noindex", etc.
+    blocked_by_robots = Column(Boolean, nullable=True)       # only set in robots_mode="audit"
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
     outlinks_count = Column(Integer, default=0)              # total outlinks from this URL
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count

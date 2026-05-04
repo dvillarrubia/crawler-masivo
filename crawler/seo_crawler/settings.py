@@ -72,6 +72,10 @@ DOWNLOADER_MIDDLEWARES = {
     "seo_crawler.middlewares.ProxyMiddleware": 410,
     "seo_crawler.middlewares.JobConfigMiddleware": 100,
     "seo_crawler.middlewares.HttpConfigMiddleware": 420,
+    # Audit-only robots.txt middleware. Self-disables unless ROBOTS_MODE='audit'.
+    # Same priority as Scrapy's built-in (100); the two are mutually exclusive
+    # via from_crawler -> NotConfigured.
+    "seo_crawler.middlewares.RobotsAuditMiddleware": 100,
 }
 
 # ---------------------------------------------------------------------------

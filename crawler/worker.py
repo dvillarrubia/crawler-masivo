@@ -128,8 +128,12 @@ def _run_job(job_id: str) -> None:
             cmd += ["-s", f"CONCURRENT_REQUESTS={job_config['concurrent_requests']}"]
         if "concurrent_requests_per_domain" in job_config:
             cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={job_config['concurrent_requests_per_domain']}"]
-        if job_config.get("respect_robots") is False:
+        robots_mode = job_config.get("robots_mode", "respect")
+        if robots_mode == "ignore":
             cmd += ["-s", "ROBOTSTXT_OBEY=False"]
+        elif robots_mode == "audit":
+            # Disable built-in blocking middleware; enable our audit one.
+            cmd += ["-s", "ROBOTSTXT_OBEY=False", "-s", "ROBOTS_MODE=audit"]
         if job_config.get("user_agent"):
             cmd += ["-s", f"USER_AGENT={job_config['user_agent']}"]
         if job_config.get("impersonate"):
