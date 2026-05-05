@@ -113,22 +113,20 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         "Expansion": "rgba(251, 188, 4, 0.08)",
         "Peripheral": "rgba(234, 67, 53, 0.06)",
     }
-    # Ring outer radius in plot units
-    ring_radii = {"Core": 1.0, "Focus": 2.0, "Expansion": 3.0, "Peripheral": 4.0}
-
-    # Compute max distance for normalizing to ring system
+    # Compute distance thresholds (IQR-based, same as classify_rings)
+    import numpy as np
     all_dists = [p.get("distance_to_centroid", 0) for p in pages_data]
-    max_dist = max(all_dists) if all_dists else 1.0
+    dists_arr = np.array(all_dists)
+    max_dist = float(dists_arr.max()) if len(dists_arr) else 1.0
     if max_dist == 0:
         max_dist = 1.0
 
-    # Compute distance thresholds (IQR-based, same as classify_rings)
-    import numpy as np
-    dists_arr = np.array(all_dists)
     q1 = float(np.percentile(dists_arr, 25))
     q2 = float(np.percentile(dists_arr, 50))
     q3 = float(np.percentile(dists_arr, 75))
-    # Ring boundary distances: Core=[0,q1], Focus=(q1,q2], Expansion=(q2,q3], Peripheral=(q3,max]
+
+    # Fixed visual ring radii (equal spacing for readability)
+    ring_radii = {"Core": 1.0, "Focus": 2.0, "Expansion": 3.0, "Peripheral": 4.0}
 
     traces: list[dict] = []
 
@@ -169,8 +167,22 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         })
 
     # --- Map each page distance to radius in plot coords ---
-    # Normalize: 0→center, max_dist→outermost ring
     outer_r = ring_radii["Peripheral"]
+
+    # Visual boundaries per ring zone
+    ring_bounds = {
+        "Core": (0.0, 1.0),
+        "Focus": (1.0, 2.0),
+        "Expansion": (2.0, 3.0),
+        "Peripheral": (3.0, 4.0),
+    }
+    # Distance thresholds per ring (for mapping within zone)
+    dist_bounds = {
+        "Core": (0.0, q1),
+        "Focus": (q1, q2),
+        "Expansion": (q2, q3),
+        "Peripheral": (q3, max_dist),
+    }
 
     # Group by ring for coloring
     rings: dict[str, list[dict]] = {}
@@ -178,7 +190,7 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         r = p.get("ring", "Peripheral")
         rings.setdefault(r, []).append(p)
 
-    # Place data points: radius from actual distance, angle spread evenly per ring
+    # Place data points: position within their ring zone proportionally
     for ring_name in ["Core", "Focus", "Expansion", "Peripheral"]:
         pages = rings.get(ring_name, [])
         if not pages:
@@ -188,11 +200,16 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         # Random-ish angular spread (use index-based offset)
         angles = [2 * math.pi * i / max(n, 1) + 0.5 for i in range(n)]
 
+        r_inner, r_outer = ring_bounds[ring_name]
+        d_min, d_max = dist_bounds[ring_name]
+        d_range = d_max - d_min if d_max > d_min else 1.0
+
         xs, ys = [], []
         for i, p in enumerate(pages):
             d = p.get("distance_to_centroid", 0)
-            # Scale distance to plot radius
-            r = (d / max_dist) * outer_r
+            # Map distance within this ring's zone
+            t = min(max((d - d_min) / d_range, 0.0), 1.0)
+            r = r_inner + t * (r_outer - r_inner)
             # Add small angular jitter based on weight
             jitter = (p.get("weight", 0.5) - 0.5) * 0.3
             a = angles[i] + jitter
@@ -202,6 +219,26 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         weights = [p.get("weight", 0.5) for p in pages]
         max_w = max(weights) if weights else 1
         sizes = [max(5, (w / max(max_w, 0.001)) * 16) for w in weights]
+
+        # Border: orange dashed for pages needing reinforcement (low PR + no clicks)
+        needs_boost = [
+            (p.get("pr_norm") or 0) < 0.1 and (p.get("clicks") or 0) == 0
+            for p in pages
+        ]
+        line_colors = [
+            "#ff8c00" if nb else "white"
+            for nb in needs_boost
+        ]
+        line_widths = [
+            2.5 if nb else 0.5
+            for nb in needs_boost
+        ]
+
+        # Status label for tooltip
+        status_labels = [
+            "Necesita refuerzo" if nb else "OK"
+            for nb in needs_boost
+        ]
 
         traces.append({
             "type": "scatter",
@@ -214,24 +251,33 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
                 [
                     ring_name,
                     round(p.get("distance_to_centroid", 0), 4),
-                    round(p.get("weight", 0), 4),
+                    round(p.get("pr_norm", 0) or 0, 2),
+                    p.get("clicks", 0) or 0,
+                    p.get("impressions", 0) or 0,
+                    round(p.get("position", 0) or 0, 1),
                     p.get("cluster_id", -1),
+                    status_labels[i],
+                    p.get("inlinks", 0),
+                    p.get("unique_inlinks", 0),
                 ]
-                for p in pages
+                for i, p in enumerate(pages)
             ],
             "hovertemplate": (
                 "<b>%{text}</b><br>"
-                "Anillo: %{customdata[0]}<br>"
-                "Distancia: %{customdata[1]}<br>"
-                "Peso: %{customdata[2]}<br>"
-                "Cluster: %{customdata[3]}<br>"
+                "Anillo: %{customdata[0]} · %{customdata[7]}<br>"
+                "Distancia al centro: %{customdata[1]}<br>"
+                "Enlaces entrantes: %{customdata[8]} (desde %{customdata[9]} paginas)<br>"
+                "PageRank (norm): %{customdata[2]}<br>"
+                "GSC Clicks: %{customdata[3]} · Impresiones: %{customdata[4]}<br>"
+                "Posición media: %{customdata[5]}<br>"
+                "Cluster: %{customdata[6]}<br>"
                 "<extra></extra>"
             ),
             "marker": {
                 "size": sizes,
                 "color": ring_colors[ring_name],
                 "opacity": 0.85,
-                "line": {"color": "white", "width": 0.5},
+                "line": {"color": line_colors, "width": line_widths},
             },
         })
 

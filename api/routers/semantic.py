@@ -663,12 +663,18 @@ def get_ring_data(job_id: uuid.UUID, db: Session = Depends(get_session)):
             SemanticPage.semantic_role,
             SemanticPage.distance_to_centroid,
             SemanticPage.weight,
+            SemanticPage.pr_norm,
+            SemanticPage.clicks_norm,
             Url.url,
+            Url.inlinks_count,
+            Url.unique_inlinks_count,
         )
         .join(Url, Url.id == SemanticPage.url_id)
         .filter(SemanticPage.analysis_id == analysis.id)
         .all()
     )
+
+    gsc_map = _load_gsc_map(job_id, db)
 
     pages_data = [
         {
@@ -679,6 +685,13 @@ def get_ring_data(job_id: uuid.UUID, db: Session = Depends(get_session)):
             "semantic_role": p.semantic_role,
             "distance_to_centroid": p.distance_to_centroid,
             "weight": p.weight,
+            "pr_norm": p.pr_norm,
+            "clicks_norm": p.clicks_norm,
+            "clicks": gsc_map.get(p.url_id, {}).get("clicks", 0),
+            "impressions": gsc_map.get(p.url_id, {}).get("impressions", 0),
+            "position": gsc_map.get(p.url_id, {}).get("position"),
+            "inlinks": p.inlinks_count or 0,
+            "unique_inlinks": p.unique_inlinks_count or 0,
         }
         for p in pages
     ]
