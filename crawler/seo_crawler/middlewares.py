@@ -13,7 +13,10 @@ import logging
 from typing import TYPE_CHECKING
 
 from scrapy import Request, signals
+from scrapy.downloadermiddlewares.robotstxt import RobotsTxtMiddleware
+from scrapy.exceptions import NotConfigured
 from scrapy.http import Response
+from scrapy.utils.misc import load_object
 
 if TYPE_CHECKING:
     from scrapy.crawler import Crawler
@@ -115,6 +118,44 @@ class JobConfigMiddleware:
         if job_config and "job_config" not in request.meta:
             request.meta["job_config"] = job_config
         return None
+
+
+class RobotsAuditMiddleware(RobotsTxtMiddleware):
+    """
+    Robots.txt audit-only middleware. Fetches robots.txt and stamps
+    ``request.meta["blocked_by_robots"]`` with True/False, but never
+    raises IgnoreRequest -- the request always proceeds.
+
+    Activates when ``ROBOTS_MODE=='audit'`` (independent of
+    ``ROBOTSTXT_OBEY``). The worker sets ``ROBOTSTXT_OBEY=False`` in
+    audit mode so Scrapy's built-in middleware stays disabled while
+    this one runs alongside.
+    """
+
+    def __init__(self, crawler):
+        # Bypass parent's ROBOTSTXT_OBEY check; replicate its setup.
+        self._default_useragent = crawler.settings.get("USER_AGENT", "Scrapy")
+        self._robotstxt_useragent = crawler.settings.get("ROBOTSTXT_USER_AGENT", None)
+        self.crawler = crawler
+        self._parsers = {}
+        self._parserimpl = load_object(crawler.settings.get("ROBOTSTXT_PARSER"))
+        self._parserimpl.from_crawler(crawler, b"")
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        if crawler.settings.get("ROBOTS_MODE") != "audit":
+            raise NotConfigured
+        return cls(crawler)
+
+    def process_request_2(self, rp, request):
+        # Signature aligned with Scrapy 2.13+ (spider arg dropped).
+        if rp is None:
+            return
+        useragent = self._robotstxt_useragent
+        if not useragent:
+            useragent = request.headers.get(b"User-Agent", self._default_useragent)
+        request.meta["blocked_by_robots"] = not rp.allowed(request.url, useragent)
+        # Never raise IgnoreRequest -- audit mode always lets the request through.
 
 
 class HttpConfigMiddleware:

@@ -120,7 +120,7 @@ class PostgresPipeline:
                     "url_length", "folder_depth", "word_count",
                     "text_ratio", "redirect_type", "status_text",
                     "last_modified", "http_version", "transfer_size",
-                    "indexability_status",
+                    "indexability_status", "blocked_by_robots",
                 ):
                     setattr(existing, field, data.get(field))
                 existing.last_crawled_at = datetime.now(timezone.utc)
@@ -156,6 +156,7 @@ class PostgresPipeline:
                     http_version=data.get("http_version"),
                     transfer_size=data.get("transfer_size"),
                     indexability_status=data.get("indexability_status"),
+                    blocked_by_robots=data.get("blocked_by_robots"),
                 )
                 self.session.add(url_obj)
                 self.session.flush()

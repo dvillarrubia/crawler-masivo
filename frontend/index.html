@@ -341,7 +341,7 @@
                 <div><span class="text-dim">Concurrencia:</span> <span x-text="job.config?.concurrent_requests"></span></div>
                 <div><span class="text-dim">Por dominio:</span> <span x-text="job.config?.concurrent_requests_per_domain"></span></div>
                 <div><span class="text-dim">Seguir externos:</span> <span x-text="job.config?.follow_external ? 'Si' : 'No'"></span></div>
-                <div><span class="text-dim">Respetar robots.txt:</span> <span x-text="job.config?.respect_robots ? 'Si' : 'No'"></span></div>
+                <div><span class="text-dim">Robots.txt:</span> <span x-text="({respect:'Respetar',ignore:'Ignorar',audit:'Auditar (no bloquea)'})[job.config?.robots_mode] || 'Respetar'"></span></div>
                 <div><span class="text-dim">Renderizar JS:</span> <span x-text="job.config?.render_js ? 'Si' : 'No'"></span></div>
                 <div><span class="text-dim">Huella TLS:</span> <span x-text="({'chrome124':'Chrome','safari17_0':'Safari','edge101':'Edge'})[job.config?.impersonate] || job.config?.impersonate || 'Chrome'"></span></div>
                 <div style="grid-column:1/-1"><span class="text-dim">User Agent:</span> <span class="text-sm" x-text="job.config?.user_agent" style="word-break:break-all"></span></div>
@@ -2168,10 +2168,17 @@
             <input type="text" x-model="createForm.user_agent_custom" placeholder="Mozilla/5.0 ...">
           </div>
           <div class="form-hint" style="margin-bottom:.75rem">El User Agent y la huella TLS se envian juntos. Para maxima eficacia, usa el mismo navegador en ambos (ej: Chrome + Chrome)</div>
-          <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.respect_robots"> Respetar robots.txt</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
+          </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Robots.txt</label>
+            <select x-model="createForm.robots_mode">
+              <option value="respect">Respetar (no entrar en URLs bloqueadas)</option>
+              <option value="ignore">Ignorar (no leer robots.txt)</option>
+              <option value="audit">Ignorar pero auditar (crawlear todo y reportar qué bloquearía)</option>
+            </select>
           </div>
         </div>
 

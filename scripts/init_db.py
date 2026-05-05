@@ -23,6 +23,7 @@ if __name__ == "__main__":
     # Migrations for existing installations
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS pagerank FLOAT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS blocked_by_robots BOOLEAN"))
         conn.commit()
     print("Migrations applied.")
 

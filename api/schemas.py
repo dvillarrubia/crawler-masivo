@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -123,7 +123,7 @@ class JobConfig(BaseModel):
     max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=50)
     max_urls: int = Field(default=DEFAULT_MAX_URLS, ge=1, le=5_000_000)
     follow_external: bool = False
-    respect_robots: bool = True
+    robots_mode: Literal["respect", "ignore", "audit"] = "respect"
     concurrent_requests: int = Field(default=DEFAULT_CONCURRENT_REQUESTS, ge=1, le=256)
     concurrent_requests_per_domain: int = Field(
         default=DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN, ge=1, le=64
@@ -321,6 +321,7 @@ class UrlResponse(BaseModel):
     http_version: str | None = None
     transfer_size: int | None = None
     indexability_status: str | None = None
+    blocked_by_robots: bool | None = None
     inlinks_count: int | None = None
     outlinks_count: int | None = None
     external_outlinks_count: int | None = None
