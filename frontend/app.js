@@ -176,6 +176,42 @@ function app() {
     // Pestana Enlaces
     links: [], linksPage: 1, linksPages: 1, linksTotal: 0,
 
+    // Pestana Semantico
+    semanticResults: null,
+    semanticLoading: false,
+    semanticError: null,
+    semanticSubTab: 'rings',
+    semanticProgress: null,
+    semanticPollTimer: null,
+    semanticAlpha: 0.6,
+    semanticBeta: 0.4,
+    semanticThreshold: 0.92,
+    gscAccounts: [],
+    semanticGscAccountId: '',
+    semanticGscProps: [],
+    semanticGscProp: '',
+    semanticGscDays: '90',
+    gscPropsLoading: false,
+    gscFetchLoading: false,
+    gscFetchResult: null,
+    showGscUploadModal: false,
+    gscUploadName: '',
+    gscUploadFile: null,
+    cannibalPairs: [],
+    cannibalLoading: false,
+    cannibalBrand: '',
+    cannibalHasQueryData: false,
+    cannibalFilter: 'all',
+    driftData: [],
+    driftLoading: false,
+    gapTopic: '',
+    gapExclude: '',
+    gapResults: null,
+    gapLoading: false,
+    targetTheme: '',
+    targetResults: null,
+    targetLoading: false,
+
     // Vista detalle de URL
     urlDetail: null,
     urlDetailTab: 'general',
@@ -326,6 +362,18 @@ function app() {
       this.progress = null;
       this.insights = null;
       this.expandedCategories = {};
+      this.semanticResults = null;
+      this.semanticError = null;
+      this.semanticProgress = null;
+      this.cannibalPairs = [];
+      this.cannibalHasQueryData = false;
+      this.cannibalFilter = 'all';
+      this.driftData = [];
+      this.gapResults = null;
+      this.gapTopic = '';
+      this.targetResults = null;
+      this.targetTheme = '';
+      this.gscFetchResult = null;
       this.urls = []; this.issues = []; this.links = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
@@ -404,6 +452,7 @@ function app() {
       if (tab === 'issues' && this.issues.length === 0) this.loadIssues();
       if (tab === 'links' && this.links.length === 0) this.loadLinks();
       if (tab === 'insights' && !this.insights) this.loadInsights();
+      if (tab === 'semantic') this.loadSemantic();
       this.$nextTick(() => lucide.createIcons());
     },
 
@@ -510,6 +559,213 @@ function app() {
     ringDash(score, radius) {
       const circ = 2 * Math.PI * radius;
       return `${(score / 100) * circ} ${circ}`;
+    },
+
+    // ------- Semantico -------
+    async loadSemantic() {
+      if (!this.job) return;
+      // Load GSC accounts
+      try { this.gscAccounts = await api('/semantic/gsc-accounts'); } catch (_) {}
+      // Check if analysis exists
+      try {
+        const status = await api(`/jobs/${this.job.id}/semantic/status`);
+        if (status.status === 'completed') {
+          const results = await api(`/jobs/${this.job.id}/semantic/results`);
+          this.semanticResults = results;
+          this.semanticError = null;
+          this.$nextTick(() => this.renderSemanticChart('rings'));
+        } else if (status.status === 'running') {
+          this.semanticLoading = true;
+          this.semanticProgress = { stage: status.stage, progress: status.progress };
+          this._pollSemanticStatus();
+        } else if (status.status === 'failed') {
+          this.semanticError = status.error_message || 'El analisis fallo.';
+        }
+      } catch (_) {}
+    },
+
+    _pollSemanticStatus() {
+      if (this.semanticPollTimer) clearInterval(this.semanticPollTimer);
+      this.semanticPollTimer = setInterval(async () => {
+        try {
+          const status = await api(`/jobs/${this.job.id}/semantic/status`);
+          this.semanticProgress = { stage: status.stage, progress: status.progress };
+          if (status.status === 'completed') {
+            clearInterval(this.semanticPollTimer);
+            this.semanticPollTimer = null;
+            this.semanticLoading = false;
+            const results = await api(`/jobs/${this.job.id}/semantic/results`);
+            this.semanticResults = results;
+            this.semanticError = null;
+            this.$nextTick(() => this.renderSemanticChart('rings'));
+          } else if (status.status === 'failed') {
+            clearInterval(this.semanticPollTimer);
+            this.semanticPollTimer = null;
+            this.semanticLoading = false;
+            this.semanticError = status.error_message || 'El analisis fallo.';
+          }
+        } catch (_) {}
+      }, 2000);
+    },
+
+    async runSemanticAnalysis() {
+      if (!this.job) return;
+      this.semanticLoading = true;
+      this.semanticError = null;
+      this.semanticResults = null;
+      this.semanticProgress = { stage: 'starting', progress: 0 };
+      try {
+        await api(`/jobs/${this.job.id}/semantic/analyze`, {
+          method: 'POST',
+          body: JSON.stringify({
+            alpha: this.semanticAlpha,
+            beta: this.semanticBeta,
+            cannibal_threshold: this.semanticThreshold,
+          }),
+        });
+        this._pollSemanticStatus();
+      } catch (e) {
+        this.semanticLoading = false;
+        this.semanticError = e.message;
+      }
+    },
+
+    semanticStageLabel(stage) {
+      const labels = {
+        starting: 'Iniciando...',
+        loading_data: 'Cargando datos de la BD...',
+        filtering: 'Filtrando paginas...',
+        embedding: 'Generando embeddings (esto puede tardar)...',
+        weighting: 'Calculando pesos...',
+        centroid: 'Calculando centroide...',
+        dimensionality_reduction: 'Reduccion dimensional (PCA + UMAP)...',
+        clustering: 'Clustering HDBSCAN...',
+        classification: 'Clasificando anillos...',
+        cannibalization: 'Detectando canibalizacion...',
+        done: 'Completado',
+      };
+      return labels[stage] || stage || 'Procesando...';
+    },
+
+    async renderSemanticChart(type) {
+      if (!this.job) return;
+      await this.$nextTick();
+      try {
+        if (type === 'rings') {
+          const data = await api(`/jobs/${this.job.id}/semantic/ring-data`);
+          await this.$nextTick();
+          const el = document.getElementById('semantic-ring-chart');
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+        } else if (type === 'scatter') {
+          const data = await api(`/jobs/${this.job.id}/semantic/scatter-data`);
+          await this.$nextTick();
+          const el = document.getElementById('semantic-scatter-chart');
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+        }
+      } catch (e) { this.error = e.message; }
+    },
+
+    async loadCannibalization() {
+      if (!this.job) return;
+      this.cannibalLoading = true;
+      try {
+        const brand = encodeURIComponent(this.cannibalBrand.trim());
+        const data = await api(`/jobs/${this.job.id}/semantic/cannibalization?brand=${brand}`);
+        this.cannibalPairs = data.pairs || [];
+        this.cannibalHasQueryData = data.has_query_data || false;
+      } catch (e) { this.error = e.message; }
+      this.cannibalLoading = false;
+    },
+
+    async loadDrift() {
+      if (!this.job || this.driftData.length > 0) return;
+      this.driftLoading = true;
+      try {
+        const data = await api(`/jobs/${this.job.id}/semantic/drift`);
+        this.driftData = data.drift || [];
+      } catch (e) { this.error = e.message; }
+      this.driftLoading = false;
+    },
+
+    async runGapAnalysis() {
+      if (!this.job || !this.gapTopic.trim()) return;
+      this.gapLoading = true;
+      this.gapResults = null;
+      try {
+        this.gapResults = await api(`/jobs/${this.job.id}/semantic/gap-analysis`, {
+          method: 'POST',
+          body: JSON.stringify({ topic: this.gapTopic.trim() }),
+        });
+      } catch (e) { this.error = e.message; }
+      this.gapLoading = false;
+    },
+
+    async analyzeTarget() {
+      if (!this.job || !this.targetTheme.trim()) return;
+      this.targetLoading = true;
+      this.targetResults = null;
+      try {
+        this.targetResults = await api(`/jobs/${this.job.id}/semantic/target-rings`, {
+          method: 'POST',
+          body: JSON.stringify({ target_theme: this.targetTheme.trim() }),
+        });
+        this.$nextTick(() => {
+          const el = document.getElementById('semantic-target-ring-chart');
+          if (el && window.Plotly && this.targetResults.ring_map) {
+            Plotly.newPlot(el, this.targetResults.ring_map.data, this.targetResults.ring_map.layout, { responsive: true });
+          }
+        });
+      } catch (e) { this.error = e.message; }
+      this.targetLoading = false;
+    },
+
+    async loadGscProperties() {
+      if (!this.semanticGscAccountId) return;
+      this.gscPropsLoading = true;
+      try {
+        const data = await api(`/semantic/gsc-accounts/${this.semanticGscAccountId}/properties`);
+        this.semanticGscProps = data.properties || [];
+      } catch (e) { this.error = e.message; }
+      this.gscPropsLoading = false;
+    },
+
+    async fetchGscData() {
+      if (!this.job || !this.semanticGscAccountId || !this.semanticGscProp) return;
+      this.gscFetchLoading = true;
+      this.gscFetchResult = null;
+      try {
+        this.gscFetchResult = await api(`/jobs/${this.job.id}/semantic/fetch-gsc`, {
+          method: 'POST',
+          body: JSON.stringify({
+            gsc_account_id: this.semanticGscAccountId,
+            property_url: this.semanticGscProp,
+            days: parseInt(this.semanticGscDays) || 90,
+          }),
+        });
+      } catch (e) { this.error = e.message; }
+      this.gscFetchLoading = false;
+    },
+
+    async uploadGscAccount() {
+      if (!this.gscUploadFile || !this.gscUploadName.trim()) return;
+      try {
+        const text = await this.gscUploadFile.text();
+        const json = JSON.parse(text);
+        await api('/semantic/gsc-accounts', {
+          method: 'POST',
+          body: JSON.stringify({ name: this.gscUploadName.trim(), credentials_json: json }),
+        });
+        this.gscAccounts = await api('/semantic/gsc-accounts');
+        this.showGscUploadModal = false;
+        this.gscUploadName = '';
+        this.gscUploadFile = null;
+        this.showToast('Cuenta GSC guardada');
+      } catch (e) { this.error = e.message; }
+    },
+
+    exportSemanticCsv() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/semantic/export`, '_blank');
     },
 
     // ------- URLs -------

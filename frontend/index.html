@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/app.js"></script>
 </head>
@@ -269,6 +270,9 @@
           <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
           </div>
+          <div class="tab" :class="detailTab === 'semantic' && 'active'" @click="switchTab('semantic')" data-tip="Mapa semantico vectorial con embeddings, clustering y canibalizacion" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="orbit" style="width:14px;height:14px"></i> Semantico
+          </div>
         </div>
 
         <!-- ===== PESTANA: RESUMEN ===== -->
@@ -390,7 +394,7 @@
                         <th data-tip="Nivel de profundidad desde la URL semilla">Prof.</th>
                         <th data-tip="Inlinks: enlaces internos que apuntan a esta URL">In</th>
                         <th data-tip="Outlinks: enlaces que salen de esta URL">Out</th>
-                        <th data-tip="PageRank interno: importancia de la pagina segun enlaces internos (0-10)">PR</th>
+                        <th data-tip="PageRank interno (0-10): mide la importancia de la pagina segun cuantos enlaces internos recibe y de que paginas. Una URL enlazada desde muchas paginas importantes tiene mayor PR. Se calcula con el mismo algoritmo que usa Google.">PR</th>
                         <th data-tip="Problemas SEO detectados en esta URL">Issues</th>
                       </tr>
                     </thead>
@@ -571,6 +575,476 @@
                     <button class="btn btn-sm" :disabled="linksPage >= linksPages" @click="setLinksPage(linksPage + 1)">&raquo;</button>
                   </div>
                 </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: SEMANTICO ===== -->
+        <template x-if="detailTab === 'semantic'">
+          <div>
+            <!-- Header: metricas globales -->
+            <template x-if="semanticResults && semanticResults.site_metrics">
+              <div style="display:flex;align-items:center;gap:1.5rem;padding:.75rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap">
+                <span class="text-sm" data-tip="Coherencia tematica del sitio (0-100). Cuanto mas alto, mas enfocado esta el contenido en un mismo tema. Sitios nicho suelen tener >70, sitios genericos <40."><strong>Focus:</strong> <span x-text="(semanticResults.site_metrics.focus_score * 100).toFixed(1)"></span>%</span>
+                <span class="text-sm" data-tip="Distancia maxima de cualquier pagina al centro semantico. Indica cuanto se dispersa el contenido. Valores altos = contenido muy variado."><strong>Radius:</strong> <span x-text="semanticResults.site_metrics.semantic_radius"></span></span>
+                <span class="text-sm" data-tip="Impacto de las paginas con mas autoridad que estan lejos del centro. Si una pagina importante (alto PageRank/clicks) esta lejos del tema principal, arrastra el centro semantico del sitio."><strong>Drift:</strong> <span x-text="semanticResults.site_metrics.drift_score"></span></span>
+                <span class="text-sm" data-tip="Total de paginas indexables con contenido suficiente (min 150 palabras) incluidas en el analisis."><strong>Paginas:</strong> <span x-text="semanticResults.site_metrics.total_pages"></span></span>
+                <span class="text-sm" data-tip="Grupos tematicos detectados automaticamente (HDBSCAN). Cada cluster agrupa paginas con contenido semanticamente similar."><strong>Clusters:</strong> <span x-text="semanticResults.site_metrics.n_clusters"></span></span>
+                <span class="text-sm" data-tip="Pares de paginas con contenido tan similar que compiten entre si en buscadores. Cuantos mas pares, mas canibalizacion tiene el sitio."><strong>Canibalizacion:</strong> <span x-text="semanticResults.site_metrics.n_cannibal_pairs"></span> pares</span>
+                <button class="btn btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:.3rem" @click="exportSemanticCsv()">
+                  <i data-lucide="download" style="width:13px;height:13px"></i> Export CSV
+                </button>
+              </div>
+            </template>
+
+            <!-- GSC Summary -->
+            <template x-if="semanticResults && semanticResults.gsc_summary">
+              <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap;border-left:3px solid #4285f4">
+                <span class="text-sm" style="font-weight:600;color:#4285f4;display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="bar-chart-3" style="width:14px;height:14px"></i> GSC
+                </span>
+                <span class="text-sm" data-tip="Total de clicks organicos de Google Search Console para las URLs del analisis."><strong>Clicks:</strong> <span x-text="semanticResults.gsc_summary.total_clicks.toLocaleString('es-ES')"></span></span>
+                <span class="text-sm" data-tip="Total de impresiones en resultados de Google para las URLs del analisis."><strong>Impressions:</strong> <span x-text="semanticResults.gsc_summary.total_impressions.toLocaleString('es-ES')"></span></span>
+                <span class="text-sm" data-tip="CTR medio (Click-Through Rate). Porcentaje de impresiones que generan click."><strong>CTR medio:</strong> <span x-text="(semanticResults.gsc_summary.avg_ctr * 100).toFixed(2) + '%'"></span></span>
+                <span class="text-sm" data-tip="Posicion media en los resultados de Google. Menor = mejor posicionamiento."><strong>Pos. media:</strong> <span x-text="semanticResults.gsc_summary.avg_position"></span></span>
+                <span class="text-sm text-dim" data-tip="Numero de URLs del analisis que tienen datos en GSC."><span x-text="semanticResults.gsc_summary.urls_with_data"></span> URLs con datos</span>
+              </div>
+            </template>
+
+            <!-- Ring summary cards -->
+            <template x-if="semanticResults && semanticResults.site_metrics && semanticResults.site_metrics.ring_counts">
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1rem">
+                <template x-for="ring in ['Core','Focus','Expansion','Peripheral']" :key="ring">
+                  <div class="card" style="padding:.75rem 1rem;border-left:3px solid"
+                       :style="'border-left-color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]"
+                       :data-tip="({Core:'Paginas mas cercanas al centro semantico (Q1). Son el nucleo tematico del sitio: el contenido que mejor define de que trata.',Focus:'Paginas cercanas al centro (Q1-Q2). Refuerzan el tema principal con contenido relevante y complementario.',Expansion:'Paginas a distancia media (Q2-Q3). Cubren temas relacionados pero no centrales. Oportunidad de reforzar o redirigir.',Peripheral:'Paginas mas alejadas del centro (>Q3). Contenido tangencial o fuera de tema. Candidatas a revisar, consolidar o eliminar.'})[ring]">
+                    <div style="font-size:.8rem;font-weight:600" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]" x-text="ring"></div>
+                    <div style="font-size:1.5rem;font-weight:700" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]"
+                         x-text="semanticResults.site_metrics.ring_counts[ring] || 0"></div>
+                    <div class="text-dim text-sm" x-text="((semanticResults.site_metrics.ring_counts[ring] || 0) / semanticResults.total_pages * 100).toFixed(1) + '%'"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- Panel: GSC + Parametros + Analisis -->
+            <template x-if="!semanticResults">
+              <div class="card" style="padding:1.5rem">
+                <h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:.4rem">
+                  <i data-lucide="brain" style="width:18px;height:18px"></i> Analisis Semantico
+                </h3>
+
+                <!-- GSC Section -->
+                <div style="margin-bottom:1.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--border)">
+                  <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Conecta GSC para incluir clicks reales de Google en el calculo de autoridad. Sin GSC, solo se usa PageRank interno. Con GSC, las paginas con mas trafico organico influyen mas en el centro semantico.">
+                    <i data-lucide="bar-chart-3" style="width:14px;height:14px"></i> Google Search Console (opcional)
+                  </h4>
+                  <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
+                    <div>
+                      <label class="text-dim text-sm">Cuenta GSC</label>
+                      <select style="display:block;margin-top:.2rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem"
+                              x-model="semanticGscAccountId" @change="semanticGscProps = []; semanticGscProp = ''">
+                        <option value="">Sin GSC</option>
+                        <template x-for="acc in gscAccounts" :key="acc.id">
+                          <option :value="acc.id" x-text="acc.name"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <button class="btn btn-sm" @click="showGscUploadModal = true" style="display:flex;align-items:center;gap:.25rem">
+                      <i data-lucide="upload" style="width:12px;height:12px"></i> Subir cuenta
+                    </button>
+                    <template x-if="semanticGscAccountId">
+                      <button class="btn btn-sm" @click="loadGscProperties()" :disabled="gscPropsLoading" style="display:flex;align-items:center;gap:.25rem">
+                        <template x-if="gscPropsLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                        Cargar propiedades
+                      </button>
+                    </template>
+                    <template x-if="semanticGscProps.length > 0">
+                      <div>
+                        <select style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem"
+                                x-model="semanticGscProp">
+                          <option value="">Seleccionar propiedad</option>
+                          <template x-for="prop in semanticGscProps" :key="prop">
+                            <option :value="prop" x-text="prop"></option>
+                          </template>
+                        </select>
+                      </div>
+                    </template>
+                    <template x-if="semanticGscProp">
+                      <div>
+                        <label class="text-dim text-sm">Rango</label>
+                        <select style="display:block;margin-top:.2rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem"
+                                x-model="semanticGscDays">
+                          <option value="90">90 dias</option>
+                          <option value="180">6 meses</option>
+                          <option value="365">12 meses</option>
+                          <option value="480">16 meses (max)</option>
+                        </select>
+                      </div>
+                    </template>
+                    <template x-if="semanticGscProp">
+                      <button class="btn btn-sm btn-primary" @click="fetchGscData()" :disabled="gscFetchLoading" style="display:flex;align-items:center;gap:.25rem">
+                        <template x-if="gscFetchLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                        Obtener datos GSC
+                      </button>
+                    </template>
+                  </div>
+                  <template x-if="gscFetchResult">
+                    <p class="text-sm" style="margin-top:.5rem;color:var(--green)" x-text="'GSC: ' + gscFetchResult.matched + ' URLs emparejadas de ' + gscFetchResult.total_gsc_rows + ' filas' + (gscFetchResult.query_rows ? ' | ' + gscFetchResult.query_rows.toLocaleString('es-ES') + ' query-page rows' : '')"></p>
+                  </template>
+                </div>
+
+                <!-- Parametros -->
+                <div style="margin-bottom:1.25rem">
+                  <h4 style="margin-bottom:.5rem;font-size:.9rem">Parametros</h4>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem">
+                    <div data-tip="Peso del PageRank interno en el calculo de autoridad. Con alpha=1.0 solo usa PageRank. Si tienes datos GSC, baja alpha para dar peso a clicks reales.">
+                      <label class="text-dim text-sm">Alpha (PageRank): <span x-text="semanticAlpha"></span></label>
+                      <input type="range" min="0" max="1" step="0.05" x-model.number="semanticAlpha" style="width:100%">
+                    </div>
+                    <div data-tip="Peso de los clicks de Google Search Console. Solo aplica si has importado datos GSC. Con beta=0.4 las paginas con mas trafico organico tendran mas influencia en el centro semantico.">
+                      <label class="text-dim text-sm">Beta (Clicks GSC): <span x-text="semanticBeta"></span></label>
+                      <input type="range" min="0" max="1" step="0.05" x-model.number="semanticBeta" style="width:100%">
+                    </div>
+                    <div data-tip="Similitud coseno minima para considerar dos paginas como canibalizacion. 0.92 = conservador (solo pares muy similares). Baja a 0.85 para detectar mas pares, sube a 0.95 para solo los mas criticos.">
+                      <label class="text-dim text-sm">Umbral canibalizacion: <span x-text="semanticThreshold"></span></label>
+                      <input type="range" min="0.8" max="0.99" step="0.01" x-model.number="semanticThreshold" style="width:100%">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Boton Analizar -->
+                <button class="btn btn-primary" @click="runSemanticAnalysis()" :disabled="semanticLoading"
+                        style="display:flex;align-items:center;gap:.4rem;font-size:.95rem;padding:.6rem 1.5rem">
+                  <template x-if="semanticLoading"><span class="spinner" style="width:16px;height:16px"></span></template>
+                  <i data-lucide="brain" style="width:16px;height:16px" x-show="!semanticLoading"></i>
+                  Analizar
+                </button>
+              </div>
+            </template>
+
+            <!-- Progress bar -->
+            <template x-if="semanticLoading && semanticProgress">
+              <div class="card" style="padding:1rem;margin-bottom:1rem">
+                <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem">
+                  <span class="spinner" style="width:16px;height:16px"></span>
+                  <span class="text-sm" x-text="semanticStageLabel(semanticProgress.stage)"></span>
+                  <span class="text-sm text-dim" x-text="semanticProgress.progress + '%'" style="margin-left:auto"></span>
+                </div>
+                <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+                  <div style="height:100%;background:var(--accent);border-radius:3px;transition:width .3s" :style="'width:' + semanticProgress.progress + '%'"></div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Error -->
+            <template x-if="semanticError">
+              <div class="card" style="padding:1rem;border-color:var(--red);color:var(--red);margin-bottom:1rem">
+                <span x-text="semanticError"></span>
+                <button class="btn btn-sm" style="margin-left:1rem" @click="semanticError=null;semanticResults=null">Reintentar</button>
+              </div>
+            </template>
+
+            <!-- Sub-tabs de resultados -->
+            <template x-if="semanticResults">
+              <div>
+                <div class="tabs" style="margin-bottom:1rem">
+                  <div class="tab" :class="semanticSubTab === 'rings' && 'active'" @click="semanticSubTab='rings'; renderSemanticChart('rings')" data-tip="Visualizacion en anillos concentricos. Las paginas se colocan segun su distancia al centro semantico del sitio. Core = tema principal, Peripheral = contenido lejano.">Ring Map</div>
+                  <div class="tab" :class="semanticSubTab === 'scatter' && 'active'" @click="semanticSubTab='scatter'; renderSemanticChart('scatter')" data-tip="Mapa 2D donde cada punto es una pagina. Las paginas cercanas tratan temas similares. Los colores agrupan clusters tematicos detectados automaticamente.">Scatter UMAP</div>
+                  <div class="tab" :class="semanticSubTab === 'cannibal' && 'active'" @click="semanticSubTab='cannibal'; loadCannibalization()" data-tip="Pares de paginas con contenido casi identico que compiten entre si en Google. La URL dominante es la de mayor autoridad (PageRank/clicks). La debil es candidata a consolidar, redirigir o diferenciar.">Canibalizacion</div>
+                  <div class="tab" :class="semanticSubTab === 'drift' && 'active'" @click="semanticSubTab='drift'; loadDrift()" data-tip="Paginas con alta autoridad que estan lejos del tema central. Al tener mucho peso, arrastran el centro semantico del sitio. Candidatas a reenfocar o desacoplar.">Drift</div>
+                  <div class="tab" :class="semanticSubTab === 'gap' && 'active'" @click="semanticSubTab='gap'" data-tip="Busca que paginas de tu sitio son mas relevantes para un tema concreto. Compara embeddings directamente para encontrar contenido existente que cubra o se acerque al topico buscado.">Gap Analysis</div>
+                </div>
+
+                <!-- Ring Map -->
+                <template x-if="semanticSubTab === 'rings'">
+                  <div>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Cada punto es una pagina posicionada segun su distancia al <strong>centro semantico actual</strong> del sitio. El centro se calcula como la media ponderada de todos los embeddings (peso = PageRank + clicks GSC). <strong>PageRank</strong> mide la importancia de cada pagina segun cuantos enlaces internos recibe y de que paginas: una URL enlazada desde muchas paginas (o desde paginas importantes) tiene mas PageRank. Es la misma logica que usa Google internamente. Las paginas del anillo <strong style="color:#34a853">Core</strong> definen el tema principal, las del <strong style="color:#ea4335">Peripheral</strong> estan fuera de foco. El tamano del punto refleja su autoridad.</p>
+                    <div id="semantic-ring-chart" style="width:100%;height:600px;border-radius:8px;overflow:hidden"></div>
+
+                    <!-- Target Theme -->
+                    <div class="card" style="padding:1rem;margin-top:1rem">
+                      <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Define el tema ideal de tu sitio. El sistema re-centra los anillos alrededor de ese tema y te dice que paginas reforzar (estan cerca del objetivo pero con poca autoridad) y cuales reenfocar (tienen mucha autoridad pero estan lejos del objetivo).">
+                        <i data-lucide="target" style="width:14px;height:14px"></i> Tema objetivo
+                      </h4>
+                      <p class="text-dim text-sm" style="margin-bottom:.5rem">Describe el tema central ideal de tu sitio (5-15 palabras para mejor precision). El sistema re-centrara los anillos alrededor de ese tema y mostrara como mover el centro semantico hacia el.</p>
+                      <div style="display:flex;gap:.5rem;align-items:end">
+                        <div style="flex:1">
+                          <input type="text" x-model="targetTheme" placeholder="Ej: Formacion Profesional online a distancia, ciclos de grado medio y superior"
+                                 style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.9rem">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="analyzeTarget()" :disabled="targetLoading || !targetTheme.trim()" style="display:flex;align-items:center;gap:.25rem">
+                          <template x-if="targetLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                          <i data-lucide="target" style="width:13px;height:13px" x-show="!targetLoading"></i>
+                          Re-centrar
+                        </button>
+                      </div>
+
+                      <!-- Target Results -->
+                      <template x-if="targetResults">
+                        <div style="margin-top:1rem">
+                          <!-- Alignment Score -->
+                          <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap">
+                            <span class="text-sm" data-tip="Similitud coseno entre el centro semantico actual del sitio y el tema objetivo. 100% = perfectamente alineado.">
+                              <strong>Alineamiento:</strong>
+                              <span :style="'font-weight:700;color:' + (targetResults.alignment >= 0.9 ? 'var(--green)' : targetResults.alignment >= 0.8 ? 'var(--orange)' : 'var(--red)')"
+                                    x-text="(targetResults.alignment * 100).toFixed(1) + '%'"></span>
+                            </span>
+                            <span class="text-sm text-dim" x-text="'Tema: ' + targetResults.target_theme"></span>
+                            <template x-for="ring in ['Core','Focus','Expansion','Peripheral']" :key="ring">
+                              <span class="text-sm" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]">
+                                <strong x-text="ring + ': '"></strong><span x-text="targetResults.ring_counts[ring] || 0"></span>
+                              </span>
+                            </template>
+                          </div>
+
+                          <!-- Target Ring Map -->
+                          <div id="semantic-target-ring-chart" style="width:100%;height:600px;border-radius:8px;overflow:hidden;margin-bottom:1rem"></div>
+
+                          <!-- Recommendations -->
+                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                            <!-- Reinforce -->
+                            <div>
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#34a853;display:flex;align-items:center;gap:.3rem" data-tip="Paginas cercanas al tema objetivo pero con poca autoridad. Refuerza el enlazado interno hacia ellas para mover el centro semantico hacia tu objetivo.">
+                                <i data-lucide="arrow-up-circle" style="width:14px;height:14px"></i> Reforzar (enlazar mas)
+                              </h5>
+                              <template x-if="targetResults.reinforce.length === 0">
+                                <p class="text-dim text-sm">No hay candidatas.</p>
+                              </template>
+                              <template x-if="targetResults.reinforce.length > 0">
+                                <div style="max-height:300px;overflow-y:auto">
+                                  <table class="tbl" style="font-size:.8rem">
+                                    <thead><tr><th>URL</th><th>Peso</th><th data-tip="Anillo actual → anillo con el tema objetivo">Cambio</th></tr></thead>
+                                    <tbody>
+                                      <template x-for="r in targetResults.reinforce" :key="r.url_id">
+                                        <tr>
+                                          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="r.url" x-text="r.url.replace(/^https?:\/\/[^\/]+/, '')"></td>
+                                          <td x-text="r.weight.toFixed(3)"></td>
+                                          <td><span :style="r.ring_current !== r.ring_target ? 'color:var(--orange)' : ''" x-text="r.ring_current + ' → ' + r.ring_target"></span></td>
+                                        </tr>
+                                      </template>
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </template>
+                            </div>
+
+                            <!-- Refocus -->
+                            <div>
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#ea4335;display:flex;align-items:center;gap:.3rem" data-tip="Paginas con alta autoridad pero alejadas del tema objetivo. Estan arrastrando el centro semantico en otra direccion. Opciones: reenfocar su contenido hacia el objetivo, o reducir su enlazado interno.">
+                                <i data-lucide="arrow-down-circle" style="width:14px;height:14px"></i> Reenfocar (alejadas del objetivo)
+                              </h5>
+                              <template x-if="targetResults.refocus.length === 0">
+                                <p class="text-dim text-sm">No hay candidatas.</p>
+                              </template>
+                              <template x-if="targetResults.refocus.length > 0">
+                                <div style="max-height:300px;overflow-y:auto">
+                                  <table class="tbl" style="font-size:.8rem">
+                                    <thead><tr><th>URL</th><th>Peso</th><th data-tip="Anillo actual → anillo con el tema objetivo">Cambio</th></tr></thead>
+                                    <tbody>
+                                      <template x-for="r in targetResults.refocus" :key="r.url_id">
+                                        <tr>
+                                          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="r.url" x-text="r.url.replace(/^https?:\/\/[^\/]+/, '')"></td>
+                                          <td x-text="r.weight.toFixed(3)"></td>
+                                          <td><span :style="r.ring_current !== r.ring_target ? 'color:var(--red)' : ''" x-text="r.ring_current + ' → ' + r.ring_target"></span></td>
+                                        </tr>
+                                      </template>
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- Scatter UMAP -->
+                <template x-if="semanticSubTab === 'scatter'">
+                  <div>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Proyeccion 2D del espacio de embeddings (UMAP). Paginas cercanas tratan temas similares. Los colores representan clusters tematicos (HDBSCAN). Puntos con borde rojo son outliers semanticos. Pasa el raton sobre un punto para ver la URL y sus metricas.</p>
+                    <div id="semantic-scatter-chart" style="width:100%;height:600px;border-radius:8px;overflow:hidden"></div>
+                  </div>
+                </template>
+
+                <!-- Canibalizacion -->
+                <template x-if="semanticSubTab === 'cannibal'">
+                  <div>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Pares de paginas con contenido similar que compiten por las mismas keywords en Google. Si hay datos GSC con queries, se valida que ambas paginas ranqueen para las mismas keywords no-marca. Sin datos GSC, se muestra solo la similitud semantica.</p>
+
+                    <!-- Brand filter + reload -->
+                    <div style="display:flex;gap:.5rem;align-items:end;margin-bottom:.75rem;flex-wrap:wrap">
+                      <div style="flex:1;min-width:200px">
+                        <label class="text-dim text-sm" data-tip="Keywords de marca a excluir. Separadas por coma. Ej: ilerna, ilerna fp. Dos paginas que solo comparten queries de marca NO son canibalizacion real.">Keywords de marca (excluir)</label>
+                        <input type="text" x-model="cannibalBrand" placeholder="Ej: ilerna, ilerna fp"
+                               style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem;margin-top:.2rem">
+                      </div>
+                      <button class="btn btn-sm" @click="cannibalPairs=[]; loadCannibalization()" :disabled="cannibalLoading" style="display:flex;align-items:center;gap:.25rem">
+                        <template x-if="cannibalLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                        Recargar
+                      </button>
+                      <template x-if="cannibalHasQueryData && cannibalPairs.length > 0">
+                        <div style="display:flex;gap:.25rem">
+                          <button class="btn btn-sm" :class="cannibalFilter === 'all' && 'btn-primary'" @click="cannibalFilter='all'">Todos</button>
+                          <button class="btn btn-sm" :class="cannibalFilter === 'confirmed' && 'btn-primary'" @click="cannibalFilter='confirmed'" data-tip="Solo pares que comparten keywords no-marca en GSC">Confirmados</button>
+                          <button class="btn btn-sm" :class="cannibalFilter === 'unconfirmed' && 'btn-primary'" @click="cannibalFilter='unconfirmed'" data-tip="Pares sin keywords compartidas (posibles falsos positivos)">Sin validar</button>
+                        </div>
+                      </template>
+                    </div>
+
+                    <template x-if="cannibalLoading">
+                      <div class="loading-overlay"><div class="spinner"></div> Cargando canibalizacion...</div>
+                    </template>
+                    <template x-if="!cannibalLoading && cannibalPairs.length === 0">
+                      <div class="empty" style="padding:2rem">
+                        <i data-lucide="check-circle" style="width:32px;height:32px;color:var(--green);margin-bottom:.5rem"></i>
+                        <p>No se detectaron pares de canibalizacion con el umbral actual.</p>
+                      </div>
+                    </template>
+                    <template x-if="!cannibalLoading && cannibalPairs.length > 0">
+                      <div style="overflow-x:auto">
+                        <table class="tbl">
+                          <thead>
+                            <tr>
+                              <th>URL Dominante</th>
+                              <th data-tip="Clicks organicos de la URL dominante (GSC).">Clicks</th>
+                              <th>URL Debil</th>
+                              <th data-tip="Clicks organicos de la URL debil (GSC).">Clicks</th>
+                              <th>Similitud</th>
+                              <th data-tip="Keywords no-marca compartidas entre ambas URLs en GSC. Si hay queries compartidas = canibalizacion confirmada.">KWs compartidas</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="pair in cannibalPairs.filter(p => {
+                              if (cannibalFilter === 'all') return true;
+                              if (cannibalFilter === 'confirmed') return p.shared_query_count > 0;
+                              return p.shared_query_count === 0;
+                            })" :key="pair.url_dominant + pair.url_weak">
+                              <tr>
+                                <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="pair.url_dominant" x-text="pair.url_dominant"></td>
+                                <td x-text="pair.dominant_clicks != null ? pair.dominant_clicks.toLocaleString('es-ES') : '—'"></td>
+                                <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="pair.url_weak" x-text="pair.url_weak"></td>
+                                <td x-text="pair.weak_clicks != null ? pair.weak_clicks.toLocaleString('es-ES') : '—'"></td>
+                                <td><span style="font-weight:600" :style="pair.cosine_similarity >= 0.95 ? 'color:var(--red)' : 'color:var(--orange)'" x-text="(pair.cosine_similarity * 100).toFixed(1) + '%'"></span></td>
+                                <td>
+                                  <template x-if="pair.shared_query_count > 0">
+                                    <span style="cursor:help" :title="pair.shared_queries.join(', ')" :style="'color:var(--red);font-weight:600'">
+                                      <span x-text="pair.shared_query_count"></span> kws
+                                    </span>
+                                  </template>
+                                  <template x-if="pair.shared_query_count === 0 && cannibalHasQueryData">
+                                    <span class="text-dim">0</span>
+                                  </template>
+                                  <template x-if="!cannibalHasQueryData">
+                                    <span class="text-dim">—</span>
+                                  </template>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- Drift -->
+                <template x-if="semanticSubTab === 'drift'">
+                  <div>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Paginas que mas desplazan el centro semantico del sitio. Son URLs con <strong>alta autoridad</strong> (peso) pero <strong>alejadas del tema principal</strong> (distancia). El Drift Score = peso x distancia. Si una pagina importante habla de algo muy diferente al resto del sitio, arrastra el centroide. Accion: reenfocar su contenido o reducir su autoridad interna.</p>
+                    <template x-if="driftLoading">
+                      <div class="loading-overlay"><div class="spinner"></div> Cargando drift...</div>
+                    </template>
+                    <template x-if="!driftLoading && driftData.length > 0">
+                      <div style="overflow-x:auto">
+                        <table class="tbl">
+                          <thead>
+                            <tr>
+                              <th>#</th><th>URL</th>
+                              <th data-tip="Distancia euclidea al centroide. Mayor = mas alejada del tema central.">Distancia</th>
+                              <th data-tip="Autoridad normalizada (PageRank + clicks GSC). Mayor = mas influyente.">Peso</th>
+                              <th data-tip="Impacto en el desplazamiento del centro semantico. Drift = peso x distancia.">Drift Score</th>
+                              <th data-tip="Clicks organicos de Google (GSC). Contexto: por que esta pagina importa.">Clicks</th>
+                              <th data-tip="Posicion media en Google (GSC). Menor = mejor posicionamiento.">Pos.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="(d, idx) in driftData" :key="d.url_id">
+                              <tr>
+                                <td x-text="idx + 1"></td>
+                                <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="d.url" x-text="d.url"></td>
+                                <td x-text="d.distance"></td>
+                                <td x-text="d.weight"></td>
+                                <td><strong x-text="d.drift_score"></strong></td>
+                                <td x-text="d.clicks != null ? d.clicks.toLocaleString('es-ES') : '—'"></td>
+                                <td x-text="d.position != null ? d.position.toFixed(1) : '—'"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- Gap Analysis -->
+                <template x-if="semanticSubTab === 'gap'">
+                  <div>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Escribe un tema y el sistema busca que paginas de tu sitio cubren mejor ese contenido. Compara el embedding del tema con el de cada pagina. Las mas similares son candidatas para enlazar, expandir o reforzar. Tambien muestra la centralidad de cada pagina (similitud al centroide) para saber si esta en el nucleo o en la periferia del sitio.</p>
+                    <div style="display:flex;gap:.5rem;align-items:end;margin-bottom:.5rem">
+                      <div style="flex:1">
+                        <label class="text-dim text-sm">Topico objetivo</label>
+                        <input type="text" x-model="gapTopic" placeholder="Ej: guia de cuidado dental infantil"
+                               style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.9rem;margin-top:.2rem">
+                      </div>
+                      <button class="btn btn-primary btn-sm" @click="runGapAnalysis()" :disabled="gapLoading || !gapTopic.trim()" style="display:flex;align-items:center;gap:.25rem">
+                        <template x-if="gapLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                        Analizar gap
+                      </button>
+                    </div>
+                    <div style="margin-bottom:1rem">
+                      <label class="text-dim text-sm" data-tip="Patrones de URL a excluir de los resultados, separados por coma. Ej: /page/, /tag/, /category/. Se aplica como 'contiene'.">Excluir URLs que contengan</label>
+                      <input type="text" x-model="gapExclude" placeholder="Ej: /page/, /tag/, /category/"
+                             style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem;margin-top:.2rem">
+                    </div>
+                    <template x-if="gapResults && gapResults.candidates">
+                      <div>
+                        <p class="text-sm text-dim" style="margin-bottom:.5rem">Paginas mas relevantes para "<span x-text="gapResults.topic"></span>":</p>
+                        <table class="tbl">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>URL</th>
+                              <th data-tip="Similitud coseno entre el embedding de la pagina y el del tema buscado. Mayor = mas relevante.">Similitud al tema</th>
+                              <th data-tip="Similitud coseno al centroide del sitio. Alto = pagina central. Bajo = pagina periferica.">Centralidad</th>
+                              <th data-tip="Clicks organicos de Google (GSC).">Clicks</th>
+                              <th data-tip="Posicion media en Google (GSC).">Pos.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="(c, idx) in gapResults.candidates.filter(c => {
+                              if (!gapExclude || !gapExclude.trim()) return true;
+                              const patterns = gapExclude.split(',').map(p => p.trim().toLowerCase()).filter(Boolean);
+                              return !patterns.some(p => c.url.toLowerCase().includes(p));
+                            })" :key="c.url_id">
+                              <tr>
+                                <td x-text="idx + 1"></td>
+                                <td style="max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="c.url" x-text="c.url"></td>
+                                <td><strong x-text="(c.similarity_to_topic * 100).toFixed(1) + '%'"></strong></td>
+                                <td x-text="(c.similarity_to_centroid * 100).toFixed(1) + '%'"></td>
+                                <td x-text="c.clicks != null ? c.clicks.toLocaleString('es-ES') : '—'"></td>
+                                <td x-text="c.position != null ? c.position.toFixed(1) : '—'"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                  </div>
+                </template>
               </div>
             </template>
           </div>
@@ -855,7 +1329,7 @@
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem;color:var(--accent)" x-text="urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—'"></div>
-                <div class="stat-label">PageRank</div>
+                <div class="stat-label" data-tip="Importancia de esta pagina segun enlaces internos que recibe. Mas enlaces desde paginas importantes = mayor PageRank. Escala 0-10.">PageRank</div>
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" :class="urlDetail.issues?.length > 0 ? 'orange' : 'green'"
@@ -1955,6 +2429,38 @@
           <template x-if="importing"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="upload" style="width:14px;height:14px" x-show="!importing"></i>
           Importar
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== MODAL: SUBIR CUENTA GSC ===== -->
+<template x-if="showGscUploadModal">
+  <div class="modal-backdrop" @click.self="showGscUploadModal = false" @keydown.escape.window="showGscUploadModal = false">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h3 style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="key" style="width:18px;height:18px;color:var(--accent)"></i>
+          Subir cuenta de servicio GSC
+        </h3>
+        <button class="btn-icon" @click="showGscUploadModal = false" style="font-size:1.25rem">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1.25rem">
+        <div class="form-group" style="margin-bottom:1rem">
+          <label>Nombre de la cuenta</label>
+          <input type="text" x-model="gscUploadName" placeholder="Ej: Mi proyecto GSC" style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text)">
+        </div>
+        <div class="form-group">
+          <label>Archivo JSON de cuenta de servicio</label>
+          <input type="file" accept=".json" @change="gscUploadFile = $event.target.files[0]" style="font-size:.85rem">
+          <div class="form-hint">El JSON de la cuenta de servicio de Google Cloud con permisos de lectura en Search Console.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="showGscUploadModal = false">Cancelar</button>
+        <button class="btn btn-primary" @click="uploadGscAccount()" :disabled="!gscUploadFile || !gscUploadName.trim()" style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="upload" style="width:14px;height:14px"></i> Guardar
         </button>
       </div>
     </div>

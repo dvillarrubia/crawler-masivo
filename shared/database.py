@@ -31,4 +31,8 @@ def init_db():
         Job, Url, HtmlMeta, Heading, Link, Hreflang,
         StructuredData, Resource, Issue,
     )
+    from shared.semantic_models import (  # noqa: F401 – force semantic table registration
+        GscAccount, SemanticAnalysis, SemanticPage,
+        SemanticCannibalization, GscJobData,
+    )
     Base.metadata.create_all(bind=engine)
