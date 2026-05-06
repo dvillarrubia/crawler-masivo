@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -155,6 +157,70 @@ def cancel_job(
     # The spider checks this key on every response.
     r = get_redis()
     r.set(f"job:{job.id}:cancel", "1")
+
+    return job
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/{job_id}/resume  --  re-queue a failed/cancelled job
+# ---------------------------------------------------------------------------
+@router.post("/{job_id}/resume", response_model=JobResponse)
+def resume_job(
+    job_id: uuid.UUID,
+    overrides: dict[str, Any] | None = Body(default=None),
+    db: Session = Depends(get_session),
+):
+    """Re-queue a failed/cancelled job. The spider auto-detects already-crawled
+    URLs and the discovered-but-not-yet-crawled frontier from the database, so
+    the crawl resumes rather than restarting.
+
+    Optional body: shallow-merged config overrides. Supported keys:
+      - top-level: ``concurrent_requests``, ``concurrent_requests_per_domain``,
+        ``render_js``, ``robots_mode``, ``user_agent``, ``impersonate``
+      - sub-objects: ``crawl_behavior`` (deep-merged)
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("failed", "cancelled", "completed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot resume a job with status '{job.status}'",
+        )
+
+    # Apply optional config overrides (shallow + crawl_behavior deep merge)
+    if overrides:
+        cfg = dict(job.config or {})
+        cb = dict(cfg.get("crawl_behavior", {}))
+        if isinstance(overrides.get("crawl_behavior"), dict):
+            cb.update(overrides["crawl_behavior"])
+        cfg["crawl_behavior"] = cb
+        for key in (
+            "concurrent_requests",
+            "concurrent_requests_per_domain",
+            "render_js",
+            "robots_mode",
+            "user_agent",
+            "impersonate",
+            "max_urls",
+            "max_depth",
+        ):
+            if key in overrides:
+                cfg[key] = overrides[key]
+        job.config = cfg
+
+    job.status = "pending"
+    job.completed_at = None
+    db.commit()
+    db.refresh(job)
+
+    # Clear any stale cancel signal and re-queue
+    r = get_redis()
+    try:
+        r.delete(f"job:{job_id}:cancel")
+    except Exception:
+        pass
+    r.rpush("jobs:pending", str(job.id))
 
     return job
 

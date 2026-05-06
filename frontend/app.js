@@ -851,6 +851,56 @@ function app() {
       window.open(`${API}/jobs/${this.job.id}/backup`, '_blank');
     },
 
+    // ------- Reanudar job fallido / cancelado -------
+    showResumeModal: false,
+    resuming: false,
+    resumeForm: {
+      max_runtime_hours: 6,
+      autothrottle_enabled: true,
+      concurrent_requests_per_domain: 8,
+      concurrent_requests: 32,
+    },
+
+    openResumeDialog() {
+      if (!this.job) return;
+      const cfg = this.job.config || {};
+      const cb = cfg.crawl_behavior || {};
+      this.resumeForm = {
+        max_runtime_hours: cb.max_runtime_hours || 6,
+        autothrottle_enabled: cb.autothrottle_enabled !== false,
+        concurrent_requests_per_domain: cfg.concurrent_requests_per_domain || 8,
+        concurrent_requests: cfg.concurrent_requests || 32,
+      };
+      this.showResumeModal = true;
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    async confirmResume() {
+      if (!this.job || this.resuming) return;
+      this.resuming = true;
+      try {
+        const overrides = {
+          concurrent_requests: parseInt(this.resumeForm.concurrent_requests) || 32,
+          concurrent_requests_per_domain: parseInt(this.resumeForm.concurrent_requests_per_domain) || 8,
+          crawl_behavior: {
+            max_runtime_hours: parseInt(this.resumeForm.max_runtime_hours) || 6,
+            autothrottle_enabled: !!this.resumeForm.autothrottle_enabled,
+          },
+        };
+        this.job = await api(`/jobs/${this.job.id}/resume`, {
+          method: 'POST',
+          body: JSON.stringify(overrides),
+        });
+        this.showResumeModal = false;
+        this.showToast('Rastreo reanudado', 'info');
+        // Restart progress polling
+        this._startProgress();
+      } catch (e) {
+        alert(e.message);
+      }
+      this.resuming = false;
+    },
+
     // ------- Importar backup -------
     showImportModal: false,
     importFile: null,

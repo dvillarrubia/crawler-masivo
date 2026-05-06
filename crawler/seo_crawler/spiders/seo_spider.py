@@ -176,6 +176,10 @@ class SeoSpider(scrapy.Spider):
         self._crawled_count: int = 0
         self._redis: redis.Redis | None = None
         self._redis_update_interval: int = 50
+        # Resume support: hashes of URLs already crawled in a previous run for
+        # this same job, plus the discovered-but-not-yet-crawled frontier.
+        self._already_crawled_hashes: set[str] = set()
+        self._frontier_urls: list[str] = []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -270,6 +274,56 @@ class SeoSpider(scrapy.Spider):
                 self.max_urls,
                 self.allowed_hosts,
             )
+
+            # -- Resume detection: load already-crawled URL hashes + frontier
+            # If this job already has rows in `urls`, treat the run as a resume:
+            # skip URLs we already fetched and seed the queue with the
+            # discovered-but-not-yet-crawled internal links from the `links`
+            # table so the BFS picks up where it left off.
+            from shared.models import Link, Url
+
+            already_rows = (
+                session.query(Url.url_hash)
+                .filter(Url.job_id == self.job_id)
+                .all()
+            )
+            if already_rows:
+                self._already_crawled_hashes = {row[0] for row in already_rows}
+                # Discovered-but-not-crawled internal links (frontier).
+                # NOT EXISTS lets Postgres use the indexed (job_id, url_hash)
+                # lookup on `urls`, so this scales beyond a few thousand URLs.
+                # Cap the result count to keep start_requests time bounded; if
+                # a job has more than this in flight, the rest will be
+                # rediscovered as the crawl progresses through the frontier.
+                FRONTIER_CAP = 200_000
+                already_subq = (
+                    session.query(Url.url_hash)
+                    .filter(
+                        Url.job_id == Link.job_id,
+                        Url.url_hash == Link.to_url_hash,
+                    )
+                    .exists()
+                )
+                frontier_rows = (
+                    session.query(Link.to_url)
+                    .filter(
+                        Link.job_id == self.job_id,
+                        Link.is_internal.is_(True),
+                        ~already_subq,
+                    )
+                    .distinct()
+                    .limit(FRONTIER_CAP)
+                    .all()
+                )
+                self._frontier_urls = [row[0] for row in frontier_rows]
+                self._crawled_count = len(self._already_crawled_hashes)
+                logger.info(
+                    "Resume mode for job %s: %d URLs already crawled, "
+                    "%d frontier URLs to seed",
+                    self.job_id,
+                    len(self._already_crawled_hashes),
+                    len(self._frontier_urls),
+                )
         finally:
             session.close()
 
@@ -327,9 +381,33 @@ class SeoSpider(scrapy.Spider):
         }
 
     def start_requests(self) -> Generator[Request, None, None]:
+        # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
+            if compute_url_hash(normalized) in self._already_crawled_hashes:
+                continue
             req_meta: dict[str, Any] = {"depth": 0}
+            if self.render_js and _url_likely_html(normalized):
+                req_meta.update(self._playwright_meta())
+            yield scrapy.Request(
+                url=normalized,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=req_meta,
+                dont_filter=True,
+            )
+
+        # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
+        # run. Emitted with depth=1 since we know they were linked from a
+        # crawled page; honoring the original depth would require a join we
+        # don't pay for.
+        for url in self._frontier_urls:
+            normalized = normalize_url(url)
+            if compute_url_hash(normalized) in self._already_crawled_hashes:
+                continue
+            if not self._should_follow(normalized):
+                continue
+            req_meta = {"depth": 1}
             if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
             yield scrapy.Request(
@@ -752,6 +830,10 @@ class SeoSpider(scrapy.Spider):
                 should_follow = link_internal or self.follow_external
                 if should_follow and (link.get("follow", True) or self._follow_nofollow):
                     if self._should_follow(link["url"]):
+                        # Resume: skip URLs already crawled in a previous run.
+                        if self._already_crawled_hashes and \
+                                compute_url_hash(link["url"]) in self._already_crawled_hashes:
+                            continue
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js and _url_likely_html(link["url"]):
                             follow_meta.update(self._playwright_meta())

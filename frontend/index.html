@@ -187,6 +187,11 @@
                   <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
                 </button>
               </template>
+              <template x-if="['failed','cancelled'].includes(job.status)">
+                <button class="btn btn-sm btn-primary" @click="openResumeDialog()" style="display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="play-circle" style="width:13px;height:13px"></i> Reanudar
+                </button>
+              </template>
               <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
               </button>
@@ -2441,6 +2446,60 @@
           <template x-if="importing"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="upload" style="width:14px;height:14px" x-show="!importing"></i>
           Importar
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== MODAL: REANUDAR JOB ===== -->
+<template x-if="showResumeModal">
+  <div class="modal-backdrop" @click.self="showResumeModal = false" @keydown.escape.window="showResumeModal = false">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3 style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="play-circle" style="width:18px;height:18px;color:var(--accent)"></i>
+          Reanudar rastreo
+        </h3>
+        <button class="btn-icon" @click="showResumeModal = false" style="font-size:1.25rem">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1.25rem">
+        <p class="text-dim text-sm" style="margin-bottom:1rem">
+          Las URLs ya rastreadas se preservan. El crawler continuara desde la frontera descubierta. Puedes ajustar los parametros mas relevantes antes de relanzar.
+        </p>
+
+        <div class="form-group">
+          <label>Tiempo maximo (horas)</label>
+          <input type="number" x-model="resumeForm.max_runtime_hours" min="1" max="72">
+          <div class="form-hint">Si el crawl no termina en este tiempo, se marca como fallido.</div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="checkbox-label">
+            <input type="checkbox" x-model="resumeForm.autothrottle_enabled">
+            Habilitar autothrottle
+          </label>
+          <div class="form-hint">Desactivalo si tienes IP whitelisteada y quieres exprimir la concurrencia.</div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Concurrencia por dominio</label>
+          <input type="number" x-model="resumeForm.concurrent_requests_per_domain" min="1" max="64">
+          <div class="form-hint">Sin autothrottle, este es el techo real. Con whitelist, 16-32 es seguro.</div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Concurrencia global</label>
+          <input type="number" x-model="resumeForm.concurrent_requests" min="1" max="256">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="showResumeModal = false">Cancelar</button>
+        <button class="btn btn-primary" @click="confirmResume()" :disabled="resuming"
+                style="display:flex;align-items:center;gap:.4rem">
+          <template x-if="resuming"><span class="spinner" style="width:14px;height:14px"></span></template>
+          <i data-lucide="play-circle" style="width:14px;height:14px" x-show="!resuming"></i>
+          Reanudar
         </button>
       </div>
     </div>
