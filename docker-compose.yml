@@ -40,13 +40,6 @@ services:
       - PYTHONPATH=/app
     volumes:
       - hf_cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     depends_on:
       postgres:
         condition: service_healthy
