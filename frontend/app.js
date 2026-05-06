@@ -313,6 +313,7 @@ function app() {
               autothrottle_target_concurrency: parseFloat(f.autothrottle_target_concurrency) || 8,
               follow_nofollow: f.follow_nofollow,
               crawl_subdomains: f.crawl_subdomains,
+              max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
             },
             url_filters: {
               max_url_length: parseInt(f.max_url_length) || 0,
@@ -1216,6 +1217,7 @@ function _freshForm() {
     request_delay: 0,
     autothrottle_enabled: true,
     autothrottle_target_concurrency: 8,
+    max_runtime_hours: 6,
     // HTTP
     custom_headers: '',
     accept_language: '',

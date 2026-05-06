@@ -98,6 +98,7 @@ def _run_job(job_id: str) -> None:
 
     # -- Run Scrapy as subprocess (avoids Twisted reactor restart issues) --
     final_status = "completed"
+    max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 6)), 72))
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = (
@@ -158,7 +159,7 @@ def _run_job(job_id: str) -> None:
             env=env,
             capture_output=True,
             text=True,
-            timeout=3600 * 6,  # 6 hour max per job
+            timeout=3600 * max_runtime_hours,
         )
 
         # Always log last portion of stderr for debugging
@@ -181,7 +182,11 @@ def _run_job(job_id: str) -> None:
             logger.info("Scrapy crawl finished successfully for job %s", job_id)
 
     except subprocess.TimeoutExpired:
-        logger.error("Crawl timed out for job %s", job_id)
+        logger.error(
+            "Crawl timed out for job %s after %d hour(s)",
+            job_id,
+            max_runtime_hours,
+        )
         final_status = "failed"
     except Exception:
         logger.exception("Crawl failed for job %s", job_id)

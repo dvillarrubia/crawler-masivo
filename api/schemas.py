@@ -73,6 +73,7 @@ class CrawlBehaviorConfig(BaseModel):
     autothrottle_target_concurrency: float = Field(default=8.0, ge=1.0, le=100.0)
     follow_nofollow: bool = False
     crawl_subdomains: bool = False
+    max_runtime_hours: int = Field(default=6, ge=1, le=72)
 
 
 class UrlFilterConfig(BaseModel):
