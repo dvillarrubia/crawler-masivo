@@ -143,10 +143,12 @@ _BOILERPLATE_REMOVAL_JS = """
      '[class*="livechat" i]', '[id*="livechat" i]'
     ].forEach(r);
 
-    // ---- Structural non-content elements ----
-    ['form', 'nav', 'aside', 'footer', 'header'].forEach(tag => {
-        r(tag);
-    });
+    // NOTE: structural elements (form, nav, aside, footer, header) are
+    // intentionally NOT removed here. They contain real internal links that
+    // must reach `extract_links` so the BFS can follow them. Boilerplate
+    // stripping for content extraction happens later in Python via
+    // `_strip_boilerplate_html` (extractors.py), which operates on a copy of
+    // the HTML and does not affect link discovery.
 
     // ---- ARIA modals / HTML5 dialogs ----
     r('[aria-modal="true"]');
