@@ -1,0 +1,43 @@
+name: Deploy to Hostinger VPS
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crawler/**'
+      - 'api/**'
+      - 'analysis/**'
+      - 'shared/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.vps.yml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 168.231.83.181 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key root@168.231.83.181 bash -se <<'EOF'
+          set -euo pipefail
+          cd /opt/crawler-masivo
+          git fetch origin master
+          git reset --hard origin/master
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml ps
+          EOF
