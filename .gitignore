@@ -24,3 +24,7 @@ Thumbs.db
 # Claude Code
 .claude/
 POC_centro_semantico/big-bison-734-3dde0ec362c4 (3).json
+
+# Local-only experiments and notes
+POC_orbea/
+SETUP_OTRO_ORDENADOR.md
