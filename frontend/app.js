@@ -841,9 +841,13 @@ function app() {
     setLinksPage(p) { if (p >= 1 && p <= this.linksPages) { this.linksPage = p; this.loadLinks(); } },
 
     // ------- Exportar -------
-    exportCSV() {
+    exportCSV(format = 'csv') {
       if (!this.job) return;
-      window.open(`${API}/jobs/${this.job.id}/export`, '_blank');
+      window.open(`${API}/jobs/${this.job.id}/export?format=${format}`, '_blank');
+    },
+
+    exportTSV() {
+      this.exportCSV('tsv');
     },
 
     exportBackup() {

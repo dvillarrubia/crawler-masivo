@@ -11,7 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260512-tsv"></script>
 </head>
 <body x-data="app()" x-init="init()" x-effect="$nextTick(() => lucide.createIcons())">
 
@@ -170,7 +170,7 @@
     <template x-if="view === 'detail' && job">
       <div>
         <!-- Hero gradient header -->
-        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:#f0f1f3;border-bottom:1px solid var(--border)">
+        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:transparent">
           <!-- Cabecera -->
           <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
             <div>
@@ -197,6 +197,9 @@
               </button>
               <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
+              </button>
+              <button class="btn btn-sm" @click="exportTSV()" title="TSV: separador tabulador, ideal para Excel sin descuadres" style="display:flex;align-items:center;gap:.3rem">
+                <i data-lucide="download" style="width:13px;height:13px"></i> Exportar TSV
               </button>
               <template x-if="['completed','failed','cancelled'].includes(job.status)">
                 <button class="btn btn-sm" @click="exportBackup()" style="display:flex;align-items:center;gap:.3rem">
@@ -1853,6 +1856,9 @@
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
             <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.25rem;margin-left:auto">
               <i data-lucide="download" style="width:12px;height:12px"></i> CSV
+            </button>
+            <button class="btn btn-sm" @click="exportTSV()" title="TSV: separador tabulador, ideal para Excel sin descuadres" style="display:flex;align-items:center;gap:.25rem">
+              <i data-lucide="download" style="width:12px;height:12px"></i> TSV
             </button>
           </div>
 
