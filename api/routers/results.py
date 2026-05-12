@@ -537,17 +537,30 @@ def _csv_row(url_obj: Url) -> list[str]:
     ]
 
 
-def _stream_csv(job_id: uuid.UUID):
-    """Generator that yields CSV content in chunks using windowed queries."""
+def _sanitize_for_tsv(row: list[str]) -> list[str]:
+    """Replace tabs/newlines inside cells so they don't break TSV alignment."""
+    return [
+        c.replace("\t", " ").replace("\r", " ").replace("\n", " ") if isinstance(c, str) else c
+        for c in row
+    ]
+
+
+def _stream_tabular(job_id: uuid.UUID, fmt: str):
+    """Generator that yields CSV or TSV content in chunks using windowed queries."""
     # Each chunk opens its own session so we do not hold one long transaction.
     from shared.database import SessionLocal
 
+    is_tsv = fmt == "tsv"
+    delimiter = "\t" if is_tsv else ","
     batch_size = 1000
     last_id = 0
 
+    # UTF-8 BOM so Excel detects encoding correctly on double-click
+    yield "﻿"
+
     # Header row
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = csv.writer(buf, delimiter=delimiter)
     writer.writerow(CSV_COLUMNS)
     yield buf.getvalue()
 
@@ -567,9 +580,12 @@ def _stream_csv(job_id: uuid.UUID):
                 break
 
             buf = io.StringIO()
-            writer = csv.writer(buf)
+            writer = csv.writer(buf, delimiter=delimiter)
             for row in rows:
-                writer.writerow(_csv_row(row))
+                csv_row = _csv_row(row)
+                if is_tsv:
+                    csv_row = _sanitize_for_tsv(csv_row)
+                writer.writerow(csv_row)
                 last_id = row.id
 
             yield buf.getvalue()
@@ -580,15 +596,19 @@ def _stream_csv(job_id: uuid.UUID):
 @router.get("/export")
 def export_csv(
     job_id: uuid.UUID,
+    fmt: str = Query("csv", alias="format", regex="^(csv|tsv)$"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
 
+    media_type = "text/tab-separated-values" if fmt == "tsv" else "text/csv"
+    extension = "tsv" if fmt == "tsv" else "csv"
+
     return StreamingResponse(
-        _stream_csv(job_id),
-        media_type="text/csv",
+        _stream_tabular(job_id, fmt),
+        media_type=f"{media_type}; charset=utf-8",
         headers={
-            "Content-Disposition": f"attachment; filename=job_{job_id}_urls.csv",
+            "Content-Disposition": f"attachment; filename=job_{job_id}_urls.{extension}",
         },
     )
 
