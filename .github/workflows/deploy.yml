@@ -130,11 +130,44 @@ jobs:
           for attempt in 1 2 3; do
             if ssh "${ssh_opts[@]}" "${VPS_USER}@${VPS_HOST}" bash -se <<< "$remote_script"; then
               echo "Deploy succeeded on attempt $attempt"
-              exit 0
+              break
             fi
             echo "Deploy attempt $attempt failed"
             [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+            [ "$attempt" -eq 3 ] && { echo "::error::Deploy failed after 3 attempts"; exit 1; }
           done
 
-          echo "::error::Deploy failed after 3 attempts"
-          exit 1
+      # ----------------------------------------------------------------
+      # Post-deploy disk / image footprint so we can see at a glance
+      # how much the VPS is using. Useful after dependency changes
+      # (e.g. dropping torch + sentence-transformers should free
+      # several GB of image+volume space).
+      # ----------------------------------------------------------------
+      - name: Report VPS footprint
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i ~/.ssh/deploy_key
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+          )
+          ssh "${ssh_opts[@]}" "${VPS_USER}@${VPS_HOST}" bash -se <<'REMOTE' || true
+          set -uo pipefail
+          echo "=== Disk usage (df -h /) ==="
+          df -h /
+          echo
+          echo "=== Docker overall (docker system df) ==="
+          docker system df
+          echo
+          echo "=== Crawler images (size, age) ==="
+          docker images 'crawler-masivo-*' --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}'
+          echo
+          echo "=== Dangling / orphan layers ==="
+          docker images --filter "dangling=true" --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}'
+          echo
+          echo "=== /opt/crawler-masivo size ==="
+          du -sh /opt/crawler-masivo 2>/dev/null || true
+          echo
+          echo "=== Top 5 docker volumes by size ==="
+          docker system df -v 2>/dev/null | awk '/VOLUME NAME/,/^$/' | head -20 || true
+          REMOTE
