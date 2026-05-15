@@ -19,31 +19,110 @@ concurrency:
   group: deploy-vps
   cancel-in-progress: false
 
+env:
+  VPS_HOST: 168.231.83.181
+  VPS_USER: root
+  VPS_PATH: /opt/crawler-masivo
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
+      # ----------------------------------------------------------------
+      # SSH setup. The GitHub-hosted runner gets a fresh public IP every
+      # invocation; the VPS firewall (fail2ban + Hostinger filters)
+      # occasionally throttles new IPs, which used to fail this step on
+      # the very first ssh-keyscan with no usable error message because
+      # stderr was redirected to /dev/null. We:
+      #   1. validate that the secret actually has content,
+      #   2. retry ssh-keyscan with backoff and surface its stderr,
+      #   3. surface tcp reachability separately so we can tell apart
+      #      "VPS is down" from "VPS rejected this runner IP".
+      # ----------------------------------------------------------------
       - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 168.231.83.181 >> ~/.ssh/known_hosts 2>/dev/null
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
 
+          # Use printf via env var rather than a YAML heredoc: multi-line
+          # secrets interact badly with YAML's literal-block indent rules
+          # and a single missing newline kills the whole deploy with an
+          # opaque "invalid format" error from ssh.
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+
+          if ! [ -s ~/.ssh/deploy_key ]; then
+            echo "::error::VPS_SSH_KEY secret is empty or missing"
+            exit 1
+          fi
+
+          # Quick TCP probe: tells us whether port 22 is reachable at all
+          # from this runner before we blame ssh-keyscan for everything.
+          if ! timeout 10 bash -c "</dev/tcp/${VPS_HOST}/22" 2>/dev/null; then
+            echo "::warning::TCP probe to ${VPS_HOST}:22 timed out; runner IP may be filtered."
+          fi
+
+          : > /tmp/keyscan.log
+          for attempt in 1 2 3 4 5; do
+            if ssh-keyscan -T 15 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>>/tmp/keyscan.log; then
+              echo "ssh-keyscan OK on attempt $attempt"
+              break
+            fi
+            echo "ssh-keyscan attempt $attempt failed; backing off..."
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::ssh-keyscan failed 5 times"
+              echo '--- keyscan log ---'
+              cat /tmp/keyscan.log || true
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+      # ----------------------------------------------------------------
+      # Deploy. Wrapped in its own retry loop because sshd on the VPS
+      # sometimes refuses the first TCP connection after we've been
+      # idle; the second attempt 10-20s later almost always works.
+      # We use BatchMode + explicit timeouts so an unresponsive VPS
+      # fails fast instead of hanging the whole runner.
+      # ----------------------------------------------------------------
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key root@168.231.83.181 bash -se <<'EOF'
+          set -euo pipefail
+
+          ssh_opts=(
+            -i ~/.ssh/deploy_key
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=20
+            -o ServerAliveCountMax=6
+          )
+
+          remote_script=$(cat <<'REMOTE'
           set -euo pipefail
           cd /opt/crawler-masivo
           git fetch origin master
           git reset --hard origin/master
           docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
-          # Apply any pending schema changes. init_db.py is idempotent:
-          # SQLAlchemy create_all only creates tables that don't exist,
-          # and the embedded ALTER...IF NOT EXISTS migrations are safe to
-          # re-run. Required so new tables (e.g. gemini_accounts) appear
-          # on the VPS without a manual SSH step.
-          docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api python scripts/init_db.py
+          # init_db.py is idempotent (CREATE TABLE IF NOT EXISTS, etc.)
+          # so re-running it on every deploy is safe and applies any
+          # pending schema migrations without a manual SSH step.
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api \
+            python scripts/init_db.py
           docker compose -f docker-compose.yml -f docker-compose.vps.yml ps
-          EOF
+          REMOTE
+          )
+
+          for attempt in 1 2 3; do
+            if ssh "${ssh_opts[@]}" "${VPS_USER}@${VPS_HOST}" bash -se <<< "$remote_script"; then
+              echo "Deploy succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Deploy attempt $attempt failed"
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+          done
+
+          echo "::error::Deploy failed after 3 attempts"
+          exit 1
