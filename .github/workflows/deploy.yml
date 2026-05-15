@@ -121,8 +121,14 @@ jobs:
           # init_db.py is idempotent (CREATE TABLE IF NOT EXISTS, etc.)
           # so re-running it on every deploy is safe and applies any
           # pending schema migrations without a manual SSH step.
+          #
+          # IMPORTANT: redirect </dev/null. `docker compose exec -T` reads
+          # the outer bash's stdin and forwards it to the container — but
+          # this outer bash IS reading its own script from stdin (bash -s).
+          # Without </dev/null, exec swallows the rest of the script and
+          # everything below this line silently never runs.
           docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api \
-            python scripts/init_db.py
+            python scripts/init_db.py </dev/null
           docker compose -f docker-compose.yml -f docker-compose.vps.yml ps
           # Prune dangling images: each `compose build` leaves the previous
           # version of the image behind as a <none>:<none> layer (every
