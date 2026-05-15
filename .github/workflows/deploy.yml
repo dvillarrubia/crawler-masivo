@@ -50,12 +50,24 @@ jobs:
           # Use printf via env var rather than a YAML heredoc: multi-line
           # secrets interact badly with YAML's literal-block indent rules
           # and a single missing newline kills the whole deploy with an
-          # opaque "invalid format" error from ssh.
+          # opaque "error in libcrypto" from ssh.
+          # Two important details:
+          #   - %s\n (not %s) — OpenSSH refuses keys with no trailing newline.
+          #   - tr -d '\r'    — secrets pasted from Windows include CRLF;
+          #                     the \r breaks key parsing the same way.
           install -m 600 /dev/null ~/.ssh/deploy_key
-          printf '%s' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
 
           if ! [ -s ~/.ssh/deploy_key ]; then
             echo "::error::VPS_SSH_KEY secret is empty or missing"
+            exit 1
+          fi
+          # Verify ssh can actually parse the key before we go further;
+          # a libcrypto failure here surfaces a clear message instead of
+          # bleeding into the deploy step.
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null 2>/tmp/keycheck.log; then
+            echo "::error::deploy_key is not a valid SSH key"
+            cat /tmp/keycheck.log || true
             exit 1
           fi
 
