@@ -113,7 +113,11 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         "Expansion": "rgba(251, 188, 4, 0.08)",
         "Peripheral": "rgba(234, 67, 53, 0.06)",
     }
-    # Compute distance thresholds (IQR-based, same as classify_rings)
+    # Compute distance thresholds (IQR-based, mirroring classify_rings):
+    #   Core:       0    .. Q1
+    #   Focus:      Q1   .. Q3
+    #   Expansion:  Q3   .. Q3 + 1.5*IQR
+    #   Peripheral: > Q3 + 1.5*IQR (true outliers)
     import numpy as np
     all_dists = [p.get("distance_to_centroid", 0) for p in pages_data]
     dists_arr = np.array(all_dists)
@@ -122,8 +126,13 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         max_dist = 1.0
 
     q1 = float(np.percentile(dists_arr, 25))
-    q2 = float(np.percentile(dists_arr, 50))
     q3 = float(np.percentile(dists_arr, 75))
+    iqr = q3 - q1
+    outlier_threshold = q3 + 1.5 * iqr
+    # Cap the outlier threshold at observed max so the "Expansion" upper
+    # bound stays inside the visible data range.
+    expansion_upper = min(outlier_threshold, max_dist)
+    peripheral_upper = max(max_dist, outlier_threshold)
 
     # Fixed visual ring radii (equal spacing for readability)
     ring_radii = {"Core": 1.0, "Focus": 2.0, "Expansion": 3.0, "Peripheral": 4.0}
@@ -176,12 +185,12 @@ def build_ring_map(pages_data: list[dict], site_metrics: dict | None = None) -> 
         "Expansion": (2.0, 3.0),
         "Peripheral": (3.0, 4.0),
     }
-    # Distance thresholds per ring (for mapping within zone)
+    # Distance thresholds per ring (must match classify_rings).
     dist_bounds = {
         "Core": (0.0, q1),
-        "Focus": (q1, q2),
-        "Expansion": (q2, q3),
-        "Peripheral": (q3, max_dist),
+        "Focus": (q1, q3),
+        "Expansion": (q3, expansion_upper),
+        "Peripheral": (expansion_upper, peripheral_upper),
     }
 
     # Group by ring for coloring

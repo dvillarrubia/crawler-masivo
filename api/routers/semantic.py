@@ -20,6 +20,7 @@ from shared.config import REDIS_URL
 from shared.database import SessionLocal, get_session
 from shared.models import Job, Url
 from shared.semantic_models import (
+    GeminiAccount,
     GscAccount,
     GscJobData,
     GscQueryData,
@@ -29,6 +30,58 @@ from shared.semantic_models import (
 )
 
 router = APIRouter(prefix="/api", tags=["semantic"])
+
+
+def _resolve_gemini_key_from_analysis(
+    analysis: SemanticAnalysis,
+    db: Session,
+) -> str:
+    """Look up the Gemini API key tied to an analysis.
+
+    Used by endpoints (target-rings, gap-analysis) that need to embed a
+    query *after* the main analysis has completed. The account id is
+    stored in `analysis.config.gemini_account_id`; if it has been deleted
+    since the analysis ran, we respond 400 so the user can re-attach a
+    new account rather than silently failing.
+    """
+    cfg = analysis.config or {}
+    account_id_raw = cfg.get("gemini_account_id")
+    if not account_id_raw:
+        raise HTTPException(
+            status_code=400,
+            detail="This analysis has no Gemini account attached. Re-run the analysis.",
+        )
+    try:
+        account_id = uuid.UUID(account_id_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Stored gemini_account_id is invalid")
+    account = db.query(GeminiAccount).filter(GeminiAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(
+            status_code=400,
+            detail="The Gemini account used for this analysis no longer exists",
+        )
+    return account.api_key
+
+
+def _normalize_url_for_match(u: str) -> str:
+    """Lowercase + strip trailing slash + drop common tracking params.
+
+    Used for cross-system joins (e.g. matching GSC API rows against crawled
+    URLs in the DB), where minor formatting differences would otherwise drop
+    rows silently.
+    """
+    if not u:
+        return u
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+    parts = urlparse(u.strip().lower())
+    drop = {
+        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+        "fbclid", "gclid", "mc_cid", "mc_eid", "_ga",
+    }
+    q = [(k, v) for k, v in parse_qsl(parts.query) if k not in drop]
+    path = parts.path.rstrip("/") or "/"
+    return urlunparse((parts.scheme, parts.netloc, path, parts.params, urlencode(q), ""))
 
 
 # ---------------------------------------------------------------------------
@@ -52,10 +105,32 @@ class FetchGscRequest(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    model_name: str = "intfloat/multilingual-e5-large-instruct"
+    """Request body for /semantic/analyze.
+
+    The embedding model is fixed at the backend level (Gemini
+    embedding-001 with 1024-dim output). It is not a user-tunable
+    parameter on purpose: changing it would silently invalidate stored
+    `pgvector(1024)` embeddings and break cross-analysis comparisons.
+
+    `gemini_account_id` is required: each client uses their own API key
+    so they pay for their own usage. No global/shared key fallback.
+    """
+    gemini_account_id: uuid.UUID
     alpha: float = 0.6
     beta: float = 0.4
     cannibal_threshold: float = 0.92
+
+
+class GeminiAccountCreate(BaseModel):
+    name: str
+    api_key: str
+
+
+class GeminiAccountResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    api_key_preview: str  # first 4 + "…" + last 4, never the full key
+    created_at: datetime | None = None
 
 
 class GapAnalysisRequest(BaseModel):
@@ -107,16 +182,29 @@ def _load_gsc_map(job_id: uuid.UUID, db: Session) -> dict[int, dict]:
     }
 
 
+# --- Progress heartbeat ----------------------------------------------------
+# We keep two pieces of state in Redis per running analysis:
+#   - progress payload: {stage, progress, updated_at}
+#   - TTL: 24h so it survives a long-running embedding stage (large corpora
+#     with a local model can take well over an hour).
+# The watchdog in get_semantic_status() considers the thread dead only if
+# `updated_at` is older than HEARTBEAT_DEAD_AFTER_S — never because the key
+# happens to be absent (which used to kill live threads after Redis TTL).
+PROGRESS_TTL_S = 24 * 3600
+HEARTBEAT_DEAD_AFTER_S = 15 * 60  # 15 min with zero heartbeat → presume dead
+
+
 def _redis_progress_key(analysis_id: str) -> str:
     return f"semantic:{analysis_id}:progress"
 
 
 def _set_progress(r: redis.Redis, analysis_id: str, stage: str, pct: int) -> None:
-    r.set(
-        _redis_progress_key(analysis_id),
-        json.dumps({"stage": stage, "progress": pct}),
-        ex=3600,  # expire after 1h
-    )
+    payload = {
+        "stage": stage,
+        "progress": pct,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    r.set(_redis_progress_key(analysis_id), json.dumps(payload), ex=PROGRESS_TTL_S)
 
 
 def _get_progress(analysis_id: str) -> dict[str, Any]:
@@ -129,6 +217,20 @@ def _get_progress(analysis_id: str) -> dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def _heartbeat_age_seconds(progress_info: dict[str, Any]) -> float | None:
+    """Return seconds since last heartbeat, or None if no valid timestamp."""
+    ts_raw = progress_info.get("updated_at")
+    if not ts_raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(ts_raw)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts).total_seconds()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +259,54 @@ def delete_gsc_account(account_id: uuid.UUID, db: Session = Depends(get_session)
     account = db.query(GscAccount).filter(GscAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="GSC account not found")
+    db.delete(account)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Gemini Account endpoints — each client brings their own API key
+# ---------------------------------------------------------------------------
+def _mask_key(api_key: str) -> str:
+    """Render a non-reversible preview so the UI can identify a key."""
+    if not api_key:
+        return ""
+    if len(api_key) <= 8:
+        return "…"
+    return f"{api_key[:4]}…{api_key[-4:]}"
+
+
+def _gemini_account_response(a: GeminiAccount) -> GeminiAccountResponse:
+    return GeminiAccountResponse(
+        id=a.id,
+        name=a.name,
+        api_key_preview=_mask_key(a.api_key),
+        created_at=a.created_at,
+    )
+
+
+@router.get("/semantic/gemini-accounts", response_model=list[GeminiAccountResponse])
+def list_gemini_accounts(db: Session = Depends(get_session)):
+    accounts = db.query(GeminiAccount).order_by(GeminiAccount.created_at.desc()).all()
+    return [_gemini_account_response(a) for a in accounts]
+
+
+@router.post("/semantic/gemini-accounts", response_model=GeminiAccountResponse)
+def create_gemini_account(body: GeminiAccountCreate, db: Session = Depends(get_session)):
+    if not body.api_key.strip():
+        raise HTTPException(status_code=400, detail="api_key cannot be empty")
+    account = GeminiAccount(name=body.name.strip() or "Gemini account", api_key=body.api_key.strip())
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return _gemini_account_response(account)
+
+
+@router.delete("/semantic/gemini-accounts/{account_id}")
+def delete_gemini_account(account_id: uuid.UUID, db: Session = Depends(get_session)):
+    account = db.query(GeminiAccount).filter(GeminiAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Gemini account not found")
     db.delete(account)
     db.commit()
     return {"ok": True}
@@ -196,11 +346,18 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
         if df.empty:
             return {"matched": 0, "total_gsc_rows": 0, "query_rows": 0}
 
-        # Match GSC URLs to crawled URLs
-        url_map = {
-            row.url: row.id
-            for row in db.query(Url.id, Url.url).filter(Url.job_id == job_id).all()
+        # Match GSC URLs to crawled URLs. We do both an exact match and a
+        # normalized match (lowercased, trailing slash stripped, tracking
+        # params dropped) so minor formatting differences between GSC and
+        # the crawler don't silently drop rows.
+        url_rows = db.query(Url.id, Url.url).filter(Url.job_id == job_id).all()
+        url_map: dict[str, int] = {row.url: row.id for row in url_rows}
+        url_map_norm: dict[str, int] = {
+            _normalize_url_for_match(row.url): row.id for row in url_rows
         }
+
+        def _resolve_url_id(raw: str) -> int | None:
+            return url_map.get(raw) or url_map_norm.get(_normalize_url_for_match(raw))
 
         # Delete old GSC data for this job
         db.query(GscJobData).filter(GscJobData.job_id == job_id).delete()
@@ -208,7 +365,7 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
 
         matched = 0
         for _, row in df.iterrows():
-            url_id = url_map.get(row["url"])
+            url_id = _resolve_url_id(row["url"])
             if url_id:
                 db.add(GscJobData(
                     job_id=job_id,
@@ -228,7 +385,7 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
             )
             if not df_q.empty:
                 for _, row in df_q.iterrows():
-                    url_id = url_map.get(row["url"])
+                    url_id = _resolve_url_id(row["url"])
                     if url_id:
                         db.add(GscQueryData(
                             job_id=job_id,
@@ -253,7 +410,13 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
 # ---------------------------------------------------------------------------
 # Run semantic analysis
 # ---------------------------------------------------------------------------
-def _run_analysis_thread(analysis_id: str, job_id: str, config: dict, gsc_data: dict | None):
+def _run_analysis_thread(
+    analysis_id: str,
+    job_id: str,
+    config: dict,
+    gsc_data: dict | None,
+    gemini_api_key: str,
+):
     """Background thread that runs the semantic engine."""
     db = SessionLocal()
     r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -272,18 +435,20 @@ def _run_analysis_thread(analysis_id: str, job_id: str, config: dict, gsc_data: 
         def progress_cb(stage: str, pct: int):
             _set_progress(r, analysis_id, stage, pct)
 
+        from POC_centro_semantico.src.embedding_backends import get_backend
         from POC_centro_semantico.src.engine import SemanticEngine
 
+        backend = get_backend(api_key=gemini_api_key)
         engine = SemanticEngine()
         result = engine.process(
             db=db,
             job_id=job_uuid,
-            model_name=config.get("model_name", "intfloat/multilingual-e5-large-instruct"),
             alpha=config.get("alpha", 0.6),
             beta=config.get("beta", 0.4),
             cannibal_threshold=config.get("cannibal_threshold", 0.92),
             gsc_data=gsc_data,
             progress_callback=progress_cb,
+            backend=backend,
         )
 
         if result.get("error"):
@@ -359,6 +524,22 @@ def run_semantic_analysis(
 ):
     _get_job_or_404(job_id, db)
 
+    # Validate weighting coefficients. The semantic engine treats α and β as
+    # the relative pull of PageRank vs GSC clicks on the centroid; they must
+    # be on a comparable scale or the saved pr_norm/clicks_norm columns lose
+    # interpretability across analyses.
+    if not (0.0 <= body.alpha <= 1.0 and 0.0 <= body.beta <= 1.0):
+        raise HTTPException(status_code=400, detail="alpha and beta must be in [0, 1]")
+    if abs((body.alpha + body.beta) - 1.0) > 1e-6:
+        raise HTTPException(status_code=400, detail="alpha + beta must equal 1.0")
+
+    # Resolve the Gemini account that will pay for this run.
+    gemini_account = (
+        db.query(GeminiAccount).filter(GeminiAccount.id == body.gemini_account_id).first()
+    )
+    if not gemini_account:
+        raise HTTPException(status_code=404, detail="Gemini account not found")
+
     # Check if there's already a running analysis
     existing = (
         db.query(SemanticAnalysis)
@@ -389,10 +570,14 @@ def run_semantic_analysis(
                 }
 
     config = {
-        "model_name": body.model_name,
         "alpha": body.alpha,
         "beta": body.beta,
         "cannibal_threshold": body.cannibal_threshold,
+        # Persist the account id (NOT the key itself) so target-rings and
+        # gap-analysis can re-use the same billing source without the user
+        # selecting it again. The actual key is fetched from the DB at
+        # request time so rotating it is enough to take effect.
+        "gemini_account_id": str(gemini_account.id),
     }
 
     # Create analysis record
@@ -407,10 +592,11 @@ def run_semantic_analysis(
 
     analysis_id = str(analysis.id)
 
-    # Launch background thread
+    # Launch background thread (snapshot the key now — if the account is
+    # deleted/rotated mid-run, this analysis still completes cleanly).
     t = threading.Thread(
         target=_run_analysis_thread,
-        args=(analysis_id, str(job_id), config, gsc_data),
+        args=(analysis_id, str(job_id), config, gsc_data, gemini_account.api_key),
         daemon=True,
     )
     t.start()
@@ -429,12 +615,28 @@ def get_semantic_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
 
     progress_info = _get_progress(str(analysis.id))
 
-    # Detect stale analysis: running >10 min with no Redis progress → mark failed
-    if analysis.status == "running" and not progress_info:
+    # Detect a truly dead thread by missing *heartbeat*, not by missing key.
+    # The old logic killed live analyses as soon as Redis TTL expired, even
+    # while the engine was still working at 700%+ CPU. The new rule:
+    #   * If there is a heartbeat → check its age. >HEARTBEAT_DEAD_AFTER_S
+    #     since last update means the thread really stopped pumping.
+    #   * If there is no heartbeat at all → only call it dead if enough time
+    #     has passed since the analysis was created that the worker should
+    #     have written at least one update.
+    if analysis.status == "running":
         elapsed = (datetime.now(timezone.utc) - analysis.created_at).total_seconds()
-        if elapsed > 600:
+        age = _heartbeat_age_seconds(progress_info)
+        dead = False
+        if age is not None and age > HEARTBEAT_DEAD_AFTER_S:
+            dead = True
+            reason = f"No heartbeat for {int(age)}s"
+        elif age is None and not progress_info and elapsed > HEARTBEAT_DEAD_AFTER_S:
+            dead = True
+            reason = f"No progress ever recorded after {int(elapsed)}s"
+
+        if dead:
             analysis.status = "failed"
-            analysis.error_message = "Analysis thread died (no progress for 10 min)"
+            analysis.error_message = f"Analysis thread died: {reason}"
             db.commit()
 
     return {
@@ -738,25 +940,27 @@ def get_target_rings(
     import numpy as np
     from sklearn.metrics.pairwise import cosine_similarity as cos_sim
     from POC_centro_semantico.src.analysis import classify_rings
-    from POC_centro_semantico.src.embeddings import load_model
+    from POC_centro_semantico.src.embedding_backends import get_backend
     from POC_centro_semantico.src.visualization import build_ring_map
 
-    model_name = (analysis.config or {}).get("model_name", "intfloat/multilingual-e5-large-instruct")
-    model = load_model(model_name)
-
-    # Embed target theme
-    target_emb = model.encode([body.target_theme], show_progress_bar=False)[0]
+    # Embed target theme as a *query* through the same backend used at
+    # analysis time, paid by the same Gemini account that ran the analysis.
+    # Stored page embeddings are L2-normalized passages → comparing against
+    # a query-type embedding gives the asymmetric retrieval signal Gemini
+    # was trained for.
+    api_key = _resolve_gemini_key_from_analysis(analysis, db)
+    backend = get_backend(api_key=api_key)
+    target_emb = backend.embed_query(body.target_theme)
     centroid = np.array(analysis.centroid)
 
     # Alignment: cosine similarity between current centroid and target
     alignment = float(cos_sim([centroid], [target_emb])[0][0])
 
-    # Compute distances from target for all pages
+    # Compute distances from target for all pages (both sides unit-norm).
     vectors = np.array([list(p.embedding) for p in pages])
-    # Euclidean distance to target
     dists_to_target = np.linalg.norm(vectors - target_emb, axis=1)
 
-    # Reclassify rings based on distance to target
+    # Reclassify rings based on distance to target (Peripheral = IQR outliers).
     target_rings = classify_rings(dists_to_target)
 
     # Build pages_data for ring map
@@ -848,7 +1052,7 @@ def run_gap_analysis(
 
     import numpy as np
     from POC_centro_semantico.src.analysis import gap_analysis as _gap
-    from POC_centro_semantico.src.embeddings import load_model
+    from POC_centro_semantico.src.embedding_backends import get_backend
 
     centroid = np.array(analysis.centroid)
     vectors = np.array([list(p.embedding) for p in pages])
@@ -856,10 +1060,9 @@ def run_gap_analysis(
     url_list = [p.url for p in pages]
     url_map = {p.url_id: p.url for p in pages}
 
-    model_name = (analysis.config or {}).get("model_name", "intfloat/multilingual-e5-large-instruct")
-    model = load_model(model_name)
-
-    result = _gap(centroid, body.topic, vectors, url_ids, url_list, model, top_n=20)
+    api_key = _resolve_gemini_key_from_analysis(analysis, db)
+    backend = get_backend(api_key=api_key)
+    result = _gap(centroid, body.topic, vectors, url_ids, url_list, backend, top_n=20)
 
     # Resolve URLs + add GSC data
     gsc_map = _load_gsc_map(job_id, db)

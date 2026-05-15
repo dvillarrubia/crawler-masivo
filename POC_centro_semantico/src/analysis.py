@@ -7,8 +7,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 if TYPE_CHECKING:
-    import pandas as pd
-    from sentence_transformers import SentenceTransformer
+    from POC_centro_semantico.src.embedding_backends.base import EmbeddingBackend
 
 
 def minmax_normalize(series: np.ndarray) -> np.ndarray:
@@ -87,16 +86,17 @@ def gap_analysis(
     vectors: np.ndarray,
     url_ids: list[int],
     urls: list[str],
-    model: "SentenceTransformer",
+    backend: "EmbeddingBackend",
     top_n: int = 10,
 ) -> dict:
     """Find URLs most similar to a target topic.
 
-    Compares all page embeddings directly against the target topic embedding.
-    Also provides centroid similarity as context (high = generic/central page,
-    low = niche/peripheral page).
+    Embeds `target_text` through the same backend used at analysis time and
+    ranks pages by cosine similarity. The backend is responsible for the
+    asymmetric *query* embedding (e.g. Gemini's RETRIEVAL_QUERY task type),
+    so the engine code does not need to know provider-specific details.
     """
-    target_emb = model.encode([target_text], show_progress_bar=False)[0]
+    target_emb = backend.embed_query(target_text)
 
     sims_target = cosine_similarity([target_emb], vectors)[0]
     sims_centroid = cosine_similarity([centroid], vectors)[0]
@@ -115,25 +115,41 @@ def gap_analysis(
     }
 
 
-def classify_rings(distances: np.ndarray) -> list[str]:
-    """Classify pages into rings based on IQR of distances.
+def classify_rings(
+    distances: np.ndarray,
+    outlier_threshold: float | None = None,
+) -> list[str]:
+    """Classify pages into rings using quartiles + IQR outlier rule.
 
-    - Core: distance <= Q1
-    - Focus: Q1 < distance <= Q2 (median)
-    - Expansion: Q2 < distance <= Q3
-    - Peripheral: distance > Q3
+    Follows sem_seo_engine_v2 spec (§7B):
+    - Core:       distance <= Q1                       (25% closest)
+    - Focus:      Q1 < distance <= Q3                  (50% central)
+    - Expansion:  Q3 < distance <= Q3 + 1.5*IQR        (legit expansion)
+    - Peripheral: distance > Q3 + 1.5*IQR              (true IQR outliers)
+
+    Peripheral is intentionally *not* a fixed quartile: it must reflect
+    pages that genuinely distort the semantic focus, so in a healthy
+    site it should be a small subset, not 25% by construction.
+
+    Args:
+        distances: array of distances to centroid.
+        outlier_threshold: optional precomputed threshold (Q3 + 1.5*IQR).
+            If None, it is computed here. Pass it in to keep "Peripheral"
+            consistent with whatever the engine called an outlier.
     """
     q1 = np.percentile(distances, 25)
-    q2 = np.percentile(distances, 50)
     q3 = np.percentile(distances, 75)
+    if outlier_threshold is None:
+        iqr = q3 - q1
+        outlier_threshold = q3 + 1.5 * iqr
 
     rings: list[str] = []
     for d in distances:
         if d <= q1:
             rings.append("Core")
-        elif d <= q2:
-            rings.append("Focus")
         elif d <= q3:
+            rings.append("Focus")
+        elif d <= outlier_threshold:
             rings.append("Expansion")
         else:
             rings.append("Peripheral")

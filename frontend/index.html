@@ -700,6 +700,51 @@
                   </template>
                 </div>
 
+                <!-- Gemini API key (cada cliente paga su consumo de embeddings) -->
+                <div style="margin-bottom:1.25rem" data-tip="El analisis genera embeddings via la API de Gemini. Cada cliente usa su propia API key para que el coste se facture en su cuenta de Google AI. La key se guarda solo aqui y nunca se devuelve completa al frontend.">
+                  <h4 style="margin-bottom:.5rem;font-size:.9rem">API key de Gemini</h4>
+                  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                    <select x-model="semanticGeminiAccountId" style="flex:1;min-width:200px">
+                      <option value="">— Selecciona una API key —</option>
+                      <template x-for="acc in geminiAccounts" :key="acc.id">
+                        <option :value="acc.id" x-text="acc.name + ' (' + acc.api_key_preview + ')'"></option>
+                      </template>
+                    </select>
+                    <button class="btn btn-sm" @click="showGeminiModal = true; geminiFormError = null">+ Nueva</button>
+                    <template x-if="semanticGeminiAccountId">
+                      <button class="btn btn-sm btn-danger" @click="deleteGeminiAccount(semanticGeminiAccountId)">Eliminar</button>
+                    </template>
+                  </div>
+                  <template x-if="geminiAccounts.length === 0">
+                    <p class="text-sm text-dim" style="margin-top:.5rem">No hay API keys guardadas. Anade una para poder lanzar analisis.</p>
+                  </template>
+                </div>
+
+                <!-- Modal: nueva API key Gemini -->
+                <template x-if="showGeminiModal">
+                  <div class="modal-backdrop" @click.self="showGeminiModal = false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000">
+                    <div class="card" style="max-width:480px;width:90%;padding:1.5rem">
+                      <h3 style="margin-bottom:1rem">Nueva API key de Gemini</h3>
+                      <div style="margin-bottom:.75rem">
+                        <label class="text-dim text-sm">Nombre identificativo</label>
+                        <input type="text" x-model="geminiFormName" placeholder="Cliente X" style="width:100%">
+                      </div>
+                      <div style="margin-bottom:.75rem">
+                        <label class="text-dim text-sm">API key</label>
+                        <input type="password" x-model="geminiFormKey" placeholder="AIza..." style="width:100%" autocomplete="off">
+                        <p class="text-sm text-dim" style="margin-top:.25rem">Obtenla en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
+                      </div>
+                      <template x-if="geminiFormError">
+                        <p class="text-sm" style="color:var(--red);margin-bottom:.5rem" x-text="geminiFormError"></p>
+                      </template>
+                      <div style="display:flex;gap:.5rem;justify-content:flex-end">
+                        <button class="btn btn-sm" @click="showGeminiModal = false">Cancelar</button>
+                        <button class="btn btn-sm btn-primary" @click="saveGeminiAccount()">Guardar</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
                 <!-- Parametros -->
                 <div style="margin-bottom:1.25rem">
                   <h4 style="margin-bottom:.5rem;font-size:.9rem">Parametros</h4>

@@ -28,3 +28,10 @@ POC_centro_semantico/big-bison-734-3dde0ec362c4 (3).json
 # Local-only experiments and notes
 POC_orbea/
 SETUP_OTRO_ORDENADOR.md
+
+# Generated client reports / exports (artifacts, not source)
+*_ring_map.html
+ilerna_ring_map.html
+export_ilerna_md/
+export_ilerna_md.zip
+export_*.html

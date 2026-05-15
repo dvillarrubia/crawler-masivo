@@ -187,6 +187,12 @@ function app() {
     semanticBeta: 0.4,
     semanticThreshold: 0.92,
     gscAccounts: [],
+    geminiAccounts: [],
+    semanticGeminiAccountId: '',
+    showGeminiModal: false,
+    geminiFormName: '',
+    geminiFormKey: '',
+    geminiFormError: null,
     semanticGscAccountId: '',
     semanticGscProps: [],
     semanticGscProp: '',
@@ -565,8 +571,18 @@ function app() {
     // ------- Semantico -------
     async loadSemantic() {
       if (!this.job) return;
-      // Load GSC accounts
-      try { this.gscAccounts = await api('/semantic/gsc-accounts'); } catch (_) {}
+      // Load GSC + Gemini accounts in parallel
+      try {
+        const [gsc, gemini] = await Promise.all([
+          api('/semantic/gsc-accounts'),
+          api('/semantic/gemini-accounts'),
+        ]);
+        this.gscAccounts = gsc;
+        this.geminiAccounts = gemini;
+        if (gemini.length === 1 && !this.semanticGeminiAccountId) {
+          this.semanticGeminiAccountId = gemini[0].id;
+        }
+      } catch (_) {}
       // Check if analysis exists
       try {
         const status = await api(`/jobs/${this.job.id}/semantic/status`);
@@ -611,6 +627,10 @@ function app() {
 
     async runSemanticAnalysis() {
       if (!this.job) return;
+      if (!this.semanticGeminiAccountId) {
+        this.semanticError = 'Selecciona una API key de Gemini antes de lanzar el analisis.';
+        return;
+      }
       this.semanticLoading = true;
       this.semanticError = null;
       this.semanticResults = null;
@@ -619,6 +639,7 @@ function app() {
         await api(`/jobs/${this.job.id}/semantic/analyze`, {
           method: 'POST',
           body: JSON.stringify({
+            gemini_account_id: this.semanticGeminiAccountId,
             alpha: this.semanticAlpha,
             beta: this.semanticBeta,
             cannibal_threshold: this.semanticThreshold,
@@ -627,6 +648,40 @@ function app() {
         this._pollSemanticStatus();
       } catch (e) {
         this.semanticLoading = false;
+        this.semanticError = e.message;
+      }
+    },
+
+    async saveGeminiAccount() {
+      this.geminiFormError = null;
+      const name = (this.geminiFormName || '').trim();
+      const key = (this.geminiFormKey || '').trim();
+      if (!key) {
+        this.geminiFormError = 'La API key no puede estar vacia.';
+        return;
+      }
+      try {
+        const created = await api('/semantic/gemini-accounts', {
+          method: 'POST',
+          body: JSON.stringify({ name: name || 'Gemini account', api_key: key }),
+        });
+        this.geminiAccounts = await api('/semantic/gemini-accounts');
+        this.semanticGeminiAccountId = created.id;
+        this.geminiFormName = '';
+        this.geminiFormKey = '';
+        this.showGeminiModal = false;
+      } catch (e) {
+        this.geminiFormError = e.message;
+      }
+    },
+
+    async deleteGeminiAccount(id) {
+      if (!confirm('Eliminar esta API key? Los analisis pasados conservaran el id pero no podran re-embebir queries.')) return;
+      try {
+        await api(`/semantic/gemini-accounts/${id}`, { method: 'DELETE' });
+        this.geminiAccounts = await api('/semantic/gemini-accounts');
+        if (this.semanticGeminiAccountId === id) this.semanticGeminiAccountId = '';
+      } catch (e) {
         this.semanticError = e.message;
       }
     },

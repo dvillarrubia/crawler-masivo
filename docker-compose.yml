@@ -41,8 +41,6 @@ services:
     env_file: .env
     environment:
       - PYTHONPATH=/app
-    volumes:
-      - hf_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,4 +87,3 @@ services:
 volumes:
   pgdata:
   redisdata:
-  hf_cache:

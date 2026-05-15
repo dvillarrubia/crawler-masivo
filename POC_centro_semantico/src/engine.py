@@ -18,15 +18,15 @@ from POC_centro_semantico.src.analysis import (
     minmax_normalize,
 )
 from POC_centro_semantico.src.config import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
     DEFAULT_ALPHA,
     DEFAULT_BETA,
-    DEFAULT_MODEL_NAME,
     MIN_TOKENS,
     get_umap_config,
 )
-from POC_centro_semantico.src.embeddings import embed_pages, load_model
+from POC_centro_semantico.src.embedding_backends import (
+    EmbeddingBackend,
+    get_backend,
+)
 from shared.models import PageContent, Url
 
 logger = logging.getLogger(__name__)
@@ -39,28 +39,30 @@ class SemanticEngine:
         self,
         db: Session,
         job_id: str | uuid.UUID,
-        model_name: str = DEFAULT_MODEL_NAME,
         alpha: float = DEFAULT_ALPHA,
         beta: float = DEFAULT_BETA,
         cannibal_threshold: float = 0.92,
         gsc_data: dict[str, dict] | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
+        backend: EmbeddingBackend | None = None,
     ) -> dict:
         """Execute semantic analysis and return results dict.
 
         Args:
             db: SQLAlchemy session.
             job_id: Crawl job UUID.
-            model_name: SentenceTransformer model name.
             alpha: Weight for PageRank (0-1).
             beta: Weight for GSC clicks (0-1).
             cannibal_threshold: Cosine similarity threshold for cannibalization.
             gsc_data: Optional dict mapping URL → {clicks, impressions, ctr, position}.
             progress_callback: Optional fn(stage_name, pct) for progress updates.
+            backend: EmbeddingBackend (default: Gemini via get_backend()).
 
         Returns:
             Dict with analysis_id, pages, site_metrics, cannibalization, etc.
         """
+        if backend is None:
+            backend = get_backend()
         if not gsc_data:
             alpha, beta = 1.0, 0.0
 
@@ -113,38 +115,53 @@ class SemanticEngine:
 
         _progress("embedding", 20)
 
-        # 3-4. Chunk + embed → representative chunk per page
-        model = load_model(model_name)
-        vectors = embed_pages(texts, model, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+        # 3-4. Chunk + embed → representative chunk per page (Gemini backend).
+        # Backends return L2-normalized vectors so the centroid lives on the
+        # unit sphere as the pages → distances are pure angular distances
+        # and the resulting metrics are comparable across sites.
+        # Sub-progress (20% → 50%) streams from inside the backend so the
+        # watchdog never thinks the thread is dead during this long stage.
+        def _embed_progress(done: int, total: int) -> None:
+            pct = 20 + int(30 * done / max(total, 1))
+            _progress(f"embedding {done}/{total}", min(pct, 49))
+
+        vectors = backend.embed_documents(texts, progress_callback=_embed_progress)
 
         _progress("weighting", 50)
 
-        # 5. Weights: w = alpha * norm(PR) + beta * norm(clicks)
-        pr_norm = minmax_normalize(pageranks)
+        # 5. Weights: w = alpha * norm(log(PR)) + beta * norm(log(clicks))
+        # log1p compresses extreme outliers (e.g. homepage PR=10 vs blog PR=0.02)
+        # so the rest of the signal isn't crushed to zero by min-max.
+        pr_norm = minmax_normalize(np.log1p(pageranks))
 
         if gsc_data and beta > 0:
             clicks = np.array([
                 gsc_data.get(u, {}).get("clicks", 0) for u in urls
             ], dtype=float)
-            clicks_norm = minmax_normalize(clicks)
+            clicks_norm = minmax_normalize(np.log1p(clicks))
         else:
             clicks_norm = np.zeros(n_pages)
 
         weights = alpha * pr_norm + beta * clicks_norm
-        # Ensure no zero weights
-        weights = np.maximum(weights, 0.01)
+        # Tiny epsilon to avoid all-zero weights (np.average breaks); does not
+        # flatten the signal the way the previous 0.01 floor did.
+        weights = np.maximum(weights, 1e-6)
 
         _progress("centroid", 55)
 
-        # 6. Weighted centroid
-        centroid = np.average(vectors, axis=0, weights=weights)
+        # 6. Weighted centroid, re-normalized onto the unit sphere so distances
+        # are comparable across sites (a diffuse corpus would otherwise produce
+        # an interior centroid and inflate every distance).
+        centroid_raw = np.average(vectors, axis=0, weights=weights)
+        centroid_norm = float(np.linalg.norm(centroid_raw))
+        centroid = centroid_raw / centroid_norm if centroid_norm > 0 else centroid_raw
 
         # 7. Distances + IQR outliers
         distances = np.linalg.norm(vectors - centroid, axis=1)
         q1 = np.percentile(distances, 25)
         q3 = np.percentile(distances, 75)
         iqr = q3 - q1
-        outlier_threshold = q3 + 1.5 * iqr
+        outlier_threshold = float(q3 + 1.5 * iqr)
 
         _progress("dimensionality_reduction", 60)
 
@@ -164,20 +181,26 @@ class SemanticEngine:
 
         _progress("clustering", 75)
 
-        # 9. HDBSCAN clustering
+        # 9. HDBSCAN clustering on the PCA-reduced high-dim space (not on the
+        # 2D UMAP coords). UMAP can warp local/global structure, so clusters
+        # built on it are less reliable; PCA preserves variance faithfully.
+        # min_cluster = n_pages // 50 (was n_pages // 20): on mono-thematic
+        # sites the higher floor returned 0 clusters because no group was
+        # dense *enough* for the threshold. //50 reveals the real sub-themes.
         import hdbscan
-        min_cluster = max(5, n_pages // 20)
+        min_cluster = max(5, n_pages // 50)
+        cluster_space = vectors_reduced if pca_dim >= 2 else vectors
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=min_cluster,
             min_samples=max(2, min_cluster // 2),
             metric="euclidean",
         )
-        cluster_labels = clusterer.fit_predict(coords_2d)
+        cluster_labels = clusterer.fit_predict(cluster_space)
 
         _progress("classification", 85)
 
-        # 10. Classify rings
-        rings = classify_rings(distances)
+        # 10. Classify rings (Peripheral = IQR outliers, not just top quartile).
+        rings = classify_rings(distances, outlier_threshold=outlier_threshold)
 
         # Semantic role
         roles = []
@@ -214,14 +237,24 @@ class SemanticEngine:
                 "y": round(float(coords_2d[i, 1]), 6),
             })
 
-        # Site metrics
+        # Site metrics.
+        # focus_score and semantic_radius use the 95th-percentile distance as
+        # reference instead of max(): a single weird page should not be able
+        # to swing the whole-site headline metric.
         ring_counts = {r: rings.count(r) for r in ["Core", "Focus", "Expansion", "Peripheral"]}
-        focus_score = round(
-            1.0 - (np.mean(distances) / (np.max(distances) or 1.0)), 4
-        )
-        semantic_radius = round(float(np.max(distances)), 4)
+        distance_p95 = float(np.percentile(distances, 95))
+        distance_ref = distance_p95 if distance_p95 > 0 else 1.0
+        focus_score = round(1.0 - (float(np.mean(distances)) / distance_ref), 4)
+        semantic_radius = round(distance_p95, 4)
+
         drift_data = drift_analysis(distances, weights, url_ids, top_n=10)
-        drift_score = round(float(drift_data[0]["drift_score"]) if drift_data else 0.0, 4)
+        # Site-level drift = average drift of the top-5 worst offenders, so a
+        # single page cannot define the whole-site metric.
+        top_drift = drift_data[:5]
+        drift_score = round(
+            float(np.mean([d["drift_score"] for d in top_drift])) if top_drift else 0.0,
+            4,
+        )
 
         site_metrics = {
             "focus_score": focus_score,
@@ -232,6 +265,9 @@ class SemanticEngine:
             "n_clusters": len(set(cluster_labels) - {-1}),
             "n_outliers": roles.count("outlier"),
             "n_cannibal_pairs": len(cannibal_pairs),
+            "outlier_threshold": round(outlier_threshold, 4),
+            "distance_q1": round(float(q1), 4),
+            "distance_q3": round(float(q3), 4),
         }
 
         _progress("done", 100)
@@ -246,7 +282,9 @@ class SemanticEngine:
                 "alpha": alpha,
                 "beta": beta,
                 "cannibal_threshold": cannibal_threshold,
-                "model_name": model_name,
+                "embedding_provider": backend.name,
+                "embedding_model": backend.model if hasattr(backend, "model") else None,
+                "embedding_dim": backend.dim,
             },
             "total_pages": n_pages,
         }

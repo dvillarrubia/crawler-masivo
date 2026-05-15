@@ -3,8 +3,6 @@ from __future__ import annotations
 
 # --- Content filtering ---
 MIN_TOKENS = 150
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
 
 # --- Cannibalization ---
 CANNIBAL_THRESHOLD = 0.92
@@ -14,9 +12,8 @@ DEFAULT_ALPHA = 0.6   # PageRank weight (when GSC data available)
 DEFAULT_BETA = 0.4    # Clicks weight (when GSC data available)
 # Without GSC: alpha=1.0, beta=0.0
 
-# --- Default embedding model ---
-DEFAULT_MODEL_NAME = "intfloat/multilingual-e5-large-instruct"
-EMBEDDING_DIM = 1024
+# Embedding model / dimension are owned by the backend module
+# (POC_centro_semantico/src/embedding_backends/gemini.py).
 
 # --- UMAP ---
 def get_umap_config(n_urls: int) -> dict:

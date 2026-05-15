@@ -44,6 +44,25 @@ class GscAccount(Base):
 
 
 # ---------------------------------------------------------------------------
+# Gemini Accounts (one per user/client; each pays their own embeddings)
+# ---------------------------------------------------------------------------
+class GeminiAccount(Base):
+    """Stores Gemini API keys so each client pays their own embeddings.
+
+    The api_key column is stored as-is (matching the GscAccount pattern).
+    This is not production-grade for shared deployments — for that, wrap
+    with Fernet/AES at-rest encryption keyed off an env-var master key.
+    """
+
+    __tablename__ = "gemini_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name = Column(String(256), nullable=False)
+    api_key = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Semantic Analysis (one per job run)
 # ---------------------------------------------------------------------------
 class SemanticAnalysis(Base):
