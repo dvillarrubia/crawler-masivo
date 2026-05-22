@@ -1894,12 +1894,55 @@
             </button>
             <div class="exp-search-wrap">
               <i data-lucide="search"></i>
-              <input type="text" class="exp-search" placeholder="Buscar URL o titulo..." x-model="expSearch" @input="explorerSearchInput()">
+              <input type="text" class="exp-search" placeholder="Buscar URL o título..." x-model="expSearch" @input="explorerSearchInput()">
             </div>
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
-            <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.25rem;margin-left:auto">
+
+            <!-- Active filter chip -->
+            <template x-if="expActiveFilterCount() > 0">
+              <button class="exp-toolbar-btn active" @click="expClearAllColumnFilters()" data-tip="Quitar todos los filtros por columna">
+                <i data-lucide="filter-x" style="width:13px;height:13px"></i>
+                <span x-text="expActiveFilterCount() + ' filtro' + (expActiveFilterCount() > 1 ? 's' : '')"></span>
+              </button>
+            </template>
+
+            <!-- Column picker -->
+            <div class="exp-col-picker-wrap" @click.outside="expColumnPickerOpen = false">
+              <button class="exp-toolbar-btn" :class="expColumnPickerOpen && 'active'" @click="expColumnPickerOpen = !expColumnPickerOpen" data-tip="Configurar columnas visibles">
+                <i data-lucide="settings-2" style="width:13px;height:13px"></i>
+                <span>Columnas</span>
+                <span class="badge-inline" x-text="getExpColumns().length"></span>
+              </button>
+              <template x-if="expColumnPickerOpen">
+                <div class="exp-col-picker">
+                  <div class="exp-col-picker-header">
+                    <span>Columnas visibles</span>
+                    <button class="exp-col-picker-reset" @click="resetExpColumns()">Restaurar predeterminadas</button>
+                  </div>
+                  <template x-for="key in getExpAllColumnKeys()" :key="key">
+                    <label class="exp-col-picker-item">
+                      <input type="checkbox" :checked="isExpColumnActive(key)" @change="toggleExpColumn(key)">
+                      <span x-text="EXP_COLUMN_DEFS[key]?.label || key"></span>
+                    </label>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.25rem">
               <i data-lucide="download" style="width:12px;height:12px"></i> CSV
             </button>
+          </div>
+
+          <!-- Helper hint about how filters work -->
+          <div class="exp-filter-hint">
+            <i data-lucide="info" style="width:12px;height:12px;flex-shrink:0"></i>
+            <span>
+              Filtra cada columna debajo de su nombre. En las numéricas, elige el operador
+              (<strong>≥</strong> al menos, <strong>&gt;</strong> mayor que, <strong>=</strong> igual,
+              <strong>≤</strong> máximo, <strong>&lt;</strong> menor que) y escribe el valor.
+              Usa ↑↓ para moverte por las filas.
+            </span>
           </div>
 
           <!-- Table -->
@@ -1918,29 +1961,77 @@
                   <tr>
                     <template x-for="col in getExpColumns()" :key="col">
                       <th :class="expSort === col && 'sorted'"
-                          @click="EXP_COLUMN_DEFS[col]?.sortable && explorerSort(col)">
+                          :data-sortable="EXP_COLUMN_DEFS[col]?.sortable ? '1' : '0'"
+                          :style="EXP_COLUMN_DEFS[col]?.width ? ('min-width:' + EXP_COLUMN_DEFS[col].width + 'px') : ''"
+                          @click="EXP_COLUMN_DEFS[col]?.sortable && explorerSort(col)"
+                          :title="EXP_COLUMN_DEFS[col]?.label || col">
                         <span x-text="EXP_COLUMN_DEFS[col]?.label || col"></span>
                         <template x-if="expSort === col">
-                          <span class="exp-sort-icon" x-text="expSortDir === 'asc' ? ' ▲' : ' ▼'"></span>
+                          <span class="exp-sort-icon" x-text="expSortDir === 'asc' ? '▲' : '▼'"></span>
+                        </template>
+                      </th>
+                    </template>
+                  </tr>
+                  <!-- Inline filter row (Screaming Frog style) -->
+                  <tr class="exp-filter-row">
+                    <template x-for="col in getExpColumns()" :key="'f_' + col">
+                      <th>
+                        <template x-if="EXP_COLUMN_DEFS[col]?.filterKey">
+                          <div class="exp-filter-cell" :class="EXP_COLUMN_DEFS[col].type === 'boolean' && 'boolean'">
+                            <template x-if="EXP_COLUMN_DEFS[col].type === 'numeric'">
+                              <select class="exp-filter-op"
+                                      :class="expColumnFilters[col]?.value && 'has-value'"
+                                      :value="expCurrentOp(col)"
+                                      :title="expOpTooltip(col)"
+                                      @change="expColumnFilterInput(col, { op: $event.target.value, value: expColumnFilters[col]?.value || '' })">
+                                <option value=">=" title="al menos">≥</option>
+                                <option value=">"  title="mayor que">&gt;</option>
+                                <option value="="  title="igual a">=</option>
+                                <option value="<=" title="como máximo">≤</option>
+                                <option value="<"  title="menor que">&lt;</option>
+                              </select>
+                            </template>
+                            <template x-if="EXP_COLUMN_DEFS[col].type === 'boolean'">
+                              <select class="exp-filter-input"
+                                      :class="expColumnFilters[col]?.value && 'has-value'"
+                                      :title="(EXP_COLUMN_DEFS[col].label || col) + ': filtrar Sí/No'"
+                                      :value="expColumnFilters[col]?.value ?? ''"
+                                      @change="expColumnFilterInput(col, { value: $event.target.value })">
+                                <option value="">Todos</option>
+                                <option value="true">Sólo Sí</option>
+                                <option value="false">Sólo No</option>
+                              </select>
+                            </template>
+                            <template x-if="EXP_COLUMN_DEFS[col].type !== 'boolean'">
+                              <input type="text"
+                                     :inputmode="EXP_COLUMN_DEFS[col].type === 'numeric' ? 'decimal' : 'text'"
+                                     class="exp-filter-input"
+                                     :class="expColumnFilters[col]?.value && 'has-value'"
+                                     :placeholder="expFilterPlaceholder(col)"
+                                     :title="(EXP_COLUMN_DEFS[col].label || col) + ': ' + expFilterPlaceholder(col)"
+                                     :value="expColumnFilters[col]?.value || ''"
+                                     @input="expColumnFilterInput(col, { value: $event.target.value })">
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="!EXP_COLUMN_DEFS[col]?.filterKey">
+                          <div class="exp-filter-cell empty">&nbsp;</div>
                         </template>
                       </th>
                     </template>
                   </tr>
                 </thead>
                 <tbody>
-                  <template x-for="row in expUrls" :key="row.id">
+                  <template x-for="(row, idx) in expUrls" :key="row.id">
                     <tr :class="expSelectedUrl?.id === row.id && 'exp-row-selected'"
-                        @click="selectExplorerUrl(row)"
+                        @click="selectExplorerUrl(row, idx)"
                         @dblclick="openUrlFromExplorer(row.id)">
                       <template x-for="col in getExpColumns()" :key="row.id + '_' + col">
-                        <td>
+                        <td :title="getExpCellValue(row, col)">
                           <template x-if="col === 'status_code'">
                             <span class="exp-status" :class="expStatusClass(row.status_code)" x-text="row.status_code || ''"></span>
                           </template>
-                          <template x-if="col === 'url'">
-                            <span :title="row.url" x-text="getExpCellValue(row, col)"></span>
-                          </template>
-                          <template x-if="col !== 'status_code' && col !== 'url'">
+                          <template x-if="col !== 'status_code'">
                             <span x-text="getExpCellValue(row, col)"></span>
                           </template>
                         </td>
@@ -1958,17 +2049,37 @@
               <div class="exp-detail-header">
                 <span class="exp-status" :class="expStatusClass(expSelectedUrl.status_code)" x-text="expSelectedUrl.status_code"></span>
                 <span class="exp-detail-url" :title="expSelectedUrl.url" x-text="expSelectedUrl.url"></span>
+                <span class="text-dim text-sm" style="font-size:.7rem">↑↓ navegar · Esc cerrar</span>
                 <button class="btn btn-sm" @click="openUrlFromExplorer(expSelectedUrl.id)" style="font-size:.72rem;padding:.2rem .5rem">
                   Abrir completo
                 </button>
                 <button class="exp-detail-close" @click="closeExplorerDetail()">&times;</button>
               </div>
               <div class="exp-detail-tabs">
-                <div class="exp-detail-tab" :class="expDetailTab === 'general' && 'active'" @click="expDetailTab = 'general'">General</div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'seo' && 'active'" @click="expDetailTab = 'seo'">SEO</div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">Contenido</div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'links' && 'active'" @click="expDetailTab = 'links'">Links</div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">Issues</div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">
+                  Contenido
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'headings' && 'active'" @click="expDetailTab = 'headings'">
+                  Encabezados <span class="count" x-text="expUrlDetail?.headings?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'inlinks' && 'active'" @click="expDetailTab = 'inlinks'">
+                  Inlinks <span class="count" x-text="expUrlDetail?.inlinks?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'outlinks' && 'active'" @click="expDetailTab = 'outlinks'">
+                  Outlinks <span class="count" x-text="expUrlDetail?.outlinks?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">
+                  Problemas <span class="count" x-text="expUrlDetail?.issues?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'resources' && 'active'" @click="expDetailTab = 'resources'">
+                  Recursos <span class="count" x-text="expUrlDetail?.resources?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'structured' && 'active'" @click="expDetailTab = 'structured'">
+                  Datos estr. <span class="count" x-text="expUrlDetail?.structured_data?.length || 0"></span>
+                </div>
+                <div class="exp-detail-tab" :class="expDetailTab === 'hreflang' && 'active'" @click="expDetailTab = 'hreflang'">
+                  Hreflang <span class="count" x-text="expUrlDetail?.hreflangs?.length || 0"></span>
+                </div>
               </div>
               <div class="exp-detail-body">
                 <!-- Loading -->
@@ -1977,92 +2088,121 @@
                 </template>
                 <template x-if="expUrlDetail">
                   <div>
-                    <!-- General tab -->
-                    <template x-if="expDetailTab === 'general'">
-                      <div class="exp-detail-grid">
-                        <div class="exp-detail-row"><span class="exp-detail-label">URL</span><span class="exp-detail-value" x-text="expUrlDetail.url"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Estado</span><span class="exp-detail-value" x-text="expUrlDetail.status_code + ' ' + (expUrlDetail.status_text || '')"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Tipo</span><span class="exp-detail-value" x-text="expUrlDetail.content_type || ''"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Tamano</span><span class="exp-detail-value" x-text="fmt.bytes(expUrlDetail.content_length)"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Tiempo</span><span class="exp-detail-value" x-text="fmt.ms(expUrlDetail.response_time_ms)"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Profundidad</span><span class="exp-detail-value" x-text="expUrlDetail.crawl_depth ?? ''"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Interna</span><span class="exp-detail-value" x-text="expUrlDetail.is_internal ? 'Si' : 'No'"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Indexable</span><span class="exp-detail-value" x-text="expUrlDetail.indexable ? 'Si' : 'No'"></span></div>
-                        <template x-if="expUrlDetail.redirect_url">
-                          <div class="exp-detail-row"><span class="exp-detail-label">Redirige a</span><span class="exp-detail-value" x-text="expUrlDetail.redirect_url"></span></div>
-                        </template>
-                      </div>
-                    </template>
-                    <!-- SEO tab -->
-                    <template x-if="expDetailTab === 'seo'">
-                      <div class="exp-detail-grid">
-                        <div class="exp-detail-row"><span class="exp-detail-label">Title</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.title || '(vacio)'"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Title len</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.title_len ?? ''"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Description</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_description || '(vacio)'"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Desc len</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_description_len ?? ''"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Canonical</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.canonical_href || ''"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Robots</span><span class="exp-detail-value" x-text="expUrlDetail.html_meta?.meta_robots || ''"></span></div>
-                        <template x-if="expUrlDetail.headings && expUrlDetail.headings.length > 0">
-                          <div class="exp-detail-row" style="grid-column:1/-1">
-                            <span class="exp-detail-label">H1</span>
-                            <span class="exp-detail-value" x-text="expUrlDetail.headings.filter(h => h.tag === 'h1').map(h => h.text).join(' | ') || '(sin H1)'"></span>
-                          </div>
-                        </template>
-                        <div class="exp-detail-row"><span class="exp-detail-label">Palabras</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.word_count)"></span></div>
-                        <div class="exp-detail-row"><span class="exp-detail-label">PageRank</span><span class="exp-detail-value" x-text="expUrlDetail.pagerank != null ? expUrlDetail.pagerank.toFixed(4) : ''"></span></div>
-                      </div>
-                    </template>
-                    <!-- Content tab -->
+                    <!-- Content tab: full text + markdown -->
                     <template x-if="expDetailTab === 'content'">
                       <div>
-                        <template x-if="expUrlDetail.headings && expUrlDetail.headings.length > 0">
+                        <template x-if="!expUrlDetail.page_content || (!expUrlDetail.page_content.content_text && !expUrlDetail.page_content.content_markdown)">
+                          <div class="text-dim" style="padding:.5rem 0">Sin contenido extraído para esta URL.</div>
+                        </template>
+                        <template x-if="expUrlDetail.page_content?.content_markdown">
                           <div style="margin-bottom:.75rem">
-                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.35rem">Encabezados</div>
-                            <div class="heading-tree">
-                              <template x-for="h in expUrlDetail.headings" :key="h.id">
-                                <div class="heading-item" :style="'padding-left:' + headingIndent(h.tag) + 'rem'">
-                                  <span class="heading-tag" :style="'color:' + headingColor(h.tag)" x-text="h.tag"></span>
-                                  <span class="heading-text" x-text="h.text || '(vacio)'"></span>
-                                </div>
-                              </template>
-                            </div>
+                            <div style="font-weight:600;font-size:.75rem;color:var(--accent);margin-bottom:.35rem">Markdown</div>
+                            <pre class="content-preview" style="white-space:pre-wrap;max-height:none;font-family:'Consolas','Monaco',monospace;font-size:.75rem" x-text="expUrlDetail.page_content.content_markdown"></pre>
                           </div>
                         </template>
                         <template x-if="expUrlDetail.page_content?.content_text">
                           <div>
-                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.35rem">Texto extraido (primeros 500 car.)</div>
-                            <div class="content-preview" x-text="expUrlDetail.page_content.content_text.substring(0, 500)"></div>
+                            <div style="font-weight:600;font-size:.75rem;color:var(--accent);margin-bottom:.35rem">
+                              Texto plano (<span x-text="fmt.num(expUrlDetail.page_content.content_length)"></span> car.)
+                            </div>
+                            <div class="content-preview" style="white-space:pre-wrap;max-height:none" x-text="expUrlDetail.page_content.content_text"></div>
                           </div>
                         </template>
                       </div>
                     </template>
-                    <!-- Links tab -->
-                    <template x-if="expDetailTab === 'links'">
+
+                    <!-- Headings tab -->
+                    <template x-if="expDetailTab === 'headings'">
                       <div>
-                        <div class="exp-detail-grid" style="margin-bottom:.5rem">
-                          <div class="exp-detail-row"><span class="exp-detail-label">Inlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.inlinks_count)"></span></div>
-                          <div class="exp-detail-row"><span class="exp-detail-label">Outlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.outlinks_count)"></span></div>
-                          <div class="exp-detail-row"><span class="exp-detail-label">Ext. outlinks</span><span class="exp-detail-value" x-text="fmt.num(expUrlDetail.external_outlinks_count)"></span></div>
-                        </div>
-                        <template x-if="expUrlDetail.inlinks && expUrlDetail.inlinks.length > 0">
-                          <div style="margin-bottom:.5rem">
-                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.25rem">Inlinks (top <span x-text="expUrlDetail.inlinks.length"></span>)</div>
-                            <template x-for="l in expUrlDetail.inlinks.slice(0, 20)" :key="l.id">
-                              <div class="exp-link-item" x-text="l.from_url || l.to_url"></div>
+                        <template x-if="!expUrlDetail.headings || expUrlDetail.headings.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Sin encabezados detectados.</div>
+                        </template>
+                        <template x-if="expUrlDetail.headings && expUrlDetail.headings.length > 0">
+                          <div class="heading-tree">
+                            <template x-for="h in expUrlDetail.headings" :key="h.id">
+                              <div class="heading-item" :style="'padding-left:' + headingIndent(h.tag) + 'rem'">
+                                <span class="heading-tag" :style="'color:' + headingColor(h.tag)" x-text="h.tag"></span>
+                                <span class="heading-text" x-text="h.text || '(vacío)'"></span>
+                              </div>
                             </template>
                           </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Inlinks tab: full table -->
+                    <template x-if="expDetailTab === 'inlinks'">
+                      <div>
+                        <template x-if="!expUrlDetail.inlinks || expUrlDetail.inlinks.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Esta URL no recibe enlaces internos (página huérfana).</div>
+                        </template>
+                        <template x-if="expUrlDetail.inlinks && expUrlDetail.inlinks.length > 0">
+                          <table class="table" style="font-size:.75rem">
+                            <thead>
+                              <tr>
+                                <th>URL origen</th>
+                                <th style="width:200px">Anchor</th>
+                                <th style="width:80px">Follow</th>
+                                <th style="width:100px">Posición</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="l in expUrlDetail.inlinks" :key="l.id">
+                                <tr>
+                                  <td :title="l.from_url || ''" style="max-width:380px">
+                                    <div class="truncate" x-text="l.from_url || '—'"></div>
+                                  </td>
+                                  <td :title="l.anchor_text || ''" style="max-width:200px">
+                                    <div class="truncate" x-text="l.anchor_text || '—'"></div>
+                                  </td>
+                                  <td x-text="l.follow === false ? 'nofollow' : 'follow'"></td>
+                                  <td x-text="l.link_position || '—'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Outlinks tab: full table -->
+                    <template x-if="expDetailTab === 'outlinks'">
+                      <div>
+                        <template x-if="!expUrlDetail.outlinks || expUrlDetail.outlinks.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Esta URL no tiene enlaces salientes.</div>
                         </template>
                         <template x-if="expUrlDetail.outlinks && expUrlDetail.outlinks.length > 0">
-                          <div>
-                            <div style="font-weight:600;font-size:.78rem;color:var(--accent);margin-bottom:.25rem">Outlinks (top <span x-text="expUrlDetail.outlinks.length"></span>)</div>
-                            <template x-for="l in expUrlDetail.outlinks.slice(0, 20)" :key="l.id">
-                              <div class="exp-link-item" x-text="l.to_url"></div>
-                            </template>
-                          </div>
+                          <table class="table" style="font-size:.75rem">
+                            <thead>
+                              <tr>
+                                <th>URL destino</th>
+                                <th style="width:200px">Anchor</th>
+                                <th style="width:80px">Follow</th>
+                                <th style="width:80px">Interno</th>
+                                <th style="width:100px">Posición</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="l in expUrlDetail.outlinks" :key="l.id">
+                                <tr>
+                                  <td :title="l.to_url" style="max-width:380px">
+                                    <div class="truncate" x-text="l.to_url"></div>
+                                  </td>
+                                  <td :title="l.anchor_text || ''" style="max-width:200px">
+                                    <div class="truncate" x-text="l.anchor_text || '—'"></div>
+                                  </td>
+                                  <td x-text="l.follow === false ? 'nofollow' : 'follow'"></td>
+                                  <td x-text="l.is_internal ? 'Sí' : 'No'"></td>
+                                  <td x-text="l.link_position || '—'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
                         </template>
                       </div>
                     </template>
-                    <!-- Issues tab -->
+
+                    <!-- Issues tab with details JSON -->
                     <template x-if="expDetailTab === 'issues'">
                       <div>
                         <template x-if="!expUrlDetail.issues || expUrlDetail.issues.length === 0">
@@ -2076,12 +2216,98 @@
                                   <span class="badge" :class="'severity-' + iss.severity" x-text="fmt.severity(iss.severity)" style="font-size:.68rem"></span>
                                   <span style="font-weight:600;font-size:.8rem" x-text="fmt.issue(iss.issue_type)"></span>
                                 </div>
+                                <template x-if="iss.details && Object.keys(iss.details).length > 0">
+                                  <div style="margin-top:.3rem;padding-left:.5rem;font-size:.72rem;color:var(--text-dim)">
+                                    <template x-for="[k,v] in Object.entries(iss.details)" :key="k">
+                                      <div><span style="font-weight:600" x-text="k + ':'"></span> <span x-text="String(v)"></span></div>
+                                    </template>
+                                  </div>
+                                </template>
                               </div>
                             </template>
                           </div>
                         </template>
                       </div>
                     </template>
+
+                    <!-- Resources tab -->
+                    <template x-if="expDetailTab === 'resources'">
+                      <div>
+                        <template x-if="!expUrlDetail.resources || expUrlDetail.resources.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Sin recursos asociados.</div>
+                        </template>
+                        <template x-if="expUrlDetail.resources && expUrlDetail.resources.length > 0">
+                          <table class="table" style="font-size:.75rem">
+                            <thead>
+                              <tr>
+                                <th>Recurso</th>
+                                <th style="width:80px">Tipo</th>
+                                <th style="width:160px">Alt</th>
+                                <th style="width:80px">Tamaño</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="r in expUrlDetail.resources" :key="r.id">
+                                <tr>
+                                  <td :title="r.resource_url" style="max-width:380px">
+                                    <div class="truncate" x-text="r.resource_url"></div>
+                                  </td>
+                                  <td x-text="r.resource_type"></td>
+                                  <td :title="r.alt_text || ''" style="max-width:160px">
+                                    <div class="truncate" x-text="r.alt_text || '—'"></div>
+                                  </td>
+                                  <td x-text="r.size_bytes != null ? fmt.bytes(r.size_bytes) : '—'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Structured data -->
+                    <template x-if="expDetailTab === 'structured'">
+                      <div>
+                        <template x-if="!expUrlDetail.structured_data || expUrlDetail.structured_data.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Sin datos estructurados.</div>
+                        </template>
+                        <template x-for="sd in expUrlDetail.structured_data" :key="sd.id">
+                          <div style="margin-bottom:.5rem">
+                            <div style="font-weight:600;font-size:.75rem;color:var(--accent);margin-bottom:.25rem">
+                              <span x-text="sd.schema_type || '(sin tipo)'"></span>
+                              <span class="text-dim" style="font-weight:400" x-text="'· ' + sd.format"></span>
+                            </div>
+                            <pre style="background:#f7f8fa;padding:.5rem;border-radius:3px;font-size:.72rem;max-height:200px;overflow:auto" x-text="JSON.stringify(sd.raw, null, 2)"></pre>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Hreflang -->
+                    <template x-if="expDetailTab === 'hreflang'">
+                      <div>
+                        <template x-if="!expUrlDetail.hreflangs || expUrlDetail.hreflangs.length === 0">
+                          <div class="text-dim" style="padding:.5rem 0">Sin anotaciones hreflang.</div>
+                        </template>
+                        <template x-if="expUrlDetail.hreflangs && expUrlDetail.hreflangs.length > 0">
+                          <table class="table" style="font-size:.75rem">
+                            <thead>
+                              <tr><th style="width:80px">Lang</th><th>Href</th><th style="width:100px">Return OK</th></tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="hl in expUrlDetail.hreflangs" :key="hl.id">
+                                <tr>
+                                  <td x-text="hl.lang"></td>
+                                  <td :title="hl.href" style="max-width:380px"><div class="truncate" x-text="hl.href"></div></td>
+                                  <td x-text="hl.return_tag_ok === true ? 'Sí' : hl.return_tag_ok === false ? 'No' : '—'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </template>
+                      </div>
+                    </template>
+
                   </div>
                 </template>
               </div>
@@ -2090,7 +2316,7 @@
 
           <!-- Status bar -->
           <div class="exp-statusbar">
-            <span x-text="'Pag. ' + expPage + ' de ' + expPages"></span>
+            <span x-text="'Pág. ' + expPage + ' de ' + expPages"></span>
             <div class="exp-pager">
               <button :disabled="expPage <= 1" @click="setExpPage(1)">&#171;</button>
               <button :disabled="expPage <= 1" @click="setExpPage(expPage - 1)">&#8249;</button>

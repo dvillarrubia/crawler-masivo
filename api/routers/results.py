@@ -9,10 +9,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import case, func, or_
+from sqlalchemy import case, exists, func, or_
 from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from api.backup import stream_backup_zip
@@ -81,18 +81,71 @@ SORT_COLUMNS = {
     "word_count": Url.word_count,
     "response_time_ms": Url.response_time_ms,
     "content_length": Url.content_length,
+    "transfer_size": Url.transfer_size,
     "crawl_depth": Url.crawl_depth,
     "inlinks_count": Url.inlinks_count,
     "outlinks_count": Url.outlinks_count,
+    "external_outlinks_count": Url.external_outlinks_count,
+    "unique_inlinks_count": Url.unique_inlinks_count,
     "pagerank": Url.pagerank,
     "url_length": Url.url_length,
+    "folder_depth": Url.folder_depth,
     "text_ratio": Url.text_ratio,
+    "host": Url.host,
+    "last_crawled_at": Url.last_crawled_at,
+    "title": HtmlMeta.title,
+    "title_len": HtmlMeta.title_len,
+    "meta_description": HtmlMeta.meta_description,
+    "meta_description_len": HtmlMeta.meta_description_len,
+}
+
+# Numeric range filters mapped to (model_column, requires_html_meta_join)
+_RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
+    "pagerank": (Url.pagerank, False),
+    "content_length": (Url.content_length, False),
+    "transfer_size": (Url.transfer_size, False),
+    "word_count": (Url.word_count, False),
+    "response_time_ms": (Url.response_time_ms, False),
+    "inlinks_count": (Url.inlinks_count, False),
+    "outlinks_count": (Url.outlinks_count, False),
+    "external_outlinks_count": (Url.external_outlinks_count, False),
+    "unique_inlinks_count": (Url.unique_inlinks_count, False),
+    "url_length": (Url.url_length, False),
+    "folder_depth": (Url.folder_depth, False),
+    "text_ratio": (Url.text_ratio, False),
+    "crawl_depth": (Url.crawl_depth, False),
+    "status_code": (Url.status_code, False),
+    "redirect_type": (Url.redirect_type, False),
+    "title_len": (HtmlMeta.title_len, True),
+    "meta_description_len": (HtmlMeta.meta_description_len, True),
+}
+
+# String "contains" filters mapped to (model_column, requires_html_meta_join).
+# Each entry exposes a `<key>` query parameter (e.g. ?host_contains=…).
+_STRING_CONTAINS_FILTERS: dict[str, tuple[Any, bool]] = {
+    "host_contains":                 (Url.host,                False),
+    "content_type_contains":         (Url.content_type,        False),
+    "status_text_contains":          (Url.status_text,         False),
+    "redirect_url_contains":         (Url.redirect_url,        False),
+    "indexability_status_contains":  (Url.indexability_status, False),
+    "http_version_contains":         (Url.http_version,        False),
+    "last_modified_contains":        (Url.last_modified,       False),
+    "title_contains":                (HtmlMeta.title,                True),
+    "description_contains":          (HtmlMeta.meta_description,     True),
+    "canonical_contains":            (HtmlMeta.canonical_href,       True),
+    "meta_robots_contains":          (HtmlMeta.meta_robots,          True),
+    "og_title_contains":             (HtmlMeta.og_title,             True),
+    "og_image_contains":             (HtmlMeta.og_image,             True),
+    "og_type_contains":              (HtmlMeta.og_type,              True),
+    "og_url_contains":               (HtmlMeta.og_url,               True),
+    "twitter_card_contains":         (HtmlMeta.twitter_card,         True),
 }
 
 
 @router.get("/urls", response_model=PaginatedResponse[UrlResponse])
 def list_urls(
     job_id: uuid.UUID,
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status_group: str | None = Query(None),
@@ -102,11 +155,52 @@ def list_urls(
     sort_by: str | None = Query(None),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     indexable: bool | None = Query(None),
+    status_code: int | None = Query(None),
+    issue_type: str | None = Query(None),
+    severity: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
 
     q = db.query(Url).filter(Url.job_id == job_id)
+
+    qp = request.query_params
+
+    # ---------- Build dynamic filters from query params ----------
+    # 1) Numeric range filters: <col>_gte / <col>_lte from _RANGE_FILTERS
+    range_clauses: list = []
+    range_needs_meta = False
+    for col_name, (col_expr, needs_meta) in _RANGE_FILTERS.items():
+        gte_raw = qp.get(f"{col_name}_gte")
+        lte_raw = qp.get(f"{col_name}_lte")
+        if (gte_raw in (None, "")) and (lte_raw in (None, "")):
+            continue
+        try:
+            if gte_raw not in (None, ""):
+                range_clauses.append(col_expr >= float(gte_raw))
+            if lte_raw not in (None, ""):
+                range_clauses.append(col_expr <= float(lte_raw))
+        except ValueError:
+            continue  # ignore malformed numeric input
+        if needs_meta:
+            range_needs_meta = True
+
+    # 2) String "contains" filters from _STRING_CONTAINS_FILTERS
+    contains_clauses: list = []
+    contains_needs_meta = False
+    for param_name, (col_expr, needs_meta) in _STRING_CONTAINS_FILTERS.items():
+        val = qp.get(param_name)
+        if val in (None, ""):
+            continue
+        contains_clauses.append(col_expr.ilike(f"%{val}%"))
+        if needs_meta:
+            contains_needs_meta = True
+
+    sort_needs_meta = sort_by in {"title", "title_len", "meta_description", "meta_description_len"}
+    needs_meta_join = bool(search or sort_needs_meta or range_needs_meta or contains_needs_meta)
+
+    if needs_meta_join:
+        q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id)
 
     if status_group is not None:
         q = q.filter(Url.status_group == status_group)
@@ -116,13 +210,27 @@ def list_urls(
         q = q.filter(Url.resource_type == resource_type)
     if indexable is not None:
         q = q.filter(Url.indexable == indexable)
+    if status_code is not None:
+        q = q.filter(Url.status_code == status_code)
+
+    for clause in range_clauses:
+        q = q.filter(clause)
+    for clause in contains_clauses:
+        q = q.filter(clause)
 
     # Search across url and title
     if search:
         pattern = f"%{search}%"
-        q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id).filter(
-            or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern))
-        )
+        q = q.filter(or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern)))
+
+    # Filter by URLs that have at least one matching issue
+    if issue_type or severity:
+        issue_subq = db.query(Issue.url_id).filter(Issue.job_id == job_id)
+        if issue_type:
+            issue_subq = issue_subq.filter(Issue.issue_type == issue_type)
+        if severity:
+            issue_subq = issue_subq.filter(Issue.severity == severity)
+        q = q.filter(Url.id.in_(issue_subq))
 
     total = q.count()
 

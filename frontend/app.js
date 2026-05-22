@@ -1094,11 +1094,17 @@ function app() {
     expPageSize: 100,
     expLoading: false,
     expSelectedUrl: null,
+    expSelectedIndex: -1,
     expUrlDetail: null,
-    expDetailTab: 'general',
+    expDetailTab: 'content',
     expDetailOpen: false,
     expBadgeCounts: {},
+    expColumnsByTab: {},        // { tabKey: [colKey, ...] } — persisted column selection per tab
+    expColumnPickerOpen: false,
+    expColumnFilters: {},       // { columnKey: { op: '>=', value: '0.5' } | { value: 'foo' } }
     _expSearchTimer: null,
+    _expFilterTimer: null,
+    _expKeyHandler: null,
 
     openExplorer() {
       this.view = 'explorer';
@@ -1109,13 +1115,19 @@ function app() {
       this.expPage = 1;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
+      this.expSelectedIndex = -1;
       this.expUrlDetail = null;
+      this.expColumnFilters = {};
+      this.expColumnPickerOpen = false;
+      this.expColumnsByTab = this._loadExpColumnPrefs();
+      this._bindExplorerKeyNav();
       this.loadExplorerBadges();
       this.loadExplorerUrls();
       this.$nextTick(() => lucide.createIcons());
     },
 
     backFromExplorer() {
+      this._unbindExplorerKeyNav();
       this.view = 'detail';
       this.$nextTick(() => lucide.createIcons());
     },
@@ -1144,6 +1156,9 @@ function app() {
       this.expSearch = '';
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
+      this.expSelectedIndex = -1;
+      this.expColumnFilters = {};
+      this.expColumnPickerOpen = false;
       this.loadExplorerUrls();
     },
 
@@ -1166,31 +1181,83 @@ function app() {
       }, 400);
     },
 
+    /**
+     * Build the query string parameters for the /urls endpoint based on tab,
+     * sort, search and the inline per-column filters.
+     */
+    _buildExplorerParams() {
+      const tabCfg = EXP_TABS.find(t => t.key === this.expTab) || EXP_TABS[0];
+      const params = new URLSearchParams();
+      params.set('page', String(this.expPage));
+      params.set('page_size', String(this.expPageSize));
+      if (tabCfg.filter) {
+        for (const [k, v] of Object.entries(tabCfg.filter)) params.set(k, String(v));
+      }
+      if (this.expSearch) params.set('search', this.expSearch);
+      if (this.expSort) { params.set('sort_by', this.expSort); params.set('sort_dir', this.expSortDir); }
+
+      // Inline column filters
+      for (const [colKey, f] of Object.entries(this.expColumnFilters)) {
+        if (!f) continue;
+        const def = EXP_COLUMN_DEFS[colKey];
+        if (!def || !def.filterKey) continue;
+        const raw = (f.value ?? '').toString().trim();
+        if (raw === '') continue;
+        if (def.type === 'numeric') {
+          if (def.exact && (f.op === '=' || !f.op)) {
+            // status_code exact match — overrides any tab filter on status_code
+            params.set(def.filterKey, raw);
+          } else {
+            const op = f.op || '>=';
+            if (op === '=')        { params.set(`${def.filterKey}_gte`, raw); params.set(`${def.filterKey}_lte`, raw); }
+            else if (op === '>=' ) { params.set(`${def.filterKey}_gte`, raw); }
+            else if (op === '>')   { const n = parseFloat(raw); if (!isNaN(n)) params.set(`${def.filterKey}_gte`, String(n + 0.00001)); }
+            else if (op === '<=')  { params.set(`${def.filterKey}_lte`, raw); }
+            else if (op === '<')   { const n = parseFloat(raw); if (!isNaN(n)) params.set(`${def.filterKey}_lte`, String(n - 0.00001)); }
+          }
+        } else if (def.type === 'boolean') {
+          params.set(def.filterKey, raw);
+        } else {
+          // string contains — for url use the 'search' param
+          if (def.filterKey === 'search') {
+            params.set('search', raw);
+          } else {
+            params.set(def.filterKey, raw);
+          }
+        }
+      }
+      return params.toString();
+    },
+
     async loadExplorerUrls() {
       if (!this.job) return;
       this.expLoading = true;
       try {
-        const tabCfg = EXP_TABS.find(t => t.key === this.expTab) || EXP_TABS[0];
-        let params = `page=${this.expPage}&page_size=${this.expPageSize}`;
-        if (tabCfg.filter) {
-          for (const [k, v] of Object.entries(tabCfg.filter)) {
-            params += `&${k}=${v}`;
-          }
-        }
-        if (this.expSearch) params += `&search=${encodeURIComponent(this.expSearch)}`;
-        if (this.expSort) params += `&sort_by=${this.expSort}&sort_dir=${this.expSortDir}`;
+        const params = this._buildExplorerParams();
         const data = await api(`/jobs/${this.job.id}/urls?${params}`);
         this.expUrls = data.items;
         this.expPages = data.pages;
         this.expTotal = data.total;
+        // Keep current selection in sync with the new page
+        if (this.expSelectedUrl) {
+          const idx = this.expUrls.findIndex(u => u.id === this.expSelectedUrl.id);
+          this.expSelectedIndex = idx;
+          if (idx === -1) {
+            this.expDetailOpen = false;
+            this.expSelectedUrl = null;
+            this.expUrlDetail = null;
+          }
+        } else {
+          this.expSelectedIndex = -1;
+        }
       } catch (e) { this.error = e.message; }
       this.expLoading = false;
     },
 
-    async selectExplorerUrl(u) {
+    async selectExplorerUrl(u, idx = null) {
       this.expSelectedUrl = u;
+      this.expSelectedIndex = idx != null ? idx : this.expUrls.findIndex(x => x.id === u.id);
       this.expDetailOpen = true;
-      this.expDetailTab = 'general';
       this.expUrlDetail = null;
       try {
         this.expUrlDetail = await api(`/jobs/${this.job.id}/urls/${u.id}`);
@@ -1201,6 +1268,7 @@ function app() {
     closeExplorerDetail() {
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
+      this.expSelectedIndex = -1;
       this.expUrlDetail = null;
     },
 
@@ -1210,15 +1278,183 @@ function app() {
       this.loadExplorerUrls();
     },
 
+    /* ---------- column picker ---------- */
     getExpColumns() {
+      const stored = this.expColumnsByTab[this.expTab];
+      if (stored && stored.length) return stored;
       const tabCfg = EXP_TABS.find(t => t.key === this.expTab);
       return (tabCfg && tabCfg.columns) || EXP_DEFAULT_COLUMNS;
+    },
+
+    getExpAllColumnKeys() {
+      return Object.keys(EXP_COLUMN_DEFS);
+    },
+
+    isExpColumnActive(key) {
+      return this.getExpColumns().includes(key);
+    },
+
+    toggleExpColumn(key) {
+      const current = this.getExpColumns().slice();
+      const idx = current.indexOf(key);
+      if (idx >= 0) {
+        if (current.length <= 1) return; // never leave the table without columns
+        current.splice(idx, 1);
+      } else {
+        current.push(key);
+      }
+      this.expColumnsByTab = { ...this.expColumnsByTab, [this.expTab]: current };
+      this._saveExpColumnPrefs();
+    },
+
+    resetExpColumns() {
+      const next = { ...this.expColumnsByTab };
+      delete next[this.expTab];
+      this.expColumnsByTab = next;
+      this._saveExpColumnPrefs();
+    },
+
+    _expColumnPrefsKey() {
+      return `expCols:${this.job?.id || 'global'}`;
+    },
+
+    _loadExpColumnPrefs() {
+      try {
+        const raw = localStorage.getItem(this._expColumnPrefsKey());
+        return raw ? JSON.parse(raw) : {};
+      } catch { return {}; }
+    },
+
+    _saveExpColumnPrefs() {
+      try { localStorage.setItem(this._expColumnPrefsKey(), JSON.stringify(this.expColumnsByTab)); }
+      catch (_) { /* localStorage full / disabled */ }
+    },
+
+    /* ---------- inline column filters ---------- */
+    expColumnFilterInput(colKey, patch) {
+      const cur = this.expColumnFilters[colKey] || {};
+      const next = { ...cur, ...patch };
+      this.expColumnFilters = { ...this.expColumnFilters, [colKey]: next };
+      clearTimeout(this._expFilterTimer);
+      this._expFilterTimer = setTimeout(() => {
+        this.expPage = 1;
+        this.loadExplorerUrls();
+      }, 400);
+    },
+
+    expClearColumnFilter(colKey) {
+      const next = { ...this.expColumnFilters };
+      delete next[colKey];
+      this.expColumnFilters = next;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    expClearAllColumnFilters() {
+      this.expColumnFilters = {};
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    expActiveFilterCount() {
+      return Object.values(this.expColumnFilters).filter(f =>
+        f && f.value != null && f.value.toString().trim() !== ''
+      ).length;
+    },
+
+    /**
+     * Default operator shown when a numeric column has no filter yet.
+     * status_code is "exact" so it defaults to '='.
+     */
+    expDefaultOp(col) {
+      return EXP_COLUMN_DEFS[col]?.exact ? '=' : '>=';
+    },
+
+    expCurrentOp(col) {
+      return this.expColumnFilters[col]?.op || this.expDefaultOp(col);
+    },
+
+    /** Dynamic placeholder so the user knows what the input expects right now. */
+    expFilterPlaceholder(col) {
+      const def = EXP_COLUMN_DEFS[col];
+      if (!def) return '';
+      if (def.type === 'numeric') {
+        const op = this.expCurrentOp(col);
+        return ({
+          '>=': 'al menos…',
+          '>':  'mayor que…',
+          '=':  'igual a…',
+          '<=': 'máximo…',
+          '<':  'menor que…',
+        })[op] || 'núm';
+      }
+      if (def.type === 'string') return 'contiene…';
+      return '';
+    },
+
+    /** Tooltip for the operator selector explaining each option. */
+    expOpTooltip(col) {
+      const op = this.expCurrentOp(col);
+      const colLabel = EXP_COLUMN_DEFS[col]?.label || col;
+      const human = ({
+        '>=': 'al menos',
+        '>':  'mayor que',
+        '=':  'igual a',
+        '<=': 'como máximo',
+        '<':  'menor que',
+      })[op] || op;
+      return `${colLabel} ${human}…  (clic para cambiar operador)`;
+    },
+
+    /* ---------- keyboard navigation ---------- */
+    _bindExplorerKeyNav() {
+      if (this._expKeyHandler) return;
+      this._expKeyHandler = (e) => {
+        if (this.view !== 'explorer') return;
+        // Don't hijack typing inside inputs/textareas/contenteditable
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+        if (!this.expUrls.length) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const idx = Math.min(this.expSelectedIndex + 1, this.expUrls.length - 1);
+          if (idx !== this.expSelectedIndex && idx >= 0) {
+            this.selectExplorerUrl(this.expUrls[idx], idx);
+            this._scrollSelectedRowIntoView();
+          }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const idx = Math.max((this.expSelectedIndex < 0 ? 0 : this.expSelectedIndex) - 1, 0);
+          if (idx !== this.expSelectedIndex) {
+            this.selectExplorerUrl(this.expUrls[idx], idx);
+            this._scrollSelectedRowIntoView();
+          }
+        } else if (e.key === 'Escape' && this.expDetailOpen) {
+          e.preventDefault();
+          this.closeExplorerDetail();
+        }
+      };
+      window.addEventListener('keydown', this._expKeyHandler);
+    },
+
+    _unbindExplorerKeyNav() {
+      if (this._expKeyHandler) {
+        window.removeEventListener('keydown', this._expKeyHandler);
+        this._expKeyHandler = null;
+      }
+    },
+
+    _scrollSelectedRowIntoView() {
+      this.$nextTick(() => {
+        const row = document.querySelector('.exp-table tr.exp-row-selected');
+        if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      });
     },
 
     getExpCellValue(row, col) {
       const def = EXP_COLUMN_DEFS[col];
       if (!def) return '';
-      return def.fmt(row);
+      try { return def.fmt(row); } catch { return ''; }
     },
 
     expStatusClass(code) {
@@ -1236,46 +1472,84 @@ function app() {
 }
 
 
-/* ===== Explorer Constants ===== */
-const EXP_DEFAULT_COLUMNS = ['url', 'status_code', 'content_type', 'response_time_ms', 'content_length', 'crawl_depth'];
+/* ===== Explorer Constants =====
+ *
+ * EXP_COLUMN_DEFS describes every column the explorer table can render.
+ *
+ *   type:        'string' | 'numeric' | 'boolean'
+ *   filterKey:   query-param prefix used for inline filters
+ *                  - numeric → emits `${filterKey}_gte` / `${filterKey}_lte`
+ *                  - string  → emits `${filterKey}` directly (contains)
+ *                  - boolean → emits `${filterKey}=true|false`
+ *                Omit to make the column non-filterable.
+ *   width:       suggested min width in px for the column.
+ */
+const EXP_COLUMN_DEFS = {
+  url:                  { label: 'URL',              type: 'string',  sortable: true,  filterKey: 'search',                width: 320, fmt: r => { try { return new URL(r.url).pathname || '/'; } catch { return r.url; } } },
+  status_code:          { label: 'Estado',           type: 'numeric', sortable: true,  filterKey: 'status_code', exact: true, width: 130, fmt: r => r.status_code ?? '' },
+  status_text:          { label: 'Texto estado',     type: 'string',  sortable: false, filterKey: 'status_text_contains',    width: 150, fmt: r => r.status_text ?? '' },
+  content_type:         { label: 'Tipo',             type: 'string',  sortable: false, filterKey: 'content_type_contains',   width: 160, fmt: r => r.content_type ? r.content_type.split(';')[0] : '' },
+  content_length:       { label: 'Tamaño',           type: 'numeric', sortable: true,  filterKey: 'content_length',          width: 140, fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
+  transfer_size:        { label: 'Transferido',      type: 'numeric', sortable: true,  filterKey: 'transfer_size',           width: 140, fmt: r => r.transfer_size != null ? fmt.bytes(r.transfer_size) : '' },
+  response_time_ms:     { label: 'Tiempo (ms)',      type: 'numeric', sortable: true,  filterKey: 'response_time_ms',        width: 140, fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
+  crawl_depth:          { label: 'Prof.',            type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 130, fmt: r => r.crawl_depth ?? '' },
+  folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
+  word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
+  text_ratio:           { label: '% texto',          type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
+  url_length:           { label: 'Long. URL',        type: 'numeric', sortable: true,  filterKey: 'url_length',              width: 140, fmt: r => r.url_length ?? '' },
+  inlinks_count:        { label: 'Inlinks',          type: 'numeric', sortable: true,  filterKey: 'inlinks_count',           width: 130, fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },
+  unique_inlinks_count: { label: 'Inlinks únicos',   type: 'numeric', sortable: true,  filterKey: 'unique_inlinks_count',    width: 140, fmt: r => r.unique_inlinks_count != null ? r.unique_inlinks_count.toLocaleString('es-ES') : '' },
+  outlinks_count:       { label: 'Outlinks',         type: 'numeric', sortable: true,  filterKey: 'outlinks_count',          width: 130, fmt: r => r.outlinks_count != null ? r.outlinks_count.toLocaleString('es-ES') : '' },
+  external_outlinks_count: { label: 'Outlinks ext.', type: 'numeric', sortable: true,  filterKey: 'external_outlinks_count', width: 140, fmt: r => r.external_outlinks_count != null ? r.external_outlinks_count.toLocaleString('es-ES') : '' },
+  pagerank:             { label: 'PageRank',         type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
+  redirect_url:         { label: 'Redirige a',      type: 'string',  sortable: false, filterKey: 'redirect_url_contains',   width: 260, fmt: r => r.redirect_url ?? '' },
+  redirect_type:        { label: 'Cód. redir.',     type: 'numeric', sortable: false, filterKey: 'redirect_type',            width: 130, fmt: r => r.redirect_type ?? '' },
+  indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },
+  indexability_status:  { label: 'Razón noindex',   type: 'string',  sortable: false, filterKey: 'indexability_status_contains', width: 200, fmt: r => r.indexability_status ?? '' },
+  is_internal:          { label: 'Interna',          type: 'boolean', sortable: false, filterKey: 'is_internal',             width: 130, fmt: r => r.is_internal === true ? 'Sí' : r.is_internal === false ? 'No' : '' },
+  host:                 { label: 'Host',             type: 'string',  sortable: true,  filterKey: 'host_contains',           width: 200, fmt: r => r.host ?? '' },
+  // html_meta fields
+  title:                { label: 'Título',          type: 'string',  sortable: true,  filterKey: 'title_contains',          width: 260, fmt: r => r.html_meta?.title ?? '' },
+  title_len:            { label: 'Long. título',    type: 'numeric', sortable: true,  filterKey: 'title_len',               width: 140, fmt: r => r.html_meta?.title_len ?? '' },
+  meta_description:     { label: 'Descripción',     type: 'string',  sortable: false, filterKey: 'description_contains',    width: 300, fmt: r => r.html_meta?.meta_description ?? '' },
+  meta_description_len: { label: 'Long. desc.',     type: 'numeric', sortable: true,  filterKey: 'meta_description_len',    width: 140, fmt: r => r.html_meta?.meta_description_len ?? '' },
+  canonical_href:       { label: 'Canonical',       type: 'string',  sortable: false, filterKey: 'canonical_contains',      width: 260, fmt: r => r.html_meta?.canonical_href ?? '' },
+  meta_robots:          { label: 'Meta robots',     type: 'string',  sortable: false, filterKey: 'meta_robots_contains',    width: 180, fmt: r => r.html_meta?.meta_robots ?? '' },
+  og_title:             { label: 'OG title',        type: 'string',  sortable: false, filterKey: 'og_title_contains',       width: 220, fmt: r => r.html_meta?.og_title ?? '' },
+  og_image:             { label: 'OG image',        type: 'string',  sortable: false, filterKey: 'og_image_contains',       width: 240, fmt: r => r.html_meta?.og_image ?? '' },
+  og_type:              { label: 'OG type',         type: 'string',  sortable: false, filterKey: 'og_type_contains',        width: 140, fmt: r => r.html_meta?.og_type ?? '' },
+  og_url:               { label: 'OG url',          type: 'string',  sortable: false, filterKey: 'og_url_contains',         width: 240, fmt: r => r.html_meta?.og_url ?? '' },
+  twitter_card:         { label: 'Twitter card',    type: 'string',  sortable: false, filterKey: 'twitter_card_contains',   width: 150, fmt: r => r.html_meta?.twitter_card ?? '' },
+  http_version:         { label: 'HTTP',            type: 'string',  sortable: false, filterKey: 'http_version_contains',   width: 130, fmt: r => r.html_meta?.http_version ?? r.http_version ?? '' },
+  last_modified:        { label: 'Last-Modified',   type: 'string',  sortable: false, filterKey: 'last_modified_contains',  width: 180, fmt: r => r.last_modified ?? '' },
+  last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
+};
 
-const EXP_TABS = [
-  { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                         columns: EXP_DEFAULT_COLUMNS },
-  { key: 'html',       label: 'HTML',        icon: 'file-text',   filter: { resource_type: 'html' },                    columns: ['url','status_code','title','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank'] },
-  { key: 'js',         label: 'JavaScript',  icon: 'file-code',   filter: { resource_type: 'js' },                      columns: ['url','status_code','content_length','response_time_ms'] },
-  { key: 'css',        label: 'CSS',         icon: 'palette',     filter: { resource_type: 'css' },                     columns: ['url','status_code','content_length','response_time_ms'] },
-  { key: 'image',      label: 'Imagenes',    icon: 'image',       filter: { resource_type: 'image' },                   columns: ['url','status_code','content_length','response_time_ms'] },
-  { key: 'pdf',        label: 'PDFs',        icon: 'file',        filter: { resource_type: 'pdf' },                     columns: ['url','status_code','content_length','response_time_ms'] },
-  { key: '_div1', divider: true },
-  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                        columns: ['url','status_code','title','word_count','inlinks_count','outlinks_count','pagerank'] },
-  { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },                     columns: ['url','status_code','content_type','response_time_ms'] },
-  { key: '_div2', divider: true },
-  { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },                     columns: ['url','title','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank'] },
-  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                      columns: ['url','status_code','redirect_url','response_time_ms'] },
-  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },                   columns: ['url','status_code','inlinks_count','crawl_depth'] },
-  { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },                    columns: ['url','status_code','response_time_ms','crawl_depth'] },
-  { key: '_div3', divider: true },
-  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true },        columns: ['url','status_code','title','word_count','inlinks_count','pagerank'] },
-  { key: 'noindex',    label: 'No index.',   icon: 'eye-off',     filter: { indexable: false, is_internal: true },       columns: ['url','status_code','indexability_status','title'] },
+const EXP_DEFAULT_COLUMNS = [
+  'url','status_code','title','title_len','meta_description','meta_description_len',
+  'content_type','content_length','response_time_ms','crawl_depth',
+  'word_count','inlinks_count','outlinks_count','pagerank','indexable','canonical_href'
 ];
 
-const EXP_COLUMN_DEFS = {
-  url:                  { label: 'URL',           sortable: true,  fmt: r => { try { return new URL(r.url).pathname; } catch { return r.url; } } },
-  status_code:          { label: 'Estado',        sortable: true,  fmt: r => r.status_code ?? '' },
-  title:                { label: 'Titulo',        sortable: false, fmt: r => r.html_meta?.title ?? '' },
-  word_count:           { label: 'Palabras',      sortable: true,  fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
-  response_time_ms:     { label: 'Tiempo',        sortable: true,  fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
-  content_length:       { label: 'Tamano',        sortable: true,  fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
-  content_type:         { label: 'Tipo',          sortable: false, fmt: r => r.content_type ? r.content_type.split(';')[0] : '' },
-  crawl_depth:          { label: 'Prof.',         sortable: true,  fmt: r => r.crawl_depth ?? '' },
-  inlinks_count:        { label: 'Inlinks',       sortable: true,  fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },
-  outlinks_count:       { label: 'Outlinks',      sortable: true,  fmt: r => r.outlinks_count != null ? r.outlinks_count.toLocaleString('es-ES') : '' },
-  pagerank:             { label: 'PageRank',      sortable: true,  fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
-  redirect_url:         { label: 'Redirige a',    sortable: false, fmt: r => r.redirect_url ?? '' },
-  indexability_status:  { label: 'Razon noindex', sortable: false, fmt: r => r.indexability_status ?? '' },
-  url_length:           { label: 'Long. URL',     sortable: true,  fmt: r => r.url_length ?? '' },
-  text_ratio:           { label: '% texto',       sortable: true,  fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
-};
+const EXP_TABS = [
+  { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                   columns: EXP_DEFAULT_COLUMNS },
+  { key: 'html',       label: 'HTML',        icon: 'file-text',   filter: { resource_type: 'html' },              columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','content_length','inlinks_count','outlinks_count','external_outlinks_count','pagerank','indexable','canonical_href','meta_robots'] },
+  { key: 'js',         label: 'JavaScript',  icon: 'file-code',   filter: { resource_type: 'js' },                columns: ['url','status_code','content_length','transfer_size','response_time_ms','last_modified'] },
+  { key: 'css',        label: 'CSS',         icon: 'palette',     filter: { resource_type: 'css' },               columns: ['url','status_code','content_length','transfer_size','response_time_ms','last_modified'] },
+  { key: 'image',      label: 'Imágenes',    icon: 'image',       filter: { resource_type: 'image' },             columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
+  { key: 'pdf',        label: 'PDFs',        icon: 'file',        filter: { resource_type: 'pdf' },               columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
+  { key: '_div1', divider: true },
+  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                  columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','outlinks_count','external_outlinks_count','pagerank','crawl_depth','indexable','canonical_href'] },
+  { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },               columns: ['url','status_code','host','content_type','content_length','response_time_ms'] },
+  { key: '_div2', divider: true },
+  { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },               columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank','indexable','canonical_href'] },
+  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','response_time_ms','inlinks_count','crawl_depth'] },
+  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','status_text','inlinks_count','crawl_depth','content_type'] },
+  { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','crawl_depth','inlinks_count'] },
+  { key: '_div3', divider: true },
+  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true }, columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','pagerank','canonical_href'] },
+  { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
+];
 
 function _freshForm() {
   return {
