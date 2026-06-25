@@ -382,6 +382,19 @@ class SeoSpider(scrapy.Spider):
             ],
         }
 
+    async def start(self):
+        """Scrapy 2.13+ entry point.
+
+        ``Spider.start_requests`` was deprecated in Scrapy 2.13 and removed
+        from the base class in 2.16, so the engine now drives crawls through
+        the async ``start()`` method. We delegate to the existing
+        ``start_requests`` generator so the seeding/resume logic is shared and
+        the spider keeps working across Scrapy 2.11–2.16 (older versions still
+        call ``start_requests`` directly).
+        """
+        for request in self.start_requests():
+            yield request
+
     def start_requests(self) -> Generator[Request, None, None]:
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
