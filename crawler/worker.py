@@ -317,8 +317,18 @@ def main() -> None:
                 time.sleep(1)
                 continue
 
-            # Poll for a new job
-            result = rconn.brpop(JOBS_QUEUE, timeout=BRPOP_TIMEOUT)
+            # Poll for a new job. Blocking pops can raise transient
+            # TimeoutError/ConnectionError (e.g. the socket read timing out
+            # around the BRPOP window, or Redis briefly unavailable during a
+            # deploy). These must NOT kill the worker — otherwise the process
+            # exits, the container restarts, and any in-flight crawl is killed
+            # in a crash loop. Swallow them and keep polling.
+            try:
+                result = rconn.brpop(JOBS_QUEUE, timeout=BRPOP_TIMEOUT)
+            except (redis_lib.exceptions.TimeoutError, redis_lib.exceptions.ConnectionError) as exc:
+                logger.warning("Redis poll error (%s); retrying", exc)
+                time.sleep(1)
+                continue
             if result is None:
                 continue
 
