@@ -130,7 +130,7 @@ Orden = apéndice D del plan, ajustado con las correcciones §1.1 e intercalando
 
 ### Fase 2 — Multiplicadores
 - [x] **2.1 T12** — motor de segmentación (tablas cliente-level, `assign_segments()`, preview, filtro `segment_id` en endpoints). — tablas `segments` (client-level, prefix|regex sobre el path, priority asc) y `url_segments` (PK job+url, idempotente); `assign_segments()` al inicio de `run_all` (solo HTML interno, first-match-wins, regex inválida se salta con warning); router `segments.py` (CRUD + `POST /preview` contra el último job completado con conteos/muestras/unmatched); filtro `segment_id` opcional en `list_urls`, `list_issues` y `get_stats` (todos los agregados) (2026-07-04)
-- [ ] **2.2 T7** — diff entre crawls + flapping (router `diff.py`). **La tarea de más valor del plan.**
+- [x] **2.2 T7** — diff entre crawls + flapping (router `diff.py`). **La tarea de más valor del plan.** — `GET /api/diff` (resumen new/gone + cambios por campo con umbral de delta de pagerank), `GET /api/diff/urls?change=...` (old/new paginado), `GET /api/diff/flapping?client_id=&last_n=` (A→B→A por compresión de duplicados consecutivos sobre status_group/indexable); validaciones mismo client (422), ambos completed (422), mismo `normalization_fingerprint` (409 — T8); filas `not_crawled` de T2 excluidas de ambos lados; `segment_id` (T12) re-corta el diff; on-the-fly como pide el plan v1 (2026-07-04)
 - [ ] **2.3 T16** — robots versionado (interceptar en middleware, §1.2) + watchlist + umbrales sugeridos.
 
 ### Fase 3 — UI v1 (en paralelo con fase 2–3 de backend)
