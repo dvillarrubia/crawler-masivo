@@ -124,58 +124,136 @@ export const EDGE_CLASS_INFO = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Formateo de la columna «Detalles» de las incidencias               */
+/* Formateo de la columna «Detalles»: una FRASE por tipo de incidencia */
 /* ------------------------------------------------------------------ */
 
-const DETAIL_LABELS = {
-  length: "longitud", min: "mínimo", max: "máximo", value: "valor",
-  count: "nº", pages: "páginas", urls: "URLs", url: "URL",
-  duplicate_count: "duplicados", duplicates: "duplicados",
-  chain: "cadena", hops: "saltos", target: "destino", source: "origen",
-  similarity: "similitud", cosine_similarity: "similitud",
-  best_similarity: "mejor similitud", sim_threshold: "umbral",
-  mismatch_threshold: "umbral", orphan_threshold: "umbral",
-  threshold: "umbral", query: "búsqueda", impressions: "impresiones",
-  clicks: "clics", position: "posición", chunk_position: "posición del pasaje",
-  heading_path: "sección", best_passage_url: "mejor pasaje en",
-  word_count: "palabras", unique_word_count: "palabras propias",
-  text_ratio: "% texto", ratio: "ratio", response_time_ms: "ms de respuesta",
-  anchor: "anchor", n_links: "enlaces", sources_sample: "desde",
-  generic_inlinks: "inlinks genéricos", anchors: "anchors",
-  orphan_chunks: "pasajes sin demanda", total_chunks: "pasajes totales",
-  positions: "posiciones", approximate: "aproximado",
-  click_depth: "profundidad de clic", depth: "profundidad",
-  pagerank: "autoridad", lost_ratio: "proporción perdida",
-  lost_weight: "peso perdido", out_total: "peso saliente",
-  outlinks: "enlaces salientes", inlinks: "enlaces entrantes",
-  reasons: "motivos", label: "etiqueta", hint: "pista",
-  pattern: "patrón", urls_seen: "URLs vistas", lastmod: "lastmod",
-  body_changed: "contenido cambiado", images: "imágenes",
-  missing_alt_count: "sin alt", total_images: "imágenes totales",
-  dominant_url: "página dominante", weak_url: "página débil",
-  langs: "idiomas", lang: "idioma", href: "URL", errors: "errores",
-  schema_type: "tipo de schema", format: "formato",
+const _n = (v) => (v == null ? "—" : Number(v).toLocaleString("es"));
+const _pct = (v) => (v == null ? "—" : `${(Number(v) * 100).toFixed(1).replace(".", ",")}%`);
+const _dec = (v) => (v == null ? "—" : Number(v).toFixed(3).replace(/0+$/, "").replace(/\.$/, "").replace(".", ","));
+const _urls = (arr, max = 2) => {
+  if (!arr || !arr.length) return "";
+  const shown = arr.slice(0, max).join(" · ");
+  return arr.length > max ? `${shown} (+${arr.length - max} más)` : shown;
+};
+
+/** Razones internas traducidas. */
+const REASONS = {
+  no_click_path_from_home: "no existe ninguna ruta de clics desde la portada hasta esta página",
+  probe_template_hash: "su HTML es idéntico a la página de error del sitio",
+  probe_template_similarity: "su contenido es casi idéntico a la página de error del sitio",
+  error_title_low_content: "tiene título de error y casi ningún contenido",
+  lastmod_changed_content_identical: "el sitemap dice que la página cambió, pero el contenido es exactamente el mismo",
+  content_changed_lastmod_stale: "el contenido cambió, pero el sitemap sigue con la fecha antigua",
+  not_crawled: "no responde (no se pudo rastrear)",
+  not_indexable: "ha dejado de ser indexable",
+  canonical_not_self: "su canonical ya no apunta a sí misma",
+};
+const _reason = (r) => REASONS[r] || (r || "").replace(/^status_(\d+)$/, "responde con error $1").replace(/_/g, " ");
+
+/** Frase específica por tipo. d = details tal cual lo emite el backend. */
+const DETAIL_RENDERERS = {
+  title_too_short: (d) => `Longitud ${_n(d.length)} caracteres (mínimo recomendado ${_n(d.min)})`,
+  title_too_long: (d) => `Longitud ${_n(d.length)} caracteres (máximo recomendado ${_n(d.max)})`,
+  description_too_short: (d) => `Longitud ${_n(d.length)} caracteres (mínimo recomendado ${_n(d.min)})`,
+  description_too_long: (d) => `Longitud ${_n(d.length)} caracteres (máximo recomendado ${_n(d.max)})`,
+  title_duplicate: (d) => `Comparte title con otras ${_n((d.duplicate_urls || []).length)} páginas del sitio`,
+  description_duplicate: (d) => `Comparte description con otras ${_n((d.duplicate_urls || []).length)} páginas`,
+  h1_duplicate: (d) => `Comparte H1 con otras ${_n((d.duplicate_urls || []).length)} páginas`,
+  h1_multiple: (d) => `Tiene ${_n(d.count)} encabezados H1 (debería haber uno)`,
+  duplicate_content: (d) => `Contenido idéntico al de otras ${_n((d.duplicate_urls || []).length)} páginas`,
+  near_duplicate_content: (d) =>
+    `Casi idéntica a otras ${_n((d.cluster_size || 1) - 1)} páginas${d.urls ? `: ${_urls(d.urls)}` : ""}`,
+  low_word_count: (d) => `Solo ${_n(d.word_count)} palabras de texto`,
+  low_unique_content: (d) =>
+    `Solo ${_n(d.unique_word_count)} palabras propias (mínimo ${_n(d.threshold)}); el ${_pct(d.boilerplate_ratio)} de la página es plantilla repetida`,
+  url_too_long: (d) => `${_n(d.length)} caracteres de URL`,
+  high_outlink_count: (d) => `${_n(d.count)} enlaces salientes en una sola página`,
+  slow_page: (d) => `Respondió en ${_n(d.response_time_ms)} ms (umbral: ${_n(d.threshold_ms)} ms)`,
+  redirect_chain: (d) => `${_n(d.hops ?? (d.chain || []).length)} saltos: ${_urls(d.chain, 3)}`,
+  redirect_loop: (d) => `La cadena vuelve sobre sí misma: ${_urls(d.chain, 3)}`,
+  canonical_chain: (d) => `Cadena de canonicals: ${_urls(d.chain, 3)}`,
+  canonical_loop: (d) => `Bucle de canonicals: ${_urls(d.chain, 3)}`,
+  meta_refresh_redirect: (d) => (d.target ? `Redirige a ${d.target}` : ""),
+  js_redirect: (d) => (d.target ? `Redirige por JavaScript a ${d.target}` : ""),
+  soft_404: (d) => `Parece un error disfrazado: ${_reason(d.reason)}${d.similarity != null ? ` (similitud ${_dec(d.similarity)})` : ""}`,
+  stale_lastmod: (d) => `${_reason(d.reason)}${d.lastmod ? ` (lastmod declarado: ${String(d.lastmod).slice(0, 10)})` : ""}`,
+  link_orphan: (d) => _reason(d.reason),
+  excessive_click_depth: (d) =>
+    `A ${_n(d.click_depth)} clics de la portada (límite: ${_n(d.limit)}${d.is_business ? ", más estricto por ser sección de negocio" : ""})`,
+  no_contextual_inlinks: () =>
+    "Solo recibe enlaces de menús o listados; ninguna otra página la enlaza desde su texto",
+  authority_sink: (d) =>
+    `Acumula autoridad ${_dec(d.pagerank)} (la mediana del sitio es ${_dec(d.pagerank_p50)}) y no enlaza a nada desde su contenido.${d.template_fix ? ` ${d.template_fix}` : ""}`,
+  equity_leak: (d) =>
+    `Pierde el ${_pct(d.leak_ratio)} del peso de sus enlaces (${_dec(d.leaked_weight)} de ${_dec(d.total_weight)}): ${_n(d.leaked_edges)} enlaces rotos, redirigidos o nofollow`,
+  hierarchy_imbalance: (d) =>
+    `Solo el ${_pct(d.business_share)} de las páginas cercanas a la portada son de negocio (mínimo esperado: ${_pct(d.threshold)})`,
+  deep_pagination: (d) => (d.chain ? `Cadena de paginación: ${_urls(d.chain, 3)}` : ""),
+  crawl_trap_detected: (d) =>
+    `Patrón «${d.pattern}» — se cortó tras ver ${_n(d.urls_seen)} URLs del mismo molde`,
+  watchlist_check_failed: (d) =>
+    `${d.label ? `«${d.label}» — ` : ""}${(d.reasons || []).map(_reason).join("; ")}`,
+  in_sitemap_not_crawled: (d) => (d.lastmod ? `Declarada en el sitemap (lastmod ${String(d.lastmod).slice(0, 10)})` : "Declarada en el sitemap"),
+  orphan_not_in_crawl: (d) => (d.lastmod ? `El sitemap la declara (lastmod ${String(d.lastmod).slice(0, 10)}) pero navegando no se llega` : "Conocida por sitemap/GSC pero sin camino navegando"),
+  content_only_after_js: (d) =>
+    `El ${_pct(d.js_content_ratio)} del contenido solo existe tras ejecutar JS (${_n(d.rendered_word_count)} palabras renderizadas vs ${_n(d.raw_word_count)} en el HTML crudo)`,
+  image_missing_alt: (d) =>
+    d.missing_alt_count != null ? `${_n(d.missing_alt_count)} de ${_n(d.total_images ?? d.missing_alt_count)} imágenes sin alt` : "",
+  semantic_cannibalization: (d) =>
+    `Compite con ${d.dominant_url || "otra página"} (similitud ${_dec(d.cosine_similarity)}). Esta es la débil: consolidar, redirigir o diferenciar`,
+  passage_gap: (d) =>
+    `«${d.query}» — ${_n(d.impressions)} impresiones y ${_n(d.clicks)} clics, pero el mejor pasaje del sitio solo llega a ${_dec(d.best_similarity)} de similitud`,
+  buried_passage: (d) =>
+    `«${d.query}» — el pasaje que la responde (similitud ${_dec(d.similarity)}) está enterrado en la posición ${_n(d.chunk_position)} de la página${d.heading_path ? ` (sección ${d.heading_path})` : ""}`,
+  orphan_chunk: (d) =>
+    `${_n(d.orphan_chunks)} de sus ${_n(d.total_chunks)} pasajes no responden a ninguna búsqueda medida${d.approximate ? " (estimación)" : ""}`,
+  generic_anchor: (d) =>
+    `${_n(d.generic_inlinks)} enlaces con anchors vacíos de significado: ${(d.anchors || []).map((a) => `«${a}»`).join(", ")}${d.sources_sample && d.sources_sample.length ? ` — desde ${_urls(d.sources_sample, 1)}` : ""}`,
+  anchor_target_mismatch: (d) =>
+    `El anchor «${d.anchor}» apenas guarda relación con esta página (similitud ${_dec(d.similarity)}, ${_n(d.n_links)} enlaces)${d.sources_sample && d.sources_sample.length ? ` — desde ${_urls(d.sources_sample, 1)}` : ""}`,
+};
+
+// Claves internas que jamás aportan nada al usuario (ids, hashes…).
+const HIDDEN_KEYS = new Set([
+  "body_hash", "duplicate_urls", "segment_id", "cluster_id", "method",
+  "is_business", "sim_threshold", "mismatch_threshold", "orphan_threshold",
+  "watch_url", "hint",
+]);
+
+const GENERIC_LABELS = {
+  length: "longitud", min: "mínimo", max: "máximo", count: "nº",
+  chain: "cadena", hops: "saltos", target: "destino",
+  similarity: "similitud", threshold: "umbral", reason: "motivo",
+  word_count: "palabras", urls: "URLs", lastmod: "lastmod",
 };
 
 const _fmtVal = (v) => {
   if (v == null) return "—";
-  if (typeof v === "number") {
-    return Number.isInteger(v) ? v.toLocaleString("es") : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-  }
+  if (typeof v === "number") return Number.isInteger(v) ? _n(v) : _dec(v);
   if (typeof v === "boolean") return v ? "sí" : "no";
-  if (Array.isArray(v)) {
-    const shown = v.slice(0, 3).map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x)));
-    return shown.join(", ") + (v.length > 3 ? ` (+${v.length - 3})` : "");
-  }
+  if (Array.isArray(v)) return _urls(v.map(String), 3);
   if (typeof v === "object") return JSON.stringify(v);
-  const s = String(v);
-  return s.length > 90 ? s.slice(0, 90) + "…" : s;
+  return String(v);
 };
 
-/** Convierte el JSON de details en texto legible «clave: valor · …». */
-export const detailsToText = (details) => {
+/** Frase legible para los details de una incidencia. Si el tipo tiene
+ *  renderer propio se usa; si no, clave: valor traducido y sin ids. */
+export const detailsToText = (type, details) => {
   if (!details || typeof details !== "object") return "";
+  const renderer = DETAIL_RENDERERS[type];
+  if (renderer) {
+    try {
+      const out = renderer(details);
+      if (out) return out;
+    } catch { /* cae al genérico */ }
+  }
   return Object.entries(details)
-    .map(([k, v]) => `${DETAIL_LABELS[k] || k.replace(/_/g, " ")}: ${_fmtVal(v)}`)
+    .filter(([k]) => !HIDDEN_KEYS.has(k))
+    .map(([k, v]) => {
+      if (k === "reason" || k === "reasons") {
+        return Array.isArray(v) ? v.map(_reason).join("; ") : _reason(v);
+      }
+      return `${GENERIC_LABELS[k] || k.replace(/_/g, " ")}: ${_fmtVal(v)}`;
+    })
     .join(" · ");
 };

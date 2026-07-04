@@ -130,9 +130,8 @@ export default function IssuesView() {
                       <tr key={i.id}>
                         <td className="cell-url" title={i.url}>{i.url}</td>
                         <td><Severity level={i.severity} /></td>
-                        <td style={{ maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", fontSize: 12 }}
-                            title={detailsToText(i.details)}>
-                          {detailsToText(i.details)}
+                        <td style={{ maxWidth: 420, whiteSpace: "normal", fontSize: 12, lineHeight: 1.45 }}>
+                          {detailsToText(selected, i.details)}
                         </td>
                       </tr>
                     ))}

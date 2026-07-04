@@ -392,14 +392,11 @@ function UrlDrawer({ jobId, urlId, onClose }) {
             <div key={i.id} style={{ marginBottom: 8 }}>
               <div className="row">
                 <Severity level={i.severity} />
-                <b style={{ fontSize: 12.5 }} title={i.issue_type}>{issueLabel(i.issue_type)}</b>
+                <b style={{ fontSize: 12.5 }} title={`${i.issue_type} — ${issueInfo(i.issue_type)}`}>{issueLabel(i.issue_type)}</b>
                 {i.review_status && <span className="tag">{i.review_status}</span>}
               </div>
               <div className="proxy-tag" style={{ marginLeft: 2 }}>
-                {issueInfo(i.issue_type)}
-                {i.details && Object.keys(i.details).length > 0 && (
-                  <span className="mono"> — {detailsToText(i.details)}</span>
-                )}
+                {detailsToText(i.issue_type, i.details) || issueInfo(i.issue_type)}
               </div>
             </div>
           ))}
