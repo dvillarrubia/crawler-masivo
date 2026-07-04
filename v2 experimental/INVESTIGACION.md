@@ -99,27 +99,90 @@ Neo4j por cliente.** El multi-tenant real de este repo es:
 (client_id, yaml_text o JSON, updated_at)) editable desde la vista
 Configuración de la consola, igual que segmentos y watchlist. Alternativa
 file-based (`config/gliner/<client_id>.schema.yaml`) solo si se quiere
-versionado git del schema; rompe la convención "todo lo de cliente vive en DB
-y se edita en la consola". Decisión abierta (§5).
+versionado git del schema. Nota: el `clients.yaml` por el que pregunta el
+brief pertenece al ecosistema WebKnograph (contrato §6, conexiones
+PG-schema/Neo4j por cliente); si el POC vive aquí, su equivalente es
+`client_id` + tablas de cliente. Decisión abierta (§5).
 
 ---
 
-## 2. Estado real de Seontology / Neo4j
+## 2. Estado real de Seontology
 
-- `contrato_seontology_neo4j_postgres.md` **no existe en este repositorio**
-  (búsqueda global por nombre y por contenido "seontology"/"neo4j": cero
-  resultados en código; solo menciones en HTML de mockups de diseño).
-- No hay driver Neo4j en requirements, ni servicio en `docker-compose.yml`
-  (postgres, redis, api, crawler — nada más), ni nodos/relaciones/constraints
-  que auditar. No existe nodo entidad ni relación MENTIONS porque no existe
-  grafo alguno fuera del grafo de enlaces relacional (`links`, `arch_edges`).
-- **Conclusión: la recomendación por defecto del brief queda VALIDADA con la
-  forma más fuerte posible — el POC es 100 % Postgres por ausencia total de la
-  alternativa.** El "anexo de migración futura" debe escribirse contra el
-  contrato Seontology del OTRO repo si existe allí; desde este lado, las
-  garantías exportables al grafo futuro son: `url_hash` determinista como
-  clave de join, cero texto fuera de Postgres, y `entity_id` estable del
-  catálogo como identificador de nodo entidad.
+El contrato existe: `v2 experimental/contrato_seontology_neo4j_postgres.md`
+(**propuesta v1.0 del proyecto WebKnograph**, 2026-06-10). Es un diseño
+objetivo, no un sistema desplegado: en ESTE repo no hay driver Neo4j en
+requirements, ni servicio en `docker-compose.yml` (postgres, redis, api,
+crawler), ni constraint/índice alguno que auditar.
+
+### 2.1 Invariantes del contrato (lista)
+
+1. **Un solo espacio vectorial**: `gemini-embedding-001` a **768d** fijadas
+   (MRL), normalización L2 obligatoria a esa dimensión, `task_type` parte del
+   contrato (`RETRIEVAL_DOCUMENT` para lo almacenado, `RETRIEVAL_QUERY` en
+   runtime, `SEMANTIC_SIMILARITY` para comparaciones simétricas como
+   canibalización). Cambio de modelo/dimensión ⇒ re-embeber todo + `model_version`.
+2. **Cero duplicación**: cada dato tiene un dueño; el otro motor guarda solo
+   la referencia.
+3. **Unión lógica, no física**: sin FKs entre motores; la clave es `page_id`
+   = `sha1(normalize_url(url))[:16]`, resuelta en Python. `chunk_id =
+   {page_id}:{index:04d}`; `entity_id = wikidata_qid` o `local:{slug}` con
+   `is_linked=false`.
+4. **Python decide umbrales; el LLM solo escribe lenguaje.**
+5. **El agente no toca las bases**: solo tools de firma fija (§7 del contrato).
+6. **Orden de ingesta estricto**: Postgres primero, Neo4j siempre derivado;
+   upserts `MERGE` idempotentes; skip por `html_hash` (control de coste de
+   embeddings) y hash por chunk; Batch API en ingesta.
+7. **Nada de texto ni embeddings de chunk en el grafo** (única excepción: el
+   centroide 768d por página como propiedad derivada del nodo `Page`).
+8. Anti-patrones explícitos: segundo modelo/dimensión, texto en el grafo,
+   joins cross-DB en runtime, escribir en Neo4j antes que en PG, borrar
+   comunidades antiguas (se archivan).
+
+### 2.2 Auditoría de implementación real
+
+**Nada de la ontología (6 nodos, 12 relaciones) está implementado hoy**: no
+existe instancia Neo4j, ni nodo `Entity`, ni relación `MENTIONS`, ni
+constraints. Todo es especificación.
+
+Lo relevante para el POC es que **el contrato ya anticipa TODO lo que este
+pipeline produce, sin necesidad de extenderlo**:
+
+- Nodo `Entity` (`entity_id`, `name`, `wikidata_qid`, `entity_type`,
+  `is_linked`) y relaciones `MENTIONS` (Page→Entity: `frequency`,
+  `confidence`, `source` — con **`gliner` ya contemplado como source**),
+  `SAME_AS`, `SUBCLASS_OF/PART_OF`.
+- Nodo `Query` + `COVERS` (Page→Query) para el cruce entidad-query.
+- `funnel_stage` es propiedad del nodo `Page` en el contrato: la
+  clasificación funnel del POC tiene destino declarado.
+
+### 2.3 Conflictos contrato ↔ este repo (hay que decidirlos, §5)
+
+| Tema | Contrato WebKnograph | Este repo (crawler-masivo v2) |
+|---|---|---|
+| Clave de página | `page_id` = sha1(url normalizada)[:16]; normalización fija (lowercase, sin trailing slash, sin utm, sin fragmento) | `url_hash` = sha256 completo (64), normalización CONFIGURABLE por job + `normalization_fingerprint` que gatea comparaciones |
+| Espacio vectorial | 768d único en todo el ecosistema | 1024d en todas las tablas (`semantic_pages/chunks`, `query_embeddings`, centroides) — el repo ya incumple el contrato si se considera parte del ecosistema |
+| `model_version` en tablas con vectores | Obligatorio (`gemini-embedding-001@768`) | No existe en ninguna tabla actual |
+| GSC | `gsc_metrics` serie diaria (page_id, query, date) | Agregado por run (`gsc_job_data`, `gsc_query_data`), sin serie temporal |
+| Multi-tenancy | Schema PG por cliente + contenedor Neo4j por cliente + `clients.yaml` | Un schema único, `client_id` por job, credenciales en tablas |
+| Control de coste re-embedding | Skip por `html_hash` + hash por chunk | `urls.body_hash` ya existe (equivalente directo al html_hash del contrato); no hay hash por chunk |
+
+Ambas claves de página son deterministas desde la URL ⇒ **`page_id` es
+derivable desde nuestros datos** (una función de mapeo, sin tabla de mapeo,
+como quiere el contrato). Pero solo si la normalización del job coincide con
+la del contrato: con `strip_common_tracking=false` (nuestro default) las URLs
+con utm producirían page_id distintos. La migración exige fijar una política.
+
+### 2.4 Conclusión
+
+La recomendación por defecto del brief queda **validada**: el POC se hace
+**100 % en Postgres** (no hay grafo que poblar) y la migración futura se
+documenta como anexo (al final de este informe) contra el contrato v1.0. El
+contrato NO necesita extensión formal para las aristas página-entidad — ya
+las define. Lo que sí conviene adoptar DESDE YA en el POC para que la
+migración sea un volcado y no una reescritura: (a) convención de `entity_id`
+del contrato (`wikidata_qid` | `local:{slug}` + `is_linked`), (b) columna
+`model_version` en toda tabla nueva con vectores, (c) `source='gliner'` y
+`confidence` en las menciones con los nombres del contrato.
 
 ---
 
@@ -170,14 +233,23 @@ y se edita en la consola". Decisión abierta (§5).
   vectores almacenados). **Ninguna tabla actual lleva columna de
   modelo/dimensión** — la invariante del brief ("columna de versión de modelo
   en toda tabla con vectores") es NUEVA y solo la cumpliría `entity_catalog`.
-- El brief propone 768d para el catálogo. Conviven sin peligro si jamás se
-  comparan (tablas separadas + columna `embedding_model`), **pero recomiendo
-  1024d reutilizando el backend existente** (`embed_queries`/`embed_documents`
-  ya implementados, batching + backoff + L2-norm resueltos, misma cuenta
-  Gemini por cliente vía `gemini_accounts`): menos código nuevo, un solo
-  espacio vectorial en el sistema, y abre la puerta a comparar entidad↔chunk
-  con los vectores T11 ya persistidos. El ahorro de 768 vs 1024 es marginal a
-  escala de catálogo. Decisión abierta (§5).
+- El brief propone 768d para el catálogo y **el contrato Seontology (§2) fija
+  768d como espacio único del ecosistema WebKnograph** — lo que convierte los
+  1024d de este repo en una divergencia preexistente. Las dos opciones
+  honestas:
+  - **(A) 768d conforme al contrato** (mi recomendación tras leerlo): las
+    tablas `gliner_*`/`entity_catalog` nacen ya en el espacio del ecosistema
+    destino, con `model_version='gemini-embedding-001@768'`, L2 explícita y
+    task_type del contrato (`SEMANTIC_SIMILARITY` para la comparación
+    simétrica span↔catálogo). Coste: parámetro `output_dimensionality`
+    distinto en el backend (una línea) y NO poder comparar directamente con
+    los vectores 1024d existentes (T11/T19) — que el contrato prohibiría
+    igualmente como "segundo espacio".
+  - **(B) 1024d reutilizando el backend tal cual**: menos fricción local y
+    comparabilidad con `semantic_chunks`, pero consolida la divergencia con
+    el contrato y obligaría a re-embeber el catálogo al migrar.
+  En ambos casos: tablas separadas + columna `model_version`, y jamás una
+  comparación entre espacios. Decisión abierta (§5).
 
 ### 3.4 Clasificación funnel
 
@@ -271,9 +343,11 @@ ordenar por ese campo sin cambios de backend.
    completa con la auditoría de aquel lado.
 2. **Punto de enganche**: ¿apruebas batch independiente por `job_id` (opción
    d) para el POC, con evolución a endpoint+background (opción c) en producto?
-3. **Espacio vectorial del catálogo**: ¿768d como dice el brief, o 1024d
-   reutilizando el backend Gemini existente (mi recomendación, §3.3)? En ambos
-   casos `entity_catalog` lleva `embedding_model` + dimensión.
+3. **Espacio vectorial del catálogo**: ¿768d conforme al contrato Seontology
+   (mi recomendación tras leerlo, opción A de §3.3) o 1024d como el resto de
+   este repo (opción B)? Pregunta ligada: ¿el 1024d preexistente de este repo
+   se considera divergencia a corregir algún día en WebKnograph, o los dos
+   ecosistemas se declaran espacios separados de forma permanente?
 4. **`schema.yaml` por cliente**: ¿tabla Postgres editable desde la consola
    (convención de la casa) o fichero YAML en el repo (versionado git)?
 5. **Zona gris con LLM**: ¿OpenRouter como pide el brief (dependencia nueva,
@@ -292,6 +366,31 @@ ordenar por ese campo sin cambios de backend.
 9. **Gold set**: las 50 URLs + 200 queries las anota un humano (tú u otro).
    ¿Quién y con qué herramienta (Excel simple vs Label Studio)? El gate
    F1 ≥ 0,75 en resolubles queda como está salvo que digas otra cosa.
+
+---
+
+## Anexo: migración futura a Neo4j (contra el contrato v1.0 de WebKnograph)
+
+El POC es 100 % Postgres, pero sus tablas se diseñan para que la migración
+sea un volcado idempotente (pasos 5-8 del pipeline del contrato), no una
+reescritura:
+
+| Dato del POC (Postgres) | Destino en el grafo (contrato §3) | Notas |
+|---|---|---|
+| `entity_catalog.entity_id` | Nodo `Entity` (`entity_id`, `name`, `entity_type`, `wikidata_qid`, `is_linked`) | El POC adopta desde el día 1 la convención `wikidata_qid` \| `local:{slug}` + `is_linked=false`; el entity linking a QIDs es un paso posterior que solo cambia el flag. |
+| `gliner_page_entities` (spans agregados por URL) | Relación `MENTIONS` (Page→Entity: `frequency`, `confidence`, `source='gliner'`) | Los nombres de propiedades del contrato se usan tal cual en las columnas del POC. Los spans (texto, offsets) NO migran: texto = Postgres. |
+| `gliner_query_entities` + `gsc_query_data` | Nodo `Query` + relación `COVERS` (Page→Query: `position`, `clicks_ref`) | `clicks_ref` es referencia temporal; la métrica vive en PG como exige el contrato. |
+| Label funnel de `gliner_page_labels` | Propiedad `funnel_stage` del nodo `Page` | Ya prevista en el contrato; vocabulario TOFU/MOFU/BOFU a mapear con el suyo (`transaccional`… — fijar equivalencia al migrar). |
+| Label tipo_pagina | Sin destino declarado en el contrato | Único punto que requeriría extensión formal (propiedad `page_type` en `Page`) — o quedarse en PG. |
+| Clave de join | `page_id` = sha1(normalized)[:16] | Derivable desde nuestra URL con una función de mapeo (sin tablas de mapeo). Requiere congelar la política de normalización (§2.3): recomendación = migrar solo jobs cuyo fingerprint coincida con la normalización del contrato (lowercase, sin trailing slash, sin tracking, sin fragmento) o recalcular page_id desde la URL cruda con esa política fija. |
+| Embeddings del catálogo | NO migran (anti-patrón §8.1 del contrato) | Solo el centroide por página (768d) sería propiedad del nodo `Page`, derivada de PG. |
+
+Garantías que el POC ya respeta del contrato: PG primero y grafo derivado,
+cero texto fuera de PG, umbrales en código versionado (calibrados contra gold
+set, no en prompts), LLM solo para juicio lingüístico (zona gris y naming de
+clusters), `model_version` en tablas con vectores.
+
+---
 
 **STOP.** Conforme a la regla de oro del brief, no se escribe código de fase 1
 hasta tu aprobación explícita de este informe y respuesta a las decisiones.
