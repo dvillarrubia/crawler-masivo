@@ -1,0 +1,112 @@
+/* ============================================================
+   LIN3S Slides — shared styles for 16:9 slide artifacts
+   Each slide HTML file is 1920×1080 inside; the host scales it.
+   ============================================================ */
+
+@import url("../colors_and_type.css");
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+body { background: #2a2a2a; }
+
+/* Each slide HTML opens as a standalone preview: render a single
+   1920x1080 stage, letterboxed-to-fit via a CSS scale anchored at top-left. */
+.slide {
+  width: 1920px;
+  height: 1080px;
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+  background: var(--bg-1);
+  padding: 160px 96px 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 40px;
+}
+.slide.dark    { background: #101010; color: #ffffff; }
+.slide.darker  { background: #0a0a0a; color: #ffffff; }
+.slide.gray    { background: #F0F0F0; color: #101010; }
+
+/* Fit standalone slide into viewport */
+.fit-stage {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: #2a2a2a;
+}
+.fit-stage > .slide {
+  transform-origin: center center;
+}
+
+/* Header chrome (wordmark top-left, slide n° top-right) */
+.slide-chrome {
+  position: absolute;
+  top: 64px; left: 96px; right: 96px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; letter-spacing: 0.04em;
+  color: inherit; opacity: 0.85;
+}
+.slide-chrome .wordmark {
+  font-weight: 700; font-size: 18px; letter-spacing: -0.02em;
+}
+.slide-chrome .pageno {
+  font-variant-numeric: tabular-nums; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px;
+}
+
+/* Footer chrome */
+.slide-footer {
+  position: absolute;
+  bottom: 64px; left: 96px; right: 96px;
+  display: flex; align-items: end; justify-content: space-between;
+  font-size: 14px; color: inherit; opacity: 0.6;
+}
+
+/* Brand glyph: three lines */
+.three-lines { display: inline-flex; flex-direction: column; gap: 8px; }
+.three-lines i { display: block; height: 6px; background: currentColor; }
+.three-lines.sm i { height: 4px; }
+.three-lines i:nth-child(1), .three-lines i:nth-child(2), .three-lines i:nth-child(3) { width: 64px; }
+.three-lines.lg i { width: 120px; height: 8px; }
+
+/* Type primitives */
+.eyebrow {
+  font-size: 18px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  opacity: 0.7;
+}
+.display-xl {
+  font-size: 180px; font-weight: 600; line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+.display-lg {
+  font-size: 128px; font-weight: 600; line-height: 1; letter-spacing: -0.03em;
+}
+.display-md {
+  font-size: 96px; font-weight: 600; line-height: 1.02; letter-spacing: -0.025em;
+}
+.display-sm {
+  font-size: 72px; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em;
+}
+.h-title { font-size: 64px; font-weight: 600; line-height: 1.08; letter-spacing: -0.02em; }
+.h-2 { font-size: 48px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+.h-3 { font-size: 36px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+.lede-xl { font-size: 32px; line-height: 1.4; max-width: 28ch; font-weight: 400; }
+.lede    { font-size: 24px; line-height: 1.5; max-width: 36ch; font-weight: 400; }
+.body-l  { font-size: 20px; line-height: 1.55; max-width: 48ch; }
+
+.serif-italic {
+  font-family: var(--font-display);
+  font-style: italic; font-weight: 500;
+}
+
+/* Stagger helpers */
+.stack-6  > * + * { margin-top: 6px;  }
+.stack-12 > * + * { margin-top: 12px; }
+.stack-16 > * + * { margin-top: 16px; }
+.stack-24 > * + * { margin-top: 24px; }
+.stack-32 > * + * { margin-top: 32px; }
+.stack-48 > * + * { margin-top: 48px; }
+.stack-64 > * + * { margin-top: 64px; }

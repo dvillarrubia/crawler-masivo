@@ -1,0 +1,2196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="_ds/lin3s-design-system-5a3374a7-e6e2-43fb-afaa-ede5c8e49d46/colors_and_type.css">
+<script src="_ds/lin3s-design-system-5a3374a7-e6e2-43fb-afaa-ede5c8e49d46/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;background:#fff;}
+  *{box-sizing:border-box;}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:#D6D6D6;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  @media (max-width: 820px){
+    main [style*="padding: 32px"]{padding:16px!important;}
+    header{padding:0 16px!important;}
+    header h1{font-size:17px!important;white-space:normal!important;line-height:1.15!important;}
+    /* collapse KPI + multi-column layout grids */
+    main [style*="repeat(4, 1fr)"]{grid-template-columns:repeat(2,1fr)!important;}
+    main [style*="repeat(3, 1fr)"]{grid-template-columns:1fr!important;}
+    main [style*="1.6fr 1fr"],
+    main [style*="1.5fr 1fr"],
+    main [style*="1.4fr 1fr"],
+    main [style*="1.3fr 1fr"],
+    main [style*="1.2fr 1fr"],
+    main [style*="1fr 1fr"]{grid-template-columns:1fr!important;}
+    /* tables: keep columns, scroll horizontally inside their card */
+    main [style*="border: 1px solid #E5E5E5"]{overflow-x:auto;}
+    main [style*="0.7fr"],
+    main [style*="0.8fr"],
+    main [style*="0.9fr"],
+    main [style*="2.4fr"],
+    main [style*="2.5fr"],
+    main [style*="1fr 2fr"],
+    main [style*="auto auto"]{min-width:560px!important;}
+  }
+  @media (max-width: 560px){
+    header h1{font-size:15px!important;}
+    header > div:last-child > div:first-child{display:none!important;}
+    header button[data-cta]{padding:9px 12px!important;font-size:13px!important;}
+  }
+</style>
+</helmet>
+<div style="display:flex;height:100vh;width:100%;font-family:var(--font-sans);color:#101010;overflow:hidden;">
+
+  <!-- ============ SIDEBAR ============ -->
+  <sc-if value="{{ showBackdrop }}" hint-placeholder-val="">
+    <div onClick="{{ closeNav }}" style="position:fixed;inset:0;background:rgba(16,16,16,0.45);z-index:55;"></div>
+  </sc-if>
+  <aside style="{{ asideStyle }}">
+    <div style="padding:26px 24px 22px;border-bottom:1px solid #1f1f1f;display:flex;align-items:baseline;gap:10px;">
+      <span style="font-weight:700;font-size:22px;letter-spacing:-0.04em;">LIN3S</span>
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#777;border-left:1px solid #2A2A2A;padding-left:10px;">Crawler</span>
+    </div>
+
+    <!-- project selector -->
+    <div style="padding:16px 20px;border-bottom:1px solid #1f1f1f;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#666;margin-bottom:8px;">Proyecto</div>
+      <button onClick="{{ cycleProject }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:#1A1A1A;border:1px solid #2A2A2A;color:#fff;padding:11px 14px;font:500 14px var(--font-sans);cursor:pointer;text-align:left;" style-hover="background:#222;">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ project }}</span>
+        <span style="color:#777;font-size:11px;">▾</span>
+      </button>
+    </div>
+
+    <!-- nav -->
+    <nav style="flex:1;overflow-y:auto;padding:14px 12px 24px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#666;padding:8px 12px 6px;">Rastreo</div>
+      <sc-for list="{{ navCrawl }}" as="n" hint-placeholder-count="3">
+        <sc-if value="{{ n.active }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;background:#1f1f1f;border-left:2px solid #fff;margin-bottom:1px;">
+            <span style="font:600 11px var(--font-mono);color:#fff;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#fff;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ n.idle }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-left:2px solid transparent;margin-bottom:1px;" style-hover="background:#181818;">
+            <span style="font:600 11px var(--font-mono);color:#666;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#B3B3B3;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+      </sc-for>
+
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#666;padding:18px 12px 6px;">Análisis</div>
+      <sc-for list="{{ navAnalysis }}" as="n" hint-placeholder-count="6">
+        <sc-if value="{{ n.active }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;background:#1f1f1f;border-left:2px solid #fff;margin-bottom:1px;">
+            <span style="font:600 11px var(--font-mono);color:#fff;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#fff;flex:1;">{{ n.label }}</span>
+            <sc-if value="{{ n.badge }}" hint-placeholder-val="moat"><span style="font:600 9px var(--font-mono);letter-spacing:0.1em;text-transform:uppercase;background:#B12B29;color:#fff;padding:2px 5px;">{{ n.badge }}</span></sc-if>
+          </div>
+        </sc-if>
+        <sc-if value="{{ n.idle }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-left:2px solid transparent;margin-bottom:1px;" style-hover="background:#181818;">
+            <span style="font:600 11px var(--font-mono);color:#666;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#B3B3B3;flex:1;">{{ n.label }}</span>
+            <sc-if value="{{ n.badge }}" hint-placeholder-val="moat"><span style="font:600 9px var(--font-mono);letter-spacing:0.1em;text-transform:uppercase;background:#B12B29;color:#fff;padding:2px 5px;">{{ n.badge }}</span></sc-if>
+          </div>
+        </sc-if>
+      </sc-for>
+
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#666;padding:18px 12px 6px;">Plataforma</div>
+      <sc-for list="{{ navPlatform }}" as="n" hint-placeholder-count="1">
+        <sc-if value="{{ n.active }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;background:#1f1f1f;border-left:2px solid #fff;margin-bottom:1px;">
+            <span style="font:600 11px var(--font-mono);color:#fff;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#fff;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ n.idle }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-left:2px solid transparent;margin-bottom:1px;" style-hover="background:#181818;">
+            <span style="font:600 11px var(--font-mono);color:#666;width:18px;font-variant-numeric:tabular-nums;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#B3B3B3;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+      </sc-for>
+
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#666;padding:18px 12px 6px;">Arquitectura</div>
+      <sc-for list="{{ navArch }}" as="n" hint-placeholder-count="2">
+        <sc-if value="{{ n.active }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;background:#1f1f1f;border-left:2px solid #fff;margin-bottom:1px;">
+            <span style="font:600 10px var(--font-mono);color:#fff;width:18px;letter-spacing:0.04em;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#fff;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ n.idle }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-left:2px solid transparent;margin-bottom:1px;" style-hover="background:#181818;">
+            <span style="font:600 10px var(--font-mono);color:#666;width:18px;letter-spacing:0.04em;">{{ n.layer }}</span>
+            <span style="font-size:14px;font-weight:500;color:#B3B3B3;flex:1;">{{ n.label }}</span>
+          </div>
+        </sc-if>
+      </sc-for>
+    </nav>
+
+    <div style="padding:14px 20px;border-top:1px solid #1f1f1f;display:flex;align-items:center;gap:10px;">
+      <div style="width:30px;height:30px;border-radius:50%;background:#333;display:grid;place-items:center;font-size:12px;font-weight:600;">JM</div>
+      <div style="flex:1;line-height:1.3;"><div style="font-size:13px;font-weight:500;">Jon M.</div><div style="font-size:11px;color:#777;">SEO Lead</div></div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div style="flex:1;display:flex;flex-direction:column;height:100%;min-width:0;background:#fff;">
+
+    <!-- topbar -->
+    <header style="height:68px;flex:0 0 68px;border-bottom:1px solid #E5E5E5;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:rgba(255,255,255,0.97);">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;">
+        <sc-if value="{{ isMobile }}" hint-placeholder-val="">
+          <button onClick="{{ toggleNav }}" aria-label="Menú" style="background:none;border:0;padding:6px;margin-left:-6px;cursor:pointer;display:flex;flex-direction:column;gap:4px;flex:0 0 auto;">
+            <span style="width:20px;height:2px;background:#101010;display:block;"></span>
+            <span style="width:20px;height:2px;background:#101010;display:block;"></span>
+            <span style="width:20px;height:2px;background:#101010;display:block;"></span>
+          </button>
+        </sc-if>
+        <span style="font:600 11px var(--font-mono);color:#999;font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ viewKicker }}</span>
+        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">{{ viewTitle }}</h1>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;flex:0 0 auto;padding-left:16px;">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#666;padding-right:14px;border-right:1px solid #E5E5E5;">
+          <span style="width:7px;height:7px;border-radius:50%;background:#1F8A5B;display:inline-block;"></span>
+          Último rastreo {{ lastCrawl }}
+        </div>
+        <button data-cta="1" onClick="{{ openModal }}" style="display:inline-flex;align-items:center;gap:9px;background:#101010;color:#fff;border:0;padding:11px 18px;font:500 14px var(--font-sans);cursor:pointer;white-space:nowrap;" style-hover="background:#333;">
+          <span style="font-size:15px;line-height:1;">+</span> Nuevo rastreo
+        </button>
+      </div>
+    </header>
+
+    <!-- scroll content -->
+    <main style="flex:1;overflow-y:auto;background:#fff;">
+
+      <!-- ===== OVERVIEW ===== -->
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <!-- KPI row -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:32px;">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:44px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="display:flex;align-items:center;gap:7px;margin-top:12px;font-size:13px;">
+                  <span style="font-weight:600;color:{{ k.deltaColor }};font-variant-numeric:tabular-nums;">{{ k.delta }}</span>
+                  <span style="color:#999;">{{ k.sub }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:24px;margin-bottom:24px;">
+            <!-- status distribution -->
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:24px;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Distribución por código de estado</h3>
+                <span style="font-size:13px;color:#999;font-variant-numeric:tabular-nums;">248.391 URLs</span>
+              </div>
+              <sc-for list="{{ statusBars }}" as="s" hint-placeholder-count="5">
+                <div style="margin-bottom:18px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;">
+                    <span style="font-weight:500;">{{ s.label }}</span>
+                    <span style="color:#666;font-variant-numeric:tabular-nums;">{{ s.count }} · {{ s.pct }}</span>
+                  </div>
+                  <div style="height:10px;background:#F0F0F0;width:100%;">
+                    <div style="height:100%;background:{{ s.color }};width:{{ s.w }};"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- click depth -->
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 6px;">Profundidad de clic</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">Distancia desde la home</p>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;align-items:end;height:170px;">
+                <sc-for list="{{ depthBars }}" as="d" hint-placeholder-count="7">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:end;">
+                    <span style="font-size:11px;color:#666;font-variant-numeric:tabular-nums;">{{ d.count }}</span>
+                    <div style="width:100%;background:{{ d.color }};height:{{ d.h }};"></div>
+                    <span style="font-size:12px;color:#999;font-weight:500;">{{ d.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+            <!-- top issues -->
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;justify-content:space-between;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Incidencias prioritarias</h3>
+                <span onClick="{{ goTechnical }}" style="font-size:13px;color:#101010;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">Ver todas</span>
+              </div>
+              <sc-for list="{{ topIssues }}" as="i" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:14px;padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                  <span style="width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:{{ i.sevColor }};"></span>
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-size:14px;font-weight:500;">{{ i.title }}</div>
+                    <div style="font-size:12px;color:#999;">{{ i.layer }}</div>
+                  </div>
+                  <span style="font:600 15px var(--font-sans);font-variant-numeric:tabular-nums;">{{ i.count }}</span>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- recent runs -->
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Rastreos recientes</h3>
+              </div>
+              <sc-for list="{{ recentRuns }}" as="r" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:14px;padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;">{{ r.date }}</div>
+                    <div style="font-size:12px;color:#999;">{{ r.trigger }}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:13px;color:#666;font-variant-numeric:tabular-nums;">{{ r.pages }} URLs</div>
+                    <div style="font-size:12px;color:{{ r.statusColor }};font-weight:500;">{{ r.status }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== LOGS (moat) ===== -->
+      <sc-if value="{{ isLogs }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#B12B29;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">La verdad empírica. Ingesta sin muestreo de cada petición HTTP desde el CDN — lo único que los crawlers no ven. <strong>100% Python determinista</strong>, particionado por fecha, unido al crawl por <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">url_hash</code>.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:28px;">
+            <sc-for list="{{ logKpis }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:13px;font-weight:500;color:{{ k.deltaColor }};">{{ k.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-bottom:24px;">
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Fuga de crawl budget</h3>
+                <span style="font:600 14px var(--font-sans);color:#B12B29;font-variant-numeric:tabular-nums;">31% desperdiciado</span>
+              </div>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">Hits de bot en URLs que no deberían rastrearse</p>
+              <sc-for list="{{ budgetLeak }}" as="s" hint-placeholder-count="5">
+                <div style="margin-bottom:18px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;">
+                    <span style="font-weight:500;">{{ s.label }}</span>
+                    <span style="color:#666;font-variant-numeric:tabular-nums;">{{ s.count }} · {{ s.pct }}</span>
+                  </div>
+                  <div style="height:10px;background:#F0F0F0;width:100%;"><div style="height:100%;background:{{ s.color }};width:{{ s.w }};"></div></div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Bots de IA</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 22px;">Separar entrenamiento de fetch en vivo</p>
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:14px;">Entrenamiento</div>
+              <sc-for list="{{ aiTraining }}" as="b" hint-placeholder-count="4">
+                <div style="margin-bottom:13px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;"><span style="font-weight:500;font-family:var(--font-mono);">{{ b.bot }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ b.hits }}</span></div>
+                  <div style="height:8px;background:#F0F0F0;"><div style="height:100%;background:#102F47;width:{{ b.w }};"></div></div>
+                </div>
+              </sc-for>
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin:22px 0 14px;">Fetch en vivo</div>
+              <sc-for list="{{ aiLive }}" as="b" hint-placeholder-count="3">
+                <div style="margin-bottom:13px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;"><span style="font-weight:500;font-family:var(--font-mono);">{{ b.bot }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ b.hits }}</span></div>
+                  <div style="height:8px;background:#F0F0F0;"><div style="height:100%;background:#729AB9;width:{{ b.w }};"></div></div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Patrón de rastreo por directorio</h3></div>
+            <div style="display:grid;grid-template-columns:1.6fr 0.8fr 2fr 0.9fr;gap:24px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Directorio</span><span style="text-align:right;">Hits</span><span>Cuota</span><span style="text-align:right;">Señal</span>
+            </div>
+            <sc-for list="{{ botDirs }}" as="d" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:1.6fr 0.8fr 2fr 0.9fr;gap:24px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);">{{ d.dir }}</span>
+                <span style="font-size:14px;text-align:right;font-variant-numeric:tabular-nums;color:#444;">{{ d.hits }}</span>
+                <span style="display:flex;align-items:center;gap:10px;"><span style="flex:1;height:8px;background:#F0F0F0;"><span style="display:block;height:100%;background:#102F47;width:{{ d.w }};"></span></span><span style="font-size:12px;color:#999;width:32px;font-variant-numeric:tabular-nums;">{{ d.share }}</span></span>
+                <span style="font-size:13px;text-align:right;color:#666;">{{ d.trend }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== INRANK ===== -->
+      <sc-if value="{{ isInrank }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">PageRank interno ponderado sobre el grafo aislado del dominio — la capa Neo4j. Modela dilución por densidad de enlaces, <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">nofollow</code> como diluyente y decay en redirecciones. Calculado con GDS.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:28px;">
+            <sc-for list="{{ inrankStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Páginas por Inrank</h3></div>
+              <sc-for list="{{ inrankTop }}" as="p" hint-placeholder-count="5">
+                <div onClick="{{ p.open }}" style="padding:16px 26px;border-bottom:1px solid #F0F0F0;cursor:pointer;" style-hover="background:#FAFAFA;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:9px;">
+                    <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ p.url }}</span>
+                    <span style="font:600 16px var(--font-sans);font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ p.inrank }}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="flex:1;height:8px;background:#F0F0F0;"><div style="height:100%;background:#102F47;width:{{ p.bar }};"></div></div>
+                    <span style="font-size:12px;color:#999;font-variant-numeric:tabular-nums;width:120px;text-align:right;">{{ p.inlinks }} entrantes</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Infra-enlazadas de alto rendimiento</h3>
+                <p style="font-size:13px;color:#999;margin:6px 0 0;">Mucho tráfico, poco Inrank — oportunidad de enlazado interno</p>
+              </div>
+              <sc-for list="{{ underlinked }}" as="u" hint-placeholder-count="3">
+                <div onClick="{{ u.open }}" style="padding:16px 26px;border-bottom:1px solid #F0F0F0;cursor:pointer;" style-hover="background:#FAFAFA;">
+                  <div style="font-size:14px;font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ u.url }}</div>
+                  <div style="display:flex;gap:18px;margin-top:8px;font-size:12px;color:#666;font-variant-numeric:tabular-nums;">
+                    <span>Inrank <strong style="color:#B12B29;">{{ u.inrank }}</strong></span>
+                    <span>{{ u.clicks }} clics/mes</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== TECHNICAL ===== -->
+      <sc-if value="{{ isTechnical }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;gap:10px;margin-bottom:26px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:500;padding:8px 14px;background:#101010;color:#fff;">Todas · 30.804</span>
+            <span style="font-size:13px;font-weight:500;padding:8px 14px;border:1px solid #D6D6D6;cursor:pointer;" style-hover="background:#F0F0F0;">Alta · 30.165</span>
+            <span style="font-size:13px;font-weight:500;padding:8px 14px;border:1px solid #D6D6D6;cursor:pointer;" style-hover="background:#F0F0F0;">Media · 8.992</span>
+            <span style="font-size:13px;font-weight:500;padding:8px 14px;border:1px solid #D6D6D6;cursor:pointer;" style-hover="background:#F0F0F0;">Baja · 583</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:24px;">
+            <sc-for list="{{ techGroups }}" as="g" hint-placeholder-count="3">
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:18px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;background:#FAFAFA;">
+                  <span style="font:600 11px var(--font-mono);color:#999;">{{ g.layer }}</span>
+                  <h3 style="font-size:17px;font-weight:600;letter-spacing:-0.01em;margin:0;">{{ g.name }}</h3>
+                </div>
+                <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
+                  <div style="display:grid;grid-template-columns:1fr auto auto;gap:24px;align-items:center;padding:15px 26px;border-bottom:1px solid #F0F0F0;">
+                    <span style="font-size:14px;font-weight:500;">{{ r.check }}</span>
+                    <span style="font:600 15px var(--font-sans);font-variant-numeric:tabular-nums;text-align:right;width:90px;">{{ r.count }}</span>
+                    <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#666;width:74px;"><span style="width:8px;height:8px;border-radius:50%;background:{{ r.sevColor }};"></span>{{ r.sev }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CROSS-ANALYSIS ===== -->
+      <sc-if value="{{ isCross }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="padding:20px 26px;border-bottom:1px solid #E5E5E5;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:10px;">Pregunta de negocio</div>
+              <div style="font-size:18px;font-weight:500;line-height:1.4;">Páginas indexables, sin errores, cercanas a la home, con <strong>0 visitas</strong> y <strong>0 hits de bot</strong>.</div>
+            </div>
+            <div style="padding:16px 26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="font-size:12px;color:#999;margin-right:4px;">Une por <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">url_hash</code>:</span>
+              <sc-for list="{{ crossSources }}" as="s" hint-placeholder-count="5">
+                <span style="display:inline-flex;align-items:center;gap:8px;font-size:13px;font-family:var(--font-mono);border:1px solid #D6D6D6;padding:6px 11px;"><span style="font-weight:500;">{{ s.name }}</span><span style="color:#999;font-size:11px;">{{ s.count }}</span></span>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;">
+            <div style="padding:18px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;justify-content:space-between;">
+              <h3 style="font-size:17px;font-weight:600;margin:0;">Resultado · 412 URLs</h3>
+              <span style="font-size:13px;color:#101010;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">Exportar · MCP query_pages</span>
+            </div>
+            <div style="display:grid;grid-template-columns:2.5fr 0.7fr 0.7fr 0.8fr 0.8fr;gap:20px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>URL</span><span style="text-align:right;">Depth</span><span style="text-align:right;">Inrank</span><span style="text-align:right;">Clics</span><span style="text-align:right;">Hits bot</span>
+            </div>
+            <sc-for list="{{ crossResult }}" as="r" hint-placeholder-count="5">
+              <div onClick="{{ r.open }}" style="display:grid;grid-template-columns:2.5fr 0.7fr 0.7fr 0.8fr 0.8fr;gap:20px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;font-variant-numeric:tabular-nums;cursor:pointer;" style-hover="background:#FAFAFA;">
+                <span style="font-size:14px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.url }}</span>
+                <span style="font-size:14px;text-align:right;color:#444;">{{ r.depth }}</span>
+                <span style="font-size:14px;text-align:right;color:#444;">{{ r.inrank }}</span>
+                <span style="font-size:14px;text-align:right;color:#B12B29;font-weight:500;">{{ r.clicks }}</span>
+                <span style="font-size:14px;text-align:right;color:#B12B29;font-weight:500;">{{ r.hits }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== EXPLORADOR DE DATOS ===== -->
+      <sc-if value="{{ isExplorer }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px 32px 0;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:22px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Todas las URLs con todos sus campos en una sola rejilla. Filtra por patrón, ordena por cualquier columna y cruza señales de crawl, logs, GSC y GA4 para encontrar patrones. Pincha una fila para ver su ficha completa.</p>
+          </div>
+
+          <!-- toolbar -->
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:9px;border:1px solid #D6D6D6;padding:0 14px;flex:1;min-width:240px;height:42px;">
+              <span style="color:#999;font-size:15px;">⌕</span>
+              <input value="{{ exQuery }}" onInput="{{ onExSearch }}" placeholder="Filtrar por URL — p. ej. /producto/" style="border:0;outline:none;flex:1;font:400 14px var(--font-sans);color:#101010;background:transparent;height:100%;" />
+            </div>
+            <button style="height:42px;font-size:13px;font-weight:500;border:1px solid #D6D6D6;background:#fff;padding:0 16px;cursor:pointer;white-space:nowrap;" style-hover="background:#F0F0F0;">Columnas (15)</button>
+            <button style="height:42px;font-size:13px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:0 16px;cursor:pointer;white-space:nowrap;" style-hover="background:#333;">Exportar CSV</button>
+          </div>
+
+          <!-- filter chips -->
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:16px;flex-wrap:wrap;">
+            <sc-for list="{{ exFilterChips }}" as="f" hint-placeholder-count="8">
+              <sc-if value="{{ f.active }}" hint-placeholder-val="{{ true }}">
+                <span onClick="{{ f.go }}" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:7px 13px;cursor:pointer;">{{ f.label }}<span style="font-size:11px;color:#B3B3B3;font-variant-numeric:tabular-nums;">{{ f.count }}</span></span>
+              </sc-if>
+              <sc-if value="{{ f.idle }}" hint-placeholder-val="{{ true }}">
+                <span onClick="{{ f.go }}" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;border:1px solid #D6D6D6;color:#444;padding:7px 13px;cursor:pointer;" style-hover="border-color:#101010;">{{ f.label }}<span style="font-size:11px;color:#999;font-variant-numeric:tabular-nums;">{{ f.count }}</span></span>
+              </sc-if>
+            </sc-for>
+          </div>
+
+          <div style="font-size:13px;color:#999;margin-bottom:14px;">Mostrando <strong style="color:#101010;font-variant-numeric:tabular-nums;">{{ exShown }}</strong> de {{ exTotal }} URLs · ordenado por {{ exSortLabel }}</div>
+        </div>
+
+        <!-- grid -->
+        <div style="margin:0 32px 32px;border:1px solid #E5E5E5;overflow-x:auto;">
+          <table style="border-collapse:collapse;width:100%;min-width:1480px;">
+            <thead>
+              <tr>
+                <sc-for list="{{ exCols }}" as="c" hint-placeholder-count="15">
+                  <th onClick="{{ c.go }}" style="{{ c.thStyle }}">{{ c.label }}{{ c.arrow }}</th>
+                </sc-for>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ exRows }}" as="row" hint-placeholder-count="20">
+                <tr onClick="{{ row.open }}" style="border-bottom:1px solid #F0F0F0;cursor:pointer;" style-hover="background:#FAFAFA;">
+                  <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="15">
+                    <td style="{{ cell.style }}">{{ cell.disp }}</td>
+                  </sc-for>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </sc-if>
+
+      <!-- ===== ENGINE (Capa 0) ===== -->
+      <sc-if value="{{ isEngine }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">El núcleo de adquisición. Fetch estático con control de concurrencia, renderizado JS headless para sitios React/Vue/Angular y diff crudo-vs-renderizado. Todo determinista; la sustancia se escribe a Postgres antes de proyectar a Neo4j.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ engineStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- live run -->
+          <div style="border:1px solid #E5E5E5;padding:28px;margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+              <div style="display:flex;align-items:center;gap:11px;">
+                <span style="width:8px;height:8px;border-radius:50%;background:#1F8A5B;display:inline-block;"></span>
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Rastreo en curso</h3>
+              </div>
+              <span style="font-size:13px;color:#999;font-variant-numeric:tabular-nums;">{{ engineRun.elapsed }} transcurridos · ETA {{ engineRun.eta }}</span>
+            </div>
+            <div style="height:12px;background:#F0F0F0;width:100%;margin-bottom:12px;"><div style="height:100%;background:#101010;width:{{ engineRun.pct }};"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;font-variant-numeric:tabular-nums;">
+              <span>{{ engineRun.done }} rastreadas · {{ engineRun.pct }}</span>
+              <span>{{ engineRun.queue }} en cola · {{ engineRun.total }} total</span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Pipeline de fetch</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">Diff crudo-vs-renderizado → js_dependency_flag</p>
+              <sc-for list="{{ enginePipeline }}" as="s" hint-placeholder-count="2">
+                <div style="margin-bottom:18px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;"><span style="font-weight:500;">{{ s.label }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ s.count }} · {{ s.pct }}</span></div>
+                  <div style="height:10px;background:#F0F0F0;width:100%;"><div style="height:100%;background:{{ s.color }};width:{{ s.w }};"></div></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Sitemap vs. crawl</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 18px;">Cobertura de descubrimiento</p>
+              <sc-for list="{{ engineSitemap }}" as="r" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #F0F0F0;">
+                  <span style="font-size:14px;font-weight:500;">{{ r.label }}</span>
+                  <span style="font:600 16px var(--font-sans);font-variant-numeric:tabular-nums;">{{ r.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Extracción personalizada</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 2fr 0.8fr 0.8fr;gap:24px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Campo</span><span>Selector</span><span>Tipo</span><span style="text-align:right;">Cobertura</span>
+            </div>
+            <sc-for list="{{ engineFields }}" as="f" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:1fr 2fr 0.8fr 0.8fr;gap:24px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);">{{ f.name }}</span>
+                <span style="font-size:13px;font-family:var(--font-mono);color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ f.sel }}</span>
+                <span style="font-size:13px;color:#444;">{{ f.type }}</span>
+                <span style="font-size:14px;text-align:right;font-variant-numeric:tabular-nums;color:#444;">{{ f.cov }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ON-PAGE (Capa 2) ===== -->
+      <sc-if value="{{ isOnpage }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ onpageStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;color:{{ k.deltaColor }};">{{ k.value }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;margin-bottom:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Inventario de incidencias on-page</h3></div>
+              <sc-for list="{{ onpageIssues }}" as="r" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:1fr auto auto;gap:24px;align-items:center;padding:15px 26px;border-bottom:1px solid #F0F0F0;">
+                  <span style="font-size:14px;font-weight:500;">{{ r.check }}</span>
+                  <span style="font:600 15px var(--font-sans);font-variant-numeric:tabular-nums;text-align:right;width:90px;">{{ r.count }}</span>
+                  <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#666;width:74px;"><span style="width:8px;height:8px;border-radius:50%;background:{{ r.sevColor }};"></span>{{ r.sev }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Distribución por nº de palabras</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">Umbral de thin content: 200</p>
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:end;height:160px;">
+                <sc-for list="{{ wordCountBars }}" as="d" hint-placeholder-count="5">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:end;">
+                    <span style="font-size:11px;color:#666;font-variant-numeric:tabular-nums;">{{ d.count }}</span>
+                    <div style="width:100%;background:{{ d.color }};height:{{ d.h }};"></div>
+                    <span style="font-size:11px;color:#999;font-weight:500;">{{ d.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Enlaces internos por posición</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">3,4 M enlaces inventariados con anchor, rel y posición</p>
+              <sc-for list="{{ linkPositions }}" as="s" hint-placeholder-count="4">
+                <div style="margin-bottom:18px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;"><span style="font-weight:500;">{{ s.pos }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ s.count }} · {{ s.pct }}</span></div>
+                  <div style="height:10px;background:#F0F0F0;width:100%;"><div style="height:100%;background:#102F47;width:{{ s.w }};"></div></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;padding:28px;display:flex;flex-direction:column;gap:24px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Enlaces rotos</h3>
+              <sc-for list="{{ brokenLinks }}" as="b" hint-placeholder-count="2">
+                <div style="border-top:2px solid #B12B29;padding-top:16px;">
+                  <div style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1;font-variant-numeric:tabular-nums;">{{ b.value }}</div>
+                  <div style="font-size:14px;font-weight:500;margin-top:10px;">{{ b.label }}</div>
+                  <div style="font-size:13px;color:#999;margin-top:3px;">{{ b.sub }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SEMÁNTICA (Capa 4) ===== -->
+      <sc-if value="{{ isSemantic }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#E29F37;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Scoring de contenido donde hay lenguaje — el LLM solo entra aquí. <strong>Features de juicio:</strong> requieren sign-off humano antes de entrar al loop. Embeddings en pgvector, intención vía LLM.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ semStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-bottom:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;">
+                <span style="font:600 11px var(--font-mono);color:#999;">SEM-01</span>
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Canibalización de intención</h3>
+              </div>
+              <sc-for list="{{ canibal }}" as="c" hint-placeholder-count="3">
+                <div style="padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+                    <div style="min-width:0;">
+                      <div style="font-size:13px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.a }}</div>
+                      <div style="font-size:13px;font-family:var(--font-mono);color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.b }}</div>
+                    </div>
+                    <span style="font:600 16px var(--font-sans);color:#B12B29;font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ c.overlap }}</span>
+                  </div>
+                  <div style="font-size:12px;color:#999;margin-top:8px;">Recomendado consolidar en favor de <span style="color:#101010;font-family:var(--font-mono);">{{ c.loser }}</span></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Gaps temáticos</h3></div>
+              <sc-for list="{{ topicGaps }}" as="g" hint-placeholder-count="3">
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                  <span style="width:8px;height:8px;border-radius:50%;flex:0 0 8px;margin-top:6px;background:{{ g.sevColor }};"></span>
+                  <div><div style="font-size:14px;font-weight:500;">{{ g.topic }}</div><div style="font-size:12px;color:#999;margin-top:2px;">{{ g.vs }}</div></div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;background:#FAFAFA;">
+            <div style="padding:18px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:center;gap:11px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:#E29F37;display:inline-block;"></span>
+              <h3 style="font-size:17px;font-weight:600;letter-spacing:-0.01em;margin:0;">Cola de sign-off humano</h3>
+              <span style="font-size:12px;color:#999;">Features de juicio — no entran al loop autónomo hasta su revisión</span>
+            </div>
+            <sc-for list="{{ signoffQueue }}" as="s" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 26px;border-bottom:1px solid #F0F0F0;background:#fff;">
+                <span style="font-size:14px;font-weight:500;">{{ s.item }}</span>
+                <span style="display:flex;align-items:center;gap:14px;">
+                  <span style="font-size:13px;color:#999;">{{ s.who }}</span>
+                  <span style="font-size:13px;font-weight:500;border:1px solid #101010;padding:6px 12px;cursor:pointer;" style-hover="background:#101010;color:#fff;">Revisar</span>
+                </span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== GEO / IA (Capa 5) ===== -->
+      <sc-if value="{{ isGeo }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Preparación para motores generativos: HTML semántico que el LLM puede parsear sin JS, señales de citabilidad y el funnel completo — indexabilidad → propensión a cita → tráfico.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ geoStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px;">Funnel de citación</h3>
+              <p style="font-size:13px;color:#999;margin:0 0 24px;">De indexable a citada por un motor de IA</p>
+              <sc-for list="{{ geoFunnel }}" as="s" hint-placeholder-count="4">
+                <div style="margin-bottom:16px;">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;"><span style="font-weight:500;">{{ s.label }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ s.value }}</span></div>
+                  <div style="height:22px;background:#F0F0F0;width:100%;"><div style="height:100%;background:{{ s.color }};width:{{ s.w }};"></div></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:24px;">
+              <div style="border:1px solid #E5E5E5;padding:28px;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 20px;">Visibilidad por plataforma</h3>
+                <sc-for list="{{ platformVis }}" as="p" hint-placeholder-count="3">
+                  <div style="margin-bottom:15px;">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;"><span style="font-weight:500;">{{ p.plat }}</span><span style="color:#666;font-variant-numeric:tabular-nums;">{{ p.cites }} citas</span></div>
+                    <div style="height:8px;background:#F0F0F0;"><div style="height:100%;background:#102F47;width:{{ p.w }};"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="border:1px solid #E5E5E5;padding:28px;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 18px;">Señales de citabilidad</h3>
+                <sc-for list="{{ geoChecklist }}" as="c" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid #F0F0F0;">
+                    <span style="font-size:13px;">{{ c.item }}</span>
+                    <span style="font:600 14px var(--font-sans);color:{{ c.okColor }};font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ c.ok }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== WORKFLOW (Capa 10) ===== -->
+      <sc-if value="{{ isWorkflow }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ wfStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Gestor de tareas</h3></div>
+            <div style="display:grid;grid-template-columns:2.4fr 1fr 0.8fr 0.9fr;gap:20px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Tarea</span><span>Responsable</span><span>Prioridad</span><span style="text-align:right;">Estado</span>
+            </div>
+            <sc-for list="{{ wfTasks }}" as="t" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:2.4fr 1fr 0.8fr 0.9fr;gap:20px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                <span style="font-size:14px;font-weight:500;">{{ t.task }}</span>
+                <span style="font-size:13px;color:#666;">{{ t.owner }}</span>
+                <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#666;"><span style="width:8px;height:8px;border-radius:50%;background:{{ t.prioColor }};"></span>{{ t.prio }}</span>
+                <span style="font-size:13px;text-align:right;color:#444;font-weight:500;">{{ t.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Alertas de umbral</h3></div>
+              <sc-for list="{{ wfAlerts }}" as="a" hint-placeholder-count="4">
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:15px 26px;border-bottom:1px solid #F0F0F0;">
+                  <span style="width:8px;height:8px;border-radius:50%;flex:0 0 8px;margin-top:6px;background:{{ a.sev }};"></span>
+                  <div style="flex:1;"><div style="font-size:14px;font-weight:500;">{{ a.msg }}</div><div style="font-size:12px;color:#999;margin-top:2px;">{{ a.when }} · Slack #seo-alertas</div></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Gating CI/CD · staging</h3></div>
+              <sc-for list="{{ wfCICD }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                  <div style="min-width:0;"><div style="font-size:14px;font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.branch }}</div><div style="font-size:12px;color:#999;margin-top:2px;">{{ c.detail }}</div></div>
+                  <span style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:{{ c.color }};flex:0 0 auto;">{{ c.result }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== RENDIMIENTO / CWV (Capa 8) ===== -->
+      <sc-if value="{{ isPerf }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Core Web Vitals por página y plantilla, desde datos de campo (CrUX) y laboratorio (PSI API). Detección de recursos render-blocking y peso de scripts.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ cwv }}" as="c" hint-placeholder-count="3">
+              <div style="background:#fff;padding:26px;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;">
+                  <span style="font:700 13px var(--font-mono);letter-spacing:0.04em;">{{ c.metric }}</span>
+                  <span style="font-size:12px;color:#999;">objetivo {{ c.th }}</span>
+                </div>
+                <div style="font-size:44px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ c.value }}</div>
+                <div style="font-size:13px;color:#999;margin-top:8px;">{{ c.name }}</div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:16px;">
+                  <div style="flex:1;height:8px;background:#F0F0F0;"><div style="height:100%;background:{{ c.barColor }};width:{{ c.good }};"></div></div>
+                  <span style="font-size:12px;color:#666;font-variant-numeric:tabular-nums;">{{ c.good }} OK</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Por plantilla</h3></div>
+            <div style="display:grid;grid-template-columns:1.6fr 0.7fr 0.7fr 0.7fr 0.9fr 1fr;gap:18px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Plantilla</span><span style="text-align:right;">LCP</span><span style="text-align:right;">INP</span><span style="text-align:right;">CLS</span><span style="text-align:right;">URLs</span><span style="text-align:right;">Estado</span>
+            </div>
+            <sc-for list="{{ cwvTemplates }}" as="t" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:1.6fr 0.7fr 0.7fr 0.7fr 0.9fr 1fr;gap:18px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;font-variant-numeric:tabular-nums;">
+                <span style="font-size:14px;font-weight:500;">{{ t.tpl }}</span>
+                <span style="font-size:14px;text-align:right;color:#444;">{{ t.lcp }}</span>
+                <span style="font-size:14px;text-align:right;color:#444;">{{ t.inp }}</span>
+                <span style="font-size:14px;text-align:right;color:#444;">{{ t.cls }}</span>
+                <span style="font-size:14px;text-align:right;color:#666;">{{ t.urls }}</span>
+                <span style="font-size:12px;text-align:right;font-weight:600;color:{{ t.statusColor }};">{{ t.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Recursos bloqueantes</h3></div>
+            <sc-for list="{{ cwvBlocking }}" as="b" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 26px;border-bottom:1px solid #F0F0F0;">
+                <div style="min-width:0;"><div style="font-size:14px;font-weight:500;font-family:var(--font-mono);">{{ b.res }}</div><div style="font-size:12px;color:#999;margin-top:2px;">{{ b.impact }}</div></div>
+                <span style="font:600 14px var(--font-sans);font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ b.size }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ACCESIBILIDAD (Capa 9) ===== -->
+      <sc-if value="{{ isA11y }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Violaciones WCAG 2.2 niveles A / AA / AAA detectadas con axe-core sobre el DOM renderizado, más análisis automático de contraste de color.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <sc-for list="{{ a11yStats }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">{{ k.label }}</div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+                <div style="margin-top:12px;font-size:12px;color:#999;line-height:1.4;">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Violaciones por regla</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 2fr auto auto;gap:20px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Regla</span><span>Descripción</span><span>Nivel</span><span style="text-align:right;">Casos</span>
+            </div>
+            <sc-for list="{{ a11yRules }}" as="r" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:1fr 2fr auto auto;gap:20px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);">{{ r.rule }}</span>
+                <span style="font-size:14px;color:#444;">{{ r.desc }}</span>
+                <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#666;width:50px;"><span style="width:8px;height:8px;border-radius:50%;background:{{ r.sevColor }};"></span>{{ r.level }}</span>
+                <span style="font:600 15px var(--font-sans);font-variant-numeric:tabular-nums;text-align:right;width:80px;">{{ r.count }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== API / INTEGRACIONES (transversal) ===== -->
+      <sc-if value="{{ isApi }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">La capa de acceso a los datos. GraphQL para consultas sin over-fetch, REST, OQL sobre el data layer, conectores BI y exposición MCP para que el LLM traduzca lenguaje natural a SQL/Cypher — sin volcar HTML crudo a la ventana de contexto.</p>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Cuenta de servicio · Google</h3>
+              <span style="font-size:13px;color:#999;">Un JSON de credenciales da acceso a todas las propiedades compartidas — eliges cuál usar</span>
+            </div>
+
+            <!-- not connected: upload -->
+            <sc-if value="{{ svcIdle }}" hint-placeholder-val="{{ true }}">
+              <div style="padding:32px 26px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;">
+                <div style="font-size:14px;color:#666;max-width:52ch;line-height:1.55;">Sube el JSON de la cuenta de servicio. Comparte tus propiedades de Search Console y Analytics 4 con su <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">client_email</code> y aparecerán para elegir.</div>
+                <label style="display:inline-flex;align-items:center;gap:9px;font-size:14px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:12px 20px;cursor:pointer;" style-hover="background:#333;">
+                  <span style="font-size:16px;line-height:1;">↑</span> Subir JSON de credenciales
+                  <input type="file" accept="application/json,.json" onChange="{{ onSvcUpload }}" style="display:none;" />
+                </label>
+              </div>
+            </sc-if>
+
+            <!-- connected: account + dropdowns -->
+            <sc-if value="{{ svcConnected }}" hint-placeholder-val="">
+              <div style="padding:18px 26px;border-bottom:1px solid #F0F0F0;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:#FAFAFA;">
+                <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+                  <span style="width:9px;height:9px;border-radius:50%;background:#1F8A5B;flex:0 0 auto;"></span>
+                  <div style="min-width:0;">
+                    <div style="font-size:14px;font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ svcEmail }}</div>
+                    <div style="font-size:12px;color:#999;">proyecto {{ svcProj }} · {{ svcFile }}</div>
+                  </div>
+                </div>
+                <button onClick="{{ disconnectSvc }}" style="font-size:13px;font-weight:500;border:1px solid #D6D6D6;background:#fff;padding:9px 15px;cursor:pointer;flex:0 0 auto;" style-hover="background:#F0F0F0;">Desconectar</button>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px 26px;">
+                <div>
+                  <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Propiedad de Search Console <span style="color:#999;font-weight:400;text-transform:none;letter-spacing:0;">· {{ gscPropCount }} disponibles</span></label>
+                  <select onChange="{{ onSelGsc }}" style="width:100%;border:1px solid #D6D6D6;background:#fff;padding:12px 14px;font:400 14px var(--font-sans);color:#101010;cursor:pointer;border-radius:0;height:46px;">
+                    <sc-for list="{{ gscProps }}" as="p" hint-placeholder-count="5">
+                      <option value="{{ p.v }}" selected="{{ p.selected }}">{{ p.l }}</option>
+                    </sc-for>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Propiedad de Analytics 4 <span style="color:#999;font-weight:400;text-transform:none;letter-spacing:0;">· {{ ga4PropCount }} disponibles</span></label>
+                  <select onChange="{{ onSelGa4 }}" style="width:100%;border:1px solid #D6D6D6;background:#fff;padding:12px 14px;font:400 14px var(--font-sans);color:#101010;cursor:pointer;border-radius:0;height:46px;">
+                    <sc-for list="{{ ga4Groups }}" as="g" hint-placeholder-count="3">
+                      <optgroup label="{{ g.acct }}">
+                        <sc-for list="{{ g.props }}" as="p" hint-placeholder-count="2">
+                          <option value="{{ p.v }}" selected="{{ p.selected }}">{{ p.l }}</option>
+                        </sc-for>
+                      </optgroup>
+                    </sc-for>
+                  </select>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Endpoints de consulta</h3></div>
+            <sc-for list="{{ apiEndpoints }}" as="e" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:16px;padding:16px 26px;border-bottom:1px solid #F0F0F0;">
+                <span style="font:600 11px var(--font-mono);letter-spacing:0.04em;color:#fff;background:#101010;padding:4px 8px;width:54px;text-align:center;flex:0 0 auto;">{{ e.method }}</span>
+                <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);width:160px;flex:0 0 auto;">{{ e.path }}</span>
+                <span style="font-size:14px;color:#666;flex:1;">{{ e.desc }}</span>
+                <span style="font-size:12px;font-weight:500;border:1px solid #D6D6D6;padding:4px 10px;flex:0 0 auto;">{{ e.tag }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Exposición MCP</h3>
+                <span style="font-size:12px;color:#999;">para Claude Code</span>
+              </div>
+              <sc-for list="{{ mcpTools }}" as="t" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 26px;border-bottom:1px solid #F0F0F0;">
+                  <div><div style="font-size:15px;font-weight:600;font-family:var(--font-mono);">{{ t.tool }}</div><div style="font-size:13px;color:#999;margin-top:4px;">{{ t.desc }}</div></div>
+                  <span style="font-size:12px;font-weight:600;border:1px solid #101010;padding:5px 11px;flex:0 0 auto;">{{ t.store }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #E5E5E5;padding:28px;">
+              <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0 0 20px;">Conectores activos</h3>
+              <div style="display:flex;flex-wrap:wrap;gap:10px;">
+                <sc-for list="{{ connectors }}" as="c" hint-placeholder-count="6">
+                  <span style="display:inline-flex;align-items:center;gap:9px;font-size:13px;font-weight:500;border:1px solid #D6D6D6;padding:9px 13px;">
+                    <span style="width:7px;height:7px;border-radius:50%;background:#1F8A5B;"></span>{{ c.name }}
+                    <span style="font-size:11px;color:#999;">{{ c.kind }}</span>
+                  </span>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== MODELO DE DATOS (§3) ===== -->
+      <sc-if value="{{ isDatamodel }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:28px;max-width:900px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:16px;line-height:1.55;color:#444;margin:0;">Postgres guarda la <strong>sustancia</strong>, Neo4j la <strong>estructura</strong>, y <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">url_hash</code> los une. La misma función de hash en las once tablas que lo usan y en los nodos <code style="font-family:var(--font-mono);background:#F0F0F0;padding:1px 5px;">:Page</code> — lo que no casa cae en un bucket de huérfanas, nunca se descarta en silencio.</p>
+          </div>
+
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:14px;">Principios de arquitectura</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:32px;">
+            <sc-for list="{{ principles }}" as="p" hint-placeholder-count="6">
+              <div style="background:#fff;padding:24px 26px;">
+                <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;"><span style="font:700 12px var(--font-mono);color:#999;">{{ p.n }}</span><span style="font-size:15px;font-weight:600;">{{ p.title }}</span></div>
+                <div style="font-size:13px;line-height:1.5;color:#666;">{{ p.body }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;">
+            <div style="border:1px solid #E5E5E5;">
+              <div style="padding:20px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+                <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Postgres</h3>
+                <span style="font-size:13px;color:#999;">sustancia · atributos de página y enlace</span>
+              </div>
+              <sc-for list="{{ pgTables }}" as="t" hint-placeholder-count="13">
+                <div style="padding:13px 26px;border-bottom:1px solid #F0F0F0;">
+                  <div style="font-size:14px;font-weight:600;font-family:var(--font-mono);">{{ t.name }}</div>
+                  <div style="font-size:12px;color:#999;font-family:var(--font-mono);margin-top:3px;">{{ t.cols }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:24px;">
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:20px 26px;border-bottom:1px solid #E5E5E5;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+                  <h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Neo4j</h3>
+                  <span style="font-size:13px;color:#999;">estructura · Seontology</span>
+                </div>
+                <div style="padding:22px 26px;">
+                  <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:12px;">Nodos</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px;">
+                    <sc-for list="{{ neoNodes }}" as="node" hint-placeholder-count="6">
+                      <span style="font:500 13px var(--font-mono);border:1px solid #D6D6D6;padding:5px 11px;">:{{ node }}</span>
+                    </sc-for>
+                  </div>
+                  <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:12px;">Aristas</div>
+                  <sc-for list="{{ neoEdges }}" as="ed" hint-placeholder-count="2">
+                    <div style="font:500 13px var(--font-mono);color:#444;line-height:1.5;padding:6px 0;border-bottom:1px solid #F0F0F0;">{{ ed.e }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="border:1px solid #101010;background:#101010;color:#fff;padding:26px;">
+                <div style="font:700 14px var(--font-mono);letter-spacing:0.02em;margin-bottom:10px;">url_hash</div>
+                <div style="font-size:13px;line-height:1.55;color:#B3B3B3;">La clave de join, idéntica en Postgres y Neo4j. Determinista, definida una sola vez en <span style="color:#fff;font-family:var(--font-mono);">prepare.py</span>. El puente entre sustancia y estructura.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ESTADO Y ROADMAP (§4 + §5) ===== -->
+      <sc-if value="{{ isRoadmap }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div style="border:1px solid #E5E5E5;margin-bottom:32px;">
+            <div style="padding:22px 26px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">Ya lo tienes vs. el hueco</h3></div>
+            <div style="display:grid;grid-template-columns:1.6fr 0.7fr 1.7fr;gap:20px;padding:13px 26px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#999;">
+              <span>Capacidad</span><span>Estado</span><span>Acción</span>
+            </div>
+            <sc-for list="{{ matrix }}" as="m" hint-placeholder-count="9">
+              <div style="display:grid;grid-template-columns:1.6fr 0.7fr 1.7fr;gap:20px;padding:15px 26px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                <span style="font-size:14px;font-weight:500;">{{ m.cap }}</span>
+                <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#666;"><span style="width:8px;height:8px;border-radius:50%;background:{{ m.stateColor }};"></span>{{ m.state }}</span>
+                <span style="font-size:14px;color:#666;">{{ m.acc }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;margin-bottom:14px;">Orden de construcción · contrato primero, slices verificables</div>
+          <div style="display:flex;flex-direction:column;gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;">
+            <sc-for list="{{ slices }}" as="s" hint-placeholder-count="4">
+              <div style="background:#fff;display:flex;gap:20px;padding:26px;align-items:flex-start;">
+                <div style="width:4px;align-self:stretch;flex:0 0 4px;background:{{ s.accent }};"></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
+                    <span style="font:700 12px var(--font-mono);letter-spacing:0.04em;color:{{ s.accent }};">{{ s.n }}</span>
+                    <h4 style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin:0;">{{ s.title }}</h4>
+                  </div>
+                  <p style="font-size:14px;line-height:1.55;color:#666;margin:0 0 10px;max-width:80ch;">{{ s.body }}</p>
+                  <div style="font-size:13px;color:#101010;"><span style="font-weight:600;">Entregable · </span>{{ s.deliver }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E5E5E5;background:#FAFAFA;padding:24px 26px;margin-top:24px;display:flex;align-items:flex-start;gap:14px;">
+            <div style="width:3px;align-self:stretch;background:#101010;flex:0 0 3px;"></div>
+            <p style="font-size:14px;line-height:1.55;color:#444;margin:0;max-width:80ch;">Cada slice: invariantes verdes = <strong>keeper autónomo</strong>; features de juicio (scoring semántico, asignación de tópico) = <strong>sign-off humano</strong> antes de entrar al loop.</p>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== DETALLE DE URL ===== -->
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:32px;">
+          <div onClick="{{ closeDetail }}" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#666;cursor:pointer;margin-bottom:20px;" style-hover="color:#101010;">
+            <span style="font-size:15px;">←</span> Volver
+          </div>
+
+          <div style="border:1px solid #E5E5E5;padding:28px;margin-bottom:24px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap;">
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                  <span style="display:inline-flex;align-items:center;gap:7px;font:600 12px var(--font-sans);color:#fff;background:{{ detailData.statusColor }};padding:4px 10px;">{{ detailData.statusBadge }} {{ detailData.statusLabel }}</span>
+                  <span style="font:500 12px var(--font-mono);color:#666;border:1px solid #D6D6D6;padding:4px 10px;">{{ detailData.template }}</span>
+                </div>
+                <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0;font-family:var(--font-mono);word-break:break-all;">{{ detailData.url }}</h2>
+                <div style="font-size:13px;color:#999;margin-top:8px;">url_hash <span style="font-family:var(--font-mono);color:#666;">{{ detailData.urlHash }}</span> · primera vez {{ detailData.firstSeen }} · último rastreo {{ detailData.lastCrawl }}</div>
+              </div>
+              <div style="display:flex;gap:10px;flex:0 0 auto;">
+                <button style="font-size:13px;font-weight:500;border:1px solid #D6D6D6;background:#fff;padding:10px 16px;cursor:pointer;" style-hover="background:#F0F0F0;">Re-rastrear</button>
+                <button style="font-size:13px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:10px 16px;cursor:pointer;" style-hover="background:#333;">Crear tarea</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-bottom:24px;">
+            <div style="background:#fff;padding:22px 24px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Inrank</div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:12px;font-variant-numeric:tabular-nums;">{{ detailData.inrank }}</div>
+              <div style="height:6px;background:#F0F0F0;margin-top:14px;"><div style="height:100%;background:#102F47;width:{{ detailData.inrankCard.scoreW }};"></div></div>
+            </div>
+            <div style="background:#fff;padding:22px 24px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Profundidad</div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:12px;font-variant-numeric:tabular-nums;">{{ detailData.depth }}</div>
+              <div style="margin-top:14px;font-size:12px;color:#999;">clics desde home</div>
+            </div>
+            <div style="background:#fff;padding:22px 24px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Hits de bot (30 d)</div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:12px;font-variant-numeric:tabular-nums;">{{ detailData.logsCard.botHits }}</div>
+              <div style="margin-top:14px;font-size:12px;color:#999;">{{ detailData.logsCard.lastBot }}</div>
+            </div>
+            <div style="background:#fff;padding:22px 24px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Clics GSC (28 d)</div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1;margin-top:12px;font-variant-numeric:tabular-nums;">{{ detailData.gsc.clicks }}</div>
+              <div style="margin-top:14px;font-size:12px;color:#999;">pos. media {{ detailData.gsc.position }}</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;">
+            <!-- left column -->
+            <div style="display:flex;flex-direction:column;gap:24px;">
+              <!-- facts -->
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:18px 24px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:16px;font-weight:600;margin:0;">SEO técnico</h3></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;">
+                  <sc-for list="{{ detailData.facts }}" as="f" hint-placeholder-count="8">
+                    <div style="padding:14px 24px;border-bottom:1px solid #F0F0F0;border-right:1px solid #F0F0F0;">
+                      <div style="font-size:12px;color:#999;margin-bottom:4px;">{{ f.k }}</div>
+                      <div style="font-size:14px;font-weight:500;word-break:break-word;">{{ f.v }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <!-- onpage -->
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:18px 24px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:16px;font-weight:600;margin:0;">On-page</h3></div>
+                <sc-for list="{{ detailData.onpage }}" as="o" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:14px 24px;border-bottom:1px solid #F0F0F0;">
+                    <div style="min-width:0;"><div style="font-size:12px;color:#999;margin-bottom:3px;">{{ o.k }}</div><div style="font-size:14px;font-weight:500;">{{ o.v }}</div></div>
+                    <span style="font-size:12px;color:#999;font-variant-numeric:tabular-nums;flex:0 0 auto;">{{ o.len }} car.</span>
+                  </div>
+                </sc-for>
+              </div>
+
+              <!-- inbound links -->
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:18px 24px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:16px;font-weight:600;margin:0;">Enlaces entrantes</h3></div>
+                <div style="display:grid;grid-template-columns:1.6fr 1.4fr 0.7fr 0.7fr;gap:14px;padding:11px 24px;border-bottom:1px solid #E5E5E5;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#999;">
+                  <span>Desde</span><span>Anchor</span><span>Rel</span><span>Pos.</span>
+                </div>
+                <sc-for list="{{ detailData.inbound }}" as="l" hint-placeholder-count="4">
+                  <div style="display:grid;grid-template-columns:1.6fr 1.4fr 0.7fr 0.7fr;gap:14px;padding:13px 24px;border-bottom:1px solid #F0F0F0;align-items:center;">
+                    <span style="font-size:13px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ l.from }}</span>
+                    <span style="font-size:13px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ l.anchor }}</span>
+                    <span style="font-size:13px;color:#666;">{{ l.rel }}</span>
+                    <span style="font-size:13px;color:#666;">{{ l.pos }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- right column -->
+            <div style="display:flex;flex-direction:column;gap:24px;">
+              <!-- issues -->
+              <div style="border:1px solid #E5E5E5;">
+                <div style="padding:18px 24px;border-bottom:1px solid #E5E5E5;"><h3 style="font-size:16px;font-weight:600;margin:0;">Incidencias</h3></div>
+                <sc-for list="{{ detailData.issues }}" as="i" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 24px;border-bottom:1px solid #F0F0F0;">
+                    <span style="width:8px;height:8px;border-radius:50%;flex:0 0 8px;margin-top:6px;background:{{ i.c }};"></span>
+                    <div><div style="font-size:14px;font-weight:500;line-height:1.4;">{{ i.t }}</div><div style="font-size:12px;color:#999;margin-top:3px;">{{ i.layer }} · {{ i.sev }}</div></div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <!-- inrank detail -->
+              <div style="border:1px solid #E5E5E5;padding:22px 24px;">
+                <h3 style="font-size:16px;font-weight:600;margin:0 0 16px;">Autoridad interna</h3>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">Enlaces entrantes</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.inrankCard.inlinks }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">Enlaces salientes</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.inrankCard.outlinks }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;"><span style="color:#666;">nofollow entrantes</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.inrankCard.nofollowIn }}</span></div>
+              </div>
+
+              <!-- logs + analytics -->
+              <div style="border:1px solid #E5E5E5;padding:22px 24px;">
+                <h3 style="font-size:16px;font-weight:600;margin:0 0 16px;">Logs y analítica</h3>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">Hits de bots de IA</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.logsCard.aiHits }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">Impresiones GSC</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.gsc.impressions }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">CTR</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.gsc.ctr }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid #F0F0F0;"><span style="color:#666;">Sesiones GA4</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.ga4.sessions }}</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:9px 0;"><span style="color:#666;">Conversiones · valor</span><span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ detailData.ga4.conv }} · {{ detailData.ga4.convValue }}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- other views injected here -->
+      <sc-if value="{{ isPlaceholder }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:64px 32px;">
+          <div style="max-width:760px;">
+            <div style="font:600 11px var(--font-mono);color:#999;letter-spacing:0.1em;">CAPA {{ viewLayer }}</div>
+            <h2 style="font-size:40px;font-weight:600;letter-spacing:-0.025em;margin:14px 0 18px;">{{ viewTitle }}</h2>
+            <p style="font-size:18px;line-height:1.55;color:#666;max-width:60ch;">{{ placeholderDesc }}</p>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;margin-top:40px;max-width:920px;">
+            <sc-for list="{{ placeholderFeatures }}" as="f" hint-placeholder-count="4">
+              <div style="background:#fff;padding:26px;">
+                <div style="font-size:15px;font-weight:600;margin-bottom:8px;">{{ f.title }}</div>
+                <div style="font-size:14px;line-height:1.5;color:#666;">{{ f.desc }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+
+  <!-- ============ MODAL · NUEVO RASTREO ============ -->
+  <sc-if value="{{ modalOpen }}" hint-placeholder-val="">
+    <div onClick="{{ closeModal }}" style="position:fixed;inset:0;background:rgba(16,16,16,0.5);z-index:80;display:flex;align-items:flex-start;justify-content:center;padding:48px 20px;overflow-y:auto;">
+      <div onClick="{{ stop }}" style="background:#fff;width:100%;max-width:680px;border:1px solid #101010;box-shadow:0 24px 60px rgba(0,0,0,0.3);">
+        <!-- modal header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:24px 30px;border-bottom:1px solid #E5E5E5;">
+          <div>
+            <div style="font:600 11px var(--font-mono);color:#999;letter-spacing:0.1em;">CAPA 00 · MOTOR</div>
+            <h2 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:6px 0 0;">Nuevo rastreo</h2>
+          </div>
+          <button onClick="{{ closeModal }}" aria-label="Cerrar" style="background:none;border:0;font-size:24px;line-height:1;color:#999;cursor:pointer;padding:4px;" style-hover="color:#101010;">×</button>
+        </div>
+
+        <div style="padding:28px 30px;display:flex;flex-direction:column;gap:26px;">
+          <!-- project -->
+          <div>
+            <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Proyecto</label>
+            <div style="border:1px solid #D6D6D6;padding:13px 14px;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:space-between;">
+              <span>{{ project }}</span><span style="color:#999;">▾</span>
+            </div>
+          </div>
+
+          <!-- crawl type -->
+          <div>
+            <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Tipo de rastreo</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <sc-for list="{{ crawlTypes }}" as="t" hint-placeholder-count="4">
+                <sc-if value="{{ t.sel }}" hint-placeholder-val="{{ true }}">
+                  <div style="border:2px solid #101010;padding:14px 16px;cursor:pointer;background:#FAFAFA;">
+                    <div style="font-size:14px;font-weight:600;">{{ t.title }}</div>
+                    <div style="font-size:12px;color:#666;margin-top:4px;line-height:1.4;">{{ t.desc }}</div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ t.idle }}" hint-placeholder-val="{{ true }}">
+                  <div style="border:1px solid #D6D6D6;padding:14px 16px;cursor:pointer;" style-hover="border-color:#101010;">
+                    <div style="font-size:14px;font-weight:600;">{{ t.title }}</div>
+                    <div style="font-size:12px;color:#666;margin-top:4px;line-height:1.4;">{{ t.desc }}</div>
+                  </div>
+                </sc-if>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- scope row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+            <div>
+              <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Profundidad máx.</label>
+              <div style="border:1px solid #D6D6D6;padding:13px 14px;font-size:14px;font-variant-numeric:tabular-nums;">10 niveles</div>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Límite de URLs</label>
+              <div style="border:1px solid #D6D6D6;padding:13px 14px;font-size:14px;font-variant-numeric:tabular-nums;">500.000</div>
+            </div>
+          </div>
+
+          <!-- toggles -->
+          <div style="display:flex;flex-direction:column;gap:1px;background:#E5E5E5;border:1px solid #E5E5E5;">
+            <div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">
+              <div><div style="font-size:14px;font-weight:500;">Renderizado JS</div><div style="font-size:12px;color:#999;">Ejecuta el DOM final (headless) para React/Vue/Angular</div></div>
+              <div style="width:42px;height:24px;background:#101010;border-radius:12px;position:relative;flex:0 0 auto;cursor:pointer;"><div style="width:18px;height:18px;background:#fff;border-radius:50%;position:absolute;top:3px;right:3px;"></div></div>
+            </div>
+            <div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">
+              <div><div style="font-size:14px;font-weight:500;">Respetar robots.txt</div><div style="font-size:12px;color:#999;">Y la capacidad declarada por el host</div></div>
+              <div style="width:42px;height:24px;background:#101010;border-radius:12px;position:relative;flex:0 0 auto;cursor:pointer;"><div style="width:18px;height:18px;background:#fff;border-radius:50%;position:absolute;top:3px;right:3px;"></div></div>
+            </div>
+            <div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">
+              <div><div style="font-size:14px;font-weight:500;">Guardar snapshots</div><div style="font-size:12px;color:#999;">HTML renderizado + captura por crawl</div></div>
+              <div style="width:42px;height:24px;background:#D6D6D6;border-radius:12px;position:relative;flex:0 0 auto;cursor:pointer;"><div style="width:18px;height:18px;background:#fff;border-radius:50%;position:absolute;top:3px;left:3px;"></div></div>
+            </div>
+          </div>
+
+          <!-- include / exclude -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+            <div>
+              <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Incluir patrones</label>
+              <div style="border:1px solid #D6D6D6;padding:13px 14px;font-size:13px;font-family:var(--font-mono);color:#666;min-height:62px;">/producto/*<br>/categoria/*</div>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Excluir patrones</label>
+              <div style="border:1px solid #D6D6D6;padding:13px 14px;font-size:13px;font-family:var(--font-mono);color:#666;min-height:62px;">/buscar/*?<br>*utm_*</div>
+            </div>
+          </div>
+
+          <!-- data sources -->
+          <div>
+            <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Fuentes a unir por url_hash</label>
+            <div style="display:flex;flex-wrap:wrap;gap:9px;">
+              <sc-for list="{{ crawlSources }}" as="s" hint-placeholder-count="5">
+                <sc-if value="{{ s.on }}" hint-placeholder-val="{{ true }}">
+                  <span style="display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:8px 13px;cursor:pointer;"><span style="width:7px;height:7px;border-radius:50%;background:#1F8A5B;"></span>{{ s.name }}</span>
+                </sc-if>
+                <sc-if value="{{ s.off }}" hint-placeholder-val="{{ true }}">
+                  <span style="display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;border:1px solid #D6D6D6;color:#666;padding:8px 13px;cursor:pointer;" style-hover="border-color:#101010;">{{ s.name }}</span>
+                </sc-if>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- service account -->
+          <div>
+            <label style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#666;display:block;margin-bottom:10px;">Cuenta de servicio (un JSON, varias propiedades)</label>
+            <sc-if value="{{ svcIdle }}" hint-placeholder-val="{{ true }}">
+              <div style="border:1px solid #D6D6D6;padding:18px 16px;display:flex;align-items:center;justify-content:space-between;gap:14px;">
+                <div style="font-size:13px;color:#999;">Sube el JSON para elegir propiedad de GSC y GA4</div>
+                <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:10px 15px;cursor:pointer;flex:0 0 auto;" style-hover="background:#333;">↑ Subir JSON<input type="file" accept="application/json,.json" onChange="{{ onSvcUpload }}" style="display:none;" /></label>
+              </div>
+            </sc-if>
+            <sc-if value="{{ svcConnected }}" hint-placeholder-val="">
+              <div style="border:1px solid #E5E5E5;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;background:#FAFAFA;border-bottom:1px solid #E5E5E5;">
+                  <div style="display:flex;align-items:center;gap:9px;min-width:0;"><span style="width:8px;height:8px;border-radius:50%;background:#1F8A5B;flex:0 0 auto;"></span><span style="font-size:13px;font-family:var(--font-mono);color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ svcEmail }}</span></div>
+                  <span onClick="{{ disconnectSvc }}" style="font-size:12px;color:#999;cursor:pointer;text-decoration:underline;text-underline-offset:2px;flex:0 0 auto;">Quitar</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px;">
+                  <div>
+                    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#999;margin-bottom:7px;">Search Console</div>
+                    <select onChange="{{ onSelGsc }}" style="width:100%;border:1px solid #D6D6D6;background:#fff;padding:10px 12px;font:400 13px var(--font-sans);color:#101010;cursor:pointer;border-radius:0;">
+                      <sc-for list="{{ gscProps }}" as="p" hint-placeholder-count="5"><option value="{{ p.v }}" selected="{{ p.selected }}">{{ p.l }}</option></sc-for>
+                    </select>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#999;margin-bottom:7px;">Analytics 4</div>
+                    <select onChange="{{ onSelGa4 }}" style="width:100%;border:1px solid #D6D6D6;background:#fff;padding:10px 12px;font:400 13px var(--font-sans);color:#101010;cursor:pointer;border-radius:0;">
+                      <sc-for list="{{ ga4Groups }}" as="g" hint-placeholder-count="3"><optgroup label="{{ g.acct }}"><sc-for list="{{ g.props }}" as="p" hint-placeholder-count="2"><option value="{{ p.v }}" selected="{{ p.selected }}">{{ p.l }}</option></sc-for></optgroup></sc-for>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+
+        <!-- modal footer -->
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px 30px;border-top:1px solid #E5E5E5;background:#FAFAFA;">
+          <span style="font-size:13px;color:#999;">Postgres primero · proyección a Neo4j después</span>
+          <div style="display:flex;gap:10px;">
+            <button onClick="{{ closeModal }}" style="font-size:14px;font-weight:500;border:1px solid #D6D6D6;background:#fff;padding:11px 18px;cursor:pointer;" style-hover="background:#F0F0F0;">Cancelar</button>
+            <button onClick="{{ closeModal }}" style="font-size:14px;font-weight:500;border:1px solid #101010;background:#101010;color:#fff;padding:11px 20px;cursor:pointer;" style-hover="background:#333;">Lanzar rastreo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { view: 'overview', projectIdx: 0, isMobile: false, navOpen: false, modalOpen: false, detail: null, exQuery:'', exFilter:'all', sortKey:'inrank', sortDir:'desc', svc:{ connected:false, file:'', email:'', proj:'' }, sel:{ gsc:'', ga4:'' } };
+
+  // propiedades a las que la cuenta de servicio tiene acceso (se descubren tras conectar)
+  gscProps = ['https://acme-retail.com/', 'sc-domain:acme-retail.com', 'https://blog.acme-retail.com/', 'https://m.acme-retail.com/', 'https://acme-retail.fr/'];
+  ga4Groups = [
+    { acct:'ACME Retail', props:[{ v:'312045882', l:'acme-retail.com — Web (312045882)' }, { v:'445120033', l:'App ACME iOS+Android (445120033)' }] },
+    { acct:'ACME Internacional', props:[{ v:'501933740', l:'acme-retail.fr — Web (501933740)' }, { v:'502874119', l:'acme-retail.it — Web (502874119)' }] },
+    { acct:'ACME Labs', props:[{ v:'998120044', l:'staging.acme-retail.com (998120044)' }] },
+  ];
+
+  onSvcUpload(e){
+    const f = e.target && e.target.files && e.target.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let email='', proj='';
+      try { const j = JSON.parse(reader.result); email = j.client_email||''; proj = j.project_id||''; } catch(_) {}
+      this.setState({
+        svc: { connected:true, file:f.name, email, proj },
+        sel: { gsc: this.gscProps[0], ga4: this.ga4Groups[0].props[0].v },
+      });
+    };
+    reader.readAsText(f);
+  }
+  disconnectSvc(){ return () => this.setState({ svc:{ connected:false, file:'', email:'', proj:'' }, sel:{ gsc:'', ga4:'' } }); }
+  selGsc(){ return (e) => this.setState(s => ({ sel:{...s.sel, gsc:e.target.value} })); }
+  selGa4(){ return (e) => this.setState(s => ({ sel:{...s.sel, ga4:e.target.value} })); }
+
+  openDetail(url){ return () => { this.setState({ detail: url, navOpen:false }); const mn=document.querySelector('main'); if(mn) mn.scrollTop=0; }; }
+
+  buildDetail(url){
+    // deterministic-ish mock from the url string
+    const seed = url.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const orphan = /mochila|outlet|pirineos|campana|travesia|comparativa|bastones/.test(url);
+    const isHome = url === '/';
+    const inrankMap = {
+      '/':'9.8','/producto/zapatillas-running':'8.4','/categoria/calzado':'7.9',
+      '/blog/guia-tallas':'6.2','/producto/chaqueta-tecnica':'5.1',
+      '/producto/mochila-trail-40l':'2.1','/blog/comparativa-gps':'1.8','/producto/bastones-carbono':'2.4',
+    };
+    const inrank = inrankMap[url] || (orphan ? '1.4' : '4.3');
+    const depth = isHome ? '0' : (orphan ? String(2 + seed % 4) : '2');
+    const seg = url.split('/').filter(Boolean)[0] || 'home';
+    const tpl = seg==='producto' ? 'Producto (PDP)' : seg==='categoria' ? 'Categoría (PLP)' : seg==='blog' || seg==='guias' ? 'Blog / artículo' : isHome ? 'Home' : 'Genérica';
+    const botHits = orphan ? '0' : String(1200 + seed*7);
+    const clicks = orphan ? '0' : String(40 + seed % 900);
+    return {
+      url,
+      urlHash: 'a' + (seed*2654435761 % 0xffffff).toString(16).padStart(6,'0') + 'f3',
+      statusBadge: '200', statusColor:'#1F8A5B', statusLabel:'OK',
+      indexable: orphan ? 'Sí · 0 señales de tráfico' : 'Sí',
+      template: tpl, depth, inrank,
+      lastCrawl:'28 jun · 06:00', firstSeen:'12 mar 2024',
+      facts: [
+        { k:'Código de estado', v:'200 OK' },
+        { k:'Indexable', v: orphan ? 'Sí (huérfana)' : 'Sí' },
+        { k:'Canonical', v: isHome ? 'self' : url, ok: true },
+        { k:'Robots', v:'index, follow' },
+        { k:'En sitemap', v: orphan ? 'No' : 'Sí', ok: !orphan },
+        { k:'Profundidad de clic', v: depth },
+        { k:'Render JS necesario', v: seg==='producto' ? 'Sí' : 'No' },
+        { k:'Plantilla', v: tpl },
+      ],
+      onpage: [
+        { k:'Título', v: isHome ? 'ACME · Equipamiento outdoor' : (url.split('/').pop()||'').replace(/-/g,' '), len: isHome ? '31' : '48' },
+        { k:'Meta description', v: orphan ? '— ausente' : 'Descripción optimizada del producto…', len: orphan ? '0' : '152' },
+        { k:'H1', v: isHome ? 'Equípate para la montaña' : (url.split('/').pop()||'').replace(/-/g,' '), len:'—' },
+        { k:'Palabras', v: orphan ? '184' : '742', len:'—' },
+      ],
+      onpageWarn: orphan,
+      inrankCard: {
+        score: inrank, scoreW: (parseFloat(inrank)*10)+'%',
+        inlinks: isHome ? '24.812' : (orphan ? '3' : '418'),
+        outlinks: isHome ? '142' : '38',
+        nofollowIn: orphan ? '1' : '12',
+      },
+      logsCard: {
+        botHits, humanVisits: clicks,
+        lastBot: orphan ? 'Nunca rastreada por bot de IA' : 'GPTBot · hace 6 h',
+        aiHits: orphan ? '0' : String(40 + seed % 200),
+        leak: orphan,
+      },
+      gsc: { clicks, impressions: orphan ? '0' : String(2000+seed*9), position: orphan ? '—' : (8 + seed%30/10).toFixed(1), ctr: orphan ? '0%' : '3,2%' },
+      ga4: { sessions: clicks, conv: orphan ? '0' : String(seed%40), convValue: orphan ? '0 €' : (seed*3)+' €' },
+      inbound: orphan ? [
+        { from:'/sitemap-derivado', anchor:'(solo sitemap)', rel:'—', pos:'—' },
+      ] : [
+        { from:'/categoria/calzado', anchor:'ver modelo', rel:'follow', pos:'body' },
+        { from:'/', anchor:'destacados', rel:'follow', pos:'body' },
+        { from:'/blog/guia-tallas', anchor:'esta zapatilla', rel:'follow', pos:'body' },
+        { from:'/footer-global', anchor:'novedades', rel:'follow', pos:'footer' },
+      ],
+      issues: [
+        ...(orphan ? [{ t:'Página huérfana — sin enlaces internos entrantes', sev:'Alta', c:'#B12B29', layer:'Capa 3 · Inrank' }] : []),
+        ...(orphan ? [{ t:'0 hits de bot y 0 visitas — candidata a poda o enlazado', sev:'Alta', c:'#B12B29', layer:'Capa 6 · Logs' }] : []),
+        ...(orphan ? [{ t:'Meta description ausente', sev:'Media', c:'#E29F37', layer:'Capa 2 · On-page' }] : []),
+        ...(!orphan ? [{ t:'Título supera 60 caracteres', sev:'Baja', c:'#999999', layer:'Capa 2 · On-page' }] : []),
+        ...(seg==='producto' ? [{ t:'Schema Product solo visible tras ejecutar JS', sev:'Media', c:'#E29F37', layer:'Capa 1 · Técnico' }] : []),
+      ],
+    };
+  }
+
+  componentDidMount(){
+    this._onResize = () => {
+      const m = window.innerWidth < 820;
+      if (m !== this.state.isMobile) this.setState({ isMobile: m, navOpen: false });
+    };
+    this._onResize();
+    window.addEventListener('resize', this._onResize);
+  }
+  componentWillUnmount(){ window.removeEventListener('resize', this._onResize); }
+
+  projects = ['acme-retail.com', 'banco-nordeste.es', 'viajes-altamar.com'];
+
+  modules = [
+    { id:'overview',  layer:'00', label:'Resumen',          group:'crawl' },
+    { id:'engine',    layer:'00', label:'Motor de rastreo',  group:'crawl' },
+    { id:'technical', layer:'01', label:'SEO técnico',       group:'crawl' },
+    { id:'onpage',    layer:'02', label:'On-page',           group:'crawl' },
+    { id:'inrank',    layer:'03', label:'Inrank',            group:'analysis' },
+    { id:'semantic',  layer:'04', label:'Semántica',         group:'analysis' },
+    { id:'geo',       layer:'05', label:'GEO / IA',          group:'analysis' },
+    { id:'logs',      layer:'06', label:'Logs',              group:'analysis', badge:'moat' },
+    { id:'cross',     layer:'07', label:'Análisis cruzado',  group:'analysis' },
+    { id:'explorer',  layer:'07', label:'Explorador',        group:'analysis' },
+    { id:'perf',      layer:'08', label:'Rendimiento',       group:'analysis' },
+    { id:'a11y',      layer:'09', label:'Accesibilidad',     group:'analysis' },
+    { id:'workflow',  layer:'10', label:'Workflow',          group:'analysis' },
+    { id:'api',       layer:'TR', label:'API e integraciones', group:'platform' },
+    { id:'datamodel', layer:'DB', label:'Modelo de datos',     group:'arch' },
+    { id:'roadmap',   layer:'RM', label:'Estado y roadmap',    group:'arch' },
+  ];
+
+  meta = {
+    overview:  { layer:'00', title:'Resumen del proyecto' },
+    technical: { layer:'01', title:'SEO técnico' },
+    inrank:    { layer:'03', title:'Inrank · autoridad interna' },
+    logs:      { layer:'06', title:'Análisis de logs' },
+    cross:     { layer:'07', title:'Análisis cruzado' },
+    explorer:  { layer:'07', title:'Explorador de datos' },
+    perf:      { layer:'08', title:'Rendimiento · Core Web Vitals' },
+    a11y:      { layer:'09', title:'Accesibilidad' },
+    api:       { layer:'TR', title:'API, integraciones y automatización' },
+    datamodel: { layer:'DB', title:'Modelo de datos núcleo' },
+    roadmap:   { layer:'RM', title:'Estado y orden de construcción' },
+    engine:    { layer:'00', title:'Motor de rastreo', desc:'El núcleo de adquisición: fetch estático con control de concurrencia, renderizado JS headless para sitios React/Vue/Angular, y diff crudo-vs-renderizado para detectar contenido que solo existe tras ejecutar JS. Todo determinista; la sustancia se escribe a Postgres antes de proyectar a Neo4j.', features:[
+      {title:'Fetch + render', desc:'HTML crudo y DOM final, con respeto a la capacidad del host y a robots.txt.'},
+      {title:'Diff JS', desc:'Marca cada URL con js_dependency_flag cuando el contenido depende de la ejecución.'},
+      {title:'Sitemap vs. crawl', desc:'Lee sitemap.xml y marca in-sitemap frente a in-crawl.'},
+      {title:'Extracción custom', desc:'CSS / XPath / regex para cualquier dato de página, a page_custom_fields.'},
+    ]},
+    onpage:    { layer:'02', title:'On-page y estructura', desc:'Inventario de titles, metas y encabezados; conteo de palabras y umbral de contenido delgado; inventario completo de enlaces internos con anchor, target, rel y posición. La sustancia vive en Postgres; la topología en Neo4j.', features:[
+      {title:'Titles / metas / Hn', desc:'Longitud, faltantes y duplicados en page_onpage.'},
+      {title:'Thin content', desc:'Conteo de palabras contra umbral configurable.'},
+      {title:'Enlaces internos', desc:'Anchor, rel y posición (header/nav/body/footer).'},
+      {title:'Enlaces rotos', desc:'Derivado de links × status hacia 4xx/5xx.'},
+    ]},
+    semantic:  { layer:'04', title:'Semántica y calidad', desc:'Scoring de contenido donde hay lenguaje: el LLM solo entra aquí. Intención de búsqueda vs. contenido, profundidad semántica frente a competidores SERP, gaps temáticos y canibalización por solapamiento de intención. Features de juicio: requieren sign-off humano antes de entrar al loop.', features:[
+      {title:'Intent match', desc:'Embeddings + LLM. Feature de juicio.'},
+      {title:'Profundidad semántica', desc:'Página vs. SERP vía pgvector.'},
+      {title:'Gaps temáticos', desc:'Clustering + ontología.'},
+      {title:'Canibalización', desc:'GSC URL flux + embeddings (SEM-01).'},
+    ]},
+    geo:       { layer:'05', title:'GEO / búsqueda de IA', desc:'Preparación para motores generativos: HTML semántico que el LLM puede parsear sin JS, señales de citabilidad, funnel de citación (indexabilidad → propensión a cita → tráfico) y visibilidad por plataforma (AIO, ChatGPT, Perplexity).', features:[
+      {title:'GEO readiness', desc:'DOM crudo accesible sin ejecución de JS.'},
+      {title:'Citabilidad', desc:'Formato y schema que favorecen ser citado.'},
+      {title:'Funnel de citación', desc:'Crawl + logs cruzados.'},
+      {title:'Visibilidad plataforma', desc:'Panel de monitorización por motor.'},
+    ]},
+    workflow:  { layer:'10', title:'Workflow y entrega', desc:'La capa de operación: dashboards multidominio, alertas de umbral a Slack/Teams/email, tendencias in-app, gestor de tareas que verifica el cierre vía rastreo posterior, y gating CI/CD que bloquea el deploy si hay regresión SEO en staging.', features:[
+      {title:'Alertas de umbral', desc:'Picos de no-indexables o violaciones → Slack/Teams.'},
+      {title:'Task manager', desc:'Prioriza, asigna y verifica cierre con re-crawl.'},
+      {title:'AI dev tickets', desc:'El LLM redacta tickets a partir de hallazgos.'},
+      {title:'Gating CI/CD', desc:'Rastreo de staging bloquea deploy con regresión.'},
+    ]},
+  };
+
+  built = ['overview','technical','inrank','logs','cross','engine','onpage','semantic','geo','workflow','perf','a11y','api','datamodel','roadmap','explorer'];
+
+  go(id){ return () => this.setState({ view:id, navOpen:false, detail:null }); }
+
+  // ===== EXPLORADOR — dataset determinista =====
+  dataset(){
+    if(this._ds) return this._ds;
+    const R = (i,s)=>{ const x=Math.sin(i*12.9898 + s*78.233)*43758.5453; return x-Math.floor(x); };
+    const pools = {
+      producto: ['zapatillas-running','chaqueta-tecnica','mochila-trail-40l','bastones-carbono','tienda-campana-ultralight','botas-trekking-gtx','forro-polar-micro','pantalon-montana','guantes-termicos','gafas-polarizadas','frontal-led-350','saco-dormir-pluma','crampones-acero','piolet-tecnico','camiseta-merino','calcetines-tecnicos','chubasquero-3capas','arnes-escalada','casco-alpino','linterna-recargable'],
+      categoria: ['calzado','ropa-tecnica','mochilas','acampada','escalada','esqui','running','senderismo','outlet-invierno','novedades','marcas','rebajas'],
+      blog: ['guia-tallas','comparativa-gps','rutas-pirineos-2024','como-elegir-talla','mantenimiento-botas','nudos-escalada','primeros-auxilios','meteorologia-alpina','preparacion-fisica','test-material-2025'],
+      guias: ['preparar-travesia','iniciacion-escalada','capas-ropa-tecnica','eleccion-tienda','planificar-ruta'],
+      legal: ['aviso-legal','privacidad','cookies','condiciones-compra','devoluciones'],
+    };
+    const tplOf = { producto:'Producto (PDP)', categoria:'Categoría (PLP)', blog:'Blog / artículo', guias:'Guía', legal:'Legal' };
+    const baseDepth = { producto:2, categoria:1, blog:3, guias:4, legal:3 };
+    const wordBase = { producto:[380,560], categoria:[180,320], blog:[700,1300], guias:[900,1600], legal:[260,420] };
+    const rows = [];
+    // home
+    rows.push({ url:'/', statusCode:200, statusColor:'#1F8A5B', indexable:true, template:'Home', depth:0, inrank:9.8, words:540, titleLen:31, canonical:'self', inSitemap:true, botHits:48210, aiHits:1820, clicks:12480, impressions:184000, position:1.4 });
+    let gi = 1;
+    Object.keys(pools).forEach(seg => {
+      let variant = 0;
+      while (rows.filter(r=>r.url.startsWith('/'+seg)).length < (seg==='producto'?34:seg==='blog'?18:seg==='categoria'?14:seg==='guias'?8:6)) {
+        const pool = pools[seg];
+        const slug = pool[variant % pool.length] + (variant >= pool.length ? '-'+(Math.floor(variant/pool.length)+1) : '');
+        variant++;
+        const url = '/'+seg+'/'+slug;
+        const p = R(gi,1);
+        const statusCode = p<0.05?301 : p<0.085?404 : p<0.10?500 : 200;
+        const statusColor = statusCode===200?'#1F8A5B' : statusCode<400?'#729AB9' : statusCode<500?'#B12B29':'#6E120B';
+        const noindex = R(gi,2) < 0.10;
+        const indexable = statusCode===200 && !noindex;
+        const orphan = R(gi,6) < 0.16;
+        const depth = baseDepth[seg] + Math.floor(R(gi,11)*3) + (orphan?1:0);
+        const thin = R(gi,3) < 0.12;
+        const wb = wordBase[seg];
+        const words = thin ? 110 + Math.floor(R(gi,12)*80) : wb[0] + Math.floor(R(gi,13)*(wb[1]-wb[0]));
+        const titleLen = 28 + Math.floor(R(gi,4)*48);
+        const pc = R(gi,5);
+        const canonical = pc<0.05?'ausente' : pc<0.15?'otra' : 'self';
+        const inSitemap = !orphan && statusCode===200;
+        const botHits = (orphan || statusCode>=400) ? (statusCode>=400 ? Math.floor(R(gi,7)*2400) : 0) : Math.floor(160 + R(gi,7)*7600 - depth*180);
+        const aiHits = orphan ? 0 : Math.floor(R(gi,8)*260);
+        const clicks = (!indexable || orphan) ? 0 : Math.max(0, Math.floor(R(gi,9)*900 - depth*120));
+        const impressions = clicks>0 ? clicks*(7+Math.floor(R(gi,14)*26)) : (R(gi,15)<0.4?Math.floor(R(gi,16)*380):0);
+        const position = clicks>0 ? +(3 + R(gi,10)*38).toFixed(1) : 0;
+        rows.push({ url, statusCode, statusColor, indexable, template:tplOf[seg], depth, inrank:+Math.max(0.4, 9 - depth*1.7 + R(gi,17)*1.6 - (orphan?2:0)).toFixed(1), words, titleLen, canonical, inSitemap, botHits:Math.max(0,botHits), aiHits, clicks, impressions, position });
+        gi++;
+      }
+    });
+    this._ds = rows;
+    return rows;
+  }
+
+  exFilters(){
+    return [
+      { id:'all', label:'Todas', test:()=>true },
+      { id:'errors', label:'Errores 4xx/5xx', test:r=>r.statusCode>=400 },
+      { id:'redirect', label:'Redirecciones', test:r=>r.statusCode>=300&&r.statusCode<400 },
+      { id:'noindex', label:'No indexables', test:r=>!r.indexable },
+      { id:'nosit', label:'Fuera de sitemap', test:r=>!r.inSitemap },
+      { id:'thin', label:'Thin content', test:r=>r.words<200 },
+      { id:'nocanon', label:'Canonical roto', test:r=>r.canonical!=='self' },
+      { id:'nodata', label:'0 clics + 0 hits bot', test:r=>r.clicks===0&&r.botHits===0 },
+    ];
+  }
+
+  setFilter(id){ return () => this.setState({ exFilter:id }); }
+  sortBy(key){ return () => this.setState(s => ({ sortKey:key, sortDir: s.sortKey===key && s.sortDir==='desc' ? 'asc' : 'desc' })); }
+
+  renderVals(){
+    const detail = this.state.detail;
+    const view = detail ? '__detail__' : this.state.view;
+    const m = this.meta[this.state.view] || {};
+    const mkNav = (g) => this.modules.filter(x=>x.group===g).map(x=>({
+      layer:x.layer, label:x.label, badge:x.badge||null,
+      active: x.id===view, idle: x.id!==view, go:this.go(x.id),
+    }));
+
+    const isMobile = this.state.isMobile;
+    const navOpen = this.state.navOpen;
+    return {
+      isMobile,
+      navOpen,
+      showBackdrop: isMobile && navOpen,
+      toggleNav: () => this.setState(s => ({ navOpen: !s.navOpen })),
+      closeNav: () => this.setState({ navOpen: false }),
+      modalOpen: this.state.modalOpen,
+      openModal: () => this.setState({ modalOpen: true, navOpen: false }),
+      closeModal: () => this.setState({ modalOpen: false }),
+      stop: (e) => { if(e && e.stopPropagation) e.stopPropagation(); },
+      isDetail: !!detail,
+      detailUrl: detail || '',
+      closeDetail: () => this.setState({ detail: null }),
+      asideStyle: isMobile
+        ? ('position:fixed;top:0;bottom:0;left:0;width:280px;max-width:84vw;background:#101010;color:#fff;display:flex;flex-direction:column;height:100%;border-right:1px solid #2A2A2A;z-index:60;box-shadow:0 16px 40px rgba(0,0,0,0.4);transition:transform 220ms cubic-bezier(0.2,0.6,0.2,1);transform:translateX(' + (navOpen ? '0' : '-101%') + ');')
+        : 'width:268px;flex:0 0 268px;background:#101010;color:#fff;display:flex;flex-direction:column;height:100%;border-right:1px solid #2A2A2A;',
+      project: this.projects[this.state.projectIdx],
+      cycleProject: () => this.setState(s=>({ projectIdx:(s.projectIdx+1)%this.projects.length })),
+      navCrawl: mkNav('crawl'),
+      navAnalysis: mkNav('analysis'),
+      navPlatform: mkNav('platform'),
+      navArch: mkNav('arch'),
+      lastCrawl: 'hace 2 h',
+      viewLayer: (this.meta[view]?.layer) || (this.modules.find(x=>x.id===view)?.layer) || '00',
+      viewTitle: detail ? detail : (m.title || 'Módulo'),
+      viewKicker: detail ? 'DETALLE DE URL'
+                 : (this.modules.find(x=>x.id===view)?.group==='arch') ? 'ARQUITECTURA'
+                 : (view==='api' ? 'TRANSVERSAL'
+                 : 'CAPA ' + ((this.meta[this.state.view]?.layer) || (this.modules.find(x=>x.id===this.state.view)?.layer) || '00')),
+      isDatamodel: !detail && view==='datamodel',
+      isRoadmap: !detail && view==='roadmap',
+      isOverview: !detail && view==='overview',
+      isLogs: !detail && view==='logs',
+      isInrank: !detail && view==='inrank',
+      isTechnical: !detail && view==='technical',
+      isCross: !detail && view==='cross',
+      isExplorer: !detail && view==='explorer',
+      isEngine: !detail && view==='engine',
+      isOnpage: !detail && view==='onpage',
+      isSemantic: !detail && view==='semantic',
+      isGeo: !detail && view==='geo',
+      isWorkflow: !detail && view==='workflow',
+      isPerf: !detail && view==='perf',
+      isA11y: !detail && view==='a11y',
+      isApi: !detail && view==='api',
+      detailData: detail ? this.buildDetail(detail) : null,
+      isPlaceholder: !this.built.includes(view) && !detail,
+      placeholderDesc: m.desc || '',
+      placeholderFeatures: m.features || [],
+      goTechnical: this.go('technical'),
+
+      // ===== CUENTA DE SERVICIO (un JSON, varias propiedades) =====
+      svcConnected: this.state.svc.connected,
+      svcIdle: !this.state.svc.connected,
+      svcEmail: this.state.svc.email || 'crawler@proyecto.iam.gserviceaccount.com',
+      svcProj: this.state.svc.proj || 'mi-proyecto-gcp',
+      svcFile: this.state.svc.file || '',
+      onSvcUpload: (e) => this.onSvcUpload(e),
+      disconnectSvc: this.disconnectSvc(),
+      gscProps: this.gscProps.map(p => ({ v:p, l:p, selected: p===this.state.sel.gsc })),
+      ga4Groups: this.ga4Groups.map(g => ({ acct:g.acct, props: g.props.map(p => ({ v:p.v, l:p.l, selected: p.v===this.state.sel.ga4 })) })),
+      onSelGsc: this.selGsc(),
+      onSelGa4: this.selGa4(),
+      gscPropCount: this.gscProps.length,
+      ga4PropCount: this.ga4Groups.reduce((a,g)=>a+g.props.length,0),
+
+      // ===== EXPLORADOR =====
+      ...(function(self){
+        const fmt = n => (n||0).toLocaleString('es-ES');
+        const ds = self.dataset();
+        const q = (self.state.exQuery||'').toLowerCase().trim();
+        const filt = self.exFilters();
+        const active = filt.find(f=>f.id===self.state.exFilter) || filt[0];
+        let rows = ds.filter(active.test);
+        if(q) rows = rows.filter(r => r.url.toLowerCase().includes(q));
+        const sk = self.state.sortKey, sd = self.state.sortDir, mul = sd==='asc'?1:-1;
+        rows = rows.slice().sort((a,b)=>{
+          let av=a[sk], bv=b[sk];
+          if(typeof av==='boolean'){ av=av?1:0; bv=bv?1:0; }
+          if(typeof av==='string'){ return av.localeCompare(bv)*mul; }
+          return (av-bv)*mul;
+        });
+        const colDefs = [
+          { key:'url', label:'URL', align:'left' },
+          { key:'statusCode', label:'Estado', align:'left' },
+          { key:'indexable', label:'Index', align:'left' },
+          { key:'template', label:'Tipo', align:'left' },
+          { key:'depth', label:'Prof.', align:'right' },
+          { key:'inrank', label:'Inrank', align:'right' },
+          { key:'words', label:'Palabras', align:'right' },
+          { key:'titleLen', label:'Título', align:'right' },
+          { key:'canonical', label:'Canonical', align:'left' },
+          { key:'inSitemap', label:'Sitemap', align:'left' },
+          { key:'botHits', label:'Hits bot', align:'right' },
+          { key:'aiHits', label:'Hits IA', align:'right' },
+          { key:'clicks', label:'Clics', align:'right' },
+          { key:'impressions', label:'Impr.', align:'right' },
+          { key:'position', label:'Pos.', align:'right' },
+        ];
+        const exCols = colDefs.map(c => {
+          const on = c.key===sk;
+          return {
+            label: c.label,
+            arrow: on ? (sd==='asc'?' ↑':' ↓') : '',
+            go: self.sortBy(c.key),
+            thStyle: 'position:sticky;top:0;z-index:2;background:#fff;border-bottom:1px solid #E5E5E5;padding:11px 14px;text-align:'+c.align+';cursor:pointer;font-family:var(--font-sans);font-weight:600;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;color:'+(on?'#101010':'#999')+';'
+          };
+        });
+        const exRows = rows.map(r => {
+          const cell = (disp, align, color, extra) => ({ disp, style: 'padding:10px 14px;text-align:'+align+';font-size:13px;white-space:nowrap;color:'+(color||'#444')+';'+(extra||'') });
+          return {
+            open: self.openDetail(r.url),
+            cells: [
+              cell(r.url, 'left', '#101010', 'font-family:var(--font-mono);font-weight:500;max-width:300px;overflow:hidden;text-overflow:ellipsis;'),
+              cell(String(r.statusCode), 'left', r.statusColor, 'font-weight:600;'),
+              cell(r.indexable?'Sí':'No', 'left', r.indexable?'#444':'#B12B29'),
+              cell(r.template, 'left', '#666'),
+              cell(String(r.depth), 'right', r.depth>=5?'#E29F37':'#444'),
+              cell(r.inrank.toFixed(1), 'right', '#444', 'font-weight:500;'),
+              cell(fmt(r.words), 'right', r.words<200?'#B12B29':'#444'),
+              cell(String(r.titleLen), 'right', r.titleLen>60?'#E29F37':'#444'),
+              cell(r.canonical, 'left', r.canonical!=='self'?'#E29F37':'#444'),
+              cell(r.inSitemap?'Sí':'No', 'left', r.inSitemap?'#444':'#999'),
+              cell(fmt(r.botHits), 'right', r.botHits===0?'#B12B29':'#444'),
+              cell(fmt(r.aiHits), 'right', '#444'),
+              cell(fmt(r.clicks), 'right', r.clicks===0?'#999':'#444'),
+              cell(fmt(r.impressions), 'right', '#666'),
+              cell(r.position>0?r.position.toFixed(1):'—', 'right', '#666'),
+            ],
+          };
+        });
+        return {
+          exCols, exRows,
+          exFilterChips: filt.map(f => ({ label:f.label, count: ds.filter(f.test).length, active:f.id===self.state.exFilter, idle:f.id!==self.state.exFilter, go:self.setFilter(f.id) })),
+          exQuery: self.state.exQuery,
+          exTotal: ds.length,
+          exShown: exRows.length,
+          exSortLabel: (colDefs.find(c=>c.key===sk)||{}).label + (sd==='asc'?' ↑':' ↓'),
+          onExSearch: (e)=> self.setState({ exQuery: e.target.value }),
+        };
+      })(this),
+
+      // ===== NUEVO RASTREO (modal) =====
+      crawlTypes: [
+        { id:'full', title:'Completo', desc:'Re-rastreo de todo el dominio desde las semillas', sel:true, idle:false },
+        { id:'incremental', title:'Incremental', desc:'Solo URLs cambiadas desde el último rastreo', sel:false, idle:true },
+        { id:'list', title:'Lista de URLs', desc:'Conjunto concreto que pegues o subas', sel:false, idle:true },
+        { id:'staging', title:'Staging (CI/CD)', desc:'Disparado por webhook antes del deploy', sel:false, idle:true },
+      ],
+      crawlSources: [
+        { name:'Sitemap.xml', on:true, off:false },
+        { name:'Logs de servidor', on:true, off:false },
+        { name:'Google Search Console', on:true, off:false },
+        { name:'Google Analytics 4', on:false, off:true },
+        { name:'Backlinks (Majestic)', on:false, off:true },
+      ],
+
+      kpis: [
+        { label:'Páginas rastreadas', value:'248.391', delta:'+4.812', sub:'vs. rastreo previo', deltaColor:'#1F8A5B' },
+        { label:'Indexables', value:'71%', delta:'−3 pts', sub:'176.358 URLs', deltaColor:'#B12B29' },
+        { label:'Errores 4xx / 5xx', value:'3.812', delta:'+612', sub:'requieren acción', deltaColor:'#B12B29' },
+        { label:'Páginas huérfanas', value:'1.204', delta:'+88', sub:'sin enlaces entrantes', deltaColor:'#B12B29' },
+      ],
+      statusBars: [
+        { label:'2xx — OK',        count:'176.358', pct:'71%', w:'71%', color:'#102F47' },
+        { label:'3xx — Redirección', count:'29.807', pct:'12%', w:'12%', color:'#729AB9' },
+        { label:'4xx — No encontrado', count:'22.355', pct:'9%', w:'9%', color:'#B12B29' },
+        { label:'noindex',         count:'14.903', pct:'6%', w:'6%', color:'#999999' },
+        { label:'5xx — Servidor',  count:'4.968',  pct:'2%', w:'2%', color:'#6E120B' },
+      ],
+      depthBars: [
+        { label:'0', count:'1',     h:'4%',  color:'#102F47' },
+        { label:'1', count:'842',   h:'22%', color:'#102F47' },
+        { label:'2', count:'9.1k',  h:'58%', color:'#102F47' },
+        { label:'3', count:'71k',   h:'100%',color:'#102F47' },
+        { label:'4', count:'94k',   h:'92%', color:'#729AB9' },
+        { label:'5', count:'48k',   h:'48%', color:'#729AB9' },
+        { label:'6+',count:'24k',   h:'26%', color:'#B12B29' },
+      ],
+      topIssues: [
+        { title:'Cadenas de redirección (3+ saltos)', layer:'Capa 1 · Técnico', count:'1.842', sevColor:'#B12B29' },
+        { title:'Canonical en conflicto', layer:'Capa 1 · Técnico', count:'963', sevColor:'#B12B29' },
+        { title:'Títulos duplicados', layer:'Capa 2 · On-page', count:'2.418', sevColor:'#E29F37' },
+        { title:'Páginas huérfanas de alto tráfico', layer:'Capa 3 · Inrank', count:'212', sevColor:'#E29F37' },
+        { title:'Hreflang sin retorno', layer:'Capa 1 · Técnico', count:'487', sevColor:'#999999' },
+      ],
+      recentRuns: [
+        { date:'28 jun · 06:00', trigger:'Programado · completo', pages:'248.391', status:'Completado', statusColor:'#1F8A5B' },
+        { date:'27 jun · 18:22', trigger:'CI/CD · staging', pages:'4.120', status:'Completado', statusColor:'#1F8A5B' },
+        { date:'27 jun · 06:00', trigger:'Programado · completo', pages:'243.579', status:'Completado', statusColor:'#1F8A5B' },
+        { date:'26 jun · 14:08', trigger:'Manual · incremental', pages:'12.840', status:'Completado', statusColor:'#1F8A5B' },
+        { date:'26 jun · 06:00', trigger:'Programado · completo', pages:'242.011', status:'Parcial', statusColor:'#E29F37' },
+      ],
+
+      // ===== LOGS (moat) =====
+      logKpis: [
+        { label:'Hits de bot (30 d)', value:'18,4 M', delta:'sin muestreo', deltaColor:'#666' },
+        { label:'Fuga de crawl budget', value:'31%', delta:'5,7 M hits', deltaColor:'#B12B29' },
+        { label:'Bots de IA', value:'2,1 M', delta:'+118%', deltaColor:'#1F8A5B' },
+        { label:'Latencia de descubrimiento', value:'9,4 h', delta:'publicación → cita', deltaColor:'#666' },
+      ],
+      budgetLeak: [
+        { label:'Hits en 3xx (redirecciones)', count:'2.418.902', pct:'42%', w:'42%', color:'#729AB9' },
+        { label:'Hits en 4xx', count:'1.694.231', pct:'30%', w:'30%', color:'#B12B29' },
+        { label:'Hits en noindex', count:'982.114', pct:'17%', w:'17%', color:'#999999' },
+        { label:'Hits en huérfanas', count:'401.882', pct:'7%', w:'7%', color:'#E29F37' },
+        { label:'Hits en 5xx', count:'228.677', pct:'4%', w:'4%', color:'#6E120B' },
+      ],
+      botDirs: [
+        { dir:'/producto/*', hits:'6,2 M', share:'34%', w:'100%', trend:'estable' },
+        { dir:'/blog/*', hits:'3,8 M', share:'21%', w:'61%', trend:'+12%' },
+        { dir:'/categoria/*', hits:'3,1 M', share:'17%', w:'50%', trend:'estable' },
+        { dir:'/buscar/* (parámetros)', hits:'2,9 M', share:'16%', w:'47%', trend:'fuga' },
+        { dir:'/legal/*', hits:'1,4 M', share:'8%', w:'23%', trend:'sobre-rastreo' },
+        { dir:'Otros', hits:'1,0 M', share:'5%', w:'16%', trend:'—' },
+      ],
+      aiTraining: [
+        { bot:'GPTBot', hits:'784.200', w:'100%' },
+        { bot:'ClaudeBot', hits:'512.880', w:'65%' },
+        { bot:'Google-Extended', hits:'341.020', w:'43%' },
+        { bot:'CCBot', hits:'98.440', w:'13%' },
+      ],
+      aiLive: [
+        { bot:'ChatGPT-User', hits:'214.700', w:'100%' },
+        { bot:'Perplexity-User', hits:'132.510', w:'62%' },
+        { bot:'Claude-User', hits:'71.330', w:'33%' },
+      ],
+
+      // ===== INRANK =====
+      inrankTop: [
+        { url:'/', inrank:'9.8', inlinks:'24.812', traffic:'alto', bar:'100%' },
+        { url:'/producto/zapatillas-running', inrank:'8.4', inlinks:'1.204', traffic:'alto', bar:'86%' },
+        { url:'/categoria/calzado', inrank:'7.9', inlinks:'982', traffic:'medio', bar:'81%' },
+        { url:'/blog/guia-tallas', inrank:'6.2', inlinks:'418', traffic:'alto', bar:'63%' },
+        { url:'/producto/chaqueta-tecnica', inrank:'5.1', inlinks:'212', traffic:'medio', bar:'52%' },
+      ].map(r => ({ ...r, open: this.openDetail(r.url) })),
+      underlinked: [
+        { url:'/producto/mochila-trail-40l', inrank:'2.1', clicks:'4.812', gap:'alto' },
+        { url:'/blog/comparativa-gps', inrank:'1.8', clicks:'3.204', gap:'alto' },
+        { url:'/producto/bastones-carbono', inrank:'2.4', clicks:'2.118', gap:'medio' },
+      ].map(r => ({ ...r, open: this.openDetail(r.url) })),
+      inrankStats: [
+        { label:'PageRank interno medio', value:'4.2', sub:'escala 0–10, dominio aislado' },
+        { label:'Páginas huérfanas', value:'1.204', sub:'sin in-edges en Neo4j' },
+        { label:'Equity perdida en 3xx', value:'18%', sub:'decay en saltos de redirección' },
+        { label:'Enlaces nofollow', value:'42.881', sub:'diluyen, no redistribuyen' },
+      ],
+
+      // ===== TECHNICAL =====
+      techGroups: [
+        { layer:'Capa 1', name:'Códigos de estado', rows:[
+          { check:'Errores 4xx', count:'22.355', sev:'Alta', sevColor:'#B12B29' },
+          { check:'Errores 5xx', count:'4.968', sev:'Alta', sevColor:'#B12B29' },
+          { check:'Cadenas de redirección (3+ saltos)', count:'1.842', sev:'Alta', sevColor:'#B12B29' },
+          { check:'Bucles de redirección', count:'37', sev:'Alta', sevColor:'#B12B29' },
+        ]},
+        { layer:'Capa 1', name:'Indexabilidad y canonical', rows:[
+          { check:'Canonical en conflicto', count:'963', sev:'Alta', sevColor:'#B12B29' },
+          { check:'Canonical ausente', count:'5.218', sev:'Media', sevColor:'#E29F37' },
+          { check:'noindex + en sitemap', count:'412', sev:'Media', sevColor:'#E29F37' },
+          { check:'Hreflang sin retorno', count:'487', sev:'Baja', sevColor:'#999999' },
+        ]},
+        { layer:'Capa 1', name:'Schema y mobile', rows:[
+          { check:'JSON-LD inválido', count:'1.108', sev:'Media', sevColor:'#E29F37' },
+          { check:'Schema solo visible tras JS', count:'742', sev:'Media', sevColor:'#E29F37' },
+          { check:'Viewport ausente', count:'96', sev:'Baja', sevColor:'#999999' },
+        ]},
+      ],
+
+      // ===== CROSS-ANALYSIS =====
+      crossSources: [
+        { name:'crawl', join:'url_hash', count:'248.391' },
+        { name:'log_hits', join:'url_hash', count:'18,4 M' },
+        { name:'gsc_metrics', join:'url_hash', count:'412k' },
+        { name:'ga4_metrics', join:'url_hash', count:'389k' },
+        { name:'backlinks', join:'url_hash', count:'1,2 M' },
+      ],
+      crossResult: [
+        { url:'/producto/mochila-trail-40l', depth:'2', inrank:'2.1', clicks:'0', hits:'0' },
+        { url:'/categoria/outlet-invierno', depth:'3', inrank:'3.4', clicks:'0', hits:'0' },
+        { url:'/blog/rutas-pirineos-2024', depth:'4', inrank:'1.2', clicks:'0', hits:'2' },
+        { url:'/producto/tienda-campana-ultralight', depth:'3', inrank:'2.8', clicks:'0', hits:'0' },
+        { url:'/guias/preparar-travesia', depth:'5', inrank:'0.9', clicks:'0', hits:'0' },
+      ].map(r => ({ ...r, open: this.openDetail(r.url) })),
+
+      // ===== ENGINE (Capa 0) =====
+      engineStats: [
+        { label:'Páginas / segundo', value:'142', sub:'concurrencia adaptada al host' },
+        { label:'Concurrencia', value:'24', sub:'hilos simultáneos' },
+        { label:'Render JS', value:'38%', sub:'94.389 URLs necesitan DOM final' },
+        { label:'Cobertura sitemap', value:'94%', sub:'212.004 de 225.118 declaradas' },
+      ],
+      engineRun: { done:'171.482', total:'248.391', pct:'69%', queue:'76.909', elapsed:'14 min', eta:'~6 min' },
+      enginePipeline: [
+        { label:'Fetch estático', count:'154.002', pct:'62%', w:'62%', color:'#102F47' },
+        { label:'Renderizado JS (headless)', count:'94.389', pct:'38%', w:'38%', color:'#729AB9' },
+      ],
+      engineSitemap: [
+        { label:'En sitemap y rastreadas', value:'203.640' },
+        { label:'Solo en sitemap (no rastreadas)', value:'8.364' },
+        { label:'Solo en crawl (no declaradas)', value:'44.751' },
+      ],
+      engineFields: [
+        { name:'precio', sel:'.product__price', type:'CSS', cov:'98%' },
+        { name:'stock', sel:'[data-stock]', type:'XPath', cov:'91%' },
+        { name:'rating', sel:'span.stars > @aria-label', type:'XPath', cov:'74%' },
+        { name:'sku', sel:'/sku:\\s*(\\w+)/', type:'Regex', cov:'88%' },
+      ],
+
+      // ===== ON-PAGE (Capa 2) =====
+      onpageStats: [
+        { label:'Títulos faltantes', value:'1.842', deltaColor:'#B12B29' },
+        { label:'Metas duplicadas', value:'4.218', deltaColor:'#E29F37' },
+        { label:'Thin content', value:'6.904', deltaColor:'#E29F37' },
+        { label:'Sin H1', value:'982', deltaColor:'#999999' },
+      ],
+      onpageIssues: [
+        { check:'Títulos > 60 caracteres', count:'8.402', sev:'Baja', sevColor:'#999999' },
+        { check:'Títulos duplicados', count:'2.418', sev:'Media', sevColor:'#E29F37' },
+        { check:'Meta description faltante', count:'12.804', sev:'Baja', sevColor:'#999999' },
+        { check:'Múltiples H1 por página', count:'1.204', sev:'Media', sevColor:'#E29F37' },
+        { check:'Imágenes sin alt', count:'34.918', sev:'Baja', sevColor:'#999999' },
+      ],
+      wordCountBars: [
+        { label:'0–200', count:'6.9k', h:'46%', color:'#B12B29' },
+        { label:'200–500', count:'31k', h:'72%', color:'#729AB9' },
+        { label:'500–1k', count:'94k', h:'100%', color:'#102F47' },
+        { label:'1k–2k', count:'78k', h:'88%', color:'#102F47' },
+        { label:'2k+', count:'38k', h:'52%', color:'#102F47' },
+      ],
+      linkPositions: [
+        { pos:'Body', count:'2.418.902', pct:'71%', w:'100%' },
+        { pos:'Nav', count:'612.044', pct:'18%', w:'25%' },
+        { pos:'Footer', count:'238.110', pct:'7%', w:'10%' },
+        { pos:'Header', count:'138.022', pct:'4%', w:'6%' },
+      ],
+      brokenLinks: [
+        { label:'Enlaces internos rotos', value:'4.812', sub:'hacia 4xx / 5xx' },
+        { label:'Enlaces externos rotos', value:'1.204', sub:'dominios de terceros' },
+      ],
+
+      // ===== SEMÁNTICA (Capa 4) =====
+      semStats: [
+        { label:'Intent match medio', value:'72%', sub:'contenido vs. intención de búsqueda' },
+        { label:'Profundidad vs. SERP', value:'−14%', sub:'frente a competidores top-10' },
+        { label:'Gaps temáticos', value:'38', sub:'lagunas de relevancia detectadas' },
+        { label:'Clusters de canibalización', value:'24', sub:'solapamiento de intención' },
+      ],
+      canibal: [
+        { a:'/zapatillas-running-hombre', b:'/calzado/running/hombre', overlap:'91%', loser:'/calzado/running/hombre' },
+        { a:'/guia-tallas', b:'/blog/como-elegir-talla', overlap:'84%', loser:'/blog/como-elegir-talla' },
+        { a:'/ofertas-invierno', b:'/outlet/invierno', overlap:'78%', loser:'/ofertas-invierno' },
+      ],
+      topicGaps: [
+        { topic:'Sostenibilidad de materiales', vs:'3 de 5 competidores lo cubren', sev:'Alta', sevColor:'#B12B29' },
+        { topic:'Guía de cuidado del producto', vs:'Sin contenido propio', sev:'Media', sevColor:'#E29F37' },
+        { topic:'Comparativas técnicas', vs:'Cobertura parcial', sev:'Media', sevColor:'#E29F37' },
+      ],
+      signoffQueue: [
+        { item:'Asignación de tópico · 412 URLs', who:'Pendiente · SEO Lead' },
+        { item:'Scoring de intención · cluster /blog', who:'Pendiente · Editor' },
+        { item:'Resolución de canibalización · 24 pares', who:'Pendiente · SEO Lead' },
+      ],
+
+      // ===== GEO / IA (Capa 5) =====
+      geoStats: [
+        { label:'GEO readiness', value:'68', sub:'/ 100 · HTML parseable sin JS' },
+        { label:'Citabilidad', value:'54%', sub:'formato y schema favorables' },
+        { label:'Citas detectadas (30 d)', value:'1.284', sub:'AIO + ChatGPT + Perplexity' },
+        { label:'Latencia de cita', value:'9,4 h', sub:'publicación → primera cita' },
+      ],
+      geoFunnel: [
+        { label:'Indexables', value:'176.358', w:'100%', color:'#102F47' },
+        { label:'Citables (HTML semántico + schema)', value:'42.118', w:'57%', color:'#729AB9' },
+        { label:'Con propensión alta a cita', value:'8.402', w:'34%', color:'#729AB9' },
+        { label:'Citadas al menos una vez', value:'1.284', w:'14%', color:'#B12B29' },
+      ],
+      platformVis: [
+        { plat:'Google AIO', cites:'742', share:'58%', w:'100%' },
+        { plat:'ChatGPT', cites:'368', share:'29%', w:'50%' },
+        { plat:'Perplexity', cites:'174', share:'13%', w:'24%' },
+      ],
+      geoChecklist: [
+        { item:'Contenido en DOM crudo (sin depender de JS)', ok:'68%', okColor:'#E29F37' },
+        { item:'Schema Article / Product válido', ok:'82%', okColor:'#1F8A5B' },
+        { item:'Encabezados jerárquicos correctos', ok:'74%', okColor:'#E29F37' },
+        { item:'Respuestas directas y citables', ok:'41%', okColor:'#B12B29' },
+      ],
+
+      // ===== WORKFLOW (Capa 10) =====
+      wfStats: [
+        { label:'Tareas abiertas', value:'42', sub:'12 de prioridad alta' },
+        { label:'Alertas activas', value:'7', sub:'umbrales superados' },
+        { label:'Deploys bloqueados', value:'2', sub:'regresión SEO en staging' },
+        { label:'Dominios monitorizados', value:'6', sub:'en este workspace' },
+      ],
+      wfTasks: [
+        { task:'Corregir 1.842 cadenas de redirección', owner:'Dev · Backend', prio:'Alta', prioColor:'#B12B29', status:'En curso' },
+        { task:'Resolver canonicals en conflicto', owner:'SEO · Jon M.', prio:'Alta', prioColor:'#B12B29', status:'Asignada' },
+        { task:'Enlazar 212 huérfanas de alto tráfico', owner:'Contenido', prio:'Media', prioColor:'#E29F37', status:'Asignada' },
+        { task:'Revisar bloqueo de /buscar en robots', owner:'Dev · Infra', prio:'Media', prioColor:'#E29F37', status:'Verificada' },
+      ],
+      wfAlerts: [
+        { msg:'Pico de no-indexables: +2.418 en 24 h', when:'hace 1 h', sev:'#B12B29' },
+        { msg:'Errores 5xx por encima del umbral (>1%)', when:'hace 4 h', sev:'#B12B29' },
+        { msg:'Latencia de descubrimiento IA > 12 h', when:'hace 9 h', sev:'#E29F37' },
+        { msg:'Caída de cobertura sitemap a 94%', when:'ayer', sev:'#E29F37' },
+      ],
+      wfCICD: [
+        { branch:'feature/pdp-redesign', result:'Bloqueado', detail:'+612 canonicals rotos', color:'#B12B29' },
+        { branch:'feature/blog-migration', result:'Bloqueado', detail:'94 noindex inesperados', color:'#B12B29' },
+        { branch:'release/2026.06', result:'Aprobado', detail:'sin regresión', color:'#1F8A5B' },
+      ],
+
+      // ===== RENDIMIENTO / CWV (Capa 8) =====
+      cwv: [
+        { metric:'LCP', name:'Largest Contentful Paint', value:'2,8 s', th:'≤ 2,5 s', good:'62%', barColor:'#E29F37' },
+        { metric:'INP', name:'Interaction to Next Paint', value:'180 ms', th:'≤ 200 ms', good:'81%', barColor:'#1F8A5B' },
+        { metric:'CLS', name:'Cumulative Layout Shift', value:'0,14', th:'≤ 0,10', good:'48%', barColor:'#B12B29' },
+      ],
+      cwvTemplates: [
+        { tpl:'Producto (PDP)', lcp:'3,4 s', inp:'210 ms', cls:'0,18', urls:'94.012', status:'Necesita mejora', statusColor:'#E29F37' },
+        { tpl:'Categoría (PLP)', lcp:'2,9 s', inp:'160 ms', cls:'0,21', urls:'12.804', status:'Necesita mejora', statusColor:'#E29F37' },
+        { tpl:'Blog / artículo', lcp:'2,1 s', inp:'120 ms', cls:'0,06', urls:'8.402', status:'Bueno', statusColor:'#1F8A5B' },
+        { tpl:'Home', lcp:'2,4 s', inp:'140 ms', cls:'0,04', urls:'1', status:'Bueno', statusColor:'#1F8A5B' },
+        { tpl:'Landing campaña', lcp:'4,1 s', inp:'320 ms', cls:'0,29', urls:'212', status:'Pobre', statusColor:'#B12B29' },
+      ],
+      cwvBlocking: [
+        { res:'main.bundle.js', size:'842 KB', impact:'Render-blocking · −1,2 s LCP' },
+        { res:'vendor.chunk.js', size:'618 KB', impact:'Long task · +90 ms INP' },
+        { res:'hero-carousel.js', size:'214 KB', impact:'CLS 0,12 sin reservar espacio' },
+      ],
+
+      // ===== ACCESIBILIDAD (Capa 9) =====
+      a11yStats: [
+        { label:'Violaciones totales', value:'18.402', sub:'axe-core sobre DOM renderizado' },
+        { label:'Nivel A', value:'4.218', sub:'críticas — bloquean uso' },
+        { label:'Nivel AA', value:'11.804', sub:'objetivo legal (EAA 2025)' },
+        { label:'Contraste insuficiente', value:'6.912', sub:'texto bajo ratio 4.5:1' },
+      ],
+      a11yRules: [
+        { rule:'image-alt', desc:'Imágenes sin texto alternativo', level:'A', count:'34.918', sevColor:'#B12B29' },
+        { rule:'color-contrast', desc:'Contraste de texto insuficiente', level:'AA', count:'6.912', sevColor:'#B12B29' },
+        { rule:'link-name', desc:'Enlaces sin nombre accesible', level:'A', count:'2.104', sevColor:'#B12B29' },
+        { rule:'label', desc:'Campos de formulario sin etiqueta', level:'A', count:'1.402', sevColor:'#E29F37' },
+        { rule:'heading-order', desc:'Jerarquía de encabezados rota', level:'AA', count:'982', sevColor:'#E29F37' },
+        { rule:'html-has-lang', desc:'Atributo lang ausente', level:'A', count:'128', sevColor:'#999999' },
+      ],
+
+      // ===== API / INTEGRACIONES (transversal) =====
+      apiEndpoints: [
+        { method:'POST', path:'/graphql', desc:'Consulta hiper-específica, sin over-fetch', tag:'GraphQL' },
+        { method:'GET', path:'/v1/pages', desc:'Atributos de página filtrables por cualquier métrica', tag:'REST' },
+        { method:'GET', path:'/v1/links', desc:'Aristas del grafo con anchor, rel y posición', tag:'REST' },
+        { method:'POST', path:'/v1/oql', desc:'Lenguaje de consulta OQL-like sobre el data layer', tag:'OQL' },
+      ],
+      mcpTools: [
+        { tool:'query_pages', desc:'Traduce lenguaje natural a SQL sobre Postgres', store:'Postgres' },
+        { tool:'query_links', desc:'Traduce a Cypher sobre el grafo Neo4j', store:'Neo4j' },
+      ],
+      connectors: [
+        { name:'Tableau', kind:'BI' },
+        { name:'Power BI', kind:'BI' },
+        { name:'Looker Studio', kind:'BI' },
+        { name:'Slack', kind:'Alertas' },
+        { name:'Microsoft Teams', kind:'Alertas' },
+        { name:'Claude Code', kind:'MCP' },
+      ],
+
+      // ===== MODELO DE DATOS (§3) =====
+      principles: [
+        { n:'01', title:'Clave de join única', body:'url_hash determinista, misma función en crawler, logs, GSC y GA4. Vive en prepare.py inmutable — si dos módulos lo calculan distinto, el join se rompe en silencio.' },
+        { n:'02', title:'Postgres antes que Neo4j', body:'Toda escritura: sustancia a Postgres primero, proyección a Neo4j después. El grafo nunca tiene nodos sin respaldo.' },
+        { n:'03', title:'Sustancia vs. estructura', body:'Atributos de página y enlace en Postgres. Topología (quién enlaza a quién) en Neo4j.' },
+        { n:'04', title:'Python para lo determinista', body:'Parsing, status, hashing, joins, Inrank, fugas de budget: Python puro. El LLM solo donde hay lenguaje.' },
+        { n:'05', title:'Métrica verificable', body:'Cada módulo tiene invariantes: los hits cuadran, cada url_hash casa o cae en un bucket, cobertura ≥ umbral.' },
+        { n:'06', title:'Keeper / revert humano', body:'Features deterministas → loop autónomo. Features de juicio → sign-off humano antes de entrar al loop.' },
+      ],
+      pgTables: [
+        { name:'pages', cols:'url_hash PK · status_code · indexable · canonical_url · depth' },
+        { name:'page_onpage', cols:'url_hash FK · title · meta_desc · h1 · word_count' },
+        { name:'links', cols:'src_hash · dst_hash · anchor · rel · position' },
+        { name:'redirect_chains', cols:'src_hash · hop_n · dst_hash · status' },
+        { name:'hreflang_pairs', cols:'src_hash · lang · dst_hash' },
+        { name:'duplicate_clusters', cols:'cluster_id · url_hash · dup_type' },
+        { name:'schema_validation', cols:'url_hash · type · valid · visible_after_js' },
+        { name:'log_hits', cols:'date PARTITION · url_hash · ts · ua · bot_class · status' },
+        { name:'gsc_metrics', cols:'url_hash · query · clicks · impressions · position' },
+        { name:'ga4_metrics', cols:'url_hash · sessions · conversions · conv_value' },
+        { name:'backlinks', cols:'url_hash · source_domain · authority' },
+        { name:'embeddings', cols:'chunk_id · url_hash · vector (pgvector)' },
+        { name:'audit_findings', cols:'check_id · url_hash · severity · needs_signoff' },
+      ],
+      neoNodes: ['Page', 'Query', 'Topic', 'Entity', 'Chunk', 'Directory'],
+      neoEdges: [
+        { e:'(:Page)-[:LINKS_TO {rel, status, position}]->(:Page)' },
+        { e:'Inrank como propiedad calculada vía GDS' },
+      ],
+
+      // ===== ROADMAP (§4 + §5) =====
+      matrix: [
+        { cap:'Crawl + render + extracción', state:'Tienes', stateColor:'#1F8A5B', acc:'Reusar (pipelines async + trafilatura)' },
+        { cap:'SEO técnico (status, canonical, indexab.)', state:'Tienes', stateColor:'#1F8A5B', acc:'Construible directo sobre crawl' },
+        { cap:'Inrank ponderado', state:'Parcial', stateColor:'#E29F37', acc:'Tienes el grafo; falta modelo de dilución' },
+        { cap:'Cross-analysis', state:'Tienes', stateColor:'#1F8A5B', acc:'Reusar (joins por url_hash)' },
+        { cap:'Semántica / canibalización', state:'Tienes', stateColor:'#1F8A5B', acc:'Reusar (chasis-seo, SEM-01)' },
+        { cap:'GEO', state:'Tienes', stateColor:'#1F8A5B', acc:'Reusar (chasis-seo, paneles Salto)' },
+        { cap:'Exposición MCP', state:'Tienes', stateColor:'#1F8A5B', acc:'Replicar patrón (SearchScope)' },
+        { cap:'Análisis de logs + bots IA', state:'Hueco', stateColor:'#B12B29', acc:'El moat — primer slice' },
+        { cap:'A11y / CWV / dev tickets / CI/CD', state:'Hueco', stateColor:'#B12B29', acc:'Breadth — posponer / productizar' },
+      ],
+      slices: [
+        { n:'Slice 1', title:'Logs — el moat', body:'Contrato (log_hits + taxonomía de bots + url_hash + orden Postgres-antes-Neo4j) → prepare.py inmutable → parser async con checkpoint JSONL idempotente → tabla particionada por fecha → invariantes como métrica.', deliver:'Tabla de fuga de crawl budget + hits de IA separando entrenamiento de fetch en vivo, por directorio/topic.', accent:'#B12B29' },
+        { n:'Slice 2', title:'Inrank ponderado', body:'Proyección GDS con nofollow-como-diluyente, decay en 3xx, sin self-loops.', deliver:'En paralelo. Una tarde.', accent:'#101010' },
+        { n:'Slice 3', title:'Cruces + MCP', body:'logs × GSC × GA4 × Inrank, y exposición MCP (query_pages / query_links).', deliver:'El data layer unificado, consultable en lenguaje natural.', accent:'#101010' },
+        { n:'Slice 4+', title:'Breadth opcional', body:'A11y (axe-core), CWV (CrUX/PSI), dev tickets, gating CI/CD.', deliver:'Solo si productizas.', accent:'#999999' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

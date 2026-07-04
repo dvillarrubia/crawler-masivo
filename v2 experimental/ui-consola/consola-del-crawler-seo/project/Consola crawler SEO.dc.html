@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/tokens/colors.css">
+<link rel="stylesheet" href="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/tokens/typography.css">
+<link rel="stylesheet" href="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/styles.css">
+<script src="_ds/lin3s-design-system-a9fd2b06-788b-4b1e-b5a8-d664d783545b/_ds_bundle.js"></script>
+<style>body{margin:0;background:#fff}</style>
+</helmet>
+<div data-screen-label="Consola" style="display:flex;min-height:100vh;background:var(--lin3s-canvas);font-family:'Inter',system-ui,sans-serif;color:var(--lin3s-ink)">
+
+  <!-- ===== SIDEBAR (ancho) ===== -->
+  <sc-if value="{{ esAncho }}" hint-placeholder-val="{{ true }}">
+  <div style="width:216px;flex:none;background:var(--lin3s-inverse-canvas);color:var(--lin3s-inverse-ink);display:flex;flex-direction:column;padding:20px 0 16px;position:sticky;top:0;height:100vh;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:8px;padding:0 20px 18px;border-bottom:1px solid rgba(255,255,255,.12)">
+      <div style="display:flex;gap:2.5px"><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span></div>
+      <span style="font:600 13px 'Inter',sans-serif;letter-spacing:.4px">crawler</span>
+    </div>
+    <div style="padding:16px 20px 6px;font:600 10px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-inverse-ink-soft)">PROYECTO</div>
+    <div style="display:flex;flex-direction:column;gap:1px;padding:4px 10px">
+      <sc-for list="{{ navItems }}" as="it" hint-placeholder-count="7">
+        <div onClick="{{ it.go }}" style="{{ it.st }}">
+          <span>{{ it.label }}</span>
+          <sc-if value="{{ it.badge }}" hint-placeholder-val="{{ false }}"><span style="{{ it.badgeSt }}">{{ it.badge }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <div style="margin-top:auto;padding:14px 20px 0;border-top:1px solid rgba(255,255,255,.12);font:400 11px/1.6 'Inter',sans-serif;color:var(--lin3s-inverse-ink-soft)">Casa Beltrán · agencia LIN3S<br>analista: M. Ortiz</div>
+  </div>
+  </sc-if>
+
+  <!-- ===== MAIN ===== -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+    <!-- top nav (estrecho) -->
+    <sc-if value="{{ esEstrecho }}" hint-placeholder-val="{{ false }}">
+      <div style="background:var(--lin3s-inverse-canvas);color:var(--lin3s-inverse-ink);padding:10px 16px;display:flex;align-items:center;gap:12px">
+        <div style="display:flex;align-items:center;gap:7px;flex:none">
+          <div style="display:flex;gap:2.5px"><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span><span style="width:5px;height:11px;background:#fff;border-radius:1px"></span></div>
+          <span style="font:600 13px 'Inter',sans-serif">crawler</span>
+        </div>
+        <div style="display:flex;gap:4px;overflow-x:auto;min-width:0;-webkit-overflow-scrolling:touch">
+          <sc-for list="{{ navTop }}" as="it" hint-placeholder-count="7">
+            <div onClick="{{ it.go }}" style="{{ it.st }}">
+              <span>{{ it.label }}</span>
+              <sc-if value="{{ it.badge }}" hint-placeholder-val="{{ false }}"><span style="{{ it.badgeSt }}">{{ it.badge }}</span></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- context bar -->
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 28px;border-bottom:1px solid var(--lin3s-hairline);position:relative;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px;border:1px solid var(--lin3s-hairline);border-radius:999px;padding:6px 12px;font:500 12.5px 'Inter',sans-serif;cursor:default">Casa Beltrán <span style="color:var(--lin3s-ink-muted)">▾</span></div>
+      <div style="position:relative">
+        <div onClick="{{ toggleRunMenu }}" style="display:flex;align-items:center;gap:6px;border:1px solid var(--lin3s-hairline);border-radius:999px;padding:6px 12px;font:500 12.5px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-canvas-muted)">{{ runLabel }} <span style="color:var(--lin3s-ink-muted)">▾</span></div>
+        <sc-if value="{{ menuRunAbierto }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:38px;left:0;z-index:60;background:var(--lin3s-canvas);border:1px solid var(--lin3s-hairline);border-radius:10px;min-width:250px;box-shadow:0 8px 24px rgba(5,10,14,.12);overflow:hidden">
+            <sc-for list="{{ runOpts }}" as="r" hint-placeholder-count="3">
+              <div onClick="{{ r.pick }}" style="{{ r.st }}" style-hover="background:var(--lin3s-canvas-muted)">
+                <span>{{ r.label }}</span><span style="font:400 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">{{ r.nota }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <sc-for list="{{ fuentes }}" as="f" hint-placeholder-count="5">
+          <span title="{{ f.tip }}" style="{{ f.st }}">{{ f.label }}</span>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- segment chips -->
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 28px;border-bottom:1px solid var(--lin3s-hairline);flex-wrap:wrap">
+      <span style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted)">SEGMENTO</span>
+      <sc-for list="{{ segChips }}" as="s" hint-placeholder-count="6">
+        <div onClick="{{ s.pick }}" style="{{ s.st }}">{{ s.label }}</div>
+      </sc-for>
+      <span style="margin-left:auto;font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">cambiar el segmento re-corta la vista actual</span>
+    </div>
+
+    <!-- run-state banner -->
+    <sc-if value="{{ runBanner }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 28px;background:var(--lin3s-canvas-muted);border-bottom:1px solid var(--lin3s-hairline);font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">
+        <span style="flex:none;width:8px;height:8px;border-radius:999px;background:var(--lin3s-ink)"></span>
+        <span>{{ runBanner }}</span>
+        <span onClick="{{ volverRun24 }}" style="margin-left:auto;text-decoration:underline;text-underline-offset:3px;cursor:pointer;color:var(--lin3s-ink)">volver al run #24</span>
+      </div>
+    </sc-if>
+
+    <!-- ================= SALUD (5.1) ================= -->
+    <sc-if value="{{ esSalud }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Salud del proyecto">
+        <div style="padding:28px 28px 22px;border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">{{ tituloComparacion }}</div>
+          <div style="font:400 30px/1.25 'Besley',serif;letter-spacing:-.4px;max-width:860px;text-wrap:pretty">{{ titular }}</div>
+          <div onClick="{{ irDiff }}" style="display:inline-flex;margin-top:10px;font:500 13px 'Inter',sans-serif;text-decoration:underline;text-underline-offset:3px;cursor:pointer;color:var(--lin3s-ink)" style-hover="color:var(--lin3s-ink-soft)">ver el diff completo →</div>
+          <div style="display:flex;gap:36px;margin-top:22px;flex-wrap:wrap">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+              <div>
+                <div style="{{ kpiNumSt }}">{{ k.valor }}<sc-if value="{{ k.proxy }}" hint-placeholder-val="{{ false }}"><span style="font-size:.5em;color:var(--lin3s-ink-muted)">*</span></sc-if></div>
+                <div style="font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:6px">{{ k.label }} <span style="{{ k.deltaSt }}">{{ k.delta }}</span><sc-if value="{{ k.proxy }}" hint-placeholder-val="{{ false }}"> · <span style="border:1px solid var(--lin3s-hairline);border-radius:4px;padding:0 5px;font-weight:500">proxy de tráfico</span></sc-if></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="padding:20px 24px 22px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:14px">COBERTURA DE CHECKS POR CAPA</div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <sc-for list="{{ capas }}" as="c" hint-placeholder-count="4">
+                <div onClick="{{ c.go }}" style="{{ c.rowSt }}">
+                  <div style="display:flex;justify-content:space-between;font:400 12.5px 'Inter',sans-serif;margin-bottom:5px"><span style="{{ c.labSt }}">{{ c.label }}</span><span style="color:var(--lin3s-ink-muted)">{{ c.det }}</span></div>
+                  <div style="{{ c.trackSt }}"><div style="{{ c.barSt }}"></div></div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding:20px 24px 22px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:14px">ALERTAS ACTIVAS</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ alertas }}" as="a" hint-placeholder-count="4">
+                <div onClick="{{ a.go }}" title="ver en el diff" style="display:flex;gap:10px;align-items:baseline;cursor:pointer;border-radius:6px;margin:0 -6px;padding:0 6px" style-hover="background:var(--lin3s-canvas-muted)">
+                  <span style="{{ a.dotSt }}"></span>
+                  <div style="font:400 12.5px/1.45 'Inter',sans-serif"><strong style="font-weight:600">{{ a.sev }}</strong> · {{ a.txt }} <span style="color:var(--lin3s-ink-muted)">· {{ a.seg }}</span></div>
+                </div>
+              </sc-for>
+              <sc-if value="{{ sinAlertas }}" hint-placeholder-val="{{ false }}">
+                <div style="font:400 13px/1.5 'Besley',serif;color:var(--lin3s-ink)">Ninguna alerta activa en este segmento. Está limpio de verdad, no sin datos.</div>
+              </sc-if>
+            </div>
+          </div>
+          <div style="padding:20px 24px 22px;background:var(--lin3s-canvas-muted)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">FUGA DE CRAWL BUDGET</div>
+            <sc-if value="{{ sinLogs }}" hint-placeholder-val="{{ true }}">
+              <div style="font:400 17px/1.4 'Besley',serif;text-wrap:pretty">Requiere logs de servidor, no configurados en este proyecto.</div>
+              <div style="font:400 12px/1.55 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin:10px 0 14px">Mientras tanto, modo degradado con GSC Crawl Stats (proxy, granularidad diaria).</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <div onClick="{{ irConfig }}" style="display:inline-flex;border:1px solid var(--lin3s-ink);border-radius:999px;padding:7px 16px;font:500 12.5px 'Inter',sans-serif;background:var(--lin3s-canvas);cursor:pointer" style-hover="background:var(--lin3s-ink);color:#fff">Conectar logs</div>
+                <div onClick="{{ irLogs }}" style="display:inline-flex;border:1px solid var(--lin3s-hairline);border-radius:999px;padding:7px 16px;font:500 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft);cursor:pointer" style-hover="border-color:var(--lin3s-ink)">Ver modo degradado</div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ logsOn }}" hint-placeholder-val="{{ false }}">
+              <div style="font:400 34px 'Besley',serif">23%</div>
+              <div style="font:400 12.5px/1.55 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin:6px 0 12px">de los hits verificados se gastan en 3xx/4xx/noindex. Campaña es el segmento que más fuga (44%).</div>
+              <div onClick="{{ irLogs }}" style="display:inline-flex;border:1px solid var(--lin3s-ink);border-radius:999px;padding:7px 16px;font:500 12.5px 'Inter',sans-serif;background:var(--lin3s-canvas);cursor:pointer" style-hover="background:var(--lin3s-ink);color:#fff">Ver logs y bots</div>
+            </sc-if>
+          </div>
+        </div>
+
+        <div style="padding:20px 28px 32px;overflow-x:auto">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;min-width:760px">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted)">WATCHLIST · PÁGINAS CRÍTICAS</div>
+            <div style="font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">* proxy (clics GSC) · procedencia: run + GSC 28 días, en el detalle de cada URL</div>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(0,2.2fr) .8fr .6fr .6fr .9fr 1fr;font:400 12.5px 'Inter',sans-serif;min-width:760px">
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">URL</div>
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">status</div>
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">Inrank</div>
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">clics/día *</div>
+            <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">Δ vs run anterior</div>
+            <sc-for list="{{ watchRows }}" as="w" hint-placeholder-count="4">
+              <div onClick="{{ w.open }}" style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--lin3s-hairline)" style-hover="text-decoration-color:var(--lin3s-ink)">{{ w.url }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-soft)">{{ w.seg }}</div>
+              <div style="{{ w.statusSt }}">{{ w.status }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ w.inrank }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ w.clics }}*</div>
+              <div style="{{ w.deltaSt }}">{{ w.delta }}</div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ watchVacia }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:18px 0;font:400 14px 'Besley',serif;color:var(--lin3s-ink-soft)">No hay páginas de la watchlist en este segmento.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= EXPLORADOR (5.2) ================= -->
+    <sc-if value="{{ esExplorador }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Explorador de URLs">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 28px;border-bottom:1px solid var(--lin3s-hairline);flex-wrap:wrap">
+          <input value="{{ q }}" onInput="{{ setQ }}" placeholder="filtrar por URL…" style="border:1px solid var(--lin3s-hairline);border-radius:10px;padding:8px 12px;font:400 12.5px 'Inter',sans-serif;width:260px;outline:none;color:var(--lin3s-ink)" style-focus="border-color:var(--lin3s-ink)">
+          <div style="display:flex;gap:6px">
+            <sc-for list="{{ statusChips }}" as="c" hint-placeholder-count="5">
+              <div onClick="{{ c.pick }}" style="{{ c.st }}">{{ c.label }}</div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ sinLogs }}" hint-placeholder-val="{{ true }}">
+            <span style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);border:1px dashed var(--lin3s-hairline);border-radius:6px;padding:4px 10px" title="requiere logs de servidor">columna «hits de bot» no disponible — requiere logs</span>
+          </sc-if>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <div style="position:relative">
+              <div onClick="{{ toggleVistas }}" style="border:1px solid var(--lin3s-hairline);border-radius:999px;padding:6px 14px;font:500 12px 'Inter',sans-serif;color:var(--lin3s-ink-soft);cursor:pointer" style-hover="border-color:var(--lin3s-ink)">vistas guardadas ▾</div>
+              <sc-if value="{{ menuVistasAbierto }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:36px;right:0;z-index:60;background:var(--lin3s-canvas);border:1px solid var(--lin3s-hairline);border-radius:10px;min-width:250px;box-shadow:0 8px 24px rgba(5,10,14,.12);overflow:hidden">
+                  <sc-for list="{{ vistasOpts }}" as="v" hint-placeholder-count="4">
+                    <div onClick="{{ v.pick }}" style="padding:9px 14px;font:400 12.5px 'Inter',sans-serif;cursor:pointer;border-bottom:1px solid var(--lin3s-hairline-soft)" style-hover="background:var(--lin3s-canvas-muted)">{{ v.label }}</div>
+                  </sc-for>
+                  <div onClick="{{ limpiarFiltro }}" style="padding:9px 14px;font:500 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);cursor:pointer" style-hover="background:var(--lin3s-canvas-muted)">limpiar filtro</div>
+                </div>
+              </sc-if>
+            </div>
+            <div onClick="{{ exportCsv }}" style="background:var(--lin3s-ink);color:#fff;border-radius:999px;padding:6px 16px;font:500 12px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-ink-soft)">Exportar CSV</div>
+          </div>
+        </div>
+
+        <sc-if value="{{ joinBanner }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:10px;align-items:baseline;padding:10px 28px;background:var(--lin3s-canvas-muted);border-bottom:1px solid var(--lin3s-hairline);font:400 12.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft)">
+            <span style="font:600 10px 'Inter',sans-serif;letter-spacing:1px;color:var(--lin3s-ink);border:1px solid var(--lin3s-ink);border-radius:4px;padding:1px 6px;flex:none">AVISO TÉCNICO</span>
+            <span>{{ joinBanner }}</span>
+          </div>
+        </sc-if>
+
+        <div style="padding:6px 28px 28px;overflow-x:auto">
+          <div style="display:grid;grid-template-columns:minmax(0,2.4fr) .9fr .55fr .65fr 1fr .5fr .55fr .6fr .7fr;font:400 12.5px 'Inter',sans-serif;min-width:920px">
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">URL</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">status</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">indexable</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">canonical</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">depth</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">Inrank</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">palabras</div>
+            <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">clics/día *</div>
+            <sc-for list="{{ urlRows }}" as="u" hint-placeholder-count="8">
+              <div onClick="{{ u.open }}" style="padding:8px 8px 8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--lin3s-hairline)" style-hover="text-decoration-color:var(--lin3s-ink)">{{ u.url }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-soft)">{{ u.seg }}</div>
+              <div style="{{ u.statusSt }}">{{ u.status }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ u.idx }}</div>
+              <div style="padding:8px 8px 8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lin3s-ink-soft)">{{ u.canonical }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ u.depth }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ u.inrank }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ u.words }}</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ u.clicks }}*</div>
+            </sc-for>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:12px 0;font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">
+            <span>{{ nRows }} URLs en el filtro (muestra de demo — la tabla real es virtualizada sobre {{ totalSeg }} URLs)</span>
+            <span>* clics GSC como proxy de tráfico — GA4 por URL disponible en la ficha</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= DIFF (5.3) ================= -->
+    <sc-if value="{{ esDiff }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Diff entre crawls">
+        <div style="padding:28px 28px 24px;border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">QUÉ HA CAMBIADO · RUN #24 (12 JUN) FRENTE A #23 (29 MAY) · {{ diffSegLabel }}</div>
+          <div style="display:flex;gap:44px;align-items:baseline;flex-wrap:wrap">
+            <div><div style="font:400 64px/1 'Besley',serif;letter-spacing:-1.6px">+{{ diffNuevas }}</div><div style="font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">URLs nuevas</div></div>
+            <div><div style="font:400 64px/1 'Besley',serif;letter-spacing:-1.6px;color:var(--lin3s-ink-muted)">−{{ diffIdas }}</div><div style="font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">desaparecidas</div></div>
+            <div><div style="font:400 64px/1 'Besley',serif;letter-spacing:-1.6px">{{ diffCambios }}</div><div style="font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">grupos de cambios de campo</div></div>
+            <div><div style="font:400 64px/1 'Besley',serif;letter-spacing:-1.6px">{{ diffFlap }}</div><div style="font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">URLs en flapping</div></div>
+          </div>
+        </div>
+
+        <div style="padding:22px 28px 8px;overflow-x:auto">
+          <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">CAMBIOS DE CAMPO</div>
+          <div style="display:grid;grid-template-columns:18px minmax(0,2fr) .8fr .7fr 1fr 1fr;font:400 12.5px 'Inter',sans-serif;min-width:820px">
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline)"></div>
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">URL / grupo</div>
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">campo</div>
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">antes</div>
+            <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">después</div>
+            <sc-for list="{{ diffRows }}" as="c" hint-placeholder-count="6">
+              <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline-soft)"><span style="{{ c.dotSt }}" title="{{ c.sev }}"></span></div>
+              <div onClick="{{ c.open }}" style="padding:9px 8px 9px 0;border-bottom:1px solid var(--lin3s-hairline-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--lin3s-hairline)" style-hover="text-decoration-color:var(--lin3s-ink)">{{ c.url }}</div>
+              <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-soft)">{{ c.seg }}</div>
+              <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-weight:500">{{ c.campo }}</div>
+              <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">{{ c.antes }}</div>
+              <div style="padding:9px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ c.despues }}</div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ diffVacio }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:16px 0;font:400 15px 'Besley',serif;color:var(--lin3s-ink-soft)">Ningún cambio de campo en este segmento entre los dos runs. Estable de verdad.</div>
+          </sc-if>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;padding:16px 28px 32px">
+          <div>
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">NUEVAS EN #24</div>
+            <sc-for list="{{ diffNuevasRows }}" as="n" hint-placeholder-count="4">
+              <div onClick="{{ n.open }}" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font:400 12.5px 'Inter',sans-serif;cursor:pointer" style-hover="color:var(--lin3s-ink-soft)"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ n.url }}</span><span style="flex:none;color:var(--lin3s-ink-muted)">{{ n.seg }}</span></div>
+            </sc-for>
+          </div>
+          <div>
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">DESAPARECIDAS</div>
+            <sc-for list="{{ diffIdasRows }}" as="n" hint-placeholder-count="3">
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font:400 12.5px 'Inter',sans-serif"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ n.url }}</div><div style="color:var(--lin3s-ink-muted);font-size:11.5px;margin-top:2px">{{ n.como }} · {{ n.seg }}</div></div>
+            </sc-for>
+          </div>
+          <div style="background:var(--lin3s-canvas-muted);border-radius:16px;padding:18px 20px;align-self:start">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">FLAPPING — URLS QUE ALTERNAN</div>
+            <div style="font:400 12px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin-bottom:10px">Alternan estado entre runs: suelen delatar lógica de despliegue o caché, no decisiones SEO.</div>
+            <sc-for list="{{ diffFlapRows }}" as="f" hint-placeholder-count="3">
+              <div style="padding:7px 0;border-top:1px solid var(--lin3s-hairline);font:400 12.5px 'Inter',sans-serif"><div>{{ f.url }}</div><div style="color:var(--lin3s-ink-muted);font-size:11.5px;margin-top:2px">{{ f.patron }}</div></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= COLA DE FIRMA (5.6) ================= -->
+    <sc-if value="{{ esFirma }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Cola de firma">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;padding:26px 28px 6px">
+          <div style="font:400 26px 'Besley',serif;letter-spacing:-.3px">{{ firmaTitulo }}</div>
+          <div style="font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">ordenado por severidad · los checks de juicio nunca se auto-aprueban</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;padding:16px 28px 32px;max-width:980px">
+          <sc-for list="{{ firmaItems }}" as="f" hint-placeholder-count="4">
+            <div style="border:1px solid var(--lin3s-hairline);border-radius:16px;padding:18px 22px">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span style="{{ f.dotSt }}"></span>
+                <span style="font:600 12px 'Inter',sans-serif">{{ f.sev }}</span>
+                <span style="font:500 11px 'Inter',sans-serif;border:1px solid var(--lin3s-hairline);border-radius:6px;padding:2px 8px;color:var(--lin3s-ink-soft)">{{ f.tipo }}</span>
+                <span style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento: {{ f.seg }}</span>
+              </div>
+              <div style="font:400 16.5px/1.4 'Besley',serif;margin:10px 0 8px">{{ f.titulo }}</div>
+              <sc-for list="{{ f.evid }}" as="e" hint-placeholder-count="2">
+                <div style="display:flex;gap:8px;font:400 12.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft)"><span style="flex:none;display:flex;gap:1.5px;margin-top:5px"><span style="width:2.5px;height:6px;background:var(--lin3s-ink);border-radius:.5px"></span><span style="width:2.5px;height:6px;background:var(--lin3s-ink);border-radius:.5px"></span><span style="width:2.5px;height:6px;background:var(--lin3s-ink);border-radius:.5px"></span></span><span>{{ e }}</span></div>
+              </sc-for>
+              <div style="font:400 12.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:6px">{{ f.accion }}</div>
+              <sc-if value="{{ f.pendiente }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+                  <div onClick="{{ f.firmar }}" style="background:var(--lin3s-ink);color:#fff;border-radius:999px;padding:7px 16px;font:500 12.5px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-ink-soft)">Firmar como revisado</div>
+                  <div onClick="{{ f.rechazar }}" style="border:1px solid var(--lin3s-ink);border-radius:999px;padding:7px 16px;font:500 12.5px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-canvas-muted)">Rechazar</div>
+                  <input onInput="{{ f.setNota }}" placeholder="nota opcional…" style="flex:1;min-width:180px;border:1px solid var(--lin3s-hairline);border-radius:10px;padding:7px 12px;font:400 12px 'Inter',sans-serif;outline:none" style-focus="border-color:var(--lin3s-ink)">
+                </div>
+              </sc-if>
+              <sc-if value="{{ f.resuelto }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;gap:10px;align-items:center;margin-top:14px;background:var(--lin3s-canvas-muted);border-radius:10px;padding:10px 14px;font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">
+                  <span style="font-weight:600;color:var(--lin3s-ink)">{{ f.resTxt }}</span><span>{{ f.resNota }}</span>
+                  <span onClick="{{ f.deshacer }}" style="margin-left:auto;text-decoration:underline;text-underline-offset:3px;cursor:pointer">deshacer</span>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ firmaVacia }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--lin3s-hairline);border-radius:16px;padding:32px;text-align:center;font:400 18px 'Besley',serif;color:var(--lin3s-ink-soft)">Bandeja vacía en este segmento: todo lo que requería juicio humano está firmado o rechazado.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= ENLAZADO · INRANK (5.4) ================= -->
+    <sc-if value="{{ esEnlazado }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Enlazado interno e Inrank">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="padding:24px 28px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:14px">DISTRIBUCIÓN DE INRANK POR SEGMENTO · RUN #24</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ inrankRows }}" as="r" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:12px;font:400 12.5px 'Inter',sans-serif">
+                  <span style="flex:none;width:120px">{{ r.label }}</span>
+                  <div style="flex:1;height:14px;background:var(--lin3s-surface-soft);border-radius:2px;position:relative"><div style="{{ r.barSt }}"></div></div>
+                  <span style="flex:none;width:140px;color:var(--lin3s-ink-muted)">media {{ r.avg }} · p10 {{ r.p10 }} · p90 {{ r.p90 }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font:400 11.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:12px">Inrank 0–10 calculado sobre el grafo de enlaces del run (Neo4j). Las fichas de producto concentran la cola baja: la arquitectura reparte poco hacia hoja.</div>
+          </div>
+          <div style="display:grid;grid-template-rows:1fr 1fr">
+            <div style="padding:20px 24px;border-bottom:1px solid var(--lin3s-hairline)">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">HUÉRFANAS</div>
+              <div style="font:400 40px/1 'Besley',serif">0</div>
+              <div style="font:400 12.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin-top:8px">Cero huérfanas comprobado contra sitemap y GSC — todas las URLs conocidas reciben al menos un enlace interno. No es «sin datos»: es un resultado, y bueno.</div>
+            </div>
+            <div style="padding:20px 24px">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:8px">UNDERLINKED HIGH-PERFORMERS · REQUIERE GSC ✓</div>
+              <sc-for list="{{ underRows }}" as="u" hint-placeholder-count="3">
+                <div onClick="{{ u.open }}" style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font:400 12.5px 'Inter',sans-serif;cursor:pointer" style-hover="color:var(--lin3s-ink-soft)">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ u.url }}</span>
+                  <span style="flex:none;color:var(--lin3s-ink-muted)">Inrank {{ u.inrank }} × {{ u.clicks }} clics/día*</span>
+                </div>
+              </sc-for>
+              <div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">Inrank bajo × clics altos = merecen más enlaces. * proxy GSC.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:22px 28px 32px;max-width:980px">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+            <div style="font:400 22px 'Besley',serif;letter-spacing:-.2px">sugerencias de enlazado semántico</div>
+            <div style="font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">candidatas por similitud (pgvector) × Inrank · aceptar es un check de juicio</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+            <sc-for list="{{ sugItems }}" as="f" hint-placeholder-count="3">
+              <div style="border:1px solid var(--lin3s-hairline);border-radius:16px;padding:16px 20px">
+                <div style="display:flex;align-items:center;gap:10px"><span style="{{ f.dotSt }}"></span><span style="font:600 12px 'Inter',sans-serif">{{ f.sev }}</span><span style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento: {{ f.seg }}</span></div>
+                <div style="font:400 15.5px/1.4 'Besley',serif;margin:8px 0 6px">{{ f.titulo }}</div>
+                <sc-for list="{{ f.evid }}" as="e" hint-placeholder-count="2">
+                  <div style="font:400 12.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft)">{{ e }}</div>
+                </sc-for>
+                <sc-if value="{{ f.pendiente }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;gap:8px;margin-top:12px">
+                    <div onClick="{{ f.firmar }}" style="background:var(--lin3s-ink);color:#fff;border-radius:999px;padding:6px 15px;font:500 12px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-ink-soft)">Aceptar sugerencia</div>
+                    <div onClick="{{ f.rechazar }}" style="border:1px solid var(--lin3s-ink);border-radius:999px;padding:6px 15px;font:500 12px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-canvas-muted)">Descartar</div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ f.resuelto }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:10px;margin-top:12px;background:var(--lin3s-canvas-muted);border-radius:10px;padding:8px 13px;font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-soft)"><span style="font-weight:600;color:var(--lin3s-ink)">{{ f.resTxt }}</span><span onClick="{{ f.deshacer }}" style="margin-left:auto;text-decoration:underline;text-underline-offset:3px;cursor:pointer">deshacer</span></div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font:400 12px/1.6 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:14px">El grafo completo (48.213 nodos) no se pinta: para explorar el vecindario de una URL, abre su ficha desde el explorador. Un mini-grafo de 1 salto está previsto en la ficha.</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= LOGS Y BOTS DE IA (5.5) — BLOQUEADA ================= -->
+    <sc-if value="{{ esLogs }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Logs y bots de IA">
+        <sc-if value="{{ sinLogs }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="padding:32px 28px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">VISTA BLOQUEADA POR FUENTE</div>
+            <div style="font:400 28px/1.3 'Besley',serif;letter-spacing:-.3px;max-width:520px;text-wrap:pretty">Esta vista necesita logs de servidor, y este proyecto aún no los ingesta.</div>
+            <div style="font:400 13px/1.6 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin:14px 0 18px;max-width:520px">No es un error: es una decisión pendiente. Con la ingesta de logs activada (línea a línea, bots verificados por DNS inverso), esto se convierte en la vista más valiosa de la consola.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;max-width:520px">
+              <sc-for list="{{ logsDesbloquea }}" as="l" hint-placeholder-count="5">
+                <div style="display:flex;gap:10px;align-items:baseline;font:400 13px/1.5 'Inter',sans-serif"><span style="flex:none;display:flex;gap:1.5px"><span style="width:3px;height:8px;background:var(--lin3s-ink);border-radius:.5px"></span><span style="width:3px;height:8px;background:var(--lin3s-ink);border-radius:.5px"></span><span style="width:3px;height:8px;background:var(--lin3s-ink);border-radius:.5px"></span></span><span><strong style="font-weight:600">{{ l.t }}</strong> — {{ l.d }}</span></div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:22px">
+              <div onClick="{{ irConfig }}" style="background:var(--lin3s-ink);color:#fff;border-radius:999px;padding:9px 20px;font:500 13px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-ink-soft)">Configurar ingesta de logs</div>
+            </div>
+            <div style="font:400 11.5px/1.6 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:18px">Regla de la casa: los hits de bots no verificados (spoofed) se excluirán por defecto de todas las métricas y se inspeccionan aparte.</div>
+          </div>
+          <div style="padding:32px 28px;background:var(--lin3s-canvas-muted)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">MIENTRAS TANTO · MODO DEGRADADO (GSC CRAWL STATS)</div>
+            <div style="display:grid;grid-template-columns:1fr .9fr .8fr .8fr;font:400 12.5px 'Inter',sans-serif">
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">día</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">solicitudes *</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">descarga *</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">resp. media *</div>
+              <sc-for list="{{ crawlStats }}" as="c" hint-placeholder-count="5">
+                <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ c.dia }}</div>
+                <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ c.req }}</div>
+                <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ c.kb }}</div>
+                <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ c.ms }}</div>
+              </sc-for>
+            </div>
+            <div style="font:400 11.5px/1.6 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:10px">* proxy — agregado diario de Google, sin URL ni verificación de bot. No permite cortar por segmento ni distinguir clases de bot.</div>
+            <div style="margin-top:22px">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">VOCABULARIO FIJO DE CLASES DE BOT (CUANDO HAYA LOGS)</div>
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <sc-for list="{{ botClases }}" as="b" hint-placeholder-count="4">
+                  <div style="display:flex;gap:10px;align-items:center;font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)"><span style="{{ b.dotSt }}"></span><span><strong style="font-weight:600;color:var(--lin3s-ink)">{{ b.t }}</strong> · {{ b.d }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ logsOn }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 28px;background:var(--lin3s-canvas-muted);border-bottom:1px solid var(--lin3s-hairline);font:400 12px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">Ingesta de logs activa — <strong style="font-weight:600">simulada en la maqueta</strong> · bots verificados por DNS inverso · 1.204 hits spoofed excluidos de todas las métricas <span style="margin-left:auto;text-decoration:underline dotted;text-underline-offset:3px;cursor:help" title="hits que se identifican como Googlebot pero no resuelven a IPs de Google">inspeccionar spoofed aparte</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));border-bottom:1px solid var(--lin3s-hairline)">
+            <div style="padding:22px 28px;border-right:1px solid var(--lin3s-hairline)">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">FUGA DE CRAWL BUDGET POR SEGMENTO · HITS VERIFICADOS EN 3XX/4XX/5XX/NOINDEX</div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ fugaRows }}" as="f" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:12px;font:400 12.5px 'Inter',sans-serif">
+                    <span style="flex:none;width:110px">{{ f.seg }}</span>
+                    <div style="flex:1;height:14px;background:var(--lin3s-surface-soft);border-radius:2px;position:relative"><div style="{{ f.barSt }}"></div></div>
+                    <span style="flex:none;width:44px;font-weight:600">{{ f.pct }}</span>
+                    <span style="flex:none;width:190px;color:var(--lin3s-ink-muted);font-size:11.5px">{{ f.desglose }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="font:400 11.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:12px">Campaña fuga el 44% de sus hits por el flapping index/noindex: es la acción de crawl budget más rentable del trimestre.</div>
+            </div>
+            <div style="padding:22px 28px">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">ACTIVIDAD DE BOTS POR CLASE · MEDIA 7 DÍAS</div>
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ botActividad }}" as="b" hint-placeholder-count="4">
+                  <div style="display:flex;gap:10px;align-items:baseline;font:400 12.5px/1.45 'Inter',sans-serif">
+                    <span style="{{ b.dotSt }}"></span>
+                    <span style="flex:1"><strong style="font-weight:600">{{ b.t }}</strong> <span style="color:var(--lin3s-ink-muted)">· {{ b.d }}</span></span>
+                    <span style="flex:none;font-weight:600">{{ b.hits }}</span>
+                    <span style="flex:none;width:90px;color:var(--lin3s-ink-muted)">{{ b.delta }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top:18px;font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">TRÁFICO REFERIDO DESDE PLATAFORMAS DE IA · COTA INFERIOR</div>
+              <div style="display:flex;gap:24px;flex-wrap:wrap">
+                <sc-for list="{{ iaReferido }}" as="i" hint-placeholder-count="3">
+                  <div style="font:400 12.5px 'Inter',sans-serif"><strong style="font-weight:600">{{ i.p }}</strong> · {{ i.v }}</div>
+                </sc-for>
+              </div>
+              <div style="font:400 11px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">Cota inferior: muchas visitas desde IA llegan sin referrer y no son atribuibles.</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));padding:0 0 8px">
+            <div style="padding:22px 28px;border-right:1px solid var(--lin3s-hairline)">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">LATENCIA SERVIDA A GOOGLEBOT</div>
+              <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;font:400 12.5px 'Inter',sans-serif">
+                <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+                <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">p50</div>
+                <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">p95</div>
+                <sc-for list="{{ latRows }}" as="l" hint-placeholder-count="5">
+                  <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ l.seg }}</div>
+                  <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ l.p50 }}</div>
+                  <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ l.p95 }}</div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="padding:22px 28px">
+              <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">TIME-TO-INDEX ESTIMADO · DEL PRIMER HIT A LA PRIMERA IMPRESIÓN</div>
+              <div style="display:grid;grid-template-columns:1.2fr 1fr;font:400 12.5px 'Inter',sans-serif">
+                <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+                <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">mediana</div>
+                <sc-for list="{{ ttiRows }}" as="t" hint-placeholder-count="5">
+                  <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ t.seg }}</div>
+                  <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ t.dias }}</div>
+                </sc-for>
+              </div>
+              <div style="font:400 11.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:10px">Producto tarda 9,4 días de mediana: correlaciona con su Inrank bajo y la fuga de presupuesto.</div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ================= CONFIGURACIÓN (5.7) ================= -->
+    <sc-if value="{{ esConfig }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Configuración del proyecto">
+        <div style="padding:26px 28px 8px"><div style="font:400 26px 'Besley',serif;letter-spacing:-.3px">configuración de Casa Beltrán</div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:0;border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="padding:18px 28px 24px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">FUENTES DE DATOS</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--lin3s-hairline);border-radius:12px;padding:12px 16px"><div><div style="font:500 13px 'Inter',sans-serif">crawl propio</div><div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">quincenal · último run #24 · 12 jun</div></div><span style="font:500 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">conectado ✓</span></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--lin3s-hairline);border-radius:12px;padding:12px 16px"><div><div style="font:500 13px 'Inter',sans-serif">Google Search Console</div><div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">propiedad de dominio · API diaria</div></div><span style="font:500 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">conectado ✓</span></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--lin3s-hairline);border-radius:12px;padding:12px 16px"><div><div style="font:500 13px 'Inter',sans-serif">GA4</div><div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">export diario a BigQuery</div></div><span style="font:500 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">conectado ✓</span></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border:1px dashed var(--lin3s-hairline);border-radius:12px;padding:12px 16px;background:var(--lin3s-canvas-muted)"><div><div style="font:500 13px 'Inter',sans-serif">logs de servidor</div><div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">desbloquea crawl budget, bots de IA, time-to-index</div></div>
+                <sc-if value="{{ sinLogs }}" hint-placeholder-val="{{ true }}"><div onClick="{{ conectarLogs }}" style="border:1px solid var(--lin3s-ink);border-radius:999px;padding:5px 13px;font:500 12px 'Inter',sans-serif;cursor:pointer" style-hover="background:var(--lin3s-ink);color:#fff">Configurar ingesta</div></sc-if>
+                <sc-if value="{{ logsOn }}" hint-placeholder-val="{{ false }}"><span style="font:500 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">conectado ✓ (simulado)</span></sc-if>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border:1px dashed var(--lin3s-hairline);border-radius:12px;padding:12px 16px"><div><div style="font:500 13px 'Inter',sans-serif">backlinks</div><div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">fuente de pago — requiere aprobación del cliente</div></div><span style="font:500 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">no contratado</span></div>
+            </div>
+          </div>
+          <div style="padding:18px 28px 24px">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">REGLAS DE SEGMENTACIÓN · CON VISTA PREVIA</div>
+            <div style="display:grid;grid-template-columns:1fr 1.3fr .9fr;font:400 12.5px 'Inter',sans-serif">
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">segmento</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">regla</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">captura</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">ficha de producto</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--lin3s-ink-soft)">^/(cocina|menaje)/.+/[a-z0-9-]+$</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">31.480 URLs</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">categoría</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--lin3s-ink-soft)">^/(cocina|menaje)/[a-z-]+/$</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">2.140 URLs</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">editorial</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--lin3s-ink-soft)">^/(guias|blog)/</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">890 URLs</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">ayuda</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--lin3s-ink-soft)">^/(es-ca/)?ayuda|ajuda/</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">312 URLs</div>
+              <div style="padding:8px 0">campaña</div><div style="padding:8px 0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--lin3s-ink-soft)">^/ofertas/</div><div style="padding:8px 0">64 URLs</div>
+            </div>
+            <div style="font:400 11.5px/1.6 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:10px">13.327 URLs sin segmento asignado (parámetros y paginaciones). Editar una regla recalcula la vista previa antes de guardar.</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));border-bottom:1px solid var(--lin3s-hairline)">
+          <div style="padding:18px 28px 24px;border-right:1px solid var(--lin3s-hairline)">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">POLÍTICA DE PARÁMETROS DE URL</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;font:400 12.5px 'Inter',sans-serif">
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">parámetro</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">tratamiento</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">afecta a</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px">?orden=</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">descartar en normalización</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">8.410 URLs</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-family:ui-monospace,Menlo,monospace;font-size:11.5px">?marca=</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">rastrear como URL propia</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">3.204 URLs</div>
+              <div style="padding:8px 0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px">?page=</div><div style="padding:8px 0">rastrear hasta page=5</div><div style="padding:8px 0;color:var(--lin3s-ink-muted)">1.713 URLs</div>
+            </div>
+          </div>
+          <div style="padding:18px 28px 24px">
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:12px">UMBRALES DE ALERTA · SUGERIDO = AUTO DEL RUN ANTERIOR</div>
+            <div style="display:grid;grid-template-columns:1.4fr .8fr .8fr;font:400 12.5px 'Inter',sans-serif">
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">métrica</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">sugerido</div>
+              <div style="padding:7px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">valor</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">caída de indexables por segmento</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">−2,0 pt</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-weight:500">−2,0 pt</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">URLs nuevas con noindex</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">> 5%</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-weight:500">> 5%</div>
+              <div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">tasa de no-join GSC↔crawl</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">> 12%</div><div style="padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font-weight:500">> 15% <span style="font:400 11px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">(editado)</span></div>
+              <div style="padding:8px 0">flapping consecutivo</div><div style="padding:8px 0;color:var(--lin3s-ink-muted)">≥ 2 runs</div><div style="padding:8px 0;font-weight:500">≥ 2 runs</div>
+            </div>
+            <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin:20px 0 10px">WATCHLIST</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ watchChips }}" as="w" hint-placeholder-count="4">
+                <span onClick="{{ w.quitar }}" title="quitar de la watchlist" style="font:400 12px 'Inter',sans-serif;border:1px solid var(--lin3s-hairline);border-radius:999px;padding:5px 12px;cursor:pointer" style-hover="border-color:var(--lin3s-error);color:var(--lin3s-error)">{{ w.url }} ×</span>
+              </sc-for>
+              <span onClick="{{ anadirWatch }}" style="font:500 12px 'Inter',sans-serif;border:1px dashed var(--lin3s-hairline);border-radius:999px;padding:5px 12px;color:var(--lin3s-ink-muted);cursor:pointer" style-hover="border-color:var(--lin3s-ink);color:var(--lin3s-ink)">+ añadir URL</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+
+  </div>
+</div>
+<sc-if value="{{ hayDetalle }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Ficha de URL">
+    <div onClick="{{ cerrarDetalle }}" style="position:fixed;inset:0;background:rgba(5,10,14,.6);z-index:90"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:min(540px,100vw);background:var(--lin3s-canvas);z-index:91;overflow-y:auto;border-left:1px solid var(--lin3s-hairline)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:22px 26px 16px;border-bottom:1px solid var(--lin3s-hairline)">
+        <div>
+          <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:6px">FICHA DE URL · {{ dSeg }}</div>
+          <div style="font:400 19px/1.35 'Besley',serif;word-break:break-all">{{ dUrl }}</div>
+        </div>
+        <div onClick="{{ cerrarDetalle }}" style="flex:none;border:1px solid var(--lin3s-hairline);border-radius:999px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;font:400 14px 'Inter',sans-serif" style-hover="border-color:var(--lin3s-ink)">×</div>
+      </div>
+      <div style="padding:16px 26px;border-bottom:1px solid var(--lin3s-hairline)">
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <sc-for list="{{ dChips }}" as="c" hint-placeholder-count="6">
+            <span style="{{ c.st }}">{{ c.k }} <strong style="font-weight:600">{{ c.v }}</strong></span>
+          </sc-for>
+        </div>
+        <div style="font:400 11.5px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:12px">Procedencia: crawl run #24 (12 jun 2026) · clics de GSC, 28 días, etiquetados como proxy · GA4 conectado a nivel de sesión.</div>
+      </div>
+      <div style="padding:16px 26px;border-bottom:1px solid var(--lin3s-hairline)">
+        <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">ENLACES ENTRANTES · {{ dInCount }}</div>
+        <div style="display:grid;grid-template-columns:1.4fr 1fr .7fr;font:400 12px 'Inter',sans-serif">
+          <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">desde</div>
+          <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">anchor</div>
+          <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">posición</div>
+          <sc-for list="{{ dInlinks }}" as="l" hint-placeholder-count="3">
+            <div style="padding:6px 8px 6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ l.from }}</div>
+            <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-soft)">«{{ l.anchor }}»</div>
+            <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">{{ l.pos }}</div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ dSinInlinks }}" hint-placeholder-val="{{ false }}">
+          <div style="font:400 13px/1.5 'Besley',serif;color:var(--lin3s-ink-soft);padding:6px 0">Ninguna página enlaza a esta URL en el run #24 — candidata a huérfana si sigue así.</div>
+        </sc-if>
+        <div style="font:400 11.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">Enlaces salientes: {{ dOut }}</div>
+      </div>
+      <div style="padding:16px 26px;border-bottom:1px solid var(--lin3s-hairline)">
+        <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">HISTORIAL ENTRE RUNS</div>
+        <sc-for list="{{ dHist }}" as="h" hint-placeholder-count="2">
+          <div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);font:400 12px 'Inter',sans-serif">
+            <span style="flex:none;width:88px;color:var(--lin3s-ink-muted)">{{ h.run }}</span>
+            <span style="flex:none;width:80px;font-weight:500">{{ h.campo }}</span>
+            <span style="color:var(--lin3s-ink-soft)">{{ h.cambio }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ dSinHist }}" hint-placeholder-val="{{ false }}">
+          <div style="font:400 12.5px 'Inter',sans-serif;color:var(--lin3s-ink-soft)">Sin cambios registrados en los últimos 3 runs.</div>
+        </sc-if>
+      </div>
+      <div style="padding:16px 26px 28px">
+        <div style="font:600 10.5px 'Inter',sans-serif;letter-spacing:1.2px;color:var(--lin3s-ink-muted);margin-bottom:10px">HITS DE BOT</div>
+        <sc-if value="{{ sinLogs }}" hint-placeholder-val="{{ true }}">
+          <div style="background:var(--lin3s-canvas-muted);border-radius:12px;padding:16px 18px">
+            <div style="font:400 14px/1.45 'Besley',serif">Bloqueado: requiere logs de servidor.</div>
+            <div style="font:400 12px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-soft);margin:6px 0 12px">Con logs verías hits de Googlebot verificado, bots de IA y latencia servida para esta URL.</div>
+            <div onClick="{{ irConfig }}" style="display:inline-flex;border:1px solid var(--lin3s-ink);border-radius:999px;padding:6px 14px;font:500 12px 'Inter',sans-serif;cursor:pointer;background:var(--lin3s-canvas)" style-hover="background:var(--lin3s-ink);color:#fff">Conectar logs</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ logsOn }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:1.2fr 1fr .8fr;font:400 12px 'Inter',sans-serif">
+            <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">clase</div>
+            <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">hits verificados</div>
+            <div style="padding:5px 0;border-bottom:1px solid var(--lin3s-hairline);font:600 10.5px 'Inter',sans-serif;color:var(--lin3s-ink-muted)">último</div>
+            <sc-for list="{{ dBots }}" as="b" hint-placeholder-count="3">
+              <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ b.clase }}</div>
+              <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft)">{{ b.hits }}</div>
+              <div style="padding:6px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:var(--lin3s-ink-muted)">{{ b.ultimo }}</div>
+            </sc-for>
+          </div>
+          <div style="font:400 11px/1.5 'Inter',sans-serif;color:var(--lin3s-ink-muted);margin-top:8px">Solo bots verificados por DNS inverso; los hits spoofed se inspeccionan aparte. Ingesta simulada en la maqueta.</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+</sc-if>
+<!-- OVERLAYS -->
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;modoProyeccion&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;presentación&quot;},&quot;umbralJoin&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:33,&quot;min&quot;:5,&quot;max&quot;:50,&quot;step&quot;:1,&quot;unit&quot;:&quot;%&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;alertas&quot;}}">
+class Component extends DCLogic {
+  state = { view:'salud', seg:'todos', run:24, menuRun:false, detail:null, q:'', fStatus:'todos', firmas:{}, notaAbierta:null, notaTxt:'' };
+
+  SEGS = [
+    {id:'todos', label:'todos'},
+    {id:'producto', label:'ficha de producto'},
+    {id:'categoria', label:'categoría'},
+    {id:'editorial', label:'editorial'},
+    {id:'ayuda', label:'ayuda'},
+    {id:'campana', label:'campaña'},
+  ];
+
+  SEV = { critico:{label:'crítico', color:'#6E120B'}, alto:{label:'alto', color:'#B12B29'}, medio:{label:'medio', color:'#BD6C27'}, bajo:{label:'bajo', color:'#729AB9'} };
+
+  RUNS = [
+    {n:25, label:'run #25 · en curso', nota:'62% rastreado'},
+    {n:24, label:'run #24 · 12 jun 2026', nota:'cerrado'},
+    {n:23, label:'run #23 · 29 may 2026', nota:'cerrado'},
+  ];
+
+  AGG = {
+    todos:    {urls:'48.213', durls:'+228', idx:'71,4%', didx:'−2,6 pt', dmal:true,  depth:'3,8', ddepth:'=',    clicks:'2.917', dclicks:'+6%'},
+    producto: {urls:'31.480', durls:'+177', idx:'64,2%', didx:'−3,9 pt', dmal:true,  depth:'4,4', ddepth:'+0,1', clicks:'1.604', dclicks:'+4%'},
+    categoria:{urls:'2.140',  durls:'+9',   idx:'96,1%', didx:'+0,4 pt', dmal:false, depth:'2,9', ddepth:'=',    clicks:'861',   dclicks:'+9%'},
+    editorial:{urls:'890',    durls:'+62',  idx:'98,3%', didx:'+0,1 pt', dmal:false, depth:'3,2', ddepth:'−0,2', clicks:'402',   dclicks:'+12%'},
+    ayuda:    {urls:'312',    durls:'+2',   idx:'99,0%', didx:'=',       dmal:false, depth:'2,4', ddepth:'=',    clicks:'38',    dclicks:'+1%'},
+    campana:  {urls:'64',     durls:'−22',  idx:'87,5%', didx:'+21 pt',  dmal:false, depth:'1,8', ddepth:'=',    clicks:'12',    dclicks:'−48%'},
+  };
+
+  TITULARES = {
+    todos: 'Desde el último crawl: 312 URLs nuevas, 84 desaparecidas y 1.204 fichas de producto han pasado a canonical externo.',
+    producto: 'La noticia del segmento: 1.204 fichas han pasado a canonical externo tras el despliegue del 8 de junio.',
+    categoria: 'Las categorías crecen poco (+12 URLs) pero la profundidad > 6 sube al 14%: hay ramas que se están hundiendo.',
+    editorial: 'Editorial suma 64 guías nuevas; 96 llegan con títulos duplicados de la plantilla.',
+    ayuda: 'Ayuda estable: 2 URLs nuevas y 12 hreflang recíprocos rotos como único frente abierto.',
+    campana: 'Campaña rota como debe: 38 URLs de rebajas retiradas, pero 9 siguen alternando index/noindex.',
+  };
+
+  ALERTAS = [
+    {sev:'critico', txt:'1.204 fichas con canonical fuera del dominio', seg:'producto'},
+    {sev:'alto',    txt:'profundidad > 6 sube al 14% en categoría', seg:'categoria'},
+    {sev:'medio',   txt:'96 títulos duplicados nuevos', seg:'editorial'},
+    {sev:'bajo',    txt:'12 hreflang recíprocos rotos', seg:'ayuda'},
+    {sev:'medio',   txt:'9 URLs alternan index/noindex entre runs', seg:'campana'},
+  ];
+
+  URLS = [
+    {url:'/cocina/sartenes-antiadherentes/', seg:'categoria', status:200, idx:'sí', canonical:'self', depth:2, inrank:8.4, words:1240, clicks:412, delta:'sin cambios', dcol:0, watch:true,
+      inlinks:[{from:'/', anchor:'sartenes', pos:'nav principal'},{from:'/cocina/', anchor:'antiadherentes', pos:'listado'},{from:'/guias/cuidar-sartenes/', anchor:'nuestra gama antiadherente', pos:'cuerpo'}],
+      out:14, hist:[{run:'#22 → #23', campo:'title', cambio:'añadido «| Casa Beltrán»'},{run:'#23 → #24', campo:'—', cambio:'sin cambios'}]},
+    {url:'/menaje/vajillas/vajilla-porcelana-18p', seg:'producto', status:301, idx:'no', canonical:'—', depth:4, inrank:6.1, words:0, clicks:188, delta:'200 → 301', dcol:2, watch:true,
+      inlinks:[{from:'/menaje/vajillas/', anchor:'vajilla porcelana 18 piezas', pos:'listado'},{from:'/ofertas/rebajas-verano/', anchor:'vajilla porcelana', pos:'grid ofertas'}],
+      out:0, hist:[{run:'#23 → #24', campo:'status', cambio:'200 → 301 hacia /menaje/vajillas/porcelana-blanca-18p'}]},
+    {url:'/guias/como-elegir-cuchillo-chef/', seg:'editorial', status:200, idx:'sí', canonical:'self', depth:3, inrank:5.9, words:2870, clicks:602, delta:'Inrank +0,7', dcol:1, watch:true,
+      inlinks:[{from:'/guias/', anchor:'elegir cuchillo de chef', pos:'listado'},{from:'/cocina/cuchillos/', anchor:'guía de compra', pos:'lateral'}],
+      out:22, hist:[{run:'#23 → #24', campo:'Inrank', cambio:'5,2 → 5,9'}]},
+    {url:'/ofertas/rebajas-verano/', seg:'campana', status:200, idx:'sí', canonical:'self', depth:1, inrank:7.2, words:640, clicks:1310, delta:'noindex → index', dcol:3, watch:true,
+      inlinks:[{from:'/', anchor:'rebajas de verano', pos:'hero'},{from:'/menaje/', anchor:'ver ofertas', pos:'banner'}],
+      out:48, hist:[{run:'#21 → #22', campo:'meta robots', cambio:'index → noindex'},{run:'#22 → #23', campo:'meta robots', cambio:'noindex → index'},{run:'#23 → #24', campo:'meta robots', cambio:'index (flapping)'}]},
+    {url:'/menaje/cristaleria/copas-vino-borgona-x6', seg:'producto', status:200, idx:'no', canonical:'https://proveedor-cdn.example/copas-borgona', depth:5, inrank:3.8, words:410, clicks:96, delta:'canonical → externo', dcol:2,
+      inlinks:[{from:'/menaje/cristaleria/', anchor:'copas borgoña', pos:'listado'}], out:6, hist:[{run:'#23 → #24', campo:'canonical', cambio:'self → dominio externo'}]},
+    {url:'/menaje/cristaleria/vasos-agua-x12', seg:'producto', status:200, idx:'no', canonical:'https://proveedor-cdn.example/vasos-agua', depth:5, inrank:3.2, words:380, clicks:44, delta:'canonical → externo', dcol:2,
+      inlinks:[{from:'/menaje/cristaleria/', anchor:'vasos de agua', pos:'listado'}], out:5, hist:[{run:'#23 → #24', campo:'canonical', cambio:'self → dominio externo'}]},
+    {url:'/cocina/cuchillos/santoku-damasco-18cm', seg:'producto', status:200, idx:'sí', canonical:'self', depth:4, inrank:5.4, words:960, clicks:230, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/cocina/cuchillos/', anchor:'santoku damasco', pos:'listado'},{from:'/guias/como-elegir-cuchillo-chef/', anchor:'santoku de acero damasco', pos:'cuerpo'}], out:9, hist:[]},
+    {url:'/cocina/cuchillos/', seg:'categoria', status:200, idx:'sí', canonical:'self', depth:2, inrank:7.8, words:820, clicks:388, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/', anchor:'cuchillos', pos:'nav principal'},{from:'/cocina/', anchor:'cuchillos de cocina', pos:'listado'}], out:31, hist:[]},
+    {url:'/cocina/pequeno-electrodomestico/batidoras/', seg:'categoria', status:200, idx:'sí', canonical:'self', depth:7, inrank:2.1, words:540, clicks:71, delta:'depth 5 → 7', dcol:2,
+      inlinks:[{from:'/cocina/pequeno-electrodomestico/', anchor:'batidoras', pos:'listado'}], out:18, hist:[{run:'#23 → #24', campo:'depth', cambio:'5 → 7 (facetas nuevas)'}]},
+    {url:'/guias/tipos-de-arroz-paella/', seg:'editorial', status:200, idx:'sí', canonical:'self', depth:3, inrank:4.6, words:2140, clicks:840, delta:'nueva en #24', dcol:1,
+      inlinks:[{from:'/guias/', anchor:'arroz para paella', pos:'listado'}], out:12, hist:[{run:'#24', campo:'—', cambio:'primera aparición'}]},
+    {url:'/guias/menaje-mesa-navidad/', seg:'editorial', status:200, idx:'sí', canonical:'self', depth:6, inrank:1.4, words:1980, clicks:9, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/guias/archivo/', anchor:'mesa de navidad', pos:'archivo'}], out:15, hist:[]},
+    {url:'/ayuda/devoluciones/', seg:'ayuda', status:200, idx:'sí', canonical:'self', depth:2, inrank:6.9, words:760, clicks:120, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/', anchor:'devoluciones', pos:'footer'},{from:'/ayuda/', anchor:'política de devoluciones', pos:'índice'}], out:4, hist:[]},
+    {url:'/ayuda/garantia-sartenes/', seg:'ayuda', status:404, idx:'no', canonical:'—', depth:3, inrank:1.8, words:0, clicks:2, delta:'200 → 404', dcol:2,
+      inlinks:[{from:'/ayuda/', anchor:'garantía de sartenes', pos:'índice'},{from:'/cocina/sartenes-antiadherentes/', anchor:'ver garantía', pos:'ficha técnica'}], out:0, hist:[{run:'#23 → #24', campo:'status', cambio:'200 → 404'}]},
+    {url:'/menaje/vajillas/', seg:'categoria', status:200, idx:'sí', canonical:'self', depth:2, inrank:7.1, words:690, clicks:295, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/', anchor:'vajillas', pos:'nav principal'},{from:'/menaje/', anchor:'vajillas', pos:'listado'}], out:26, hist:[]},
+    {url:'/cocina/sartenes/sarten-hierro-28cm', seg:'producto', status:200, idx:'sí', canonical:'self', depth:3, inrank:2.3, words:880, clicks:340, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/cocina/sartenes-antiadherentes/', anchor:'sartén de hierro mineral', pos:'listado'}], out:7, hist:[]},
+    {url:'/guias/limpiar-tabla-madera/', seg:'editorial', status:200, idx:'sí', canonical:'self', depth:4, inrank:3.1, words:1620, clicks:410, delta:'title duplicado', dcol:3,
+      inlinks:[{from:'/guias/', anchor:'limpiar tabla de madera', pos:'listado'}], out:8, hist:[{run:'#23 → #24', campo:'title', cambio:'plantilla duplicada «Guías | Casa Beltrán»'}]},
+    {url:'/ofertas/black-friday-2025/', seg:'campana', status:410, idx:'no', canonical:'—', depth:2, inrank:0.4, words:0, clicks:0, delta:'desaparecida', dcol:2,
+      inlinks:[], out:0, hist:[{run:'#23 → #24', campo:'status', cambio:'noindex → 410'}]},
+    {url:'/menaje/cuberterias/cuberteria-acero-24p', seg:'producto', status:200, idx:'sí', canonical:'self', depth:4, inrank:4.9, words:920, clicks:150, delta:'sin cambios', dcol:0,
+      inlinks:[{from:'/menaje/cuberterias/', anchor:'cubertería 24 piezas', pos:'listado'}], out:6, hist:[]},
+    {url:'/es-ca/ajuda/devolucions/', seg:'ayuda', status:200, idx:'sí', canonical:'self', depth:3, inrank:2.6, words:740, clicks:18, delta:'hreflang roto', dcol:3,
+      inlinks:[{from:'/es-ca/', anchor:'devolucions', pos:'footer'}], out:4, hist:[{run:'#23 → #24', campo:'hreflang', cambio:'recíproco ausente hacia /ayuda/devoluciones/'}]},
+    {url:'/guias/aceites-para-freir/', seg:'editorial', status:200, idx:'sí', canonical:'self', depth:3, inrank:4.2, words:2410, clicks:530, delta:'nueva en #24', dcol:1,
+      inlinks:[{from:'/guias/', anchor:'aceites para freír', pos:'listado'}], out:10, hist:[{run:'#24', campo:'—', cambio:'primera aparición'}]},
+  ];
+
+  FINDINGS = [
+    {id:'f1', tipo:'canibalización', sev:'alto', seg:'editorial', titulo:'/guias/como-elegir-cuchillo-chef/ compite con /blog/mejores-cuchillos-cocina/',
+      evid:['Ambas posicionan para «cuchillo chef» (GSC, 28 días): 602 y 214 clics/día', 'Similitud semántica 0,91 (pgvector)', 'La guía tiene Inrank 5,9; el post, 2,2'],
+      accion:'Consolidar en la guía y redirigir el post.'},
+    {id:'f2', tipo:'canibalización', sev:'medio', seg:'categoria', titulo:'/cocina/sartenes-antiadherentes/ solapa con /cocina/sartenes/?tipo=antiadherente',
+      evid:['La faceta indexable duplica la categoría curada', 'Similitud 0,88 · la faceta captura 3% de los clics del cluster'],
+      accion:'Aplicar noindex a la faceta y consolidar.'},
+    {id:'f3', tipo:'enlazado', sev:'alto', seg:'editorial', titulo:'Enlazar /guias/tipos-de-arroz-paella/ desde 3 páginas de alto Inrank',
+      evid:['Objetivo: Inrank 4,6 · 840 clics/día (underlinked high-performer)', 'Candidatas: /cocina/ (8,9 · sim 0,74) · /guias/ (7,4 · sim 0,81) · /menaje/vajillas/ (7,1 · sim 0,62)'],
+      accion:'Aceptar propone los 3 enlaces con anchor sugerido.'},
+    {id:'f4', tipo:'enlazado', sev:'medio', seg:'producto', titulo:'Enlazar /cocina/sartenes/sarten-hierro-28cm desde la guía de cuidado',
+      evid:['Objetivo: Inrank 2,3 · 340 clics/día', 'Candidata: /guias/cuidar-sartenes/ (6,2 · sim 0,86)'],
+      accion:'Un enlace en cuerpo con anchor «sartén de hierro mineral».'},
+    {id:'f5', tipo:'enlazado', sev:'bajo', seg:'editorial', titulo:'Refrescar enlaces internos de /guias/menaje-mesa-navidad/ (estacional)',
+      evid:['Inrank 1,4 · 9 clics/día · profundidad 6', 'Candidatas de temporada baja: /guias/ (7,4 · sim 0,58)'],
+      accion:'Puede esperar a septiembre; firmar como aplazado.'},
+    {id:'f6', tipo:'scoring semántico', sev:'medio', seg:'producto', titulo:'14 fichas de cristalería con contenido fino (score < 0,3)',
+      evid:['Media de 390 palabras, sin diferenciación entre variantes', 'Coincide con el grupo que ha pasado a canonical externo'],
+      accion:'Revisar si el score justifica reescritura o es efecto del canonical.'},
+    {id:'f7', tipo:'gap', sev:'bajo', seg:'editorial', titulo:'Gap: «fundas de sofá» tiene demanda y ninguna página objetivo',
+      evid:['1.900 búsquedas/mes (fuente externa) · 0 URLs en el sitio', 'El cluster de textil hogar existe pero no cubre la intención'],
+      accion:'Proponer nueva guía + categoría al cliente.'},
+  ];
+
+  DIFF = {
+    nuevas:[
+      {url:'/guias/tipos-de-arroz-paella/', seg:'editorial'},
+      {url:'/guias/aceites-para-freir/', seg:'editorial'},
+      {url:'/cocina/pequeno-electrodomestico/batidoras/?marca=taurus', seg:'categoria'},
+      {url:'/menaje/textil/manteles-lino/', seg:'categoria'},
+      {url:'/ofertas/rebajas-verano/cocina/', seg:'campana'},
+    ],
+    idas:[
+      {url:'/ofertas/black-friday-2025/', seg:'campana', como:'noindex → 410'},
+      {url:'/menaje/vajillas/vajilla-gres-12p', seg:'producto', como:'descatalogada, 301'},
+      {url:'/blog/feliz-navidad-2025/', seg:'editorial', como:'eliminada sin redirección (404)'},
+    ],
+    cambios:[
+      {url:'/menaje/cristaleria/* (1.204 URLs)', seg:'producto', campo:'canonical', antes:'self', despues:'dominio del proveedor', sev:'critico'},
+      {url:'/menaje/vajillas/vajilla-porcelana-18p', seg:'producto', campo:'status', antes:'200', despues:'301', sev:'alto'},
+      {url:'/ayuda/garantia-sartenes/', seg:'ayuda', campo:'status', antes:'200', despues:'404', sev:'alto'},
+      {url:'/cocina/pequeno-electrodomestico/batidoras/', seg:'categoria', campo:'depth', antes:'5', despues:'7', sev:'medio'},
+      {url:'/guias/limpiar-tabla-madera/ (+95 más)', seg:'editorial', campo:'title', antes:'únicos', despues:'plantilla duplicada', sev:'medio'},
+      {url:'/guias/como-elegir-cuchillo-chef/', seg:'editorial', campo:'Inrank', antes:'5,2', despues:'5,9', sev:'bajo'},
+      {url:'/es-ca/ajuda/devolucions/', seg:'ayuda', campo:'hreflang', antes:'recíproco', despues:'roto', sev:'bajo'},
+    ],
+    flapping:[
+      {url:'/ofertas/rebajas-verano/', seg:'campana', patron:'index → noindex → index → index (runs #21–24)'},
+      {url:'/ofertas/rebajas-verano/menaje/', seg:'campana', patron:'200 → 302 → 200 (runs #22–24)'},
+      {url:'/cocina/robots-cocina/?page=9', seg:'categoria', patron:'aparece/desaparece según profundidad de rastreo'},
+    ],
+  };
+
+  componentDidMount(){
+    this._onResize = ()=>{ const n = window.innerWidth < 980; if(n !== !!this.state.narrow) this.setState({narrow:n}); };
+    window.addEventListener('resize', this._onResize);
+    this._onResize();
+  }
+  componentWillUnmount(){ window.removeEventListener('resize', this._onResize); }
+
+  nav(v){ this.setState({view:v, menuRun:false, menuVistas:false, detail:null}); }
+
+  fmtSeg(id){ const s = this.SEGS.find(x=>x.id===id); return s? s.label : id; }
+
+  renderVals(){
+    const st = this.state;
+    const seg = st.seg, run = st.run;
+    const umbralJoin = this.props.umbralJoin ?? 15;
+    const proyeccion = this.props.modoProyeccion ?? false;
+
+    const pendientes = this.FINDINGS.filter(f=>!st.firmas[f.id]).length;
+
+    // --- nav ---
+    const NAV = [
+      {id:'salud', label:'salud del proyecto'},
+      {id:'explorador', label:'explorador de URLs'},
+      {id:'diff', label:'diff entre crawls'},
+      {id:'enlazado', label:'enlazado · Inrank'},
+      {id:'logs', label:'logs y bots de IA', badge:this.state.logsOn?'':'sin logs', badgeTipo:'pill'},
+      {id:'firma', label:'cola de firma', badge: pendientes>0 ? String(pendientes) : '', badgeTipo:'count'},
+      {id:'config', label:'configuración'},
+    ];
+    const navItems = NAV.map(n=>({
+      label:n.label,
+      badge:n.badge||false,
+      badgeSt: n.badgeTipo==='count'
+        ? 'font:600 11px Inter,sans-serif;background:#fff;color:#050A0E;border-radius:999px;padding:1px 8px'
+        : 'font:500 10px Inter,sans-serif;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:1px 7px',
+      st:'display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font:'+(st.view===n.id?'500':'400')+' 13px Inter,sans-serif;cursor:pointer;'+(st.view===n.id?'background:rgba(255,255,255,.10);color:#fff':'color:#A6A6A6'),
+      go:()=>this.nav(n.id),
+    }));
+
+    // --- runs ---
+    const runMeta = this.RUNS.find(r=>r.n===run);
+    const runOpts = this.RUNS.map(r=>({
+      label:r.label, nota:r.nota,
+      st:'display:flex;justify-content:space-between;gap:14px;padding:10px 14px;font:'+(r.n===run?'600':'400')+' 12.5px Inter,sans-serif;cursor:pointer;border-bottom:1px solid var(--lin3s-hairline-soft)',
+      pick:()=>this.setState({run:r.n, menuRun:false}),
+    }));
+    let runBanner = false;
+    if(run===25) runBanner = 'Crawl #25 en curso — 29.900 de ~48.000 URLs rastreadas (62%). Los agregados que ves son parciales y no se consolidan hasta que el run cierre.';
+    if(run===23) runBanner = 'Estás viendo el run #23 (cerrado el 29 may 2026). Su diff se calcula contra el #22 del 15 may.';
+
+    // --- fuentes ---
+    const fuentes = [
+      {label:'crawl ✓', on:true, tip:'rastreo propio — fuente primaria'},
+      {label:'GSC ✓', on:true, tip:'Search Console conectado — clics, impresiones, crawl stats'},
+      {label:'GA4 ✓', on:true, tip:'GA4 conectado — sesiones y conversión'},
+      this.state.logsOn ? {label:'logs ✓ (sim.)', on:true, tip:'ingesta de logs activa — simulada en la maqueta'} : {label:'logs ✗', on:false, tip:'logs de servidor no configurados — crawl budget y bots de IA bloqueados'},
+      {label:'backlinks ✗', on:false, tip:'fuente de pago no contratada'},
+    ].map(f=>({label:f.label, tip:f.tip, st:'font:500 11.5px Inter,sans-serif;padding:4px 10px;border-radius:999px;'+(f.on?'color:var(--lin3s-ink-soft);border:1px solid var(--lin3s-hairline)':'color:var(--lin3s-ink-muted);border:1px dashed var(--lin3s-hairline);cursor:help')}));
+
+    // --- segment chips ---
+    const segChips = this.SEGS.map(s=>({
+      label:s.label,
+      st:'padding:5px 13px;border-radius:999px;font:500 12px Inter,sans-serif;cursor:pointer;'+(st.seg===s.id?'background:var(--lin3s-ink);color:#fff':'border:1px solid var(--lin3s-hairline);color:var(--lin3s-ink-soft)'),
+      pick:()=>this.setState({seg:s.id}),
+    }));
+
+    // --- salud ---
+    const agg = this.AGG[seg];
+    const parcial = run===25;
+    const kpis = [
+      {valor:parcial?'29.900':agg.urls, label:parcial?'URLs rastreadas (parcial)':'URLs rastreadas', delta:parcial?'en curso':agg.durls, mal:false},
+      {valor:parcial?'—':agg.idx, label:'indexables', delta:parcial?'al cierre del run':agg.didx, mal:agg.dmal},
+      {valor:parcial?'—':agg.depth, label:'profundidad media', delta:parcial?'al cierre del run':agg.ddepth, mal:false},
+      {valor:agg.clicks, label:'clics/día (GSC)', delta:agg.dclicks, mal:String(agg.dclicks).startsWith('−'), proxy:true},
+    ].map(k=>({...k, proxy:!!k.proxy, deltaSt:'color:'+(k.mal?'var(--lin3s-error)':'var(--lin3s-ink-soft)')}));
+
+    const capasBase = [
+      {label:'técnico', pct:89, det:'41/46 verificados'},
+      {label:'on-page', pct:82, det:'28/34'},
+      {label:'semántico', pct:50, det:'9/18 · '+pendientes+' esperan firma'},
+      {label:'GEO', pct:0, det:'bloqueada — requiere logs', blocked:true},
+    ];
+    const capaDestino = {'semántico':'firma','GEO':'logs'};
+    const capas = capasBase.map(c=>({
+      label:c.label, det:c.det,
+      go: capaDestino[c.label] ? ()=>this.nav(capaDestino[c.label]) : undefined,
+      rowSt: capaDestino[c.label] ? 'cursor:pointer' : '',
+      labSt:'color:'+(c.blocked?'var(--lin3s-ink-muted)':'var(--lin3s-ink)'),
+      trackSt:'height:6px;border-radius:2px;overflow:hidden;background:'+(c.blocked?'repeating-linear-gradient(45deg,transparent,transparent 4px,var(--lin3s-hairline) 4px,var(--lin3s-hairline) 8px)':'var(--lin3s-surface-soft)'),
+      barSt:'width:'+c.pct+'%;height:100%;background:var(--lin3s-ink)',
+    }));
+
+    const alertasFiltradas = this.ALERTAS.filter(a=>seg==='todos'||a.seg===seg);
+    const alertas = alertasFiltradas.map(a=>({
+      sev:this.SEV[a.sev].label, txt:a.txt, seg:this.fmtSeg(a.seg),
+      dotSt:'flex:none;width:8px;height:8px;border-radius:2px;background:'+this.SEV[a.sev].color+';transform:translateY(-1px)',
+      go:()=>this.setState({seg:a.seg, view:'diff', detail:null}),
+    }));
+
+    const wl = this.state.watch ?? this.URLS.filter(u=>u.watch).map(u=>u.url);
+    const watchAll = this.URLS.filter(u=>wl.includes(u.url) && (seg==='todos'||u.seg===seg));
+    const dcolMap = ['var(--lin3s-ink-soft)','var(--lin3s-success)','var(--lin3s-error)','var(--lin3s-warning)'];
+    const watchRows = watchAll.map(u=>({
+      url:u.url, seg:this.fmtSeg(u.seg), status:String(u.status), inrank:String(u.inrank).replace('.',','), clics:String(u.clicks),
+      delta:u.delta,
+      statusSt:'padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);'+(u.status>=300?'color:var(--lin3s-error);font-weight:600':''),
+      deltaSt:'padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);color:'+dcolMap[u.dcol],
+      open:()=>this.setState({detail:u.url}),
+    }));
+
+    return {
+      navItems, runOpts, fuentes, segChips,
+      runLabel: runMeta.label, menuRunAbierto: st.menuRun, runBanner,
+      toggleRunMenu:()=>this.setState({menuRun:!st.menuRun}),
+      volverRun24:()=>this.setState({run:24}),
+      esSalud: st.view==='salud', esExplorador: st.view==='explorador', esDiff: st.view==='diff',
+      esEnlazado: st.view==='enlazado', esLogs: st.view==='logs', esFirma: st.view==='firma', esConfig: st.view==='config',
+      irConfig:()=>this.nav('config'), irLogs:()=>this.nav('logs'),
+      // salud
+      tituloComparacion: run===23 ? 'RUN #23 FRENTE A RUN #22 · 15 MAY 2026' : (run===25 ? 'RUN #25 (EN CURSO) — DIFF DISPONIBLE AL CIERRE' : 'RUN #24 FRENTE A RUN #23 · 29 MAY 2026') ,
+      titular: this.TITULARES[seg],
+      kpis, kpiNumSt:'font:400 '+(proyeccion?'64px':'44px')+'/1 Besley,serif;letter-spacing:-1px;color:var(--lin3s-ink)',
+      capas, alertas, sinAlertas: alertasFiltradas.length===0,
+      watchRows, watchVacia: watchAll.length===0,
+      ...this.explorerVals(umbralJoin),
+      ...this.diffVals(),
+      ...this.firmaVals(),
+      ...this.enlazadoVals(),
+      ...this.logsVals(),
+      ...this.configVals(),
+      sinLogs: !st.logsOn, logsOn: !!st.logsOn,
+      irDiff:()=>this.nav('diff'),
+      esAncho: !st.narrow, esEstrecho: !!st.narrow,
+      navTop: NAV.map(n=>({
+        label:n.label, badge:n.badge||false,
+        badgeSt: n.badgeTipo==='count'
+          ? 'font:600 10px Inter,sans-serif;background:#fff;color:#050A0E;border-radius:999px;padding:0 6px'
+          : 'font:500 9.5px Inter,sans-serif;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:0 6px',
+        st:'display:flex;align-items:center;gap:6px;flex:none;padding:6px 12px;border-radius:999px;font:'+(st.view===n.id?'600':'400')+' 12.5px Inter,sans-serif;cursor:pointer;white-space:nowrap;'+(st.view===n.id?'background:rgba(255,255,255,.14);color:#fff':'color:#A6A6A6'),
+        go:()=>this.nav(n.id),
+      })),
+    };
+  }
+
+  logsVals(){
+    const st = this.state, seg = st.seg;
+    const FUGA = [
+      {id:'producto', hits:'28.400', pct:31, desglose:'3xx 11% · 4xx 5% · noindex 15%'},
+      {id:'categoria', hits:'6.900', pct:12, desglose:'3xx 4% · 4xx 2% · noindex 6%'},
+      {id:'editorial', hits:'2.100', pct:8, desglose:'3xx 3% · 4xx 1% · noindex 4%'},
+      {id:'ayuda', hits:'640', pct:5, desglose:'3xx 2% · 4xx 3%'},
+      {id:'campana', hits:'1.850', pct:44, desglose:'3xx 9% · noindex 35% (flapping)'},
+    ].filter(f=>seg==='todos'||f.id===seg);
+    const LAT = [
+      {id:'producto', p50:'420 ms', p95:'1.180 ms'},
+      {id:'categoria', p50:'310 ms', p95:'720 ms'},
+      {id:'editorial', p50:'350 ms', p95:'810 ms'},
+      {id:'ayuda', p50:'280 ms', p95:'540 ms'},
+      {id:'campana', p50:'390 ms', p95:'980 ms'},
+    ].filter(f=>seg==='todos'||f.id===seg);
+    const TTI = [
+      {id:'producto', dias:'9,4 días'},
+      {id:'categoria', dias:'2,1 días'},
+      {id:'editorial', dias:'3,8 días'},
+      {id:'ayuda', dias:'6,0 días'},
+      {id:'campana', dias:'1,2 días'},
+    ].filter(f=>seg==='todos'||f.id===seg);
+    // detail bots
+    const d = st.detail ? this.URLS.find(u=>u.url===st.detail) : null;
+    const base = d ? Math.max(1, Math.round(d.clicks/9)) : 0;
+    return {
+      fugaRows: FUGA.map(f=>({seg:this.fmtSeg(f.id), hits:f.hits, pct:f.pct+'%', desglose:f.desglose,
+        barSt:'position:absolute;left:0;top:0;bottom:0;width:'+f.pct+'%;background:var(--lin3s-ink);border-radius:2px'})),
+      latRows: LAT.map(f=>({seg:this.fmtSeg(f.id), p50:f.p50, p95:f.p95})),
+      ttiRows: TTI.map(f=>({seg:this.fmtSeg(f.id), dias:f.dias})),
+      botActividad: [
+        {t:'búsqueda clásica', d:'Googlebot, Bingbot', hits:'39.900/día', delta:'+3% vs 7 días', color:'#102F47'},
+        {t:'entrenamiento IA', d:'GPTBot, ClaudeBot, CCBot', hits:'4.820/día', delta:'+41%', color:'#6E120B'},
+        {t:'indexación para búsqueda IA', d:'OAI-SearchBot, PerplexityBot', hits:'1.140/día', delta:'+18%', color:'#BD6C27'},
+        {t:'fetch en vivo', d:'ChatGPT-User, Claude-User', hits:'310/día', delta:'+9%', color:'#729AB9'},
+      ].map(b=>({...b, dotSt:'flex:none;width:9px;height:9px;border-radius:2px;background:'+b.color})),
+      iaReferido: [
+        {p:'ChatGPT', v:'41 sesiones/día'},
+        {p:'Perplexity', v:'12 sesiones/día'},
+        {p:'Gemini', v:'9 sesiones/día'},
+      ],
+      dBots: d ? [
+        {clase:'búsqueda clásica', hits:String(base*4)+' hits/28 días', ultimo:'hace 6 h'},
+        {clase:'entrenamiento IA', hits:String(Math.max(1,base))+' hits/28 días', ultimo:'hace 2 días'},
+        {clase:'fetch en vivo', hits:String(Math.max(0,Math.round(base/3)))+' hits/28 días', ultimo:'hace 5 días'},
+      ] : [],
+    };
+  }
+
+  configVals(){
+    const st = this.state;
+    const wl = st.watch ?? this.URLS.filter(u=>u.watch).map(u=>u.url);
+    return {
+      conectarLogs:()=>this.setState({logsOn:true, view:'logs'}),
+      watchChips: wl.map(u=>({url:u, quitar:()=>this.setState({watch: wl.filter(x=>x!==u)})})),
+      anadirWatch:()=>{
+        const u = window.prompt('URL a vigilar (ruta relativa):');
+        if(u) this.setState({watch:[...wl, u]});
+      },
+    };
+  }
+
+  diffVals(){
+    const seg = this.state.seg, F = s => seg==='todos'||s===seg;
+    const nuevas = this.DIFF.nuevas.filter(x=>F(x.seg));
+    const idas = this.DIFF.idas.filter(x=>F(x.seg));
+    const cambios = this.DIFF.cambios.filter(x=>F(x.seg));
+    const flap = this.DIFF.flapping.filter(x=>F(x.seg));
+    const totNuevas = seg==='todos' ? '312' : {producto:'218',categoria:'12',editorial:'64',ayuda:'2',campana:'16'}[seg];
+    const totIdas = seg==='todos' ? '84' : {producto:'41',categoria:'3',editorial:'2',ayuda:'0',campana:'38'}[seg];
+    return {
+      diffSegLabel: seg==='todos' ? 'TODOS LOS SEGMENTOS' : 'SEGMENTO: '+this.fmtSeg(seg).toUpperCase(),
+      diffNuevas: totNuevas, diffIdas: totIdas,
+      diffCambios: String(cambios.length), diffFlap: String(flap.length===0?0:(seg==='todos'?9:flap.length)),
+      diffRows: cambios.map(c=>({
+        url:c.url, seg:this.fmtSeg(c.seg), campo:c.campo, antes:c.antes, despues:c.despues, sev:this.SEV[c.sev].label,
+        dotSt:'display:inline-block;width:8px;height:8px;border-radius:2px;background:'+this.SEV[c.sev].color,
+        open:()=>this.abrirDesdeDiff(c.url),
+      })),
+      diffVacio: cambios.length===0,
+      diffNuevasRows: nuevas.map(n=>({url:n.url, seg:this.fmtSeg(n.seg), open:()=>this.abrirDesdeDiff(n.url)})),
+      diffIdasRows: idas.map(n=>({url:n.url, seg:this.fmtSeg(n.seg), como:n.como, open:()=>this.abrirDesdeDiff(n.url)})),
+      diffFlapRows: flap,
+    };
+  }
+
+  firmaVals(){
+    const st = this.state, seg = st.seg;
+    const orden = {critico:0, alto:1, medio:2, bajo:3};
+    const items = this.FINDINGS
+      .filter(f=> seg==='todos'||f.seg===seg)
+      .slice().sort((a,b)=>orden[a.sev]-orden[b.sev]);
+    const pend = this.FINDINGS.filter(f=>!st.firmas[f.id]).length;
+    const firmaItems = items.map(f=>{
+      const r = st.firmas[f.id];
+      return {
+        sev:this.SEV[f.sev].label, tipo:f.tipo, seg:this.fmtSeg(f.seg), titulo:f.titulo, evid:f.evid, accion:f.accion,
+        dotSt:'flex:none;width:9px;height:9px;border-radius:2px;background:'+this.SEV[f.sev].color,
+        pendiente: !r, resuelto: !!r,
+        resTxt: r ? (r.estado==='firmada' ? 'Firmado como revisado por '+r.por+' · '+r.cuando : 'Rechazado por '+r.por+' · '+r.cuando) : '',
+        resNota: r && r.nota ? '«'+r.nota+'»' : '',
+        firmar:()=>this.resolver(f.id,'firmada'),
+        rechazar:()=>this.resolver(f.id,'rechazada'),
+        deshacer:()=>{ const firmas={...this.state.firmas}; delete firmas[f.id]; this.setState({firmas}); },
+        setNota:(e)=>{ this._notas = this._notas||{}; this._notas[f.id]=e.target.value; },
+      };
+    });
+    return {
+      firmaItems, firmaVacia: items.length===0,
+      firmaTitulo: pend===0 ? 'Nada espera tu firma' : pend+' hallazgos esperan tu firma',
+    };
+  }
+
+  enlazadoVals(){
+    const st = this.state, seg = st.seg;
+    const DIST = [
+      {id:'producto', avg:'4,2', p10:'1,9', p90:'6,8', pct:42},
+      {id:'categoria', avg:'6,8', p10:'4,1', p90:'8,9', pct:68},
+      {id:'editorial', avg:'5,1', p10:'1,6', p90:'7,2', pct:51},
+      {id:'ayuda', avg:'3,4', p10:'2,0', p90:'6,9', pct:34},
+      {id:'campana', avg:'7,0', p10:'5,2', p90:'8,1', pct:70},
+    ];
+    const inrankRows = DIST.map(d=>({
+      label:this.fmtSeg(d.id), avg:d.avg, p10:d.p10, p90:d.p90,
+      barSt:'position:absolute;left:0;top:0;bottom:0;width:'+d.pct+'%;background:'+(seg===d.id?'var(--lin3s-ink)':'var(--lin3s-ink-muted)')+';border-radius:2px',
+    }));
+    const under = [
+      {url:'/guias/tipos-de-arroz-paella/', inrank:'4,6', clicks:'840'},
+      {url:'/guias/aceites-para-freir/', inrank:'4,2', clicks:'530'},
+      {url:'/cocina/sartenes/sarten-hierro-28cm', inrank:'2,3', clicks:'340'},
+    ];
+    const underRows = under.map(u=>({...u, open:()=>this.setState({detail:this.URLS.some(x=>x.url===u.url)?u.url:null, view: this.URLS.some(x=>x.url===u.url)?st.view:st.view})}));
+    const orden = {critico:0, alto:1, medio:2, bajo:3};
+    const sugItems = this.FINDINGS
+      .filter(f=>f.tipo==='enlazado' && (seg==='todos'||f.seg===seg))
+      .sort((a,b)=>orden[a.sev]-orden[b.sev])
+      .map(f=>{
+        const r = st.firmas[f.id];
+        return {
+          sev:this.SEV[f.sev].label, seg:this.fmtSeg(f.seg), titulo:f.titulo, evid:f.evid,
+          dotSt:'flex:none;width:9px;height:9px;border-radius:2px;background:'+this.SEV[f.sev].color,
+          pendiente:!r, resuelto:!!r,
+          resTxt: r ? (r.estado==='firmada'?'Aceptada por '+r.por+' · '+r.cuando:'Descartada por '+r.por+' · '+r.cuando) : '',
+          firmar:()=>this.resolver(f.id,'firmada'),
+          rechazar:()=>this.resolver(f.id,'rechazada'),
+          deshacer:()=>{ const firmas={...this.state.firmas}; delete firmas[f.id]; this.setState({firmas}); },
+        };
+      });
+    return {
+      inrankRows, underRows, sugItems,
+      logsDesbloquea: [
+        {t:'fuga de crawl budget por segmento', d:'hits verificados gastados en 3xx/4xx/5xx/noindex'},
+        {t:'actividad de bots por clase', d:'búsqueda clásica · entrenamiento IA · indexación para búsqueda IA · fetch en vivo'},
+        {t:'latencia servida a Googlebot', d:'percentiles p50/p95 por segmento'},
+        {t:'tráfico referido desde plataformas de IA', d:'etiquetado como cota inferior'},
+        {t:'time-to-index estimado', d:'del primer hit de bot a la primera impresión, por segmento'},
+      ],
+      crawlStats: [
+        {dia:'27 jun', req:'41.320', kb:'812 MB', ms:'412 ms'},
+        {dia:'28 jun', req:'39.480', kb:'790 MB', ms:'398 ms'},
+        {dia:'29 jun', req:'44.010', kb:'861 MB', ms:'405 ms'},
+        {dia:'30 jun', req:'38.270', kb:'744 MB', ms:'421 ms'},
+        {dia:'1 jul', req:'40.115', kb:'801 MB', ms:'416 ms'},
+      ],
+      botClases: [
+        {t:'búsqueda clásica', d:'Googlebot, Bingbot (verificados)', color:'#102F47'},
+        {t:'entrenamiento IA', d:'GPTBot, ClaudeBot, CCBot', color:'#6E120B'},
+        {t:'indexación para búsqueda IA', d:'OAI-SearchBot, PerplexityBot', color:'#BD6C27'},
+        {t:'fetch en vivo', d:'ChatGPT-User, Claude-User', color:'#729AB9'},
+      ].map(b=>({t:b.t, d:b.d, dotSt:'flex:none;width:9px;height:9px;border-radius:2px;background:'+b.color})),
+    };
+  }
+
+  abrirDesdeDiff(url){
+    if(this.URLS.some(u=>u.url===url)){ this.setState({detail:url}); }
+    else { this.setState({view:'explorador', q:url.split('*')[0].split(' ')[0], fStatus:'todos', detail:null}); }
+  }
+
+  resolver(id, estado){
+    const hora = new Date();
+    const cuando = 'hoy, '+String(hora.getHours()).padStart(2,'0')+':'+String(hora.getMinutes()).padStart(2,'0');
+    const nota = (this._notas&&this._notas[id])||'';
+    this.setState({firmas:{...this.state.firmas, [id]:{estado, por:'M. Ortiz', cuando, nota}}});
+  }
+
+  explorerVals(umbralJoin){
+    const st = this.state, seg = st.seg;
+    let rows = this.URLS.filter(u=> seg==='todos'||u.seg===seg);
+    if(st.q) rows = rows.filter(u=>u.url.includes(st.q));
+    if(st.fStatus!=='todos') rows = rows.filter(u=>{
+      if(st.fStatus==='200') return u.status===200;
+      if(st.fStatus==='3xx') return u.status>=300&&u.status<400;
+      if(st.fStatus==='4xx/5xx') return u.status>=400;
+      if(st.fStatus==='no indexable') return u.idx==='no';
+      return true;
+    });
+    const urlRows = rows.map(u=>({
+      url:u.url, seg:this.fmtSeg(u.seg), status:String(u.status),
+      idx:u.idx, canonical:u.canonical, depth:String(u.depth),
+      inrank:String(u.inrank).replace('.',','), words:u.words? String(u.words):'—',
+      clicks:String(u.clicks),
+      statusSt:'padding:8px 0;border-bottom:1px solid var(--lin3s-hairline-soft);'+(u.status>=300?'color:var(--lin3s-error);font-weight:600':''),
+      open:()=>this.setState({detail:u.url}),
+    }));
+    const statusChips = ['todos','200','3xx','4xx/5xx','no indexable'].map(c=>({
+      label:c,
+      st:'padding:5px 12px;border-radius:999px;font:500 11.5px Inter,sans-serif;cursor:pointer;'+(st.fStatus===c?'background:var(--lin3s-ink);color:#fff':'border:1px solid var(--lin3s-hairline);color:var(--lin3s-ink-soft)'),
+      pick:()=>this.setState({fStatus:c}),
+    }));
+
+    const joinBanner = (seg==='categoria' && 18 > umbralJoin)
+      ? 'La tasa de no-join GSC↔crawl en «categoría» es del 18% (umbral: '+umbralJoin+'%). Posible problema de normalización de URLs (mayúsculas o barras finales) en este segmento: las métricas de GSC pueden estar infraatribuidas.'
+      : false;
+
+    // detail
+    const d = st.detail ? this.URLS.find(u=>u.url===st.detail) : null;
+    const chip = (k,v,warn)=>({k, v, st:'font:400 11.5px Inter,sans-serif;border:1px solid '+(warn?'var(--lin3s-error)':'var(--lin3s-hairline)')+';border-radius:6px;padding:4px 10px;color:'+(warn?'var(--lin3s-error)':'var(--lin3s-ink-soft)')});
+    const dChips = d ? [
+      chip('status', String(d.status), d.status>=300),
+      chip('indexable', d.idx, d.idx==='no'),
+      chip('canonical', d.canonical==='self'?'self':d.canonical, d.canonical!=='self'&&d.canonical!=='—'),
+      chip('depth', String(d.depth)),
+      chip('Inrank', String(d.inrank).replace('.',',')),
+      chip('palabras', d.words?String(d.words):'—'),
+      chip('clics/día *proxy', String(d.clicks)),
+    ] : [];
+    return {
+      q: st.q, setQ:(e)=>this.setState({q:e.target.value}),
+      statusChips, urlRows, nRows:String(rows.length), totalSeg:this.AGG[seg].urls,
+      menuVistasAbierto: !!st.menuVistas,
+      toggleVistas:()=>this.setState({menuVistas:!st.menuVistas}),
+      vistasOpts: [
+        {label:'errores (4xx/5xx)', q:'', f:'4xx/5xx'},
+        {label:'no indexables', q:'', f:'no indexable'},
+        {label:'redirecciones (3xx)', q:'', f:'3xx'},
+        {label:'cristalería con canonical externo', q:'/menaje/cristaleria/', f:'no indexable'},
+        {label:'campaña /ofertas/', q:'/ofertas/', f:'todos'},
+      ].map(v=>({label:v.label, pick:()=>this.setState({q:v.q, fStatus:v.f, menuVistas:false})})),
+      limpiarFiltro:()=>this.setState({q:'', fStatus:'todos', menuVistas:false}),
+      joinBanner,
+      exportCsv:()=>{
+        const head = 'url;segmento;status;indexable;canonical;depth;inrank;palabras;clics_gsc_proxy';
+        const csv = [head].concat(rows.map(u=>[u.url,u.seg,u.status,u.idx,u.canonical,u.depth,u.inrank,u.words,u.clicks].join(';'))).join('\n');
+        const a = document.createElement('a');
+        a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+        a.download = 'casabeltran_run24_'+seg+'.csv'; a.click();
+      },
+      hayDetalle: !!d,
+      dUrl: d?d.url:'', dSeg: d?this.fmtSeg(d.seg).toUpperCase():'',
+      dChips, dInlinks: d?d.inlinks:[], dInCount: d?String(d.inlinks.length):'0',
+      dSinInlinks: d? d.inlinks.length===0 : false,
+      dOut: d?String(d.out):'0',
+      dHist: d?d.hist:[], dSinHist: d? d.hist.length===0 : false,
+      cerrarDetalle:()=>this.setState({detail:null}),
+    };
+  }
+}
+</script>
+</body>
+</html>

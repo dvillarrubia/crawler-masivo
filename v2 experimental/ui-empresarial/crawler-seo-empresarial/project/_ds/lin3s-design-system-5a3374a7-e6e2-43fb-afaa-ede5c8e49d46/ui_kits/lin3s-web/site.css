@@ -1,0 +1,253 @@
+/* ============================================================
+   LIN3S Web — UI Kit styles (in addition to colors_and_type.css)
+   ============================================================ */
+
+html, body, #root { background: #fff; }
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+
+.l3-shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ---------- Header ---------- */
+.l3-header {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.96);
+  border-bottom: 1px solid #E5E5E5;
+  height: 72px;
+  display: flex; align-items: center;
+  padding: 0 48px;
+}
+.l3-header.on-dark {
+  background: #101010; border-bottom-color: #1f1f1f; color: #fff;
+}
+.l3-header .row {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; max-width: 1440px; margin: 0 auto;
+}
+.l3-wordmark {
+  font-family: var(--font-sans);
+  font-weight: 700; font-size: 22px;
+  letter-spacing: -0.04em;
+  text-decoration: none; color: inherit;
+}
+.l3-nav { display: flex; align-items: center; gap: 36px; }
+.l3-nav a {
+  font-size: 14px; font-weight: 500;
+  text-decoration: none; color: inherit;
+  letter-spacing: 0.01em;
+  transition: opacity 120ms var(--ease-out);
+}
+.l3-nav a:hover { opacity: 0.6; }
+.l3-nav a.active { font-weight: 600; }
+.l3-nav .langs {
+  display: flex; gap: 8px; align-items: center;
+  font-size: 12px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.l3-nav .langs button {
+  background: none; border: 0; padding: 4px 0; color: inherit;
+  font: inherit; cursor: pointer; opacity: 0.5;
+}
+.l3-nav .langs button.active { opacity: 1; }
+
+/* ---------- Buttons ---------- */
+.l3-btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 22px;
+  font: 500 14px/1 "Inter", sans-serif;
+  border: 1px solid transparent;
+  border-radius: 0; cursor: pointer;
+  text-decoration: none;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.l3-btn .arr { display: inline-block; transition: transform 160ms var(--ease-out); }
+.l3-btn:hover .arr { transform: translateX(4px); }
+.l3-btn.primary    { background: #101010; color: #fff; }
+.l3-btn.primary:hover    { background: #333; }
+.l3-btn.secondary  { background: transparent; color: #101010; border-color: #101010; }
+.l3-btn.secondary:hover  { background: #101010; color: #fff; }
+.l3-btn.ghost      { background: transparent; color: #101010; padding: 14px 0; }
+.l3-btn.ghost:hover { opacity: 0.6; }
+.l3-btn.on-dark.secondary { color: #fff; border-color: #fff; }
+.l3-btn.on-dark.secondary:hover { background: #fff; color: #101010; }
+.l3-btn.on-dark.primary { background: #fff; color: #101010; }
+.l3-btn.on-dark.primary:hover { background: #E5E5E5; }
+
+/* ---------- Section primitives ---------- */
+.l3-section {
+  padding: 120px 48px;
+}
+.l3-section.dark { background: #101010; color: #fff; }
+.l3-section.gray { background: #F0F0F0; }
+.l3-section .wrap {
+  max-width: 1440px; margin: 0 auto;
+}
+.l3-eyebrow {
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: #999;
+}
+.l3-section.dark .l3-eyebrow { color: #999; }
+
+/* ---------- Hero ---------- */
+.l3-hero { padding: 120px 48px 140px; background: #fff; }
+.l3-hero .wrap { max-width: 1440px; margin: 0 auto; }
+.l3-hero h1 {
+  font-size: clamp(64px, 8vw, 128px);
+  font-weight: 600; line-height: 0.98;
+  letter-spacing: -0.04em;
+  margin: 24px 0 0; max-width: 18ch;
+}
+.l3-hero h1 .serif {
+  font-family: var(--font-display);
+  font-style: italic; font-weight: 500;
+}
+.l3-hero .lede {
+  margin-top: 40px;
+  font-size: 22px; line-height: 1.45; max-width: 48ch; color: #333;
+}
+.l3-hero .actions { margin-top: 48px; display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* ---------- Three-lines glyph ---------- */
+.l3-three-lines { display: inline-flex; flex-direction: column; gap: 6px; }
+.l3-three-lines i { display: block; height: 4px; width: 60px; background: currentColor; }
+.l3-three-lines.lg i { height: 6px; width: 96px; }
+.l3-three-lines.sm i { height: 3px; width: 36px; }
+
+/* ---------- Marquee band ---------- */
+.l3-marquee {
+  border-top: 1px solid #E5E5E5; border-bottom: 1px solid #E5E5E5;
+  padding: 32px 0;
+  overflow: hidden;
+  background: #fff;
+}
+.l3-marquee .track {
+  display: flex; gap: 64px; align-items: center;
+  animation: l3-marquee 28s linear infinite;
+  font-size: 22px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap;
+}
+.l3-marquee .track span { color: #101010; }
+.l3-marquee .track .sep { color: #999; }
+@keyframes l3-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* ---------- Services grid ---------- */
+.l3-services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border-top: 1px solid #E5E5E5;
+}
+.l3-service {
+  padding: 56px 48px;
+  border-bottom: 1px solid #E5E5E5;
+  display: flex; flex-direction: column; gap: 20px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 200ms var(--ease-out);
+}
+.l3-service:nth-child(odd) { border-right: 1px solid #E5E5E5; }
+.l3-service:hover { background: #F0F0F0; }
+.l3-service .num {
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0.12em; color: #999; font-variant-numeric: tabular-nums;
+}
+.l3-service h3 { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin: 0; }
+.l3-service p { font-size: 16px; line-height: 1.55; color: #666; margin: 0; max-width: 48ch; }
+.l3-service .arrow {
+  margin-top: auto; padding-top: 24px;
+  font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px;
+}
+
+/* ---------- Case-study row ---------- */
+.l3-case-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr 1fr 32px;
+  gap: 32px;
+  padding: 40px 0;
+  border-top: 1px solid #E5E5E5;
+  align-items: center;
+  cursor: pointer;
+  transition: padding 200ms var(--ease-out);
+}
+.l3-case-row:last-child { border-bottom: 1px solid #E5E5E5; }
+.l3-case-row:hover { background: #FAFAFA; padding-left: 16px; padding-right: 16px; }
+.l3-case-row .yr { font-size: 14px; color: #999; font-variant-numeric: tabular-nums; }
+.l3-case-row .name { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.l3-case-row .sector { font-size: 14px; color: #666; }
+.l3-case-row .stat { font-size: 14px; color: #666; }
+.l3-case-row .arrow { text-align: right; font-size: 18px; opacity: 0.4; }
+.l3-case-row:hover .arrow { opacity: 1; }
+
+/* ---------- Stats ---------- */
+.l3-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; }
+.l3-stat { border-top: 2px solid currentColor; padding-top: 24px; }
+.l3-stat .v { font-size: 72px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.l3-stat .l { font-size: 14px; line-height: 1.5; margin-top: 12px; opacity: 0.7; max-width: 28ch; }
+
+/* ---------- Big statement ---------- */
+.l3-statement h2 {
+  font-size: clamp(48px, 6vw, 96px);
+  font-weight: 600; line-height: 1.02; letter-spacing: -0.03em;
+  max-width: 22ch; margin: 0;
+}
+.l3-statement h2 .serif {
+  font-family: var(--font-display); font-style: italic; font-weight: 500;
+}
+
+/* ---------- Article (case study detail) ---------- */
+.l3-article { max-width: 880px; margin: 0 auto; padding: 0 48px; }
+.l3-article .meta { display: flex; gap: 24px; font-size: 14px; color: #666; }
+.l3-article h1 {
+  font-size: clamp(48px, 6vw, 96px);
+  font-weight: 600; letter-spacing: -0.03em; line-height: 1.02;
+  margin: 24px 0 32px;
+}
+.l3-article .lede {
+  font-size: 24px; line-height: 1.5; color: #333; margin: 0 0 48px;
+}
+.l3-article .body p { font-size: 18px; line-height: 1.65; color: #1A1A1A; margin: 0 0 24px; }
+.l3-article .body h2 { font-size: 32px; margin: 56px 0 16px; font-weight: 600; letter-spacing: -0.01em; }
+.l3-article .img-frame {
+  background: #F0F0F0; aspect-ratio: 16 / 9; margin: 48px 0;
+  display: grid; place-items: center; font-size: 14px; color: #999;
+}
+
+/* ---------- Form ---------- */
+.l3-form { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.l3-form .full { grid-column: 1 / -1; }
+.l3-form label { display: flex; flex-direction: column; gap: 8px; font: 500 12px/1 "Inter", sans-serif; color: #666; letter-spacing: 0.04em; text-transform: uppercase; }
+.l3-form input, .l3-form select, .l3-form textarea {
+  font: 400 16px/1.4 "Inter", sans-serif; color: #101010;
+  padding: 14px 16px; border: 1px solid #D6D6D6; background: #fff; border-radius: 0;
+  outline: none; transition: border-color 120ms;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.l3-form textarea { min-height: 140px; resize: vertical; font-family: "Inter", sans-serif; }
+.l3-form input:focus, .l3-form select:focus, .l3-form textarea:focus { border-color: #101010; }
+.l3-form .check { display: flex; gap: 10px; align-items: flex-start; font: 400 14px/1.5 "Inter", sans-serif; text-transform: none; letter-spacing: 0; color: #333; }
+.l3-form .check input { width: 18px; height: 18px; accent-color: #101010; margin-top: 1px; padding: 0; }
+.l3-form .actions { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.l3-form .success { padding: 24px; background: #F0F0F0; border-left: 4px solid #101010; }
+.l3-form .success h4 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.l3-form .success p { margin: 0; font-size: 14px; color: #666; }
+
+/* ---------- Footer ---------- */
+.l3-footer { background: #101010; color: #fff; padding: 96px 48px 48px; }
+.l3-footer .wrap { max-width: 1440px; margin: 0 auto; }
+.l3-footer .big {
+  font-size: clamp(40px, 5vw, 72px); font-weight: 600;
+  line-height: 1.05; letter-spacing: -0.03em; max-width: 22ch; margin: 0 0 80px;
+}
+.l3-footer .big .serif { font-family: var(--font-display); font-style: italic; font-weight: 500; }
+.l3-footer .cols { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 48px; padding-top: 48px; border-top: 1px solid #2A2A2A; }
+.l3-footer .cols h5 { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #999; margin: 0 0 16px; }
+.l3-footer .cols a { color: #fff; text-decoration: none; font-size: 14px; display: block; padding: 4px 0; opacity: 0.85; }
+.l3-footer .cols a:hover { opacity: 0.5; }
+.l3-footer .colophon { display: flex; justify-content: space-between; padding-top: 32px; margin-top: 64px; border-top: 1px solid #2A2A2A; font-size: 12px; color: #666; letter-spacing: 0.04em; }
+
+/* Spacer */
+.l3-spacer-l { height: 96px; }
+.l3-spacer-m { height: 64px; }
+.l3-spacer-s { height: 32px; }

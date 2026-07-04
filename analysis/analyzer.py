@@ -1081,6 +1081,15 @@ class SEOAnalyzer:
 
     # Weights for link_position: content links carry more SEO value than
     # boilerplate navigation/footer links that repeat on every page.
+    #
+    # BUG LATENTE CONOCIDO (C3, documento maestro v2): link_position tiene
+    # 5 valores posibles (content, nav, footer, header, sidebar) pero este
+    # mapa no cubre "nav" ni "sidebar", que caen al default 0.5 — es decir,
+    # hoy un enlace de menú pesa MÁS que uno de header (0.3) o footer (0.2).
+    # NO corregir aquí: cambiaría el PageRank de todos los jobs históricos
+    # y rompería su comparabilidad (hay snapshot congelado en
+    # tests/python/test_pagerank_v1_snapshot.py). La corrección va solo en
+    # la rama v2 del cálculo (T3), conmutada por job.config.
     _POSITION_WEIGHT: dict[str | None, float] = {
         "content": 1.0,
         "header": 0.3,

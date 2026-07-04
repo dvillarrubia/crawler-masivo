@@ -1,0 +1,61 @@
+/* LIN3S — Colour tokens
+ * Source: LIN3S Brand Guide 2025 (-move Branding) — Paleta Primaria, Comunicación, Gráficos.
+ *
+ * THREE QUARANTINED COLOUR ROLES — never bleed into each other:
+ *   Primary    — black + white, all corporate/permanent chrome (nav, body, CTA, footer, logo).
+ *   Communication (--comm-*) — campaign/temporary surfaces only (full-bleed colour-block panels).
+ *   Graphics   (--chart-*) — data visualisation only (charts). Never UI or brand colour.
+ */
+:root {
+  /* ---- Primary (corporate) ---- */
+  --lin3s-primary: #050A0E;      /* LIN3S Black — deep near-black, not pure #000 */
+  --lin3s-on-primary: #FFFFFF;
+  --lin3s-ink: #050A0E;
+  --lin3s-ink-soft: #3D3D3D;     /* secondary paragraphs, lead-ins */
+  --lin3s-ink-muted: #717171;    /* captions, eyebrows, metadata */
+
+  /* ---- Surface ---- */
+  --lin3s-canvas: #FFFFFF;       /* default page background */
+  --lin3s-canvas-muted: #F3F3F1; /* editorial floor; cards, alternating bands */
+  --lin3s-surface-soft: #ECEBE7; /* media tiles, image placeholders, inset wells */
+  --lin3s-inverse-canvas: #050A0E; /* footer + dark feature bands */
+  --lin3s-inverse-ink: #FFFFFF;
+  --lin3s-inverse-ink-soft: #A6A6A6;
+  --lin3s-hairline: #E2E1DD;     /* 1px borders / dividers on light */
+  --lin3s-hairline-soft: #EFEEEA;
+
+  /* ---- Communication (temporary / campaign only) ---- */
+  --lin3s-comm-blue: #415986;
+  --lin3s-comm-brown: #AFA27D;
+  --lin3s-comm-red: #D65040;
+  --lin3s-comm-orange: #E29F37;
+  --lin3s-comm-lilac: #C5B0F4;
+
+  /* ---- Graphics (data viz only) ---- */
+  --lin3s-chart-maroon: #6E120B;
+  --lin3s-chart-red: #B12B29;
+  --lin3s-chart-cream: #FBF2D8;
+  --lin3s-chart-navy: #102F47;
+  --lin3s-chart-blue: #729AB9;
+  --lin3s-chart-forest: #2B361C;
+  --lin3s-chart-olive: #636C3F;
+  --lin3s-chart-rose: #DFA3A2;
+  --lin3s-chart-amber: #BD6C27;
+  --lin3s-chart-yellow: #F9D94A;
+
+  /* ---- Semantic (mapped onto existing palette — no new hues) ---- */
+  --lin3s-success: #2B361C;      /* = chart-forest */
+  --lin3s-warning: #E29F37;      /* = comm-orange */
+  --lin3s-error: #D65040;        /* = comm-red */
+  --lin3s-overlay-scrim: #050A0E; /* black @ ~60% behind modals (opacity at render) */
+
+  /* ---- Semantic surface/text aliases ---- */
+  --lin3s-surface-page: var(--lin3s-canvas);
+  --lin3s-surface-card: var(--lin3s-canvas-muted);
+  --lin3s-surface-media: var(--lin3s-surface-soft);
+  --lin3s-surface-inverse: var(--lin3s-inverse-canvas);
+  --lin3s-text-heading: var(--lin3s-ink);
+  --lin3s-text-body: var(--lin3s-ink-soft);
+  --lin3s-text-muted: var(--lin3s-ink-muted);
+  --lin3s-border-hairline: var(--lin3s-hairline);
+}

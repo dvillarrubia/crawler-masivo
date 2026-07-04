@@ -1,0 +1,326 @@
+/* ============================================================
+   LIN3S DESIGN SYSTEM — colors_and_type.css
+   Single source of truth for color tokens, type scale and
+   semantic CSS variables. Import this on every artifact.
+   ============================================================ */
+
+/* ----------  FONTS  ----------
+   Inter is the workhorse — every weight, every surface.
+   Besley is the display accent and is reserved for COVERS
+   and special editorial moments. Never use Besley for body.
+   Besley is loaded from Google Fonts (the user did not
+   supply a Besley file — see README for the substitution flag).
+*/
+@import url("https://fonts.googleapis.com/css2?family=Besley:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter_18pt-Black.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ----------  COLOR — PRIMARY  ---------- */
+  --l3-black:    #101010;   /* primary surface, covers, section dividers */
+  --l3-dark:     #1A1A1A;   /* secondary dark surface, code blocks       */
+  --l3-white:    #FFFFFF;   /* primary light surface                     */
+
+  /* ----------  COLOR — NEUTRAL  ---------- */
+  --l3-gray-bg:  #F0F0F0;   /* light backgrounds, cards, dividers        */
+  --l3-gray-mid: #999999;   /* captions, metadata, secondary text        */
+  /* extra steps interpolated for UI density — keep usage rare           */
+  --l3-gray-08:  #141414;
+  --l3-gray-20:  #333333;
+  --l3-gray-40:  #666666;
+  --l3-gray-70:  #B3B3B3;
+  --l3-gray-90:  #E5E5E5;
+
+  /* ----------  COLOR — ACCENT (RRSS / social only)  ----------
+     NEVER use these on slides. Reserved for social, web hover
+     moments and editorial accents on rrss content.            */
+  --l3-blue:     #415986;
+  --l3-red:      #D65040;
+  --l3-orange:   #E29F37;
+
+  /* ----------  COLOR — DATA VIZ (charts only)  ---------- */
+  --l3-viz-1:    #6E120B;   /* deepest red */
+  --l3-viz-2:    #B12B29;   /* red         */
+  --l3-viz-3:    #102F47;   /* deep navy   */
+  --l3-viz-4:    #729AB9;   /* mid blue    */
+
+  /* ----------  SEMANTIC — FG / BG  ---------- */
+  --fg-1:        var(--l3-black);   /* primary text on light */
+  --fg-2:        var(--l3-gray-40); /* secondary text        */
+  --fg-3:        var(--l3-gray-mid);/* tertiary / captions   */
+  --fg-on-dark:  var(--l3-white);
+  --fg-on-dark-2:#B3B3B3;           /* secondary on black    */
+
+  --bg-1:        var(--l3-white);   /* primary light bg      */
+  --bg-2:        var(--l3-gray-bg); /* subtle card bg        */
+  --bg-dark:     var(--l3-black);   /* primary dark bg       */
+  --bg-dark-2:   var(--l3-dark);    /* secondary dark bg     */
+
+  --border-1:    #E5E5E5;
+  --border-2:    #D6D6D6;
+  --border-dark: #2A2A2A;
+
+  /* ----------  TYPOGRAPHY — FAMILIES  ---------- */
+  --font-sans:    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-display: "Besley", "Inter", Georgia, serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* ----------  TYPE SCALE  ----------
+     Modular scale tuned for editorial slides + product UI.   */
+  --fs-12:  0.75rem;   /* 12px — meta, legal           */
+  --fs-14:  0.875rem;  /* 14px — caption, ui small     */
+  --fs-16:  1rem;      /* 16px — body                  */
+  --fs-18:  1.125rem;  /* 18px — body large            */
+  --fs-20:  1.25rem;   /* 20px — lede                  */
+  --fs-24:  1.5rem;    /* 24px — h4                    */
+  --fs-32:  2rem;      /* 32px — h3                    */
+  --fs-40:  2.5rem;    /* 40px — h2                    */
+  --fs-56:  3.5rem;    /* 56px — h1                    */
+  --fs-72:  4.5rem;    /* 72px — display              */
+  --fs-96:  6rem;      /* 96px — slide cover           */
+  --fs-128: 8rem;      /* 128px — big-statement slide  */
+
+  /* ----------  LINE HEIGHT  ---------- */
+  --lh-tight:   1.05;
+  --lh-snug:    1.15;
+  --lh-base:    1.4;
+  --lh-relaxed: 1.55;
+
+  /* ----------  LETTER SPACING  ----------
+     LIN3S is uppercase-heavy in moments. Tracking matters.   */
+  --tracking-tight:  -0.02em;
+  --tracking-snug:   -0.01em;
+  --tracking-normal: 0em;
+  --tracking-wide:   0.04em;
+  --tracking-wider:  0.08em;   /* uppercase eyebrows / labels */
+
+  /* ----------  WEIGHTS  ---------- */
+  --fw-light:    300;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semi:     600;
+  --fw-bold:     700;
+  --fw-black:    900;
+
+  /* ----------  SPACING (4px base)  ---------- */
+  --s-0:  0;
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  24px;
+  --s-6:  32px;
+  --s-7:  48px;
+  --s-8:  64px;
+  --s-9:  96px;
+  --s-10: 128px;
+  --s-11: 192px;
+
+  /* ----------  RADII  ----------
+     LIN3S is firmly geometric. Default to 0. Reserve small
+     radii (4–8px) for tags/inputs only. Never pill / never
+     fully rounded except for avatars.                        */
+  --r-0:    0px;
+  --r-sm:   2px;
+  --r-md:   4px;
+  --r-lg:   8px;
+  --r-full: 9999px;
+
+  /* ----------  SHADOWS  ----------
+     Used sparingly. The brand prefers contrast + tight borders
+     over elevation. Reserve for menus, toasts, overlays only. */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px rgba(16,16,16,0.06), 0 1px 1px rgba(16,16,16,0.04);
+  --shadow-2: 0 4px 12px rgba(16,16,16,0.08), 0 2px 4px rgba(16,16,16,0.04);
+  --shadow-3: 0 16px 40px rgba(16,16,16,0.12), 0 4px 12px rgba(16,16,16,0.06);
+
+  /* ----------  MOTION  ---------- */
+  --ease-out:   cubic-bezier(0.2, 0.6, 0.2, 1);
+  --ease-in:    cubic-bezier(0.4, 0, 1, 1);
+  --ease-inout: cubic-bezier(0.6, 0, 0.2, 1);
+  --dur-fast:   120ms;
+  --dur-base:   220ms;
+  --dur-slow:   360ms;
+
+  /* ----------  LAYOUT  ---------- */
+  --slide-w: 1920px;
+  --slide-h: 1080px;
+  --slide-pad: 96px;        /* outer slide gutter           */
+  --grid-cols: 12;
+  --grid-gap:  24px;
+  --max-measure: 64ch;      /* readable body width          */
+}
+
+/* ============================================================
+   SEMANTIC ELEMENT STYLES
+   Use these by default. Override per artifact only when needed.
+   ============================================================ */
+
+html, body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-16);
+  line-height: var(--lh-base);
+  color: var(--fg-1);
+  background: var(--bg-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-56);
+  font-weight: var(--fw-semi);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+h2, .h2 {
+  font-size: var(--fs-40);
+  font-weight: var(--fw-semi);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-snug);
+  margin: 0;
+}
+h3, .h3 {
+  font-size: var(--fs-32);
+  font-weight: var(--fw-semi);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-snug);
+  margin: 0;
+}
+h4, .h4 {
+  font-size: var(--fs-24);
+  font-weight: var(--fw-semi);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+h5, .h5 {
+  font-size: var(--fs-20);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+
+p, .body {
+  font-size: var(--fs-16);
+  line-height: var(--lh-relaxed);
+  margin: 0;
+  max-width: var(--max-measure);
+  text-wrap: pretty;
+}
+.body-lg { font-size: var(--fs-18); line-height: var(--lh-relaxed); }
+.lede    { font-size: var(--fs-20); line-height: var(--lh-relaxed); color: var(--fg-2); }
+
+.caption {
+  font-size: var(--fs-14);
+  color: var(--fg-3);
+  line-height: var(--lh-base);
+}
+
+.eyebrow {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+  color: var(--fg-2);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--fs-96);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.display-italic {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+}
+
+code, kbd, samp, pre, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+a:hover { opacity: 0.6; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border-1);
+  margin: var(--s-6) 0;
+}
+
+/* ----------  Dark-surface helpers  ---------- */
+.on-dark   { color: var(--fg-on-dark);   background: var(--bg-dark); }
+.on-dark p, .on-dark .body { color: var(--fg-on-dark-2); }
+.on-dark hr { border-top-color: var(--border-dark); }
+.on-dark .eyebrow, .on-dark .caption { color: var(--fg-on-dark-2); }
+
+/* ----------  Utility text styles  ---------- */
+.uppercase { text-transform: uppercase; letter-spacing: var(--tracking-wider); }
+.tnum      { font-variant-numeric: tabular-nums; }
+.italic    { font-style: italic; }
+.fw-light  { font-weight: var(--fw-light); }
+.fw-reg    { font-weight: var(--fw-regular); }
+.fw-med    { font-weight: var(--fw-medium); }
+.fw-semi   { font-weight: var(--fw-semi); }
+.fw-bold   { font-weight: var(--fw-bold); }
+.fw-black  { font-weight: var(--fw-black); }

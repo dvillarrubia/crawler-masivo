@@ -1,0 +1,28 @@
+/* LIN3S — Spacing & radius tokens
+ * 8px base grid. Section rhythm = 96px between major bands. Cards pad 32px; colour-blocks 48px.
+ */
+:root {
+  /* ---- Spacing (8px base) ---- */
+  --lin3s-space-hair: 1px;
+  --lin3s-space-xxs: 4px;
+  --lin3s-space-xs: 8px;
+  --lin3s-space-sm: 12px;
+  --lin3s-space-md: 16px;
+  --lin3s-space-lg: 24px;
+  --lin3s-space-xl: 32px;
+  --lin3s-space-xxl: 48px;
+  --lin3s-space-section: 96px;
+
+  /* ---- Radius ---- */
+  --lin3s-rounded-xs: 2px;     /* hairline corners, chart cells, isotype squares */
+  --lin3s-rounded-sm: 6px;     /* chips, business cards, small tiles */
+  --lin3s-rounded-md: 10px;    /* inputs, list items, small media */
+  --lin3s-rounded-lg: 16px;    /* cards, colour-block sections, large media */
+  --lin3s-rounded-xl: 24px;    /* hero feature panels, oversized callouts */
+  --lin3s-rounded-pill: 999px; /* all buttons */
+  --lin3s-rounded-full: 9999px;/* circular icon buttons, status dots */
+
+  /* ---- Layout ---- */
+  --lin3s-container-max: 1240px;
+  --lin3s-nav-height: 64px;
+}

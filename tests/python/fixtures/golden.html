@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>  Página dorada — fixture de   pruebas  </title>
+  <meta name="description" content="Descripción canónica de la página dorada usada como fixture de regresión para los extractores del crawler.">
+  <meta name="keywords" content="seo, crawler, fixture">
+  <meta name="robots" content="index, follow">
+  <meta http-equiv="refresh" content="5; url=https://golden.local/destino-refresh">
+  <link rel="canonical" href="https://golden.local/pagina-dorada">
+  <link rel="next" href="https://golden.local/pagina-dorada?page=2">
+  <link rel="prev" href="https://golden.local/">
+  <link rel="alternate" hreflang="es" href="https://golden.local/pagina-dorada">
+  <link rel="alternate" hreflang="en-US" href="https://golden.local/en/golden-page">
+  <link rel="alternate" hreflang="x-default" href="https://golden.local/">
+  <link rel="alternate" hreflang="zz-INVALID-!!" href="https://golden.local/invalid">
+  <link rel="stylesheet" href="/assets/main.css">
+  <meta property="og:title" content="Página dorada OG">
+  <meta property="og:description" content="Descripción OG">
+  <meta property="og:image" content="https://golden.local/assets/og.png">
+  <meta property="og:url" content="https://golden.local/pagina-dorada">
+  <meta property="og:type" content="article">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Página dorada Twitter">
+  <meta name="twitter:description" content="Descripción Twitter">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Página dorada",
+    "author": {"@type": "Person", "name": "Fixture"}
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <a href="/">Logo home</a>
+    <nav>
+      <a href="/seccion/uno">Sección uno</a>
+      <a href="/seccion/dos?b=2&amp;a=1">Sección dos</a>
+    </nav>
+  </header>
+
+  <div class="main-navigation">
+    <a href="/seccion/tres">Sección tres (nav por clase)</a>
+  </div>
+
+  <aside>
+    <a href="/relacionado">Enlace de sidebar</a>
+  </aside>
+
+  <main>
+    <h1>Título principal de la página dorada</h1>
+    <p>Párrafo de contenido con un <a href="/articulo/enlace-contenido">enlace editorial</a>
+       y otro <a href="https://externo.example.org/ref" rel="nofollow sponsored" target="_blank">enlace externo patrocinado</a>.</p>
+
+    <h2>Sección de   contenido</h2>
+    <p>Texto suficiente para el recuento de palabras. Un enlace duplicado:
+       <a href="/articulo/enlace-contenido#fragmento">enlace editorial repetido</a>.
+       Un <a href="mailto:hola@golden.local">mailto que se ignora</a> y un
+       <a href="javascript:void(0)">javascript que se ignora</a>.</p>
+
+    <a href="/producto/42"><img src="/assets/producto.jpg" alt="Producto 42"></a>
+    <a href="/producto/43"><img src="/assets/producto43.jpg" alt="Producto 43"> Ver producto 43</a>
+
+    <img src="http://inseguro.golden.local/assets/mixta.png" alt="Imagen con mixed content" width="120" height="80">
+    <img src="/assets/sin-alt.png">
+
+    <div itemscope itemtype="https://schema.org/Product">
+      <span itemprop="name">Producto microdata</span>
+    </div>
+
+    <template>
+      <h2>Heading fantasma en template (debe excluirse)</h2>
+    </template>
+    <noscript>
+      <h3>Heading en noscript (debe excluirse)</h3>
+    </noscript>
+    <svg viewBox="0 0 10 10"><h4>Heading dentro de svg (debe excluirse)</h4></svg>
+
+    <h3>Subsección final</h3>
+  </main>
+
+  <footer>
+    <a href="/legal/privacidad">Privacidad</a>
+    <a href="/legal/cookies" rel="nofollow">Cookies (nofollow interno)</a>
+  </footer>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

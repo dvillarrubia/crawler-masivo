@@ -1,0 +1,167 @@
+[
+  {
+    "input": "https://example.com",
+    "normalized": "https://example.com/",
+    "url_hash": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+  },
+  {
+    "input": "https://example.com/",
+    "normalized": "https://example.com/",
+    "url_hash": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+  },
+  {
+    "input": "https://Example.COM/Path/Page",
+    "normalized": "https://example.com/Path/Page",
+    "url_hash": "6e90c1a8e8ff626c6e12f5d59cd09bba1202fe1fe9b0d1573625f346a7dd146d"
+  },
+  {
+    "input": "HTTPS://EXAMPLE.COM/A",
+    "normalized": "https://example.com/A",
+    "url_hash": "aeb05612f62b8a95c5c1a3ed78542f1a0abb0ea478703001a44c540de67fb9da"
+  },
+  {
+    "input": "https://www.example.com/a",
+    "normalized": "https://www.example.com/a",
+    "url_hash": "7ea22417f447d9f9e1b7d35aae3f76e9f8f939ba6e28b271a451e91d84634405"
+  },
+  {
+    "input": "https://example.com:443/a",
+    "normalized": "https://example.com:443/a",
+    "url_hash": "75c97b0873af285587267df85a3d68c5a793ee9aa3e4a5a4d3d6d8cb80526937"
+  },
+  {
+    "input": "http://example.com:80/a",
+    "normalized": "http://example.com:80/a",
+    "url_hash": "be6905d6dc36e7ee893d98e498684c91ad39822add6e4c51214b27f6ce3f3a90"
+  },
+  {
+    "input": "https://example.com:8080/a",
+    "normalized": "https://example.com:8080/a",
+    "url_hash": "4153f4762b8ddd531411f2c4d4394d8c29f925c998bd3d5324b673e4a8c7f13c"
+  },
+  {
+    "input": "https://example.com/a#seccion",
+    "normalized": "https://example.com/a",
+    "url_hash": "2dce0a4c50441bfccfa9caf4b58c3cba6e06c420505dd829f0436de1aa44baac"
+  },
+  {
+    "input": "https://example.com/a?b=2&a=1",
+    "normalized": "https://example.com/a?a=1&b=2",
+    "url_hash": "051029b6a13fc6686e4523427e03b3a177e6970f9bfe03b026a9a023819b902a"
+  },
+  {
+    "input": "https://example.com/a?",
+    "normalized": "https://example.com/a",
+    "url_hash": "2dce0a4c50441bfccfa9caf4b58c3cba6e06c420505dd829f0436de1aa44baac"
+  },
+  {
+    "input": "https://example.com/a?x=1&x=2",
+    "normalized": "https://example.com/a?x=1&x=2",
+    "url_hash": "7131b54920dbcc49cb9836e6536f795e9c9675aba659d8fb614f0b9cd13664ec"
+  },
+  {
+    "input": "https://example.com/a?X=1",
+    "normalized": "https://example.com/a?X=1",
+    "url_hash": "2c8b96fa79ca394692357f3e48270cf154b232d4b11f1c9e198a5eca952949bf"
+  },
+  {
+    "input": "https://example.com/a?empty=&b=1",
+    "normalized": "https://example.com/a?b=1&empty=",
+    "url_hash": "acbc8751c288fa4eaeae122a644f431cdfa318e8714ccb61c7706d6c52149fed"
+  },
+  {
+    "input": "https://example.com/search?q=hello+world&lang=es",
+    "normalized": "https://example.com/search?lang=es&q=hello+world",
+    "url_hash": "3e3f6d967632ea0a4b0f2cb5421b390658125368b12feead66005bfd8ecd2a5d"
+  },
+  {
+    "input": "https://example.com/a?arr[]=1&arr[]=2",
+    "normalized": "https://example.com/a?arr%5B%5D=1&arr%5B%5D=2",
+    "url_hash": "95f2202a54dff62560f00a55a176991e24eb4f4816c318a4320ad2a245688fb5"
+  },
+  {
+    "input": "https://example.com/a?utm_source=x&id=5",
+    "normalized": "https://example.com/a?id=5&utm_source=x",
+    "url_hash": "2c019c081149ed8fa0d8c5365aafe66dffea48a0f432dfe66c4bbc1f8e2d7b34"
+  },
+  {
+    "input": "https://example.com/a?fbclid=123&gclid=456",
+    "normalized": "https://example.com/a?fbclid=123&gclid=456",
+    "url_hash": "e4e12aea5065d72bb56d151f01df619d8ffdea4de8b1063caa53efcc65dcfaba"
+  },
+  {
+    "input": "https://example.com/a%2Fb",
+    "normalized": "https://example.com/a%2Fb",
+    "url_hash": "1a5c33d5e6c4f38f2ce14c4ecc172c0487d5b93aae5efd22cc8145dddb054bc1"
+  },
+  {
+    "input": "https://example.com/a b",
+    "normalized": "https://example.com/a%20b",
+    "url_hash": "f785dc530cf18312e8580c7674cbed6a1a35d5fb0888aa649c7194d5df6e67ae"
+  },
+  {
+    "input": "https://example.com/ñoño",
+    "normalized": "https://example.com/%C3%B1o%C3%B1o",
+    "url_hash": "39f011f1bcc71e3d5bad680b4dee906cae2378fa4f71e58e501731b83bc0f0aa"
+  },
+  {
+    "input": "https://example.com/a?q=caf%C3%A9",
+    "normalized": "https://example.com/a?q=caf%C3%A9",
+    "url_hash": "49e42a66dc38ddd3be45d209573c13ca9378b8b4be85c36ed77023c4b03cfddd"
+  },
+  {
+    "input": "https://example.com/%7Euser",
+    "normalized": "https://example.com/~user",
+    "url_hash": "ab9c6a86a4b68c3b76dfbab50c3e670793d220c2edf5cd9abe5189cffb4d5ae5"
+  },
+  {
+    "input": "https://example.com/%41bc",
+    "normalized": "https://example.com/Abc",
+    "url_hash": "8dc172f409a1507555b193d04d7054fdca0eb198e5515e679f73105d2c91866f"
+  },
+  {
+    "input": "https://example.com/trailing/",
+    "normalized": "https://example.com/trailing/",
+    "url_hash": "3588d4f24f0043450b3437e9cac0a3458769d83d3b35fd82cfe6ff2d717ec174"
+  },
+  {
+    "input": "https://example.com/trailing",
+    "normalized": "https://example.com/trailing",
+    "url_hash": "9fdb6f213bdb23a482e31da618010d9f59bfa856ba8780cf32bf16b071746c8f"
+  },
+  {
+    "input": "https://example.com//doble//slash",
+    "normalized": "https://example.com//doble//slash",
+    "url_hash": "3b381ad14e7f64b8a27fdc99ace9a998816bf4e356eb6f3daaaeec13582c6aba"
+  },
+  {
+    "input": "https://example.com/a/../b",
+    "normalized": "https://example.com/a/../b",
+    "url_hash": "246d39ca7400202cf74ae3adf943e91e72e582429af8c4dbf586a729fbed9ffc"
+  },
+  {
+    "input": "https://example.com/a/./b",
+    "normalized": "https://example.com/a/./b",
+    "url_hash": "ac07a0ec89da2b7a4711aa29d50c8505f2a09ac6d6a57e71f108af6029580ec4"
+  },
+  {
+    "input": "https://example.com/index.html",
+    "normalized": "https://example.com/index.html",
+    "url_hash": "ce57b65edfa501e69481741abda04893b0431344ea1180b6f80f043ded43c527"
+  },
+  {
+    "input": "https://example.com/a;jsessionid=ABC123?x=1",
+    "normalized": "https://example.com/a;jsessionid=ABC123?x=1",
+    "url_hash": "1fd7dbad9703c62b422c7ae2777fedc906afd2ce5bfa6418598cccf2e55254a5"
+  },
+  {
+    "input": "https://user:pass@example.com/a",
+    "normalized": "https://user:pass@example.com/a",
+    "url_hash": "3969fd4493f1cea5852f6f54f35faf66325459b4884018930fdf55fd1ea398fa"
+  },
+  {
+    "input": "example.com/sin-esquema",
+    "normalized": "example.com/sin-esquema",
+    "url_hash": "116d7e7ef74ca955ff617398228b04a5468d70657554e09ac72b2d821664646f"
+  }
+]

@@ -1,0 +1,68 @@
+/* LIN3S — Typography tokens
+ * Display is BESLEY; functional is INTER. The split IS the voice.
+ * Negative tracking scales with display size; alignment is left or centre, NEVER right.
+ */
+:root {
+  /* ---- Families ---- */
+  --lin3s-font-display: "Besley", Georgia, "Times New Roman", serif;
+  --lin3s-font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* ---- Type scale: size / weight ---- */
+  --lin3s-claim-size: 120px;      --lin3s-claim-weight: 400;
+  --lin3s-display-xl-size: 88px;  --lin3s-display-xl-weight: 500;
+  --lin3s-display-lg-size: 56px;  --lin3s-display-lg-weight: 500;
+  --lin3s-headline-size: 34px;    --lin3s-headline-weight: 500;
+  --lin3s-subhead-size: 24px;     --lin3s-subhead-weight: 400;
+  --lin3s-stat-size: 72px;        --lin3s-stat-weight: 500;
+  --lin3s-body-lg-size: 20px;     --lin3s-body-lg-weight: 400;
+  --lin3s-body-size: 16px;        --lin3s-body-weight: 400;
+  --lin3s-body-sm-size: 14px;     --lin3s-body-sm-weight: 400;
+  --lin3s-label-size: 13px;       --lin3s-label-weight: 500;
+  --lin3s-eyebrow-size: 12px;     --lin3s-eyebrow-weight: 500;
+  --lin3s-button-size: 15px;      --lin3s-button-weight: 500;
+  --lin3s-caption-size: 11px;     --lin3s-caption-weight: 400;
+
+  /* ---- Line-heights (unitless ratios — not a spacing/size kind) ---- */
+  --lin3s-claim-lh: 0.98;      /* @kind other */
+  --lin3s-display-xl-lh: 1.02; /* @kind other */
+  --lin3s-display-lg-lh: 1.06; /* @kind other */
+  --lin3s-headline-lh: 1.18;   /* @kind other */
+  --lin3s-subhead-lh: 1.3;     /* @kind other */
+  --lin3s-stat-lh: 1.0;        /* @kind other */
+  --lin3s-body-lg-lh: 1.5;     /* @kind other */
+  --lin3s-body-lh: 1.55;       /* @kind other */
+  --lin3s-body-sm-lh: 1.5;     /* @kind other */
+  --lin3s-label-lh: 1.4;       /* @kind other */
+  --lin3s-eyebrow-lh: 1.3;     /* @kind other */
+  --lin3s-button-lh: 1.0;      /* @kind other */
+  --lin3s-caption-lh: 1.3;     /* @kind other */
+
+  /* ---- Letter-spacing / tracking ---- */
+  --lin3s-claim-ls: -2.4px;      /* @kind other */
+  --lin3s-display-xl-ls: -1.76px;/* @kind other */
+  --lin3s-display-lg-ls: -0.84px;/* @kind other */
+  --lin3s-headline-ls: -0.34px;  /* @kind other */
+  --lin3s-subhead-ls: -0.24px;   /* @kind other */
+  --lin3s-stat-ls: -1.44px;      /* @kind other */
+  --lin3s-body-lg-ls: -0.1px;    /* @kind other */
+  --lin3s-body-ls: 0;            /* @kind other */
+  --lin3s-body-sm-ls: 0;         /* @kind other */
+  --lin3s-label-ls: 0;           /* @kind other */
+  --lin3s-eyebrow-ls: 1.2px;     /* @kind other */
+  --lin3s-button-ls: 0;          /* @kind other */
+  --lin3s-caption-ls: 0.2px;     /* @kind other */
+}
+
+/* ---- Convenience type roles ---- */
+.lin3s-claim      { font-family: var(--lin3s-font-display); font-size: var(--lin3s-claim-size); font-weight: var(--lin3s-claim-weight); line-height: var(--lin3s-claim-lh); letter-spacing: var(--lin3s-claim-ls); }
+.lin3s-display-xl { font-family: var(--lin3s-font-display); font-size: var(--lin3s-display-xl-size); font-weight: var(--lin3s-display-xl-weight); line-height: var(--lin3s-display-xl-lh); letter-spacing: var(--lin3s-display-xl-ls); }
+.lin3s-display-lg { font-family: var(--lin3s-font-display); font-size: var(--lin3s-display-lg-size); font-weight: var(--lin3s-display-lg-weight); line-height: var(--lin3s-display-lg-lh); letter-spacing: var(--lin3s-display-lg-ls); }
+.lin3s-headline   { font-family: var(--lin3s-font-display); font-size: var(--lin3s-headline-size); font-weight: var(--lin3s-headline-weight); line-height: var(--lin3s-headline-lh); letter-spacing: var(--lin3s-headline-ls); }
+.lin3s-subhead    { font-family: var(--lin3s-font-display); font-size: var(--lin3s-subhead-size); font-weight: var(--lin3s-subhead-weight); line-height: var(--lin3s-subhead-lh); letter-spacing: var(--lin3s-subhead-ls); }
+.lin3s-stat       { font-family: var(--lin3s-font-display); font-size: var(--lin3s-stat-size); font-weight: var(--lin3s-stat-weight); line-height: var(--lin3s-stat-lh); letter-spacing: var(--lin3s-stat-ls); }
+.lin3s-body-lg    { font-family: var(--lin3s-font-body); font-size: var(--lin3s-body-lg-size); font-weight: var(--lin3s-body-lg-weight); line-height: var(--lin3s-body-lg-lh); letter-spacing: var(--lin3s-body-lg-ls); }
+.lin3s-body       { font-family: var(--lin3s-font-body); font-size: var(--lin3s-body-size); font-weight: var(--lin3s-body-weight); line-height: var(--lin3s-body-lh); letter-spacing: var(--lin3s-body-ls); }
+.lin3s-body-sm    { font-family: var(--lin3s-font-body); font-size: var(--lin3s-body-sm-size); font-weight: var(--lin3s-body-sm-weight); line-height: var(--lin3s-body-sm-lh); letter-spacing: var(--lin3s-body-sm-ls); }
+.lin3s-label      { font-family: var(--lin3s-font-body); font-size: var(--lin3s-label-size); font-weight: var(--lin3s-label-weight); line-height: var(--lin3s-label-lh); letter-spacing: var(--lin3s-label-ls); }
+.lin3s-eyebrow    { font-family: var(--lin3s-font-body); font-size: var(--lin3s-eyebrow-size); font-weight: var(--lin3s-eyebrow-weight); line-height: var(--lin3s-eyebrow-lh); letter-spacing: var(--lin3s-eyebrow-ls); text-transform: uppercase; }
+.lin3s-caption    { font-family: var(--lin3s-font-body); font-size: var(--lin3s-caption-size); font-weight: var(--lin3s-caption-weight); line-height: var(--lin3s-caption-lh); letter-spacing: var(--lin3s-caption-ls); }

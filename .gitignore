@@ -35,3 +35,6 @@ ilerna_ring_map.html
 export_ilerna_md/
 export_ilerna_md.zip
 export_*.html
+
+# v2 design handoff zips (decompressed dirs are committed)
+v2 experimental/*.zip
