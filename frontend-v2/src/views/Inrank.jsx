@@ -14,7 +14,7 @@ export default function InrankView() {
   if (!jobId) return <Blocked title="Sin run seleccionado" reason="Elige un run en la barra superior." />;
 
   const TABS = [
-    ["striking", "Striking distance"],
+    ["striking", "Keywords a optimizar"],
     ["delta", "Delta PR semántico"],
     ["simulador", "Simulador what-if"],
     ["profundidad", "Profundidad de clic"],
@@ -23,7 +23,7 @@ export default function InrankView() {
   ];
 
   const TAB_HELP = {
-    striking: "Consultas que rankean en posición 5–15: un empujón de enlazado interno puede subirlas a primera página. Es la cola de trabajo con mejor retorno.",
+    striking: "Las keywords reales (de Search Console) que rankean cerca de primera página: un empujón de contenido o enlazado puede subirlas. Ojo: sin datos de SERP no sabemos si alguna tiene techo por la tipología de resultados (mapas, shopping…).",
     delta: "Compara la autoridad estructural (quién te enlaza) con la semántica (quién te enlaza HABLANDO de lo tuyo). Diferencias grandes = autoridad frágil o desaprovechada.",
     simulador: "Prueba enlaces hipotéticos y mira cómo se movería la autoridad de todo el sitio ANTES de tocar nada. No escribe nada en los datos.",
     profundidad: "Cuántos clics reales hacen falta desde la portada hasta cada página. Lo profundo se rastrea menos y posiciona peor.",
@@ -142,37 +142,93 @@ function FlowsPanel({ jobId }) {
   );
 }
 
-/* -- Striking distance (T9) ------------------------------------------------ */
+/* -- Striking distance (T9): keywords a optimizar --------------------------- */
 function StrikingPanel({ jobId }) {
   const [page, setPage] = useState(1);
-  const q = useAsync(() => api.strikingDistance(jobId, { page, page_size: 50 }), [jobId, page]);
+  const [range, setRange] = useState({ pos_min: 5, pos_max: 15 });
+  const [applied, setApplied] = useState({ pos_min: 5, pos_max: 15 });
+  const q = useAsync(
+    () => api.strikingDistance(jobId, { ...applied, page, page_size: 50 }),
+    [jobId, page, applied],
+  );
   if (q.loading) return <Spinner />;
   if (q.error) return <ErrorBox error={q.error} />;
   const d = q.data;
   if (d.status === "blocked") {
-    return <Blocked title="Striking distance"
-      reason="Necesita datos de GSC del run (posición media por URL)."
+    return <Blocked title="Keywords a tiro de piedra"
+      reason="Necesita los datos de Search Console del run: son las búsquedas reales con su posición."
       cta={<a href="#/semantica"><button>Importar GSC en Semántica</button></a>} />;
   }
+
+  const byQuery = d.level === "query";
+
   return (
     <div className="card">
-      <h3>Cola de trabajo de enlazado: posición 5–15, ordenado por impresiones ↓ y PageRank ↑ ({fmt(d.total)})</h3>
-      <div className="table-wrap" style={{ maxHeight: "60vh" }}>
+      <div className="row between" style={{ flexWrap: "wrap" }}>
+        <h3>
+          {byQuery
+            ? `Keywords en posición ${applied.pos_min}–${applied.pos_max}, por impresiones ↓ (${fmt(d.total)})`
+            : `URLs con posición media ${applied.pos_min}–${applied.pos_max} (${fmt(d.total)})`}
+        </h3>
+        <span className="row" style={{ gap: 6 }}>
+          <label className="kpi-label">posición</label>
+          <input type="number" min={1} max={100} style={{ width: 60 }} value={range.pos_min}
+            onChange={(e) => setRange({ ...range, pos_min: e.target.value })} />
+          <span>–</span>
+          <input type="number" min={1} max={100} style={{ width: 60 }} value={range.pos_max}
+            onChange={(e) => setRange({ ...range, pos_max: e.target.value })} />
+          <button className="secondary" onClick={() => {
+            setApplied({ pos_min: Number(range.pos_min), pos_max: Number(range.pos_max) });
+            setPage(1);
+          }}>Aplicar</button>
+        </span>
+      </div>
+      {!byQuery && (
+        <div className="alert warn" style={{ margin: "6px 0" }}>
+          Este run solo tiene medias por página (sin desglose por keyword). Re-importa los datos GSC
+          en Semántica para ver las consultas concretas a optimizar.
+        </div>
+      )}
+      <p className="proxy-tag" style={{ marginTop: 4 }}>
+        Demanda casi ganada: ya rankeas, falta el empujón (contenido que responda mejor, enlaces internos
+        hacia la URL, anchor descriptivo). Sin datos de SERP no podemos saber si alguna keyword tiene techo
+        por la tipología de resultados — valida las importantes mirando su SERP antes de invertir.
+      </p>
+      <div className="table-wrap" style={{ maxHeight: "58vh" }}>
         <table className="data">
           <thead>
-            <tr><th>URL</th><th className="num">Posición</th><th className="num">Impresiones</th>
-              <th className="num">Clics</th><th className="num">PageRank</th><th className="num">Inlinks</th></tr>
+            {byQuery ? (
+              <tr><th>Keyword</th><th>URL que rankea</th><th className="num">Posición</th>
+                <th className="num">Impresiones</th><th className="num">Clics</th>
+                <th className="num">CTR</th><th className="num">PageRank</th><th className="num">Inlinks</th></tr>
+            ) : (
+              <tr><th>URL</th><th className="num">Posición</th><th className="num">Impresiones</th>
+                <th className="num">Clics</th><th className="num">PageRank</th><th className="num">Inlinks</th></tr>
+            )}
           </thead>
           <tbody>
             {d.items.map((u, i) => (
-              <tr key={i}>
-                <td className="cell-url" title={u.url}>{u.url}</td>
-                <td className="num">{u.position?.toFixed(1)}</td>
-                <td className="num">{fmt(u.impressions)}</td>
-                <td className="num">{fmt(u.clicks)}</td>
-                <td className="num">{u.pagerank ?? "—"}</td>
-                <td className="num">{fmt(u.inlinks_count)}</td>
-              </tr>
+              byQuery ? (
+                <tr key={i}>
+                  <td><b>{u.query}</b></td>
+                  <td className="cell-url" title={u.url}>{u.url}</td>
+                  <td className="num">{u.position?.toFixed(1)}</td>
+                  <td className="num">{fmt(u.impressions)}</td>
+                  <td className="num">{fmt(u.clicks)}</td>
+                  <td className="num">{u.ctr != null ? `${(u.ctr * 100).toFixed(1)}%` : "—"}</td>
+                  <td className="num">{u.pagerank ?? "—"}</td>
+                  <td className="num">{fmt(u.inlinks_count)}</td>
+                </tr>
+              ) : (
+                <tr key={i}>
+                  <td className="cell-url" title={u.url}>{u.url}</td>
+                  <td className="num">{u.position?.toFixed(1)}</td>
+                  <td className="num">{fmt(u.impressions)}</td>
+                  <td className="num">{fmt(u.clicks)}</td>
+                  <td className="num">{u.pagerank ?? "—"}</td>
+                  <td className="num">{fmt(u.inlinks_count)}</td>
+                </tr>
+              )
             ))}
           </tbody>
         </table>

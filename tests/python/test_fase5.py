@@ -187,7 +187,8 @@ def test_striking_distance_blocked_without_gsc(db_session, make_job, gsc_tables)
     assert result == {"status": "blocked", "reason": "gsc_not_configured"}
 
 
-def test_striking_distance_queue(db_session, make_job, gsc_tables):
+def test_striking_distance_url_fallback(db_session, make_job, gsc_tables):
+    """Sin filas por consulta, cae al nivel URL (medias por página)."""
     from api.routers.results import striking_distance
 
     GscJobData = gsc_tables
@@ -202,10 +203,51 @@ def test_striking_distance_queue(db_session, make_job, gsc_tables):
     ])
     db_session.flush()
 
-    result = striking_distance(job.id, page=1, page_size=50, db=db_session)
+    result = striking_distance(job.id, pos_min=5.0, pos_max=15.0,
+                               page=1, page_size=50, db=db_session)
     assert result["status"] == "ok"
+    assert result["level"] == "url"
     assert result["total"] == 1
     assert result["items"][0]["url"] == "https://toy.local/casi"
+
+
+def test_striking_distance_keyword_level(db_session, make_job, gsc_tables):
+    """Con datos por consulta, la cola son las KEYWORDS a optimizar."""
+    from api.routers.results import striking_distance
+    from shared.semantic_models import GscQueryData
+
+    GscJobData = gsc_tables
+    GscQueryData.__table__.create(db_session.get_bind(), checkfirst=True)
+
+    job = make_job()
+    page_a = _url(db_session, job, "/guia", pagerank=2.0, inlinks=4)
+    db_session.add(GscJobData(job_id=job.id, url_id=page_a.id, clicks=100,
+                              impressions=8000, position=7.0))
+    db_session.add_all([
+        GscQueryData(job_id=job.id, url_id=page_a.id, query="keyword casi",
+                     clicks=20, impressions=6000, ctr=0.003, position=8.4),
+        GscQueryData(job_id=job.id, url_id=page_a.id, query="keyword ganada",
+                     clicks=500, impressions=9000, ctr=0.05, position=1.2),
+        GscQueryData(job_id=job.id, url_id=page_a.id, query="keyword lejana",
+                     clicks=0, impressions=300, ctr=0.0, position=42.0),
+    ])
+    db_session.flush()
+
+    result = striking_distance(job.id, pos_min=5.0, pos_max=15.0,
+                               page=1, page_size=50, db=db_session)
+    assert result["status"] == "ok"
+    assert result["level"] == "query"
+    # solo la keyword en rango; ni la ganada (1.2) ni la lejana (42)
+    assert result["total"] == 1
+    row = result["items"][0]
+    assert row["query"] == "keyword casi"
+    assert row["url"] == "https://toy.local/guia"
+    assert row["impressions"] == 6000
+
+    # el rango es configurable: ampliándolo entra la lejana
+    wide = striking_distance(job.id, pos_min=5.0, pos_max=50.0,
+                             page=1, page_size=50, db=db_session)
+    assert wide["total"] == 2
 
 
 # ---------------------------------------------------------------------------

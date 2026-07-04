@@ -1167,36 +1167,79 @@ def list_link_suggestions(
 @router.get("/striking-distance")
 def striking_distance(
     job_id: uuid.UUID,
+    pos_min: float = Query(5.0, ge=1.0, le=100.0),
+    pos_max: float = Query(15.0, ge=1.0, le=100.0),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_session),
 ):
-    """T9: URLs with average position 5–15, ordered by impressions desc and
-    pagerank asc — the internal-linking work queue.
+    """T9: the keyword work queue. Primary level = QUERY (gsc_query_data):
+    the actual searches sitting at position pos_min–pos_max, ordered by
+    impressions desc — what to optimize. Falls back to URL level (page
+    averages) when the GSC import brought no per-query rows, with the
+    level flagged in the response.
+
+    Honest limitation (no SERP data): we cannot tell whether a keyword is
+    capped by SERP typology (maps packs, shopping…). This is the a-priori
+    reachable demand, not a guarantee.
 
     Blocked-source rule: without GSC data this answers an explicit
     ``{"status": "blocked"}``, never a silent empty list.
     """
     _get_job_or_404(job_id, db)
+    from shared.semantic_models import GscQueryData
 
-    try:
-        from shared.semantic_models import GscJobData
-    except ImportError:
-        return {"status": "blocked", "reason": "gsc_not_configured"}
-
-    has_data = (
+    has_page_data = (
         db.query(GscJobData.id).filter(GscJobData.job_id == job_id).first()
     )
-    if not has_data:
+    has_query_data = (
+        db.query(GscQueryData.id).filter(GscQueryData.job_id == job_id).first()
+    )
+    if not has_page_data and not has_query_data:
         return {"status": "blocked", "reason": "gsc_not_configured"}
 
+    if has_query_data:
+        q = (
+            db.query(GscQueryData, Url)
+            .join(Url, Url.id == GscQueryData.url_id)
+            .filter(
+                GscQueryData.job_id == job_id,
+                GscQueryData.position >= pos_min,
+                GscQueryData.position <= pos_max,
+            )
+            .order_by(
+                GscQueryData.impressions.desc(),
+                Url.pagerank.asc().nulls_last(),
+            )
+        )
+        total = q.count()
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+        items = [
+            {
+                "query": g.query,
+                "url": u.url,
+                "position": g.position,
+                "impressions": g.impressions,
+                "clicks": g.clicks,
+                "ctr": g.ctr,
+                "pagerank": u.pagerank,
+                "inlinks_count": u.inlinks_count,
+            }
+            for g, u in rows
+        ]
+        resp = _paginate(items, total, page, page_size)
+        resp["status"] = "ok"
+        resp["level"] = "query"
+        return resp
+
+    # Fallback: solo medias por página (el import no trajo consultas)
     q = (
         db.query(GscJobData, Url)
         .join(Url, Url.id == GscJobData.url_id)
         .filter(
             GscJobData.job_id == job_id,
-            GscJobData.position >= 5,
-            GscJobData.position <= 15,
+            GscJobData.position >= pos_min,
+            GscJobData.position <= pos_max,
         )
         .order_by(
             GscJobData.impressions.desc(),
@@ -1205,7 +1248,6 @@ def striking_distance(
     )
     total = q.count()
     rows = q.offset((page - 1) * page_size).limit(page_size).all()
-
     items = [
         {
             "url": u.url,
@@ -1220,6 +1262,7 @@ def striking_distance(
     ]
     resp = _paginate(items, total, page, page_size)
     resp["status"] = "ok"
+    resp["level"] = "url"
     return resp
 
 
