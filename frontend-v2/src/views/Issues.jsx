@@ -3,24 +3,32 @@ import { useState } from "react";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
-import { issueInfo } from "../issueCatalog.js";
+import { detailsToText, issueInfo, issueLabel } from "../issueCatalog.js";
 import { Blocked, EmptyClean, ErrorBox, Pager, Severity, Spinner, fmt } from "../ui.jsx";
 
-/** Agrupación por capas: cada tipo tiene su descripción en issueCatalog. */
+/** Agrupación por capas — los tipos son los issue_type REALES del analyzer. */
 const LAYERS = {
   "Técnico": [
-    "status_4xx", "status_5xx", "redirect_chain", "meta_refresh_redirect",
-    "js_redirect", "canonical_chain", "canonical_loop", "slow_page",
-    "soft_404", "http_url", "mixed_content", "missing_hsts", "missing_csp",
-    "in_sitemap_not_crawled", "crawled_not_in_sitemap", "orphan_not_in_crawl",
-    "watchlist_check_failed", "crawl_trap_detected", "stale_lastmod",
+    "4xx_error", "5xx_error", "connection_error", "redirect_chain",
+    "redirect_loop", "meta_refresh_redirect", "js_redirect", "slow_page",
+    "soft_404", "canonical_missing", "canonical_broken",
+    "canonical_cross_domain", "canonical_chain", "canonical_loop",
+    "noindex_page", "http_url", "mixed_content", "missing_hsts",
+    "missing_csp", "missing_x_content_type_options",
+    "missing_x_frame_options", "unsafe_crossorigin",
+    "in_sitemap_not_crawled", "crawled_not_in_sitemap",
+    "orphan_not_in_crawl", "stale_lastmod", "watchlist_check_failed",
+    "crawl_trap_detected",
   ],
   "On-page": [
-    "missing_title", "title_too_short", "title_too_long", "duplicate_title",
-    "missing_description", "description_too_short", "description_too_long",
-    "duplicate_description", "missing_h1", "multiple_h1", "image_missing_alt",
-    "low_word_count", "low_text_ratio", "duplicate_content",
-    "near_duplicate_content", "low_unique_content",
+    "title_missing", "title_too_short", "title_too_long", "title_duplicate",
+    "description_missing", "description_too_short", "description_too_long",
+    "description_duplicate", "h1_missing", "h1_multiple", "h1_duplicate",
+    "image_missing_alt", "low_word_count", "low_text_ratio",
+    "very_low_text_ratio", "duplicate_content", "near_duplicate_content",
+    "low_unique_content", "hreflang_missing_return", "hreflang_invalid_lang",
+    "hreflang_broken_target", "structured_data_error",
+    "structured_data_warning",
   ],
   "Enlazado y arquitectura": [
     "orphan_page", "link_orphan", "excessive_click_depth",
@@ -107,7 +115,7 @@ export default function IssuesView() {
           {!selected && <Blocked title="Detalle" reason="Selecciona un tipo de incidencia a la izquierda: verás qué significa y las URLs afectadas." />}
           {selected && (
             <div className="card muted" style={{ marginBottom: 10 }}>
-              <b className="mono">{selected}</b>
+              <b>{issueLabel(selected)}</b> <span className="mono proxy-tag">{selected}</span>
               <div style={{ marginTop: 4 }}>{issueInfo(selected)}</div>
             </div>
           )}
@@ -122,8 +130,9 @@ export default function IssuesView() {
                       <tr key={i.id}>
                         <td className="cell-url" title={i.url}>{i.url}</td>
                         <td><Severity level={i.severity} /></td>
-                        <td className="mono" style={{ maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {i.details ? JSON.stringify(i.details) : ""}
+                        <td style={{ maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", fontSize: 12 }}
+                            title={detailsToText(i.details)}>
+                          {detailsToText(i.details)}
                         </td>
                       </tr>
                     ))}
@@ -144,7 +153,7 @@ function IssueRow({ type, meta, active, onClick }) {
     <div className="row between" onClick={onClick} title={issueInfo(type)}
       style={{ cursor: "pointer", padding: "3px 4px",
                background: active ? "var(--surface-soft)" : "transparent" }}>
-      <span className="sev-row"><Severity level={meta.severity} /> <span className="mono">{type}</span></span>
+      <span className="sev-row"><Severity level={meta.severity} /> <span>{issueLabel(type)}</span></span>
       <span className="num">{fmt(meta.count)}</span>
     </div>
   );

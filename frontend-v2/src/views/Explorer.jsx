@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync, useStored } from "../hooks.js";
+import { detailsToText, issueInfo, issueLabel } from "../issueCatalog.js";
 import { Blocked, Drawer, ErrorBox, Pager, Severity, Spinner, StatusPill, fmt } from "../ui.jsx";
 
 /** Definición de columnas: key API, etiqueta, tipo, filtro de servidor.
@@ -324,10 +325,18 @@ function UrlDrawer({ jobId, urlId, onClose }) {
         <div className="card" style={{ marginTop: 10 }}>
           <h3>Incidencias ({u.issues.length})</h3>
           {u.issues.map((i) => (
-            <div key={i.id} className="row" style={{ marginBottom: 6 }}>
-              <Severity level={i.severity} />
-              <span className="mono">{i.issue_type}</span>
-              {i.review_status && <span className="tag">{i.review_status}</span>}
+            <div key={i.id} style={{ marginBottom: 8 }}>
+              <div className="row">
+                <Severity level={i.severity} />
+                <b style={{ fontSize: 12.5 }} title={i.issue_type}>{issueLabel(i.issue_type)}</b>
+                {i.review_status && <span className="tag">{i.review_status}</span>}
+              </div>
+              <div className="proxy-tag" style={{ marginLeft: 2 }}>
+                {issueInfo(i.issue_type)}
+                {i.details && Object.keys(i.details).length > 0 && (
+                  <span className="mono"> — {detailsToText(i.details)}</span>
+                )}
+              </div>
             </div>
           ))}
         </div>

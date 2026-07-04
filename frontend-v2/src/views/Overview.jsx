@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
+import { issueLabel } from "../issueCatalog.js";
 import { BarRow, Blocked, ErrorBox, Kpi, Spinner, fmt } from "../ui.jsx";
 
 const GROUP_COLORS = {
@@ -129,7 +130,7 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
           <p className="proxy-tag" style={{ marginTop: 0 }}>Los 8 tipos con más URLs afectadas. El detalle completo, con explicación de cada tipo, está en Incidencias.</p>
           {topIssues.length === 0 && <div className="empty-clean">Sin incidencias — limpio de verdad, no sin datos.</div>}
           {topIssues.map((i) => (
-            <BarRow key={`${i.issue_type}-${i.severity}`} label={i.issue_type}
+            <BarRow key={`${i.issue_type}-${i.severity}`} label={issueLabel(i.issue_type)}
               value={i.count} max={topIssues[0].count}
               color={i.severity === "error" ? "var(--chart-red)" : i.severity === "warning" ? "var(--chart-amber)" : "var(--chart-blue)"} />
           ))}
