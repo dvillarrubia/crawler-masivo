@@ -30,7 +30,11 @@ export default function DiffView() {
   return (
     <div>
       <h1 className="page-title">Diff entre crawls</h1>
-      <p className="page-sub">Comparación por url_hash; solo runs con la misma semántica de normalización (T8).</p>
+      <p className="page-sub">
+        Compara dos rastreos URL a URL: qué apareció, qué desapareció y qué cambió (status, indexabilidad,
+        canonical, title, profundidad, autoridad, contenido). Haz clic en una tarjeta para ver las URLs.
+        Solo se comparan runs configurados con las mismas reglas de URL — si no, la comparación mentiría y se bloquea.
+      </p>
 
       <div className="toolbar">
         <label className="kpi-label">Base</label>

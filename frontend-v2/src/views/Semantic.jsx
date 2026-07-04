@@ -33,6 +33,17 @@ export default function SemanticView() {
     ["anclas", "Anclas"],
   ];
 
+  const TAB_HELP = {
+    analisis: "Punto de partida: importa los datos de Search Console y lanza el análisis de embeddings (convierte cada página en un vector que captura de qué habla).",
+    mapa: "El sitio dibujado por temas: cada punto es una página, la cercanía es parecido temático y el color es el anillo (del núcleo temático a la periferia).",
+    anillos: "Escribe el tema al que QUIERES que apunte el sitio y verás cuánto se aleja el sitio real, qué páginas reforzar y cuáles lo están desviando.",
+    canibalizacion: "Pares de páginas que hablan de lo mismo y compiten entre sí en Google. Decidir cuál manda es trabajo humano: se firman en la Cola de firma.",
+    gap: "Escribe un tema y comprueba si el sitio lo cubre de verdad, lo roza o le falta contenido.",
+    drift: "Páginas con mucho peso que hablan de otra cosa: las que están arrastrando el tema global del sitio hacia otro lado.",
+    consultas: "Cruza cada búsqueda real de Search Console con los pasajes del sitio: qué demanda está sin responder, qué respuesta está enterrada y qué texto no responde a nada.",
+    anclas: "¿Los textos de los enlaces describen su destino? Detecta anchors genéricos («leer más») y anchors que prometen una cosa distinta de lo que hay al otro lado.",
+  };
+
   return (
     <div>
       <div className="row between">
@@ -41,6 +52,10 @@ export default function SemanticView() {
           <a href={api.semanticExportUrl(jobId)}><button className="secondary">Exportar CSV</button></a>
         )}
       </div>
+      <p className="page-sub">
+        Análisis del CONTENIDO del sitio con embeddings (Gemini): de qué habla cada página, cómo de
+        centrado está el sitio en su tema y dónde compite consigo mismo o le falta cobertura.
+      </p>
       <div className="toolbar">
         {TABS.map(([k, label]) => (
           <button key={k} className={tab === k ? "" : "secondary"} onClick={() => setTab(k)}>
@@ -48,6 +63,7 @@ export default function SemanticView() {
           </button>
         ))}
       </div>
+      <p className="proxy-tag" style={{ marginTop: 2 }}>{TAB_HELP[tab]}</p>
 
       {tab === "analisis" && <AnalysisPanel jobId={jobId} status={status} onChanged={statusQ.reload} />}
       {tab === "mapa" && <MapPanel jobId={jobId} status={status} />}
@@ -197,14 +213,20 @@ function AnalysisPanel({ jobId, status, onChanged }) {
                   {gemQ.data.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
+              <p className="proxy-tag">
+                El «centro» temático del sitio se calcula ponderando cada página. α y β reparten ese peso
+                (deben sumar 1): α = manda la autoridad interna (PageRank), β = mandan los clics reales de
+                Search Console. El umbral de canibalización marca cómo de parecidas tienen que ser dos
+                páginas para considerarlas competidoras (0.92 = muy parecidas).
+              </p>
               <div className="form-grid">
                 <div className="field">
-                  <label>α (peso PageRank)</label>
+                  <label>α (peso de la autoridad interna)</label>
                   <input type="number" step="0.1" min="0" max="1" value={form.alpha}
                     onChange={(e) => setForm({ ...form, alpha: e.target.value })} />
                 </div>
                 <div className="field">
-                  <label>β (peso clics GSC)</label>
+                  <label>β (peso de los clics de GSC)</label>
                   <input type="number" step="0.1" min="0" max="1" value={form.beta}
                     onChange={(e) => setForm({ ...form, beta: e.target.value })} />
                 </div>
@@ -214,11 +236,11 @@ function AnalysisPanel({ jobId, status, onChanged }) {
                     onChange={(e) => setForm({ ...form, cannibal_threshold: e.target.value })} />
                 </div>
                 <div className="field">
-                  <label>Chunking (T11)</label>
+                  <label>Troceado en pasajes (chunking)</label>
                   <select value={form.chunking_strategy}
                     onChange={(e) => setForm({ ...form, chunking_strategy: e.target.value })}>
-                    <option value="fixed">fijo (histórico)</option>
-                    <option value="semantic">semántico (fronteras H2/H3 + embedding)</option>
+                    <option value="fixed">fijo — trozos de tamaño constante (histórico)</option>
+                    <option value="semantic">semántico — corta en los cambios de tema y encabezados (mejor para Consultas→Pasajes)</option>
                   </select>
                 </div>
               </div>
@@ -579,10 +601,11 @@ function QueryCoveragePanel({ jobId, status }) {
   return (
     <div>
       <div className="card" style={{ marginBottom: 12 }}>
-        <h3>Cobertura consulta→pasaje (T19): ¿qué queries de GSC tienen un pasaje que las responda?</h3>
+        <h3>Cobertura consulta→pasaje: ¿qué búsquedas reales tienen un pasaje que las responda?</h3>
         <p className="proxy-tag" style={{ marginTop: 0 }}>
-          Embebe las queries de GSC (RETRIEVAL_QUERY) y las cruza con los chunks persistidos del análisis (T11).
-          Gap de pasaje, pasaje enterrado y chunks huérfanos entran como issues firmables en la Cola de firma.
+          Toma las búsquedas por las que el sitio aparece en Google (Search Console) y comprueba, una a una,
+          si algún pasaje del sitio las responde de verdad. Lo que encuentre (demanda sin responder, respuestas
+          enterradas, texto que no responde a nada) entra como propuestas en la Cola de firma.
         </p>
         <div className="form-grid">
           <div className="field"><label>Máx. queries</label>
@@ -677,10 +700,11 @@ function AnchorsPanel({ jobId, status }) {
   return (
     <div>
       <div className="card" style={{ marginBottom: 12 }}>
-        <h3>Relevancia de anchors (T18): ¿los anchors contextuales describen su destino?</h3>
+        <h3>Relevancia de anchors: ¿los textos de los enlaces describen su destino?</h3>
         <p className="proxy-tag" style={{ marginTop: 0 }}>
-          Los genéricos se detectan por léxico (sin coste). Los demás se embeben como query y se comparan
-          con el vector de la página destino. Ambos entran como issues firmables en la Cola de firma.
+          El anchor es la promesa del enlace. Los genéricos («leer más», «aquí») se detectan sin coste;
+          el resto se compara semánticamente con la página de destino para cazar enlaces que prometen
+          una cosa y llevan a otra. Ambos entran como propuestas en la Cola de firma.
         </p>
         <div className="form-grid">
           <div className="field"><label>Umbral de mismatch (cos)</label>

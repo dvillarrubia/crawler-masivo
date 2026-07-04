@@ -22,14 +22,28 @@ export default function InrankView() {
     ["aristas", "Aristas del grafo"],
   ];
 
+  const TAB_HELP = {
+    striking: "Consultas que rankean en posición 5–15: un empujón de enlazado interno puede subirlas a primera página. Es la cola de trabajo con mejor retorno.",
+    delta: "Compara la autoridad estructural (quién te enlaza) con la semántica (quién te enlaza HABLANDO de lo tuyo). Diferencias grandes = autoridad frágil o desaprovechada.",
+    simulador: "Prueba enlaces hipotéticos y mira cómo se movería la autoridad de todo el sitio ANTES de tocar nada. No escribe nada en los datos.",
+    profundidad: "Cuántos clics reales hacen falta desde la portada hasta cada página. Lo profundo se rastrea menos y posiciona peor.",
+    flujos: "Cuánta autoridad fluye de cada sección del sitio a las demás. La foto de arquitectura para sitios grandes.",
+    aristas: "La vista agregada del grafo de enlaces: los enlaces repetidos en todo el sitio (menú, footer) colapsan en una sola fila.",
+  };
+
   return (
     <div>
       <h1 className="page-title">Enlazado · Inrank</h1>
+      <p className="page-sub">
+        Todo lo relativo a cómo se reparte la autoridad por el enlazado interno: dónde empujar,
+        qué está mal colgado y qué pasaría si cambias enlaces.
+      </p>
       <div className="toolbar">
         {TABS.map(([k, label]) => (
           <button key={k} className={tab === k ? "" : "secondary"} onClick={() => setTab(k)}>{label}</button>
         ))}
       </div>
+      <p className="proxy-tag" style={{ marginTop: 2 }}>{TAB_HELP[tab]}</p>
       {tab === "striking" && <StrikingPanel jobId={jobId} />}
       {tab === "delta" && <DeltaPanel jobId={jobId} segmentId={segmentId} />}
       {tab === "simulador" && <SimulatorPanel jobId={jobId} />}

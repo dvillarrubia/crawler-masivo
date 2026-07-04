@@ -139,7 +139,11 @@ export default function ExplorerView() {
       <div className="row between">
         <div>
           <h1 className="page-title">Explorador</h1>
-          <p className="page-sub">Filtros de servidor por columna, orden, preferencias de columnas y navegación con ↑ ↓ Enter.</p>
+          <p className="page-sub">
+            Todas las URLs del rastreo con todo lo que se sabe de cada una (status, title, autoridad,
+            profundidad, contenido…). Filtra por cualquier columna, ordena, elige columnas con «Columnas ▾»
+            y muévete con ↑ ↓; Enter abre la ficha completa de la URL.
+          </p>
         </div>
         <span className="row" style={{ gap: 6 }}>
           <button className="secondary" onClick={() => setShowCols(!showCols)}>Columnas ▾</button>
@@ -306,7 +310,7 @@ function UrlDrawer({ jobId, urlId, onClose }) {
           <Fact k="Inlinks contextuales" v={u.in_contextual} />
           <Fact k="Outlinks contextuales" v={u.out_contextual} />
           <Fact k="Palabras" v={fmt(u.word_count)} />
-          <Fact k="Palabras únicas (T20)" v={u.unique_word_count} />
+          <Fact k="Palabras únicas (sin plantilla)" v={u.unique_word_count} />
           <Fact k="% plantilla" v={u.boilerplate_ratio != null ? `${(u.boilerplate_ratio * 100).toFixed(1)}%` : null} />
           <Fact k="% solo tras JS" v={u.js_content_ratio != null ? `${(u.js_content_ratio * 100).toFixed(1)}%` : null} />
           <Fact k="Latencia" v={u.response_time_ms != null ? `${u.response_time_ms} ms` : null} />

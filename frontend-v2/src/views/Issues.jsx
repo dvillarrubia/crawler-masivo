@@ -3,30 +3,38 @@ import { useState } from "react";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
+import { issueInfo } from "../issueCatalog.js";
 import { Blocked, EmptyClean, ErrorBox, Pager, Severity, Spinner, fmt } from "../ui.jsx";
 
-/** Agrupación Técnico / On-page / Enlazado (capas del Empresarial con backend real). */
+/** Agrupación por capas: cada tipo tiene su descripción en issueCatalog. */
 const LAYERS = {
   "Técnico": [
     "status_4xx", "status_5xx", "redirect_chain", "meta_refresh_redirect",
     "js_redirect", "canonical_chain", "canonical_loop", "slow_page",
-    "http_url", "mixed_content", "missing_hsts", "missing_csp",
+    "soft_404", "http_url", "mixed_content", "missing_hsts", "missing_csp",
     "in_sitemap_not_crawled", "crawled_not_in_sitemap", "orphan_not_in_crawl",
-    "watchlist_check_failed", "crawl_trap_detected",
+    "watchlist_check_failed", "crawl_trap_detected", "stale_lastmod",
   ],
   "On-page": [
     "missing_title", "title_too_short", "title_too_long", "duplicate_title",
     "missing_description", "description_too_short", "description_too_long",
     "duplicate_description", "missing_h1", "multiple_h1", "image_missing_alt",
     "low_word_count", "low_text_ratio", "duplicate_content",
+    "near_duplicate_content", "low_unique_content",
   ],
-  "Enlazado · Inrank": [
-    "orphan_page", "high_outlink_count", "equity_leak",
+  "Enlazado y arquitectura": [
+    "orphan_page", "link_orphan", "excessive_click_depth",
+    "no_contextual_inlinks", "authority_sink", "deep_pagination",
+    "hierarchy_imbalance", "high_outlink_count", "equity_leak",
   ],
   "URLs": [
     "url_too_long", "url_non_ascii", "url_uppercase", "url_underscores",
     "url_multiple_slashes", "url_has_parameters", "url_non_seo_friendly",
     "url_cms_faceted",
+  ],
+  "Semántica y cobertura (se firman a mano)": [
+    "semantic_cannibalization", "passage_gap", "buried_passage",
+    "orphan_chunk", "generic_anchor", "anchor_target_mismatch",
   ],
 };
 
@@ -59,7 +67,11 @@ export default function IssuesView() {
   return (
     <div>
       <h1 className="page-title">Incidencias</h1>
-      <p className="page-sub num">{fmt(total)} incidencias {segmentId ? "en el segmento" : "en el run"}</p>
+      <p className="page-sub">
+        Todos los problemas que el análisis encontró en este rastreo, agrupados por capa.
+        Haz clic en un tipo para ver su explicación y las URLs afectadas.
+        {" "}<b className="num">{fmt(total)}</b> incidencias {segmentId ? "en el segmento seleccionado" : "en el run"}.
+      </p>
 
       {total === 0 && <EmptyClean>Cero incidencias en este corte — limpio de verdad, no sin datos.</EmptyClean>}
 
@@ -92,7 +104,13 @@ export default function IssuesView() {
         </div>
 
         <div>
-          {!selected && <Blocked title="Detalle" reason="Selecciona un tipo de incidencia para ver las URLs afectadas." />}
+          {!selected && <Blocked title="Detalle" reason="Selecciona un tipo de incidencia a la izquierda: verás qué significa y las URLs afectadas." />}
+          {selected && (
+            <div className="card muted" style={{ marginBottom: 10 }}>
+              <b className="mono">{selected}</b>
+              <div style={{ marginTop: 4 }}>{issueInfo(selected)}</div>
+            </div>
+          )}
           {selected && detailQ.loading && <Spinner />}
           {selected && detailQ.data && (
             <>
@@ -123,7 +141,7 @@ export default function IssuesView() {
 
 function IssueRow({ type, meta, active, onClick }) {
   return (
-    <div className="row between" onClick={onClick}
+    <div className="row between" onClick={onClick} title={issueInfo(type)}
       style={{ cursor: "pointer", padding: "3px 4px",
                background: active ? "var(--surface-soft)" : "transparent" }}>
       <span className="sev-row"><Severity level={meta.severity} /> <span className="mono">{type}</span></span>

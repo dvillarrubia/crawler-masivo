@@ -97,8 +97,9 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
     <div>
       <h1 className="page-title">Overview del run</h1>
       <p className="page-sub">
-        {segmentId ? "Cortado por segmento (T12)" : "Sitio completo"}
-        {prev && ` · delta vs "${prev.name}"`}
+        Resumen ejecutivo del rastreo: cuántas URLs se vieron, cómo respondieron, qué incidencias pesan más
+        y la velocidad del sitio. {segmentId ? "Filtrado por el segmento seleccionado arriba." : "Sitio completo."}
+        {prev && ` Los deltas (▲▼) comparan con el run anterior «${prev.name}».`}
       </p>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
@@ -117,6 +118,7 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 12 }}>
         <div className="card">
           <h3>Distribución por status</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Cómo respondió el servidor: 2xx = bien · 3xx = redirecciones · 4xx/5xx = errores · not_crawled = conocidas pero no visitadas.</p>
           {Object.entries(groups).map(([g, count]) => (
             <BarRow key={g} label={g} value={count} max={maxGroup}
               color={GROUP_COLORS[g] || "var(--chart-blue)"} />
@@ -124,6 +126,7 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
         </div>
         <div className="card">
           <h3>Incidencias prioritarias</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Los 8 tipos con más URLs afectadas. El detalle completo, con explicación de cada tipo, está en Incidencias.</p>
           {topIssues.length === 0 && <div className="empty-clean">Sin incidencias — limpio de verdad, no sin datos.</div>}
           {topIssues.map((i) => (
             <BarRow key={`${i.issue_type}-${i.severity}`} label={i.issue_type}
@@ -135,7 +138,8 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
 
       {s.geo && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h3>GEO — crudo vs renderizado (T15)</h3>
+          <h3>GEO — contenido crudo vs. renderizado</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Compara cada página descargada sin ejecutar JavaScript contra la versión renderizada.</p>
           <div className="facts">
             <div className="fact"><div className="k">Páginas evaluadas</div><div className="v num">{fmt(s.geo.pages_evaluated)}</div></div>
             <div className="fact"><div className="k">% medio solo tras JS</div><div className="v num">{s.geo.avg_js_content_ratio != null ? `${(s.geo.avg_js_content_ratio * 100).toFixed(1)}%` : "—"}</div></div>
@@ -149,6 +153,7 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
       {s.latency && (
         <div className="card" style={{ marginTop: 12 }}>
           <h3>Latencia por status group (p50 / p90 / p99, ms)</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Tiempo de respuesta del servidor: la mitad de las páginas responde por debajo del p50; el p90/p99 enseña la cola lenta.</p>
           <table className="data" style={{ maxWidth: 480 }}>
             <thead><tr><th>Grupo</th><th className="num">p50</th><th className="num">p90</th><th className="num">p99</th></tr></thead>
             <tbody>

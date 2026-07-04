@@ -25,6 +25,10 @@ export default function InsightsView() {
         </span>
         <span className="kpi-label">score global</span>
       </div>
+      <p className="page-sub">
+        Nota de salud SEO de 0 a 100 por categoría, con recomendaciones priorizadas y el número de URLs
+        afectadas por cada una. Verde ≥ 80 · ámbar ≥ 50 · rojo &lt; 50. Es la vista para decidir por dónde empezar.
+      </p>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", marginTop: 12 }}>
         {d.categories.map((c) => (

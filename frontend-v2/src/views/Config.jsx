@@ -16,7 +16,11 @@ export default function ConfigView() {
   return (
     <div>
       <h1 className="page-title">Configuración · {clientId}</h1>
-      <p className="page-sub">Se define una vez y se aplica a cada rastreo nuevo del proyecto.</p>
+      <p className="page-sub">
+        Ajustes a nivel de proyecto: se definen una vez y se aplican a cada rastreo nuevo.
+        Los segmentos trocean el sitio por plantillas (blog, producto, categoría…) y permiten filtrar
+        cualquier vista; la watchlist vigila tus páginas clave en cada rastreo.
+      </p>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
         <SegmentsPanel clientId={clientId} />
         <div>
@@ -84,6 +88,11 @@ function SegmentsPanel({ clientId }) {
   return (
     <div className="card">
       <h3>Segmentos</h3>
+      <p className="proxy-tag" style={{ marginTop: 0 }}>
+        Reglas sobre la ruta de la URL que clasifican cada página en una plantilla (ej.: <code>^/blog/</code> → Blog).
+        Gana la primera regla que encaje por orden de prioridad. La vista previa contra el último rastreo
+        es obligatoria antes de guardar: evita reglas que capturan todo o nada.
+      </p>
       {listQ.loading && <Spinner />}
       {(listQ.data || []).map((s) => (
         <div className="row between" key={s.id} style={{ marginBottom: 6 }}>
@@ -137,7 +146,7 @@ function SegmentsPanel({ clientId }) {
         <label className="checkbox-row">
           <input type="checkbox" checked={draft.is_business}
             onChange={(e) => setDraft({ ...draft, is_business: e.target.checked })} />
-          Sección de negocio (umbrales de arquitectura más estrictos — T23)
+          Sección de negocio — sus páginas se vigilan con umbrales más estrictos (profundidad de clic, enlaces desde contenido)
         </label>
         <div className="row" style={{ gap: 8 }}>
           {editingId != null && (

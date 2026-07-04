@@ -20,7 +20,11 @@ export default function FreshnessView() {
   return (
     <div>
       <h1 className="page-title">Frescura</h1>
-      <p className="page-sub">Cambio de contenido (body_hash) entre dos runs del mismo proyecto, cruzado por url_hash.</p>
+      <p className="page-sub">
+        ¿Qué páginas han cambiado de contenido de verdad entre dos rastreos? Se compara la huella del
+        contenido de cada URL entre este run y el que elijas. También destapa sitemaps mentirosos:
+        páginas cuyo lastmod dice una cosa y el contenido otra.
+      </p>
 
       {others.length === 0 ? (
         <Blocked title="Sin run de comparación"

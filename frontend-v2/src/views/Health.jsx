@@ -52,7 +52,9 @@ function HealthBody({ clientId, current, previous }) {
     <div>
       <h1 className="page-title">Salud del proyecto</h1>
       <p className="page-sub">
-        «{previous.name}» → «{current.name}» · {new Date(current.created_at).toLocaleDateString("es")}
+        ¿Qué ha cambiado desde el último rastreo y hay algo grave? Compara automáticamente los dos últimos
+        runs del proyecto: páginas vigiladas, cambios de robots.txt, indexabilidad y URLs inestables.
+        Comparando «{previous.name}» → «{current.name}» · {new Date(current.created_at).toLocaleDateString("es")}.
       </p>
 
       <div className="card muted" style={{ marginBottom: 14 }}>
@@ -87,7 +89,8 @@ function HealthBody({ clientId, current, previous }) {
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 14 }}>
         <div className="card">
-          <h3>Flapping (últimos 6 runs)</h3>
+          <h3>URLs inestables — "flapping" (últimos 6 runs)</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Páginas que van y vienen entre estados (200 → 404 → 200, indexable → no indexable…). Suelen delatar un servidor o una plantilla inestables.</p>
           {flapQ.loading && <Spinner />}
           {!flapQ.loading && flapping.length === 0 &&
             <EmptyClean>Nada alterna entre estados — estable.</EmptyClean>}
@@ -101,7 +104,8 @@ function HealthBody({ clientId, current, previous }) {
           ))}
         </div>
         <div className="card">
-          <h3>Vigilancia</h3>
+          <h3>Vigilancia (watchlist)</h3>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>Las páginas de negocio que marcaste en Configuración. En cada rastreo se comprueba que respondan 200, sean indexables y su canonical apunte a sí mismas.</p>
           {watchQ.loading && <Spinner />}
           {!watchQ.loading && watchFails.length === 0 &&
             <EmptyClean>Todas las URLs de la watchlist pasan sus checks.</EmptyClean>}

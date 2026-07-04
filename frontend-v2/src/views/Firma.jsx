@@ -18,7 +18,11 @@ export default function FirmaView() {
       <div className="row between">
         <div>
           <h1 className="page-title">Cola de firma</h1>
-          <p className="page-sub">Checks de juicio: solo un humano los acepta o rechaza. Autor y fecha quedan registrados.</p>
+          <p className="page-sub">
+            Aquí llega todo lo que la máquina PROPONE pero no decide: sugerencias de enlaces internos,
+            canibalizaciones, huecos de contenido y anchors malos. Nada se aplica solo — una persona
+            lo firma (acepta) o lo rechaza, y la decisión queda registrada con autor y fecha.
+          </p>
         </div>
         <span>
           <label className="kpi-label" style={{ marginRight: 6 }}>Firmas como</label>
@@ -147,7 +151,7 @@ function CoverageQueue({ jobId, reviewer }) {
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <div className="row between">
-        <h3>Cobertura consulta→pasaje · T19 ({fmt(d.total)})</h3>
+        <h3>Cobertura consulta→pasaje ({fmt(d.total)})</h3>
         <span className="row" style={{ gap: 6 }}>
           {Object.entries(T19_LABEL).map(([k, label]) => (
             <button key={k} className={kind === k ? "" : "secondary"}
@@ -218,7 +222,7 @@ function AnchorQueue({ jobId, reviewer }) {
   return (
     <div className="card" style={{ marginTop: 14 }}>
       <div className="row between">
-        <h3>Relevancia de anchors · T18 ({fmt(d.total)})</h3>
+        <h3>Relevancia de anchors ({fmt(d.total)})</h3>
         <span className="row" style={{ gap: 6 }}>
           {Object.entries(T18_LABEL).map(([k, label]) => (
             <button key={k} className={kind === k ? "" : "secondary"}

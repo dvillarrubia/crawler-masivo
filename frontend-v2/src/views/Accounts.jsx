@@ -9,7 +9,11 @@ export default function AccountsView() {
   return (
     <div>
       <h1 className="page-title">Cuentas</h1>
-      <p className="page-sub">Credenciales por cliente: cada uno paga sus embeddings y accede a su GSC.</p>
+      <p className="page-sub">
+        Credenciales para las fuentes externas. <b>Search Console</b>: una service account de Google con acceso
+        a la propiedad del cliente — trae clics, impresiones y consultas reales. <b>Gemini</b>: la API key que
+        paga los embeddings del análisis semántico — cada cliente usa la suya y asume su propio coste.
+      </p>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
         <GscAccounts />
         <GeminiAccounts />
