@@ -64,24 +64,10 @@ def _resolve_gemini_key_from_analysis(
     return account.api_key
 
 
-def _normalize_url_for_match(u: str) -> str:
-    """Lowercase + strip trailing slash + drop common tracking params.
-
-    Used for cross-system joins (e.g. matching GSC API rows against crawled
-    URLs in the DB), where minor formatting differences would otherwise drop
-    rows silently.
-    """
-    if not u:
-        return u
-    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-    parts = urlparse(u.strip().lower())
-    drop = {
-        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-        "fbclid", "gclid", "mc_cid", "mc_eid", "_ga",
-    }
-    q = [(k, v) for k, v in parse_qsl(parts.query) if k not in drop]
-    path = parts.path.rstrip("/") or "/"
-    return urlunparse((parts.scheme, parts.netloc, path, parts.params, urlencode(q), ""))
+# T8/C4: the matching normalizer now lives in shared.url_normalization so
+# there is a single maintained tracking-param list in the codebase. This
+# alias keeps existing call sites working.
+from shared.url_normalization import normalize_for_match as _normalize_url_for_match
 
 
 # ---------------------------------------------------------------------------

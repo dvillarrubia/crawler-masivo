@@ -207,6 +207,17 @@ class SeoSpider(scrapy.Spider):
             self.seed_urls = job.seeds or []
             self.job_config = job.config or {}
 
+            # T8: activate the per-job URL normalization policy for this
+            # crawl subprocess. Every normalize_url/compute_url_hash call
+            # (spider, extractors, pipeline, sitemap ingest) picks it up.
+            from shared.url_normalization import (
+                UrlNormalizationConfig,
+                set_active_config,
+            )
+            set_active_config(
+                UrlNormalizationConfig.from_job_config(self.job_config)
+            )
+
             self.max_depth = self.job_config.get("max_depth", 3)
             self.max_urls = self.job_config.get("max_urls", 50_000)
             self.follow_external = self.job_config.get("follow_external", False)

@@ -24,6 +24,8 @@ if __name__ == "__main__":
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS pagerank FLOAT"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS blocked_by_robots BOOLEAN"))
+        # T8: normalization fingerprint per job (NULL = default semantics)
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS normalization_fingerprint VARCHAR(64)"))
         conn.commit()
     print("Migrations applied.")
 

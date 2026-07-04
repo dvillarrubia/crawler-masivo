@@ -103,6 +103,13 @@ class HttpConfig(BaseModel):
     basic_auth_password: str = ""
 
 
+class UrlNormalizationConfig(BaseModel):
+    """URL normalization policy (T8). Defaults reproduce current behaviour."""
+
+    strip_params: list[str] = Field(default_factory=list)
+    strip_common_tracking: bool = False
+
+
 class AnalysisThresholdsConfig(BaseModel):
     """Per-job thresholds for SEO analysis."""
 
@@ -142,6 +149,7 @@ class JobConfig(BaseModel):
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     analysis_thresholds: AnalysisThresholdsConfig = Field(default_factory=AnalysisThresholdsConfig)
+    url_normalization: UrlNormalizationConfig = Field(default_factory=UrlNormalizationConfig)
 
 
 # ---------------------------------------------------------------------------

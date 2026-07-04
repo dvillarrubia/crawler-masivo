@@ -47,6 +47,15 @@ def _bigint_as_integer_on_sqlite(type_, compiler, **kw):
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _reset_url_normalization_config():
+    """T8: never leak a per-test active config into other tests."""
+    yield
+    from shared.url_normalization import DEFAULT_CONFIG, set_active_config
+
+    set_active_config(DEFAULT_CONFIG)
+
+
 # ---------------------------------------------------------------------------
 # Database fixtures
 # ---------------------------------------------------------------------------

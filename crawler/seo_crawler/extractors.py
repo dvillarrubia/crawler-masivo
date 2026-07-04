@@ -8,14 +8,17 @@ extraction logic testable without bringing in a full Scrapy response.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import extruct
-from w3lib.url import canonicalize_url
+
+from shared.url_normalization import (
+    compute_url_hash as _compute_url_hash,
+    normalize_url as _normalize_url,
+)
 
 # ---- regex helpers ---------------------------------------------------------
 _WHITESPACE = re.compile(r"\s+")
@@ -45,14 +48,18 @@ def _parse_int(value: str | None) -> int | None:
 # ---------------------------------------------------------------------------
 
 def compute_url_hash(url: str) -> str:
-    """Return the hex SHA-256 of the canonicalized URL."""
-    normalized = normalize_url(url)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    """Return the hex SHA-256 of the canonicalized URL.
+
+    Delegates to ``shared.url_normalization`` (T8): honours the per-job
+    normalization config the spider activates at startup; without one the
+    behaviour is bit-for-bit the historical default.
+    """
+    return _compute_url_hash(url)
 
 
 def normalize_url(url: str) -> str:
-    """Canonicalize a URL using w3lib for consistent dedup."""
-    return canonicalize_url(url, keep_fragments=False)
+    """Canonicalize a URL for consistent dedup (see ``compute_url_hash``)."""
+    return _normalize_url(url)
 
 
 def compute_status_group(status_code: int | None) -> str:

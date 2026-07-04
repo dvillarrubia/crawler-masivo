@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from shared.database import get_session
 from shared.models import Job, Url, Issue, Link
+from shared.url_normalization import UrlNormalizationConfig
 
 from api.backup import ConflictError, import_backup_zip
 from api.dependencies import get_redis
@@ -61,13 +62,18 @@ def create_job(
     payload: JobCreate,
     db: Session = Depends(get_session),
 ):
+    config_dict = payload.config.model_dump()
     job = Job(
         id=uuid.uuid4(),
         name=payload.name,
         seeds=payload.seeds,
         client_id=payload.client_id,
         status="pending",
-        config=payload.config.model_dump(),
+        config=config_dict,
+        # T8: NULL fingerprint = default normalization (comparable together)
+        normalization_fingerprint=(
+            UrlNormalizationConfig.from_job_config(config_dict).fingerprint()
+        ),
     )
     db.add(job)
     db.commit()

@@ -121,7 +121,7 @@ Orden = apéndice D del plan, ajustado con las correcciones §1.1 e intercalando
 - [x] **0.4** Documentar el bug latente de `_POSITION_WEIGHT` (nav/sidebar → 0.5) en el código; se corrige solo en v2 (C3). — comentario en `analyzer.py:1082` (2026-07-04)
 
 ### Fase 1 — Fundamentos backend
-- [ ] **1.1 T8** — normalización configurable + fingerprint + **unificación con `_normalize_url_for_match` de semantic.py (C4)**. Riesgo de enhebrado de config: ver §1.2.
+- [x] **1.1 T8** — normalización configurable + fingerprint + **unificación con `_normalize_url_for_match` de semantic.py (C4)**. Riesgo de enhebrado de config: ver §1.2. — `shared/url_normalization.py` (fuente única: config por dataclass, tracking list unificada, `normalize_for_match`); enhebrado vía config activa por proceso (`set_active_config` en `spider_opened`, válido porque cada crawl es un subproceso); `extractors.normalize_url` delega; `jobs.normalization_fingerprint` (modelo+migración+create_job); `UrlNormalizationConfig` en `JobConfig`; w3lib añadido a requirements de api/analysis; tests en `test_url_normalization.py` incl. regresión literal del normalizador legacy de semantic.py (2026-07-04)
 - [ ] **1.2 T1** — ingesta de sitemaps (flag off por defecto).
 - [ ] **1.3 T2** — huérfanas reales (`orphan_not_in_crawl`), con la salvaguarda `is_html=False` y revisión de `list_urls`/backup/frontend (§1.2).
 - [ ] **1.4 T3** — PageRank v2 (nofollow diluyente, decay 301, solo-indexables, `equity_leak`); incluye corrección de pesos nav/sidebar SOLO en v2 (C3).

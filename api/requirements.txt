@@ -16,3 +16,4 @@ google-auth>=2.29.0
 google-api-python-client>=2.120.0
 google-genai>=2.0.0
 tenacity>=8.2.0
+w3lib>=2.1

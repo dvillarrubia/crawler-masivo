@@ -36,6 +36,10 @@ class Job(Base):
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
 
+    # T8: sha256 of the URL-normalization config; NULL = default semantics.
+    # Two jobs are diff-comparable (T7) only if fingerprints match.
+    normalization_fingerprint = Column(String(64), nullable=True)
+
     total_urls_discovered = Column(Integer, default=0)
     total_urls_crawled = Column(Integer, default=0)
     total_urls_failed = Column(Integer, default=0)
