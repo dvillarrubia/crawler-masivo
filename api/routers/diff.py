@@ -39,6 +39,12 @@ CHANGE_FIELDS = (
 # Schemas
 # ---------------------------------------------------------------------------
 
+class RobotsChange(BaseModel):
+    host: str
+    changed: bool
+    diff: str | None = None  # unified diff when changed
+
+
 class DiffSummary(BaseModel):
     job_a: uuid.UUID
     job_b: uuid.UUID
@@ -46,6 +52,8 @@ class DiffSummary(BaseModel):
     gone_urls: int
     changes: dict[str, int]
     pagerank_delta_threshold: float
+    # T16: robots.txt comparison per host (empty when no snapshots exist)
+    robots_changes: list[RobotsChange] = []
 
 
 class DiffUrlEntry(BaseModel):
@@ -197,7 +205,41 @@ def diff_summary(
         gone_urls=gone_urls,
         changes=changes,
         pagerank_delta_threshold=pagerank_delta,
+        robots_changes=_robots_changes(db, job_a, job_b),
     )
+
+
+def _robots_changes(db: Session, job_a, job_b) -> list[RobotsChange]:
+    """T16: compare robots.txt snapshots host by host between two jobs."""
+    import difflib
+
+    from shared.models import RobotsSnapshot
+
+    def _by_host(job_id) -> dict[str, str | None]:
+        rows = db.execute(
+            select(RobotsSnapshot.host, RobotsSnapshot.content,
+                   RobotsSnapshot.content_hash)
+            .where(RobotsSnapshot.job_id == job_id)
+        ).all()
+        return {r.host: (r.content, r.content_hash) for r in rows}
+
+    a, b = _by_host(job_a), _by_host(job_b)
+    results: list[RobotsChange] = []
+    for host in sorted(a.keys() | b.keys()):
+        content_a, hash_a = a.get(host, (None, None))
+        content_b, hash_b = b.get(host, (None, None))
+        if hash_a == hash_b:
+            results.append(RobotsChange(host=host, changed=False))
+            continue
+        diff_text = "\n".join(difflib.unified_diff(
+            (content_a or "").splitlines(),
+            (content_b or "").splitlines(),
+            fromfile=f"robots.txt@{job_a}",
+            tofile=f"robots.txt@{job_b}",
+            lineterm="",
+        ))
+        results.append(RobotsChange(host=host, changed=True, diff=diff_text))
+    return results
 
 
 # ---------------------------------------------------------------------------

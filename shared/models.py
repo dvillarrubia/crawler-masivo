@@ -128,6 +128,39 @@ class Url(Base):
 
 
 # ---------------------------------------------------------------------------
+# Robots snapshots (T16) — robots.txt content per job+host, for diffing.
+# ---------------------------------------------------------------------------
+class RobotsSnapshot(Base):
+    __tablename__ = "robots_snapshots"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    host = Column(String(512), nullable=False)
+    content = Column(Text, nullable=True)          # NULL = fetch failed / 404
+    content_hash = Column(String(64), nullable=True)
+    fetched_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_robots_snapshots_job", "job_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Watchlist (T16) — client-level business-critical URLs, sanity-checked on
+# every crawl.
+# ---------------------------------------------------------------------------
+class WatchlistEntry(Base):
+    __tablename__ = "watchlist"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    client_id = Column(String(128), nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    url_hash = Column(String(64), nullable=False)  # default-config hash (reference)
+    label = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Segments (T12) — client-level segmentation rules, applied to every crawl.
 # ---------------------------------------------------------------------------
 class Segment(Base):

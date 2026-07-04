@@ -189,6 +189,7 @@ class SEOAnalyzer:
         self.analyze_links()
         self.analyze_sitemaps()
         self.analyze_real_orphans()
+        self.analyze_watchlist()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1950,6 +1951,84 @@ class SEOAnalyzer:
                 },
             )
 
+        self._flush_issues()
+
+
+    # -- Watchlist (T16) --------------------------------------------------------
+
+    def analyze_watchlist(self) -> None:
+        """T16: sanity-check the client's business-critical URLs.
+
+        Each watchlist entry must be: crawled, status 200, indexable, and
+        canonical-to-self. The FIRST failed condition emits
+        ``watchlist_check_failed`` (error) with every failed reason in
+        ``details``. Uncrawled entries get a minimal ``not_crawled`` row
+        (same pattern as T2) so the issue FK holds.
+        """
+        from urllib.parse import urlparse as _urlparse
+
+        from shared.models import WatchlistEntry
+        from shared.url_normalization import compute_url_hash as _hash
+
+        client_id = self._job.client_id if self._job else None
+        if not client_id:
+            return
+
+        entries = self.session.execute(
+            select(WatchlistEntry).where(WatchlistEntry.client_id == client_id)
+        ).scalars().all()
+        if not entries:
+            return
+
+        logger.debug("Analyzing watchlist (%d entries) ...", len(entries))
+
+        for entry in entries:
+            url_hash = _hash(entry.url, self._norm_config)
+            row = self.session.execute(
+                select(Url, HtmlMeta.canonical_href)
+                .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+                .where(Url.job_id == self.job_id, Url.url_hash == url_hash)
+            ).first()
+
+            reasons: list[str] = []
+            if row is None:
+                parsed = _urlparse(entry.url)
+                new_row = Url(
+                    job_id=self.job_id,
+                    url=entry.url,
+                    url_hash=url_hash,
+                    host=parsed.hostname,
+                    path=parsed.path or None,
+                    scheme=parsed.scheme or None,
+                    is_internal=True,
+                    is_html=False,
+                    status_group="not_crawled",
+                )
+                self.session.add(new_row)
+                self.session.flush()
+                url_id = new_row.id
+                reasons.append("not_crawled")
+            else:
+                url_obj, canonical = row
+                url_id = url_obj.id
+                if url_obj.status_code != 200:
+                    reasons.append(f"status_{url_obj.status_code}")
+                if url_obj.indexable is False:
+                    reasons.append("not_indexable")
+                if canonical and _hash(canonical, self._norm_config) != url_hash:
+                    reasons.append("canonical_not_self")
+
+            if reasons:
+                self._add_issue(
+                    url_id,
+                    "watchlist_check_failed",
+                    "error",
+                    {
+                        "watch_url": entry.url,
+                        "label": entry.label,
+                        "reasons": reasons,
+                    },
+                )
         self._flush_issues()
 
 

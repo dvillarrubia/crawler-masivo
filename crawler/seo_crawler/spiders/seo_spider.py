@@ -295,6 +295,20 @@ class SeoSpider(scrapy.Spider):
                 self.allowed_hosts,
             )
 
+            # -- T16: robots.txt snapshot (always on, one fetch per host);
+            # a failure never aborts the crawl.
+            try:
+                from seo_crawler.robots_snapshot import persist_robots_snapshots
+
+                persist_robots_snapshots(session, job.id, self.seed_urls)
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.warning(
+                    "robots.txt snapshot failed for job %s; crawling anyway",
+                    self.job_id, exc_info=True,
+                )
+
             # -- T1: sitemap ingestion (flag off by default). Runs after
             # set_active_config so sitemap hashes match crawl hashes. A
             # sitemap failure never aborts the crawl.
