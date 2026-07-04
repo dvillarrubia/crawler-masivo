@@ -124,6 +124,13 @@ class Url(Base):
     in_contextual = Column(Integer, nullable=True)           # contextual inlinks (T22 classes)
     out_contextual = Column(Integer, nullable=True)          # contextual outlinks
 
+    # --- T20: unique content (template boilerplate discounted) ---
+    unique_word_count = Column(Integer, nullable=True)
+    boilerplate_ratio = Column(Float, nullable=True)
+
+    # --- T18: semantic PageRank (edges weighted by source→target cosine) ---
+    pagerank_semantic = Column(Float, nullable=True)
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")

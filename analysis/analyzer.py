@@ -114,6 +114,109 @@ def parse_meta_refresh(content: str | None) -> tuple[int | None, str | None]:
 
 
 # ---------------------------------------------------------------------------
+# PageRank power iteration (T17.1)
+# ---------------------------------------------------------------------------
+
+# Above this node count the dict-based loop becomes unviable (the 1M-URL
+# target of millones-de-URL.md); switch to a scipy.sparse CSR matrix.
+SPARSE_PAGERANK_THRESHOLD = 50_000
+
+
+def run_power_iteration(
+    n: int,
+    edge_weight: dict[tuple[int, int], float],
+    out_total: dict[int, float],
+    damping: float,
+    max_iter: int,
+    tol: float,
+    force: str | None = None,
+) -> list[float]:
+    """Shared PageRank power iteration (T17.1).
+
+    Semantics identical to the historical in-place loop: uniform start,
+    dangling nodes (zero out-weight) redistribute evenly, max-abs-diff
+    convergence. Dispatches to a vectorized scipy.sparse path when
+    ``n > SPARSE_PAGERANK_THRESHOLD`` (or ``force='sparse'``); falls back
+    to pure Python when scipy is unavailable. Numerical equivalence
+    between both paths is locked by tests (tolerance 1e-6).
+    """
+    use_sparse = force == "sparse" or (
+        force is None and n > SPARSE_PAGERANK_THRESHOLD
+    )
+    if use_sparse and force != "python":
+        try:
+            return _power_iteration_sparse(
+                n, edge_weight, out_total, damping, max_iter, tol,
+            )
+        except ImportError:
+            logger.warning(
+                "scipy no disponible: PageRank con bucle Python para %d nodos",
+                n,
+            )
+    return _power_iteration_python(
+        n, edge_weight, out_total, damping, max_iter, tol,
+    )
+
+
+def _power_iteration_python(
+    n, edge_weight, out_total, damping, max_iter, tol,
+) -> list[float]:
+    outlinks: dict[int, dict[int, float]] = defaultdict(dict)
+    for (src, dst), w in edge_weight.items():
+        outlinks[src][dst] = w
+
+    pr = [1.0 / n] * n
+    for _ in range(max_iter):
+        new_pr = [(1.0 - damping) / n] * n
+        for i in range(n):
+            total_w = out_total.get(i, 0.0)
+            if total_w > 0:
+                for j, w in outlinks[i].items():
+                    new_pr[j] += damping * pr[i] * (w / total_w)
+        dangling_sum = sum(
+            pr[i] for i in range(n) if out_total.get(i, 0.0) == 0
+        )
+        dangling_add = damping * dangling_sum / n
+        new_pr = [p + dangling_add for p in new_pr]
+
+        diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
+        pr = new_pr
+        if diff < tol:
+            break
+    return pr
+
+
+def _power_iteration_sparse(
+    n, edge_weight, out_total, damping, max_iter, tol,
+) -> list[float]:
+    import numpy as np
+    from scipy.sparse import csr_matrix
+
+    rows, cols, data = [], [], []
+    for (src, dst), w in edge_weight.items():
+        total = out_total.get(src, 0.0)
+        if total > 0:
+            rows.append(dst)
+            cols.append(src)
+            data.append(w / total)
+    matrix = csr_matrix((data, (rows, cols)), shape=(n, n))
+
+    dangling = np.array(
+        [1.0 if out_total.get(i, 0.0) == 0 else 0.0 for i in range(n)]
+    )
+
+    pr = np.full(n, 1.0 / n)
+    base = (1.0 - damping) / n
+    for _ in range(max_iter):
+        new_pr = base + damping * (matrix @ pr) + damping * (dangling @ pr) / n
+        diff = float(np.max(np.abs(new_pr - pr)))
+        pr = new_pr
+        if diff < tol:
+            break
+    return pr.tolist()
+
+
+# ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
 class SEOAnalyzer:
@@ -203,6 +306,7 @@ class SEOAnalyzer:
         self.analyze_gsc_signals()
         self.analyze_geo()
         self.analyze_architecture()
+        self.analyze_unique_content()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1258,37 +1362,15 @@ class SEOAnalyzer:
                 if key not in edge_weight or w > edge_weight[key]:
                     edge_weight[key] = w
 
-        # Build outlinks and total weight per source node
-        outlinks: dict[int, dict[int, float]] = defaultdict(dict)  # src -> {dst: weight}
+        # Total weight per source node
         out_total_weight: dict[int, float] = defaultdict(float)
-        for (src, dst), w in edge_weight.items():
-            outlinks[src][dst] = w
+        for (src, _dst), w in edge_weight.items():
             out_total_weight[src] += w
 
-        # 3. Weighted iterative power method
-        pr = [1.0 / n] * n
-
-        for _ in range(max_iter):
-            new_pr = [(1.0 - damping) / n] * n
-
-            for i in range(n):
-                total_w = out_total_weight.get(i, 0.0)
-                if total_w > 0:
-                    for j, w in outlinks[i].items():
-                        new_pr[j] += damping * pr[i] * (w / total_w)
-
-            # Handle dangling nodes (no outlinks): redistribute
-            dangling_sum = sum(
-                pr[i] for i in range(n) if out_total_weight.get(i, 0.0) == 0
-            )
-            dangling_add = damping * dangling_sum / n
-            new_pr = [p + dangling_add for p in new_pr]
-
-            # Check convergence
-            diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
-            pr = new_pr
-            if diff < tol:
-                break
+        # 3. Weighted power method (T17.1: sparse path above the threshold)
+        pr = run_power_iteration(
+            n, edge_weight, out_total_weight, damping, max_iter, tol,
+        )
 
         # 4. Normalize to 0-10 scale
         max_pr = max(pr) if pr else 1.0
@@ -1429,32 +1511,12 @@ class SEOAnalyzer:
             if key not in edge_weight or effective > edge_weight[key]:
                 edge_weight[key] = effective
 
-        outlinks: dict[int, dict[int, float]] = defaultdict(dict)
-        for (src, dst), w in edge_weight.items():
-            outlinks[src][dst] = w
-
-        # Power iteration. The denominator is the TOTAL emitted weight, so
-        # nofollow/leaked fractions vanish instead of being redistributed.
-        pr = [1.0 / n] * n
-        for _ in range(max_iter):
-            new_pr = [(1.0 - damping) / n] * n
-            for i in range(n):
-                total_w = out_total.get(i, 0.0)
-                if total_w > 0:
-                    for j, w in outlinks[i].items():
-                        new_pr[j] += damping * pr[i] * (w / total_w)
-            # True dangling nodes (zero outlinks) still redistribute, as in
-            # v1; pages whose weight was fully destroyed do NOT.
-            dangling_sum = sum(
-                pr[i] for i in range(n) if out_total.get(i, 0.0) == 0
-            )
-            dangling_add = damping * dangling_sum / n
-            new_pr = [p + dangling_add for p in new_pr]
-
-            diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
-            pr = new_pr
-            if diff < tol:
-                break
+        # Power iteration (T17.1 shared). The denominator is the TOTAL
+        # emitted weight, so nofollow/leaked fractions vanish instead of
+        # being redistributed; true dangling nodes still redistribute.
+        pr = run_power_iteration(
+            n, edge_weight, out_total, damping, max_iter, tol,
+        )
 
         max_pr = max(pr) if pr else 1.0
         if max_pr > 0:
@@ -2034,6 +2096,109 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+
+    # -- Unique content (T20) -----------------------------------------------------
+
+    _SHINGLE_SIZE = 5
+
+    def analyze_unique_content(self) -> None:
+        """T20: thin content measured RELATIVE to the template.
+
+        Per segment (T12): word 5-gram shingles present in more than
+        ``boilerplate_shingle_share`` of the segment's pages form the
+        segment's boilerplate set. Per page: ``unique_word_count`` (words
+        in shingles NOT in that set) and ``boilerplate_ratio``. Emits
+        ``low_unique_content`` below ``min_unique_word_count``. The
+        existing ``low_word_count`` is untouched. Gated by
+        ``analysis_thresholds.unique_content_analysis``.
+        """
+        t = ((self._job.config or {}).get("analysis_thresholds", {})
+             if self._job else {})
+        if not t.get("unique_content_analysis"):
+            return
+
+        from shared.models import UrlSegment
+
+        share = t.get("boilerplate_shingle_share", 0.3)
+        min_unique = t.get("min_unique_word_count", 100)
+        k = self._SHINGLE_SIZE
+
+        logger.debug("Analyzing unique content ...")
+
+        seg_by_url = dict(self.session.execute(
+            select(UrlSegment.url_id, UrlSegment.segment_id)
+            .where(UrlSegment.job_id == self.job_id)
+        ).all())
+
+        rows = self.session.execute(
+            select(Url.id, PageContent.content_text)
+            .join(PageContent, PageContent.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                PageContent.content_text.isnot(None),
+            )
+        ).all()
+        if not rows:
+            return
+
+        def _shingles(text: str) -> list[tuple]:
+            words = re.findall(r"\w+", text.lower())
+            if len(words) < k:
+                return [tuple(words)] if words else []
+            return [tuple(words[i:i + k]) for i in range(len(words) - k + 1)]
+
+        # shingle presence per segment (segment 0 = unsegmented)
+        page_shingles: dict[int, list[tuple]] = {}
+        seg_pages: dict[int, list[int]] = defaultdict(list)
+        seg_shingle_pages: dict[int, dict[tuple, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        for url_id, text in rows:
+            sh = _shingles(text or "")
+            page_shingles[url_id] = sh
+            seg = seg_by_url.get(url_id, 0) or 0
+            seg_pages[seg].append(url_id)
+            for s in set(sh):
+                seg_shingle_pages[seg][s] += 1
+
+        boilerplate: dict[int, set[tuple]] = {}
+        for seg, counts in seg_shingle_pages.items():
+            n = len(seg_pages[seg])
+            if n < 2:
+                boilerplate[seg] = set()
+                continue
+            boilerplate[seg] = {
+                s for s, c in counts.items() if c / n > share
+            }
+
+        for url_id, sh in page_shingles.items():
+            seg = seg_by_url.get(url_id, 0) or 0
+            bp = boilerplate.get(seg, set())
+            total = len(sh)
+            if total == 0:
+                continue
+            bp_hits = sum(1 for s in sh if s in bp)
+            ratio = bp_hits / total
+            # unique words ≈ words covered only by non-boilerplate shingles
+            total_words = total + k - 1 if sh and len(sh[0]) == k else total
+            unique_words = max(0, round(total_words * (1 - ratio)))
+            self.session.execute(
+                update(Url).where(Url.id == url_id).values(
+                    unique_word_count=unique_words,
+                    boilerplate_ratio=round(ratio, 4),
+                )
+            )
+            if unique_words < min_unique:
+                self._add_issue(url_id, "low_unique_content", "warning", {
+                    "unique_word_count": unique_words,
+                    "boilerplate_ratio": round(ratio, 4),
+                    "threshold": min_unique,
+                })
+        self.session.flush()
+        self._flush_issues()
 
     # -- Architecture (T22/T23) --------------------------------------------------
 

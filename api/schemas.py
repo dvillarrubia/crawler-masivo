@@ -139,6 +139,10 @@ class AnalysisThresholdsConfig(BaseModel):
     near_duplicate_hamming: int = Field(default=3, ge=1, le=16)
     # T6: similitud de tokens con la plantilla de error del probe
     soft404_similarity: float = Field(default=0.85, ge=0.5, le=1.0)
+    # T20: contenido único (descuento de boilerplate por segmento)
+    unique_content_analysis: bool = False
+    boilerplate_shingle_share: float = Field(default=0.3, ge=0.05, le=1.0)
+    min_unique_word_count: int = Field(default=100, ge=0, le=10000)
 
 
 # ---------------------------------------------------------------------------

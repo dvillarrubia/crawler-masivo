@@ -340,15 +340,66 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-No tests exist yet. Extractors are pure functions and should be the first to get unit tests. Test directory exists at `tests/`.
+Python test suite under `tests/python/` (pytest, 215+ tests): run with
+`python -m pytest` from the repo root (`pytest.ini` sets testpaths).
+`conftest.py` provides in-memory SQLite sessions (BigInteger compiled as
+INTEGER), a golden HTML fixture, and an autouse reset of the T8
+normalization config. Two permanent regression anchors — never "update to
+make green" without reading their module docstrings first:
+
+- `test_normalization_golden.py` — freezes `normalize_url` semantics
+  (33 URLs + hashes). Regenerate only via
+  `regenerate_normalization_golden.py` with a reviewed diff.
+- `test_pagerank_v1_snapshot.py` — freezes PageRank v1 output on the
+  shared `toygraph.py`. v1 must never change (job comparability).
+
+`tests/` root also holds legacy frontend inspection scripts (`*.mjs`).
+
+## v2 Feature Set (documento maestro)
+
+The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
+(fases 0–7, each item annotated with what was actually built). Highlights:
+
+- **Normalization (T8):** `shared/url_normalization.py` is the single
+  source of truth; per-job config via `JobConfig.url_normalization`;
+  `jobs.normalization_fingerprint` gates crawl comparability.
+- **Sitemaps + orphans (T1/T2):** `ingest_sitemaps` flag; three orphan
+  concepts (`orphan_page`, `orphan_not_in_crawl`, `link_orphan`) — see
+  `analyze_real_orphans` docstring.
+- **PageRank:** v1 frozen; v2 (`analysis_thresholds.pagerank_version=2`)
+  adds nofollow dilution, 3xx collapse, indexable-only graph and
+  `equity_leak`. Shared power iteration in `run_power_iteration`
+  (scipy.sparse above 50k nodes). Semantic PageRank (T18 core) in
+  `analysis/link_suggester.compute_semantic_pagerank`.
+- **Diff/flapping (T7):** router `api/routers/diff.py` (+ robots.txt diff).
+- **Segments (T12):** client-level rules, `assign_segments()` in the
+  analyzer, `segment_id` filter on urls/issues/stats/diff.
+- **Watchlist + suggested thresholds (T16):** router `clients.py`.
+- **Crawl quality:** trap detection (T13), freshness endpoint + 
+  `stale_lastmod` (T5), soft-404 probe (T6), simhash near-duplicates (T14).
+- **Business layer:** GSC rows keep unmatched URLs (T9/D2); semantic
+  chunks persisted (T11, `semantic_chunks` + HNSW); signable issues and
+  link suggestions (T10, `review_status`); GEO raw-vs-rendered (T15).
+- **Architecture (T22/T23):** `analysis/architecture.py` — edge
+  classifier (3 passes), `arch_edges`, real `click_depth`,
+  `section_flows`, ARQ checks. Flag `edge_classification`.
+- **Simulator (T21):** `POST /api/jobs/{id}/pagerank-simulate` (pure,
+  no DB writes).
+- **Frontend v2:** `frontend-v2/` (Vite+React) served at `/` when built;
+  the Alpine.js app stays at `/legacy`. Build: `npm run build` inside
+  `frontend-v2/` (the api Dockerfile has a node stage).
+
+All new behaviour is behind JobConfig flags whose default reproduces the
+previous behaviour exactly (regla de oro 3 del plan).
 
 ## What Does NOT Exist Yet
 
 - Authentication/authorization
 - CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
-- Sitemap ingestion
 - PageSpeed/CrUX integration
-- Near-duplicate content detection (simhash)
+- Server log ingestion (the UI shows it as a blocked source)
+- T19 query→passage coverage (needs runtime GSC query embeddings)
+- T18 anchor relevance (needs runtime `embed_query` per anchor)
 - Hreflang return-tag validation
 - Structured data rich-result validation

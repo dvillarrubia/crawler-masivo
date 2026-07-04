@@ -165,6 +165,79 @@ def generate_for_job(
     return len(suggestions)
 
 
+def compute_semantic_pagerank(
+    session,
+    job_id,
+    analysis_id,
+    *,
+    alpha: float = 0.3,
+    damping: float = 0.85,
+) -> int:
+    """T18: second PageRank where each edge is weighted by the semantic
+    similarity source→target (reasonable-surfer): ``position_weight ×
+    (α + (1−α) × cos)``. Same graph, same power iteration (T17.1), second
+    score in ``urls.pagerank_semantic``. Requires the job's page vectors;
+    without them nothing is computed (the API exposes blocked).
+    """
+    from sqlalchemy import update as _update
+
+    from analysis.analyzer import SEOAnalyzer, run_power_iteration
+    from shared.models import Link, Url
+    from shared.semantic_models import SemanticPage
+
+    rows = session.query(
+        Url.id, Url.url_hash, SemanticPage.embedding,
+    ).join(SemanticPage, SemanticPage.url_id == Url.id).filter(
+        SemanticPage.analysis_id == analysis_id,
+        SemanticPage.embedding.isnot(None),
+    ).all()
+    if len(rows) < 2:
+        return 0
+
+    vec_by_id = {r[0]: tuple(r[2]) for r in rows}
+    node_ids = [r[0] for r in rows]
+    idx_by_id = {uid: i for i, uid in enumerate(node_ids)}
+    idx_by_hash = {r[1]: idx_by_id[r[0]] for r in rows}
+    n = len(node_ids)
+
+    position_weights = SEOAnalyzer._POSITION_WEIGHT_V2
+    link_rows = session.query(
+        Link.from_url_id, Link.to_url_hash, Link.link_position, Link.follow,
+    ).filter(Link.job_id == job_id, Link.is_internal.is_(True)).all()
+
+    edge_weight: dict[tuple[int, int], float] = {}
+    out_total: dict[int, float] = {}
+    for from_id, to_hash, position, follow in link_rows:
+        src = idx_by_id.get(from_id)
+        dst = idx_by_hash.get(to_hash)
+        if src is None:
+            continue
+        pos_w = position_weights.get(position, 0.5)
+        if dst is None or dst == src or follow is False:
+            out_total[src] = out_total.get(src, 0.0) + pos_w
+            continue
+        sim = max(0.0, _cosine(vec_by_id[node_ids[src]], vec_by_id[node_ids[dst]]))
+        w = pos_w * (alpha + (1.0 - alpha) * sim)
+        out_total[src] = out_total.get(src, 0.0) + w
+        key = (src, dst)
+        if key not in edge_weight or w > edge_weight[key]:
+            edge_weight[key] = w
+
+    pr = run_power_iteration(n, edge_weight, out_total, damping, 100, 1e-6)
+    max_pr = max(pr) if pr else 1.0
+    if max_pr > 0:
+        pr = [p / max_pr * 10.0 for p in pr]
+
+    for i, uid in enumerate(node_ids):
+        session.execute(
+            _update(Url).where(Url.id == uid)
+            .values(pagerank_semantic=round(pr[i], 4))
+        )
+    session.flush()
+    logger.info("Semantic PageRank computed for %d pages (job %s)", n, job_id)
+    return n
+
+
 def emit_cannibalization_issues(session, job_id, analysis_id) -> int:
     """T10: dump the analysis' cannibalization pairs into ``issues`` as
     signable ``semantic_cannibalization`` (warning, review_status

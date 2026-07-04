@@ -14,7 +14,9 @@ from shared.config import REDIS_URL
 from shared.database import init_db
 
 from api import dependencies
-from api.routers import clients, diff, jobs, results, review, segments, semantic
+from api.routers import (
+    clients, diff, jobs, results, review, segments, semantic, simulate,
+)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 # Fase 3 (D1): SPA nueva Vite+React. Si el build existe se sirve en la
@@ -68,6 +70,7 @@ app.include_router(results.router)
 app.include_router(review.router)
 app.include_router(segments.router)
 app.include_router(semantic.router)
+app.include_router(simulate.router)
 
 
 @app.get("/health", tags=["system"])

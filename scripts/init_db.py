@@ -61,6 +61,10 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS raw_schema_types JSON"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS js_content_ratio FLOAT"))
         conn.execute(text("ALTER TABLE structured_data ADD COLUMN IF NOT EXISTS visible_without_js BOOLEAN"))
+        # T20: contenido único / T18: PageRank semántico
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS unique_word_count INT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS boilerplate_ratio FLOAT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS pagerank_semantic FLOAT"))
         # T11: índice HNSW para chunks semánticos (create_all no lo crea)
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_semantic_chunks_embedding "

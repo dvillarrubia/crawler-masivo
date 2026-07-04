@@ -536,12 +536,14 @@ def _run_analysis_thread(
         # canibalización como issues firmables. Nunca bloquean el análisis.
         try:
             from analysis.link_suggester import (
+                compute_semantic_pagerank,
                 emit_cannibalization_issues,
                 generate_for_job,
             )
 
             generate_for_job(db, job_uuid, analysis_uuid)
             emit_cannibalization_issues(db, job_uuid, analysis_uuid)
+            compute_semantic_pagerank(db, job_uuid, analysis_uuid)  # T18
             db.commit()
         except Exception:
             db.rollback()
