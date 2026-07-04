@@ -165,6 +165,7 @@ class SEOAnalyzer:
 
         self.clear_existing_issues()
 
+        self.assign_segments()
         self.analyze_status_codes()
         self.analyze_titles()
         self.analyze_descriptions()
@@ -1521,6 +1522,78 @@ class SEOAnalyzer:
             )
 
         self._flush_issues()
+
+    # -- Segments (T12) ---------------------------------------------------------
+
+    def assign_segments(self) -> None:
+        """T12: assign every HTML URL of the job to a client-level segment.
+
+        Rules (``segments`` table, client-scoped) are evaluated against the
+        URL path in priority order (lower number wins); first match wins;
+        no match → no row (implicit "(sin segmento)"). Re-analysis wipes
+        the job's assignments first, so re-crawls never duplicate rows.
+        Jobs without client_id or without rules are untouched.
+        """
+        from shared.models import Segment, UrlSegment
+
+        client_id = self._job.client_id if self._job else None
+        if not client_id:
+            return
+
+        segments = self.session.execute(
+            select(Segment)
+            .where(Segment.client_id == client_id)
+            .order_by(Segment.priority, Segment.id)
+        ).scalars().all()
+        if not segments:
+            return
+
+        logger.debug("Assigning segments (%d rules) ...", len(segments))
+
+        matchers: list[tuple[int, Any]] = []
+        for seg in segments:
+            if seg.rule_type == "regex":
+                try:
+                    matchers.append((seg.id, re.compile(seg.rule).search))
+                except re.error:
+                    logger.warning(
+                        "Segment %s has an invalid regex, skipping: %r",
+                        seg.name, seg.rule,
+                    )
+            else:  # prefix
+                matchers.append(
+                    (seg.id, lambda path, p=seg.rule: path.startswith(p))
+                )
+
+        # Idempotent: wipe and reassign in one pass.
+        self.session.execute(
+            delete(UrlSegment).where(UrlSegment.job_id == self.job_id)
+        )
+
+        rows = self.session.execute(
+            select(Url.id, Url.path)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+            )
+        ).all()
+
+        pending: list[UrlSegment] = []
+        for url_id, path in rows:
+            path = path or "/"
+            for seg_id, match in matchers:
+                if match(path):
+                    pending.append(UrlSegment(
+                        job_id=self.job_id, url_id=url_id, segment_id=seg_id,
+                    ))
+                    break
+            if len(pending) >= BATCH_SIZE:
+                self.session.bulk_save_objects(pending)
+                pending = []
+        if pending:
+            self.session.bulk_save_objects(pending)
+        self.session.flush()
 
     # -- Canonical chains (T17.4) ----------------------------------------------
 

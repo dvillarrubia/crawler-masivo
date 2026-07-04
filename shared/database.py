@@ -30,6 +30,7 @@ def init_db():
     from shared.models import (  # noqa: F401 – force table registration
         Job, Url, HtmlMeta, Heading, Link, Hreflang,
         StructuredData, Resource, Issue, SitemapUrl,
+        Segment, UrlSegment,
     )
     from shared.semantic_models import (  # noqa: F401 – force semantic table registration
         GscAccount, SemanticAnalysis, SemanticPage,

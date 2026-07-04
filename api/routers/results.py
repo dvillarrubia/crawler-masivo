@@ -22,6 +22,7 @@ from shared.database import get_session
 from shared.models import (
     Job, Url, Issue, Link, HtmlMeta, PageContent,
     Heading, Hreflang, StructuredData, Resource, SecurityHeaders,
+    UrlSegment,
 )
 
 from api.schemas import (
@@ -158,6 +159,7 @@ def list_urls(
     sort_by: str | None = Query(None),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     indexable: bool | None = Query(None),
+    segment_id: int | None = Query(None),
     status_code: int | None = Query(None),
     issue_type: str | None = Query(None),
     severity: str | None = Query(None),
@@ -213,6 +215,10 @@ def list_urls(
         q = q.filter(Url.resource_type == resource_type)
     if indexable is not None:
         q = q.filter(Url.indexable == indexable)
+    if segment_id is not None:  # T12: optional segment filter
+        q = q.join(UrlSegment, UrlSegment.url_id == Url.id).filter(
+            UrlSegment.job_id == job_id, UrlSegment.segment_id == segment_id,
+        )
     if status_code is not None:
         q = q.filter(Url.status_code == status_code)
 
@@ -350,6 +356,7 @@ def list_issues(
     page_size: int = Query(50, ge=1, le=200),
     severity: str | None = Query(None),
     issue_type: str | None = Query(None),
+    segment_id: int | None = Query(None),
     db: Session = Depends(get_session),
 ):
     """List SEO issues for a job, filterable by severity and issue type.
@@ -369,6 +376,10 @@ def list_issues(
         q = q.filter(Issue.severity == severity)
     if issue_type is not None:
         q = q.filter(Issue.issue_type == issue_type)
+    if segment_id is not None:  # T12: optional segment filter
+        q = q.join(UrlSegment, UrlSegment.url_id == Issue.url_id).filter(
+            UrlSegment.job_id == job_id, UrlSegment.segment_id == segment_id,
+        )
 
     total = q.count()
 
@@ -471,22 +482,40 @@ def list_links(
 @router.get("/stats", response_model=JobStats)
 def get_stats(
     job_id: uuid.UUID,
+    segment_id: int | None = Query(None),
     db: Session = Depends(get_session),
 ):
     job = _get_job_or_404(job_id, db)
+
+    # T12: optional segment restriction applied to every aggregate below.
+    from sqlalchemy import select as _select
+
+    seg_urls = None
+    if segment_id is not None:
+        seg_urls = _select(UrlSegment.url_id).where(
+            UrlSegment.job_id == job_id,
+            UrlSegment.segment_id == segment_id,
+        )
+
+    def _seg(q, column):
+        return q.filter(column.in_(seg_urls)) if seg_urls is not None else q
 
     # Total URL count for this job. T2: rows with status_group='not_crawled'
     # (sitemap/GSC orphans never fetched) stay out of the crawl totals but
     # remain visible in the urls_by_status_group breakdown below.
     _crawled = (Url.status_group.is_(None)) | (Url.status_group != "not_crawled")
-    total_urls = db.query(func.count(Url.id)).filter(
-        Url.job_id == job_id, _crawled,
+    total_urls = _seg(
+        db.query(func.count(Url.id)).filter(Url.job_id == job_id, _crawled),
+        Url.id,
     ).scalar() or 0
 
     # URLs by status group
     status_rows = (
-        db.query(Url.status_group, func.count(Url.id))
-        .filter(Url.job_id == job_id, Url.status_group.isnot(None))
+        _seg(
+            db.query(Url.status_group, func.count(Url.id))
+            .filter(Url.job_id == job_id, Url.status_group.isnot(None)),
+            Url.id,
+        )
         .group_by(Url.status_group)
         .all()
     )
@@ -496,8 +525,11 @@ def get_stats(
 
     # Issues by type + severity
     issue_rows = (
-        db.query(Issue.issue_type, Issue.severity, func.count(Issue.id))
-        .filter(Issue.job_id == job_id)
+        _seg(
+            db.query(Issue.issue_type, Issue.severity, func.count(Issue.id))
+            .filter(Issue.job_id == job_id),
+            Issue.url_id,
+        )
         .group_by(Issue.issue_type, Issue.severity)
         .all()
     )
@@ -508,8 +540,11 @@ def get_stats(
 
     # Top 20 hosts
     host_rows = (
-        db.query(Url.host, func.count(Url.id))
-        .filter(Url.job_id == job_id, Url.host.isnot(None))
+        _seg(
+            db.query(Url.host, func.count(Url.id))
+            .filter(Url.job_id == job_id, Url.host.isnot(None)),
+            Url.id,
+        )
         .group_by(Url.host)
         .order_by(func.count(Url.id).desc())
         .limit(20)
@@ -519,8 +554,11 @@ def get_stats(
 
     # URLs by resource_type
     rt_rows = (
-        db.query(Url.resource_type, func.count(Url.id))
-        .filter(Url.job_id == job_id, Url.resource_type.isnot(None))
+        _seg(
+            db.query(Url.resource_type, func.count(Url.id))
+            .filter(Url.job_id == job_id, Url.resource_type.isnot(None)),
+            Url.id,
+        )
         .group_by(Url.resource_type)
         .all()
     )
@@ -529,15 +567,21 @@ def get_stats(
     ]
 
     # Internal / external counts (crawled rows only, see T2 note above)
-    internal_count = db.query(func.count(Url.id)).filter(
-        Url.job_id == job_id, Url.is_internal == True, _crawled,
+    internal_count = _seg(
+        db.query(func.count(Url.id)).filter(
+            Url.job_id == job_id, Url.is_internal == True, _crawled,
+        ),
+        Url.id,
     ).scalar() or 0
     external_count = total_urls - internal_count
 
     # T17.3: latency percentiles, global and per status group (additive).
     latency_rows = (
-        db.query(Url.status_group, Url.response_time_ms)
-        .filter(Url.job_id == job_id, Url.response_time_ms.isnot(None))
+        _seg(
+            db.query(Url.status_group, Url.response_time_ms)
+            .filter(Url.job_id == job_id, Url.response_time_ms.isnot(None)),
+            Url.id,
+        )
         .all()
     )
     latency = None

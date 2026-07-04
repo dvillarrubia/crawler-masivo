@@ -185,7 +185,7 @@ def test_get_stats_excludes_not_crawled_from_totals(db_session, make_job):
 
     from api.routers.results import get_stats
 
-    stats = get_stats(job.id, db_session)
+    stats = get_stats(job.id, segment_id=None, db=db_session)
     assert stats.total_urls == 2          # la huérfana no cuenta
     assert stats.internal_count == 2
     # pero sí aparece en el desglose por status_group

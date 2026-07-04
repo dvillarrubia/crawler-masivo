@@ -128,6 +128,36 @@ class Url(Base):
 
 
 # ---------------------------------------------------------------------------
+# Segments (T12) — client-level segmentation rules, applied to every crawl.
+# ---------------------------------------------------------------------------
+class Segment(Base):
+    __tablename__ = "segments"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    client_id = Column(String(128), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    rule_type = Column(String(16), nullable=False, default="prefix")  # prefix | regex
+    rule = Column(Text, nullable=False)      # evaluated against the URL path
+    priority = Column(Integer, nullable=False, default=100)  # lower wins
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class UrlSegment(Base):
+    __tablename__ = "url_segments"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    primary_key=True)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"),
+                    primary_key=True)
+    segment_id = Column(BigInteger, ForeignKey("segments.id", ondelete="CASCADE"),
+                        nullable=False)
+
+    __table_args__ = (
+        Index("ix_url_segments_job_segment", "job_id", "segment_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Sitemap URLs (T1) — every URL declared by the job's sitemaps, including
 # ones the crawl never reaches (that gap is what T2's orphan check needs).
 # ---------------------------------------------------------------------------

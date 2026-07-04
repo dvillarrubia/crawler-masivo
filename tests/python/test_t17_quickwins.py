@@ -51,7 +51,7 @@ def test_stats_latency_block(db_session, make_job):
     _url(db_session, job, "/c", status=404, ms=1000)
     _url(db_session, job, "/sin-tiempo")
 
-    stats = get_stats(job.id, db_session)
+    stats = get_stats(job.id, segment_id=None, db=db_session)
     assert stats.latency is not None
     assert stats.latency.p50 == 300.0
     assert stats.latency.p99 == 1000.0
@@ -64,7 +64,7 @@ def test_stats_latency_none_without_timings(db_session, make_job):
 
     job = make_job()
     _url(db_session, job, "/a")
-    assert get_stats(job.id, db_session).latency is None
+    assert get_stats(job.id, segment_id=None, db=db_session).latency is None
 
 
 def test_slow_page_issue(db_session, make_job):
