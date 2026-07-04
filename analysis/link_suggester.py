@@ -88,7 +88,9 @@ def suggest_links(
                 continue
             if (source.url_hash, target.url_hash) in existing_links:
                 continue
-            sim = _cosine(source.vector, target.vector)
+            # float() nativo: con vectores numpy.float32 (pgvector) el
+            # coseno sale numpy y psycopg2 no lo adapta al persistir
+            sim = float(_cosine(source.vector, target.vector))
             if sim < similarity_threshold:
                 continue
             pr_norm = (
@@ -263,9 +265,11 @@ def compute_semantic_pagerank(
         pr = [p / max_pr * 10.0 for p in pr]
 
     for i, uid in enumerate(node_ids):
+        # float() nativo: los vectores pgvector son numpy.float32 y
+        # contaminan pr; psycopg2 no adapta numpy (falla solo en Postgres)
         session.execute(
             _update(Url).where(Url.id == uid)
-            .values(pagerank_semantic=round(pr[i], 4))
+            .values(pagerank_semantic=round(float(pr[i]), 4))
         )
     session.flush()
     logger.info("Semantic PageRank computed for %d pages (job %s)", n, job_id)

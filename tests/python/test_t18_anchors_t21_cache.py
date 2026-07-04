@@ -283,6 +283,33 @@ def test_proposed_anchor_falls_back_to_title(
     assert s.proposed_anchor == "Solo hay title"
 
 
+def test_suggest_links_returns_native_floats_with_numpy_vectors():
+    """Regresión del bug E2E: los vectores de pgvector son numpy.float32;
+    psycopg2 no adapta numpy, así que los valores que van a DB deben ser
+    floats nativos aunque la entrada sea numpy."""
+    import numpy as np
+
+    from analysis.link_suggester import PageVector, suggest_links
+
+    def page(h, vec, pr, wc=300):
+        return PageVector(
+            url_hash=h, url=f"https://t/{h}",
+            vector=tuple(np.asarray(vec, dtype=np.float32)),
+            pagerank=pr, indexable=True, status_code=200, word_count=wc,
+        )
+
+    pages = [
+        page("a" * 64, (1, 0), 10.0),
+        page("b" * 64, (0.99, 0.14), 1.0),
+        page("c" * 64, (0, 1), 5.0),
+    ]
+    suggestions = suggest_links(pages, set())
+    assert suggestions, "el fixture debe producir al menos una sugerencia"
+    for s in suggestions:
+        assert type(s["cosine_similarity"]) is float
+        assert type(s["score"]) is float
+
+
 # ---------------------------------------------------------------------------
 # T21 — caché de grafo del simulador
 # ---------------------------------------------------------------------------
