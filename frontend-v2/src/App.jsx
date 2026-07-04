@@ -3,14 +3,21 @@ import { createContext, useContext, useMemo } from "react";
 import { api } from "./api.js";
 import { navigate, useAsync, useHashRoute, useStored } from "./hooks.js";
 import { Spinner } from "./ui.jsx";
+import AccountsView from "./views/Accounts.jsx";
 import ConfigView from "./views/Config.jsx";
 import DiffView from "./views/DiffView.jsx";
 import ExplorerView from "./views/Explorer.jsx";
+import FirmaView from "./views/Firma.jsx";
+import FreshnessView from "./views/Freshness.jsx";
 import HealthView from "./views/Health.jsx";
+import InrankView from "./views/Inrank.jsx";
+import InsightsView from "./views/Insights.jsx";
 import IssuesView from "./views/Issues.jsx";
 import JobsView from "./views/Jobs.jsx";
+import LinksView from "./views/Links.jsx";
 import LogsView from "./views/Logs.jsx";
 import OverviewView from "./views/Overview.jsx";
+import SemanticView from "./views/Semantic.jsx";
 
 /** Contexto global: proyecto (client_id) + run (job) + segmento (T12). */
 const Ctx = createContext(null);
@@ -25,14 +32,20 @@ const NAV = [
     ["overview", "Overview"],
     ["explorer", "Explorador"],
     ["issues", "Incidencias"],
+    ["links", "Enlaces"],
+    ["insights", "Insights"],
     ["diff", "Diff entre crawls"],
+    ["freshness", "Frescura"],
   ]},
   { group: "Análisis", items: [
-    ["semantica", "Semántica", "legacy"],
+    ["inrank", "Enlazado · Inrank"],
+    ["semantica", "Semántica"],
+    ["firma", "Cola de firma"],
     ["logs", "Logs", "blocked"],
   ]},
   { group: "Ajustes", items: [
     ["config", "Configuración"],
+    ["cuentas", "Cuentas"],
   ]},
 ];
 
@@ -65,12 +78,20 @@ export default function App() {
   );
   const segments = segsQ.data || [];
 
+  // Estado real de fuentes del run activo (chips honestos)
+  const semStatusQ = useAsync(
+    () => (jobId ? api.semanticStatus(jobId).catch(() => null) : Promise.resolve(null)),
+    [jobId],
+  );
+  const semStatus = semStatusQ.data;
+
   const ctx = {
     clientId, setClientId,
     jobId, setJobId,
     segmentId: segmentId ? Number(segmentId) : null, setSegmentId,
-    job, jobs, clientJobs, clients, segments,
+    job, jobs, clientJobs, clients, segments, semStatus,
     reloadJobs: jobsQ.reload,
+    reloadSegments: segsQ.reload,
   };
 
   const views = {
@@ -79,9 +100,16 @@ export default function App() {
     overview: OverviewView,
     explorer: ExplorerView,
     issues: IssuesView,
+    links: LinksView,
+    insights: InsightsView,
     diff: DiffView,
+    freshness: FreshnessView,
+    inrank: InrankView,
+    semantica: SemanticView,
+    firma: FirmaView,
     logs: LogsView,
     config: ConfigView,
+    cuentas: AccountsView,
   };
   const View = views[view] || JobsView;
 
@@ -96,22 +124,16 @@ export default function App() {
           {NAV.map(({ group, items }) => (
             <div key={group}>
               <div className="group">{group}</div>
-              {items.map(([key, label, kind]) =>
-                kind === "legacy" ? (
-                  <a key={key} href="/legacy" target="_blank" rel="noreferrer">
-                    {label} <span className="lock">↗</span>
-                  </a>
-                ) : (
-                  <a
-                    key={key}
-                    href={`#/${key}`}
-                    className={view === key ? "active" : ""}
-                  >
-                    {label}
-                    {kind === "blocked" && <span className="lock">fuente ✗</span>}
-                  </a>
-                ),
-              )}
+              {items.map(([key, label, kind]) => (
+                <a
+                  key={key}
+                  href={`#/${key}`}
+                  className={view === key ? "active" : ""}
+                >
+                  {label}
+                  {kind === "blocked" && <span className="lock">fuente ✗</span>}
+                </a>
+              ))}
             </div>
           ))}
         </nav>
@@ -129,7 +151,11 @@ export default function App() {
 
 function ContextBar() {
   const { clientId, setClientId, jobId, setJobId, segmentId, setSegmentId,
-          clients, clientJobs, job, segments } = useCtx();
+          clients, clientJobs, job, segments, semStatus } = useCtx();
+
+  const semState = semStatus && semStatus.status === "completed" ? "ok"
+    : semStatus && semStatus.status === "running" ? "warn" : "off";
+  const gscState = semStatus && semStatus.has_gsc_data ? "ok" : "off";
 
   return (
     <div className="contextbar">
@@ -162,8 +188,8 @@ function ContextBar() {
       )}
       <div className="sources">
         <SourceChip label="crawl" state={job ? (job.status === "completed" ? "ok" : "warn") : "off"} />
-        <SourceChip label="GSC" state="off" title="Conéctalo desde la vista legacy de semántica" />
-        <SourceChip label="semántica" state="off" title="Disponible en /legacy hasta el re-skin" />
+        <SourceChip label="GSC" state={gscState} title={gscState === "off" ? "Importa datos desde Semántica" : "Datos GSC cargados"} />
+        <SourceChip label="semántica" state={semState} title={semState === "off" ? "Lanza el análisis desde Semántica" : ""} />
         <SourceChip label="logs" state="off" title="Fuente no conectada (sin ingesta de logs)" />
       </div>
     </div>

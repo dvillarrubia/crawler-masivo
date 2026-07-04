@@ -2242,7 +2242,9 @@ class SEOAnalyzer:
         seeds = {(
             _hash(s, self._norm_config)
         ) for s in (self._job.seeds or [])}
-        depth = compute_click_depth(self.session, self.job_id, seeds)
+        depth = compute_click_depth(
+            self.session, self.job_id, seeds, self._norm_config,
+        )
         compute_contextual_counters(self.session, self.job_id)
         compute_section_flows(self.session, self.job_id)
 

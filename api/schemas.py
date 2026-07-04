@@ -393,6 +393,14 @@ class UrlResponse(BaseModel):
     in_sitemap: bool | None = None
     sitemap_lastmod: datetime | None = None
     js_redirect_url: str | None = None
+    # T23 arquitectura / T20 contenido único / T18 semántico / T15 GEO
+    click_depth: int | None = None
+    in_contextual: int | None = None
+    out_contextual: int | None = None
+    unique_word_count: int | None = None
+    boilerplate_ratio: float | None = None
+    pagerank_semantic: float | None = None
+    js_content_ratio: float | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 
@@ -454,6 +462,8 @@ class LinkResponse(BaseModel):
     # T17.5.b: DOM context
     dom_ancestor: str | None = None
     dom_container: str | None = None
+    # T22: fine edge taxonomy (NULL unless edge_classification ran)
+    edge_class: str | None = None
 
 
 # ---------------------------------------------------------------------------

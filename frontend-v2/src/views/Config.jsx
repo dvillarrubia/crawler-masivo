@@ -33,7 +33,7 @@ export default function ConfigView() {
 function SegmentsPanel({ clientId }) {
   const listQ = useAsync(() => api.segments(clientId), [clientId]);
   const { setSegmentId } = useCtx();
-  const [draft, setDraft] = useState({ name: "", rule_type: "regex", rule: "", priority: 100 });
+  const [draft, setDraft] = useState({ name: "", rule_type: "regex", rule: "", priority: 100, is_business: false });
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
 
@@ -52,7 +52,7 @@ function SegmentsPanel({ clientId }) {
     setError(null);
     try {
       await api.createSegment(clientId, { ...draft, priority: Number(draft.priority) });
-      setDraft({ name: "", rule_type: "regex", rule: "", priority: 100 });
+      setDraft({ name: "", rule_type: "regex", rule: "", priority: 100, is_business: false });
       setPreview(null);
       listQ.reload();
     } catch (e) { setError(e.message); }
@@ -64,7 +64,10 @@ function SegmentsPanel({ clientId }) {
       {listQ.loading && <Spinner />}
       {(listQ.data || []).map((s) => (
         <div className="row between" key={s.id} style={{ marginBottom: 6 }}>
-          <span><b>{s.name}</b> <span className="mono proxy-tag">{s.rule_type}:{s.rule}</span></span>
+          <span>
+            <b>{s.name}</b> <span className="mono proxy-tag">{s.rule_type}:{s.rule}</span>
+            {s.is_business && <span className="tag" style={{ marginLeft: 6 }}>negocio</span>}
+          </span>
           <span className="row">
             <span className="tag num">prio {s.priority}</span>
             <button className="secondary" onClick={async () => {
@@ -106,6 +109,11 @@ function SegmentsPanel({ clientId }) {
               onChange={(e) => setDraft({ ...draft, rule: e.target.value })} placeholder="^/blog/" />
           </div>
         </div>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={draft.is_business}
+            onChange={(e) => setDraft({ ...draft, is_business: e.target.checked })} />
+          Sección de negocio (umbrales de arquitectura más estrictos — T23)
+        </label>
         <div className="row" style={{ gap: 8 }}>
           <button className="secondary" disabled={!draft.name || !draft.rule} onClick={doPreview}>
             Vista previa
@@ -209,8 +217,8 @@ function SourcesPanel() {
       <h3>Fuentes de datos</h3>
       <SourceRow name="Crawl" state="Conectado" ok />
       <SourceRow name="Sitemaps" state="Por job (flag ingest_sitemaps)" ok />
-      <SourceRow name="Google Search Console" state="Gestión en la app legacy" href="/legacy" />
-      <SourceRow name="Semántica (Gemini)" state="Gestión en la app legacy" href="/legacy" />
+      <SourceRow name="Google Search Console" state="Cuentas + import por run" href="#/cuentas" />
+      <SourceRow name="Semántica (Gemini)" state="Cuentas + análisis por run" href="#/cuentas" />
       <SourceRow name="Logs de servidor" state="No conectado — sin ingesta de logs" />
     </div>
   );
@@ -222,7 +230,7 @@ function SourceRow({ name, state, ok, href }) {
       <span>{name}</span>
       <span className={`chip ${ok ? "ok" : "off"}`}>
         <span className="dot" />
-        {href ? <a href={href} target="_blank" rel="noreferrer">{state} ↗</a> : state}
+        {href ? <a href={href}>{state} →</a> : state}
       </span>
     </div>
   );

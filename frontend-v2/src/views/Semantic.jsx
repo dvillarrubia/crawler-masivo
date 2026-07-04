@@ -1,0 +1,472 @@
+import { useEffect, useState } from "react";
+
+import { useCtx } from "../App.jsx";
+import { api } from "../api.js";
+import { useAsync } from "../hooks.js";
+import { Blocked, ErrorBox, Pager, Spinner, fmt } from "../ui.jsx";
+
+const RING_COLORS = {
+  Core: "var(--chart-maroon)", Focus: "var(--chart-red)",
+  Expansion: "var(--chart-amber)", Peripheral: "var(--chart-blue)",
+};
+
+/** Centro semántico nativo: GSC, análisis Gemini, mapa, canibalización,
+ *  gap y drift — reconstruido sobre la API existente (sin legacy). */
+export default function SemanticView() {
+  const { jobId } = useCtx();
+  const [tab, setTab] = useState("analisis");
+
+  if (!jobId) return <Blocked title="Sin run seleccionado" reason="Elige un run en la barra superior." />;
+
+  const statusQ = useAsync(() => api.semanticStatus(jobId), [jobId]);
+  if (statusQ.loading) return <Spinner />;
+  const status = statusQ.data || { status: "none" };
+
+  const TABS = [
+    ["analisis", "Análisis"],
+    ["mapa", "Mapa semántico"],
+    ["canibalizacion", "Canibalización"],
+    ["gap", "Gap de contenido"],
+    ["drift", "Drift"],
+  ];
+
+  return (
+    <div>
+      <div className="row between">
+        <h1 className="page-title">Semántica</h1>
+        {status.status === "completed" && (
+          <a href={api.semanticExportUrl(jobId)}><button className="secondary">Exportar CSV</button></a>
+        )}
+      </div>
+      <div className="toolbar">
+        {TABS.map(([k, label]) => (
+          <button key={k} className={tab === k ? "" : "secondary"} onClick={() => setTab(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "analisis" && <AnalysisPanel jobId={jobId} status={status} onChanged={statusQ.reload} />}
+      {tab === "mapa" && <MapPanel jobId={jobId} status={status} />}
+      {tab === "canibalizacion" && <CannibalPanel jobId={jobId} status={status} />}
+      {tab === "gap" && <GapPanel jobId={jobId} status={status} />}
+      {tab === "drift" && <DriftPanel jobId={jobId} status={status} />}
+    </div>
+  );
+}
+
+function NeedsAnalysis() {
+  return <Blocked title="Análisis semántico no ejecutado"
+    reason="Lanza el análisis desde la pestaña Análisis (necesita una cuenta Gemini en Cuentas)." />;
+}
+
+/* ------------------------------------------------------------------ */
+/* Análisis: GSC fetch + lanzar análisis + progreso + métricas de sitio */
+/* ------------------------------------------------------------------ */
+function AnalysisPanel({ jobId, status, onChanged }) {
+  const gemQ = useAsync(() => api.geminiAccounts().catch(() => []), []);
+  const gscQ = useAsync(() => api.gscAccounts().catch(() => []), []);
+  const [form, setForm] = useState({
+    gemini_account_id: "", alpha: 0.6, beta: 0.4, cannibal_threshold: 0.92,
+    chunking_strategy: "fixed", chunk_embedding_mode: "aggregate",
+  });
+  const [gsc, setGsc] = useState({ gsc_account_id: "", property_url: "", days: 90 });
+  const [properties, setProperties] = useState([]);
+  const [msg, setMsg] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [polling, setPolling] = useState(status.status === "running");
+
+  useEffect(() => {
+    if (!polling) return;
+    const t = setInterval(async () => {
+      const s = await api.semanticStatus(jobId).catch(() => null);
+      if (s && s.status !== "running") {
+        setPolling(false);
+        onChanged();
+      } else if (s) {
+        setMsg(`${s.stage || "procesando"} · ${s.progress || 0}%`);
+      }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [polling, jobId]);
+
+  const loadProperties = async (accountId) => {
+    setGsc({ ...gsc, gsc_account_id: accountId, property_url: "" });
+    setProperties([]);
+    if (!accountId) return;
+    try {
+      const props = await api.gscProperties(accountId);
+      setProperties(props.properties || props || []);
+    } catch (e) { setError(e.message); }
+  };
+
+  const doFetchGsc = async () => {
+    setBusy(true); setError(null); setMsg(null);
+    try {
+      const r = await api.fetchGsc(jobId, gsc);
+      setMsg(`GSC importado: ${r.matched} con match, ${r.unmatched ?? 0} sin match (conservadas), ${r.query_rows} filas de queries.`);
+      onChanged();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const doAnalyze = async () => {
+    setBusy(true); setError(null);
+    try {
+      await api.semanticAnalyze(jobId, {
+        ...form,
+        alpha: Number(form.alpha), beta: Number(form.beta),
+        cannibal_threshold: Number(form.cannibal_threshold),
+      });
+      setMsg("Análisis lanzado…");
+      setPolling(true);
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const resultsQ = useAsync(
+    () => (status.status === "completed" ? api.semanticResults(jobId) : Promise.resolve(null)),
+    [jobId, status.status],
+  );
+  const results = resultsQ.data;
+
+  return (
+    <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+      <div>
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3>1 · Datos GSC (opcional pero recomendado)</h3>
+          {(gscQ.data || []).length === 0 && (
+            <div className="proxy-tag">Sin cuentas GSC. <a href="#/cuentas">Añade una en Cuentas →</a></div>
+          )}
+          {(gscQ.data || []).length > 0 && (
+            <>
+              <div className="field">
+                <label>Cuenta GSC</label>
+                <select value={gsc.gsc_account_id} onChange={(e) => loadProperties(e.target.value)}>
+                  <option value="">— elegir —</option>
+                  {gscQ.data.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div className="form-grid">
+                <div className="field">
+                  <label>Propiedad</label>
+                  {properties.length > 0 ? (
+                    <select value={gsc.property_url} onChange={(e) => setGsc({ ...gsc, property_url: e.target.value })}>
+                      <option value="">— elegir —</option>
+                      {properties.map((p) => {
+                        const url = typeof p === "string" ? p : p.siteUrl || p.url;
+                        return <option key={url} value={url}>{url}</option>;
+                      })}
+                    </select>
+                  ) : (
+                    <input type="text" placeholder="sc-domain:ejemplo.com" value={gsc.property_url}
+                      onChange={(e) => setGsc({ ...gsc, property_url: e.target.value })} />
+                  )}
+                </div>
+                <div className="field">
+                  <label>Días</label>
+                  <input type="number" min={7} max={480} value={gsc.days}
+                    onChange={(e) => setGsc({ ...gsc, days: Number(e.target.value) })} />
+                </div>
+              </div>
+              <button className="secondary" disabled={busy || !gsc.gsc_account_id || !gsc.property_url}
+                onClick={doFetchGsc}>Importar datos GSC</button>
+            </>
+          )}
+        </div>
+
+        <div className="card">
+          <h3>2 · Análisis de embeddings (Gemini)</h3>
+          {(gemQ.data || []).length === 0 && (
+            <div className="proxy-tag">Sin cuentas Gemini. <a href="#/cuentas">Añade una en Cuentas →</a></div>
+          )}
+          {(gemQ.data || []).length > 0 && (
+            <>
+              <div className="field">
+                <label>Cuenta Gemini (cada cliente paga sus embeddings)</label>
+                <select value={form.gemini_account_id}
+                  onChange={(e) => setForm({ ...form, gemini_account_id: e.target.value })}>
+                  <option value="">— elegir —</option>
+                  {gemQ.data.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div className="form-grid">
+                <div className="field">
+                  <label>α (peso PageRank)</label>
+                  <input type="number" step="0.1" min="0" max="1" value={form.alpha}
+                    onChange={(e) => setForm({ ...form, alpha: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>β (peso clics GSC)</label>
+                  <input type="number" step="0.1" min="0" max="1" value={form.beta}
+                    onChange={(e) => setForm({ ...form, beta: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Umbral canibalización</label>
+                  <input type="number" step="0.01" min="0.5" max="1" value={form.cannibal_threshold}
+                    onChange={(e) => setForm({ ...form, cannibal_threshold: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Chunking (T11)</label>
+                  <select value={form.chunking_strategy}
+                    onChange={(e) => setForm({ ...form, chunking_strategy: e.target.value })}>
+                    <option value="fixed">fijo (histórico)</option>
+                    <option value="semantic">semántico (fronteras H2/H3 + embedding)</option>
+                  </select>
+                </div>
+              </div>
+              <button disabled={busy || polling || !form.gemini_account_id} onClick={doAnalyze}>
+                {polling ? "Analizando…" : "Lanzar análisis semántico"}
+              </button>
+            </>
+          )}
+          {msg && <div className="alert warn" style={{ marginTop: 10 }}>{msg}</div>}
+          {error && <div className="alert" style={{ marginTop: 10 }}>{error}</div>}
+          {status.status === "failed" && (
+            <div className="alert" style={{ marginTop: 10 }}>Último análisis falló: {status.error_message}</div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        {status.status === "completed" && results && (
+          <div className="card">
+            <h3>Métricas del sitio</h3>
+            <div className="facts">
+              {Object.entries(results.site_metrics || {}).map(([k, v]) => (
+                <div className="fact" key={k}>
+                  <div className="k">{k}</div>
+                  <div className="v num">{typeof v === "number" ? v.toFixed(3) : String(v)}</div>
+                </div>
+              ))}
+            </div>
+            {results.gsc_summary && (
+              <>
+                <h3>GSC (28-90d)</h3>
+                <div className="facts">
+                  <div className="fact"><div className="k">Clics</div><div className="v num">{fmt(results.gsc_summary.total_clicks)}</div></div>
+                  <div className="fact"><div className="k">Impresiones</div><div className="v num">{fmt(results.gsc_summary.total_impressions)}</div></div>
+                  <div className="fact"><div className="k">CTR medio</div><div className="v num">{(results.gsc_summary.avg_ctr * 100).toFixed(2)}%</div></div>
+                  <div className="fact"><div className="k">Posición media</div><div className="v num">{results.gsc_summary.avg_position}</div></div>
+                </div>
+              </>
+            )}
+            <div className="proxy-tag">
+              {fmt(results.total_pages)} páginas · estrategia {results.config && results.config.chunking_strategy} ·
+              modelo {results.config && results.config.embedding_model}
+            </div>
+          </div>
+        )}
+        {status.status !== "completed" && (
+          <Blocked title="Sin resultados todavía"
+            reason={status.status === "running" ? "Análisis en curso…" : "Lanza el análisis para ver las métricas del sitio, el mapa y la canibalización."} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Mapa semántico: scatter SVG propio (sin plotly)                     */
+/* ------------------------------------------------------------------ */
+function MapPanel({ jobId, status }) {
+  const [hover, setHover] = useState(null);
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const q = useAsync(() => api.semanticResults(jobId), [jobId]);
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const pages = (q.data.pages || []).filter((p) => p.x != null && p.y != null);
+  if (!pages.length) return <Blocked title="Sin coordenadas" reason="El análisis no generó proyección 2D." />;
+
+  const xs = pages.map((p) => p.x), ys = pages.map((p) => p.y);
+  const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
+  const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
+  const W = 900, H = 560, PAD = 30;
+  const sx = (x) => PAD + ((x - minX) / (maxX - minX || 1)) * (W - 2 * PAD);
+  const sy = (y) => PAD + ((y - minY) / (maxY - minY || 1)) * (H - 2 * PAD);
+
+  return (
+    <div className="card">
+      <h3>Mapa semántico (UMAP) · color por anillo, tamaño por peso</h3>
+      <div className="row" style={{ gap: 14, marginBottom: 8 }}>
+        {Object.entries(RING_COLORS).map(([ring, color]) => (
+          <span key={ring} className="sev"><span className="dot" style={{ background: color }} />{ring}</span>
+        ))}
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <svg width={W} height={H} style={{ border: "1px solid var(--hairline)", background: "var(--canvas-muted)" }}>
+          {pages.map((p, i) => (
+            <circle key={i} cx={sx(p.x)} cy={sy(p.y)}
+              r={3 + (p.weight || 0) * 6}
+              fill={RING_COLORS[p.ring] || "var(--ink-muted)"}
+              fillOpacity={0.75}
+              onMouseEnter={() => setHover(p)}
+              onMouseLeave={() => setHover(null)}
+            />
+          ))}
+        </svg>
+      </div>
+      <div className="mono" style={{ minHeight: 34, fontSize: 11.5, marginTop: 6 }}>
+        {hover
+          ? `${hover.url} · ${hover.ring || "?"} · dist ${hover.distance_to_centroid?.toFixed(3)} · ${hover.clicks != null ? `${fmt(hover.clicks)} clics` : "sin GSC"}`
+          : "Pasa el ratón por un punto para ver la URL."}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Canibalización — con firma T10                                      */
+/* ------------------------------------------------------------------ */
+function CannibalPanel({ jobId, status }) {
+  const [brand, setBrand] = useState("");
+  const [applied, setApplied] = useState("");
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const q = useAsync(
+    () => api.semanticCannibalization(jobId, { brand: applied }),
+    [jobId, applied],
+  );
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const pairs = q.data.pairs || q.data || [];
+
+  return (
+    <div>
+      <div className="toolbar">
+        <input type="text" style={{ width: 280 }} placeholder="palabras de marca a excluir (coma)"
+          value={brand} onChange={(e) => setBrand(e.target.value)} />
+        <button className="secondary" onClick={() => setApplied(brand)}>Filtrar</button>
+        <span className="proxy-tag">Los pares también entran en la Cola de firma como issues pendientes.</span>
+      </div>
+      {pairs.length === 0 && <div className="empty-clean">Sin pares de canibalización sobre el umbral.</div>}
+      <div className="table-wrap" style={{ maxHeight: "62vh" }}>
+        <table className="data">
+          <thead><tr><th>Dominante</th><th>Débil</th><th className="num">Similitud</th></tr></thead>
+          <tbody>
+            {pairs.map((p, i) => (
+              <tr key={i}>
+                <td className="cell-url" title={p.url_dominant || p.dominant_url}>{p.url_dominant || p.dominant_url}</td>
+                <td className="cell-url" title={p.url_weak || p.weak_url}>{p.url_weak || p.weak_url}</td>
+                <td className="num">{(p.cosine_similarity ?? p.similarity ?? 0).toFixed(4)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Gap de contenido                                                     */
+/* ------------------------------------------------------------------ */
+function GapPanel({ jobId, status }) {
+  const [topic, setTopic] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      setResult(await api.semanticGap(jobId, { topic: topic.trim() }));
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const best = result && result.candidates && result.candidates[0];
+
+  return (
+    <div className="grid" style={{ gridTemplateColumns: "340px 1fr", alignItems: "start" }}>
+      <div className="card">
+        <h3>Tema / consulta objetivo</h3>
+        <input type="text" value={topic} onChange={(e) => setTopic(e.target.value)}
+          placeholder="fiscalidad de criptomonedas para autónomos"
+          onKeyDown={(e) => e.key === "Enter" && topic.trim() && run()} />
+        <button style={{ marginTop: 8 }} disabled={busy || !topic.trim()} onClick={run}>
+          {busy ? "Embebiendo…" : "Analizar cobertura"}
+        </button>
+        {error && <div className="alert" style={{ marginTop: 8 }}>{error}</div>}
+        {best && (
+          <div className="card muted" style={{ marginTop: 10 }}>
+            <div className="kpi-label">Veredicto</div>
+            <div className="editorial" style={{ fontSize: 15 }}>
+              {best.similarity_to_topic >= 0.75
+                ? "El sitio tiene contenido que cubre este tema."
+                : best.similarity_to_topic >= 0.6
+                  ? "Cobertura parcial: hay contenido cercano pero ninguna página lo ataca de lleno."
+                  : "Gap real: no existe contenido que cubra este tema."}
+            </div>
+          </div>
+        )}
+      </div>
+      <div>
+        {!result && <Blocked title="Gap de contenido" reason="Introduce un tema: verás las páginas más cercanas y si el sitio lo cubre de verdad." />}
+        {result && (
+          <div className="card">
+            <h3>Páginas más cercanas a «{result.topic}»</h3>
+            <table className="data">
+              <thead>
+                <tr><th>URL</th><th className="num">Sim. al tema</th>
+                  <th className="num">Sim. al centro del sitio</th>
+                  <th className="num">Clics</th><th className="num">Posición</th></tr>
+              </thead>
+              <tbody>
+                {result.candidates.map((c, i) => (
+                  <tr key={i}>
+                    <td className="cell-url" title={c.url}>{c.url}</td>
+                    <td className="num">{c.similarity_to_topic?.toFixed(4)}</td>
+                    <td className="num">{c.similarity_to_centroid?.toFixed(4)}</td>
+                    <td className="num">{c.clicks ?? "—"}</td>
+                    <td className="num">{c.position != null ? c.position.toFixed(1) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Drift                                                                */
+/* ------------------------------------------------------------------ */
+function DriftPanel({ jobId, status }) {
+  if (status.status !== "completed") return <NeedsAnalysis />;
+  const q = useAsync(() => api.semanticDrift(jobId), [jobId]);
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const entries = (q.data && q.data.drift) || [];
+  return (
+    <div className="card">
+      <h3>Páginas que más arrastran el centro semántico (peso × distancia)</h3>
+      <p className="proxy-tag">Mucho peso y mucha distancia = la página tira del sitio hacia su tema. Decide si es intencional o dilución.</p>
+      {entries.length === 0 && <div className="proxy-tag">Sin candidatas de drift.</div>}
+      <table className="data">
+        <thead>
+          <tr><th>URL</th><th className="num">Drift score</th>
+            <th className="num">Distancia</th><th className="num">Peso</th>
+            <th className="num">Clics</th><th className="num">Posición</th></tr>
+        </thead>
+        <tbody>
+          {entries.map((a, i) => (
+            <tr key={i}>
+              <td className="cell-url" title={a.url}>{a.url}</td>
+              <td className="num">{a.drift_score?.toFixed(4)}</td>
+              <td className="num">{a.distance?.toFixed(4)}</td>
+              <td className="num">{a.weight?.toFixed(4)}</td>
+              <td className="num">{a.clicks ?? "—"}</td>
+              <td className="num">{a.position != null ? a.position.toFixed(1) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

@@ -97,6 +97,14 @@ SORT_COLUMNS = {
     "text_ratio": Url.text_ratio,
     "host": Url.host,
     "last_crawled_at": Url.last_crawled_at,
+    # v2: architecture + unique content + semantic PR
+    "click_depth": Url.click_depth,
+    "in_contextual": Url.in_contextual,
+    "out_contextual": Url.out_contextual,
+    "unique_word_count": Url.unique_word_count,
+    "boilerplate_ratio": Url.boilerplate_ratio,
+    "pagerank_semantic": Url.pagerank_semantic,
+    "js_content_ratio": Url.js_content_ratio,
     "title": HtmlMeta.title,
     "title_len": HtmlMeta.title_len,
     "meta_description": HtmlMeta.meta_description,
@@ -122,6 +130,14 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "redirect_type": (Url.redirect_type, False),
     "title_len": (HtmlMeta.title_len, True),
     "meta_description_len": (HtmlMeta.meta_description_len, True),
+    # v2: architecture + unique content + semantic PR
+    "click_depth": (Url.click_depth, False),
+    "in_contextual": (Url.in_contextual, False),
+    "out_contextual": (Url.out_contextual, False),
+    "unique_word_count": (Url.unique_word_count, False),
+    "boilerplate_ratio": (Url.boilerplate_ratio, False),
+    "pagerank_semantic": (Url.pagerank_semantic, False),
+    "js_content_ratio": (Url.js_content_ratio, False),
 }
 
 # String "contains" filters mapped to (model_column, requires_html_meta_join).
@@ -922,6 +938,52 @@ def export_csv(
             "Content-Disposition": f"attachment; filename=job_{job_id}_{entity}.csv",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/section-flows  --  authority flow matrix (T23)
+# ---------------------------------------------------------------------------
+@router.get("/section-flows")
+def get_section_flows(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_session),
+):
+    """T23: authority flow segment→segment (the blocks-and-arrows map).
+
+    Segment id 0 = "(sin segmento)". Blocked when the job never ran the
+    edge classifier.
+    """
+    job = _get_job_or_404(job_id, db)
+    from shared.models import SectionFlow, Segment
+
+    rows = (
+        db.query(SectionFlow)
+        .filter(SectionFlow.job_id == job_id)
+        .order_by(SectionFlow.flow.desc())
+        .all()
+    )
+    if not rows:
+        return {"status": "blocked", "reason": "edge_classification_not_run"}
+
+    names = {0: "(sin segmento)"}
+    if job.client_id:
+        for s in db.query(Segment).filter(Segment.client_id == job.client_id):
+            names[s.id] = s.name
+
+    return {
+        "status": "ok",
+        "flows": [
+            {
+                "from_segment_id": r.segment_from,
+                "from_segment": names.get(r.segment_from, str(r.segment_from)),
+                "to_segment_id": r.segment_to,
+                "to_segment": names.get(r.segment_to, str(r.segment_to)),
+                "flow": r.flow,
+            }
+            for r in rows
+        ],
+        "total_flow": round(sum(r.flow for r in rows), 6),
+    }
 
 
 # ---------------------------------------------------------------------------

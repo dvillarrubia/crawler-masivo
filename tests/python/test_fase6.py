@@ -182,6 +182,47 @@ def test_click_depth_differs_from_crawl_depth(db_session, make_job):
     assert home.click_depth == 0
 
 
+def test_click_depth_passes_through_redirects(db_session, make_job):
+    """Fix E2E: un enlace hacia una 301 alcanza el destino final en UN clic
+    (el redirect no es un clic); las páginas solo alcanzables vía redirect
+    ya no salen como link_orphan."""
+    from analysis.architecture import compute_click_depth
+    from shared.models import Url
+    from shared.url_normalization import compute_url_hash
+
+    job = make_job(name="redir-depth", seeds=["http://toy.local/"])
+    # la semilla http 301 → https home
+    seed_redir = Url(
+        job_id=job.id, url="http://toy.local/",
+        url_hash=compute_url_hash("http://toy.local/"),
+        is_internal=True, is_html=False, status_code=301,
+        status_group="3xx", redirect_url="https://toy.local/",
+    )
+    db_session.add(seed_redir)
+    db_session.flush()
+    home = _url(db_session, job, "/")
+    # home enlaza a una 301 que apunta a /final
+    hop = Url(
+        job_id=job.id, url="https://toy.local/vieja",
+        url_hash=compute_url_hash("https://toy.local/vieja"),
+        is_internal=True, is_html=False, status_code=301,
+        status_group="3xx", redirect_url="https://toy.local/final",
+    )
+    db_session.add(hop)
+    db_session.flush()
+    final = _url(db_session, job, "/final")
+    _link(db_session, job, home, "/vieja", ancestor="main")
+
+    depth = compute_click_depth(
+        db_session, job.id, {compute_url_hash("http://toy.local/")},
+    )
+    db_session.expire_all()
+
+    assert home.click_depth == 0     # semilla resuelta a través del 301
+    assert final.click_depth == 1    # un clic, no dos
+    assert hop.click_depth is None   # la 301 es pass-through
+
+
 def test_link_orphan_only_for_pages_without_click_path(db_session, make_job):
     """Criterio: página en sitemap sin camino de clics → link_orphan y ni
     rastro de los otros dos tipos de huérfana."""

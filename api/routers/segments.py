@@ -30,6 +30,8 @@ class SegmentRule(BaseModel):
     rule_type: str = Field("prefix", pattern="^(prefix|regex)$")
     rule: str = Field(..., min_length=1)
     priority: int = Field(100, ge=0, le=10000)
+    # T23: business sections get stricter architecture thresholds
+    is_business: bool = False
 
     @field_validator("rule")
     @classmethod
@@ -56,6 +58,7 @@ class SegmentResponse(BaseModel):
     rule_type: str
     rule: str
     priority: int
+    is_business: bool = False
     created_at: datetime | None = None
 
 
@@ -101,6 +104,7 @@ def create_segment(
         rule_type=payload.rule_type,
         rule=payload.rule,
         priority=payload.priority,
+        is_business=payload.is_business,
     )
     db.add(seg)
     db.commit()
@@ -127,6 +131,7 @@ def update_segment(
     seg.rule_type = payload.rule_type
     seg.rule = payload.rule
     seg.priority = payload.priority
+    seg.is_business = payload.is_business
     db.commit()
     db.refresh(seg)
     return seg

@@ -661,8 +661,16 @@ def run_semantic_analysis(
 @router.get("/jobs/{job_id}/semantic/status")
 def get_semantic_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
     analysis = _get_latest_analysis(job_id, db)
+
+    # Source chips in the UI need to know whether GSC data exists even
+    # before any analysis has run.
+    has_gsc = (
+        db.query(GscJobData.id).filter(GscJobData.job_id == job_id).first()
+        is not None
+    )
+
     if not analysis:
-        return {"status": "none"}
+        return {"status": "none", "has_gsc_data": has_gsc}
 
     progress_info = _get_progress(str(analysis.id))
 
@@ -699,6 +707,7 @@ def get_semantic_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
         "stage": progress_info.get("stage", ""),
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
+        "has_gsc_data": has_gsc,
     }
 
 

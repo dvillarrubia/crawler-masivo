@@ -1,35 +1,61 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
-import { useAsync } from "../hooks.js";
+import { useAsync, useStored } from "../hooks.js";
 import { Blocked, Drawer, ErrorBox, Pager, Severity, Spinner, StatusPill, fmt } from "../ui.jsx";
 
+/** Definición de columnas: key API, etiqueta, tipo, filtro de servidor.
+ *  filter: 'range' usa <key>_gte/_lte; 'contains' usa <param>; null sin filtro. */
 const COLUMNS = [
-  ["url", "URL"],
-  ["status_code", "Status", "num"],
-  ["resource_type", "Tipo"],
-  ["indexable", "Indexable"],
-  ["crawl_depth", "Prof.", "num"],
-  ["inlinks_count", "Inlinks", "num"],
-  ["outlinks_count", "Outlinks", "num"],
-  ["pagerank", "PageRank", "num"],
-  ["word_count", "Palabras", "num"],
-  ["response_time_ms", "ms", "num"],
+  { key: "url", label: "URL", num: false, filter: null, always: true },
+  { key: "status_code", label: "Status", num: true, filter: "range", def: true },
+  { key: "resource_type", label: "Tipo", num: false, filter: null, def: true },
+  { key: "indexable", label: "Indexable", num: false, filter: null, def: true },
+  { key: "crawl_depth", label: "Prof. desc.", num: true, filter: "range", def: true },
+  { key: "click_depth", label: "Clics home", num: true, filter: "range", def: false },
+  { key: "inlinks_count", label: "Inlinks", num: true, filter: "range", def: true },
+  { key: "outlinks_count", label: "Outlinks", num: true, filter: "range", def: true },
+  { key: "in_contextual", label: "In ctx", num: true, filter: "range", def: false },
+  { key: "out_contextual", label: "Out ctx", num: true, filter: "range", def: false },
+  { key: "pagerank", label: "PageRank", num: true, filter: "range", def: true },
+  { key: "pagerank_semantic", label: "PR sem.", num: true, filter: "range", def: false },
+  { key: "word_count", label: "Palabras", num: true, filter: "range", def: true },
+  { key: "unique_word_count", label: "Palabras únicas", num: true, filter: "range", def: false },
+  { key: "boilerplate_ratio", label: "% plantilla", num: true, filter: "range", def: false },
+  { key: "js_content_ratio", label: "% solo JS", num: true, filter: "range", def: false },
+  { key: "text_ratio", label: "Texto/HTML", num: true, filter: "range", def: false },
+  { key: "response_time_ms", label: "ms", num: true, filter: "range", def: true },
+  { key: "transfer_size", label: "Bytes", num: true, filter: "range", def: false },
+  { key: "url_length", label: "Long. URL", num: true, filter: "range", def: false },
+  { key: "folder_depth", label: "Carpetas", num: true, filter: "range", def: false },
+  { key: "in_sitemap", label: "Sitemap", num: false, filter: null, def: false },
+  { key: "title", label: "Title", num: false, filter: "contains", param: "title_contains", def: false, meta: true },
+  { key: "canonical", label: "Canonical", num: false, filter: "contains", param: "canonical_contains", def: false, metaField: "canonical_href" },
+  { key: "host", label: "Host", num: false, filter: "contains", param: "host_contains", def: false },
 ];
 
-/** Explorador fusionado: sort + chips con conteos (Empresarial) sobre la
- *  API real con filtros de servidor (frontend actual). */
 export default function ExplorerView() {
   const { jobId, segmentId } = useCtx();
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ status_group: "", is_internal: "", resource_type: "", search: "" });
+  const [colFilters, setColFilters] = useState({});   // draft de filtros por columna
+  const [applied, setApplied] = useState({});          // filtros aplicados
   const [sort, setSort] = useState({ by: null, dir: "asc" });
   const [detailId, setDetailId] = useState(null);
+  const [selIdx, setSelIdx] = useState(-1);
+  const [visibleKeys, setVisibleKeys] = useStored(
+    "explorer.columns.v2",
+    COLUMNS.filter((c) => c.always || c.def).map((c) => c.key),
+  );
+  const [showCols, setShowCols] = useState(false);
+  const tableRef = useRef(null);
 
   if (!jobId) return <Blocked title="Sin run seleccionado" reason="Elige un run en la barra superior." />;
 
-  const params = {
+  const visible = COLUMNS.filter((c) => visibleKeys.includes(c.key) || c.always);
+
+  const params = useMemo(() => ({
     page, page_size: 100,
     segment_id: segmentId,
     status_group: filters.status_group,
@@ -37,23 +63,105 @@ export default function ExplorerView() {
     search: filters.search,
     is_internal: filters.is_internal,
     sort_by: sort.by, sort_dir: sort.dir,
-  };
-  const urlsQ = useAsync(() => api.urls(jobId, params),
-    [jobId, segmentId, page, JSON.stringify(filters), sort.by, sort.dir]);
+    ...applied,
+  }), [page, segmentId, filters, sort, applied]);
+
+  const urlsQ = useAsync(() => api.urls(jobId, params), [jobId, JSON.stringify(params)]);
   const statsQ = useAsync(() => api.stats(jobId, { segment_id: segmentId }), [jobId, segmentId]);
 
   const setFilter = (k, v) => { setFilters({ ...filters, [k]: v }); setPage(1); };
   const toggleSort = (col) => setSort((s) =>
     s.by === col ? { by: col, dir: s.dir === "asc" ? "desc" : "asc" } : { by: col, dir: "asc" });
 
+  const applyColFilters = () => {
+    const out = {};
+    for (const c of COLUMNS) {
+      if (c.filter === "range") {
+        const lo = colFilters[`${c.key}_gte`], hi = colFilters[`${c.key}_lte`];
+        if (lo) out[`${c.key}_gte`] = lo;
+        if (hi) out[`${c.key}_lte`] = hi;
+      } else if (c.filter === "contains") {
+        const v = colFilters[c.param];
+        if (v) out[c.param] = v;
+      }
+    }
+    setApplied(out);
+    setPage(1);
+  };
+
+  // Navegación por teclado: ↑/↓ mueven la selección, Enter abre, Esc cierra
+  useEffect(() => {
+    const onKey = (e) => {
+      if (detailId && e.key === "Escape") { setDetailId(null); return; }
+      if (detailId || ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+      const items = urlsQ.data ? urlsQ.data.items : [];
+      if (!items.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelIdx((i) => Math.min(items.length - 1, i + 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelIdx((i) => Math.max(0, i - 1));
+      } else if (e.key === "Enter" && selIdx >= 0) {
+        setDetailId(items[selIdx].id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [urlsQ.data, selIdx, detailId]);
+
+  useEffect(() => {
+    const row = tableRef.current?.querySelector("tr[data-selected='true']");
+    row?.scrollIntoView({ block: "nearest" });
+  }, [selIdx]);
+
   const groups = statsQ.data
     ? Object.fromEntries(statsQ.data.urls_by_status_group.map((g) => [g.status_group, g.count]))
     : {};
 
+  const cellValue = (u, c) => {
+    if (c.key === "url") return <span className="cell-url" title={u.url}>{u.url}</span>;
+    if (c.key === "status_code") return <><StatusPill group={u.status_group} /> {u.status_code ?? ""}</>;
+    if (c.key === "indexable") return u.indexable == null ? "—" : u.indexable ? "sí" : "no";
+    if (c.key === "in_sitemap") return u.in_sitemap == null ? "—" : u.in_sitemap ? "sí" : "no";
+    if (c.key === "click_depth" && u.click_depth == null && u.is_html) return <span className="tag">sin camino</span>;
+    if (c.key === "title" || c.key === "canonical") {
+      const meta = u.html_meta || {};
+      const v = c.key === "title" ? meta.title : meta.canonical_href;
+      return <span style={{ maxWidth: 260, display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v || ""}>{v || "—"}</span>;
+    }
+    const v = u[c.key];
+    return v == null ? "—" : c.num ? fmt(v) : String(v);
+  };
+
   return (
     <div>
-      <h1 className="page-title">Explorador</h1>
-      <p className="page-sub">Todas las URLs del run, con filtros de servidor y orden por columna.</p>
+      <div className="row between">
+        <div>
+          <h1 className="page-title">Explorador</h1>
+          <p className="page-sub">Filtros de servidor por columna, orden, preferencias de columnas y navegación con ↑ ↓ Enter.</p>
+        </div>
+        <span className="row" style={{ gap: 6 }}>
+          <button className="secondary" onClick={() => setShowCols(!showCols)}>Columnas ▾</button>
+          <a href={api.exportUrl(jobId, "urls")}><button className="secondary">CSV</button></a>
+        </span>
+      </div>
+
+      {showCols && (
+        <div className="card muted" style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+          {COLUMNS.filter((c) => !c.always).map((c) => (
+            <label key={c.key} className="checkbox-row" style={{ margin: 0 }}>
+              <input type="checkbox" checked={visibleKeys.includes(c.key)}
+                onChange={(e) => setVisibleKeys(
+                  e.target.checked
+                    ? [...visibleKeys, c.key]
+                    : visibleKeys.filter((k) => k !== c.key),
+                )} />
+              {c.label}
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="toolbar">
         {["2xx", "3xx", "4xx", "5xx", "not_crawled"].map((g) => (
@@ -75,7 +183,7 @@ export default function ExplorerView() {
           <option value="true">solo internas</option>
           <option value="false">solo externas</option>
         </select>
-        <input type="text" style={{ width: 240 }} placeholder="buscar en URL o title…"
+        <input type="text" style={{ width: 220 }} placeholder="buscar en URL o title…"
           value={filters.search}
           onChange={(e) => setFilter("search", e.target.value)} />
       </div>
@@ -83,30 +191,53 @@ export default function ExplorerView() {
       {urlsQ.error && <ErrorBox error={urlsQ.error} />}
       {urlsQ.loading ? <Spinner /> : (
         <>
-          <div className="table-wrap" style={{ maxHeight: "62vh" }}>
+          <div className="table-wrap" style={{ maxHeight: "58vh" }} ref={tableRef}>
             <table className="data">
               <thead>
                 <tr>
-                  {COLUMNS.map(([key, label, cls]) => (
-                    <th key={key} className={cls || ""} onClick={() => toggleSort(key)}>
-                      {label}{sort.by === key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+                  {visible.map((c) => (
+                    <th key={c.key} className={c.num ? "num" : ""} onClick={() => toggleSort(c.key)}>
+                      {c.label}{sort.by === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="filter-row">
+                  {visible.map((c) => (
+                    <th key={c.key} onClick={(e) => e.stopPropagation()}>
+                      {c.filter === "range" && (
+                        <span className="row" style={{ gap: 3 }}>
+                          <input type="number" placeholder="≥" style={{ width: 54, padding: "2px 4px", fontSize: 11 }}
+                            value={colFilters[`${c.key}_gte`] || ""}
+                            onChange={(e) => setColFilters({ ...colFilters, [`${c.key}_gte`]: e.target.value })}
+                            onKeyDown={(e) => e.key === "Enter" && applyColFilters()} />
+                          <input type="number" placeholder="≤" style={{ width: 54, padding: "2px 4px", fontSize: 11 }}
+                            value={colFilters[`${c.key}_lte`] || ""}
+                            onChange={(e) => setColFilters({ ...colFilters, [`${c.key}_lte`]: e.target.value })}
+                            onKeyDown={(e) => e.key === "Enter" && applyColFilters()} />
+                        </span>
+                      )}
+                      {c.filter === "contains" && (
+                        <input type="text" placeholder="contiene…" style={{ width: 120, padding: "2px 4px", fontSize: 11 }}
+                          value={colFilters[c.param] || ""}
+                          onChange={(e) => setColFilters({ ...colFilters, [c.param]: e.target.value })}
+                          onKeyDown={(e) => e.key === "Enter" && applyColFilters()} />
+                      )}
+                      {c.key === "url" && (
+                        <button className="secondary" style={{ padding: "2px 8px", fontSize: 11 }}
+                          onClick={applyColFilters}>Aplicar filtros</button>
+                      )}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {urlsQ.data.items.map((u) => (
-                  <tr key={u.id} onClick={() => setDetailId(u.id)}>
-                    <td className="cell-url" title={u.url}>{u.url}</td>
-                    <td className="num"><StatusPill group={u.status_group} /> {u.status_code ?? ""}</td>
-                    <td>{u.resource_type || "—"}</td>
-                    <td>{u.indexable == null ? "—" : u.indexable ? "sí" : "no"}</td>
-                    <td className="num">{u.crawl_depth ?? "—"}</td>
-                    <td className="num">{fmt(u.inlinks_count)}</td>
-                    <td className="num">{fmt(u.outlinks_count)}</td>
-                    <td className="num">{u.pagerank ?? "—"}</td>
-                    <td className="num">{fmt(u.word_count)}</td>
-                    <td className="num">{u.response_time_ms ?? "—"}</td>
+                {urlsQ.data.items.map((u, i) => (
+                  <tr key={u.id} data-selected={i === selIdx}
+                    style={i === selIdx ? { outline: "2px solid var(--ink)", outlineOffset: -2 } : undefined}
+                    onClick={() => { setSelIdx(i); setDetailId(u.id); }}>
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.num ? "num" : ""}>{cellValue(u, c)}</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
@@ -124,76 +255,205 @@ export default function ExplorerView() {
   );
 }
 
-/** Ficha de URL (drawer del Empresarial): facts + on-page + inlinks + issues. */
+/* ------------------------------------------------------------------ */
+/* Ficha de URL completa                                                */
+/* ------------------------------------------------------------------ */
 function UrlDrawer({ jobId, urlId, onClose }) {
   const q = useAsync(() => api.urlDetail(jobId, urlId), [jobId, urlId]);
+  const [tab, setTab] = useState("resumen");
 
   if (q.loading) return <Drawer onClose={onClose}><Spinner /></Drawer>;
   if (q.error) return <Drawer onClose={onClose}><ErrorBox error={q.error} /></Drawer>;
   const u = q.data;
   const meta = u.html_meta;
 
+  const TABS = [
+    ["resumen", "Resumen"],
+    ["onpage", "On-page"],
+    ["enlaces", `Enlaces (${u.inlinks.length}/${u.outlinks.length})`],
+    ["recursos", `Recursos (${u.resources.length})`],
+    ["datos", "Datos estructurados"],
+    ["seguridad", "Seguridad"],
+  ];
+
   return (
     <Drawer onClose={onClose}>
       <h2>{u.url}</h2>
-      <div className="row" style={{ margin: "8px 0" }}>
+      <div className="row" style={{ margin: "8px 0", flexWrap: "wrap" }}>
         <StatusPill group={u.status_group} />
         <span className="tag">{u.resource_type}</span>
         {u.indexable === false && <span className="tag">no indexable · {u.indexability_status || "?"}</span>}
         {u.in_sitemap != null && <span className="tag">{u.in_sitemap ? "en sitemap" : "fuera de sitemap"}</span>}
+        {u.js_redirect_url && <span className="tag">JS redirect</span>}
       </div>
 
-      <div className="facts">
-        <Fact k="Profundidad" v={u.crawl_depth} />
-        <Fact k="PageRank" v={u.pagerank} />
-        <Fact k="Inlinks" v={fmt(u.inlinks_count)} />
-        <Fact k="Outlinks" v={fmt(u.outlinks_count)} />
-        <Fact k="Palabras" v={fmt(u.word_count)} />
-        <Fact k="Latencia" v={u.response_time_ms != null ? `${u.response_time_ms} ms` : null} />
-        <Fact k="Content-Type" v={u.content_type} />
-        <Fact k="Redirige a" v={u.redirect_url} />
-        <Fact k="JS redirect" v={u.js_redirect_url} />
+      <div className="toolbar">
+        {TABS.map(([k, label]) => (
+          <button key={k} className={tab === k ? "" : "secondary"}
+            style={{ padding: "3px 10px", fontSize: 11.5 }}
+            onClick={() => setTab(k)}>{label}</button>
+        ))}
       </div>
 
-      {meta && (
-        <div className="card muted" style={{ marginBottom: 12 }}>
-          <h3>On-page</h3>
-          <Fact k="Title" v={meta.title} wide />
-          <Fact k="Description" v={meta.meta_description} wide />
-          <Fact k="Canonical" v={meta.canonical_href} wide />
-          {meta.meta_refresh && <Fact k="Meta refresh" v={`${meta.meta_refresh_delay ?? "?"}s → ${meta.meta_refresh_url || "?"}`} wide />}
-          <Fact k="Robots" v={meta.meta_robots} wide />
+      {tab === "resumen" && (
+        <div className="facts">
+          <Fact k="Prof. descubrimiento" v={u.crawl_depth} />
+          <Fact k="Clics desde home" v={u.click_depth} />
+          <Fact k="PageRank" v={u.pagerank} />
+          <Fact k="PR semántico" v={u.pagerank_semantic} />
+          <Fact k="Inlinks" v={fmt(u.inlinks_count)} />
+          <Fact k="Outlinks" v={fmt(u.outlinks_count)} />
+          <Fact k="Inlinks contextuales" v={u.in_contextual} />
+          <Fact k="Outlinks contextuales" v={u.out_contextual} />
+          <Fact k="Palabras" v={fmt(u.word_count)} />
+          <Fact k="Palabras únicas (T20)" v={u.unique_word_count} />
+          <Fact k="% plantilla" v={u.boilerplate_ratio != null ? `${(u.boilerplate_ratio * 100).toFixed(1)}%` : null} />
+          <Fact k="% solo tras JS" v={u.js_content_ratio != null ? `${(u.js_content_ratio * 100).toFixed(1)}%` : null} />
+          <Fact k="Latencia" v={u.response_time_ms != null ? `${u.response_time_ms} ms` : null} />
+          <Fact k="Content-Type" v={u.content_type} />
+          <Fact k="Redirige a" v={u.redirect_url} />
+          <Fact k="JS redirect" v={u.js_redirect_url} />
         </div>
       )}
 
-      {u.issues.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
+      {tab === "resumen" && u.issues.length > 0 && (
+        <div className="card" style={{ marginTop: 10 }}>
           <h3>Incidencias ({u.issues.length})</h3>
           {u.issues.map((i) => (
             <div key={i.id} className="row" style={{ marginBottom: 6 }}>
               <Severity level={i.severity} />
               <span className="mono">{i.issue_type}</span>
+              {i.review_status && <span className="tag">{i.review_status}</span>}
             </div>
           ))}
         </div>
       )}
 
-      <div className="card">
-        <h3>Inlinks ({u.inlinks.length})</h3>
-        {u.inlinks.length === 0 && <div className="proxy-tag">Sin enlaces entrantes registrados.</div>}
-        <table className="data">
-          <tbody>
-            {u.inlinks.slice(0, 50).map((l) => (
-              <tr key={l.id}>
-                <td className="cell-url" title={l.from_url}>{l.from_url}</td>
-                <td>{l.anchor_text || <i className="proxy-tag">sin anchor</i>}</td>
-                <td><span className="tag">{l.link_position}</span></td>
-                <td>{l.follow === false ? <span className="tag">nofollow</span> : ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {tab === "onpage" && (
+        <>
+          {meta ? (
+            <div className="card muted">
+              <Fact k="Title" v={meta.title} wide />
+              <Fact k="Description" v={meta.meta_description} wide />
+              <Fact k="Canonical" v={meta.canonical_href} wide />
+              {meta.meta_refresh && <Fact k="Meta refresh" v={`${meta.meta_refresh_delay ?? "?"}s → ${meta.meta_refresh_url || "?"}`} wide />}
+              <Fact k="Robots" v={meta.meta_robots} wide />
+              <Fact k="OG title" v={meta.og_title} wide />
+              <Fact k="rel next/prev" v={[meta.rel_next, meta.rel_prev].filter(Boolean).join(" · ") || null} wide />
+            </div>
+          ) : <div className="proxy-tag">Sin metadatos HTML.</div>}
+          {u.headings.length > 0 && (
+            <div className="card" style={{ marginTop: 10 }}>
+              <h3>Encabezados ({u.headings.length})</h3>
+              {u.headings.map((h) => (
+                <div key={h.id} style={{ fontSize: 12.5, marginBottom: 3, paddingLeft: (parseInt(h.tag[1], 10) - 1) * 14 }}>
+                  <span className="tag">{h.tag}</span> {h.text || <i className="proxy-tag">vacío</i>}
+                </div>
+              ))}
+            </div>
+          )}
+          {u.hreflangs.length > 0 && (
+            <div className="card" style={{ marginTop: 10 }}>
+              <h3>Hreflang ({u.hreflangs.length})</h3>
+              {u.hreflangs.map((h) => (
+                <div key={h.id} className="row between" style={{ fontSize: 12 }}>
+                  <span className="tag">{h.lang}</span>
+                  <span className="cell-url">{h.href}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "enlaces" && (
+        <>
+          <div className="card">
+            <h3>Inlinks ({u.inlinks.length})</h3>
+            {u.inlinks.length === 0 && <div className="proxy-tag">Sin enlaces entrantes registrados.</div>}
+            <table className="data">
+              <tbody>
+                {u.inlinks.slice(0, 100).map((l) => (
+                  <tr key={l.id}>
+                    <td className="cell-url" title={l.from_url}>{l.from_url}</td>
+                    <td>{l.anchor_text || <i className="proxy-tag">sin anchor</i>}</td>
+                    <td><span className="tag">{l.edge_class || l.link_position}</span></td>
+                    <td>{l.follow === false ? <span className="tag">nofollow</span> : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="card" style={{ marginTop: 10 }}>
+            <h3>Outlinks ({u.outlinks.length})</h3>
+            <table className="data">
+              <tbody>
+                {u.outlinks.slice(0, 100).map((l) => (
+                  <tr key={l.id}>
+                    <td className="cell-url" title={l.to_url}>{l.to_url}</td>
+                    <td>{l.anchor_text || ""}</td>
+                    <td><span className="tag">{l.edge_class || l.link_position}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {tab === "recursos" && (
+        <div className="card">
+          <h3>Recursos ({u.resources.length})</h3>
+          <table className="data">
+            <tbody>
+              {u.resources.map((r) => (
+                <tr key={r.id}>
+                  <td><span className="tag">{r.resource_type}</span></td>
+                  <td className="cell-url" title={r.resource_url}>{r.resource_url}</td>
+                  <td>{r.alt_text || (r.resource_type === "image" ? <i className="proxy-tag">sin alt</i> : "")}</td>
+                  <td>{r.is_mixed_content ? <span className="tag">mixed content</span> : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === "datos" && (
+        <div className="card">
+          <h3>Datos estructurados ({u.structured_data.length})</h3>
+          {u.structured_data.length === 0 && <div className="proxy-tag">Sin datos estructurados.</div>}
+          {u.structured_data.map((s) => (
+            <div key={s.id} style={{ marginBottom: 10 }}>
+              <div className="row" style={{ gap: 6 }}>
+                <span className="tag">{s.format}</span>
+                <b style={{ fontSize: 12.5 }}>{s.schema_type || "?"}</b>
+                {s.visible_without_js === false && <span className="tag">solo tras JS</span>}
+              </div>
+              <pre className="diff" style={{ maxHeight: 160, overflow: "auto" }}>
+                {JSON.stringify(s.raw, null, 2)}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "seguridad" && (
+        <div className="card">
+          <h3>Cabeceras de seguridad</h3>
+          {u.security ? (
+            <div className="facts">
+              <Fact k="HTTPS" v={u.security.is_https ? "sí" : "no"} />
+              <Fact k="HSTS" v={u.security.has_hsts ? "sí" : "no"} />
+              <Fact k="CSP" v={u.security.has_csp ? "sí" : "no"} />
+              <Fact k="X-Content-Type-Options" v={u.security.has_x_content_type_options ? "sí" : "no"} />
+              <Fact k="X-Frame-Options" v={u.security.has_x_frame_options ? "sí" : "no"} />
+              <Fact k="Referrer-Policy" v={u.security.referrer_policy} />
+              <Fact k="Mixed content" v={u.security.has_mixed_content ? "sí" : "no"} />
+            </div>
+          ) : <div className="proxy-tag">Sin datos de seguridad.</div>}
+        </div>
+      )}
     </Drawer>
   );
 }

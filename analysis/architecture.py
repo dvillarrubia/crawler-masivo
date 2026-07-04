@@ -235,13 +235,24 @@ def classify_edges(
     }
 
 
-def compute_click_depth(session, job_id, seed_hashes: set[str]) -> dict[int, int]:
+def compute_click_depth(
+    session, job_id, seed_hashes: set[str], norm_config=None,
+) -> dict[int, int]:
     """T23: BFS from the seeds over ALL internal edges (sitewide included).
     Fills ``urls.click_depth``; returns {url_id: depth}. Indexables left
     without depth are link-orphans (issue emitted by the analyzer).
+
+    Redirects are pass-through, same as PageRank v2: a link toward a 3xx
+    URL reaches its final destination in ONE click (the user clicks once;
+    the redirect is not a click). Without this, every page only reachable
+    via http→https or trailing-slash redirects came out as a link_orphan
+    — seen against a real site where 27 redirect rows produced 31 false
+    orphans. Loops and >10-hop chains are cut.
     """
+    from shared.url_normalization import compute_url_hash as _hash
+
     url_rows = session.execute(
-        select(Url.id, Url.url_hash)
+        select(Url.id, Url.url_hash, Url.status_code, Url.redirect_url)
         .where(
             Url.job_id == job_id,
             Url.is_internal.is_(True),
@@ -249,20 +260,45 @@ def compute_click_depth(session, job_id, seed_hashes: set[str]) -> dict[int, int
         )
     ).all()
     id_by_hash = {r.url_hash: r.id for r in url_rows}
+    row_by_hash = {r.url_hash: r for r in url_rows}
+
+    def _resolve(target_hash: str) -> int | None:
+        """Follow 3xx chains to the final URL id (None if unresolvable)."""
+        seen: set[str] = set()
+        current = target_hash
+        for _ in range(10):
+            if current in seen:
+                return None
+            seen.add(current)
+            row = row_by_hash.get(current)
+            if row is None:
+                return None
+            is_redirect = (
+                row.status_code is not None and 300 <= row.status_code < 400
+            )
+            if is_redirect and row.redirect_url:
+                current = _hash(row.redirect_url, norm_config)
+                continue
+            return row.id
+        return None
 
     adj: dict[int, set[int]] = defaultdict(set)
     for from_id, to_hash in session.execute(
         select(Link.from_url_id, Link.to_url_hash)
         .where(Link.job_id == job_id, Link.is_internal.is_(True))
     ).all():
-        to_id = id_by_hash.get(to_hash)
+        to_id = _resolve(to_hash)
         if to_id is not None:
             adj[from_id].add(to_id)
 
     depth: dict[int, int] = {}
     queue: deque[int] = deque()
     for h in seed_hashes:
-        uid = id_by_hash.get(h)
+        # Seeds resolve through redirects too (a seed declared as http://
+        # usually 301s to the real https home).
+        uid = _resolve(h)
+        if uid is None:
+            uid = id_by_hash.get(h)
         if uid is not None and uid not in depth:
             depth[uid] = 0
             queue.append(uid)

@@ -133,6 +133,19 @@ function CompletedOverview({ jobId, segmentId, clientJobs }) {
         </div>
       </div>
 
+      {s.geo && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <h3>GEO — crudo vs renderizado (T15)</h3>
+          <div className="facts">
+            <div className="fact"><div className="k">Páginas evaluadas</div><div className="v num">{fmt(s.geo.pages_evaluated)}</div></div>
+            <div className="fact"><div className="k">% medio solo tras JS</div><div className="v num">{s.geo.avg_js_content_ratio != null ? `${(s.geo.avg_js_content_ratio * 100).toFixed(1)}%` : "—"}</div></div>
+            <div className="fact"><div className="k">Contenido solo tras JS</div><div className="v num">{fmt(s.geo.content_only_after_js)}</div></div>
+            <div className="fact"><div className="k">Schema solo tras JS</div><div className="v num">{fmt(s.geo.schema_only_after_js)}</div></div>
+          </div>
+          <p className="proxy-tag">Lo que solo existe tras ejecutar JS es invisible para los crawlers de IA y el primer pase de Google.</p>
+        </div>
+      )}
+
       {s.latency && (
         <div className="card" style={{ marginTop: 12 }}>
           <h3>Latencia por status group (p50 / p90 / p99, ms)</h3>

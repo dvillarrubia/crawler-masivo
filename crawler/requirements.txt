@@ -10,3 +10,4 @@ scrapy-playwright>=0.0.40
 scrapy-impersonate
 html2text>=2024.2
 trafilatura>=2.0
+pgvector>=0.3.0

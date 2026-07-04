@@ -295,6 +295,15 @@ def main() -> None:
         logger.critical("Cannot connect to Redis at %s", REDIS_URL)
         sys.exit(1)
 
+    # Ensure schema + additive migrations before touching any table: a
+    # fresh worker must never query columns the DB doesn't have yet.
+    try:
+        from shared.database import init_db
+
+        init_db()
+    except Exception:
+        logger.exception("Schema init failed; continuing (API may own it)")
+
     _recover_stale_jobs(rconn)
 
     executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)

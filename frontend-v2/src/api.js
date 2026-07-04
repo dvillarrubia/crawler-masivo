@@ -43,6 +43,66 @@ export const api = {
   issueUrls: (id, params) => request(`/api/jobs/${id}/issues/urls${qs(params)}`),
   exportUrl: (id, entity) => `/api/jobs/${id}/export?entity=${entity}`,
 
+  links: (id, params) => request(`/api/jobs/${id}/links${qs(params)}`),
+  insights: (id) => request(`/api/jobs/${id}/insights`),
+  resumeJob: (id) => request(`/api/jobs/${id}/resume`, { method: "POST" }),
+  backupUrl: (id) => `/api/jobs/${id}/backup`,
+  importJob: (file, params) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`/api/jobs/import${qs(params)}`, { method: "POST", body: fd })
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(body && body.detail ? JSON.stringify(body.detail) : r.statusText);
+        return body;
+      });
+  },
+
+  // T5/T9/T10/T18/T21 — mejoras nuevas
+  freshness: (id, params) => request(`/api/jobs/${id}/freshness${qs(params)}`),
+  strikingDistance: (id, params) => request(`/api/jobs/${id}/striking-distance${qs(params)}`),
+  linkSuggestions: (id, params) => request(`/api/jobs/${id}/link-suggestions${qs(params)}`),
+  decideSuggestion: (sid, payload) =>
+    request(`/api/link-suggestions/${sid}/decision`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  reviewIssue: (iid, payload) =>
+    request(`/api/issues/${iid}/review`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  pagerankDelta: (id, params) => request(`/api/jobs/${id}/pagerank-delta${qs(params)}`),
+  sectionFlows: (id) => request(`/api/jobs/${id}/section-flows`),
+  simulate: (id, payload) =>
+    request(`/api/jobs/${id}/pagerank-simulate`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+
+  // Semántica (paridad con legacy)
+  gscAccounts: () => request("/api/semantic/gsc-accounts"),
+  addGscAccount: (payload) =>
+    request("/api/semantic/gsc-accounts", { method: "POST", body: JSON.stringify(payload) }),
+  deleteGscAccount: (id) =>
+    request(`/api/semantic/gsc-accounts/${id}`, { method: "DELETE" }),
+  gscProperties: (id) => request(`/api/semantic/gsc-accounts/${id}/properties`),
+  geminiAccounts: () => request("/api/semantic/gemini-accounts"),
+  addGeminiAccount: (payload) =>
+    request("/api/semantic/gemini-accounts", { method: "POST", body: JSON.stringify(payload) }),
+  deleteGeminiAccount: (id) =>
+    request(`/api/semantic/gemini-accounts/${id}`, { method: "DELETE" }),
+
+  fetchGsc: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/fetch-gsc`, { method: "POST", body: JSON.stringify(payload) }),
+  semanticAnalyze: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/analyze`, { method: "POST", body: JSON.stringify(payload) }),
+  semanticStatus: (id) => request(`/api/jobs/${id}/semantic/status`),
+  semanticResults: (id) => request(`/api/jobs/${id}/semantic/results`),
+  semanticCannibalization: (id, params) =>
+    request(`/api/jobs/${id}/semantic/cannibalization${qs(params)}`),
+  semanticDrift: (id) => request(`/api/jobs/${id}/semantic/drift`),
+  semanticGap: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/gap-analysis`, { method: "POST", body: JSON.stringify(payload) }),
+  semanticExportUrl: (id) => `/api/jobs/${id}/semantic/export`,
+
   diff: (params) => request(`/api/diff${qs(params)}`),
   diffUrls: (params) => request(`/api/diff/urls${qs(params)}`),
   flapping: (params) => request(`/api/diff/flapping${qs(params)}`),

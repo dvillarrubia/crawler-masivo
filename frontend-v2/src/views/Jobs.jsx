@@ -24,7 +24,10 @@ export default function JobsView() {
             {clientId ? `Proyecto ${clientId}` : "Todos los proyectos"} · {clientJobs.length} runs
           </p>
         </div>
-        <button onClick={() => setShowNew(true)}>+ Nuevo rastreo</button>
+        <span className="row" style={{ gap: 6 }}>
+          <ImportButton onDone={reloadJobs} />
+          <button onClick={() => setShowNew(true)}>+ Nuevo rastreo</button>
+        </span>
       </div>
 
       <div className="table-wrap">
@@ -70,6 +73,33 @@ export default function JobsView() {
   );
 }
 
+/** Importa un backup ZIP (paridad legacy). */
+function ImportButton({ onDone }) {
+  const [busy, setBusy] = useState(false);
+  const pick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".zip";
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      setBusy(true);
+      try {
+        const r = await api.importJob(file, {});
+        alert(`Importado como job ${r.new_job_id}. Filas: ${JSON.stringify(r.rows_imported)}`);
+        onDone();
+      } catch (e) { alert(`Import falló: ${e.message}`); }
+      setBusy(false);
+    };
+    input.click();
+  };
+  return (
+    <button className="secondary" disabled={busy} onClick={pick}>
+      {busy ? "Importando…" : "Importar backup"}
+    </button>
+  );
+}
+
 function JobStatus({ job }) {
   const map = { completed: "s2xx", running: "s3xx", pending: "sother",
                 failed: "s4xx", cancelled: "sother" };
@@ -90,10 +120,20 @@ function JobActions({ job, onDone }) {
         <button className="secondary" disabled={busy}
           onClick={() => act(() => api.cancelJob(job.id))}>Cancelar</button>
       )}
-      {job.status === "completed" && (
+      {["cancelled", "failed"].includes(job.status) && (
         <button className="secondary" disabled={busy}
-          onClick={() => act(() => api.reanalyze(job.id))}
-          title="Re-análisis sin re-crawl (T17.2)">Re-analizar</button>
+          onClick={() => act(() => api.resumeJob(job.id))}
+          title="Reanuda el crawl desde la frontera pendiente">Reanudar</button>
+      )}
+      {job.status === "completed" && (
+        <>
+          <button className="secondary" disabled={busy}
+            onClick={() => act(() => api.reanalyze(job.id))}
+            title="Re-análisis sin re-crawl (T17.2)">Re-analizar</button>
+          <a href={api.backupUrl(job.id)} title="Backup ZIP completo (NDJSON)">
+            <button className="secondary">Backup</button>
+          </a>
+        </>
       )}
       <button className="secondary" disabled={busy}
         onClick={() => act(() => api.deleteJob(job.id),
