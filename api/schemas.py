@@ -356,6 +356,8 @@ class UrlResponse(BaseModel):
     id: int
     job_id: uuid.UUID
     url: str
+    # el simulador (Inrank) resuelve URL→hash desde este listado
+    url_hash: str | None = None
     host: str | None = None
     path: str | None = None
     scheme: str | None = None
