@@ -139,6 +139,8 @@ class JobConfig(BaseModel):
     user_agent: str = DEFAULT_USER_AGENT
     render_js: bool = False
     impersonate: str = "chrome124"
+    # T1: ingest sitemap.xml at job start (in_sitemap flags + orphan basis)
+    ingest_sitemaps: bool = False
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
 

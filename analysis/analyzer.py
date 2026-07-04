@@ -144,6 +144,7 @@ class SEOAnalyzer:
         self.compute_link_counts()
         self.compute_pagerank()
         self.analyze_links()
+        self.analyze_sitemaps()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1238,6 +1239,102 @@ class SEOAnalyzer:
                 "info",
                 {"count": outlink_count},
             )
+
+        self._flush_issues()
+
+    # -- Sitemaps (T1) --------------------------------------------------------
+
+    def analyze_sitemaps(self) -> None:
+        """Cross ``sitemap_urls`` (T1) with the crawl by ``url_hash``.
+
+        No-op when the job ingested no sitemaps (flag off → zero rows →
+        zero changes). Fills ``urls.in_sitemap`` / ``urls.sitemap_lastmod``
+        and emits:
+
+        * ``in_sitemap_not_crawled`` (warning): declared in a sitemap and
+          the crawl reached it WITHOUT a 2xx (3xx/4xx/5xx/timeout). URLs
+          the crawl never created a row for are T2 territory
+          (``orphan_not_in_crawl``), not this issue.
+        * ``crawled_not_in_sitemap`` (info): indexable internal HTML with
+          2xx that no sitemap declares.
+        """
+        from shared.models import SitemapUrl
+
+        logger.debug("Analyzing sitemaps ...")
+
+        has_rows = self.session.execute(
+            select(SitemapUrl.id)
+            .where(SitemapUrl.job_id == self.job_id)
+            .limit(1)
+        ).first()
+        if not has_rows:
+            return
+
+        # 1. Mark declared URLs (UPDATE ... FROM works on PG and SQLite 3.33+)
+        self.session.execute(
+            update(Url)
+            .where(
+                Url.job_id == self.job_id,
+                SitemapUrl.job_id == self.job_id,
+                Url.url_hash == SitemapUrl.url_hash,
+            )
+            .values(in_sitemap=True, sitemap_lastmod=SitemapUrl.lastmod)
+        )
+
+        # 2. Crawled internal HTML not declared anywhere → explicit False
+        self.session.execute(
+            update(Url)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.in_sitemap.is_(None),
+            )
+            .values(in_sitemap=False)
+        )
+        self.session.flush()
+
+        # 3a. in_sitemap_not_crawled: declared but the crawl got a non-2xx.
+        rows = self.session.execute(
+            select(Url.id, Url.status_code, SitemapUrl.lastmod)
+            .join(SitemapUrl, and_(
+                SitemapUrl.job_id == Url.job_id,
+                SitemapUrl.url_hash == Url.url_hash,
+            ))
+            .where(
+                Url.job_id == self.job_id,
+                (Url.status_group.is_(None)) | (Url.status_group != "not_crawled"),
+                (Url.status_code.is_(None))
+                | (Url.status_code < 200)
+                | (Url.status_code >= 300),
+            )
+        ).all()
+        for url_id, status_code, lastmod in rows:
+            self._add_issue(
+                url_id,
+                "in_sitemap_not_crawled",
+                "warning",
+                {
+                    "status_code": status_code,
+                    "lastmod": lastmod.isoformat() if lastmod else None,
+                },
+            )
+
+        # 3b. crawled_not_in_sitemap: indexable HTML the sitemaps omit.
+        rows = self.session.execute(
+            select(Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.indexable.is_(True),
+                Url.status_code >= 200,
+                Url.status_code < 300,
+                Url.in_sitemap.is_(False),
+            )
+        ).all()
+        for (url_id,) in rows:
+            self._add_issue(url_id, "crawled_not_in_sitemap", "info")
 
         self._flush_issues()
 

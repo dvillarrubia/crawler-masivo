@@ -26,6 +26,9 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS blocked_by_robots BOOLEAN"))
         # T8: normalization fingerprint per job (NULL = default semantics)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS normalization_fingerprint VARCHAR(64)"))
+        # T1: sitemap ingestion flags on urls (NULL = no sitemap ingested)
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS in_sitemap BOOLEAN"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS sitemap_lastmod TIMESTAMPTZ"))
         conn.commit()
     print("Migrations applied.")
 

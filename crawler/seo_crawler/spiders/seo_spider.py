@@ -288,6 +288,26 @@ class SeoSpider(scrapy.Spider):
                 self.allowed_hosts,
             )
 
+            # -- T1: sitemap ingestion (flag off by default). Runs after
+            # set_active_config so sitemap hashes match crawl hashes. A
+            # sitemap failure never aborts the crawl.
+            if self.job_config.get("ingest_sitemaps"):
+                try:
+                    from seo_crawler.sitemap_ingest import ingest_sitemaps
+
+                    count = ingest_sitemaps(session, job.id, self.seed_urls)
+                    session.commit()
+                    logger.info(
+                        "Sitemap ingestion done for job %s: %d URLs",
+                        self.job_id, count,
+                    )
+                except Exception:
+                    session.rollback()
+                    logger.warning(
+                        "Sitemap ingestion failed for job %s; crawling anyway",
+                        self.job_id, exc_info=True,
+                    )
+
             # -- Resume detection: load already-crawled URL hashes + frontier
             # If this job already has rows in `urls`, treat the run as a resume:
             # skip URLs we already fetched and seed the queue with the

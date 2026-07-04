@@ -29,7 +29,7 @@ def get_session():
 def init_db():
     from shared.models import (  # noqa: F401 – force table registration
         Job, Url, HtmlMeta, Heading, Link, Hreflang,
-        StructuredData, Resource, Issue,
+        StructuredData, Resource, Issue, SitemapUrl,
     )
     from shared.semantic_models import (  # noqa: F401 – force semantic table registration
         GscAccount, SemanticAnalysis, SemanticPage,

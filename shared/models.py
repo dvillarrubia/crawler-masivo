@@ -103,6 +103,10 @@ class Url(Base):
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
     pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
 
+    # --- T1: sitemap ingestion (NULL = no sitemap ingested for this job) ---
+    in_sitemap = Column(Boolean, nullable=True)              # declared in sitemap.xml
+    sitemap_lastmod = Column(DateTime(timezone=True), nullable=True)
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")
@@ -117,6 +121,25 @@ class Url(Base):
         UniqueConstraint("job_id", "url_hash", name="uq_job_url"),
         Index("ix_urls_job_status", "job_id", "status_code"),
         Index("ix_urls_job_host", "job_id", "host"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sitemap URLs (T1) — every URL declared by the job's sitemaps, including
+# ones the crawl never reaches (that gap is what T2's orphan check needs).
+# ---------------------------------------------------------------------------
+class SitemapUrl(Base):
+    __tablename__ = "sitemap_urls"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    url = Column(Text, nullable=False)
+    url_hash = Column(String(64), nullable=False)  # same normalization as urls.url_hash
+    lastmod = Column(DateTime(timezone=True), nullable=True)
+    sitemap_source = Column(Text, nullable=True)   # which sitemap document declared it
+
+    __table_args__ = (
+        Index("ix_sitemap_urls_job_hash", "job_id", "url_hash"),
     )
 
 
