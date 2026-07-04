@@ -30,6 +30,7 @@ export default function SemanticView() {
     ["gap", "Gap de contenido"],
     ["drift", "Drift"],
     ["consultas", "Consultas→Pasajes"],
+    ["anclas", "Anclas"],
   ];
 
   return (
@@ -55,6 +56,7 @@ export default function SemanticView() {
       {tab === "gap" && <GapPanel jobId={jobId} status={status} />}
       {tab === "drift" && <DriftPanel jobId={jobId} status={status} />}
       {tab === "consultas" && <QueryCoveragePanel jobId={jobId} status={status} />}
+      {tab === "anclas" && <AnchorsPanel jobId={jobId} status={status} />}
     </div>
   );
 }
@@ -644,6 +646,109 @@ function QueryCoveragePanel({ jobId, status }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* T18 — Relevancia de anchors contextuales                            */
+/* ------------------------------------------------------------------ */
+function AnchorsPanel({ jobId, status }) {
+  const [params, setParams] = useState({ mismatch_threshold: 0.35, max_anchors: 300 });
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      setResult(await api.anchorRelevance(jobId, {
+        mismatch_threshold: Number(params.mismatch_threshold),
+        max_anchors: Number(params.max_anchors),
+      }));
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>Relevancia de anchors (T18): ¿los anchors contextuales describen su destino?</h3>
+        <p className="proxy-tag" style={{ marginTop: 0 }}>
+          Los genéricos se detectan por léxico (sin coste). Los demás se embeben como query y se comparan
+          con el vector de la página destino. Ambos entran como issues firmables en la Cola de firma.
+        </p>
+        <div className="form-grid">
+          <div className="field"><label>Umbral de mismatch (cos)</label>
+            <input type="number" step="0.05" min="0" max="1" value={params.mismatch_threshold}
+              onChange={(e) => setParams({ ...params, mismatch_threshold: e.target.value })} /></div>
+          <div className="field"><label>Máx. anchors a embeber</label>
+            <input type="number" min={10} max={2000} value={params.max_anchors}
+              onChange={(e) => setParams({ ...params, max_anchors: e.target.value })} /></div>
+        </div>
+        <button disabled={busy} onClick={run}>{busy ? "Embebiendo anchors…" : "Analizar anchors"}</button>
+        {error && <div className="alert" style={{ marginTop: 8 }}>{error}</div>}
+        {result && result.status === "blocked" && (
+          <div className="alert warn" style={{ marginTop: 8 }}>
+            {result.reason === "no_contextual_anchors"
+              ? "El run no tiene enlaces contextuales con anchor de texto."
+              : "El análisis no tiene vectores de página."}
+          </div>
+        )}
+      </div>
+
+      {result && result.status === "ok" && (
+        <>
+          <div className="facts" style={{ marginBottom: 12 }}>
+            <div className="fact"><div className="k">Grupos anchor→destino</div><div className="v num">{fmt(result.summary.anchor_groups)}</div></div>
+            <div className="fact"><div className="k">Embebidos</div><div className="v num">{fmt(result.summary.embedded)}</div></div>
+            <div className="fact"><div className="k">Destinos con anchors genéricos</div><div className="v num">{fmt(result.summary.generic_targets)}</div></div>
+            <div className="fact"><div className="k">Mismatches</div><div className="v num">{fmt(result.summary.mismatches)}</div></div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 12 }}>
+            <h3>Anchor ↔ destino sin relación (peor primero)</h3>
+            {result.mismatches.length === 0 && <div className="proxy-tag">Sin mismatches bajo el umbral.</div>}
+            {result.mismatches.length > 0 && (
+              <table className="data">
+                <thead><tr><th>Anchor</th><th>Destino</th><th className="num">Similitud</th>
+                  <th className="num">Enlaces</th><th>Origen (muestra)</th></tr></thead>
+                <tbody>
+                  {result.mismatches.map((m, i) => (
+                    <tr key={i}>
+                      <td title={m.anchor}>«{m.anchor}»</td>
+                      <td className="cell-url" title={m.target_url}>{m.target_url}</td>
+                      <td className="num">{m.similarity.toFixed(3)}</td>
+                      <td className="num">{fmt(m.n_links)}</td>
+                      <td className="cell-url">{(m.sources_sample || [])[0] || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>Destinos con anchors genéricos (más inlinks genéricos primero)</h3>
+            {result.generic.length === 0 && <div className="proxy-tag">Sin anchors genéricos contextuales.</div>}
+            {result.generic.length > 0 && (
+              <table className="data">
+                <thead><tr><th>Destino</th><th className="num">Inlinks genéricos</th><th>Anchors</th></tr></thead>
+                <tbody>
+                  {result.generic.map((g, i) => (
+                    <tr key={i}>
+                      <td className="cell-url" title={g.target_url}>{g.target_url}</td>
+                      <td className="num">{fmt(g.generic_inlinks)}</td>
+                      <td>{(g.anchors || []).map((a) => `«${a}»`).join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </>
       )}

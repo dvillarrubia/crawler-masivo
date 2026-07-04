@@ -1138,6 +1138,56 @@ def run_gap_analysis(
 
 
 # ---------------------------------------------------------------------------
+# T18 (cierre) — relevancia de anchors
+# ---------------------------------------------------------------------------
+class AnchorRelevanceRequest(BaseModel):
+    """Params del análisis de anchors. El umbral por defecto es laxo a
+    propósito: anchor↔página es una comparación query→documento y los
+    cosenos absolutos son más bajos que entre documentos."""
+
+    mismatch_threshold: float = 0.35
+    max_anchors: int = 300
+
+
+@router.post("/jobs/{job_id}/semantic/anchor-relevance")
+def run_anchor_relevance_endpoint(
+    job_id: uuid.UUID,
+    body: AnchorRelevanceRequest,
+    db: Session = Depends(get_session),
+):
+    """T18: embebe los anchors contextuales como queries y los compara
+    con el vector de su página destino. Emite ``generic_anchor`` (lexical,
+    agregado por destino) y ``anchor_target_mismatch`` como issues
+    firmables. Los resultados persistentes son los issues (Cola de firma).
+    """
+    _get_job_or_404(job_id, db)
+    analysis = _get_latest_analysis(job_id, db)
+    if not analysis or analysis.status != "completed":
+        raise HTTPException(status_code=404, detail="No completed analysis found")
+    if not (0.0 <= body.mismatch_threshold <= 1.0):
+        raise HTTPException(status_code=400, detail="mismatch_threshold must be in [0, 1]")
+    if not (1 <= body.max_anchors <= 2000):
+        raise HTTPException(status_code=400, detail="max_anchors must be in [1, 2000]")
+
+    from analysis.anchor_relevance import run_anchor_relevance
+    from POC_centro_semantico.src.embedding_backends import get_backend
+
+    api_key = _resolve_gemini_key_from_analysis(analysis, db)
+    backend = get_backend(api_key=api_key)
+
+    result = run_anchor_relevance(
+        db, job_id, analysis.id, backend,
+        mismatch_threshold=body.mismatch_threshold,
+        max_anchors=body.max_anchors,
+    )
+    if result.get("status") == "blocked":
+        db.rollback()
+        return result
+    db.commit()
+    return result
+
+
+# ---------------------------------------------------------------------------
 # T19 — Query→passage coverage
 # ---------------------------------------------------------------------------
 class QueryCoverageRequest(BaseModel):

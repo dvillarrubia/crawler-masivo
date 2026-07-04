@@ -8,6 +8,8 @@ idempotent, no side effects.
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from collections import defaultdict
 
@@ -24,6 +26,17 @@ router = APIRouter(prefix="/api/jobs/{job_id}", tags=["simulate"])
 
 MAX_MUTATIONS = 500
 
+# T21: per-job graph cache for interactive re-simulation. Loading the
+# graph dominates simulate latency on big jobs; the power iteration
+# itself is fast. Process-local, TTL-bound (a re-crawl/re-analysis of
+# the same job is picked up at most TTL seconds later; `fresh=true`
+# forces an immediate reload). Simulation stays pure — the cache only
+# memoizes READS.
+GRAPH_CACHE_TTL = 600.0   # seconds
+GRAPH_CACHE_MAX = 4       # jobs kept (a graph can be tens of MB)
+_graph_cache: dict = {}
+_graph_cache_lock = threading.Lock()
+
 
 class AddLink(BaseModel):
     from_hash: str = Field(..., min_length=64, max_length=64)
@@ -35,6 +48,7 @@ class SimulateRequest(BaseModel):
     add: list[AddLink] = Field(default_factory=list)
     remove: list[int] = Field(default_factory=list)  # link ids
     top_n: int = Field(default=50, ge=1, le=500)
+    fresh: bool = False  # bypass the graph cache (after a re-analysis)
 
 
 def _load_graph(db: Session, job_id):
@@ -61,6 +75,24 @@ def _load_graph(db: Session, job_id):
         .where(Link.job_id == job_id, Link.is_internal.is_(True))
     ).all()
     return nodes, idx_by_hash, id_to_idx, links
+
+
+def _load_graph_cached(db: Session, job_id, *, fresh: bool = False):
+    """TTL-bound memo of :func:`_load_graph` keyed by job (T21 cache)."""
+    now = time.monotonic()
+    if not fresh:
+        with _graph_cache_lock:
+            entry = _graph_cache.get(job_id)
+            if entry and now - entry[0] < GRAPH_CACHE_TTL:
+                return entry[1]
+
+    data = _load_graph(db, job_id)
+    with _graph_cache_lock:
+        _graph_cache[job_id] = (now, data)
+        while len(_graph_cache) > GRAPH_CACHE_MAX:
+            oldest = min(_graph_cache, key=lambda k: _graph_cache[k][0])
+            del _graph_cache[oldest]
+    return data
 
 
 def _pagerank(nodes, idx_by_hash, id_to_idx, edges) -> list[float]:
@@ -111,7 +143,9 @@ def simulate_pagerank(
             detail=f"Too many mutations (max {MAX_MUTATIONS})",
         )
 
-    nodes, idx_by_hash, id_to_idx, links = _load_graph(db, job_id)
+    nodes, idx_by_hash, id_to_idx, links = _load_graph_cached(
+        db, job_id, fresh=payload.fresh,
+    )
     if not nodes:
         return {"status": "blocked", "reason": "no_indexable_pages"}
 

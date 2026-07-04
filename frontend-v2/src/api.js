@@ -102,6 +102,8 @@ export const api = {
     request(`/api/jobs/${id}/semantic/gap-analysis`, { method: "POST", body: JSON.stringify(payload) }),
   targetRings: (id, payload) =>
     request(`/api/jobs/${id}/semantic/target-rings`, { method: "POST", body: JSON.stringify(payload) }),
+  anchorRelevance: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/anchor-relevance`, { method: "POST", body: JSON.stringify(payload) }),
   queryCoverage: (id) => request(`/api/jobs/${id}/semantic/query-coverage`),
   runQueryCoverage: (id, payload) =>
     request(`/api/jobs/${id}/semantic/query-coverage`, { method: "POST", body: JSON.stringify(payload) }),

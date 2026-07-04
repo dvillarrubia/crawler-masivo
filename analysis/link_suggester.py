@@ -122,7 +122,7 @@ def generate_for_job(
     Replaces the job's previous PENDING suggestions (decisions are never
     touched). Returns the number of suggestions written.
     """
-    from shared.models import Link, LinkSuggestion, Url
+    from shared.models import Heading, HtmlMeta, Link, LinkSuggestion, Url
     from shared.semantic_models import SemanticPage
 
     rows = session.query(
@@ -151,13 +151,47 @@ def generate_for_job(
         similarity_threshold=similarity_threshold, top_k=top_k,
     )
 
+    # T18: anchor propuesto = H1 del destino (fallback: title). Texto
+    # determinista sacado de la propia página — sin coste de embeddings.
+    target_hashes = {s["target_url_hash"] for s in suggestions}
+    proposed_by_hash: dict[str, str] = {}
+    if target_hashes:
+        h1_rows = session.query(Url.url_hash, Heading.text).join(
+            Heading, Heading.url_id == Url.id,
+        ).filter(
+            Url.job_id == job_id,
+            Url.url_hash.in_(target_hashes),
+            Heading.tag == "h1",
+        ).order_by(Heading.position).all()
+        title_rows = session.query(Url.url_hash, HtmlMeta.title).join(
+            HtmlMeta, HtmlMeta.url_id == Url.id,
+        ).filter(
+            Url.job_id == job_id,
+            Url.url_hash.in_(target_hashes),
+        ).all()
+        for url_hash, title in title_rows:
+            if title and title.strip():
+                proposed_by_hash[url_hash] = title.strip()[:120]
+        # el primer H1 del destino gana sobre el title
+        seen_h1: set[str] = set()
+        for url_hash, h1 in h1_rows:
+            if url_hash in seen_h1:
+                continue
+            seen_h1.add(url_hash)
+            if h1 and h1.strip():
+                proposed_by_hash[url_hash] = h1.strip()[:120]
+
     session.query(LinkSuggestion).filter(
         LinkSuggestion.job_id == job_id,
         LinkSuggestion.status == "pending",
     ).delete()
 
     for s in suggestions:
-        session.add(LinkSuggestion(job_id=job_id, **s))
+        session.add(LinkSuggestion(
+            job_id=job_id,
+            proposed_anchor=proposed_by_hash.get(s["target_url_hash"]),
+            **s,
+        ))
     session.flush()
     logger.info(
         "Link suggestions for job %s: %d written", job_id, len(suggestions)

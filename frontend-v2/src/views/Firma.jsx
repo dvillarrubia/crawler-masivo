@@ -30,6 +30,7 @@ export default function FirmaView() {
       <SuggestionsQueue jobId={jobId} reviewer={reviewer} />
       <CannibalQueue jobId={jobId} reviewer={reviewer} />
       <CoverageQueue jobId={jobId} reviewer={reviewer} />
+      <AnchorQueue jobId={jobId} reviewer={reviewer} />
     </div>
   );
 }
@@ -76,7 +77,7 @@ function SuggestionsQueue({ jobId, reviewer }) {
         <table className="data">
           <thead>
             <tr>
-              <th>Desde</th><th>Hacia (objetivo)</th>
+              <th>Desde</th><th>Hacia (objetivo)</th><th>Anchor propuesto</th>
               <th className="num">Similitud</th><th className="num">PR origen</th>
               <th className="num">Score</th><th>Decisión</th>
             </tr>
@@ -86,6 +87,7 @@ function SuggestionsQueue({ jobId, reviewer }) {
               <tr key={s.id}>
                 <td className="cell-url" title={s.source_url}>{s.source_url}</td>
                 <td className="cell-url" title={s.target_url}>{s.target_url}</td>
+                <td title={s.proposed_anchor || ""}>{s.proposed_anchor ? `«${s.proposed_anchor}»` : "—"}</td>
                 <td className="num">{s.cosine_similarity?.toFixed(4)}</td>
                 <td className="num">{s.source_pagerank ?? "—"}</td>
                 <td className="num">{s.score?.toFixed(4)}</td>
@@ -158,6 +160,77 @@ function CoverageQueue({ jobId, reviewer }) {
         <table className="data">
           <thead>
             <tr><th>URL accionable</th><th>Detalle</th><th>Firma</th></tr>
+          </thead>
+          <tbody>
+            {d.items.map((i) => (
+              <tr key={i.id}>
+                <td className="cell-url" title={i.url}>{i.url}</td>
+                <td>{detail(i)}</td>
+                <td>
+                  {i.review_status === "pending" ? (
+                    <span className="row" style={{ gap: 4 }}>
+                      <button onClick={() => review(i.id, "signed")}>Firmar</button>
+                      <button className="secondary" onClick={() => review(i.id, "rejected")}>Rechazar</button>
+                    </span>
+                  ) : (
+                    <span className="proxy-tag">{i.review_status} · {i.reviewed_by}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={d.pages} onPage={setPage} />
+    </div>
+  );
+}
+
+/* Relevancia de anchors (T18): genéricos y anchor↔destino sin relación. */
+const T18_LABEL = {
+  anchor_target_mismatch: "anchor sin relación",
+  generic_anchor: "anchors genéricos",
+};
+
+function AnchorQueue({ jobId, reviewer }) {
+  const [kind, setKind] = useState("anchor_target_mismatch");
+  const [page, setPage] = useState(1);
+  const q = useAsync(
+    () => api.issues(jobId, { issue_type: kind, page, page_size: 50 }),
+    [jobId, kind, page],
+  );
+
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const d = q.data;
+
+  const review = async (iid, decision) => {
+    if (!reviewer) { alert("Pon tu nombre arriba para firmar."); return; }
+    await api.reviewIssue(iid, { review_status: decision, reviewed_by: reviewer });
+    q.reload();
+  };
+
+  const detail = (i) =>
+    kind === "anchor_target_mismatch"
+      ? `«${i.details?.anchor}» · sim ${i.details?.similarity?.toFixed(3)} · ${fmt(i.details?.n_links)} enlaces`
+      : `${fmt(i.details?.generic_inlinks)} inlinks genéricos: ${(i.details?.anchors || []).slice(0, 4).map((a) => `«${a}»`).join(", ")}`;
+
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="row between">
+        <h3>Relevancia de anchors · T18 ({fmt(d.total)})</h3>
+        <span className="row" style={{ gap: 6 }}>
+          {Object.entries(T18_LABEL).map(([k, label]) => (
+            <button key={k} className={kind === k ? "" : "secondary"}
+              onClick={() => { setKind(k); setPage(1); }}>{label}</button>
+          ))}
+        </span>
+      </div>
+      {d.items.length === 0 && <EmptyClean>Sin issues de este tipo. Se generan en Semántica → Anclas.</EmptyClean>}
+      <div className="table-wrap" style={{ maxHeight: "40vh" }}>
+        <table className="data">
+          <thead>
+            <tr><th>URL destino</th><th>Detalle</th><th>Firma</th></tr>
           </thead>
           <tbody>
             {d.items.map((i) => (

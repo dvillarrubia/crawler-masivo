@@ -75,6 +75,8 @@ _MIGRATIONS = [
     # T11: índice HNSW para chunks semánticos (create_all no lo crea)
     "CREATE INDEX IF NOT EXISTS ix_semantic_chunks_embedding "
     "ON semantic_chunks USING hnsw (embedding vector_cosine_ops)",
+    # T18 (cierre): anchor propuesto en las sugerencias T10
+    "ALTER TABLE link_suggestions ADD COLUMN IF NOT EXISTS proposed_anchor TEXT",
 ]
 
 

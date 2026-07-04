@@ -207,6 +207,9 @@ class LinkSuggestion(Base):
     cosine_similarity = Column(Float, nullable=False)
     source_pagerank = Column(Float, nullable=True)
     score = Column(Float, nullable=True)                    # similarity × pr_norm
+    # T18: anchor propuesto (H1 del destino, fallback title) — texto listo
+    # para implementar la sugerencia sin abrir la página destino.
+    proposed_anchor = Column(Text, nullable=True)
     status = Column(String(16), nullable=False, default="pending")  # pending|accepted|rejected
     decided_by = Column(Text, nullable=True)
     decided_at = Column(DateTime(timezone=True), nullable=True)

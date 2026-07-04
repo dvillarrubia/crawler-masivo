@@ -1095,6 +1095,7 @@ def list_link_suggestions(
             "cosine_similarity": s.cosine_similarity,
             "source_pagerank": s.source_pagerank,
             "score": s.score,
+            "proposed_anchor": s.proposed_anchor,
             "status": s.status,
             "decided_by": s.decided_by,
             "decided_at": s.decided_at,
