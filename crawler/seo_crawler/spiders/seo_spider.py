@@ -986,6 +986,23 @@ class SeoSpider(scrapy.Spider):
                     content_markdown=content_md,
                 )
 
+        # -- T15: GEO — fetch the RAW (no-JS) side of rendered pages ------
+        # Only for geo_analysis jobs (which require render_js). One plain
+        # extra request per HTML page, low priority so the pipeline has
+        # committed the rendered row before the raw callback updates it.
+        if (
+            self.job_config.get("geo_analysis")
+            and response.request.meta.get("playwright")
+        ):
+            yield scrapy.Request(
+                url=response.url,
+                callback=self._handle_geo_raw,
+                errback=lambda f: None,
+                meta={"depth": depth, "geo_raw": True},
+                dont_filter=True,
+                priority=-10,
+            )
+
         # -- Follow links (BFS) -----------------------------------------
         if depth < self.max_depth:
             for link in links:
@@ -1010,6 +1027,50 @@ class SeoSpider(scrapy.Spider):
                             errback=self.handle_error,
                             meta=follow_meta,
                         )
+
+    # ------------------------------------------------------------------
+    # GEO raw fetch (T15)
+    # ------------------------------------------------------------------
+    def _handle_geo_raw(self, response):
+        """Persist the raw (pre-JS) word count and JSON-LD types of a page
+        already crawled with rendering. The analyzer derives the ratio and
+        the issues; a page whose raw side never lands is simply not
+        evaluated (never guessed).
+        """
+        from shared.database import SessionLocal
+        from shared.models import Url
+
+        try:
+            raw_words = extract_word_count(response.selector)
+        except Exception:
+            raw_words = 0
+        raw_types: list[str] = []
+        try:
+            for item in extract_structured_data(response.text, response.url):
+                if item.get("format") == "jsonld" and item.get("schema_type"):
+                    raw_types.append(item["schema_type"])
+        except Exception:
+            pass
+
+        url_hash = compute_url_hash(response.url)
+        session = SessionLocal()
+        try:
+            updated = (
+                session.query(Url)
+                .filter(Url.job_id == self.job_id, Url.url_hash == url_hash)
+                .update({
+                    "raw_word_count": raw_words,
+                    "raw_schema_types": sorted(set(raw_types)),
+                })
+            )
+            session.commit()
+            if not updated:
+                logger.debug("GEO raw fetch: no row yet for %s", response.url)
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to persist GEO raw data")
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------
     # Soft-404 probe (T6)

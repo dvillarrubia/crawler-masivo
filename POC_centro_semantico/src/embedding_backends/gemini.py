@@ -110,6 +110,110 @@ class GeminiBackend:
         vecs = self._embed_batch([text], task_type="RETRIEVAL_QUERY")
         return l2_normalize(np.asarray(vecs[0]))
 
+    def embed_documents_with_chunks(
+        self,
+        texts: list[str],
+        headings_per_page: list[list[dict]] | None = None,
+        strategy: str = "fixed",
+        chunk_embedding_mode: str = "aggregate",
+        cut_percentile: float = 90.0,
+        progress_callback: ProgressCallback | None = None,
+    ) -> tuple[np.ndarray, list[list[dict]]]:
+        """T11: like :meth:`embed_documents` but also returns per-page chunk
+        metadata for persistence (``semantic_chunks``).
+
+        ``fixed`` reproduces the historical pipeline exactly (same chunking,
+        same single batch, same representative vector) — the chunk metadata
+        is a free by-product of the flat embeddings. ``semantic`` uses
+        :func:`semantic_chunk_text` (heading boundaries + embedding cuts);
+        with ``aggregate`` the API call count matches the window count, and
+        with ``reembed`` a second pass embeds every final chunk.
+        """
+        total = len(texts)
+        empty = np.zeros((0, self.dim), dtype=np.float32)
+        if total == 0:
+            return empty, []
+
+        if strategy != "semantic":
+            per_page_chunks: list[list[str]] = []
+            flat_chunks: list[str] = []
+            for text in texts:
+                chunks = chunk_text(text, size=DOC_CHUNK_SIZE, overlap=DOC_CHUNK_OVERLAP)
+                if not chunks:
+                    chunks = [text or " "]
+                per_page_chunks.append(chunks)
+                flat_chunks.extend(chunks)
+
+            flat_embeddings = self._embed_batch(
+                flat_chunks,
+                task_type="RETRIEVAL_DOCUMENT",
+                progress_callback=self._wrap_chunk_progress(
+                    progress_callback, per_page_chunks, total
+                ),
+            )
+
+            out: list[np.ndarray] = []
+            meta: list[list[dict]] = []
+            offset = 0
+            for chunks in per_page_chunks:
+                n = len(chunks)
+                page_embs = flat_embeddings[offset : offset + n]
+                offset += n
+                out.append(_representative_vector(page_embs))
+                normed = l2_normalize(np.asarray(page_embs))
+                meta.append([
+                    {
+                        "position": i,
+                        "heading_path": None,
+                        "text": c,
+                        "word_count": len(c.split()),
+                        "char_start": None,
+                        "char_end": None,
+                        "embedding": normed[i].tolist(),
+                        "strategy": "fixed",
+                    }
+                    for i, c in enumerate(chunks)
+                ])
+            return l2_normalize(np.array(out)), meta
+
+        # -- semantic strategy ------------------------------------------------
+        from POC_centro_semantico.src.text_utils import semantic_chunk_text
+
+        def _embed_fn(windows: list[str]) -> np.ndarray:
+            return self._embed_batch(windows, task_type="RETRIEVAL_DOCUMENT")
+
+        out = []
+        meta = []
+        for page_idx, text in enumerate(texts):
+            headings = (headings_per_page or [[]] * total)[page_idx]
+            chunks = semantic_chunk_text(
+                text,
+                headings=headings,
+                embed_fn=_embed_fn,
+                cut_percentile=cut_percentile,
+                chunk_embedding_mode=chunk_embedding_mode,
+            )
+            embs = [c["embedding"] for c in chunks if c.get("embedding")]
+            if embs:
+                out.append(_representative_vector(np.asarray(embs, dtype=np.float32)))
+            else:
+                # Page too short for windows: embed it whole (one call).
+                whole = self._embed_batch([text or " "], task_type="RETRIEVAL_DOCUMENT")
+                out.append(whole[0])
+                if chunks:
+                    normed = l2_normalize(np.asarray(whole))
+                    chunks[0]["embedding"] = normed[0].tolist()
+            for c in chunks:
+                c["strategy"] = "semantic"
+            meta.append(chunks)
+            if progress_callback is not None:
+                try:
+                    progress_callback(page_idx + 1, total)
+                except Exception:
+                    pass
+
+        return l2_normalize(np.array(out)), meta
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

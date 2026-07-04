@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -68,6 +69,8 @@ def _resolve_gemini_key_from_analysis(
 # there is a single maintained tracking-param list in the codebase. This
 # alias keeps existing call sites working.
 from shared.url_normalization import normalize_for_match as _normalize_url_for_match
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -327,10 +330,21 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
             fetch_gsc_data as _fetch,
             fetch_gsc_query_page_data as _fetch_queries,
         )
+        from shared.url_normalization import (
+            UrlNormalizationConfig,
+            compute_url_hash as _hash,
+        )
 
         df = _fetch(account.credentials_json, body.property_url, days=body.days)
         if df.empty:
-            return {"matched": 0, "total_gsc_rows": 0, "query_rows": 0}
+            return {"matched": 0, "unmatched": 0, "total_gsc_rows": 0, "query_rows": 0}
+
+        # T8/T9: hash GSC URLs under THIS job's normalization config so the
+        # hashes join against the crawl's url_hash.
+        job = db.query(Job).filter(Job.id == job_id).first()
+        norm_config = UrlNormalizationConfig.from_job_config(
+            job.config if job else None
+        )
 
         # Match GSC URLs to crawled URLs. We do both an exact match and a
         # normalized match (lowercased, trailing slash stripped, tracking
@@ -349,19 +363,27 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
         db.query(GscJobData).filter(GscJobData.job_id == job_id).delete()
         db.query(GscQueryData).filter(GscQueryData.job_id == job_id).delete()
 
+        # T9/D2: unmatched GSC URLs are KEPT (url_id NULL) — they are the
+        # orphan candidates that used to be silently discarded.
         matched = 0
+        unmatched = 0
         for _, row in df.iterrows():
-            url_id = _resolve_url_id(row["url"])
+            raw_url = str(row["url"])
+            url_id = _resolve_url_id(raw_url)
             if url_id:
-                db.add(GscJobData(
-                    job_id=job_id,
-                    url_id=url_id,
-                    clicks=int(row["clicks"]),
-                    impressions=int(row["impressions"]),
-                    ctr=float(row["ctr"]),
-                    position=float(row["position"]),
-                ))
                 matched += 1
+            else:
+                unmatched += 1
+            db.add(GscJobData(
+                job_id=job_id,
+                url_id=url_id,
+                url=raw_url,
+                url_hash=_hash(raw_url, norm_config),
+                clicks=int(row["clicks"]),
+                impressions=int(row["impressions"]),
+                ctr=float(row["ctr"]),
+                position=float(row["position"]),
+            ))
 
         # Fetch query+page data for cannibalization validation
         query_matched = 0
@@ -387,7 +409,12 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
             pass  # Query data is optional, don't fail the whole fetch
 
         db.commit()
-        return {"matched": matched, "total_gsc_rows": len(df), "query_rows": query_matched}
+        return {
+            "matched": matched,
+            "unmatched": unmatched,
+            "total_gsc_rows": len(df),
+            "query_rows": query_matched,
+        }
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -435,6 +462,9 @@ def _run_analysis_thread(
             gsc_data=gsc_data,
             progress_callback=progress_cb,
             backend=backend,
+            # T11 (default fixed = comportamiento actual bit a bit)
+            chunking_strategy=config.get("chunking_strategy", "fixed"),
+            chunk_embedding_mode=config.get("chunk_embedding_mode", "aggregate"),
         )
 
         if result.get("error"):
@@ -452,9 +482,12 @@ def _run_analysis_thread(
         analysis.total_pages = result["total_pages"]
         analysis.completed_at = datetime.now(timezone.utc)
 
-        # Delete old pages/cannibal data for this analysis (safety)
+        # Delete old pages/cannibal/chunk data for this analysis (safety)
         db.query(SemanticPage).filter(SemanticPage.analysis_id == analysis_uuid).delete()
         db.query(SemanticCannibalization).filter(SemanticCannibalization.analysis_id == analysis_uuid).delete()
+        from shared.semantic_models import SemanticChunk
+
+        db.query(SemanticChunk).filter(SemanticChunk.analysis_id == analysis_uuid).delete()
 
         # Insert pages
         for p in result["pages"]:
@@ -473,6 +506,21 @@ def _run_analysis_thread(
                 y=p["y"],
             ))
 
+        # T11: persist chunk-level embeddings (passage-level GEO basis)
+        for c in result.get("chunks", []):
+            db.add(SemanticChunk(
+                analysis_id=analysis_uuid,
+                url_id=c["url_id"],
+                position=c["position"],
+                heading_path=c.get("heading_path"),
+                text=c["text"],
+                word_count=c.get("word_count"),
+                char_start=c.get("char_start"),
+                char_end=c.get("char_end"),
+                embedding=c.get("embedding"),
+                strategy=c.get("strategy", "fixed"),
+            ))
+
         # Insert cannibalization pairs
         for pair in result["cannibalization"]:
             db.add(SemanticCannibalization(
@@ -483,6 +531,21 @@ def _run_analysis_thread(
             ))
 
         db.commit()
+
+        # T10: acción a partir del análisis — sugerencias de enlazado y
+        # canibalización como issues firmables. Nunca bloquean el análisis.
+        try:
+            from analysis.link_suggester import (
+                emit_cannibalization_issues,
+                generate_for_job,
+            )
+
+            generate_for_job(db, job_uuid, analysis_uuid)
+            emit_cannibalization_issues(db, job_uuid, analysis_uuid)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Link suggestions failed (analysis %s)", analysis_id)
 
     except Exception as e:
         try:

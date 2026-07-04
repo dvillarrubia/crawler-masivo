@@ -131,6 +131,29 @@ class SemanticCannibalization(Base):
 
 
 # ---------------------------------------------------------------------------
+# Semantic Chunks (T11) — persisted passage-level embeddings.
+# ---------------------------------------------------------------------------
+class SemanticChunk(Base):
+    __tablename__ = "semantic_chunks"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("semantic_analyses.id", ondelete="CASCADE"), nullable=False)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)
+    heading_path = Column(Text, nullable=True)   # "H1 > H2 > H3" of the passage
+    text = Column(Text, nullable=False)
+    word_count = Column(Integer, nullable=True)
+    char_start = Column(Integer, nullable=True)
+    char_end = Column(Integer, nullable=True)
+    embedding = Column(Vector(1024), nullable=True)
+    strategy = Column(String(16), nullable=False, default="fixed")  # fixed | semantic
+
+    __table_args__ = (
+        Index("ix_semantic_chunks_analysis_url", "analysis_id", "url_id", "position"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # GSC Job Data (GSC metrics linked to a crawl job)
 # ---------------------------------------------------------------------------
 class GscJobData(Base):
@@ -138,7 +161,13 @@ class GscJobData(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
-    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    # T9/D2: nullable — GSC URLs with no crawl match are kept (orphan
+    # candidates) instead of silently discarded.
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=True)
+    # T9/D2: raw GSC URL + hash under the job's normalization (T8), so
+    # unmatched rows stay joinable and auditable.
+    url = Column(Text, nullable=True)
+    url_hash = Column(String(64), nullable=True)
     clicks = Column(Integer, default=0)
     impressions = Column(Integer, default=0)
     ctr = Column(Float, nullable=True)
@@ -147,6 +176,7 @@ class GscJobData(Base):
     __table_args__ = (
         Index("ix_gsc_job_data_job", "job_id"),
         Index("ix_gsc_job_data_url", "url_id"),
+        Index("ix_gsc_job_data_hash", "job_id", "url_hash"),
     )
 
 

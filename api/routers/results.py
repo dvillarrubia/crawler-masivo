@@ -600,6 +600,26 @@ def get_stats(
             },
         )
 
+    # T15: GEO block only for geo_analysis jobs — never fake zeros.
+    geo = None
+    if (job.config or {}).get("geo_analysis"):
+        geo_rows = _seg(
+            db.query(Url.js_content_ratio).filter(
+                Url.job_id == job_id, Url.js_content_ratio.isnot(None),
+            ),
+            Url.id,
+        ).all()
+        ratios = [r[0] for r in geo_rows]
+        issue_counts = {i.issue_type: i.count for i in issues_by_type}
+        geo = {
+            "pages_evaluated": len(ratios),
+            "avg_js_content_ratio": (
+                round(sum(ratios) / len(ratios), 4) if ratios else None
+            ),
+            "content_only_after_js": issue_counts.get("content_only_after_js", 0),
+            "schema_only_after_js": issue_counts.get("schema_only_after_js", 0),
+        }
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -612,6 +632,7 @@ def get_stats(
         internal_count=internal_count,
         external_count=external_count,
         latency=latency,
+        geo=geo,
     )
 
 
@@ -901,6 +922,120 @@ def export_csv(
             "Content-Disposition": f"attachment; filename=job_{job_id}_{entity}.csv",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/link-suggestions  --  signing queue (T10)
+# ---------------------------------------------------------------------------
+@router.get("/link-suggestions")
+def list_link_suggestions(
+    job_id: uuid.UUID,
+    status: str | None = Query(None, pattern="^(pending|accepted|rejected)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """T10: semantic linking suggestions with their signing state.
+
+    Blocked-source rule: without a completed semantic analysis this
+    answers an explicit blocked status, never a silent empty list.
+    """
+    _get_job_or_404(job_id, db)
+    from shared.models import LinkSuggestion
+
+    base = db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id)
+    if base.first() is None:
+        return {"status": "blocked", "reason": "semantic_analysis_not_run"}
+
+    q = base
+    if status is not None:
+        q = q.filter(LinkSuggestion.status == status)
+    total = q.count()
+    rows = (
+        q.order_by(LinkSuggestion.score.desc().nulls_last(), LinkSuggestion.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = [
+        {
+            "id": s.id,
+            "target_url": s.target_url,
+            "source_url": s.source_url,
+            "cosine_similarity": s.cosine_similarity,
+            "source_pagerank": s.source_pagerank,
+            "score": s.score,
+            "status": s.status,
+            "decided_by": s.decided_by,
+            "decided_at": s.decided_at,
+        }
+        for s in rows
+    ]
+    resp = _paginate(items, total, page, page_size)
+    resp["status"] = "ok"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/striking-distance  --  linking work queue (T9)
+# ---------------------------------------------------------------------------
+@router.get("/striking-distance")
+def striking_distance(
+    job_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """T9: URLs with average position 5–15, ordered by impressions desc and
+    pagerank asc — the internal-linking work queue.
+
+    Blocked-source rule: without GSC data this answers an explicit
+    ``{"status": "blocked"}``, never a silent empty list.
+    """
+    _get_job_or_404(job_id, db)
+
+    try:
+        from shared.semantic_models import GscJobData
+    except ImportError:
+        return {"status": "blocked", "reason": "gsc_not_configured"}
+
+    has_data = (
+        db.query(GscJobData.id).filter(GscJobData.job_id == job_id).first()
+    )
+    if not has_data:
+        return {"status": "blocked", "reason": "gsc_not_configured"}
+
+    q = (
+        db.query(GscJobData, Url)
+        .join(Url, Url.id == GscJobData.url_id)
+        .filter(
+            GscJobData.job_id == job_id,
+            GscJobData.position >= 5,
+            GscJobData.position <= 15,
+        )
+        .order_by(
+            GscJobData.impressions.desc(),
+            Url.pagerank.asc().nulls_last(),
+        )
+    )
+    total = q.count()
+    rows = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    items = [
+        {
+            "url": u.url,
+            "position": g.position,
+            "impressions": g.impressions,
+            "clicks": g.clicks,
+            "ctr": g.ctr,
+            "pagerank": u.pagerank,
+            "inlinks_count": u.inlinks_count,
+        }
+        for g, u in rows
+    ]
+    resp = _paginate(items, total, page, page_size)
+    resp["status"] = "ok"
+    return resp
 
 
 # ---------------------------------------------------------------------------

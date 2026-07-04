@@ -113,6 +113,11 @@ class Url(Base):
     # --- T14: 64-bit SimHash (signed) for near-duplicate detection ---
     simhash = Column(BigInteger, nullable=True)
 
+    # --- T15: GEO readiness — raw (no-JS) side of the page ---
+    raw_word_count = Column(Integer, nullable=True)          # words without JS
+    raw_schema_types = Column(JSON, nullable=True)           # JSON-LD types in raw HTML
+    js_content_ratio = Column(Float, nullable=True)          # share of text that needs JS
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")
@@ -127,6 +132,31 @@ class Url(Base):
         UniqueConstraint("job_id", "url_hash", name="uq_job_url"),
         Index("ix_urls_job_status", "job_id", "status_code"),
         Index("ix_urls_job_host", "job_id", "host"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Link suggestions (T10) — semantic internal-linking work queue, signable.
+# ---------------------------------------------------------------------------
+class LinkSuggestion(Base):
+    __tablename__ = "link_suggestions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    target_url_hash = Column(String(64), nullable=False)   # page that NEEDS links
+    source_url_hash = Column(String(64), nullable=False)   # page that should link to it
+    target_url = Column(Text, nullable=True)
+    source_url = Column(Text, nullable=True)
+    cosine_similarity = Column(Float, nullable=False)
+    source_pagerank = Column(Float, nullable=True)
+    score = Column(Float, nullable=True)                    # similarity × pr_norm
+    status = Column(String(16), nullable=False, default="pending")  # pending|accepted|rejected
+    decided_by = Column(Text, nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_link_suggestions_job", "job_id"),
+        Index("ix_link_suggestions_job_status", "job_id", "status"),
     )
 
 
@@ -354,6 +384,9 @@ class StructuredData(Base):
     validation_status = Column(String(10), nullable=True)  # ok, warning, error
     validation_issues = Column(JSON, nullable=True)
 
+    # T15: whether this block exists in the raw (no-JS) HTML too
+    visible_without_js = Column(Boolean, nullable=True)
+
     url_rel = relationship("Url", back_populates="structured_data")
 
 
@@ -422,6 +455,13 @@ class Issue(Base):
     severity = Column(String(10), nullable=False)  # error, warning, info
     details = Column(JSON, nullable=True)
     detected_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    # T10: judgement checks are signable. NULL for deterministic issues
+    # (nothing changes for them); 'pending' | 'signed' | 'rejected' for the
+    # ones born from semantic judgement. Nothing auto-accepts.
+    review_status = Column(String(16), nullable=True)
+    reviewed_by = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
 
     url_rel = relationship("Url", back_populates="issues")
 

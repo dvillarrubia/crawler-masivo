@@ -45,6 +45,8 @@ class SemanticEngine:
         gsc_data: dict[str, dict] | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
         backend: EmbeddingBackend | None = None,
+        chunking_strategy: str = "fixed",
+        chunk_embedding_mode: str = "aggregate",
     ) -> dict:
         """Execute semantic analysis and return results dict.
 
@@ -125,7 +127,34 @@ class SemanticEngine:
             pct = 20 + int(30 * done / max(total, 1))
             _progress(f"embedding {done}/{total}", min(pct, 49))
 
-        vectors = backend.embed_documents(texts, progress_callback=_embed_progress)
+        # T11: when the backend supports chunk metadata, use it (fixed
+        # strategy is bit-for-bit the historical pipeline) and expose the
+        # chunks for persistence. Otherwise fall back to plain embedding.
+        chunks_per_page: list[list[dict]] = []
+        if hasattr(backend, "embed_documents_with_chunks"):
+            headings_per_page: list[list[dict]] | None = None
+            if chunking_strategy == "semantic":
+                from shared.models import Heading
+
+                h_rows = db.execute(
+                    select(Heading.url_id, Heading.tag, Heading.text)
+                    .where(Heading.url_id.in_(url_ids))
+                    .order_by(Heading.url_id, Heading.position)
+                ).all()
+                by_url: dict[int, list[dict]] = {}
+                for uid, tag, h_text in h_rows:
+                    by_url.setdefault(uid, []).append({"tag": tag, "text": h_text})
+                headings_per_page = [by_url.get(uid, []) for uid in url_ids]
+
+            vectors, chunks_per_page = backend.embed_documents_with_chunks(
+                texts,
+                headings_per_page=headings_per_page,
+                strategy=chunking_strategy,
+                chunk_embedding_mode=chunk_embedding_mode,
+                progress_callback=_embed_progress,
+            )
+        else:
+            vectors = backend.embed_documents(texts, progress_callback=_embed_progress)
 
         _progress("weighting", 50)
 
@@ -272,12 +301,19 @@ class SemanticEngine:
 
         _progress("done", 100)
 
+        # T11: flatten chunk metadata (url_id attached) for persistence.
+        chunks_out: list[dict] = []
+        for uid, page_chunks in zip(url_ids, chunks_per_page):
+            for c in page_chunks:
+                chunks_out.append({"url_id": uid, **c})
+
         return {
             "pages": pages_data,
             "centroid": centroid.tolist(),
             "site_metrics": site_metrics,
             "cannibalization": cannibal_pairs,
             "drift": drift_data,
+            "chunks": chunks_out,
             "config": {
                 "alpha": alpha,
                 "beta": beta,
@@ -285,6 +321,9 @@ class SemanticEngine:
                 "embedding_provider": backend.name,
                 "embedding_model": backend.model if hasattr(backend, "model") else None,
                 "embedding_dim": backend.dim,
+                # T11: reproducibilidad de la estrategia de chunking
+                "chunking_strategy": chunking_strategy,
+                "chunk_embedding_mode": chunk_embedding_mode,
             },
             "total_pages": n_pages,
         }

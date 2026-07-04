@@ -200,6 +200,8 @@ class SEOAnalyzer:
         self.analyze_watchlist()
         self.analyze_crawl_traps()
         self.analyze_freshness()
+        self.analyze_gsc_signals()
+        self.analyze_geo()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1936,9 +1938,75 @@ class SEOAnalyzer:
             )
             self.session.flush()
 
+        # 1b. T9: GSC URLs the crawl never saw are orphan candidates too.
+        # semantic_models needs pgvector; the worker image may not ship it,
+        # so this source degrades gracefully.
+        gsc_hashes: set[str] = set()
+        try:
+            from shared.semantic_models import GscJobData
+
+            gsc_hashes = {
+                h for (h,) in self.session.execute(
+                    select(GscJobData.url_hash).where(
+                        GscJobData.job_id == self.job_id,
+                        GscJobData.url_hash.isnot(None),
+                    )
+                ).all()
+            }
+            gsc_missing = self.session.execute(
+                select(GscJobData.url, GscJobData.url_hash)
+                .where(
+                    GscJobData.job_id == self.job_id,
+                    GscJobData.url_id.is_(None),
+                    GscJobData.url.isnot(None),
+                    ~select(Url.id)
+                    .where(
+                        Url.job_id == self.job_id,
+                        Url.url_hash == GscJobData.url_hash,
+                    )
+                    .exists(),
+                )
+                .distinct()
+            ).all()
+            for url, url_hash in gsc_missing:
+                parsed = _urlparse(url)
+                self.session.add(Url(
+                    job_id=self.job_id,
+                    url=url,
+                    url_hash=url_hash,
+                    host=parsed.hostname,
+                    path=parsed.path or None,
+                    scheme=parsed.scheme or None,
+                    is_internal=True,
+                    is_html=False,
+                    status_group="not_crawled",
+                ))
+            if gsc_missing:
+                self.session.flush()
+                missing = True  # force the counter-NULL safeguard below
+        except ImportError:
+            pass
+
+        if missing:
+            self.session.execute(
+                update(Url)
+                .where(
+                    Url.job_id == self.job_id,
+                    Url.status_group == "not_crawled",
+                )
+                .values(
+                    inlinks_count=None,
+                    outlinks_count=None,
+                    unique_inlinks_count=None,
+                    external_outlinks_count=None,
+                )
+            )
+            self.session.flush()
+
         # 2. Emit the issue for EVERY not_crawled row (idempotent re-runs).
         rows = self.session.execute(
-            select(Url.id, Url.sitemap_lastmod, SitemapUrl.id.isnot(None))
+            select(Url.id, Url.url_hash, Url.sitemap_lastmod,
+                   SitemapUrl.id.isnot(None))
             .outerjoin(SitemapUrl, and_(
                 SitemapUrl.job_id == Url.job_id,
                 SitemapUrl.url_hash == Url.url_hash,
@@ -1949,8 +2017,10 @@ class SEOAnalyzer:
             )
         ).all()
 
-        for url_id, lastmod, in_sitemap in rows:
-            seen_in = ["sitemap"] if in_sitemap else []
+        for url_id, url_hash, lastmod, in_sitemap in rows:
+            seen_in = (["sitemap"] if in_sitemap else []) + (
+                ["gsc"] if url_hash in gsc_hashes else []
+            )
             self._add_issue(
                 url_id,
                 "orphan_not_in_crawl",
@@ -1963,6 +2033,172 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+
+    # -- GEO readiness (T15) ----------------------------------------------------
+
+    def analyze_geo(self) -> None:
+        """T15: what only exists after executing JS is invisible to AI
+        crawlers (and to Google's first pass).
+
+        For pages with both sides captured, derives ``js_content_ratio``
+        (share of rendered text absent from the raw HTML), stamps
+        ``structured_data.visible_without_js`` and emits:
+        * ``content_only_after_js`` (error) above the ratio threshold;
+        * ``schema_only_after_js`` (warning) for JSON-LD blocks missing
+          from the raw HTML.
+        Jobs without the flag: columns stay NULL, zero changes.
+        """
+        config = (self._job.config or {}) if self._job else {}
+        if not config.get("geo_analysis"):
+            return
+
+        threshold = (
+            config.get("analysis_thresholds", {}) or {}
+        ).get("geo_js_content_threshold", 0.5)
+
+        logger.debug("Analyzing GEO readiness ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.word_count, Url.raw_word_count,
+                   Url.raw_schema_types)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                Url.raw_word_count.isnot(None),
+            )
+        ).all()
+
+        for url_id, rendered_words, raw_words, raw_types in rows:
+            rendered = rendered_words or 0
+            ratio = 0.0
+            if rendered > 0:
+                ratio = max(0.0, 1.0 - (raw_words or 0) / rendered)
+            self.session.execute(
+                update(Url).where(Url.id == url_id)
+                .values(js_content_ratio=round(ratio, 4))
+            )
+            if ratio >= threshold and rendered > 0:
+                self._add_issue(
+                    url_id, "content_only_after_js", "error",
+                    {
+                        "js_content_ratio": round(ratio, 4),
+                        "rendered_word_count": rendered,
+                        "raw_word_count": raw_words or 0,
+                        "threshold": threshold,
+                    },
+                )
+
+            # JSON-LD visibility: rendered blocks vs raw types
+            raw_set = set(raw_types or [])
+            sd_rows = self.session.execute(
+                select(StructuredData.id, StructuredData.schema_type)
+                .where(
+                    StructuredData.url_id == url_id,
+                    StructuredData.format == "jsonld",
+                )
+            ).all()
+            missing_types = []
+            for sd_id, schema_type in sd_rows:
+                visible = schema_type in raw_set if schema_type else None
+                self.session.execute(
+                    update(StructuredData)
+                    .where(StructuredData.id == sd_id)
+                    .values(visible_without_js=visible)
+                )
+                if visible is False:
+                    missing_types.append(schema_type)
+            if missing_types:
+                self._add_issue(
+                    url_id, "schema_only_after_js", "warning",
+                    {"schema_types": sorted(set(missing_types))},
+                )
+
+        self.session.flush()
+        self._flush_issues()
+
+    # -- GSC signals (T9) -------------------------------------------------------
+
+    def analyze_gsc_signals(self) -> None:
+        """T9: cross GSC metrics with the link graph.
+
+        * ``no_inlinks_with_traffic`` (warning): 0 inlinks × clicks > 0.
+        * ``underlinked_high_performer`` (info): pagerank < P25 of the job
+          × clicks > P75 of the job's clicked pages.
+
+        No-op when the job has no GSC data (never a silent empty result:
+        the API exposes the blocked state separately).
+        """
+        try:
+            from shared.semantic_models import GscJobData
+        except ImportError:
+            return
+
+        rows = self.session.execute(
+            select(GscJobData.url_id, GscJobData.clicks)
+            .where(
+                GscJobData.job_id == self.job_id,
+                GscJobData.url_id.isnot(None),
+            )
+        ).all()
+        clicks_by_url = {url_id: (clicks or 0) for url_id, clicks in rows}
+        if not clicks_by_url:
+            return
+
+        logger.debug("Analyzing GSC signals (%d URLs) ...", len(clicks_by_url))
+
+        import math as _math
+
+        def _nearest_rank(values: list[float], p: float) -> float | None:
+            if not values:
+                return None
+            ordered = sorted(values)
+            idx = min(len(ordered) - 1, max(0, _math.ceil(p * len(ordered)) - 1))
+            return ordered[idx]
+
+        pr_values = [
+            float(pr) for (pr,) in self.session.execute(
+                select(Url.pagerank).where(
+                    Url.job_id == self.job_id,
+                    Url.is_internal.is_(True),
+                    Url.is_html.is_(True),
+                    Url.pagerank.isnot(None),
+                )
+            ).all()
+        ]
+        p25_pr = _nearest_rank(pr_values, 0.25)
+        p75_clicks = _nearest_rank(
+            [float(c) for c in clicks_by_url.values() if c > 0], 0.75,
+        )
+
+        url_rows = self.session.execute(
+            select(Url.id, Url.inlinks_count, Url.pagerank)
+            .where(Url.job_id == self.job_id, Url.id.in_(clicks_by_url))
+        ).all()
+
+        for url_id, inlinks, pagerank in url_rows:
+            clicks = clicks_by_url.get(url_id, 0)
+            if clicks > 0 and inlinks == 0:
+                self._add_issue(
+                    url_id, "no_inlinks_with_traffic", "warning",
+                    {"clicks": clicks, "inlinks": 0},
+                )
+            if (
+                p25_pr is not None and p75_clicks is not None
+                and pagerank is not None
+                and pagerank < p25_pr and clicks > p75_clicks
+            ):
+                self._add_issue(
+                    url_id, "underlinked_high_performer", "info",
+                    {
+                        "clicks": clicks,
+                        "pagerank": pagerank,
+                        "pagerank_p25": p25_pr,
+                        "clicks_p75": p75_clicks,
+                    },
+                )
+        self._flush_issues()
 
     # -- Watchlist (T16) --------------------------------------------------------
 

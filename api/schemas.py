@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared.config import (
     DEFAULT_CONCURRENT_REQUESTS,
@@ -164,10 +164,22 @@ class JobConfig(BaseModel):
     detect_soft_404: bool = False
     # T5: job anterior contra el que evaluar frescura (stale_lastmod)
     compare_to_job_id: str | None = None
+    # T15: comparar HTML crudo vs renderizado (exige render_js)
+    geo_analysis: bool = False
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
 
     # Advanced configuration sub-models
+    @model_validator(mode="after")
+    def _geo_requires_render_js(self):
+        # T15: sin render no hay DOM renderizado que comparar
+        if self.geo_analysis and not self.render_js:
+            raise ValueError(
+                "geo_analysis requiere render_js=true: compara el HTML "
+                "crudo con el DOM renderizado por el navegador"
+            )
+        return self
+
     resource_types: ResourceTypeConfig = Field(default_factory=ResourceTypeConfig)
     crawl_behavior: CrawlBehaviorConfig = Field(default_factory=CrawlBehaviorConfig)
     url_filters: UrlFilterConfig = Field(default_factory=UrlFilterConfig)
@@ -406,6 +418,11 @@ class IssueResponse(BaseModel):
     severity: str
     details: dict[str, Any] | None = None
     detected_at: datetime | None = None
+    # T10: NULL para issues deterministas; pending/signed/rejected para
+    # los checks de juicio (canibalización semántica)
+    review_status: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +499,8 @@ class JobStats(BaseModel):
     external_count: int = 0
     # T17.3 — None when the job has no timed responses
     latency: LatencyStats | None = None
+    # T15 — present only for geo_analysis jobs (never fake zeros)
+    geo: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

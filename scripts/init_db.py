@@ -38,6 +38,28 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS dom_container TEXT"))
         # T14: SimHash para near-duplicates
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS simhash BIGINT"))
+        # T9/D2: conservar URLs de GSC sin match en el crawl
+        conn.execute(text("ALTER TABLE gsc_job_data ADD COLUMN IF NOT EXISTS url TEXT"))
+        conn.execute(text("ALTER TABLE gsc_job_data ADD COLUMN IF NOT EXISTS url_hash VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE gsc_job_data ALTER COLUMN url_id DROP NOT NULL"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_gsc_job_data_hash "
+            "ON gsc_job_data (job_id, url_hash)"
+        ))
+        # T10: issues firmables (NULL = issue determinista, nada cambia)
+        conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS review_status VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS reviewed_by TEXT"))
+        conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ"))
+        # T15: GEO crudo vs renderizado
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS raw_word_count INT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS raw_schema_types JSON"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS js_content_ratio FLOAT"))
+        conn.execute(text("ALTER TABLE structured_data ADD COLUMN IF NOT EXISTS visible_without_js BOOLEAN"))
+        # T11: índice HNSW para chunks semánticos (create_all no lo crea)
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_semantic_chunks_embedding "
+            "ON semantic_chunks USING hnsw (embedding vector_cosine_ops)"
+        ))
         conn.commit()
     print("Migrations applied.")
 
