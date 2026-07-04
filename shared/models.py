@@ -118,6 +118,12 @@ class Url(Base):
     raw_schema_types = Column(JSON, nullable=True)           # JSON-LD types in raw HTML
     js_content_ratio = Column(Float, nullable=True)          # share of text that needs JS
 
+    # --- T23: architecture — REAL click depth from home (≠ crawl_depth,
+    # which is discovery depth and depends on crawl order/seeds) ---
+    click_depth = Column(Integer, nullable=True)
+    in_contextual = Column(Integer, nullable=True)           # contextual inlinks (T22 classes)
+    out_contextual = Column(Integer, nullable=True)          # contextual outlinks
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")
@@ -133,6 +139,50 @@ class Url(Base):
         Index("ix_urls_job_status", "job_id", "status_code"),
         Index("ix_urls_job_host", "job_id", "host"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Architecture (T22/T23) — aggregated edge view + section flows.
+# ---------------------------------------------------------------------------
+class ArchEdge(Base):
+    """T22: aggregated graph view. Sitewide targets collapse their sources
+    into one row (source_hash='*') so a 15-item menu on 100k pages is 15
+    rows, not 1.5M. Per-occurrence detail stays in ``links`` untouched.
+    """
+
+    __tablename__ = "arch_edges"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
+    source_hash = Column(String(64), primary_key=True)   # '*' = sitewide-collapsed
+    target_hash = Column(String(64), primary_key=True)
+    edge_class = Column(String(16), primary_key=True)
+    n_pages = Column(Integer, nullable=False, default=0)
+    sitewide = Column(Boolean, nullable=False, default=False)
+    anchor_sample = Column(Text, nullable=True)
+
+
+class ClientSelector(Base):
+    """T22: per-client DOM selectors (substring match on dom_container)
+    because every CMS has its own class names.
+    """
+
+    __tablename__ = "client_selectors"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    client_id = Column(String(128), nullable=False, index=True)
+    edge_class = Column(String(16), nullable=False)
+    selector = Column(String(256), nullable=False)
+
+
+class SectionFlow(Base):
+    """T23: authority flow between segments (the blocks-and-arrows map)."""
+
+    __tablename__ = "section_flows"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
+    segment_from = Column(BigInteger, primary_key=True, default=0)  # 0 = (sin segmento)
+    segment_to = Column(BigInteger, primary_key=True, default=0)
+    flow = Column(Float, nullable=False, default=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +274,8 @@ class Segment(Base):
     rule = Column(Text, nullable=False)      # evaluated against the URL path
     priority = Column(Integer, nullable=False, default=100)  # lower wins
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+    # T23: business sections get stricter architecture thresholds
+    is_business = Column(Boolean, nullable=False, default=False)
 
 
 class UrlSegment(Base):
@@ -345,6 +397,11 @@ class Link(Base):
     # --- T17.5.b: DOM context for the edge classifier (T22) ---
     dom_ancestor = Column(String(16), nullable=True)      # nearest semantic ancestor tag
     dom_container = Column(Text, nullable=True)           # tag.classes#id of nearest classed container
+
+    # --- T22: fine edge taxonomy (link_position's 5 values stay untouched) ---
+    # contextual | listado | breadcrumb | paginacion | menu | footer |
+    # sidebar | desconocido — NULL when edge_classification is off.
+    edge_class = Column(String(16), nullable=True)
 
     from_url_rel = relationship("Url", foreign_keys=[from_url_id])
 

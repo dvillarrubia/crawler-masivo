@@ -31,7 +31,8 @@ def init_db():
         Job, Url, HtmlMeta, Heading, Link, Hreflang,
         StructuredData, Resource, Issue, SitemapUrl,
         Segment, UrlSegment, RobotsSnapshot, WatchlistEntry,
-        CrawlTrapEvent, LinkSuggestion,
+        CrawlTrapEvent, LinkSuggestion, ArchEdge, ClientSelector,
+        SectionFlow,
     )
     from shared.semantic_models import (  # noqa: F401 – force semantic table registration
         GscAccount, SemanticAnalysis, SemanticPage,

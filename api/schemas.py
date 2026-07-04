@@ -166,6 +166,8 @@ class JobConfig(BaseModel):
     compare_to_job_id: str | None = None
     # T15: comparar HTML crudo vs renderizado (exige render_js)
     geo_analysis: bool = False
+    # T22/T23: clasificador de aristas + capa de arquitectura
+    edge_classification: bool = False
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
 

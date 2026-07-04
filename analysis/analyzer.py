@@ -202,6 +202,7 @@ class SEOAnalyzer:
         self.analyze_freshness()
         self.analyze_gsc_signals()
         self.analyze_geo()
+        self.analyze_architecture()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -2034,7 +2035,194 @@ class SEOAnalyzer:
         self._flush_issues()
 
 
-    # -- GEO readiness (T15) ----------------------------------------------------
+    # -- Architecture (T22/T23) --------------------------------------------------
+
+    def analyze_architecture(self) -> None:
+        """T22 + T23: edge classifier, real click depth, section flows and
+        the deterministic ARQ checks. Gated by ``edge_classification``
+        (off → edge_class stays NULL, zero changes).
+
+        Orphan concepts, all three documented here so nobody confuses them:
+        * ``orphan_page``: crawled HTML with 0 inlinks.
+        * ``orphan_not_in_crawl``: known to sitemap/GSC, unreachable by the
+          crawl (synthetic ``not_crawled`` row).
+        * ``link_orphan`` (T23): crawled and indexable but with NO click
+          path from the home (reached only via sitemap discovery).
+        """
+        config = (self._job.config or {}) if self._job else {}
+        if not config.get("edge_classification"):
+            return
+
+        from analysis.architecture import (
+            classify_edges,
+            compute_click_depth,
+            compute_contextual_counters,
+            compute_section_flows,
+        )
+        from shared.models import Segment, UrlSegment
+        from shared.url_normalization import compute_url_hash as _hash
+
+        t = config.get("analysis_thresholds", {}) or {}
+        max_depth_business = t.get("excessive_click_depth_business", 4)
+        max_depth_default = t.get("excessive_click_depth", 5)
+        deep_pagination_max = t.get("deep_pagination_max", 3)
+        business_min_share = t.get("business_pagerank_min_share", 0.5)
+
+        logger.debug("Analyzing architecture ...")
+
+        client_id = self._job.client_id if self._job else None
+        summary = classify_edges(self.session, self.job_id, client_id)
+        logger.info("Edge classification: %s", summary)
+
+        seeds = {(
+            _hash(s, self._norm_config)
+        ) for s in (self._job.seeds or [])}
+        depth = compute_click_depth(self.session, self.job_id, seeds)
+        compute_contextual_counters(self.session, self.job_id)
+        compute_section_flows(self.session, self.job_id)
+
+        # Segment membership + business flags
+        seg_by_url = dict(self.session.execute(
+            select(UrlSegment.url_id, UrlSegment.segment_id)
+            .where(UrlSegment.job_id == self.job_id)
+        ).all())
+        business_segments = {
+            s.id for s in self.session.execute(
+                select(Segment).where(
+                    Segment.client_id == client_id,
+                    Segment.is_business.is_(True),
+                )
+            ).scalars()
+        } if client_id else set()
+
+        rows = self.session.execute(
+            select(Url.id, Url.url, Url.click_depth, Url.in_contextual,
+                   Url.out_contextual, Url.pagerank)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code >= 200,
+                Url.status_code < 300,
+                Url.indexable.isnot(False),
+            )
+        ).all()
+
+        pr_values = sorted(r.pagerank for r in rows if r.pagerank is not None)
+        p50_pr = pr_values[len(pr_values) // 2] if pr_values else None
+
+        for r in rows:
+            seg = seg_by_url.get(r.id)
+            is_business = seg in business_segments
+
+            # link_orphan: indexable without any click path from home
+            if r.click_depth is None:
+                self._add_issue(r.id, "link_orphan", "warning", {
+                    "reason": "no_click_path_from_home",
+                })
+            else:
+                limit = max_depth_business if is_business else max_depth_default
+                if r.click_depth >= limit:
+                    self._add_issue(r.id, "excessive_click_depth", "warning", {
+                        "click_depth": r.click_depth,
+                        "limit": limit,
+                        "is_business": is_business,
+                    })
+
+            if is_business and (r.in_contextual or 0) == 0:
+                self._add_issue(r.id, "no_contextual_inlinks", "warning", {
+                    "segment_id": seg,
+                })
+
+            if (
+                p50_pr is not None and r.pagerank is not None
+                and r.pagerank > p50_pr and (r.out_contextual or 0) == 0
+            ):
+                self._add_issue(r.id, "authority_sink", "info", {
+                    "pagerank": r.pagerank,
+                    "pagerank_p50": p50_pr,
+                    "template_fix": (
+                        "Un bloque de relacionados en la plantilla de esta "
+                        "sección repartiría autoridad desde todas las "
+                        "páginas equivalentes con un solo cambio."
+                    ),
+                })
+
+        # deep_pagination: chains of 'paginacion' edges longer than K
+        self._check_deep_pagination(deep_pagination_max)
+
+        # hierarchy_imbalance (job level)
+        if business_segments and pr_values:
+            share_by_segment: dict[int, float] = {}
+            total_pr = sum(pr_values) or 1.0
+            for r in rows:
+                seg = seg_by_url.get(r.id) or 0
+                share_by_segment[seg] = share_by_segment.get(seg, 0.0) + (r.pagerank or 0.0)
+            business_share = sum(
+                v for s, v in share_by_segment.items() if s in business_segments
+            ) / total_pr
+            if business_share < business_min_share:
+                home_id = rows[0].id if rows else None
+                for r in rows:
+                    if r.click_depth == 0:
+                        home_id = r.id
+                        break
+                if home_id is not None:
+                    self._add_issue(home_id, "hierarchy_imbalance", "warning", {
+                        "business_share": round(business_share, 4),
+                        "threshold": business_min_share,
+                        "distribution": {
+                            str(s): round(v / total_pr, 4)
+                            for s, v in sorted(share_by_segment.items())
+                        },
+                    })
+
+        self._flush_issues()
+
+    def _check_deep_pagination(self, max_len: int) -> None:
+        """T23: flag pagination chains longer than *max_len* hops."""
+        rows = self.session.execute(
+            select(Link.from_url_id, Url.id)
+            .join(Url, and_(
+                Url.job_id == Link.job_id,
+                Url.url_hash == Link.to_url_hash,
+            ))
+            .where(
+                Link.job_id == self.job_id,
+                Link.edge_class == "paginacion",
+            )
+        ).all()
+        if not rows:
+            return
+
+        nxt: dict[int, set[int]] = {}
+        has_incoming: set[int] = set()
+        for src, dst in rows:
+            nxt.setdefault(src, set()).add(dst)
+            has_incoming.add(dst)
+
+        memo: dict[int, int] = {}
+
+        def chain_len(node: int, seen: frozenset) -> int:
+            if node in memo:
+                return memo[node]
+            if node in seen:
+                return 0  # cycle guard
+            best = 0
+            for d in nxt.get(node, ()):
+                best = max(best, 1 + chain_len(d, seen | {node}))
+            memo[node] = best
+            return best
+
+        for start in nxt:
+            if start in has_incoming:
+                continue  # only chain heads
+            length = chain_len(start, frozenset())
+            if length > max_len:
+                self._add_issue(start, "deep_pagination", "info", {
+                    "chain_length": length,
+                    "max": max_len,
+                })
 
     def analyze_geo(self) -> None:
         """T15: what only exists after executing JS is invisible to AI

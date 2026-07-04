@@ -50,6 +50,12 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS review_status VARCHAR(16)"))
         conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS reviewed_by TEXT"))
         conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ"))
+        # T22/T23: arquitectura
+        conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS edge_class VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS click_depth INT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS in_contextual INT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS out_contextual INT"))
+        conn.execute(text("ALTER TABLE segments ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE"))
         # T15: GEO crudo vs renderizado
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS raw_word_count INT"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS raw_schema_types JSON"))
