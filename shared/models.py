@@ -110,6 +110,9 @@ class Url(Base):
     # --- T4: JS redirect detected by the Playwright flow (render_js only) ---
     js_redirect_url = Column(Text, nullable=True)            # browser final URL if JS-redirected
 
+    # --- T14: 64-bit SimHash (signed) for near-duplicate detection ---
+    simhash = Column(BigInteger, nullable=True)
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")
@@ -124,6 +127,24 @@ class Url(Base):
         UniqueConstraint("job_id", "url_hash", name="uq_job_url"),
         Index("ix_urls_job_status", "job_id", "status_code"),
         Index("ix_urls_job_host", "job_id", "host"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Crawl trap events (T13) — capped URL patterns, persisted at spider close.
+# ---------------------------------------------------------------------------
+class CrawlTrapEvent(Base):
+    __tablename__ = "crawl_trap_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    pattern = Column(Text, nullable=False)
+    urls_seen = Column(Integer, nullable=False, default=0)
+    urls_skipped = Column(Integer, nullable=False, default=0)
+    first_url_sample = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_crawl_trap_events_job", "job_id"),
     )
 
 

@@ -904,6 +904,74 @@ def export_csv(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/freshness  --  content change vs a previous job (T5)
+# ---------------------------------------------------------------------------
+@router.get("/freshness")
+def get_freshness(
+    job_id: uuid.UUID,
+    compare_to: uuid.UUID = Query(...),
+    only_changed: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """T5: which URLs changed content between two crawls of the same
+    client, by ``body_hash`` joined on ``url_hash``.
+    """
+    job = _get_job_or_404(job_id, db)
+    prev = db.query(Job).filter(Job.id == compare_to).first()
+    if prev is None:
+        raise HTTPException(status_code=404, detail="compare_to job not found")
+    if not job.client_id or job.client_id != prev.client_id:
+        raise HTTPException(
+            status_code=422, detail="Jobs must share the same client_id"
+        )
+    if getattr(job, "normalization_fingerprint", None) != getattr(
+        prev, "normalization_fingerprint", None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Jobs are not comparable (different normalization fingerprints)",
+        )
+
+    prev_hashes = dict(
+        db.query(Url.url_hash, Url.body_hash)
+        .filter(Url.job_id == compare_to, Url.body_hash.isnot(None))
+        .all()
+    )
+
+    rows = (
+        db.query(Url)
+        .filter(
+            Url.job_id == job_id,
+            Url.is_internal.is_(True),
+            Url.body_hash.isnot(None),
+        )
+        .order_by(Url.id)
+        .all()
+    )
+
+    items = []
+    for u in rows:
+        old = prev_hashes.get(u.url_hash)
+        body_changed = old is not None and old != u.body_hash
+        if only_changed and not body_changed:
+            continue
+        items.append({
+            "url": u.url,
+            "body_changed": body_changed,
+            "is_new": old is None,
+            "last_modified": u.last_modified,
+            "sitemap_lastmod": u.sitemap_lastmod,
+            "first_seen_at": u.first_seen_at,
+        })
+
+    total = len(items)
+    start = (page - 1) * page_size
+    return _paginate(items[start:start + page_size], total, page, page_size)
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/backup  --  full backup as ZIP with NDJSON
 # ---------------------------------------------------------------------------
 @router.get("/backup")

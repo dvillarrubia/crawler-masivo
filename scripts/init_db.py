@@ -36,6 +36,8 @@ if __name__ == "__main__":
         # T17.5.b: DOM context per link (prerequisite for T22)
         conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS dom_ancestor VARCHAR(16)"))
         conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS dom_container TEXT"))
+        # T14: SimHash para near-duplicates
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS simhash BIGINT"))
         conn.commit()
     print("Migrations applied.")
 

@@ -103,6 +103,14 @@ class HttpConfig(BaseModel):
     basic_auth_password: str = ""
 
 
+class TrapDetectionConfig(BaseModel):
+    """T13: crawl-trap protection (off by default = current behaviour)."""
+
+    enabled: bool = False
+    max_urls_per_pattern: int = Field(default=500, ge=10, le=100000)
+    max_param_combinations: int = Field(default=3, ge=1, le=20)
+
+
 class UrlNormalizationConfig(BaseModel):
     """URL normalization policy (T8). Defaults reproduce current behaviour."""
 
@@ -126,6 +134,11 @@ class AnalysisThresholdsConfig(BaseModel):
     equity_leak_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
     # T17.3: umbral de página lenta en milisegundos
     slow_page_ms: int = Field(default=3000, ge=100, le=120000)
+    # T14: near-duplicates (off = comportamiento actual)
+    near_duplicate_detection: Literal["off", "simhash", "embeddings"] = "off"
+    near_duplicate_hamming: int = Field(default=3, ge=1, le=16)
+    # T6: similitud de tokens con la plantilla de error del probe
+    soft404_similarity: float = Field(default=0.85, ge=0.5, le=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +160,10 @@ class JobConfig(BaseModel):
     impersonate: str = "chrome124"
     # T1: ingest sitemap.xml at job start (in_sitemap flags + orphan basis)
     ingest_sitemaps: bool = False
+    # T6: probe de soft 404 por host al inicio del job
+    detect_soft_404: bool = False
+    # T5: job anterior contra el que evaluar frescura (stale_lastmod)
+    compare_to_job_id: str | None = None
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
 
@@ -158,6 +175,7 @@ class JobConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
     analysis_thresholds: AnalysisThresholdsConfig = Field(default_factory=AnalysisThresholdsConfig)
     url_normalization: UrlNormalizationConfig = Field(default_factory=UrlNormalizationConfig)
+    trap_detection: TrapDetectionConfig = Field(default_factory=TrapDetectionConfig)
 
 
 class ReanalyzeRequest(BaseModel):

@@ -36,6 +36,7 @@ from shared.models import (
     Hreflang,
     Issue,
     Link,
+    PageContent,
     Resource,
     SecurityHeaders,
     StructuredData,
@@ -149,6 +150,11 @@ class SEOAnalyzer:
         self.equity_leak_threshold = t.get("equity_leak_threshold", 0.3)
         # T17.3: slow page threshold (ms)
         self.slow_page_ms = t.get("slow_page_ms", 3000)
+        # T14: near duplicates
+        self.near_duplicate_detection = t.get("near_duplicate_detection", "off")
+        self.near_duplicate_hamming = t.get("near_duplicate_hamming", 3)
+        # T6: soft 404
+        self.soft404_similarity = t.get("soft404_similarity", 0.85)
         # T8: normalization config of THIS job (the analyzer process does
         # not have the crawl subprocess' active config)
         from shared.url_normalization import UrlNormalizationConfig
@@ -176,6 +182,8 @@ class SEOAnalyzer:
         self.analyze_structured_data()
         self.analyze_indexability()
         self.analyze_duplicates()
+        self.analyze_near_duplicates()
+        self.analyze_soft_404()
         self.analyze_redirect_chains()
         self.analyze_meta_refresh()
         self.analyze_js_redirects()
@@ -190,6 +198,8 @@ class SEOAnalyzer:
         self.analyze_sitemaps()
         self.analyze_real_orphans()
         self.analyze_watchlist()
+        self.analyze_crawl_traps()
+        self.analyze_freshness()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -2029,6 +2039,294 @@ class SEOAnalyzer:
                         "reasons": reasons,
                     },
                 )
+        self._flush_issues()
+
+
+    # -- Soft 404 (T6) ----------------------------------------------------------
+
+    _SOFT404_TITLE_PATTERNS = (
+        "404", "no encontrado", "no encontrada", "not found",
+        "página no existe", "page not found", "no existe",
+    )
+
+    def analyze_soft_404(self) -> None:
+        """T6: 200 pages that are actually "not found".
+
+        Signals (any one marks the page, flag ``detect_soft_404`` on):
+        (a) body_hash equals the host's 404-probe template;
+        (b) token similarity with the probe's text ≥ threshold;
+        (c) word_count below ``min_word_count`` AND error-pattern title.
+        If the probe answered 200, only (c) applies and the fact is
+        recorded in the issue details.
+        """
+        config = (self._job.config or {}) if self._job else {}
+        if not config.get("detect_soft_404"):
+            return
+
+        logger.debug("Analyzing soft 404 ...")
+
+        signatures: dict[str, dict] = config.get("_soft404_signature") or {}
+        probe_200 = {
+            h for h, s in signatures.items() if s.get("status") == 200
+        }
+        valid_sigs = {
+            h: s for h, s in signatures.items() if s.get("status") == 404
+        }
+
+        def _tokens(text: str) -> set[str]:
+            return set(re.findall(r"\w+", (text or "").lower()))
+
+        sig_tokens = {h: _tokens(s.get("sample_text")) for h, s in valid_sigs.items()}
+
+        rows = self.session.execute(
+            select(Url.id, Url.host, Url.body_hash, Url.word_count,
+                   HtmlMeta.title, PageContent.content_text)
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .outerjoin(PageContent, PageContent.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+            )
+        ).all()
+
+        for url_id, host, body_hash, word_count, title, content in rows:
+            sig = valid_sigs.get(host)
+            reason = None
+            score = None
+
+            if sig and body_hash and body_hash == sig.get("body_hash"):
+                reason = "probe_template_hash"
+            elif sig and content:
+                probe_toks = sig_tokens.get(host) or set()
+                page_toks = _tokens(content)
+                smaller = min(len(probe_toks), len(page_toks))
+                if smaller >= 5:
+                    score = len(probe_toks & page_toks) / smaller
+                    if score >= self.soft404_similarity:
+                        reason = "probe_template_similarity"
+            if reason is None:
+                title_l = (title or "").lower()
+                if (
+                    word_count is not None
+                    and word_count < self.min_word_count
+                    and any(p in title_l for p in self._SOFT404_TITLE_PATTERNS)
+                ):
+                    reason = "error_title_low_content"
+
+            if reason:
+                details = {"reason": reason}
+                if score is not None:
+                    details["similarity"] = round(score, 4)
+                if host in probe_200:
+                    details["probe_returned_200"] = True
+                self._add_issue(url_id, "soft_404", "error", details)
+
+        self._flush_issues()
+
+    # -- Near duplicates (T14) --------------------------------------------------
+
+    def analyze_near_duplicates(self) -> None:
+        """T14: cluster near-identical pages. ``simhash`` groups by Hamming
+        distance ≤ threshold with 4×16-bit band bucketing (no O(n²));
+        ``embeddings`` requires the semantic analysis and degrades to a
+        logged skip when unavailable. ``duplicate_content`` (exact) is
+        untouched.
+        """
+        mode = self.near_duplicate_detection
+        if mode == "off":
+            return
+        if mode == "embeddings":
+            logger.warning(
+                "near_duplicate_detection=embeddings requiere análisis "
+                "semántico con vectores persistidos (T11); omitido para "
+                "job %s", self.job_id,
+            )
+            return
+
+        from shared.simhash import from_signed, hamming
+
+        logger.debug("Analyzing near duplicates (simhash) ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.url, Url.simhash)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.simhash.isnot(None),
+            )
+        ).all()
+        if len(rows) < 2:
+            return
+
+        values = [(r.id, r.url, from_signed(r.simhash)) for r in rows]
+
+        # Band bucketing: two hashes within Hamming ≤ 16/4-ish share at
+        # least one identical 16-bit band (pigeonhole for d ≤ 3 ≤ 4-1).
+        buckets: dict[tuple[int, int], list[int]] = {}
+        for idx, (_, _, h) in enumerate(values):
+            for band in range(4):
+                key = (band, (h >> (band * 16)) & 0xFFFF)
+                buckets.setdefault(key, []).append(idx)
+
+        parent = list(range(len(values)))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for members in buckets.values():
+            if len(members) < 2:
+                continue
+            for i in range(len(members)):
+                for j in range(i + 1, len(members)):
+                    a, b = members[i], members[j]
+                    if find(a) == find(b):
+                        continue
+                    d = hamming(values[a][2], values[b][2])
+                    if d <= self.near_duplicate_hamming:
+                        union(a, b)
+
+        clusters: dict[int, list[int]] = {}
+        for idx in range(len(values)):
+            clusters.setdefault(find(idx), []).append(idx)
+
+        cluster_id = 0
+        for members in clusters.values():
+            if len(members) < 2:
+                continue
+            cluster_id += 1
+            urls_sample = [values[i][1] for i in members[:10]]
+            for i in members:
+                self._add_issue(
+                    values[i][0],
+                    "near_duplicate_content",
+                    "warning",
+                    {
+                        "cluster_id": cluster_id,
+                        "method": "simhash",
+                        "cluster_size": len(members),
+                        "urls": urls_sample,
+                    },
+                )
+        self._flush_issues()
+
+    # -- Crawl traps (T13) ------------------------------------------------------
+
+    def analyze_crawl_traps(self) -> None:
+        """T13: surface capped crawl patterns as ``crawl_trap_detected``
+        (warning) so the analyst decides: add an exclude or raise the cap
+        and relaunch. Attached to the pattern's first sampled URL.
+        """
+        from shared.models import CrawlTrapEvent
+        from shared.url_normalization import compute_url_hash as _hash
+
+        events = self.session.execute(
+            select(CrawlTrapEvent).where(CrawlTrapEvent.job_id == self.job_id)
+        ).scalars().all()
+        if not events:
+            return
+
+        for ev in events:
+            url_id = None
+            if ev.first_url_sample:
+                url_id = self.session.execute(
+                    select(Url.id).where(
+                        Url.job_id == self.job_id,
+                        Url.url_hash == _hash(
+                            ev.first_url_sample, self._norm_config
+                        ),
+                    )
+                ).scalar()
+            if url_id is None:
+                # Sample never crawled (capped immediately): attach to any
+                # crawled URL of the job to keep the FK; the pattern lives
+                # in details either way.
+                url_id = self.session.execute(
+                    select(Url.id)
+                    .where(Url.job_id == self.job_id)
+                    .order_by(Url.id)
+                    .limit(1)
+                ).scalar()
+            if url_id is None:
+                continue
+            self._add_issue(
+                url_id,
+                "crawl_trap_detected",
+                "warning",
+                {
+                    "pattern": ev.pattern,
+                    "urls_seen": ev.urls_seen,
+                    "urls_skipped": ev.urls_skipped,
+                    "sample": ev.first_url_sample,
+                },
+            )
+        self._flush_issues()
+
+    # -- Freshness (T5) ---------------------------------------------------------
+
+    def analyze_freshness(self) -> None:
+        """T5: ``stale_lastmod`` — sitemaps that lie. Only runs when the job
+        was launched with ``compare_to_job_id`` in its config.
+        """
+        compare_to = (self._job.config or {}).get("compare_to_job_id") if self._job else None
+        if not compare_to:
+            return
+
+        import uuid as _uuid
+
+        try:
+            compare_to = _uuid.UUID(str(compare_to))
+        except (TypeError, ValueError):
+            logger.warning("compare_to_job_id inválido: %r", compare_to)
+            return
+
+        logger.debug("Analyzing freshness vs job %s ...", compare_to)
+
+        prev_rows = self.session.execute(
+            select(Url.url_hash, Url.body_hash, Url.sitemap_lastmod)
+            .where(Url.job_id == compare_to, Url.body_hash.isnot(None))
+        ).all()
+        prev = {r.url_hash: r for r in prev_rows}
+        if not prev:
+            return
+
+        rows = self.session.execute(
+            select(Url.id, Url.url_hash, Url.body_hash, Url.sitemap_lastmod)
+            .where(
+                Url.job_id == self.job_id,
+                Url.body_hash.isnot(None),
+                Url.sitemap_lastmod.isnot(None),
+            )
+        ).all()
+
+        for url_id, url_hash, body_hash, lastmod in rows:
+            old = prev.get(url_hash)
+            if old is None:
+                continue
+            lastmod_changed = (
+                old.sitemap_lastmod is not None and lastmod != old.sitemap_lastmod
+            )
+            body_changed = body_hash != old.body_hash
+            if lastmod_changed and not body_changed:
+                self._add_issue(url_id, "stale_lastmod", "info", {
+                    "reason": "lastmod_changed_content_identical",
+                    "lastmod": lastmod.isoformat() if lastmod else None,
+                })
+            elif body_changed and not lastmod_changed and old.sitemap_lastmod is not None:
+                self._add_issue(url_id, "stale_lastmod", "info", {
+                    "reason": "content_changed_lastmod_stale",
+                    "lastmod": lastmod.isoformat() if lastmod else None,
+                })
         self._flush_issues()
 
 

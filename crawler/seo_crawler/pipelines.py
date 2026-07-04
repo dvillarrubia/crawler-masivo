@@ -221,6 +221,21 @@ class PostgresPipeline:
             else:
                 content_obj = PageContent(url_id=url_id, **data)
                 self.session.add(content_obj)
+
+            # T14: SimHash del contenido cuando el job lo pide
+            thresholds = (getattr(spider, "job_config", {}) or {}).get(
+                "analysis_thresholds", {},
+            )
+            if thresholds.get("near_duplicate_detection") == "simhash":
+                from shared.models import Url
+                from shared.simhash import simhash64, to_signed
+
+                value = simhash64(data.get("content_text") or "")
+                if value is not None:
+                    self.session.query(Url).filter(Url.id == url_id).update(
+                        {"simhash": to_signed(value)}
+                    )
+
             self.session.commit()
         except Exception:
             self.session.rollback()

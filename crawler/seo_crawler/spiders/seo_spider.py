@@ -190,6 +190,9 @@ class SeoSpider(scrapy.Spider):
         self._already_crawled_hashes: set[str] = set()
         self._frontier_urls: list[str] = []
 
+        # T13: crawl-trap detector (set in spider_opened when enabled)
+        self._trap_detector = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -295,6 +298,17 @@ class SeoSpider(scrapy.Spider):
                 self.allowed_hosts,
             )
 
+            # -- T13: crawl-trap detection (flag off by default)
+            trap_cfg = self.job_config.get("trap_detection") or {}
+            self._trap_detector = None
+            if trap_cfg.get("enabled"):
+                from seo_crawler.trap_detection import TrapDetector
+
+                self._trap_detector = TrapDetector(
+                    max_urls_per_pattern=trap_cfg.get("max_urls_per_pattern", 500),
+                    max_param_combinations=trap_cfg.get("max_param_combinations", 3),
+                )
+
             # -- T16: robots.txt snapshot (always on, one fetch per host);
             # a failure never aborts the crawl.
             try:
@@ -393,6 +407,28 @@ class SeoSpider(scrapy.Spider):
 
     def spider_closed(self, spider, reason):
         """Push final count and close Redis connection."""
+        # T13: persist capped trap patterns; nothing is lost silently.
+        if self._trap_detector is not None:
+            events = self._trap_detector.events()
+            if events:
+                from shared.database import SessionLocal
+                from shared.models import CrawlTrapEvent
+
+                session = SessionLocal()
+                try:
+                    for ev in events:
+                        session.add(CrawlTrapEvent(job_id=self.job_id, **ev))
+                    session.commit()
+                    logger.warning(
+                        "Crawl traps detected for job %s: %d patterns capped",
+                        self.job_id, len(events),
+                    )
+                except Exception:
+                    session.rollback()
+                    logger.exception("Failed to persist crawl trap events")
+                finally:
+                    session.close()
+
         if self._redis:
             try:
                 self._redis.set(
@@ -475,6 +511,30 @@ class SeoSpider(scrapy.Spider):
             yield request
 
     def start_requests(self) -> Generator[Request, None, None]:
+        # T6: soft-404 probe per host (flag off by default). The probe
+        # response never becomes a `urls` row: its callback only persists
+        # the error-template signature into job.config.
+        if self.job_config.get("detect_soft_404"):
+            import uuid as _uuid
+
+            seen_hosts: set[str] = set()
+            for seed in self.seed_urls:
+                parsed = urlparse(seed)
+                if not parsed.hostname or parsed.hostname in seen_hosts:
+                    continue
+                seen_hosts.add(parsed.hostname)
+                probe_url = (
+                    f"{parsed.scheme}://{parsed.netloc}"
+                    f"/__soft404_probe_{_uuid.uuid4().hex}"
+                )
+                yield scrapy.Request(
+                    url=probe_url,
+                    callback=self._handle_soft404_probe,
+                    errback=lambda f: None,
+                    meta={"depth": 0, "soft404_probe": True},
+                    dont_filter=True,
+                )
+
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
@@ -937,6 +997,10 @@ class SeoSpider(scrapy.Spider):
                         if self._already_crawled_hashes and \
                                 compute_url_hash(link["url"]) in self._already_crawled_hashes:
                             continue
+                        # T13: crawl-trap gate (no-op unless enabled)
+                        if self._trap_detector is not None and \
+                                not self._trap_detector.allow(link["url"]):
+                            continue
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js and _url_likely_html(link["url"]):
                             follow_meta.update(self._playwright_meta())
@@ -946,6 +1010,52 @@ class SeoSpider(scrapy.Spider):
                             errback=self.handle_error,
                             meta=follow_meta,
                         )
+
+    # ------------------------------------------------------------------
+    # Soft-404 probe (T6)
+    # ------------------------------------------------------------------
+    def _handle_soft404_probe(self, response):
+        """Persist the host's error-template signature into job.config.
+
+        A well-behaved host answers 404: we keep the template's body hash
+        and a text sample so the analyzer can spot 200 pages serving the
+        same template. A host answering 200 here serves soft 404s across
+        the board — recorded as such, only heuristic (c) applies then.
+        """
+        import hashlib as _hashlib
+
+        host = urlparse(response.url).hostname or "?"
+        try:
+            sample = extract_visible_text(response.selector)[:1000]
+        except Exception:
+            sample = ""
+        signature = {
+            "status": response.status,
+            "body_hash": _hashlib.sha256(response.body).hexdigest(),
+            "sample_text": sample,
+        }
+
+        from shared.database import SessionLocal
+        from shared.models import Job
+
+        session = SessionLocal()
+        try:
+            job = session.query(Job).filter(Job.id == self.job_id).one_or_none()
+            if job is not None:
+                config = dict(job.config or {})
+                sigs = dict(config.get("_soft404_signature") or {})
+                sigs[host] = signature
+                config["_soft404_signature"] = sigs
+                job.config = config
+                session.commit()
+                logger.info(
+                    "Soft-404 probe for %s: status %s", host, response.status
+                )
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to persist soft-404 signature")
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------
     # Error handling
