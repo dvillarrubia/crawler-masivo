@@ -110,6 +110,7 @@ class SEOAnalyzer:
         from shared.models import Job
 
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        self._job = job
         t = (job.config or {}).get("analysis_thresholds", {}) if job else {}
         self.title_min_len = t.get("title_min_length", TITLE_MIN_LEN)
         self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
@@ -118,6 +119,16 @@ class SEOAnalyzer:
         self.min_word_count = t.get("min_word_count", LOW_WORD_COUNT_THRESHOLD)
         self.max_redirect_chain = t.get("max_redirect_chain_length", 2)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+        # T3: PageRank version switch (1 = historical, bit-for-bit)
+        self.pagerank_version = t.get("pagerank_version", 1)
+        self.equity_leak_threshold = t.get("equity_leak_threshold", 0.3)
+        # T8: normalization config of THIS job (the analyzer process does
+        # not have the crawl subprocess' active config)
+        from shared.url_normalization import UrlNormalizationConfig
+
+        self._norm_config = UrlNormalizationConfig.from_job_config(
+            job.config if job else None
+        )
 
     # -- public interface ---------------------------------------------------
 
@@ -1099,6 +1110,22 @@ class SEOAnalyzer:
         None: 0.5,
     }
 
+    # T3/C3: position weights for the v2 branch ONLY. Fixes the latent bug
+    # above: nav/sidebar get boilerplate-level weights instead of the 0.5
+    # default that made a menu link outweigh header/footer.
+    _POSITION_WEIGHT_V2: dict[str | None, float] = {
+        "content": 1.0,
+        "header": 0.3,
+        "sidebar": 0.25,
+        "nav": 0.2,
+        "footer": 0.2,
+        None: 0.5,
+    }
+
+    # T3: per-hop decay applied when collapsing 3xx chains in v2.
+    _REDIRECT_DECAY = 0.9
+    _REDIRECT_MAX_HOPS = 10
+
     def compute_pagerank(
         self,
         damping: float = 0.85,
@@ -1107,10 +1134,33 @@ class SEOAnalyzer:
     ) -> None:
         """Compute weighted internal PageRank for all URLs in this job.
 
-        Links from the main content area are weighted higher than
-        boilerplate nav/footer links that repeat on every page.
+        Dispatches on ``analysis_thresholds.pagerank_version`` (T3):
+        version 1 is the historical algorithm bit-for-bit (snapshot-locked);
+        version 2 adds nofollow dilution, redirect collapse with decay,
+        an indexable-only graph and ``equity_leak`` reporting. The version
+        used is recorded in ``jobs.config["_pagerank_version_used"]``.
         """
-        logger.debug("Computing PageRank ...")
+        version = 2 if self.pagerank_version == 2 else 1
+        if self._job is not None:
+            self._job.config = {
+                **(self._job.config or {}),
+                "_pagerank_version_used": version,
+            }
+        if version == 2:
+            self._compute_pagerank_v2(damping, max_iter, tol)
+        else:
+            self._compute_pagerank_v1(damping, max_iter, tol)
+
+    def _compute_pagerank_v1(
+        self,
+        damping: float = 0.85,
+        max_iter: int = 100,
+        tol: float = 1e-6,
+    ) -> None:
+        """Historical weighted PageRank (v1). DO NOT change: snapshot-locked
+        by tests/python/test_pagerank_v1_snapshot.py for job comparability.
+        """
+        logger.debug("Computing PageRank (v1) ...")
 
         # 1. Get all internal URL IDs for this job.
         # T2: rows with status_group='not_crawled' (sitemap/GSC orphans that
@@ -1208,6 +1258,198 @@ class SEOAnalyzer:
             )
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
+
+    def _compute_pagerank_v2(
+        self,
+        damping: float = 0.85,
+        max_iter: int = 100,
+        tol: float = 1e-6,
+    ) -> None:
+        """PageRank v2 (T3): nofollow dilution, redirect collapse, indexable-
+        only graph, equity leak.
+
+        * ALL internal links enter the denominator of their source page;
+          only usable ones distribute. The rest of the fraction is
+          destroyed (no pre-2009 sculpting, no dangling redistribution).
+        * Destinations are resolved through 3xx chains (``urls.redirect_url``,
+          max 10 hops, 0.9 decay per hop; loops cut). 3xx URLs are
+          pass-through and accumulate no rank of their own.
+        * Graph nodes are indexable 2xx internal pages only. Edges toward
+          non-indexable / error / unresolved destinations are destroyed and
+          reported per page as ``equity_leak`` above the configured ratio.
+        """
+        from shared.url_normalization import compute_url_hash as _hash
+
+        logger.debug("Computing PageRank (v2) ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.url_hash, Url.status_code, Url.indexable,
+                   Url.redirect_url)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                (Url.status_group.is_(None))
+                | (Url.status_group != "not_crawled"),
+            )
+        ).all()
+        if not rows:
+            return
+
+        by_hash: dict[str, tuple] = {r.url_hash: r for r in rows}
+        by_id: dict[int, tuple] = {r.id: r for r in rows}
+
+        def _is_node(r) -> bool:
+            return (
+                r.status_code is not None
+                and 200 <= r.status_code < 300
+                and r.indexable is not False
+            )
+
+        node_ids = [r.id for r in rows if _is_node(r)]
+        if not node_ids:
+            return
+        id_to_idx = {uid: i for i, uid in enumerate(node_ids)}
+        n = len(node_ids)
+
+        def _resolve(target_hash: str) -> tuple[int | None, float]:
+            """Follow 3xx chains → (final node id | None, decay factor)."""
+            decay = 1.0
+            seen: set[str] = set()
+            current = target_hash
+            for _ in range(self._REDIRECT_MAX_HOPS):
+                if current in seen:
+                    return None, decay  # loop
+                seen.add(current)
+                row = by_hash.get(current)
+                if row is None:
+                    return None, decay  # uncrawled or external redirect
+                if row.status_code is not None and 300 <= row.status_code < 400:
+                    if not row.redirect_url:
+                        return None, decay
+                    decay *= self._REDIRECT_DECAY
+                    current = _hash(row.redirect_url, self._norm_config)
+                    continue
+                return (row.id, decay) if _is_node(row) else (None, decay)
+            return None, decay  # too many hops
+
+        link_rows = self.session.execute(
+            select(Link.from_url_id, Link.to_url_hash, Link.link_position,
+                   Link.follow)
+            .where(
+                Link.job_id == self.job_id,
+                Link.is_internal.is_(True),
+            )
+        ).all()
+
+        # Dedup raw links first, keeping the max position weight per
+        # (source, target, follow) — same dedup philosophy as v1.
+        raw_edges: dict[tuple[int, str, bool], float] = {}
+        for from_id, to_hash, position, follow in link_rows:
+            src_row = by_id.get(from_id)
+            if src_row is None or not _is_node(src_row):
+                continue  # non-indexable sources have no rank to give
+            w = self._POSITION_WEIGHT_V2.get(position, 0.5)
+            key = (src_row.id, to_hash, follow is not False)
+            if key not in raw_edges or w > raw_edges[key]:
+                raw_edges[key] = w
+
+        # Per source: total emitted weight (denominator), effective edges
+        # (what actually distributes) and destroyed weight by cause.
+        out_total: dict[int, float] = defaultdict(float)
+        edge_weight: dict[tuple[int, int], float] = {}
+        leaked: dict[int, float] = defaultdict(float)     # bad destinations
+        nofollow_w: dict[int, float] = defaultdict(float)  # deliberate dilution
+        leaked_edges: dict[int, int] = defaultdict(int)
+
+        for (src_id, to_hash, follow), w in raw_edges.items():
+            src = id_to_idx[src_id]
+            out_total[src] += w
+
+            if not follow:
+                nofollow_w[src] += w
+                continue  # counts in denominator, never distributes
+
+            target_id, decay = _resolve(to_hash)
+            if target_id is None:
+                leaked[src] += w
+                leaked_edges[src] += 1
+                continue
+            dst = id_to_idx[target_id]
+            if dst == src:
+                out_total[src] -= w  # self-links stay excluded, as in v1
+                continue
+            key = (src, dst)
+            effective = w * decay
+            if key not in edge_weight or effective > edge_weight[key]:
+                edge_weight[key] = effective
+
+        outlinks: dict[int, dict[int, float]] = defaultdict(dict)
+        for (src, dst), w in edge_weight.items():
+            outlinks[src][dst] = w
+
+        # Power iteration. The denominator is the TOTAL emitted weight, so
+        # nofollow/leaked fractions vanish instead of being redistributed.
+        pr = [1.0 / n] * n
+        for _ in range(max_iter):
+            new_pr = [(1.0 - damping) / n] * n
+            for i in range(n):
+                total_w = out_total.get(i, 0.0)
+                if total_w > 0:
+                    for j, w in outlinks[i].items():
+                        new_pr[j] += damping * pr[i] * (w / total_w)
+            # True dangling nodes (zero outlinks) still redistribute, as in
+            # v1; pages whose weight was fully destroyed do NOT.
+            dangling_sum = sum(
+                pr[i] for i in range(n) if out_total.get(i, 0.0) == 0
+            )
+            dangling_add = damping * dangling_sum / n
+            new_pr = [p + dangling_add for p in new_pr]
+
+            diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
+            pr = new_pr
+            if diff < tol:
+                break
+
+        max_pr = max(pr) if pr else 1.0
+        if max_pr > 0:
+            pr = [p / max_pr * 10.0 for p in pr]
+
+        for i, uid in enumerate(node_ids):
+            self.session.execute(
+                update(Url).where(Url.id == uid).values(pagerank=round(pr[i], 4))
+            )
+        # Non-node internal URLs (3xx pass-through, errors, non-indexables)
+        # accumulate no rank of their own in v2.
+        non_nodes = [r.id for r in rows if not _is_node(r)]
+        if non_nodes:
+            self.session.execute(
+                update(Url).where(Url.id.in_(non_nodes)).values(pagerank=None)
+            )
+        self.session.flush()
+
+        # Equity leak per page (weight destroyed toward worthless targets).
+        for src, lost in leaked.items():
+            total = out_total.get(src, 0.0)
+            if total <= 0:
+                continue
+            ratio = lost / total
+            if ratio >= self.equity_leak_threshold:
+                self._add_issue(
+                    node_ids[src],
+                    "equity_leak",
+                    "warning",
+                    {
+                        "leaked_weight": round(lost, 4),
+                        "total_weight": round(total, 4),
+                        "leak_ratio": round(ratio, 4),
+                        "nofollow_weight": round(nofollow_w.get(src, 0.0), 4),
+                        "leaked_edges": leaked_edges.get(src, 0),
+                    },
+                )
+        self._flush_issues()
+        logger.info(
+            "PageRank v2 computed for %d nodes (job %s)", n, self.job_id
+        )
 
     # -- Link Analysis ------------------------------------------------------
 

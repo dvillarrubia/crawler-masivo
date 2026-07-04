@@ -120,6 +120,10 @@ class AnalysisThresholdsConfig(BaseModel):
     min_word_count: int = Field(default=200, ge=0, le=10000)
     max_redirect_chain_length: int = Field(default=2, ge=1, le=20)
     max_outlinks: int = Field(default=100, ge=1, le=10000)
+    # T3: 1 = algoritmo histórico bit a bit; 2 = nofollow diluyente +
+    # colapso de redirecciones + solo-indexables + equity_leak
+    pagerank_version: int = Field(default=1, ge=1, le=2)
+    equity_leak_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------
