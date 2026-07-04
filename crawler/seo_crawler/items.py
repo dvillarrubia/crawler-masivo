@@ -42,6 +42,9 @@ class PageItem(scrapy.Item):
     indexability_status = scrapy.Field()
     blocked_by_robots = scrapy.Field()
 
+    # T4: browser final URL when a JS redirect was detected (render_js only)
+    js_redirect_url = scrapy.Field()
+
 
 class HtmlMetaItem(scrapy.Item):
     """On-page SEO metadata extracted from HTML <head>."""

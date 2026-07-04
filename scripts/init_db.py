@@ -29,6 +29,10 @@ if __name__ == "__main__":
         # T1: sitemap ingestion flags on urls (NULL = no sitemap ingested)
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS in_sitemap BOOLEAN"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS sitemap_lastmod TIMESTAMPTZ"))
+        # T4: client-side redirects (meta refresh parsed + JS redirect)
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_refresh_url TEXT"))
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_refresh_delay INT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS js_redirect_url TEXT"))
         conn.commit()
     print("Migrations applied.")
 

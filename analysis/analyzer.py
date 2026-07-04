@@ -87,6 +87,31 @@ _CMS_FACETED_RE = re.compile(
 )
 
 
+# T4 (C1): parse the raw content of <meta http-equiv="refresh"> as stored
+# in html_meta.meta_refresh. Formats seen in the wild: "5", "0;URL=/x",
+# "3; url='https://x'". Returns (delay_seconds, raw_target_or_None).
+_META_REFRESH_URL_RE = re.compile(
+    r"url\s*=\s*['\"]?\s*([^'\";\s]+)", re.IGNORECASE
+)
+_META_REFRESH_DELAY_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)")
+
+
+def parse_meta_refresh(content: str | None) -> tuple[int | None, str | None]:
+    """Parse a meta-refresh content attribute into (delay, target URL)."""
+    if not content:
+        return None, None
+    delay: int | None = None
+    m = _META_REFRESH_DELAY_RE.match(content)
+    if m:
+        try:
+            delay = int(float(m.group(1)))
+        except ValueError:
+            delay = None
+    m = _META_REFRESH_URL_RE.search(content)
+    target = m.group(1).strip() if m else None
+    return delay, target or None
+
+
 # ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
@@ -148,6 +173,8 @@ class SEOAnalyzer:
         self.analyze_indexability()
         self.analyze_duplicates()
         self.analyze_redirect_chains()
+        self.analyze_meta_refresh()
+        self.analyze_js_redirects()
         self.analyze_images()
         self.analyze_security()
         self.analyze_content()
@@ -1489,6 +1516,70 @@ class SEOAnalyzer:
                 {"count": outlink_count},
             )
 
+        self._flush_issues()
+
+    # -- Client-side redirects (T4) -------------------------------------------
+
+    def analyze_meta_refresh(self) -> None:
+        """T4/C1: derive delay + target from the EXISTING
+        ``html_meta.meta_refresh`` column (no re-extraction) and emit
+        ``meta_refresh_redirect`` — warning when delay ≤ 5s (search
+        engines treat it as a redirect), info otherwise.
+        """
+        from urllib.parse import urljoin as _urljoin
+
+        logger.debug("Analyzing meta refresh ...")
+
+        rows = self.session.execute(
+            select(HtmlMeta.url_id, HtmlMeta.meta_refresh, Url.url)
+            .join(Url, Url.id == HtmlMeta.url_id)
+            .where(
+                Url.job_id == self.job_id,
+                HtmlMeta.meta_refresh.isnot(None),
+            )
+        ).all()
+
+        for url_id, refresh, page_url in rows:
+            delay, target = parse_meta_refresh(refresh)
+            resolved = _urljoin(page_url, target) if target else None
+            self.session.execute(
+                update(HtmlMeta)
+                .where(HtmlMeta.url_id == url_id)
+                .values(meta_refresh_url=resolved, meta_refresh_delay=delay)
+            )
+            # A refresh pointing at the page itself is a reload, not a
+            # redirect; only true redirects become issues.
+            if resolved and resolved != page_url:
+                severity = "warning" if (delay is not None and delay <= 5) else "info"
+                self._add_issue(
+                    url_id,
+                    "meta_refresh_redirect",
+                    severity,
+                    {"delay": delay, "target": resolved},
+                )
+
+        self.session.flush()
+        self._flush_issues()
+
+    def analyze_js_redirects(self) -> None:
+        """T4: pages where the Playwright flow recorded a JS redirect
+        (``urls.js_redirect_url``). Jobs without render_js have no such
+        values and are untouched.
+        """
+        logger.debug("Analyzing JS redirects ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.js_redirect_url)
+            .where(
+                Url.job_id == self.job_id,
+                Url.js_redirect_url.isnot(None),
+            )
+        ).all()
+
+        for url_id, target in rows:
+            self._add_issue(
+                url_id, "js_redirect", "warning", {"target": target}
+            )
         self._flush_issues()
 
     # -- Sitemaps (T1) --------------------------------------------------------

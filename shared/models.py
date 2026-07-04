@@ -107,6 +107,9 @@ class Url(Base):
     in_sitemap = Column(Boolean, nullable=True)              # declared in sitemap.xml
     sitemap_lastmod = Column(DateTime(timezone=True), nullable=True)
 
+    # --- T4: JS redirect detected by the Playwright flow (render_js only) ---
+    js_redirect_url = Column(Text, nullable=True)            # browser final URL if JS-redirected
+
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
     headings = relationship("Heading", back_populates="url_rel", cascade="all, delete-orphan")
@@ -180,6 +183,10 @@ class HtmlMeta(Base):
     meta_description_pixel_width = Column(Integer, nullable=True)  # SERP pixel width at Arial 14px
     meta_refresh = Column(Text, nullable=True)                     # meta refresh content if present
     has_meta_outside_head = Column(Boolean, nullable=True)         # meta tags found outside head
+
+    # T4 (C1): derived from meta_refresh by the analyzer — never re-extracted
+    meta_refresh_url = Column(Text, nullable=True)                 # resolved redirect target
+    meta_refresh_delay = Column(Integer, nullable=True)            # seconds before refresh
 
     url_rel = relationship("Url", back_populates="html_meta")
 

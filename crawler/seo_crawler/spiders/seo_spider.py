@@ -107,6 +107,13 @@ def _url_likely_html(url: str) -> bool:
 # consent overlays, chat widgets, and ARIA modals so extractors only see
 # real page content.
 # ---------------------------------------------------------------------------
+# T4: evaluated in the final document to disambiguate HTTP vs JS redirects.
+_NAV_ENTRIES_JS = """
+() => performance.getEntriesByType('navigation').map(e => ({
+    name: e.name, redirectCount: e.redirectCount, type: e.type
+}))
+"""
+
 _BOILERPLATE_REMOVAL_JS = """
 () => {
     const r = (s) => { try { document.querySelectorAll(s).forEach(e => e.remove()); } catch(_) {} };
@@ -410,8 +417,35 @@ class SeoSpider(scrapy.Spider):
                 # banners (they typically fire on DOMContentLoaded / load).
                 PageMethod("wait_for_timeout", 2000),
                 PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
+                # T4: navigation probe for JS-redirect detection. Runs in
+                # the FINAL document; redirectCount tells HTTP hops apart
+                # from JS-driven URL changes (see _detect_js_redirect).
+                PageMethod("evaluate", _NAV_ENTRIES_JS),
             ],
         }
+
+    def _detect_js_redirect(self, response) -> str | None:
+        """T4: return the browser's final URL when it differs from the
+        requested one for reasons other than HTTP redirects.
+
+        With Playwright the browser follows HTTP redirects internally, so
+        ``response.url`` (page.url) != ``request.url`` covers both cases.
+        The navigation probe evaluated in the final document disambiguates:
+        ``redirectCount == 0`` means the final navigation involved no HTTP
+        redirect — the URL change came from JS (location.replace/assign or
+        an early meta refresh). Conservative: ambiguous cases return None.
+        """
+        if compute_url_hash(response.url) == compute_url_hash(response.request.url):
+            return None
+
+        for pm in response.request.meta.get("playwright_page_methods", []):
+            args = getattr(pm, "args", None)
+            if args and args[0] == _NAV_ENTRIES_JS:
+                entries = getattr(pm, "result", None) or []
+                if entries and entries[-1].get("redirectCount", 0) == 0:
+                    return response.url
+                return None
+        return None
 
     async def start(self):
         """Scrapy 2.13+ entry point.
@@ -695,6 +729,12 @@ class SeoSpider(scrapy.Spider):
             transfer_size=len(response.body),
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
+            # T4: only evaluated on Playwright responses; None otherwise
+            js_redirect_url=(
+                self._detect_js_redirect(response)
+                if response.request.meta.get("playwright")
+                else None
+            ),
         )
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------

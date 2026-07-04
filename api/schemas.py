@@ -236,6 +236,9 @@ class HtmlMetaResponse(BaseModel):
     meta_description_pixel_width: int | None = None
     meta_refresh: str | None = None
     has_meta_outside_head: bool | None = None
+    # T4: derived from meta_refresh by the analyzer
+    meta_refresh_url: str | None = None
+    meta_refresh_delay: int | None = None
 
 
 class PageContentResponse(BaseModel):
@@ -342,6 +345,10 @@ class UrlResponse(BaseModel):
     external_outlinks_count: int | None = None
     unique_inlinks_count: int | None = None
     pagerank: float | None = None
+    # T1/T4
+    in_sitemap: bool | None = None
+    sitemap_lastmod: datetime | None = None
+    js_redirect_url: str | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 

@@ -487,6 +487,8 @@ def _insert_url_batch(
             # T1/T2: sitemap flags + not_crawled orphan rows round-trip
             in_sitemap=d.get("in_sitemap"),
             sitemap_lastmod=_parse_datetime(d.get("sitemap_lastmod")),
+            # T4
+            js_redirect_url=d.get("js_redirect_url"),
         )
         db.add(url)
         db.flush()
