@@ -17,6 +17,10 @@ from api import dependencies
 from api.routers import clients, diff, jobs, results, segments, semantic
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# Fase 3 (D1): SPA nueva Vite+React. Si el build existe se sirve en la
+# raíz y el frontend clásico queda accesible en /legacy hasta la paridad.
+FRONTEND_V2_DIST = Path(__file__).resolve().parent.parent / "frontend-v2" / "dist"
+V2_ACTIVE = (FRONTEND_V2_DIST / "index.html").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +78,18 @@ def healthcheck():
 if FRONTEND_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+    if V2_ACTIVE:
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(FRONTEND_V2_DIST / "assets")),
+            name="v2-assets",
+        )
+
+        @app.get("/legacy", include_in_schema=False)
+        @app.get("/legacy/{rest:path}", include_in_schema=False)
+        def legacy_spa(rest: str = "") -> Response:
+            return FileResponse(str(FRONTEND_DIR / "index.html"))
+
     # Well-known files that browsers and crawlers fetch from the site root.
     # Serving them from a real path with a proper content-type avoids the
     # 404s seen behind reverse proxies that don't fall through to the SPA.
@@ -116,4 +132,8 @@ if FRONTEND_DIR.is_dir():
             ext = last.rsplit(".", 1)[-1].lower()
             if ext in _NON_HTML_EXTS:
                 return Response(status_code=404)
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        index = (
+            FRONTEND_V2_DIST / "index.html" if V2_ACTIVE
+            else FRONTEND_DIR / "index.html"
+        )
+        return FileResponse(str(index))

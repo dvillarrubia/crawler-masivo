@@ -1,3 +1,11 @@
+# Fase 3 (D1): build de la SPA nueva (frontend-v2) en una stage de node
+FROM node:22-alpine AS frontend-build
+WORKDIR /fe
+COPY frontend-v2/package.json frontend-v2/package-lock.json* ./
+RUN npm install --no-fund --no-audit
+COPY frontend-v2/ ./
+RUN npm run build
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -15,6 +23,7 @@ COPY api/ /app/api/
 COPY analysis/ /app/analysis/
 COPY POC_centro_semantico/ /app/POC_centro_semantico/
 COPY frontend/ /app/frontend/
+COPY --from=frontend-build /fe/dist/ /app/frontend-v2/dist/
 COPY scripts/ /app/scripts/
 
 EXPOSE 8000

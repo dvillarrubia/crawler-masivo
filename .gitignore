@@ -38,3 +38,7 @@ export_*.html
 
 # v2 design handoff zips (decompressed dirs are committed)
 v2 experimental/*.zip
+
+# frontend v2
+frontend-v2/node_modules/
+frontend-v2/dist/
