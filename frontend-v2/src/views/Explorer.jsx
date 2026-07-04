@@ -22,6 +22,11 @@ const COLUMNS = [
   { key: "out_contextual", label: "Out ctx", num: true, filter: "range", def: false },
   { key: "pagerank", label: "PageRank", num: true, filter: "range", def: true },
   { key: "pagerank_semantic", label: "PR sem.", num: true, filter: "range", def: false },
+  // Métricas de Search Console (aparecen al importar GSC en Semántica)
+  { key: "gsc_clicks", label: "Clics GSC", num: true, filter: "range", def: true },
+  { key: "gsc_impressions", label: "Imprs. GSC", num: true, filter: "range", def: true },
+  { key: "gsc_position", label: "Pos. GSC", num: true, filter: "range", def: true },
+  { key: "gsc_ctr", label: "CTR GSC", num: true, filter: null, def: false },
   { key: "word_count", label: "Palabras", num: true, filter: "range", def: true },
   { key: "unique_word_count", label: "Palabras únicas", num: true, filter: "range", def: false },
   { key: "boilerplate_ratio", label: "% plantilla", num: true, filter: "range", def: false },
@@ -47,7 +52,7 @@ export default function ExplorerView() {
   const [detailId, setDetailId] = useState(null);
   const [selIdx, setSelIdx] = useState(-1);
   const [visibleKeys, setVisibleKeys] = useStored(
-    "explorer.columns.v2",
+    "explorer.columns.v3",  // v3: + columnas GSC por defecto
     COLUMNS.filter((c) => c.always || c.def).map((c) => c.key),
   );
   const [showCols, setShowCols] = useState(false);
@@ -127,6 +132,8 @@ export default function ExplorerView() {
     if (c.key === "indexable") return u.indexable == null ? "—" : u.indexable ? "sí" : "no";
     if (c.key === "in_sitemap") return u.in_sitemap == null ? "—" : u.in_sitemap ? "sí" : "no";
     if (c.key === "click_depth" && u.click_depth == null && u.is_html) return <span className="tag">sin camino</span>;
+    if (c.key === "gsc_ctr") return u.gsc_ctr == null ? "—" : `${(u.gsc_ctr * 100).toFixed(2)}%`;
+    if (c.key === "gsc_position") return u.gsc_position == null ? "—" : u.gsc_position.toFixed(1);
     if (c.key === "title" || c.key === "canonical") {
       const meta = u.html_meta || {};
       const v = c.key === "title" ? meta.title : meta.canonical_href;
@@ -378,6 +385,10 @@ function UrlDrawer({ jobId, urlId, onClose }) {
           <Fact k="Palabras únicas (sin plantilla)" v={u.unique_word_count} />
           <Fact k="% plantilla" v={u.boilerplate_ratio != null ? `${(u.boilerplate_ratio * 100).toFixed(1)}%` : null} />
           <Fact k="% solo tras JS" v={u.js_content_ratio != null ? `${(u.js_content_ratio * 100).toFixed(1)}%` : null} />
+          <Fact k="Clics GSC" v={u.gsc_clicks != null ? fmt(u.gsc_clicks) : null} />
+          <Fact k="Impresiones GSC" v={u.gsc_impressions != null ? fmt(u.gsc_impressions) : null} />
+          <Fact k="Posición media GSC" v={u.gsc_position != null ? u.gsc_position.toFixed(1) : null} />
+          <Fact k="CTR GSC" v={u.gsc_ctr != null ? `${(u.gsc_ctr * 100).toFixed(2)}%` : null} />
           <Fact k="Latencia" v={u.response_time_ms != null ? `${u.response_time_ms} ms` : null} />
           <Fact k="Content-Type" v={u.content_type} />
           <Fact k="Redirige a" v={u.redirect_url} />

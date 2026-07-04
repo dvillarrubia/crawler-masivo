@@ -665,14 +665,27 @@ def get_semantic_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
     analysis = _get_latest_analysis(job_id, db)
 
     # Source chips in the UI need to know whether GSC data exists even
-    # before any analysis has run.
-    has_gsc = (
-        db.query(GscJobData.id).filter(GscJobData.job_id == job_id).first()
-        is not None
+    # before any analysis has run. Counts included so the user can SEE
+    # that the import happened (and how many rows matched the crawl).
+    from sqlalchemy import func as _func
+
+    gsc_total, gsc_matched = (
+        db.query(
+            _func.count(GscJobData.id),
+            _func.count(GscJobData.url_id),
+        )
+        .filter(GscJobData.job_id == job_id)
+        .one()
     )
+    gsc_info = {
+        "total": gsc_total,
+        "matched": gsc_matched,
+        "unmatched": gsc_total - gsc_matched,
+    }
+    has_gsc = gsc_total > 0
 
     if not analysis:
-        return {"status": "none", "has_gsc_data": has_gsc}
+        return {"status": "none", "has_gsc_data": has_gsc, "gsc": gsc_info}
 
     progress_info = _get_progress(str(analysis.id))
 
@@ -710,6 +723,7 @@ def get_semantic_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
         "has_gsc_data": has_gsc,
+        "gsc": gsc_info,
     }
 
 

@@ -188,7 +188,10 @@ function ContextBar() {
       )}
       <div className="sources">
         <SourceChip label="crawl" state={job ? (job.status === "completed" ? "ok" : "warn") : "off"} />
-        <SourceChip label="GSC" state={gscState} title={gscState === "off" ? "Importa datos desde Semántica" : "Datos GSC cargados"} />
+        <SourceChip label="GSC" state={gscState}
+          title={gscState === "off"
+            ? "Este run no tiene datos de Search Console: impórtalos en Semántica → Análisis"
+            : `Datos GSC importados: ${(semStatus && semStatus.gsc && semStatus.gsc.total) || "?"} URLs con métricas`} />
         <SourceChip label="semántica" state={semState} title={semState === "off" ? "Lanza el análisis desde Semántica" : ""} />
         <SourceChip label="logs" state="off" title="Fuente no conectada (sin ingesta de logs)" />
       </div>

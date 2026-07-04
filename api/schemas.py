@@ -403,6 +403,11 @@ class UrlResponse(BaseModel):
     boilerplate_ratio: float | None = None
     pagerank_semantic: float | None = None
     js_content_ratio: float | None = None
+    # Métricas GSC del run (si se importaron): merge desde gsc_job_data
+    gsc_clicks: int | None = None
+    gsc_impressions: int | None = None
+    gsc_ctr: float | None = None
+    gsc_position: float | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 

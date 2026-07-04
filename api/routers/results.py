@@ -111,6 +111,17 @@ SORT_COLUMNS = {
     "meta_description_len": HtmlMeta.meta_description_len,
 }
 
+# Métricas GSC por URL (join a gsc_job_data cuando se ordena/filtra por ellas)
+from shared.semantic_models import GscJobData  # noqa: E402
+
+GSC_SORT_COLUMNS = {
+    "gsc_clicks": GscJobData.clicks,
+    "gsc_impressions": GscJobData.impressions,
+    "gsc_ctr": GscJobData.ctr,
+    "gsc_position": GscJobData.position,
+}
+SORT_COLUMNS.update(GSC_SORT_COLUMNS)
+
 # Numeric range filters mapped to (model_column, requires_html_meta_join)
 _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "pagerank": (Url.pagerank, False),
@@ -138,6 +149,10 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "boilerplate_ratio": (Url.boilerplate_ratio, False),
     "pagerank_semantic": (Url.pagerank_semantic, False),
     "js_content_ratio": (Url.js_content_ratio, False),
+    # GSC (requieren join a gsc_job_data — detectado por el prefijo gsc_)
+    "gsc_clicks": (GscJobData.clicks, False),
+    "gsc_impressions": (GscJobData.impressions, False),
+    "gsc_position": (GscJobData.position, False),
 }
 
 # String "contains" filters mapped to (model_column, requires_html_meta_join).
@@ -191,6 +206,7 @@ def list_urls(
     # 1) Numeric range filters: <col>_gte / <col>_lte from _RANGE_FILTERS
     range_clauses: list = []
     range_needs_meta = False
+    range_needs_gsc = False
     for col_name, (col_expr, needs_meta) in _RANGE_FILTERS.items():
         gte_raw = qp.get(f"{col_name}_gte")
         lte_raw = qp.get(f"{col_name}_lte")
@@ -205,6 +221,8 @@ def list_urls(
             continue  # ignore malformed numeric input
         if needs_meta:
             range_needs_meta = True
+        if col_name.startswith("gsc_"):
+            range_needs_gsc = True
 
     # 2) String "contains" filters from _STRING_CONTAINS_FILTERS
     contains_clauses: list = []
@@ -222,6 +240,13 @@ def list_urls(
 
     if needs_meta_join:
         q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id)
+
+    # Join GSC solo si se ordena o filtra por sus métricas
+    if range_needs_gsc or (sort_by in GSC_SORT_COLUMNS):
+        q = q.outerjoin(
+            GscJobData,
+            (GscJobData.url_id == Url.id) & (GscJobData.job_id == job_id),
+        )
 
     if status_group is not None:
         q = q.filter(Url.status_group == status_group)
@@ -276,8 +301,27 @@ def list_urls(
         .all()
     )
 
+    items = [UrlResponse.model_validate(r) for r in rows]
+
+    # Merge de métricas GSC de la página actual (si el run las importó)
+    ids = [r.id for r in rows]
+    if ids:
+        gsc_rows = (
+            db.query(GscJobData)
+            .filter(GscJobData.job_id == job_id, GscJobData.url_id.in_(ids))
+            .all()
+        )
+        by_url = {g.url_id: g for g in gsc_rows}
+        for item in items:
+            g = by_url.get(item.id)
+            if g is not None:
+                item.gsc_clicks = g.clicks
+                item.gsc_impressions = g.impressions
+                item.gsc_ctr = g.ctr
+                item.gsc_position = g.position
+
     return _paginate(
-        items=[UrlResponse.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -338,6 +382,16 @@ def get_url_detail(
 
     # Serialize
     resp = UrlDetailResponse.model_validate(url_obj)
+    gsc = (
+        db.query(GscJobData)
+        .filter(GscJobData.job_id == job_id, GscJobData.url_id == url_id)
+        .first()
+    )
+    if gsc is not None:
+        resp.gsc_clicks = gsc.clicks
+        resp.gsc_impressions = gsc.impressions
+        resp.gsc_ctr = gsc.ctr
+        resp.gsc_position = gsc.position
     resp.headings = [HeadingResponse.model_validate(h) for h in url_obj.headings]
     resp.resources = [ResourceResponse.model_validate(r) for r in url_obj.resources]
     resp.hreflangs = [HreflangResponse.model_validate(h) for h in url_obj.hreflangs]

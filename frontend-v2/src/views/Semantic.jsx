@@ -158,6 +158,18 @@ function AnalysisPanel({ jobId, status, onChanged }) {
       <div>
         <div className="card" style={{ marginBottom: 12 }}>
           <h3>1 · Datos GSC (opcional pero recomendado)</h3>
+          {status.gsc && status.gsc.total > 0 ? (
+            <div className="alert warn" style={{ marginBottom: 8 }}>
+              ✓ Este run YA tiene datos GSC importados: <b className="num">{fmt(status.gsc.total)}</b> URLs con métricas
+              ({fmt(status.gsc.matched)} con match en el rastreo, {fmt(status.gsc.unmatched)} sin match, conservadas como
+              posibles huérfanas). Las verás como columnas en el Explorador. Re-importar sobrescribe.
+            </div>
+          ) : (
+            <div className="proxy-tag" style={{ marginBottom: 8 }}>
+              Este run aún no tiene datos GSC. Al importarlos, los clics, impresiones y posición aparecen
+              como columnas por URL en el Explorador y alimentan striking distance y el análisis semántico.
+            </div>
+          )}
           {(gscQ.data || []).length === 0 && (
             <div className="proxy-tag">Sin cuentas GSC. <a href="#/cuentas">Añade una en Cuentas →</a></div>
           )}
