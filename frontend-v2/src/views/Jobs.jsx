@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { navigate } from "../hooks.js";
-import { Modal, StatusPill } from "../ui.jsx";
+import { Modal } from "../ui.jsx";
 
 /** Rastreos: gestión real de jobs + modal "Nuevo rastreo" (del Empresarial). */
 export default function JobsView() {

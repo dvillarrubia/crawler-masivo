@@ -110,6 +110,22 @@ class GeminiBackend:
         vecs = self._embed_batch([text], task_type="RETRIEVAL_QUERY")
         return l2_normalize(np.asarray(vecs[0]))
 
+    def embed_queries(
+        self,
+        texts: list[str],
+        progress_callback: ProgressCallback | None = None,
+    ) -> np.ndarray:
+        """T19: batched query embeddings (RETRIEVAL_QUERY, L2-normalized).
+        Same batching/backoff as documents but with the asymmetric query
+        task type — one row per input text.
+        """
+        if not texts:
+            return np.zeros((0, self.dim), dtype=np.float32)
+        vecs = self._embed_batch(
+            texts, task_type="RETRIEVAL_QUERY", progress_callback=progress_callback,
+        )
+        return l2_normalize(np.asarray(vecs))
+
     def embed_documents_with_chunks(
         self,
         texts: list[str],

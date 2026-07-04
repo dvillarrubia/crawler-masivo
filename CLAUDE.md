@@ -340,7 +340,7 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Python test suite under `tests/python/` (pytest, 215+ tests): run with
+Python test suite under `tests/python/` (pytest, 220+ tests): run with
 `python -m pytest` from the repo root (`pytest.ini` sets testpaths).
 `conftest.py` provides in-memory SQLite sessions (BigInteger compiled as
 INTEGER), a golden HTML fixture, and an autouse reset of the T8
@@ -380,6 +380,12 @@ The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
 - **Business layer:** GSC rows keep unmatched URLs (T9/D2); semantic
   chunks persisted (T11, `semantic_chunks` + HNSW); signable issues and
   link suggestions (T10, `review_status`); GEO raw-vs-rendered (T15).
+- **Query→passage coverage (T19):** `analysis/query_coverage.py` +
+  `POST/GET /api/jobs/{id}/semantic/query-coverage`. Embeds GSC queries
+  at runtime (`embed_queries`, RETRIEVAL_QUERY), crosses them against
+  T11 chunks (exact blocked matmul; HNSW top-K path on Postgres above
+  20M pairs), caches per-query results in `query_embeddings` and emits
+  signable issues: `passage_gap`, `buried_passage`, `orphan_chunk`.
 - **Architecture (T22/T23):** `analysis/architecture.py` — edge
   classifier (3 passes), `arch_edges`, real `click_depth`,
   `section_flows`, ARQ checks. Flag `edge_classification`.
@@ -399,7 +405,7 @@ previous behaviour exactly (regla de oro 3 del plan).
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
 - Server log ingestion (the UI shows it as a blocked source)
-- T19 query→passage coverage (needs runtime GSC query embeddings)
 - T18 anchor relevance (needs runtime `embed_query` per anchor)
 - Hreflang return-tag validation
 - Structured data rich-result validation
+- Simulator matrix cache per job (interactive re-simulation)

@@ -29,6 +29,7 @@ export default function FirmaView() {
 
       <SuggestionsQueue jobId={jobId} reviewer={reviewer} />
       <CannibalQueue jobId={jobId} reviewer={reviewer} />
+      <CoverageQueue jobId={jobId} reviewer={reviewer} />
     </div>
   );
 }
@@ -96,6 +97,81 @@ function SuggestionsQueue({ jobId, reviewer }) {
                     </span>
                   ) : (
                     <span className="proxy-tag">{s.status} · {s.decided_by} · {s.decided_at ? new Date(s.decided_at).toLocaleDateString("es") : ""}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={d.pages} onPage={setPage} />
+    </div>
+  );
+}
+
+/* Cobertura consulta→pasaje (T19): gap / enterrado / chunk huérfano. */
+const T19_LABEL = {
+  passage_gap: "gap de pasaje",
+  buried_passage: "pasaje enterrado",
+  orphan_chunk: "chunks huérfanos",
+};
+
+function CoverageQueue({ jobId, reviewer }) {
+  const [kind, setKind] = useState("passage_gap");
+  const [page, setPage] = useState(1);
+  const q = useAsync(
+    () => api.issues(jobId, { issue_type: kind, page, page_size: 50 }),
+    [jobId, kind, page],
+  );
+
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const d = q.data;
+
+  const review = async (iid, decision) => {
+    if (!reviewer) { alert("Pon tu nombre arriba para firmar."); return; }
+    await api.reviewIssue(iid, { review_status: decision, reviewed_by: reviewer });
+    q.reload();
+  };
+
+  const detail = (i) => {
+    if (kind === "passage_gap")
+      return `«${i.details?.query}» · ${fmt(i.details?.impressions)} imprs · mejor sim ${i.details?.best_similarity?.toFixed(3)}`;
+    if (kind === "buried_passage")
+      return `«${i.details?.query}» · sim ${i.details?.similarity?.toFixed(3)} · chunk #${i.details?.chunk_position}`;
+    return `${fmt(i.details?.orphan_chunks)} de ${fmt(i.details?.total_chunks)} chunks sin demanda${i.details?.approximate ? " (aprox.)" : ""}`;
+  };
+
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="row between">
+        <h3>Cobertura consulta→pasaje · T19 ({fmt(d.total)})</h3>
+        <span className="row" style={{ gap: 6 }}>
+          {Object.entries(T19_LABEL).map(([k, label]) => (
+            <button key={k} className={kind === k ? "" : "secondary"}
+              onClick={() => { setKind(k); setPage(1); }}>{label}</button>
+          ))}
+        </span>
+      </div>
+      {d.items.length === 0 && <EmptyClean>Sin issues de este tipo. Se generan al calcular la cobertura en Semántica → Consultas→Pasajes.</EmptyClean>}
+      <div className="table-wrap" style={{ maxHeight: "40vh" }}>
+        <table className="data">
+          <thead>
+            <tr><th>URL accionable</th><th>Detalle</th><th>Firma</th></tr>
+          </thead>
+          <tbody>
+            {d.items.map((i) => (
+              <tr key={i.id}>
+                <td className="cell-url" title={i.url}>{i.url}</td>
+                <td>{detail(i)}</td>
+                <td>
+                  {i.review_status === "pending" ? (
+                    <span className="row" style={{ gap: 4 }}>
+                      <button onClick={() => review(i.id, "signed")}>Firmar</button>
+                      <button className="secondary" onClick={() => review(i.id, "rejected")}>Rechazar</button>
+                    </span>
+                  ) : (
+                    <span className="proxy-tag">{i.review_status} · {i.reviewed_by}</span>
                   )}
                 </td>
               </tr>

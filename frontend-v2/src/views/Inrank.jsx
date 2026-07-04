@@ -19,6 +19,7 @@ export default function InrankView() {
     ["simulador", "Simulador what-if"],
     ["profundidad", "Profundidad de clic"],
     ["flujos", "Flujos entre secciones"],
+    ["aristas", "Aristas del grafo"],
   ];
 
   return (
@@ -34,6 +35,59 @@ export default function InrankView() {
       {tab === "simulador" && <SimulatorPanel jobId={jobId} />}
       {tab === "profundidad" && <DepthPanel jobId={jobId} segmentId={segmentId} />}
       {tab === "flujos" && <FlowsPanel jobId={jobId} />}
+      {tab === "aristas" && <EdgesPanel jobId={jobId} />}
+    </div>
+  );
+}
+
+/* -- Matriz agregada de aristas (T22) ---------------------------------------- */
+const EDGE_CLASSES = ["contextual", "listado", "breadcrumb", "paginacion", "menu", "footer", "sidebar", "desconocido"];
+
+function EdgesPanel({ jobId }) {
+  const [page, setPage] = useState(1);
+  const [klass, setKlass] = useState("");
+  const q = useAsync(
+    () => api.archEdges(jobId, { edge_class: klass, page, page_size: 50 }),
+    [jobId, klass, page],
+  );
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const d = q.data;
+  if (d.status === "blocked") {
+    return <Blocked title="Aristas del grafo"
+      reason="La matriz agregada se materializa con edge_classification=true. Los enlaces sitewide colapsan en una fila (origen *)." />;
+  }
+  return (
+    <div className="card">
+      <h3>Vista agregada del grafo · sitewide colapsado en una fila por destino ({fmt(d.total)})</h3>
+      <div className="toolbar">
+        <select value={klass} onChange={(e) => { setKlass(e.target.value); setPage(1); }}>
+          <option value="">todas las clases</option>
+          {EDGE_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="table-wrap" style={{ maxHeight: "60vh" }}>
+        <table className="data">
+          <thead>
+            <tr><th>Origen</th><th>Destino</th><th>Clase</th>
+              <th className="num">Páginas</th><th>Anchor (muestra)</th></tr>
+          </thead>
+          <tbody>
+            {d.items.map((e, i) => (
+              <tr key={i}>
+                <td className="cell-url" title={e.source_url || "sitewide"}>
+                  {e.source_url || <span className="tag">sitewide ({fmt(e.n_pages)} páginas)</span>}
+                </td>
+                <td className="cell-url" title={e.target_url}>{e.target_url}</td>
+                <td><span className="tag">{e.edge_class}</span></td>
+                <td className="num">{fmt(e.n_pages)}</td>
+                <td className="cell-url" title={e.anchor_sample || ""}>{e.anchor_sample || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={d.pages} onPage={setPage} />
     </div>
   );
 }

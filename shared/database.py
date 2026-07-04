@@ -103,6 +103,7 @@ def init_db():
     from shared.semantic_models import (  # noqa: F401 – force semantic table registration
         GscAccount, SemanticAnalysis, SemanticPage,
         SemanticCannibalization, GscJobData, SemanticChunk,
+        QueryEmbedding,
     )
     if engine.dialect.name.startswith("postgres"):
         # Vector columns need the extension before create_all on a fresh DB

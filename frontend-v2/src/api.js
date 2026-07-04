@@ -25,7 +25,6 @@ const qs = (params) => {
 
 export const api = {
   jobs: (params) => request(`/api/jobs${qs(params)}`),
-  job: (id) => request(`/api/jobs/${id}`),
   createJob: (payload) =>
     request("/api/jobs", { method: "POST", body: JSON.stringify(payload) }),
   cancelJob: (id) => request(`/api/jobs/${id}/cancel`, { method: "PATCH" }),
@@ -40,7 +39,6 @@ export const api = {
   urls: (id, params) => request(`/api/jobs/${id}/urls${qs(params)}`),
   urlDetail: (id, urlId) => request(`/api/jobs/${id}/urls/${urlId}`),
   issues: (id, params) => request(`/api/jobs/${id}/issues${qs(params)}`),
-  issueUrls: (id, params) => request(`/api/jobs/${id}/issues/urls${qs(params)}`),
   exportUrl: (id, entity) => `/api/jobs/${id}/export?entity=${entity}`,
 
   links: (id, params) => request(`/api/jobs/${id}/links${qs(params)}`),
@@ -72,6 +70,7 @@ export const api = {
     }),
   pagerankDelta: (id, params) => request(`/api/jobs/${id}/pagerank-delta${qs(params)}`),
   sectionFlows: (id) => request(`/api/jobs/${id}/section-flows`),
+  archEdges: (id, params) => request(`/api/jobs/${id}/arch-edges${qs(params)}`),
   simulate: (id, payload) =>
     request(`/api/jobs/${id}/pagerank-simulate`, {
       method: "POST", body: JSON.stringify(payload),
@@ -101,6 +100,11 @@ export const api = {
   semanticDrift: (id) => request(`/api/jobs/${id}/semantic/drift`),
   semanticGap: (id, payload) =>
     request(`/api/jobs/${id}/semantic/gap-analysis`, { method: "POST", body: JSON.stringify(payload) }),
+  targetRings: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/target-rings`, { method: "POST", body: JSON.stringify(payload) }),
+  queryCoverage: (id) => request(`/api/jobs/${id}/semantic/query-coverage`),
+  runQueryCoverage: (id, payload) =>
+    request(`/api/jobs/${id}/semantic/query-coverage`, { method: "POST", body: JSON.stringify(payload) }),
   semanticExportUrl: (id) => `/api/jobs/${id}/semantic/export`,
 
   diff: (params) => request(`/api/diff${qs(params)}`),
@@ -111,6 +115,11 @@ export const api = {
   createSegment: (clientId, payload) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/segments`, {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateSegment: (clientId, segId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/segments/${segId}`, {
+      method: "PUT",
       body: JSON.stringify(payload),
     }),
   deleteSegment: (clientId, segId) =>

@@ -987,6 +987,74 @@ def get_section_flows(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/arch-edges  --  aggregated edge matrix (T22)
+# ---------------------------------------------------------------------------
+@router.get("/arch-edges")
+def list_arch_edges(
+    job_id: uuid.UUID,
+    edge_class: str | None = Query(None, pattern="^(contextual|listado|breadcrumb|paginacion|menu|footer|sidebar|desconocido)$"),
+    sitewide: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """T22: the aggregated edge view (``arch_edges``). Sitewide targets are
+    one row with source ``*`` and ``n_pages`` = how many pages carry the
+    link. Blocked when the job never ran the edge classifier.
+    """
+    _get_job_or_404(job_id, db)
+    from shared.models import ArchEdge
+
+    base = db.query(ArchEdge).filter(ArchEdge.job_id == job_id)
+    if base.first() is None:
+        return {"status": "blocked", "reason": "edge_classification_not_run"}
+
+    q = base
+    if edge_class is not None:
+        q = q.filter(ArchEdge.edge_class == edge_class)
+    if sitewide is not None:
+        q = q.filter(ArchEdge.sitewide.is_(sitewide))
+    total = q.count()
+    rows = (
+        q.order_by(ArchEdge.n_pages.desc(), ArchEdge.edge_class,
+                   ArchEdge.target_hash)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    # Resolve the page's hashes to URLs ('*' = collapsed sitewide source).
+    hashes = {r.target_hash for r in rows} | {
+        r.source_hash for r in rows if r.source_hash != "*"
+    }
+    url_by_hash: dict[str, str] = {}
+    if hashes:
+        url_by_hash = dict(
+            db.query(Url.url_hash, Url.url)
+            .filter(Url.job_id == job_id, Url.url_hash.in_(hashes))
+            .all()
+        )
+
+    items = [
+        {
+            "source_url": (
+                None if r.source_hash == "*"
+                else url_by_hash.get(r.source_hash, r.source_hash)
+            ),
+            "target_url": url_by_hash.get(r.target_hash, r.target_hash),
+            "edge_class": r.edge_class,
+            "n_pages": r.n_pages,
+            "sitewide": r.sitewide,
+            "anchor_sample": r.anchor_sample,
+        }
+        for r in rows
+    ]
+    resp = _paginate(items, total, page, page_size)
+    resp["status"] = "ok"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/link-suggestions  --  signing queue (T10)
 # ---------------------------------------------------------------------------
 @router.get("/link-suggestions")

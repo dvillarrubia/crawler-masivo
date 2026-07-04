@@ -25,8 +25,10 @@ from shared.semantic_models import (
     GscAccount,
     GscJobData,
     GscQueryData,
+    QueryEmbedding,
     SemanticAnalysis,
     SemanticCannibalization,
+    SemanticChunk,
     SemanticPage,
 )
 
@@ -1133,6 +1135,144 @@ def run_gap_analysis(
         c["position"] = gsc.get("position")
 
     return {"topic": body.topic, "candidates": result["candidates"]}
+
+
+# ---------------------------------------------------------------------------
+# T19 — Query→passage coverage
+# ---------------------------------------------------------------------------
+class QueryCoverageRequest(BaseModel):
+    """Params for the T19 coverage run. Defaults follow the maestro doc:
+    top demand queries only (embedding cost is per query) and a coverage
+    threshold consistent with the gap-analysis verdict bands."""
+
+    max_queries: int = 200
+    min_impressions: int = 10
+    sim_threshold: float = 0.60
+    buried_min_position: int = 5
+    orphan_threshold: float = 0.50
+
+
+@router.post("/jobs/{job_id}/semantic/query-coverage")
+def run_query_coverage_endpoint(
+    job_id: uuid.UUID,
+    body: QueryCoverageRequest,
+    db: Session = Depends(get_session),
+):
+    """T19: embed the job's GSC queries and cross them against the
+    persisted chunks (T11). Emits ``passage_gap`` / ``buried_passage`` /
+    ``orphan_chunk`` as signable issues and caches the per-query result
+    in ``query_embeddings`` so GET re-serves without re-embedding.
+    """
+    _get_job_or_404(job_id, db)
+    analysis = _get_latest_analysis(job_id, db)
+    if not analysis or analysis.status != "completed":
+        raise HTTPException(status_code=404, detail="No completed analysis found")
+    if not (1 <= body.max_queries <= 1000):
+        raise HTTPException(status_code=400, detail="max_queries must be in [1, 1000]")
+    if not (0.0 <= body.sim_threshold <= 1.0 and 0.0 <= body.orphan_threshold <= 1.0):
+        raise HTTPException(status_code=400, detail="thresholds must be in [0, 1]")
+
+    from analysis.query_coverage import run_query_coverage
+    from POC_centro_semantico.src.embedding_backends import get_backend
+
+    api_key = _resolve_gemini_key_from_analysis(analysis, db)
+    backend = get_backend(api_key=api_key)
+
+    result = run_query_coverage(
+        db, job_id, analysis.id, backend,
+        max_queries=body.max_queries,
+        min_impressions=body.min_impressions,
+        sim_threshold=body.sim_threshold,
+        buried_min_position=body.buried_min_position,
+        orphan_threshold=body.orphan_threshold,
+    )
+    if result.get("status") == "blocked":
+        db.rollback()
+        return result
+
+    # Persist the summary on the analysis so GET can rebuild the header
+    # without recomputing the matrix.
+    analysis.site_metrics = {
+        **(analysis.site_metrics or {}),
+        "query_coverage": result["summary"],
+    }
+    db.commit()
+    return result
+
+
+@router.get("/jobs/{job_id}/semantic/query-coverage")
+def get_query_coverage(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """T19: cached coverage from ``query_embeddings`` (no embedding cost).
+    Blocked-source rule: explicit reasons, never a silent empty list.
+    """
+    _get_job_or_404(job_id, db)
+    analysis = _get_latest_analysis(job_id, db)
+    if not analysis or analysis.status != "completed":
+        return {"status": "blocked", "reason": "semantic_analysis_not_run"}
+
+    has_queries = (
+        db.query(GscQueryData.id).filter(GscQueryData.job_id == job_id).first()
+    )
+    rows = (
+        db.query(QueryEmbedding)
+        .filter(QueryEmbedding.job_id == job_id)
+        .order_by(QueryEmbedding.impressions.desc())
+        .all()
+    )
+    if not rows:
+        return {
+            "status": "blocked",
+            "reason": "not_run" if has_queries else "no_gsc_query_data",
+        }
+
+    chunk_ids = {r.best_chunk_id for r in rows if r.best_chunk_id is not None}
+    chunk_info: dict[int, tuple] = {}
+    if chunk_ids:
+        chunk_info = {
+            c[0]: (c[1], c[2], c[3])
+            for c in db.query(
+                SemanticChunk.id, SemanticChunk.url_id,
+                SemanticChunk.position, SemanticChunk.heading_path,
+            ).filter(SemanticChunk.id.in_(chunk_ids)).all()
+        }
+    url_ids = {r.ranking_url_id for r in rows if r.ranking_url_id} | {
+        info[0] for info in chunk_info.values()
+    }
+    url_by_id = dict(
+        db.query(Url.id, Url.url).filter(Url.id.in_(url_ids)).all()
+    ) if url_ids else {}
+
+    queries = []
+    for r in rows:
+        info = chunk_info.get(r.best_chunk_id)
+        queries.append({
+            "query": r.query,
+            "clicks": r.clicks,
+            "impressions": r.impressions,
+            "position": r.position,
+            "best_similarity": r.best_similarity,
+            "best_chunk_id": r.best_chunk_id,
+            "best_chunk_position": info[1] if info else None,
+            "best_chunk_heading": info[2] if info else None,
+            "covered": r.covered,
+            "buried": r.buried,
+            "ranking_url": url_by_id.get(r.ranking_url_id),
+            "best_chunk_url": url_by_id.get(info[0]) if info else None,
+        })
+
+    summary = (analysis.site_metrics or {}).get("query_coverage") or {
+        "queries_analyzed": len(queries),
+        "covered": sum(1 for q in queries if q["covered"]),
+        "coverage_ratio": (
+            round(sum(1 for q in queries if q["covered"]) / len(queries), 4)
+            if queries else 0.0
+        ),
+        "gaps": sum(1 for q in queries if q["covered"] is False),
+        "buried": sum(1 for q in queries if q["buried"]),
+        "chunks_total": None,
+        "orphan_chunks": None,
+    }
+    return {"status": "ok", "summary": summary, "queries": queries}
 
 
 # ---------------------------------------------------------------------------

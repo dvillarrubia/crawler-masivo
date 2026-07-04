@@ -25,9 +25,11 @@ export default function SemanticView() {
   const TABS = [
     ["analisis", "Análisis"],
     ["mapa", "Mapa semántico"],
+    ["anillos", "Anillos objetivo"],
     ["canibalizacion", "Canibalización"],
     ["gap", "Gap de contenido"],
     ["drift", "Drift"],
+    ["consultas", "Consultas→Pasajes"],
   ];
 
   return (
@@ -48,9 +50,11 @@ export default function SemanticView() {
 
       {tab === "analisis" && <AnalysisPanel jobId={jobId} status={status} onChanged={statusQ.reload} />}
       {tab === "mapa" && <MapPanel jobId={jobId} status={status} />}
+      {tab === "anillos" && <TargetRingsPanel jobId={jobId} status={status} />}
       {tab === "canibalizacion" && <CannibalPanel jobId={jobId} status={status} />}
       {tab === "gap" && <GapPanel jobId={jobId} status={status} />}
       {tab === "drift" && <DriftPanel jobId={jobId} status={status} />}
+      {tab === "consultas" && <QueryCoveragePanel jobId={jobId} status={status} />}
     </div>
   );
 }
@@ -318,6 +322,106 @@ function MapPanel({ jobId, status }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Anillos objetivo: re-centra el mapa sobre un tema deseado           */
+/* ------------------------------------------------------------------ */
+function TargetRingsPanel({ jobId, status }) {
+  const [theme, setTheme] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      setResult(await api.targetRings(jobId, { target_theme: theme.trim() }));
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="grid" style={{ gridTemplateColumns: "340px 1fr", alignItems: "start" }}>
+      <div className="card">
+        <h3>Tema objetivo del sitio</h3>
+        <input type="text" value={theme} onChange={(e) => setTheme(e.target.value)}
+          placeholder="asesoría fiscal para pymes"
+          onKeyDown={(e) => e.key === "Enter" && theme.trim() && run()} />
+        <button style={{ marginTop: 8 }} disabled={busy || !theme.trim()} onClick={run}>
+          {busy ? "Embebiendo…" : "Re-centrar anillos"}
+        </button>
+        {error && <div className="alert" style={{ marginTop: 8 }}>{error}</div>}
+        {result && (
+          <div className="card muted" style={{ marginTop: 10 }}>
+            <div className="kpi-label">Alineación centro actual ↔ tema</div>
+            <div className="kpi-value num">{(result.alignment * 100).toFixed(1)}%</div>
+            <div className="facts" style={{ marginTop: 8 }}>
+              {Object.entries(result.ring_counts || {}).map(([ring, n]) => (
+                <div className="fact" key={ring}>
+                  <div className="k"><span className="dot" style={{ background: RING_COLORS[ring] }} /> {ring}</div>
+                  <div className="v num">{fmt(n)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <div>
+        {!result && <Blocked title="Anillos objetivo"
+          reason="Introduce el tema al que QUIERES que apunte el sitio: se reclasifican los anillos respecto a ese tema y salen las páginas a reforzar o reenfocar." />}
+        {result && (
+          <>
+            <div className="card" style={{ marginBottom: 12 }}>
+              <h3>Reforzar — cerca del tema pero con poco peso interno (enlázalas más)</h3>
+              {result.reinforce.length === 0 && <div className="proxy-tag">Nada que reforzar.</div>}
+              {result.reinforce.length > 0 && (
+                <table className="data">
+                  <thead><tr><th>URL</th><th>Anillo (tema)</th><th>Anillo (actual)</th>
+                    <th className="num">Dist. al tema</th><th className="num">Peso</th><th className="num">Clics</th></tr></thead>
+                  <tbody>
+                    {result.reinforce.map((r, i) => (
+                      <tr key={i}>
+                        <td className="cell-url" title={r.url}>{r.url}</td>
+                        <td><span className="tag">{r.ring_target}</span></td>
+                        <td><span className="tag">{r.ring_current}</span></td>
+                        <td className="num">{r.distance_to_target?.toFixed(3)}</td>
+                        <td className="num">{r.weight?.toFixed(3)}</td>
+                        <td className="num">{r.clicks ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="card">
+              <h3>Reenfocar — lejos del tema y con mucho peso (tiran del centro hacia otro lado)</h3>
+              {result.refocus.length === 0 && <div className="proxy-tag">Nada que reenfocar.</div>}
+              {result.refocus.length > 0 && (
+                <table className="data">
+                  <thead><tr><th>URL</th><th>Anillo (tema)</th><th>Anillo (actual)</th>
+                    <th className="num">Dist. al tema</th><th className="num">Peso</th><th className="num">Clics</th></tr></thead>
+                  <tbody>
+                    {result.refocus.map((r, i) => (
+                      <tr key={i}>
+                        <td className="cell-url" title={r.url}>{r.url}</td>
+                        <td><span className="tag">{r.ring_target}</span></td>
+                        <td><span className="tag">{r.ring_current}</span></td>
+                        <td className="num">{r.distance_to_target?.toFixed(3)}</td>
+                        <td className="num">{r.weight?.toFixed(3)}</td>
+                        <td className="num">{r.clicks ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Canibalización — con firma T10                                      */
 /* ------------------------------------------------------------------ */
 function CannibalPanel({ jobId, status }) {
@@ -430,6 +534,119 @@ function GapPanel({ jobId, status }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* T19 — Cobertura consulta→pasaje                                     */
+/* ------------------------------------------------------------------ */
+function QueryCoveragePanel({ jobId, status }) {
+  const [params, setParams] = useState({
+    max_queries: 200, min_impressions: 10, sim_threshold: 0.6,
+    buried_min_position: 5, orphan_threshold: 0.5,
+  });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (status.status !== "completed") return <NeedsAnalysis />;
+
+  const q = useAsync(() => api.queryCoverage(jobId), [jobId]);
+
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      await api.runQueryCoverage(jobId, {
+        ...params,
+        max_queries: Number(params.max_queries),
+        min_impressions: Number(params.min_impressions),
+        sim_threshold: Number(params.sim_threshold),
+        buried_min_position: Number(params.buried_min_position),
+        orphan_threshold: Number(params.orphan_threshold),
+      });
+      q.reload();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  if (q.loading) return <Spinner />;
+  const d = q.data || { status: "blocked", reason: "not_run" };
+  const rows = d.status === "ok" ? d.queries : [];
+  const sorted = rows.slice().sort((a, b) =>
+    (a.covered === b.covered ? (b.impressions || 0) - (a.impressions || 0) : a.covered ? 1 : -1));
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>Cobertura consulta→pasaje (T19): ¿qué queries de GSC tienen un pasaje que las responda?</h3>
+        <p className="proxy-tag" style={{ marginTop: 0 }}>
+          Embebe las queries de GSC (RETRIEVAL_QUERY) y las cruza con los chunks persistidos del análisis (T11).
+          Gap de pasaje, pasaje enterrado y chunks huérfanos entran como issues firmables en la Cola de firma.
+        </p>
+        <div className="form-grid">
+          <div className="field"><label>Máx. queries</label>
+            <input type="number" min={10} max={1000} value={params.max_queries}
+              onChange={(e) => setParams({ ...params, max_queries: e.target.value })} /></div>
+          <div className="field"><label>Impresiones mínimas</label>
+            <input type="number" min={0} value={params.min_impressions}
+              onChange={(e) => setParams({ ...params, min_impressions: e.target.value })} /></div>
+          <div className="field"><label>Umbral cobertura (cos)</label>
+            <input type="number" step="0.05" min="0" max="1" value={params.sim_threshold}
+              onChange={(e) => setParams({ ...params, sim_threshold: e.target.value })} /></div>
+          <div className="field"><label>Pos. de chunk "enterrado" ≥</label>
+            <input type="number" min={1} value={params.buried_min_position}
+              onChange={(e) => setParams({ ...params, buried_min_position: e.target.value })} /></div>
+        </div>
+        <button disabled={busy} onClick={run}>
+          {busy ? "Embebiendo queries…" : d.status === "ok" ? "Recalcular cobertura" : "Calcular cobertura"}
+        </button>
+        {error && <div className="alert" style={{ marginTop: 8 }}>{error}</div>}
+        {d.status === "blocked" && d.reason === "no_gsc_query_data" && (
+          <div className="alert warn" style={{ marginTop: 8 }}>
+            Sin datos de queries de GSC: impórtalos en la pestaña Análisis.
+          </div>
+        )}
+      </div>
+
+      {d.status === "ok" && (
+        <>
+          <div className="facts" style={{ marginBottom: 12 }}>
+            <div className="fact"><div className="k">Queries analizadas</div><div className="v num">{fmt(d.summary.queries_analyzed)}</div></div>
+            <div className="fact"><div className="k">Cubiertas</div><div className="v num">{fmt(d.summary.covered)} ({(d.summary.coverage_ratio * 100).toFixed(0)}%)</div></div>
+            <div className="fact"><div className="k">Gaps de pasaje</div><div className="v num">{fmt(d.summary.gaps)}</div></div>
+            <div className="fact"><div className="k">Pasajes enterrados</div><div className="v num">{fmt(d.summary.buried)}</div></div>
+            <div className="fact"><div className="k">Chunks huérfanos</div><div className="v num">{fmt(d.summary.orphan_chunks)} / {fmt(d.summary.chunks_total)}</div></div>
+          </div>
+          <div className="card">
+            <h3>Queries · sin cubrir primero, por impresiones</h3>
+            <div className="table-wrap" style={{ maxHeight: "58vh" }}>
+              <table className="data">
+                <thead>
+                  <tr><th>Query</th><th className="num">Impresiones</th><th className="num">Clics</th>
+                    <th className="num">Mejor similitud</th><th>Estado</th><th>Mejor pasaje (URL · posición)</th></tr>
+                </thead>
+                <tbody>
+                  {sorted.map((r, i) => (
+                    <tr key={i}>
+                      <td title={r.query}>{r.query}</td>
+                      <td className="num">{fmt(r.impressions)}</td>
+                      <td className="num">{fmt(r.clicks)}</td>
+                      <td className="num">{r.best_similarity != null ? r.best_similarity.toFixed(3) : "—"}</td>
+                      <td>
+                        {!r.covered ? <span className="tag" style={{ color: "var(--chart-red)" }}>gap</span>
+                          : r.buried ? <span className="tag" style={{ color: "var(--chart-amber)" }}>enterrado</span>
+                            : <span className="tag" style={{ color: "var(--chart-forest)" }}>cubierta</span>}
+                      </td>
+                      <td className="cell-url" title={r.best_chunk_url || ""}>
+                        {r.best_chunk_url ? `${r.best_chunk_url} · #${r.best_chunk_position}` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

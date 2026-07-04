@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -150,6 +151,36 @@ class SemanticChunk(Base):
 
     __table_args__ = (
         Index("ix_semantic_chunks_analysis_url", "analysis_id", "url_id", "position"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Query Embeddings (T19) — GSC queries embedded at runtime for the
+# query→passage coverage matrix. One row per distinct query per job;
+# best_* columns cache the coverage result so GET re-serves without
+# re-embedding.
+# ---------------------------------------------------------------------------
+class QueryEmbedding(Base):
+    __tablename__ = "query_embeddings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("semantic_analyses.id", ondelete="CASCADE"), nullable=False)
+    query = Column(String(500), nullable=False)
+    embedding = Column(Vector(1024), nullable=True)
+    clicks = Column(Integer, default=0)
+    impressions = Column(Integer, default=0)
+    position = Column(Float, nullable=True)          # impression-weighted avg
+    ranking_url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=True)
+    best_similarity = Column(Float, nullable=True)   # vs best chunk
+    best_chunk_id = Column(BigInteger, ForeignKey("semantic_chunks.id", ondelete="SET NULL"), nullable=True)
+    covered = Column(Boolean, nullable=True)
+    buried = Column(Boolean, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_query_embeddings_job", "job_id"),
+        Index("ix_query_embeddings_analysis", "analysis_id"),
     )
 
 

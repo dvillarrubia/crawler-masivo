@@ -33,16 +33,35 @@ export default function ConfigView() {
 function SegmentsPanel({ clientId }) {
   const listQ = useAsync(() => api.segments(clientId), [clientId]);
   const { setSegmentId } = useCtx();
-  const [draft, setDraft] = useState({ name: "", rule_type: "regex", rule: "", priority: 100, is_business: false });
+  const EMPTY = { name: "", rule_type: "regex", rule: "", priority: 100, is_business: false };
+  const [draft, setDraft] = useState(EMPTY);
+  const [editingId, setEditingId] = useState(null);
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
+
+  const startEdit = (s) => {
+    setEditingId(s.id);
+    setDraft({ name: s.name, rule_type: s.rule_type, rule: s.rule, priority: s.priority, is_business: !!s.is_business });
+    setPreview(null);
+    setError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setDraft(EMPTY);
+    setPreview(null);
+    setError(null);
+  };
 
   const doPreview = async () => {
     setError(null);
     try {
-      const existing = (listQ.data || []).map((s) => ({
-        name: s.name, rule_type: s.rule_type, rule: s.rule, priority: s.priority,
-      }));
+      // Al editar, la regla en curso sustituye a la guardada (no se duplica).
+      const existing = (listQ.data || [])
+        .filter((s) => s.id !== editingId)
+        .map((s) => ({
+          name: s.name, rule_type: s.rule_type, rule: s.rule, priority: s.priority,
+        }));
       const res = await api.previewSegments(clientId, [...existing, { ...draft, priority: Number(draft.priority) }]);
       setPreview(res);
     } catch (e) { setError(e.message); }
@@ -51,9 +70,13 @@ function SegmentsPanel({ clientId }) {
   const save = async () => {
     setError(null);
     try {
-      await api.createSegment(clientId, { ...draft, priority: Number(draft.priority) });
-      setDraft({ name: "", rule_type: "regex", rule: "", priority: 100, is_business: false });
-      setPreview(null);
+      const payload = { ...draft, priority: Number(draft.priority) };
+      if (editingId != null) {
+        await api.updateSegment(clientId, editingId, payload);
+      } else {
+        await api.createSegment(clientId, payload);
+      }
+      cancelEdit();
       listQ.reload();
     } catch (e) { setError(e.message); }
   };
@@ -70,10 +93,12 @@ function SegmentsPanel({ clientId }) {
           </span>
           <span className="row">
             <span className="tag num">prio {s.priority}</span>
+            <button className="secondary" title="Editar" onClick={() => startEdit(s)}>✎</button>
             <button className="secondary" onClick={async () => {
               if (window.confirm(`¿Borrar el segmento "${s.name}"?`)) {
                 await api.deleteSegment(clientId, s.id);
                 setSegmentId("");
+                if (editingId === s.id) cancelEdit();
                 listQ.reload();
               }
             }}>×</button>
@@ -115,13 +140,19 @@ function SegmentsPanel({ clientId }) {
           Sección de negocio (umbrales de arquitectura más estrictos — T23)
         </label>
         <div className="row" style={{ gap: 8 }}>
+          {editingId != null && (
+            <span className="tag">editando «{(listQ.data || []).find((s) => s.id === editingId)?.name}»</span>
+          )}
           <button className="secondary" disabled={!draft.name || !draft.rule} onClick={doPreview}>
             Vista previa
           </button>
           <button disabled={!preview || !draft.name || !draft.rule} onClick={save}
             title="La preview es obligatoria antes de guardar">
-            Guardar segmento
+            {editingId != null ? "Guardar cambios" : "Guardar segmento"}
           </button>
+          {editingId != null && (
+            <button className="secondary" onClick={cancelEdit}>Cancelar</button>
+          )}
         </div>
 
         {preview && (
