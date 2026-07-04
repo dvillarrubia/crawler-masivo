@@ -483,6 +483,10 @@ def _insert_url_batch(
             external_outlinks_count=d.get("external_outlinks_count", 0),
             unique_inlinks_count=d.get("unique_inlinks_count", 0),
             pagerank=d.get("pagerank"),
+            blocked_by_robots=d.get("blocked_by_robots"),
+            # T1/T2: sitemap flags + not_crawled orphan rows round-trip
+            in_sitemap=d.get("in_sitemap"),
+            sitemap_lastmod=_parse_datetime(d.get("sitemap_lastmod")),
         )
         db.add(url)
         db.flush()

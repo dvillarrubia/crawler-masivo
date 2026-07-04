@@ -349,6 +349,15 @@ def list_issues(
     issue_type: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
+    """List SEO issues for a job, filterable by severity and issue type.
+
+    Orphan semantics (T2): ``orphan_page`` = crawled HTML page with zero
+    inlinks (page without incoming links). ``orphan_not_in_crawl`` = URL
+    declared by external sources (sitemap; GSC once available) that the
+    crawl could not reach at all — its ``urls`` row is a synthetic one
+    with ``status_group='not_crawled'``. The two never co-occur on the
+    same URL.
+    """
     _get_job_or_404(job_id, db)
 
     q = db.query(Issue).filter(Issue.job_id == job_id)
@@ -463,8 +472,13 @@ def get_stats(
 ):
     job = _get_job_or_404(job_id, db)
 
-    # Total URL count for this job
-    total_urls = db.query(func.count(Url.id)).filter(Url.job_id == job_id).scalar() or 0
+    # Total URL count for this job. T2: rows with status_group='not_crawled'
+    # (sitemap/GSC orphans never fetched) stay out of the crawl totals but
+    # remain visible in the urls_by_status_group breakdown below.
+    _crawled = (Url.status_group.is_(None)) | (Url.status_group != "not_crawled")
+    total_urls = db.query(func.count(Url.id)).filter(
+        Url.job_id == job_id, _crawled,
+    ).scalar() or 0
 
     # URLs by status group
     status_rows = (
@@ -511,9 +525,9 @@ def get_stats(
         ResourceTypeCount(resource_type=rt, count=c) for rt, c in rt_rows
     ]
 
-    # Internal / external counts
+    # Internal / external counts (crawled rows only, see T2 note above)
     internal_count = db.query(func.count(Url.id)).filter(
-        Url.job_id == job_id, Url.is_internal == True,
+        Url.job_id == job_id, Url.is_internal == True, _crawled,
     ).scalar() or 0
     external_count = total_urls - internal_count
 

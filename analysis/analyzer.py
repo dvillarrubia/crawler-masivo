@@ -145,6 +145,7 @@ class SEOAnalyzer:
         self.compute_pagerank()
         self.analyze_links()
         self.analyze_sitemaps()
+        self.analyze_real_orphans()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1111,12 +1112,18 @@ class SEOAnalyzer:
         """
         logger.debug("Computing PageRank ...")
 
-        # 1. Get all internal URL IDs for this job
+        # 1. Get all internal URL IDs for this job.
+        # T2: rows with status_group='not_crawled' (sitemap/GSC orphans that
+        # were never fetched) are not part of the crawl graph — excluding
+        # them keeps re-analysis output identical to the first analysis.
+        # Jobs without such rows are bit-for-bit unaffected (v1 snapshot).
         url_rows = (
             self.session.execute(
                 select(Url.id).where(
                     Url.job_id == self.job_id,
                     Url.is_internal.is_(True),
+                    (Url.status_group.is_(None))
+                    | (Url.status_group != "not_crawled"),
                 )
             ).all()
         )
@@ -1335,6 +1342,109 @@ class SEOAnalyzer:
         ).all()
         for (url_id,) in rows:
             self._add_issue(url_id, "crawled_not_in_sitemap", "info")
+
+        self._flush_issues()
+
+    # -- Real orphans (T2) ----------------------------------------------------
+
+    def analyze_real_orphans(self) -> None:
+        """T2: URLs known to external sources but unreachable by the crawl.
+
+        Semantics (documented in ``list_issues``):
+
+        * ``orphan_page`` (unchanged, ``analyze_links``): crawled HTML with
+          zero inlinks — "page without incoming links".
+        * ``orphan_not_in_crawl`` (this step): URL declared by a sitemap
+          (and by GSC once T9 lands) whose ``url_hash`` has NO row in
+          ``urls`` — "the crawl cannot even reach it".
+
+        Missing URLs get a minimal ``urls`` row so the issues FK holds and
+        they show up in the explorer: ``status_group='not_crawled'``,
+        ``is_html=False`` and ``inlinks_count=NULL`` — the two safeguards
+        that keep the old ``orphan_page`` from double-firing on them.
+        Idempotent: re-analysis emits the issue from the persisted rows
+        without duplicating them.
+        """
+        from urllib.parse import urlparse as _urlparse
+
+        from shared.models import SitemapUrl
+
+        logger.debug("Analyzing real orphans ...")
+
+        # 1. Insert minimal rows for sitemap URLs the crawl never saw.
+        missing = self.session.execute(
+            select(SitemapUrl.url, SitemapUrl.url_hash, SitemapUrl.lastmod)
+            .where(
+                SitemapUrl.job_id == self.job_id,
+                ~select(Url.id)
+                .where(
+                    Url.job_id == self.job_id,
+                    Url.url_hash == SitemapUrl.url_hash,
+                )
+                .exists(),
+            )
+        ).all()
+
+        for url, url_hash, lastmod in missing:
+            parsed = _urlparse(url)
+            self.session.add(Url(
+                job_id=self.job_id,
+                url=url,
+                url_hash=url_hash,
+                host=parsed.hostname,
+                path=parsed.path or None,
+                scheme=parsed.scheme or None,
+                is_internal=True,
+                is_html=False,          # safeguard: never orphan_page
+                status_code=None,
+                status_group="not_crawled",
+                in_sitemap=True,
+                sitemap_lastmod=lastmod,
+            ))
+        if missing:
+            self.session.flush()
+            # Safeguard: link counters must be NULL (unknown), not 0. An
+            # explicit None in the constructor would not override the
+            # column defaults, so force it here.
+            self.session.execute(
+                update(Url)
+                .where(
+                    Url.job_id == self.job_id,
+                    Url.status_group == "not_crawled",
+                )
+                .values(
+                    inlinks_count=None,
+                    outlinks_count=None,
+                    unique_inlinks_count=None,
+                    external_outlinks_count=None,
+                )
+            )
+            self.session.flush()
+
+        # 2. Emit the issue for EVERY not_crawled row (idempotent re-runs).
+        rows = self.session.execute(
+            select(Url.id, Url.sitemap_lastmod, SitemapUrl.id.isnot(None))
+            .outerjoin(SitemapUrl, and_(
+                SitemapUrl.job_id == Url.job_id,
+                SitemapUrl.url_hash == Url.url_hash,
+            ))
+            .where(
+                Url.job_id == self.job_id,
+                Url.status_group == "not_crawled",
+            )
+        ).all()
+
+        for url_id, lastmod, in_sitemap in rows:
+            seen_in = ["sitemap"] if in_sitemap else []
+            self._add_issue(
+                url_id,
+                "orphan_not_in_crawl",
+                "warning",
+                {
+                    "seen_in": seen_in,
+                    "lastmod": lastmod.isoformat() if lastmod else None,
+                },
+            )
 
         self._flush_issues()
 
