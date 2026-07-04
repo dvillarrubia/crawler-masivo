@@ -1,3 +1,4 @@
+import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useCtx } from "../App.jsx";
@@ -261,6 +262,68 @@ export default function ExplorerView() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Contenido extraído: renderizado / markdown fuente / texto plano      */
+/* ------------------------------------------------------------------ */
+function ContentPanel({ u }) {
+  const [mode, setMode] = useState("render");
+  const pc = u.page_content;
+
+  if (!pc || (!pc.content_markdown && !pc.content_text)) {
+    return (
+      <div className="card muted">
+        No hay contenido extraído para esta URL. Ocurre si no es HTML, si respondió con error
+        o si el rastreo se lanzó con la extracción de contenido desactivada.
+      </div>
+    );
+  }
+
+  const MODES = [
+    ["render", "Renderizado", !!pc.content_markdown],
+    ["md", "Markdown (fuente)", !!pc.content_markdown],
+    ["text", "Texto plano", !!pc.content_text],
+  ];
+
+  const rendered = () => {
+    try {
+      // se escapa el HTML crudo antes de parsear: el contenido viene de
+      // sitios rastreados y no debe poder inyectar etiquetas
+      return marked.parse((pc.content_markdown || "").replace(/</g, "&lt;"));
+    } catch {
+      return "<pre>" + (pc.content_markdown || "").replace(/</g, "&lt;") + "</pre>";
+    }
+  };
+
+  return (
+    <div>
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        {MODES.filter(([, , ok]) => ok).map(([k, label]) => (
+          <button key={k} className={mode === k ? "" : "secondary"}
+            style={{ padding: "3px 10px", fontSize: 11.5 }}
+            onClick={() => setMode(k)}>{label}</button>
+        ))}
+        <span className="proxy-tag num">
+          {fmt(pc.content_length)} caracteres · el contenido principal de la página, sin menús ni plantilla
+        </span>
+      </div>
+      {mode === "render" && (
+        <div className="card" style={{ maxHeight: "58vh", overflowY: "auto", lineHeight: 1.55, fontSize: 13.5 }}
+          dangerouslySetInnerHTML={{ __html: rendered() }} />
+      )}
+      {mode === "md" && (
+        <pre className="card mono" style={{ maxHeight: "58vh", overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 12 }}>
+          {pc.content_markdown}
+        </pre>
+      )}
+      {mode === "text" && (
+        <pre className="card" style={{ maxHeight: "58vh", overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5 }}>
+          {pc.content_text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Ficha de URL completa                                                */
 /* ------------------------------------------------------------------ */
 function UrlDrawer({ jobId, urlId, onClose }) {
@@ -275,6 +338,7 @@ function UrlDrawer({ jobId, urlId, onClose }) {
   const TABS = [
     ["resumen", "Resumen"],
     ["onpage", "On-page"],
+    ["contenido", "Contenido"],
     ["enlaces", `Enlaces (${u.inlinks.length}/${u.outlinks.length})`],
     ["recursos", `Recursos (${u.resources.length})`],
     ["datos", "Datos estructurados"],
@@ -341,6 +405,8 @@ function UrlDrawer({ jobId, urlId, onClose }) {
           ))}
         </div>
       )}
+
+      {tab === "contenido" && <ContentPanel u={u} />}
 
       {tab === "onpage" && (
         <>
