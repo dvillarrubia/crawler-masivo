@@ -9,37 +9,68 @@ import { Blocked, Drawer, ErrorBox, Pager, Severity, Spinner, StatusPill, fmt } 
 
 /** Definición de columnas: key API, etiqueta, tipo, filtro de servidor.
  *  filter: 'range' usa <key>_gte/_lte; 'contains' usa <param>; null sin filtro. */
+// Cada columna lleva su explicación (desc): visible al pasar el ratón por la
+// cabecera y por el selector de columnas. «—» = sin dato para esa URL.
 const COLUMNS = [
-  { key: "url", label: "URL", num: false, filter: null, always: true },
-  { key: "status_code", label: "Status", num: true, filter: "range", def: true },
-  { key: "resource_type", label: "Tipo", num: false, filter: null, def: true },
-  { key: "indexable", label: "Indexable", num: false, filter: null, def: true },
-  { key: "crawl_depth", label: "Prof. desc.", num: true, filter: "range", def: true },
-  { key: "click_depth", label: "Clics home", num: true, filter: "range", def: false },
-  { key: "inlinks_count", label: "Inlinks", num: true, filter: "range", def: true },
-  { key: "outlinks_count", label: "Outlinks", num: true, filter: "range", def: true },
-  { key: "in_contextual", label: "In ctx", num: true, filter: "range", def: false },
-  { key: "out_contextual", label: "Out ctx", num: true, filter: "range", def: false },
-  { key: "pagerank", label: "PageRank", num: true, filter: "range", def: true },
-  { key: "pagerank_semantic", label: "PR sem.", num: true, filter: "range", def: false },
+  { key: "url", label: "URL", num: false, filter: null, always: true,
+    desc: "La dirección de la página. Clic o Enter para abrir su ficha completa." },
+  { key: "status_code", label: "Status", num: true, filter: "range", def: true,
+    desc: "Código de respuesta del servidor: 200 = bien · 3xx = redirección · 4xx = no existe/prohibida · 5xx = el servidor falla." },
+  { key: "resource_type", label: "Tipo", num: false, filter: null, def: true,
+    desc: "Qué es la URL: página HTML, imagen, CSS, JavaScript, PDF, redirección…" },
+  { key: "indexable", label: "Indexable", num: false, filter: null, def: true,
+    desc: "¿Puede aparecer en Google? «no» si tiene noindex, canonical hacia otra página, error o redirección." },
+  { key: "crawl_depth", label: "Prof. rastreo", num: true, filter: "range", def: true,
+    desc: "A cuántos saltos de la semilla se DESCUBRIÓ la URL durante el rastreo. No es lo mismo que los clics reales desde la portada." },
+  { key: "click_depth", label: "Clics desde home", num: true, filter: "range", def: false,
+    desc: "Clics reales necesarios desde la portada para llegar. «sin camino» = no se llega clicando. Requiere activar la clasificación de enlaces en el rastreo." },
+  { key: "inlinks_count", label: "Inlinks", num: true, filter: "range", def: true,
+    desc: "Cuántos enlaces internos APUNTAN a esta página. Más inlinks = más autoridad recibida." },
+  { key: "outlinks_count", label: "Outlinks", num: true, filter: "range", def: true,
+    desc: "Cuántos enlaces salen de esta página hacia otras del sitio." },
+  { key: "in_contextual", label: "Inlinks contenido", num: true, filter: "range", def: false,
+    desc: "De sus inlinks, cuántos vienen del TEXTO de otras páginas (no de menús, footers o listados). Son los que más valen. Requiere clasificación de enlaces." },
+  { key: "out_contextual", label: "Outlinks contenido", num: true, filter: "range", def: false,
+    desc: "Cuántos enlaces salen desde el TEXTO de esta página (no de su plantilla). Requiere clasificación de enlaces." },
+  { key: "pagerank", label: "PageRank", num: true, filter: "range", def: true,
+    desc: "Autoridad interna de 0 a 10 según el grafo de enlaces del propio sitio. 10 = la página más enlazada/importante." },
+  { key: "pagerank_semantic", label: "PR semántico", num: true, filter: "range", def: false,
+    desc: "Autoridad contando solo los enlaces que llegan desde páginas del MISMO tema. Si es mucho menor que el PageRank, la página se sostiene por plantilla, no por relevancia. Requiere el análisis semántico." },
   // Métricas de Search Console (aparecen al importar GSC en Semántica)
-  { key: "gsc_clicks", label: "Clics GSC", num: true, filter: "range", def: true },
-  { key: "gsc_impressions", label: "Imprs. GSC", num: true, filter: "range", def: true },
-  { key: "gsc_position", label: "Pos. GSC", num: true, filter: "range", def: true },
-  { key: "gsc_ctr", label: "CTR GSC", num: true, filter: null, def: false },
-  { key: "word_count", label: "Palabras", num: true, filter: "range", def: true },
-  { key: "unique_word_count", label: "Palabras únicas", num: true, filter: "range", def: false },
-  { key: "boilerplate_ratio", label: "% plantilla", num: true, filter: "range", def: false },
-  { key: "js_content_ratio", label: "% solo JS", num: true, filter: "range", def: false },
-  { key: "text_ratio", label: "Texto/HTML", num: true, filter: "range", def: false },
-  { key: "response_time_ms", label: "ms", num: true, filter: "range", def: true },
-  { key: "transfer_size", label: "Bytes", num: true, filter: "range", def: false },
-  { key: "url_length", label: "Long. URL", num: true, filter: "range", def: false },
-  { key: "folder_depth", label: "Carpetas", num: true, filter: "range", def: false },
-  { key: "in_sitemap", label: "Sitemap", num: false, filter: null, def: false },
-  { key: "title", label: "Title", num: false, filter: "contains", param: "title_contains", def: false, meta: true },
-  { key: "canonical", label: "Canonical", num: false, filter: "contains", param: "canonical_contains", def: false, metaField: "canonical_href" },
-  { key: "host", label: "Host", num: false, filter: "contains", param: "host_contains", def: false },
+  { key: "gsc_clicks", label: "Clics GSC", num: true, filter: "range", def: true,
+    desc: "Clics reales desde Google en el periodo importado de Search Console. Requiere importar GSC en Semántica." },
+  { key: "gsc_impressions", label: "Imprs. GSC", num: true, filter: "range", def: true,
+    desc: "Veces que la página apareció en los resultados de Google (haya clic o no). Requiere importar GSC." },
+  { key: "gsc_position", label: "Pos. GSC", num: true, filter: "range", def: true,
+    desc: "Posición media en los resultados de Google. 1–10 = primera página. Requiere importar GSC." },
+  { key: "gsc_ctr", label: "CTR GSC", num: true, filter: null, def: false,
+    desc: "Porcentaje de impresiones que acabaron en clic. Bajo con muchas impresiones = título/descripción poco atractivos o posición baja." },
+  { key: "word_count", label: "Palabras", num: true, filter: "range", def: true,
+    desc: "Palabras de texto visible en la página." },
+  { key: "unique_word_count", label: "Palabras propias", num: true, filter: "range", def: false,
+    desc: "Palabras que quedan tras descontar la plantilla que se repite en toda la sección (menús, bloques legales…). Pocas = página «hueca». Requiere la capa de contenido único." },
+  { key: "boilerplate_ratio", label: "% plantilla", num: true, filter: "range", def: false,
+    desc: "Qué parte del texto de la página es plantilla repetida. 0,8 = el 80% no es contenido propio. Requiere la capa de contenido único." },
+  { key: "js_content_ratio", label: "% solo JS", num: true, filter: "range", def: false,
+    desc: "Qué parte del contenido solo existe tras ejecutar JavaScript — invisible para los buscadores de IA y el primer pase de Google. Requiere el análisis GEO del rastreo." },
+  { key: "text_ratio", label: "% texto", num: true, filter: "range", def: false,
+    desc: "Proporción de texto visible frente a código en el peso de la página. Muy bajo = casi todo es HTML/JS." },
+  { key: "response_time_ms", label: "Latencia (ms)", num: true, filter: "range", def: true,
+    desc: "Milisegundos que tardó el servidor en responder esta URL durante el rastreo." },
+  { key: "transfer_size", label: "Peso (bytes)", num: true, filter: "range", def: false,
+    desc: "Bytes transferidos al descargar la página." },
+  { key: "url_length", label: "Long. URL", num: true, filter: "range", def: false,
+    desc: "Caracteres de la URL completa. Más de ~115 se considera demasiado larga." },
+  { key: "folder_depth", label: "Carpetas", num: true, filter: "range", def: false,
+    desc: "Niveles de carpeta en la ruta: /ropa/hombre/camisas = 3." },
+  { key: "in_sitemap", label: "Sitemap", num: false, filter: null, def: false,
+    desc: "¿Está declarada en el sitemap.xml del sitio? Requiere haber activado la lectura de sitemaps en el rastreo." },
+  { key: "title", label: "Title", num: false, filter: "contains", param: "title_contains", def: false, meta: true,
+    desc: "La etiqueta <title> de la página: el texto azul del resultado en Google." },
+  { key: "canonical", label: "Canonical", num: false, filter: "contains", param: "canonical_contains", def: false, metaField: "canonical_href",
+    desc: "A qué URL declara pertenecer el contenido. Si apunta a otra página, esta versión cede su indexación." },
+  { key: "host", label: "Host", num: false, filter: "contains", param: "host_contains", def: false,
+    desc: "El dominio o subdominio de la URL." },
 ];
 
 export default function ExplorerView() {
@@ -161,18 +192,29 @@ export default function ExplorerView() {
       </div>
 
       {showCols && (
-        <div className="card muted" style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
-          {COLUMNS.filter((c) => !c.always).map((c) => (
-            <label key={c.key} className="checkbox-row" style={{ margin: 0 }}>
-              <input type="checkbox" checked={visibleKeys.includes(c.key)}
-                onChange={(e) => setVisibleKeys(
-                  e.target.checked
-                    ? [...visibleKeys, c.key]
-                    : visibleKeys.filter((k) => k !== c.key),
-                )} />
-              {c.label}
-            </label>
-          ))}
+        <div className="card muted" style={{ marginBottom: 10 }}>
+          <p className="proxy-tag" style={{ marginTop: 0 }}>
+            Marca las columnas que quieras ver. Cada una lleva su explicación debajo — también aparece al
+            pasar el ratón por la cabecera de la tabla.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "6px 16px" }}>
+            {COLUMNS.filter((c) => !c.always).map((c) => (
+              <label key={c.key} className="checkbox-row" style={{ margin: 0, alignItems: "flex-start" }}>
+                <input type="checkbox" checked={visibleKeys.includes(c.key)}
+                  onChange={(e) => setVisibleKeys(
+                    e.target.checked
+                      ? [...visibleKeys, c.key]
+                      : visibleKeys.filter((k) => k !== c.key),
+                  )} />
+                <span>
+                  <b style={{ fontSize: 12 }}>{c.label}</b>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--ink-muted)", lineHeight: 1.35 }}>
+                    {c.desc}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
 
@@ -201,6 +243,13 @@ export default function ExplorerView() {
           onChange={(e) => setFilter("search", e.target.value)} />
       </div>
 
+      <p className="proxy-tag" style={{ margin: "4px 0 8px" }}>
+        Pasa el ratón por cualquier cabecera para ver qué significa esa columna. «—» = sin dato: o la métrica
+        no aplica a esa URL (p. ej. GSC en una imagen), o la capa que la calcula no se activó en este rastreo
+        (PR semántico → análisis semántico · clics desde home y enlaces de contenido → clasificación de
+        enlaces · % solo JS → GEO · % plantilla → contenido único · métricas GSC → importar Search Console).
+      </p>
+
       {urlsQ.error && <ErrorBox error={urlsQ.error} />}
       {urlsQ.loading ? <Spinner /> : (
         <>
@@ -209,7 +258,8 @@ export default function ExplorerView() {
               <thead>
                 <tr>
                   {visible.map((c) => (
-                    <th key={c.key} className={c.num ? "num" : ""} onClick={() => toggleSort(c.key)}>
+                    <th key={c.key} className={c.num ? "num" : ""} title={c.desc}
+                      onClick={() => toggleSort(c.key)}>
                       {c.label}{sort.by === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   ))}
