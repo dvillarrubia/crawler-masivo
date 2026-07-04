@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import uuid
 from datetime import datetime, timezone
@@ -32,6 +33,8 @@ from api.schemas import (
     IssueResponse,
     IssueTypeCount,
     JobStats,
+    LatencyPercentiles,
+    LatencyStats,
     LinkResponse,
     PaginatedResponse,
     Recommendation,
@@ -531,6 +534,28 @@ def get_stats(
     ).scalar() or 0
     external_count = total_urls - internal_count
 
+    # T17.3: latency percentiles, global and per status group (additive).
+    latency_rows = (
+        db.query(Url.status_group, Url.response_time_ms)
+        .filter(Url.job_id == job_id, Url.response_time_ms.isnot(None))
+        .all()
+    )
+    latency = None
+    if latency_rows:
+        all_values: list[float] = []
+        by_group: dict[str, list[float]] = {}
+        for sg, ms in latency_rows:
+            all_values.append(ms)
+            if sg:
+                by_group.setdefault(sg, []).append(ms)
+        latency = LatencyStats(
+            **_percentiles(all_values),
+            by_status_group={
+                sg: LatencyPercentiles(**_percentiles(vals))
+                for sg, vals in sorted(by_group.items())
+            },
+        )
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -542,7 +567,20 @@ def get_stats(
         urls_by_resource_type=urls_by_rt,
         internal_count=internal_count,
         external_count=external_count,
+        latency=latency,
     )
+
+
+def _percentiles(values: list[float]) -> dict[str, float]:
+    """p50/p90/p99 by nearest-rank on a sorted copy (T17.3)."""
+    ordered = sorted(values)
+    n = len(ordered)
+
+    def _pick(p: float) -> float:
+        idx = min(n - 1, max(0, math.ceil(p * n) - 1))
+        return round(ordered[idx], 2)
+
+    return {"p50": _pick(0.50), "p90": _pick(0.90), "p99": _pick(0.99)}
 
 
 # ---------------------------------------------------------------------------
@@ -699,18 +737,124 @@ def _stream_csv(job_id: uuid.UUID):
             session.close()
 
 
+# T17.7: additional streaming exports reusing the windowed-session pattern.
+ISSUES_CSV_COLUMNS = [
+    "url", "issue_type", "severity", "details", "detected_at",
+]
+
+LINKS_CSV_COLUMNS = [
+    "from_url", "to_url", "anchor_text", "rel", "is_internal",
+    "link_position", "follow", "target", "link_type",
+    "dom_ancestor", "dom_container",
+]
+
+
+def _stream_issues_csv(job_id: uuid.UUID):
+    from shared.database import SessionLocal
+
+    batch_size = 1000
+    last_id = 0
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(ISSUES_CSV_COLUMNS)
+    yield buf.getvalue()
+
+    while True:
+        session = SessionLocal()
+        try:
+            rows = (
+                session.query(Issue, Url.url)
+                .join(Url, Url.id == Issue.url_id)
+                .filter(Issue.job_id == job_id, Issue.id > last_id)
+                .order_by(Issue.id)
+                .limit(batch_size)
+                .all()
+            )
+            if not rows:
+                break
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            for issue, url in rows:
+                writer.writerow([
+                    _val(url),
+                    _val(issue.issue_type),
+                    _val(issue.severity),
+                    _val(json.dumps(issue.details, ensure_ascii=False) if issue.details else ""),
+                    _val(issue.detected_at),
+                ])
+                last_id = issue.id
+            yield buf.getvalue()
+        finally:
+            session.close()
+
+
+def _stream_links_csv(job_id: uuid.UUID):
+    from shared.database import SessionLocal
+
+    batch_size = 1000
+    last_id = 0
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(LINKS_CSV_COLUMNS)
+    yield buf.getvalue()
+
+    while True:
+        session = SessionLocal()
+        try:
+            rows = (
+                session.query(Link, Url.url)
+                .join(Url, Url.id == Link.from_url_id)
+                .filter(Link.job_id == job_id, Link.id > last_id)
+                .order_by(Link.id)
+                .limit(batch_size)
+                .all()
+            )
+            if not rows:
+                break
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            for link, from_url in rows:
+                writer.writerow([
+                    _val(from_url),
+                    _val(link.to_url),
+                    _val(link.anchor_text),
+                    _val(link.rel),
+                    _val(link.is_internal),
+                    _val(link.link_position),
+                    _val(link.follow),
+                    _val(link.target),
+                    _val(link.link_type),
+                    _val(link.dom_ancestor),
+                    _val(link.dom_container),
+                ])
+                last_id = link.id
+            yield buf.getvalue()
+        finally:
+            session.close()
+
+
 @router.get("/export")
 def export_csv(
     job_id: uuid.UUID,
+    entity: str = Query("urls", pattern="^(urls|issues|links)$"),
     db: Session = Depends(get_session),
 ):
+    """Stream a CSV export. ``entity`` selects urls (default, historical
+    behaviour), issues or links (T17.7)."""
     _get_job_or_404(job_id, db)
 
+    streams = {
+        "urls": _stream_csv,
+        "issues": _stream_issues_csv,
+        "links": _stream_links_csv,
+    }
     return StreamingResponse(
-        _stream_csv(job_id),
+        streams[entity](job_id),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename=job_{job_id}_urls.csv",
+            "Content-Disposition": f"attachment; filename=job_{job_id}_{entity}.csv",
         },
     )
 

@@ -111,6 +111,10 @@ class LinkItem(scrapy.Item):
     alt_text = scrapy.Field()
     link_type = scrapy.Field()
 
+    # T17.5.b: DOM context (edge classifier prerequisite)
+    dom_ancestor = scrapy.Field()
+    dom_container = scrapy.Field()
+
 
 class HreflangItem(scrapy.Item):
     """An hreflang annotation."""

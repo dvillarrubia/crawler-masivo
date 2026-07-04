@@ -229,6 +229,9 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
         # Heuristic link position
         link_position = _detect_link_position(a)
 
+        # T17.5.b: DOM context for the edge classifier (T22)
+        dom_ancestor, dom_container = _extract_dom_context(a)
+
         # Target attribute (_blank, _self, _parent, _top, or custom)
         target = _clean(a.attrib.get("target", ""))
 
@@ -265,19 +268,53 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
             "alt_text": alt_text,
             "follow": follow,
             "link_type": link_type,
+            "dom_ancestor": dom_ancestor,
+            "dom_container": dom_container,
         })
 
     return results
 
 
+# T17.5: semantic ancestor tags and the position they imply.
+_SEMANTIC_POSITION = {
+    "nav": "nav",
+    "header": "header",
+    "footer": "footer",
+    "aside": "sidebar",
+    "main": "content",
+    "article": "content",
+}
+
+_SEMANTIC_TAGS = frozenset(_SEMANTIC_POSITION)
+
+
+def _ancestor_names(a_selector) -> list[str]:
+    """Ancestor tag names in document order (outermost first)."""
+    return [
+        node.xpath("name()").get() or ""
+        for node in a_selector.xpath("ancestor::*")
+    ]
+
+
 def _detect_link_position(a_selector) -> str:
     """
-    Simple heuristic: check ancestor element names for nav / footer / header.
-    Falls back to ``content``.
+    Heuristic link position (T17.5.a).
+
+    Real semantic elements win over CSS classes, and the NEAREST ancestor
+    wins over outer ones (a <nav> inside <header> is ``nav``; an in-article
+    TOC <nav> inside <main> is ``nav``). Only when no semantic ancestor
+    exists do we fall back to class names, again nearest-first. Default:
+    ``content``.
     """
-    # Walk up the ancestor axis looking for semantic elements
-    for ancestor_tag in a_selector.xpath("ancestor::*/@class").getall():
-        lower = ancestor_tag.lower()
+    # 1. Semantic elements, nearest ancestor first
+    for name in reversed(_ancestor_names(a_selector)):
+        nl = name.lower()
+        if nl in _SEMANTIC_POSITION:
+            return _SEMANTIC_POSITION[nl]
+
+    # 2. Class-based fallback, nearest container first
+    for ancestor_cls in reversed(a_selector.xpath("ancestor::*/@class").getall()):
+        lower = ancestor_cls.lower()
         if "nav" in lower:
             return "nav"
         if "footer" in lower:
@@ -287,23 +324,40 @@ def _detect_link_position(a_selector) -> str:
         if "sidebar" in lower:
             return "sidebar"
 
-    # Also check tag names
-    ancestor_names = [
-        node.xpath("name()").get()
-        for node in a_selector.xpath("ancestor::*")
-    ]
-    for name in ancestor_names:
-        nl = name.lower()
-        if nl == "nav":
-            return "nav"
-        if nl == "footer":
-            return "footer"
-        if nl == "header":
-            return "header"
-        if nl == "aside":
-            return "sidebar"
-
     return "content"
+
+
+def _extract_dom_context(a_selector) -> tuple[str | None, str | None]:
+    """
+    T17.5.b: DOM context of a link, persisted for the edge classifier (T22).
+
+    Returns ``(dom_ancestor, dom_container)``: the nearest semantic
+    ancestor tag (nav/header/footer/aside/main/article) and a compact
+    signature of the nearest ancestor that carries a class or id
+    (``tag.class1.class2#id``).
+    """
+    dom_ancestor = None
+    for name in reversed(_ancestor_names(a_selector)):
+        if name.lower() in _SEMANTIC_TAGS:
+            dom_ancestor = name.lower()
+            break
+
+    dom_container = None
+    # ancestor axis yields document order (outermost first); nearest wins
+    for node in reversed(list(a_selector.xpath("ancestor::*"))):
+        cls = (node.attrib.get("class") or "").strip()
+        node_id = (node.attrib.get("id") or "").strip()
+        if cls or node_id:
+            tag = (node.xpath("name()").get() or "").lower()
+            sig = tag
+            if cls:
+                sig += "." + ".".join(cls.split())
+            if node_id:
+                sig += f"#{node_id}"
+            dom_container = sig[:512]
+            break
+
+    return dom_ancestor, dom_container
 
 
 def extract_hreflang(selector) -> list[dict[str, Any]]:

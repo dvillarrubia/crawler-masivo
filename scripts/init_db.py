@@ -33,6 +33,9 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_refresh_url TEXT"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_refresh_delay INT"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS js_redirect_url TEXT"))
+        # T17.5.b: DOM context per link (prerequisite for T22)
+        conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS dom_ancestor VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE links ADD COLUMN IF NOT EXISTS dom_container TEXT"))
         conn.commit()
     print("Migrations applied.")
 

@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r api/requirements.txt
 
 COPY shared/ /app/shared/
 COPY api/ /app/api/
+# T17.2: reanalysis endpoint runs the analyzer in-process
+COPY analysis/ /app/analysis/
 COPY POC_centro_semantico/ /app/POC_centro_semantico/
 COPY frontend/ /app/frontend/
 COPY scripts/ /app/scripts/

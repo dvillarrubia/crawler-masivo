@@ -147,6 +147,8 @@ class SEOAnalyzer:
         # T3: PageRank version switch (1 = historical, bit-for-bit)
         self.pagerank_version = t.get("pagerank_version", 1)
         self.equity_leak_threshold = t.get("equity_leak_threshold", 0.3)
+        # T17.3: slow page threshold (ms)
+        self.slow_page_ms = t.get("slow_page_ms", 3000)
         # T8: normalization config of THIS job (the analyzer process does
         # not have the crawl subprocess' active config)
         from shared.url_normalization import UrlNormalizationConfig
@@ -168,6 +170,7 @@ class SEOAnalyzer:
         self.analyze_descriptions()
         self.analyze_headings()
         self.analyze_canonicals()
+        self.analyze_canonical_chains()
         self.analyze_hreflang()
         self.analyze_structured_data()
         self.analyze_indexability()
@@ -178,6 +181,7 @@ class SEOAnalyzer:
         self.analyze_images()
         self.analyze_security()
         self.analyze_content()
+        self.analyze_performance()
         self.analyze_url_issues()
         self.compute_link_counts()
         self.compute_pagerank()
@@ -1516,6 +1520,100 @@ class SEOAnalyzer:
                 {"count": outlink_count},
             )
 
+        self._flush_issues()
+
+    # -- Canonical chains (T17.4) ----------------------------------------------
+
+    _CANONICAL_MAX_HOPS = 5
+
+    def analyze_canonical_chains(self) -> None:
+        """T17.4: transitive canonical resolution, mirroring
+        ``analyze_redirect_chains``. A canonical→B canonical→C emits
+        ``canonical_chain`` (warning) on A; cycles emit ``canonical_loop``
+        (error) on every member. ``analyze_canonicals`` (single-hop
+        validation) is untouched.
+        """
+        from shared.url_normalization import compute_url_hash as _hash
+
+        logger.debug("Analyzing canonical chains ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.url, Url.url_hash, HtmlMeta.canonical_href)
+            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                HtmlMeta.canonical_href.isnot(None),
+            )
+        ).all()
+
+        # url_hash → (url_id, url, canonical_target_hash or None if self)
+        canon: dict[str, tuple[int, str, str | None]] = {}
+        for url_id, url, url_hash, href in rows:
+            target_hash = _hash(href, self._norm_config)
+            canon[url_hash] = (
+                url_id, url, target_hash if target_hash != url_hash else None,
+            )
+
+        for start_hash, (url_id, url, target) in canon.items():
+            if target is None:
+                continue
+            chain = [start_hash]
+            current = target
+            is_loop = False
+            while current is not None and len(chain) <= self._CANONICAL_MAX_HOPS:
+                if current in chain:
+                    is_loop = True
+                    chain.append(current)
+                    break
+                chain.append(current)
+                entry = canon.get(current)
+                current = entry[2] if entry else None
+
+            def _url_of(h: str) -> str:
+                e = canon.get(h)
+                return e[1] if e else h
+
+            if is_loop:
+                self._add_issue(
+                    url_id,
+                    "canonical_loop",
+                    "error",
+                    {"chain": [_url_of(h) for h in chain]},
+                )
+            elif len(chain) > 2:  # start → intermediate → final = chain
+                self._add_issue(
+                    url_id,
+                    "canonical_chain",
+                    "warning",
+                    {
+                        "chain": [_url_of(h) for h in chain],
+                        "hops": len(chain) - 1,
+                    },
+                )
+        self._flush_issues()
+
+    # -- Performance (T17.3) ---------------------------------------------------
+
+    def analyze_performance(self) -> None:
+        """T17.3: flag pages slower than ``slow_page_ms`` (default 3000)."""
+        logger.debug("Analyzing performance ...")
+
+        rows = self.session.execute(
+            select(Url.id, Url.response_time_ms)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.response_time_ms > self.slow_page_ms,
+            )
+        ).all()
+
+        for url_id, ms in rows:
+            self._add_issue(
+                url_id,
+                "slow_page",
+                "warning",
+                {"response_time_ms": ms, "threshold_ms": self.slow_page_ms},
+            )
         self._flush_issues()
 
     # -- Client-side redirects (T4) -------------------------------------------

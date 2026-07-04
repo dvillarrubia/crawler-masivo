@@ -808,6 +808,9 @@ class SeoSpider(scrapy.Spider):
                 target=link.get("target"),
                 alt_text=link.get("alt_text"),
                 link_type=link.get("link_type", "hyperlink"),
+                # T17.5.b: DOM context (edge classifier prerequisite)
+                dom_ancestor=link.get("dom_ancestor"),
+                dom_container=link.get("dom_container"),
             )
 
         # Hreflang

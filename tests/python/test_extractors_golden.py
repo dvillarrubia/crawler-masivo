@@ -61,14 +61,22 @@ def test_extract_links_positions_and_follow(golden_selector):
     # mailto / javascript are skipped
     assert not any(u.startswith(("mailto:", "javascript:")) for u in by_url)
 
-    # Semántica ACTUAL de _detect_link_position (congelada a propósito):
-    # el paso por clases va primero; el paso por tags devuelve el ancestro
-    # MÁS EXTERNO, por eso un enlace en <nav> dentro de <header> es "header".
-    assert by_url["https://golden.local/seccion/uno"]["link_position"] == "header"
+    # Semántica T17.5.a: elementos semánticos primero y el ancestro MÁS
+    # CERCANO gana — un enlace en <nav> dentro de <header> es "nav".
+    # Clases solo como fallback (main-navigation → nav).
+    assert by_url["https://golden.local/seccion/uno"]["link_position"] == "nav"
+    assert by_url["https://golden.local/"]["link_position"] == "header"  # <a> directo en <header>
     assert by_url["https://golden.local/seccion/tres"]["link_position"] == "nav"  # clase main-navigation
     assert by_url["https://golden.local/relacionado"]["link_position"] == "sidebar"
     assert by_url["https://golden.local/legal/privacidad"]["link_position"] == "footer"
     assert by_url["https://golden.local/articulo/enlace-contenido"]["link_position"] == "content"
+
+    # T17.5.b: contexto DOM persistido para T22
+    assert by_url["https://golden.local/seccion/uno"]["dom_ancestor"] == "nav"
+    assert by_url["https://golden.local/relacionado"]["dom_ancestor"] == "aside"
+    assert by_url["https://golden.local/articulo/enlace-contenido"]["dom_ancestor"] == "main"
+    assert by_url["https://golden.local/seccion/tres"]["dom_ancestor"] is None
+    assert by_url["https://golden.local/seccion/tres"]["dom_container"] == "div.main-navigation"
 
     # Query params se ordenan al normalizar
     assert "https://golden.local/seccion/dos?a=1&b=2" in by_url

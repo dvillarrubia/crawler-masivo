@@ -348,6 +348,9 @@ class PostgresPipeline:
             target=data.get("target"),
             alt_text=data.get("alt_text"),
             link_type=data.get("link_type", "hyperlink"),
+            # T17.5.b: DOM context (edge classifier prerequisite)
+            dom_ancestor=data.get("dom_ancestor"),
+            dom_container=data.get("dom_container"),
         )
 
     def _make_heading(self, data: dict):

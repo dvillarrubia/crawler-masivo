@@ -10,10 +10,37 @@ import re
 import numpy as np
 
 
+# T17.6: Spanish abbreviations whose trailing period must NOT end a
+# sentence. Deliberately conservative — "etc.", "no." and "D." often DO end
+# sentences, so they are not protected.
+_PROTECTED_ABBREVIATIONS = re.compile(
+    r"\b(?:"
+    r"Sr|Sra|Srta|Dr|Dra|Dña|Prof|Lic|Ing|"      # honorifics
+    r"núm|nro|pág|págs|art|cap|vol|fig|ej|"      # references
+    r"aprox|dpto|depto|avda|tfno|tel|"           # misc
+    r"Ud|Uds|Vd|Vds|EE|UU"                       # usted / EE. UU.
+    r")\.",
+    re.IGNORECASE,
+)
+_ABBR_SENTINEL = "\x00"
+
+
 def _split_sentences(text: str) -> list[str]:
-    """Basic sentence splitting on `.!?` boundaries."""
-    parts = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in parts if s.strip()]
+    """Sentence splitting on `.!?` boundaries.
+
+    T17.6: periods belonging to common Spanish abbreviations (Sr., núm.,
+    pág., EE. UU., p. ej. ...) are protected before the split so they no
+    longer produce bogus sentence cuts.
+    """
+    protected = _PROTECTED_ABBREVIATIONS.sub(
+        lambda m: m.group(0)[:-1] + _ABBR_SENTINEL, text
+    )
+    parts = re.split(r"(?<=[.!?])\s+", protected)
+    return [
+        s.replace(_ABBR_SENTINEL, ".").strip()
+        for s in parts
+        if s.strip()
+    ]
 
 
 def chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:

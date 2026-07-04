@@ -6,7 +6,10 @@ import uuid
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -20,6 +23,7 @@ from api.schemas import (
     JobCreate,
     JobResponse,
     PaginatedResponse,
+    ReanalyzeRequest,
 )
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -84,6 +88,57 @@ def create_job(
     r.rpush("jobs:pending", str(job.id))
 
     return job
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/{job_id}/reanalyze  --  re-run analysis without re-crawling
+# ---------------------------------------------------------------------------
+def _run_reanalysis(job_id: str) -> None:
+    from analysis.analyzer import run_analysis
+
+    try:
+        run_analysis(job_id)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Reanalysis failed for job %s", job_id
+        )
+
+
+@router.post("/{job_id}/reanalyze", status_code=202)
+def reanalyze_job(
+    job_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    payload: ReanalyzeRequest | None = Body(default=None),
+    db: Session = Depends(get_session),
+):
+    """T17.2: re-run the SEO analysis over the existing crawl data.
+
+    Crawl data is immutable; only issues and computed metrics change.
+    Optional ``analysis_thresholds`` are merged over the job's stored ones
+    (persisted, so future reanalyses reuse them).
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status in ("pending", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reanalyze a job that is still queued or crawling",
+        )
+
+    if payload is not None and payload.analysis_thresholds is not None:
+        cfg = dict(job.config or {})
+        cfg["analysis_thresholds"] = {
+            **cfg.get("analysis_thresholds", {}),
+            **payload.analysis_thresholds.model_dump(exclude_unset=True),
+        }
+        job.config = cfg
+        db.commit()
+
+    background_tasks.add_task(_run_reanalysis, str(job_id))
+    return {"job_id": str(job_id), "status": "reanalysis_started"}
 
 
 # ---------------------------------------------------------------------------

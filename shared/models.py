@@ -228,6 +228,10 @@ class Link(Base):
     alt_text = Column(Text, nullable=True)                # for image links
     link_type = Column(String(20), default="hyperlink")   # hyperlink, image, redirect, canonical
 
+    # --- T17.5.b: DOM context for the edge classifier (T22) ---
+    dom_ancestor = Column(String(16), nullable=True)      # nearest semantic ancestor tag
+    dom_container = Column(Text, nullable=True)           # tag.classes#id of nearest classed container
+
     from_url_rel = relationship("Url", foreign_keys=[from_url_id])
 
     __table_args__ = (

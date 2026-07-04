@@ -124,6 +124,8 @@ class AnalysisThresholdsConfig(BaseModel):
     # colapso de redirecciones + solo-indexables + equity_leak
     pagerank_version: int = Field(default=1, ge=1, le=2)
     equity_leak_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    # T17.3: umbral de página lenta en milisegundos
+    slow_page_ms: int = Field(default=3000, ge=100, le=120000)
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +158,12 @@ class JobConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
     analysis_thresholds: AnalysisThresholdsConfig = Field(default_factory=AnalysisThresholdsConfig)
     url_normalization: UrlNormalizationConfig = Field(default_factory=UrlNormalizationConfig)
+
+
+class ReanalyzeRequest(BaseModel):
+    """T17.2: optional threshold overrides for a reanalysis run."""
+
+    analysis_thresholds: AnalysisThresholdsConfig | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +410,9 @@ class LinkResponse(BaseModel):
     target: str | None = None
     alt_text: str | None = None
     link_type: str | None = None
+    # T17.5.b: DOM context
+    dom_ancestor: str | None = None
+    dom_container: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +439,18 @@ class ResourceTypeCount(BaseModel):
     count: int
 
 
+class LatencyPercentiles(BaseModel):
+    """T17.3: nearest-rank latency percentiles in milliseconds."""
+
+    p50: float
+    p90: float
+    p99: float
+
+
+class LatencyStats(LatencyPercentiles):
+    by_status_group: dict[str, LatencyPercentiles] = {}
+
+
 class JobStats(BaseModel):
     job_id: uuid.UUID
     total_urls: int
@@ -439,6 +462,8 @@ class JobStats(BaseModel):
     urls_by_resource_type: list[ResourceTypeCount] = []
     internal_count: int = 0
     external_count: int = 0
+    # T17.3 — None when the job has no timed responses
+    latency: LatencyStats | None = None
 
 
 # ---------------------------------------------------------------------------
