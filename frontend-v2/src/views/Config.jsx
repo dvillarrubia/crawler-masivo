@@ -17,19 +17,91 @@ export default function ConfigView() {
     <div>
       <h1 className="page-title">Configuración · {clientId}</h1>
       <p className="page-sub">
-        Ajustes a nivel de proyecto: se definen una vez y se aplican a cada rastreo nuevo.
-        Los segmentos trocean el sitio por plantillas (blog, producto, categoría…) y permiten filtrar
-        cualquier vista; la watchlist vigila tus páginas clave en cada rastreo.
+        El configurador del cliente: se define una vez y se aplica a cada rastreo nuevo.
+        Cuentas y propiedad, segmentos, páginas vigiladas, y la capa de entidades
+        (qué extraer y su catálogo).
       </p>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
-        <SegmentsPanel clientId={clientId} />
         <div>
+          <ClientAccountsPanel clientId={clientId} />
+          <SegmentsPanel clientId={clientId} />
           <WatchlistPanel clientId={clientId} />
-          <ThresholdsPanel clientId={clientId} />
+        </div>
+        <div>
           <ExtractionSchemaPanel clientId={clientId} />
+          <CatalogPanel clientId={clientId} />
+          <EntityStatusPanel />
+          <ThresholdsPanel clientId={clientId} />
           <SourcesPanel />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Cuentas y propiedad del cliente: qué credenciales usa este proyecto. */
+function ClientAccountsPanel({ clientId }) {
+  const settingsQ = useAsync(() => api.clientSettings(clientId), [clientId]);
+  const gemQ = useAsync(() => api.geminiAccounts().catch(() => []), []);
+  const gscQ = useAsync(() => api.gscAccounts().catch(() => []), []);
+  const [draft, setDraft] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [error, setError] = useState(null);
+
+  const s = settingsQ.data || {};
+  const value = draft || {
+    gemini_account_id: s.gemini_account_id || "",
+    gsc_account_id: s.gsc_account_id || "",
+    gsc_property: s.gsc_property || "",
+  };
+
+  const save = async () => {
+    setError(null); setMsg(null);
+    try {
+      await api.saveClientSettings(clientId, {
+        gemini_account_id: value.gemini_account_id || null,
+        gsc_account_id: value.gsc_account_id || null,
+        gsc_property: value.gsc_property || null,
+      });
+      setMsg("Guardado. La consola pre-rellenará estas cuentas en Semántica y en los pipelines.");
+      settingsQ.reload();
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3>Cuentas del proyecto</h3>
+      <p className="proxy-tag" style={{ marginTop: 0 }}>
+        Qué cuenta de Gemini paga los análisis de este cliente y de qué propiedad de Search Console
+        se importan sus datos. Las cuentas se dan de alta en <a href="#/cuentas">Cuentas</a>.
+      </p>
+      {settingsQ.loading && <Spinner />}
+      <div className="form-grid">
+        <div className="field">
+          <label>Cuenta Gemini</label>
+          <select value={value.gemini_account_id}
+            onChange={(e) => setDraft({ ...value, gemini_account_id: e.target.value })}>
+            <option value="">— sin asignar —</option>
+            {(gemQ.data || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Cuenta Search Console</label>
+          <select value={value.gsc_account_id}
+            onChange={(e) => setDraft({ ...value, gsc_account_id: e.target.value })}>
+            <option value="">— sin asignar —</option>
+            {(gscQ.data || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="field">
+        <label>Propiedad GSC</label>
+        <input type="text" placeholder="sc-domain:cliente.com" value={value.gsc_property}
+          onChange={(e) => setDraft({ ...value, gsc_property: e.target.value })} />
+      </div>
+      {error && <div className="alert">{error}</div>}
+      {msg && <div className="alert warn">{msg}</div>}
+      <button onClick={save}>Guardar cuentas</button>
     </div>
   );
 }
@@ -252,21 +324,74 @@ function ThresholdsPanel({ clientId }) {
   );
 }
 
-/** Schema de extracción de entidades (GLiNER2) — único config del cliente. */
+/** Filas nombre+descripción para tipos de entidad (añadir/quitar). */
+function TypeRows({ rows, onChange, placeholderNombre, placeholderDesc }) {
+  const set = (i, k, v) => {
+    const next = rows.slice();
+    next[i] = { ...next[i], [k]: v };
+    onChange(next);
+  };
+  return (
+    <>
+      {rows.map((r, i) => (
+        <div key={i} className="row" style={{ gap: 6, marginBottom: 6, alignItems: "flex-start" }}>
+          <input type="text" style={{ width: 130 }} className="mono" placeholder={placeholderNombre}
+            value={r.nombre} onChange={(e) => set(i, "nombre", e.target.value.toLowerCase())} />
+          <input type="text" style={{ flex: 1 }} placeholder={placeholderDesc}
+            value={r.descripcion} onChange={(e) => set(i, "descripcion", e.target.value)} />
+          <button className="secondary" title="Quitar"
+            onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
+        </div>
+      ))}
+      <button className="secondary" onClick={() => onChange([...rows, { nombre: "", descripcion: "" }])}>
+        + añadir tipo
+      </button>
+    </>
+  );
+}
+
+const EMPTY_SCHEMA_FORM = {
+  resolubles: [{ nombre: "", descripcion: "" }],
+  senal: [],
+  catalogo_fuente: "generado",
+  tipo_pagina: "",
+  resolucion_alta: 0.85,
+  resolucion_baja: 0.6,
+};
+
+/** Qué entidades busca el pipeline en este cliente — FORMULARIO
+ *  (el YAML es interno: lo genera y valida el servidor). */
 function ExtractionSchemaPanel({ clientId }) {
   const q = useAsync(() => api.extractionSchema(clientId), [clientId]);
-  const [text, setText] = useState(null); // null = aún sin editar
+  const [draft, setDraft] = useState(null);
   const [msg, setMsg] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const value = text != null ? text : (q.data ? q.data.yaml_text : "");
+  const parsed = q.data && q.data.parsed;
+  const form = draft || (parsed ? {
+    resolubles: parsed.resolubles,
+    senal: parsed.senal,
+    catalogo_fuente: parsed.catalogo_fuente,
+    tipo_pagina: (parsed.tipo_pagina || []).join(", "),
+    resolucion_alta: parsed.resolucion_alta,
+    resolucion_baja: parsed.resolucion_baja,
+  } : EMPTY_SCHEMA_FORM);
 
   const save = async () => {
     setBusy(true); setError(null); setMsg(null);
     try {
-      const r = await api.saveExtractionSchema(clientId, value);
-      setMsg(`Guardado. Tipos resolubles: ${r.resolubles.join(", ")} · señal: ${r.senal.join(", ")}`);
+      const payload = {
+        resolubles: form.resolubles.filter((r) => r.nombre && r.descripcion),
+        senal: form.senal.filter((r) => r.nombre && r.descripcion),
+        catalogo_fuente: form.catalogo_fuente,
+        tipo_pagina: form.tipo_pagina.split(",").map((s) => s.trim()).filter(Boolean),
+        resolucion_alta: Number(form.resolucion_alta),
+        resolucion_baja: Number(form.resolucion_baja),
+      };
+      const r = await api.saveExtractionSchemaForm(clientId, payload);
+      setMsg(`Guardado: ${r.resolubles.length} tipos con catálogo, ${r.senal.length} de señal.`);
+      setDraft(null);
       q.reload();
     } catch (e) { setError(e.message); }
     setBusy(false);
@@ -274,28 +399,163 @@ function ExtractionSchemaPanel({ clientId }) {
 
   return (
     <div className="card" style={{ marginBottom: 12 }}>
-      <h3>Extracción de entidades (schema.yaml)</h3>
+      <h3>Extracción de entidades — qué buscar en este cliente</h3>
       <p className="proxy-tag" style={{ marginTop: 0 }}>
-        Define qué entidades busca el pipeline GLiNER2 en este cliente (productos, servicios,
-        categorías…), con una descripción en lenguaje natural por tipo, y las etiquetas de tipo de
-        página. Hay plantillas en <code>config/entities/</code> (ecommerce y leads). El pipeline se
-        ejecuta por run con <code>docker compose --profile gliner run gliner …</code> y sus
-        propuestas llegan a Incidencias y a la Cola de firma.
+        Define los tipos de cosa que el análisis de entidades debe reconocer en las páginas y en las
+        búsquedas. Cada tipo lleva una descripción en lenguaje natural: es la instrucción que recibe
+        el modelo, escríbela como se lo explicarías a una persona.
       </p>
       {q.loading && <Spinner />}
-      <textarea rows={12} className="mono" style={{ width: "100%", fontSize: 11.5 }}
-        placeholder={"entidades:\n  resolubles:\n    servicio: \"Servicio profesional concreto...\"\n  senal:\n    problema: \"Problema que expresa el usuario...\"\ncatalogo:\n  fuente: generado\nclasificacion:\n  funnel: [TOFU, MOFU, BOFU]\n  tipo_pagina: [servicio, blog]"}
-        value={value} onChange={(e) => setText(e.target.value)} />
+
+      <h3 style={{ fontSize: 12.5 }}>Entidades con catálogo (se resuelven a un id)</h3>
+      <Hint>Lo nuclear del negocio: producto, servicio, categoría… Ej.: <b>servicio</b> — «Servicio profesional concreto que se ofrece, como 'diseño de tienda online'».</Hint>
+      <TypeRows rows={form.resolubles} onChange={(rows) => setDraft({ ...form, resolubles: rows })}
+        placeholderNombre="servicio" placeholderDesc="Descripción en lenguaje natural de qué es este tipo…" />
+
+      <h3 style={{ fontSize: 12.5, marginTop: 12 }}>Entidades de señal (no se resuelven)</h3>
+      <Hint>Evidencia de intención: problemas que expresa el usuario, atributos, ganas de contactar…</Hint>
+      <TypeRows rows={form.senal} onChange={(rows) => setDraft({ ...form, senal: rows })}
+        placeholderNombre="problema" placeholderDesc="Ej.: Problema o necesidad que expresa el usuario…" />
+
+      <div className="form-grid" style={{ marginTop: 12 }}>
+        <div className="field">
+          <label>Origen del catálogo</label>
+          <select value={form.catalogo_fuente}
+            onChange={(e) => setDraft({ ...form, catalogo_fuente: e.target.value })}>
+            <option value="generado">generado — se siembra del propio crawl y lo validas abajo</option>
+            <option value="feed">feed — lo cargas tú (alta manual en el catálogo)</option>
+            <option value="crawl">crawl — derivado del rastreo</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Tipos de página (separados por comas)</label>
+          <input type="text" placeholder="servicio, caso_exito, blog, landing, contacto"
+            value={form.tipo_pagina}
+            onChange={(e) => setDraft({ ...form, tipo_pagina: e.target.value })} />
+          <Hint>Las plantillas de este vertical. El funnel (TOFU/MOFU/BOFU) es universal y va siempre.</Hint>
+        </div>
+      </div>
+
       {error && <div className="alert" style={{ marginTop: 6 }}>{error}</div>}
       {msg && <div className="alert warn" style={{ marginTop: 6 }}>{msg}</div>}
       <div className="row" style={{ gap: 8, marginTop: 6 }}>
-        <button disabled={busy || !value.trim()} onClick={save}>
-          {busy ? "Validando…" : "Validar y guardar"}
-        </button>
-        {q.data && q.data.status === "empty" && (
-          <span className="proxy-tag">Este cliente aún no tiene schema.</span>
+        <button disabled={busy} onClick={save}>{busy ? "Validando…" : "Guardar"}</button>
+        {q.data && q.data.status === "empty" && !draft && (
+          <span className="proxy-tag">Este cliente aún no tiene definición de entidades.</span>
         )}
       </div>
+    </div>
+  );
+}
+
+function Hint({ children }) {
+  return <p className="proxy-tag" style={{ margin: "2px 0 6px" }}>{children}</p>;
+}
+
+/** Catálogo de entidades: la validación humana del catálogo generado. */
+function CatalogPanel({ clientId }) {
+  const [search, setSearch] = useState("");
+  const [applied, setApplied] = useState("");
+  const q = useAsync(
+    () => api.entityCatalog(clientId, { search: applied, page_size: 30 }),
+    [clientId, applied],
+  );
+  const [nuevo, setNuevo] = useState({ name: "", entity_type: "" });
+  const [error, setError] = useState(null);
+
+  const add = async () => {
+    setError(null);
+    try {
+      await api.addCatalogEntry(clientId, nuevo);
+      setNuevo({ name: "", entity_type: "" });
+      q.reload();
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3>Catálogo de entidades {q.data ? `(${fmt(q.data.total)})` : ""}</h3>
+      <p className="proxy-tag" style={{ marginTop: 0 }}>
+        La lista canónica de cosas del cliente (sus servicios, productos…). El pipeline resuelve las
+        menciones contra este catálogo. Si el origen es «generado», se siembra del crawl y aquí lo
+        depuras: borra el ruido y añade lo que falte.
+      </p>
+      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+        <input type="text" placeholder="buscar…" value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && setApplied(search)} />
+        <button className="secondary" onClick={() => setApplied(search)}>Buscar</button>
+      </div>
+      {q.loading && <Spinner />}
+      {q.data && q.data.items.map((e) => (
+        <div className="row between" key={e.entity_id} style={{ marginBottom: 4 }}>
+          <span>
+            <b style={{ fontSize: 12.5 }}>{e.name}</b>{" "}
+            <span className="tag">{e.entity_type}</span>{" "}
+            <span className="proxy-tag">{e.source}{e.embedded ? "" : " · sin embeber aún"}</span>
+          </span>
+          <button className="secondary" title="Borrar del catálogo" onClick={async () => {
+            if (window.confirm(`¿Borrar «${e.name}» del catálogo?`)) {
+              await api.deleteCatalogEntry(clientId, e.entity_id);
+              q.reload();
+            }
+          }}>×</button>
+        </div>
+      ))}
+      {q.data && q.data.items.length === 0 && (
+        <div className="proxy-tag">Catálogo vacío: se sembrará al ejecutar el pipeline (origen «generado») o añade entradas a mano.</div>
+      )}
+      {error && <div className="alert">{error}</div>}
+      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+        <input type="text" placeholder="nombre de la entidad" value={nuevo.name}
+          onChange={(e) => setNuevo({ ...nuevo, name: e.target.value })} />
+        <input type="text" style={{ width: 120 }} className="mono" placeholder="tipo"
+          value={nuevo.entity_type}
+          onChange={(e) => setNuevo({ ...nuevo, entity_type: e.target.value })} />
+        <button disabled={!nuevo.name || !nuevo.entity_type} onClick={add}>Añadir</button>
+      </div>
+    </div>
+  );
+}
+
+/** Estado del pipeline de entidades para el run seleccionado. */
+function EntityStatusPanel() {
+  const { jobId } = useCtx();
+  if (!jobId) {
+    return (
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>Pipeline de entidades — estado del run</h3>
+        <p className="proxy-tag">Selecciona un run arriba para ver si sus entidades están extraídas.</p>
+      </div>
+    );
+  }
+  const q = useAsync(() => api.entitiesStatus(jobId), [jobId]);
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const d = q.data;
+  const resolved = Object.entries(d.resolved || {}).map(([k, v]) => `${v} por ${k}`).join(" · ");
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3>Pipeline de entidades — estado del run</h3>
+      <div className="facts">
+        <div className="fact"><div className="k">Definición</div><div className="v">{d.has_schema ? "✓" : "falta"}</div></div>
+        <div className="fact"><div className="k">Menciones</div><div className="v num">{fmt(d.mentions)}</div></div>
+        <div className="fact"><div className="k">Labels</div><div className="v num">{fmt(d.labels)}</div></div>
+        <div className="fact"><div className="k">Entidades en queries</div><div className="v num">{fmt(d.query_entities)}</div></div>
+        <div className="fact"><div className="k">Catálogo</div><div className="v num">{fmt(d.catalog_entries)}</div></div>
+      </div>
+      {resolved && <p className="proxy-tag">Resueltas: {resolved}</p>}
+      {Object.keys(d.issues || {}).length > 0 && (
+        <p className="proxy-tag">
+          Propuestas generadas: {Object.entries(d.issues).map(([k, v]) => `${v} ${k}`).join(" · ")}
+          {" "}— revísalas en <a href="#/incidencias">Incidencias</a> y <a href="#/firma">Firma</a>.
+        </p>
+      )}
+      {d.mentions === 0 && (
+        <p className="proxy-tag mono" style={{ fontSize: 10.5 }}>
+          docker compose --profile gliner run --rm gliner python -m analysis.entities.run --job-id {jobId}
+        </p>
+      )}
     </div>
   );
 }

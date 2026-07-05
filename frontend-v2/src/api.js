@@ -149,9 +149,31 @@ export const api = {
 
   extractionSchema: (clientId) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/extraction-schema`),
-  saveExtractionSchema: (clientId, yamlText) =>
+  saveExtractionSchemaForm: (clientId, form) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/extraction-schema`, {
       method: "PUT",
-      body: JSON.stringify({ yaml_text: yamlText }),
+      body: JSON.stringify({ form }),
     }),
+
+  clientSettings: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/settings`),
+  saveClientSettings: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  entityCatalog: (clientId, params) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog${qs(params)}`),
+  addCatalogEntry: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteCatalogEntry: (clientId, entityId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/${encodeURIComponent(entityId)}`, {
+      method: "DELETE",
+    }),
+
+  entitiesStatus: (jobId) => request(`/api/jobs/${jobId}/entities/status`),
 };

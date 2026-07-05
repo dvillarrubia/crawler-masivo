@@ -42,6 +42,23 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+class ClientSettings(Base):
+    """Configurador de cliente: qué cuentas y propiedad usa cada cliente.
+
+    Vincula las credenciales globales (gsc_accounts / gemini_accounts) al
+    cliente para que la consola pre-rellene y los pipelines sepan con qué
+    cuenta trabajar sin elegirla a mano cada vez.
+    """
+
+    __tablename__ = "client_settings"
+
+    client_id = Column(String(128), primary_key=True)
+    gemini_account_id = Column(UUID(as_uuid=True), nullable=True)
+    gsc_account_id = Column(UUID(as_uuid=True), nullable=True)
+    gsc_property = Column(Text, nullable=True)   # sc-domain:cliente.com
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class ClientExtractionSchema(Base):
     """El `schema.yaml` por cliente (convención de la casa: config de
     cliente en DB, editable desde la consola)."""

@@ -51,7 +51,7 @@ def extract_pages(session, job_id, schema: ExtractionSchema, adapter, *,
     )
     if max_urls:
         q = q.limit(max_urls)
-    rows = q.all()
+    rows = [tuple(r) for r in q.all()]
 
     h1_by_url: dict[int, str] = {}
     if rows:
@@ -63,12 +63,16 @@ def extract_pages(session, job_id, schema: ExtractionSchema, adapter, *,
         ):
             h1_by_url.setdefault(uid, text or "")
 
-    # reemplazo por job (re-ejecutable)
-    session.query(GlinerPageEntity).filter(GlinerPageEntity.job_id == job_id).delete()
-    session.query(GlinerPageLabel).filter(GlinerPageLabel.job_id == job_id).delete()
+    # CRÍTICO: cerrar la transacción de lectura ANTES de la inferencia.
+    # El modelo tarda minutos y una transacción abierta retiene locks de
+    # Postgres que bloquean migraciones y otros procesos (visto en E2E:
+    # la API se quedó colgada en startup esperando un ALTER).
+    session.commit()
 
     n_mentions = 0
     n_labeled = 0
+    pending_entities: list = []
+    pending_labels: list = []
     for url_id, url_hash, body, title in rows:
         spans: list[Span] = []
         funnel_votes: list[tuple[str, float]] = []
@@ -106,7 +110,7 @@ def extract_pages(session, job_id, schema: ExtractionSchema, adapter, *,
         for m in aggregate_spans(spans):
             if m.entity_type not in schema.all_entity_types:
                 continue
-            session.add(GlinerPageEntity(
+            pending_entities.append(GlinerPageEntity(
                 job_id=job_id, url_id=url_id, url_hash=url_hash,
                 entity_text=m.entity_text, entity_type=m.entity_type,
                 kind=schema.kind_of(m.entity_type),
@@ -119,12 +123,17 @@ def extract_pages(session, job_id, schema: ExtractionSchema, adapter, *,
         for label_type, votes in (("funnel", funnel_votes), ("tipo_pagina", tipo_votes)):
             picked = _pick_label(votes)
             if picked:
-                session.add(GlinerPageLabel(
+                pending_labels.append(GlinerPageLabel(
                     job_id=job_id, url_id=url_id, label_type=label_type,
                     label=picked[0], confidence=picked[1],
                 ))
                 n_labeled += 1
 
+    # transacción de escritura corta al final: reemplazo por job + inserts
+    session.query(GlinerPageEntity).filter(GlinerPageEntity.job_id == job_id).delete()
+    session.query(GlinerPageLabel).filter(GlinerPageLabel.job_id == job_id).delete()
+    session.add_all(pending_entities)
+    session.add_all(pending_labels)
     session.flush()
     logger.info("GLiNER2 páginas job %s: %d URLs, %d menciones, %d labels",
                 job_id, len(rows), n_mentions, n_labeled)
@@ -154,11 +163,12 @@ def extract_queries(session, job_id, schema: ExtractionSchema, adapter, *,
     )
     if not agg:
         return {"status": "blocked", "reason": "no_gsc_query_data"}
-
-    session.query(GlinerQueryEntity).filter(GlinerQueryEntity.job_id == job_id).delete()
-    session.query(GlinerQueryLabel).filter(GlinerQueryLabel.job_id == job_id).delete()
+    agg = [tuple(r) for r in agg]
+    session.commit()  # sin locks abiertos durante la inferencia
 
     n_entities = 0
+    pending_q_entities: list = []
+    pending_q_labels: list = []
     for query, _imprs in agg:
         out = adapter.process(query)
         for m in aggregate_spans([
@@ -169,7 +179,7 @@ def extract_queries(session, job_id, schema: ExtractionSchema, adapter, *,
         ]):
             if m.entity_type not in schema.all_entity_types:
                 continue
-            session.add(GlinerQueryEntity(
+            pending_q_entities.append(GlinerQueryEntity(
                 job_id=job_id, query=query,
                 entity_text=m.entity_text, entity_type=m.entity_type,
                 kind=schema.kind_of(m.entity_type),
@@ -178,11 +188,15 @@ def extract_queries(session, job_id, schema: ExtractionSchema, adapter, *,
             n_entities += 1
         picked = _pick_label(out["labels"].get("funnel", []))
         if picked:
-            session.add(GlinerQueryLabel(
+            pending_q_labels.append(GlinerQueryLabel(
                 job_id=job_id, query=query, label_type="funnel",
                 label=picked[0], confidence=picked[1],
             ))
 
+    session.query(GlinerQueryEntity).filter(GlinerQueryEntity.job_id == job_id).delete()
+    session.query(GlinerQueryLabel).filter(GlinerQueryLabel.job_id == job_id).delete()
+    session.add_all(pending_q_entities)
+    session.add_all(pending_q_labels)
     session.flush()
     logger.info("GLiNER2 queries job %s: %d queries, %d entidades",
                 job_id, len(agg), n_entities)

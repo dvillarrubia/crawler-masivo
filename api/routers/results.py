@@ -1041,6 +1041,58 @@ def get_section_flows(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/entities/status  --  estado de la capa GLiNER2
+# ---------------------------------------------------------------------------
+@router.get("/entities/status")
+def entities_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Para el configurador de la consola: qué pasos del pipeline de
+    entidades han corrido en este run y con qué volumen."""
+    job = _get_job_or_404(job_id, db)
+    from sqlalchemy import func
+
+    from shared.entity_models import (
+        ClientExtractionSchema, EntityCatalog, GlinerPageEntity,
+        GlinerPageLabel, GlinerQueryEntity,
+    )
+
+    client_id = job.client_id
+    has_schema = bool(client_id) and (
+        db.get(ClientExtractionSchema, client_id) is not None
+    )
+    mentions = db.query(func.count(GlinerPageEntity.id)).filter(
+        GlinerPageEntity.job_id == job_id).scalar()
+    resolved = db.query(GlinerPageEntity.resolved_by, func.count()).filter(
+        GlinerPageEntity.job_id == job_id,
+        GlinerPageEntity.resolved_by.isnot(None),
+    ).group_by(GlinerPageEntity.resolved_by).all()
+    labels = db.query(func.count(GlinerPageLabel.id)).filter(
+        GlinerPageLabel.job_id == job_id).scalar()
+    q_entities = db.query(func.count(GlinerQueryEntity.id)).filter(
+        GlinerQueryEntity.job_id == job_id).scalar()
+    catalog = db.query(func.count()).select_from(EntityCatalog).filter(
+        EntityCatalog.client_id == (client_id or "")).scalar()
+    issue_counts = dict(
+        db.query(Issue.issue_type, func.count()).filter(
+            Issue.job_id == job_id,
+            Issue.issue_type.in_((
+                "entity_query_mismatch", "entity_coverage_gap",
+                "entity_cannibalization", "funnel_mismatch",
+            )),
+        ).group_by(Issue.issue_type).all()
+    )
+    return {
+        "client_id": client_id,
+        "has_schema": has_schema,
+        "mentions": mentions,
+        "labels": labels,
+        "query_entities": q_entities,
+        "resolved": {k: v for k, v in resolved},
+        "catalog_entries": catalog,
+        "issues": issue_counts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/arch-edges  --  aggregated edge matrix (T22)
 # ---------------------------------------------------------------------------
 @router.get("/arch-edges")

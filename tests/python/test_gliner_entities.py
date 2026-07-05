@@ -490,10 +490,94 @@ def test_schema_endpoint_roundtrip(db_session, entity_tables):
     r = put_extraction_schema(
         "cli", ExtractionSchemaPayload(yaml_text=SCHEMA_YAML), db=db_session)
     assert r["status"] == "ok" and r["resolubles"] == ["servicio"]
-    assert get_extraction_schema("cli", db=db_session)["status"] == "ok"
+    got = get_extraction_schema("cli", db=db_session)
+    assert got["status"] == "ok"
+    # el GET devuelve la forma parseada para el FORMULARIO de la consola
+    assert got["parsed"]["resolubles"][0]["nombre"] == "servicio"
+    assert got["parsed"]["catalogo_fuente"] == "generado"
 
     with pytest.raises(HTTPException) as exc:
         put_extraction_schema(
             "cli", ExtractionSchemaPayload(yaml_text="entidades: {}\n"),
             db=db_session)
     assert exc.value.status_code == 422
+
+
+def test_schema_form_to_yaml_roundtrip(db_session, entity_tables):
+    """El usuario rellena el formulario; el YAML es interno."""
+    from api.routers.clients import (
+        EntityTypeDef, ExtractionSchemaForm, ExtractionSchemaPayload,
+        get_extraction_schema, put_extraction_schema,
+    )
+
+    form = ExtractionSchemaForm(
+        resolubles=[EntityTypeDef(
+            nombre="servicio",
+            descripcion="Servicio profesional concreto que se ofrece o busca")],
+        senal=[EntityTypeDef(
+            nombre="problema",
+            descripcion="Problema o necesidad que expresa el usuario")],
+        catalogo_fuente="generado",
+        tipo_pagina=["servicio", "blog"],
+        resolucion_alta=0.9, resolucion_baja=0.5,
+    )
+    r = put_extraction_schema("cli2", ExtractionSchemaPayload(form=form),
+                              db=db_session)
+    assert r["resolubles"] == ["servicio"] and r["senal"] == ["problema"]
+
+    got = get_extraction_schema("cli2", db=db_session)
+    assert got["parsed"]["resolucion_alta"] == 0.9
+    assert got["parsed"]["tipo_pagina"] == ["servicio", "blog"]
+    # y el yaml interno re-parsea con el validador estándar
+    from analysis.entities.schema_config import parse_schema
+
+    s = parse_schema(got["yaml_text"])
+    assert s.kind_of("problema") == "senal"
+
+
+def test_client_settings_roundtrip(db_session, entity_tables):
+    from api.routers.clients import (
+        ClientSettingsPayload, get_client_settings, put_client_settings,
+    )
+
+    assert get_client_settings("cli", db=db_session)["status"] == "empty"
+    put_client_settings("cli", ClientSettingsPayload(
+        gsc_property="sc-domain:toy.local"), db=db_session)
+    got = get_client_settings("cli", db=db_session)
+    assert got["status"] == "ok" and got["gsc_property"] == "sc-domain:toy.local"
+    assert got["gemini_account_name"] is None
+
+
+def test_entity_catalog_crud(db_session, entity_tables):
+    from fastapi import HTTPException
+
+    from api.routers.clients import (
+        CatalogEntryCreate, add_entity_catalog, delete_entity_catalog,
+        list_entity_catalog,
+    )
+
+    r = add_entity_catalog("cli", CatalogEntryCreate(
+        name="Diseño de tienda online", entity_type="servicio"), db=db_session)
+    assert r["entity_id"] == "local:diseno-de-tienda-online"
+    with pytest.raises(HTTPException) as exc:
+        add_entity_catalog("cli", CatalogEntryCreate(
+            name="diseño de tienda online", entity_type="servicio"), db=db_session)
+    assert exc.value.status_code == 409
+
+    lst = list_entity_catalog("cli", search="tienda", db=db_session)
+    assert lst["total"] == 1 and lst["items"][0]["source"] == "feed"
+    assert lst["items"][0]["embedded"] is False
+
+    delete_entity_catalog("cli", "local:diseno-de-tienda-online", db=db_session)
+    assert list_entity_catalog("cli", db=db_session)["total"] == 0
+
+
+def test_entities_status_endpoint(db_session, make_job, entity_tables):
+    from api.routers.results import entities_status
+
+    job, home, a, b = _report_scenario(db_session, make_job)[0:4]
+    d = entities_status(job.id, db=db_session)
+    assert d["client_id"] == "cli"
+    assert d["mentions"] == 3          # cocina en A y B + baño en C
+    assert d["catalog_entries"] == 3
+    assert d["query_entities"] == 2

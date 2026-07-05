@@ -86,6 +86,7 @@ function NeedsAnalysis() {
 /* Análisis: GSC fetch + lanzar análisis + progreso + métricas de sitio */
 /* ------------------------------------------------------------------ */
 function AnalysisPanel({ jobId, status, onChanged }) {
+  const { clientId } = useCtx();
   const gemQ = useAsync(() => api.geminiAccounts().catch(() => []), []);
   const gscQ = useAsync(() => api.gscAccounts().catch(() => []), []);
   const [form, setForm] = useState({
@@ -93,6 +94,22 @@ function AnalysisPanel({ jobId, status, onChanged }) {
     chunking_strategy: "fixed", chunk_embedding_mode: "aggregate",
   });
   const [gsc, setGsc] = useState({ gsc_account_id: "", property_url: "", days: 90 });
+
+  // Pre-rellena con las cuentas del proyecto (Configuración → Cuentas del
+  // proyecto) para no elegirlas a mano en cada run.
+  useEffect(() => {
+    if (!clientId) return;
+    api.clientSettings(clientId).then((s) => {
+      if (s.status !== "ok") return;
+      setForm((f) => (f.gemini_account_id ? f
+        : { ...f, gemini_account_id: s.gemini_account_id || "" }));
+      setGsc((g) => (g.gsc_account_id ? g : {
+        ...g,
+        gsc_account_id: s.gsc_account_id || "",
+        property_url: s.gsc_property || "",
+      }));
+    }).catch(() => {});
+  }, [clientId]);
   const [properties, setProperties] = useState([]);
   const [msg, setMsg] = useState(null);
   const [error, setError] = useState(null);

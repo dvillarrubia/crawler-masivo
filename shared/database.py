@@ -90,15 +90,28 @@ _MIGRATIONS = [
 def run_migrations() -> None:
     """Apply the additive migration block. Postgres-only statements: no-op
     (with a log) on other engines like the SQLite test harness.
+
+    lock_timeout: los ALTER idempotentes se re-ejecutan en cada arranque;
+    si otra sesión (p. ej. el batch de entidades) tiene un lock largo, el
+    arranque NO debe colgarse — se avisa y se sigue (la migración ya
+    estará aplicada de un arranque anterior o se aplicará en el próximo).
     """
+    import logging
+
     from sqlalchemy import text
 
     if not engine.dialect.name.startswith("postgres"):
         return
+    log = logging.getLogger(__name__)
     with engine.connect() as conn:
+        conn.execute(text("SET lock_timeout = '5000ms'"))
         for stmt in _MIGRATIONS:
-            conn.execute(text(stmt))
-        conn.commit()
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception as exc:  # lock ocupado o tipo ya migrado
+                conn.rollback()
+                log.warning("Migración pospuesta (%s…): %s", stmt[:60], exc)
 
 
 def init_db():
@@ -115,8 +128,9 @@ def init_db():
         QueryEmbedding,
     )
     from shared.entity_models import (  # noqa: F401 – capa de entidades GLiNER2
-        ClientExtractionSchema, EntityCatalog, GlinerPageEntity,
-        GlinerPageLabel, GlinerQueryEntity, GlinerQueryLabel,
+        ClientExtractionSchema, ClientSettings, EntityCatalog,
+        GlinerPageEntity, GlinerPageLabel, GlinerQueryEntity,
+        GlinerQueryLabel,
     )
     if engine.dialect.name.startswith("postgres"):
         # Vector columns need the extension before create_all on a fresh DB

@@ -67,8 +67,7 @@ class Gliner2Adapter:
     def _build_schema(self, model):
         """Entidades con descripción + 2 tareas de clasificación en un pass."""
         s = model.create_schema()
-        for etype, desc in self.schema.all_entity_types.items():
-            s = s.entities({etype: desc})
+        s = s.entities(dict(self.schema.all_entity_types))
         s = s.classification("funnel", {
             lbl: FUNNEL_DESCRIPTIONS.get(lbl, lbl) for lbl in self.schema.funnel
         }, multi_label=False)
@@ -79,8 +78,13 @@ class Gliner2Adapter:
 
     # -- contrato ----------------------------------------------------------
     def process(self, text: str) -> dict:
+        if not (text or "").strip():
+            return {"entities": [], "labels": {}}
         model = self._load()
-        raw = model.process(text, self._build_schema(model))
+        # API real de gliner2 1.3.x: extract(text, schema) con spans y
+        # confidence explícitos (verificado contra el paquete instalado).
+        raw = model.extract(text, self._build_schema(model),
+                            include_confidence=True, include_spans=True)
         self._n_processed += 1
         return self._normalize_output(raw)
 
@@ -95,15 +99,32 @@ class Gliner2Adapter:
     def _normalize_output(raw: dict) -> dict:
         """Tolerante con variaciones de la API: normaliza al contrato."""
         entities = []
-        for e in (raw or {}).get("entities", []):
-            if isinstance(e, dict):
-                entities.append({
-                    "text": e.get("text") or e.get("span") or "",
-                    "type": e.get("type") or e.get("label") or "",
-                    "start": e.get("start"),
-                    "end": e.get("end"),
-                    "confidence": float(e.get("confidence") or e.get("score") or 0.0),
-                })
+        raw_entities = (raw or {}).get("entities", [])
+        if isinstance(raw_entities, dict):
+            # formato gliner2 1.3.x: {tipo: [{text, confidence, start, end}]}
+            for etype, items in raw_entities.items():
+                for e in items or []:
+                    if isinstance(e, dict):
+                        entities.append({
+                            "text": e.get("text") or "",
+                            "type": etype,
+                            "start": e.get("start"),
+                            "end": e.get("end"),
+                            "confidence": float(e.get("confidence") or 0.0),
+                        })
+                    elif isinstance(e, str):
+                        entities.append({"text": e, "type": etype, "start": None,
+                                         "end": None, "confidence": 0.0})
+        else:
+            for e in raw_entities:
+                if isinstance(e, dict):
+                    entities.append({
+                        "text": e.get("text") or e.get("span") or "",
+                        "type": e.get("type") or e.get("label") or "",
+                        "start": e.get("start"),
+                        "end": e.get("end"),
+                        "confidence": float(e.get("confidence") or e.get("score") or 0.0),
+                    })
         labels: dict = {}
         for task, val in (raw or {}).items():
             if task == "entities":
