@@ -247,6 +247,66 @@ def test_suggest_catalog_needs_schema(db_session, db_engine, ent_tables):
         suggest_catalog(db_session, "cli", api_key="x", generate_fn=lambda _p: "{}")
 
 
+# --- revisión del catálogo (limpieza) ------------------------------------
+def test_parse_llm_review_defensive():
+    from analysis.entities.schema_suggester import parse_llm_review
+
+    text = json.dumps({"revision": [
+        {"i": 0, "verdict": "descartar", "reason": "ruido"},
+        {"i": 1, "verdict": "renombrar", "canonical": "Branding"},
+        {"i": 2, "verdict": "renombrar"},                 # sin canonical → mantener
+        {"i": 9, "verdict": "descartar"},                 # fuera de rango → ignora
+        {"i": 3, "verdict": "cosa_rara"},                 # verdict inválido → mantener
+    ]})
+    out = parse_llm_review(text, n_entries=4)
+    assert out[0]["verdict"] == "descartar"
+    assert out[1]["verdict"] == "renombrar" and out[1]["canonical"] == "Branding"
+    assert out[2]["verdict"] == "mantener"    # renombrar sin nombre = no-op
+    assert 9 not in out
+    assert out[3]["verdict"] == "mantener"
+
+
+def test_review_catalog_counts(db_session, db_engine, ent_tables):
+    from analysis.entities.schema_suggester import review_catalog
+    from shared.entity_models import EntityCatalog
+
+    _catalog_tables(db_engine)
+    job = _job(db_session)
+    _page(db_session, job, "/", "Home", "Home")
+    _schema_row(db_session)
+    for i, (name, etype) in enumerate([
+        ("Branding", "servicio"), ("de la agencia", "servicio"), ("Bellota", "cliente")]):
+        db_session.add(EntityCatalog(client_id="cli", entity_id=f"local:e{i}",
+                                     name=name, entity_type=etype,
+                                     source="generado", is_linked=False))
+    db_session.flush()
+
+    # el fake marca la 2ª (ruido) a descartar; el orden es por source/type/name
+    def fake(_prompt):
+        # entries ordenadas: por entity_type,name → «Bellota»(cliente),
+        # «Branding»(servicio), «de la agencia»(servicio)
+        return json.dumps({"revision": [
+            {"i": 0, "verdict": "mantener"},
+            {"i": 1, "verdict": "mantener"},
+            {"i": 2, "verdict": "descartar", "reason": "fragmento de frase"},
+        ]})
+    out = review_catalog(db_session, "cli", api_key="x", generate_fn=fake)
+    assert out["n"] == 3
+    assert out["counts"]["descartar"] == 1 and out["counts"]["mantener"] == 2
+    descartada = next(e for e in out["entries"] if e["verdict"] == "descartar")
+    assert descartada["name"] == "de la agencia"
+
+
+def test_review_catalog_empty_raises(db_session, db_engine, ent_tables):
+    from analysis.entities.schema_suggester import review_catalog
+
+    _catalog_tables(db_engine)
+    _job(db_session)
+    _schema_row(db_session)
+    with pytest.raises(ValueError):      # catálogo vacío
+        review_catalog(db_session, "cli", api_key="x", generate_fn=lambda _p: "{}")
+
+
 def test_suggest_schema_retries_transient_bad_output(db_session, ent_tables):
     """El LLM es no determinista: el 1º intento sale vacío/malo, el 2º bien.
     No debe fallar (evita el 422 intermitente)."""

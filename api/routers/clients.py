@@ -369,6 +369,89 @@ def add_entity_catalog_bulk(
     return {"status": "ok", "added": added, "skipped": skipped}
 
 
+@router.post("/entity-catalog/review")
+def review_entity_catalog(
+    client_id: str,
+    payload: SuggestSchemaPayload,
+    db: Session = Depends(get_session),
+):
+    """Revisa el catálogo actual con un LLM (mantener/descartar/renombrar)
+    para depurar el ruido del catálogo generado. No actúa: devuelve los
+    veredictos para que el usuario aplique lo que quiera."""
+    from analysis.entities.schema_config import SchemaError
+    from analysis.entities.schema_suggester import review_catalog
+    from shared.entity_models import ClientSettings
+    from shared.semantic_models import GeminiAccount
+
+    account_id = payload.gemini_account_id
+    if account_id is None:
+        settings = db.get(ClientSettings, client_id)
+        account_id = settings.gemini_account_id if settings else None
+    if account_id is None:
+        raise HTTPException(status_code=400, detail=(
+            "Este proyecto no tiene cuenta Gemini asignada. Configúrala para "
+            "poder revisar el catálogo con IA."))
+    account = db.get(GeminiAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Cuenta Gemini no encontrada.")
+
+    try:
+        result = review_catalog(db, client_id, account.api_key)
+    except SchemaError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Error del LLM: {exc}")
+    return {"status": "ok", **result}
+
+
+class CatalogRename(BaseModel):
+    old_entity_id: str
+    new_name: str = Field(..., min_length=2, max_length=300)
+    entity_type: str = Field(..., min_length=1, max_length=64)
+
+
+class ApplyReviewPayload(BaseModel):
+    delete_ids: list[str] = Field(default_factory=list)
+    renames: list[CatalogRename] = Field(default_factory=list)
+
+
+@router.post("/entity-catalog/apply-review")
+def apply_catalog_review(
+    client_id: str,
+    payload: ApplyReviewPayload,
+    db: Session = Depends(get_session),
+):
+    """Aplica la limpieza elegida: borra las descartadas y renombra (borra
+    la vieja + alta de la nueva con el nombre canónico). Idempotente-ish."""
+    from analysis.entities.extraction import slugify
+    from shared.entity_models import EntityCatalog
+
+    deleted, renamed = 0, 0
+    for eid in payload.delete_ids:
+        row = db.get(EntityCatalog, (client_id, eid))
+        if row is not None:
+            db.delete(row)
+            deleted += 1
+    for r in payload.renames:
+        old = db.get(EntityCatalog, (client_id, r.old_entity_id))
+        etype = r.entity_type
+        source = old.source if old is not None else "feed"
+        if old is not None:
+            db.delete(old)
+        new_id = f"local:{slugify(r.new_name)}"
+        if db.get(EntityCatalog, (client_id, new_id)) is None:
+            db.add(EntityCatalog(client_id=client_id, entity_id=new_id,
+                                 name=r.new_name, entity_type=etype,
+                                 source=source, is_linked=False))
+            renamed += 1
+    db.commit()
+    if deleted or renamed:
+        _auto_enqueue_entities(db, client_id, "catalog")
+    return {"status": "ok", "deleted": deleted, "renamed": renamed}
+
+
 @router.delete("/entity-catalog/{entity_id:path}", status_code=204)
 def delete_entity_catalog(
     client_id: str,

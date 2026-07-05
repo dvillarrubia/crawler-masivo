@@ -247,6 +247,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entries }),
     }),
+  reviewEntityCatalog: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/review`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    }),
+  applyCatalogReview: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/apply-review`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   entitiesStatus: (jobId) => request(`/api/jobs/${jobId}/entities/status`),
 };

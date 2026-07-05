@@ -409,6 +409,131 @@ def suggest_catalog(session, client_id: str, api_key: str, *,
     }
 
 
+# ---------------------------------------------------------------------------
+# Revisión del catálogo GENERADO (limpiar el ruido del crawl con un LLM)
+# ---------------------------------------------------------------------------
+REVIEW_PROMPT_HEADER = """\
+Eres un revisor del catálogo de entidades de un cliente. El catálogo se
+sembró automáticamente del rastreo, así que tiene RUIDO: fragmentos de
+frase, términos genéricos, elementos de navegación, duplicados o cosas mal
+clasificadas.
+
+Te doy entradas NUMERADAS (i, nombre, tipo). Para cada una decide:
+- "mantener": es una entidad legítima del negocio y está bien clasificada.
+- "descartar": es ruido y no debería estar en el catálogo.
+- "renombrar": es válida pero el nombre debería ser su forma canónica
+  (indícala en "canonical", p. ej. «servicios de branding» → «Branding»).
+
+Tipos válidos (para juzgar si está bien clasificada):
+{tipos}
+
+Devuelve SOLO un JSON:
+{{"revision": [{{"i": 0, "verdict": "descartar", "canonical": null, "reason": "genérico, no es una entidad"}}]}}
+Incluye TODAS las entradas por su índice i.
+"""
+
+
+def build_review_prompt(entries: list[dict], resolubles: dict[str, str]) -> str:
+    """Prompt para revisar el catálogo. `entries` = [{name, entity_type}]. Puro."""
+    tipos = "\n".join(f"- {name}: {desc}" for name, desc in resolubles.items())
+    header = REVIEW_PROMPT_HEADER.format(tipos=tipos)
+    lines = [header, "\n--- ENTRADAS DEL CATÁLOGO ---"]
+    for i, e in enumerate(entries):
+        lines.append(f"{i}. «{e['name']}» [{e['entity_type']}]")
+    lines.append("\n--- FIN ---\nDevuelve solo el JSON con 'revision'.")
+    return "\n".join(lines)
+
+
+def parse_llm_review(text: str, n_entries: int) -> dict[int, dict]:
+    """Parsea la revisión a {índice: {verdict, canonical, reason}}. Defensivo;
+    ignora índices fuera de rango y verdicts desconocidos (→ mantener)."""
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not m:
+            raise ValueError("La respuesta del modelo no era JSON válido.")
+        data = json.loads(m.group(0))
+    items = data.get("revision") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("La respuesta no traía una lista 'revision'.")
+
+    out: dict[int, dict] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            i = int(it.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= i < n_entries):
+            continue
+        verdict = str(it.get("verdict", "mantener")).strip().lower()
+        if verdict not in ("mantener", "descartar", "renombrar"):
+            verdict = "mantener"
+        canonical = it.get("canonical")
+        canonical = str(canonical).strip()[:300] if canonical else None
+        if verdict == "renombrar" and not canonical:
+            verdict = "mantener"  # renombrar sin nombre nuevo = no-op
+        out[i] = {"verdict": verdict, "canonical": canonical,
+                  "reason": str(it.get("reason", ""))[:300]}
+    return out
+
+
+def review_catalog(session, client_id: str, api_key: str, *,
+                   generate_fn=None, attempts: int = 3,
+                   max_review: int = 200) -> dict:
+    """Revisa el catálogo existente con un LLM y devuelve un veredicto por
+    entrada (mantener/descartar/renombrar). NO actúa: el usuario decide.
+    Prioriza el catálogo `generado`/`crawl` (el que trae ruido)."""
+    from analysis.entities.schema_config import load_client_schema
+    from shared.entity_models import EntityCatalog
+
+    schema = load_client_schema(session, client_id)  # SchemaError si no hay
+
+    rows = (session.query(EntityCatalog)
+            .filter(EntityCatalog.client_id == client_id)
+            # generado/crawl primero (traen el ruido), feed al final
+            .order_by(EntityCatalog.source.desc(),
+                      EntityCatalog.entity_type, EntityCatalog.name)
+            .limit(max_review).all())
+    if not rows:
+        raise ValueError("El catálogo está vacío: no hay nada que revisar.")
+
+    entries = [{"entity_id": r.entity_id, "name": r.name,
+                "entity_type": r.entity_type, "source": r.source} for r in rows]
+    prompt = build_review_prompt(entries, schema.resolubles)
+
+    if generate_fn is None:
+        generate_fn = _gemini_generate(api_key)
+
+    verdicts: dict[int, dict] = {}
+    last_err = "sin revisión"
+    for _ in range(max(1, attempts)):
+        try:
+            verdicts = parse_llm_review(generate_fn(prompt), len(entries))
+        except ValueError as exc:
+            last_err = str(exc)
+            continue
+        if verdicts:
+            break
+    if not verdicts:
+        raise ValueError(f"No se pudo revisar el catálogo tras {attempts} "
+                         f"intentos ({last_err}).")
+
+    reviewed = []
+    counts = {"mantener": 0, "descartar": 0, "renombrar": 0}
+    for i, e in enumerate(entries):
+        v = verdicts.get(i, {"verdict": "mantener", "canonical": None, "reason": ""})
+        counts[v["verdict"]] = counts.get(v["verdict"], 0) + 1
+        reviewed.append({**e, **v})
+    return {"entries": reviewed, "counts": counts, "n": len(entries)}
+
+
 def _gemini_generate(api_key: str):
     """Cierre que llama a Gemini Flash pidiendo JSON. Import perezoso."""
     def _run(prompt: str) -> str:

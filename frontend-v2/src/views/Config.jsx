@@ -538,6 +538,10 @@ function CatalogPanel({ clientId }) {
   const [suggesting, setSuggesting] = useState(false);
   const [sug, setSug] = useState(null);      // {entries:[{name,entity_type,exists,_pick}], n_nuevas, context}
   const [adding, setAdding] = useState(false);
+  // Revisar (limpiar) con IA
+  const [reviewing, setReviewing] = useState(false);
+  const [rev, setRev] = useState(null);      // {entries:[{entity_id,name,verdict,canonical,reason,_pick}], counts}
+  const [applying, setApplying] = useState(false);
 
   const add = async () => {
     setError(null);
@@ -573,6 +577,32 @@ function CatalogPanel({ clientId }) {
     setAdding(false);
   };
 
+  const review = async () => {
+    setReviewing(true); setError(null); setRev(null); setSug(null);
+    try {
+      const r = await api.reviewEntityCatalog(clientId, {});
+      // pre-marca para aplicar: descartar y renombrar sí; mantener no
+      r.entries = r.entries.map((e) => ({ ...e, _pick: e.verdict !== "mantener" }));
+      setRev(r);
+    } catch (e) { setError(e.message); }
+    setReviewing(false);
+  };
+
+  const applyReview = async () => {
+    const picked = (rev.entries || []).filter((e) => e._pick);
+    const delete_ids = picked.filter((e) => e.verdict === "descartar").map((e) => e.entity_id);
+    const renames = picked.filter((e) => e.verdict === "renombrar" && e.canonical)
+      .map((e) => ({ old_entity_id: e.entity_id, new_name: e.canonical, entity_type: e.entity_type }));
+    if (!delete_ids.length && !renames.length) return;
+    setApplying(true); setError(null);
+    try {
+      await api.applyCatalogReview(clientId, { delete_ids, renames });
+      setRev(null);
+      q.reload();
+    } catch (e) { setError(e.message); }
+    setApplying(false);
+  };
+
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <h3>Catálogo de entidades {q.data ? `(${fmt(q.data.total)})` : ""}</h3>
@@ -582,19 +612,29 @@ function CatalogPanel({ clientId }) {
         depuras: borra el ruido y añade lo que falte.
       </p>
 
-      {/* Proponer entradas del catálogo con IA */}
+      {/* Proponer / revisar el catálogo con IA */}
       <div className="row between" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
         <span className="proxy-tag" style={{ flex: 1, minWidth: 200 }}>
-          ✨ La IA puede leer el sitio y proponer las entidades concretas (por tipo del esquema).
+          ✨ La IA puede <b>proponer</b> entidades leyendo el sitio, o <b>revisar</b> el catálogo actual
+          para limpiar el ruido del crawl (descartar/renombrar).
         </span>
-        <button className="secondary" disabled={suggesting} onClick={suggest}>
-          {suggesting ? "Pensando…" : "Proponer con IA"}
-        </button>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="secondary" disabled={suggesting || reviewing} onClick={suggest}>
+            {suggesting ? "Pensando…" : "Proponer con IA"}
+          </button>
+          <button className="secondary" disabled={suggesting || reviewing} onClick={review}>
+            {reviewing ? "Revisando…" : "Revisar/limpiar con IA"}
+          </button>
+        </div>
       </div>
 
       {sug && (
         <SuggestedCatalog sug={sug} setSug={setSug} adding={adding}
           onAdd={addSelected} onCancel={() => setSug(null)} />
+      )}
+      {rev && (
+        <ReviewedCatalog rev={rev} setRev={setRev} applying={applying}
+          onApply={applyReview} onCancel={() => setRev(null)} />
       )}
 
       <div className="row" style={{ gap: 6, marginBottom: 8 }}>
@@ -693,6 +733,67 @@ function SuggestedCatalog({ sug, setSug, adding, onAdd, onCancel }) {
         </button>
         <button className="secondary" onClick={onCancel}>Descartar</button>
       </div>
+    </div>
+  );
+}
+
+/** Revisión del catálogo por la IA: veredicto por entrada (mantener /
+ *  descartar el ruido / renombrar a su forma canónica). El usuario marca
+ *  qué aplicar. */
+function ReviewedCatalog({ rev, setRev, applying, onApply, onCancel }) {
+  const entries = rev.entries || [];
+  const toggle = (i) => setRev({
+    ...rev, entries: entries.map((e, k) => (k === i ? { ...e, _pick: !e._pick } : e)),
+  });
+  const c = rev.counts || {};
+  // solo mostramos lo accionable (descartar/renombrar); mantener se resume
+  const accionables = entries.map((e, i) => ({ ...e, i }))
+    .filter((e) => e.verdict !== "mantener");
+  const picked = accionables.filter((e) => e._pick).length;
+  const VERD = {
+    descartar: { label: "descartar", color: "var(--chart-red)" },
+    renombrar: { label: "renombrar", color: "var(--chart-amber)" },
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--hairline)", borderRadius: 4,
+      padding: 10, margin: "6px 0 12px", background: "var(--canvas-muted)" }}>
+      <div className="row between" style={{ marginBottom: 6 }}>
+        <b style={{ fontSize: 12.5 }}>Revisión de la IA — {c.descartar || 0} a descartar, {c.renombrar || 0} a renombrar, {c.mantener || 0} ok</b>
+      </div>
+      {accionables.length === 0 && (
+        <div className="proxy-tag">La IA no encontró ruido: el catálogo está limpio. 👍</div>
+      )}
+      {accionables.length > 0 && (
+        <div style={{ maxHeight: "42vh", overflowY: "auto" }}>
+          {accionables.map((e) => (
+            <label key={e.i} className="row" style={{ gap: 6, alignItems: "flex-start",
+              marginBottom: 5, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!e._pick} onChange={() => toggle(e.i)}
+                style={{ marginTop: 2 }} />
+              <span style={{ fontSize: 12 }}>
+                <span className="tag" style={{ color: VERD[e.verdict]?.color }}>{VERD[e.verdict]?.label}</span>{" "}
+                <b>{e.name}</b> <span className="proxy-tag">[{e.entity_type}]</span>
+                {e.verdict === "renombrar" && e.canonical && (
+                  <span> → <b>{e.canonical}</b></span>
+                )}
+                {e.reason && <span className="proxy-tag"> · {e.reason}</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      {accionables.length > 0 && (
+        <div className="row" style={{ gap: 8, marginTop: 8 }}>
+          <button disabled={applying || !picked} onClick={onApply}>
+            {applying ? "Aplicando…" : `Aplicar a ${picked}`}
+          </button>
+          <button className="secondary" onClick={onCancel}>Cancelar</button>
+        </div>
+      )}
+      {accionables.length === 0 && (
+        <button className="secondary" style={{ marginTop: 6 }} onClick={onCancel}>Cerrar</button>
+      )}
     </div>
   );
 }
