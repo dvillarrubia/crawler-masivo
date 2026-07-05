@@ -16,7 +16,7 @@ import hashlib
 import logging
 import re
 from typing import Any, Generator
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import redis
 import scrapy
@@ -693,6 +693,64 @@ class SeoSpider(scrapy.Spider):
 
         url_hash = compute_url_hash(url_for_record)
 
+        # -- 3xx directo (middlewares de redirección DESACTIVADOS en
+        # settings): registrar el salto y encolar el destino. Con el
+        # middleware activo, un bucle (A↔B) agotaba los 20 saltos y se
+        # esfumaba SIN fila ni issue, y una redirección hacia una URL ya
+        # vista caía en el dupefilter perdiendo el salto (cazado con el
+        # sitio hostil). El dupefilter corta los bucles de forma natural
+        # porque cada hop es una request propia.
+        if 300 <= status_code < 400 and not redirect_urls:
+            location = response.headers.get(b"Location", b"").decode(
+                "utf-8", errors="ignore").strip()
+            redirect_target = urljoin(url_for_record, location) if location else None
+            yield PageItem(
+                url=url_for_record,
+                url_hash=url_hash,
+                host=parsed.hostname or "",
+                path=parsed.path or "/",
+                scheme=parsed.scheme or "https",
+                is_internal=internal,
+                crawl_depth=depth,
+                content_type=content_type,
+                content_length=content_length,
+                status_code=status_code,
+                status_group=compute_status_group(status_code),
+                response_time_ms=response_time_ms,
+                is_html=False,
+                resource_type="redirect",
+                redirect_url=redirect_target,
+                body_hash=None,
+                job_id=self.job_id,
+                url_length=len(url_for_record),
+                folder_depth=compute_folder_depth(url_for_record),
+                word_count=None,
+                text_ratio=None,
+                redirect_type=status_code,
+                status_text=http_status_text(status_code),
+                last_modified=None,
+                http_version=None,
+                transfer_size=0,
+                indexability_status=f"Redirect ({status_code})",
+            )
+            follow_ok = redirect_target and (
+                self._is_internal(redirect_target) or self.follow_external
+            ) and self._should_follow(redirect_target)
+            if follow_ok and not (
+                self._trap_detector is not None
+                and not self._trap_detector.allow(redirect_target)
+            ):
+                follow_meta: dict[str, Any] = {"depth": depth}  # un hop no gasta profundidad BFS
+                if self.render_js and _url_likely_html(redirect_target):
+                    follow_meta.update(self._playwright_meta())
+                yield scrapy.Request(
+                    url=redirect_target,
+                    callback=self.parse,
+                    errback=self.handle_error,
+                    meta=follow_meta,
+                )
+            return
+
         # Body hash for duplicate content detection
         body_hash = None
         if is_html and status_code < 400 and hasattr(response, "body"):
@@ -867,6 +925,20 @@ class SeoSpider(scrapy.Spider):
 
         # Links (extract_links already returns enhanced SF fields)
         links = extract_links(selector, response.url, self.allowed_hosts)
+        # El destino de un meta-refresh es una redirección: se sigue como
+        # un enlace más (con los middlewares de meta-refresh desactivados
+        # no se seguía y su página destino quedaba sin descubrir).
+        mr = extract_meta_refresh(selector)
+        if mr:
+            mr_target = urljoin(response.url, mr)
+            if not any(l["url"] == mr_target for l in links):
+                links.append({
+                    "url": mr_target, "anchor_text": None, "rel": None,
+                    "is_internal": self._is_internal(mr_target),
+                    "link_position": "content", "follow": True,
+                    "link_type": "meta_refresh", "target": None,
+                    "dom_ancestor": None, "dom_container": None,
+                })
         for link in links:
             yield LinkItem(
                 from_url_hash=final_hash,

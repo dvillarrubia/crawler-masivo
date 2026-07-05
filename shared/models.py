@@ -71,7 +71,11 @@ class Url(Base):
     content_type = Column(String(256))
     content_length = Column(BigInteger, nullable=True)
     status_code = Column(Integer, nullable=True)
-    status_group = Column(String(10))  # 2xx, 3xx, 4xx, 5xx, timeout, dns_error
+    # 2xx, 3xx, 4xx, 5xx, other, timeout, dns_error, not_crawled (11 chars:
+    # con String(10) el INSERT de huérfanas de sitemap reventaba el análisis
+    # entero — cazado con el sitio hostil; SQLite no valida longitudes y la
+    # suite no podía verlo)
+    status_group = Column(String(20))
     response_time_ms = Column(Float, nullable=True)
 
     is_html = Column(Boolean, default=False)

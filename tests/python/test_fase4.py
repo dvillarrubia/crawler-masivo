@@ -37,6 +37,26 @@ def _url(db_session, job, path, *, status=200, body_hash=None, words=None,
 # T13 — trampas de rastreo
 # ---------------------------------------------------------------------------
 
+def test_trap_detector_counts_unique_urls_not_attempts():
+    """Regresión del sitio hostil: una página sitewide (p. ej. /legal en
+    el footer) se encola una vez por cada página que la enlaza; contar
+    intentos la convertía en falsa trampa al pasar el cap."""
+    from seo_crawler.trap_detection import TrapDetector
+
+    det = TrapDetector(max_urls_per_pattern=5, max_param_combinations=10)
+    # 100 páginas enlazan a /legal → 100 intentos de la MISMA URL
+    for _ in range(100):
+        assert det.allow("https://x.com/legal") is True
+    assert det.events() == []  # ni trampa ni evento
+
+    # y el veredicto de una URL bloqueada es estable entre reintentos
+    for i in range(5):
+        det.allow(f"https://x.com/item/{i}")
+    assert det.allow("https://x.com/item/99") is False
+    assert det.allow("https://x.com/item/99") is False
+    assert det.events()[0]["urls_skipped"] == 1  # única, no dos intentos
+
+
 def test_pattern_signature():
     from seo_crawler.trap_detection import pattern_signature
 

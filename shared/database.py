@@ -84,6 +84,9 @@ _MIGRATIONS = [
     # GLiNER2: índice HNSW del catálogo de entidades (768d, espacio propio)
     "CREATE INDEX IF NOT EXISTS ix_entity_catalog_embedding "
     "ON entity_catalog USING hnsw (embedding vector_cosine_ops)",
+    # Hostil: 'not_crawled' (11) no cabía en VARCHAR(10) y tumbaba el
+    # análisis de cualquier sitio con huérfanas de sitemap
+    "ALTER TABLE urls ALTER COLUMN status_group TYPE VARCHAR(20)",
 ]
 
 

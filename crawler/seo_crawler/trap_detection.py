@@ -35,10 +35,18 @@ def pattern_signature(url: str) -> str:
     return f"{host}{path}" + (f"?{query}" if query else "")
 
 
+# Muestra acotada de URLs bloqueadas por patrón: evita doble conteo de la
+# misma URL sin dejar que el propio detector se coma la memoria en una
+# trampa infinita (más allá del límite, un duplicado repetido podría
+# contarse dos veces — sesgo asumido y documentado).
+_SKIPPED_SAMPLE_MAX = 1000
+
+
 @dataclass
 class _PatternStats:
-    seen: int = 0
-    skipped: int = 0
+    urls: set = field(default_factory=set)      # URLs ÚNICAS admitidas
+    skipped_sample: set = field(default_factory=set)
+    skipped_count: int = 0                       # únicas bloqueadas
     first_url: str | None = None
 
 
@@ -51,8 +59,16 @@ class TrapDetector:
     def allow(self, url: str) -> bool:
         """True if the URL may be enqueued; False when its pattern is capped.
 
+        Cuenta URLs ÚNICAS por patrón, no intentos de encolado: el gate se
+        evalúa por cada enlace extraído, así que una página sitewide (el
+        /legal del footer, enlazada desde cientos de páginas) dispararía el
+        cap con la versión por-intentos y se marcaba como falsa trampa
+        (cazado con el sitio hostil). Repetir una URL ya admitida devuelve
+        el mismo veredicto sin sumar. Memoria acotada: cada set queda
+        limitado por el propio cap.
+
         Two triggers:
-        * the pattern already produced ``max_urls_per_pattern`` URLs;
+        * the pattern already produced ``max_urls_per_pattern`` UNIQUE urls;
         * the URL combines more than ``max_param_combinations`` distinct
           query params (typical faceted explosion) — capped immediately.
         """
@@ -61,14 +77,21 @@ class TrapDetector:
         if stats.first_url is None:
             stats.first_url = url
 
+        if url in stats.urls:
+            return True   # ya admitida: los duplicados no cuentan
+        if url in stats.skipped_sample:
+            return False  # ya bloqueada: veredicto estable, sin recontar
+
         n_params = len(parse_qsl(urlparse(url).query, keep_blank_values=True))
         over_params = n_params > self.max_param_combinations
-        over_count = stats.seen >= self.max_urls_per_pattern
+        over_count = len(stats.urls) >= self.max_urls_per_pattern
 
         if over_params or over_count:
-            stats.skipped += 1
+            stats.skipped_count += 1
+            if len(stats.skipped_sample) < _SKIPPED_SAMPLE_MAX:
+                stats.skipped_sample.add(url)
             return False
-        stats.seen += 1
+        stats.urls.add(url)
         return True
 
     def events(self) -> list[dict]:
@@ -76,10 +99,10 @@ class TrapDetector:
         return [
             {
                 "pattern": sig,
-                "urls_seen": s.seen,
-                "urls_skipped": s.skipped,
+                "urls_seen": len(s.urls),
+                "urls_skipped": s.skipped_count,
                 "first_url_sample": s.first_url,
             }
             for sig, s in self._stats.items()
-            if s.skipped > 0
+            if s.skipped_count
         ]

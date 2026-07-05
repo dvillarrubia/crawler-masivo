@@ -28,6 +28,15 @@ DNS_TIMEOUT = 10
 # ---------------------------------------------------------------------------
 HTTPERROR_ALLOW_ALL = True
 
+# Los 3xx los maneja el SPIDER (registra cada salto y encola el destino).
+# Con los middlewares activos, un bucle de redirecciones agotaba los 20
+# saltos y desaparecía sin dejar fila ni issue, y una redirección hacia
+# una URL ya vista perdía el salto en el dupefilter (cazado con el sitio
+# hostil). El meta-refresh se registra vía extract_meta_refresh y su
+# destino se encola como un enlace más — sin seguirlo en silencio.
+REDIRECT_ENABLED = False
+METAREFRESH_ENABLED = False
+
 # ---------------------------------------------------------------------------
 # Politeness
 # ---------------------------------------------------------------------------
