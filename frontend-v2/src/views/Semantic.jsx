@@ -300,12 +300,12 @@ function AnalysisPanel({ jobId, status, onChanged }) {
             </div>
             {results.gsc_summary && (
               <>
-                <h3>GSC (28-90d)</h3>
+                <h3>GSC (periodo importado en este run)</h3>
                 <div className="facts">
                   <div className="fact"><div className="k">Clics</div><div className="v num">{fmt(results.gsc_summary.total_clicks)}</div></div>
                   <div className="fact"><div className="k">Impresiones</div><div className="v num">{fmt(results.gsc_summary.total_impressions)}</div></div>
-                  <div className="fact"><div className="k">CTR medio</div><div className="v num">{(results.gsc_summary.avg_ctr * 100).toFixed(2)}%</div></div>
-                  <div className="fact"><div className="k">Posición media</div><div className="v num">{results.gsc_summary.avg_position}</div></div>
+                  <div className="fact"><div className="k">CTR medio</div><div className="v num">{results.gsc_summary.avg_ctr != null ? `${(results.gsc_summary.avg_ctr * 100).toFixed(2)}%` : "—"}</div></div>
+                  <div className="fact"><div className="k">Posición media</div><div className="v num">{results.gsc_summary.avg_position ?? "—"}</div></div>
                 </div>
               </>
             )}
@@ -507,7 +507,7 @@ function CannibalPanel({ jobId, status }) {
               <tr key={i}>
                 <td className="cell-url" title={p.url_dominant || p.dominant_url}>{p.url_dominant || p.dominant_url}</td>
                 <td className="cell-url" title={p.url_weak || p.weak_url}>{p.url_weak || p.weak_url}</td>
-                <td className="num">{(p.cosine_similarity ?? p.similarity ?? 0).toFixed(4)}</td>
+                <td className="num">{(p.cosine_similarity ?? p.similarity) != null ? (p.cosine_similarity ?? p.similarity).toFixed(4) : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -775,7 +775,7 @@ function AnchorsPanel({ jobId, status }) {
                     <tr key={i}>
                       <td title={m.anchor}>«{m.anchor}»</td>
                       <td className="cell-url" title={m.target_url}>{m.target_url}</td>
-                      <td className="num">{m.similarity.toFixed(3)}</td>
+                      <td className="num">{m.similarity != null ? m.similarity.toFixed(3) : "—"}</td>
                       <td className="num">{fmt(m.n_links)}</td>
                       <td className="cell-url">{(m.sources_sample || [])[0] || "—"}</td>
                     </tr>

@@ -34,7 +34,9 @@ class Recommendation(BaseModel):
 class CategoryInsight(BaseModel):
     key: str
     name: str
-    score: int
+    # None = sin datos / no aplica — NUNCA se disfraza de 0 ni de 100,
+    # y la categoría queda fuera de la media global (peso renormalizado)
+    score: int | None
     icon: str
     metrics: dict[str, Any]
     recommendations: list[Recommendation]

@@ -4,7 +4,8 @@ import { useAsync } from "../hooks.js";
 import { Blocked, ErrorBox, Spinner, fmt } from "../ui.jsx";
 
 const SCORE_COLOR = (s) =>
-  s >= 80 ? "var(--chart-forest)" : s >= 50 ? "var(--chart-amber)" : "var(--chart-red)";
+  s == null ? "var(--ink-muted)"
+    : s >= 80 ? "var(--chart-forest)" : s >= 50 ? "var(--chart-amber)" : "var(--chart-red)";
 
 /** Insights (paridad legacy): score global + categorías + recomendaciones. */
 export default function InsightsView() {
@@ -35,7 +36,10 @@ export default function InsightsView() {
           <div className="card" key={c.key}>
             <div className="row between">
               <h3 style={{ margin: 0 }}>{c.name}</h3>
-              <span className="display-num num" style={{ fontSize: 22, color: SCORE_COLOR(c.score) }}>{c.score}</span>
+              <span className="display-num num" style={{ fontSize: 22, color: SCORE_COLOR(c.score) }}
+                title={c.score == null ? "Sin datos o no aplica: no puntúa ni afecta al score global" : ""}>
+                {c.score == null ? "—" : c.score}
+              </span>
             </div>
             <div className="proxy-tag mono" style={{ margin: "6px 0 10px" }}>
               {Object.entries(c.metrics || {}).slice(0, 4)

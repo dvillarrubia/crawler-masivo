@@ -79,7 +79,8 @@ def collect_pages(session, job) -> list[dict]:
     except Exception:  # tabla aún sin crear en instalaciones viejas
         pass
 
-    # skip por contenido idéntico vs el run anterior (TODO en Postgres)
+    # skip por contenido idéntico vs el run anterior — comparación hecha
+    # íntegramente en Postgres (ni un hash de contenido viaja al grafo)
     prev = _prev_completed_job(session, job)
     prev_hash: dict[str, str] = {}
     if prev is not None:

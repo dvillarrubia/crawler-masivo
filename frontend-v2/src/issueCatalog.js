@@ -218,7 +218,7 @@ const DETAIL_RENDERERS = {
   anchor_target_mismatch: (d) =>
     `El anchor «${d.anchor}» apenas guarda relación con esta página (similitud ${_dec(d.similarity)}, ${_n(d.n_links)} enlaces)${d.sources_sample && d.sources_sample.length ? ` — desde ${_urls(d.sources_sample, 1)}` : ""}`,
   entity_query_mismatch: (d) =>
-    `Rankea para «${d.query}» (${_n(d.impressions)} imprs, pos ${_dec(d.position)}) pero la entidad «${d.entity}» no aparece en la página${d.entidades_presentes && d.entidades_presentes.length ? ` (habla de: ${d.entidades_presentes.join(", ")})` : ""}. Prioridad ${_n(Math.round(d.prioridad || 0))}`,
+    `Rankea para «${d.query}» (${_n(d.impressions)} imprs, pos ${_dec(d.position)}) pero la entidad «${d.entity}» no aparece en la página${d.entidades_presentes && d.entidades_presentes.length ? ` (habla de: ${d.entidades_presentes.join(", ")})` : ""}${d.prioridad != null ? `. Prioridad ${_n(Math.round(d.prioridad))}` : ""}`,
   entity_coverage_gap: (d) =>
     `Nadie cubre «${d.entity}» y hay demanda: ${_n(d.impressions)} impresiones en búsquedas como ${(d.queries || []).slice(0, 3).map((q) => `«${q}»`).join(", ")}`,
   entity_cannibalization: (d) =>

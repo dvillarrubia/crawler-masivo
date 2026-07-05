@@ -58,7 +58,14 @@ export default function App() {
   const [segmentId, setSegmentId] = useStored("ctx.segment", "");
 
   const jobsQ = useAsync(() => api.jobs({ page_size: 100 }), []);
-  const jobs = jobsQ.data ? jobsQ.data.items : [];
+  // Orden defensivo desc por fecha: Overview/Salud/Diff derivan el "run
+  // anterior" de este orden — si el backend lo cambiara, los deltas se
+  // invertirían en silencio (cazado en la auditoría anti-alucinaciones).
+  const jobs = useMemo(() => {
+    const items = jobsQ.data ? [...jobsQ.data.items] : [];
+    items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return items;
+  }, [jobsQ.data]);
 
   const clients = useMemo(() => {
     const set = new Set(jobs.map((j) => j.client_id).filter(Boolean));

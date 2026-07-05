@@ -44,8 +44,10 @@ function LiveProgress({ job }) {
   }, [job.id]);
 
   const crawled = progress ? progress.crawled_count : job.total_urls_crawled;
-  const maxUrls = (job.config && job.config.max_urls) || 50000;
-  const pct = Math.min(100, Math.round((crawled / maxUrls) * 100));
+  // Sin límite real configurado no se inventa uno: la barra solo tiene
+  // sentido contra el tope de seguridad del job, y así se etiqueta.
+  const maxUrls = job.config && job.config.max_urls;
+  const pct = maxUrls ? Math.min(100, Math.round((crawled / maxUrls) * 100)) : null;
 
   return (
     <div>
@@ -53,8 +55,18 @@ function LiveProgress({ job }) {
       <p className="page-sub">{job.name} · estado {progress ? progress.status : job.status}</p>
       <div className="card" style={{ maxWidth: 560 }}>
         <div className="display-num num">{fmt(crawled)}</div>
-        <div className="kpi-label">URLs rastreadas (límite {fmt(maxUrls)})</div>
-        <div className="progressbar" style={{ marginTop: 12 }}><i style={{ width: `${pct}%` }} /></div>
+        <div className="kpi-label">
+          URLs rastreadas{maxUrls ? ` · tope de seguridad del job: ${fmt(maxUrls)}` : ""}
+        </div>
+        {pct != null && (
+          <>
+            <div className="progressbar" style={{ marginTop: 12 }}><i style={{ width: `${pct}%` }} /></div>
+            <p className="proxy-tag" style={{ margin: "4px 0 0" }}>
+              La barra mide contra el tope configurado, no contra el tamaño real del sitio
+              (que no se conoce hasta terminar).
+            </p>
+          </>
+        )}
         <div className="row between" style={{ marginTop: 8 }}>
           <span className="proxy-tag">refresco cada 3 s desde Redis</span>
           <button className="secondary" onClick={() => api.cancelJob(job.id)}>Cancelar rastreo</button>

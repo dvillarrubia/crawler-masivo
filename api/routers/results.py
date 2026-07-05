@@ -1681,12 +1681,14 @@ def _calc_security(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     ).filter(Url.job_id == job_id, Url.is_internal == True).scalar() or 0
 
     if total_with_sec == 0:
+        # score=None: "sin datos" no es "inseguro" — un 0 aquí falseaba
+        # el overall (bug cazado en la auditoría anti-datos-inventados)
         return CategoryInsight(
-            key="security", name="Seguridad", icon="🔒", score=0,
-            metrics={"total_checked": 0, "pct_https": 0, "pct_hsts": 0, "pct_csp": 0, "pct_mixed": 0},
+            key="security", name="Seguridad", icon="🔒", score=None,
+            metrics={"total_checked": 0},
             recommendations=[Recommendation(
                 priority="baja", title="Sin datos de seguridad",
-                description="No se encontraron cabeceras de seguridad en las paginas rastreadas.",
+                description="No se capturaron cabeceras de seguridad en este rastreo (¿extracción desactivada?). La categoría no puntúa ni afecta al score global.",
                 affected_count=0,
             )],
         )
@@ -1835,10 +1837,16 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     ).filter(Url.job_id == job_id).scalar() or 0
 
     if total_hreflang == 0:
+        # score=None: sin hreflang la categoría NO APLICA — el 100 anterior
+        # inflaba el overall presentando "sin datos" como "perfecto"
         return CategoryInsight(
-            key="i18n", name="Internacionalizacion", icon="🌐", score=100,
-            metrics={"total_hreflang": 0, "languages": [], "pct_return_ok": 0, "pct_lang_valid": 0},
-            recommendations=[],
+            key="i18n", name="Internacionalizacion", icon="🌐", score=None,
+            metrics={"total_hreflang": 0, "languages": []},
+            recommendations=[Recommendation(
+                priority="baja", title="Sin hreflang",
+                description="El sitio no declara alternativas de idioma. Si es monolingüe, es lo esperado; la categoría no puntúa ni afecta al score global.",
+                affected_count=0,
+            )],
         )
 
     # Languages detected
@@ -1860,36 +1868,61 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Url, Hreflang.url_id == Url.id,
     ).filter(Url.job_id == job_id, Hreflang.lang_valid == True).scalar() or 0
 
-    pct_return_ok = _safe_pct(return_ok, total_hreflang)
-    pct_lang_valid = _safe_pct(lang_valid, total_hreflang)
+    # Solo puntúan las validaciones que REALMENTE corrieron (columna no
+    # NULL). Con todo a NULL —la validación de return-tags aún no está
+    # implementada— el score anterior era un 0 fabricado: presentaba
+    # "sin validar" como "todo mal" (cazado en la auditoría).
+    return_validated = db.query(func.count(Hreflang.id)).join(
+        Url, Hreflang.url_id == Url.id,
+    ).filter(Url.job_id == job_id, Hreflang.return_tag_ok.isnot(None)).scalar() or 0
+    lang_validated = db.query(func.count(Hreflang.id)).join(
+        Url, Hreflang.url_id == Url.id,
+    ).filter(Url.job_id == job_id, Hreflang.lang_valid.isnot(None)).scalar() or 0
 
-    score = pct_return_ok * 0.5 + pct_lang_valid * 0.5
-
+    components: list[float] = []
+    metrics: dict = {"total_hreflang": total_hreflang, "languages": languages}
     recs: list[Recommendation] = []
-    missing_return = total_hreflang - return_ok
-    if missing_return > 0:
-        recs.append(Recommendation(
-            priority="alta", title="Corregir etiquetas hreflang sin retorno",
-            description=f"Hay {missing_return} etiquetas hreflang sin una etiqueta de retorno confirmada. Cada hreflang debe tener una referencia reciproca.",
-            affected_count=missing_return,
-            issue_types=["hreflang_missing_return"],
-        ))
-    invalid_lang = total_hreflang - lang_valid
-    if invalid_lang > 0:
-        recs.append(Recommendation(
-            priority="media", title="Corregir codigos de idioma invalidos",
-            description=f"Hay {invalid_lang} etiquetas hreflang con codigos de idioma no validos. Usa codigos ISO 639-1 (ej: es, en, fr).",
-            affected_count=invalid_lang,
-            issue_types=["hreflang_invalid_lang"],
-        ))
+
+    if return_validated:
+        pct_return_ok = _safe_pct(return_ok, return_validated)
+        metrics["pct_return_ok"] = pct_return_ok
+        components.append(pct_return_ok)
+        missing_return = return_validated - return_ok
+        if missing_return > 0:
+            recs.append(Recommendation(
+                priority="alta", title="Corregir etiquetas hreflang sin retorno",
+                description=f"Hay {missing_return} etiquetas hreflang sin una etiqueta de retorno confirmada. Cada hreflang debe tener una referencia reciproca.",
+                affected_count=missing_return,
+                issue_types=["hreflang_missing_return"],
+            ))
+    if lang_validated:
+        pct_lang_valid = _safe_pct(lang_valid, lang_validated)
+        metrics["pct_lang_valid"] = pct_lang_valid
+        components.append(pct_lang_valid)
+        invalid_lang = lang_validated - lang_valid
+        if invalid_lang > 0:
+            recs.append(Recommendation(
+                priority="media", title="Corregir codigos de idioma invalidos",
+                description=f"Hay {invalid_lang} etiquetas hreflang con codigos de idioma no validos. Usa codigos ISO 639-1 (ej: es, en, fr).",
+                affected_count=invalid_lang,
+                issue_types=["hreflang_invalid_lang"],
+            ))
+
+    if not components:
+        return CategoryInsight(
+            key="i18n", name="Internacionalizacion", icon="🌐", score=None,
+            metrics=metrics,
+            recommendations=[Recommendation(
+                priority="baja", title="Hreflang presente pero sin validar",
+                description=f"El sitio declara {total_hreflang} etiquetas hreflang en {len(languages)} idiomas, pero la validación de reciprocidad aún no se ejecuta. La categoría no puntúa hasta que exista esa comprobación.",
+                affected_count=total_hreflang,
+            )],
+        )
 
     return CategoryInsight(
         key="i18n", name="Internacionalizacion", icon="🌐",
-        score=_clamp_score(score),
-        metrics={
-            "total_hreflang": total_hreflang, "languages": languages,
-            "pct_return_ok": pct_return_ok, "pct_lang_valid": pct_lang_valid,
-        },
+        score=_clamp_score(sum(components) / len(components)),
+        metrics=metrics,
         recommendations=recs,
     )
 
@@ -1910,9 +1943,14 @@ def get_insights(
         _calc_i18n(job_id, db),
     ]
 
-    # Weighted average: crawlability 25%, content 25%, links 20%, security 15%, SD 10%, i18n 5%
+    # Media ponderada: crawlability 25%, content 25%, links 20%,
+    # security 15%, SD 10%, i18n 5%. Las categorías SIN DATOS (score
+    # None) quedan fuera y el peso se renormaliza sobre las presentes —
+    # así "sin datos" ni hunde ni infla el global.
     weights = [0.25, 0.25, 0.20, 0.15, 0.10, 0.05]
-    overall = sum(c.score * w for c, w in zip(categories, weights))
+    scored = [(c, w) for c, w in zip(categories, weights) if c.score is not None]
+    total_w = sum(w for _, w in scored)
+    overall = (sum(c.score * w for c, w in scored) / total_w) if total_w else 0
 
     return InsightsResponse(
         job_id=job_id,

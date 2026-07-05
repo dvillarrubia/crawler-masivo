@@ -561,11 +561,16 @@ function EntityStatusPanel() {
 }
 
 function SourcesPanel() {
+  // Estados honestos: nada de verdes decorativos — el chip de crawl solo
+  // está OK si el proyecto tiene al menos un rastreo completado.
+  const { clientJobs } = useCtx();
+  const hasCompleted = (clientJobs || []).some((j) => j.status === "completed");
   return (
     <div className="card">
       <h3>Fuentes de datos</h3>
-      <SourceRow name="Crawl" state="Conectado" ok />
-      <SourceRow name="Sitemaps" state="Por job (flag ingest_sitemaps)" ok />
+      <SourceRow name="Crawl" ok={hasCompleted}
+        state={hasCompleted ? "Con rastreos completados" : "Sin rastreos completados aún"} />
+      <SourceRow name="Sitemaps" state="Se activa por rastreo (opción «Leer los sitemaps»)" />
       <SourceRow name="Google Search Console" state="Cuentas + import por run" href="#/cuentas" />
       <SourceRow name="Semántica (Gemini)" state="Cuentas + análisis por run" href="#/cuentas" />
       <SourceRow name="Logs de servidor" state="No conectado — sin ingesta de logs" />

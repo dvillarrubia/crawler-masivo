@@ -26,8 +26,19 @@ DETERMINISTIC_TYPES = ("entity_query_mismatch", "entity_coverage_gap")
 SIGNABLE_TYPES = ("entity_cannibalization", "funnel_mismatch")
 
 
+# Cuando no existe medición (p. ej. una entidad sin posición conocida),
+# el factor es NEUTRO (1.0): la prioridad degrada a impresiones×confianza.
+# Nunca se inventa una "posición" — cazado en la auditoría anti-datos-falsos.
+_FACTOR_NEUTRO = 1.0
+
+
 def _prioridad(impressions: int, position: float | None, confidence: float | None) -> float:
-    return round((impressions or 0) * (position or 1.0) * (confidence or 0.5), 2)
+    return round(
+        (impressions or 0)
+        * (position if position is not None else _FACTOR_NEUTRO)
+        * (confidence if confidence is not None else _FACTOR_NEUTRO),
+        2,
+    )
 
 
 def build_report(session, job_id, client_id: str) -> dict:
@@ -140,14 +151,25 @@ def build_report(session, job_id, client_id: str) -> dict:
         })
 
     # -- 2. gaps de cobertura ----------------------------------------------
+    # posición y confianza REALES por entidad (media ponderada de sus
+    # queries / máxima confianza de extracción) — nada de constantes.
     demand_by_entity: dict[str, dict] = defaultdict(
-        lambda: {"impressions": 0, "clicks": 0, "queries": []})
+        lambda: {"impressions": 0, "clicks": 0, "queries": [],
+                 "pos_w": 0.0, "conf": 0.0})
     for q, (eid, conf) in q_entity.items():
         d = demand.get(q, {})
         e = demand_by_entity[eid]
         e["impressions"] += d.get("impressions", 0)
         e["clicks"] += d.get("clicks", 0)
         e["queries"].append(q)
+        e["pos_w"] += d.get("pos_w", 0.0)
+        e["conf"] = max(e["conf"], conf or 0.0)
+
+    def _entity_pos(eid: str) -> float | None:
+        e = demand_by_entity.get(eid)
+        if not e or not e["impressions"] or not e["pos_w"]:
+            return None
+        return round(e["pos_w"] / e["impressions"], 2)
     gaps = []
     home_id = None
     home_candidates = [u for u in urls.values() if u.click_depth == 0]
@@ -164,9 +186,10 @@ def build_report(session, job_id, client_id: str) -> dict:
             "url_id": home_id, "entity_id": eid,
             "entity": cat_name.get(eid, eid),
             "impressions": e["impressions"], "clicks": e["clicks"],
+            "position": _entity_pos(eid),
             "queries": sorted(e["queries"])[:10],
             "accion": "crear_contenido",
-            "prioridad": _prioridad(e["impressions"], 10.0, 1.0),
+            "prioridad": _prioridad(e["impressions"], _entity_pos(eid), e["conf"]),
         })
 
     # -- 3. canibalización por entidad primaria + banda funnel --------------
@@ -199,8 +222,9 @@ def build_report(session, job_id, client_id: str) -> dict:
                 "converge_embeddings": uid in converge_ids,
                 "accion": "consolidar" if same_tipo else "diferenciar",
                 "prioridad": _prioridad(
-                    demand_by_entity.get(eid, {}).get("impressions", 0), 5.0,
-                    confidence_by_url.get(uid, {}).get(eid, 0.5)),
+                    demand_by_entity.get(eid, {}).get("impressions", 0),
+                    _entity_pos(eid),
+                    confidence_by_url.get(uid, {}).get(eid)),
             })
 
     # -- 4. circuito funnel roto --------------------------------------------
@@ -219,13 +243,17 @@ def build_report(session, job_id, client_id: str) -> dict:
         if not wrong:
             continue
         imprs = sum(demand.get(q, {}).get("impressions", 0) for q in wrong)
+        # posición media REAL de las queries mal encajadas
+        pos_w = sum(demand.get(q, {}).get("pos_w", 0.0) for q in wrong)
+        avg_pos = round(pos_w / imprs, 2) if imprs and pos_w else None
+        page_label_conf = labels.get((url_id, "funnel"), (None, None))[1]
         funnel_issues.append({
             "url_id": url_id, "url": urls[url_id].url,
             "page_funnel": page_funnel, "query_funnel": opposite,
             "queries": sorted(wrong)[:10], "n_queries": len(wrong),
-            "impressions": imprs,
+            "impressions": imprs, "position": avg_pos,
             "accion": "crear_contenido" if page_funnel == "BOFU" else "enlazar",
-            "prioridad": _prioridad(imprs, 8.0, 0.8),
+            "prioridad": _prioridad(imprs, avg_pos, page_label_conf),
         })
 
     return {"mismatches": mismatches, "gaps": gaps, "cannibalization": cannibal,

@@ -65,6 +65,8 @@ const COLUMNS = [
     desc: "Niveles de carpeta en la ruta: /ropa/hombre/camisas = 3." },
   { key: "in_sitemap", label: "Sitemap", num: false, filter: null, def: false,
     desc: "¿Está declarada en el sitemap.xml del sitio? Requiere haber activado la lectura de sitemaps en el rastreo." },
+  { key: "blocked_by_robots", label: "Robots", num: false, filter: null, def: false,
+    desc: "¿El robots.txt la bloquearía? Con el modo «auditar» se rastrea igualmente pero queda marcada aquí; con «respetar» ni se visita." },
   { key: "title", label: "Title", num: false, filter: "contains", param: "title_contains", def: false, meta: true,
     desc: "La etiqueta <title> de la página: el texto azul del resultado en Google." },
   { key: "canonical", label: "Canonical", num: false, filter: "contains", param: "canonical_contains", def: false, metaField: "canonical_href",
@@ -162,6 +164,7 @@ export default function ExplorerView() {
     if (c.key === "status_code") return <><StatusPill group={u.status_group} /> {u.status_code ?? ""}</>;
     if (c.key === "indexable") return u.indexable == null ? "—" : u.indexable ? "sí" : "no";
     if (c.key === "in_sitemap") return u.in_sitemap == null ? "—" : u.in_sitemap ? "sí" : "no";
+    if (c.key === "blocked_by_robots") return u.blocked_by_robots == null ? "—" : u.blocked_by_robots ? <span className="tag">bloqueada</span> : "no";
     if (c.key === "click_depth" && u.click_depth == null && u.is_html) return <span className="tag">sin camino</span>;
     if (c.key === "gsc_ctr") return u.gsc_ctr == null ? "—" : `${(u.gsc_ctr * 100).toFixed(2)}%`;
     if (c.key === "gsc_position") return u.gsc_position == null ? "—" : u.gsc_position.toFixed(1);
