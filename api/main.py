@@ -36,9 +36,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     dependencies.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     dependencies.redis_client.ping()
 
+    # Cron de sincronización diaria de métricas (GSC/GA4). Tolerante: si
+    # falta APScheduler la API arranca igual, solo sin cron.
+    from api.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+
     yield
 
     # Shutdown ---------------------------------------------------------
+    stop_scheduler()
     if dependencies.redis_client is not None:
         dependencies.redis_client.close()
         dependencies.redis_client = None

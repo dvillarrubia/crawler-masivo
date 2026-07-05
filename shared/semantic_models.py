@@ -272,6 +272,30 @@ class Ga4Daily(Base):
     )
 
 
+class MetricSyncConfig(Base):
+    """Qué debe sincronizar el cron cada día. Una fila por fuente activa de
+    un cliente: el planificador recorre las habilitadas y refresca una
+    ventana móvil reciente (idempotente). Lo escribe el panel de
+    "Sincronizar histórico" cuando marcas "a diario"."""
+
+    __tablename__ = "metric_sync_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    client_id = Column(String(128), nullable=False)
+    source = Column(String(8), nullable=False)               # 'gsc' | 'ga4'
+    account_id = Column(String(64), nullable=False)          # uuid de la cuenta
+    property = Column(String(512), nullable=False)           # url GSC o property_id GA4
+    by_page = Column(Boolean, default=True)                  # solo GSC
+    enabled = Column(Boolean, default=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    last_status = Column(Text, nullable=True)                # 'ok: N filas' / 'error: …'
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_metric_sync_client", "client_id"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # GSC Query-Page Data (per-query per-page GSC metrics)
 # ---------------------------------------------------------------------------

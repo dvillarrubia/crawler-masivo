@@ -131,51 +131,81 @@ def _parse_day(s: str) -> datetime:
     return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
-@router.post("/sync-gsc")
-def sync_gsc_daily(client_id: str, body: SyncGscRequest,
-                   db: Session = Depends(get_session)):
-    """Trae la serie DIARIA de GSC para el rango y la reemplaza en
-    `gsc_daily` (idempotente: borra el rango y reinserta). `by_page=true`
-    guarda además el detalle por URL, con `url_hash` normalizado por
-    defecto para poder cruzar con las URLs vigiladas."""
-    acc = db.query(GscAccount).filter(GscAccount.id == body.gsc_account_id).first()
-    if not acc:
-        raise HTTPException(status_code=404, detail="Cuenta GSC no encontrada")
-    try:
-        from POC_centro_semantico.src.gsc import fetch_gsc_daily
-        from shared.url_normalization import compute_url_hash
-    except ImportError as e:  # pragma: no cover
-        raise HTTPException(status_code=501, detail=str(e))
+# -- Lógica de sincronización reutilizable (endpoint manual + cron) ----------
+def do_sync_gsc(db: Session, client_id: str, account: GscAccount,
+                property_url: str, start_date: str, end_date: str,
+                by_page: bool) -> int:
+    """Trae GSC día a día y reemplaza el rango en `gsc_daily` (idempotente).
+    Devuelve el nº de filas. Sin capa HTTP para poder llamarla desde el cron."""
+    from POC_centro_semantico.src.gsc import fetch_gsc_daily
+    from shared.url_normalization import compute_url_hash
 
-    try:
-        df = fetch_gsc_daily(acc.credentials_json, body.property_url,
-                             body.start_date, body.end_date, by_page=body.by_page)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Error consultando GSC: {e}")
-
-    start, end = _parse_day(body.start_date), _parse_day(body.end_date)
-    # Borra el rango exacto (mismo scope: site vs by_page) para no mezclar
+    df = fetch_gsc_daily(account.credentials_json, property_url,
+                         start_date, end_date, by_page=by_page)
+    start, end = _parse_day(start_date), _parse_day(end_date)
     q = db.query(GscDaily).filter(
-        GscDaily.client_id == client_id, GscDaily.property == body.property_url,
+        GscDaily.client_id == client_id, GscDaily.property == property_url,
         GscDaily.date >= start, GscDaily.date <= end)
-    q = q.filter(GscDaily.url_hash.isnot(None)) if body.by_page else q.filter(GscDaily.url_hash.is_(None))
+    q = q.filter(GscDaily.url_hash.isnot(None)) if by_page else q.filter(GscDaily.url_hash.is_(None))
     q.delete(synchronize_session=False)
 
     n = 0
     for _, row in df.iterrows():
-        d = _parse_day(str(row["date"]))
         rec = GscDaily(
-            client_id=client_id, property=body.property_url, date=d,
+            client_id=client_id, property=property_url, date=_parse_day(str(row["date"])),
             clicks=int(row["clicks"]), impressions=int(row["impressions"]),
             position=float(row["position"]) if row["position"] is not None else None,
         )
-        if body.by_page:
+        if by_page:
             raw = str(row["url"])
             rec.url = raw
             rec.url_hash = compute_url_hash(raw)
         db.add(rec)
         n += 1
     db.commit()
+    return n
+
+
+def do_sync_ga4(db: Session, client_id: str, account: Ga4Account,
+                property_id: str, start_date: str, end_date: str) -> int:
+    """Trae GA4 día a día (por canal) y reemplaza el rango. Devuelve nº filas."""
+    from POC_centro_semantico.src.ga4 import fetch_ga4_daily
+
+    df = fetch_ga4_daily(account.credentials_json, property_id,
+                         start_date, end_date)
+    start, end = _parse_day(start_date), _parse_day(end_date)
+    db.query(Ga4Daily).filter(
+        Ga4Daily.client_id == client_id, Ga4Daily.property_id == property_id,
+        Ga4Daily.date >= start, Ga4Daily.date <= end).delete(synchronize_session=False)
+    n = 0
+    for _, row in df.iterrows():
+        db.add(Ga4Daily(
+            client_id=client_id, property_id=property_id, date=_parse_day(str(row["date"])),
+            channel=str(row["channel"]) if row.get("channel") is not None else None,
+            sessions=int(row["sessions"]), active_users=int(row["active_users"]),
+            conversions=float(row["conversions"]), revenue=float(row["revenue"]),
+        ))
+        n += 1
+    db.commit()
+    return n
+
+
+@router.post("/sync-gsc")
+def sync_gsc_daily(client_id: str, body: SyncGscRequest,
+                   db: Session = Depends(get_session)):
+    """Trae la serie DIARIA de GSC para el rango y la reemplaza en
+    `gsc_daily` (idempotente). `by_page=true` guarda además el detalle por
+    URL, con `url_hash` normalizado para cruzar con las URLs vigiladas."""
+    acc = db.query(GscAccount).filter(GscAccount.id == body.gsc_account_id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Cuenta GSC no encontrada")
+    try:
+        n = do_sync_gsc(db, client_id, acc, body.property_url,
+                        body.start_date, body.end_date, body.by_page)
+    except ImportError as e:  # pragma: no cover
+        raise HTTPException(status_code=501, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Error consultando GSC: {e}")
     return {"status": "ok", "rows": n, "by_page": body.by_page,
             "range": [body.start_date, body.end_date]}
 
@@ -190,33 +220,166 @@ def sync_ga4_daily(client_id: str, body: SyncGa4Request,
         raise HTTPException(status_code=404, detail="Cuenta GA4 no encontrada")
     prop = body.property_id or acc.property_id
     try:
-        from POC_centro_semantico.src.ga4 import fetch_ga4_daily
+        n = do_sync_ga4(db, client_id, acc, prop, body.start_date, body.end_date)
     except ImportError:
         raise HTTPException(status_code=501, detail=(
             "Falta google-analytics-data. Instálalo en el contenedor api "
             "para sincronizar GA4."))
-    try:
-        df = fetch_ga4_daily(acc.credentials_json, prop,
-                             body.start_date, body.end_date)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Error consultando GA4: {e}")
-
-    start, end = _parse_day(body.start_date), _parse_day(body.end_date)
-    db.query(Ga4Daily).filter(
-        Ga4Daily.client_id == client_id, Ga4Daily.property_id == prop,
-        Ga4Daily.date >= start, Ga4Daily.date <= end).delete(synchronize_session=False)
-    n = 0
-    for _, row in df.iterrows():
-        db.add(Ga4Daily(
-            client_id=client_id, property_id=prop, date=_parse_day(str(row["date"])),
-            channel=str(row["channel"]) if row.get("channel") is not None else None,
-            sessions=int(row["sessions"]), active_users=int(row["active_users"]),
-            conversions=float(row["conversions"]), revenue=float(row["revenue"]),
-        ))
-        n += 1
-    db.commit()
     return {"status": "ok", "rows": n, "property_id": prop,
             "range": [body.start_date, body.end_date]}
+
+
+# ---------------------------------------------------------------------------
+# Configuraciones de sincronización diaria (lo que el cron refresca solo)
+# ---------------------------------------------------------------------------
+class SyncConfigCreate(BaseModel):
+    source: str                    # 'gsc' | 'ga4'
+    account_id: str
+    property: str
+    by_page: bool = True
+    enabled: bool = True
+
+
+class SyncConfigResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    source: str
+    account_id: str
+    property: str
+    by_page: bool
+    enabled: bool
+    last_synced_at: datetime | None
+    last_status: str | None
+
+
+@router.get("/sync-configs", response_model=list[SyncConfigResponse])
+def list_sync_configs(client_id: str, db: Session = Depends(get_session)):
+    from shared.semantic_models import MetricSyncConfig
+    return (db.query(MetricSyncConfig)
+            .filter(MetricSyncConfig.client_id == client_id)
+            .order_by(MetricSyncConfig.created_at.desc()).all())
+
+
+@router.post("/sync-configs", response_model=SyncConfigResponse)
+def upsert_sync_config(client_id: str, body: SyncConfigCreate,
+                       db: Session = Depends(get_session)):
+    """Programa (o actualiza) una fuente para el cron diario. Único por
+    (cliente, fuente, propiedad): re-programar la misma no duplica."""
+    from shared.semantic_models import MetricSyncConfig
+    if body.source not in ("gsc", "ga4"):
+        raise HTTPException(status_code=422, detail="source debe ser gsc o ga4")
+    cfg = (db.query(MetricSyncConfig).filter(
+        MetricSyncConfig.client_id == client_id,
+        MetricSyncConfig.source == body.source,
+        MetricSyncConfig.property == body.property).first())
+    if not cfg:
+        cfg = MetricSyncConfig(client_id=client_id, source=body.source,
+                               property=body.property)
+        db.add(cfg)
+    cfg.account_id = body.account_id
+    cfg.by_page = body.by_page
+    cfg.enabled = body.enabled
+    db.commit()
+    db.refresh(cfg)
+    return cfg
+
+
+@router.delete("/sync-configs/{config_id}")
+def delete_sync_config(client_id: str, config_id: uuid.UUID,
+                       db: Session = Depends(get_session)):
+    from shared.semantic_models import MetricSyncConfig
+    cfg = db.query(MetricSyncConfig).filter(MetricSyncConfig.id == config_id).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Config no encontrada")
+    db.delete(cfg)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/sync-configs/{config_id}/run")
+def run_sync_config_now(client_id: str, config_id: uuid.UUID,
+                        db: Session = Depends(get_session)):
+    """Ejecuta ahora una config concreta (la ventana móvil por defecto).
+    Mismo camino que usa el cron."""
+    from shared.semantic_models import MetricSyncConfig
+    cfg = db.query(MetricSyncConfig).filter(MetricSyncConfig.id == config_id).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Config no encontrada")
+    ok, msg = run_one_config(db, cfg)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "ok", "detail": msg}
+
+
+# Ventana móvil que refresca el cron: GSC arrastra ~2-3 días de lag y los
+# datos siguen consolidándose después, así que reprocesamos los últimos días
+# (idempotente) en vez de solo "ayer".
+SYNC_WINDOW_DAYS = 5
+GSC_LAG_DAYS = 2
+
+
+def _window(today: datetime) -> tuple[str, str]:
+    end = (today - timedelta(days=GSC_LAG_DAYS)).date()
+    start = end - timedelta(days=SYNC_WINDOW_DAYS)
+    return start.isoformat(), end.isoformat()
+
+
+def run_one_config(db: Session, cfg, today: datetime | None = None) -> tuple[bool, str]:
+    """Refresca UNA config sobre la ventana móvil. Actualiza last_status.
+    Devuelve (ok, mensaje). No lanza: el cron debe seguir con las demás."""
+    today = today or datetime.now(timezone.utc)
+    start, end = _window(today)
+    try:
+        try:
+            acc_uuid = uuid.UUID(str(cfg.account_id))
+        except ValueError:
+            raise RuntimeError(f"account_id inválido: {cfg.account_id}")
+        if cfg.source == "gsc":
+            acc = db.query(GscAccount).filter(GscAccount.id == acc_uuid).first()
+            if not acc:
+                raise RuntimeError("cuenta GSC no encontrada")
+            n = do_sync_gsc(db, cfg.client_id, acc, cfg.property, start, end, cfg.by_page)
+        else:
+            acc = db.query(Ga4Account).filter(Ga4Account.id == acc_uuid).first()
+            if not acc:
+                raise RuntimeError("cuenta GA4 no encontrada")
+            n = do_sync_ga4(db, cfg.client_id, acc, cfg.property, start, end)
+        cfg.last_synced_at = today
+        cfg.last_status = f"ok: {n} filas ({start}→{end})"
+        db.commit()
+        return True, cfg.last_status
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        cfg.last_status = f"error: {e}"
+        cfg.last_synced_at = today
+        try:
+            db.commit()
+        except Exception:  # pragma: no cover
+            db.rollback()
+        return False, str(e)
+
+
+def run_daily_sync(today: datetime | None = None) -> dict:
+    """Punto de entrada del cron: recorre TODAS las configs habilitadas y
+    refresca cada una. Serializado entre réplicas por lock Redis (lo pone
+    el planificador). Devuelve un resumen para el log."""
+    from shared.database import SessionLocal
+    from shared.semantic_models import MetricSyncConfig
+
+    db = SessionLocal()
+    done = {"ok": 0, "error": 0, "total": 0}
+    try:
+        cfgs = db.query(MetricSyncConfig).filter(
+            MetricSyncConfig.enabled.is_(True)).all()
+        done["total"] = len(cfgs)
+        for cfg in cfgs:
+            ok, _ = run_one_config(db, cfg, today=today)
+            done["ok" if ok else "error"] += 1
+    finally:
+        db.close()
+    return done
 
 
 # ---------------------------------------------------------------------------

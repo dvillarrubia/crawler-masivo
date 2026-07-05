@@ -9,6 +9,22 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Cron de sincronización diaria de métricas (GSC/GA4)** (2026-07-05)
+  → Un cron no sirve sin saber QUÉ sincronizar, así que se añade el
+  registro `metric_sync_configs` (cliente·fuente·propiedad, habilitable).
+  Planificador APScheduler en el arranque de la API (`api/scheduler.py`),
+  diario 05:00 UTC, con **lock Redis** para no duplicar entre réplicas y
+  tolerante (si falta la lib, la API arranca sin cron). Refresca una
+  **ventana móvil** de los últimos días (GSC arrastra 2-3 de lag) de forma
+  idempotente y guarda `last_status`/`last_synced_at` por fuente. La lógica
+  de sync se extrajo a `do_sync_gsc`/`do_sync_ga4` (endpoint manual + cron
+  comparten camino). UI: en Cuentas y fuentes, casilla **"Sincronizar a
+  diario"** al sincronizar + tabla de **programadas** (ejecutar ahora,
+  pausar/reanudar, quitar, con el último resultado). Vars
+  `METRICS_SYNC_ENABLED`/`METRICS_SYNC_HOUR`. 4 tests (suite 299).
+  De paso: quitado el default débil `seontology` del `NEO4J_PASSWORD` en
+  docker-compose (ahora compose falla si no se define). Commit: (este).
+
 - ✅ **Informe de rendimiento AGNÓSTICO a los rastreos (por rangos de
   fecha) + GA4** (2026-07-05) → El eje deja de ser el crawl y pasa a ser la
   FECHA. Serie **diaria real** de Search Console (dimensión `date`, y

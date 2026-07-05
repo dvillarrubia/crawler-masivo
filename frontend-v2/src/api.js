@@ -133,6 +133,20 @@ export const api = {
     request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-ga4`, {
       method: "POST", body: JSON.stringify(payload),
     }),
+  syncConfigs: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-configs`),
+  saveSyncConfig: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-configs`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  deleteSyncConfig: (clientId, id) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-configs/${id}`, {
+      method: "DELETE",
+    }),
+  runSyncConfig: (clientId, id) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-configs/${id}/run`, {
+      method: "POST",
+    }),
   ga4Accounts: (clientId) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/metrics/ga4-accounts`),
   addGa4Account: (clientId, payload) =>

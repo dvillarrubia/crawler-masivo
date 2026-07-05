@@ -165,9 +165,12 @@ function DailySyncPanel({ clientId }) {
   const [source, setSource] = useState("gsc");
   const gsc = useAsync(() => api.gscAccounts(), []);
   const ga4 = useAsync(() => api.ga4Accounts(clientId || "_"), [clientId]);
+  const configs = useAsync(
+    () => (clientId ? api.syncConfigs(clientId) : Promise.resolve([])), [clientId]);
   const [accountId, setAccountId] = useState("");
   const [property, setProperty] = useState("");
   const [byPage, setByPage] = useState(true);
+  const [daily, setDaily] = useState(true);
   const [from, setFrom] = useState(isoDaysAgo(90));
   const [to, setTo] = useState(isoDaysAgo(2));
   const [result, setResult] = useState(null);
@@ -200,6 +203,16 @@ function DailySyncPanel({ clientId }) {
         });
         setResult(`GA4: ${r.rows} filas sincronizadas (${r.range[0]} → ${r.range[1]})`);
       }
+      // Si se pidió, deja la fuente programada para el cron diario.
+      if (daily) {
+        const prop = source === "gsc" ? property
+          : (ga4.data || []).find((a) => a.id === accountId)?.property_id || accountId;
+        await api.saveSyncConfig(clientId, {
+          source, account_id: accountId, property: prop,
+          by_page: byPage, enabled: true,
+        });
+        configs.reload();
+      }
     } catch (e) { setError(e.message); }
     setBusy(false);
   };
@@ -212,7 +225,7 @@ function DailySyncPanel({ clientId }) {
       <p className="proxy-tag" style={{ marginTop: 0 }}>
         Descarga la serie <b>día a día</b> del rango elegido — es lo que alimenta el informe
         <b> Rendimiento → Por fechas</b>. La primera vez trae todo el histórico (hasta 16 meses en GSC);
-        luego basta con sincronizar los días nuevos. Reemplaza el rango (idempotente).
+        marca <b>"a diario"</b> y el cron refresca solo los días nuevos cada madrugada. Reemplaza el rango (idempotente).
       </p>
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <label className="kpi-label">Fuente:</label>
@@ -243,10 +256,82 @@ function DailySyncPanel({ clientId }) {
             También por URL (para seguir URLs vigiladas)
           </label>
         )}
+        <label className="kpi-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={daily} onChange={(e) => setDaily(e.target.checked)} />
+          Sincronizar a diario (cron)
+        </label>
         <button disabled={busy} onClick={run}>{busy ? "Sincronizando…" : "Sincronizar rango"}</button>
       </div>
       {error && <div className="alert">{error}</div>}
       {result && <div className="proxy-tag" style={{ color: "var(--chart-forest)" }}>✓ {result}</div>}
+
+      <ScheduledSyncs clientId={clientId} configs={configs} />
+    </div>
+  );
+}
+
+/* -- Sincronizaciones programadas (lo que refresca el cron) ----------------- */
+function ScheduledSyncs({ clientId, configs }) {
+  const [busyId, setBusyId] = useState(null);
+  const rows = configs.data || [];
+  if (configs.loading) return <Spinner />;
+
+  const toggle = async (c) => {
+    await api.saveSyncConfig(clientId, {
+      source: c.source, account_id: c.account_id, property: c.property,
+      by_page: c.by_page, enabled: !c.enabled,
+    });
+    configs.reload();
+  };
+  const runNow = async (c) => {
+    setBusyId(c.id);
+    try { await api.runSyncConfig(clientId, c.id); } catch { /* el estado se ve en last_status */ }
+    setBusyId(null);
+    configs.reload();
+  };
+  const remove = async (c) => {
+    if (!window.confirm(`¿Quitar del cron la sincronización de ${c.property}?`)) return;
+    await api.deleteSyncConfig(clientId, c.id);
+    configs.reload();
+  };
+
+  return (
+    <div style={{ borderTop: "1px solid var(--hairline-soft)", marginTop: 12, paddingTop: 10 }}>
+      <div className="row between">
+        <b>Sincronización automática diaria</b>
+        <span className="proxy-tag">el cron corre cada madrugada (05:00 UTC)</span>
+      </div>
+      {rows.length === 0 && (
+        <p className="proxy-tag">Nada programado. Marca "Sincronizar a diario" arriba para que el cron mantenga el histórico al día.</p>
+      )}
+      {rows.length > 0 && (
+        <table className="data" style={{ marginTop: 8 }}>
+          <thead>
+            <tr><th>Fuente</th><th>Propiedad</th><th>Último resultado</th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => (
+              <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.5 }}>
+                <td><span className="tag">{c.source.toUpperCase()}</span></td>
+                <td className="cell-url mono" title={c.property}>{c.property}</td>
+                <td className="proxy-tag">
+                  {c.last_status
+                    ? <span style={{ color: c.last_status.startsWith("error") ? "var(--chart-red)" : "var(--chart-forest)" }}>{c.last_status}</span>
+                    : "— nunca ejecutado —"}
+                  {c.last_synced_at ? <span> · {new Date(c.last_synced_at).toLocaleString("es")}</span> : null}
+                </td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}>
+                  <button className="secondary" disabled={busyId === c.id}
+                    onClick={() => runNow(c)} title="Ejecutar ahora">{busyId === c.id ? "…" : "▷"}</button>{" "}
+                  <button className="secondary" onClick={() => toggle(c)}
+                    title={c.enabled ? "Pausar" : "Reanudar"}>{c.enabled ? "⏸" : "▶"}</button>{" "}
+                  <button className="secondary" onClick={() => remove(c)} title="Quitar">×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
