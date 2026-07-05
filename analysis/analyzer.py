@@ -2951,13 +2951,48 @@ def run_analysis(job_id: str) -> None:
 
     Creates its own database session, runs every analysis check, and
     ensures the session is closed on exit.
+
+    Serializado por job con un ADVISORY LOCK de Postgres: dos análisis del
+    mismo job (endpoint reanalyze + trigger del worker, o varios reanalyze)
+    se pisaban en el DELETE+INSERT de issues y DUPLICABAN filas (cazado en
+    la auditoría de concurrencia: 1390 → 4170). El advisory lock cubre
+    AMBOS procesos sin depender de Redis; si otro análisis del mismo job
+    ya lo tiene, este se salta con log en vez de duplicar.
     """
+    from sqlalchemy import text as _text
+
     session = SessionLocal()
+    lock_key = _job_advisory_key(job_id)
+    is_pg = session.get_bind().dialect.name.startswith("postgres")
     try:
+        if is_pg:
+            got = session.execute(
+                _text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key}
+            ).scalar()
+            if not got:
+                logger.warning(
+                    "Análisis de %s ya en curso (advisory lock ocupado): se "
+                    "omite esta ejecución para no duplicar", job_id)
+                return
         analyzer = SEOAnalyzer(session, job_id)
         analyzer.run_all()
     finally:
+        if is_pg:
+            try:
+                session.execute(
+                    _text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key})
+                session.commit()
+            except Exception:
+                pass
         session.close()
+
+
+def _job_advisory_key(job_id: str) -> int:
+    """Clave estable de 63 bits para pg_advisory_lock desde un UUID de job."""
+    import hashlib
+
+    digest = hashlib.sha1(str(job_id).encode()).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
 
 
 if __name__ == "__main__":

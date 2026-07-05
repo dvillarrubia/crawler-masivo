@@ -12,6 +12,18 @@ peso se renormaliza sobre las categorías con datos.
 from __future__ import annotations
 
 
+def test_job_advisory_key_stable_and_bounded():
+    """La clave del advisory lock es estable por job y cabe en un bigint
+    con signo (Postgres exige int64)."""
+    from analysis.analyzer import _job_advisory_key
+
+    k1 = _job_advisory_key("4e7e1931-1798-4d40-b7d2-0b16022f7897")
+    k2 = _job_advisory_key("4e7e1931-1798-4d40-b7d2-0b16022f7897")
+    k3 = _job_advisory_key("00000000-0000-0000-0000-000000000000")
+    assert k1 == k2 and k1 != k3
+    assert 0 <= k1 < 2**63
+
+
 def test_security_and_i18n_without_data_score_none(db_session, make_job):
     from api.routers.results import _calc_i18n, _calc_security
 

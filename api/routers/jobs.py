@@ -93,6 +93,15 @@ def create_job(
 # ---------------------------------------------------------------------------
 # POST /api/jobs/{job_id}/reanalyze  --  re-run analysis without re-crawling
 # ---------------------------------------------------------------------------
+def _reanalysis_lock_key(job_id: str) -> str:
+    return f"reanalysis:{job_id}:lock"
+
+
+# Backstop por si el proceso muere con el lock puesto (un re-análisis real
+# no debería acercarse ni de lejos).
+_REANALYSIS_LOCK_TTL = 3600
+
+
 def _run_reanalysis(job_id: str) -> None:
     from analysis.analyzer import run_analysis
 
@@ -104,6 +113,14 @@ def _run_reanalysis(job_id: str) -> None:
         logging.getLogger(__name__).exception(
             "Reanalysis failed for job %s", job_id
         )
+    finally:
+        # Libera el lock pase lo que pase (ver reanalyze_job).
+        try:
+            from api.dependencies import get_redis
+
+            get_redis().delete(_reanalysis_lock_key(job_id))
+        except Exception:
+            pass
 
 
 @router.post("/{job_id}/reanalyze", status_code=202)
@@ -126,6 +143,23 @@ def reanalyze_job(
         raise HTTPException(
             status_code=409,
             detail="Cannot reanalyze a job that is still queued or crawling",
+        )
+
+    # Lock atómico anti-carrera: dos re-análisis simultáneos del mismo job
+    # se pisan (cada uno hace DELETE+INSERT de issues) y DUPLICAN las
+    # filas — cazado en la auditoría de concurrencia (1390 → 4170). SET NX
+    # es atómico en Redis; solo el primero pasa, el resto recibe 409.
+    from api.dependencies import get_redis
+
+    lock_key = _reanalysis_lock_key(str(job_id))
+    try:
+        got_lock = get_redis().set(lock_key, "1", nx=True, ex=_REANALYSIS_LOCK_TTL)
+    except Exception:
+        got_lock = True  # Redis caído: no bloqueamos la funcionalidad
+    if not got_lock:
+        raise HTTPException(
+            status_code=409,
+            detail="Ya hay un re-análisis en curso para este job. Espera a que termine.",
         )
 
     if payload is not None and payload.analysis_thresholds is not None:
