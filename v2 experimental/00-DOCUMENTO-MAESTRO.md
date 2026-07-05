@@ -178,12 +178,20 @@ Trabajo de producto sobre la consola ya funcional. Tablero vivo en
 - [x] **Reciprocidad de hreflang (cierre del fleco C-i18n)** — `analyze_hreflang` calcula `return_tag_ok` (3 estados: recíproco / no devuelve / destino no rastreado) y `lang_valid` (BCP-47); resuelve hrefs relativos y arregla el check de destino roto. Desbloquea Insights → i18n (dejaba de puntuar). 7 tests. Commit: a1be35f
 - [x] **Descubrir propiedades GSC/GA4 desde el JSON** — `POST /api/sources/discover` (router `sources.py`) lista las propiedades que ve la service account de cada fuente; UI en las formas de cuenta (elige property_id sin teclear) y desplegable de propiedad GSC en el panel de sync. 2 tests. Commit: e014ed9
 
-Suite: **308 tests**. Todo en rama `v2-experimental` (sin merge a master
-hasta validar en vivo — regla del propietario). Imagen `api` reconstruida y
-verificada en caliente (endpoints, libs GA4/APScheduler, cron programado).
+**Noche 2026-07-06 (entidades con IA + bandeja del usuario + rich results):**
+- [x] **Entidades asistidas por IA** — la sección de Entidades de Config se rellena con un LLM (Gemini Flash): (a) **proponer el esquema** (tipos resolubles/señal + tipo_pagina desde el contenido del cliente, `schema_suggester.py`, verificado con workoholics: con pista errónea se autocorrigió), (b) **proponer las entradas del catálogo** (valores concretos por tipo, marca las existentes), (c) **revisar/limpiar el catálogo generado** (mantener/descartar/renombrar el ruido del crawl). Endpoints en `clients.py` (suggest/bulk/review/apply-review), UI en Config. Reintento ante salida no determinista (arreglado un 422 intermitente). Commits: 6151a54, dc2d47b, 68ab053, 756aaa5
+- [x] **Bandeja: Incidencias → ficha de URL + "ver la web"** — drawer de ficha extraído a `frontend-v2/src/UrlDrawer.jsx` (compartido Explorador/Incidencias/Semántica/Propuestas) con botón a la web; URLs clicables en Incidencias. Commit: (incidencias)
+- [x] **Bandeja: Semántica más clara** — mapa UMAP reescrito (color por tema/cluster con centroides, tamaño por peso normalizado, tooltip flotante, clic→ficha); anillos objetivo y drift con tarjetas explicativas y URLs clicables. Commit: 7747067
+- [x] **Rich results (datos estructurados)** — `analysis/rich_results.py` valida el JSON-LD por tipo (Product, Article, Recipe, FAQ, LocalBusiness, Event, JobPosting…); `analyze_structured_data` persiste `validation_status`/`issues` y emite `structured_data_error/warning`. 13 tests. Verificado en vivo (workoholics: Organization → ok). Commit: (rich-results)
+- [x] **Propuestas → ficha de URL** — `_collect_proposals` expone `url_id`; el drawer de Acciones propuestas abre la ficha. Commit: 0d0a524
 
-Pendiente inmediato (sin decisión): validación de rich results de datos
-estructurados. Grandes con decisión: B1 (API para agentes), B2 (logs).
+Suite: **337 tests**. Todo en rama `v2-experimental` (sin merge a master
+hasta validar en vivo — regla del propietario). Imagen `api` reconstruida y
+verificada en caliente en cada tanda (endpoints, LLM real, rich results).
+
+Grandes con decisión pendiente del propietario: B1 (API para agentes:
+MCP vs REST+key), B2 (ingesta de logs). Flecos menores: retirar legacy
+(needs confirmación), gold set del POC de entidades (trabajo humano).
 
 ---
 
