@@ -167,6 +167,24 @@ Orden = apéndice D del plan, ajustado con las correcciones §1.1 e intercalando
 ### T17.1 — PageRank a escala (añadido en el cierre)
 - [x] **17.1** — power iteration extraída a `run_power_iteration` compartida por v1/v2/simulador/semántico, con camino `scipy.sparse` (CSR + vector dangling) conmutado automáticamente en n>50.000 (`SPARSE_PAGERANK_THRESHOLD`, forzable); equivalencia numérica Python↔sparse verificada a 1e-6 sobre grafo aleatorio de 400 nodos; snapshot v1 intacto tras la extracción; scipy en requirements de api/analysis con fallback logueado si falta (2026-07-04)
 
+### Fase 8 — Producto y rendimiento (post-plan, 2026-07-05)
+Trabajo de producto sobre la consola ya funcional. Tablero vivo en
+`ideas_a_investigar.md` (repo de mejoras); aquí el resumen con commit.
+- [x] **UX Acciones propuestas** — la "Cola de firma" pasa a zona de trabajo real: bandeja unificada de las 5 familias, filtros (estado, búsqueda, desde/hacia estilo SEO), selección múltiple + acciones por lotes, panel de detalle (drawer), vista "URLs a potenciar" agrupada por destino, y export CSV de las pendientes. Commits: a1(ecf9466)/166703b, 6372dde
+- [x] **Config por pestañas** — Configuración reorganizada en 4 pestañas con onboarding en lenguaje llano (Cuentas y fuentes · Estructura · Entidades · Umbrales). Commit: 390e342
+- [x] **B3 · Rendimiento por rastreos** — vista nivel proyecto: serie de todos los runs (clics/impresiones/posición GSC, URLs, incidencias, PageRank), scope sitio/segmento/watchlist, evolución por URL vigilada; marca cortes de normalización. `api/routers/performance.py`, 7 tests. Commit: 88293d9
+- [x] **Informe por FECHAS (agnóstico a rastreos) + GA4** — serie diaria real de GSC (dim `date`, y `date+page`) y GA4 (sesiones/usuarios/conversiones/ingresos por canal) a nivel propiedad/cliente. Tablas `gsc_daily`/`ga4_daily`/`ga4_accounts`; router `metrics.py` (cuentas GA4, sync por rango idempotente, cobertura, informe día/semana/mes con comparación al periodo anterior); vista Rendimiento → Por fechas. GA4 con import perezoso. 9 tests. Commit: 961c368
+- [x] **Cron de sincronización diaria** — registro `metric_sync_configs` + planificador APScheduler en el arranque de la API (05:00 UTC, lock Redis, tolerante), ventana móvil idempotente, UI de programadas. Vars `METRICS_SYNC_*`. Quita el default débil `seontology` de NEO4J_PASSWORD en compose. 4 tests. Commit: 6169674
+- [x] **Reciprocidad de hreflang (cierre del fleco C-i18n)** — `analyze_hreflang` calcula `return_tag_ok` (3 estados: recíproco / no devuelve / destino no rastreado) y `lang_valid` (BCP-47); resuelve hrefs relativos y arregla el check de destino roto. Desbloquea Insights → i18n (dejaba de puntuar). 7 tests. Commit: a1be35f
+- [x] **Descubrir propiedades GSC/GA4 desde el JSON** — `POST /api/sources/discover` (router `sources.py`) lista las propiedades que ve la service account de cada fuente; UI en las formas de cuenta (elige property_id sin teclear) y desplegable de propiedad GSC en el panel de sync. 2 tests. Commit: e014ed9
+
+Suite: **308 tests**. Todo en rama `v2-experimental` (sin merge a master
+hasta validar en vivo — regla del propietario). Imagen `api` reconstruida y
+verificada en caliente (endpoints, libs GA4/APScheduler, cron programado).
+
+Pendiente inmediato (sin decisión): validación de rich results de datos
+estructurados. Grandes con decisión: B1 (API para agentes), B2 (logs).
+
 ---
 
 ## 5. Decisiones abiertas (para el propietario del proyecto)
@@ -180,4 +198,6 @@ Orden = apéndice D del plan, ajustado con las correcciones §1.1 e intercalando
 
 ## 6. Qué NO se hace (consolidado)
 
-Del apéndice C del plan: no tocar `normalize_url` por defecto, no cambiar PageRank v1, no bloquear pipeline con GSC/semántica, no Alembic, no dependencias pesadas. Añadidos de esta consolidación: **no Neo4j** (los prototipos lo mencionan; el cálculo real es Python/Postgres sparse), **no ingesta de logs** (fuera de T1–T23; la UI lo refleja como fuente no conectada), **no GA4/backlinks/CWV/a11y/CI-CD/MCP** en este ciclo.
+Del apéndice C del plan: no tocar `normalize_url` por defecto, no cambiar PageRank v1, no bloquear pipeline con GSC/semántica, no Alembic, no dependencias pesadas. Añadidos de esta consolidación: **no ingesta de logs** (fuera de T1–T23; la UI lo refleja como fuente no conectada), **no backlinks/CWV/a11y/CI-CD/MCP** en este ciclo.
+
+> **Actualización 2026-07-05:** dos "no se hace" de la consolidación original ya SÍ se hicieron: **Neo4j** (lado grafo del contrato Seontology, perfil compose `graph`, split estricto grafo=estructura / Postgres=texto+vectores+métricas) y **GA4** (informe por fechas + conector, fase 8). El cálculo de PageRank sigue siendo Python/Postgres sparse; Neo4j es el grafo DERIVADO, no el motor de cálculo.

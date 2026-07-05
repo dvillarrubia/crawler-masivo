@@ -19,7 +19,7 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   (sin teclear el ID); en GSC muestra lo accesible. Además, en el panel de
   sincronización la propiedad GSC pasa a **desplegable** cargado de la
   cuenta elegida. Degrada con gracia (credencial mala → error por fuente,
-  nunca 500). 2 tests (suite 308). Verificado en vivo. Commit: (este).
+  nunca 500). 2 tests (suite 308). Verificado en vivo. Commit: e014ed9.
 
 - ✅ **Validación de return-tags de hreflang (reciprocidad)** (2026-07-05)
   → `analyze_hreflang` ya no deja `return_tag_ok`/`lang_valid` en NULL:
@@ -32,7 +32,7 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   destino roto (usaba el href sin resolver, no casaba nunca). Con esto
   **Insights → i18n deja de salir "sin validar" y puntúa**. Detalles de
   issue en castellano en el catálogo del frontend. 7 tests (suite 306).
-  Fleco heredado del CLAUDE.md, ya retirado de "no existe aún". Commit: (este).
+  Fleco heredado del CLAUDE.md, ya retirado de "no existe aún". Commit: a1be35f.
 
 - ✅ **Cron de sincronización diaria de métricas (GSC/GA4)** (2026-07-05)
   → Un cron no sirve sin saber QUÉ sincronizar, así que se añade el
@@ -48,7 +48,7 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   pausar/reanudar, quitar, con el último resultado). Vars
   `METRICS_SYNC_ENABLED`/`METRICS_SYNC_HOUR`. 4 tests (suite 299).
   De paso: quitado el default débil `seontology` del `NEO4J_PASSWORD` en
-  docker-compose (ahora compose falla si no se define). Commit: (este).
+  docker-compose (ahora compose falla si no se define). Commit: 6169674.
 
 - ✅ **Informe de rendimiento AGNÓSTICO a los rastreos (por rangos de
   fecha) + GA4** (2026-07-05) → El eje deja de ser el crawl y pasa a ser la
@@ -64,7 +64,7 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   watchlist) y panel de **sincronización de histórico** en Cuentas y
   fuentes. Sin datos → `blocked` con motivo, nunca ceros falsos. 9 tests
   (suite 295). GA4 con import perezoso: la API arranca sin las libs; solo
-  la sincronización GA4 las exige. Commit: (este).
+  la sincronización GA4 las exige. Commit: 961c368.
 
 - ✅ **Reworkear la "Cola de firma" + el nombre nefasto** (2026-07-05)
   → Renombrada a **"Acciones propuestas"**. Zona de trabajo real: bandeja
@@ -84,7 +84,7 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   descarga las propuestas con los filtros actuales (por defecto las
   pendientes = "en duda"), una fila por propuesta con familia, tipo, URL,
   origen, prioridad, estado y el detalle completo. Verificado: 120 KB de
-  pendientes reales de workoholics. Commit: (este).
+  pendientes reales de workoholics. Commit: 6372dde.
 
 ---
 
@@ -127,7 +127,9 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
   **segmento** (una sección: servicios, cursos, categorías) o por
   **watchlist** (URLs vigiladas), y sección de **evolución por URL
   vigilada una a una** (clics/impresiones/posición con su delta).
-  Router `api/routers/performance.py`, 7 tests. Commit: (este).
+  Router `api/routers/performance.py`, 7 tests. Commit: 88293d9.
+  **Ampliado luego** con el informe por FECHAS (agnóstico a rastreos) +
+  GA4 + cron diario — ver arriba en Hecho.
 
 ---
 
@@ -155,15 +157,11 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
   desde el detalle de una propuesta** (mejoras menores de UX de la bandeja
   de Acciones propuestas).
 
-- 📋 **Validación de return-tags de hreflang.** Hoy NO se comprueba la
-  reciprocidad de los hreflang (columnas `return_tag_ok`/`lang_valid`
-  siempre NULL). Por eso Insights → i18n sale "sin validar" (score —).
-  Implementarla desbloquea esa categoría del score y el issue
-  `hreflang_missing_return`. Fleco heredado del `CLAUDE.md` "no existe aún".
-
 - 💡 **Validación de rich results de datos estructurados.** Se extrae el
   JSON-LD/microdata pero no se valida contra los requisitos de resultados
   enriquecidos de Google (campos obligatorios por tipo de schema).
+  **Candidato siguiente** (misma línea que hreflang: el dato ya se extrae,
+  falta la capa de validación por tipo de schema).
 
 - 💡 **Features de plataforma (no de análisis), del `CLAUDE.md`:** CI/CD,
   monitoring (Prometheus/Grafana), integración PageSpeed/CrUX. Fuera del
