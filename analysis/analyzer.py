@@ -18,7 +18,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.orm import Session
@@ -683,63 +683,101 @@ class SEOAnalyzer:
     # -- Hreflang -----------------------------------------------------------
 
     def analyze_hreflang(self) -> None:
-        """Validate hreflang annotations."""
+        """Validate hreflang annotations, incluida la RECIPROCIDAD.
+
+        Rellena `return_tag_ok` y `lang_valid` (antes siempre NULL, por eso
+        Insights → i18n salía "sin validar"):
+
+        - `lang_valid`: el código de idioma cumple BCP-47 (regex).
+        - `return_tag_ok` (reciprocidad, tres estados honestos):
+            * True  → el destino, rastreado, declara un hreflang de vuelta a
+                      esta URL (o es una autorreferencia).
+            * False → el destino se rastreó pero NO enlaza de vuelta.
+            * None  → el destino no se rastreó: no se puede confirmar (no se
+                      inventa un veredicto).
+
+        Los hrefs se resuelven a absoluto contra la URL de origen (pueden ser
+        relativos) y se normalizan para casar con las URLs rastreadas.
+        """
         logger.debug("Analyzing hreflang ...")
 
-        # Preload URL statuses within the job for target validation.
-        url_status: dict[str, int | None] = {}
-        for row_url, sc in self.session.execute(
-            select(Url.url, Url.status_code).where(Url.job_id == self.job_id)
-        ).all():
-            url_status[row_url] = sc
+        def _norm(u: str) -> str:
+            """Normalización ligera para casar targets con URLs rastreadas:
+            esquema+host en minúsculas, sin fragmento, sin barra final."""
+            try:
+                p = urlparse(u)
+            except Exception:
+                return u.strip()
+            netloc = p.netloc.lower()
+            path = p.path.rstrip("/") or "/"
+            base = f"{p.scheme.lower()}://{netloc}{path}"
+            return base + (f"?{p.query}" if p.query else "")
 
-        stmt = (
+        # URLs rastreadas del job: norm → (url_id, status_code) y url_id → norm
+        crawled_id: dict[str, int] = {}
+        crawled_status: dict[int, int | None] = {}
+        id_to_norm: dict[int, str] = {}
+        for uid, u, sc in self.session.execute(
+            select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
+        ).all():
+            n = _norm(u)
+            crawled_id.setdefault(n, uid)
+            crawled_status[uid] = sc
+            id_to_norm[uid] = n
+
+        # Todas las filas hreflang del job, con la URL de origen para resolver.
+        rows = self.session.execute(
             select(
-                Hreflang.id,
-                Hreflang.url_id,
-                Hreflang.lang,
-                Hreflang.href,
-                Hreflang.return_tag_ok,
-                Hreflang.lang_valid,
+                Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href, Url.url,
             )
             .join(Url, Url.id == Hreflang.url_id)
             .where(Url.job_id == self.job_id)
-        )
-        rows = self.session.execute(stmt).all()
+        ).all()
 
-        for _hreflang_id, url_id, lang, href, return_tag_ok, lang_valid in rows:
-            # Missing return tag.
+        # Paso 1: resolver cada href a absoluto+normalizado y construir el
+        # mapa de "qué declara cada URL de origen" (para la reciprocidad).
+        resolved: list[tuple] = []  # (hid, src_id, lang, href, target_norm)
+        declares: dict[int, set[str]] = defaultdict(set)
+        for hid, src_id, lang, href, src_url in rows:
+            target_norm = _norm(urljoin(src_url, href))
+            resolved.append((hid, src_id, lang, href, target_norm))
+            declares[src_id].add(target_norm)
+
+        # Paso 2: veredicto por fila + issues.
+        updates: list[dict] = []
+        for hid, src_id, lang, href, target_norm in resolved:
+            lang_valid = bool(_LANG_TAG_RE.match(lang))
+
+            src_norm = id_to_norm.get(src_id)
+            target_id = crawled_id.get(target_norm)
+            if target_norm == src_norm:
+                return_tag_ok = True                     # autorreferencia
+            elif target_id is None:
+                return_tag_ok = None                     # destino no rastreado
+            else:
+                return_tag_ok = src_norm in declares.get(target_id, set())
+
+            updates.append({"id": hid, "return_tag_ok": return_tag_ok,
+                            "lang_valid": lang_valid})
+
             if return_tag_ok is False:
-                self._add_issue(
-                    url_id,
-                    "hreflang_missing_return",
-                    "warning",
-                    {"lang": lang, "href": href},
-                )
+                self._add_issue(src_id, "hreflang_missing_return", "warning",
+                                {"lang": lang, "href": href, "target": target_norm})
+            if not lang_valid:
+                self._add_issue(src_id, "hreflang_invalid_lang", "warning",
+                                {"lang": lang})
 
-            # Invalid language code. Use the stored flag if available,
-            # otherwise fall back to regex validation.
-            lang_is_valid = lang_valid if lang_valid is not None else bool(
-                _LANG_TAG_RE.match(lang)
-            )
-            if not lang_is_valid:
-                self._add_issue(
-                    url_id,
-                    "hreflang_invalid_lang",
-                    "warning",
-                    {"lang": lang},
-                )
+            # Destino rastreado pero sin 200 (roto). Solo si lo conocemos.
+            if target_id is not None:
+                st = crawled_status.get(target_id)
+                if st is not None and st != 200:
+                    self._add_issue(src_id, "hreflang_broken_target", "error",
+                                    {"href": href, "target": target_norm,
+                                     "target_status": st})
 
-            # Target URL not returning 200.
-            target_status = url_status.get(href)
-            if target_status is not None and target_status != 200:
-                self._add_issue(
-                    url_id,
-                    "hreflang_broken_target",
-                    "error",
-                    {"href": href, "target_status": target_status},
-                )
-
+        if updates:
+            self.session.bulk_update_mappings(Hreflang, updates)
+            self.session.flush()
         self._flush_issues()
 
     # -- Structured Data ----------------------------------------------------

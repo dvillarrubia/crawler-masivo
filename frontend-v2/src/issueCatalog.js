@@ -179,6 +179,11 @@ const DETAIL_RENDERERS = {
   redirect_loop: (d) => `La cadena vuelve sobre sí misma: ${_urls(d.chain, 3)}`,
   canonical_chain: (d) => `Cadena de canonicals: ${_urls(d.chain, 3)}`,
   canonical_loop: (d) => `Bucle de canonicals: ${_urls(d.chain, 3)}`,
+  hreflang_missing_return: (d) =>
+    `Declara «${d.lang}» → ${d.target || d.href}, pero esa página no enlaza de vuelta (falta la etiqueta recíproca)`,
+  hreflang_invalid_lang: (d) => `Código de idioma/región no válido: «${d.lang}»`,
+  hreflang_broken_target: (d) =>
+    `«${d.lang}» apunta a ${d.target || d.href}, que responde ${_n(d.target_status)} en vez de 200`,
   meta_refresh_redirect: (d) => (d.target ? `Redirige a ${d.target}` : ""),
   js_redirect: (d) => (d.target ? `Redirige por JavaScript a ${d.target}` : ""),
   soft_404: (d) => `Parece un error disfrazado: ${_reason(d.reason)}${d.similarity != null ? ` (similitud ${_dec(d.similarity)})` : ""}`,
@@ -239,6 +244,7 @@ const GENERIC_LABELS = {
   chain: "cadena", hops: "saltos", target: "destino",
   similarity: "similitud", threshold: "umbral", reason: "motivo",
   word_count: "palabras", urls: "URLs", lastmod: "lastmod",
+  lang: "idioma", href: "href declarado", target_status: "estado del destino",
 };
 
 const _fmtVal = (v) => {

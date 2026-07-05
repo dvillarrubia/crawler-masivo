@@ -9,6 +9,19 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Validación de return-tags de hreflang (reciprocidad)** (2026-07-05)
+  → `analyze_hreflang` ya no deja `return_tag_ok`/`lang_valid` en NULL:
+  resuelve cada href a absoluto (soporta relativos) contra la URL de
+  origen, normaliza y comprueba la **reciprocidad** con tres estados
+  honestos — True (el destino rastreado enlaza de vuelta o es
+  autorreferencia), False (rastreado pero no devuelve → issue
+  `hreflang_missing_return`), None (destino no rastreado: no se inventa
+  veredicto). También valida BCP-47 (`lang_valid`) y arregla el check de
+  destino roto (usaba el href sin resolver, no casaba nunca). Con esto
+  **Insights → i18n deja de salir "sin validar" y puntúa**. Detalles de
+  issue en castellano en el catálogo del frontend. 7 tests (suite 306).
+  Fleco heredado del CLAUDE.md, ya retirado de "no existe aún". Commit: (este).
+
 - ✅ **Cron de sincronización diaria de métricas (GSC/GA4)** (2026-07-05)
   → Un cron no sirve sin saber QUÉ sincronizar, así que se añade el
   registro `metric_sync_configs` (cliente·fuente·propiedad, habilitable).
