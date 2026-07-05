@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import UrlDrawer from "../UrlDrawer.jsx";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
@@ -35,11 +36,11 @@ export default function SemanticView() {
 
   const TAB_HELP = {
     analisis: "Punto de partida: importa los datos de Search Console y lanza el análisis de embeddings (convierte cada página en un vector que captura de qué habla).",
-    mapa: "El sitio dibujado por temas: cada punto es una página, la cercanía es parecido temático y el color es el anillo (del núcleo temático a la periferia).",
-    anillos: "Escribe el tema al que QUIERES que apunte el sitio y verás cuánto se aleja el sitio real, qué páginas reforzar y cuáles lo están desviando.",
+    mapa: "El sitio dibujado por temas: cada punto es una página, la cercanía = parecido temático, el color agrupa por tema (o por anillo) y el tamaño es su peso. Clic en un punto = ficha de la URL.",
+    anillos: "«¿Y si quisiera que el sitio fuera de OTRO tema?» Escribe ese tema objetivo y el sitio se re-mide contra él: qué páginas reforzar (ya van del tema) y cuáles reenfocar (potentes pero desvían).",
     canibalizacion: "Pares de páginas que hablan de lo mismo y compiten entre sí en Google. Decidir cuál manda es trabajo humano: se firman en la Cola de firma.",
     gap: "Escribe un tema y comprueba si el sitio lo cubre de verdad, lo roza o le falta contenido.",
-    drift: "Páginas con mucho peso que hablan de otra cosa: las que están arrastrando el tema global del sitio hacia otro lado.",
+    drift: "Páginas potentes (mucho PageRank/tráfico) pero lejos del tema núcleo: las que diluyen la identidad del sitio. Decide por cada una si es negocio nuevo deseado o dilución a corregir.",
     consultas: "Cruza cada búsqueda real de Search Console con los pasajes del sitio: qué demanda está sin responder, qué respuesta está enterrada y qué texto no responde a nada.",
     anclas: "¿Los textos de los enlaces describen su destino? Detecta anchors genéricos («leer más») y anchors que prometen una cosa distinta de lo que hay al otro lado.",
   };
@@ -327,8 +328,19 @@ function AnalysisPanel({ jobId, status, onChanged }) {
 /* ------------------------------------------------------------------ */
 /* Mapa semántico: scatter SVG propio (sin plotly)                     */
 /* ------------------------------------------------------------------ */
+// Color categórico por tema (cluster). El ruido de HDBSCAN (cluster < 0)
+// va en gris. Colores estables por índice de cluster.
+function clusterPalette(clusterIds) {
+  const sorted = [...clusterIds].filter((c) => c != null && c >= 0).sort((a, b) => a - b);
+  const map = {};
+  sorted.forEach((c, i) => { map[c] = `hsl(${(i * 67) % 360} 60% 47%)`; });
+  return map;
+}
+
 function MapPanel({ jobId, status }) {
-  const [hover, setHover] = useState(null);
+  const [hover, setHover] = useState(null);   // {p, left, top}
+  const [detailId, setDetailId] = useState(null);
+  const [colorBy, setColorBy] = useState("tema");   // tema | anillo
   if (status.status !== "completed") return <NeedsAnalysis />;
 
   const q = useAsync(() => api.semanticResults(jobId), [jobId]);
@@ -340,36 +352,90 @@ function MapPanel({ jobId, status }) {
   const xs = pages.map((p) => p.x), ys = pages.map((p) => p.y);
   const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
   const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
-  const W = 900, H = 560, PAD = 30;
+  const W = 900, H = 560, PAD = 34;
   const sx = (x) => PAD + ((x - minX) / (maxX - minX || 1)) * (W - 2 * PAD);
   const sy = (y) => PAD + ((y - minY) / (maxY - minY || 1)) * (H - 2 * PAD);
 
+  // tamaño por peso, normalizado (raíz para que se aprecien las diferencias)
+  const ws = pages.map((p) => p.weight || 0);
+  const wMin = Math.min(...ws), wMax = Math.max(...ws);
+  const rOf = (w) => 2.5 + Math.sqrt(((w || 0) - wMin) / ((wMax - wMin) || 1)) * 9;
+
+  const clusterIds = [...new Set(pages.map((p) => p.cluster_id))];
+  const palette = clusterPalette(clusterIds);
+  const colorOf = (p) => colorBy === "tema"
+    ? (p.cluster_id != null && p.cluster_id >= 0 ? palette[p.cluster_id] : "var(--ink-muted)")
+    : (RING_COLORS[p.ring] || "var(--ink-muted)");
+
+  // centroides de tema para etiquetar los grupos
+  const centroids = {};
+  if (colorBy === "tema") {
+    for (const p of pages) {
+      if (p.cluster_id == null || p.cluster_id < 0) continue;
+      const c = centroids[p.cluster_id] || (centroids[p.cluster_id] = { x: 0, y: 0, n: 0 });
+      c.x += p.x; c.y += p.y; c.n += 1;
+    }
+  }
+
+  const nClusters = clusterIds.filter((c) => c != null && c >= 0).length;
+
   return (
     <div className="card">
-      <h3>Mapa semántico (UMAP) · color por anillo, tamaño por peso</h3>
-      <div className="row" style={{ gap: 14, marginBottom: 8 }}>
-        {Object.entries(RING_COLORS).map(([ring, color]) => (
-          <span key={ring} className="sev"><span className="dot" style={{ background: color }} />{ring}</span>
-        ))}
+      <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
+        <h3 style={{ margin: 0 }}>Mapa semántico (UMAP)</h3>
+        <div className="toolbar">
+          <label className="kpi-label">Color:</label>
+          <button className={colorBy === "tema" ? "" : "secondary"} style={{ padding: "3px 10px" }}
+            onClick={() => setColorBy("tema")}>por tema ({nClusters})</button>
+          <button className={colorBy === "anillo" ? "" : "secondary"} style={{ padding: "3px 10px" }}
+            onClick={() => setColorBy("anillo")}>por anillo</button>
+        </div>
       </div>
-      <div style={{ overflowX: "auto" }}>
+      <p className="proxy-tag" style={{ marginTop: 4 }}>
+        Cada punto es una página. La <b>cercanía</b> = parecido temático (proyección UMAP de los embeddings);
+        el <b>color</b> agrupa por tema o por anillo, y el <b>tamaño</b> es el peso de la página (PageRank + clics).
+        Pasa el ratón para ver la URL; haz <b>clic</b> para abrir su ficha.
+      </p>
+
+      {/* leyenda */}
+      <div className="row" style={{ gap: 14, marginBottom: 8, flexWrap: "wrap" }}>
+        {colorBy === "anillo"
+          ? Object.entries(RING_COLORS).map(([ring, color]) => (
+              <span key={ring} className="sev"><span className="dot" style={{ background: color }} />{ring}</span>))
+          : (<span className="proxy-tag">{nClusters} temas detectados (HDBSCAN) · gris = sin tema claro</span>)}
+      </div>
+
+      <div style={{ overflowX: "auto", position: "relative" }}>
         <svg width={W} height={H} style={{ border: "1px solid var(--hairline)", background: "var(--canvas-muted)" }}>
           {pages.map((p, i) => (
-            <circle key={i} cx={sx(p.x)} cy={sy(p.y)}
-              r={3 + (p.weight || 0) * 6}
-              fill={RING_COLORS[p.ring] || "var(--ink-muted)"}
-              fillOpacity={0.75}
-              onMouseEnter={() => setHover(p)}
+            <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={rOf(p.weight)}
+              fill={colorOf(p)}
+              fillOpacity={hover && hover.p === p ? 1 : 0.7}
+              stroke={hover && hover.p === p ? "var(--ink)" : "none"} strokeWidth={1.5}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHover({ p, left: sx(p.x), top: sy(p.y) })}
               onMouseLeave={() => setHover(null)}
+              onClick={() => setDetailId(p.url_id)}
             />
           ))}
+          {colorBy === "tema" && Object.entries(centroids).map(([cid, c]) => (
+            <text key={cid} x={sx(c.x / c.n)} y={sy(c.y / c.n)} textAnchor="middle"
+              fontSize="11" fontWeight="700" fill="var(--ink)" opacity={0.65}
+              style={{ pointerEvents: "none" }}>{cid}</text>
+          ))}
         </svg>
+        {hover && (
+          <div style={{ position: "absolute", left: Math.min(hover.left + 12, W - 240), top: hover.top + 12,
+            background: "var(--ink)", color: "var(--inverse-ink)", padding: "5px 8px", borderRadius: 3,
+            fontSize: 11, maxWidth: 240, pointerEvents: "none", zIndex: 5, wordBreak: "break-all" }}>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>{hover.p.url}</div>
+            <div>tema {hover.p.cluster_id ?? "—"} · {hover.p.ring || "?"} · dist {hover.p.distance_to_centroid?.toFixed(3)}</div>
+            <div>{hover.p.clicks != null ? `${fmt(hover.p.clicks)} clics` : "sin GSC"} · peso {(hover.p.weight ?? 0).toFixed(3)}</div>
+          </div>
+        )}
       </div>
-      <div className="mono" style={{ minHeight: 34, fontSize: 11.5, marginTop: 6 }}>
-        {hover
-          ? `${hover.url} · ${hover.ring || "?"} · dist ${hover.distance_to_centroid?.toFixed(3)} · ${hover.clicks != null ? `${fmt(hover.clicks)} clics` : "sin GSC"}`
-          : "Pasa el ratón por un punto para ver la URL."}
-      </div>
+
+      {detailId && <UrlDrawer jobId={jobId} urlId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }
@@ -382,6 +448,7 @@ function TargetRingsPanel({ jobId, status }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [detailId, setDetailId] = useState(null);
   if (status.status !== "completed") return <NeedsAnalysis />;
 
   const run = async () => {
@@ -392,7 +459,27 @@ function TargetRingsPanel({ jobId, status }) {
     setBusy(false);
   };
 
+  const urlCell = (r) => r.url_id
+    ? <a className="linklike" style={{ cursor: "pointer" }} onClick={() => setDetailId(r.url_id)}>{r.url}</a>
+    : r.url;
+
   return (
+   <>
+    <div className="card muted" style={{ marginBottom: 12 }}>
+      <h3 style={{ marginTop: 0 }}>¿Para qué sirven los «anillos objetivo»?</h3>
+      <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "4px 0" }}>
+        El mapa normal ordena tus páginas alrededor del tema que el sitio tiene <b>hoy</b>. Aquí escribes
+        el tema que <b>QUIERES</b> dominar (p. ej. «asesoría fiscal para pymes») y el sitio se
+        <b> re-mide contra ese objetivo</b>: cada página se reclasifica en anillos según su cercanía al
+        tema deseado (Core = clava el tema · Peripheral = lejísimos). La <b>alineación</b> te dice cuánto
+        se parece el centro actual del sitio al objetivo (100% = ya apuntas ahí).
+      </p>
+      <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "4px 0 0" }}>
+        Sirve para dos jugadas: <b>Reforzar</b> = páginas que ya tratan el tema pero tienen poco peso
+        interno (enlázalas más, súbelas de nivel). <b>Reenfocar</b> = páginas potentes que hablan de
+        otra cosa y desvían tu autoridad del objetivo (reorienta su contenido o su enlazado).
+      </p>
+    </div>
     <div className="grid" style={{ gridTemplateColumns: "340px 1fr", alignItems: "start" }}>
       <div className="card">
         <h3>Tema objetivo del sitio</h3>
@@ -433,7 +520,7 @@ function TargetRingsPanel({ jobId, status }) {
                   <tbody>
                     {result.reinforce.map((r, i) => (
                       <tr key={i}>
-                        <td className="cell-url" title={r.url}>{r.url}</td>
+                        <td className="cell-url" title={r.url}>{urlCell(r)}</td>
                         <td><span className="tag">{r.ring_target}</span></td>
                         <td><span className="tag">{r.ring_current}</span></td>
                         <td className="num">{r.distance_to_target?.toFixed(3)}</td>
@@ -455,7 +542,7 @@ function TargetRingsPanel({ jobId, status }) {
                   <tbody>
                     {result.refocus.map((r, i) => (
                       <tr key={i}>
-                        <td className="cell-url" title={r.url}>{r.url}</td>
+                        <td className="cell-url" title={r.url}>{urlCell(r)}</td>
                         <td><span className="tag">{r.ring_target}</span></td>
                         <td><span className="tag">{r.ring_current}</span></td>
                         <td className="num">{r.distance_to_target?.toFixed(3)}</td>
@@ -471,6 +558,8 @@ function TargetRingsPanel({ jobId, status }) {
         )}
       </div>
     </div>
+    {detailId && <UrlDrawer jobId={jobId} urlId={detailId} onClose={() => setDetailId(null)} />}
+   </>
   );
 }
 
@@ -813,35 +902,61 @@ function AnchorsPanel({ jobId, status }) {
 /* Drift                                                                */
 /* ------------------------------------------------------------------ */
 function DriftPanel({ jobId, status }) {
+  const [detailId, setDetailId] = useState(null);
   if (status.status !== "completed") return <NeedsAnalysis />;
   const q = useAsync(() => api.semanticDrift(jobId), [jobId]);
   if (q.loading) return <Spinner />;
   if (q.error) return <ErrorBox error={q.error} />;
   const entries = (q.data && q.data.drift) || [];
   return (
-    <div className="card">
-      <h3>Páginas que más arrastran el centro semántico (peso × distancia)</h3>
-      <p className="proxy-tag">Mucho peso y mucha distancia = la página tira del sitio hacia su tema. Decide si es intencional o dilución.</p>
-      {entries.length === 0 && <div className="proxy-tag">Sin candidatas de drift.</div>}
-      <table className="data">
-        <thead>
-          <tr><th>URL</th><th className="num">Drift score</th>
-            <th className="num">Distancia</th><th className="num">Peso</th>
-            <th className="num">Clics</th><th className="num">Posición</th></tr>
-        </thead>
-        <tbody>
-          {entries.map((a, i) => (
-            <tr key={i}>
-              <td className="cell-url" title={a.url}>{a.url}</td>
-              <td className="num">{a.drift_score?.toFixed(4)}</td>
-              <td className="num">{a.distance?.toFixed(4)}</td>
-              <td className="num">{a.weight?.toFixed(4)}</td>
-              <td className="num">{a.clicks ?? "—"}</td>
-              <td className="num">{a.position != null ? a.position.toFixed(1) : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="card muted" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>¿Qué es el «drift» (desvío temático)?</h3>
+        <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "4px 0" }}>
+          Tu sitio tiene un <b>centro de gravedad temático</b> (de qué va, en promedio). El drift
+          señala las páginas que <b>a la vez</b> pesan mucho (mucho PageRank/tráfico) y están lejos
+          de ese centro: son las que <b>tiran de la identidad del sitio hacia otro tema</b> y diluyen
+          su relevancia a ojos de Google. <b>Drift score = peso × distancia</b>: una página irrelevante
+          pero sin fuerza no aparece; una potente pero fuera de tema, sí.
+        </p>
+        <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "4px 0 0" }}>
+          <b>Cómo explotarlo:</b> por cada página de arriba decide — ¿es un desvío <i>deseado</i>
+          (una línea de negocio nueva que quieres potenciar) o <i>dilución</i>? Si dilida:
+          reenfoca el contenido al tema núcleo, reduce su enlazado interno, o muévela a un
+          subdominio/sección aparte para que no arrastre al resto. Haz clic en la URL para ver su ficha.
+        </p>
+      </div>
+      <div className="card">
+        <h3>Páginas que más arrastran el centro semántico</h3>
+        {entries.length === 0 && <div className="proxy-tag">Sin candidatas de drift: el sitio está temáticamente cohesionado. 👍</div>}
+        {entries.length > 0 && (
+          <table className="data">
+            <thead>
+              <tr><th>URL</th><th className="num" title="peso × distancia: cuánto arrastra">Drift ↓</th>
+                <th className="num" title="Distancia al centro temático del sitio">Distancia</th>
+                <th className="num" title="Peso de la página (PageRank + clics)">Peso</th>
+                <th className="num">Clics</th><th className="num">Posición</th></tr>
+            </thead>
+            <tbody>
+              {entries.map((a, i) => (
+                <tr key={i}>
+                  <td className="cell-url" title={a.url}>
+                    {a.url_id
+                      ? <a className="linklike" style={{ cursor: "pointer" }} onClick={() => setDetailId(a.url_id)}>{a.url}</a>
+                      : a.url}
+                  </td>
+                  <td className="num">{a.drift_score?.toFixed(4)}</td>
+                  <td className="num">{a.distance?.toFixed(4)}</td>
+                  <td className="num">{a.weight?.toFixed(4)}</td>
+                  <td className="num">{a.clicks ?? "—"}</td>
+                  <td className="num">{a.position != null ? a.position.toFixed(1) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {detailId && <UrlDrawer jobId={jobId} urlId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }

@@ -9,6 +9,17 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Semántica más clara: mapa, anillos y drift** (2026-07-06, bandeja)
+  → Tres quejas de la bandeja resueltas. **Mapa (UMAP):** reescrito —
+  color **por tema** (cluster) con centroides etiquetados, toggle a color
+  por anillo, tamaño por peso **normalizado** (antes todos los puntos
+  salían iguales), tooltip flotante y **clic en un punto = ficha de la
+  URL**. **Anillos objetivo:** tarjeta explicativa («escribe el tema que
+  QUIERES dominar; reforzar vs reenfocar») + URLs clicables. **Drift:**
+  tarjeta que explica qué es (páginas potentes fuera del tema núcleo que
+  diluyen la identidad) y **cómo explotarlo**, + URLs clicables. Textos de
+  las pestañas reescritos. Commit: (este).
+
 - ✅ **Incidencias → ficha de URL + "ver la web"** (2026-07-06, bandeja)
   → En Incidencias, cada URL afectada es clicable y abre la **ficha
   completa** (la misma del Explorador: resumen, on-page, contenido,
@@ -211,10 +222,10 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 
 ~~En la pestaña de incidencias necesitamos poder pinchar en el detalle de las urls para ver todo lo relacionado con la url como si fuera la parte del explorador, y poner un enlace para ver la web estaria bien.~~ ✅ hecho (arriba)
 
-Mapa semántico (UMAP) · color por anillo, tamaño por peso esto esta fatal, no esta bien traido del original el mapa semantico.
+~~Mapa semántico (UMAP) · color por anillo, tamaño por peso esto esta fatal, no esta bien traido del original el mapa semantico.~~ ✅ hecho (arriba)
 
-lo de anillos objetivo no se entiende ni cascorro, no se muy bien para que sirve
+~~lo de anillos objetivo no se entiende ni cascorro, no se muy bien para que sirve~~ ✅ hecho (arriba)
 
-lo del drift igual no se para que sirve y como lo puedo explotar, esto hay que mejorarlo
+~~lo del drift igual no se para que sirve y como lo puedo explotar, esto hay que mejorarlo~~ ✅ hecho (arriba)
 
 - 
