@@ -36,7 +36,13 @@ def get_driver():
 
     uri = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
     user = os.environ.get("NEO4J_USER", "neo4j")
-    password = os.environ.get("NEO4J_PASSWORD", "seontology")
+    # Sin contraseña por defecto en código: un fallback hardcodeado acaba
+    # en producción por descuido. Debe venir del entorno (.env / compose).
+    password = os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "NEO4J_PASSWORD no está definida. Configúrala en .env "
+            "(mismo valor que NEO4J_AUTH del servicio neo4j).")
     return GraphDatabase.driver(uri, auth=(user, password))
 
 

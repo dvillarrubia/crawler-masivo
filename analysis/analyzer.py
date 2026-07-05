@@ -1626,9 +1626,19 @@ class SEOAnalyzer:
 
         logger.debug("Assigning segments (%d rules) ...", len(segments))
 
+        # Defensa en profundidad: además del guard del endpoint, se salta
+        # aquí cualquier regex legada con cuantificador anidado (ReDoS)
+        # antes de que cuelgue el análisis entero sobre una URL adversaria.
+        _nested = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
         matchers: list[tuple[int, Any]] = []
         for seg in segments:
             if seg.rule_type == "regex":
+                if len(seg.rule) > 500 or _nested.search(seg.rule):
+                    logger.warning(
+                        "Segment %s tiene una regex peligrosa/larga, se salta: %r",
+                        seg.name, seg.rule,
+                    )
+                    continue
                 try:
                     matchers.append((seg.id, re.compile(seg.rule).search))
                 except re.error:

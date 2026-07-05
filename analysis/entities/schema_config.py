@@ -54,6 +54,9 @@ def parse_schema(yaml_text: str) -> ExtractionSchema:
                           "'entidades', 'catalogo' y 'clasificacion'.")
 
     ent = data.get("entidades") or {}
+    if not isinstance(ent, dict):
+        raise SchemaError("'entidades' debe ser un mapa con 'resolubles' y "
+                          "'senal', no una lista ni un valor suelto.")
     resolubles = ent.get("resolubles") or {}
     senal = ent.get("senal") or {}
     for bloque, nombre in ((resolubles, "resolubles"), (senal, "senal")):
@@ -71,11 +74,15 @@ def parse_schema(yaml_text: str) -> ExtractionSchema:
         raise SchemaError(f"Tipos duplicados en resolubles y senal: {sorted(solapados)}")
 
     cat = data.get("catalogo") or {}
+    if not isinstance(cat, dict):
+        raise SchemaError("'catalogo' debe ser un mapa (fuente, ruta_o_tabla).")
     fuente = cat.get("fuente", "generado")
     if fuente not in ("feed", "crawl", "generado"):
         raise SchemaError("catalogo.fuente debe ser feed | crawl | generado.")
 
     cls = data.get("clasificacion") or {}
+    if not isinstance(cls, dict):
+        raise SchemaError("'clasificacion' debe ser un mapa (funnel, tipo_pagina).")
     funnel = cls.get("funnel") or list(FUNNEL_UNIVERSAL)
     if funnel != FUNNEL_UNIVERSAL:
         raise SchemaError("clasificacion.funnel es universal y fijo: [TOFU, MOFU, BOFU].")
@@ -84,8 +91,13 @@ def parse_schema(yaml_text: str) -> ExtractionSchema:
         raise SchemaError("clasificacion.tipo_pagina debe ser una lista de etiquetas.")
 
     umb = data.get("umbrales") or {}
-    high = float(umb.get("resolucion_alta", DEFAULT_HIGH_THRESHOLD))
-    low = float(umb.get("resolucion_baja", DEFAULT_LOW_THRESHOLD))
+    if not isinstance(umb, dict):
+        raise SchemaError("'umbrales' debe ser un mapa (resolucion_alta, resolucion_baja).")
+    try:
+        high = float(umb.get("resolucion_alta", DEFAULT_HIGH_THRESHOLD))
+        low = float(umb.get("resolucion_baja", DEFAULT_LOW_THRESHOLD))
+    except (TypeError, ValueError):
+        raise SchemaError("umbrales: resolucion_alta y resolucion_baja deben ser números.")
     if not (0.0 < low < high <= 1.0):
         raise SchemaError("umbrales: se exige 0 < resolucion_baja < resolucion_alta ≤ 1.")
 

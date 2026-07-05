@@ -20,6 +20,10 @@ from shared.models import Job, Segment, Url
 
 router = APIRouter(prefix="/api/clients/{client_id}/segments", tags=["segments"])
 
+# Cuantificador anidado: un grupo repetido que a su vez repite → backtracking
+# exponencial (ReDoS). Cubre (a+)+, (a*)*, (a+)*, (a{1,3})+, etc.
+_NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -40,6 +44,17 @@ class SegmentRule(BaseModel):
 
     def compiled_matcher(self):
         if self.rule_type == "regex":
+            if len(self.rule) > 500:
+                raise HTTPException(
+                    status_code=422, detail="La regex del segmento es demasiado larga (máx 500).")
+            # Corta los ReDoS de libro (cuantificador anidado: (a+)+, (a*)*,
+            # (a+)*…) que colgarían el preview sobre una URL adversaria
+            # larga. No es exhaustivo — es defensa en profundidad barata.
+            if _NESTED_QUANTIFIER.search(self.rule):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Regex potencialmente catastrófica (cuantificador "
+                           "anidado tipo (a+)+). Reescríbela sin anidar repeticiones.")
             try:
                 return re.compile(self.rule).search
             except re.error as exc:

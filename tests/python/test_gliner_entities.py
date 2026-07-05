@@ -163,6 +163,41 @@ def test_parse_schema_errores():
         parse_schema(SCHEMA_YAML.replace("0.85", "0.5"))  # alta < baja
 
 
+def test_parse_schema_tipos_hostiles():
+    """Regresión del fuzzing: bloques con el tipo equivocado deben dar
+    SchemaError (422), NUNCA AttributeError/500."""
+    from analysis.entities.schema_config import SchemaError, parse_schema
+
+    # 'entidades' como lista (bomba de anclas YAML daba 500)
+    with pytest.raises(SchemaError):
+        parse_schema("entidades: [a, b]\n")
+    with pytest.raises(SchemaError):
+        parse_schema("entidades:\n  resolubles:\n    x: 'desc larga valida'\ncatalogo: [1,2]\n")
+    with pytest.raises(SchemaError):
+        parse_schema("entidades:\n  resolubles:\n    x: 'desc larga valida'\nclasificacion: soy-un-string\n")
+    with pytest.raises(SchemaError):
+        parse_schema("entidades:\n  resolubles:\n    x: 'desc larga valida'\numbrales:\n  resolucion_alta: no-numero\n")
+    # y un escalar suelto sigue dando error legible
+    with pytest.raises(SchemaError):
+        parse_schema("42\n")
+
+
+def test_segment_regex_redos_rejected():
+    """Regresión del fuzzing: una regex con cuantificador anidado (ReDoS)
+    se rechaza con 422 en vez de colgar el preview."""
+    from fastapi import HTTPException
+
+    from api.routers.segments import SegmentRule
+
+    for evil in ("(a+)+$", "(x*)*", "(ab+)+", "(.*)*"):
+        with pytest.raises(HTTPException) as exc:
+            SegmentRule(name="x", rule_type="regex", rule=evil, priority=1).compiled_matcher()
+        assert exc.value.status_code == 422
+    # una regex normal sigue funcionando
+    m = SegmentRule(name="ok", rule_type="regex", rule="^/blog/", priority=1).compiled_matcher()
+    assert m("/blog/post") and not m("/tienda")
+
+
 # ---------------------------------------------------------------------------
 # Núcleo puro
 # ---------------------------------------------------------------------------
