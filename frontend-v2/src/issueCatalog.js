@@ -271,3 +271,19 @@ export const detailsToText = (type, details) => {
     })
     .join(" · ");
 };
+
+/** Pares [etiqueta, valor] legibles de un details, para la vista de
+ *  detalle (no una frase apretada: campo a campo, sin ids ni hashes). */
+export const detailPairs = (details) => {
+  if (!details || typeof details !== "object") return [];
+  return Object.entries(details)
+    .filter(([k]) => !HIDDEN_KEYS.has(k))
+    .map(([k, v]) => {
+      const label = GENERIC_LABELS[k] || k.replace(/_/g, " ");
+      if (k === "reason" || k === "reasons") {
+        return [label, Array.isArray(v) ? v.map(_reason).join("; ") : _reason(v)];
+      }
+      if (Array.isArray(v)) return [label, v.map(String).join(", ")];
+      return [label, _fmtVal(v)];
+    });
+};

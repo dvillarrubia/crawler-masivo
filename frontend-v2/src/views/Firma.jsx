@@ -3,13 +3,12 @@ import { useMemo, useState } from "react";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync, useStored } from "../hooks.js";
-import { detailsToText, issueInfo, issueLabel } from "../issueCatalog.js";
-import { Blocked, EmptyClean, ErrorBox, Pager, Spinner, fmt } from "../ui.jsx";
+import { detailPairs, detailsToText, issueInfo, issueLabel } from "../issueCatalog.js";
+import { Blocked, Drawer, EmptyClean, ErrorBox, Pager, Spinner, fmt } from "../ui.jsx";
 
 /** Zona de trabajo de acciones propuestas: todo lo que la máquina propone
- *  pero no decide (enlaces internos, canibalización, cobertura, anclas,
- *  entidades), con filtros y acciones por lotes. Regla dura T10: nada se
- *  aplica solo — lo firma o rechaza una persona, con autor y fecha. */
+ *  pero no decide. Tabla compacta para escanear + panel de detalle para
+ *  decidir con todo el contexto. Regla dura T10: nada se aplica solo. */
 const FAMILIES = [
   ["", "Todas"],
   ["enlace", "Enlaces internos"],
@@ -19,11 +18,7 @@ const FAMILIES = [
   ["entidades", "Entidades"],
 ];
 
-const STATE_TAG = {
-  pendiente: null,
-  aceptada: "s2xx",
-  rechazada: "s4xx",
-};
+const STATE_TAG = { pendiente: null, aceptada: "s2xx", rechazada: "s4xx" };
 
 export default function FirmaView() {
   const { jobId } = useCtx();
@@ -32,21 +27,21 @@ export default function FirmaView() {
   const [state, setState] = useState("pendiente");
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
-  // Filtros SEO de enlazado: origen y destino por separado
   const [fromTo, setFromTo] = useState({ from: "", to: "" });
   const [fromToApplied, setFromToApplied] = useState({ from: "", to: "" });
-  const [linkMode, setLinkMode] = useState("sugerencia");  // sugerencia | destino
+  const [linkMode, setLinkMode] = useState("sugerencia");
   const [order, setOrder] = useState("prioridad");
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState({});   // key -> item
+  const [selected, setSelected] = useState({});
+  const [detail, setDetail] = useState(null);        // propuesta abierta
+  const [targetDetail, setTargetDetail] = useState(null);  // destino abierto
   const [busy, setBusy] = useState(false);
 
   if (!jobId) return <Blocked title="Sin run seleccionado" reason="Elige un run en la barra superior." />;
 
   const q = useAsync(
     () => api.proposals(jobId, {
-      kind: family || undefined,
-      state: state || undefined,
+      kind: family || undefined, state: state || undefined,
       search: applied || undefined,
       to_contains: fromToApplied.to || undefined,
       from_contains: fromToApplied.from || undefined,
@@ -61,14 +56,11 @@ export default function FirmaView() {
   const keyOf = (it) => `${it.kind_row}:${it.id}`;
   const selList = useMemo(() => Object.values(selected), [selected]);
 
-  const toggle = (it) => {
-    const k = keyOf(it);
-    setSelected((s) => {
-      const n = { ...s };
-      if (n[k]) delete n[k]; else n[k] = it;
-      return n;
-    });
-  };
+  const toggle = (it) => setSelected((s) => {
+    const k = keyOf(it); const n = { ...s };
+    if (n[k]) delete n[k]; else n[k] = it;
+    return n;
+  });
   const allVisibleSelected = items.length > 0 && items.every((it) => selected[keyOf(it)]);
   const toggleAll = () => {
     if (allVisibleSelected) { setSelected({}); return; }
@@ -86,13 +78,14 @@ export default function FirmaView() {
         decision, decided_by: reviewer,
         items: list.map((it) => ({ kind_row: it.kind_row, id: it.id })),
       });
-      setSelected({});
+      setSelected({}); setDetail(null); setTargetDetail(null);
       q.reload();
     } catch (e) { alert(e.message); }
     setBusy(false);
   };
 
   const runSearch = () => { setApplied(search); setPage(1); };
+  const applyFromTo = () => { setFromToApplied({ ...fromTo }); setPage(1); };
 
   return (
     <div>
@@ -101,8 +94,8 @@ export default function FirmaView() {
           <h1 className="page-title">Acciones propuestas</h1>
           <p className="page-sub">
             Tu bandeja de trabajo: todo lo que el análisis PROPONE pero no decide.
-            Filtra, selecciona y firma o rechaza — en bloque si quieres. Nada se aplica
-            solo; cada decisión queda con tu nombre y la fecha.
+            Filtra, abre una propuesta para verla entera y firma o rechaza — suelta o en bloque.
+            Nada se aplica solo; cada decisión queda con tu nombre y la fecha.
           </p>
         </div>
         <span>
@@ -112,7 +105,6 @@ export default function FirmaView() {
         </span>
       </div>
 
-      {/* Pestañas por familia con contador de pendientes */}
       <div className="toolbar" style={{ flexWrap: "wrap" }}>
         {FAMILIES.map(([k, label]) => {
           const c = k ? counts[k] : Object.values(counts).reduce(
@@ -128,7 +120,6 @@ export default function FirmaView() {
         })}
       </div>
 
-      {/* Filtros de estado / búsqueda / orden */}
       <div className="toolbar" style={{ flexWrap: "wrap" }}>
         <select value={state} onChange={(e) => { setState(e.target.value); setPage(1); setSelected({}); }}>
           <option value="pendiente">Pendientes</option>
@@ -147,7 +138,6 @@ export default function FirmaView() {
         </select>
       </div>
 
-      {/* Filtros específicos de enlazado interno — cómo piensa un SEO */}
       {family === "enlace" && (
         <div className="toolbar" style={{ flexWrap: "wrap", background: "var(--surface-soft)", padding: "6px 8px", borderRadius: 6 }}>
           <span className="row" style={{ gap: 6 }}>
@@ -158,25 +148,20 @@ export default function FirmaView() {
             <label className="kpi-label">desde</label>
             <input type="text" style={{ width: 150 }} placeholder="/blog"
               value={fromTo.from} onChange={(e) => setFromTo({ ...fromTo, from: e.target.value })}
-              onKeyDown={(e) => e.key === "Enter" && (setFromToApplied({ ...fromTo }), setPage(1))} />
+              onKeyDown={(e) => e.key === "Enter" && applyFromTo()} />
           </span>
           <span className="row" style={{ gap: 4 }}>
             <label className="kpi-label">hacia</label>
-            <input type="text" style={{ width: 170 }} placeholder="/servicios (la que quieres potenciar)"
+            <input type="text" style={{ width: 200 }} placeholder="/servicios (la que quieres potenciar)"
               value={fromTo.to} onChange={(e) => setFromTo({ ...fromTo, to: e.target.value })}
-              onKeyDown={(e) => e.key === "Enter" && (setFromToApplied({ ...fromTo }), setPage(1))} />
+              onKeyDown={(e) => e.key === "Enter" && applyFromTo()} />
           </span>
-          <button className="secondary" onClick={() => { setFromToApplied({ ...fromTo }); setPage(1); }}>Aplicar</button>
+          <button className="secondary" onClick={applyFromTo}>Aplicar</button>
           {(fromToApplied.from || fromToApplied.to) &&
             <button className="secondary" onClick={() => { setFromTo({ from: "", to: "" }); setFromToApplied({ from: "", to: "" }); }}>× enlazado</button>}
         </div>
       )}
 
-      {family === "enlace" && linkMode === "destino" && (
-        <LinkTargetsPanel jobId={jobId} filters={fromToApplied} reviewer={reviewer} />
-      )}
-
-      {/* Barra de acciones por lote (aparece con selección) */}
       {selList.length > 0 && (
         <div className="card muted row between" style={{ padding: "8px 12px", marginBottom: 8 }}>
           <span><b className="num">{selList.length}</b> seleccionadas</span>
@@ -188,21 +173,28 @@ export default function FirmaView() {
         </div>
       )}
 
-      {/* La vista "URLs a potenciar" reemplaza la tabla normal */}
       {family === "enlace" && linkMode === "destino"
-        ? null
-        : <ProposalsTable
-            q={q} d={d} items={items} selected={selected} toggle={toggle}
-            allVisibleSelected={allVisibleSelected} toggleAll={toggleAll}
-            decide={decide} page={page} setPage={setPage} />}
+        ? <LinkTargetsPanel jobId={jobId} filters={fromToApplied} onOpen={setTargetDetail} />
+        : <ProposalsTable q={q} d={d} items={items} keyOf={keyOf}
+            selected={selected} toggle={toggle} allVisibleSelected={allVisibleSelected}
+            toggleAll={toggleAll} onOpen={setDetail} page={page} setPage={setPage} />}
+
+      {detail && (
+        <ProposalDrawer item={detail} busy={busy} onClose={() => setDetail(null)}
+          onDecide={(dec) => decide([detail], dec)} />
+      )}
+      {targetDetail && (
+        <LinkTargetDrawer jobId={jobId} target={targetDetail} reviewer={reviewer}
+          onClose={() => setTargetDetail(null)}
+          onDone={() => { setTargetDetail(null); q.reload(); }} />
+      )}
     </div>
   );
 }
 
-/* -- Tabla de propuestas (bandeja principal) -------------------------------- */
-function ProposalsTable({ q, d, items, selected, toggle, allVisibleSelected,
-                          toggleAll, decide, page, setPage }) {
-  const keyOf = (it) => `${it.kind_row}:${it.id}`;
+/* -- Tabla compacta: se escanea, se selecciona, se abre --------------------- */
+function ProposalsTable({ q, d, items, keyOf, selected, toggle, allVisibleSelected,
+                          toggleAll, onOpen, page, setPage }) {
   return (
     <>
       {q.loading && <Spinner />}
@@ -212,39 +204,33 @@ function ProposalsTable({ q, d, items, selected, toggle, allVisibleSelected,
           reason="Se generan al ejecutar el análisis semántico y el pipeline de entidades sobre este run."
           cta={<a href="#/semantica"><button>Ir a Semántica</button></a>} />
       )}
-
       {d && d.status === "ok" && (
         <>
-          {items.length === 0 && (
-            <EmptyClean>Nada que revisar con estos filtros.</EmptyClean>
-          )}
+          {items.length === 0 && <EmptyClean>Nada que revisar con estos filtros.</EmptyClean>}
           {items.length > 0 && (
-            <div className="table-wrap" style={{ maxHeight: "60vh" }}>
+            <div className="table-wrap" style={{ maxHeight: "62vh" }}>
               <table className="data">
                 <thead>
                   <tr>
                     <th style={{ width: 28 }}>
                       <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} />
                     </th>
-                    <th>Propuesta</th><th>URL</th><th>Detalle</th>
-                    <th className="num">Prioridad</th><th>Estado</th><th>Decisión</th>
+                    <th>Propuesta</th><th>URL</th>
+                    <th className="num">Prioridad</th><th>Estado</th><th style={{ width: 24 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((it) => {
                     const k = keyOf(it);
                     const label = it.kind_row === "issue" ? issueLabel(it.issue_type) : it.titulo;
-                    const detalle = it.kind_row === "issue"
-                      ? (detailsToText(it.issue_type, it.detalle) || issueInfo(it.issue_type))
-                      : it.detalle;
                     return (
-                      <tr key={k} data-selected={!!selected[k]}
-                        style={selected[k] ? { background: "var(--surface-soft)" } : undefined}>
-                        <td><input type="checkbox" checked={!!selected[k]} onChange={() => toggle(it)} /></td>
-                        <td><b style={{ fontSize: 12.5 }}
-                          title={it.kind_row === "issue" ? issueInfo(it.issue_type) : ""}>{label}</b></td>
+                      <tr key={k} style={{ cursor: "pointer", background: selected[k] ? "var(--surface-soft)" : undefined }}
+                        onClick={() => onOpen(it)}>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={!!selected[k]} onChange={() => toggle(it)} />
+                        </td>
+                        <td><b style={{ fontSize: 12.5 }}>{label}</b></td>
                         <td className="cell-url" title={it.url}>{it.url || "—"}</td>
-                        <td style={{ maxWidth: 340, whiteSpace: "normal", fontSize: 12, lineHeight: 1.4 }}>{detalle}</td>
                         <td className="num">{it.prioridad ? fmt(Math.round(it.prioridad)) : "—"}</td>
                         <td>
                           {it.estado === "pendiente"
@@ -252,19 +238,7 @@ function ProposalsTable({ q, d, items, selected, toggle, allVisibleSelected,
                             : <span className={`pill ${STATE_TAG[it.estado] || "sother"}`}>
                                 {it.estado}{it.decided_by ? ` · ${it.decided_by}` : ""}</span>}
                         </td>
-                        <td>
-                          {it.estado === "pendiente" ? (
-                            <span className="row" style={{ gap: 4 }}>
-                              <button onClick={() => decide([it], "aceptar")}>Firmar</button>
-                              <button className="secondary" onClick={() => decide([it], "rechazar")}>Rechazar</button>
-                            </span>
-                          ) : (
-                            <button className="secondary" title="Volver a pendiente no está: re-decide en bloque"
-                              onClick={() => decide([it], it.estado === "aceptada" ? "rechazar" : "aceptar")}>
-                              cambiar
-                            </button>
-                          )}
-                        </td>
+                        <td className="proxy-tag">›</td>
                       </tr>
                     );
                   })}
@@ -279,10 +253,89 @@ function ProposalsTable({ q, d, items, selected, toggle, allVisibleSelected,
   );
 }
 
-/* -- "URLs a potenciar": sugerencias de enlace agrupadas por destino -------- */
-function LinkTargetsPanel({ jobId, filters, reviewer }) {
+/* -- Detalle de una propuesta: todo el contexto + decisión ------------------ */
+function ProposalDrawer({ item, busy, onClose, onDecide }) {
+  const isIssue = item.kind_row === "issue";
+  const label = isIssue ? issueLabel(item.issue_type) : item.titulo;
+  const resumen = isIssue
+    ? (detailsToText(item.issue_type, item.detalle) || issueInfo(item.issue_type))
+    : item.detalle;
+  const pairs = isIssue ? detailPairs(item.detalle) : [];
+
+  return (
+    <Drawer onClose={onClose}>
+      <h2 style={{ marginBottom: 4 }}>{label}</h2>
+      <div className="row" style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        <span className="tag">{item.familia}</span>
+        {item.estado === "pendiente"
+          ? <span className="proxy-tag">pendiente de decisión</span>
+          : <span className={`pill ${STATE_TAG[item.estado] || "sother"}`}>
+              {item.estado}{item.decided_by ? ` · ${item.decided_by}` : ""}</span>}
+        {item.prioridad ? <span className="tag num">prioridad {fmt(Math.round(item.prioridad))}</span> : null}
+      </div>
+
+      {isIssue && (
+        <div className="card muted" style={{ marginBottom: 10 }}>
+          {issueInfo(item.issue_type)}
+        </div>
+      )}
+
+      {item.url && (
+        <div style={{ marginBottom: 10 }}>
+          <div className="kpi-label">URL afectada</div>
+          <a href={item.url} target="_blank" rel="noreferrer" className="cell-url">{item.url}</a>
+        </div>
+      )}
+      {!isIssue && item.source_url && (
+        <div style={{ marginBottom: 10 }}>
+          <div className="kpi-label">Enlace propuesto</div>
+          <div className="cell-url" style={{ marginTop: 2 }}>
+            <span className="proxy-tag">desde</span> {item.source_url}
+          </div>
+          <div className="cell-url">
+            <span className="proxy-tag">hacia</span> {item.url}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginBottom: 12 }}>
+        <div className="kpi-label">Qué propone</div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.5, marginTop: 3 }}>{resumen}</div>
+      </div>
+
+      {pairs.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <table className="data">
+            <tbody>
+              {pairs.map(([k, v], i) => (
+                <tr key={i}>
+                  <td style={{ color: "var(--ink-muted)", width: "40%" }}>{k}</td>
+                  <td>{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {item.estado === "pendiente" ? (
+        <div className="row" style={{ gap: 8 }}>
+          <button disabled={busy} onClick={() => onDecide("aceptar")}>Firmar</button>
+          <button className="secondary" disabled={busy} onClick={() => onDecide("rechazar")}>Rechazar</button>
+        </div>
+      ) : (
+        <button className="secondary" disabled={busy}
+          onClick={() => onDecide(item.estado === "aceptada" ? "rechazar" : "aceptar")}>
+          Cambiar decisión
+        </button>
+      )}
+    </Drawer>
+  );
+}
+
+/* -- "URLs a potenciar": tabla compacta de destinos ------------------------- */
+function LinkTargetsPanel({ jobId, filters, onOpen }) {
   const [page, setPage] = useState(1);
-  const [busy, setBusy] = useState(false);
   const q = useAsync(
     () => api.linkTargets(jobId, {
       from_contains: filters.from || undefined,
@@ -298,50 +351,27 @@ function LinkTargetsPanel({ jobId, filters, reviewer }) {
     return <Blocked title="URLs a potenciar"
       reason="No hay sugerencias de enlace interno todavía: necesitan el análisis semántico del run." />;
   }
-
-  const firmarDestino = async (t) => {
-    if (!reviewer) { alert("Pon tu nombre arriba para firmar."); return; }
-    setBusy(true);
-    try {
-      await api.bulkDecision(jobId, {
-        decision: "aceptar", decided_by: reviewer,
-        items: t.suggestion_ids.map((id) => ({ kind_row: "suggestion", id })),
-      });
-      q.reload();
-    } catch (e) { alert(e.message); }
-    setBusy(false);
-  };
-
   return (
     <div>
       <p className="proxy-tag" style={{ margin: "4px 0" }}>
-        Cada fila es una página que quieres reforzar, con todos los enlaces internos que se le
-        propondrían. Las que más se reforzarían van primero; el PageRank actual te dice dónde hay
-        más margen. «Firmar todos» acepta de golpe los enlaces entrantes de esa URL.
+        Cada fila es una página que puedes reforzar. «Enlaces» = cuántos enlaces internos recibiría;
+        «PageRank» actual te dice dónde hay más margen. Ábrela para ver los orígenes y firmar.
       </p>
-      <div className="table-wrap" style={{ maxHeight: "58vh" }}>
+      <div className="table-wrap" style={{ maxHeight: "60vh" }}>
         <table className="data">
           <thead>
-            <tr><th>URL a potenciar</th><th className="num">Enlaces propuestos</th>
-              <th className="num">PageRank actual</th><th>Anchors propuestos</th>
-              <th>Vendrían de</th><th></th></tr>
+            <tr><th>URL a potenciar</th><th className="num">Enlaces</th>
+              <th className="num">PageRank</th><th>Anchors propuestos</th><th style={{ width: 24 }}></th></tr>
           </thead>
           <tbody>
             {d.items.map((t, i) => (
-              <tr key={i}>
+              <tr key={i} style={{ cursor: "pointer" }} onClick={() => onOpen(t)}>
                 <td className="cell-url" title={t.target_url}><b>{t.target_url}</b></td>
                 <td className="num"><span className="tag num">{t.n_sugerencias}</span></td>
                 <td className="num">{t.pagerank_actual != null ? t.pagerank_actual.toFixed(2) : "—"}</td>
-                <td style={{ maxWidth: 220, fontSize: 12 }}>
+                <td style={{ maxWidth: 260, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {(t.anchors_propuestos || []).map((a) => `«${a}»`).join(", ") || "—"}</td>
-                <td className="cell-url" style={{ fontSize: 11.5 }} title={(t.origenes || []).join("\n")}>
-                  {(t.origenes || []).slice(0, 2).join(" · ")}{t.origenes.length > 2 ? ` +${t.origenes.length - 2}` : ""}</td>
-                <td>
-                  <button disabled={busy} onClick={() => firmarDestino(t)}
-                    title="Firmar todos los enlaces entrantes propuestos de esta URL">
-                    Firmar todos ({t.n_sugerencias})
-                  </button>
-                </td>
+                <td className="proxy-tag">›</td>
               </tr>
             ))}
           </tbody>
@@ -349,5 +379,59 @@ function LinkTargetsPanel({ jobId, filters, reviewer }) {
       </div>
       <Pager page={page} pages={d.pages} onPage={setPage} />
     </div>
+  );
+}
+
+/* -- Detalle de una URL a potenciar: sus enlaces entrantes + firmar --------- */
+function LinkTargetDrawer({ jobId, target, reviewer, onClose, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const firmar = async () => {
+    if (!reviewer) { alert("Pon tu nombre arriba para firmar."); return; }
+    setBusy(true);
+    try {
+      await api.bulkDecision(jobId, {
+        decision: "aceptar", decided_by: reviewer,
+        items: target.suggestion_ids.map((id) => ({ kind_row: "suggestion", id })),
+      });
+      onDone();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  return (
+    <Drawer onClose={onClose}>
+      <h2 style={{ marginBottom: 4 }}>Potenciar esta URL</h2>
+      <a href={target.target_url} target="_blank" rel="noreferrer" className="cell-url">{target.target_url}</a>
+      <div className="facts" style={{ marginTop: 12 }}>
+        <div className="fact"><div className="k">Enlaces propuestos</div><div className="v num">{target.n_sugerencias}</div></div>
+        <div className="fact"><div className="k">PageRank actual</div><div className="v num">{target.pagerank_actual != null ? target.pagerank_actual.toFixed(2) : "—"}</div></div>
+        <div className="fact"><div className="k">Mejor score</div><div className="v num">{target.best_score}</div></div>
+      </div>
+
+      {target.anchors_propuestos && target.anchors_propuestos.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="kpi-label">Anchors propuestos</div>
+          <div style={{ marginTop: 3 }}>{target.anchors_propuestos.map((a) => `«${a}»`).join(", ")}</div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        <div className="kpi-label">Vendrían de ({target.origenes.length})</div>
+        <div className="table-wrap" style={{ maxHeight: "40vh", marginTop: 4 }}>
+          <table className="data">
+            <tbody>
+              {target.origenes.map((o, i) => (
+                <tr key={i}><td className="cell-url" title={o}>{o}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <button disabled={busy} onClick={firmar}>
+          Firmar los {target.n_sugerencias} enlaces entrantes
+        </button>
+      </div>
+    </Drawer>
   );
 }
