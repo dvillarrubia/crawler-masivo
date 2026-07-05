@@ -60,14 +60,17 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
   más rápido para desbloquear) o conector (S3/rsync)? Formatos: Apache/
   Nginx combined + JSON, parser tolerante. Cruce por url_hash. → `spec-logs.md`.
 
-- 📋 **B3 · Dashboards de performance interanuales.** Existe diff entre
-  crawls y GSC por run, pero no hay serie temporal ni year-over-year. Los
-  datos YA están (varios runs por cliente con su GSC en fechas distintas).
-  **Decisión:** ¿comparar dos runs separados ~12 meses (rápido con lo que
-  hay) o construir la serie completa de todos los runs (más rico)?
-  Métricas: clics/impresiones/posición GSC, issues por tipo, PageRank,
-  cobertura de entidades. Solo comparar runs con la misma normalización
-  (fingerprint). → `spec-interanual.md`.
+- ✅ **B3 · Dashboards de rendimiento (evolución en el tiempo)** (2026-07-05)
+  → Vista **Rendimiento** (nivel proyecto): serie de todos los rastreos
+  del cliente con clics/impresiones/posición GSC, URLs, incidencias y
+  PageRank medio; gráfico SVG por métrica, tarjetas de comparación
+  actual-vs-referencia (delta interanual) y tabla de todos los runs.
+  Marca los cortes de normalización (no finge continuidad).
+  **+ Seguir grupos concretos** (petición del usuario): scope por
+  **segmento** (una sección: servicios, cursos, categorías) o por
+  **watchlist** (URLs vigiladas), y sección de **evolución por URL
+  vigilada una a una** (clics/impresiones/posición con su delta).
+  Router `api/routers/performance.py`, 7 tests. Commit: (este).
 
 ---
 

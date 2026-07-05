@@ -17,6 +17,7 @@ import JobsView from "./views/Jobs.jsx";
 import LinksView from "./views/Links.jsx";
 import LogsView from "./views/Logs.jsx";
 import OverviewView from "./views/Overview.jsx";
+import PerformanceView from "./views/Performance.jsx";
 import SemanticView from "./views/Semantic.jsx";
 
 /** Contexto global: proyecto (client_id) + run (job) + segmento (T12). */
@@ -26,6 +27,7 @@ export const useCtx = () => useContext(Ctx);
 const NAV = [
   { group: "Proyecto", items: [
     ["salud", "Salud del proyecto"],
+    ["rendimiento", "Rendimiento"],
     ["jobs", "Rastreos"],
   ]},
   { group: "Run", items: [
@@ -103,6 +105,7 @@ export default function App() {
 
   const views = {
     salud: HealthView,
+    rendimiento: PerformanceView,
     jobs: JobsView,
     overview: OverviewView,
     explorer: ExplorerView,

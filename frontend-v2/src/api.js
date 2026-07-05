@@ -120,6 +120,13 @@ export const api = {
   diffUrls: (params) => request(`/api/diff/urls${qs(params)}`),
   flapping: (params) => request(`/api/diff/flapping${qs(params)}`),
 
+  performanceTimeline: (clientId, params) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/timeline${qs(params)}`),
+  performanceSummary: (clientId, params) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/performance-summary${qs(params)}`),
+  watchlistTimeline: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/watchlist-timeline`),
+
   segments: (clientId) => request(`/api/clients/${encodeURIComponent(clientId)}/segments`),
   createSegment: (clientId, payload) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/segments`, {
