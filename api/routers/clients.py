@@ -300,6 +300,75 @@ def add_entity_catalog(
     return {"entity_id": entity_id}
 
 
+@router.post("/entity-catalog/suggest")
+def suggest_entity_catalog(
+    client_id: str,
+    payload: SuggestSchemaPayload,
+    db: Session = Depends(get_session),
+):
+    """Propone entradas CONCRETAS del catálogo con un LLM (los valores por
+    tipo resoluble del esquema del cliente), marcando las que ya existen.
+    No guarda: el usuario elige cuáles añadir."""
+    from analysis.entities.schema_config import SchemaError
+    from analysis.entities.schema_suggester import suggest_catalog
+    from shared.entity_models import ClientSettings
+    from shared.semantic_models import GeminiAccount
+
+    account_id = payload.gemini_account_id
+    if account_id is None:
+        settings = db.get(ClientSettings, client_id)
+        account_id = settings.gemini_account_id if settings else None
+    if account_id is None:
+        raise HTTPException(status_code=400, detail=(
+            "Este proyecto no tiene cuenta Gemini asignada. Configúrala para "
+            "poder proponer el catálogo con IA."))
+    account = db.get(GeminiAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Cuenta Gemini no encontrada.")
+
+    try:
+        result = suggest_catalog(db, client_id, account.api_key)
+    except SchemaError as exc:
+        raise HTTPException(status_code=422, detail=(
+            f"{exc} Define primero el esquema de entidades (arriba)."))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Error del LLM: {exc}")
+    return {"status": "ok", **result}
+
+
+class CatalogBulkPayload(BaseModel):
+    entries: list[CatalogEntryCreate] = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/entity-catalog/bulk")
+def add_entity_catalog_bulk(
+    client_id: str,
+    payload: CatalogBulkPayload,
+    db: Session = Depends(get_session),
+):
+    """Alta por lotes (para aceptar varias propuestas de la IA a la vez).
+    Ignora las que ya existen. source='feed', nacen sin embedding."""
+    from analysis.entities.extraction import slugify
+    from shared.entity_models import EntityCatalog
+
+    added, skipped = 0, 0
+    for entry in payload.entries:
+        entity_id = f"local:{slugify(entry.name)}"
+        if db.get(EntityCatalog, (client_id, entity_id)) is not None:
+            skipped += 1
+            continue
+        db.add(EntityCatalog(client_id=client_id, entity_id=entity_id,
+                             name=entry.name, entity_type=entry.entity_type,
+                             source="feed", is_linked=False))
+        added += 1
+    db.commit()
+    if added:
+        _auto_enqueue_entities(db, client_id, "catalog")
+    return {"status": "ok", "added": added, "skipped": skipped}
+
+
 @router.delete("/entity-catalog/{entity_id:path}", status_code=204)
 def delete_entity_catalog(
     client_id: str,

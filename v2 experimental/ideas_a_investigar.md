@@ -9,6 +9,20 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Proponer las ENTRADAS del catálogo con IA** (2026-07-06)
+  → Complemento del anterior: la IA propone no solo los tipos, sino los
+  VALORES concretos del catálogo (los servicios, clientes, localizaciones,
+  casos… reales), clasificados por los tipos resolubles del esquema del
+  cliente. `suggest_catalog` en `schema_suggester.py` (usa el esquema
+  guardado + contenido del rastreo + queries; reintento; marca las que ya
+  existen para no duplicar). Endpoints `POST .../entity-catalog/suggest`
+  (propone, no guarda) y `POST .../entity-catalog/bulk` (alta por lotes de
+  las elegidas). UI: botón "Proponer con IA" en el catálogo → checklist
+  agrupado por tipo con marcar/desmarcar y "Añadir N al catálogo". 4 tests
+  (suite 321). **Verificado en vivo con workoholics:** 24 entidades reales
+  (Kit Digital, Branding, Athletic Club, Café Fortaleza, Ausolan…), 21
+  nuevas + 3 ya existentes marcadas. Commit: (este).
+
 - ✅ **Proponer el esquema de entidades con IA** (2026-07-06)
   → El "formulario" de Entidades (Config) ya no se rellena a mano: un LLM
   propone los tipos a partir del cliente. `analysis/entities/schema_suggester.py`
@@ -190,5 +204,9 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 ## Bandeja de entrada — apunta aquí lo que se te ocurra
 
 *(añade líneas debajo; yo las recojo)*
+
+En la pestaña de incidencias necesitamos poder pinchar en el detalle de las urls para ver todo lo relacionado con la url como si fuera la parte del explorador, y poner un enlace para ver la web estaria bien.
+
+
 
 - 

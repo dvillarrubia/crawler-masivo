@@ -270,6 +270,145 @@ def suggest_schema(session, client_id: str, api_key: str, *,
     return proposal
 
 
+# ---------------------------------------------------------------------------
+# Propuesta de ENTRADAS del catálogo (los valores concretos, no los tipos)
+# ---------------------------------------------------------------------------
+CATALOG_PROMPT_HEADER = """\
+Eres un analista SEO construyendo el CATÁLOGO de entidades de un cliente:
+la lista de cosas CONCRETAS y nombradas que aparecen en su web, clasificadas
+por tipo. No inventes: extrae solo lo que se deduzca del contenido dado.
+
+Tipos válidos (usa EXACTAMENTE estos nombres en 'entity_type'):
+{tipos}
+
+Reglas:
+- name = el nombre propio tal como aparece (ej. «Athletic Club», «Kit Digital»,
+  «Bilbao»), sin artículos sobrantes ni texto de relleno.
+- entity_type debe ser uno de los tipos válidos de arriba.
+- No repitas entidades; agrupa variantes en el nombre más canónico.
+- Prioriza lo relevante para el negocio; ignora menús, legal y genéricos.
+- Hasta {max} entradas en total.
+
+Devuelve SOLO un JSON:
+{{"catalogo": [{{"name": "...", "entity_type": "..."}}]}}
+"""
+
+
+def build_catalog_prompt(context: dict, resolubles: dict[str, str],
+                         max_entries: int = 60) -> str:
+    """Prompt para extraer entradas concretas del catálogo. Puro."""
+    tipos = "\n".join(f"- {name}: {desc}" for name, desc in resolubles.items())
+    header = CATALOG_PROMPT_HEADER.format(tipos=tipos, max=max_entries)
+    lines = [header, "\n--- CONTENIDO DEL CLIENTE ---"]
+    if context.get("host"):
+        lines.append(f"Dominio: {context['host']}")
+    pages = context.get("pages") or []
+    if pages:
+        lines.append(f"\n{len(pages)} páginas (path — título — H1):")
+        for p in pages:
+            bits = [p.get("path", "")]
+            if p.get("title"):
+                bits.append(p["title"])
+            if p.get("h1"):
+                bits.append(f"H1: {p['h1']}")
+            lines.append("  · " + " — ".join(bits))
+    queries = context.get("queries") or []
+    if queries:
+        lines.append("\nBúsquedas en Google: " + "; ".join(queries))
+    lines.append("\n--- FIN ---\nDevuelve solo el JSON con 'catalogo'.")
+    return "\n".join(lines)
+
+
+def parse_llm_catalog(text: str, valid_types: set[str]) -> list[dict]:
+    """Parsea la respuesta a [{name, entity_type}], quedándose solo con
+    tipos válidos, sin duplicados. Defensivo (fences, formatos raros)."""
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not m:
+            raise ValueError("La respuesta del modelo no era JSON válido.")
+        data = json.loads(m.group(0))
+    items = data.get("catalogo") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("La respuesta no traía una lista 'catalogo'.")
+
+    out, seen = [], set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("name", "")).strip()
+        etype = str(it.get("entity_type", "")).strip()
+        if not name or len(name) < 2 or etype not in valid_types:
+            continue
+        key = (etype, name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"name": name[:300], "entity_type": etype})
+    return out
+
+
+def suggest_catalog(session, client_id: str, api_key: str, *,
+                    generate_fn=None, attempts: int = 3,
+                    max_entries: int = 60) -> dict:
+    """Propone entradas concretas del catálogo con un LLM, usando los tipos
+    resolubles del esquema del cliente. Marca las que YA existen (para no
+    duplicar) y NO guarda nada. Reintenta ante salida vacía/inválida."""
+    from analysis.entities.extraction import slugify
+    from analysis.entities.schema_config import load_client_schema
+    from shared.entity_models import EntityCatalog
+
+    schema = load_client_schema(session, client_id)  # SchemaError si no hay
+    valid_types = set(schema.resolubles)
+    if not valid_types:
+        raise ValueError("El esquema no tiene tipos resolubles: define al "
+                         "menos uno antes de proponer el catálogo.")
+
+    context = gather_client_context(session, client_id, max_pages=60,
+                                    max_queries=50)
+    prompt = build_catalog_prompt(context, schema.resolubles, max_entries)
+
+    if generate_fn is None:
+        generate_fn = _gemini_generate(api_key)
+
+    entries: list[dict] = []
+    last_err = "sin entradas"
+    for _ in range(max(1, attempts)):
+        try:
+            entries = parse_llm_catalog(generate_fn(prompt), valid_types)
+        except ValueError as exc:
+            last_err = str(exc)
+            continue
+        if entries:
+            break
+    if not entries:
+        raise ValueError(
+            f"No se pudieron proponer entradas tras {attempts} intentos "
+            f"({last_err}). Revisa que el rastreo tenga contenido.")
+
+    existing = {eid for (eid,) in session.query(EntityCatalog.entity_id)
+                .filter(EntityCatalog.client_id == client_id).all()}
+    for e in entries:
+        e["entity_id"] = f"local:{slugify(e['name'])}"
+        e["exists"] = e["entity_id"] in existing
+
+    nuevas = sum(1 for e in entries if not e["exists"])
+    return {
+        "entries": entries[:max_entries],
+        "types": sorted(valid_types),
+        "n_total": len(entries),
+        "n_nuevas": nuevas,
+        "context": {"host": context.get("host"),
+                    "n_pages": context.get("n_pages", 0),
+                    "n_queries": context.get("n_queries", 0)},
+    }
+
+
 def _gemini_generate(api_key: str):
     """Cierre que llama a Gemini Flash pidiendo JSON. Import perezoso."""
     def _run(prompt: str) -> str:

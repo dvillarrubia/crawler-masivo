@@ -534,6 +534,10 @@ function CatalogPanel({ clientId }) {
   );
   const [nuevo, setNuevo] = useState({ name: "", entity_type: "" });
   const [error, setError] = useState(null);
+  // Proponer con IA
+  const [suggesting, setSuggesting] = useState(false);
+  const [sug, setSug] = useState(null);      // {entries:[{name,entity_type,exists,_pick}], n_nuevas, context}
+  const [adding, setAdding] = useState(false);
 
   const add = async () => {
     setError(null);
@@ -544,6 +548,31 @@ function CatalogPanel({ clientId }) {
     } catch (e) { setError(e.message); }
   };
 
+  const suggest = async () => {
+    setSuggesting(true); setError(null); setSug(null);
+    try {
+      const r = await api.suggestEntityCatalog(clientId, {});
+      // pre-selecciona solo las nuevas (las que ya existen van desmarcadas)
+      r.entries = r.entries.map((e) => ({ ...e, _pick: !e.exists }));
+      setSug(r);
+    } catch (e) { setError(e.message); }
+    setSuggesting(false);
+  };
+
+  const addSelected = async () => {
+    const picked = (sug.entries || []).filter((e) => e._pick && !e.exists)
+      .map((e) => ({ name: e.name, entity_type: e.entity_type }));
+    if (!picked.length) return;
+    setAdding(true); setError(null);
+    try {
+      const r = await api.addCatalogBulk(clientId, picked);
+      setSug(null);
+      q.reload();
+      setError(null);
+    } catch (e) { setError(e.message); }
+    setAdding(false);
+  };
+
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <h3>Catálogo de entidades {q.data ? `(${fmt(q.data.total)})` : ""}</h3>
@@ -552,6 +581,22 @@ function CatalogPanel({ clientId }) {
         menciones contra este catálogo. Si el origen es «generado», se siembra del crawl y aquí lo
         depuras: borra el ruido y añade lo que falte.
       </p>
+
+      {/* Proponer entradas del catálogo con IA */}
+      <div className="row between" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+        <span className="proxy-tag" style={{ flex: 1, minWidth: 200 }}>
+          ✨ La IA puede leer el sitio y proponer las entidades concretas (por tipo del esquema).
+        </span>
+        <button className="secondary" disabled={suggesting} onClick={suggest}>
+          {suggesting ? "Pensando…" : "Proponer con IA"}
+        </button>
+      </div>
+
+      {sug && (
+        <SuggestedCatalog sug={sug} setSug={setSug} adding={adding}
+          onAdd={addSelected} onCancel={() => setSug(null)} />
+      )}
+
       <div className="row" style={{ gap: 6, marginBottom: 8 }}>
         <input type="text" placeholder="buscar…" value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -585,6 +630,68 @@ function CatalogPanel({ clientId }) {
           value={nuevo.entity_type}
           onChange={(e) => setNuevo({ ...nuevo, entity_type: e.target.value })} />
         <button disabled={!nuevo.name || !nuevo.entity_type} onClick={add}>Añadir</button>
+      </div>
+    </div>
+  );
+}
+
+/** Checklist de entradas de catálogo propuestas por la IA — el usuario
+ *  marca cuáles añadir. Las que ya existen salen desmarcadas y avisadas. */
+function SuggestedCatalog({ sug, setSug, adding, onAdd, onCancel }) {
+  const entries = sug.entries || [];
+  const toggle = (i) => setSug({
+    ...sug,
+    entries: entries.map((e, k) => (k === i ? { ...e, _pick: !e._pick } : e)),
+  });
+  const setAll = (val) => setSug({
+    ...sug, entries: entries.map((e) => ({ ...e, _pick: val && !e.exists })),
+  });
+  const picked = entries.filter((e) => e._pick && !e.exists).length;
+  const c = sug.context || {};
+
+  // agrupar por tipo para que se lea como un catálogo
+  const byType = {};
+  entries.forEach((e, i) => { (byType[e.entity_type] ||= []).push({ ...e, i }); });
+
+  return (
+    <div style={{ border: "1px solid var(--hairline)", borderRadius: 4,
+      padding: 10, margin: "6px 0 12px", background: "var(--canvas-muted)" }}>
+      <div className="row between" style={{ marginBottom: 6 }}>
+        <b style={{ fontSize: 12.5 }}>Propuesta de la IA — {sug.n_nuevas} nuevas de {sug.n_total}</b>
+        <span className="proxy-tag">
+          basado en {c.n_pages || 0} páginas{c.n_queries ? `, ${c.n_queries} búsquedas` : ""}
+        </span>
+      </div>
+      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+        <button className="secondary" style={{ fontSize: 11, padding: "2px 8px" }}
+          onClick={() => setAll(true)}>Marcar todas</button>
+        <button className="secondary" style={{ fontSize: 11, padding: "2px 8px" }}
+          onClick={() => setAll(false)}>Ninguna</button>
+      </div>
+      <div style={{ maxHeight: "40vh", overflowY: "auto" }}>
+        {Object.entries(byType).map(([tipo, items]) => (
+          <div key={tipo} style={{ marginBottom: 8 }}>
+            <div className="tag" style={{ marginBottom: 4 }}>{tipo} ({items.length})</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {items.map((e) => (
+                <label key={e.i} title={e.exists ? "Ya está en el catálogo" : ""}
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12,
+                    opacity: e.exists ? 0.5 : 1, cursor: e.exists ? "not-allowed" : "pointer",
+                    border: "1px solid var(--hairline)", borderRadius: 3, padding: "2px 6px" }}>
+                  <input type="checkbox" checked={!!e._pick} disabled={e.exists}
+                    onChange={() => toggle(e.i)} />
+                  {e.name}{e.exists ? " · ya existe" : ""}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 8 }}>
+        <button disabled={adding || !picked} onClick={onAdd}>
+          {adding ? "Añadiendo…" : `Añadir ${picked} al catálogo`}
+        </button>
+        <button className="secondary" onClick={onCancel}>Descartar</button>
       </div>
     </div>
   );

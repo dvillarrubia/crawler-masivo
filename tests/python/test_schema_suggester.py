@@ -175,6 +175,78 @@ def test_suggest_schema_empty_resolubles_raises(db_session, ent_tables):
                        generate_fn=lambda _p: '{"resolubles": [], "senal": []}')
 
 
+# --- catálogo (entradas concretas) ---------------------------------------
+def _catalog_tables(db_engine):
+    from shared.entity_models import ClientExtractionSchema, EntityCatalog
+    for m in (ClientExtractionSchema, EntityCatalog):
+        m.__table__.create(db_engine, checkfirst=True)
+
+
+def _schema_row(db_session, client_id="cli"):
+    from shared.entity_models import ClientExtractionSchema
+    yaml_text = (
+        "entidades:\n  resolubles:\n"
+        "    servicio: Servicios que ofrece la agencia al cliente final\n"
+        "    cliente: Empresas que han contratado a la agencia\n"
+        "  senal: {}\n"
+        "catalogo:\n  fuente: generado\n"
+        "clasificacion:\n  funnel: [TOFU, MOFU, BOFU]\n  tipo_pagina: [home]\n")
+    db_session.add(ClientExtractionSchema(client_id=client_id, yaml_text=yaml_text))
+    db_session.flush()
+
+
+def test_parse_llm_catalog_filters_types():
+    from analysis.entities.schema_suggester import parse_llm_catalog
+
+    text = json.dumps({"catalogo": [
+        {"name": "SEO", "entity_type": "servicio"},
+        {"name": "Bellota", "entity_type": "cliente"},
+        {"name": "X", "entity_type": "tipo_invalido"},   # tipo fuera → fuera
+        {"name": "SEO", "entity_type": "servicio"},        # duplicado → fuera
+        {"name": "a", "entity_type": "servicio"},          # nombre <2 → fuera
+    ]})
+    out = parse_llm_catalog(text, {"servicio", "cliente"})
+    names = sorted(e["name"] for e in out)
+    assert names == ["Bellota", "SEO"]
+
+
+def test_suggest_catalog_marks_existing(db_session, db_engine, ent_tables):
+    from analysis.entities.schema_suggester import suggest_catalog
+    from shared.entity_models import EntityCatalog
+
+    _catalog_tables(db_engine)
+    job = _job(db_session)
+    _page(db_session, job, "/servicios/seo", "SEO", "Servicio de SEO")
+    _schema_row(db_session)
+    # una entidad ya en el catálogo
+    db_session.add(EntityCatalog(client_id="cli", entity_id="local:seo",
+                                 name="SEO", entity_type="servicio",
+                                 source="feed", is_linked=False))
+    db_session.flush()
+
+    fake = json.dumps({"catalogo": [
+        {"name": "SEO", "entity_type": "servicio"},        # ya existe
+        {"name": "Branding", "entity_type": "servicio"},   # nueva
+        {"name": "Bellota", "entity_type": "cliente"},     # nueva
+    ]})
+    out = suggest_catalog(db_session, "cli", api_key="x", generate_fn=lambda _p: fake)
+    assert out["n_total"] == 3 and out["n_nuevas"] == 2
+    seo = next(e for e in out["entries"] if e["name"] == "SEO")
+    assert seo["exists"] is True
+    branding = next(e for e in out["entries"] if e["name"] == "Branding")
+    assert branding["exists"] is False and branding["entity_id"] == "local:branding"
+
+
+def test_suggest_catalog_needs_schema(db_session, db_engine, ent_tables):
+    from analysis.entities.schema_config import SchemaError
+    from analysis.entities.schema_suggester import suggest_catalog
+
+    _catalog_tables(db_engine)
+    _job(db_session)
+    with pytest.raises(SchemaError):     # sin schema del cliente
+        suggest_catalog(db_session, "cli", api_key="x", generate_fn=lambda _p: "{}")
+
+
 def test_suggest_schema_retries_transient_bad_output(db_session, ent_tables):
     """El LLM es no determinista: el 1º intento sale vacío/malo, el 2º bien.
     No debe fallar (evita el 422 intermitente)."""

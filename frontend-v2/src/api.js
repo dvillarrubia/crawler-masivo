@@ -237,6 +237,16 @@ export const api = {
     request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/${encodeURIComponent(entityId)}`, {
       method: "DELETE",
     }),
+  suggestEntityCatalog: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/suggest`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    }),
+  addCatalogBulk: (clientId, entries) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/entity-catalog/bulk`, {
+      method: "POST",
+      body: JSON.stringify({ entries }),
+    }),
 
   entitiesStatus: (jobId) => request(`/api/jobs/${jobId}/entities/status`),
 };
