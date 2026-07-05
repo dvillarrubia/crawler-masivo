@@ -403,6 +403,14 @@ The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
   Emits `entity_query_mismatch`/`entity_coverage_gap` (deterministic)
   and `entity_cannibalization`/`funnel_mismatch` (signable). Docs:
   `v2 experimental/INVESTIGACION.md` + `brief_gliner2_crawler.md`.
+- **Neo4j graph side (Seontology contract):** service `neo4j` (compose
+  profile `graph`); `shared/graph_identity.py` (`page_id` = sha1[:16] of
+  contract-normalized URL — NOT the crawler's url_hash); sync with
+  `docker compose --profile gliner run gliner python -m
+  analysis.graph.sync --job-id <uuid> [--prune] [--gds]`. Strict split:
+  graph gets structure only (Page/Entity/Query/Site/Cluster + edges);
+  text, chunks, 1024d vectors and metric series stay in Postgres.
+  Agent tools boundary in `analysis/graph/tools.py`.
 - **Architecture (T22/T23):** `analysis/architecture.py` — edge
   classifier (3 passes), `arch_edges`, real `click_depth`,
   `section_flows`, ARQ checks. Flag `edge_classification`.

@@ -70,6 +70,28 @@ services:
           memory: 2g
           cpus: '2'
 
+  # ---------- Neo4j (lado grafo del contrato Seontology; perfil opcional) ----
+  # El grafo es DERIVADO de Postgres (orden estricto del contrato §4):
+  #   docker compose --profile graph up -d neo4j
+  #   docker compose --profile gliner run --rm gliner \
+  #     python -m analysis.graph.sync --job-id <uuid>
+  neo4j:
+    image: neo4j:5-community
+    profiles: ["graph"]
+    ports:
+      - "127.0.0.1:7474:7474"   # browser
+      - "127.0.0.1:7687:7687"   # bolt
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-seontology}
+      # descomenta para GDS (PageRank/Leiden nativos, paso 9 opcional):
+      # - NEO4J_PLUGINS=["graph-data-science"]
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-seontology} 'RETURN 1' || exit 1"]
+      interval: 10s
+      retries: 12
+
   # ---------- Entidades GLiNER2 (perfil opcional: torch queda fuera de
   # las imágenes api/crawler). Uso:
   #   docker compose --profile gliner build gliner
@@ -108,3 +130,4 @@ volumes:
   pgdata:
   redisdata:
   gliner_models:
+  neo4jdata:

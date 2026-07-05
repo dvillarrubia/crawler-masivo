@@ -8,6 +8,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# torch en su propia capa: es lo pesado y así los cambios de requirements
+# no obligan a re-descargarlo
+RUN pip install --no-cache-dir "torch>=2.2" --extra-index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements-gliner.txt .
 RUN pip install --no-cache-dir -r requirements-gliner.txt
 
