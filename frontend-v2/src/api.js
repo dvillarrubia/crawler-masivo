@@ -69,6 +69,7 @@ export const api = {
       method: "POST", body: JSON.stringify(payload),
     }),
   proposals: (id, params) => request(`/api/jobs/${id}/proposals${qs(params)}`),
+  proposalsExportUrl: (id, params) => `/api/jobs/${id}/proposals/export${qs(params)}`,
   linkTargets: (id, params) => request(`/api/jobs/${id}/link-targets${qs(params)}`),
   bulkDecision: (id, payload) =>
     request(`/api/jobs/${id}/proposals/bulk-decision`, {

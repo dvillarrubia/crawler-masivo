@@ -167,6 +167,34 @@ def test_link_targets_grouped_by_destination(db_session, make_job):
     assert pot_row["n_sugerencias"] == 2
 
 
+def test_export_proposals_csv(db_session, make_job):
+    """Sacar las propuestas 'en duda' (pendientes) a CSV con filtros."""
+    from api.routers.results import _collect_proposals, _proposals_csv_lines
+
+    job, a, b = _scenario(db_session, make_job)
+    items, _c, _a = _collect_proposals(
+        db_session, job.id, None, "pendiente", None, None, None, "prioridad")
+    body = "".join(_proposals_csv_lines(items))
+    lines = [ln for ln in body.splitlines() if ln]
+    assert lines[0].startswith("familia,tipo,url,origen,prioridad,estado")
+    assert len(lines) == 5  # cabecera + 4 pendientes
+    assert "low_word_count" not in body  # el determinista NO aparece
+
+    # el endpoint responde CSV con cabecera de descarga
+    from api.routers.results import export_proposals
+
+    resp = export_proposals(job.id, kind=None, state="pendiente", search=None,
+                            to_contains=None, from_contains=None, db=db_session)
+    assert "text/csv" in resp.media_type
+    assert "propuestas_" in resp.headers["content-disposition"]
+
+    # filtrado: solo enlace → cabecera + 1
+    items2, _c2, _a2 = _collect_proposals(
+        db_session, job.id, "enlace", "pendiente", None, None, None, "prioridad")
+    body2 = "".join(_proposals_csv_lines(items2))
+    assert len([ln for ln in body2.splitlines() if ln]) == 2
+
+
 def test_bulk_decision_ignores_deterministic_and_missing(db_session, make_job):
     from api.routers.review import BulkDecision, BulkItem, bulk_decision
     from shared.models import Issue

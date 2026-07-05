@@ -98,10 +98,20 @@ export default function FirmaView() {
             Nada se aplica solo; cada decisión queda con tu nombre y la fecha.
           </p>
         </div>
-        <span>
-          <label className="kpi-label" style={{ marginRight: 6 }}>Trabajas como</label>
-          <input type="text" style={{ width: 160 }} placeholder="tu nombre"
-            value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
+        <span className="row" style={{ gap: 8 }}>
+          <a href={api.proposalsExportUrl(jobId, {
+            kind: family || undefined, state: state || undefined,
+            search: applied || undefined,
+            to_contains: fromToApplied.to || undefined,
+            from_contains: fromToApplied.from || undefined,
+          })} title="Descarga las propuestas con los filtros actuales (por defecto, las pendientes) para trabajarlas fuera">
+            <button className="secondary">Exportar CSV</button>
+          </a>
+          <span>
+            <label className="kpi-label" style={{ marginRight: 6 }}>Trabajas como</label>
+            <input type="text" style={{ width: 160 }} placeholder="tu nombre"
+              value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
+          </span>
         </span>
       </div>
 

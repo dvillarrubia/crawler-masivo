@@ -1266,11 +1266,28 @@ def list_proposals(
     (semántica/pipeline no ejecutados) — nunca lista vacía silenciosa.
     """
     _get_job_or_404(job_id, db)
+    items, counts, has_any = _collect_proposals(
+        db, job_id, kind, state, search, to_contains, from_contains, order)
+    if not items and not has_any:
+        return {"status": "blocked", "reason": "sin_propuestas",
+                "counts": {}, "items": [], "total": 0, "page": page,
+                "page_size": page_size, "pages": 1}
+    total = len(items)
+    start = (page - 1) * page_size
+    resp = _paginate(items[start:start + page_size], total, page, page_size)
+    resp["status"] = "ok"
+    resp["counts"] = counts
+    return resp
+
+
+def _collect_proposals(db, job_id, kind, state, search, to_contains,
+                       from_contains, order):
+    """Construye la lista filtrada+ordenada de propuestas y sus contadores.
+    Compartido por el listado paginado y el export CSV. Devuelve
+    (items, counts, has_any_proposal)."""
     from shared.models import Issue, LinkSuggestion
 
     items: list[dict] = []
-
-    # -- sugerencias de enlace (LinkSuggestion) --------------------------
     if kind in (None, "enlace"):
         for s in db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id):
             items.append({
@@ -1284,7 +1301,6 @@ def list_proposals(
                 "decided_by": s.decided_by,
             })
 
-    # -- issues firmables (review_status no NULL) ------------------------
     fams = ([kind] if kind in _PROPOSAL_FAMILIES else list(_PROPOSAL_FAMILIES))
     wanted_types = [t for f in fams for t in _PROPOSAL_FAMILIES[f]]
     if kind in (None, *_PROPOSAL_FAMILIES):
@@ -1299,8 +1315,6 @@ def list_proposals(
         ) if url_ids else {}
         for i in iq:
             d = i.details or {}
-            # prioridad: la explícita del informe de entidades, si no las
-            # impresiones (cobertura), si no 0 — nunca un número inventado
             prio = d.get("prioridad")
             if not isinstance(prio, (int, float)):
                 prio = d.get("impressions") or 0
@@ -1316,7 +1330,6 @@ def list_proposals(
                 "decided_by": i.reviewed_by,
             })
 
-    # -- filtros en memoria (conjunto pequeño: propuestas de un job) -----
     if state is not None:
         items = [x for x in items if x["estado"] == state]
     if search:
@@ -1324,7 +1337,6 @@ def list_proposals(
         items = [x for x in items
                  if (x.get("url") or "").lower().find(needle) >= 0
                  or (x.get("source_url") or "").lower().find(needle) >= 0]
-    # destino a potenciar (target) y origen (source) — pensado para SEO
     if to_contains:
         t = to_contains.lower()
         items = [x for x in items if (x.get("url") or "").lower().find(t) >= 0]
@@ -1332,38 +1344,80 @@ def list_proposals(
         f = from_contains.lower()
         items = [x for x in items if (x.get("source_url") or "").lower().find(f) >= 0]
 
-    if not items and not (state or search or kind):
-        # ¿de verdad no hay NADA firmable, o es que no se generó?
-        any_row = (
-            db.query(LinkSuggestion.id).filter(LinkSuggestion.job_id == job_id).first()
-            or db.query(Issue.id).filter(
-                Issue.job_id == job_id, Issue.review_status.isnot(None)).first()
-        )
-        if not any_row:
-            return {"status": "blocked", "reason": "sin_propuestas",
-                    "counts": {}, "items": [], "total": 0, "page": page,
-                    "page_size": page_size, "pages": 1}
+    has_any = bool(
+        db.query(LinkSuggestion.id).filter(LinkSuggestion.job_id == job_id).first()
+        or db.query(Issue.id).filter(
+            Issue.job_id == job_id, Issue.review_status.isnot(None)).first()
+    )
 
     if order == "prioridad":
         items.sort(key=lambda x: (x["estado"] != "pendiente", -x["prioridad"]))
     else:
         items.sort(key=lambda x: (x["estado"], -x["prioridad"]))
 
-    # contadores para las pestañas/badges (sobre el conjunto ya filtrado
-    # por state/search, pero con TODAS las familias)
     counts: dict[str, dict] = {}
     for x in items:
         c = counts.setdefault(x["familia"], {"total": 0, "pendiente": 0})
         c["total"] += 1
         if x["estado"] == "pendiente":
             c["pendiente"] += 1
+    return items, counts, has_any
 
-    total = len(items)
-    start = (page - 1) * page_size
-    resp = _paginate(items[start:start + page_size], total, page, page_size)
-    resp["status"] = "ok"
-    resp["counts"] = counts
-    return resp
+
+@router.get("/proposals/export")
+def export_proposals(
+    job_id: uuid.UUID,
+    kind: str | None = Query(None),
+    state: str | None = Query("pendiente"),  # por defecto, lo "en duda"
+    search: str | None = Query(None),
+    to_contains: str | None = Query(None),
+    from_contains: str | None = Query(None),
+    db: Session = Depends(get_session),
+):
+    """CSV de las propuestas con los filtros aplicados (por defecto las
+    pendientes = "en duda"). Para trabajarlas fuera de la consola."""
+    import csv as _csv
+    import io as _io
+
+    _get_job_or_404(job_id, db)
+    items, _counts, _any = _collect_proposals(
+        db, job_id, kind, state, search, to_contains, from_contains, "prioridad")
+
+    return StreamingResponse(
+        iter(list(_proposals_csv_lines(items))), media_type="text/csv",
+        headers={"Content-Disposition":
+                 f"attachment; filename=propuestas_{job_id}_{state or 'todas'}.csv"},
+    )
+
+
+def _proposals_csv_lines(items):
+    """Genera las líneas CSV (str) de una lista de propuestas. Puro y
+    testeable (sin StreamingResponse de por medio)."""
+    import csv as _csv
+    import io as _io
+    import json as _json
+
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+
+    def _flush():
+        val = buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+        return val
+
+    w.writerow(["familia", "tipo", "url", "origen", "prioridad",
+                "estado", "decidido_por", "detalle"])
+    yield _flush()
+    for x in items:
+        detalle = x["detalle"] if isinstance(x["detalle"], str) else _json.dumps(
+            x["detalle"], ensure_ascii=False, separators=(",", ":"))
+        w.writerow([
+            x["familia"], x.get("issue_type") or x["titulo"],
+            x.get("url") or "", x.get("source_url") or "",
+            round(x["prioridad"], 2), x["estado"],
+            x.get("decided_by") or "", detalle,
+        ])
+        yield _flush()
 
 
 # ---------------------------------------------------------------------------
