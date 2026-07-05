@@ -446,4 +446,3 @@ previous behaviour exactly (regla de oro 3 del plan).
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
 - Server log ingestion (the UI shows it as a blocked source)
-- Structured data rich-result validation

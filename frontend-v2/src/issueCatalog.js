@@ -179,6 +179,10 @@ const DETAIL_RENDERERS = {
   redirect_loop: (d) => `La cadena vuelve sobre sí misma: ${_urls(d.chain, 3)}`,
   canonical_chain: (d) => `Cadena de canonicals: ${_urls(d.chain, 3)}`,
   canonical_loop: (d) => `Bucle de canonicals: ${_urls(d.chain, 3)}`,
+  structured_data_error: (d) =>
+    `${d.schema_type || "Schema"}: ${(d.validation_issues || []).filter((v) => v.level === "error").map((v) => v.message).join("; ") || "faltan campos obligatorios"}`,
+  structured_data_warning: (d) =>
+    `${d.schema_type || "Schema"}: ${(d.validation_issues || []).map((v) => v.message).join("; ") || "faltan campos recomendados"}`,
   hreflang_missing_return: (d) =>
     `Declara «${d.lang}» → ${d.target || d.href}, pero esa página no enlaza de vuelta (falta la etiqueta recíproca)`,
   hreflang_invalid_lang: (d) => `Código de idioma/región no válido: «${d.lang}»`,

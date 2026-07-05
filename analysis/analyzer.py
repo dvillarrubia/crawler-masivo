@@ -783,13 +783,24 @@ class SEOAnalyzer:
     # -- Structured Data ----------------------------------------------------
 
     def analyze_structured_data(self) -> None:
-        """Surface structured-data validation errors and warnings."""
+        """Valida los datos estructurados contra los requisitos de rich
+        result de Google y emite errores/warnings.
+
+        Antes leía `validation_status`/`validation_issues` pero NADIE las
+        rellenaba (siempre NULL), así que estos issues no saltaban nunca.
+        Ahora se calcula la validación aquí (por tipo de schema) sobre el
+        `raw` extraído, se persiste y se emiten los issues con el detalle de
+        qué campos faltan."""
         logger.debug("Analyzing structured data ...")
+
+        from analysis.rich_results import validate_rich_result
 
         stmt = (
             select(
+                StructuredData.id,
                 StructuredData.url_id,
                 StructuredData.schema_type,
+                StructuredData.raw,
                 StructuredData.validation_status,
                 StructuredData.validation_issues,
             )
@@ -798,28 +809,27 @@ class SEOAnalyzer:
         )
         rows = self.session.execute(stmt).all()
 
-        for url_id, schema_type, validation_status, validation_issues in rows:
-            if validation_status == "error":
+        updates: list[dict] = []
+        for sd_id, url_id, schema_type, raw, validation_status, validation_issues in rows:
+            status, issues = validate_rich_result(schema_type, raw)
+            # persistimos lo calculado (idempotente en re-análisis)
+            updates.append({"id": sd_id, "validation_status": status,
+                            "validation_issues": issues})
+
+            if status == "error":
                 self._add_issue(
-                    url_id,
-                    "structured_data_error",
-                    "error",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    url_id, "structured_data_error", "error",
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
-            elif validation_status == "warning":
+            elif status == "warning":
                 self._add_issue(
-                    url_id,
-                    "structured_data_warning",
-                    "warning",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    url_id, "structured_data_warning", "warning",
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
 
+        if updates:
+            self.session.bulk_update_mappings(StructuredData, updates)
+            self.session.flush()
         self._flush_issues()
 
     # -- Indexability --------------------------------------------------------

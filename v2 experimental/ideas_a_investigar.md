@@ -9,6 +9,20 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Validación de rich results (datos estructurados)** (2026-07-06)
+  → `analysis/rich_results.py`: valida el JSON-LD/microdata ya extraído
+  contra los requisitos de resultado enriquecido de Google por tipo de
+  schema (Product, Article/News/Blog, Recipe, FAQPage, HowTo, Breadcrumb,
+  Organization, LocalBusiness+subtipos, Event, JobPosting, Review, Video,
+  Course, SoftwareApplication…). Campos obligatorios que faltan → `error`
+  (no sale el rich result), recomendados → `warning`. `analyze_structured_data`
+  ahora CALCULA y persiste `validation_status`/`validation_issues` (antes
+  siempre NULL → los issues no saltaban nunca) y emite
+  `structured_data_error`/`warning` con el detalle de qué campos faltan
+  (frase legible en el catálogo del frontend). Conservador (presencia de
+  campo, solo tipos con requisitos claros) para no dar falsos positivos.
+  13 tests (suite 337). Retirado de "no existe aún" en CLAUDE.md. Commit: (este).
+
 - ✅ **Semántica más clara: mapa, anillos y drift** (2026-07-06, bandeja)
   → Tres quejas de la bandeja resueltas. **Mapa (UMAP):** reescrito —
   color **por tema** (cluster) con centroides etiquetados, toggle a color
@@ -203,11 +217,8 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
   desde el detalle de una propuesta** (mejoras menores de UX de la bandeja
   de Acciones propuestas).
 
-- 💡 **Validación de rich results de datos estructurados.** Se extrae el
-  JSON-LD/microdata pero no se valida contra los requisitos de resultados
-  enriquecidos de Google (campos obligatorios por tipo de schema).
-  **Candidato siguiente** (misma línea que hreflang: el dato ya se extrae,
-  falta la capa de validación por tipo de schema).
+- ✅ ~~Validación de rich results de datos estructurados~~ → hecho
+  (2026-07-06, ver arriba en Hecho).
 
 - 💡 **Features de plataforma (no de análisis), del `CLAUDE.md`:** CI/CD,
   monitoring (Prometheus/Grafana), integración PageSpeed/CrUX. Fuera del
