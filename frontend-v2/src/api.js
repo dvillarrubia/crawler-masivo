@@ -120,6 +120,12 @@ export const api = {
   diffUrls: (params) => request(`/api/diff/urls${qs(params)}`),
   flapping: (params) => request(`/api/diff/flapping${qs(params)}`),
 
+  // Descubrir propiedades GSC/GA4 desde el JSON de una service account
+  discoverProperties: (credentials_json) =>
+    request("/api/sources/discover", {
+      method: "POST", body: JSON.stringify({ credentials_json }),
+    }),
+
   // Informe de rendimiento AGNÓSTICO a rastreos (serie diaria GSC/GA4)
   metricsReport: (clientId, params) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/metrics/report${qs(params)}`),

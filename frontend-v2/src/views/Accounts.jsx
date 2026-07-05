@@ -28,6 +28,79 @@ export default function AccountsView() {
   );
 }
 
+/* -- Descubrir propiedades desde el JSON pegado (GSC + GA4) ----------------- */
+function DiscoverProperties({ credentials, onPickGsc, onPickGa4 }) {
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const run = async () => {
+    setBusy(true); setErr(null); setRes(null);
+    let parsed;
+    try { parsed = JSON.parse(credentials); }
+    catch { setErr("El JSON de la service account no es válido"); setBusy(false); return; }
+    try { setRes(await api.discoverProperties(parsed)); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ margin: "8px 0" }}>
+      <button type="button" className="secondary" disabled={busy || !credentials}
+        onClick={run}>{busy ? "Consultando a Google…" : "Descubrir propiedades"}</button>
+      {err && <div className="alert" style={{ marginTop: 6 }}>{err}</div>}
+      {res && (
+        <div className="proxy-tag" style={{ marginTop: 8 }}>
+          {res.service_account && <div style={{ marginBottom: 6 }}>Cuenta: <span className="mono">{res.service_account}</span></div>}
+          {/* GSC */}
+          <div style={{ marginBottom: 6 }}>
+            <b>Search Console</b>{" "}
+            {res.gsc.ok
+              ? (res.gsc.properties.length
+                  ? <span>({res.gsc.properties.length})</span>
+                  : <span>— sin propiedades accesibles</span>)
+              : <span style={{ color: "var(--chart-red)" }}>— {res.gsc.error}</span>}
+            {res.gsc.ok && res.gsc.properties.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                {res.gsc.properties.map((p) => (
+                  <button type="button" key={p}
+                    className={onPickGsc ? "" : "secondary"}
+                    style={{ fontSize: 11, padding: "2px 6px", cursor: onPickGsc ? "pointer" : "default" }}
+                    onClick={() => onPickGsc && onPickGsc(p)} title={onPickGsc ? "Usar esta propiedad" : ""}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* GA4 */}
+          <div>
+            <b>Analytics (GA4)</b>{" "}
+            {res.ga4.ok
+              ? (res.ga4.properties.length
+                  ? <span>({res.ga4.properties.length})</span>
+                  : <span>— sin propiedades accesibles</span>)
+              : <span style={{ color: "var(--ink-muted)" }}>— {res.ga4.error}</span>}
+            {res.ga4.ok && res.ga4.properties.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                {res.ga4.properties.map((p) => (
+                  <button type="button" key={p.property_id}
+                    className={onPickGa4 ? "" : "secondary"}
+                    style={{ fontSize: 11, padding: "2px 6px", cursor: onPickGa4 ? "pointer" : "default" }}
+                    onClick={() => onPickGa4 && onPickGa4(p.property_id)}
+                    title={onPickGa4 ? "Usar esta propiedad" : ""}>
+                    {p.display_name} <span className="mono">· {p.property_id.replace("properties/", "")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* -- Cuentas GA4 ------------------------------------------------------------ */
 function Ga4Accounts({ clientId }) {
   const cid = clientId || "_";
@@ -76,17 +149,19 @@ function Ga4Accounts({ clientId }) {
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="cliente-x GA4" />
         </div>
         <div className="field">
-          <label>Property ID</label>
-          <input type="text" className="mono" value={propertyId}
-            onChange={(e) => setPropertyId(e.target.value)} placeholder="properties/123456789" />
-          <div className="hint">El ID de la propiedad GA4 (Admin → Detalles de la propiedad).</div>
-        </div>
-        <div className="field">
           <label>JSON de la service account</label>
           <textarea rows={4} className="mono" value={credentials}
             onChange={(e) => setCredentials(e.target.value)}
             placeholder='{"type": "service_account", ...}' />
           <div className="hint">La service account debe tener rol de lector en la propiedad GA4.</div>
+        </div>
+        {/* Pega el JSON y elige la propiedad de la lista, sin teclear el ID */}
+        <DiscoverProperties credentials={credentials} onPickGa4={setPropertyId} />
+        <div className="field">
+          <label>Property ID {propertyId ? <span className="proxy-tag">· elegido</span> : null}</label>
+          <input type="text" className="mono" value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)} placeholder="properties/123456789 (o elígelo arriba)" />
+          <div className="hint">Se rellena solo al pulsar una propiedad descubierta; también puedes escribirlo.</div>
         </div>
         <button disabled={busy || !name || !propertyId || !credentials} onClick={add}>Añadir cuenta GA4</button>
       </div>
@@ -148,6 +223,8 @@ function GscAccounts() {
             placeholder='{"type": "service_account", ...}' />
           <div className="hint">La cuenta de servicio debe tener acceso a la propiedad en GSC.</div>
         </div>
+        {/* Comprueba qué propiedades (GSC y GA4) ve esta credencial antes de guardar */}
+        <DiscoverProperties credentials={credentials} />
         <button disabled={busy || !name || !credentials} onClick={add}>Añadir cuenta GSC</button>
       </div>
     </div>
@@ -168,6 +245,11 @@ function DailySyncPanel({ clientId }) {
   const configs = useAsync(
     () => (clientId ? api.syncConfigs(clientId) : Promise.resolve([])), [clientId]);
   const [accountId, setAccountId] = useState("");
+  // Propiedades de la cuenta GSC elegida → desplegable en vez de teclear
+  const gscProps = useAsync(
+    () => (source === "gsc" && accountId
+      ? api.gscProperties(accountId).catch(() => null) : Promise.resolve(null)),
+    [source, accountId]);
   const [property, setProperty] = useState("");
   const [byPage, setByPage] = useState(true);
   const [daily, setDaily] = useState(true);
@@ -239,10 +321,16 @@ function DailySyncPanel({ clientId }) {
           <option value="">— cuenta {source === "gsc" ? "GSC" : "GA4"} —</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        {source === "gsc" && (
+        {source === "gsc" && gscProps.data && gscProps.data.properties && gscProps.data.properties.length > 0 ? (
+          <select style={{ minWidth: 260 }} value={property}
+            onChange={(e) => setProperty(e.target.value)}>
+            <option value="">— elige propiedad —</option>
+            {gscProps.data.properties.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        ) : source === "gsc" && (
           <input type="text" style={{ minWidth: 240 }} value={property}
             onChange={(e) => setProperty(e.target.value)}
-            placeholder="https://www.cliente.com/  (o sc-domain:cliente.com)" />
+            placeholder={gscProps.loading ? "cargando propiedades…" : "https://www.cliente.com/  (o sc-domain:cliente.com)"} />
         )}
       </div>
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>

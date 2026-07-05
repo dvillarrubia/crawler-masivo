@@ -9,6 +9,18 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Descubrir propiedades GSC/GA4 al pegar el JSON** (2026-07-05)
+  → Pegas la service account y la app consulta a Google qué propiedades ve
+  de cada fuente (una misma credencial suele tener GSC y GA4). Endpoint
+  `POST /api/sources/discover` (router `sources.py`) intenta ambas por
+  separado → `{gsc:{ok,properties,error}, ga4:{...}}`. UI: componente
+  `DiscoverProperties` en las dos formas de cuenta (botón "Descubrir
+  propiedades"); en GA4 rellena el `property_id` al pulsar una propiedad
+  (sin teclear el ID); en GSC muestra lo accesible. Además, en el panel de
+  sincronización la propiedad GSC pasa a **desplegable** cargado de la
+  cuenta elegida. Degrada con gracia (credencial mala → error por fuente,
+  nunca 500). 2 tests (suite 308). Verificado en vivo. Commit: (este).
+
 - ✅ **Validación de return-tags de hreflang (reciprocidad)** (2026-07-05)
   → `analyze_hreflang` ya no deja `return_tag_ok`/`lang_valid` en NULL:
   resuelve cada href a absoluto (soporta relativos) contra la URL de
