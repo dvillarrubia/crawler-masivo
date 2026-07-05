@@ -68,6 +68,26 @@ def put_client_settings(
     return {"status": "ok"}
 
 
+def _auto_enqueue_entities(db: Session, client_id: str, reason: str) -> None:
+    """Encola el pipeline de entidades del último rastreo completado del
+    cliente (best-effort): guardar el schema o tocar el catálogo debe
+    refrescar el análisis sin pasos manuales."""
+    try:
+        from api.dependencies import get_redis
+        from shared.entities_queue import enqueue_safe
+
+        job = (
+            db.query(Job)
+            .filter(Job.client_id == client_id, Job.status == "completed")
+            .order_by(Job.completed_at.desc())
+            .first()
+        )
+        if job is not None:
+            enqueue_safe(get_redis(), db, job.id, reason=reason)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Extracción de entidades: el usuario rellena un FORMULARIO; el YAML es
 # interno (se genera y valida en el servidor).
@@ -170,6 +190,7 @@ def put_extraction_schema(
     else:
         row.yaml_text = yaml_text
     db.commit()
+    _auto_enqueue_entities(db, client_id, "schema")
     return {
         "status": "ok",
         "resolubles": sorted(schema.resolubles),
@@ -232,6 +253,7 @@ def add_entity_catalog(
                          name=payload.name, entity_type=payload.entity_type,
                          source="feed", is_linked=False))
     db.commit()
+    _auto_enqueue_entities(db, client_id, "catalog")
     return {"entity_id": entity_id}
 
 
@@ -248,6 +270,7 @@ def delete_entity_catalog(
         raise HTTPException(status_code=404, detail="Entrada no encontrada")
     db.delete(row)
     db.commit()
+    _auto_enqueue_entities(db, client_id, "catalog")
 
 
 # ---------------------------------------------------------------------------

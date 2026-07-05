@@ -1080,6 +1080,15 @@ def entities_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
             )),
         ).group_by(Issue.issue_type).all()
     )
+    # Estado del worker residente (cola Redis): queued/running/done/failed
+    pipeline = None
+    try:
+        from api.dependencies import get_redis
+        from shared.entities_queue import get_status
+
+        pipeline = get_status(get_redis(), job_id)
+    except Exception:
+        pipeline = None
     return {
         "client_id": client_id,
         "has_schema": has_schema,
@@ -1089,6 +1098,7 @@ def entities_status(job_id: uuid.UUID, db: Session = Depends(get_session)):
         "resolved": {k: v for k, v in resolved},
         "catalog_entries": catalog,
         "issues": issue_counts,
+        "pipeline": pipeline,
     }
 
 

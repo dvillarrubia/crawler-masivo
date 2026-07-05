@@ -417,6 +417,17 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
             pass  # Query data is optional, don't fail the whole fetch
 
         db.commit()
+
+        # GLiNER2: con GSC nuevo, re-cruzar entidades contra las queries
+        # (best-effort; lo procesa el worker residente del perfil gliner).
+        try:
+            from api.dependencies import get_redis
+            from shared.entities_queue import enqueue_safe
+
+            enqueue_safe(get_redis(), db, job_id, reason="gsc")
+        except Exception:
+            pass
+
         return {
             "matched": matched,
             "unmatched": unmatched,

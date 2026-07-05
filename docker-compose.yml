@@ -93,8 +93,13 @@ services:
       retries: 12
 
   # ---------- Entidades GLiNER2 (perfil opcional: torch queda fuera de
-  # las imágenes api/crawler). Uso:
+  # las imágenes api/crawler). Worker RESIDENTE: consume la cola Redis
+  # `entities:pending` — el pipeline se encola solo cuando entran datos
+  # (crawl completado, import GSC, schema guardado, catálogo tocado).
   #   docker compose --profile gliner build gliner
+  #   docker compose --profile gliner up -d          # lo deja corriendo
+  # (o añade COMPOSE_PROFILES=gliner al .env y el `up -d` normal lo incluye).
+  # Ejecución manual puntual, si hace falta:
   #   docker compose --profile gliner run --rm gliner \
   #     python -m analysis.entities.run --job-id <uuid>
   gliner:
@@ -102,14 +107,18 @@ services:
       context: .
       dockerfile: Dockerfile.gliner
     profiles: ["gliner"]
+    command: python -m analysis.entities.worker
     env_file: .env
     environment:
       - PYTHONPATH=/app
     volumes:
       - gliner_models:/root/.cache/huggingface
       - ./informes:/app/informes
+    restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ---------- Analysis (runs inside crawler, but can also be standalone) ----------

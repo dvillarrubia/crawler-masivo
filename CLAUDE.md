@@ -396,10 +396,18 @@ The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
   (TTL 600s, max 4 jobs, read-only memo); `fresh: true` bypasses.
 - **Entity layer (GLiNER2 POC):** `analysis/entities/` — per-client
   `schema.yaml` (table `client_extraction_schemas`, edited in Config
-  view; examples in `config/entities/`), batch pipeline per job
-  (`docker compose --profile gliner run gliner python -m
-  analysis.entities.run --job-id <uuid>`), tables `gliner_*` +
-  `entity_catalog` (768d per Seontology contract, HNSW, model_version).
+  view; examples in `config/entities/`). Event-driven: a resident
+  worker (`analysis/entities/worker.py`, service `gliner`, started with
+  `docker compose --profile gliner up -d`) consumes the Redis queue
+  `entities:pending` (`shared/entities_queue.py`); jobs are auto-enqueued
+  on crawl completion, GSC import, schema save and catalog edits, with
+  data-driven step selection (a GSC import doesn't re-extract pages; a
+  catalog edit doesn't load the model). Status surfaced in
+  `GET /api/jobs/{id}/entities/status` (`pipeline` field) and the Config
+  view. Manual one-off runs still possible via `docker compose --profile
+  gliner run gliner python -m analysis.entities.run --job-id <uuid>`.
+  Tables `gliner_*` + `entity_catalog` (768d per Seontology contract,
+  HNSW, model_version).
   Emits `entity_query_mismatch`/`entity_coverage_gap` (deterministic)
   and `entity_cannibalization`/`funnel_mismatch` (signable). Docs:
   `v2 experimental/INVESTIGACION.md` + `brief_gliner2_crawler.md`.

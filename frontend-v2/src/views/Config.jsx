@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
@@ -529,14 +529,45 @@ function EntityStatusPanel() {
       </div>
     );
   }
-  const q = useAsync(() => api.entitiesStatus(jobId), [jobId]);
-  if (q.loading) return <Spinner />;
+  return <EntityStatusInner jobId={jobId} />;
+}
+
+const PIPELINE_LABELS = {
+  queued: "En cola",
+  running: "Ejecutándose",
+  done: "Completado",
+  partial: "Completado con avisos",
+  failed: "Error",
+};
+
+function EntityStatusInner({ jobId }) {
+  const [tick, setTick] = useState(0);
+  const q = useAsync(() => api.entitiesStatus(jobId), [jobId, tick]);
+  const state = q.data?.pipeline?.state;
+  // Mientras hay una pasada en cola o en marcha, refrescar solo.
+  useEffect(() => {
+    if (state !== "queued" && state !== "running") return;
+    const t = setTimeout(() => setTick((x) => x + 1), 8000);
+    return () => clearTimeout(t);
+  }, [state, tick]);
+  if (q.loading && !q.data) return <Spinner />;
   if (q.error) return <ErrorBox error={q.error} />;
   const d = q.data;
+  const p = d.pipeline;
   const resolved = Object.entries(d.resolved || {}).map(([k, v]) => `${v} por ${k}`).join(" · ");
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <h3>Pipeline de entidades — estado del run</h3>
+      {p && (
+        <p className="proxy-tag">
+          {PIPELINE_LABELS[p.state] || p.state}
+          {p.steps ? ` · pasos: ${p.steps.join(", ")}` : ""}
+          {p.reasons ? ` · disparado por: ${p.reasons.join(", ")}` : p.reason ? ` · disparado por: ${p.reason}` : ""}
+          {p.seconds != null ? ` · ${p.seconds}s` : ""}
+          {p.state === "failed" && p.error ? ` — ${p.error}` : ""}
+          {(p.notes || []).length > 0 ? ` — ${p.notes.join("; ")}` : ""}
+        </p>
+      )}
       <div className="facts">
         <div className="fact"><div className="k">Definición</div><div className="v">{d.has_schema ? "✓" : "falta"}</div></div>
         <div className="fact"><div className="k">Menciones</div><div className="v num">{fmt(d.mentions)}</div></div>
@@ -551,9 +582,11 @@ function EntityStatusPanel() {
           {" "}— revísalas en <a href="#/incidencias">Incidencias</a> y <a href="#/firma">Firma</a>.
         </p>
       )}
-      {d.mentions === 0 && (
-        <p className="proxy-tag mono" style={{ fontSize: 10.5 }}>
-          docker compose --profile gliner run --rm gliner python -m analysis.entities.run --job-id {jobId}
+      {d.mentions === 0 && !p && (
+        <p className="proxy-tag">
+          Se ejecuta solo cuando entran datos (rastreo completado, import de GSC,
+          definición guardada) si el worker de entidades está levantado:
+          <span className="mono" style={{ fontSize: 10.5 }}> docker compose --profile gliner up -d</span>
         </p>
       )}
     </div>

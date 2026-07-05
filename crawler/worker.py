@@ -212,6 +212,7 @@ def _run_job(job_id: str) -> None:
     # -- Trigger analysis (best-effort) --
     if final_status == "completed":
         _trigger_analysis(job_id)
+        _trigger_entities(job_id)
 
 
 def _trigger_analysis(job_id: str) -> None:
@@ -229,6 +230,30 @@ def _trigger_analysis(job_id: str) -> None:
         )
     except Exception:
         logger.exception("Analysis failed for job %s", job_id)
+
+
+def _trigger_entities(job_id: str) -> None:
+    """Encola el pipeline de entidades GLiNER2 (best-effort).
+
+    Solo encola si el cliente del job tiene schema de extracción; lo
+    procesa el worker residente del contenedor ``gliner``. Sin ese
+    worker levantado el encolado queda pendiente en Redis, y nada de
+    esto puede tumbar el cierre del crawl.
+    """
+    try:
+        from shared.database import SessionLocal
+        from shared.entities_queue import connect, enqueue_safe
+
+        session = SessionLocal()
+        try:
+            out = enqueue_safe(connect(REDIS_URL), session, job_id, reason="crawl")
+        finally:
+            session.close()
+        if not out.get("enqueued"):
+            logger.info("Entities pipeline not queued for %s: %s",
+                        job_id, out.get("why"))
+    except Exception:
+        logger.exception("Failed to enqueue entities pipeline for job %s", job_id)
 
 
 # ---------------------------------------------------------------------------
