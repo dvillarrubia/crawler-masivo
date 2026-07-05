@@ -1224,6 +1224,231 @@ def list_link_suggestions(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/proposals  --  bandeja unificada de acciones
+# propuestas (issues firmables + sugerencias de enlace) con filtros. Es la
+# "zona de trabajo": una sola lista filtrable en vez de 5 colas separadas.
+# ---------------------------------------------------------------------------
+
+# Familias de propuesta → los issue_type firmables que agrupa cada una.
+_PROPOSAL_FAMILIES: dict[str, list[str]] = {
+    "canibalizacion": ["semantic_cannibalization"],
+    "cobertura": ["passage_gap", "buried_passage", "orphan_chunk"],
+    "anclas": ["generic_anchor", "anchor_target_mismatch"],
+    "entidades": ["entity_cannibalization", "funnel_mismatch"],
+}
+_ISSUE_FAMILY_OF = {
+    t: fam for fam, types in _PROPOSAL_FAMILIES.items() for t in types
+}
+# Estado normalizado (issues usan 'signed', sugerencias 'accepted').
+_NORM_STATE = {"signed": "aceptada", "accepted": "aceptada",
+               "rejected": "rechazada", "pending": "pendiente"}
+
+
+@router.get("/proposals")
+def list_proposals(
+    job_id: uuid.UUID,
+    kind: str | None = Query(None, pattern="^(enlace|canibalizacion|cobertura|anclas|entidades)$"),
+    state: str | None = Query(None, pattern="^(pendiente|aceptada|rechazada)$"),
+    search: str | None = Query(None),
+    # Filtros pensados como un SEO: en enlazado interno importa el ORIGEN
+    # y el DESTINO por separado ("desde el blog", "hacia /servicios").
+    to_contains: str | None = Query(None),    # URL destino a potenciar
+    from_contains: str | None = Query(None),  # sección/URL de origen
+    order: str = Query("prioridad", pattern="^(prioridad|estado)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """Todas las propuestas accionables del job, normalizadas y filtrables.
+
+    Cada item: {kind_row ('issue'|'suggestion'), id, familia, titulo, url,
+    detalle, prioridad, estado}. Blocked explícito si no hay ninguna
+    (semántica/pipeline no ejecutados) — nunca lista vacía silenciosa.
+    """
+    _get_job_or_404(job_id, db)
+    from shared.models import Issue, LinkSuggestion
+
+    items: list[dict] = []
+
+    # -- sugerencias de enlace (LinkSuggestion) --------------------------
+    if kind in (None, "enlace"):
+        for s in db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id):
+            items.append({
+                "kind_row": "suggestion", "id": s.id, "familia": "enlace",
+                "titulo": "Enlace interno propuesto",
+                "url": s.target_url, "source_url": s.source_url,
+                "detalle": (f"desde {s.source_url} · sim {round(s.cosine_similarity or 0, 3)}"
+                            + (f" · anchor «{s.proposed_anchor}»" if s.proposed_anchor else "")),
+                "prioridad": round((s.score or 0) * 1000, 2),
+                "estado": _NORM_STATE.get(s.status, s.status),
+                "decided_by": s.decided_by,
+            })
+
+    # -- issues firmables (review_status no NULL) ------------------------
+    fams = ([kind] if kind in _PROPOSAL_FAMILIES else list(_PROPOSAL_FAMILIES))
+    wanted_types = [t for f in fams for t in _PROPOSAL_FAMILIES[f]]
+    if kind in (None, *_PROPOSAL_FAMILIES):
+        iq = db.query(Issue).filter(
+            Issue.job_id == job_id,
+            Issue.review_status.isnot(None),
+            Issue.issue_type.in_(wanted_types),
+        )
+        url_ids = {i.url_id for i in iq if i.url_id}
+        url_by_id = dict(
+            db.query(Url.id, Url.url).filter(Url.id.in_(url_ids)).all()
+        ) if url_ids else {}
+        for i in iq:
+            d = i.details or {}
+            # prioridad: la explícita del informe de entidades, si no las
+            # impresiones (cobertura), si no 0 — nunca un número inventado
+            prio = d.get("prioridad")
+            if not isinstance(prio, (int, float)):
+                prio = d.get("impressions") or 0
+            items.append({
+                "kind_row": "issue", "id": i.id,
+                "familia": _ISSUE_FAMILY_OF.get(i.issue_type, "otros"),
+                "issue_type": i.issue_type,
+                "titulo": i.issue_type,
+                "url": url_by_id.get(i.url_id),
+                "detalle": d,
+                "prioridad": float(prio),
+                "estado": _NORM_STATE.get(i.review_status, i.review_status),
+                "decided_by": i.reviewed_by,
+            })
+
+    # -- filtros en memoria (conjunto pequeño: propuestas de un job) -----
+    if state is not None:
+        items = [x for x in items if x["estado"] == state]
+    if search:
+        needle = search.lower()
+        items = [x for x in items
+                 if (x.get("url") or "").lower().find(needle) >= 0
+                 or (x.get("source_url") or "").lower().find(needle) >= 0]
+    # destino a potenciar (target) y origen (source) — pensado para SEO
+    if to_contains:
+        t = to_contains.lower()
+        items = [x for x in items if (x.get("url") or "").lower().find(t) >= 0]
+    if from_contains:
+        f = from_contains.lower()
+        items = [x for x in items if (x.get("source_url") or "").lower().find(f) >= 0]
+
+    if not items and not (state or search or kind):
+        # ¿de verdad no hay NADA firmable, o es que no se generó?
+        any_row = (
+            db.query(LinkSuggestion.id).filter(LinkSuggestion.job_id == job_id).first()
+            or db.query(Issue.id).filter(
+                Issue.job_id == job_id, Issue.review_status.isnot(None)).first()
+        )
+        if not any_row:
+            return {"status": "blocked", "reason": "sin_propuestas",
+                    "counts": {}, "items": [], "total": 0, "page": page,
+                    "page_size": page_size, "pages": 1}
+
+    if order == "prioridad":
+        items.sort(key=lambda x: (x["estado"] != "pendiente", -x["prioridad"]))
+    else:
+        items.sort(key=lambda x: (x["estado"], -x["prioridad"]))
+
+    # contadores para las pestañas/badges (sobre el conjunto ya filtrado
+    # por state/search, pero con TODAS las familias)
+    counts: dict[str, dict] = {}
+    for x in items:
+        c = counts.setdefault(x["familia"], {"total": 0, "pendiente": 0})
+        c["total"] += 1
+        if x["estado"] == "pendiente":
+            c["pendiente"] += 1
+
+    total = len(items)
+    start = (page - 1) * page_size
+    resp = _paginate(items[start:start + page_size], total, page, page_size)
+    resp["status"] = "ok"
+    resp["counts"] = counts
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/link-targets  --  "URLs a potenciar": sugerencias
+# de enlace AGRUPADAS por destino, como piensa un SEO ("¿qué páginas puedo
+# reforzar y con cuántos enlaces internos?").
+# ---------------------------------------------------------------------------
+@router.get("/link-targets")
+def link_targets(
+    job_id: uuid.UUID,
+    to_contains: str | None = Query(None),
+    from_contains: str | None = Query(None),
+    only_pending: bool = Query(True),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_session),
+):
+    """Cada fila = una URL destino con TODAS sus sugerencias de enlace
+    entrante pendientes: cuántas, su PageRank actual (margen de mejora),
+    los anchors propuestos y de qué orígenes vendrían. Ordenado por número
+    de enlaces propuestos — las que más se reforzarían, primero."""
+    _get_job_or_404(job_id, db)
+    from collections import defaultdict
+
+    from shared.models import LinkSuggestion
+
+    q = db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id)
+    if only_pending:
+        q = q.filter(LinkSuggestion.status == "pending")
+    if to_contains:
+        q = q.filter(LinkSuggestion.target_url.ilike(f"%{to_contains}%"))
+    if from_contains:
+        q = q.filter(LinkSuggestion.source_url.ilike(f"%{from_contains}%"))
+    rows = q.all()
+    if not rows:
+        has_any = db.query(LinkSuggestion.id).filter(
+            LinkSuggestion.job_id == job_id).first()
+        if not has_any:
+            return {"status": "blocked", "reason": "sin_sugerencias",
+                    "items": [], "total": 0, "page": page, "page_size": page_size,
+                    "pages": 1}
+
+    # PageRank actual de cada destino (margen de mejora)
+    hashes = {r.target_url_hash for r in rows}
+    pr_by_hash = dict(
+        db.query(Url.url_hash, Url.pagerank)
+        .filter(Url.job_id == job_id, Url.url_hash.in_(hashes)).all()
+    ) if hashes else {}
+
+    grouped: dict[str, dict] = defaultdict(
+        lambda: {"suggestion_ids": [], "sources": [], "anchors": set(), "best_score": 0.0})
+    for r in rows:
+        g = grouped[r.target_url]
+        g["target_url_hash"] = r.target_url_hash
+        g["suggestion_ids"].append(r.id)
+        if len(g["sources"]) < 8:
+            g["sources"].append(r.source_url)
+        if r.proposed_anchor:
+            g["anchors"].add(r.proposed_anchor)
+        g["best_score"] = max(g["best_score"], r.score or 0.0)
+
+    items = [
+        {
+            "target_url": url,
+            "n_sugerencias": len(g["suggestion_ids"]),
+            "suggestion_ids": g["suggestion_ids"],
+            "pagerank_actual": pr_by_hash.get(g["target_url_hash"]),
+            "best_score": round(g["best_score"], 4),
+            "anchors_propuestos": sorted(g["anchors"])[:5],
+            "origenes": g["sources"],
+        }
+        for url, g in grouped.items()
+    ]
+    # más enlaces propuestos primero; a igualdad, menor pagerank actual
+    # (más margen de mejora) antes
+    items.sort(key=lambda x: (-x["n_sugerencias"], x["pagerank_actual"] or 0))
+
+    total = len(items)
+    start = (page - 1) * page_size
+    resp = _paginate(items[start:start + page_size], total, page, page_size)
+    resp["status"] = "ok"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/striking-distance  --  linking work queue (T9)
 # ---------------------------------------------------------------------------
 @router.get("/striking-distance")

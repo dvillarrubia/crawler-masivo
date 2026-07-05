@@ -40,7 +40,7 @@ const NAV = [
   { group: "Análisis", items: [
     ["inrank", "Enlazado · Inrank"],
     ["semantica", "Semántica"],
-    ["firma", "Cola de firma"],
+    ["firma", "Acciones propuestas"],
     ["logs", "Logs", "blocked"],
   ]},
   { group: "Ajustes", items: [

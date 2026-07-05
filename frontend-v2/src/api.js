@@ -68,6 +68,12 @@ export const api = {
     request(`/api/issues/${iid}/review`, {
       method: "POST", body: JSON.stringify(payload),
     }),
+  proposals: (id, params) => request(`/api/jobs/${id}/proposals${qs(params)}`),
+  linkTargets: (id, params) => request(`/api/jobs/${id}/link-targets${qs(params)}`),
+  bulkDecision: (id, payload) =>
+    request(`/api/jobs/${id}/proposals/bulk-decision`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
   pagerankDelta: (id, params) => request(`/api/jobs/${id}/pagerank-delta${qs(params)}`),
   sectionFlows: (id) => request(`/api/jobs/${id}/section-flows`),
   archEdges: (id, params) => request(`/api/jobs/${id}/arch-edges${qs(params)}`),

@@ -18,6 +18,58 @@ from shared.models import Issue, LinkSuggestion
 router = APIRouter(prefix="/api", tags=["review"])
 
 
+# ---------------------------------------------------------------------------
+# Decisión POR LOTES — la zona de trabajo necesita firmar/rechazar en masa
+# ---------------------------------------------------------------------------
+class BulkItem(BaseModel):
+    kind_row: str = Field(..., pattern="^(issue|suggestion)$")
+    id: int
+
+
+class BulkDecision(BaseModel):
+    decision: str = Field(..., pattern="^(aceptar|rechazar)$")
+    decided_by: str = Field(..., min_length=1, max_length=256)
+    items: list[BulkItem] = Field(..., min_length=1, max_length=1000)
+
+
+@router.post("/jobs/{job_id}/proposals/bulk-decision")
+def bulk_decision(job_id, payload: BulkDecision, db: Session = Depends(get_session)):
+    """Aplica la misma decisión a muchas propuestas de golpe. Mapea el
+    verbo neutro (aceptar/rechazar) a los estados de cada tipo: los issues
+    firmables usan 'signed'/'rejected'; las sugerencias 'accepted'/'rejected'.
+    Salta en silencio lo que no exista o no sea firmable, y devuelve el
+    recuento aplicado (nunca 500 por un id suelto malo)."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    issue_state = "signed" if payload.decision == "aceptar" else "rejected"
+    sugg_state = "accepted" if payload.decision == "aceptar" else "rejected"
+
+    issue_ids = [it.id for it in payload.items if it.kind_row == "issue"]
+    sugg_ids = [it.id for it in payload.items if it.kind_row == "suggestion"]
+
+    applied = 0
+    if issue_ids:
+        for i in db.query(Issue).filter(
+            Issue.job_id == job_id, Issue.id.in_(issue_ids),
+            Issue.review_status.isnot(None),  # solo firmables
+        ):
+            i.review_status = issue_state
+            i.reviewed_by = payload.decided_by
+            i.reviewed_at = now
+            applied += 1
+    if sugg_ids:
+        for s in db.query(LinkSuggestion).filter(
+            LinkSuggestion.job_id == job_id, LinkSuggestion.id.in_(sugg_ids),
+        ):
+            s.status = sugg_state
+            s.decided_by = payload.decided_by
+            s.decided_at = now
+            applied += 1
+    db.commit()
+    return {"applied": applied, "requested": len(payload.items)}
+
+
 class SuggestionDecision(BaseModel):
     status: str = Field(..., pattern="^(accepted|rejected|pending)$")
     decided_by: str = Field(..., min_length=1, max_length=256)
