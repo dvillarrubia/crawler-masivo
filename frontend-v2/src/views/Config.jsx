@@ -5,36 +5,62 @@ import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
 import { Blocked, ErrorBox, Spinner, fmt } from "../ui.jsx";
 
-/** Configuración del proyecto: segmentos con preview, watchlist,
- *  umbrales sugeridos y estado de fuentes. */
+/** Configurador del cliente, por pestañas y explicado para alguien que
+ *  no sabe de SEO. Se define una vez y se aplica a cada rastreo nuevo. */
+const CONFIG_TABS = [
+  ["cuentas", "Cuentas y fuentes",
+    "De dónde saca datos este proyecto: la cuenta de Google que paga los análisis y de qué propiedad de Search Console vienen los clics. Empieza por aquí — sin cuentas, buena parte del análisis no tiene con qué trabajar."],
+  ["estructura", "Estructura del sitio",
+    "Trocea el sitio en secciones (blog, producto, servicios…) para poder filtrar cualquier vista por ellas, y marca las páginas importantes que quieres vigilar en cada rastreo."],
+  ["entidades", "Entidades",
+    "Enseña al análisis qué cosas del negocio buscar en las páginas y en las búsquedas (productos, servicios, categorías…). Es lo que alimenta las propuestas de canibalización y cobertura por entidad."],
+  ["umbrales", "Umbrales",
+    "A partir de qué valores el análisis marca cada problema. Los valores por defecto siguen las prácticas habituales; ajústalos solo si sabes lo que haces."],
+];
+
 export default function ConfigView() {
   const { clientId } = useCtx();
+  const [tab, setTab] = useState("cuentas");
   if (!clientId) {
     return <Blocked title="Configuración de proyecto"
-      reason="Los segmentos, la watchlist y los umbrales viven a nivel de proyecto. Selecciona uno en la barra superior." />;
+      reason="Todo lo de aquí vive a nivel de PROYECTO (cliente): cuentas, secciones, entidades y umbrales. Selecciona un proyecto en la barra superior." />;
   }
+  const intro = (CONFIG_TABS.find(([k]) => k === tab) || CONFIG_TABS[0])[2];
   return (
     <div>
       <h1 className="page-title">Configuración · {clientId}</h1>
       <p className="page-sub">
-        El configurador del cliente: se define una vez y se aplica a cada rastreo nuevo.
-        Cuentas y propiedad, segmentos, páginas vigiladas, y la capa de entidades
-        (qué extraer y su catálogo).
+        El configurador del proyecto: se define una vez y se aplica a cada rastreo nuevo.
       </p>
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
-        <div>
+      <div className="toolbar" style={{ flexWrap: "wrap" }}>
+        {CONFIG_TABS.map(([k, label]) => (
+          <button key={k} className={tab === k ? "" : "secondary"} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+      <div className="card muted" style={{ marginBottom: 12 }}>{intro}</div>
+
+      {tab === "cuentas" && (
+        <>
           <ClientAccountsPanel clientId={clientId} />
+          <SourcesPanel />
+        </>
+      )}
+      {tab === "estructura" && (
+        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
           <SegmentsPanel clientId={clientId} />
           <WatchlistPanel clientId={clientId} />
         </div>
-        <div>
+      )}
+      {tab === "entidades" && (
+        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
           <ExtractionSchemaPanel clientId={clientId} />
-          <CatalogPanel clientId={clientId} />
-          <EntityStatusPanel />
-          <ThresholdsPanel clientId={clientId} />
-          <SourcesPanel />
+          <div>
+            <CatalogPanel clientId={clientId} />
+            <EntityStatusPanel />
+          </div>
         </div>
-      </div>
+      )}
+      {tab === "umbrales" && <ThresholdsPanel clientId={clientId} />}
     </div>
   );
 }
