@@ -120,6 +120,30 @@ export const api = {
   diffUrls: (params) => request(`/api/diff/urls${qs(params)}`),
   flapping: (params) => request(`/api/diff/flapping${qs(params)}`),
 
+  // Informe de rendimiento AGNÓSTICO a rastreos (serie diaria GSC/GA4)
+  metricsReport: (clientId, params) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/report${qs(params)}`),
+  metricsCoverage: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/coverage`),
+  syncGscDaily: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-gsc`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  syncGa4Daily: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/sync-ga4`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  ga4Accounts: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/ga4-accounts`),
+  addGa4Account: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/ga4-accounts`, {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+  deleteGa4Account: (clientId, id) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/metrics/ga4-accounts/${id}`, {
+      method: "DELETE",
+    }),
+
   performanceTimeline: (clientId, params) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/timeline${qs(params)}`),
   performanceSummary: (clientId, params) =>

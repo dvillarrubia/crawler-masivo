@@ -9,6 +9,22 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Informe de rendimiento AGNÓSTICO a los rastreos (por rangos de
+  fecha) + GA4** (2026-07-05) → El eje deja de ser el crawl y pasa a ser la
+  FECHA. Serie **diaria real** de Search Console (dimensión `date`, y
+  `date+page` para el detalle por URL) y de **GA4** (sesiones, usuarios,
+  conversiones, ingresos por canal), ingerida a nivel de propiedad/cliente
+  e independiente de cuándo se rastreó. Tablas nuevas `gsc_daily`,
+  `ga4_daily`, `ga4_accounts`. Router `api/routers/metrics.py`: cuentas GA4
+  (CRUD), sincronización por rango (idempotente, reemplaza el rango),
+  cobertura, e **informe por rangos** (agrupa día/semana/mes y compara con
+  el periodo anterior de la misma duración). Vista **Rendimiento → Por
+  fechas** (presets 7/28/90 días + rango personalizado, GSC/GA4, scope
+  watchlist) y panel de **sincronización de histórico** en Cuentas y
+  fuentes. Sin datos → `blocked` con motivo, nunca ceros falsos. 9 tests
+  (suite 295). GA4 con import perezoso: la API arranca sin las libs; solo
+  la sincronización GA4 las exige. Commit: (este).
+
 - ✅ **Reworkear la "Cola de firma" + el nombre nefasto** (2026-07-05)
   → Renombrada a **"Acciones propuestas"**. Zona de trabajo real: bandeja
   unificada de las 5 familias, filtros (estado, búsqueda), selección

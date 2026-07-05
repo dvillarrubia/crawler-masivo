@@ -80,6 +80,52 @@ def fetch_gsc_data(
     )
 
 
+def fetch_gsc_daily(
+    service_account_json: dict,
+    property_url: str,
+    start_date: str,
+    end_date: str,
+    by_page: bool = False,
+) -> pd.DataFrame:
+    """Serie DIARIA (agnóstica a rastreos) para un rango de fechas.
+
+    Dimensión ``date`` (y ``page`` si ``by_page``): una fila por día (o
+    por día×página). Es la base del informe por rangos — a diferencia de
+    ``fetch_gsc_data``, que agrega todo el periodo sin fecha.
+    Devuelve columnas: date[, url], clicks, impressions, position.
+    """
+    service = _build_service(service_account_json)
+    dims = ["date", "page"] if by_page else ["date"]
+    body = {
+        "startDate": start_date, "endDate": end_date,
+        "dimensions": dims, "rowLimit": 25000, "type": "web",
+    }
+    rows: list[dict] = []
+    start_row = 0
+    while True:
+        body["startRow"] = start_row
+        resp = service.searchanalytics().query(siteUrl=property_url, body=body).execute()
+        batch = resp.get("rows", [])
+        if not batch:
+            break
+        for row in batch:
+            rec = {
+                "date": row["keys"][0],
+                "clicks": row.get("clicks", 0),
+                "impressions": row.get("impressions", 0),
+                "position": round(row.get("position", 0), 2),
+            }
+            if by_page:
+                rec["url"] = row["keys"][1]
+            rows.append(rec)
+        start_row += len(batch)
+        if len(batch) < 25000:
+            break
+    cols = (["date", "url", "clicks", "impressions", "position"] if by_page
+            else ["date", "clicks", "impressions", "position"])
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=cols)
+
+
 def fetch_gsc_query_page_data(
     service_account_json: dict,
     property_url: str,

@@ -380,6 +380,14 @@ The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
 - **Business layer:** GSC rows keep unmatched URLs (T9/D2); semantic
   chunks persisted (T11, `semantic_chunks` + HNSW); signable issues and
   link suggestions (T10, `review_status`); GEO raw-vs-rendered (T15).
+- **Performance / date-range report:** per-crawl series in
+  `api/routers/performance.py` (one point per run); crawl-AGNOSTIC daily
+  series in `api/routers/metrics.py` — `gsc_daily`/`ga4_daily` tables
+  (property/client level, real `date` dimension), GA4 accounts + connector
+  (`POC_centro_semantico/src/ga4.py`, lazy import), range report grouping
+  by day/week/month with previous-period comparison. UI: Rendimiento view
+  (Por rastreos / Por fechas) + daily sync panel in Cuentas y fuentes. GA4
+  libs (`google-analytics-data/admin`) only needed to sync GA4.
 - **Query→passage coverage (T19):** `analysis/query_coverage.py` +
   `POST/GET /api/jobs/{id}/semantic/query-coverage`. Embeds GSC queries
   at runtime (`embed_queries`, RETRIEVAL_QUERY), crosses them against

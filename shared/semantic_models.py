@@ -212,6 +212,67 @@ class GscJobData(Base):
 
 
 # ---------------------------------------------------------------------------
+# Serie temporal DIARIA — agnóstica a los rastreos. La foto de rendimiento
+# por rangos de fecha (no por crawl). Ingerida a nivel de propiedad/cliente.
+# ---------------------------------------------------------------------------
+class GscDaily(Base):
+    """Una fila por (propiedad, día) — y opcionalmente por URL. url_hash
+    NULL = agregado de toda la propiedad ese día; con url_hash = por página
+    (para seguir URLs vigiladas en el tiempo)."""
+
+    __tablename__ = "gsc_daily"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    client_id = Column(String(128), nullable=False)
+    property = Column(String(512), nullable=False)
+    date = Column(DateTime(timezone=True), nullable=False)   # día (00:00 UTC)
+    url = Column(Text, nullable=True)
+    url_hash = Column(String(64), nullable=True)             # NULL = propiedad
+    clicks = Column(Integer, default=0)
+    impressions = Column(Integer, default=0)
+    position = Column(Float, nullable=True)
+
+    __table_args__ = (
+        Index("ix_gsc_daily_client_date", "client_id", "date"),
+        Index("ix_gsc_daily_client_hash_date", "client_id", "url_hash", "date"),
+    )
+
+
+class Ga4Account(Base):
+    """Cuenta GA4: property_id + credenciales de service account (misma
+    convención que GscAccount)."""
+
+    __tablename__ = "ga4_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name = Column(String(256), nullable=False)
+    property_id = Column(String(64), nullable=False)         # ej. "properties/123456"
+    credentials_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class Ga4Daily(Base):
+    """Una fila por (propiedad GA4, día, canal). Sesiones, usuarios,
+    conversiones e ingresos — el lado de negocio que GSC no ve."""
+
+    __tablename__ = "ga4_daily"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    client_id = Column(String(128), nullable=False)
+    property_id = Column(String(64), nullable=False)
+    date = Column(DateTime(timezone=True), nullable=False)
+    channel = Column(String(64), nullable=True)              # NULL = total del día
+    sessions = Column(Integer, default=0)
+    active_users = Column(Integer, default=0)
+    conversions = Column(Float, default=0.0)
+    revenue = Column(Float, default=0.0)
+
+    __table_args__ = (
+        Index("ix_ga4_daily_client_date", "client_id", "date"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # GSC Query-Page Data (per-query per-page GSC metrics)
 # ---------------------------------------------------------------------------
 class GscQueryData(Base):

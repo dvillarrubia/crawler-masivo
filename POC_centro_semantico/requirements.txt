@@ -10,3 +10,5 @@ networkx>=3.2.0
 pgvector>=0.3.0
 google-auth>=2.29.0
 google-api-python-client>=2.120.0
+google-analytics-data>=0.18.0
+google-analytics-admin>=0.22.0

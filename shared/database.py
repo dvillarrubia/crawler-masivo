@@ -128,7 +128,7 @@ def init_db():
     from shared.semantic_models import (  # noqa: F401 – force semantic table registration
         GscAccount, SemanticAnalysis, SemanticPage,
         SemanticCannibalization, GscJobData, SemanticChunk,
-        QueryEmbedding,
+        QueryEmbedding, GscDaily, Ga4Account, Ga4Daily,
     )
     from shared.entity_models import (  # noqa: F401 – capa de entidades GLiNER2
         ClientExtractionSchema, ClientSettings, EntityCatalog,
