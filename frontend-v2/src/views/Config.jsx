@@ -393,6 +393,10 @@ function ExtractionSchemaPanel({ clientId }) {
   const [msg, setMsg] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Proponer con IA
+  const [hint, setHint] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState(null);
 
   const parsed = q.data && q.data.parsed;
   const form = draft || (parsed ? {
@@ -423,6 +427,27 @@ function ExtractionSchemaPanel({ clientId }) {
     setBusy(false);
   };
 
+  // Pide al LLM una propuesta y la vuelca en el formulario (sin guardar).
+  const suggest = async () => {
+    setSuggesting(true); setError(null); setMsg(null); setSuggestNote(null);
+    try {
+      const s = await api.suggestExtractionSchema(clientId, { business_hint: hint || null });
+      setDraft({
+        ...form,
+        resolubles: s.resolubles.length ? s.resolubles : form.resolubles,
+        senal: s.senal || [],
+        tipo_pagina: (s.tipo_pagina || []).join(", "),
+      });
+      const c = s.context || {};
+      setSuggestNote(
+        `${s.razonamiento || "Propuesta generada."} · Basado en ${c.n_pages || 0} páginas`
+        + (c.n_queries ? `, ${c.n_queries} búsquedas` : "")
+        + (c.used_business_hint ? " y tu descripción" : "")
+        + ". Revisa y ajusta antes de guardar.");
+    } catch (e) { setError(e.message); }
+    setSuggesting(false);
+  };
+
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <h3>Extracción de entidades — qué buscar en este cliente</h3>
@@ -432,6 +457,27 @@ function ExtractionSchemaPanel({ clientId }) {
         el modelo, escríbela como se lo explicarías a una persona.
       </p>
       {q.loading && <Spinner />}
+
+      {/* Proponer el esquema con un LLM a partir del cliente */}
+      <div style={{ background: "var(--canvas-muted)", border: "1px solid var(--hairline)",
+        borderRadius: 4, padding: 10, margin: "8px 0 14px" }}>
+        <div className="row between" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <b style={{ fontSize: 12.5 }}>✨ Proponer con IA</b>
+            <Hint>La IA lee las páginas y búsquedas de este cliente y propone los tipos de entidad y de
+              página. Rellena el formulario de abajo para que lo revises — no guarda nada solo.</Hint>
+            <input type="text" style={{ width: "100%", marginTop: 6 }}
+              placeholder="Opcional: describe el negocio en una frase (ej. «agencia de reformas en Bilbao»)"
+              value={hint} onChange={(e) => setHint(e.target.value)} />
+          </div>
+          <button disabled={suggesting} onClick={suggest} style={{ marginTop: 18 }}>
+            {suggesting ? "Pensando…" : "Proponer entidades"}
+          </button>
+        </div>
+        {suggestNote && (
+          <div className="proxy-tag" style={{ marginTop: 8, color: "var(--chart-forest)" }}>✓ {suggestNote}</div>
+        )}
+      </div>
 
       <h3 style={{ fontSize: 12.5 }}>Entidades con catálogo (se resuelven a un id)</h3>
       <Hint>Lo nuclear del negocio: producto, servicio, categoría… Ej.: <b>servicio</b> — «Servicio profesional concreto que se ofrece, como 'diseño de tienda online'».</Hint>

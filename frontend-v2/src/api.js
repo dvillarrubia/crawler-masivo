@@ -212,6 +212,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ form }),
     }),
+  suggestExtractionSchema: (clientId, payload) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/extraction-schema/suggest`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    }),
 
   clientSettings: (clientId) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/settings`),

@@ -199,6 +199,49 @@ def put_extraction_schema(
     }
 
 
+class SuggestSchemaPayload(BaseModel):
+    business_hint: str | None = Field(default=None, max_length=1000)
+    gemini_account_id: uuid.UUID | None = None
+
+
+@router.post("/extraction-schema/suggest")
+def suggest_extraction_schema(
+    client_id: str,
+    payload: SuggestSchemaPayload,
+    db: Session = Depends(get_session),
+):
+    """Propone el esquema de entidades con un LLM a partir del cliente
+    (títulos + H1 de sus páginas, secciones, top queries GSC y la
+    descripción opcional del negocio). NO guarda nada: devuelve la
+    propuesta para pre-rellenar el formulario, que el usuario revisa y
+    guarda con el PUT de siempre."""
+    from analysis.entities.schema_suggester import suggest_schema
+    from shared.entity_models import ClientSettings
+    from shared.semantic_models import GeminiAccount
+
+    account_id = payload.gemini_account_id
+    if account_id is None:
+        settings = db.get(ClientSettings, client_id)
+        account_id = settings.gemini_account_id if settings else None
+    if account_id is None:
+        raise HTTPException(status_code=400, detail=(
+            "Este proyecto no tiene cuenta Gemini asignada. Configúrala en "
+            "Configuración → Entidades (o Cuentas) para poder proponer el "
+            "esquema con IA."))
+    account = db.get(GeminiAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Cuenta Gemini no encontrada.")
+
+    try:
+        proposal = suggest_schema(db, client_id, account.api_key,
+                                  business_hint=payload.business_hint)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 — errores de red / API de Gemini
+        raise HTTPException(status_code=502, detail=f"Error del LLM: {exc}")
+    return {"status": "ok", **proposal}
+
+
 # ---------------------------------------------------------------------------
 # Catálogo de entidades: la "validación humana" del catálogo generado
 # ---------------------------------------------------------------------------

@@ -9,6 +9,23 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Proponer el esquema de entidades con IA** (2026-07-06)
+  → El "formulario" de Entidades (Config) ya no se rellena a mano: un LLM
+  propone los tipos a partir del cliente. `analysis/entities/schema_suggester.py`
+  reúne señal real (host, títulos + H1 de las páginas más importantes del
+  rastreo, secciones de path, top queries GSC) y le pide a Gemini Flash
+  (JSON) los `resolubles`/`senal`/`tipo_pagina` con descripciones en
+  lenguaje natural (las que GLiNER2 usa como definición). Endpoint
+  `POST /api/clients/{id}/extraction-schema/suggest` (no guarda: pre-rellena
+  el formulario, el usuario revisa y guarda con el PUT de siempre). UI:
+  botón "✨ Proponer con IA" + campo opcional de descripción del negocio en
+  el panel de extracción. Partes puras (contexto/prompt/parseo defensivo)
+  testeadas sin Gemini; 9 tests (suite 317). **Verificado en vivo con
+  workoholics real:** con una pista deliberadamente errónea ("coworking")
+  el modelo leyó las páginas y se autocorrigió a agencia de branding en
+  Bilbao, con entidades ancladas en clientes/casos reales del sitio.
+  Commit: (este).
+
 - ✅ **Descubrir propiedades GSC/GA4 al pegar el JSON** (2026-07-05)
   → Pegas la service account y la app consulta a Google qué propiedades ve
   de cada fuente (una misma credencial suele tener GSC y GA4). Endpoint
