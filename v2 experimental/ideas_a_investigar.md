@@ -9,19 +9,23 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **Incidencias → ficha de URL + "ver la web"** (2026-07-06, bandeja)
+  → En Incidencias, cada URL afectada es clicable y abre la **ficha
+  completa** (la misma del Explorador: resumen, on-page, contenido,
+  enlaces, recursos, datos estructurados, seguridad e incidencias de esa
+  URL). El drawer se extrajo a `frontend-v2/src/UrlDrawer.jsx` (compartido
+  por Explorador e Incidencias, sin duplicar) y se le añadió un botón
+  **"Ver la web ↗"** que abre la página real. Commit: (este).
+
+- ✅ **Revisar/limpiar el catálogo generado con IA** (2026-07-06)
+  → Un LLM revisa el catálogo (mantener/descartar/renombrar) para quitar
+  el ruido del crawl; endpoints review + apply-review; UI en el catálogo.
+  Commit: 68ab053.
+
 - ✅ **Proponer las ENTRADAS del catálogo con IA** (2026-07-06)
-  → Complemento del anterior: la IA propone no solo los tipos, sino los
-  VALORES concretos del catálogo (los servicios, clientes, localizaciones,
-  casos… reales), clasificados por los tipos resolubles del esquema del
-  cliente. `suggest_catalog` en `schema_suggester.py` (usa el esquema
-  guardado + contenido del rastreo + queries; reintento; marca las que ya
-  existen para no duplicar). Endpoints `POST .../entity-catalog/suggest`
-  (propone, no guarda) y `POST .../entity-catalog/bulk` (alta por lotes de
-  las elegidas). UI: botón "Proponer con IA" en el catálogo → checklist
-  agrupado por tipo con marcar/desmarcar y "Añadir N al catálogo". 4 tests
-  (suite 321). **Verificado en vivo con workoholics:** 24 entidades reales
-  (Kit Digital, Branding, Athletic Club, Café Fortaleza, Ausolan…), 21
-  nuevas + 3 ya existentes marcadas. Commit: (este).
+  → La IA propone los valores concretos por tipo resoluble (marca los que
+  ya existen); endpoints suggest + bulk; verificado con workoholics.
+  Commit: dc2d47b.
 
 - ✅ **Proponer el esquema de entidades con IA** (2026-07-06)
   → El "formulario" de Entidades (Config) ya no se rellena a mano: un LLM
@@ -205,8 +209,12 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 
 *(añade líneas debajo; yo las recojo)*
 
-En la pestaña de incidencias necesitamos poder pinchar en el detalle de las urls para ver todo lo relacionado con la url como si fuera la parte del explorador, y poner un enlace para ver la web estaria bien.
+~~En la pestaña de incidencias necesitamos poder pinchar en el detalle de las urls para ver todo lo relacionado con la url como si fuera la parte del explorador, y poner un enlace para ver la web estaria bien.~~ ✅ hecho (arriba)
 
+Mapa semántico (UMAP) · color por anillo, tamaño por peso esto esta fatal, no esta bien traido del original el mapa semantico.
 
+lo de anillos objetivo no se entiende ni cascorro, no se muy bien para que sirve
+
+lo del drift igual no se para que sirve y como lo puedo explotar, esto hay que mejorarlo
 
 - 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import UrlDrawer from "../UrlDrawer.jsx";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync } from "../hooks.js";
@@ -52,6 +53,7 @@ export default function IssuesView() {
   const { jobId, segmentId } = useCtx();
   const [selected, setSelected] = useState(null); // issue_type
   const [page, setPage] = useState(1);
+  const [detailId, setDetailId] = useState(null); // url_id para el drawer
 
   if (!jobId) return <Blocked title="Sin run seleccionado" reason="Elige un run en la barra superior." />;
 
@@ -130,7 +132,13 @@ export default function IssuesView() {
                   <tbody>
                     {detailQ.data.items.map((i) => (
                       <tr key={i.id}>
-                        <td className="cell-url" title={i.url}>{i.url}</td>
+                        <td className="cell-url" title={i.url}>
+                          {i.url_id
+                            ? <a className="linklike" onClick={() => setDetailId(i.url_id)}
+                                style={{ cursor: "pointer" }}
+                                title="Ver la ficha completa de esta URL">{i.url}</a>
+                            : i.url}
+                        </td>
                         <td><Severity level={i.severity} /></td>
                         <td style={{ maxWidth: 420, whiteSpace: "normal", fontSize: 12, lineHeight: 1.45 }}>
                           {detailsToText(selected, i.details)}
@@ -145,6 +153,8 @@ export default function IssuesView() {
           )}
         </div>
       </div>
+
+      {detailId && <UrlDrawer jobId={jobId} urlId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }

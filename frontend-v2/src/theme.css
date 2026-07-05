@@ -210,6 +210,10 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--ink); }
 .blocked .cta { margin-top: 12px; }
 .empty-clean { padding: 22px; text-align: center; color: var(--success); font-size: 12.5px; border: 1px solid var(--hairline-soft); background: #fbfbf9; }
 
+/* Texto clicable que abre un detalle (ficha de URL, etc.) */
+.linklike { color: var(--chart-navy); text-decoration: underline; text-underline-offset: 2px; }
+.linklike:hover { color: var(--ink); }
+
 /* ---- Drawer ---------------------------------------------------- */
 .drawer-scrim { position: fixed; inset: 0; background: rgba(5,10,14,.55); z-index: 40; }
 .drawer {
