@@ -171,5 +171,30 @@ def test_suggest_schema_empty_resolubles_raises(db_session, ent_tables):
 
     _job(db_session)
     with pytest.raises(ValueError):
-        suggest_schema(db_session, "cli", api_key="x",
+        suggest_schema(db_session, "cli", api_key="x", attempts=2,
                        generate_fn=lambda _p: '{"resolubles": [], "senal": []}')
+
+
+def test_suggest_schema_retries_transient_bad_output(db_session, ent_tables):
+    """El LLM es no determinista: el 1º intento sale vacío/malo, el 2º bien.
+    No debe fallar (evita el 422 intermitente)."""
+    from analysis.entities.schema_suggester import suggest_schema
+
+    _job(db_session)
+    calls = {"n": 0}
+    good = json.dumps({
+        "resolubles": [{"nombre": "servicio", "descripcion": "Servicios que ofrece la agencia al cliente final"}],
+        "senal": [], "tipo_pagina": ["home"],
+    })
+
+    def flaky(_prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "no soy json"           # 1º intento: basura
+        if calls["n"] == 2:
+            return '{"resolubles": []}'    # 2º intento: vacío
+        return good                        # 3º intento: bien
+
+    out = suggest_schema(db_session, "cli", api_key="x", generate_fn=flaky, attempts=3)
+    assert out["resolubles"][0]["nombre"] == "servicio"
+    assert calls["n"] == 3

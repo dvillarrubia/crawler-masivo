@@ -227,25 +227,39 @@ def parse_llm_schema(text: str) -> dict:
 
 def suggest_schema(session, client_id: str, api_key: str, *,
                    business_hint: str | None = None,
-                   generate_fn=None) -> dict:
+                   generate_fn=None, attempts: int = 3) -> dict:
     """Orquesta: contexto → prompt → LLM → esquema propuesto.
 
     `generate_fn(prompt) -> str` es inyectable (tests). Por defecto usa
-    Gemini Flash con salida JSON. Devuelve el esquema propuesto + un bloque
-    `context` con lo que se usó (para que la UI sea honesta sobre en qué se
-    basó la propuesta)."""
+    Gemini Flash con salida JSON. El modelo es no determinista y de vez en
+    cuando devuelve JSON malo o sin resolubles: se REINTENTA hasta
+    `attempts` veces antes de rendirse (evita el 422 intermitente).
+    Devuelve el esquema + un bloque `context` con en qué se basó (para que
+    la UI sea honesta)."""
     context = gather_client_context(session, client_id)
     prompt = build_prompt(context, business_hint)
 
     if generate_fn is None:
         generate_fn = _gemini_generate(api_key)
-    text = generate_fn(prompt)
-    proposal = parse_llm_schema(text)
 
-    if not proposal["resolubles"]:
+    proposal = None
+    last_err = "sin resolubles"
+    for _ in range(max(1, attempts)):
+        try:
+            candidate = parse_llm_schema(generate_fn(prompt))
+        except ValueError as exc:
+            last_err = str(exc)
+            continue
+        if candidate["resolubles"]:
+            proposal = candidate
+            break
+        last_err = "el modelo no propuso ningún tipo resoluble"
+
+    if proposal is None:
         raise ValueError(
-            "El modelo no propuso ningún tipo resoluble. Prueba a añadir una "
-            "descripción del negocio, o revisa que el rastreo tenga contenido.")
+            f"No se pudo generar un esquema válido tras {attempts} intentos "
+            f"({last_err}). Prueba a añadir una descripción del negocio, o "
+            "revisa que el rastreo tenga contenido.")
 
     proposal["context"] = {
         "host": context.get("host"),
