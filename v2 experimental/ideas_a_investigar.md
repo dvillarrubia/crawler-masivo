@@ -95,6 +95,21 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
   desde el detalle de una propuesta** (mejoras menores de UX de la bandeja
   de Acciones propuestas).
 
+- 📋 **Validación de return-tags de hreflang.** Hoy NO se comprueba la
+  reciprocidad de los hreflang (columnas `return_tag_ok`/`lang_valid`
+  siempre NULL). Por eso Insights → i18n sale "sin validar" (score —).
+  Implementarla desbloquea esa categoría del score y el issue
+  `hreflang_missing_return`. Fleco heredado del `CLAUDE.md` "no existe aún".
+
+- 💡 **Validación de rich results de datos estructurados.** Se extrae el
+  JSON-LD/microdata pero no se valida contra los requisitos de resultados
+  enriquecidos de Google (campos obligatorios por tipo de schema).
+
+- 💡 **Features de plataforma (no de análisis), del `CLAUDE.md`:** CI/CD,
+  monitoring (Prometheus/Grafana), integración PageSpeed/CrUX. Fuera del
+  alcance actual; anotadas por si algún día. La **autenticación** también
+  falta, pero la cubre B1 (la API para agentes la necesita sí o sí).
+
 ---
 
 ## Bandeja de entrada — apunta aquí lo que se te ocurra
