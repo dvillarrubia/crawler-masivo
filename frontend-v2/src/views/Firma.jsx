@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import UrlDrawer from "../UrlDrawer.jsx";
 import { useCtx } from "../App.jsx";
 import { api } from "../api.js";
 import { useAsync, useStored } from "../hooks.js";
@@ -265,6 +266,8 @@ function ProposalsTable({ q, d, items, keyOf, selected, toggle, allVisibleSelect
 
 /* -- Detalle de una propuesta: todo el contexto + decisión ------------------ */
 function ProposalDrawer({ item, busy, onClose, onDecide }) {
+  const { jobId } = useCtx();
+  const [ficha, setFicha] = useState(false);
   const isIssue = item.kind_row === "issue";
   const label = isIssue ? issueLabel(item.issue_type) : item.titulo;
   const resumen = isIssue
@@ -294,7 +297,18 @@ function ProposalDrawer({ item, busy, onClose, onDecide }) {
         <div style={{ marginBottom: 10 }}>
           <div className="kpi-label">URL afectada</div>
           <a href={item.url} target="_blank" rel="noreferrer" className="cell-url">{item.url}</a>
+          <div className="row" style={{ gap: 6, marginTop: 6 }}>
+            {item.url_id && (
+              <button className="secondary" style={{ padding: "2px 8px", fontSize: 11 }}
+                onClick={() => setFicha(true)}>Ver ficha de la URL</button>)}
+            <a href={item.url} target="_blank" rel="noreferrer">
+              <button className="secondary" style={{ padding: "2px 8px", fontSize: 11 }}>Ver la web ↗</button>
+            </a>
+          </div>
         </div>
+      )}
+      {ficha && item.url_id && (
+        <UrlDrawer jobId={jobId} urlId={item.url_id} onClose={() => setFicha(false)} />
       )}
       {!isIssue && item.source_url && (
         <div style={{ marginBottom: 10 }}>

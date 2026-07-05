@@ -1289,11 +1289,19 @@ def _collect_proposals(db, job_id, kind, state, search, to_contains,
 
     items: list[dict] = []
     if kind in (None, "enlace"):
-        for s in db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id):
+        sugg = list(db.query(LinkSuggestion).filter(LinkSuggestion.job_id == job_id))
+        # resolver target_url → url_id para poder abrir la ficha desde la propuesta
+        turls = {s.target_url for s in sugg if s.target_url}
+        sugg_url_id = dict(
+            db.query(Url.url, Url.id).filter(
+                Url.job_id == job_id, Url.url.in_(turls)).all()
+        ) if turls else {}
+        for s in sugg:
             items.append({
                 "kind_row": "suggestion", "id": s.id, "familia": "enlace",
                 "titulo": "Enlace interno propuesto",
                 "url": s.target_url, "source_url": s.source_url,
+                "url_id": sugg_url_id.get(s.target_url),
                 "detalle": (f"desde {s.source_url} · sim {round(s.cosine_similarity or 0, 3)}"
                             + (f" · anchor «{s.proposed_anchor}»" if s.proposed_anchor else "")),
                 "prioridad": round((s.score or 0) * 1000, 2),
@@ -1324,6 +1332,7 @@ def _collect_proposals(db, job_id, kind, state, search, to_contains,
                 "issue_type": i.issue_type,
                 "titulo": i.issue_type,
                 "url": url_by_id.get(i.url_id),
+                "url_id": i.url_id,
                 "detalle": d,
                 "prioridad": float(prio),
                 "estado": _NORM_STATE.get(i.review_status, i.review_status),
