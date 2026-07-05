@@ -219,7 +219,11 @@ class GscQueryData(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
-    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    # GLiNER2/T9-D2: nullable — las queries de URLs sin match en el crawl
+    # se conservan (antes se descartaban y sesgaban el análisis por query).
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=True)
+    url = Column(Text, nullable=True)
+    url_hash = Column(String(64), nullable=True)
     query = Column(String(500), nullable=False)
     clicks = Column(Integer, default=0)
     impressions = Column(Integer, default=0)

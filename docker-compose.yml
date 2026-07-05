@@ -70,6 +70,26 @@ services:
           memory: 2g
           cpus: '2'
 
+  # ---------- Entidades GLiNER2 (perfil opcional: torch queda fuera de
+  # las imágenes api/crawler). Uso:
+  #   docker compose --profile gliner build gliner
+  #   docker compose --profile gliner run --rm gliner \
+  #     python -m analysis.entities.run --job-id <uuid>
+  gliner:
+    build:
+      context: .
+      dockerfile: Dockerfile.gliner
+    profiles: ["gliner"]
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - gliner_models:/root/.cache/huggingface
+      - ./informes:/app/informes
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # ---------- Analysis (runs inside crawler, but can also be standalone) ----------
   # Analysis is triggered by the crawler worker after each job completes.
   # Uncomment below to run as a separate service if needed:
@@ -87,3 +107,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  gliner_models:

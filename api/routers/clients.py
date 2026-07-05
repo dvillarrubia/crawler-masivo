@@ -18,6 +18,56 @@ router = APIRouter(prefix="/api/clients/{client_id}", tags=["clients"])
 
 
 # ---------------------------------------------------------------------------
+# Extracción de entidades: schema.yaml por cliente (GLiNER2)
+# ---------------------------------------------------------------------------
+
+class ExtractionSchemaPayload(BaseModel):
+    yaml_text: str = Field(..., min_length=1)
+
+
+@router.get("/extraction-schema")
+def get_extraction_schema(client_id: str, db: Session = Depends(get_session)):
+    """El schema.yaml del cliente (config única de la capa de entidades)."""
+    from shared.entity_models import ClientExtractionSchema
+
+    row = db.get(ClientExtractionSchema, client_id)
+    if row is None:
+        return {"status": "empty", "yaml_text": ""}
+    return {"status": "ok", "yaml_text": row.yaml_text,
+            "updated_at": row.updated_at}
+
+
+@router.put("/extraction-schema")
+def put_extraction_schema(
+    client_id: str,
+    payload: ExtractionSchemaPayload,
+    db: Session = Depends(get_session),
+):
+    """Guarda el schema tras validarlo (422 con el error en castellano)."""
+    from analysis.entities.schema_config import SchemaError, parse_schema
+    from shared.entity_models import ClientExtractionSchema
+
+    try:
+        schema = parse_schema(payload.yaml_text)
+    except SchemaError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    row = db.get(ClientExtractionSchema, client_id)
+    if row is None:
+        row = ClientExtractionSchema(client_id=client_id, yaml_text=payload.yaml_text)
+        db.add(row)
+    else:
+        row.yaml_text = payload.yaml_text
+    db.commit()
+    return {
+        "status": "ok",
+        "resolubles": sorted(schema.resolubles),
+        "senal": sorted(schema.senal),
+        "tipo_pagina": schema.tipo_pagina,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Watchlist
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,22 @@
+# schema.yaml de ejemplo — vertical LEADS (servicios, agencias, educación…)
+
+entidades:
+  resolubles:
+    servicio: "Servicio profesional concreto que se ofrece o se busca, como 'diseño de tienda online' o 'auditoría SEO técnica'"
+    sector: "Sector o industria del cliente potencial, como 'clínicas dentales' o 'inmobiliarias'"
+    ubicacion: "Ciudad, provincia o zona geográfica donde se presta o busca el servicio"
+  senal:
+    problema: "Problema de negocio que expresa el usuario, como 'mi web no aparece en Google'"
+    intencion_contacto: "Expresión de querer contactar, pedir presupuesto, llamar o contratar"
+
+catalogo:
+  fuente: generado
+  ruta_o_tabla: null
+
+clasificacion:
+  funnel: [TOFU, MOFU, BOFU]
+  tipo_pagina: [servicio, caso_exito, blog, landing, contacto]
+
+umbrales:
+  resolucion_alta: 0.85
+  resolucion_baja: 0.60

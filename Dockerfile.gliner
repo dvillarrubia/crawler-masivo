@@ -1,0 +1,19 @@
+# Contenedor del pipeline de entidades GLiNER2 (CPU). Separado a propósito:
+# torch + pesos del modelo no deben engordar las imágenes api/crawler.
+#
+#   docker compose --profile gliner build gliner
+#   docker compose --profile gliner run --rm gliner \
+#       python -m analysis.entities.run --job-id <uuid>
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements-gliner.txt .
+RUN pip install --no-cache-dir -r requirements-gliner.txt
+
+COPY shared/ shared/
+COPY analysis/ analysis/
+COPY config/ config/
+
+ENV PYTHONPATH=/app
+CMD ["python", "-m", "analysis.entities.run", "--help"]

@@ -26,6 +26,7 @@ export default function ConfigView() {
         <div>
           <WatchlistPanel clientId={clientId} />
           <ThresholdsPanel clientId={clientId} />
+          <ExtractionSchemaPanel clientId={clientId} />
           <SourcesPanel />
         </div>
       </div>
@@ -247,6 +248,54 @@ function ThresholdsPanel({ clientId }) {
           <p className="proxy-tag">Calculados con percentiles del último rastreo. Solo sugerencia: aplícalos al re-analizar o en el próximo job.</p>
         </>
       )}
+    </div>
+  );
+}
+
+/** Schema de extracción de entidades (GLiNER2) — único config del cliente. */
+function ExtractionSchemaPanel({ clientId }) {
+  const q = useAsync(() => api.extractionSchema(clientId), [clientId]);
+  const [text, setText] = useState(null); // null = aún sin editar
+  const [msg, setMsg] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const value = text != null ? text : (q.data ? q.data.yaml_text : "");
+
+  const save = async () => {
+    setBusy(true); setError(null); setMsg(null);
+    try {
+      const r = await api.saveExtractionSchema(clientId, value);
+      setMsg(`Guardado. Tipos resolubles: ${r.resolubles.join(", ")} · señal: ${r.senal.join(", ")}`);
+      q.reload();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3>Extracción de entidades (schema.yaml)</h3>
+      <p className="proxy-tag" style={{ marginTop: 0 }}>
+        Define qué entidades busca el pipeline GLiNER2 en este cliente (productos, servicios,
+        categorías…), con una descripción en lenguaje natural por tipo, y las etiquetas de tipo de
+        página. Hay plantillas en <code>config/entities/</code> (ecommerce y leads). El pipeline se
+        ejecuta por run con <code>docker compose --profile gliner run gliner …</code> y sus
+        propuestas llegan a Incidencias y a la Cola de firma.
+      </p>
+      {q.loading && <Spinner />}
+      <textarea rows={12} className="mono" style={{ width: "100%", fontSize: 11.5 }}
+        placeholder={"entidades:\n  resolubles:\n    servicio: \"Servicio profesional concreto...\"\n  senal:\n    problema: \"Problema que expresa el usuario...\"\ncatalogo:\n  fuente: generado\nclasificacion:\n  funnel: [TOFU, MOFU, BOFU]\n  tipo_pagina: [servicio, blog]"}
+        value={value} onChange={(e) => setText(e.target.value)} />
+      {error && <div className="alert" style={{ marginTop: 6 }}>{error}</div>}
+      {msg && <div className="alert warn" style={{ marginTop: 6 }}>{msg}</div>}
+      <div className="row" style={{ gap: 8, marginTop: 6 }}>
+        <button disabled={busy || !value.trim()} onClick={save}>
+          {busy ? "Validando…" : "Validar y guardar"}
+        </button>
+        {q.data && q.data.status === "empty" && (
+          <span className="proxy-tag">Este cliente aún no tiene schema.</span>
+        )}
+      </div>
     </div>
   );
 }

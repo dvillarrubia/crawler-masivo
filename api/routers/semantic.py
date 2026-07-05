@@ -395,17 +395,23 @@ def fetch_gsc_data(job_id: uuid.UUID, body: FetchGscRequest, db: Session = Depen
             )
             if not df_q.empty:
                 for _, row in df_q.iterrows():
-                    url_id = _resolve_url_id(row["url"])
+                    raw_q_url = str(row["url"])
+                    url_id = _resolve_url_id(raw_q_url)
+                    # GLiNER2/T9-D2: las queries de URLs sin match se
+                    # CONSERVAN (url_id NULL + url_hash) — antes se tiraban
+                    # y sesgaban cualquier análisis a nivel de consulta.
+                    db.add(GscQueryData(
+                        job_id=job_id,
+                        url_id=url_id,
+                        url=raw_q_url,
+                        url_hash=_hash(raw_q_url, norm_config),
+                        query=str(row["query"])[:500],
+                        clicks=int(row["clicks"]),
+                        impressions=int(row["impressions"]),
+                        ctr=float(row["ctr"]),
+                        position=float(row["position"]),
+                    ))
                     if url_id:
-                        db.add(GscQueryData(
-                            job_id=job_id,
-                            url_id=url_id,
-                            query=str(row["query"])[:500],
-                            clicks=int(row["clicks"]),
-                            impressions=int(row["impressions"]),
-                            ctr=float(row["ctr"]),
-                            position=float(row["position"]),
-                        ))
                         query_matched += 1
         except Exception:
             pass  # Query data is optional, don't fail the whole fetch

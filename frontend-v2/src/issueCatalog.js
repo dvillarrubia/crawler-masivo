@@ -90,6 +90,12 @@ export const ISSUE_CATALOG = {
   url_non_seo_friendly: ["URL malformada", "URL rota o ilegible que un robot puede descubrir y rastrear. Si nuestro crawler la encontró, Google también puede."],
   url_cms_faceted: ["URL de filtros del CMS", "Navegación facetada (combinaciones de filtros) que genera un número explosivo de páginas casi iguales y quema presupuesto de rastreo."],
 
+  // ── Entidades (GLiNER2): cruce entidad ↔ demanda real ────────────────
+  entity_query_mismatch: ["Entidad ausente donde rankeas", "La página rankea para una búsqueda cuya entidad principal ni siquiera aparece en su contenido. Añadirla (on-page) suele ser la subida más barata."],
+  entity_coverage_gap: ["Entidad demandada sin página", "Hay búsquedas reales pidiendo una entidad que ninguna página del sitio cubre. Contenido a crear con demanda demostrada."],
+  entity_cannibalization: ["Canibalización por entidad", "Dos o más páginas tienen la misma entidad principal en la misma fase del funnel: compiten entre sí. Decidir cuál manda (consolidar, diferenciar o desoptimizar)."],
+  funnel_mismatch: ["Página en la fase equivocada", "Una página transaccional está capturando búsquedas informativas (o al revés). El usuario no encuentra lo que esperaba: crear la pieza que falta o reconducir el enlazado."],
+
   // ── Semántica y cobertura (propuestas: las firma una persona) ────────
   semantic_cannibalization: ["Canibalización", "Dos páginas hablan de lo mismo y compiten por las mismas búsquedas. Decidir cuál manda y fusionar o diferenciar."],
   passage_gap: ["Búsqueda sin respuesta", "Hay demanda real (búsqueda de Search Console con impresiones) pero ningún pasaje del sitio la responde. Contenido a crear o ampliar."],
@@ -211,6 +217,14 @@ const DETAIL_RENDERERS = {
     `${_n(d.generic_inlinks)} enlaces con anchors vacíos de significado: ${(d.anchors || []).map((a) => `«${a}»`).join(", ")}${d.sources_sample && d.sources_sample.length ? ` — desde ${_urls(d.sources_sample, 1)}` : ""}`,
   anchor_target_mismatch: (d) =>
     `El anchor «${d.anchor}» apenas guarda relación con esta página (similitud ${_dec(d.similarity)}, ${_n(d.n_links)} enlaces)${d.sources_sample && d.sources_sample.length ? ` — desde ${_urls(d.sources_sample, 1)}` : ""}`,
+  entity_query_mismatch: (d) =>
+    `Rankea para «${d.query}» (${_n(d.impressions)} imprs, pos ${_dec(d.position)}) pero la entidad «${d.entity}» no aparece en la página${d.entidades_presentes && d.entidades_presentes.length ? ` (habla de: ${d.entidades_presentes.join(", ")})` : ""}. Prioridad ${_n(Math.round(d.prioridad || 0))}`,
+  entity_coverage_gap: (d) =>
+    `Nadie cubre «${d.entity}» y hay demanda: ${_n(d.impressions)} impresiones en búsquedas como ${(d.queries || []).slice(0, 3).map((q) => `«${q}»`).join(", ")}`,
+  entity_cannibalization: (d) =>
+    `Misma entidad principal «${d.entity}» y misma fase ${d.funnel} que ${d.dominant_url} (${_n(d.n_urls)} páginas compiten)${d.converge_embeddings ? " · también salta por similitud de contenido" : ""}. Sugerencia: ${d.accion}`,
+  funnel_mismatch: (d) =>
+    `Página ${d.page_funnel} capturando ${_n(d.n_queries)} búsquedas ${d.query_funnel} (${_n(d.impressions)} imprs), como ${(d.queries || []).slice(0, 2).map((q) => `«${q}»`).join(", ")}`,
 };
 
 // Claves internas que jamás aportan nada al usuario (ids, hashes…).

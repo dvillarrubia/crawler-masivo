@@ -43,6 +43,8 @@ const LAYERS = {
   "Semántica y cobertura (se firman a mano)": [
     "semantic_cannibalization", "passage_gap", "buried_passage",
     "orphan_chunk", "generic_anchor", "anchor_target_mismatch",
+    "entity_query_mismatch", "entity_coverage_gap",
+    "entity_cannibalization", "funnel_mismatch",
   ],
 };
 

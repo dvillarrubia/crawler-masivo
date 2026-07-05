@@ -1,0 +1,27 @@
+# schema.yaml de ejemplo — vertical ECOMMERCE
+# Único fichero específico de cliente. Se guarda en la tabla
+# client_extraction_schemas (Configuración → Extracción de entidades) o se
+# carga con: python -m analysis.entities.run --schema-file este_fichero.
+
+entidades:
+  resolubles:            # pasan por el gate de resolución a catálogo → entity_id
+    producto: "Nombre de producto o modelo concreto mencionado en el texto, como 'iPhone 15 Pro' o 'zapatillas Pegasus 41'"
+    categoria: "Categoría o familia de producto a la que pertenece algo, como 'zapatillas de running' o 'portátiles gaming'"
+    marca: "Marca comercial o fabricante mencionado, como 'Nike' o 'Samsung'"
+  senal:                 # evidencia de funnel, no se resuelven a catálogo
+    problema: "Problema o necesidad que expresa el usuario, como 'me duelen los pies al correr'"
+    atributo: "Característica de producto: material, talla, color, capacidad, precio"
+
+catalogo:
+  fuente: generado       # feed | crawl | generado (clustering + validación humana)
+  ruta_o_tabla: null     # con fuente=feed: ruta del CSV (entity_id,name,entity_type)
+
+clasificacion:
+  funnel: [TOFU, MOFU, BOFU]                    # universal, no tocar
+  tipo_pagina: [ficha, categoria, guia, blog]   # por vertical
+
+# PROVISIONALES hasta calibrar por barrido contra el gold set (no se
+# hereda el 0,92 histórico de canibalización).
+umbrales:
+  resolucion_alta: 0.85
+  resolucion_baja: 0.60

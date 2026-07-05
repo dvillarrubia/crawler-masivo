@@ -146,4 +146,12 @@ export const api = {
     }),
   suggestedThresholds: (clientId) =>
     request(`/api/clients/${encodeURIComponent(clientId)}/suggested-thresholds`),
+
+  extractionSchema: (clientId) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/extraction-schema`),
+  saveExtractionSchema: (clientId, yamlText) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/extraction-schema`, {
+      method: "PUT",
+      body: JSON.stringify({ yaml_text: yamlText }),
+    }),
 };

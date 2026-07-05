@@ -35,6 +35,78 @@ export default function FirmaView() {
       <CannibalQueue jobId={jobId} reviewer={reviewer} />
       <CoverageQueue jobId={jobId} reviewer={reviewer} />
       <AnchorQueue jobId={jobId} reviewer={reviewer} />
+      <EntityQueue jobId={jobId} reviewer={reviewer} />
+    </div>
+  );
+}
+
+/* Entidades (GLiNER2): canibalización por entidad y funnel roto. */
+const ENTITY_LABEL = {
+  entity_cannibalization: "canibalización por entidad",
+  funnel_mismatch: "fase de funnel equivocada",
+};
+
+function EntityQueue({ jobId, reviewer }) {
+  const [kind, setKind] = useState("entity_cannibalization");
+  const [page, setPage] = useState(1);
+  const q = useAsync(
+    () => api.issues(jobId, { issue_type: kind, page, page_size: 50 }),
+    [jobId, kind, page],
+  );
+
+  if (q.loading) return <Spinner />;
+  if (q.error) return <ErrorBox error={q.error} />;
+  const d = q.data;
+
+  const review = async (iid, decision) => {
+    if (!reviewer) { alert("Pon tu nombre arriba para firmar."); return; }
+    await api.reviewIssue(iid, { review_status: decision, reviewed_by: reviewer });
+    q.reload();
+  };
+
+  const detail = (i) =>
+    kind === "entity_cannibalization"
+      ? `«${i.details?.entity}» · ${i.details?.funnel} · domina ${i.details?.dominant_url} · sugerencia: ${i.details?.accion}${i.details?.converge_embeddings ? " · converge con similitud de contenido" : ""}`
+      : `página ${i.details?.page_funnel} capturando ${i.details?.n_queries} búsquedas ${i.details?.query_funnel} (${fmt(i.details?.impressions)} imprs)`;
+
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="row between">
+        <h3>Entidades ({fmt(d.total)})</h3>
+        <span className="row" style={{ gap: 6 }}>
+          {Object.entries(ENTITY_LABEL).map(([k, label]) => (
+            <button key={k} className={kind === k ? "" : "secondary"}
+              onClick={() => { setKind(k); setPage(1); }}>{label}</button>
+          ))}
+        </span>
+      </div>
+      {d.items.length === 0 && <EmptyClean>Sin propuestas de este tipo. Se generan al ejecutar el pipeline de entidades (GLiNER2) sobre el run.</EmptyClean>}
+      <div className="table-wrap" style={{ maxHeight: "40vh" }}>
+        <table className="data">
+          <thead>
+            <tr><th>URL accionable</th><th>Detalle</th><th>Firma</th></tr>
+          </thead>
+          <tbody>
+            {d.items.map((i) => (
+              <tr key={i.id}>
+                <td className="cell-url" title={i.url}>{i.url}</td>
+                <td>{detail(i)}</td>
+                <td>
+                  {i.review_status === "pending" ? (
+                    <span className="row" style={{ gap: 4 }}>
+                      <button onClick={() => review(i.id, "signed")}>Firmar</button>
+                      <button className="secondary" onClick={() => review(i.id, "rejected")}>Rechazar</button>
+                    </span>
+                  ) : (
+                    <span className="proxy-tag">{i.review_status} · {i.reviewed_by}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={d.pages} onPage={setPage} />
     </div>
   );
 }

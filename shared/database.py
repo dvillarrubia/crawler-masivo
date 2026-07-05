@@ -77,6 +77,13 @@ _MIGRATIONS = [
     "ON semantic_chunks USING hnsw (embedding vector_cosine_ops)",
     # T18 (cierre): anchor propuesto en las sugerencias T10
     "ALTER TABLE link_suggestions ADD COLUMN IF NOT EXISTS proposed_anchor TEXT",
+    # GLiNER2: conservar queries GSC de URLs sin match (patrón T9/D2)
+    "ALTER TABLE gsc_query_data ADD COLUMN IF NOT EXISTS url TEXT",
+    "ALTER TABLE gsc_query_data ADD COLUMN IF NOT EXISTS url_hash VARCHAR(64)",
+    "ALTER TABLE gsc_query_data ALTER COLUMN url_id DROP NOT NULL",
+    # GLiNER2: índice HNSW del catálogo de entidades (768d, espacio propio)
+    "CREATE INDEX IF NOT EXISTS ix_entity_catalog_embedding "
+    "ON entity_catalog USING hnsw (embedding vector_cosine_ops)",
 ]
 
 
@@ -106,6 +113,10 @@ def init_db():
         GscAccount, SemanticAnalysis, SemanticPage,
         SemanticCannibalization, GscJobData, SemanticChunk,
         QueryEmbedding,
+    )
+    from shared.entity_models import (  # noqa: F401 – capa de entidades GLiNER2
+        ClientExtractionSchema, EntityCatalog, GlinerPageEntity,
+        GlinerPageLabel, GlinerQueryEntity, GlinerQueryLabel,
     )
     if engine.dialect.name.startswith("postgres"):
         # Vector columns need the extension before create_all on a fresh DB

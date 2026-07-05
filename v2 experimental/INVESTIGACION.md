@@ -392,5 +392,31 @@ clusters), `model_version` en tablas con vectores.
 
 ---
 
-**STOP.** Conforme a la regla de oro del brief, no se escribe código de fase 1
-hasta tu aprobación explícita de este informe y respuesta a las decisiones.
+---
+
+## Decisiones tomadas (aprobación 2026-07-05: "todo en este repo, recomienda tú")
+
+1. Repo destino: **este** (crawler-masivo v2), integrado en su consola.
+2. Enganche: **batch por job_id** en contenedor propio (`Dockerfile.gliner`,
+   perfil compose `gliner` — torch fuera de las imágenes api/crawler).
+3. Espacio vectorial: **768d conforme al contrato** (`gemini-embedding-001@768`,
+   L2, SEMANTIC_SIMILARITY, `model_version` en tabla).
+4. schema.yaml: **tabla `client_extraction_schemas`** editable desde la consola
+   (Configuración → Extracción de entidades) + plantillas en `config/entities/`.
+5. Zona gris: **google-genai directo** (Gemini Flash, cuenta por cliente de
+   `gemini_accounts`); OpenRouter queda como failover futuro documentado.
+6. `gsc_query_data` **extendida** (url_id nullable + url/url_hash): las queries
+   de URLs sin match ya se conservan.
+7. Códigos de check: los 4 propuestos, con el mapeo determinista/firmable de §4.
+   Refinamiento surgido en tests: el gap tiene precedencia sobre el mismatch
+   (si NADIE cubre la entidad, la acción es crear contenido, no on-page).
+8. Piloto: **workoholics** (schema leads ya cargado en su tabla).
+9. Gold set: plantilla CSV generada por `--gold-out`, anotación humana, F1 con
+   `--gold-eval`; gate 0,75 intacto.
+
+Implementación de fase 1: módulo `analysis/entities/` (schema_config,
+extraction, gliner_adapter, pipeline, resolve, report, gold_set, run CLI),
+tablas `gliner_*` + `entity_catalog` + HNSW, endpoints del schema, checks en
+consola y cola de firma. 11 tests con fakes (suite completa en verde).
+Pendiente de ejecución real: build del contenedor gliner + gold set anotado +
+calibración de umbrales + criterios de éxito 1-3 del brief.
