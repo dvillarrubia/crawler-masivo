@@ -486,7 +486,10 @@ def _run_analysis_thread(
         analysis.status = "completed"
         analysis.site_metrics = result["site_metrics"]
         analysis.centroid = result["centroid"]
-        analysis.config = result["config"]
+        # merge, no sobrescribir: la config del engine (alpha/beta/modelo)
+        # no debe borrar gemini_account_id — sin él, target-rings,
+        # gap-analysis, query-coverage y anchor-relevance quedan huérfanos
+        analysis.config = {**(config or {}), **(result["config"] or {})}
         analysis.total_pages = result["total_pages"]
         analysis.completed_at = datetime.now(timezone.utc)
 
