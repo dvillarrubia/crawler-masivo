@@ -214,6 +214,9 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--ink); }
 .linklike { color: var(--chart-navy); text-decoration: underline; text-underline-offset: 2px; }
 .linklike:hover { color: var(--ink); }
 
+/* Recomendación de Insights clicable (abre las URLs afectadas) */
+.rec-clickable:hover { background: var(--surface-soft); }
+
 /* ---- Drawer ---------------------------------------------------- */
 .drawer-scrim { position: fixed; inset: 0; background: rgba(5,10,14,.55); z-index: 40; }
 .drawer {
