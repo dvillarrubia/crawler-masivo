@@ -9,6 +9,22 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **B1 · Servidor MCP con verbos de negocio (POC)** (2026-07-06)
+  → Decisión tomada por el usuario: MCP con verbos. `mcp_server/` — capa
+  FINA sobre la REST (una sola fuente de verdad, no toca DB/Redis; llama a
+  la API por HTTP). 10 verbos en castellano: `listar_proyectos`,
+  `listar_rastreos`, `lanzar_rastreo`, `estado_rastreo`, `resumen_rastreo`,
+  `top_incidencias`, `buscar_urls`, `detalle_url`, `preguntar_a_los_datos`
+  (recolector de dossier, no inventa) y `cancelar_rastreo`. Lógica en
+  `verbs.py` (solo httpx → testeable sin el SDK); `server.py` registra en
+  FastMCP. Registro en Claude Code: `claude mcp add crawler -- python -m
+  mcp_server.server` (README). 10 tests (lógica con HTTP mockeado) +
+  verificado en vivo (los 10 verbos contra la API real; el servidor arranca
+  y expone los 10 tools con el SDK). Suite 347. **Queda (decisión aparte):
+  autenticación** — hoy la API es CORS-abierto sin auth; el MCP asume
+  acceso local de confianza. Antes de exponerlo: API key por proyecto o
+  proxy autenticado. Commit: (este).
+
 - ✅ **Validación de rich results (datos estructurados)** (2026-07-06)
   → `analysis/rich_results.py`: valida el JSON-LD/microdata ya extraído
   contra los requisitos de resultado enriquecido de Google por tipo de
@@ -159,16 +175,12 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 Backend nuevo. El siguiente paso de cada uno es una spec de una página; no
 se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 
-- 📋 **B1 · API para trabajar con Claude Code / cowork** (la más
-  estratégica). Analizar los datos y lanzar crawls desde un agente. Hoy
-  hay REST FastAPI completa pero **sin auth** (CORS abierto) y **sin capa
-  de agente** (8 routers de bajo nivel). Alcance mínimo del POC: lanzar un
-  crawl, consultar su estado, devolver el resumen de issues y responder
-  preguntas sobre los datos de un job.
-  **Decisión que necesito:** ¿(a) servidor **MCP** con verbos de negocio
-  —`lanzar_crawl`, `estado_job`, `top_issues`, `preguntar_a_los_datos`—
-  (mi recomendación: es literalmente "trabajar con Claude Code"), (b) REST
-  + API key por cliente, o (c) MCP encima de la REST? → `spec-api-agentes.md`.
+- 🔨 **B1 · API para agentes.** POC del **servidor MCP con verbos** HECHO
+  (opción (a), ver arriba en Hecho: `mcp_server/`, 10 verbos, tests + vivo).
+  **Queda solo la capa de AUTENTICACIÓN** (la API sigue CORS-abierto sin
+  auth; el MCP asume acceso local). Decisión pendiente: ¿API key por
+  proyecto en la REST, o proxy/gateway autenticado delante? Es lo único que
+  falta para poder exponerlo fuera de local.
 
 - 📋 **B2 · Ingesta de logs de servidor.** La vista Logs está honestamente
   bloqueada-por-fuente (no se finge nada). Desbloquearía: hits de bots,
