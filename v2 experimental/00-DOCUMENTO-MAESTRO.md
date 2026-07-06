@@ -184,6 +184,7 @@ Trabajo de producto sobre la consola ya funcional. Tablero vivo en
 - [x] **Bandeja: Semántica más clara** — mapa UMAP reescrito (color por tema/cluster con centroides, tamaño por peso normalizado, tooltip flotante, clic→ficha); anillos objetivo y drift con tarjetas explicativas y URLs clicables. Commit: 7747067
 - [x] **Rich results (datos estructurados)** — `analysis/rich_results.py` valida el JSON-LD por tipo (Product, Article, Recipe, FAQ, LocalBusiness, Event, JobPosting…); `analyze_structured_data` persiste `validation_status`/`issues` y emite `structured_data_error/warning`. 13 tests. Verificado en vivo (workoholics: Organization → ok). Commit: (rich-results)
 - [x] **Propuestas → ficha de URL** — `_collect_proposals` expone `url_id`; el drawer de Acciones propuestas abre la ficha. Commit: 0d0a524
+- [x] **B1 · Servidor MCP con verbos de negocio (POC)** — `mcp_server/` (capa fina sobre la REST, solo httpx): 10 verbos en castellano (listar_proyectos/rastreos, lanzar/estado/resumen/cancelar_rastreo, top_incidencias, buscar_urls, detalle_url, preguntar_a_los_datos). Lógica en `verbs.py` (testeable sin el SDK) + `server.py` FastMCP. Registro: `claude mcp add crawler -- python -m mcp_server.server`. 10 tests + verificado en vivo. Queda la capa de AUTH (decisión aparte). Commit: (b1)
 
 Suite: **337 tests**. Todo en rama `v2-experimental` (sin merge a master
 hasta validar en vivo — regla del propietario). Imagen `api` reconstruida y
