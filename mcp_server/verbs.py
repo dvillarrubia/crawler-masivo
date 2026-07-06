@@ -18,12 +18,19 @@ API_URL = os.getenv("CRAWLER_API_URL", "http://localhost:8000").rstrip("/")
 TIMEOUT = float(os.getenv("CRAWLER_API_TIMEOUT", "60"))
 
 
+def _headers() -> dict:
+    """Añade la API key del proyecto si está configurada (CRAWLER_API_KEY).
+    Sin ella, funciona igual cuando la API tiene la auth desactivada."""
+    key = os.getenv("CRAWLER_API_KEY", "").strip()
+    return {"X-API-Key": key} if key else {}
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers — todo error se traduce a un dict legible (nunca excepción cruda)
 # ---------------------------------------------------------------------------
 def _get(path: str, params: dict | None = None) -> Any:
     try:
-        with httpx.Client(timeout=TIMEOUT) as c:
+        with httpx.Client(timeout=TIMEOUT, headers=_headers()) as c:
             r = c.get(f"{API_URL}{path}",
                       params={k: v for k, v in (params or {}).items() if v is not None})
         if r.status_code >= 400:
@@ -35,7 +42,7 @@ def _get(path: str, params: dict | None = None) -> Any:
 
 def _post(path: str, body: dict) -> Any:
     try:
-        with httpx.Client(timeout=TIMEOUT) as c:
+        with httpx.Client(timeout=TIMEOUT, headers=_headers()) as c:
             r = c.post(f"{API_URL}{path}", json=body)
         if r.status_code >= 400:
             return {"error": f"{r.status_code}: {_detail(r)}"}
@@ -46,7 +53,7 @@ def _post(path: str, body: dict) -> Any:
 
 def _patch(path: str) -> Any:
     try:
-        with httpx.Client(timeout=TIMEOUT) as c:
+        with httpx.Client(timeout=TIMEOUT, headers=_headers()) as c:
             r = c.patch(f"{API_URL}{path}")
         if r.status_code >= 400:
             return {"error": f"{r.status_code}: {_detail(r)}"}

@@ -15,8 +15,8 @@ from shared.database import init_db
 
 from api import dependencies
 from api.routers import (
-    clients, diff, jobs, metrics, performance, results, review, segments,
-    semantic, simulate, sources,
+    api_keys, clients, diff, jobs, metrics, performance, results, review,
+    segments, semantic, simulate, sources,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -60,6 +60,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# API key por proyecto (B1 · auth). Desactivada por defecto: con
+# API_AUTH_ENABLED != "1" deja pasar todo (retrocompatible). Se añade ANTES
+# de CORS para que el preflight (OPTIONS) no requiera key.
+from api.auth import ApiKeyAuthMiddleware  # noqa: E402
+
+app.add_middleware(ApiKeyAuthMiddleware)
+
 # CORS -- allow everything during development; tighten for production.
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +77,7 @@ app.add_middleware(
 )
 
 # Routers
+app.include_router(api_keys.router)
 app.include_router(clients.router)
 app.include_router(diff.router)
 app.include_router(performance.router)

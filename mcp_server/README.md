@@ -47,6 +47,22 @@ O con una URL de API distinta:
 claude mcp add crawler -e CRAWLER_API_URL=http://localhost:8000 -- python -m mcp_server.server
 ```
 
+### Con autenticación activada (API key por proyecto)
+
+Si la API corre con `API_AUTH_ENABLED=1`, pasa la key del proyecto en
+`CRAWLER_API_KEY`. La key ata el MCP a ESE proyecto: solo verá y tocará sus
+datos.
+
+```bash
+claude mcp add crawler \
+  -e CRAWLER_API_URL=http://localhost:8000 \
+  -e CRAWLER_API_KEY=sk_tu_clave_del_proyecto \
+  -- python -m mcp_server.server
+```
+
+Para emitir una key: `POST /api/clients/{proyecto}/api-keys` con el header
+`X-Admin-Token: <ADMIN_TOKEN>` (la clave entera se devuelve una sola vez).
+
 Comprueba que está conectado con `/mcp` dentro de Claude Code. Luego ya
 puedes pedir cosas como:
 

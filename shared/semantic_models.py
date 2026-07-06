@@ -63,6 +63,23 @@ class GeminiAccount(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
+class ApiKey(Base):
+    """API key POR PROYECTO (B1 · auth). Solo se guarda el HASH sha256 de la
+    clave (nunca la clave en claro); la clave entera se muestra una única vez
+    al crearla. Cada key da acceso únicamente a los datos de su `client_id`."""
+
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    client_id = Column(String(128), nullable=False, index=True)
+    name = Column(String(256), nullable=True)
+    key_hash = Column(String(64), nullable=False, unique=True, index=True)
+    prefix = Column(String(16), nullable=True)          # para reconocerla en la UI
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Semantic Analysis (one per job run)
 # ---------------------------------------------------------------------------

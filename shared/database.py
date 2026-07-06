@@ -129,6 +129,7 @@ def init_db():
         GscAccount, SemanticAnalysis, SemanticPage,
         SemanticCannibalization, GscJobData, SemanticChunk,
         QueryEmbedding, GscDaily, Ga4Account, Ga4Daily, MetricSyncConfig,
+        ApiKey,
     )
     from shared.entity_models import (  # noqa: F401 – capa de entidades GLiNER2
         ClientExtractionSchema, ClientSettings, EntityCatalog,

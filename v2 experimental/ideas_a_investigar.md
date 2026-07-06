@@ -9,6 +9,20 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 
 ## Hecho
 
+- ✅ **B1 · Auth por API key POR PROYECTO** (2026-07-06)
+  → Cierra B1. `api/auth.py`: middleware `ApiKeyAuthMiddleware` **desactivado
+  por defecto** (`API_AUTH_ENABLED=0` → todo pasa, la consola local intacta).
+  Al activarlo, `/api/*` exige una API key de proyecto (`X-API-Key` o
+  `Authorization: Bearer`) y **cada key solo ve su `client_id`** (scoping por
+  ruta: `/api/clients/{cid}/…` y `/api/jobs/{job_id}…`; `list_jobs`/`create_job`
+  fuerzan el proyecto de la key). Tabla `api_keys` (solo el **hash** sha256; la
+  clave entera se muestra una vez). Gestión (`…/api-keys`) protegida por
+  `ADMIN_TOKEN`. Router `api_keys.py` (crear/listar/revocar). El MCP manda la
+  key desde `CRAWLER_API_KEY`. 9 tests (puros + CRUD + validación) + **verificado
+  en vivo**: auth off = backwards-compat 200; auth on = 401 sin key, 200 con la
+  del proyecto, 403 en proyecto ajeno, admin token para emitir. Suite 356.
+  **Queda (opcional):** UI para gestionar las keys desde la consola. Commit: (este).
+
 - ✅ **B1 · Servidor MCP con verbos de negocio (POC)** (2026-07-06)
   → Decisión tomada por el usuario: MCP con verbos. `mcp_server/` — capa
   FINA sobre la REST (una sola fuente de verdad, no toca DB/Redis; llama a
@@ -175,12 +189,10 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
 Backend nuevo. El siguiente paso de cada uno es una spec de una página; no
 se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 
-- 🔨 **B1 · API para agentes.** POC del **servidor MCP con verbos** HECHO
-  (opción (a), ver arriba en Hecho: `mcp_server/`, 10 verbos, tests + vivo).
-  **Queda solo la capa de AUTENTICACIÓN** (la API sigue CORS-abierto sin
-  auth; el MCP asume acceso local). Decisión pendiente: ¿API key por
-  proyecto en la REST, o proxy/gateway autenticado delante? Es lo único que
-  falta para poder exponerlo fuera de local.
+- ✅ **B1 · API para agentes — COMPLETO** (ver arriba en Hecho): servidor
+  MCP con 10 verbos + auth por API key por proyecto (desactivable, scoping
+  por cliente, admin token). Fleco opcional: UI de gestión de keys en la
+  consola (hoy se emiten por API/MCP).
 
 - 📋 **B2 · Ingesta de logs de servidor.** La vista Logs está honestamente
   bloqueada-por-fuente (no se finge nada). Desbloquearía: hits de bots,

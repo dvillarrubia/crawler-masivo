@@ -435,13 +435,19 @@ The v2 redesign is tracked in `v2 experimental/00-DOCUMENTO-MAESTRO.md`
 - **Frontend v2:** `frontend-v2/` (Vite+React) served at `/` when built;
   the Alpine.js app stays at `/legacy`. Build: `npm run build` inside
   `frontend-v2/` (the api Dockerfile has a node stage).
+- **Agent API (B1):** MCP server in `mcp_server/` (business verbs over the
+  REST via httpx — `verbs.py` testable without the SDK, `server.py`
+  registers FastMCP). Optional **API-key-per-project auth** in `api/auth.py`
+  (`ApiKeyAuthMiddleware`, table `api_keys`, router `api_keys.py`): OFF by
+  default (`API_AUTH_ENABLED`), scopes each key to its `client_id`; key
+  management gated by `ADMIN_TOKEN`. Register:
+  `claude mcp add crawler -- python -m mcp_server.server`.
 
 All new behaviour is behind JobConfig flags whose default reproduces the
 previous behaviour exactly (regla de oro 3 del plan).
 
 ## What Does NOT Exist Yet
 
-- Authentication/authorization
 - CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration

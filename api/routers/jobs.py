@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import (
     APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query,
-    UploadFile,
+    Request, UploadFile,
 )
 from sqlalchemy.orm import Session
 
@@ -64,14 +64,20 @@ def get_progress(
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(
     payload: JobCreate,
+    request: Request,
     db: Session = Depends(get_session),
 ):
+    # B1 · auth: si la petición viene con una API key de proyecto, el rastreo
+    # se crea SÍ o SÍ bajo ese proyecto (no puede colar client_id ajeno).
+    auth_client = getattr(request.state, "auth_client_id", None)
+    client_id = auth_client or payload.client_id
+
     config_dict = payload.config.model_dump()
     job = Job(
         id=uuid.uuid4(),
         name=payload.name,
         seeds=payload.seeds,
-        client_id=payload.client_id,
+        client_id=client_id,
         status="pending",
         config=config_dict,
         # T8: NULL fingerprint = default normalization (comparable together)
@@ -180,6 +186,7 @@ def reanalyze_job(
 # ---------------------------------------------------------------------------
 @router.get("", response_model=PaginatedResponse[JobResponse])
 def list_jobs(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
@@ -192,6 +199,11 @@ def list_jobs(
         q = q.filter(Job.status == status)
     if client_id is not None:
         q = q.filter(Job.client_id == client_id)
+    # B1 · auth: con API key de proyecto, el listado se limita a ese proyecto
+    # (aunque no se pase client_id o se pase otro).
+    auth_client = getattr(request.state, "auth_client_id", None)
+    if auth_client is not None:
+        q = q.filter(Job.client_id == auth_client)
 
     total = q.count()
     pages = max(1, -(-total // page_size))  # ceiling division
