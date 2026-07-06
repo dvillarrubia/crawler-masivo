@@ -69,6 +69,10 @@ export const ISSUE_CATALOG = {
   structured_data_error: ["Datos estructurados con errores", "El marcado (schema.org) tiene errores que impiden a Google usarlo para resultados enriquecidos."],
   structured_data_warning: ["Datos estructurados mejorables", "El marcado es válido pero le faltan campos recomendados."],
 
+  // ── Contenido que solo existe tras ejecutar JavaScript (GEO) ─────────
+  content_only_after_js: ["Contenido solo tras JavaScript", "Buena parte del contenido de la página solo aparece después de ejecutar JavaScript. Los buscadores y motores de IA que no renderizan JS ven la página casi vacía."],
+  schema_only_after_js: ["Datos estructurados solo tras JS", "El marcado schema.org solo se inyecta al ejecutar JavaScript; en el HTML crudo no existe. Google puede no verlo y perderás el resultado enriquecido."],
+
   // ── Enlazado y arquitectura ──────────────────────────────────────────
   orphan_page: ["Página sin enlaces internos", "Ninguna página del rastreo la enlaza; solo se llegó por sitemap o semilla. Sin enlaces internos no recibe autoridad."],
   link_orphan: ["Sin camino desde la portada", "No existe ninguna ruta de clics desde la home hasta esta página, aunque esté enlazada desde algún rincón."],
@@ -79,6 +83,8 @@ export const ISSUE_CATALOG = {
   hierarchy_imbalance: ["Arquitectura desequilibrada", "La distribución de profundidades del sitio está desequilibrada: niveles saturados y saltos bruscos."],
   high_outlink_count: ["Demasiados enlaces salientes", "La página tiene tantos enlaces que cada uno transmite una fracción mínima de autoridad."],
   equity_leak: ["Fuga de autoridad", "Gran parte de la autoridad que sale de esta página se pierde en enlaces nofollow, rotos o redirigidos."],
+  no_inlinks_with_traffic: ["Con tráfico pero sin enlaces internos", "La página recibe clics de Google pero ninguna otra página del sitio la enlaza. Enlazándola le darías la autoridad que le falta para rendir aún más."],
+  underlinked_high_performer: ["Rinde mucho para lo poco enlazada que está", "Trae clics muy por encima de la media pese a tener poca autoridad interna (PageRank bajo). Reforzar su enlazado suele traducirse en más tráfico."],
 
   // ── Calidad de las URLs ──────────────────────────────────────────────
   url_too_long: ["URL demasiado larga", "Fea en resultados, difícil de compartir y de mantener."],
@@ -212,6 +218,10 @@ const DETAIL_RENDERERS = {
   orphan_not_in_crawl: (d) => (d.lastmod ? `El sitemap la declara (lastmod ${String(d.lastmod).slice(0, 10)}) pero navegando no se llega` : "Conocida por sitemap/GSC pero sin camino navegando"),
   content_only_after_js: (d) =>
     `El ${_pct(d.js_content_ratio)} del contenido solo existe tras ejecutar JS (${_n(d.rendered_word_count)} palabras renderizadas vs ${_n(d.raw_word_count)} en el HTML crudo)`,
+  no_inlinks_with_traffic: (d) =>
+    `${_n(d.clicks)} clics de Google pero 0 enlaces internos que la apunten`,
+  underlinked_high_performer: (d) =>
+    `${_n(d.clicks)} clics (por encima del P75 del sitio) con PageRank ${_dec(d.pagerank)}, por debajo del P25 (${_dec(d.pagerank_p25)})`,
   image_missing_alt: (d) =>
     d.missing_alt_count != null ? `${_n(d.missing_alt_count)} de ${_n(d.total_images ?? d.missing_alt_count)} imágenes sin alt` : "",
   semantic_cannibalization: (d) =>

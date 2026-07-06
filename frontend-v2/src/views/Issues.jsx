@@ -29,12 +29,13 @@ const LAYERS = {
     "very_low_text_ratio", "duplicate_content", "near_duplicate_content",
     "low_unique_content", "hreflang_missing_return", "hreflang_invalid_lang",
     "hreflang_broken_target", "structured_data_error",
-    "structured_data_warning",
+    "structured_data_warning", "content_only_after_js", "schema_only_after_js",
   ],
   "Enlazado y arquitectura": [
     "orphan_page", "link_orphan", "excessive_click_depth",
     "no_contextual_inlinks", "authority_sink", "deep_pagination",
     "hierarchy_imbalance", "high_outlink_count", "equity_leak",
+    "no_inlinks_with_traffic", "underlinked_high_performer",
   ],
   "URLs": [
     "url_too_long", "url_non_ascii", "url_uppercase", "url_underscores",
