@@ -1627,23 +1627,39 @@ class SEOAnalyzer:
         for (url_id,) in rows:
             self._add_issue(url_id, "orphan_page", "warning")
 
-        # Pages with very high outlinks (> threshold).
-        stmt = (
-            select(Url.id, Url.outlinks_count)
+        # Páginas con demasiados enlaces salientes DESDE EL CONTENIDO.
+        # Antes se contaban TODAS las filas Link internas (incluido el
+        # menú/cabecera/pie/sidebar), que son sitewide e iguales en todas
+        # las páginas: eso penalizaba cada página por tener el mega-menú del
+        # sitio (falso positivo real reportado). Ahora se cuentan solo los
+        # enlaces del CONTENIDO (link_position='content'); el total se
+        # conserva en el detalle para contexto.
+        content_counts = self.session.execute(
+            select(Link.from_url_id, func.count(Link.id))
+            .join(Url, Url.id == Link.from_url_id)
             .where(
                 Url.job_id == self.job_id,
-                Url.outlinks_count > self.max_outlinks,
+                Link.is_internal.is_(True),
+                Link.link_position == "content",
             )
-        )
-        rows = self.session.execute(stmt).all()
+            .group_by(Link.from_url_id)
+        ).all()
 
-        for url_id, outlink_count in rows:
-            self._add_issue(
-                url_id,
-                "high_outlink_count",
-                "info",
-                {"count": outlink_count},
-            )
+        totals = dict(
+            self.session.execute(
+                select(Url.id, Url.outlinks_count).where(Url.job_id == self.job_id)
+            ).all()
+        )
+
+        for url_id, n_content in content_counts:
+            if n_content > self.max_outlinks:
+                self._add_issue(
+                    url_id,
+                    "high_outlink_count",
+                    "info",
+                    {"count": n_content, "content_links": n_content,
+                     "total_outlinks": totals.get(url_id)},
+                )
 
         self._flush_issues()
 

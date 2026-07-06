@@ -81,7 +81,7 @@ export const ISSUE_CATALOG = {
   authority_sink: ["Autoridad estancada", "Página con mucha autoridad acumulada que no enlaza a nada desde su contenido: la autoridad muere ahí en vez de repartirse."],
   deep_pagination: ["Paginación profunda", "Cadenas de paginación muy largas (página 4, 5, 6…). Lo que solo es alcanzable así apenas se rastrea."],
   hierarchy_imbalance: ["Arquitectura desequilibrada", "La distribución de profundidades del sitio está desequilibrada: niveles saturados y saltos bruscos."],
-  high_outlink_count: ["Demasiados enlaces salientes", "La página tiene tantos enlaces que cada uno transmite una fracción mínima de autoridad."],
+  high_outlink_count: ["Demasiados enlaces en el contenido", "El CUERPO de la página (sin contar menú, cabecera ni pie) tiene tantísimos enlaces que cada uno transmite una fracción mínima de autoridad. Los enlaces de plantilla no cuentan aquí porque son iguales en todo el sitio."],
   equity_leak: ["Fuga de autoridad", "Gran parte de la autoridad que sale de esta página se pierde en enlaces nofollow, rotos o redirigidos."],
   no_inlinks_with_traffic: ["Con tráfico pero sin enlaces internos", "La página recibe clics de Google pero ninguna otra página del sitio la enlaza. Enlazándola le darías la autoridad que le falta para rendir aún más."],
   underlinked_high_performer: ["Rinde mucho para lo poco enlazada que está", "Trae clics muy por encima de la media pese a tener poca autoridad interna (PageRank bajo). Reforzar su enlazado suele traducirse en más tráfico."],
@@ -179,7 +179,8 @@ const DETAIL_RENDERERS = {
   low_unique_content: (d) =>
     `Solo ${_n(d.unique_word_count)} palabras propias (mínimo ${_n(d.threshold)}); el ${_pct(d.boilerplate_ratio)} de la página es plantilla repetida`,
   url_too_long: (d) => `${_n(d.length)} caracteres de URL`,
-  high_outlink_count: (d) => `${_n(d.count)} enlaces salientes en una sola página`,
+  high_outlink_count: (d) =>
+    `${_n(d.count)} enlaces en el contenido${d.total_outlinks != null ? ` (${_n(d.total_outlinks)} en total contando menú y pie)` : ""}`,
   slow_page: (d) => `Respondió en ${_n(d.response_time_ms)} ms (umbral: ${_n(d.threshold_ms)} ms)`,
   redirect_chain: (d) => `${_n(d.hops ?? (d.chain || []).length)} saltos: ${_urls(d.chain, 3)}`,
   redirect_loop: (d) => `La cadena vuelve sobre sí misma: ${_urls(d.chain, 3)}`,
