@@ -24,6 +24,7 @@ export default function AccountsView() {
         <Ga4Accounts clientId={clientId} />
       </div>
       <DailySyncPanel clientId={clientId} />
+      <ApiKeysPanel clientId={clientId} />
     </div>
   );
 }
@@ -226,6 +227,91 @@ function GscAccounts() {
         {/* Comprueba qué propiedades (GSC y GA4) ve esta credencial antes de guardar */}
         <DiscoverProperties credentials={credentials} />
         <button disabled={busy || !name || !credentials} onClick={add}>Añadir cuenta GSC</button>
+      </div>
+    </div>
+  );
+}
+
+/* -- API keys por proyecto (B1 · auth) -------------------------------------- */
+function ApiKeysPanel({ clientId }) {
+  const q = useAsync(
+    () => (clientId ? api.apiKeys(clientId).catch(() => []) : Promise.resolve([])),
+    [clientId]);
+  const [name, setName] = useState("");
+  const [adminToken, setAdminToken] = useState("");
+  const [nueva, setNueva] = useState(null);   // clave recién creada (una vez)
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!clientId) {
+    return (
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Claves de API (acceso de agentes)</h3>
+        <p className="proxy-tag">Selecciona un proyecto para gestionar sus claves de API.</p>
+      </div>
+    );
+  }
+
+  const crear = async () => {
+    setBusy(true); setError(null); setNueva(null);
+    try {
+      const r = await api.createApiKey(clientId, { name }, adminToken || undefined);
+      setNueva(r);      // muestra la clave entera una vez
+      setName("");
+      q.reload();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const revocar = async (id) => {
+    if (!window.confirm("¿Revocar esta clave? Dejará de funcionar.")) return;
+    try { await api.revokeApiKey(clientId, id, adminToken || undefined); q.reload(); }
+    catch (e) { setError(e.message); }
+  };
+
+  const keys = q.data || [];
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Claves de API — acceso de agentes (MCP) a este proyecto</h3>
+      <p className="proxy-tag" style={{ marginTop: 0 }}>
+        Cada clave da acceso <b>solo a este proyecto</b> vía la API / el servidor MCP. Solo se muestra
+        entera al crearla — guárdala. Si la API corre con autenticación activada
+        (<span className="mono">API_AUTH_ENABLED=1</span>), hace falta el <b>token de admin</b> para
+        emitir o revocar.
+      </p>
+
+      {keys.length > 0 && (
+        <table className="data" style={{ marginBottom: 8 }}>
+          <thead><tr><th>Nombre</th><th>Prefijo</th><th>Último uso</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k.id} style={{ opacity: k.revoked ? 0.5 : 1 }}>
+                <td>{k.name || "—"}</td>
+                <td className="mono">{k.prefix}…</td>
+                <td className="proxy-tag">{k.last_used_at ? new Date(k.last_used_at).toLocaleString("es") : "nunca"}</td>
+                <td>{k.revoked ? <span className="tag">revocada</span> : <span className="tag" style={{ color: "var(--chart-forest)" }}>activa</span>}</td>
+                <td className="num">{!k.revoked && <button className="secondary" onClick={() => revocar(k.id)} title="Revocar">×</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {keys.length === 0 && <div className="proxy-tag" style={{ marginBottom: 8 }}>Este proyecto no tiene claves.</div>}
+
+      {nueva && (
+        <div className="alert warn" style={{ marginBottom: 8 }}>
+          <b>Clave creada — cópiala ahora, no se vuelve a mostrar:</b>
+          <div className="mono" style={{ wordBreak: "break-all", marginTop: 4 }}>{nueva.api_key}</div>
+        </div>
+      )}
+      {error && <div className="alert" style={{ marginBottom: 8 }}>{error}</div>}
+
+      <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+        <input type="text" placeholder="nombre (ej. agente-claude)" value={name}
+          onChange={(e) => setName(e.target.value)} />
+        <input type="password" className="mono" style={{ minWidth: 200 }}
+          placeholder="token de admin (solo si auth activa)" value={adminToken}
+          onChange={(e) => setAdminToken(e.target.value)} />
+        <button disabled={busy} onClick={crear}>{busy ? "Creando…" : "Crear clave"}</button>
       </div>
     </div>
   );

@@ -21,7 +21,9 @@ Estados: ✅ hecho · 🔨 en curso · 📋 pendiente (necesita decisión/spec) 
   key desde `CRAWLER_API_KEY`. 9 tests (puros + CRUD + validación) + **verificado
   en vivo**: auth off = backwards-compat 200; auth on = 401 sin key, 200 con la
   del proyecto, 403 en proyecto ajeno, admin token para emitir. Suite 356.
-  **Queda (opcional):** UI para gestionar las keys desde la consola. Commit: (este).
+  **UI incluida:** panel "Claves de API" en Cuentas y fuentes (crear —muestra
+  la clave una vez—, listar con último uso, revocar; campo de admin token para
+  cuando la auth está activa). Commits: (auth), (ui).
 
 - ✅ **B1 · Servidor MCP con verbos de negocio (POC)** (2026-07-06)
   → Decisión tomada por el usuario: MCP con verbos. `mcp_server/` — capa
@@ -191,8 +193,7 @@ se tocan a medias. Contexto ampliado en `plan-tarde.md`.
 
 - ✅ **B1 · API para agentes — COMPLETO** (ver arriba en Hecho): servidor
   MCP con 10 verbos + auth por API key por proyecto (desactivable, scoping
-  por cliente, admin token). Fleco opcional: UI de gestión de keys en la
-  consola (hoy se emiten por API/MCP).
+  por cliente, admin token) + UI de gestión de keys en la consola.
 
 - 📋 **B2 · Ingesta de logs de servidor.** La vista Logs está honestamente
   bloqueada-por-fuente (no se finge nada). Desbloquearía: hits de bots,

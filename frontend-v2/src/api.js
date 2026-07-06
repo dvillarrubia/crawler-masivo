@@ -16,6 +16,11 @@ async function request(path, options = {}) {
   return body;
 }
 
+const _authHeaders = (adminToken) => ({
+  "Content-Type": "application/json",
+  ...(adminToken ? { "X-Admin-Token": adminToken } : {}),
+});
+
 const qs = (params) => {
   const clean = Object.entries(params || {}).filter(
     ([, v]) => v !== null && v !== undefined && v !== "",
@@ -119,6 +124,18 @@ export const api = {
   diff: (params) => request(`/api/diff${qs(params)}`),
   diffUrls: (params) => request(`/api/diff/urls${qs(params)}`),
   flapping: (params) => request(`/api/diff/flapping${qs(params)}`),
+
+  // API keys por proyecto (B1 · auth). El admin token solo hace falta si la
+  // API corre con API_AUTH_ENABLED=1.
+  apiKeys: (clientId, adminToken) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/api-keys`,
+      { headers: _authHeaders(adminToken) }),
+  createApiKey: (clientId, payload, adminToken) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/api-keys`,
+      { method: "POST", headers: _authHeaders(adminToken), body: JSON.stringify(payload || {}) }),
+  revokeApiKey: (clientId, id, adminToken) =>
+    request(`/api/clients/${encodeURIComponent(clientId)}/api-keys/${id}`,
+      { method: "DELETE", headers: _authHeaders(adminToken) }),
 
   // Descubrir propiedades GSC/GA4 desde el JSON de una service account
   discoverProperties: (credentials_json) =>
