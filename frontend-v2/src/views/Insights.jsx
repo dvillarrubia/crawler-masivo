@@ -96,12 +96,17 @@ function RecDrawer({ jobId, rec, onClose }) {
   const [ficha, setFicha] = useState(null);
   const types = rec.issue_types || [];
   const q = useAsync(
-    () => Promise.all(types.map((t) => api.issues(jobId, { issue_type: t, page_size: 300 })))
-      .then((rs) => rs.flatMap((r, i) => (r.items || []).map((it) => ({ ...it, _type: types[i] })))),
+    () => Promise.all(types.map((t) => api.issues(jobId, { issue_type: t, page_size: 200 })))
+      .then((rs) => rs.map((r, i) => ({
+        items: (r.items || []).map((it) => ({ ...it, _type: types[i] })),
+        total: r.total || 0,
+      }))),
     [jobId, rec.title],
   );
 
-  const items = q.data || [];
+  const items = (q.data || []).flatMap((r) => r.items);
+  const totalAll = (q.data || []).reduce((a, r) => a + r.total, 0);
+  const truncated = totalAll > items.length;
 
   const exportCsv = () => {
     const esc = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
@@ -125,11 +130,16 @@ function RecDrawer({ jobId, rec, onClose }) {
       <div className="card muted" style={{ marginBottom: 10 }}>{rec.description}</div>
 
       <div className="row between" style={{ marginBottom: 8 }}>
-        <b>{fmt(rec.affected_count)} URLs afectadas</b>
+        <b>{fmt(rec.affected_count)} URLs afectadas{truncated ? ` · mostrando ${fmt(items.length)}` : ""}</b>
         {items.length > 0 && (
-          <button className="secondary" onClick={exportCsv}>Exportar CSV</button>
+          <button className="secondary" onClick={exportCsv}>Exportar CSV{truncated ? " (mostradas)" : ""}</button>
         )}
       </div>
+      {truncated && (
+        <div className="proxy-tag" style={{ marginBottom: 6 }}>
+          Lista recortada a 200 por tipo. Para el listado completo, ve a Incidencias y filtra por el tipo.
+        </div>
+      )}
 
       {q.loading && <Spinner />}
       {q.error && <ErrorBox error={q.error} />}
