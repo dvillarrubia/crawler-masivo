@@ -329,6 +329,38 @@ def list_urls(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/{url_id}/raw-html  --  HTML tal cual se rastreó
+# ---------------------------------------------------------------------------
+@router.get("/urls/{url_id}/raw-html")
+def get_url_raw_html(
+    job_id: uuid.UUID,
+    url_id: int,
+    db: Session = Depends(get_session),
+):
+    """El HTML almacenado de la página (renderizado si el job usó
+    render_js). Solo existe si el job se lanzó con
+    ``extraction.store_raw_html``."""
+    from fastapi import Response
+
+    _get_job_or_404(job_id, db)
+    row = (
+        db.query(PageContent.raw_html)
+        .join(Url, Url.id == PageContent.url_id)
+        .filter(Url.id == url_id, Url.job_id == job_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="URL not found")
+    if row[0] is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Sin HTML almacenado: el job no se lanzó con "
+                   "extraction.store_raw_html activado",
+        )
+    return Response(content=row[0], media_type="text/html; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls/{url_id}  -- full detail for a single URL
 # ---------------------------------------------------------------------------
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)

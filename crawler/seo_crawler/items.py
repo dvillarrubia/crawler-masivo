@@ -158,6 +158,7 @@ class ContentItem(scrapy.Item):
     content_text = scrapy.Field()
     content_length = scrapy.Field()
     content_markdown = scrapy.Field()
+    raw_html = scrapy.Field()
 
 
 class SecurityItem(scrapy.Item):

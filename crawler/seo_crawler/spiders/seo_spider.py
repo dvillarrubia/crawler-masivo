@@ -1045,17 +1045,28 @@ class SeoSpider(scrapy.Spider):
                 has_unsafe_crossorigin=has_unsafe_crossorigin,
             )
 
-        # -- ContentItem (main page text + markdown) -----------------------
-        if self._extraction.get("extract_page_content", True):
-            main_content = extract_main_content(selector, word_count=word_count_val)
-            if main_content:
-                content_md = extract_main_content_markdown(selector, word_count=word_count_val)
+        # -- ContentItem (main page text + markdown + raw HTML) ------------
+        store_raw = self._extraction.get("store_raw_html", False)
+        if self._extraction.get("extract_page_content", True) or store_raw:
+            main_content = None
+            content_md = None
+            if self._extraction.get("extract_page_content", True):
+                main_content = extract_main_content(selector, word_count=word_count_val)
+                if main_content:
+                    content_md = extract_main_content_markdown(selector, word_count=word_count_val)
+            # El HTML tal y como lo vio el crawler: con render_js activo es
+            # el DOM renderizado (el lado crudo lo cubre GEO/T15). Se guarda
+            # aunque el extractor de contenido no saque nada (páginas
+            # boilerplate-only), que es justo donde más se necesita.
+            raw_html = response.text if store_raw else None
+            if main_content or raw_html:
                 yield ContentItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
                     content_text=main_content,
-                    content_length=len(main_content),
+                    content_length=len(main_content) if main_content else None,
                     content_markdown=content_md,
+                    raw_html=raw_html,
                 )
 
         # -- T15: GEO — fetch the RAW (no-JS) side of rendered pages ------

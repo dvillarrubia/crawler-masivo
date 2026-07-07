@@ -492,6 +492,9 @@ class PageContent(Base):
     content_text = Column(Text, nullable=True)
     content_length = Column(Integer, nullable=True)
     content_markdown = Column(Text, nullable=True)
+    # Solo cuando el job pide extraction.store_raw_html: el HTML tal y como
+    # lo vio el crawler (renderizado si render_js estaba activo)
+    raw_html = Column(Text, nullable=True)
 
     url_rel = relationship("Url", back_populates="page_content")
 
