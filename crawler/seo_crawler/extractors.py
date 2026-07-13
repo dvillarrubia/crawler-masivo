@@ -339,6 +339,10 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
                     schema_type = ", ".join(str(t) for t in schema_type)
                 elif schema_type is not None:
                     schema_type = str(schema_type)
+            # RDFa items without a schema type are xhtml/ARIA role
+            # annotations (tabs, dialogs, buttons) — noise on any site.
+            if fmt == "rdfa" and not schema_type:
+                continue
             results.append({
                 "raw": item,
                 "format": fmt.replace("-", ""),  # jsonld, microdata, rdfa
@@ -759,10 +763,34 @@ _BOILERPLATE_ID_CLASS_PATTERNS: list[str] = [
     "chat-widget", "livechat",
 ]
 
+# Promotional / engagement blocks: newsletter CTAs, product carousels,
+# cross-sell and "related items" grids.  Kept separate from the core
+# boilerplate list because on rare layouts a carousel can hold primary
+# content — jobs can opt out via ``extraction.strip_promo_blocks``.
+_PROMO_ID_CLASS_PATTERNS: list[str] = [
+    "newsletter",
+    "carousel",
+    "cross-sell", "crosssell", "crossselling",
+    "upsell", "up-sell",
+    "related-product", "relatedproduct",
+    "related-post", "relatedpost",
+    "recently-viewed", "recentlyviewed",
+    "product-recommend", "recommended-product",
+]
 
-def _strip_boilerplate_html(html: str) -> str:
+
+def _strip_boilerplate_html(
+    html: str,
+    *,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+) -> str:
     """Remove cookie banners, chat widgets, overlays, and structural
     non-content elements (form, nav, aside, footer, header) from raw HTML.
+
+    *extra_selectors* are per-job CSS selectors (from
+    ``extraction.custom_boilerplate_selectors``) so site-specific noise
+    can be stripped via job config without hardcoding it here.
 
     Uses lxml to parse and strip elements matching known boilerplate
     patterns, then serialises back to a string.  The cleaned HTML is
@@ -775,7 +803,10 @@ def _strip_boilerplate_html(html: str) -> str:
         doc = lxml_html.fromstring(html)
 
         # 1) Remove by exact CSS selector
-        for css in _BOILERPLATE_CSS_SELECTORS:
+        css_selectors = list(_BOILERPLATE_CSS_SELECTORS)
+        if extra_selectors:
+            css_selectors += list(extra_selectors)
+        for css in css_selectors:
             try:
                 sel = CSSSelector(css)
                 for el in sel(doc):
@@ -784,12 +815,15 @@ def _strip_boilerplate_html(html: str) -> str:
                 pass
 
         # 2) Remove by id/class substring pattern
+        patterns = list(_BOILERPLATE_ID_CLASS_PATTERNS)
+        if strip_promo:
+            patterns += _PROMO_ID_CLASS_PATTERNS
         for el in doc.iter():
             el_id = (el.get("id") or "").lower()
             el_class = (el.get("class") or "").lower()
             if not el_id and not el_class:
                 continue
-            for pattern in _BOILERPLATE_ID_CLASS_PATTERNS:
+            for pattern in patterns:
                 if pattern in el_id or pattern in el_class:
                     parent = el.getparent()
                     if parent is not None:
@@ -811,7 +845,12 @@ def _strip_boilerplate_html(html: str) -> str:
         return html  # on any failure, return original HTML unchanged
 
 
-def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
+def _trafilatura_extract(
+    html: str,
+    *,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+) -> tuple[str | None, str | None]:
     """Use trafilatura to extract clean text and markdown from raw HTML.
 
     Before running trafilatura, strips known boilerplate elements (cookie
@@ -827,7 +866,9 @@ def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
     try:
         import trafilatura
 
-        clean = _strip_boilerplate_html(html)
+        clean = _strip_boilerplate_html(
+            html, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
 
         text = trafilatura.extract(
             clean,
@@ -855,13 +896,31 @@ def _trafilatura_extract(html: str) -> tuple[str | None, str | None]:
         return (None, None)
 
 
-def _fallback_extract_text(selector) -> str | None:
+def _fallback_extract_text(
+    selector, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
+) -> str | None:
     """Fallback text extraction when trafilatura returns nothing.
 
     Looks for ``<main>``, ``<article>``, or ``[role="main"]``, then
     falls back to body content between the first ``<h1>`` and ``<footer>``.
     Strips script/style/nav/header/footer nodes via XPath.
+
+    Re-parses from boilerplate-stripped HTML first, so promo blocks and
+    per-job custom selectors are excluded here too — this path handles
+    the pages where trafilatura fails, and must not reintroduce noise.
     """
+    raw_html = selector.get()
+    if raw_html:
+        try:
+            from parsel import Selector as _Selector
+
+            stripped = _strip_boilerplate_html(
+                raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+            )
+            selector = _Selector(text=stripped)
+        except Exception:
+            pass  # fall back to the original selector unchanged
+
     container = selector.css('main, article, [role="main"]')
     if container:
         container = container[0]
@@ -894,7 +953,13 @@ def _fallback_extract_text(selector) -> str | None:
 # Indexability analysis
 # ---------------------------------------------------------------------------
 
-def extract_main_content(selector, *, word_count: int | None = None) -> str | None:
+def extract_main_content(
+    selector,
+    *,
+    word_count: int | None = None,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+) -> str | None:
     """Extract the main textual content of a page.
 
     Uses trafilatura for site-agnostic content extraction.  When the page
@@ -906,11 +971,15 @@ def extract_main_content(selector, *, word_count: int | None = None) -> str | No
     if not raw_html:
         return None
 
-    text, _ = _trafilatura_extract(raw_html)
+    text, _ = _trafilatura_extract(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
     traf_len = len(text) if text else 0
 
     if traf_len == 0:
-        return _fallback_extract_text(selector)
+        return _fallback_extract_text(
+            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
 
     # Estimate how many words trafilatura captured vs page total.
     # avg ~5 chars/word in Spanish/English (including spaces).
@@ -921,14 +990,18 @@ def extract_main_content(selector, *, word_count: int | None = None) -> str | No
     # Threshold: at least 20% of the visible words — below that it is
     # likely discarding real content (cards, grids, accordions, FAQs).
     if page_words > 200 and traf_words < page_words * 0.20:
-        fallback = _fallback_extract_text(selector)
+        fallback = _fallback_extract_text(
+            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
         if fallback and len(fallback) > traf_len:
             return fallback
 
     return text
 
 
-def _get_main_container_html(selector) -> str | None:
+def _get_main_container_html(
+    selector, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
+) -> str | None:
     """Return the inner HTML of the main content container.
 
     Used only as fallback for markdown extraction.  Strips boilerplate
@@ -945,12 +1018,18 @@ def _get_main_container_html(selector) -> str | None:
     html = node.get()
     if not html or not html.strip():
         return None
-    return _strip_boilerplate_html(html)
+    return _strip_boilerplate_html(
+        html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
 
 
-def _fallback_extract_markdown(selector) -> str | None:
+def _fallback_extract_markdown(
+    selector, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
+) -> str | None:
     """Fallback markdown extraction via html2text on the main container."""
-    container_html = _get_main_container_html(selector)
+    container_html = _get_main_container_html(
+        selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
     if not container_html:
         return None
     try:
@@ -974,7 +1053,13 @@ def _fallback_extract_markdown(selector) -> str | None:
         return None
 
 
-def extract_main_content_markdown(selector, *, word_count: int | None = None) -> str | None:
+def extract_main_content_markdown(
+    selector,
+    *,
+    word_count: int | None = None,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+) -> str | None:
     """Extract the main content as clean Markdown.
 
     Uses trafilatura's markdown output for site-agnostic extraction.
@@ -985,17 +1070,23 @@ def extract_main_content_markdown(selector, *, word_count: int | None = None) ->
     if not raw_html:
         return None
 
-    _, md = _trafilatura_extract(raw_html)
+    _, md = _trafilatura_extract(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
     traf_len = len(md) if md else 0
 
     if traf_len == 0:
-        return _fallback_extract_markdown(selector)
+        return _fallback_extract_markdown(
+            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
 
     traf_words = traf_len / 5 if traf_len else 0
     page_words = word_count or 0
 
     if page_words > 200 and traf_words < page_words * 0.20:
-        fallback_md = _fallback_extract_markdown(selector)
+        fallback_md = _fallback_extract_markdown(
+            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
         if fallback_md and len(fallback_md) > traf_len:
             return fallback_md
 

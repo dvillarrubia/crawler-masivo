@@ -90,6 +90,8 @@ class ExtractionConfig(BaseModel):
     extract_hreflang: bool = True
     extract_security_headers: bool = True
     extract_page_content: bool = True
+    strip_promo_blocks: bool = True
+    custom_boilerplate_selectors: list[str] = Field(default_factory=list)
     store_raw_html: bool = False
 
 

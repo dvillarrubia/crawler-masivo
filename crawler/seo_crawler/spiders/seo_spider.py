@@ -827,9 +827,21 @@ class SeoSpider(scrapy.Spider):
 
         # -- ContentItem (main page text + markdown) -----------------------
         if self._extraction.get("extract_page_content", True):
-            main_content = extract_main_content(selector, word_count=word_count_val)
+            strip_promo = self._extraction.get("strip_promo_blocks", True)
+            extra_selectors = self._extraction.get("custom_boilerplate_selectors") or None
+            main_content = extract_main_content(
+                selector,
+                word_count=word_count_val,
+                strip_promo=strip_promo,
+                extra_selectors=extra_selectors,
+            )
             if main_content:
-                content_md = extract_main_content_markdown(selector, word_count=word_count_val)
+                content_md = extract_main_content_markdown(
+                    selector,
+                    word_count=word_count_val,
+                    strip_promo=strip_promo,
+                    extra_selectors=extra_selectors,
+                )
                 yield ContentItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
