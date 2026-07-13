@@ -776,7 +776,39 @@ _PROMO_ID_CLASS_PATTERNS: list[str] = [
     "related-post", "relatedpost",
     "recently-viewed", "recentlyviewed",
     "product-recommend", "recommended-product",
+    # Subscription / signup CTAs (es + en)
+    "subscribe", "subscription", "suscripcion", "suscribete",
+    "signup", "sign-up",
+    # Social / sharing widgets
+    "social-share", "share-button", "sharing-button",
+    # Ads / comments embeds
+    "advertisement", "adsense", "disqus",
+    # Misc engagement widgets
+    "wishlist", "lightbox",
 ]
+
+# Text phrases (lowercase, es + en) that identify small CTA/legal/social
+# blocks regardless of their class names — catches bespoke-class noise
+# that no id/class pattern can.  Only elements whose TOTAL visible text
+# is short (< _PROMO_TEXT_MAX_LEN) are removed, so an article that merely
+# mentions one of these phrases in a real paragraph is never affected.
+_PROMO_TEXT_PHRASES: list[str] = [
+    # Cookies / consent
+    "aceptar cookies", "accept cookies", "utilizamos cookies", "we use cookies",
+    "política de cookies", "cookie policy",
+    # Newsletter / subscription CTAs
+    "suscríbete", "suscribete", "subscribe to", "join our newsletter",
+    # Social CTAs
+    "síguenos en", "siguenos en", "follow us on", "compartir en", "share on",
+    # Legal boilerplate
+    "todos los derechos reservados", "all rights reserved",
+]
+
+_PROMO_TEXT_MAX_LEN = 400  # chars — only prune small blocks
+
+_PROMO_TEXT_TAGS: frozenset[str] = frozenset({
+    "div", "section", "p", "span", "li", "a", "button",
+})
 
 
 def _strip_boilerplate_html(
@@ -839,6 +871,24 @@ def _strip_boilerplate_html(
             parent = el.getparent()
             if parent is not None:
                 parent.remove(el)
+
+        # 4) Remove small blocks by text phrase (catches bespoke-class
+        #    CTA/legal/social widgets that id/class patterns miss).
+        if strip_promo:
+            doomed = []
+            for el in doc.iter():
+                if not isinstance(el.tag, str) or el.tag not in _PROMO_TEXT_TAGS:
+                    continue
+                text = el.text_content()
+                if not text or len(text) > _PROMO_TEXT_MAX_LEN:
+                    continue
+                lower = text.lower()
+                if any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
+                    doomed.append(el)
+            for el in doomed:
+                parent = el.getparent()
+                if parent is not None:
+                    parent.remove(el)
 
         return lxml_html.tostring(doc, encoding="unicode")
     except Exception:
