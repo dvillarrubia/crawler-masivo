@@ -218,6 +218,21 @@ function app() {
     targetResults: null,
     targetLoading: false,
 
+    // Pestana Limpieza
+    cleaningGroups: [],
+    cleaningGroupsLoading: false,
+    cleaningSelectedGroup: null,
+    cleaningRules: [{ type: 'line_exact', value: '' }],
+    cleaningTargets: 'both',
+    cleaningUrlRegex: '',
+    cleaningPreview: null,
+    cleaningPreviewLoading: false,
+    cleaningApplying: false,
+    cleaningReverting: false,
+    cleaningRulesets: [],
+    cleaningError: null,
+    cleaningMessage: null,
+
     // Vista detalle de URL
     urlDetail: null,
     urlDetailTab: 'general',
@@ -381,6 +396,12 @@ function app() {
       this.targetResults = null;
       this.targetTheme = '';
       this.gscFetchResult = null;
+      this.cleaningGroups = [];
+      this.cleaningSelectedGroup = null;
+      this.cleaningPreview = null;
+      this.cleaningRulesets = [];
+      this.cleaningError = null;
+      this.cleaningMessage = null;
       this.urls = []; this.issues = []; this.links = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
@@ -460,6 +481,7 @@ function app() {
       if (tab === 'links' && this.links.length === 0) this.loadLinks();
       if (tab === 'insights' && !this.insights) this.loadInsights();
       if (tab === 'semantic') this.loadSemantic();
+      if (tab === 'cleaning') this.loadCleaning();
       this.$nextTick(() => lucide.createIcons());
     },
 
@@ -894,6 +916,126 @@ function app() {
     },
 
     setLinksPage(p) { if (p >= 1 && p <= this.linksPages) { this.linksPage = p; this.loadLinks(); } },
+
+    // ------- Limpieza -------
+    // Wrapper propio (en lugar de api()) para poder mostrar el detalle de los
+    // errores 422 de FastAPI, que llegan como array de objetos y no como string.
+    async _cleaningApi(path, opts = {}) {
+      const res = await fetch(`${API}/jobs/${this.job.id}/cleaning${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        let msg = err.detail;
+        if (Array.isArray(msg)) msg = msg.map(d => d.msg || JSON.stringify(d)).join(' | ');
+        throw new Error(msg || 'Error en la peticion');
+      }
+      return res.json();
+    },
+
+    loadCleaning() {
+      if (!this.job) return;
+      this.loadCleaningGroups();
+      this.loadCleaningRulesets();
+    },
+
+    async loadCleaningGroups() {
+      this.cleaningGroupsLoading = true;
+      this.cleaningError = null;
+      try {
+        this.cleaningGroups = await this._cleaningApi('/groups');
+      } catch (e) { this.cleaningError = e.message; }
+      this.cleaningGroupsLoading = false;
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    async loadCleaningRulesets() {
+      try {
+        this.cleaningRulesets = await this._cleaningApi('/rulesets');
+      } catch (e) { this.cleaningError = e.message; }
+    },
+
+    selectCleaningGroup(g) {
+      this.cleaningSelectedGroup = g.group_key;
+      this.cleaningPreview = null;
+      this.cleaningMessage = null;
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    addCleaningRule() { this.cleaningRules.push({ type: 'line_contains', value: '' }); },
+    removeCleaningRule(i) { this.cleaningRules.splice(i, 1); },
+
+    _cleaningValidRules() {
+      return this.cleaningRules.some(r => r.value.trim() !== '');
+    },
+
+    _cleaningPayload(withRules = true) {
+      const payload = { group_key: this.cleaningSelectedGroup };
+      if (this.cleaningUrlRegex.trim()) payload.url_regex = this.cleaningUrlRegex.trim();
+      if (withRules) {
+        payload.rules = this.cleaningRules
+          .filter(r => r.value.trim() !== '')
+          .map(r => ({ type: r.type, value: r.value }));
+        payload.targets = this.cleaningTargets;
+      }
+      return payload;
+    },
+
+    async previewCleaning() {
+      if (!this._cleaningValidRules()) { this.cleaningError = 'Añade al menos una regla con valor'; return; }
+      this.cleaningPreviewLoading = true;
+      this.cleaningError = null;
+      this.cleaningMessage = null;
+      try {
+        this.cleaningPreview = await this._cleaningApi('/preview', {
+          method: 'POST',
+          body: JSON.stringify({ ...this._cleaningPayload(), sample_size: 5 }),
+        });
+      } catch (e) { this.cleaningError = e.message; }
+      this.cleaningPreviewLoading = false;
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    async applyCleaning() {
+      if (!this._cleaningValidRules()) { this.cleaningError = 'Añade al menos una regla con valor'; return; }
+      const group = this.cleaningGroups.find(g => g.group_key === this.cleaningSelectedGroup);
+      const pages = group ? fmt.num(group.pages) : '?';
+      if (!confirm(`¿Aplicar las reglas de limpieza al grupo "${this.cleaningSelectedGroup}" (${pages} páginas)? Los originales se conservan y podrás revertir.`)) return;
+      this.cleaningApplying = true;
+      this.cleaningError = null;
+      this.cleaningMessage = null;
+      try {
+        const res = await this._cleaningApi('/apply', {
+          method: 'POST',
+          body: JSON.stringify(this._cleaningPayload()),
+        });
+        this.cleaningMessage = `Limpieza aplicada: ${fmt.num(res.pages_updated)} páginas actualizadas, ${fmt.num(res.total_chars_removed)} caracteres eliminados`
+          + (res.pages_skipped_safety ? ` (${fmt.num(res.pages_skipped_safety)} saltadas por la válvula de seguridad)` : '');
+        this.showToast('Limpieza aplicada');
+        this.cleaningPreview = null;
+        await Promise.all([this.loadCleaningGroups(), this.loadCleaningRulesets()]);
+      } catch (e) { this.cleaningError = e.message; }
+      this.cleaningApplying = false;
+    },
+
+    async revertCleaning() {
+      if (!confirm(`¿Revertir la limpieza del grupo "${this.cleaningSelectedGroup}"? Se restaurará el contenido original.`)) return;
+      this.cleaningReverting = true;
+      this.cleaningError = null;
+      this.cleaningMessage = null;
+      try {
+        const res = await this._cleaningApi('/revert', {
+          method: 'POST',
+          body: JSON.stringify(this._cleaningPayload(false)),
+        });
+        this.cleaningMessage = `Limpieza revertida: ${fmt.num(res.pages_updated)} páginas restauradas`;
+        this.showToast('Limpieza revertida', 'info');
+        this.cleaningPreview = null;
+        await Promise.all([this.loadCleaningGroups(), this.loadCleaningRulesets()]);
+      } catch (e) { this.cleaningError = e.message; }
+      this.cleaningReverting = false;
+    },
 
     // ------- Exportar -------
     exportCSV() {

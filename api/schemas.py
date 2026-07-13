@@ -452,3 +452,80 @@ class ImportResponse(BaseModel):
     rows_imported: dict[str, int]
     rows_skipped: dict[str, int]
     warnings: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Post-crawl cleaning
+# ---------------------------------------------------------------------------
+class CleaningRule(BaseModel):
+    """One cleaning rule. See api/cleaning_engine.py for semantics."""
+
+    type: Literal[
+        "line_exact", "line_prefix", "line_contains",
+        "cut_from_line", "remove_substring", "regex",
+    ]
+    value: str = Field(..., min_length=1, max_length=2000)
+
+
+class CleaningGroupInfo(BaseModel):
+    group_key: str
+    pages: int
+    cleaned_pages: int
+    avg_content_length: int
+    sample_urls: list[str]
+
+
+class CleaningPreviewRequest(BaseModel):
+    group_key: str | None = None
+    url_regex: str | None = Field(default=None, max_length=500)
+    rules: list[CleaningRule] = Field(..., min_length=1, max_length=50)
+    targets: Literal["text", "markdown", "both"] = "both"
+    sample_size: int = Field(default=5, ge=1, le=20)
+
+
+class CleaningPreviewSample(BaseModel):
+    url: str
+    before_excerpt: str
+    after_excerpt: str
+    chars_removed: int
+    removed_pct: float
+
+
+class CleaningPreviewResponse(BaseModel):
+    samples: list[CleaningPreviewSample]
+    total_chars_removed: int
+    pages_skipped_safety: int
+
+
+class CleaningApplyRequest(BaseModel):
+    group_key: str | None = None
+    url_regex: str | None = Field(default=None, max_length=500)
+    rules: list[CleaningRule] = Field(..., min_length=1, max_length=50)
+    targets: Literal["text", "markdown", "both"] = "both"
+
+
+class CleaningRevertRequest(BaseModel):
+    group_key: str | None = None
+    url_regex: str | None = Field(default=None, max_length=500)
+
+
+class CleaningApplyResponse(BaseModel):
+    ruleset_id: int | None
+    pages_updated: int
+    pages_skipped_safety: int
+    total_chars_removed: int
+
+
+class CleaningRulesetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: uuid.UUID
+    group_key: str | None
+    url_regex: str | None
+    rules: list
+    targets: str
+    pages_updated: int
+    pages_skipped: int
+    chars_removed: int
+    created_at: datetime

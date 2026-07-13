@@ -267,7 +267,29 @@ class PageContent(Base):
     content_length = Column(Integer, nullable=True)
     content_markdown = Column(Text, nullable=True)
 
+    # Post-crawl cleaning: originals kept for revert; cleaned_at marks state.
+    content_text_original = Column(Text, nullable=True)
+    content_markdown_original = Column(Text, nullable=True)
+    cleaned_at = Column(DateTime(timezone=True), nullable=True)
+
     url_rel = relationship("Url", back_populates="page_content")
+
+
+class CleaningRuleset(Base):
+    """History of post-crawl cleaning rule applications (per job + URL group)."""
+
+    __tablename__ = "cleaning_rulesets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_key = Column(Text, nullable=True)
+    url_regex = Column(Text, nullable=True)
+    rules = Column(JSON, nullable=False)
+    targets = Column(String(20), nullable=False, default="both")  # text | markdown | both
+    pages_updated = Column(Integer, default=0)
+    pages_skipped = Column(Integer, default=0)
+    chars_removed = Column(BigInteger, default=0)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class SecurityHeaders(Base):

@@ -279,6 +279,9 @@
           <div class="tab" :class="detailTab === 'semantic' && 'active'" @click="switchTab('semantic')" data-tip="Mapa semantico vectorial con embeddings, clustering y canibalizacion" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="orbit" style="width:14px;height:14px"></i> Semantico
           </div>
+          <div class="tab" :class="detailTab === 'cleaning' && 'active'" @click="switchTab('cleaning')" data-tip="Limpieza opcional del contenido extraido por grupos de URL" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="eraser" style="width:14px;height:14px"></i> Limpieza
+          </div>
         </div>
 
         <!-- ===== PESTANA: RESUMEN ===== -->
@@ -1098,6 +1101,193 @@
                 </template>
               </div>
             </template>
+          </div>
+        </template>
+
+        <!-- ===== PESTANA: LIMPIEZA ===== -->
+        <template x-if="detailTab === 'cleaning'">
+          <div>
+            <!-- Nota informativa -->
+            <div style="display:flex;align-items:flex-start;gap:.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;border-left:3px solid var(--blue);font-size:.85rem">
+              <i data-lucide="info" style="width:15px;height:15px;flex-shrink:0;margin-top:.15rem;color:var(--blue)"></i>
+              <span>Proceso opcional a posteriori. Los originales se conservan &mdash; puedes revertir en cualquier momento. Si una regla eliminaría más del 60% del contenido de una página, esa página se salta automáticamente.</span>
+            </div>
+
+            <template x-if="cleaningError">
+              <p class="text-sm" style="color:var(--red);margin-bottom:.75rem" x-text="cleaningError"></p>
+            </template>
+            <template x-if="cleaningMessage">
+              <p class="text-sm" style="color:var(--green);margin-bottom:.75rem" x-text="cleaningMessage"></p>
+            </template>
+
+            <!-- Grupos -->
+            <div class="card" style="margin-bottom:1rem">
+              <div class="card-header">
+                <h2>Grupos</h2>
+                <button class="btn btn-sm" @click="loadCleaningGroups()" :disabled="cleaningGroupsLoading" style="display:flex;align-items:center;gap:.25rem">
+                  <i data-lucide="refresh-cw" style="width:12px;height:12px"></i> Actualizar
+                </button>
+              </div>
+              <template x-if="cleaningGroupsLoading">
+                <div class="loading-overlay"><div class="spinner"></div> Cargando grupos...</div>
+              </template>
+              <template x-if="!cleaningGroupsLoading && cleaningGroups.length === 0">
+                <div class="empty"><h3>No hay grupos de contenido</h3></div>
+              </template>
+              <template x-if="!cleaningGroupsLoading && cleaningGroups.length > 0">
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th data-tip="Patron de forma de URL que agrupa paginas con estructura similar">Forma de URL</th>
+                        <th data-tip="Numero de paginas del grupo">Páginas</th>
+                        <th data-tip="Paginas del grupo con limpieza aplicada">Limpiadas</th>
+                        <th data-tip="Longitud media del contenido en caracteres">Long. media</th>
+                        <th data-tip="URL de ejemplo del grupo">Ejemplo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="g in cleaningGroups" :key="g.group_key">
+                        <tr @click="selectCleaningGroup(g)" style="cursor:pointer" :class="cleaningSelectedGroup === g.group_key && 'row-selected'">
+                          <td style="font-family:monospace;font-size:.8rem" x-text="g.group_key"></td>
+                          <td x-text="fmt.num(g.pages)"></td>
+                          <td x-text="fmt.num(g.cleaned_pages)"></td>
+                          <td x-text="fmt.num(g.avg_content_length)"></td>
+                          <td style="max-width:300px" :title="g.sample_urls?.[0] || ''">
+                            <div class="truncate text-dim text-sm" x-text="g.sample_urls?.[0] || '—'"></div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
+
+            <!-- Reglas -->
+            <template x-if="cleaningSelectedGroup">
+              <div class="card" style="margin-bottom:1rem">
+                <div class="card-header">
+                  <h2>Reglas &mdash; <span style="font-family:monospace;font-size:.85rem;font-weight:400" x-text="cleaningSelectedGroup"></span></h2>
+                </div>
+                <template x-for="(rule, idx) in cleaningRules" :key="idx">
+                  <div style="display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center">
+                    <select x-model="rule.type" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                      <option value="line_exact">Línea exacta</option>
+                      <option value="line_prefix">Línea que empieza por</option>
+                      <option value="line_contains">Línea que contiene</option>
+                      <option value="cut_from_line">Cortar desde línea que contiene</option>
+                      <option value="remove_substring">Quitar texto literal</option>
+                      <option value="regex">Expresión regular</option>
+                    </select>
+                    <input type="text" x-model="rule.value" placeholder="Valor de la regla" style="flex:1">
+                    <button class="btn btn-sm btn-danger" @click="removeCleaningRule(idx)" title="Quitar regla">&#10005;</button>
+                  </div>
+                </template>
+                <button class="btn btn-sm" @click="addCleaningRule()" style="margin-bottom:1rem">+ Añadir regla</button>
+
+                <div style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem">
+                  <div>
+                    <label class="text-dim text-sm">Aplicar a</label>
+                    <select x-model="cleaningTargets" style="display:block;margin-top:.2rem;width:auto;padding:.35rem .5rem;font-size:.8rem">
+                      <option value="text">Texto</option>
+                      <option value="markdown">Markdown</option>
+                      <option value="both">Ambos</option>
+                    </select>
+                  </div>
+                  <div style="flex:1;min-width:220px">
+                    <label class="text-dim text-sm">Filtro regex de URL (opcional)</label>
+                    <input type="text" x-model="cleaningUrlRegex" placeholder="^https://ejemplo\.com/blog/" style="display:block;margin-top:.2rem;width:100%">
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                  <button class="btn btn-sm" @click="previewCleaning()" :disabled="cleaningPreviewLoading || cleaningApplying || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
+                    <template x-if="cleaningPreviewLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                    Vista previa
+                  </button>
+                  <button class="btn btn-sm btn-primary" @click="applyCleaning()" :disabled="cleaningApplying || cleaningPreviewLoading || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
+                    <template x-if="cleaningApplying"><span class="spinner" style="width:12px;height:12px"></span></template>
+                    Aplicar al grupo
+                  </button>
+                  <button class="btn btn-sm btn-danger" @click="revertCleaning()" :disabled="cleaningReverting || cleaningApplying || cleaningPreviewLoading" style="display:flex;align-items:center;gap:.25rem">
+                    <template x-if="cleaningReverting"><span class="spinner" style="width:12px;height:12px"></span></template>
+                    Revertir grupo
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <!-- Vista previa -->
+            <template x-if="cleaningPreview">
+              <div class="card" style="margin-bottom:1rem">
+                <div class="card-header"><h2>Vista previa</h2></div>
+                <p class="text-sm" style="margin-bottom:.75rem">
+                  <strong x-text="fmt.num(cleaningPreview.total_chars_removed)"></strong> caracteres eliminados en total en la muestra.
+                  <template x-if="cleaningPreview.pages_skipped_safety > 0">
+                    <span style="color:var(--orange)" x-text="fmt.num(cleaningPreview.pages_skipped_safety) + ' páginas se saltarían por la válvula de seguridad (>60% eliminado)'"></span>
+                  </template>
+                </p>
+                <template x-if="cleaningPreview.samples.length === 0">
+                  <div class="empty"><h3>Ninguna página de la muestra cambia con estas reglas</h3></div>
+                </template>
+                <template x-for="s in cleaningPreview.samples" :key="s.url">
+                  <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
+                    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;flex-wrap:wrap">
+                      <a :href="s.url" target="_blank" rel="noopener" class="text-sm truncate" style="max-width:60%" :title="s.url" x-text="s.url"></a>
+                      <span class="text-sm" style="padding:.1rem .5rem;border-radius:10px;background:var(--red-bg);color:var(--red);font-weight:600"
+                            x-text="'-' + fmt.num(s.chars_removed) + ' chars (' + (s.removed_pct ?? 0).toFixed(1) + '%)'"></span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                      <div>
+                        <div class="text-dim text-sm" style="margin-bottom:.25rem">Antes</div>
+                        <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.before_excerpt"></pre>
+                      </div>
+                      <div>
+                        <div class="text-dim text-sm" style="margin-bottom:.25rem">Después</div>
+                        <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.after_excerpt"></pre>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- Historial -->
+            <div class="card">
+              <div class="card-header"><h2>Historial de limpiezas</h2></div>
+              <template x-if="cleaningRulesets.length === 0">
+                <div class="text-dim text-sm">Sin limpiezas aplicadas todavía</div>
+              </template>
+              <template x-if="cleaningRulesets.length > 0">
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Grupo</th>
+                        <th>Reglas</th>
+                        <th>Páginas actualizadas</th>
+                        <th>Saltadas</th>
+                        <th>Chars eliminados</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="rs in cleaningRulesets" :key="rs.id">
+                        <tr>
+                          <td x-text="fmt.date(rs.created_at)"></td>
+                          <td style="font-family:monospace;font-size:.8rem" x-text="rs.group_key || rs.url_regex || '—'"></td>
+                          <td x-text="rs.rules?.length || 0"></td>
+                          <td x-text="fmt.num(rs.pages_updated)"></td>
+                          <td x-text="fmt.num(rs.pages_skipped)"></td>
+                          <td x-text="fmt.num(rs.chars_removed)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
           </div>
         </template>
 
