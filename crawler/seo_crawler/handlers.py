@@ -10,6 +10,7 @@ the overhead of launching a browser.
 from __future__ import annotations
 
 import logging
+import time
 
 from scrapy import Request
 from scrapy.crawler import Crawler
@@ -54,14 +55,29 @@ class CompositeDownloadHandler:
         # Always pass spider when we have it; fall back to crawler.spider.
         _spider = spider or getattr(self._crawler, "spider", None)
         method = handler.download_request
+        start = time.monotonic()
         try:
             result = method(request, _spider)
         except TypeError:
             # Handler doesn't accept spider arg (new-style)
             result = method(request)
-        if hasattr(result, "__await__"):
-            return await result
-        return result
+        response = await result if hasattr(result, "__await__") else result
+        elapsed = time.monotonic() - start
+
+        # Guarantee a real response time even for sub-handlers that don't set
+        # download_latency themselves (e.g. Playwright). Without this,
+        # JS-rendered pages report response_time_ms=0. response.meta IS
+        # request.meta, so the spider reads this back downstream.
+        if not request.meta.get("download_latency"):
+            request.meta["download_latency"] = elapsed
+
+        # Preserve the HTTP protocol version when a sub-handler exposes it,
+        # so it survives into the spider even if the response object varies.
+        protocol = getattr(response, "protocol", None)
+        if protocol and not request.meta.get("http_protocol"):
+            request.meta["http_protocol"] = protocol
+
+        return response
 
     async def close(self):
         await self._playwright.close()

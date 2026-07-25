@@ -239,9 +239,14 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
 
     Returns a list of dicts with: url, anchor_text, rel, is_internal,
     link_position, target, alt_text, follow, link_type.
+
+    Every ``<a href>`` instance is returned -- links are **not** deduplicated
+    within a page. This matches Screaming Frog: a page that links to the same
+    target from both the nav and the body has two inlinks (and the target's
+    "Unique Inlinks" still counts the source page once). Callers that follow
+    links for the crawl frontier are responsible for their own dedup.
     """
     results: list[dict[str, Any]] = []
-    seen: set[str] = set()
 
     for a in selector.css("a[href]"):
         raw_href = a.attrib.get("href", "").strip()
@@ -250,12 +255,6 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
 
         absolute = urljoin(base_url, raw_href)
         normalized = normalize_url(absolute)
-
-        # Deduplicate within one page
-        url_hash = compute_url_hash(normalized)
-        if url_hash in seen:
-            continue
-        seen.add(url_hash)
 
         anchor_text = _clean(" ".join(a.css("::text").getall()))
         rel = _clean(a.attrib.get("rel", ""))

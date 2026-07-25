@@ -49,6 +49,11 @@ class PostgresPipeline:
         self._url_id_cache: dict[str, int] = {}  # url_hash -> Url.id
         self._pages_committed: int = 0
         self._last_job_update: float = 0.0
+        # url_ids whose stale child rows were already cleared this run, per
+        # child type. Prevents a later flush batch from deleting rows an
+        # earlier batch inserted for the same page (pages with >batch_size
+        # links/resources span multiple flushes).
+        self._deleted_child_url_ids: dict[type, set[int]] = {}
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -310,9 +315,16 @@ class PostgresPipeline:
                 entry = _child_model_map.get(item_cls)
                 if entry and uid_set:
                     model, fk_col = entry
-                    self.session.query(model).filter(
-                        getattr(model, fk_col).in_(uid_set)
-                    ).delete(synchronize_session=False)
+                    # Only clear stale rows the first time we see a url_id this
+                    # run; later batches for the same page must append, not wipe
+                    # what earlier batches inserted.
+                    already = self._deleted_child_url_ids.setdefault(item_cls, set())
+                    to_delete = uid_set - already
+                    if to_delete:
+                        self.session.query(model).filter(
+                            getattr(model, fk_col).in_(to_delete)
+                        ).delete(synchronize_session=False)
+                        already.update(to_delete)
 
             self.session.bulk_save_objects(objects)
             self.session.commit()

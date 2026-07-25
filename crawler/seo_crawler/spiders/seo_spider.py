@@ -571,8 +571,10 @@ class SeoSpider(scrapy.Spider):
         )
         status_text_val = http_status_text(status_code)
 
-        # HTTP version (Scrapy does not reliably expose this)
-        http_version_val = getattr(response, "protocol", None)
+        # HTTP version. Scrapy does not reliably expose this on custom
+        # download handlers, so the composite handler stashes it in meta when
+        # the sub-handler provides it; fall back to response.protocol.
+        http_version_val = response.meta.get("http_protocol") or getattr(response, "protocol", None)
 
         # HTML-specific fields computed before PageItem yield so that all
         # Screaming Frog parity fields can be included in the single yield.
@@ -857,15 +859,23 @@ class SeoSpider(scrapy.Spider):
                 )
 
         # -- Follow links (BFS) -----------------------------------------
+        # extract_links no longer dedupes within a page (so every inlink is
+        # recorded), so dedupe the follow set here to avoid enqueueing the
+        # same target multiple times from one page.
         if depth < self.max_depth:
+            followed_hashes: set[str] = set()
             for link in links:
                 link_internal = self._is_internal(link["url"]) if self._crawl_subdomains else link["is_internal"]
                 should_follow = link_internal or self.follow_external
                 if should_follow and (link.get("follow", True) or self._follow_nofollow):
                     if self._should_follow(link["url"]):
+                        link_hash = compute_url_hash(link["url"])
+                        if link_hash in followed_hashes:
+                            continue
+                        followed_hashes.add(link_hash)
                         # Resume: skip URLs already crawled in a previous run.
                         if self._already_crawled_hashes and \
-                                compute_url_hash(link["url"]) in self._already_crawled_hashes:
+                                link_hash in self._already_crawled_hashes:
                             continue
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js and _url_likely_html(link["url"]):
