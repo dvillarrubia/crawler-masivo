@@ -44,6 +44,25 @@ from shared.models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _norm_url(url: str | None) -> str | None:
+    """Canonicalise a URL for equality comparison (dedup semantics).
+
+    Uses the same w3lib canonicalisation the crawler applies when hashing
+    URLs, so a self-referencing canonical that differs from the page URL
+    only by trailing slash, query-arg order, or fragment is treated as
+    equal.  Falls back to a trimmed string if w3lib is unavailable.
+    """
+    if not url:
+        return url
+    try:
+        from w3lib.url import canonicalize_url
+
+        return canonicalize_url(url, keep_fragments=False)
+    except Exception:
+        return url.strip().rstrip("/")
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -470,6 +489,11 @@ class SEOAnalyzer:
         for row_url, sc, host in self.session.execute(url_lookup_stmt).all():
             url_status[row_url] = sc
             url_host[row_url] = host
+            # Also index by normalised URL so a canonical that differs only
+            # by trailing slash / arg order still resolves to its target.
+            norm = _norm_url(row_url)
+            if norm and norm not in url_status:
+                url_status[norm] = sc
 
         # Iterate HTML pages with their canonical information.
         stmt = (
@@ -486,8 +510,10 @@ class SEOAnalyzer:
 
             canonical = canonical_href.strip()
 
-            # Self-referencing canonical is fine -- skip.
-            if canonical == page_url:
+            # Self-referencing canonical is fine -- skip. Compare after
+            # normalisation so trailing-slash / www / scheme differences on
+            # an otherwise self-referencing canonical are not flagged.
+            if _norm_url(canonical) == _norm_url(page_url):
                 continue
 
             # Cross-domain canonical.
@@ -507,6 +533,8 @@ class SEOAnalyzer:
 
             # Canonical pointing to a non-200 URL (only if we crawled it).
             target_status = url_status.get(canonical)
+            if target_status is None:
+                target_status = url_status.get(_norm_url(canonical))
             if target_status is not None and target_status != 200:
                 self._add_issue(
                     url_id,
@@ -656,7 +684,7 @@ class SEOAnalyzer:
             canonical_ok = (
                 not canonical_href
                 or not canonical_href.strip()
-                or canonical_href.strip() == page_url
+                or _norm_url(canonical_href) == _norm_url(page_url)
             )
             is_indexable = status_code == 200 and not has_noindex and canonical_ok
 

@@ -32,6 +32,7 @@ from seo_crawler.extractors import (
     compute_text_ratio,
     compute_url_hash,
     detect_mixed_content,
+    effective_base_url,
     estimate_description_pixel_width,
     estimate_title_pixel_width,
     extract_headings,
@@ -588,8 +589,13 @@ class SeoSpider(scrapy.Spider):
         if is_html and is_success:
             selector = response.selector
 
-            # Extract meta first so we can compute indexability
-            meta = extract_meta(selector)
+            # Effective base URL for resolving relative URLs (honours <base href>)
+            base_url = effective_base_url(selector, response.url)
+
+            # Extract meta first so we can compute indexability. Passing the
+            # base URL resolves relative canonicals/og:url to absolute, so
+            # self-referencing canonicals are not misread as canonicalised.
+            meta = extract_meta(selector, base_url=base_url)
 
             # X-Robots-Tag header
             x_robots = (
@@ -721,7 +727,7 @@ class SeoSpider(scrapy.Spider):
             )
 
         # Links (extract_links already returns enhanced SF fields)
-        links = extract_links(selector, response.url, self.allowed_hosts)
+        links = extract_links(selector, base_url, self.allowed_hosts)
         for link in links:
             yield LinkItem(
                 from_url_hash=final_hash,
@@ -741,7 +747,7 @@ class SeoSpider(scrapy.Spider):
 
         # Hreflang
         if self._extraction.get("extract_hreflang", True):
-            for hreflang in extract_hreflang(selector):
+            for hreflang in extract_hreflang(selector, base_url=base_url):
                 yield HreflangItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
@@ -767,7 +773,7 @@ class SeoSpider(scrapy.Spider):
 
         # Resources (extract_resources already returns width, height,
         # is_mixed_content)
-        for resource in extract_resources(selector, response.url):
+        for resource in extract_resources(selector, base_url):
             yield ResourceItem(
                 url_hash=final_hash,
                 job_id=self.job_id,

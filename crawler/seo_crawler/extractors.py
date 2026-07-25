@@ -115,13 +115,54 @@ def is_internal_url(url: str, allowed_hosts: set[str]) -> bool:
     return bare in allowed_hosts or host.lower() in allowed_hosts
 
 
+def effective_base_url(selector, page_url: str) -> str:
+    """Return the base URL used to resolve relative links on this page.
+
+    Honours a ``<base href>`` element when present (resolved against the
+    page URL), matching how browsers -- and Screaming Frog -- resolve
+    relative URLs.  Falls back to *page_url* when no usable base tag
+    exists, so callers can always pass the result straight to ``urljoin``.
+    """
+    try:
+        base_href = selector.css("base[href]::attr(href)").get()
+    except Exception:
+        base_href = None
+    if base_href and base_href.strip():
+        try:
+            return urljoin(page_url, base_href.strip())
+        except Exception:
+            return page_url
+    return page_url
+
+
+def _resolve(base_url: str | None, href: str | None) -> str | None:
+    """Resolve a possibly-relative *href* to an absolute URL.
+
+    Returns *href* unchanged when it is falsy or no *base_url* is given.
+    ``urljoin`` is a no-op on already-absolute URLs, so this is safe to
+    call unconditionally.
+    """
+    if not href or not base_url:
+        return href
+    try:
+        return urljoin(base_url, href)
+    except Exception:
+        return href
+
+
 # ---------------------------------------------------------------------------
 # HTML extraction
 # ---------------------------------------------------------------------------
 
-def extract_meta(selector) -> dict[str, Any]:
+def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     """
     Extract SEO-relevant <head> metadata from a *parsel.Selector*.
+
+    When *base_url* is given, URL-valued fields (canonical, og:url,
+    og:image, rel next/prev) are resolved to absolute URLs.  This matches
+    Screaming Frog: a relative ``<link rel="canonical" href="/x">`` must be
+    compared against the page URL as an absolute, otherwise self-referencing
+    canonicals are misread as "canonicalised to a different URL".
 
     Returns a flat dict that maps 1-to-1 with ``HtmlMetaItem`` fields.
     """
@@ -136,7 +177,7 @@ def extract_meta(selector) -> dict[str, Any]:
     title_text = _clean(selector.css("title::text").get())
     desc = _meta("description")
 
-    canonical = selector.css('link[rel="canonical"]::attr(href)').get()
+    canonical = _resolve(base_url, _clean(selector.css('link[rel="canonical"]::attr(href)').get()))
 
     return {
         "title": title_text,
@@ -145,23 +186,23 @@ def extract_meta(selector) -> dict[str, Any]:
         "meta_description_len": len(desc) if desc else None,
         "meta_keywords": _meta("keywords"),
         "meta_robots": _meta("robots"),
-        "canonical_href": _clean(canonical),
+        "canonical_href": canonical,
         # OG
         "og_title": _meta("og:title"),
         "og_description": _meta("og:description"),
-        "og_image": _meta("og:image"),
-        "og_url": _meta("og:url"),
+        "og_image": _resolve(base_url, _meta("og:image")),
+        "og_url": _resolve(base_url, _meta("og:url")),
         "og_type": _meta("og:type"),
         # Twitter
         "twitter_card": _meta("twitter:card"),
         "twitter_title": _meta("twitter:title"),
         "twitter_description": _meta("twitter:description"),
         # Pagination
-        "rel_next": _clean(
-            selector.css('link[rel="next"]::attr(href)').get()
+        "rel_next": _resolve(
+            base_url, _clean(selector.css('link[rel="next"]::attr(href)').get())
         ),
-        "rel_prev": _clean(
-            selector.css('link[rel="prev"]::attr(href)').get()
+        "rel_prev": _resolve(
+            base_url, _clean(selector.css('link[rel="prev"]::attr(href)').get())
         ),
     }
 
@@ -265,46 +306,54 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
 
 def _detect_link_position(a_selector) -> str:
     """
-    Simple heuristic: check ancestor element names for nav / footer / header.
-    Falls back to ``content``.
+    Heuristic: classify a link by its nearest semantic ancestor.
+
+    Walks the ancestor axis **nearest-first** so the closest container
+    wins.  This matters because the ancestor axis is returned in document
+    order (outermost first); checking it in that order would let a
+    top-level wrapper such as ``<div class="site-header">`` misclassify
+    every link on the page as ``header``.  For each ancestor level we check
+    the semantic tag name first, then id/class hints.  Falls back to
+    ``content``.
     """
-    # Walk up the ancestor axis looking for semantic elements
-    for ancestor_tag in a_selector.xpath("ancestor::*/@class").getall():
-        lower = ancestor_tag.lower()
-        if "nav" in lower:
+    ancestors = a_selector.xpath("ancestor::*")
+    # Reverse to walk from the link outward (nearest ancestor first).
+    for node in reversed(ancestors):
+        tag = (node.xpath("name()").get() or "").lower()
+        if tag == "nav":
             return "nav"
-        if "footer" in lower:
+        if tag == "footer":
             return "footer"
-        if "header" in lower:
+        if tag == "header":
             return "header"
-        if "sidebar" in lower:
+        if tag == "aside":
             return "sidebar"
 
-    # Also check tag names
-    ancestor_names = [
-        node.xpath("name()").get()
-        for node in a_selector.xpath("ancestor::*")
-    ]
-    for name in ancestor_names:
-        nl = name.lower()
-        if nl == "nav":
+        hint = ((node.attrib.get("class", "") or "") + " " + (node.attrib.get("id", "") or "")).lower()
+        if not hint.strip():
+            continue
+        if "nav" in hint:
             return "nav"
-        if nl == "footer":
+        if "footer" in hint:
             return "footer"
-        if nl == "header":
+        if "header" in hint:
             return "header"
-        if nl == "aside":
+        if "sidebar" in hint:
             return "sidebar"
 
     return "content"
 
 
-def extract_hreflang(selector) -> list[dict[str, Any]]:
-    """Extract ``<link rel="alternate" hreflang="...">`` tags."""
+def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Extract ``<link rel="alternate" hreflang="...">`` tags.
+
+    When *base_url* is given, hreflang hrefs are resolved to absolute URLs
+    so reciprocal (return-tag) validation can match them reliably.
+    """
     results: list[dict[str, Any]] = []
     for link in selector.css('link[rel="alternate"][hreflang]'):
         lang = _clean(link.attrib.get("hreflang", ""))
-        href = _clean(link.attrib.get("href", ""))
+        href = _resolve(base_url, _clean(link.attrib.get("href", "")))
         if lang and href:
             results.append({"lang": lang, "href": href})
     return results
