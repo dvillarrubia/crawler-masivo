@@ -548,33 +548,71 @@ class SEOAnalyzer:
     # -- Hreflang -----------------------------------------------------------
 
     def analyze_hreflang(self) -> None:
-        """Validate hreflang annotations."""
+        """Validate hreflang annotations, including reciprocal return tags.
+
+        Computes and persists ``lang_valid`` and ``return_tag_ok`` on each
+        Hreflang row (nothing else populates them), then flags invalid
+        language codes, missing reciprocal return tags, and hreflang targets
+        that do not return 200. Reciprocity is confirmed only when the target
+        page was crawled and carries its own hreflang cluster; otherwise the
+        return tag is left unknown to avoid false positives.
+        """
         logger.debug("Analyzing hreflang ...")
 
-        # Preload URL statuses within the job for target validation.
+        # Preload URL id/status/normalised-url for target resolution.
         url_status: dict[str, int | None] = {}
-        for row_url, sc in self.session.execute(
-            select(Url.url, Url.status_code).where(Url.job_id == self.job_id)
+        url_id_by_norm: dict[str, int] = {}
+        norm_by_id: dict[int, str] = {}
+        for uid, row_url, sc in self.session.execute(
+            select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
         ).all():
             url_status[row_url] = sc
+            norm = _norm_url(row_url)
+            if norm:
+                url_status.setdefault(norm, sc)
+                url_id_by_norm[norm] = uid
+                norm_by_id[uid] = norm
 
         stmt = (
-            select(
-                Hreflang.id,
-                Hreflang.url_id,
-                Hreflang.lang,
-                Hreflang.href,
-                Hreflang.return_tag_ok,
-                Hreflang.lang_valid,
-            )
+            select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href)
             .join(Url, Url.id == Hreflang.url_id)
             .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
-        for _hreflang_id, url_id, lang, href, return_tag_ok, lang_valid in rows:
-            # Missing return tag.
-            if return_tag_ok is False:
+        # Map each crawled page to the set of hreflang targets it declares,
+        # so we can check whether a target links back (reciprocal return tag).
+        targets_by_page: dict[int, set[str]] = defaultdict(set)
+        for _hid, page_id, _lang, href in rows:
+            nh = _norm_url(href)
+            if nh:
+                targets_by_page[page_id].add(nh)
+
+        for hreflang_id, url_id, lang, href in rows:
+            norm_href = _norm_url(href)
+
+            # Language code validity (x-default is always valid).
+            lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
+
+            # Reciprocal return tag. Only decidable when the target page was
+            # crawled; x-default entries need no reciprocal.
+            page_norm = norm_by_id.get(url_id)
+            target_uid = url_id_by_norm.get(norm_href)
+            if lang and lang.lower() == "x-default":
+                return_ok = None
+            elif target_uid is None or target_uid == url_id:
+                return_ok = None  # target not crawled or self-reference
+            else:
+                return_ok = page_norm in targets_by_page.get(target_uid, set())
+
+            # Persist the computed flags (consumed by the i18n insights).
+            self.session.execute(
+                update(Hreflang)
+                .where(Hreflang.id == hreflang_id)
+                .values(lang_valid=lang_is_valid, return_tag_ok=return_ok)
+            )
+
+            if return_ok is False:
                 self._add_issue(
                     url_id,
                     "hreflang_missing_return",
@@ -582,11 +620,6 @@ class SEOAnalyzer:
                     {"lang": lang, "href": href},
                 )
 
-            # Invalid language code. Use the stored flag if available,
-            # otherwise fall back to regex validation.
-            lang_is_valid = lang_valid if lang_valid is not None else bool(
-                _LANG_TAG_RE.match(lang)
-            )
             if not lang_is_valid:
                 self._add_issue(
                     url_id,
@@ -597,6 +630,8 @@ class SEOAnalyzer:
 
             # Target URL not returning 200.
             target_status = url_status.get(href)
+            if target_status is None:
+                target_status = url_status.get(norm_href)
             if target_status is not None and target_status != 200:
                 self._add_issue(
                     url_id,
@@ -605,6 +640,7 @@ class SEOAnalyzer:
                     {"href": href, "target_status": target_status},
                 )
 
+        self.session.flush()
         self._flush_issues()
 
     # -- Structured Data ----------------------------------------------------
@@ -919,11 +955,16 @@ class SEOAnalyzer:
         """Content tab equivalent -- flag pages with low word count or low text-to-HTML ratio."""
         logger.debug("Analyzing content ...")
 
+        # Only real, served HTML pages qualify: a 404/redirect body having
+        # few words is not a "thin content" problem, and flagging it just
+        # buries the genuine low-content pages in noise.
         stmt = (
             select(Url.id, Url.word_count, Url.text_ratio)
             .where(
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
             )
         )
         rows = self.session.execute(stmt).all()
@@ -1226,12 +1267,19 @@ class SEOAnalyzer:
         """Link analysis -- flag orphan pages and pages with excessive outlinks."""
         logger.debug("Analyzing links ...")
 
-        # Orphan pages: HTML pages with 0 inlinks.
+        # Orphan pages: internal HTML pages with 0 inlinks. Seed pages
+        # (crawl_depth 0, e.g. the homepage) legitimately have no discovered
+        # inlinks and must not be flagged as orphans. Only 200-OK internal
+        # pages are considered — a 404/redirect having no inlinks is not an
+        # "orphan" in the SEO sense.
         stmt = (
             select(Url.id)
             .where(
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
             )
         )
