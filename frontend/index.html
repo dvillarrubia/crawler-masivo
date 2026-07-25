@@ -196,8 +196,14 @@
               <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
               </button>
-              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem">
+              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta todas las URLs con sus metadatos SEO a CSV (compatible con Excel)">
                 <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
+              </button>
+              <button class="btn btn-sm" @click="exportLinksCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el grafo de enlaces (origen, destino, anchor, rel, follow) a CSV">
+                <i data-lucide="link" style="width:13px;height:13px"></i> Enlaces CSV
+              </button>
+              <button class="btn btn-sm" @click="exportContentCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el contenido de texto y markdown de cada pagina a CSV">
+                <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido CSV
               </button>
               <template x-if="['completed','failed','cancelled'].includes(job.status)">
                 <button class="btn btn-sm" @click="exportBackup()" style="display:flex;align-items:center;gap:.3rem">

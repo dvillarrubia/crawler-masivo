@@ -576,7 +576,7 @@ CSV_COLUMNS = [
     "meta_refresh",
     "has_meta_outside_head",
     "content_text",
-    "content_length",
+    "content_char_count",
 ]
 
 
@@ -653,11 +653,12 @@ def _stream_csv(job_id: uuid.UUID):
     batch_size = 1000
     last_id = 0
 
-    # Header row
+    # Header row. Prefix a UTF-8 BOM so Excel opens the file with the correct
+    # encoding (otherwise accented/Spanish characters render as mojibake).
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(CSV_COLUMNS)
-    yield buf.getvalue()
+    yield "﻿" + buf.getvalue()
 
     while True:
         session = SessionLocal()
@@ -694,9 +695,186 @@ def export_csv(
 
     return StreamingResponse(
         _stream_csv(job_id),
-        media_type="text/csv",
+        media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename=job_{job_id}_urls.csv",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/links/export  --  stream CSV of all links
+# ---------------------------------------------------------------------------
+LINKS_CSV_COLUMNS = [
+    "from_url",
+    "to_url",
+    "anchor_text",
+    "link_type",
+    "link_position",
+    "rel",
+    "follow",
+    "target",
+    "is_internal",
+    "alt_text",
+]
+
+
+def _links_csv_row(link_obj: Link) -> list[str]:
+    """Build a flat CSV row from a Link (+ resolved source URL)."""
+    from_url = link_obj.from_url_rel.url if link_obj.from_url_rel else ""
+    return [
+        _val(from_url),
+        _val(link_obj.to_url),
+        _val(link_obj.anchor_text),
+        _val(link_obj.link_type),
+        _val(link_obj.link_position),
+        _val(link_obj.rel),
+        _val(link_obj.follow),
+        _val(link_obj.target),
+        _val(link_obj.is_internal),
+        _val(link_obj.alt_text),
+    ]
+
+
+def _stream_links_csv(job_id: uuid.UUID):
+    """Generator that yields the link graph as CSV in windowed chunks."""
+    from shared.database import SessionLocal
+
+    batch_size = 1000
+    last_id = 0
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(LINKS_CSV_COLUMNS)
+    yield "﻿" + buf.getvalue()
+
+    while True:
+        session = SessionLocal()
+        try:
+            rows = (
+                session.query(Link)
+                .options(joinedload(Link.from_url_rel))
+                .filter(Link.job_id == job_id, Link.id > last_id)
+                .order_by(Link.id)
+                .limit(batch_size)
+                .all()
+            )
+
+            if not rows:
+                break
+
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            for row in rows:
+                writer.writerow(_links_csv_row(row))
+                last_id = row.id
+
+            yield buf.getvalue()
+        finally:
+            session.close()
+
+
+@router.get("/links/export")
+def export_links_csv(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_session),
+):
+    _get_job_or_404(job_id, db)
+
+    return StreamingResponse(
+        _stream_links_csv(job_id),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=job_{job_id}_links.csv",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/content/export  --  stream CSV of page content
+# ---------------------------------------------------------------------------
+CONTENT_CSV_COLUMNS = [
+    "url",
+    "status_code",
+    "title",
+    "meta_description",
+    "word_count",
+    "content_char_count",
+    "content_text",
+    "content_markdown",
+]
+
+
+def _content_csv_row(url_obj: Url) -> list[str]:
+    """Build a flat CSV row with the full extracted page content."""
+    meta: HtmlMeta | None = url_obj.html_meta
+    pc: PageContent | None = url_obj.page_content
+    return [
+        _val(url_obj.url),
+        _val(url_obj.status_code),
+        _val(meta.title) if meta else "",
+        _val(meta.meta_description) if meta else "",
+        _val(url_obj.word_count),
+        _val(pc.content_length) if pc else "",
+        _val(pc.content_text) if pc else "",
+        _val(pc.content_markdown) if pc else "",
+    ]
+
+
+def _stream_content_csv(job_id: uuid.UUID):
+    """Generator that yields full page content as CSV in windowed chunks.
+
+    Only URLs that actually have extracted content are included.
+    """
+    from shared.database import SessionLocal
+
+    batch_size = 500  # smaller window: rows carry full page text
+    last_id = 0
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(CONTENT_CSV_COLUMNS)
+    yield "﻿" + buf.getvalue()
+
+    while True:
+        session = SessionLocal()
+        try:
+            rows = (
+                session.query(Url)
+                .join(PageContent, PageContent.url_id == Url.id)
+                .options(joinedload(Url.html_meta), joinedload(Url.page_content))
+                .filter(Url.job_id == job_id, Url.id > last_id)
+                .order_by(Url.id)
+                .limit(batch_size)
+                .all()
+            )
+
+            if not rows:
+                break
+
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            for row in rows:
+                writer.writerow(_content_csv_row(row))
+                last_id = row.id
+
+            yield buf.getvalue()
+        finally:
+            session.close()
+
+
+@router.get("/content/export")
+def export_content_csv(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_session),
+):
+    _get_job_or_404(job_id, db)
+
+    return StreamingResponse(
+        _stream_content_csv(job_id),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=job_{job_id}_content.csv",
         },
     )
 

@@ -1043,6 +1043,16 @@ function app() {
       window.open(`${API}/jobs/${this.job.id}/export`, '_blank');
     },
 
+    exportLinksCSV() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/links/export`, '_blank');
+    },
+
+    exportContentCSV() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/content/export`, '_blank');
+    },
+
     exportBackup() {
       if (!this.job) return;
       window.open(`${API}/jobs/${this.job.id}/backup`, '_blank');
