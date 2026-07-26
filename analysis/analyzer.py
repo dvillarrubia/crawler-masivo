@@ -299,7 +299,7 @@ class SEOAnalyzer:
 
         # Join Url with HtmlMeta for all HTML pages in the job.
         stmt = (
-            select(Url.id, HtmlMeta.title, HtmlMeta.title_len)
+            select(Url.id, HtmlMeta.title, HtmlMeta.title_len, Url.status_code, Url.is_internal)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -308,7 +308,7 @@ class SEOAnalyzer:
         # Track titles for duplicate detection.
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, title, title_len in rows:
+        for url_id, title, title_len, status_code, is_internal in rows:
             if not title or not title.strip():
                 self._add_issue(url_id, "title_missing", "warning")
                 continue
@@ -331,7 +331,11 @@ class SEOAnalyzer:
                     {"length": effective_len, "max": self.title_max_len},
                 )
 
-            title_to_url_ids[clean_title.lower()].append(url_id)
+            # Only real, served internal pages count toward duplicate groups;
+            # otherwise 404/redirect/external pages sharing a boilerplate
+            # title bury the genuine duplicates.
+            if status_code == 200 and is_internal:
+                title_to_url_ids[clean_title.lower()].append(url_id)
 
         # Duplicate titles: only flag groups with 2+ pages sharing the same title.
         for title_text, url_ids in title_to_url_ids.items():
@@ -355,7 +359,7 @@ class SEOAnalyzer:
         logger.debug("Analyzing meta descriptions ...")
 
         stmt = (
-            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len)
+            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len, Url.status_code, Url.is_internal)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -363,7 +367,7 @@ class SEOAnalyzer:
 
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, description, desc_len in rows:
+        for url_id, description, desc_len, status_code, is_internal in rows:
             if not description or not description.strip():
                 self._add_issue(url_id, "description_missing", "warning")
                 continue
@@ -386,7 +390,9 @@ class SEOAnalyzer:
                     {"length": effective_len, "max": self.desc_max_len},
                 )
 
-            desc_to_url_ids[clean_desc.lower()].append(url_id)
+            # Restrict duplicate grouping to real, served internal pages.
+            if status_code == 200 and is_internal:
+                desc_to_url_ids[clean_desc.lower()].append(url_id)
 
         for desc_text, url_ids in desc_to_url_ids.items():
             if len(url_ids) < 2:
@@ -646,43 +652,53 @@ class SEOAnalyzer:
     # -- Structured Data ----------------------------------------------------
 
     def analyze_structured_data(self) -> None:
-        """Surface structured-data validation errors and warnings."""
+        """Validate structured data and surface errors/warnings.
+
+        Nothing else populates ``validation_status``/``validation_issues``,
+        so this computes them from each block's raw JSON (missing ``@type``
+        or missing required properties for common rich-result types),
+        persists the result, and raises the corresponding issues. Validation
+        is deliberately conservative to avoid false positives.
+        """
         logger.debug("Analyzing structured data ...")
 
         stmt = (
             select(
+                StructuredData.id,
                 StructuredData.url_id,
                 StructuredData.schema_type,
-                StructuredData.validation_status,
-                StructuredData.validation_issues,
+                StructuredData.raw,
             )
             .join(Url, Url.id == StructuredData.url_id)
             .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
-        for url_id, schema_type, validation_status, validation_issues in rows:
-            if validation_status == "error":
+        for sd_id, url_id, schema_type, raw in rows:
+            status, issues = _validate_structured_data(raw)
+
+            self.session.execute(
+                update(StructuredData)
+                .where(StructuredData.id == sd_id)
+                .values(validation_status=status, validation_issues=issues or None)
+            )
+
+            if status == "error":
                 self._add_issue(
                     url_id,
                     "structured_data_error",
                     "error",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
-            elif validation_status == "warning":
+            elif status == "warning":
                 self._add_issue(
                     url_id,
                     "structured_data_warning",
                     "warning",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
 
+        self.session.flush()
         self._flush_issues()
 
     # -- Indexability --------------------------------------------------------
@@ -1318,6 +1334,81 @@ def _contains_noindex(directive: str | None) -> bool:
     if not directive:
         return False
     return "noindex" in directive.lower()
+
+
+# Minimum required properties for common schema.org types used in Google
+# rich results. Kept deliberately small — only genuinely mandatory fields are
+# listed — so validation never fires false positives on valid markup.
+_SD_REQUIRED_PROPS: dict[str, list[str]] = {
+    "product": ["name"],
+    "article": ["headline"],
+    "newsarticle": ["headline"],
+    "blogposting": ["headline"],
+    "breadcrumblist": ["itemlistelement"],
+    "recipe": ["name"],
+    "event": ["name", "startdate"],
+    "faqpage": ["mainentity"],
+    "qapage": ["mainentity"],
+    "localbusiness": ["name", "address"],
+    "organization": ["name"],
+    "person": ["name"],
+    "videoobject": ["name", "thumbnailurl", "uploaddate"],
+    "jobposting": ["title", "dateposted", "hiringorganization"],
+}
+
+
+def _sd_item_types(item: dict) -> list[str]:
+    """Return the declared @type(s) of a structured-data item."""
+    t = item.get("@type", item.get("type"))
+    if t is None:
+        return []
+    if isinstance(t, list):
+        return [str(x) for x in t if x]
+    return [str(t)]
+
+
+def _validate_sd_item(item: dict) -> list[str]:
+    """Return a list of validation problems for a single SD entity."""
+    problems: list[str] = []
+    types = _sd_item_types(item)
+    if not types:
+        problems.append("missing @type")
+        return problems
+    present = {k.lower() for k in item.keys()}
+    for t in types:
+        for prop in _SD_REQUIRED_PROPS.get(t.lower(), []):
+            if prop not in present:
+                problems.append(f"{t}: missing required property '{prop}'")
+    return problems
+
+
+def _validate_structured_data(raw) -> tuple[str, list[str]]:
+    """Validate a structured-data block.
+
+    Returns ``(status, issues)`` where *status* is ``"ok"``, ``"warning"``
+    (present but missing a required property), or ``"error"`` (missing
+    ``@type`` entirely). Handles JSON-LD ``@graph`` containers and bare
+    lists. Any unexpected shape is treated as ``"ok"`` (no false positives).
+    """
+    items: list[dict] = []
+    if isinstance(raw, dict):
+        graph = raw.get("@graph")
+        if isinstance(graph, list) and graph:
+            items = [g for g in graph if isinstance(g, dict)]
+        else:
+            items = [raw]
+    elif isinstance(raw, list):
+        items = [g for g in raw if isinstance(g, dict)]
+    else:
+        return ("ok", [])
+
+    issues: list[str] = []
+    for it in items:
+        issues += _validate_sd_item(it)
+    if not issues:
+        return ("ok", [])
+    status = "error" if any("missing @type" in i for i in issues) else "warning"
+    return (status, issues)
 
 
 # ---------------------------------------------------------------------------
