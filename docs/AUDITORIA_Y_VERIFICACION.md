@@ -27,6 +27,7 @@ a la conversación.
 - **8c. NUEVA FEATURE: ingestión de sitemaps** (⚠️ requiere re-ejecutar init_db)
 - **9. Consultas SQL de verificación (Q1–Q12)**
 - **10. Diagnóstico de impacto en crawls ANTERIORES** (¿cuánto me afectó? D1–D7)
+- **10b. Estado de paridad con Screaming Frog** (qué falta, roadmap priorizado)
 - **11. Limitaciones conocidas / trabajo futuro**
 - **12. Referencia de commits**
 
@@ -450,6 +451,42 @@ WHERE i.job_id = '<JOB_ID>' AND i.issue_type = 'orphan_page'
    **`Reanudar`** el job re-ejecuta el análisis con los fixes — sin re-fetch.
 3. Los CSV entregados a clientes con el bug de columnas/acentos: **re-exporta**
    desde el mismo job, el dato subyacente estaba bien.
+
+---
+
+## 10b. Estado de paridad con Screaming Frog (roadmap)
+
+Contrastado contra `screaming_frog_complete_fields_reference.md` (la
+referencia de pestañas/campos de SF que vive en el repo). Resumen honesto:
+**el núcleo de extracción y auditoría está a la par; faltan pestañas enteras.**
+
+### A la par (tras esta rama)
+Internal/External, Response Codes (cadenas de redirect incluidas),
+Titles/Descriptions/H1-H6 (+ pixel width), Canonicals (elemento + cabecera),
+Directives, Hreflang (con recíprocos), Links, Images (alt/dimensiones/mixed),
+Security, URL, Response Times, Sitemaps (in_sitemap + huérfanas).
+
+### Ventajas sobre SF
+Contenido como texto/markdown limpio, PageRank interno ponderado, análisis
+semántico (embeddings, clusters, canibalización), ejecución distribuida en
+servidor con API y UI multi-usuario.
+
+### Gaps pendientes (de más a menos valor estimado)
+
+| Prioridad | Gap | Notas |
+|-----------|-----|-------|
+| ⭐⭐⭐ | **Custom extraction / custom search** (XPath/CSS/regex por job) | La feature de SF más usada en consultoría; encaja en `extraction` del job config |
+| ⭐⭐⭐ | **Near-duplicate content** (simhash) | Hoy sólo detectamos contenido byte-idéntico (`body_hash`) |
+| ⭐⭐ | **JavaScript tab** (HTML crudo vs renderizado) | Ya rastreamos con y sin JS; falta la doble captura y la comparación (palabras/enlaces solo-JS, render time) |
+| ⭐⭐ | **Pagination tab** | `rel_next/prev` ya se guardan; falta el análisis (bucles, secuencias, paginación no enlazada) |
+| ⭐⭐ | **PageSpeed tab** (API PSI / CWV) | Integración de API, no crawling; ~50 métricas |
+| ⭐ | Sitemap: qué sitemap referencia cada URL | Hoy sólo booleano `in_sitemap` |
+| ⭐ | `resources.size_bytes` real | La columna existe pero nunca se rellena (habría que hacer HEAD/GET de recursos) |
+| ⭐ | robots.txt: qué regla bloquea | Tenemos `blocked_by_robots` (modo audit) sin la regla concreta |
+| ⭐ | Mobile/viewport + validación HTML básica | Checks pequeños |
+| — | AMP tab | Valor decreciente; no recomendado |
+| — | Spelling/grammar | Enorme y de poco uso |
+| — | Crawls programados desde la UI, visualización de árbol | Nice-to-have |
 
 ---
 
