@@ -202,7 +202,7 @@ Nota: el estado `analyzing` requiere reconstruir la imagen del worker
 
 ---
 
-## 8b. Segunda pasada del extractor (revisión Fable)  (commit `<f2>`)
+## 8b. Segunda pasada del extractor (revisión Fable)  (commit `b2f9804`)
 
 Revisión adicional del extractor con foco en HTML del mundo real que
 Screaming Frog maneja y el crawler no manejaba.
@@ -443,6 +443,7 @@ detalle de un commit: `git show <hash>`.
 | `922645a` | Heartbeat anti doble-crawl, parar crawl al borrar, este documento | 5 |
 | `24c7376` | CTR/posición GSC bien ponderados + doc backup/semantic | 6, 7 |
 | `2761ee2` | Estado `analyzing` (issues vacías), fuga de timer semántico | 8 |
+| `b2f9804` | Segunda pasada extractor: meta case-insensitive, robots múltiples/none, SVG title, template, nofollow de página, area, fragmentos | 8b |
 
 > Nota: los hashes pueden variar si la rama se rebasa. Usa
 > `git log --oneline origin/master..HEAD` para ver la lista actual.
