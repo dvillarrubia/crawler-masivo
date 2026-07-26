@@ -276,3 +276,98 @@ def test_pixel_width_title_wider_than_description_for_same_text():
     assert ex.estimate_title_pixel_width(text) > 0
     assert ex.estimate_description_pixel_width(text) < ex.estimate_title_pixel_width(text)
     assert ex._estimate_pixel_width("") == 0
+
+
+# ---------------------------------------------------------------------------
+# Real-world HTML robustness (second-pass audit)
+# ---------------------------------------------------------------------------
+def test_extract_meta_case_insensitive_names():
+    # Old CMS/IIS markup uses capitalised meta names; SF/Google match them.
+    s = sel(
+        '<html><head>'
+        '<meta name="Description" content="Cap desc">'
+        '<meta name="ROBOTS" content="NOINDEX">'
+        '</head></html>'
+    )
+    meta = ex.extract_meta(s)
+    assert meta["meta_description"] == "Cap desc"
+    assert "NOINDEX" in meta["meta_robots"]
+
+
+def test_extract_meta_combines_multiple_robots_tags():
+    # Directives from several robots meta tags combine (most restrictive wins
+    # downstream) — the second tag's noindex must not be lost.
+    s = sel(
+        '<head><meta name="robots" content="index, follow">'
+        '<meta name="robots" content="noindex"></head>'
+    )
+    meta = ex.extract_meta(s)
+    assert "noindex" in meta["meta_robots"].lower()
+    ok, reason = ex.compute_indexability_status(
+        200, meta["meta_robots"], None, None, "https://e.com/p")
+    assert ok is False and reason == "Noindex"
+
+
+def test_title_ignores_inline_svg_title():
+    s = sel(
+        "<html><head><title>Real Title</title></head>"
+        "<body><svg><title>SVG tooltip</title></svg></body></html>"
+    )
+    assert ex.extract_meta(s)["title"] == "Real Title"
+
+
+def test_title_from_svg_not_used_when_no_head_title():
+    s = sel("<html><body><svg><title>SVG tooltip</title></svg></body></html>")
+    assert ex.extract_meta(s)["title"] is None
+
+
+@pytest.mark.parametrize("robots,expected", [
+    ("none", False),                 # Google shorthand for noindex,nofollow
+    ("noindex nofollow", False),     # space-separated, no commas
+    ("NOINDEX", False),              # uppercase
+    ("max-snippet:-1, index", True), # unrelated directives stay indexable
+])
+def test_indexability_robots_token_parsing(robots, expected):
+    ok, _ = ex.compute_indexability_status(200, robots, None, None, "https://e.com/p")
+    assert ok is expected
+
+
+def test_robots_tokens_helper():
+    assert ex.robots_tokens("noindex, nofollow") == {"noindex", "nofollow"}
+    assert ex.robots_tokens("noindex nofollow") == {"noindex", "nofollow"}
+    assert ex.robots_tokens(None) == set()
+
+
+def test_extract_links_includes_area_maps():
+    s = sel('<map><area href="/zone" alt="Zona norte"></map>')
+    links = ex.extract_links(s, "https://e.com/", {"e.com"})
+    assert len(links) == 1
+    assert links[0]["url"].endswith("/zone")
+    assert links[0]["anchor_text"] == "Zona norte"
+
+
+def test_extract_links_skips_fragment_only():
+    s = sel('<a href="#top">up</a><a href="/real#frag">real</a>')
+    links = ex.extract_links(s, "https://e.com/page", {"e.com"})
+    assert len(links) == 1
+    assert links[0]["url"].endswith("/real")  # fragment dropped by normalize
+
+
+def test_extract_links_page_nofollow_overrides_all():
+    s = sel('<a href="/a">a</a><a href="/b" rel="nofollow">b</a>')
+    links = ex.extract_links(s, "https://e.com/", {"e.com"}, page_nofollow=True)
+    assert all(l["follow"] is False for l in links)
+    # And without the flag, the plain link stays follow.
+    links2 = ex.extract_links(s, "https://e.com/", {"e.com"})
+    by_anchor = {l["anchor_text"]: l for l in links2}
+    assert by_anchor["a"]["follow"] is True
+    assert by_anchor["b"]["follow"] is False
+
+
+def test_word_count_excludes_template():
+    s = sel(
+        "<body><p>one two three</p>"
+        "<template><p>hidden words never rendered</p></template></body>"
+    )
+    assert ex.extract_word_count(s) == 3
+    assert "hidden" not in ex.extract_visible_text(s)

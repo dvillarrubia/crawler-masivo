@@ -51,6 +51,7 @@ from seo_crawler.extractors import (
     http_status_text,
     is_internal_url,
     normalize_url,
+    robots_tokens,
 )
 from seo_crawler.items import (
     ContentItem,
@@ -732,8 +733,13 @@ class SeoSpider(scrapy.Spider):
                 text=heading["text"],
             )
 
+        # Page-level nofollow: meta robots / X-Robots-Tag "nofollow" (or
+        # "none") makes EVERY link on the page nofollow, as Google applies it.
+        combined_tokens = robots_tokens(meta.get("meta_robots")) | robots_tokens(x_robots)
+        page_nofollow = "nofollow" in combined_tokens or "none" in combined_tokens
+
         # Links (extract_links already returns enhanced SF fields)
-        links = extract_links(selector, base_url, self.allowed_hosts)
+        links = extract_links(selector, base_url, self.allowed_hosts, page_nofollow=page_nofollow)
         for link in links:
             yield LinkItem(
                 from_url_hash=final_hash,

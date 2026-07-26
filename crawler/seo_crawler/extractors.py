@@ -19,6 +19,23 @@ from w3lib.url import canonicalize_url
 # ---- regex helpers ---------------------------------------------------------
 _WHITESPACE = re.compile(r"\s+")
 
+# XPath translate() args for lowercasing attribute values (XPath 1.0 has no
+# lower-case(); this is the standard workaround).
+_XP_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_XP_LOWER = "abcdefghijklmnopqrstuvwxyz"
+
+
+def robots_tokens(value: str | None) -> set[str]:
+    """Tokenise a robots directive string (meta robots / X-Robots-Tag).
+
+    Splits on commas AND whitespace so lenient real-world markup like
+    ``content="noindex nofollow"`` (no commas) is still understood, the way
+    Google and Screaming Frog parse it. Tokens are lowercased.
+    """
+    if not value:
+        return set()
+    return {t.strip().lower() for t in re.split(r"[,\s]+", value) if t.strip()}
+
 
 def _clean(text: str | None) -> str | None:
     """Collapse whitespace and strip a string, returning None when empty."""
@@ -165,16 +182,36 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
 
     Returns a flat dict that maps 1-to-1 with ``HtmlMetaItem`` fields.
     """
-    def _meta(name: str) -> str | None:
-        """Get content="" of a <meta name="..."> or <meta property="...">."""
-        val = selector.css(
-            f'meta[name="{name}"]::attr(content), '
-            f'meta[property="{name}"]::attr(content)'
-        ).get()
-        return _clean(val)
+    def _meta_all(name: str) -> list[str]:
+        """All content="" values of <meta name|property="...">, matching the
+        attribute value case-insensitively (real-world markup uses
+        ``name="Description"``, ``name="ROBOTS"``, etc. — Screaming Frog and
+        Google both match these)."""
+        vals = selector.xpath(
+            f"//meta[translate(@name, '{_XP_UPPER}', '{_XP_LOWER}') = $n"
+            f" or translate(@property, '{_XP_UPPER}', '{_XP_LOWER}') = $n]/@content",
+            n=name.lower(),
+        ).getall()
+        return [v for v in (_clean(x) for x in vals) if v]
 
-    title_text = _clean(selector.css("title::text").get())
+    def _meta(name: str) -> str | None:
+        vals = _meta_all(name)
+        return vals[0] if vals else None
+
+    # Title: first <title> that is NOT inside an inline <svg> (SVG has its own
+    # <title> element which must not shadow the page title), joining all its
+    # text nodes.
+    title_nodes = selector.xpath("//title[not(ancestor::svg)]")
+    title_text = (
+        _clean(" ".join(title_nodes[0].xpath(".//text()").getall()))
+        if title_nodes else None
+    )
     desc = _meta("description")
+
+    # Robots: a page may carry SEVERAL robots meta tags; directives combine
+    # and the most restrictive wins downstream, so join all of them.
+    robots_vals = _meta_all("robots")
+    meta_robots = ", ".join(robots_vals) if robots_vals else None
 
     canonical = _resolve(base_url, _clean(selector.css('link[rel="canonical"]::attr(href)').get()))
 
@@ -184,7 +221,7 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         "meta_description": desc,
         "meta_description_len": len(desc) if desc else None,
         "meta_keywords": _meta("keywords"),
-        "meta_robots": _meta("robots"),
+        "meta_robots": meta_robots,
         "canonical_href": canonical,
         # OG
         "og_title": _meta("og:title"),
@@ -232,30 +269,44 @@ def extract_headings(selector) -> list[dict[str, Any]]:
 
 
 
-def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict[str, Any]]:
+def extract_links(
+    selector,
+    base_url: str,
+    allowed_hosts: set[str],
+    page_nofollow: bool = False,
+) -> list[dict[str, Any]]:
     """
-    Extract all ``<a>`` links from the page.
+    Extract all ``<a>`` and ``<area>`` links from the page.
 
     Returns a list of dicts with: url, anchor_text, rel, is_internal,
     link_position, target, alt_text, follow, link_type.
 
-    Every ``<a href>`` instance is returned -- links are **not** deduplicated
-    within a page. This matches Screaming Frog: a page that links to the same
-    target from both the nav and the body has two inlinks (and the target's
-    "Unique Inlinks" still counts the source page once). Callers that follow
-    links for the crawl frontier are responsible for their own dedup.
+    Every href instance is returned -- links are **not** deduplicated within a
+    page. This matches Screaming Frog: a page that links to the same target
+    from both the nav and the body has two inlinks (and the target's "Unique
+    Inlinks" still counts the source page once). Callers that follow links for
+    the crawl frontier are responsible for their own dedup.
+
+    ``page_nofollow`` marks every link nofollow regardless of its own ``rel``,
+    for pages whose meta robots / X-Robots-Tag carry ``nofollow``/``none`` —
+    the way Google (and Screaming Frog) apply page-level directives.
     """
     results: list[dict[str, Any]] = []
 
-    for a in selector.css("a[href]"):
+    for a in selector.css("a[href], area[href]"):
         raw_href = a.attrib.get("href", "").strip()
-        if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "data:")):
+        if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
             continue
 
         absolute = urljoin(base_url, raw_href)
         normalized = normalize_url(absolute)
 
-        anchor_text = _clean(" ".join(a.css("::text").getall()))
+        tag_name = (a.xpath("name()").get() or "a").lower()
+        if tag_name == "area":
+            # Image-map areas have no text content; alt is their anchor.
+            anchor_text = _clean(a.attrib.get("alt", ""))
+        else:
+            anchor_text = _clean(" ".join(a.css("::text").getall()))
         rel = _clean(a.attrib.get("rel", ""))
 
         # Heuristic link position
@@ -273,9 +324,10 @@ def extract_links(selector, base_url: str, allowed_hosts: set[str]) -> list[dict
                 alt_text_parts.append(alt.strip())
         alt_text = _clean(" ".join(alt_text_parts)) if alt_text_parts else None
 
-        # Follow: True unless rel contains "nofollow"
+        # Follow: True unless rel contains "nofollow" or the page itself is
+        # marked nofollow (meta robots / X-Robots-Tag).
         rel_tokens = {t.strip().lower() for t in (rel or "").split()} if rel else set()
-        follow = "nofollow" not in rel_tokens
+        follow = "nofollow" not in rel_tokens and not page_nofollow
 
         # Link type classification
         has_child_imgs = len(child_imgs) > 0
@@ -478,8 +530,19 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
 _INVISIBLE_TAGS = frozenset({"script", "style", "noscript"})
 
 
+# Text nodes under these ancestors are never rendered, so they must not count
+# as visible text. <template> matters especially: JS frameworks ship entire
+# alternate DOMs inside it, which used to double word counts.
+_INVISIBLE_TEXT_XPATH = (
+    ".//text()[not(ancestor::script)"
+    " and not(ancestor::style)"
+    " and not(ancestor::noscript)"
+    " and not(ancestor::template)]"
+)
+
+
 def extract_word_count(selector) -> int:
-    """Count words in visible body text, excluding script/style/noscript.
+    """Count words in visible body text, excluding script/style/noscript/template.
 
     Uses XPath to pull all text nodes inside ``<body>`` that are not
     descendants of invisible elements.
@@ -489,11 +552,7 @@ def extract_word_count(selector) -> int:
         return 0
 
     word_count = 0
-    for text_piece in body.xpath(
-        ".//text()[not(ancestor::script)"
-        " and not(ancestor::style)"
-        " and not(ancestor::noscript)]"
-    ).getall():
+    for text_piece in body.xpath(_INVISIBLE_TEXT_XPATH).getall():
         words = text_piece.split()
         word_count += len(words)
 
@@ -509,11 +568,7 @@ def extract_visible_text(selector) -> str:
     if not body:
         return ""
 
-    parts = body.xpath(
-        ".//text()[not(ancestor::script)"
-        " and not(ancestor::style)"
-        " and not(ancestor::noscript)]"
-    ).getall()
+    parts = body.xpath(_INVISIBLE_TEXT_XPATH).getall()
     return " ".join(parts)
 
 
@@ -1232,17 +1287,17 @@ def compute_indexability_status(
     if status_code is not None and 300 <= status_code < 400:
         return False, "3xx Redirect"
 
-    # 4. Noindex in meta robots
-    if meta_robots:
-        directives = {d.strip().lower() for d in meta_robots.split(",")}
-        if "noindex" in directives:
-            return False, "Noindex"
+    # 4. Noindex in meta robots. ``none`` is Google shorthand for
+    #    "noindex, nofollow"; tokens are split on commas AND whitespace so
+    #    lenient markup like content="noindex nofollow" still counts.
+    tokens = robots_tokens(meta_robots)
+    if "noindex" in tokens or "none" in tokens:
+        return False, "Noindex"
 
-    # 5. Noindex in X-Robots-Tag header
-    if x_robots:
-        directives = {d.strip().lower() for d in x_robots.split(",")}
-        if "noindex" in directives:
-            return False, "Noindex"
+    # 5. Noindex in X-Robots-Tag header (same token rules).
+    tokens = robots_tokens(x_robots)
+    if "noindex" in tokens or "none" in tokens:
+        return False, "Noindex"
 
     # 6. Canonicalised to a different URL
     if canonical_href:

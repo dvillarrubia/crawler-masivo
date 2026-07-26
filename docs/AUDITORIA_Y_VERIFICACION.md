@@ -202,6 +202,35 @@ Nota: el estado `analyzing` requiere reconstruir la imagen del worker
 
 ---
 
+## 8b. Segunda pasada del extractor (revisión Fable)  (commit `<f2>`)
+
+Revisión adicional del extractor con foco en HTML del mundo real que
+Screaming Frog maneja y el crawler no manejaba.
+
+| # | Bug / gap | Arreglo | Verificación | Estado |
+|---|-----------|---------|--------------|--------|
+| 8b.1 | `meta[name="robots"]`/`description` **case-sensitive**: `name="Description"` o `ROBOTS` (CMS antiguos, IIS) devolvían NULL → robots/description "perdidos" | Lookup case-insensitive vía XPath `translate()` en todos los meta | Crawl de un sitio con `name="Description"`; el campo debe salir poblado. Cubierto por test unitario | ☐ |
+| 8b.2 | **Múltiples `<meta name="robots">`**: sólo se leía la primera; un `noindex` en la segunda se perdía | Se combinan todas las etiquetas robots (la más restrictiva gana aguas abajo) | Test unitario; en crawl real, página con 2 robots meta debe salir Noindex | ☐ |
+| 8b.3 | `content="none"` y `"noindex nofollow"` (sin comas) **no detectados** como noindex | Nuevo `robots_tokens()`: separa por comas Y espacios; `none` = noindex | Test unitario | ☐ |
+| 8b.4 | `<title>` de un **SVG inline** podía capturarse como título de página | El título se toma del primer `<title>` fuera de `ancestor::svg`, uniendo todos sus nodos de texto | Test unitario | ☐ |
+| 8b.5 | `word_count` contaba texto de `<template>` (DOM alternativo de frameworks JS, invisible) → conteos inflados | `<template>` excluido de word count y visible text (consistente con headings) | Test unitario; comparar word_count con SF en una página Vue/Nuxt | ☐ |
+| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` | ☐ |
+| 8b.7 | No se extraían enlaces de `<area href>` (mapas de imagen); SF sí los cuenta | `extract_links` incluye `area[href]` con su `alt` como anchor | Test unitario | ☐ |
+| 8b.8 | Enlaces `href="#..."` (sólo fragmento) contaban como self-links, inflando inlinks al quitar el dedup | Se omiten los href que empiezan por `#` | Test unitario | ☐ |
+
+```sql
+-- Q13. Nofollow de página propagado (8b.6): en un sitio con alguna página
+-- meta-robots nofollow, TODOS los links salientes de esa página deben tener
+-- follow = false.
+SELECT l.follow, COUNT(*)
+FROM links l JOIN urls u ON u.id = l.from_url_id
+JOIN html_meta m ON m.url_id = u.id
+WHERE u.job_id = '<JOB_ID>' AND m.meta_robots ILIKE '%nofollow%'
+GROUP BY l.follow;   -- sólo debe haber follow = false
+```
+
+---
+
 ## 9. Consultas SQL de verificación
 
 ```sql
