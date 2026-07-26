@@ -340,7 +340,34 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-No tests exist yet. Extractors are pure functions and should be the first to get unit tests. Test directory exists at `tests/`.
+Unit test suite at `tests/` (80 cases, pytest): pure extractors
+(`test_extractors.py`), structured-data validation (`test_sd_validation.py`),
+and sitemap parsing (`test_sitemaps.py`). Run with
+`pip install -r tests/requirements.txt && pytest`. The DB-touching analysis
+layer has no integration tests yet — it is verified with the SQL queries in
+`docs/AUDITORIA_Y_VERIFICACION.md`.
+
+## PENDING WORK — read before adding features
+
+**`docs/AUDITORIA_Y_VERIFICACION.md` is the canonical TODO.** It contains, in
+order of priority:
+
+1. **Verification checklist (sections 0–8c)**: ~30 fixes from the 2026-07
+   audit branch (`claude/crawler-export-issues-oi77bm`, PR #5) that have NOT
+   yet been verified against a real crawl. Run it top-to-bottom on first
+   deployment (two test crawls: with and without `render_js`). ⚠️ Requires
+   `docker compose up -d --build` (worker image changed: `analyzing` status,
+   heartbeat) and re-running `scripts/init_db.py` (new `urls.in_sitemap`
+   column).
+2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: old crawls may
+   carry corrupted data (relative canonicals → false non-indexable). Measure
+   before trusting/re-delivering old reports; re-crawl bucket-A jobs.
+3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
+   custom extraction (XPath/regex per job) ⭐⭐⭐, near-duplicates via simhash
+   ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
+   PageSpeed/CWV API ⭐⭐, minor ones after.
+4. **Known limitations (section 11)**: backup is not truly streaming (OOM risk
+   on huge jobs), word_count includes hidden text, SD validation is basic.
 
 ## What Does NOT Exist Yet
 
@@ -349,5 +376,7 @@ No tests exist yet. Extractors are pure functions and should be the first to get
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
 - Near-duplicate content detection (simhash)
-- Hreflang return-tag validation
-- Structured data rich-result validation
+- Custom extraction / custom search (XPath/CSS/regex per job)
+- JavaScript comparison tab (raw HTML vs rendered)
+- Pagination (rel next/prev) analysis
+- Structured data rich-result validation (only basic @type/required-prop checks)
