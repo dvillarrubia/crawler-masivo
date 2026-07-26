@@ -1,41 +1,115 @@
-# Auditoría del crawler y guía de verificación en producción
+# Auditoría del crawler y guía de verificación
 
 Este documento registra todos los bugs encontrados durante la auditoría de la
 lógica de extracción y análisis del crawler, el arreglo aplicado, y **cómo
-verificar en producción** que cada arreglo funciona. La idea es ir marcando
-cada punto conforme se prueba contra crawls reales en el VPS.
+comprobar** que cada arreglo funciona. Está pensado para seguirlo de principio
+a fin cuando montes el repo en tu ordenador: es autónomo, no hace falta volver
+a la conversación.
 
 > Rama de trabajo: `claude/crawler-export-issues-oi77bm` (PR #5).
-> Todos los cambios son sólo de la lógica del crawler/análisis/export; no
-> tocan el esquema de la base de datos.
+> Todos los cambios son sólo de la lógica del crawler/análisis/export/UI; **no
+> tocan el esquema de la base de datos**, así que no hay migraciones.
 
-## Cómo usar esta guía
+### Índice
 
-1. Levanta el stack en el VPS con la rama del PR:
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-   docker compose exec api python scripts/init_db.py   # si es primera vez
-   ```
-2. Lanza un crawl de prueba **sin JS** y otro **con `render_js=true`** sobre un
-   sitio multi-idioma con datos estructurados (ideal para cubrirlo todo).
-3. Para cada fila de la tabla de abajo, ejecuta la comprobación indicada y marca
-   el estado (✅ / ❌).
-4. Consultas SQL: conéctate con
-   ```bash
-   docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
-   ```
-   y sustituye `'<JOB_ID>'` por el UUID del job.
+- **0. Puesta en marcha desde cero** (setup, lanzar crawls, tests, DB)
+- **1. Export CSV / Excel**
+- **2. Resolución de URLs relativas** (canonical/hreflang/og) ⭐
+- **3. Paridad Screaming Frog: enlaces y timing**
+- **4. Fase de análisis** (hreflang, orphan, contenido, structured data, duplicados)
+- **5. Orquestación / worker** (heartbeat, delete)
+- **6. Análisis semántico / GSC**
+- **7. Backup / Import**
+- **8. Frontend / orquestación de resultados** (estado `analyzing`, timers)
+- **9. Consultas SQL de verificación (Q1–Q12)**
+- **10. Limitaciones conocidas / trabajo futuro**
+- **11. Referencia de commits**
 
-## Correr los tests unitarios (antes de desplegar)
+---
+
+## 0. Puesta en marcha desde cero (en tu ordenador)
+
+Requisitos: Docker + Docker Compose, y Git. (Para los tests unitarios también
+Python 3.11+.)
+
+```bash
+# 1) Clonar el repo y situarse en la rama de la auditoría
+git clone <URL_DEL_REPO> crawler-masivo
+cd crawler-masivo
+git fetch origin claude/crawler-export-issues-oi77bm
+git checkout claude/crawler-export-issues-oi77bm
+
+# 2) Variables de entorno (si no existe .env, copiar el ejemplo)
+cp -n .env.example .env    # revisa credenciales si quieres
+
+# 3) Construir y levantar el stack (IMPORTANTE: --build, hay cambios en el
+#    worker y en el crawler que requieren reconstruir la imagen)
+docker compose up -d --build
+
+# 4) Crear las tablas (solo la primera vez)
+docker compose exec api python scripts/init_db.py
+
+# 5) Comprobar que todo está arriba
+docker compose ps
+curl -s http://localhost:8000/health
+```
+
+La interfaz queda en **http://localhost:8000**.
+
+### Lanzar los dos crawls de prueba
+
+Lo ideal para cubrir todas las comprobaciones es un sitio **multi-idioma
+(hreflang)** con **datos estructurados** (Schema.org). Lanza dos jobs: uno
+**sin JS** y otro **con `render_js=true`**.
+
+Opción A — por la interfaz web (recomendado): botón "Nuevo rastreo", pon la
+URL semilla, y en el segundo activa "Renderizar JS".
+
+Opción B — por API (sustituye la URL):
+```bash
+# Crawl SIN JS
+curl -s -X POST http://localhost:8000/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Prueba sin JS","seeds":["https://ejemplo.com"],
+       "config":{"max_depth":3,"max_urls":500,"render_js":false}}'
+
+# Crawl CON JS
+curl -s -X POST http://localhost:8000/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Prueba con JS","seeds":["https://ejemplo.com"],
+       "config":{"max_depth":2,"max_urls":200,"render_js":true}}'
+```
+La respuesta incluye el `id` del job (el **`<JOB_ID>`** que usarás abajo).
+También puedes listarlos: `curl -s http://localhost:8000/api/jobs`.
+
+Espera a que el badge pase de **En curso → Analizando → Completado**.
+
+### Conectarse a la base de datos (para las consultas SQL)
+
+```bash
+docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
+```
+> Si el contenedor tiene otro nombre, míralo con `docker compose ps` y usa
+> ese. En todas las consultas de la sección 9 sustituye `'<JOB_ID>'` por el
+> UUID real del job.
+
+### Correr los tests unitarios (sin Docker)
 
 ```bash
 pip install -r tests/requirements.txt
-pytest        # desde la raíz del repo — 56 casos
+pytest        # desde la raíz del repo — 56 casos, deben salir todos en verde
 ```
 Cubren las funciones puras de extracción y la validación de datos
 estructurados. La capa que toca base de datos (hreflang recíproco, inlinks,
 orphan, pagerank) NO es unit-testeable sin una BD: se verifica con las
-consultas SQL de esta guía.
+consultas SQL de la sección 9.
+
+### Cómo usar el checklist
+
+Cada sección (1–8) tiene una tabla con: el bug, el arreglo, **cómo
+comprobarlo**, y una casilla de estado. Ve ejecutando cada comprobación y
+cambia `☐` por `✅` (o `❌` si algo falla y me lo comentas). Las comprobaciones
+por SQL apuntan a las consultas **Q1–Q12** de la sección 9.
 
 ---
 
@@ -94,7 +168,7 @@ consultas SQL de esta guía.
 
 ---
 
-## 6. Análisis semántico / GSC  (commit `<pendiente>`)
+## 6. Análisis semántico / GSC  (commit `24c7376`)
 
 | # | Bug | Arreglo | Verificación en producción | Estado |
 |---|-----|---------|-----------------------------|--------|
@@ -115,7 +189,7 @@ las filas originales y que `inlinks/outlinks` y hreflang siguen resolviendo
 
 ---
 
-## 8. Frontend / orquestación de resultados  (commit `<pendiente>`)
+## 8. Frontend / orquestación de resultados  (commit `2761ee2`)
 
 | # | Bug | Arreglo | Verificación en producción | Estado |
 |---|-----|---------|-----------------------------|--------|
@@ -238,3 +312,25 @@ docker compose logs crawler | grep "Recovering stale job"
   SQLite/Postgres de test.
 - **`word_count`** cuenta texto de elementos ocultos (`display:none`); paridad
   aproximada con Screaming Frog.
+
+---
+
+## 11. Referencia de commits
+
+Todos en la rama `claude/crawler-export-issues-oi77bm` (PR #5). Para ver el
+detalle de un commit: `git show <hash>`.
+
+| Commit | Contenido | Secciones |
+|--------|-----------|-----------|
+| `9d86f11` | Export CSV: columna duplicada, BOM UTF-8, export de enlaces y contenido | 1 |
+| `8828ec8` | Resolución de URLs relativas (canonical/hreflang/og) + posición de enlace | 2 |
+| `bec997c` | Inlinks reales, timing/HTTP en JS, borrado de hijos seguro, heartbeat | 3, 5 |
+| `804a04f` | hreflang recíproco, orphan sin falsos positivos, ruido de contenido | 4 |
+| `2f5c03f` | Validación de structured data + duplicados/UA | 4 |
+| `cb43664` | Suite de tests unitarios (56 casos) + refactors de apoyo | tests |
+| `922645a` | Heartbeat anti doble-crawl, parar crawl al borrar, este documento | 5 |
+| `24c7376` | CTR/posición GSC bien ponderados + doc backup/semantic | 6, 7 |
+| `2761ee2` | Estado `analyzing` (issues vacías), fuga de timer semántico | 8 |
+
+> Nota: los hashes pueden variar si la rama se rebasa. Usa
+> `git log --oneline origin/master..HEAD` para ver la lista actual.
