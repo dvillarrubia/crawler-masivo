@@ -94,7 +94,28 @@ consultas SQL de esta guía.
 
 ---
 
-## 6. Consultas SQL de verificación
+## 6. Análisis semántico / GSC  (commit `<pendiente>`)
+
+| # | Bug | Arreglo | Verificación en producción | Estado |
+|---|-----|---------|-----------------------------|--------|
+| 6.1 | **CTR y posición medios mal ponderados**: `avg_ctr` era la media simple de los CTR por URL (una URL con 1 impresión pesaba igual que una con 100.000) y `avg_position` una media simple. GSC agrega distinto | `avg_ctr = total_clicks / total_impressions`; `avg_position` ponderada por impresiones (como GSC) | Ver **Q12**: compara `avg_ctr` de `/semantic/results` con `SUM(clicks)/SUM(impressions)`; deben coincidir | ☐ |
+
+---
+
+## 7. Backup / Import  (sin cambios de código — limitación documentada)
+
+| # | Observación | Estado |
+|---|-------------|--------|
+| 7.1 | Pese a llamarse `stream_backup_zip`, construye el ZIP **entero en memoria** y acumula todas las filas en listas antes de escribir; el import también lee cada `.jsonl` completo en memoria. Correcto para jobs medianos, riesgo de OOM en jobs de millones de URLs. El remapeo de FKs (url_id/job_id) en el import es correcto | ⚠️ conocido |
+
+Verificación práctica: exporta un backup de un job terminado, bórralo, e
+impórtalo con `preserve_job_id=false`; confirma que `rows_imported` cuadra con
+las filas originales y que `inlinks/outlinks` y hreflang siguen resolviendo
+(los hashes se preservan).
+
+---
+
+## 8. Consultas SQL de verificación
 
 ```sql
 -- Q1. Indexabilidad: en un sitio sano la mayoría de páginas 200 internas
@@ -161,6 +182,14 @@ SELECT u.status_code, COUNT(*)
 FROM issues i JOIN urls u ON u.id = i.url_id
 WHERE i.job_id = '<JOB_ID>' AND i.issue_type = 'title_duplicate'
 GROUP BY u.status_code;   -- debería ser sólo 200
+
+-- Q12. CTR/posición GSC bien ponderados (fix 6.1). El avg_ctr que devuelve
+-- /semantic/results debe coincidir con este cálculo agregado:
+SELECT
+  ROUND(SUM(clicks)::numeric / NULLIF(SUM(impressions), 0), 4)  AS avg_ctr_real,
+  ROUND(SUM(position * impressions)::numeric
+        / NULLIF(SUM(impressions) FILTER (WHERE position IS NOT NULL), 0), 1) AS avg_pos_real
+FROM gsc_job_data WHERE job_id = '<JOB_ID>';
 ```
 
 ### Prueba de heartbeat (fix 5.1)
@@ -176,8 +205,15 @@ docker compose logs crawler | grep "Recovering stale job"
 
 ---
 
-## 7. Limitaciones conocidas / trabajo futuro
+## 9. Limitaciones conocidas / trabajo futuro
 
+- **Backup no es streaming real** (ver 7.1): construye el ZIP en memoria;
+  riesgo de OOM en jobs enormes. Candidato a reescribir con escritura por
+  chunks.
+- **Matching GSC↔crawl** (`_normalize_url_for_match`) pasa la ruta a
+  minúsculas; en el caso raro de dos URLs que sólo difieren en mayúsculas de
+  la ruta (`/A` vs `/a`) podrían colisionar. Aceptable para la mayoría de
+  sitios; a vigilar si un sitio usa rutas case-sensitive.
 - **Validación de datos estructurados**: es conservadora (sólo `@type` y
   propiedades mínimas de tipos comunes). No valida todas las reglas de Google
   Rich Results. Ampliable por tipo si se necesita.
