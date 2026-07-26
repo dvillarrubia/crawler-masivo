@@ -14,7 +14,6 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import extruct
 from w3lib.url import canonicalize_url
 
 # ---- regex helpers ---------------------------------------------------------
@@ -367,6 +366,8 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
     results: list[dict[str, Any]] = []
 
     try:
+        import extruct
+
         data = extruct.extract(
             html_body,
             base_url=url,

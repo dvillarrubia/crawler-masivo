@@ -1,0 +1,8 @@
+# Dependencies to run the unit test suite (pytest).
+# The extractor tests exercise the pure HTML helpers; heavier crawler deps
+# (scrapy, playwright, extruct, trafilatura) are imported lazily and are NOT
+# required to run these tests.
+pytest>=8.0
+parsel>=1.9
+w3lib>=2.1
+lxml>=5.0
