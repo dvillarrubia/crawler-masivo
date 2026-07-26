@@ -115,7 +115,19 @@ las filas originales y que `inlinks/outlinks` y hreflang siguen resolviendo
 
 ---
 
-## 8. Consultas SQL de verificación
+## 8. Frontend / orquestación de resultados  (commit `<pendiente>`)
+
+| # | Bug | Arreglo | Verificación en producción | Estado |
+|---|-----|---------|-----------------------------|--------|
+| 8.1 | **Job "completado" con issues vacías**: el worker marcaba el job como `completed` ANTES de ejecutar el análisis (que corre síncrono justo después). El frontend veía `completed`, cargaba insights/issues y mostraba **0 issues / datos parciales** hasta que terminaba el análisis | Nuevo estado intermedio `analyzing`: el worker pasa a `analyzing` → corre análisis → `completed`. El frontend sigue haciendo polling durante `analyzing` y refresca los datos al completar. `analyzing` queda excluido de la recuperación de stale jobs (solo mira `running`) | Lanza un crawl mediano; al terminar el rastreo, el badge debe mostrar **"Analizando"** un momento y luego "Completado" con las issues ya pobladas. En ningún momento debe verse "Completado" con 0 issues si las hay | ☐ |
+| 8.2 | **Fuga de timer**: `semanticPollTimer` no se limpiaba al volver a la lista de jobs; seguía disparando cada 2s contra `this.job.id` (ya null) indefinidamente | `_stopSemanticPoll()` en `backToJobs` y `openJob` | Abre un job con análisis semántico en curso, vuelve a la lista y confirma en la pestaña Red del navegador que dejan de salir peticiones a `/semantic/status` | ☐ |
+
+Nota: el estado `analyzing` requiere reconstruir la imagen del worker
+(`docker compose up -d --build`) para que el cambio tenga efecto.
+
+---
+
+## 9. Consultas SQL de verificación
 
 ```sql
 -- Q1. Indexabilidad: en un sitio sano la mayoría de páginas 200 internas
@@ -205,7 +217,7 @@ docker compose logs crawler | grep "Recovering stale job"
 
 ---
 
-## 9. Limitaciones conocidas / trabajo futuro
+## 10. Limitaciones conocidas / trabajo futuro
 
 - **Backup no es streaming real** (ver 7.1): construye el ZIP en memoria;
   riesgo de OOM en jobs enormes. Candidato a reescribir con escritura por

@@ -69,7 +69,7 @@
           <span class="text-dim text-sm" style="margin-right:.25rem;display:flex;align-items:center;gap:.25rem" data-tip="Filtra los trabajos por su estado actual">
             <i data-lucide="filter" style="width:13px;height:13px"></i> Filtrar:
           </span>
-          <template x-for="s in ['pending','running','completed','failed','cancelled']">
+          <template x-for="s in ['pending','running','analyzing','completed','failed','cancelled']">
             <button class="btn btn-sm"
               :class="jobsFilter === s ? 'btn-primary' : ''"
               :data-tip="({
@@ -218,10 +218,10 @@
         </div>
 
         <!-- Barra de progreso para trabajos en curso -->
-        <template x-if="progress && ['pending','running'].includes(job.status)">
+        <template x-if="progress && ['pending','running','analyzing'].includes(job.status)">
           <div class="card mb-2">
             <div class="flex items-center justify-between text-sm">
-              <span>Rastreo en curso...</span>
+              <span x-text="job.status === 'analyzing' ? 'Analizando resultados SEO...' : 'Rastreo en curso...'"></span>
               <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
             </div>
             <div class="progress-bar">

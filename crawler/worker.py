@@ -192,11 +192,40 @@ def _run_job(job_id: str) -> None:
         logger.exception("Crawl failed for job %s", job_id)
         final_status = "failed"
 
-    # -- Post-crawl: update status --
+    # -- Post-crawl: move to 'analyzing' before running analysis --
+    # The job must NOT be marked 'completed' until analysis has populated the
+    # issues/indexability/pagerank data, or the UI shows a completed job with
+    # an empty issues table. The intermediate 'analyzing' status also keeps
+    # stale-job recovery (which only targets 'running') from re-queuing the
+    # job while analysis runs with the spider — and its heartbeat — stopped.
+    cancelled = False
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job and job.status == "cancelled":
+            cancelled = True
+        elif job and final_status == "completed":
+            job.status = "analyzing"
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to update job %s status", job_id)
+    finally:
+        session.close()
+
+    if cancelled:
+        final_status = "cancelled"
+
+    # -- Trigger analysis (best-effort) while status is 'analyzing' --
+    if final_status == "completed" and not cancelled:
+        _trigger_analysis(job_id)
+
+    # -- Finalise status --
     session = SessionLocal()
     try:
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         if job:
+            # A cancel that arrived during analysis still wins.
             if job.status == "cancelled":
                 final_status = "cancelled"
             job.status = final_status
@@ -208,10 +237,6 @@ def _run_job(job_id: str) -> None:
         logger.exception("Failed to finalise job %s", job_id)
     finally:
         session.close()
-
-    # -- Trigger analysis (best-effort) --
-    if final_status == "completed":
-        _trigger_analysis(job_id)
 
 
 def _trigger_analysis(job_id: str) -> None:

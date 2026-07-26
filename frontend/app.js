@@ -25,6 +25,7 @@ const UA_LABELS = {
 const STATUS_LABEL = {
   pending:   'Pendiente',
   running:   'En curso',
+  analyzing: 'Analizando',
   completed: 'Completado',
   failed:    'Fallido',
   cancelled: 'Cancelado',
@@ -378,6 +379,7 @@ function app() {
 
     // ------- Detalle del trabajo -------
     async openJob(id) {
+      this._stopSemanticPoll();
       this.view = 'detail';
       this.detailTab = 'overview';
       this.stats = null;
@@ -417,6 +419,7 @@ function app() {
 
     backToJobs() {
       this._stopProgress();
+      this._stopSemanticPoll();
       this.view = 'jobs';
       this.job = null;
       this.loadJobs();
@@ -433,7 +436,9 @@ function app() {
     // ------- Polling de progreso -------
     _startProgress() {
       this._stopProgress();
-      if (!this.job || !['pending','running'].includes(this.job.status)) return;
+      // 'analyzing' is a non-terminal phase after the crawl while the analyzer
+      // populates issues/indexability/pagerank — keep polling through it.
+      if (!this.job || !['pending','running','analyzing'].includes(this.job.status)) return;
       const poll = async () => {
         try {
           this.progress = await api(`/jobs/${this.job.id}/progress`);
@@ -443,6 +448,11 @@ function app() {
               this._stopProgress();
               this.job = await api(`/jobs/${this.job.id}`);
               await this.loadStats();
+              // Analysis just finished: drop cached tab data so the active
+              // tab refetches fresh issues/insights instead of the empty/
+              // partial snapshot loaded mid-analysis.
+              this._invalidateResultCaches();
+              this._reloadActiveTab();
             }
           }
         } catch {}
@@ -451,8 +461,27 @@ function app() {
       this.progressTimer = setInterval(poll, 2000);
     },
 
+    _invalidateResultCaches() {
+      this.insights = null;
+      this.issues = []; this.issuesPage = 1;
+      this.links = []; this.linksPage = 1;
+      this.urls = []; this.urlsPage = 1;
+    },
+
+    _reloadActiveTab() {
+      const t = this.detailTab;
+      if (t === 'urls') this.loadUrls();
+      else if (t === 'issues') this.loadIssues();
+      else if (t === 'links') this.loadLinks();
+      else if (t === 'insights') this.loadInsights();
+    },
+
     _stopProgress() {
       if (this.progressTimer) { clearInterval(this.progressTimer); this.progressTimer = null; }
+    },
+
+    _stopSemanticPoll() {
+      if (this.semanticPollTimer) { clearInterval(this.semanticPollTimer); this.semanticPollTimer = null; }
     },
 
     // ------- Cancelar / Eliminar -------
@@ -1155,7 +1184,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
     },
 
     barColor(group) {

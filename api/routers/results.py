@@ -890,7 +890,7 @@ def export_backup(
 ):
     job = _get_job_or_404(job_id, db)
 
-    if job.status in ("pending", "running"):
+    if job.status in ("pending", "running", "analyzing"):
         raise HTTPException(
             status_code=409,
             detail="No se puede exportar un job que aun esta en ejecucion",
