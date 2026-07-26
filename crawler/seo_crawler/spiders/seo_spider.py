@@ -15,6 +15,7 @@ import fnmatch
 import hashlib
 import logging
 import re
+import time
 from typing import Any, Generator
 from urllib.parse import urlparse
 
@@ -336,6 +337,9 @@ class SeoSpider(scrapy.Spider):
             self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
             self._redis.ping()
             logger.info("Redis connected for job progress tracking")
+            # Initial heartbeat so a freshly-started job (before it reaches the
+            # first progress-update interval) is not seen as stale.
+            self._write_heartbeat()
         except Exception as exc:
             logger.warning("Redis unavailable; progress tracking disabled: %s", exc)
             self._redis = None
@@ -956,7 +960,12 @@ class SeoSpider(scrapy.Spider):
     # Redis helpers
     # ------------------------------------------------------------------
     def _update_redis_progress(self):
-        """Push crawled count to Redis periodically."""
+        """Push crawled count + liveness heartbeat to Redis periodically.
+
+        The heartbeat lets the worker's stale-job recovery tell a genuinely
+        stuck crawl apart from a long-but-healthy one, so it never re-queues
+        (and thus double-crawls) a job that is still making progress.
+        """
         if self._redis is None:
             return
         if self._crawled_count % self._redis_update_interval != 0:
@@ -965,8 +974,18 @@ class SeoSpider(scrapy.Spider):
             self._redis.set(
                 f"job:{self.job_id}:crawled_count", self._crawled_count
             )
+            self._write_heartbeat()
         except Exception as exc:
             logger.debug("Redis progress update failed: %s", exc)
+
+    def _write_heartbeat(self):
+        """Stamp the current time as this job's liveness heartbeat."""
+        if self._redis is None:
+            return
+        try:
+            self._redis.set(f"job:{self.job_id}:heartbeat", time.time())
+        except Exception:
+            pass
 
     def _should_cancel(self) -> bool:
         """Check whether a cancel signal has been set in Redis."""

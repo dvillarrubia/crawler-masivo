@@ -246,14 +246,35 @@ def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
     from shared.models import Job
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_JOB_MINUTES)
+    cutoff_ts = cutoff.timestamp()
 
     session = SessionLocal()
     try:
-        stale = (
+        candidates = (
             session.query(Job)
             .filter(Job.status == "running", Job.started_at < cutoff)
             .all()
         )
+
+        # A job started long ago is only *stale* if it is not still making
+        # progress. The spider writes a Redis heartbeat as it crawls; if that
+        # heartbeat is recent the crawl is alive (long crawls can run for
+        # hours) and must NOT be re-queued, or two workers would crawl the
+        # same job and double-write its data.
+        stale = []
+        for job in candidates:
+            try:
+                hb = rconn.get(f"job:{job.id}:heartbeat")
+            except Exception:
+                hb = None
+            if hb is not None:
+                try:
+                    if float(hb) >= cutoff_ts:
+                        continue  # alive — skip
+                except (TypeError, ValueError):
+                    pass
+            stale.append(job)
+
         for job in stale:
             job.status = "pending"
             job.started_at = None

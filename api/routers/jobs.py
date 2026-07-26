@@ -237,6 +237,14 @@ def delete_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # If the job is still active, signal the crawler to stop first so it does
+    # not keep writing rows (with a now-dangling job_id FK) while we delete.
+    if job.status in ("pending", "running"):
+        try:
+            get_redis().set(f"job:{job_id}:cancel", "1")
+        except Exception:
+            pass
+
     # Delete associated records in bulk (faster than cascade for large sets).
     db.query(Link).filter(Link.job_id == job_id).delete(synchronize_session=False)
     db.query(Issue).filter(Issue.job_id == job_id).delete(synchronize_session=False)
