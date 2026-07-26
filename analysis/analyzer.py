@@ -164,6 +164,7 @@ class SEOAnalyzer:
         self.compute_link_counts()
         self.compute_pagerank()
         self.analyze_links()
+        self.analyze_sitemap()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -1322,6 +1323,60 @@ class SEOAnalyzer:
                 "info",
                 {"count": outlink_count},
             )
+
+        self._flush_issues()
+
+    # -- Sitemap --------------------------------------------------------------
+
+    def analyze_sitemap(self) -> None:
+        """Sitemap coverage checks (Screaming Frog "Sitemaps" tab parity).
+
+        Runs only when the crawl ingested a sitemap (some ``in_sitemap`` is
+        True); otherwise all rows are NULL and there is nothing to compare.
+
+        - ``sitemap_orphan``: URL listed in the sitemap but with zero internal
+          inlinks — only reachable through the sitemap. Stronger signal than
+          plain ``orphan_page``.
+        - ``not_in_sitemap``: indexable internal 200 HTML page missing from
+          the sitemap — should probably be listed.
+        """
+        logger.debug("Analyzing sitemap coverage ...")
+
+        has_sitemap = self.session.execute(
+            select(func.count(Url.id)).where(
+                Url.job_id == self.job_id, Url.in_sitemap.is_(True),
+            )
+        ).scalar() or 0
+        if not has_sitemap:
+            return
+
+        # In sitemap but not linked internally (run after compute_link_counts).
+        rows = self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
+                (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+            )
+        ).all()
+        for (url_id,) in rows:
+            self._add_issue(url_id, "sitemap_orphan", "warning")
+
+        # Indexable page the sitemap forgot.
+        rows = self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(False),
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+            )
+        ).all()
+        for (url_id,) in rows:
+            self._add_issue(url_id, "not_in_sitemap", "info")
 
         self._flush_issues()
 

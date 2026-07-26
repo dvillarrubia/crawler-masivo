@@ -347,7 +347,6 @@ No tests exist yet. Extractors are pure functions and should be the first to get
 - Authentication/authorization
 - CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
-- Sitemap ingestion
 - PageSpeed/CrUX integration
 - Near-duplicate content detection (simhash)
 - Hreflang return-tag validation

@@ -79,6 +79,8 @@ const ISSUE_LABEL = {
   'url_cms_faceted': 'URL de filtro/CMS (crawl budget)',
   'orphan_page': 'Pagina huerfana',
   'high_outlink_count': 'Demasiados enlaces salientes',
+  'sitemap_orphan': 'Huerfana (solo en sitemap)',
+  'not_in_sitemap': 'No incluida en el sitemap',
 };
 
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
@@ -313,6 +315,7 @@ function app() {
             follow_external: f.follow_external,
             robots_mode:     f.robots_mode,
             render_js:       f.render_js,
+            use_sitemap:     f.use_sitemap,
             user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
             impersonate:     f.impersonate || 'chrome124',
             exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
@@ -1746,6 +1749,7 @@ function _freshForm() {
     follow_external: false,
     robots_mode: 'respect',
     render_js: false,
+    use_sitemap: true,
     user_agent_preset: 'chrome_win',
     user_agent_custom: '',
     impersonate: 'chrome124',

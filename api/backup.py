@@ -483,6 +483,7 @@ def _insert_url_batch(
             external_outlinks_count=d.get("external_outlinks_count", 0),
             unique_inlinks_count=d.get("unique_inlinks_count", 0),
             pagerank=d.get("pagerank"),
+            in_sitemap=d.get("in_sitemap"),
         )
         db.add(url)
         db.flush()

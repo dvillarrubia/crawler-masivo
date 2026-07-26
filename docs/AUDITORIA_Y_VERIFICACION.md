@@ -7,8 +7,10 @@ a fin cuando montes el repo en tu ordenador: es autónomo, no hace falta volver
 a la conversación.
 
 > Rama de trabajo: `claude/crawler-export-issues-oi77bm` (PR #5).
-> Todos los cambios son sólo de la lógica del crawler/análisis/export/UI; **no
-> tocan el esquema de la base de datos**, así que no hay migraciones.
+> Los arreglos de bugs no tocan el esquema de la base de datos. La única
+> excepción es la **feature de sitemaps (sección 8c)**, que añade la columna
+> `urls.in_sitemap` — se aplica sola al re-ejecutar
+> `docker compose exec api python scripts/init_db.py` (ALTER idempotente).
 
 ### Índice
 
@@ -21,6 +23,8 @@ a la conversación.
 - **6. Análisis semántico / GSC**
 - **7. Backup / Import**
 - **8. Frontend / orquestación de resultados** (estado `analyzing`, timers)
+- **8b. Segunda pasada del extractor** (meta case-insensitive, nofollow de página…)
+- **8c. NUEVA FEATURE: ingestión de sitemaps** (⚠️ requiere re-ejecutar init_db)
 - **9. Consultas SQL de verificación (Q1–Q12)**
 - **10. Diagnóstico de impacto en crawls ANTERIORES** (¿cuánto me afectó? D1–D7)
 - **11. Limitaciones conocidas / trabajo futuro**
@@ -227,6 +231,52 @@ FROM links l JOIN urls u ON u.id = l.from_url_id
 JOIN html_meta m ON m.url_id = u.id
 WHERE u.job_id = '<JOB_ID>' AND m.meta_robots ILIKE '%nofollow%'
 GROUP BY l.follow;   -- sólo debe haber follow = false
+```
+
+---
+
+## 8c. NUEVA FEATURE: Ingestión de sitemaps  (commit `<sm>`)
+
+Paridad con la pestaña "Sitemaps" de Screaming Frog. Antes no existía (estaba
+en la lista de "no existe todavía" de CLAUDE.md).
+
+**Qué hace** (activado por defecto; checkbox "Usar sitemap.xml" en el
+formulario, o `use_sitemap: false` / `sitemap_urls: [...]` en el config):
+
+1. Lee `robots.txt` de cada host semilla y extrae las directivas `Sitemap:`;
+   si no hay, prueba el convencional `/sitemap.xml`.
+2. Parsea `<urlset>` y `<sitemapindex>` (recursivo, cap de 50 ficheros),
+   incluyendo `.xml.gz` y XML malformado (modo recover).
+3. **Rastrea las URLs del sitemap** que el crawl de enlaces no descubrió.
+4. Marca `urls.in_sitemap` (true/false; NULL = el job no tuvo sitemap).
+5. El analyzer emite dos issues nuevos:
+   - `sitemap_orphan` (warning): en el sitemap pero con 0 enlaces internos —
+     huérfana de verdad, sólo alcanzable vía sitemap.
+   - `not_in_sitemap` (info): página interna 200 indexable ausente del sitemap.
+
+**⚠️ Migración**: hay una columna nueva (`urls.in_sitemap`). Al desplegar:
+```bash
+docker compose exec api python scripts/init_db.py   # aplica el ALTER automáticamente
+```
+
+| # | Comprobación | Estado |
+|---|--------------|--------|
+| 8c.1 | Crawl de un sitio con sitemap: el log del crawler muestra `Sitemap ... URLs, ... child sitemaps` y **Q14a** devuelve filas con `in_sitemap = true` | ☐ |
+| 8c.2 | Las URLs del sitemap no enlazadas aparecen rastreadas (compara `total_urls` con un crawl previo sin sitemap) | ☐ |
+| 8c.3 | **Q14b**: issues `sitemap_orphan` sólo en páginas realmente sin inlinks; `not_in_sitemap` sólo en indexables 200 | ☐ |
+| 8c.4 | Crawl de un sitio SIN sitemap: `in_sitemap` queda todo NULL y no aparece ningún issue de sitemap | ☐ |
+| 8c.5 | Con el checkbox desactivado no se hace ninguna petición a robots.txt/sitemap.xml para descubrimiento | ☐ |
+
+```sql
+-- Q14a. Cobertura de sitemap del job.
+SELECT in_sitemap, COUNT(*) FROM urls
+WHERE job_id = '<JOB_ID>' GROUP BY in_sitemap;
+
+-- Q14b. Issues de sitemap y el estado real de sus páginas.
+SELECT i.issue_type, u.status_code, u.inlinks_count, u.indexable, COUNT(*)
+FROM issues i JOIN urls u ON u.id = i.url_id
+WHERE i.job_id = '<JOB_ID>' AND i.issue_type IN ('sitemap_orphan','not_in_sitemap')
+GROUP BY 1, 2, 3, 4 ORDER BY 1;
 ```
 
 ---

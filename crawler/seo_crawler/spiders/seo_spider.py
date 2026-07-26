@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from typing import Any, Generator
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import redis
 import scrapy
@@ -52,6 +52,11 @@ from seo_crawler.extractors import (
     is_internal_url,
     normalize_url,
     robots_tokens,
+)
+from seo_crawler.sitemaps import (
+    MAX_SITEMAP_FILES,
+    parse_robots_sitemaps,
+    parse_sitemap,
 )
 from seo_crawler.items import (
     ContentItem,
@@ -185,6 +190,10 @@ class SeoSpider(scrapy.Spider):
         # this same job, plus the discovered-but-not-yet-crawled frontier.
         self._already_crawled_hashes: set[str] = set()
         self._frontier_urls: list[str] = []
+        # Sitemap ingestion state
+        self._use_sitemap: bool = True
+        self._sitemap_url_hashes: set[str] = set()
+        self._sitemap_files_fetched: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -259,6 +268,10 @@ class SeoSpider(scrapy.Spider):
 
             # -- Advanced config: Extraction toggles --
             self._extraction = self.job_config.get("extraction", {})
+
+            # -- Sitemap ingestion (Screaming Frog parity) --
+            self._use_sitemap = self.job_config.get("use_sitemap", True)
+            self._extra_sitemap_urls = self.job_config.get("sitemap_urls", []) or []
 
             # -- Advanced config: HTTP config (for middleware) --
             self._http_config = self.job_config.get("http", {})
@@ -346,7 +359,8 @@ class SeoSpider(scrapy.Spider):
             self._redis = None
 
     def spider_closed(self, spider, reason):
-        """Push final count and close Redis connection."""
+        """Persist sitemap membership, push final count, close Redis."""
+        self._persist_sitemap_membership()
         if self._redis:
             try:
                 self._redis.set(
@@ -418,6 +432,28 @@ class SeoSpider(scrapy.Spider):
                 dont_filter=True,
             )
 
+        # Sitemap discovery: robots.txt (Sitemap: directives) per seed host,
+        # plus any explicitly configured sitemap URLs. Membership is recorded
+        # for every listed URL and uncrawled ones are seeded, so pages only
+        # reachable via the sitemap (true orphans) still get audited.
+        if self._use_sitemap:
+            seen_hosts: set[str] = set()
+            for seed in self.seed_urls:
+                parsed = urlparse(seed)
+                if not parsed.hostname or parsed.hostname in seen_hosts:
+                    continue
+                seen_hosts.add(parsed.hostname)
+                robots_url = f"{parsed.scheme or 'https'}://{parsed.netloc}/robots.txt"
+                yield scrapy.Request(
+                    url=robots_url,
+                    callback=self.parse_robots_for_sitemaps,
+                    errback=self.handle_robots_error,
+                    meta={"depth": 0},
+                    dont_filter=True,
+                )
+            for sm_url in self._extra_sitemap_urls:
+                yield self._sitemap_request(sm_url)
+
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
         # run. Emitted with depth=1 since we know they were linked from a
         # crawled page; honoring the original depth would require a join we
@@ -438,6 +474,110 @@ class SeoSpider(scrapy.Spider):
                 meta=req_meta,
                 dont_filter=True,
             )
+
+    # ------------------------------------------------------------------
+    # Sitemap ingestion
+    # ------------------------------------------------------------------
+    def _sitemap_request(self, url: str) -> Request:
+        return scrapy.Request(
+            url=url,
+            callback=self.parse_sitemap_response,
+            errback=self.handle_sitemap_error,
+            meta={"depth": 0},
+        )
+
+    def parse_robots_for_sitemaps(self, response: Response) -> Generator:
+        """Extract Sitemap: directives from robots.txt; fall back to the
+        conventional /sitemap.xml location when none are declared."""
+        sitemap_urls: list[str] = []
+        if response.status == 200:
+            body_text = response.body.decode("utf-8", errors="ignore")
+            sitemap_urls = parse_robots_sitemaps(body_text, response.url)
+        if not sitemap_urls:
+            yield self._sitemap_request(urljoin(response.url, "/sitemap.xml"))
+            return
+        for sm_url in sitemap_urls:
+            yield self._sitemap_request(sm_url)
+
+    def handle_robots_error(self, failure) -> Generator:
+        """robots.txt unreachable — still try the conventional location."""
+        yield self._sitemap_request(urljoin(failure.request.url, "/sitemap.xml"))
+
+    def parse_sitemap_response(self, response: Response) -> Generator:
+        """Parse a sitemap (urlset or index): record membership, seed
+        uncrawled URLs, and recurse into child sitemaps under a hard cap."""
+        if response.status != 200:
+            return
+        if self._sitemap_files_fetched >= MAX_SITEMAP_FILES:
+            logger.warning("Sitemap file cap (%d) reached, ignoring %s",
+                           MAX_SITEMAP_FILES, response.url)
+            return
+        self._sitemap_files_fetched += 1
+
+        page_urls, child_sitemaps = parse_sitemap(response.body, response.url)
+        logger.info("Sitemap %s: %d URLs, %d child sitemaps",
+                    response.url, len(page_urls), len(child_sitemaps))
+
+        for child in child_sitemaps:
+            yield self._sitemap_request(child)
+
+        for url in page_urls:
+            normalized = normalize_url(url)
+            if not self._is_internal(normalized):
+                continue  # sitemaps must not seed foreign hosts
+            url_hash = compute_url_hash(normalized)
+            self._sitemap_url_hashes.add(url_hash)
+            if url_hash in self._already_crawled_hashes:
+                continue
+            if not self._should_follow(normalized):
+                continue
+            req_meta: dict[str, Any] = {"depth": 1}
+            if self.render_js and _url_likely_html(normalized):
+                req_meta.update(self._playwright_meta())
+            # The scheduler dupefilter drops these if link discovery already
+            # queued the same URL.
+            yield scrapy.Request(
+                url=normalized,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=req_meta,
+            )
+
+    def handle_sitemap_error(self, failure) -> None:
+        logger.debug("Sitemap fetch failed: %s", failure.request.url)
+
+    def _persist_sitemap_membership(self) -> None:
+        """Bulk-write Url.in_sitemap for this job at spider close.
+
+        Done once at the end (not per page) so membership applies no matter
+        which path discovered each URL, without any crawl-order race. When no
+        sitemap was found, rows keep in_sitemap = NULL ("no sitemap data"),
+        which the analyzer uses to skip sitemap checks entirely.
+        """
+        if not self._use_sitemap or not self._sitemap_url_hashes:
+            return
+        from shared.database import SessionLocal
+        from shared.models import Url
+
+        session = SessionLocal()
+        try:
+            hashes = list(self._sitemap_url_hashes)
+            for start in range(0, len(hashes), 5000):
+                batch = hashes[start:start + 5000]
+                session.query(Url).filter(
+                    Url.job_id == self.job_id, Url.url_hash.in_(batch),
+                ).update({Url.in_sitemap: True}, synchronize_session=False)
+            session.query(Url).filter(
+                Url.job_id == self.job_id, Url.in_sitemap.is_(None),
+            ).update({Url.in_sitemap: False}, synchronize_session=False)
+            session.commit()
+            logger.info("Sitemap membership persisted: %d URLs in sitemap",
+                        len(hashes))
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to persist sitemap membership")
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------
     # URL filtering

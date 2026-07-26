@@ -565,6 +565,7 @@ CSV_COLUMNS = [
     "outlinks_count",
     "external_outlinks_count",
     "pagerank",
+    "in_sitemap",
     "title",
     "title_len",
     "title_pixel_width",
@@ -628,6 +629,7 @@ def _csv_row(url_obj: Url) -> list[str]:
         _val(url_obj.outlinks_count),
         _val(url_obj.external_outlinks_count),
         _val(url_obj.pagerank),
+        _val(url_obj.in_sitemap),
         # HtmlMeta fields
         _val(meta.title) if meta else "",
         _val(meta.title_len) if meta else "",

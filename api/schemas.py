@@ -330,6 +330,7 @@ class UrlResponse(BaseModel):
     external_outlinks_count: int | None = None
     unique_inlinks_count: int | None = None
     pagerank: float | None = None
+    in_sitemap: bool | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 
