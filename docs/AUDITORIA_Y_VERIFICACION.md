@@ -22,8 +22,9 @@ a la conversación.
 - **7. Backup / Import**
 - **8. Frontend / orquestación de resultados** (estado `analyzing`, timers)
 - **9. Consultas SQL de verificación (Q1–Q12)**
-- **10. Limitaciones conocidas / trabajo futuro**
-- **11. Referencia de commits**
+- **10. Diagnóstico de impacto en crawls ANTERIORES** (¿cuánto me afectó? D1–D7)
+- **11. Limitaciones conocidas / trabajo futuro**
+- **12. Referencia de commits**
 
 ---
 
@@ -291,7 +292,89 @@ docker compose logs crawler | grep "Recovering stale job"
 
 ---
 
-## 10. Limitaciones conocidas / trabajo futuro
+## 10. Diagnóstico de impacto en crawls ANTERIORES (pre-fix)
+
+Los crawls lanzados **antes** de estos arreglos pueden llevar dato incorrecto.
+El alcance depende del bug: unos corrompen el dato crudo (necesitan re-crawl),
+otros sólo el análisis (basta re-analizar), otros sólo export/UI (nada).
+
+### Clasificación por recuperación
+
+| Cubo | Bugs | Cómo recuperar crawls viejos |
+|------|------|------------------------------|
+| **A — dato crudo corrupto** | 2.1 canonical, 2.3 posición enlace, 3.1 inlinks, 3.2/3.3 timing JS, 3.4 >200 enlaces | **Re-crawl limpio** (job nuevo). `Reanudar` NO vale: salta las páginas ya rastreadas y no reescribe el dato |
+| **B — sólo análisis** | 4.1 hreflang, 4.2 orphan, 4.3 contenido, 4.4 structured data, 4.5 duplicados | **Re-analizar**: `Reanudar` el job (re-ejecuta el análisis sobre el dato existente) |
+| **C — sólo export/UI** | 1.x export, 6.1 GSC, 8.x UI | Nada: re-exportar el CSV / recargar la página |
+
+### Consultas para MEDIR el daño en cada job existente
+
+Ejecuta por cada `<JOB_ID>` sospechoso. Cuanto más alto el número "malo",
+más te afectó.
+
+```sql
+-- D1. Canonicals relativos guardados (causa raíz del 2.1). Si > 0, la
+-- indexabilidad de ese job es sospechosa y conviene re-crawl.
+SELECT
+  COUNT(*) FILTER (WHERE m.canonical_href IS NOT NULL
+                   AND m.canonical_href NOT LIKE 'http%') AS canonicals_relativos,
+  COUNT(*) FILTER (WHERE m.canonical_href IS NOT NULL)     AS canonicals_total
+FROM html_meta m JOIN urls u ON u.id = m.url_id
+WHERE u.job_id = '<JOB_ID>';
+
+-- D2. Páginas 200 internas marcadas NO indexables. Si es una fracción alta
+-- del total y D1 > 0, es el bug del canonical dando falsos "no indexable".
+SELECT
+  COUNT(*) FILTER (WHERE indexable = false) AS no_indexables,
+  COUNT(*)                                   AS total_200_internas
+FROM urls
+WHERE job_id = '<JOB_ID>' AND is_internal AND status_code = 200 AND is_html;
+
+-- D3. Inlinks deduplicados (3.1). En el código viejo inlinks_count siempre
+-- era == unique_inlinks_count; si con_diferencia = 0 en un sitio con enlaces
+-- repetidos (nav+footer), el bug estuvo activo.
+SELECT
+  COUNT(*) FILTER (WHERE inlinks_count <> unique_inlinks_count) AS con_diferencia,
+  COUNT(*)                                                       AS total
+FROM urls WHERE job_id = '<JOB_ID>' AND is_internal;
+
+-- D4. Sesgo de posición de enlace (2.3). Si casi todo cae en 'header' con un
+-- sitio normal, el bug estuvo activo.
+SELECT link_position, COUNT(*) FROM links
+WHERE job_id = '<JOB_ID>' GROUP BY 1 ORDER BY 2 DESC;
+
+-- D5. hreflang sin validar (4.1). Si null_return = total, la validación
+-- recíproca nunca corrió → re-analizar.
+SELECT
+  COUNT(*) FILTER (WHERE return_tag_ok IS NULL) AS null_return,
+  COUNT(*)                                       AS total
+FROM hreflang h JOIN urls u ON u.id = h.url_id WHERE u.job_id = '<JOB_ID>';
+
+-- D6. structured data sin validar (4.4). Si null_status = total, nunca se
+-- validó → re-analizar.
+SELECT
+  COUNT(*) FILTER (WHERE validation_status IS NULL) AS null_status,
+  COUNT(*)                                           AS total
+FROM structured_data s JOIN urls u ON u.id = s.url_id WHERE u.job_id = '<JOB_ID>';
+
+-- D7. Orphan con falsos positivos (4.2): home (depth 0) o no-200 marcados
+-- huérfanos. Si > 0, esos issues eran falsas alarmas → re-analizar.
+SELECT COUNT(*) FROM issues i JOIN urls u ON u.id = i.url_id
+WHERE i.job_id = '<JOB_ID>' AND i.issue_type = 'orphan_page'
+  AND (u.crawl_depth = 0 OR u.status_code <> 200);
+```
+
+### Recomendación práctica
+
+1. Corre **D1/D2** en tus jobs importantes. Si hay canonicals relativos y
+   muchas "no indexables", **re-crawl** esos sitios y compara.
+2. Para todo lo demás (hreflang, structured data, orphan, duplicados),
+   **`Reanudar`** el job re-ejecuta el análisis con los fixes — sin re-fetch.
+3. Los CSV entregados a clientes con el bug de columnas/acentos: **re-exporta**
+   desde el mismo job, el dato subyacente estaba bien.
+
+---
+
+## 11. Limitaciones conocidas / trabajo futuro
 
 - **Backup no es streaming real** (ver 7.1): construye el ZIP en memoria;
   riesgo de OOM en jobs enormes. Candidato a reescribir con escritura por
@@ -315,7 +398,7 @@ docker compose logs crawler | grep "Recovering stale job"
 
 ---
 
-## 11. Referencia de commits
+## 12. Referencia de commits
 
 Todos en la rama `claude/crawler-export-issues-oi77bm` (PR #5). Para ver el
 detalle de un commit: `git show <hash>`.
