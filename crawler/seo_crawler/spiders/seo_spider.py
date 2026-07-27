@@ -206,6 +206,13 @@ class SeoSpider(scrapy.Spider):
         self._use_sitemap: bool = True
         self._sitemap_url_hashes: set[str] = set()
         self._sitemap_files_fetched: int = 0
+        # Ficheros de sitemap pedidos. Si al cerrar quedan por debajo de los
+        # parseados, la vista es parcial y no se puede afirmar que el resto de
+        # URLs este fuera del sitemap.
+        self._sitemap_requested: int = 0
+        # True si se alcanzo MAX_SITEMAP_FILES: la vista del sitemap es
+        # parcial y no se puede afirmar que nada mas este fuera de el.
+        self._sitemap_truncated: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -526,6 +533,11 @@ class SeoSpider(scrapy.Spider):
     # Sitemap ingestion
     # ------------------------------------------------------------------
     def _sitemap_request(self, url: str) -> Request:
+        # Se cuenta cada fichero de sitemap pedido para poder comparar al
+        # cerrar con los realmente parseados: si no coinciden, la vista del
+        # sitemap es parcial (tope alcanzado, crawl cerrado antes de leerlos
+        # todos, o algun 404) y no se puede afirmar que el resto este fuera.
+        self._sitemap_requested += 1
         return scrapy.Request(
             url=url,
             callback=self.parse_sitemap_response,
@@ -556,6 +568,10 @@ class SeoSpider(scrapy.Spider):
         if response.status != 200:
             return
         if self._sitemap_files_fetched >= MAX_SITEMAP_FILES:
+            # Marcar que la ingesta quedo incompleta: sin esto, las URLs no
+            # vistas se dan por "fuera del sitemap" cuando en realidad no se
+            # llego a mirar (ver _persist_sitemap_membership).
+            self._sitemap_truncated = True
             logger.warning("Sitemap file cap (%d) reached, ignoring %s",
                            MAX_SITEMAP_FILES, response.url)
             return
@@ -616,9 +632,30 @@ class SeoSpider(scrapy.Spider):
                 session.query(Url).filter(
                     Url.job_id == self.job_id, Url.url_hash.in_(batch),
                 ).update({Url.in_sitemap: True}, synchronize_session=False)
-            session.query(Url).filter(
-                Url.job_id == self.job_id, Url.in_sitemap.is_(None),
-            ).update({Url.in_sitemap: False}, synchronize_session=False)
+            parcial = (
+                self._sitemap_truncated
+                or self._sitemap_files_fetched < self._sitemap_requested
+            )
+            if parcial:
+                # Vista parcial del sitemap: el resto se queda en NULL = "no se
+                # sabe", no en False. Marcarlo False afirmaria que esas URLs no
+                # estan en el sitemap cuando simplemente no se llego a leerlo
+                # entero, y el analyzer generaria incidencias not_in_sitemap
+                # falsas. Pasa por el tope MAX_SITEMAP_FILES, porque el crawl
+                # cierre antes de leerlos todos, o por hijos que fallan.
+                # Medido en un Liferay con 395 sitemaps hijos: se leia el 12,6%.
+                logger.warning(
+                    "Sitemap incompleto (%d de %d ficheros leidos): %d URLs "
+                    "marcadas en sitemap; el resto queda como desconocido en "
+                    "vez de fuera",
+                    self._sitemap_files_fetched,
+                    self._sitemap_requested,
+                    len(hashes),
+                )
+            else:
+                session.query(Url).filter(
+                    Url.job_id == self.job_id, Url.in_sitemap.is_(None),
+                ).update({Url.in_sitemap: False}, synchronize_session=False)
             session.commit()
             logger.info("Sitemap membership persisted: %d URLs in sitemap",
                         len(hashes))

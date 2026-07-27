@@ -189,23 +189,33 @@ def _run_job(job_id: str) -> None:
             timeout=3600 * max_runtime_hours,
         )
 
-        # Resumen de paginas perdidas. El spider las registra en WARNING, pero
-        # su salida es la de un subproceso que aqui se vuelca en DEBUG, asi que
-        # sin esto no aparecen en ningun sitio: la fila queda con status_code
-        # NULL y desaparece del informe sin dejar rastro operativo.
-        if result.stderr and "Request failed" in result.stderr:
-            fallos = [
-                ln.split("Request failed", 1)[1].strip()
-                for ln in result.stderr.splitlines()
-                if "Request failed" in ln
-            ]
-            logger.warning(
-                "Job %s: %d peticion(es) sin respuesta, guardadas con "
-                "status_code NULL. Primeras: %s",
-                job_id,
-                len(fallos),
-                " | ".join(f[:120] for f in fallos[:3]),
-            )
+        # Avisos del spider. Su salida es la de un subproceso que aqui se
+        # vuelca en DEBUG, asi que sin esto no aparecen en ningun sitio: una
+        # pagina perdida se guarda con status_code NULL y un sitemap leido a
+        # medias deja datos incompletos, ambos sin rastro operativo.
+        #
+        # Se filtra por el logger del spider a proposito, para no arrastrar las
+        # deprecaciones de Scrapy ni el ruido de librerias. Se agrupan por tipo
+        # de mensaje para que un crawl con cientos de fallos no inunde el log.
+        if result.stderr:
+            avisos: dict[str, list[str]] = {}
+            for ln in result.stderr.splitlines():
+                # "[seo_crawler." con corchete: es el nombre del logger. Sin el
+                # corchete tambien casaria la ruta del fichero que imprime
+                # py.warnings en las deprecaciones de Scrapy.
+                if "WARNING" not in ln or "[seo_crawler." not in ln:
+                    continue
+                msg = ln.split("WARNING:", 1)[-1].strip()
+                clave = msg.split(":", 1)[0][:60]
+                avisos.setdefault(clave, []).append(msg)
+            for clave, msgs in avisos.items():
+                logger.warning(
+                    "Job %s: %d aviso(s) de '%s'. Ejemplo: %s",
+                    job_id,
+                    len(msgs),
+                    clave,
+                    msgs[0][:180],
+                )
 
         # Always log last portion of stderr for debugging
         if result.stderr:
