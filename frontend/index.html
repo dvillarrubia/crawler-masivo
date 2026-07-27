@@ -222,10 +222,32 @@
           <div class="card mb-2">
             <div class="flex items-center justify-between text-sm">
               <span x-text="job.status === 'analyzing' ? 'Analizando resultados SEO...' : 'Rastreo en curso...'"></span>
-              <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
+              <span>
+                <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
+                <!-- Frontera pendiente: evita tener que adivinar el tamano del
+                     sitio. Si llega a 0, el rastreo cubrio todo lo enlazado. -->
+                <template x-if="progress.pending_count !== null && progress.pending_count > 0">
+                  <span class="text-dim" x-text="' · ' + fmt.num(progress.pending_count) + ' en cola'"></span>
+                </template>
+              </span>
             </div>
             <div class="progress-bar">
               <div class="progress-fill" :style="'width:' + crawledPercent() + '%'"></div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Aviso de rastreo truncado. Sin esto, un crawl cortado por el tope
+             de URLs se presentaba igual que uno completo, y las metricas de
+             enlaces (PageRank incluido) salian de un grafo parcial. -->
+        <template x-if="job.finish_reason === 'max_urls_reached'">
+          <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)">
+            <div class="text-sm">
+              <strong>Rastreo incompleto.</strong>
+              Se alcanzo el tope de URLs configurado, asi que quedaron paginas sin
+              rastrear. El grafo de enlaces y el PageRank estan calculados sobre
+              una parte del sitio. Reanuda el rastreo con un tope mayor —o sin
+              tope— antes de usar estos datos para un informe.
             </div>
           </div>
         </template>

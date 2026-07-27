@@ -10,13 +10,21 @@ Google extensions, and Screaming Frog accepts them all.
 from __future__ import annotations
 
 import gzip
+import os
 from urllib.parse import urljoin
 
 _GZIP_MAGIC = b"\x1f\x8b"
 
 # Hard caps so a hostile/broken sitemap tree cannot blow up the crawl.
-MAX_SITEMAP_FILES = 50
-MAX_URLS_PER_SITEMAP = 50_000
+#
+# 50 se quedaba muy corto con CMS que parten el sitemap por plantilla: un
+# Liferay real declaraba 395 hijos, asi que se leia el 12% y el resto de URLs
+# quedaba sin membresia. Ahora son 500 y es configurable por entorno, porque el
+# numero adecuado depende del sitio. El tope sigue existiendo como proteccion
+# ante un arbol de sitemaps hostil o roto; cuando se alcanza, el spider deja la
+# membresia en NULL en vez de afirmar que las URLs no estan en el sitemap.
+MAX_SITEMAP_FILES = int(os.getenv("MAX_SITEMAP_FILES", "500"))
+MAX_URLS_PER_SITEMAP = int(os.getenv("MAX_URLS_PER_SITEMAP", "50000"))
 
 
 def parse_robots_sitemaps(robots_txt: str, base_url: str = "") -> list[str]:

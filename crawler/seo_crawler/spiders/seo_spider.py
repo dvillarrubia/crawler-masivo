@@ -188,7 +188,8 @@ class SeoSpider(scrapy.Spider):
         self.seed_urls: list[str] = []
         self.allowed_hosts: set[str] = set()
         self.max_depth: int = 3
-        self.max_urls: int = 50_000
+        # None = sin tope (hasta agotar la frontera)
+        self.max_urls: int | None = None
         self.follow_external: bool = False
         self._exclude_patterns: list[str] = []
         self._include_patterns: list[str] = []
@@ -239,7 +240,7 @@ class SeoSpider(scrapy.Spider):
             self.job_config = job.config or {}
 
             self.max_depth = self.job_config.get("max_depth", 3)
-            self.max_urls = self.job_config.get("max_urls", 50_000)
+            self.max_urls = self.job_config.get("max_urls")
             self.follow_external = self.job_config.get("follow_external", False)
             self._exclude_patterns = self.job_config.get("exclude_patterns", [])
             self._include_patterns = self.job_config.get("include_patterns", [])
@@ -304,7 +305,7 @@ class SeoSpider(scrapy.Spider):
                         self._root_domains.add(".".join(parts[-2:]))
 
             logger.info(
-                "Job %s loaded: %d seeds, max_depth=%d, max_urls=%d, hosts=%s",
+                "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
                 self.job_id,
                 len(self.seed_urls),
                 self.max_depth,
@@ -705,9 +706,22 @@ class SeoSpider(scrapy.Spider):
             self.crawler.engine.close_spider(self, "cancelled")
             return
 
-        # Check URL limit
-        if self._crawled_count >= self.max_urls:
-            logger.info("Max URL limit (%d) reached, stopping", self.max_urls)
+        # Check URL limit. max_urls None = sin tope, hasta agotar la frontera.
+        if self.max_urls is not None and self._crawled_count >= self.max_urls:
+            # WARNING, no INFO: el rastreo queda INCOMPLETO y el grafo de
+            # enlaces —y con el el PageRank— se calcula sobre una parte del
+            # sitio. Se deja la marca en Redis para que el worker la persista
+            # en jobs.finish_reason y el crawl no pase por completo.
+            logger.warning(
+                "Tope de %d URLs alcanzado: el rastreo queda INCOMPLETO",
+                self.max_urls,
+            )
+            if self._redis is not None:
+                try:
+                    self._redis.set(f"job:{self.job_id}:finish_reason",
+                                    "max_urls_reached")
+                except Exception:
+                    pass
             self.crawler.engine.close_spider(self, "max_urls_reached")
             return
 

@@ -285,7 +285,28 @@ def _run_job(job_id: str) -> None:
                 final_status = "cancelled"
             job.status = final_status
             job.completed_at = datetime.now(timezone.utc)
+
+            # Motivo real de finalizacion. El spider marca en Redis cuando
+            # corta por el tope de URLs; sin esto, un crawl truncado quedaba
+            # indistinguible de uno completo y el PageRank se presentaba como
+            # bueno estando calculado sobre una parte del sitio.
+            motivo = "finished"
+            try:
+                rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+                if rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached":
+                    motivo = "max_urls_reached"
+                rc.delete(f"job:{job_id}:finish_reason")
+            except Exception:
+                pass
+            job.finish_reason = motivo
             session.commit()
+            if motivo == "max_urls_reached":
+                logger.warning(
+                    "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
+                    "incompleto y el PageRank se ha calculado sobre un grafo "
+                    "parcial",
+                    job_id,
+                )
             logger.info("Job %s finished with status: %s", job_id, final_status)
     except Exception:
         session.rollback()

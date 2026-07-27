@@ -1219,8 +1219,18 @@ function app() {
     },
 
     crawledPercent() {
-      if (!this.progress || !this.job?.config?.max_urls) return 0;
-      return Math.min(100, (this.progress.crawled_count / this.job.config.max_urls) * 100);
+      if (!this.progress) return 0;
+      const hechas = this.progress.crawled_count || 0;
+      const cola = this.progress.pending_count;
+      // Sin tope de URLs el porcentaje se mide contra el trabajo real que
+      // queda (rastreadas / (rastreadas + en cola)), no contra un numero
+      // inventado de antemano. Con tope se sigue midiendo contra el, porque
+      // ahi si marca el final del rastreo.
+      const tope = this.job?.config?.max_urls;
+      if (tope) return Math.min(100, (hechas / tope) * 100);
+      if (cola === null || cola === undefined) return 0;
+      const total = hechas + cola;
+      return total > 0 ? Math.min(100, (hechas / total) * 100) : 0;
     },
 
     // URL detail helpers

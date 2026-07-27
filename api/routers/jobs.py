@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -45,11 +46,39 @@ def get_progress(
     except Exception:
         crawled_count = job.total_urls_crawled
 
+    # Frontera pendiente: enlaces internos descubiertos que aun no se han
+    # rastreado. Es lo que evita tener que adivinar max_urls antes de conocer
+    # el tamano del sitio — mientras rastrea se ve cuanto queda, y al terminar
+    # un 0 confirma que la frontera se agoto.
+    pending_count = None
+    try:
+        pending_count = db.execute(
+            text(
+                """
+                SELECT COUNT(DISTINCT l.to_url_hash)
+                FROM links l
+                WHERE l.job_id = :jid AND l.is_internal
+                  AND NOT EXISTS (
+                    SELECT 1 FROM urls u
+                    WHERE u.job_id = l.job_id AND u.url_hash = l.to_url_hash
+                  )
+                """
+            ),
+            {"jid": str(job_id)},
+        ).scalar()
+    except Exception:
+        pending_count = None
+
     return {
         "job_id": str(job_id),
         "status": job.status,
         "crawled_count": crawled_count,
         "total_urls_crawled_db": job.total_urls_crawled,
+        "pending_count": pending_count,
+        # "finished" = frontera agotada (dato completo)
+        # "max_urls_reached" = cortado por el tope (dato PARCIAL)
+        "finish_reason": job.finish_reason,
+        "truncated": job.finish_reason == "max_urls_reached",
     }
 
 
