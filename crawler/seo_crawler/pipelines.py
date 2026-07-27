@@ -42,8 +42,9 @@ class PostgresPipeline:
       ``PIPELINE_BATCH_SIZE`` items.
     """
 
-    def __init__(self, batch_size: int = 200):
+    def __init__(self, batch_size: int = 200, commit_every: int = 50):
         self.batch_size = batch_size
+        self.commit_every = commit_every
         self.session = None
         self._buffer: list[tuple[type, dict]] = []
         self._url_id_cache: dict[str, int] = {}  # url_hash -> Url.id
@@ -54,11 +55,32 @@ class PostgresPipeline:
         # earlier batch inserted for the same page (pages with >batch_size
         # links/resources span multiple flushes).
         self._deleted_child_url_ids: dict[type, set[int]] = {}
+        self._uncommitted: int = 0  # escrituras flusheadas sin commit
 
     @classmethod
     def from_crawler(cls, crawler):
         batch_size = crawler.settings.getint("PIPELINE_BATCH_SIZE", 200)
-        return cls(batch_size=batch_size)
+        commit_every = crawler.settings.getint("PIPELINE_COMMIT_EVERY", 50)
+        return cls(batch_size=batch_size, commit_every=commit_every)
+
+    # ------------------------------------------------------------------
+    # Commit batching
+    # ------------------------------------------------------------------
+    def _maybe_commit(self):
+        """Commit agrupado: cada ``commit_every`` escrituras, no por item."""
+        self._uncommitted += 1
+        if self._uncommitted >= self.commit_every:
+            self.session.commit()
+            self._uncommitted = 0
+
+    def _rollback(self):
+        """Rollback + invalidar cache de ids no persistidos."""
+        self.session.rollback()
+        if self._uncommitted:
+            # Las filas flusheadas sin commit se pierden con el rollback:
+            # el cache puede contener ids que ya no existen.
+            self._url_id_cache.clear()
+            self._uncommitted = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -71,6 +93,12 @@ class PostgresPipeline:
 
     def close_spider(self, spider: Spider):
         self._flush(spider)
+        try:
+            self.session.commit()  # commit final de escrituras pendientes
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Final commit failed on close_spider")
         self._update_job_counter(spider, force=True)
         if self.session:
             self.session.close()
@@ -169,10 +197,10 @@ class PostgresPipeline:
 
             self._url_id_cache[url_hash] = url_id
             self._pages_committed += 1
-            self.session.commit()
+            self._maybe_commit()
             self._update_job_counter(spider)
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.exception("Failed to persist PageItem for %s", data.get("url"))
 
     # ------------------------------------------------------------------
@@ -197,9 +225,10 @@ class PostgresPipeline:
             else:
                 meta_obj = HtmlMeta(url_id=url_id, **data)
                 self.session.add(meta_obj)
-            self.session.commit()
+            self.session.flush()
+            self._maybe_commit()
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.exception("Failed to persist HtmlMetaItem for url_id=%s", url_id)
 
     # ------------------------------------------------------------------
@@ -224,9 +253,10 @@ class PostgresPipeline:
             else:
                 content_obj = PageContent(url_id=url_id, **data)
                 self.session.add(content_obj)
-            self.session.commit()
+            self.session.flush()
+            self._maybe_commit()
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.exception("Failed to persist ContentItem for url_id=%s", url_id)
 
     # ------------------------------------------------------------------
@@ -255,9 +285,10 @@ class PostgresPipeline:
             else:
                 sec_obj = SecurityHeaders(url_id=url_id, **data)
                 self.session.add(sec_obj)
-            self.session.commit()
+            self.session.flush()
+            self._maybe_commit()
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.exception("Failed to persist SecurityItem for url_id=%s", url_id)
 
     # ------------------------------------------------------------------
@@ -311,6 +342,12 @@ class PostgresPipeline:
                 ResourceItem: (Resource, "url_id"),
                 LinkItem: (Link, "from_url_id"),
             }
+            # Marcado diferido: los url_id no se dan por limpiados hasta que
+            # el commit de abajo tiene exito. Si falla, _rollback() deshace el
+            # DELETE, y el set no debe afirmar que ya se hizo — si no, un lote
+            # posterior de la misma pagina se saltaria la limpieza y dejaria
+            # las filas duplicadas que este mecanismo evita.
+            pending_deletes: list[tuple[set[int], set[int]]] = []
             for item_cls, uid_set in url_ids_by_type.items():
                 entry = _child_model_map.get(item_cls)
                 if entry and uid_set:
@@ -324,13 +361,16 @@ class PostgresPipeline:
                         self.session.query(model).filter(
                             getattr(model, fk_col).in_(to_delete)
                         ).delete(synchronize_session=False)
-                        already.update(to_delete)
+                        pending_deletes.append((already, to_delete))
 
             self.session.bulk_save_objects(objects)
             self.session.commit()
+            self._uncommitted = 0
+            for already, to_delete in pending_deletes:
+                already.update(to_delete)
             logger.debug("Flushed %d child items to database", len(objects))
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.exception("Batch flush failed for %d items", len(objects))
 
     # ------------------------------------------------------------------
@@ -456,6 +496,7 @@ class PostgresPipeline:
             if job:
                 job.total_urls_crawled = self._pages_committed
                 self.session.commit()
+                self._uncommitted = 0
         except Exception:
-            self.session.rollback()
+            self._rollback()
             logger.debug("Failed to update job counter")

@@ -6,6 +6,19 @@ PostgreSQL persistence via a custom pipeline.
 """
 
 import os
+import sys
+
+# Ensure project root is importable so `shared.config` (fuente unica de
+# configuracion DB/Redis/UA) resolves even when scrapy runs from crawler/.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from shared.config import (  # noqa: E402
+    DATABASE_URL,
+    DEFAULT_USER_AGENT,
+    REDIS_URL,
+)
 
 BOT_NAME = "seo_crawler"
 SPIDER_MODULES = ["seo_crawler.spiders"]
@@ -38,10 +51,7 @@ AUTOTHROTTLE_MAX_DELAY = 10
 AUTOTHROTTLE_TARGET_CONCURRENCY = 8.0
 DOWNLOAD_DELAY = 0  # autothrottle takes over
 
-USER_AGENT = os.getenv(
-    "USER_AGENT",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-)
+USER_AGENT = os.getenv("USER_AGENT", DEFAULT_USER_AGENT)
 
 # ---------------------------------------------------------------------------
 # BFS scheduling
@@ -79,13 +89,9 @@ DOWNLOADER_MIDDLEWARES = {
 }
 
 # ---------------------------------------------------------------------------
-# Database / Redis (imported from environment, fallback to shared.config)
+# Database / Redis — fuente unica: shared.config (importados arriba).
+# DATABASE_URL y REDIS_URL quedan expuestos como settings de Scrapy.
 # ---------------------------------------------------------------------------
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://crawler:crawler@localhost:5432/crawler_db",
-)
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # ---------------------------------------------------------------------------
 # Proxy (optional)
@@ -96,6 +102,8 @@ PROXY_LIST = os.getenv("PROXY_LIST", "")  # comma-separated proxy URLs
 # Pipeline batching
 # ---------------------------------------------------------------------------
 PIPELINE_BATCH_SIZE = int(os.getenv("PIPELINE_BATCH_SIZE", "200"))
+# Commit agrupado de items padre (paginas/meta/content/security)
+PIPELINE_COMMIT_EVERY = int(os.getenv("PIPELINE_COMMIT_EVERY", "50"))
 
 # ---------------------------------------------------------------------------
 # Playwright (JS rendering — activated per-request via meta["playwright"])
