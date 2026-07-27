@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev gcc libxml2-dev libxslt1-dev zlib1g-dev libffi-dev \
+    libpq-dev gcc g++ libc6-dev libxml2-dev libxslt1-dev zlib1g-dev libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY crawler/requirements.txt /app/crawler/requirements.txt
