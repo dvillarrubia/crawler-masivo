@@ -1,0 +1,28 @@
+# Todo lo que no necesita viajar al daemon en cada build.
+.git
+.gitignore
+.venv
+venv
+env
+
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Backups y exports: pesan y no forman parte de la imagen.
+*.zip
+*.csv
+*.sqlite
+*.db
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+docs/
+tests/
