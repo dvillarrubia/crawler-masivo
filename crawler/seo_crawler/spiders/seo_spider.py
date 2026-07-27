@@ -109,6 +109,15 @@ def _url_likely_html(url: str) -> bool:
     return ext not in _NON_HTML_EXTENSIONS
 
 
+def _hash_key(url_hash: str) -> int:
+    """Compacta un sha256 hex a un int de 64 bits para sets en memoria.
+
+    Reduce ~4x la memoria del set de resume. Riesgo de colision para 1M
+    de URLs: ~3e-8 (una colision = saltar una URL, aceptable).
+    """
+    return int(url_hash[:16], 16)
+
+
 # ---------------------------------------------------------------------------
 # Boilerplate DOM cleanup — runs inside Chromium via PageMethod("evaluate")
 # after page load, BEFORE Scrapy captures the HTML.  Removes cookie banners,
@@ -186,11 +195,14 @@ class SeoSpider(scrapy.Spider):
         self._crawled_count: int = 0
         self._redis: redis.Redis | None = None
         self._redis_update_interval: int = 50
-        # Resume support: hashes of URLs already crawled in a previous run for
-        # this same job, plus the discovered-but-not-yet-crawled frontier.
-        self._already_crawled_hashes: set[str] = set()
-        self._frontier_urls: list[str] = []
-        # Sitemap ingestion state
+        # Resume support: claves compactas (64-bit) de URLs ya rastreadas en
+        # una ejecucion anterior de este job. La frontera se streamea desde
+        # la BD en start_requests (ver _iter_frontier), no se carga entera.
+        self._already_crawled_hashes: set[int] = set()
+        self._resume_mode: bool = False
+        # Sitemap ingestion state. OJO: _sitemap_url_hashes guarda el sha256
+        # completo (no la clave compacta) porque se escribe tal cual en la BD
+        # al persistir Url.in_sitemap.
         self._use_sitemap: bool = True
         self._sitemap_url_hashes: set[str] = set()
         self._sitemap_files_fetched: int = 0
@@ -293,54 +305,31 @@ class SeoSpider(scrapy.Spider):
                 self.allowed_hosts,
             )
 
-            # -- Resume detection: load already-crawled URL hashes + frontier
-            # If this job already has rows in `urls`, treat the run as a resume:
-            # skip URLs we already fetched and seed the queue with the
-            # discovered-but-not-yet-crawled internal links from the `links`
-            # table so the BFS picks up where it left off.
-            from shared.models import Link, Url
+            # -- Resume detection: load already-crawled URL keys
+            # If this job already has rows in `urls`, treat the run as a
+            # resume: skip URLs we already fetched. The frontier (discovered-
+            # but-not-crawled links) se streamea desde la BD en
+            # start_requests via _iter_frontier(), sin cap ni carga completa.
+            from shared.models import Url
 
-            already_rows = (
-                session.query(Url.url_hash)
+            self._already_crawled_hashes = {
+                _hash_key(row[0])
+                for row in session.query(Url.url_hash)
                 .filter(Url.job_id == self.job_id)
-                .all()
-            )
-            if already_rows:
-                self._already_crawled_hashes = {row[0] for row in already_rows}
-                # Discovered-but-not-crawled internal links (frontier).
-                # NOT EXISTS lets Postgres use the indexed (job_id, url_hash)
-                # lookup on `urls`, so this scales beyond a few thousand URLs.
-                # Cap the result count to keep start_requests time bounded; if
-                # a job has more than this in flight, the rest will be
-                # rediscovered as the crawl progresses through the frontier.
-                FRONTIER_CAP = 200_000
-                already_subq = (
-                    session.query(Url.url_hash)
-                    .filter(
-                        Url.job_id == Link.job_id,
-                        Url.url_hash == Link.to_url_hash,
-                    )
-                    .exists()
+                .yield_per(10_000)
+            }
+            if self._already_crawled_hashes:
+                self._resume_mode = True
+                self._crawled_count = (
+                    session.query(Url)
+                    .filter(Url.job_id == self.job_id)
+                    .count()
                 )
-                frontier_rows = (
-                    session.query(Link.to_url)
-                    .filter(
-                        Link.job_id == self.job_id,
-                        Link.is_internal.is_(True),
-                        ~already_subq,
-                    )
-                    .distinct()
-                    .limit(FRONTIER_CAP)
-                    .all()
-                )
-                self._frontier_urls = [row[0] for row in frontier_rows]
-                self._crawled_count = len(self._already_crawled_hashes)
                 logger.info(
                     "Resume mode for job %s: %d URLs already crawled, "
-                    "%d frontier URLs to seed",
+                    "frontier will be streamed from DB",
                     self.job_id,
-                    len(self._already_crawled_hashes),
-                    len(self._frontier_urls),
+                    self._crawled_count,
                 )
         finally:
             session.close()
@@ -402,6 +391,58 @@ class SeoSpider(scrapy.Spider):
             ],
         }
 
+    def _iter_frontier(self) -> Generator[str, None, None]:
+        """Streamea la frontera (links descubiertos pero no rastreados).
+
+        Paginacion keyset sobre links.id en lotes, con sesion corta por
+        lote: memoria acotada y sin cap duro de frontera. Dedup en memoria
+        con claves compactas de 64 bits.
+        """
+        from shared.database import SessionLocal
+        from shared.models import Link, Url
+
+        batch_size = 5_000
+        last_id = 0
+        seen_keys: set[int] = set()
+
+        while True:
+            session = SessionLocal()
+            try:
+                # NOT EXISTS usa el indice (job_id, url_hash) de `urls`.
+                already_subq = (
+                    session.query(Url.url_hash)
+                    .filter(
+                        Url.job_id == Link.job_id,
+                        Url.url_hash == Link.to_url_hash,
+                    )
+                    .exists()
+                )
+                rows = (
+                    session.query(Link.id, Link.to_url, Link.to_url_hash)
+                    .filter(
+                        Link.job_id == self.job_id,
+                        Link.is_internal.is_(True),
+                        Link.id > last_id,
+                        ~already_subq,
+                    )
+                    .order_by(Link.id)
+                    .limit(batch_size)
+                    .all()
+                )
+            finally:
+                session.close()
+
+            if not rows:
+                return
+
+            for row_id, to_url, to_hash in rows:
+                last_id = row_id
+                key = _hash_key(to_hash)
+                if key in seen_keys or key in self._already_crawled_hashes:
+                    continue
+                seen_keys.add(key)
+                yield to_url
+
     async def start(self):
         """Scrapy 2.13+ entry point.
 
@@ -419,7 +460,7 @@ class SeoSpider(scrapy.Spider):
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
-            if compute_url_hash(normalized) in self._already_crawled_hashes:
+            if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
             req_meta: dict[str, Any] = {"depth": 0}
             if self.render_js and _url_likely_html(normalized):
@@ -455,12 +496,14 @@ class SeoSpider(scrapy.Spider):
                 yield self._sitemap_request(sm_url)
 
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
-        # run. Emitted with depth=1 since we know they were linked from a
-        # crawled page; honoring the original depth would require a join we
-        # don't pay for.
-        for url in self._frontier_urls:
+        # run, streamed lazily from DB. Emitted with depth=1 since we know
+        # they were linked from a crawled page; honoring the original depth
+        # would require a join we don't pay for.
+        if not self._resume_mode:
+            return
+        for url in self._iter_frontier():
             normalized = normalize_url(url)
-            if compute_url_hash(normalized) in self._already_crawled_hashes:
+            if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
                 continue
@@ -526,8 +569,10 @@ class SeoSpider(scrapy.Spider):
             if not self._is_internal(normalized):
                 continue  # sitemaps must not seed foreign hosts
             url_hash = compute_url_hash(normalized)
+            # El sha256 completo va al set de membresia (se escribe en BD);
+            # para el set de resume hay que usar la clave compacta.
             self._sitemap_url_hashes.add(url_hash)
-            if url_hash in self._already_crawled_hashes:
+            if _hash_key(url_hash) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
                 continue
@@ -1025,7 +1070,7 @@ class SeoSpider(scrapy.Spider):
                         followed_hashes.add(link_hash)
                         # Resume: skip URLs already crawled in a previous run.
                         if self._already_crawled_hashes and \
-                                link_hash in self._already_crawled_hashes:
+                                _hash_key(link_hash) in self._already_crawled_hashes:
                             continue
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js and _url_likely_html(link["url"]):
