@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ from shared.models import (
     PageContent,
     Issue,
 )
+
+logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = "1"
 
@@ -504,6 +507,7 @@ def _import_child_table(
     """Import rows from a child NDJSON file. Returns (imported, skipped)."""
     imported = 0
     skipped = 0
+    unmapped_fk = 0  # filas cuyo url FK no existe en el remap old→new
     lines = zf.read(jsonl_name).decode("utf-8").splitlines()
 
     # Determine columns from model, excluding auto-increment PKs
@@ -534,6 +538,7 @@ def _import_child_table(
         new_url_id = old_to_new_url.get(old_url_id)
         if new_url_id is None:
             skipped += 1
+            unmapped_fk += 1
             continue
         d[url_fk_field] = new_url_id
 
@@ -565,5 +570,14 @@ def _import_child_table(
     if batch:
         db.execute(model.__table__.insert(), batch)
         imported += len(batch)
+
+    if unmapped_fk:
+        # Aviso agregado (uno por tabla) para no inflar warnings fila a fila
+        msg = (
+            f"{jsonl_name}: {unmapped_fk} fila(s) omitida(s) — "
+            f"{url_fk_field} no remapeable (URL ausente del backup)"
+        )
+        warnings.append(msg)
+        logger.warning("Backup import: %s", msg)
 
     return imported, skipped
