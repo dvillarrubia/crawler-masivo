@@ -37,14 +37,25 @@ def get_progress(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    crawled_count = 0
+    # Manda el contador de BD, no el de Redis. Miden cosas distintas: el de
+    # Redis cuenta respuestas que llegan al spider, mientras que el spider
+    # ademas guarda una fila por cada salto de una cadena de redirecciones sin
+    # sumarlo. En un sitio con muchos 301 el de Redis se queda corto de forma
+    # permanente (medido: 6.050 frente a 7.259 filas reales, un 17%) y la UI
+    # aparentaba un rastreo estancado cuando iba fino. El de BD se refresca
+    # cada 5s y cuadra con lo que luego se ve en los resultados.
+    crawled_count = job.total_urls_crawled or 0
+    live_count = None
     try:
         r = get_redis()
         val = r.get(f"job:{job_id}:crawled_count")
         if val is not None:
-            crawled_count = int(val)
+            live_count = int(val)
+            # Solo al arrancar, antes del primer volcado del contador de BD.
+            if crawled_count == 0:
+                crawled_count = live_count
     except Exception:
-        crawled_count = job.total_urls_crawled
+        live_count = None
 
     # Frontera pendiente: enlaces internos descubiertos que aun no se han
     # rastreado. Es lo que evita tener que adivinar max_urls antes de conocer
@@ -74,6 +85,9 @@ def get_progress(
         "status": job.status,
         "crawled_count": crawled_count,
         "total_urls_crawled_db": job.total_urls_crawled,
+        # Respuestas contadas por el spider. Excluye los saltos intermedios de
+        # redireccion, asi que es normal que quede por debajo de crawled_count.
+        "responses_count": live_count,
         "pending_count": pending_count,
         # "finished" = frontera agotada (dato completo)
         # "max_urls_reached" = cortado por el tope (dato PARCIAL)
