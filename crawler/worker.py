@@ -36,8 +36,12 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# Nivel configurable por entorno. La salida de Scrapy se registra en DEBUG, y
+# como el subproceso no escribe en el stdout del worker, con INFO no habia
+# forma de diagnosticar un crawl raro sin tocar codigo: LOG_LEVEL=DEBUG lo
+# expone sin reconstruir la imagen.
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("worker")
@@ -115,9 +119,16 @@ def _run_job(job_id: str) -> None:
 
         # When JS rendering is active and no explicit concurrency override,
         # cap concurrent requests to avoid Chromium memory exhaustion.
+        #
+        # El default era 8 y perdia paginas en silencio: medido sobre un sitio
+        # real en el perfil local (2 CPU / 2 GB), con 8 fallaba el 59,6% de las
+        # URLs por "Page.goto: Timeout exceeded" y se guardaban con status_code
+        # NULL. Con 4 el fallo baja al 0% y ademas termina antes que con 2
+        # (360s frente a 440s), asi que 4 es el punto de equilibrio. Un VPS con
+        # mas CPU puede subirlo por entorno.
         js_rendering = job_config.get("render_js", False)
         if js_rendering:
-            js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "8"))
+            js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "4"))
             js_concurrent_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
             if "concurrent_requests" not in job_config:
                 cmd += ["-s", f"CONCURRENT_REQUESTS={js_concurrent}"]
@@ -334,7 +345,17 @@ def main() -> None:
         REDIS_URL,
     )
 
-    rconn = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+    # socket_timeout con holgura sobre BRPOP_TIMEOUT. redis-py >=8 fija el
+    # plazo de lectura del socket al timeout del propio comando bloqueante, asi
+    # que el socket expiraba en el mismo instante en que el servidor mandaba la
+    # respuesta vacia: BRPOP lanzaba TimeoutError en CADA sondeo en vez de
+    # devolver None. El except de abajo lo absorbia, pero dejaba un warning cada
+    # pocos segundos y sumaba la espera de reintento a cada vuelta.
+    rconn = redis_lib.Redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_timeout=BRPOP_TIMEOUT + 10,
+    )
     try:
         rconn.ping()
     except redis_lib.ConnectionError:

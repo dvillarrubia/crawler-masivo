@@ -148,7 +148,6 @@ class PostgresPipeline:
                     "status_code", "status_group", "content_type",
                     "content_length", "response_time_ms", "is_html",
                     "resource_type", "redirect_url", "body_hash",
-                    "crawl_depth",
                     # New Screaming Frog fields
                     "url_length", "folder_depth", "word_count",
                     "text_ratio", "redirect_type", "status_text",
@@ -156,6 +155,16 @@ class PostgresPipeline:
                     "indexability_status", "blocked_by_robots",
                 ):
                     setattr(existing, field, data.get(field))
+                # crawl_depth NO se sobrescribe sin mas: se conserva el MINIMO.
+                # Una URL se alcanza por varios caminos y Screaming Frog reporta
+                # la profundidad mas somera a la que se encontro. Pisarla dejaba
+                # la home (semilla, depth 0) con la profundidad del ultimo enlace
+                # que la redescubria, y ninguna fila acababa con depth 0.
+                new_depth = data.get("crawl_depth")
+                if new_depth is not None and (
+                    existing.crawl_depth is None or new_depth < existing.crawl_depth
+                ):
+                    existing.crawl_depth = new_depth
                 existing.last_crawled_at = datetime.now(timezone.utc)
                 self.session.flush()
                 url_id = existing.id

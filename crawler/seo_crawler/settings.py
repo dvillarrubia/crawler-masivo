@@ -133,8 +133,11 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
     ],
 }
 # Limit concurrent browser pages to avoid memory exhaustion
+# 4, no 8: alineado con el nuevo tope de CONCURRENT_REQUESTS para JS (ver
+# worker.py). Mas pestañas simultaneas de las que la maquina puede renderizar
+# hacen que Page.goto expire y la pagina se pierda con status_code NULL.
 PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = int(
-    os.getenv("PLAYWRIGHT_MAX_PAGES", "8")
+    os.getenv("PLAYWRIGHT_MAX_PAGES", "4")
 )
 # Safety cap on total browser contexts (default + custom + margin)
 PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "3"))
@@ -161,8 +164,13 @@ PLAYWRIGHT_ABORT_REQUEST = lambda req: req.resource_type in (
     "image", "media", "font", "texttrack", "eventsource",
     "websocket", "manifest", "other",
 )
+# Alineado con DOWNLOAD_TIMEOUT (30s). Estaba en 15s para acelerar, pero al
+# quedar POR DEBAJO del timeout de Scrapy, Playwright abandonaba la navegacion
+# antes de que Scrapy llegase a considerarlo un fallo: paginas que responden
+# 200 sin JS se perdian con "Page.goto: Timeout 15000ms exceeded" y acababan
+# en la BD con status_code NULL. Sigue siendo ajustable por entorno.
 PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = int(
-    os.getenv("PLAYWRIGHT_NAV_TIMEOUT", "15000")  # 15s instead of 30s
+    os.getenv("PLAYWRIGHT_NAV_TIMEOUT", "30000")
 )
 
 # ---------------------------------------------------------------------------

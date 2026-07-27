@@ -465,12 +465,15 @@ class SeoSpider(scrapy.Spider):
             req_meta: dict[str, Any] = {"depth": 0}
             if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
+            # Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter,
+            # sino que ademas NO registra la peticion como vista. La semilla
+            # quedaba fuera del set, cualquier enlace interno a la home la
+            # volvia a rastrear a mayor profundidad y se perdia el depth 0.
             yield scrapy.Request(
                 url=normalized,
                 callback=self.parse,
                 errback=self.handle_error,
                 meta=req_meta,
-                dont_filter=True,
             )
 
         # Sitemap discovery: robots.txt (Sitemap: directives) per seed host,
@@ -510,12 +513,13 @@ class SeoSpider(scrapy.Spider):
             req_meta = {"depth": 1}
             if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
+            # Tampoco aqui: si un enlace redescubre una URL de la frontera,
+            # debe filtrarse como duplicada en vez de rastrearse dos veces.
             yield scrapy.Request(
                 url=normalized,
                 callback=self.parse,
                 errback=self.handle_error,
                 meta=req_meta,
-                dont_filter=True,
             )
 
     # ------------------------------------------------------------------
@@ -1112,7 +1116,16 @@ class SeoSpider(scrapy.Spider):
         else:
             status_group = "error"
 
-        logger.debug("Request failed [%s]: %s", status_group, url)
+        # WARNING, no DEBUG: una peticion fallida se persiste con status_code
+        # NULL y desaparece de cualquier informe. En DEBUG nadie la veia, y asi
+        # es como paso inadvertido que el render JS perdia paginas que sin JS
+        # respondian 200. El motivo concreto va incluido.
+        logger.warning(
+            "Request failed [%s]: %s (%s)",
+            status_group,
+            url,
+            failure.getErrorMessage(),
+        )
 
         self._crawled_count += 1
 
