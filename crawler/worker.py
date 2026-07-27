@@ -117,29 +117,45 @@ def _run_job(job_id: str) -> None:
             "-a", f"job_id={job_id}",
         ]
 
-        # When JS rendering is active and no explicit concurrency override,
-        # cap concurrent requests to avoid Chromium memory exhaustion.
+        # -- Concurrencia efectiva ---------------------------------------
+        # Con render_js el tope se aplica como min() sobre lo que pida el job,
+        # no solo cuando el campo falta.
         #
-        # El default era 8 y perdia paginas en silencio: medido sobre un sitio
-        # real en el perfil local (2 CPU / 2 GB), con 8 fallaba el 59,6% de las
-        # URLs por "Page.goto: Timeout exceeded" y se guardaban con status_code
-        # NULL. Con 4 el fallo baja al 0% y ademas termina antes que con 2
-        # (360s frente a 440s), asi que 4 es el punto de equilibrio. Un VPS con
-        # mas CPU puede subirlo por entorno.
+        # Antes se saltaba por dos motivos a la vez: (1) la API rellena SIEMPRE
+        # concurrent_requests con su default (32), asi que la condicion
+        # "not in job_config" no se cumplia nunca; y (2) aunque se hubiera
+        # cumplido, el bloque de overrides volvia a emitir el flag despues y
+        # ganaba por ser el ultimo. El resultado es que el tope documentado
+        # para JS no llego a aplicarse jamas.
+        #
+        # El valor importa: medido sobre un sitio real en el perfil local
+        # (2 CPU / 2 GB), con 8 fallaba el 59,6% de las URLs por "Page.goto:
+        # Timeout exceeded" y se guardaban con status_code NULL. Con 4 el fallo
+        # baja al 0% y ademas termina antes que con 2 (360s frente a 440s). Un
+        # VPS con mas CPU puede subirlo por entorno.
         js_rendering = job_config.get("render_js", False)
+        concurrent = job_config.get("concurrent_requests")
+        concurrent_per_domain = job_config.get("concurrent_requests_per_domain")
         if js_rendering:
             js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "4"))
-            js_concurrent_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
-            if "concurrent_requests" not in job_config:
-                cmd += ["-s", f"CONCURRENT_REQUESTS={js_concurrent}"]
-            if "concurrent_requests_per_domain" not in job_config:
-                cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={js_concurrent_per_domain}"]
+            js_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
+            concurrent = min(concurrent, js_concurrent) if concurrent else js_concurrent
+            concurrent_per_domain = (
+                min(concurrent_per_domain, js_per_domain)
+                if concurrent_per_domain
+                else js_per_domain
+            )
+            logger.info(
+                "JS rendering: concurrencia limitada a %s (%s por dominio)",
+                concurrent,
+                concurrent_per_domain,
+            )
 
         # Apply job-level Scrapy settings overrides
-        if "concurrent_requests" in job_config:
-            cmd += ["-s", f"CONCURRENT_REQUESTS={job_config['concurrent_requests']}"]
-        if "concurrent_requests_per_domain" in job_config:
-            cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={job_config['concurrent_requests_per_domain']}"]
+        if concurrent is not None:
+            cmd += ["-s", f"CONCURRENT_REQUESTS={concurrent}"]
+        if concurrent_per_domain is not None:
+            cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={concurrent_per_domain}"]
         robots_mode = job_config.get("robots_mode", "respect")
         if robots_mode == "ignore":
             cmd += ["-s", "ROBOTSTXT_OBEY=False"]
@@ -172,6 +188,24 @@ def _run_job(job_id: str) -> None:
             text=True,
             timeout=3600 * max_runtime_hours,
         )
+
+        # Resumen de paginas perdidas. El spider las registra en WARNING, pero
+        # su salida es la de un subproceso que aqui se vuelca en DEBUG, asi que
+        # sin esto no aparecen en ningun sitio: la fila queda con status_code
+        # NULL y desaparece del informe sin dejar rastro operativo.
+        if result.stderr and "Request failed" in result.stderr:
+            fallos = [
+                ln.split("Request failed", 1)[1].strip()
+                for ln in result.stderr.splitlines()
+                if "Request failed" in ln
+            ]
+            logger.warning(
+                "Job %s: %d peticion(es) sin respuesta, guardadas con "
+                "status_code NULL. Primeras: %s",
+                job_id,
+                len(fallos),
+                " | ".join(f[:120] for f in fallos[:3]),
+            )
 
         # Always log last portion of stderr for debugging
         if result.stderr:
