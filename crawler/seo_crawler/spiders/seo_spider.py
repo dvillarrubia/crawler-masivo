@@ -363,6 +363,11 @@ class SeoSpider(scrapy.Spider):
                 self._redis.set(
                     f"job:{self.job_id}:crawled_count", self._crawled_count
                 )
+                # La cola queda a 0 al cerrar: si el rastreo se corto por el
+                # tope o por cancelacion habria quedado el ultimo valor vivo, y
+                # un job terminado no tiene nada en cola. Lo que quedase sin
+                # rastrear se deduce de finish_reason, no de este contador.
+                self._redis.set(f"job:{self.job_id}:pending_count", 0)
             except Exception:
                 pass
             try:
@@ -1229,9 +1234,39 @@ class SeoSpider(scrapy.Spider):
             self._redis.set(
                 f"job:{self.job_id}:crawled_count", self._crawled_count
             )
+            self._write_pending_count()
             self._write_heartbeat()
         except Exception as exc:
             logger.debug("Redis progress update failed: %s", exc)
+
+    def _write_pending_count(self):
+        """Publica la LONGITUD REAL de la cola del planificador.
+
+        Antes la cola se deducia de la BD (enlaces internos cuyo destino no
+        estaba en `urls`), y esa cifra nunca llegaba a cero: cuando el crawler
+        sigue un redirect y el destino ya estaba rastreado, Scrapy descarta la
+        peticion por duplicada y la URL original no llega a registrarse, pero su
+        enlace si — asi que se contaba como pendiente para siempre. Medido en un
+        rastreo real: 4.955 "pendientes" con la frontera ya agotada.
+
+        El planificador sabe exactamente cuantas quedan, asi que se le pregunta
+        a el. Es ademas lo que enseña Screaming Frog.
+        """
+        if self._redis is None:
+            return
+        try:
+            slot = getattr(self.crawler.engine, "_slot", None) or getattr(
+                self.crawler.engine, "slot", None
+            )
+            if slot is None or getattr(slot, "scheduler", None) is None:
+                return
+            self._redis.set(
+                f"job:{self.job_id}:pending_count", len(slot.scheduler)
+            )
+        except Exception:
+            # La cola es informativa: si la version de Scrapy no la expone, se
+            # calla y /progress cae al calculo aproximado desde la BD.
+            pass
 
     def _write_heartbeat(self):
         """Stamp the current time as this job's liveness heartbeat."""

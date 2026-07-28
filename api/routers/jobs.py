@@ -57,28 +57,45 @@ def get_progress(
     except Exception:
         live_count = None
 
-    # Frontera pendiente: enlaces internos descubiertos que aun no se han
-    # rastreado. Es lo que evita tener que adivinar max_urls antes de conocer
-    # el tamano del sitio — mientras rastrea se ve cuanto queda, y al terminar
-    # un 0 confirma que la frontera se agoto.
+    # Cola pendiente. La cifra buena la publica el propio spider leyendo la
+    # longitud del planificador de Scrapy: es exacta y llega a 0 al terminar.
+    #
+    # El calculo desde la BD que habia antes (enlaces internos cuyo destino no
+    # esta en `urls`) NUNCA llegaba a cero: cuando el crawler sigue un redirect
+    # y el destino ya estaba rastreado, Scrapy descarta la peticion por
+    # duplicada y la URL original no se registra, pero su enlace si — se
+    # contaba como pendiente para siempre. Se conserva solo como respaldo para
+    # jobs antiguos, que no tienen la clave en Redis, y va marcado como
+    # aproximado para no presentarlo como exacto.
     pending_count = None
+    pending_exacto = False
     try:
-        pending_count = db.execute(
-            text(
-                """
-                SELECT COUNT(DISTINCT l.to_url_hash)
-                FROM links l
-                WHERE l.job_id = :jid AND l.is_internal
-                  AND NOT EXISTS (
-                    SELECT 1 FROM urls u
-                    WHERE u.job_id = l.job_id AND u.url_hash = l.to_url_hash
-                  )
-                """
-            ),
-            {"jid": str(job_id)},
-        ).scalar()
+        r = get_redis()
+        val = r.get(f"job:{job_id}:pending_count")
+        if val is not None:
+            pending_count = int(val)
+            pending_exacto = True
     except Exception:
         pending_count = None
+
+    if pending_count is None:
+        try:
+            pending_count = db.execute(
+                text(
+                    """
+                    SELECT COUNT(DISTINCT l.to_url_hash)
+                    FROM links l
+                    WHERE l.job_id = :jid AND l.is_internal
+                      AND NOT EXISTS (
+                        SELECT 1 FROM urls u
+                        WHERE u.job_id = l.job_id AND u.url_hash = l.to_url_hash
+                      )
+                    """
+                ),
+                {"jid": str(job_id)},
+            ).scalar()
+        except Exception:
+            pending_count = None
 
     return {
         "job_id": str(job_id),
@@ -89,6 +106,9 @@ def get_progress(
         # redireccion, asi que es normal que quede por debajo de crawled_count.
         "responses_count": live_count,
         "pending_count": pending_count,
+        # True = cola real del planificador. False = estimacion desde la BD para
+        # jobs antiguos, que sobreestima (cuenta redirects ya resueltos).
+        "pending_exacto": pending_exacto,
         # "finished" = frontera agotada (dato completo)
         # "max_urls_reached" = cortado por el tope (dato PARCIAL)
         "finish_reason": job.finish_reason,
