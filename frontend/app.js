@@ -25,6 +25,7 @@ const UA_LABELS = {
 const STATUS_LABEL = {
   pending:   'Pendiente',
   running:   'En curso',
+  analyzing: 'Analizando',
   completed: 'Completado',
   failed:    'Fallido',
   cancelled: 'Cancelado',
@@ -78,6 +79,8 @@ const ISSUE_LABEL = {
   'url_cms_faceted': 'URL de filtro/CMS (crawl budget)',
   'orphan_page': 'Pagina huerfana',
   'high_outlink_count': 'Demasiados enlaces salientes',
+  'sitemap_orphan': 'Huerfana (solo en sitemap)',
+  'not_in_sitemap': 'No incluida en el sitemap',
 };
 
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
@@ -312,6 +315,7 @@ function app() {
             follow_external: f.follow_external,
             robots_mode:     f.robots_mode,
             render_js:       f.render_js,
+            use_sitemap:     f.use_sitemap,
             user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
             impersonate:     f.impersonate || 'chrome124',
             exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
@@ -378,6 +382,7 @@ function app() {
 
     // ------- Detalle del trabajo -------
     async openJob(id) {
+      this._stopSemanticPoll();
       this.view = 'detail';
       this.detailTab = 'overview';
       this.stats = null;
@@ -417,6 +422,7 @@ function app() {
 
     backToJobs() {
       this._stopProgress();
+      this._stopSemanticPoll();
       this.view = 'jobs';
       this.job = null;
       this.loadJobs();
@@ -433,7 +439,9 @@ function app() {
     // ------- Polling de progreso -------
     _startProgress() {
       this._stopProgress();
-      if (!this.job || !['pending','running'].includes(this.job.status)) return;
+      // 'analyzing' is a non-terminal phase after the crawl while the analyzer
+      // populates issues/indexability/pagerank — keep polling through it.
+      if (!this.job || !['pending','running','analyzing'].includes(this.job.status)) return;
       const poll = async () => {
         try {
           this.progress = await api(`/jobs/${this.job.id}/progress`);
@@ -443,6 +451,11 @@ function app() {
               this._stopProgress();
               this.job = await api(`/jobs/${this.job.id}`);
               await this.loadStats();
+              // Analysis just finished: drop cached tab data so the active
+              // tab refetches fresh issues/insights instead of the empty/
+              // partial snapshot loaded mid-analysis.
+              this._invalidateResultCaches();
+              this._reloadActiveTab();
             }
           }
         } catch {}
@@ -451,8 +464,27 @@ function app() {
       this.progressTimer = setInterval(poll, 2000);
     },
 
+    _invalidateResultCaches() {
+      this.insights = null;
+      this.issues = []; this.issuesPage = 1;
+      this.links = []; this.linksPage = 1;
+      this.urls = []; this.urlsPage = 1;
+    },
+
+    _reloadActiveTab() {
+      const t = this.detailTab;
+      if (t === 'urls') this.loadUrls();
+      else if (t === 'issues') this.loadIssues();
+      else if (t === 'links') this.loadLinks();
+      else if (t === 'insights') this.loadInsights();
+    },
+
     _stopProgress() {
       if (this.progressTimer) { clearInterval(this.progressTimer); this.progressTimer = null; }
+    },
+
+    _stopSemanticPoll() {
+      if (this.semanticPollTimer) { clearInterval(this.semanticPollTimer); this.semanticPollTimer = null; }
     },
 
     // ------- Cancelar / Eliminar -------
@@ -1043,6 +1075,16 @@ function app() {
       window.open(`${API}/jobs/${this.job.id}/export`, '_blank');
     },
 
+    exportLinksCSV() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/links/export`, '_blank');
+    },
+
+    exportContentCSV() {
+      if (!this.job) return;
+      window.open(`${API}/jobs/${this.job.id}/content/export`, '_blank');
+    },
+
     exportBackup() {
       if (!this.job) return;
       window.open(`${API}/jobs/${this.job.id}/backup`, '_blank');
@@ -1145,7 +1187,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
     },
 
     barColor(group) {
@@ -1177,8 +1219,18 @@ function app() {
     },
 
     crawledPercent() {
-      if (!this.progress || !this.job?.config?.max_urls) return 0;
-      return Math.min(100, (this.progress.crawled_count / this.job.config.max_urls) * 100);
+      if (!this.progress) return 0;
+      const hechas = this.progress.crawled_count || 0;
+      const cola = this.progress.pending_count;
+      // Sin tope de URLs el porcentaje se mide contra el trabajo real que
+      // queda (rastreadas / (rastreadas + en cola)), no contra un numero
+      // inventado de antemano. Con tope se sigue midiendo contra el, porque
+      // ahi si marca el final del rastreo.
+      const tope = this.job?.config?.max_urls;
+      if (tope) return Math.min(100, (hechas / tope) * 100);
+      if (cola === null || cola === undefined) return 0;
+      const total = hechas + cola;
+      return total > 0 ? Math.min(100, (hechas / total) * 100) : 0;
     },
 
     // URL detail helpers
@@ -1707,6 +1759,7 @@ function _freshForm() {
     follow_external: false,
     robots_mode: 'respect',
     render_js: false,
+    use_sitemap: true,
     user_agent_preset: 'chrome_win',
     user_agent_custom: '',
     impersonate: 'chrome124',

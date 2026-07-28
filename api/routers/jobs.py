@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -36,20 +37,62 @@ def get_progress(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    crawled_count = 0
+    # Manda el contador de BD, no el de Redis. Miden cosas distintas: el de
+    # Redis cuenta respuestas que llegan al spider, mientras que el spider
+    # ademas guarda una fila por cada salto de una cadena de redirecciones sin
+    # sumarlo. En un sitio con muchos 301 el de Redis se queda corto de forma
+    # permanente (medido: 6.050 frente a 7.259 filas reales, un 17%) y la UI
+    # aparentaba un rastreo estancado cuando iba fino. El de BD se refresca
+    # cada 5s y cuadra con lo que luego se ve en los resultados.
+    crawled_count = job.total_urls_crawled or 0
+    live_count = None
     try:
         r = get_redis()
         val = r.get(f"job:{job_id}:crawled_count")
         if val is not None:
-            crawled_count = int(val)
+            live_count = int(val)
+            # Solo al arrancar, antes del primer volcado del contador de BD.
+            if crawled_count == 0:
+                crawled_count = live_count
     except Exception:
-        crawled_count = job.total_urls_crawled
+        live_count = None
+
+    # Frontera pendiente: enlaces internos descubiertos que aun no se han
+    # rastreado. Es lo que evita tener que adivinar max_urls antes de conocer
+    # el tamano del sitio — mientras rastrea se ve cuanto queda, y al terminar
+    # un 0 confirma que la frontera se agoto.
+    pending_count = None
+    try:
+        pending_count = db.execute(
+            text(
+                """
+                SELECT COUNT(DISTINCT l.to_url_hash)
+                FROM links l
+                WHERE l.job_id = :jid AND l.is_internal
+                  AND NOT EXISTS (
+                    SELECT 1 FROM urls u
+                    WHERE u.job_id = l.job_id AND u.url_hash = l.to_url_hash
+                  )
+                """
+            ),
+            {"jid": str(job_id)},
+        ).scalar()
+    except Exception:
+        pending_count = None
 
     return {
         "job_id": str(job_id),
         "status": job.status,
         "crawled_count": crawled_count,
         "total_urls_crawled_db": job.total_urls_crawled,
+        # Respuestas contadas por el spider. Excluye los saltos intermedios de
+        # redireccion, asi que es normal que quede por debajo de crawled_count.
+        "responses_count": live_count,
+        "pending_count": pending_count,
+        # "finished" = frontera agotada (dato completo)
+        # "max_urls_reached" = cortado por el tope (dato PARCIAL)
+        "finish_reason": job.finish_reason,
+        "truncated": job.finish_reason == "max_urls_reached",
     }
 
 
@@ -236,6 +279,14 @@ def delete_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # If the job is still active, signal the crawler to stop first so it does
+    # not keep writing rows (with a now-dangling job_id FK) while we delete.
+    if job.status in ("pending", "running"):
+        try:
+            get_redis().set(f"job:{job_id}:cancel", "1")
+        except Exception:
+            pass
 
     # Delete associated records in bulk (faster than cascade for large sets).
     db.query(Link).filter(Link.job_id == job_id).delete(synchronize_session=False)

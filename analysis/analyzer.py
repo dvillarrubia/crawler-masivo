@@ -29,6 +29,7 @@ from shared.config import (
     TITLE_MAX_LEN,
     TITLE_MIN_LEN,
 )
+from analysis.sd_validation import validate_structured_data
 from shared.database import SessionLocal
 from shared.models import (
     Heading,
@@ -43,6 +44,25 @@ from shared.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_url(url: str | None) -> str | None:
+    """Canonicalise a URL for equality comparison (dedup semantics).
+
+    Uses the same w3lib canonicalisation the crawler applies when hashing
+    URLs, so a self-referencing canonical that differs from the page URL
+    only by trailing slash, query-arg order, or fragment is treated as
+    equal.  Falls back to a trimmed string if w3lib is unavailable.
+    """
+    if not url:
+        return url
+    try:
+        from w3lib.url import canonicalize_url
+
+        return canonicalize_url(url, keep_fragments=False)
+    except Exception:
+        return url.strip().rstrip("/")
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -144,6 +164,7 @@ class SEOAnalyzer:
         self.compute_link_counts()
         self.compute_pagerank()
         self.analyze_links()
+        self.analyze_sitemap()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -280,7 +301,7 @@ class SEOAnalyzer:
 
         # Join Url with HtmlMeta for all HTML pages in the job.
         stmt = (
-            select(Url.id, HtmlMeta.title, HtmlMeta.title_len)
+            select(Url.id, HtmlMeta.title, HtmlMeta.title_len, Url.status_code, Url.is_internal)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -289,7 +310,7 @@ class SEOAnalyzer:
         # Track titles for duplicate detection.
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, title, title_len in rows:
+        for url_id, title, title_len, status_code, is_internal in rows:
             if not title or not title.strip():
                 self._add_issue(url_id, "title_missing", "warning")
                 continue
@@ -312,7 +333,11 @@ class SEOAnalyzer:
                     {"length": effective_len, "max": self.title_max_len},
                 )
 
-            title_to_url_ids[clean_title.lower()].append(url_id)
+            # Only real, served internal pages count toward duplicate groups;
+            # otherwise 404/redirect/external pages sharing a boilerplate
+            # title bury the genuine duplicates.
+            if status_code == 200 and is_internal:
+                title_to_url_ids[clean_title.lower()].append(url_id)
 
         # Duplicate titles: only flag groups with 2+ pages sharing the same title.
         for title_text, url_ids in title_to_url_ids.items():
@@ -336,7 +361,7 @@ class SEOAnalyzer:
         logger.debug("Analyzing meta descriptions ...")
 
         stmt = (
-            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len)
+            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len, Url.status_code, Url.is_internal)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -344,7 +369,7 @@ class SEOAnalyzer:
 
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, description, desc_len in rows:
+        for url_id, description, desc_len, status_code, is_internal in rows:
             if not description or not description.strip():
                 self._add_issue(url_id, "description_missing", "warning")
                 continue
@@ -367,7 +392,9 @@ class SEOAnalyzer:
                     {"length": effective_len, "max": self.desc_max_len},
                 )
 
-            desc_to_url_ids[clean_desc.lower()].append(url_id)
+            # Restrict duplicate grouping to real, served internal pages.
+            if status_code == 200 and is_internal:
+                desc_to_url_ids[clean_desc.lower()].append(url_id)
 
         for desc_text, url_ids in desc_to_url_ids.items():
             if len(url_ids) < 2:
@@ -470,6 +497,11 @@ class SEOAnalyzer:
         for row_url, sc, host in self.session.execute(url_lookup_stmt).all():
             url_status[row_url] = sc
             url_host[row_url] = host
+            # Also index by normalised URL so a canonical that differs only
+            # by trailing slash / arg order still resolves to its target.
+            norm = _norm_url(row_url)
+            if norm and norm not in url_status:
+                url_status[norm] = sc
 
         # Iterate HTML pages with their canonical information.
         stmt = (
@@ -486,8 +518,10 @@ class SEOAnalyzer:
 
             canonical = canonical_href.strip()
 
-            # Self-referencing canonical is fine -- skip.
-            if canonical == page_url:
+            # Self-referencing canonical is fine -- skip. Compare after
+            # normalisation so trailing-slash / www / scheme differences on
+            # an otherwise self-referencing canonical are not flagged.
+            if _norm_url(canonical) == _norm_url(page_url):
                 continue
 
             # Cross-domain canonical.
@@ -507,6 +541,8 @@ class SEOAnalyzer:
 
             # Canonical pointing to a non-200 URL (only if we crawled it).
             target_status = url_status.get(canonical)
+            if target_status is None:
+                target_status = url_status.get(_norm_url(canonical))
             if target_status is not None and target_status != 200:
                 self._add_issue(
                     url_id,
@@ -520,33 +556,71 @@ class SEOAnalyzer:
     # -- Hreflang -----------------------------------------------------------
 
     def analyze_hreflang(self) -> None:
-        """Validate hreflang annotations."""
+        """Validate hreflang annotations, including reciprocal return tags.
+
+        Computes and persists ``lang_valid`` and ``return_tag_ok`` on each
+        Hreflang row (nothing else populates them), then flags invalid
+        language codes, missing reciprocal return tags, and hreflang targets
+        that do not return 200. Reciprocity is confirmed only when the target
+        page was crawled and carries its own hreflang cluster; otherwise the
+        return tag is left unknown to avoid false positives.
+        """
         logger.debug("Analyzing hreflang ...")
 
-        # Preload URL statuses within the job for target validation.
+        # Preload URL id/status/normalised-url for target resolution.
         url_status: dict[str, int | None] = {}
-        for row_url, sc in self.session.execute(
-            select(Url.url, Url.status_code).where(Url.job_id == self.job_id)
+        url_id_by_norm: dict[str, int] = {}
+        norm_by_id: dict[int, str] = {}
+        for uid, row_url, sc in self.session.execute(
+            select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
         ).all():
             url_status[row_url] = sc
+            norm = _norm_url(row_url)
+            if norm:
+                url_status.setdefault(norm, sc)
+                url_id_by_norm[norm] = uid
+                norm_by_id[uid] = norm
 
         stmt = (
-            select(
-                Hreflang.id,
-                Hreflang.url_id,
-                Hreflang.lang,
-                Hreflang.href,
-                Hreflang.return_tag_ok,
-                Hreflang.lang_valid,
-            )
+            select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href)
             .join(Url, Url.id == Hreflang.url_id)
             .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
-        for _hreflang_id, url_id, lang, href, return_tag_ok, lang_valid in rows:
-            # Missing return tag.
-            if return_tag_ok is False:
+        # Map each crawled page to the set of hreflang targets it declares,
+        # so we can check whether a target links back (reciprocal return tag).
+        targets_by_page: dict[int, set[str]] = defaultdict(set)
+        for _hid, page_id, _lang, href in rows:
+            nh = _norm_url(href)
+            if nh:
+                targets_by_page[page_id].add(nh)
+
+        for hreflang_id, url_id, lang, href in rows:
+            norm_href = _norm_url(href)
+
+            # Language code validity (x-default is always valid).
+            lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
+
+            # Reciprocal return tag. Only decidable when the target page was
+            # crawled; x-default entries need no reciprocal.
+            page_norm = norm_by_id.get(url_id)
+            target_uid = url_id_by_norm.get(norm_href)
+            if lang and lang.lower() == "x-default":
+                return_ok = None
+            elif target_uid is None or target_uid == url_id:
+                return_ok = None  # target not crawled or self-reference
+            else:
+                return_ok = page_norm in targets_by_page.get(target_uid, set())
+
+            # Persist the computed flags (consumed by the i18n insights).
+            self.session.execute(
+                update(Hreflang)
+                .where(Hreflang.id == hreflang_id)
+                .values(lang_valid=lang_is_valid, return_tag_ok=return_ok)
+            )
+
+            if return_ok is False:
                 self._add_issue(
                     url_id,
                     "hreflang_missing_return",
@@ -554,11 +628,6 @@ class SEOAnalyzer:
                     {"lang": lang, "href": href},
                 )
 
-            # Invalid language code. Use the stored flag if available,
-            # otherwise fall back to regex validation.
-            lang_is_valid = lang_valid if lang_valid is not None else bool(
-                _LANG_TAG_RE.match(lang)
-            )
             if not lang_is_valid:
                 self._add_issue(
                     url_id,
@@ -569,6 +638,8 @@ class SEOAnalyzer:
 
             # Target URL not returning 200.
             target_status = url_status.get(href)
+            if target_status is None:
+                target_status = url_status.get(norm_href)
             if target_status is not None and target_status != 200:
                 self._add_issue(
                     url_id,
@@ -577,48 +648,59 @@ class SEOAnalyzer:
                     {"href": href, "target_status": target_status},
                 )
 
+        self.session.flush()
         self._flush_issues()
 
     # -- Structured Data ----------------------------------------------------
 
     def analyze_structured_data(self) -> None:
-        """Surface structured-data validation errors and warnings."""
+        """Validate structured data and surface errors/warnings.
+
+        Nothing else populates ``validation_status``/``validation_issues``,
+        so this computes them from each block's raw JSON (missing ``@type``
+        or missing required properties for common rich-result types),
+        persists the result, and raises the corresponding issues. Validation
+        is deliberately conservative to avoid false positives.
+        """
         logger.debug("Analyzing structured data ...")
 
         stmt = (
             select(
+                StructuredData.id,
                 StructuredData.url_id,
                 StructuredData.schema_type,
-                StructuredData.validation_status,
-                StructuredData.validation_issues,
+                StructuredData.raw,
             )
             .join(Url, Url.id == StructuredData.url_id)
             .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
-        for url_id, schema_type, validation_status, validation_issues in rows:
-            if validation_status == "error":
+        for sd_id, url_id, schema_type, raw in rows:
+            status, issues = validate_structured_data(raw)
+
+            self.session.execute(
+                update(StructuredData)
+                .where(StructuredData.id == sd_id)
+                .values(validation_status=status, validation_issues=issues or None)
+            )
+
+            if status == "error":
                 self._add_issue(
                     url_id,
                     "structured_data_error",
                     "error",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
-            elif validation_status == "warning":
+            elif status == "warning":
                 self._add_issue(
                     url_id,
                     "structured_data_warning",
                     "warning",
-                    {
-                        "schema_type": schema_type,
-                        "validation_issues": validation_issues,
-                    },
+                    {"schema_type": schema_type, "validation_issues": issues},
                 )
 
+        self.session.flush()
         self._flush_issues()
 
     # -- Indexability --------------------------------------------------------
@@ -656,7 +738,7 @@ class SEOAnalyzer:
             canonical_ok = (
                 not canonical_href
                 or not canonical_href.strip()
-                or canonical_href.strip() == page_url
+                or _norm_url(canonical_href) == _norm_url(page_url)
             )
             is_indexable = status_code == 200 and not has_noindex and canonical_ok
 
@@ -808,7 +890,12 @@ class SEOAnalyzer:
             .where(
                 Url.job_id == self.job_id,
                 Resource.resource_type == "image",
-                (Resource.alt_text.is_(None)) | (Resource.alt_text == ""),
+                # Solo cuando falta el atributo. Un alt="" declara la imagen
+                # como decorativa y es lo correcto segun WCAG para iconos y
+                # adornos: marcarlo como error generaba falsos positivos en
+                # masa (medido en un sitio real: 791.455 avisos, el 94% del
+                # total de incidencias del rastreo).
+                Resource.alt_text.is_(None),
             )
         )
         rows = self.session.execute(stmt).all()
@@ -891,11 +978,16 @@ class SEOAnalyzer:
         """Content tab equivalent -- flag pages with low word count or low text-to-HTML ratio."""
         logger.debug("Analyzing content ...")
 
+        # Only real, served HTML pages qualify: a 404/redirect body having
+        # few words is not a "thin content" problem, and flagging it just
+        # buries the genuine low-content pages in noise.
         stmt = (
             select(Url.id, Url.word_count, Url.text_ratio)
             .where(
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
             )
         )
         rows = self.session.execute(stmt).all()
@@ -1198,12 +1290,19 @@ class SEOAnalyzer:
         """Link analysis -- flag orphan pages and pages with excessive outlinks."""
         logger.debug("Analyzing links ...")
 
-        # Orphan pages: HTML pages with 0 inlinks.
+        # Orphan pages: internal HTML pages with 0 inlinks. Seed pages
+        # (crawl_depth 0, e.g. the homepage) legitimately have no discovered
+        # inlinks and must not be flagged as orphans. Only 200-OK internal
+        # pages are considered — a 404/redirect having no inlinks is not an
+        # "orphan" in the SEO sense.
         stmt = (
             select(Url.id)
             .where(
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
             )
         )
@@ -1229,6 +1328,60 @@ class SEOAnalyzer:
                 "info",
                 {"count": outlink_count},
             )
+
+        self._flush_issues()
+
+    # -- Sitemap --------------------------------------------------------------
+
+    def analyze_sitemap(self) -> None:
+        """Sitemap coverage checks (Screaming Frog "Sitemaps" tab parity).
+
+        Runs only when the crawl ingested a sitemap (some ``in_sitemap`` is
+        True); otherwise all rows are NULL and there is nothing to compare.
+
+        - ``sitemap_orphan``: URL listed in the sitemap but with zero internal
+          inlinks — only reachable through the sitemap. Stronger signal than
+          plain ``orphan_page``.
+        - ``not_in_sitemap``: indexable internal 200 HTML page missing from
+          the sitemap — should probably be listed.
+        """
+        logger.debug("Analyzing sitemap coverage ...")
+
+        has_sitemap = self.session.execute(
+            select(func.count(Url.id)).where(
+                Url.job_id == self.job_id, Url.in_sitemap.is_(True),
+            )
+        ).scalar() or 0
+        if not has_sitemap:
+            return
+
+        # In sitemap but not linked internally (run after compute_link_counts).
+        rows = self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
+                (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+            )
+        ).all()
+        for (url_id,) in rows:
+            self._add_issue(url_id, "sitemap_orphan", "warning")
+
+        # Indexable page the sitemap forgot.
+        rows = self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(False),
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+            )
+        ).all()
+        for (url_id,) in rows:
+            self._add_issue(url_id, "not_in_sitemap", "info")
 
         self._flush_issues()
 

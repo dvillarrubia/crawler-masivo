@@ -69,7 +69,7 @@
           <span class="text-dim text-sm" style="margin-right:.25rem;display:flex;align-items:center;gap:.25rem" data-tip="Filtra los trabajos por su estado actual">
             <i data-lucide="filter" style="width:13px;height:13px"></i> Filtrar:
           </span>
-          <template x-for="s in ['pending','running','completed','failed','cancelled']">
+          <template x-for="s in ['pending','running','analyzing','completed','failed','cancelled']">
             <button class="btn btn-sm"
               :class="jobsFilter === s ? 'btn-primary' : ''"
               :data-tip="({
@@ -196,8 +196,14 @@
               <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
               </button>
-              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem">
+              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta todas las URLs con sus metadatos SEO a CSV (compatible con Excel)">
                 <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
+              </button>
+              <button class="btn btn-sm" @click="exportLinksCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el grafo de enlaces (origen, destino, anchor, rel, follow) a CSV">
+                <i data-lucide="link" style="width:13px;height:13px"></i> Enlaces CSV
+              </button>
+              <button class="btn btn-sm" @click="exportContentCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el contenido de texto y markdown de cada pagina a CSV">
+                <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido CSV
               </button>
               <template x-if="['completed','failed','cancelled'].includes(job.status)">
                 <button class="btn btn-sm" @click="exportBackup()" style="display:flex;align-items:center;gap:.3rem">
@@ -212,14 +218,36 @@
         </div>
 
         <!-- Barra de progreso para trabajos en curso -->
-        <template x-if="progress && ['pending','running'].includes(job.status)">
+        <template x-if="progress && ['pending','running','analyzing'].includes(job.status)">
           <div class="card mb-2">
             <div class="flex items-center justify-between text-sm">
-              <span>Rastreo en curso...</span>
-              <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
+              <span x-text="job.status === 'analyzing' ? 'Analizando resultados SEO...' : 'Rastreo en curso...'"></span>
+              <span>
+                <span x-text="fmt.num(progress.crawled_count) + ' URLs rastreadas'"></span>
+                <!-- Frontera pendiente: evita tener que adivinar el tamano del
+                     sitio. Si llega a 0, el rastreo cubrio todo lo enlazado. -->
+                <template x-if="progress.pending_count !== null && progress.pending_count > 0">
+                  <span class="text-dim" x-text="' · ' + fmt.num(progress.pending_count) + ' en cola'"></span>
+                </template>
+              </span>
             </div>
             <div class="progress-bar">
               <div class="progress-fill" :style="'width:' + crawledPercent() + '%'"></div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Aviso de rastreo truncado. Sin esto, un crawl cortado por el tope
+             de URLs se presentaba igual que uno completo, y las metricas de
+             enlaces (PageRank incluido) salian de un grafo parcial. -->
+        <template x-if="job.finish_reason === 'max_urls_reached'">
+          <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)">
+            <div class="text-sm">
+              <strong>Rastreo incompleto.</strong>
+              Se alcanzo el tope de URLs configurado, asi que quedaron paginas sin
+              rastrear. El grafo de enlaces y el PageRank estan calculados sobre
+              una parte del sitio. Reanuda el rastreo con un tope mayor —o sin
+              tope— antes de usar estos datos para un informe.
             </div>
           </div>
         </template>
@@ -2638,6 +2666,7 @@
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
+            <label class="checkbox-label" data-tip="Lee robots.txt y sitemap.xml, rastrea las URLs listadas y detecta huerfanas (en sitemap sin enlaces) y paginas indexables ausentes del sitemap"><input type="checkbox" x-model="createForm.use_sitemap"> Usar sitemap.xml</label>
           </div>
           <div class="form-group" style="margin-top:.75rem">
             <label>Robots.txt</label>

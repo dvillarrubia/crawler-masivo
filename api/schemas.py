@@ -124,7 +124,11 @@ class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
     max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=50)
-    max_urls: int = Field(default=DEFAULT_MAX_URLS, ge=1, le=5_000_000)
+    # None = rastrear hasta agotar la frontera (comportamiento de Screaming
+    # Frog). Antes era obligatorio con default 50.000, asi que habia que
+    # adivinar el tamano del sitio ANTES de rastrearlo: quedarse corto truncaba
+    # el crawl en silencio y el PageRank salia calculado sobre un grafo parcial.
+    max_urls: int | None = Field(default=None, ge=1, le=5_000_000)
     follow_external: bool = False
     robots_mode: Literal["respect", "ignore", "audit"] = "respect"
     concurrent_requests: int = Field(default=DEFAULT_CONCURRENT_REQUESTS, ge=1, le=256)
@@ -183,6 +187,8 @@ class JobResponse(BaseModel):
     client_id: str | None
     owner_id: str | None
     status: str
+    # "finished" = frontera agotada; "max_urls_reached" = truncado
+    finish_reason: str | None = None
     seeds: list[str]
     config: dict[str, Any]
     total_urls_discovered: int
@@ -330,6 +336,7 @@ class UrlResponse(BaseModel):
     external_outlinks_count: int | None = None
     unique_inlinks_count: int | None = None
     pagerank: float | None = None
+    in_sitemap: bool | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 

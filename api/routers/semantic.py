@@ -681,15 +681,33 @@ def get_semantic_results(job_id: uuid.UUID, db: Session = Depends(get_session)):
 
     gsc_summary = None
     if gsc_map:
-        total_clicks = sum(g["clicks"] for g in gsc_map.values())
-        total_impressions = sum(g["impressions"] for g in gsc_map.values())
-        ctrs = [g["ctr"] for g in gsc_map.values() if g["ctr"] is not None]
-        positions = [g["position"] for g in gsc_map.values() if g["position"] is not None]
+        total_clicks = sum(g["clicks"] or 0 for g in gsc_map.values())
+        total_impressions = sum(g["impressions"] or 0 for g in gsc_map.values())
+
+        # Site-level CTR is total clicks / total impressions, NOT the mean of
+        # per-URL CTRs (which would weight a 1-impression page the same as a
+        # 100k-impression one). This matches how GSC aggregates.
+        avg_ctr = round(total_clicks / total_impressions, 4) if total_impressions else 0
+
+        # Average position is impression-weighted (again matching GSC), not a
+        # plain mean across URLs.
+        pos_num = sum(
+            (g["position"] or 0) * (g["impressions"] or 0)
+            for g in gsc_map.values()
+            if g["position"] is not None
+        )
+        pos_den = sum(
+            g["impressions"] or 0
+            for g in gsc_map.values()
+            if g["position"] is not None
+        )
+        avg_position = round(pos_num / pos_den, 1) if pos_den else 0
+
         gsc_summary = {
             "total_clicks": total_clicks,
             "total_impressions": total_impressions,
-            "avg_ctr": round(sum(ctrs) / len(ctrs), 4) if ctrs else 0,
-            "avg_position": round(sum(positions) / len(positions), 1) if positions else 0,
+            "avg_ctr": avg_ctr,
+            "avg_position": avg_position,
             "urls_with_data": len(gsc_map),
         }
 

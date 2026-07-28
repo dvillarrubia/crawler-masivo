@@ -15,8 +15,9 @@ import fnmatch
 import hashlib
 import logging
 import re
+import time
 from typing import Any, Generator
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import redis
 import scrapy
@@ -32,6 +33,7 @@ from seo_crawler.extractors import (
     compute_text_ratio,
     compute_url_hash,
     detect_mixed_content,
+    effective_base_url,
     estimate_description_pixel_width,
     estimate_title_pixel_width,
     extract_headings,
@@ -49,6 +51,12 @@ from seo_crawler.extractors import (
     http_status_text,
     is_internal_url,
     normalize_url,
+    robots_tokens,
+)
+from seo_crawler.sitemaps import (
+    MAX_SITEMAP_FILES,
+    parse_robots_sitemaps,
+    parse_sitemap,
 )
 from seo_crawler.items import (
     ContentItem,
@@ -99,6 +107,15 @@ def _url_likely_html(url: str) -> bool:
         return True  # no extension → likely HTML
     ext = segment[dot_pos:].lower()
     return ext not in _NON_HTML_EXTENSIONS
+
+
+def _hash_key(url_hash: str) -> int:
+    """Compacta un sha256 hex a un int de 64 bits para sets en memoria.
+
+    Reduce ~4x la memoria del set de resume. Riesgo de colision para 1M
+    de URLs: ~3e-8 (una colision = saltar una URL, aceptable).
+    """
+    return int(url_hash[:16], 16)
 
 
 # ---------------------------------------------------------------------------
@@ -171,17 +188,32 @@ class SeoSpider(scrapy.Spider):
         self.seed_urls: list[str] = []
         self.allowed_hosts: set[str] = set()
         self.max_depth: int = 3
-        self.max_urls: int = 50_000
+        # None = sin tope (hasta agotar la frontera)
+        self.max_urls: int | None = None
         self.follow_external: bool = False
         self._exclude_patterns: list[str] = []
         self._include_patterns: list[str] = []
         self._crawled_count: int = 0
         self._redis: redis.Redis | None = None
         self._redis_update_interval: int = 50
-        # Resume support: hashes of URLs already crawled in a previous run for
-        # this same job, plus the discovered-but-not-yet-crawled frontier.
-        self._already_crawled_hashes: set[str] = set()
-        self._frontier_urls: list[str] = []
+        # Resume support: claves compactas (64-bit) de URLs ya rastreadas en
+        # una ejecucion anterior de este job. La frontera se streamea desde
+        # la BD en start_requests (ver _iter_frontier), no se carga entera.
+        self._already_crawled_hashes: set[int] = set()
+        self._resume_mode: bool = False
+        # Sitemap ingestion state. OJO: _sitemap_url_hashes guarda el sha256
+        # completo (no la clave compacta) porque se escribe tal cual en la BD
+        # al persistir Url.in_sitemap.
+        self._use_sitemap: bool = True
+        self._sitemap_url_hashes: set[str] = set()
+        self._sitemap_files_fetched: int = 0
+        # Ficheros de sitemap pedidos. Si al cerrar quedan por debajo de los
+        # parseados, la vista es parcial y no se puede afirmar que el resto de
+        # URLs este fuera del sitemap.
+        self._sitemap_requested: int = 0
+        # True si se alcanzo MAX_SITEMAP_FILES: la vista del sitemap es
+        # parcial y no se puede afirmar que nada mas este fuera de el.
+        self._sitemap_truncated: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -208,7 +240,7 @@ class SeoSpider(scrapy.Spider):
             self.job_config = job.config or {}
 
             self.max_depth = self.job_config.get("max_depth", 3)
-            self.max_urls = self.job_config.get("max_urls", 50_000)
+            self.max_urls = self.job_config.get("max_urls")
             self.follow_external = self.job_config.get("follow_external", False)
             self._exclude_patterns = self.job_config.get("exclude_patterns", [])
             self._include_patterns = self.job_config.get("include_patterns", [])
@@ -257,6 +289,10 @@ class SeoSpider(scrapy.Spider):
             # -- Advanced config: Extraction toggles --
             self._extraction = self.job_config.get("extraction", {})
 
+            # -- Sitemap ingestion (Screaming Frog parity) --
+            self._use_sitemap = self.job_config.get("use_sitemap", True)
+            self._extra_sitemap_urls = self.job_config.get("sitemap_urls", []) or []
+
             # -- Advanced config: HTTP config (for middleware) --
             self._http_config = self.job_config.get("http", {})
 
@@ -269,7 +305,7 @@ class SeoSpider(scrapy.Spider):
                         self._root_domains.add(".".join(parts[-2:]))
 
             logger.info(
-                "Job %s loaded: %d seeds, max_depth=%d, max_urls=%d, hosts=%s",
+                "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
                 self.job_id,
                 len(self.seed_urls),
                 self.max_depth,
@@ -277,54 +313,31 @@ class SeoSpider(scrapy.Spider):
                 self.allowed_hosts,
             )
 
-            # -- Resume detection: load already-crawled URL hashes + frontier
-            # If this job already has rows in `urls`, treat the run as a resume:
-            # skip URLs we already fetched and seed the queue with the
-            # discovered-but-not-yet-crawled internal links from the `links`
-            # table so the BFS picks up where it left off.
-            from shared.models import Link, Url
+            # -- Resume detection: load already-crawled URL keys
+            # If this job already has rows in `urls`, treat the run as a
+            # resume: skip URLs we already fetched. The frontier (discovered-
+            # but-not-crawled links) se streamea desde la BD en
+            # start_requests via _iter_frontier(), sin cap ni carga completa.
+            from shared.models import Url
 
-            already_rows = (
-                session.query(Url.url_hash)
+            self._already_crawled_hashes = {
+                _hash_key(row[0])
+                for row in session.query(Url.url_hash)
                 .filter(Url.job_id == self.job_id)
-                .all()
-            )
-            if already_rows:
-                self._already_crawled_hashes = {row[0] for row in already_rows}
-                # Discovered-but-not-crawled internal links (frontier).
-                # NOT EXISTS lets Postgres use the indexed (job_id, url_hash)
-                # lookup on `urls`, so this scales beyond a few thousand URLs.
-                # Cap the result count to keep start_requests time bounded; if
-                # a job has more than this in flight, the rest will be
-                # rediscovered as the crawl progresses through the frontier.
-                FRONTIER_CAP = 200_000
-                already_subq = (
-                    session.query(Url.url_hash)
-                    .filter(
-                        Url.job_id == Link.job_id,
-                        Url.url_hash == Link.to_url_hash,
-                    )
-                    .exists()
+                .yield_per(10_000)
+            }
+            if self._already_crawled_hashes:
+                self._resume_mode = True
+                self._crawled_count = (
+                    session.query(Url)
+                    .filter(Url.job_id == self.job_id)
+                    .count()
                 )
-                frontier_rows = (
-                    session.query(Link.to_url)
-                    .filter(
-                        Link.job_id == self.job_id,
-                        Link.is_internal.is_(True),
-                        ~already_subq,
-                    )
-                    .distinct()
-                    .limit(FRONTIER_CAP)
-                    .all()
-                )
-                self._frontier_urls = [row[0] for row in frontier_rows]
-                self._crawled_count = len(self._already_crawled_hashes)
                 logger.info(
                     "Resume mode for job %s: %d URLs already crawled, "
-                    "%d frontier URLs to seed",
+                    "frontier will be streamed from DB",
                     self.job_id,
-                    len(self._already_crawled_hashes),
-                    len(self._frontier_urls),
+                    self._crawled_count,
                 )
         finally:
             session.close()
@@ -335,12 +348,16 @@ class SeoSpider(scrapy.Spider):
             self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
             self._redis.ping()
             logger.info("Redis connected for job progress tracking")
+            # Initial heartbeat so a freshly-started job (before it reaches the
+            # first progress-update interval) is not seen as stale.
+            self._write_heartbeat()
         except Exception as exc:
             logger.warning("Redis unavailable; progress tracking disabled: %s", exc)
             self._redis = None
 
     def spider_closed(self, spider, reason):
-        """Push final count and close Redis connection."""
+        """Persist sitemap membership, push final count, close Redis."""
+        self._persist_sitemap_membership()
         if self._redis:
             try:
                 self._redis.set(
@@ -382,6 +399,58 @@ class SeoSpider(scrapy.Spider):
             ],
         }
 
+    def _iter_frontier(self) -> Generator[str, None, None]:
+        """Streamea la frontera (links descubiertos pero no rastreados).
+
+        Paginacion keyset sobre links.id en lotes, con sesion corta por
+        lote: memoria acotada y sin cap duro de frontera. Dedup en memoria
+        con claves compactas de 64 bits.
+        """
+        from shared.database import SessionLocal
+        from shared.models import Link, Url
+
+        batch_size = 5_000
+        last_id = 0
+        seen_keys: set[int] = set()
+
+        while True:
+            session = SessionLocal()
+            try:
+                # NOT EXISTS usa el indice (job_id, url_hash) de `urls`.
+                already_subq = (
+                    session.query(Url.url_hash)
+                    .filter(
+                        Url.job_id == Link.job_id,
+                        Url.url_hash == Link.to_url_hash,
+                    )
+                    .exists()
+                )
+                rows = (
+                    session.query(Link.id, Link.to_url, Link.to_url_hash)
+                    .filter(
+                        Link.job_id == self.job_id,
+                        Link.is_internal.is_(True),
+                        Link.id > last_id,
+                        ~already_subq,
+                    )
+                    .order_by(Link.id)
+                    .limit(batch_size)
+                    .all()
+                )
+            finally:
+                session.close()
+
+            if not rows:
+                return
+
+            for row_id, to_url, to_hash in rows:
+                last_id = row_id
+                key = _hash_key(to_hash)
+                if key in seen_keys or key in self._already_crawled_hashes:
+                    continue
+                seen_keys.add(key)
+                yield to_url
+
     async def start(self):
         """Scrapy 2.13+ entry point.
 
@@ -399,39 +468,203 @@ class SeoSpider(scrapy.Spider):
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
-            if compute_url_hash(normalized) in self._already_crawled_hashes:
+            if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
             req_meta: dict[str, Any] = {"depth": 0}
             if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
+            # Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter,
+            # sino que ademas NO registra la peticion como vista. La semilla
+            # quedaba fuera del set, cualquier enlace interno a la home la
+            # volvia a rastrear a mayor profundidad y se perdia el depth 0.
             yield scrapy.Request(
                 url=normalized,
                 callback=self.parse,
                 errback=self.handle_error,
                 meta=req_meta,
-                dont_filter=True,
             )
 
+        # Sitemap discovery: robots.txt (Sitemap: directives) per seed host,
+        # plus any explicitly configured sitemap URLs. Membership is recorded
+        # for every listed URL and uncrawled ones are seeded, so pages only
+        # reachable via the sitemap (true orphans) still get audited.
+        if self._use_sitemap:
+            seen_hosts: set[str] = set()
+            for seed in self.seed_urls:
+                parsed = urlparse(seed)
+                if not parsed.hostname or parsed.hostname in seen_hosts:
+                    continue
+                seen_hosts.add(parsed.hostname)
+                robots_url = f"{parsed.scheme or 'https'}://{parsed.netloc}/robots.txt"
+                yield scrapy.Request(
+                    url=robots_url,
+                    callback=self.parse_robots_for_sitemaps,
+                    errback=self.handle_robots_error,
+                    meta={"depth": 0},
+                    dont_filter=True,
+                )
+            for sm_url in self._extra_sitemap_urls:
+                yield self._sitemap_request(sm_url)
+
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
-        # run. Emitted with depth=1 since we know they were linked from a
-        # crawled page; honoring the original depth would require a join we
-        # don't pay for.
-        for url in self._frontier_urls:
+        # run, streamed lazily from DB. Emitted with depth=1 since we know
+        # they were linked from a crawled page; honoring the original depth
+        # would require a join we don't pay for.
+        if not self._resume_mode:
+            return
+        for url in self._iter_frontier():
             normalized = normalize_url(url)
-            if compute_url_hash(normalized) in self._already_crawled_hashes:
+            if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
                 continue
             req_meta = {"depth": 1}
             if self.render_js and _url_likely_html(normalized):
                 req_meta.update(self._playwright_meta())
+            # Tampoco aqui: si un enlace redescubre una URL de la frontera,
+            # debe filtrarse como duplicada en vez de rastrearse dos veces.
             yield scrapy.Request(
                 url=normalized,
                 callback=self.parse,
                 errback=self.handle_error,
                 meta=req_meta,
-                dont_filter=True,
             )
+
+    # ------------------------------------------------------------------
+    # Sitemap ingestion
+    # ------------------------------------------------------------------
+    def _sitemap_request(self, url: str) -> Request:
+        # Se cuenta cada fichero de sitemap pedido para poder comparar al
+        # cerrar con los realmente parseados: si no coinciden, la vista del
+        # sitemap es parcial (tope alcanzado, crawl cerrado antes de leerlos
+        # todos, o algun 404) y no se puede afirmar que el resto este fuera.
+        self._sitemap_requested += 1
+        return scrapy.Request(
+            url=url,
+            callback=self.parse_sitemap_response,
+            errback=self.handle_sitemap_error,
+            meta={"depth": 0},
+        )
+
+    def parse_robots_for_sitemaps(self, response: Response) -> Generator:
+        """Extract Sitemap: directives from robots.txt; fall back to the
+        conventional /sitemap.xml location when none are declared."""
+        sitemap_urls: list[str] = []
+        if response.status == 200:
+            body_text = response.body.decode("utf-8", errors="ignore")
+            sitemap_urls = parse_robots_sitemaps(body_text, response.url)
+        if not sitemap_urls:
+            yield self._sitemap_request(urljoin(response.url, "/sitemap.xml"))
+            return
+        for sm_url in sitemap_urls:
+            yield self._sitemap_request(sm_url)
+
+    def handle_robots_error(self, failure) -> Generator:
+        """robots.txt unreachable — still try the conventional location."""
+        yield self._sitemap_request(urljoin(failure.request.url, "/sitemap.xml"))
+
+    def parse_sitemap_response(self, response: Response) -> Generator:
+        """Parse a sitemap (urlset or index): record membership, seed
+        uncrawled URLs, and recurse into child sitemaps under a hard cap."""
+        if response.status != 200:
+            return
+        if self._sitemap_files_fetched >= MAX_SITEMAP_FILES:
+            # Marcar que la ingesta quedo incompleta: sin esto, las URLs no
+            # vistas se dan por "fuera del sitemap" cuando en realidad no se
+            # llego a mirar (ver _persist_sitemap_membership).
+            self._sitemap_truncated = True
+            logger.warning("Sitemap file cap (%d) reached, ignoring %s",
+                           MAX_SITEMAP_FILES, response.url)
+            return
+        self._sitemap_files_fetched += 1
+
+        page_urls, child_sitemaps = parse_sitemap(response.body, response.url)
+        logger.info("Sitemap %s: %d URLs, %d child sitemaps",
+                    response.url, len(page_urls), len(child_sitemaps))
+
+        for child in child_sitemaps:
+            yield self._sitemap_request(child)
+
+        for url in page_urls:
+            normalized = normalize_url(url)
+            if not self._is_internal(normalized):
+                continue  # sitemaps must not seed foreign hosts
+            url_hash = compute_url_hash(normalized)
+            # El sha256 completo va al set de membresia (se escribe en BD);
+            # para el set de resume hay que usar la clave compacta.
+            self._sitemap_url_hashes.add(url_hash)
+            if _hash_key(url_hash) in self._already_crawled_hashes:
+                continue
+            if not self._should_follow(normalized):
+                continue
+            req_meta: dict[str, Any] = {"depth": 1}
+            if self.render_js and _url_likely_html(normalized):
+                req_meta.update(self._playwright_meta())
+            # The scheduler dupefilter drops these if link discovery already
+            # queued the same URL.
+            yield scrapy.Request(
+                url=normalized,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=req_meta,
+            )
+
+    def handle_sitemap_error(self, failure) -> None:
+        logger.debug("Sitemap fetch failed: %s", failure.request.url)
+
+    def _persist_sitemap_membership(self) -> None:
+        """Bulk-write Url.in_sitemap for this job at spider close.
+
+        Done once at the end (not per page) so membership applies no matter
+        which path discovered each URL, without any crawl-order race. When no
+        sitemap was found, rows keep in_sitemap = NULL ("no sitemap data"),
+        which the analyzer uses to skip sitemap checks entirely.
+        """
+        if not self._use_sitemap or not self._sitemap_url_hashes:
+            return
+        from shared.database import SessionLocal
+        from shared.models import Url
+
+        session = SessionLocal()
+        try:
+            hashes = list(self._sitemap_url_hashes)
+            for start in range(0, len(hashes), 5000):
+                batch = hashes[start:start + 5000]
+                session.query(Url).filter(
+                    Url.job_id == self.job_id, Url.url_hash.in_(batch),
+                ).update({Url.in_sitemap: True}, synchronize_session=False)
+            parcial = (
+                self._sitemap_truncated
+                or self._sitemap_files_fetched < self._sitemap_requested
+            )
+            if parcial:
+                # Vista parcial del sitemap: el resto se queda en NULL = "no se
+                # sabe", no en False. Marcarlo False afirmaria que esas URLs no
+                # estan en el sitemap cuando simplemente no se llego a leerlo
+                # entero, y el analyzer generaria incidencias not_in_sitemap
+                # falsas. Pasa por el tope MAX_SITEMAP_FILES, porque el crawl
+                # cierre antes de leerlos todos, o por hijos que fallan.
+                # Medido en un Liferay con 395 sitemaps hijos: se leia el 12,6%.
+                logger.warning(
+                    "Sitemap incompleto (%d de %d ficheros leidos): %d URLs "
+                    "marcadas en sitemap; el resto queda como desconocido en "
+                    "vez de fuera",
+                    self._sitemap_files_fetched,
+                    self._sitemap_requested,
+                    len(hashes),
+                )
+            else:
+                session.query(Url).filter(
+                    Url.job_id == self.job_id, Url.in_sitemap.is_(None),
+                ).update({Url.in_sitemap: False}, synchronize_session=False)
+            session.commit()
+            logger.info("Sitemap membership persisted: %d URLs in sitemap",
+                        len(hashes))
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to persist sitemap membership")
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------
     # URL filtering
@@ -473,9 +706,22 @@ class SeoSpider(scrapy.Spider):
             self.crawler.engine.close_spider(self, "cancelled")
             return
 
-        # Check URL limit
-        if self._crawled_count >= self.max_urls:
-            logger.info("Max URL limit (%d) reached, stopping", self.max_urls)
+        # Check URL limit. max_urls None = sin tope, hasta agotar la frontera.
+        if self.max_urls is not None and self._crawled_count >= self.max_urls:
+            # WARNING, no INFO: el rastreo queda INCOMPLETO y el grafo de
+            # enlaces —y con el el PageRank— se calcula sobre una parte del
+            # sitio. Se deja la marca en Redis para que el worker la persista
+            # en jobs.finish_reason y el crawl no pase por completo.
+            logger.warning(
+                "Tope de %d URLs alcanzado: el rastreo queda INCOMPLETO",
+                self.max_urls,
+            )
+            if self._redis is not None:
+                try:
+                    self._redis.set(f"job:{self.job_id}:finish_reason",
+                                    "max_urls_reached")
+                except Exception:
+                    pass
             self.crawler.engine.close_spider(self, "max_urls_reached")
             return
 
@@ -570,8 +816,10 @@ class SeoSpider(scrapy.Spider):
         )
         status_text_val = http_status_text(status_code)
 
-        # HTTP version (Scrapy does not reliably expose this)
-        http_version_val = getattr(response, "protocol", None)
+        # HTTP version. Scrapy does not reliably expose this on custom
+        # download handlers, so the composite handler stashes it in meta when
+        # the sub-handler provides it; fall back to response.protocol.
+        http_version_val = response.meta.get("http_protocol") or getattr(response, "protocol", None)
 
         # HTML-specific fields computed before PageItem yield so that all
         # Screaming Frog parity fields can be included in the single yield.
@@ -588,8 +836,13 @@ class SeoSpider(scrapy.Spider):
         if is_html and is_success:
             selector = response.selector
 
-            # Extract meta first so we can compute indexability
-            meta = extract_meta(selector)
+            # Effective base URL for resolving relative URLs (honours <base href>)
+            base_url = effective_base_url(selector, response.url)
+
+            # Extract meta first so we can compute indexability. Passing the
+            # base URL resolves relative canonicals/og:url to absolute, so
+            # self-referencing canonicals are not misread as canonicalised.
+            meta = extract_meta(selector, base_url=base_url)
 
             # X-Robots-Tag header
             x_robots = (
@@ -720,8 +973,13 @@ class SeoSpider(scrapy.Spider):
                 text=heading["text"],
             )
 
+        # Page-level nofollow: meta robots / X-Robots-Tag "nofollow" (or
+        # "none") makes EVERY link on the page nofollow, as Google applies it.
+        combined_tokens = robots_tokens(meta.get("meta_robots")) | robots_tokens(x_robots)
+        page_nofollow = "nofollow" in combined_tokens or "none" in combined_tokens
+
         # Links (extract_links already returns enhanced SF fields)
-        links = extract_links(selector, response.url, self.allowed_hosts)
+        links = extract_links(selector, base_url, self.allowed_hosts, page_nofollow=page_nofollow)
         for link in links:
             yield LinkItem(
                 from_url_hash=final_hash,
@@ -741,7 +999,7 @@ class SeoSpider(scrapy.Spider):
 
         # Hreflang
         if self._extraction.get("extract_hreflang", True):
-            for hreflang in extract_hreflang(selector):
+            for hreflang in extract_hreflang(selector, base_url=base_url):
                 yield HreflangItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
@@ -767,7 +1025,7 @@ class SeoSpider(scrapy.Spider):
 
         # Resources (extract_resources already returns width, height,
         # is_mixed_content)
-        for resource in extract_resources(selector, response.url):
+        for resource in extract_resources(selector, base_url):
             yield ResourceItem(
                 url_hash=final_hash,
                 job_id=self.job_id,
@@ -851,15 +1109,23 @@ class SeoSpider(scrapy.Spider):
                 )
 
         # -- Follow links (BFS) -----------------------------------------
+        # extract_links no longer dedupes within a page (so every inlink is
+        # recorded), so dedupe the follow set here to avoid enqueueing the
+        # same target multiple times from one page.
         if depth < self.max_depth:
+            followed_hashes: set[str] = set()
             for link in links:
                 link_internal = self._is_internal(link["url"]) if self._crawl_subdomains else link["is_internal"]
                 should_follow = link_internal or self.follow_external
                 if should_follow and (link.get("follow", True) or self._follow_nofollow):
                     if self._should_follow(link["url"]):
+                        link_hash = compute_url_hash(link["url"])
+                        if link_hash in followed_hashes:
+                            continue
+                        followed_hashes.add(link_hash)
                         # Resume: skip URLs already crawled in a previous run.
                         if self._already_crawled_hashes and \
-                                compute_url_hash(link["url"]) in self._already_crawled_hashes:
+                                _hash_key(link_hash) in self._already_crawled_hashes:
                             continue
                         follow_meta: dict[str, Any] = {"depth": depth + 1}
                         if self.render_js and _url_likely_html(link["url"]):
@@ -901,7 +1167,16 @@ class SeoSpider(scrapy.Spider):
         else:
             status_group = "error"
 
-        logger.debug("Request failed [%s]: %s", status_group, url)
+        # WARNING, no DEBUG: una peticion fallida se persiste con status_code
+        # NULL y desaparece de cualquier informe. En DEBUG nadie la veia, y asi
+        # es como paso inadvertido que el render JS perdia paginas que sin JS
+        # respondian 200. El motivo concreto va incluido.
+        logger.warning(
+            "Request failed [%s]: %s (%s)",
+            status_group,
+            url,
+            failure.getErrorMessage(),
+        )
 
         self._crawled_count += 1
 
@@ -940,7 +1215,12 @@ class SeoSpider(scrapy.Spider):
     # Redis helpers
     # ------------------------------------------------------------------
     def _update_redis_progress(self):
-        """Push crawled count to Redis periodically."""
+        """Push crawled count + liveness heartbeat to Redis periodically.
+
+        The heartbeat lets the worker's stale-job recovery tell a genuinely
+        stuck crawl apart from a long-but-healthy one, so it never re-queues
+        (and thus double-crawls) a job that is still making progress.
+        """
         if self._redis is None:
             return
         if self._crawled_count % self._redis_update_interval != 0:
@@ -949,8 +1229,18 @@ class SeoSpider(scrapy.Spider):
             self._redis.set(
                 f"job:{self.job_id}:crawled_count", self._crawled_count
             )
+            self._write_heartbeat()
         except Exception as exc:
             logger.debug("Redis progress update failed: %s", exc)
+
+    def _write_heartbeat(self):
+        """Stamp the current time as this job's liveness heartbeat."""
+        if self._redis is None:
+            return
+        try:
+            self._redis.set(f"job:{self.job_id}:heartbeat", time.time())
+        except Exception:
+            pass
 
     def _should_cancel(self) -> bool:
         """Check whether a cancel signal has been set in Redis."""

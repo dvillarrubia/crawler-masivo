@@ -35,3 +35,6 @@ ilerna_ring_map.html
 export_ilerna_md/
 export_ilerna_md.zip
 export_*.html
+
+# Override local de docker compose (puertos propios de cada maquina)
+docker-compose.override.yml

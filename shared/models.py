@@ -30,8 +30,15 @@ class Job(Base):
     client_id = Column(String(128), nullable=True, index=True)
     owner_id = Column(String(128), nullable=True)
 
-    # pending | running | completed | failed | cancelled
+    # pending | running | analyzing | completed | failed | cancelled
     status = Column(String(20), nullable=False, default="pending", index=True)
+
+    # Por que termino el rastreo: "finished" (frontera agotada, dato completo)
+    # o "max_urls_reached" (cortado por el tope, dato PARCIAL). Sin esto, un
+    # crawl truncado quedaba como "completed" igual que uno terminado, y no
+    # habia forma de saber que el grafo de enlaces —y por tanto el PageRank—
+    # se calculo sobre una parte del sitio.
+    finish_reason = Column(String(32), nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -98,6 +105,8 @@ class Url(Base):
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
     pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
+    # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
+    in_sitemap = Column(Boolean, nullable=True, default=None)
 
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")

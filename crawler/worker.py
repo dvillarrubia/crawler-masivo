@@ -36,8 +36,12 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# Nivel configurable por entorno. La salida de Scrapy se registra en DEBUG, y
+# como el subproceso no escribe en el stdout del worker, con INFO no habia
+# forma de diagnosticar un crawl raro sin tocar codigo: LOG_LEVEL=DEBUG lo
+# expone sin reconstruir la imagen.
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("worker")
@@ -113,22 +117,45 @@ def _run_job(job_id: str) -> None:
             "-a", f"job_id={job_id}",
         ]
 
-        # When JS rendering is active and no explicit concurrency override,
-        # cap concurrent requests to avoid Chromium memory exhaustion.
+        # -- Concurrencia efectiva ---------------------------------------
+        # Con render_js el tope se aplica como min() sobre lo que pida el job,
+        # no solo cuando el campo falta.
+        #
+        # Antes se saltaba por dos motivos a la vez: (1) la API rellena SIEMPRE
+        # concurrent_requests con su default (32), asi que la condicion
+        # "not in job_config" no se cumplia nunca; y (2) aunque se hubiera
+        # cumplido, el bloque de overrides volvia a emitir el flag despues y
+        # ganaba por ser el ultimo. El resultado es que el tope documentado
+        # para JS no llego a aplicarse jamas.
+        #
+        # El valor importa: medido sobre un sitio real en el perfil local
+        # (2 CPU / 2 GB), con 8 fallaba el 59,6% de las URLs por "Page.goto:
+        # Timeout exceeded" y se guardaban con status_code NULL. Con 4 el fallo
+        # baja al 0% y ademas termina antes que con 2 (360s frente a 440s). Un
+        # VPS con mas CPU puede subirlo por entorno.
         js_rendering = job_config.get("render_js", False)
+        concurrent = job_config.get("concurrent_requests")
+        concurrent_per_domain = job_config.get("concurrent_requests_per_domain")
         if js_rendering:
-            js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "8"))
-            js_concurrent_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
-            if "concurrent_requests" not in job_config:
-                cmd += ["-s", f"CONCURRENT_REQUESTS={js_concurrent}"]
-            if "concurrent_requests_per_domain" not in job_config:
-                cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={js_concurrent_per_domain}"]
+            js_concurrent = int(os.getenv("JS_CONCURRENT_REQUESTS", "4"))
+            js_per_domain = int(os.getenv("JS_CONCURRENT_PER_DOMAIN", "4"))
+            concurrent = min(concurrent, js_concurrent) if concurrent else js_concurrent
+            concurrent_per_domain = (
+                min(concurrent_per_domain, js_per_domain)
+                if concurrent_per_domain
+                else js_per_domain
+            )
+            logger.info(
+                "JS rendering: concurrencia limitada a %s (%s por dominio)",
+                concurrent,
+                concurrent_per_domain,
+            )
 
         # Apply job-level Scrapy settings overrides
-        if "concurrent_requests" in job_config:
-            cmd += ["-s", f"CONCURRENT_REQUESTS={job_config['concurrent_requests']}"]
-        if "concurrent_requests_per_domain" in job_config:
-            cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={job_config['concurrent_requests_per_domain']}"]
+        if concurrent is not None:
+            cmd += ["-s", f"CONCURRENT_REQUESTS={concurrent}"]
+        if concurrent_per_domain is not None:
+            cmd += ["-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={concurrent_per_domain}"]
         robots_mode = job_config.get("robots_mode", "respect")
         if robots_mode == "ignore":
             cmd += ["-s", "ROBOTSTXT_OBEY=False"]
@@ -162,6 +189,34 @@ def _run_job(job_id: str) -> None:
             timeout=3600 * max_runtime_hours,
         )
 
+        # Avisos del spider. Su salida es la de un subproceso que aqui se
+        # vuelca en DEBUG, asi que sin esto no aparecen en ningun sitio: una
+        # pagina perdida se guarda con status_code NULL y un sitemap leido a
+        # medias deja datos incompletos, ambos sin rastro operativo.
+        #
+        # Se filtra por el logger del spider a proposito, para no arrastrar las
+        # deprecaciones de Scrapy ni el ruido de librerias. Se agrupan por tipo
+        # de mensaje para que un crawl con cientos de fallos no inunde el log.
+        if result.stderr:
+            avisos: dict[str, list[str]] = {}
+            for ln in result.stderr.splitlines():
+                # "[seo_crawler." con corchete: es el nombre del logger. Sin el
+                # corchete tambien casaria la ruta del fichero que imprime
+                # py.warnings en las deprecaciones de Scrapy.
+                if "WARNING" not in ln or "[seo_crawler." not in ln:
+                    continue
+                msg = ln.split("WARNING:", 1)[-1].strip()
+                clave = msg.split(":", 1)[0][:60]
+                avisos.setdefault(clave, []).append(msg)
+            for clave, msgs in avisos.items():
+                logger.warning(
+                    "Job %s: %d aviso(s) de '%s'. Ejemplo: %s",
+                    job_id,
+                    len(msgs),
+                    clave,
+                    msgs[0][:180],
+                )
+
         # Always log last portion of stderr for debugging
         if result.stderr:
             logger.debug(
@@ -192,26 +247,72 @@ def _run_job(job_id: str) -> None:
         logger.exception("Crawl failed for job %s", job_id)
         final_status = "failed"
 
-    # -- Post-crawl: update status --
+    # -- Post-crawl: move to 'analyzing' before running analysis --
+    # The job must NOT be marked 'completed' until analysis has populated the
+    # issues/indexability/pagerank data, or the UI shows a completed job with
+    # an empty issues table. The intermediate 'analyzing' status also keeps
+    # stale-job recovery (which only targets 'running') from re-queuing the
+    # job while analysis runs with the spider — and its heartbeat — stopped.
+    cancelled = False
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job and job.status == "cancelled":
+            cancelled = True
+        elif job and final_status == "completed":
+            job.status = "analyzing"
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to update job %s status", job_id)
+    finally:
+        session.close()
+
+    if cancelled:
+        final_status = "cancelled"
+
+    # -- Trigger analysis (best-effort) while status is 'analyzing' --
+    if final_status == "completed" and not cancelled:
+        _trigger_analysis(job_id)
+
+    # -- Finalise status --
     session = SessionLocal()
     try:
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         if job:
+            # A cancel that arrived during analysis still wins.
             if job.status == "cancelled":
                 final_status = "cancelled"
             job.status = final_status
             job.completed_at = datetime.now(timezone.utc)
+
+            # Motivo real de finalizacion. El spider marca en Redis cuando
+            # corta por el tope de URLs; sin esto, un crawl truncado quedaba
+            # indistinguible de uno completo y el PageRank se presentaba como
+            # bueno estando calculado sobre una parte del sitio.
+            motivo = "finished"
+            try:
+                rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+                if rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached":
+                    motivo = "max_urls_reached"
+                rc.delete(f"job:{job_id}:finish_reason")
+            except Exception:
+                pass
+            job.finish_reason = motivo
             session.commit()
+            if motivo == "max_urls_reached":
+                logger.warning(
+                    "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
+                    "incompleto y el PageRank se ha calculado sobre un grafo "
+                    "parcial",
+                    job_id,
+                )
             logger.info("Job %s finished with status: %s", job_id, final_status)
     except Exception:
         session.rollback()
         logger.exception("Failed to finalise job %s", job_id)
     finally:
         session.close()
-
-    # -- Trigger analysis (best-effort) --
-    if final_status == "completed":
-        _trigger_analysis(job_id)
 
 
 def _trigger_analysis(job_id: str) -> None:
@@ -246,14 +347,35 @@ def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
     from shared.models import Job
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_JOB_MINUTES)
+    cutoff_ts = cutoff.timestamp()
 
     session = SessionLocal()
     try:
-        stale = (
+        candidates = (
             session.query(Job)
             .filter(Job.status == "running", Job.started_at < cutoff)
             .all()
         )
+
+        # A job started long ago is only *stale* if it is not still making
+        # progress. The spider writes a Redis heartbeat as it crawls; if that
+        # heartbeat is recent the crawl is alive (long crawls can run for
+        # hours) and must NOT be re-queued, or two workers would crawl the
+        # same job and double-write its data.
+        stale = []
+        for job in candidates:
+            try:
+                hb = rconn.get(f"job:{job.id}:heartbeat")
+            except Exception:
+                hb = None
+            if hb is not None:
+                try:
+                    if float(hb) >= cutoff_ts:
+                        continue  # alive — skip
+                except (TypeError, ValueError):
+                    pass
+            stale.append(job)
+
         for job in stale:
             job.status = "pending"
             job.started_at = None
@@ -288,7 +410,17 @@ def main() -> None:
         REDIS_URL,
     )
 
-    rconn = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+    # socket_timeout con holgura sobre BRPOP_TIMEOUT. redis-py >=8 fija el
+    # plazo de lectura del socket al timeout del propio comando bloqueante, asi
+    # que el socket expiraba en el mismo instante en que el servidor mandaba la
+    # respuesta vacia: BRPOP lanzaba TimeoutError en CADA sondeo en vez de
+    # devolver None. El except de abajo lo absorbia, pero dejaba un warning cada
+    # pocos segundos y sumaba la espera de reintento a cada vuelta.
+    rconn = redis_lib.Redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_timeout=BRPOP_TIMEOUT + 10,
+    )
     try:
         rconn.ping()
     except redis_lib.ConnectionError:

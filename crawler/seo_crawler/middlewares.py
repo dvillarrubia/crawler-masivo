@@ -36,12 +36,20 @@ DEFAULT_USER_AGENTS = [
 
 class UserAgentMiddleware:
     """
-    Rotate through a list of User-Agent strings on each request.
+    Set the request User-Agent.
 
     Priority order:
     1. Per-request ``request.meta["user_agent"]``
     2. Spider-level ``spider.custom_user_agent`` (set from job config)
-    3. Round-robin from the pool
+    3. Round-robin from the configured pool
+
+    NOTE: when ``settings.USER_AGENT`` is set (the default), the pool holds a
+    single UA and rotation is effectively disabled *by design*. Non-Playwright
+    requests go through curl_cffi with a fixed Chrome TLS fingerprint
+    (``IMPERSONATE``); rotating the UA header against a fixed JA3/JA4
+    fingerprint would be internally inconsistent and easier for a WAF to flag.
+    The multi-UA ``DEFAULT_USER_AGENTS`` pool is only used as a fallback when
+    ``USER_AGENT`` is explicitly cleared.
     """
 
     def __init__(self, user_agents: list[str]):
@@ -49,6 +57,9 @@ class UserAgentMiddleware:
 
     @classmethod
     def from_crawler(cls, crawler: Crawler):
+        # A single configured UA (the default) keeps the UA header consistent
+        # with the curl_cffi TLS fingerprint; clearing USER_AGENT opts into the
+        # rotating fallback pool.
         ua_setting = crawler.settings.get("USER_AGENT", "")
         pool = [ua_setting] if ua_setting else DEFAULT_USER_AGENTS
         middleware = cls(pool)
