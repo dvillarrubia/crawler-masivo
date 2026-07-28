@@ -28,5 +28,7 @@ RUN playwright install chromium --with-deps
 COPY shared/ /app/shared/
 COPY crawler/ /app/crawler/
 COPY analysis/ /app/analysis/
+# El worker ejecuta scripts/check_js_templates.py al cerrar un rastreo sin JS.
+COPY scripts/ /app/scripts/
 
 CMD ["python", "crawler/worker.py"]

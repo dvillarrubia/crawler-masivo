@@ -369,6 +369,36 @@ order of priority:
 4. **Known limitations (section 11)**: backup is not truly streaming (OOM risk
    on huge jobs), word_count includes hidden text, SD validation is basic.
 
+## Automatic JS-render check
+
+Every crawl that finishes **without** `render_js` triggers
+`scripts/check_js_templates.py` automatically (worker → `_comprobar_render_js`).
+It groups the crawled URLs by template shape, samples them, and compares raw HTML
+against Chromium-rendered HTML.
+
+It answers the question that otherwise stays invisible: **if a template builds its
+links with JavaScript, the link graph is incomplete and the PageRank computed from
+it is wrong, with nothing to flag it.** A WARNING is logged when that happens.
+
+Result is stored in `jobs.js_check` and exposed on the job endpoint:
+
+| Field | Meaning |
+|---|---|
+| `grafo_fiable` | false → some template hides links; re-crawl with `render_js=true` before trusting link metrics |
+| `enlaces_ocultos` | whether any JS-only internal links were found |
+| `plantillas[]` | per template: samples, JS-only links, words raw vs rendered |
+
+Costs ~1 min on top of a multi-hour crawl (5 templates × 1 sample by default).
+Env: `JS_CHECK_ENABLED=0` disables it, `JS_CHECK_TEMPLATES`, `JS_CHECK_SAMPLES`.
+Classification rules live at the top of the script and are per-project — CMS URLs
+(Liferay portlets) are isolated first so they don't pollute the sample.
+
+Run it by hand against any finished job:
+
+```bash
+docker compose exec -T crawler python /app/scripts/check_js_templates.py <job_id> --muestras 2
+```
+
 ## What Does NOT Exist Yet
 
 - Authentication/authorization

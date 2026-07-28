@@ -274,6 +274,8 @@ def _run_job(job_id: str) -> None:
     # -- Trigger analysis (best-effort) while status is 'analyzing' --
     if final_status == "completed" and not cancelled:
         _trigger_analysis(job_id)
+        if not job_config.get("render_js", False):
+            _comprobar_render_js(job_id)
 
     # -- Finalise status --
     session = SessionLocal()
@@ -313,6 +315,77 @@ def _run_job(job_id: str) -> None:
         logger.exception("Failed to finalise job %s", job_id)
     finally:
         session.close()
+
+
+def _comprobar_render_js(job_id: str) -> None:
+    """Comprueba, plantilla a plantilla, que se pierde por no renderizar JS.
+
+    Se ejecuta SIEMPRE al cerrar un rastreo sin render_js, porque la respuesta
+    condiciona si el resultado es fiable: si una plantilla monta sus enlaces con
+    JavaScript, el grafo de enlaces esta incompleto y el PageRank calculado sobre
+    el es falso, sin que nada lo delate. Antes habia que sospecharlo y lanzar la
+    comprobacion a mano.
+
+    Se limita a las plantillas mayores y a una muestra por plantilla para que
+    cueste un par de minutos sobre un rastreo de horas. Todo configurable por
+    entorno; JS_CHECK_ENABLED=0 lo desactiva.
+    """
+    if os.getenv("JS_CHECK_ENABLED", "1") not in ("1", "true", "True"):
+        return
+    try:
+        sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
+        from check_js_templates import comprobar
+        from shared.database import SessionLocal
+        from shared.models import Job
+
+        plantillas = int(os.getenv("JS_CHECK_TEMPLATES", "5"))
+        muestras = int(os.getenv("JS_CHECK_SAMPLES", "1"))
+        logger.info(
+            "Comprobando render JS del job %s (%d plantillas x %d muestra)",
+            job_id, plantillas, muestras,
+        )
+        resultados = comprobar(
+            str(job_id), muestras=muestras, plantillas_max=plantillas
+        )
+        if not resultados:
+            return
+
+        con_enlaces_ocultos = [r for r in resultados if r["enlaces_solo_js"] > 0]
+        resumen = {
+            "plantillas": resultados,
+            "enlaces_ocultos": bool(con_enlaces_ocultos),
+            "grafo_fiable": not con_enlaces_ocultos,
+        }
+
+        session = SessionLocal()
+        try:
+            job = session.query(Job).filter(Job.id == job_id).one_or_none()
+            if job:
+                job.js_check = resumen
+                session.commit()
+        finally:
+            session.close()
+
+        if con_enlaces_ocultos:
+            # WARNING: invalida el PageRank del rastreo, no es un detalle.
+            logger.warning(
+                "Job %s: %d plantilla(s) esconden enlaces tras JavaScript (%s). "
+                "El grafo de enlaces esta INCOMPLETO y el PageRank no es fiable: "
+                "relanzar con render_js=true si se va a usar para analisis de "
+                "enlazado.",
+                job_id,
+                len(con_enlaces_ocultos),
+                ", ".join(r["plantilla"].split("  (")[0] for r in con_enlaces_ocultos),
+            )
+        else:
+            logger.info(
+                "Job %s: ninguna plantilla esconde enlaces tras JS; el grafo y "
+                "el PageRank son fiables sin render.",
+                job_id,
+            )
+    except Exception:
+        # Nunca debe tumbar el cierre del job: es un diagnostico, no el rastreo.
+        logger.exception("Comprobacion de render JS fallida para el job %s", job_id)
 
 
 def _trigger_analysis(job_id: str) -> None:

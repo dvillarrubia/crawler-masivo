@@ -189,6 +189,8 @@ class JobResponse(BaseModel):
     status: str
     # "finished" = frontera agotada; "max_urls_reached" = truncado
     finish_reason: str | None = None
+    # Comprobacion de render JS por plantilla (solo en rastreos sin render_js)
+    js_check: dict[str, Any] | None = None
     seeds: list[str]
     config: dict[str, Any]
     total_urls_discovered: int

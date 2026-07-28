@@ -40,6 +40,12 @@ class Job(Base):
     # se calculo sobre una parte del sitio.
     finish_reason = Column(String(32), nullable=True)
 
+    # Resultado de la comprobacion automatica de render JS por plantilla. Se
+    # rellena al cerrar un rastreo SIN render_js: dice si alguna plantilla
+    # esconde enlaces (el grafo y el PageRank no serian fiables) y cuanto
+    # contenido carga en cliente. NULL = no se llego a comprobar.
+    js_check = Column(JSON, nullable=True)
+
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
 

@@ -182,18 +182,22 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
     return resultados
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("job_id", help="UUID de un rastreo ya realizado")
-    ap.add_argument("--muestras", type=int, default=3, help="URLs por plantilla (def. 3)")
-    ap.add_argument("--espera", type=int, default=3500, help="ms de espera tras cargar (def. 3500)")
-    ap.add_argument("--semilla", type=int, default=7, help="semilla del muestreo, para reproducibilidad")
-    args = ap.parse_args()
+def comprobar(
+    job_id: str,
+    muestras: int = 3,
+    espera_ms: int = 3500,
+    semilla: int = 7,
+    plantillas_max: int | None = None,
+) -> list[dict]:
+    """Ejecuta la comprobacion y devuelve los resultados. Reutilizable.
 
-    filas = cargar_urls(args.job_id)
+    ``plantillas_max`` limita a las N plantillas con mas paginas. El worker lo
+    usa para que la comprobacion automatica cueste un par de minutos en vez de
+    los ocho que tarda el barrido completo.
+    """
+    filas = cargar_urls(job_id)
     if not filas:
-        print(f"El rastreo {args.job_id} no tiene paginas HTML con 200.")
-        sys.exit(1)
+        return []
 
     hosts = {re.sub(r"^https?://", "", u).split("/")[0] for u, _ in filas[:200]}
 
@@ -201,13 +205,33 @@ def main() -> None:
     for url, path in filas:
         grupos[clasificar(path)].append(url)
 
-    rnd = random.Random(args.semilla)
-    seleccion = []
-    for plantilla, urls in sorted(grupos.items(), key=lambda kv: -len(kv[1])):
-        seleccion.append((f"{plantilla}  (n={len(urls)})", rnd.sample(urls, min(args.muestras, len(urls)))))
+    ordenados = sorted(grupos.items(), key=lambda kv: -len(kv[1]))
+    if plantillas_max:
+        ordenados = ordenados[:plantillas_max]
 
-    print(f"{len(filas)} paginas · {len(grupos)} plantillas · {args.muestras} muestras cada una\n")
-    resultados = asyncio.run(analizar(seleccion, args.espera, hosts))
+    rnd = random.Random(semilla)
+    seleccion = [
+        (f"{plantilla}  (n={len(urls)})", rnd.sample(urls, min(muestras, len(urls))))
+        for plantilla, urls in ordenados
+    ]
+    return asyncio.run(analizar(seleccion, espera_ms, hosts))
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("job_id", help="UUID de un rastreo ya realizado")
+    ap.add_argument("--muestras", type=int, default=3, help="URLs por plantilla (def. 3)")
+    ap.add_argument("--espera", type=int, default=3500, help="ms de espera tras cargar (def. 3500)")
+    ap.add_argument("--semilla", type=int, default=7, help="semilla del muestreo, para reproducibilidad")
+    ap.add_argument("--plantillas", type=int, default=None, help="limitar a las N plantillas mayores")
+    args = ap.parse_args()
+
+    resultados = comprobar(
+        args.job_id, args.muestras, args.espera, args.semilla, args.plantillas
+    )
+    if not resultados:
+        print(f"El rastreo {args.job_id} no tiene paginas HTML con 200.")
+        sys.exit(1)
 
     print(f"\n{'plantilla':<34}{'muestras':>9}{'enl.soloJS':>12}{'pal.crudo':>11}{'pal.render':>12}{'oculto':>9}")
     print("-" * 87)
