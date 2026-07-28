@@ -480,10 +480,17 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
         seen.add(normalized)
 
         mixed = is_https and absolute.startswith("http://")
+        # OJO: alt="" y alt ausente NO son lo mismo. Un alt vacio marca la
+        # imagen como decorativa, que es lo CORRECTO segun WCAG para iconos y
+        # adornos; que falte el atributo si es un fallo. _clean("") devuelve
+        # None y colapsaba ambos casos, de modo que el analyzer reportaba como
+        # "sin alt" miles de imagenes correctamente marcadas como decorativas.
+        # Se conserva la cadena vacia tal cual para poder distinguirlos.
+        alt_text = "" if (alt is not None and not alt.strip()) else _clean(alt)
         results.append({
             "url": normalized,
             "resource_type": rtype,
-            "alt_text": _clean(alt),
+            "alt_text": alt_text,
             "width": _parse_int(width),
             "height": _parse_int(height),
             "is_mixed_content": mixed,

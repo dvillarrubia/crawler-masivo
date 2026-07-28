@@ -890,7 +890,12 @@ class SEOAnalyzer:
             .where(
                 Url.job_id == self.job_id,
                 Resource.resource_type == "image",
-                (Resource.alt_text.is_(None)) | (Resource.alt_text == ""),
+                # Solo cuando falta el atributo. Un alt="" declara la imagen
+                # como decorativa y es lo correcto segun WCAG para iconos y
+                # adornos: marcarlo como error generaba falsos positivos en
+                # masa (medido en un sitio real: 791.455 avisos, el 94% del
+                # total de incidencias del rastreo).
+                Resource.alt_text.is_(None),
             )
         )
         rows = self.session.execute(stmt).all()
