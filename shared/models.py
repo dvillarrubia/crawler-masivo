@@ -343,4 +343,10 @@ class Issue(Base):
     __table_args__ = (
         Index("ix_issues_job", "job_id"),
         Index("ix_issues_job_type", "job_id", "issue_type"),
+        # url_id es FK con ON DELETE CASCADE y sin indice Postgres tiene que
+        # recorrer la tabla entera por CADA fila de `urls` que se borra. Medido
+        # en produccion con 1,76 M de incidencias: borrar 16 rastreos (26.597
+        # URLs) pasaba de mas de 14 minutos sin terminar a 15 segundos.
+        # Tambien lo usa el join de GET /issues/urls.
+        Index("ix_issues_url_id", "url_id"),
     )

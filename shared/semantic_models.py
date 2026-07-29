@@ -127,6 +127,12 @@ class SemanticCannibalization(Base):
 
     __table_args__ = (
         Index("ix_semantic_cannibal_analysis", "analysis_id"),
+        # Ambas son FK con ON DELETE CASCADE hacia `urls`. Sin indice, borrar
+        # una URL obliga a recorrer esta tabla entera (mismo problema que tenia
+        # issues.url_id, que dejaba un borrado de 16 rastreos sin terminar en
+        # 14 minutos).
+        Index("ix_semantic_cannibal_dominant", "url_dominant_id"),
+        Index("ix_semantic_cannibal_weak", "url_weak_id"),
     )
 
 
