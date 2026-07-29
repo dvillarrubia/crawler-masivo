@@ -21,6 +21,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY shared/ /app/shared/
 COPY api/ /app/api/
+# Extraction package for post-crawl re-extraction (api/routers/reextract.py)
+COPY crawler/seo_crawler/ /app/seo_crawler/
 COPY POC_centro_semantico/ /app/POC_centro_semantico/
 COPY frontend/ /app/frontend/
 COPY scripts/ /app/scripts/

@@ -92,7 +92,12 @@ class ExtractionConfig(BaseModel):
     extract_page_content: bool = True
     strip_promo_blocks: bool = True
     custom_boilerplate_selectors: list[str] = Field(default_factory=list)
-    store_raw_html: bool = False
+    # Positive content selection: when set, page text/markdown is extracted
+    # ONLY from these containers (e.g. ["#main-content"]).
+    content_selectors: list[str] = Field(default_factory=list)
+    # Store gzip-compressed raw HTML of internal 200 pages so extraction can
+    # be re-run post-crawl without re-crawling. Auto-purged by retention.
+    store_raw_html: bool = True
 
 
 class HttpConfig(BaseModel):

@@ -1114,12 +1114,45 @@ def _fallback_extract_text(
 # Indexability analysis
 # ---------------------------------------------------------------------------
 
+def _apply_content_selectors(selector, content_selectors: list[str] | None):
+    """Narrow *selector* to the containers named by *content_selectors*.
+
+    Positive selection: when a job declares WHERE the content lives (e.g.
+    ``#main-content``), extraction runs only inside those containers and the
+    site-agnostic heuristics become a formality. Returns a new Selector over
+    the matched containers' HTML, or the original selector when the list is
+    empty or nothing matches (so a bad selector never blanks a whole site).
+    """
+    if not content_selectors:
+        return selector
+    parts: list[str] = []
+    for css in content_selectors:
+        if not css or not str(css).strip():
+            continue
+        try:
+            for node in selector.css(str(css).strip()):
+                html = node.get()
+                if html:
+                    parts.append(html)
+        except Exception:
+            continue  # invalid selector — ignore it, keep the rest
+    if not parts:
+        return selector
+    try:
+        from parsel import Selector as _Selector
+
+        return _Selector(text="<html><body>" + "\n".join(parts) + "</body></html>")
+    except Exception:
+        return selector
+
+
 def extract_main_content(
     selector,
     *,
     word_count: int | None = None,
     strip_promo: bool = True,
     extra_selectors: list[str] | None = None,
+    content_selectors: list[str] | None = None,
 ) -> str | None:
     """Extract the main textual content of a page.
 
@@ -1127,7 +1160,16 @@ def extract_main_content(
     has a known *word_count* (total visible words), we can detect cases
     where trafilatura discards too much (hub/landing pages with cards,
     grids, or accordions) and fall back to a simpler full-text extractor.
+
+    When *content_selectors* is given, extraction is confined to those
+    containers (positive per-job calibration) and the word-count fallback
+    heuristic is skipped — the human already said where the content is.
     """
+    if content_selectors:
+        narrowed = _apply_content_selectors(selector, content_selectors)
+        if narrowed is not selector:
+            selector = narrowed
+            word_count = None  # page-level count no longer comparable
     raw_html = selector.get()
     if not raw_html:
         return None
@@ -1220,13 +1262,20 @@ def extract_main_content_markdown(
     word_count: int | None = None,
     strip_promo: bool = True,
     extra_selectors: list[str] | None = None,
+    content_selectors: list[str] | None = None,
 ) -> str | None:
     """Extract the main content as clean Markdown.
 
     Uses trafilatura's markdown output for site-agnostic extraction.
     Like ``extract_main_content``, uses *word_count* to detect when
-    trafilatura is too aggressive and falls back to html2text.
+    trafilatura is too aggressive and falls back to html2text, and
+    honours *content_selectors* the same way.
     """
+    if content_selectors:
+        narrowed = _apply_content_selectors(selector, content_selectors)
+        if narrowed is not selector:
+            selector = narrowed
+            word_count = None
     raw_html = selector.get()
     if not raw_html:
         return None

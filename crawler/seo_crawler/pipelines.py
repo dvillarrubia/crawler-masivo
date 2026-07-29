@@ -7,6 +7,7 @@ for performance.  On ``close_spider`` any remaining items are flushed.
 
 from __future__ import annotations
 
+import gzip
 import logging
 import time
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from seo_crawler.items import (
     HtmlMetaItem,
     LinkItem,
     PageItem,
+    RawHtmlItem,
     ResourceItem,
     SecurityItem,
     StructuredDataItem,
@@ -119,6 +121,8 @@ class PostgresPipeline:
             self._handle_content(item, spider)
         elif isinstance(item, SecurityItem):
             self._handle_security(item, spider)
+        elif isinstance(item, RawHtmlItem):
+            self._handle_raw_html(item, spider)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -267,6 +271,43 @@ class PostgresPipeline:
         except Exception:
             self._rollback()
             logger.exception("Failed to persist ContentItem for url_id=%s", url_id)
+
+    # ------------------------------------------------------------------
+    # RawHtmlItem handling (gzip + upsert linked to Url)
+    # ------------------------------------------------------------------
+    def _handle_raw_html(self, item: RawHtmlItem, spider: Spider):
+        from shared.models import RawHtml
+
+        data = dict(item)
+        url_hash = data.pop("url_hash")
+        job_id = data.pop("job_id")
+        html = data.get("html") or ""
+        if not html:
+            return
+        url_id = self._resolve_url_id(url_hash, job_id)
+        if url_id is None:
+            logger.debug("No url_id for RawHtmlItem url_hash=%s, skipping", url_hash)
+            return
+
+        try:
+            html_gz = gzip.compress(html.encode("utf-8", errors="ignore"), compresslevel=6)
+            existing = self.session.query(RawHtml).filter(RawHtml.url_id == url_id).first()
+            if existing:
+                existing.html_gz = html_gz
+                existing.size_bytes = len(html_gz)
+                existing.stored_at = datetime.now(timezone.utc)
+            else:
+                self.session.add(RawHtml(
+                    url_id=url_id,
+                    job_id=job_id,
+                    html_gz=html_gz,
+                    size_bytes=len(html_gz),
+                ))
+            self.session.flush()
+            self._maybe_commit()
+        except Exception:
+            self._rollback()
+            logger.exception("Failed to persist RawHtmlItem for url_id=%s", url_id)
 
     # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)

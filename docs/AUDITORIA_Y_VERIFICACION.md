@@ -25,6 +25,7 @@ a la conversación.
 - **8. Frontend / orquestación de resultados** (estado `analyzing`, timers)
 - **8b. Segunda pasada del extractor** (meta case-insensitive, nofollow de página…)
 - **8c. NUEVA FEATURE: ingestión de sitemaps** (⚠️ requiere re-ejecutar init_db)
+- **8d. NUEVA FEATURE: re-extracción de contenido sin re-crawl** (HTML almacenado + calibración)
 - **9. Consultas SQL de verificación (Q1–Q12)**
 - **10. Diagnóstico de impacto en crawls ANTERIORES** (¿cuánto me afectó? D1–D7)
 - **10b. Estado de paridad con Screaming Frog** (qué falta, roadmap priorizado)
@@ -279,6 +280,44 @@ FROM issues i JOIN urls u ON u.id = i.url_id
 WHERE i.job_id = '<JOB_ID>' AND i.issue_type IN ('sitemap_orphan','not_in_sitemap')
 GROUP BY 1, 2, 3, 4 ORDER BY 1;
 ```
+
+---
+
+## 8d. NUEVA FEATURE: Re-extracción de contenido sin re-crawl
+
+Resuelve el dolor de "cada proyecto necesita personalizar la extracción de
+texto": ahora el crawl guarda el **HTML crudo comprimido** de las páginas
+internas 200 y la extracción se puede repetir a posteriori con otra
+configuración, sin volver a rastrear.
+
+**Flujo** (pestaña Limpieza → tarjeta "Re-extraer contenido"):
+1. Rastrea con "Almacenar HTML" activo (nuevo default: activado).
+2. ¿Contenido sucio o incompleto? Escribe dónde vive el contenido
+   (`#main-content`…) y/o qué eliminar, y pulsa **Vista previa** sobre una
+   URL → resultado en segundos.
+3. Cuando la vista previa esté limpia → **Re-extraer todo** (hilo en
+   background con barra de progreso). La config se guarda en el job.
+4. Al acabar la calibración → **Liberar espacio** (o purga automática a los
+   `RAW_HTML_RETENTION_DAYS` días, default 15; 0 = nunca).
+
+**Diseño anti-lentitud del VPS**: tabla `raw_html` separada (nada la consulta
+en el uso normal), gzip (~20-30 KB/página), cap de 2 MB/página, **excluida de
+los backups ZIP**, y purga por retención en el worker. `content_selectors`
+también aplica en crawl-time para jobs ya calibrados.
+
+| # | Comprobación | Estado |
+|---|--------------|--------|
+| 8d.1 | Tras un crawl, la tarjeta muestra páginas y tamaño almacenado (`GET /api/jobs/{id}/rawhtml/stats`) | ☐ |
+| 8d.2 | Vista previa con `#selector` inexistente devuelve el contenido normal (fallback, no en blanco) | ☐ |
+| 8d.3 | Vista previa con un selector real devuelve SOLO el contenido de ese contenedor | ☐ |
+| 8d.4 | "Re-extraer todo" recorre todas las páginas con progreso y actualiza `page_content` (compara `content_length` antes/después en SQL) | ☐ |
+| 8d.5 | La config re-extraída queda guardada en `jobs.config.extraction` | ☐ |
+| 8d.6 | "Liberar espacio" vacía `raw_html` del job; el backup ZIP no contiene `raw_html` | ☐ |
+| 8d.7 | Purga por retención: con `RAW_HTML_RETENTION_DAYS=15`, filas más viejas desaparecen (log del worker "Raw-HTML purge") | ☐ |
+
+⚠️ Requiere `--build` de **api y crawler** (la imagen del API ahora incluye
+`seo_crawler` + dependencias de extracción) y re-ejecutar `init_db.py`
+(tabla nueva `raw_html`; se crea sola con create_all).
 
 ---
 

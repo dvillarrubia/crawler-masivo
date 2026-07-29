@@ -1148,6 +1148,70 @@
               <p class="text-sm" style="color:var(--green);margin-bottom:.75rem" x-text="cleaningMessage"></p>
             </template>
 
+            <!-- Re-extracción desde HTML almacenado -->
+            <div class="card" style="margin-bottom:1rem">
+              <div class="card-header">
+                <h2 style="display:flex;align-items:center;gap:.4rem"><i data-lucide="repeat" style="width:15px;height:15px"></i> Re-extraer contenido (HTML almacenado)</h2>
+                <template x-if="rawHtmlStats">
+                  <div style="display:flex;align-items:center;gap:.6rem">
+                    <span class="text-dim text-sm" x-text="fmt.num(rawHtmlStats.pages) + ' páginas · ' + fmt.bytes(rawHtmlStats.total_bytes)"></span>
+                    <button class="btn btn-sm" @click="purgeRawHtml()" :disabled="rawHtmlStats.pages === 0 || reextractRunning" data-tip="Borra el HTML almacenado de este job para liberar espacio. Después ya no podrás re-extraer sin re-rastrear">
+                      <i data-lucide="trash" style="width:12px;height:12px"></i> Liberar espacio
+                    </button>
+                  </div>
+                </template>
+              </div>
+
+              <template x-if="rawHtmlStats && rawHtmlStats.pages === 0">
+                <p class="text-dim text-sm">Este job no tiene HTML almacenado (se rastreó con "Almacenar HTML" desactivado o ya se purgó). Re-extraer requiere un nuevo rastreo con esa opción activa.</p>
+              </template>
+
+              <template x-if="rawHtmlStats && rawHtmlStats.pages > 0">
+                <div>
+                  <p class="text-dim text-sm" style="margin-bottom:.75rem">Ajusta la extracción de contenido y re-aplícala a todo el job <strong>sin volver a rastrear</strong>. Prueba primero con una URL; cuando el resultado sea bueno, re-extrae todo. La configuración se guarda en el job para futuros rastreos.</p>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.75rem">
+                    <div class="form-group" style="margin:0">
+                      <label data-tip="Selectores CSS donde vive el contenido real (uno por línea). Si se indican, SOLO se extrae de ahí. Ej: #main-content o .article-body">El contenido está en… (opcional)</label>
+                      <textarea x-model="reextractSelectors" rows="3" placeholder="#main-content&#10;.article-body" style="width:100%;font-family:monospace;font-size:.8rem"></textarea>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label data-tip="Selectores CSS de bloques a eliminar antes de extraer (uno por línea). Ej: .widget-relacionados">Eliminar además… (opcional)</label>
+                      <textarea x-model="reextractExtra" rows="3" placeholder=".widget-relacionados&#10;#banner-promo" style="width:100%;font-family:monospace;font-size:.8rem"></textarea>
+                    </div>
+                  </div>
+                  <label class="checkbox-label" style="margin-bottom:.75rem;display:inline-flex"><input type="checkbox" x-model="reextractStripPromo"> Eliminar bloques promocionales (newsletters, carruseles, compartir…)</label>
+
+                  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.75rem">
+                    <input type="text" x-model="reextractPreviewUrl" placeholder="Prueba con una URL (o parte de ella)…" style="flex:1;min-width:260px">
+                    <button class="btn btn-sm" @click="reextractPreviewRun()" :disabled="reextractPreviewLoading">
+                      <span x-text="reextractPreviewLoading ? 'Probando…' : 'Vista previa'"></span>
+                    </button>
+                    <button class="btn btn-sm btn-primary" @click="reextractRun()" :disabled="reextractRunning">
+                      <span x-text="reextractRunning ? 'Re-extrayendo…' : 'Re-extraer todo'"></span>
+                    </button>
+                  </div>
+
+                  <template x-if="reextractProgress && reextractRunning">
+                    <div style="margin-bottom:.75rem">
+                      <div class="progress-bar"><div class="progress-fill" :style="'width:' + (reextractProgress.total ? Math.round(reextractProgress.done / reextractProgress.total * 100) : 0) + '%'"></div></div>
+                      <span class="text-dim text-sm" x-text="fmt.num(reextractProgress.done) + ' / ' + fmt.num(reextractProgress.total) + ' páginas'"></span>
+                    </div>
+                  </template>
+
+                  <template x-if="reextractPreview">
+                    <div style="border:1px solid var(--border);border-radius:8px;padding:.75rem;background:var(--surface)">
+                      <div class="flex items-center justify-between" style="margin-bottom:.4rem">
+                        <strong class="text-sm" x-text="reextractPreview.url"></strong>
+                        <span class="badge badge-pending" x-text="fmt.num(reextractPreview.content_length) + ' caracteres'"></span>
+                      </div>
+                      <pre style="white-space:pre-wrap;font-size:.78rem;max-height:260px;overflow:auto;margin:0" x-text="(reextractPreview.content_text || '(sin contenido extraído)').slice(0, 3000)"></pre>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
             <!-- Grupos -->
             <div class="card" style="margin-bottom:1rem">
               <div class="card-header">

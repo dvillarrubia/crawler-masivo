@@ -281,7 +281,25 @@ API_PORT=8000
 JS_CONCURRENT_REQUESTS=8
 JS_CONCURRENT_PER_DOMAIN=4
 PLAYWRIGHT_MAX_PAGES=8
+
+# Days to keep stored raw HTML (post-crawl re-extraction material). 0 = forever.
+RAW_HTML_RETENTION_DAYS=15
 ```
+
+### Post-crawl content re-extraction
+
+Crawls store gzip-compressed raw HTML of internal 200 pages (`raw_html`
+table, `extraction.store_raw_html`, default on, 2 MB/page cap) so content
+extraction can be recalibrated afterwards without re-crawling: preview on one
+stored page → re-extract the whole job in an API background thread →
+purge the HTML (manual endpoint or worker retention purge). Config knob
+`extraction.content_selectors` (positive selection: extract ONLY from these
+containers) applies both at crawl time and on re-extraction, and is persisted
+back into the job config when re-extracting. Endpoints:
+`GET/DELETE /api/jobs/{id}/rawhtml*`, `POST /api/jobs/{id}/reextract[/preview]`,
+`GET /api/jobs/{id}/reextract/status`. Raw HTML is excluded from backups.
+UI lives in the Limpieza tab. See section 8d of
+`docs/AUDITORIA_Y_VERIFICACION.md`.
 
 ## SEO Config Thresholds (`shared/config.py`)
 

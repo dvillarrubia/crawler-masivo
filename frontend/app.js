@@ -383,6 +383,7 @@ function app() {
     // ------- Detalle del trabajo -------
     async openJob(id) {
       this._stopSemanticPoll();
+      this._stopReextractPoll();
       this.view = 'detail';
       this.detailTab = 'overview';
       this.stats = null;
@@ -423,6 +424,7 @@ function app() {
     backToJobs() {
       this._stopProgress();
       this._stopSemanticPoll();
+      this._stopReextractPoll();
       this.view = 'jobs';
       this.job = null;
       this.loadJobs();
@@ -485,6 +487,14 @@ function app() {
 
     _stopSemanticPoll() {
       if (this.semanticPollTimer) { clearInterval(this.semanticPollTimer); this.semanticPollTimer = null; }
+    },
+
+    _stopReextractPoll() {
+      if (this._reextractTimer) { clearInterval(this._reextractTimer); this._reextractTimer = null; }
+      this.reextractRunning = false;
+      this.reextractProgress = null;
+      this.reextractPreview = null;
+      this.rawHtmlStats = null;
     },
 
     // ------- Cancelar / Eliminar -------
@@ -970,6 +980,108 @@ function app() {
       if (!this.job) return;
       this.loadCleaningGroups();
       this.loadCleaningRulesets();
+      this.loadRawHtmlStats();
+      this._prefillReextractConfig();
+    },
+
+    // ------- Re-extracción desde HTML almacenado -------
+    rawHtmlStats: null,
+    reextractSelectors: '',
+    reextractExtra: '',
+    reextractStripPromo: true,
+    reextractPreviewUrl: '',
+    reextractPreview: null,
+    reextractPreviewLoading: false,
+    reextractRunning: false,
+    reextractProgress: null,
+    _reextractTimer: null,
+
+    _prefillReextractConfig() {
+      const ex = (this.job && this.job.config && this.job.config.extraction) || {};
+      this.reextractSelectors = (ex.content_selectors || []).join('\n');
+      this.reextractExtra = (ex.custom_boilerplate_selectors || []).join('\n');
+      this.reextractStripPromo = ex.strip_promo_blocks !== false;
+    },
+
+    _reextractConfig() {
+      const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+      return {
+        content_selectors: lines(this.reextractSelectors),
+        custom_boilerplate_selectors: lines(this.reextractExtra),
+        strip_promo_blocks: !!this.reextractStripPromo,
+      };
+    },
+
+    async loadRawHtmlStats() {
+      if (!this.job) return;
+      try {
+        this.rawHtmlStats = await api(`/jobs/${this.job.id}/rawhtml/stats`);
+        // Si hay una re-extracción en curso (p.ej. tras recargar), reengancha.
+        const st = await api(`/jobs/${this.job.id}/reextract/status`);
+        if (st.status === 'running') { this.reextractRunning = true; this._pollReextract(); }
+      } catch (e) { this.cleaningError = e.message; }
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    async purgeRawHtml() {
+      if (!this.job || !confirm('¿Liberar el HTML almacenado de este job? Después no podrás re-extraer sin re-rastrear.')) return;
+      try {
+        await api(`/jobs/${this.job.id}/rawhtml`, { method: 'DELETE' });
+        this.showToast('Espacio liberado', 'info');
+        this.rawHtmlStats = await api(`/jobs/${this.job.id}/rawhtml/stats`);
+      } catch (e) { this.cleaningError = e.message; }
+    },
+
+    async reextractPreviewRun() {
+      if (!this.job) return;
+      this.reextractPreviewLoading = true;
+      this.cleaningError = null;
+      try {
+        this.reextractPreview = await api(`/jobs/${this.job.id}/reextract/preview`, {
+          method: 'POST',
+          body: JSON.stringify({
+            url: this.reextractPreviewUrl.trim() || null,
+            config: this._reextractConfig(),
+          }),
+        });
+      } catch (e) { this.cleaningError = e.message; this.reextractPreview = null; }
+      this.reextractPreviewLoading = false;
+    },
+
+    async reextractRun() {
+      if (!this.job || this.reextractRunning) return;
+      if (!confirm('¿Re-extraer el contenido de todas las páginas con esta configuración? Se sobrescribirá el contenido actual (y cualquier limpieza aplicada).')) return;
+      this.cleaningError = null;
+      try {
+        const res = await api(`/jobs/${this.job.id}/reextract`, {
+          method: 'POST',
+          body: JSON.stringify({ config: this._reextractConfig(), save_config: true }),
+        });
+        this.reextractRunning = true;
+        this.reextractProgress = { done: 0, total: res.total };
+        this._pollReextract();
+      } catch (e) { this.cleaningError = e.message; }
+    },
+
+    _pollReextract() {
+      if (this._reextractTimer) clearInterval(this._reextractTimer);
+      this._reextractTimer = setInterval(async () => {
+        try {
+          const st = await api(`/jobs/${this.job.id}/reextract/status`);
+          this.reextractProgress = st;
+          if (st.status === 'done' || st.status === 'failed') {
+            clearInterval(this._reextractTimer);
+            this._reextractTimer = null;
+            this.reextractRunning = false;
+            if (st.status === 'done') {
+              this.showToast(`Re-extracción completada: ${st.done} páginas`);
+              this.loadCleaningGroups();
+            } else {
+              this.cleaningError = 'La re-extracción falló: ' + (st.error || 'error desconocido');
+            }
+          }
+        } catch (_) {}
+      }, 2000);
     },
 
     async loadCleaningGroups() {
@@ -1784,7 +1896,7 @@ function _freshForm() {
     extract_hreflang: true,
     extract_security_headers: true,
     extract_page_content: true,
-    store_raw_html: false,
+    store_raw_html: true,
     // Velocidad
     download_timeout: 30,
     retry_count: 2,

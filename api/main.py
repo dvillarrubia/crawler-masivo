@@ -14,7 +14,7 @@ from shared.config import REDIS_URL
 from shared.database import init_db
 
 from api import dependencies
-from api.routers import cleaning, jobs, results, semantic
+from api.routers import cleaning, jobs, reextract, results, semantic
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -61,6 +61,7 @@ app.include_router(jobs.router)
 app.include_router(results.router)
 app.include_router(semantic.router)
 app.include_router(cleaning.router)
+app.include_router(reextract.router)
 
 
 @app.get("/health", tags=["system"])

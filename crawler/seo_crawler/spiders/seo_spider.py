@@ -65,10 +65,15 @@ from seo_crawler.items import (
     HtmlMetaItem,
     LinkItem,
     PageItem,
+    RawHtmlItem,
     ResourceItem,
     SecurityItem,
     StructuredDataItem,
 )
+
+# Pages larger than this are not stored for re-extraction (pathological HTML
+# would bloat the raw_html table; the page is still crawled normally).
+_RAW_HTML_MAX_BYTES = 2 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -1088,15 +1093,32 @@ class SeoSpider(scrapy.Spider):
                 has_unsafe_crossorigin=has_unsafe_crossorigin,
             )
 
+        # -- RawHtmlItem (compressed raw HTML for post-crawl re-extraction) --
+        # Stored for internal HTML 200 pages so extraction can be re-run later
+        # with different settings without re-crawling. Auto-purged by
+        # retention; capped to avoid pathological pages bloating the DB.
+        if (
+            self._extraction.get("store_raw_html", True)
+            and internal
+            and len(response.body) <= _RAW_HTML_MAX_BYTES
+        ):
+            yield RawHtmlItem(
+                url_hash=final_hash,
+                job_id=self.job_id,
+                html=response.text,
+            )
+
         # -- ContentItem (main page text + markdown) -----------------------
         if self._extraction.get("extract_page_content", True):
             strip_promo = self._extraction.get("strip_promo_blocks", True)
             extra_selectors = self._extraction.get("custom_boilerplate_selectors") or None
+            content_selectors = self._extraction.get("content_selectors") or None
             main_content = extract_main_content(
                 selector,
                 word_count=word_count_val,
                 strip_promo=strip_promo,
                 extra_selectors=extra_selectors,
+                content_selectors=content_selectors,
             )
             if main_content:
                 content_md = extract_main_content_markdown(
@@ -1104,6 +1126,7 @@ class SeoSpider(scrapy.Spider):
                     word_count=word_count_val,
                     strip_promo=strip_promo,
                     extra_selectors=extra_selectors,
+                    content_selectors=content_selectors,
                 )
                 yield ContentItem(
                     url_hash=final_hash,

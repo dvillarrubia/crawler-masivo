@@ -153,6 +153,14 @@ class ContentItem(scrapy.Item):
     content_markdown = scrapy.Field()
 
 
+class RawHtmlItem(scrapy.Item):
+    """Raw page HTML for post-crawl re-extraction (stored gzip-compressed)."""
+
+    url_hash = scrapy.Field()
+    job_id = scrapy.Field()
+    html = scrapy.Field()
+
+
 class SecurityItem(scrapy.Item):
     """Security header analysis for a page -- one per response."""
 

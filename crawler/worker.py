@@ -53,6 +53,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
 BRPOP_TIMEOUT = int(os.getenv("BRPOP_TIMEOUT", "5"))
 STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
+# Days to keep stored raw HTML (re-extraction material). 0 = keep forever.
+RAW_HTML_RETENTION_DAYS = int(os.getenv("RAW_HTML_RETENTION_DAYS", "15"))
+_RAW_HTML_PURGE_INTERVAL_S = 3600  # check hourly
 JOBS_QUEUE = "jobs:pending"
 
 # Path to the crawler directory (where scrapy.cfg lives)
@@ -470,6 +473,42 @@ def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Raw-HTML retention purge
+# ---------------------------------------------------------------------------
+def _purge_old_raw_html() -> None:
+    """Delete stored raw HTML older than RAW_HTML_RETENTION_DAYS.
+
+    The raw HTML is calibration material for post-crawl re-extraction; once a
+    project's content settings are dialled in it is dead weight, so it ages
+    out automatically and disk usage stays bounded to active projects.
+    """
+    if RAW_HTML_RETENTION_DAYS <= 0:
+        return
+    from shared.database import SessionLocal
+    from shared.models import RawHtml
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=RAW_HTML_RETENTION_DAYS)
+    session = SessionLocal()
+    try:
+        deleted = (
+            session.query(RawHtml)
+            .filter(RawHtml.stored_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+        if deleted:
+            logger.info(
+                "Raw-HTML purge: %d pages older than %d days freed",
+                deleted, RAW_HTML_RETENTION_DAYS,
+            )
+    except Exception:
+        session.rollback()
+        logger.exception("Raw-HTML purge failed")
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -501,12 +540,19 @@ def main() -> None:
         sys.exit(1)
 
     _recover_stale_jobs(rconn)
+    _purge_old_raw_html()
+    last_raw_html_purge = time.monotonic()
 
     executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
     active_futures: dict[str, Future] = {}
 
     try:
         while not _shutdown_event.is_set():
+            # Hourly retention purge of stored raw HTML (re-extraction material)
+            if time.monotonic() - last_raw_html_purge > _RAW_HTML_PURGE_INTERVAL_S:
+                last_raw_html_purge = time.monotonic()
+                _purge_old_raw_html()
+
             # Clean up finished futures
             done_ids = [
                 jid for jid, fut in active_futures.items() if fut.done()

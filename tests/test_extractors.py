@@ -371,3 +371,47 @@ def test_word_count_excludes_template():
     )
     assert ex.extract_word_count(s) == 3
     assert "hidden" not in ex.extract_visible_text(s)
+
+
+# ---------------------------------------------------------------------------
+# content_selectors (positive per-job content selection / re-extraction)
+# ---------------------------------------------------------------------------
+def test_apply_content_selectors_narrows_to_container():
+    s = sel(
+        '<body><div class="junk">promo junk here</div>'
+        '<div id="main-content"><p>real article text</p></div></body>'
+    )
+    narrowed = ex._apply_content_selectors(s, ["#main-content"])
+    assert narrowed is not s
+    text = " ".join(narrowed.css("::text").getall())
+    assert "real article" in text
+    assert "promo junk" not in text
+
+
+def test_apply_content_selectors_no_match_returns_original():
+    s = sel("<body><p>hello</p></body>")
+    assert ex._apply_content_selectors(s, ["#does-not-exist"]) is s
+    assert ex._apply_content_selectors(s, []) is s
+    # An invalid CSS selector must be ignored, not crash.
+    assert ex._apply_content_selectors(s, ["<<<bad"]) is s
+
+
+def test_extract_main_content_honours_content_selectors():
+    # Without trafilatura installed the fallback path runs — which is exactly
+    # the path that must respect the narrowed container.
+    s = sel(
+        "<html><body>"
+        '<div class="sidebar-links">nav nav nav nav</div>'
+        '<div id="contenido"><p>parrafo uno del articulo</p><p>parrafo dos</p></div>'
+        "</body></html>"
+    )
+    out = ex.extract_main_content(s, content_selectors=["#contenido"])
+    assert out is not None
+    assert "parrafo uno" in out and "parrafo dos" in out
+    assert "nav nav" not in out
+
+
+def test_extract_main_content_bad_selector_falls_back_to_whole_page():
+    s = sel("<html><body><main><p>page text</p></main></body></html>")
+    out = ex.extract_main_content(s, content_selectors=["#nope"])
+    assert out is not None and "page text" in out

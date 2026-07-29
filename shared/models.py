@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, Float, Text, DateTime,
-    ForeignKey, Index, JSON, UniqueConstraint,
+    ForeignKey, Index, JSON, LargeBinary, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -288,6 +288,29 @@ class PageContent(Base):
     cleaned_at = Column(DateTime(timezone=True), nullable=True)
 
     url_rel = relationship("Url", back_populates="page_content")
+
+
+class RawHtml(Base):
+    """Gzip-compressed raw HTML of a crawled page.
+
+    Temporary calibration material: lets content extraction be re-run with
+    different settings ("re-extract") without re-crawling the site. Rows are
+    purged automatically after RAW_HTML_RETENTION_DAYS (worker) or manually
+    via the API, and are deliberately excluded from job backups.
+    """
+
+    __tablename__ = "raw_html"
+
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), primary_key=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    html_gz = Column(LargeBinary, nullable=False)
+    size_bytes = Column(Integer, nullable=True)  # compressed size
+    stored_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_raw_html_job", "job_id"),
+        Index("ix_raw_html_stored", "stored_at"),
+    )
 
 
 class CleaningRuleset(Base):
