@@ -1171,13 +1171,29 @@ class SEOAnalyzer:
 
     # -- PageRank -----------------------------------------------------------
 
-    # Weights for link_position: content links carry more SEO value than
-    # boilerplate navigation/footer links that repeat on every page.
+    # Peso por posicion del enlace: los de contenido valen mas que la plantilla
+    # que se repite en todas las paginas.
+    #
+    # La tabla cubre TODO el vocabulario que emite extract_links (nav, content,
+    # footer, header, sidebar, aside, form). Antes solo declaraba cuatro valores
+    # y el resto caia en un 0.5 por defecto — incluido `nav`, que en un sitio
+    # real era el 59,9% de los enlaces. Es decir: la mayoria del grafo pesaba
+    # 0.5, MAS que header (0.3) y footer (0.2), cuando el menu es plantilla pura
+    # y deberia pesar menos. Eso inflaba artificialmente lo que cuelga del menu
+    # (en un caso medido, el blog superaba a la portada en PageRank).
+    #
+    # Criterio: cuanto mas se repite un enlace en todo el sitio, menos senal
+    # aporta. El contenido es editorial y unico; nav/header/footer son
+    # boilerplate; form casi nunca es un enlace de recomendacion.
     _POSITION_WEIGHT: dict[str | None, float] = {
         "content": 1.0,
-        "header": 0.3,
-        "footer": 0.2,
-        None: 0.5,
+        "sidebar": 0.4,
+        "aside": 0.35,
+        "nav": 0.25,
+        "header": 0.25,
+        "footer": 0.15,
+        "form": 0.1,
+        None: 0.3,
     }
 
     def compute_pagerank(
@@ -1228,14 +1244,36 @@ class SEOAnalyzer:
         # Per edge: accumulate the max weight (deduplicate src->dst,
         # keeping the highest-weight position if multiple links exist).
         edge_weight: dict[tuple[int, int], float] = {}
+        posiciones_desconocidas: dict[str, int] = {}
         for from_id, to_id, position in link_rows:
             src = id_to_idx.get(from_id)
             dst = id_to_idx.get(to_id)
             if src is not None and dst is not None and src != dst:
-                w = self._POSITION_WEIGHT.get(position, 0.5)
+                if position not in self._POSITION_WEIGHT:
+                    # Una posicion sin declarar entraba con un peso por defecto
+                    # sin que nadie se enterase. Asi fue como `nav` —el 59,9% de
+                    # los enlaces de un sitio real— acabo pesando mas que header
+                    # y footer, inflando el PageRank de todo lo que cuelga del
+                    # menu. Si vuelve a pasar, que se vea.
+                    posiciones_desconocidas[position] = (
+                        posiciones_desconocidas.get(position, 0) + 1
+                    )
+                w = self._POSITION_WEIGHT.get(position, self._POSITION_WEIGHT[None])
                 key = (src, dst)
                 if key not in edge_weight or w > edge_weight[key]:
                     edge_weight[key] = w
+
+        if posiciones_desconocidas:
+            logger.warning(
+                "PageRank: posiciones de enlace sin peso declarado, entran con "
+                "el valor por defecto (%s) y pueden sesgar el reparto: %s",
+                self._POSITION_WEIGHT[None],
+                ", ".join(
+                    f"{p}={n}" for p, n in sorted(
+                        posiciones_desconocidas.items(), key=lambda kv: -kv[1]
+                    )
+                ),
+            )
 
         # Build outlinks and total weight per source node
         outlinks: dict[int, dict[int, float]] = defaultdict(dict)  # src -> {dst: weight}
