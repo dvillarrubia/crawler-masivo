@@ -7,7 +7,6 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -57,16 +56,9 @@ def get_progress(
     except Exception:
         live_count = None
 
-    # Cola pendiente. La cifra buena la publica el propio spider leyendo la
-    # longitud del planificador de Scrapy: es exacta y llega a 0 al terminar.
-    #
-    # El calculo desde la BD que habia antes (enlaces internos cuyo destino no
-    # esta en `urls`) NUNCA llegaba a cero: cuando el crawler sigue un redirect
-    # y el destino ya estaba rastreado, Scrapy descarta la peticion por
-    # duplicada y la URL original no se registra, pero su enlace si — se
-    # contaba como pendiente para siempre. Se conserva solo como respaldo para
-    # jobs antiguos, que no tienen la clave en Redis, y va marcado como
-    # aproximado para no presentarlo como exacto.
+    # Cola pendiente: la publica el propio spider leyendo la longitud del
+    # planificador de Scrapy. Es exacta y llega a 0 al terminar. Los rastreos
+    # anteriores a ese cambio no tienen la clave y devuelven null.
     pending_count = None
     pending_exacto = False
     try:
@@ -78,24 +70,18 @@ def get_progress(
     except Exception:
         pending_count = None
 
-    if pending_count is None:
-        try:
-            pending_count = db.execute(
-                text(
-                    """
-                    SELECT COUNT(DISTINCT l.to_url_hash)
-                    FROM links l
-                    WHERE l.job_id = :jid AND l.is_internal
-                      AND NOT EXISTS (
-                        SELECT 1 FROM urls u
-                        WHERE u.job_id = l.job_id AND u.url_hash = l.to_url_hash
-                      )
-                    """
-                ),
-                {"jid": str(job_id)},
-            ).scalar()
-        except Exception:
-            pending_count = None
+    # Sin respaldo desde la BD a proposito. Antes, cuando la clave de Redis no
+    # estaba (rastreos anteriores al cambio), se calculaba la cola con un
+    # NOT EXISTS sobre `links`. Ese calculo costaba 7 s con 7,8 M de enlaces —42 s
+    # en frio— y este endpoint lo llama la interfaz CADA 2 SEGUNDOS mientras hay
+    # un rastreo abierto, asi que dejaba la aplicacion inutilizable en los jobs
+    # grandes. Y encima devolvia un numero que ya sabiamos que era erroneo:
+    # contaba como pendientes las URLs que Scrapy descarta al seguir un redirect
+    # hacia algo ya rastreado (347.780 "pendientes" en un job terminado).
+    #
+    # Un dato desconocido se declara desconocido; no se paga con siete segundos
+    # por una cifra que ademas esta mal. Para saber si un rastreo cubrio todo
+    # esta finish_reason, que si es fiable.
 
     return {
         "job_id": str(job_id),
@@ -106,8 +92,8 @@ def get_progress(
         # redireccion, asi que es normal que quede por debajo de crawled_count.
         "responses_count": live_count,
         "pending_count": pending_count,
-        # True = cola real del planificador. False = estimacion desde la BD para
-        # jobs antiguos, que sobreestima (cuenta redirects ya resueltos).
+        # True = cola real del planificador. False = no se sabe (rastreo
+        # anterior al cambio); pending_count viene null en ese caso.
         "pending_exacto": pending_exacto,
         # "finished" = frontera agotada (dato completo)
         # "max_urls_reached" = cortado por el tope (dato PARCIAL)
