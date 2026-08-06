@@ -21,6 +21,7 @@ from urllib.parse import urljoin, urlparse
 
 import redis
 import scrapy
+from sqlalchemy import text
 from scrapy import Request, signals
 from scrapy.http import HtmlResponse, Response
 from scrapy_playwright.page import PageMethod
@@ -414,46 +415,54 @@ class SeoSpider(scrapy.Spider):
         from shared.database import SessionLocal
         from shared.models import Link, Url
 
-        batch_size = 5_000
-        last_id = 0
-        seen_keys: set[int] = set()
+        batch_size = 2_000
+        last_hash = ""
 
         while True:
             session = SessionLocal()
             try:
-                # NOT EXISTS usa el indice (job_id, url_hash) de `urls`.
-                already_subq = (
-                    session.query(Url.url_hash)
-                    .filter(
-                        Url.job_id == Link.job_id,
-                        Url.url_hash == Link.to_url_hash,
-                    )
-                    .exists()
-                )
-                rows = (
-                    session.query(Link.id, Link.to_url, Link.to_url_hash)
-                    .filter(
-                        Link.job_id == self.job_id,
-                        Link.is_internal.is_(True),
-                        Link.id > last_id,
-                        ~already_subq,
-                    )
-                    .order_by(Link.id)
-                    .limit(batch_size)
-                    .all()
-                )
+                # Paginacion keyset sobre to_url_hash, no sobre links.id, y con
+                # DISTINCT ON para que la BD devuelva ya un destino por fila.
+                #
+                # Paginar por links.id obligaba a recorrer TODAS las filas de
+                # enlaces y deduplicar en Python: medido en un rastreo real,
+                # 740.190 enlaces internos para solo 6.086 destinos distintos —
+                # 148 lotes de consulta para sembrar 6.000 URLs, con el rastreo
+                # parado mientras tanto. Y empeora segun crece el crawl, porque
+                # los enlaces crecen mucho mas rapido que los destinos.
+                #
+                # Ordenar por to_url_hash aprovecha ademas el indice
+                # ix_links_to_hash (job_id, to_url_hash) que ya existe.
+                rows = session.execute(
+                    text(
+                        """
+                        SELECT DISTINCT ON (l.to_url_hash)
+                               l.to_url_hash, l.to_url
+                        FROM links l
+                        WHERE l.job_id = :jid
+                          AND l.is_internal
+                          AND l.to_url_hash > :last_hash
+                          AND NOT EXISTS (
+                            SELECT 1 FROM urls u
+                            WHERE u.job_id = l.job_id
+                              AND u.url_hash = l.to_url_hash
+                          )
+                        ORDER BY l.to_url_hash
+                        LIMIT :lim
+                        """
+                    ),
+                    {"jid": self.job_id, "last_hash": last_hash, "lim": batch_size},
+                ).all()
             finally:
                 session.close()
 
             if not rows:
                 return
 
-            for row_id, to_url, to_hash in rows:
-                last_id = row_id
-                key = _hash_key(to_hash)
-                if key in seen_keys or key in self._already_crawled_hashes:
+            for to_hash, to_url in rows:
+                last_hash = to_hash
+                if _hash_key(to_hash) in self._already_crawled_hashes:
                     continue
-                seen_keys.add(key)
                 yield to_url
 
     async def start(self):
