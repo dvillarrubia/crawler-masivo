@@ -72,6 +72,80 @@ def _signal_handler(signum, frame):
 # ---------------------------------------------------------------------------
 # Single-job execution
 # ---------------------------------------------------------------------------
+class EstancadoError(Exception):
+    """El rastreo dejo de avanzar: latido sin moverse durante el margen dado."""
+
+
+def _ejecutar_con_vigilancia(
+    cmd: list[str],
+    *,
+    cwd: str,
+    env: dict,
+    job_id: str,
+    stall_minutes: int,
+    max_seconds: float,
+) -> subprocess.CompletedProcess:
+    """Lanza Scrapy y lo mata si deja de avanzar (o si revienta el tope duro).
+
+    Devuelve lo mismo que subprocess.run. Lanza EstancadoError si el latido se
+    queda congelado, y subprocess.TimeoutExpired si se agota el tope de horas.
+    """
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+
+    rc = None
+    try:
+        rc = redis_lib.Redis.from_url(
+            REDIS_URL, decode_responses=True, socket_timeout=15
+        )
+    except Exception:
+        logger.warning("Sin Redis: el rastreo corre sin vigilancia de estancamiento")
+
+    inicio = time.monotonic()
+    ultimo_latido = None
+    visto_en = inicio
+    intervalo = 30  # cada cuanto se comprueba
+
+    while True:
+        try:
+            salida, error = proc.communicate(timeout=intervalo)
+            return subprocess.CompletedProcess(cmd, proc.returncode, salida, error)
+        except subprocess.TimeoutExpired:
+            pass  # sigue vivo: toca comprobar
+
+        ahora = time.monotonic()
+
+        if max_seconds and (ahora - inicio) > max_seconds:
+            proc.kill()
+            proc.communicate()
+            raise subprocess.TimeoutExpired(cmd, max_seconds)
+
+        if rc is None or stall_minutes <= 0:
+            continue
+
+        try:
+            latido = rc.get(f"job:{job_id}:heartbeat")
+        except Exception:
+            continue  # un fallo de Redis no debe matar un rastreo sano
+
+        if latido != ultimo_latido:
+            ultimo_latido, visto_en = latido, ahora
+            continue
+
+        parado = (ahora - visto_en) / 60
+        if parado >= stall_minutes:
+            logger.error(
+                "Job %s ESTANCADO: %.0f min sin avanzar (margen %d min). "
+                "Se detiene; lo rastreado se conserva y se analiza.",
+                job_id, parado, stall_minutes,
+            )
+            proc.kill()
+            proc.communicate()
+            raise EstancadoError(f"{parado:.0f} min sin avanzar")
+
+
 def _run_job(job_id: str) -> None:
     """Execute a single Scrapy crawl for *job_id* via subprocess."""
     from shared.database import SessionLocal
@@ -102,7 +176,13 @@ def _run_job(job_id: str) -> None:
 
     # -- Run Scrapy as subprocess (avoids Twisted reactor restart issues) --
     final_status = "completed"
-    max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 6)), 72))
+    timed_out = False
+    stalled = False
+    max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 72)), 720))
+    # 0 = sin vigilancia. Por defecto 30 min: el latido se estampa cada 50
+    # URLs y en cada lote de siembra, asi que media hora sin moverse es un
+    # rastreo muerto incluso yendo despacio.
+    stall_minutes = max(0, int(job_config.get("crawl_behavior", {}).get("stall_timeout_minutes", 30)))
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = (
@@ -180,13 +260,29 @@ def _run_job(job_id: str) -> None:
         elif crawl_behavior.get("autothrottle_target_concurrency", 8.0) != 8.0:
             cmd += ["-s", f"AUTOTHROTTLE_TARGET_CONCURRENCY={crawl_behavior['autothrottle_target_concurrency']}"]
 
-        result = subprocess.run(
+        # Vigilancia por ESTANCAMIENTO, no por reloj.
+        #
+        # Un tope de horas no protege de nada util: hay que adivinarlo antes de
+        # conocer el trabajo, y el mismo sitio rinde distinto segun el momento
+        # (medido en un caso real: 613 ms sin render y 4.097 ms con el, siete
+        # veces mas). El resultado fue cortar un rastreo al 97,5%, con 1.051
+        # URLs de 42.000 pendientes. Y al reves: un rastreo colgado seguia vivo
+        # hasta agotar el plazo, tres dias en el peor caso.
+        #
+        # Lo que importa es si AVANZA. El spider estampa un latido en Redis al
+        # actualizar progreso y al sembrar la frontera; si ese latido deja de
+        # moverse, el rastreo esta muerto aunque le sobren horas. Un rastreo
+        # lento pero sano sigue, tarde lo que tarde.
+        #
+        # max_runtime_hours se conserva como red de seguridad dura, no como
+        # mecanismo principal.
+        result = _ejecutar_con_vigilancia(
             cmd,
             cwd=_CRAWLER_DIR,
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=3600 * max_runtime_hours,
+            job_id=job_id,
+            stall_minutes=stall_minutes,
+            max_seconds=3600 * max_runtime_hours,
         )
 
         # Avisos del spider. Su salida es la de un subproceso que aqui se
@@ -236,13 +332,32 @@ def _run_job(job_id: str) -> None:
         else:
             logger.info("Scrapy crawl finished successfully for job %s", job_id)
 
+    except EstancadoError as exc:
+        # Igual que el tope de tiempo: lo rastreado es valido y se analiza. Lo
+        # que NO se hace es fingir que el rastreo termino bien — finish_reason
+        # queda en "stalled" para que el dato no se confunda con uno completo.
+        logger.warning(
+            "Job %s detenido por estancamiento (%s): se analiza lo obtenido",
+            job_id, exc,
+        )
+        stalled = True
     except subprocess.TimeoutExpired:
-        logger.error(
-            "Crawl timed out for job %s after %d hour(s)",
+        # Agotar el tiempo NO es un fallo: lo rastreado hasta ahi es valido y
+        # normalmente casi completo. Marcarlo "failed" impedia que corriese el
+        # analisis —que solo se lanza con estado "completed"— y tiraba a la
+        # basura el trabajo. Caso real: 24 h de rastreo, 41.287 URLs con solo
+        # 1.051 pendientes, y cero incidencias y cero PageRank calculados.
+        #
+        # Se trata como el tope de URLs: dato PARCIAL pero utilizable, se
+        # analiza, y finish_reason lo deja claro para que nadie lo confunda con
+        # un rastreo completo.
+        logger.warning(
+            "Job %s TRUNCADO por el limite de %d hora(s): el rastreo esta "
+            "incompleto pero lo obtenido se analiza igualmente",
             job_id,
             max_runtime_hours,
         )
-        final_status = "failed"
+        timed_out = True
     except Exception:
         logger.exception("Crawl failed for job %s", job_id)
         final_status = "failed"
@@ -292,7 +407,12 @@ def _run_job(job_id: str) -> None:
             # corta por el tope de URLs; sin esto, un crawl truncado quedaba
             # indistinguible de uno completo y el PageRank se presentaba como
             # bueno estando calculado sobre una parte del sitio.
-            motivo = "finished"
+            # OJO con el orden: el timeout manda. Antes se ponia "finished"
+            # por defecto, asi que un rastreo cortado por tiempo afirmaba haber
+            # agotado la frontera teniendo 1.051 URLs pendientes.
+            motivo = ("stalled" if stalled
+                      else "max_runtime_reached" if timed_out
+                      else "finished")
             try:
                 rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
                 if rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached":
@@ -302,7 +422,7 @@ def _run_job(job_id: str) -> None:
                 pass
             job.finish_reason = motivo
             session.commit()
-            if motivo == "max_urls_reached":
+            if motivo in ("max_urls_reached", "max_runtime_reached", "stalled"):
                 logger.warning(
                     "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
                     "incompleto y el PageRank se ha calculado sobre un grafo "

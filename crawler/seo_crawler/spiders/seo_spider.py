@@ -459,6 +459,11 @@ class SeoSpider(scrapy.Spider):
             if not rows:
                 return
 
+            # Sembrar la frontera ES progreso, aunque no se rastree nada aun:
+            # en un job grande son minutos. Sin este latido, el vigilante de
+            # estancamiento del worker daria por colgado un rastreo sano.
+            self._write_heartbeat()
+
             for to_hash, to_url in rows:
                 last_hash = to_hash
                 if _hash_key(to_hash) in self._already_crawled_hashes:

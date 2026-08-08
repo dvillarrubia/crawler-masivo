@@ -73,7 +73,16 @@ class CrawlBehaviorConfig(BaseModel):
     autothrottle_target_concurrency: float = Field(default=8.0, ge=1.0, le=100.0)
     follow_nofollow: bool = False
     crawl_subdomains: bool = False
-    max_runtime_hours: int = Field(default=6, ge=1, le=72)
+    # Red de seguridad dura, no el mecanismo principal: la parada real la
+    # decide stall_timeout_minutes. Adivinar cuanto tarda un rastreo es
+    # imposible —el mismo sitio rinde 7x distinto con y sin render— y cortar
+    # por reloj mato un rastreo al 97,5%.
+    max_runtime_hours: int = Field(default=72, ge=1, le=720)
+    # Minutos sin avanzar tras los que se da el rastreo por muerto. 0 lo
+    # desactiva. El spider estampa un latido al actualizar progreso y en cada
+    # lote de siembra de la frontera, asi que un rastreo lento pero vivo no
+    # se ve afectado.
+    stall_timeout_minutes: int = Field(default=30, ge=0, le=1440)
 
 
 class UrlFilterConfig(BaseModel):
