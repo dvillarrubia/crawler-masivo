@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from shared.config import (
@@ -1202,123 +1202,157 @@ class SEOAnalyzer:
         max_iter: int = 100,
         tol: float = 1e-6,
     ) -> None:
-        """Compute weighted internal PageRank for all URLs in this job.
+        """PageRank interno ponderado por posicion del enlace.
 
-        Links from the main content area are weighted higher than
-        boilerplate nav/footer links that repeat on every page.
+        Las aristas se agregan EN SQL y se iteran vectorizadas con numpy. La
+        version anterior cargaba todas las filas de `links` en memoria y
+        construia dicts de Python: con 139 millones de enlaces internos (un
+        e-commerce real, ~2.300 por pagina por los megamenus) eran ~14 GB y
+        mataba el proceso. Agregar en SQL baja a ~20 M de aristas distintas, y
+        en arrays compactos eso son ~240 MB.
+
+        La iteracion tambien era Python puro: 20 M de aristas x 100 vueltas son
+        2.000 millones de operaciones. Vectorizada es la misma cuenta en C.
         """
         logger.debug("Computing PageRank ...")
 
-        # 1. Get all internal URL IDs for this job
-        url_rows = (
-            self.session.execute(
-                select(Url.id).where(
-                    Url.job_id == self.job_id,
-                    Url.is_internal.is_(True),
-                )
-            ).all()
-        )
+        import numpy as np
+
+        # 1. Nodos internos del job
+        url_rows = self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id, Url.is_internal.is_(True)
+            )
+        ).all()
         if not url_rows:
             return
+        # Ordenados porque el mapeo id->indice se hace con searchsorted, que
+        # exige orden. El indice i corresponde siempre a ids_ordenados[i].
+        ids_ordenados = np.sort(np.array([r[0] for r in url_rows], dtype=np.int64))
+        n = len(ids_ordenados)
 
-        url_ids = [r[0] for r in url_rows]
-        id_to_idx = {uid: i for i, uid in enumerate(url_ids)}
-        n = len(url_ids)
-
-        # 2. Build weighted adjacency from internal dofollow links
-        link_rows = (
-            self.session.execute(
-                select(Link.from_url_id, Url.id, Link.link_position)
-                .join(Url, and_(
-                    Link.to_url_hash == Url.url_hash,
-                    Link.job_id == Url.job_id,
-                ))
-                .where(
-                    Link.job_id == self.job_id,
-                    Link.is_internal.is_(True),
-                    Link.follow.is_(True),
-                )
-            ).all()
-        )
-
-        # Per edge: accumulate the max weight (deduplicate src->dst,
-        # keeping the highest-weight position if multiple links exist).
-        edge_weight: dict[tuple[int, int], float] = {}
-        posiciones_desconocidas: dict[str, int] = {}
-        for from_id, to_id, position in link_rows:
-            src = id_to_idx.get(from_id)
-            dst = id_to_idx.get(to_id)
-            if src is not None and dst is not None and src != dst:
-                if position not in self._POSITION_WEIGHT:
-                    # Una posicion sin declarar entraba con un peso por defecto
-                    # sin que nadie se enterase. Asi fue como `nav` —el 59,9% de
-                    # los enlaces de un sitio real— acabo pesando mas que header
-                    # y footer, inflando el PageRank de todo lo que cuelga del
-                    # menu. Si vuelve a pasar, que se vea.
-                    posiciones_desconocidas[position] = (
-                        posiciones_desconocidas.get(position, 0) + 1
-                    )
-                w = self._POSITION_WEIGHT.get(position, self._POSITION_WEIGHT[None])
-                key = (src, dst)
-                if key not in edge_weight or w > edge_weight[key]:
-                    edge_weight[key] = w
-
-        if posiciones_desconocidas:
+        # 2. Aviso de posiciones sin peso declarado. Se consulta aparte porque
+        # el CASE de abajo las absorberia en el valor por defecto sin ruido, y
+        # asi fue como `nav` —el 59,9% de los enlaces de un sitio real— acabo
+        # pesando mas que header y footer.
+        conocidas = [p for p in self._POSITION_WEIGHT if p is not None]
+        desconocidas = self.session.execute(
+            text(
+                """
+                SELECT l.link_position, COUNT(*) AS n
+                FROM links l
+                WHERE l.job_id = :jid AND l.is_internal AND l.follow
+                  AND l.link_position IS NOT NULL
+                  AND NOT (l.link_position = ANY(:conocidas))
+                GROUP BY 1 ORDER BY 2 DESC
+                """
+            ),
+            {"jid": self.job_id, "conocidas": conocidas},
+        ).all()
+        if desconocidas:
             logger.warning(
                 "PageRank: posiciones de enlace sin peso declarado, entran con "
                 "el valor por defecto (%s) y pueden sesgar el reparto: %s",
                 self._POSITION_WEIGHT[None],
-                ", ".join(
-                    f"{p}={n}" for p, n in sorted(
-                        posiciones_desconocidas.items(), key=lambda kv: -kv[1]
-                    )
-                ),
+                ", ".join(f"{p}={c}" for p, c in desconocidas),
             )
 
-        # Build outlinks and total weight per source node
-        outlinks: dict[int, dict[int, float]] = defaultdict(dict)  # src -> {dst: weight}
-        out_total_weight: dict[int, float] = defaultdict(float)
-        for (src, dst), w in edge_weight.items():
-            outlinks[src][dst] = w
-            out_total_weight[src] += w
+        # 3. Aristas agregadas EN EL SERVIDOR, a una tabla temporal.
+        #
+        # Agregar y traer en la misma consulta reventaba la memoria: son 38,5
+        # millones de aristas distintas y el driver materializa cada fila como
+        # objetos de Python (tres por arista, y el peso llegaba como Decimal,
+        # ~104 bytes cada uno). Materializar en el servidor y leer despues por
+        # bloques con cursor real deja el pico en unos cientos de MB.
+        casos = " ".join(
+            f"WHEN '{pos}' THEN {peso}"
+            for pos, peso in self._POSITION_WEIGHT.items() if pos is not None
+        )
+        defecto = self._POSITION_WEIGHT[None]
+        self.session.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
+        self.session.execute(text(
+            f"""
+            CREATE TEMP TABLE pr_edges_tmp AS
+            SELECT l.from_url_id AS src, u.id AS dst,
+                   MAX(CASE l.link_position {casos} ELSE {defecto} END)::real AS w
+            FROM links l
+            JOIN urls u ON u.url_hash = l.to_url_hash AND u.job_id = l.job_id
+            WHERE l.job_id = :jid AND l.is_internal AND l.follow
+              AND u.is_internal AND l.from_url_id <> u.id
+            GROUP BY 1, 2
+            """
+        ), {"jid": self.job_id})
+        total = self.session.execute(
+            text("SELECT COUNT(*) FROM pr_edges_tmp")
+        ).scalar() or 0
+        if not total:
+            logger.info("PageRank: el job %s no tiene aristas", self.job_id)
+            return
+        logger.info("PageRank: %d nodos, %d aristas agregadas", n, total)
 
-        # 3. Weighted iterative power method
-        pr = [1.0 / n] * n
+        src = np.empty(total, dtype=np.int32)
+        dst = np.empty(total, dtype=np.int32)
+        w = np.empty(total, dtype=np.float32)
 
+        cruda = self.session.connection().connection
+        cur = cruda.cursor(name="pr_edges_cursor")
+        cur.itersize = 1_000_000
+        cur.execute("SELECT src, dst, w FROM pr_edges_tmp")
+        pos = 0
+        while True:
+            filas = cur.fetchmany(1_000_000)
+            if not filas:
+                break
+            k = len(filas)
+            # fromiter evita construir listas intermedias de 1 M de elementos
+            s_bloque = np.fromiter((f[0] for f in filas), dtype=np.int64, count=k)
+            d_bloque = np.fromiter((f[1] for f in filas), dtype=np.int64, count=k)
+            src[pos:pos + k] = np.searchsorted(ids_ordenados, s_bloque)
+            dst[pos:pos + k] = np.searchsorted(ids_ordenados, d_bloque)
+            w[pos:pos + k] = np.fromiter(
+                (f[2] for f in filas), dtype=np.float32, count=k
+            )
+            pos += k
+            del filas, s_bloque, d_bloque
+        cur.close()
+        self.session.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
+
+        # 4. Metodo de la potencia, vectorizado
+        peso_saliente = np.bincount(src, weights=w, minlength=n).astype(np.float32)
+        colgantes = peso_saliente == 0          # sin enlaces salientes
+        w_norm = (w / peso_saliente[src]).astype(np.float32)
+
+        pr = np.full(n, 1.0 / n, dtype=np.float64)
         for _ in range(max_iter):
-            new_pr = [(1.0 - damping) / n] * n
-
-            for i in range(n):
-                total_w = out_total_weight.get(i, 0.0)
-                if total_w > 0:
-                    for j, w in outlinks[i].items():
-                        new_pr[j] += damping * pr[i] * (w / total_w)
-
-            # Handle dangling nodes (no outlinks): redistribute
-            dangling_sum = sum(
-                pr[i] for i in range(n) if out_total_weight.get(i, 0.0) == 0
-            )
-            dangling_add = damping * dangling_sum / n
-            new_pr = [p + dangling_add for p in new_pr]
-
-            # Check convergence
-            diff = max(abs(new_pr[i] - pr[i]) for i in range(n))
-            pr = new_pr
-            if diff < tol:
+            aporte = np.bincount(dst, weights=pr[src] * w_norm, minlength=n)
+            nuevo = (1.0 - damping) / n + damping * aporte
+            nuevo += damping * pr[colgantes].sum() / n
+            dif = np.abs(nuevo - pr).max()
+            pr = nuevo
+            if dif < tol:
                 break
 
-        # 4. Normalize to 0-10 scale
-        max_pr = max(pr) if pr else 1.0
-        if max_pr > 0:
-            pr = [p / max_pr * 10.0 for p in pr]
+        # 5. Normalizar a escala 0-10
+        maximo = pr.max()
+        if maximo > 0:
+            pr = pr / maximo * 10.0
 
-        # 5. Bulk update
-        for i, uid in enumerate(url_ids):
+        # 6. Guardado en bloque. Antes se emitia una UPDATE por URL: en un job
+        # de 60.000 paginas eran 60.000 consultas sueltas.
+        self.session.execute(text(
+            "CREATE TEMP TABLE pr_tmp (id BIGINT PRIMARY KEY, pr DOUBLE PRECISION) "
+            "ON COMMIT DROP"
+        ))
+        filas = [{"id": int(i), "pr": round(float(v), 4)}
+                 for i, v in zip(ids_ordenados, pr)]
+        for i in range(0, len(filas), 10_000):
             self.session.execute(
-                update(Url)
-                .where(Url.id == uid)
-                .values(pagerank=round(pr[i], 4))
+                text("INSERT INTO pr_tmp (id, pr) VALUES (:id, :pr)"),
+                filas[i:i + 10_000],
             )
+        self.session.execute(text(
+            "UPDATE urls SET pagerank = pr_tmp.pr FROM pr_tmp WHERE urls.id = pr_tmp.id"
+        ))
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
 

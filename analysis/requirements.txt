@@ -1,2 +1,5 @@
 sqlalchemy
 psycopg2-binary
+# PageRank vectorizado: sin esto el calculo no escala
+# (139 M de enlaces en un sitio real).
+numpy>=1.26
