@@ -959,10 +959,8 @@ _BOILERPLATE_CSS_SELECTORS: list[str] = [
 
 # Substrings matched against element id and class attributes (case-insensitive).
 # An element is removed if ANY of its id/class tokens contains one of these.
-_BOILERPLATE_STRUCTURAL_TAGS: frozenset[str] = frozenset({
-    "form", "nav", "aside", "footer", "header",
-})
-
+# (Structural tags — form/nav/aside and page-level header/footer — are
+# handled landmark-aware in ``_strip_boilerplate_html``, see below.)
 _BOILERPLATE_ID_CLASS_PATTERNS: list[str] = [
     # Cookie / consent / GDPR / privacy
     "cookie-consent", "cookie-banner", "cookie-notice", "cookie-bar",
@@ -1025,21 +1023,136 @@ _PROMO_TEXT_TAGS: frozenset[str] = frozenset({
 })
 
 
+# Landmark semantics for content extraction.
+#
+# ``<header>`` / ``<footer>`` are NOT boilerplate per se.  Per the HTML spec
+# they are the site banner / contentinfo only when they hang directly off
+# ``<body>``; nested inside ``<main>``, ``<article>`` or ``<section>`` they
+# are the *section's own* header/footer — hero blocks, card titles, article
+# bylines — i.e. real content.  Astro / Next / Nuxt component libraries lean
+# heavily on this pattern (``<main><header class="hero">…</header></main>``),
+# and stripping every ``<header>`` used to wipe whole pages to two words.
+# This mirrors the rule ``_detect_link_position`` already applies to links.
+_SECTIONING_TAGS: frozenset[str] = frozenset({"main", "article", "section"})
+
+# Removed anywhere: they never carry indexable prose.
+_ALWAYS_STRIP_TAGS: frozenset[str] = frozenset({"form", "nav", "aside"})
+
+# Never content, whatever their position.
+# ``<video>``/``<audio>``/``<canvas>`` inner text is browser fallback copy
+# ("Your browser does not support video") -- never rendered, never content.
+_NON_CONTENT_TAGS: frozenset[str] = frozenset({
+    "script", "style", "noscript", "template", "svg", "iframe",
+    "video", "audio", "canvas",
+})
+
+# ARIA landmark roles that mark template regions regardless of tag.
+_TEMPLATE_ROLES: frozenset[str] = frozenset({
+    "banner", "contentinfo", "navigation", "complementary",
+    "dialog", "alertdialog",
+})
+
+# A page-level <header> that holds the page's <h1> AND a real paragraph is a
+# hero block, not a site banner (site banners never carry prose).
+_HERO_MIN_PARAGRAPH_WORDS = 20
+
+# Elements that start/end a line when flattening HTML to text.
+_BLOCK_TAGS: frozenset[str] = frozenset({
+    "address", "article", "aside", "blockquote", "br", "button", "dd",
+    "details", "div", "dl", "dt", "fieldset", "figcaption", "figure",
+    "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr",
+    "label", "legend", "li", "main", "nav", "ol", "option", "p", "pre",
+    "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead",
+    "tr", "ul",
+})
+
+# How many previously kept lines a new line is compared against when
+# collapsing repeats.  Marquees / letter-shuffle animations / mobile-desktop
+# clones repeat the same short line 2-12 times, sometimes alternating with
+# a second one (A B A B …); a small window catches both without touching
+# legitimately repeated text further apart.
+_DEDUPE_WINDOW = 4
+
+# Below this many words in the main container there is nothing to compare
+# against — trust trafilatura.
+_FALLBACK_MIN_CONTAINER_WORDS = 30
+# If trafilatura keeps less than this share of the container's words it is
+# discarding real content (cards, grids, accordions, hero blocks, contact
+# details).  Recall is what content_text is for (audits, RAG), so the bar
+# is deliberately high; a full article keeps ~0.85-0.95.
+_FALLBACK_MIN_SHARE = 0.7
+
+_REPEATED_MD_IMAGE = re.compile(r"(!\[[^\]]*\]\([^)\s]+\))(?:\s*\1)+")
+
+
+def _remove_keep_tail(el) -> None:
+    """Detach *el* from its parent WITHOUT losing its tail text.
+
+    lxml's ``parent.remove(el)`` also drops ``el.tail`` — the text that
+    follows the element up to the next sibling.  For
+    ``<p>Hello <a class="share-button">x</a> world</p>`` that silently
+    deletes " world".  Move the tail to the previous sibling (or the
+    parent's text) before removing.
+    """
+    parent = el.getparent()
+    if parent is None:
+        return
+    tail = el.tail
+    if tail:
+        prev = el.getprevious()
+        if prev is not None:
+            prev.tail = (prev.tail or "") + tail
+        else:
+            parent.text = (parent.text or "") + tail
+    parent.remove(el)
+
+
+def _is_page_level_landmark(el) -> bool:
+    """True when a <header>/<footer> is the site banner / contentinfo.
+
+    Explicit ``role="banner"`` / ``role="contentinfo"`` always wins;
+    otherwise the element is page-level only when no ``<main>``,
+    ``<article>`` or ``<section>`` encloses it.
+    """
+    role = (el.get("role") or "").strip().lower()
+    if role in ("banner", "contentinfo"):
+        return True
+    for anc in el.iterancestors():
+        if isinstance(anc.tag, str) and anc.tag in _SECTIONING_TAGS:
+            return False
+    return True
+
+
+def _looks_like_hero(header_el) -> bool:
+    """A page-level <header> that carries the <h1> plus a real paragraph."""
+    if header_el.find(".//h1") is None:
+        return False
+    for p in header_el.iter("p"):
+        if len(p.text_content().split()) >= _HERO_MIN_PARAGRAPH_WORDS:
+            return True
+    return False
+
+
 def _strip_boilerplate_html(
     html: str,
     *,
     strip_promo: bool = True,
     extra_selectors: list[str] | None = None,
 ) -> str:
-    """Remove cookie banners, chat widgets, overlays, and structural
-    non-content elements (form, nav, aside, footer, header) from raw HTML.
+    """Remove cookie banners, chat widgets, overlays, and template regions
+    (form, nav, aside, page-level header/footer, ARIA landmarks) from raw
+    HTML.
 
     *extra_selectors* are per-job CSS selectors (from
     ``extraction.custom_boilerplate_selectors``) so site-specific noise
     can be stripped via job config without hardcoding it here.
 
-    Uses lxml to parse and strip elements matching known boilerplate
-    patterns, then serialises back to a string.  The cleaned HTML is
+    Header/footer handling is landmark-aware: only the site banner and
+    contentinfo are removed; a ``<header>`` inside ``<main>``/``<article>``/
+    ``<section>`` (hero, card title, byline) is kept as content, and so is
+    a body-level ``<header>`` that holds the ``<h1>`` and a paragraph.
+
+    Every removal preserves the element's tail text.  The cleaned HTML is
     suitable for passing to trafilatura or html2text.
     """
     try:
@@ -1055,15 +1168,17 @@ def _strip_boilerplate_html(
         for css in css_selectors:
             try:
                 sel = CSSSelector(css)
-                for el in sel(doc):
-                    el.getparent().remove(el)
+                for el in list(sel(doc)):
+                    _remove_keep_tail(el)
             except Exception:
                 pass
 
-        # 2) Remove by id/class substring pattern
+        # 2) Remove by id/class substring pattern.  Collect first: mutating
+        #    the tree while ``iter()`` walks it skips siblings.
         patterns = list(_BOILERPLATE_ID_CLASS_PATTERNS)
         if strip_promo:
             patterns += _PROMO_ID_CLASS_PATTERNS
+        doomed = []
         for el in doc.iter():
             el_id = (el.get("id") or "").lower()
             el_class = (el.get("class") or "").lower()
@@ -1071,22 +1186,36 @@ def _strip_boilerplate_html(
                 continue
             for pattern in patterns:
                 if pattern in el_id or pattern in el_class:
-                    parent = el.getparent()
-                    if parent is not None:
-                        parent.remove(el)
-                    break  # element already removed
+                    doomed.append(el)
+                    break
+        for el in doomed:
+            _remove_keep_tail(el)
 
-        # 3) Remove structural non-content elements
-        structural = [
-            el for el in doc.iter()
-            if isinstance(el.tag, str) and el.tag in _BOILERPLATE_STRUCTURAL_TAGS
-        ]
-        for el in structural:
-            parent = el.getparent()
-            if parent is not None:
-                parent.remove(el)
+        # 3) Remove non-content tags and template regions (landmark-aware).
+        doomed = []
+        for el in doc.iter():
+            tag = el.tag
+            if not isinstance(tag, str):
+                continue
+            role = (el.get("role") or "").strip().lower()
+            if tag in _NON_CONTENT_TAGS or tag in _ALWAYS_STRIP_TAGS:
+                doomed.append(el)
+            elif tag in ("header", "footer"):
+                if _is_page_level_landmark(el) and not (
+                    tag == "header" and _looks_like_hero(el)
+                ):
+                    doomed.append(el)
+            elif role in _TEMPLATE_ROLES:
+                doomed.append(el)
+        for el in doomed:
+            _remove_keep_tail(el)
 
-        # 4) Remove small blocks by text phrase (catches bespoke-class
+        # 4) <address> is content (NAP for local SEO) but trafilatura drops
+        #    it; present it as a paragraph.
+        for el in list(doc.iter("address")):
+            el.tag = "p"
+
+        # 5) Remove small blocks by text phrase (catches bespoke-class
         #    CTA/legal/social widgets that id/class patterns miss).
         if strip_promo:
             doomed = []
@@ -1100,13 +1229,98 @@ def _strip_boilerplate_html(
                 if any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
                     doomed.append(el)
             for el in doomed:
-                parent = el.getparent()
-                if parent is not None:
-                    parent.remove(el)
+                _remove_keep_tail(el)
 
         return lxml_html.tostring(doc, encoding="unicode")
     except Exception:
         return html  # on any failure, return original HTML unchanged
+
+
+def _dedupe_lines(text: str) -> str:
+    """Collapse lines repeated within a short window (see ``_DEDUPE_WINDOW``).
+
+    Blank lines are kept (squeezed to one) so Markdown paragraphs survive.
+    Comparison is whitespace-normalised and case-insensitive.
+    """
+    out: list[str] = []
+    recent: list[str] = []
+    prev_blank = False
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            if out and not prev_blank:
+                out.append("")
+            prev_blank = True
+            continue
+        key = _WHITESPACE.sub(" ", line).casefold()
+        if key in recent:
+            continue  # dropped repeat: the pending blank stays pending
+        recent.append(key)
+        if len(recent) > _DEDUPE_WINDOW:
+            recent.pop(0)
+        out.append(line)
+        prev_blank = False
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out)
+
+
+def _block_text(el) -> str:
+    """Flatten an lxml element to text, one line per block-level element.
+
+    Keeps paragraph boundaries (so later consumers — dedupe, chunking for
+    RAG, diffing — see structure) instead of the space-joined blob a bare
+    ``//text()`` produces.  Repeated lines are collapsed.
+    """
+    parts: list[str] = []
+
+    def walk(node, include_tail: bool) -> None:
+        if not isinstance(node.tag, str):  # comment / PI
+            if include_tail and node.tail:
+                parts.append(node.tail)
+            return
+        block = node.tag in _BLOCK_TAGS
+        if block:
+            parts.append("\n")
+        if node.text:
+            parts.append(node.text)
+        for child in node:
+            walk(child, True)
+        if block:
+            parts.append("\n")
+        if include_tail and node.tail:
+            parts.append(node.tail)
+
+    walk(el, False)
+    lines = [_WHITESPACE.sub(" ", ln).strip() for ln in "".join(parts).split("\n")]
+    return _dedupe_lines("\n".join(ln for ln in lines if ln))
+
+
+def _main_container(
+    html: str, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
+):
+    """Parse *html*, strip boilerplate on the WHOLE document, then return the
+    main content container as an lxml element (or None).
+
+    Stripping before selecting matters: a ``<header>`` inside ``<main>`` is
+    only recognisable as content while its ``<main>`` ancestor is present.
+    Prefers ``<main>``, ``<article>``, ``[role=main]``; falls back to body.
+    """
+    try:
+        from lxml import html as lxml_html
+
+        stripped = _strip_boilerplate_html(
+            html, strip_promo=strip_promo, extra_selectors=extra_selectors
+        )
+        doc = lxml_html.fromstring(stripped)
+        for css in ("main", "article", "[role='main']"):
+            found = doc.cssselect(css)
+            if found:
+                return found[0]
+        body = doc.cssselect("body")
+        return body[0] if body else doc
+    except Exception:
+        return None
 
 
 def _trafilatura_extract(
@@ -1163,54 +1377,30 @@ def _trafilatura_extract(
 def _fallback_extract_text(
     selector, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
 ) -> str | None:
-    """Fallback text extraction when trafilatura returns nothing.
+    """Fallback text extraction when trafilatura returns nothing or too little.
 
-    Looks for ``<main>``, ``<article>``, or ``[role="main"]``, then
-    falls back to body content between the first ``<h1>`` and ``<footer>``.
-    Strips script/style/nav/header/footer nodes via XPath.
-
-    Re-parses from boilerplate-stripped HTML first, so promo blocks and
-    per-job custom selectors are excluded here too — this path handles
-    the pages where trafilatura fails, and must not reintroduce noise.
+    Strips boilerplate on the whole document (landmark-aware, per-job
+    selectors included), takes ``<main>`` / ``<article>`` / ``[role=main]``
+    (else body) and flattens it block by block with repeats collapsed.
     """
     raw_html = selector.get()
-    if raw_html:
-        try:
-            from parsel import Selector as _Selector
-
-            stripped = _strip_boilerplate_html(
-                raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
-            )
-            selector = _Selector(text=stripped)
-        except Exception:
-            pass  # fall back to the original selector unchanged
-
-    container = selector.css('main, article, [role="main"]')
-    if container:
-        container = container[0]
-    else:
-        body = selector.css("body")
-        if not body:
-            return None
-        container = body[0]
-
-    parts = container.xpath(
-        ".//text()[not(ancestor::script)"
-        " and not(ancestor::style)"
-        " and not(ancestor::noscript)"
-        " and not(ancestor::nav)"
-        " and not(ancestor::header)"
-        " and not(ancestor::footer)"
-        " and not(ancestor::form)"
-        " and not(ancestor::aside)"
-        " and not(ancestor::dialog)"
-        " and not(ancestor::*[@aria-modal='true'])"
-        " and not(ancestor::*[@role='dialog'])"
-        " and not(ancestor::*[@role='alertdialog'])"
-        " and not(ancestor::*[@role='complementary'])]"
-    ).getall()
-    text = _WHITESPACE.sub(" ", " ".join(parts)).strip()
+    if not raw_html:
+        return None
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    if container is None:
+        return None
+    text = _block_text(container)
     return text or None
+
+
+def _should_fall_back(candidate: str | None, reference_words: int) -> bool:
+    """Trafilatura kept too small a share of the main container's words."""
+    if reference_words < _FALLBACK_MIN_CONTAINER_WORDS:
+        return False
+    kept = len(candidate.split()) if candidate else 0
+    return kept < reference_words * _FALLBACK_MIN_SHARE
 
 
 # ---------------------------------------------------------------------------
@@ -1226,10 +1416,17 @@ def extract_main_content(
 ) -> str | None:
     """Extract the main textual content of a page.
 
-    Uses trafilatura for site-agnostic content extraction.  When the page
-    has a known *word_count* (total visible words), we can detect cases
-    where trafilatura discards too much (hub/landing pages with cards,
-    grids, or accordions) and fall back to a simpler full-text extractor.
+    Uses trafilatura for site-agnostic content extraction, then checks the
+    result against the words actually present in the (boilerplate-stripped)
+    main container.  When trafilatura kept less than half of them it is
+    discarding real content — hub/landing pages with cards, grids,
+    accordions, hero blocks — and the block-flattened container text is
+    used instead.
+
+    *word_count* (whole-body visible words) is accepted for backwards
+    compatibility but no longer drives the decision: it counts nav and
+    footer text too, so it over-estimated the reference and let
+    two-word extractions through on pages whose content sat in a hero.
     """
     raw_html = selector.get()
     if not raw_html:
@@ -1238,53 +1435,43 @@ def extract_main_content(
     text, _ = _trafilatura_extract(
         raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
-    traf_len = len(text) if text else 0
+    if text:
+        text = _dedupe_lines(text)
 
-    if traf_len == 0:
-        return _fallback_extract_text(
-            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
-        )
+    fallback = _fallback_extract_text(
+        selector, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    if not text:
+        return fallback
 
-    # Estimate how many words trafilatura captured vs page total.
-    # avg ~5 chars/word in Spanish/English (including spaces).
-    traf_words = traf_len / 5 if traf_len else 0
-    page_words = word_count or 0
-
-    # If trafilatura captured a decent share of the page, trust it.
-    # Threshold: at least 20% of the visible words — below that it is
-    # likely discarding real content (cards, grids, accordions, FAQs).
-    if page_words > 200 and traf_words < page_words * 0.20:
-        fallback = _fallback_extract_text(
-            selector, strip_promo=strip_promo, extra_selectors=extra_selectors
-        )
-        if fallback and len(fallback) > traf_len:
-            return fallback
-
+    reference_words = len(fallback.split()) if fallback else 0
+    if fallback and _should_fall_back(text, reference_words) and len(fallback) > len(text):
+        return fallback
     return text
 
 
 def _get_main_container_html(
     selector, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
 ) -> str | None:
-    """Return the inner HTML of the main content container.
+    """Return the HTML of the main content container after boilerplate
+    stripping.  Used only as fallback for markdown extraction."""
+    raw_html = selector.get()
+    if not raw_html:
+        return None
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    if container is None:
+        return None
+    try:
+        from lxml import html as lxml_html
 
-    Used only as fallback for markdown extraction.  Strips boilerplate
-    (cookie banners, chat widgets, etc.) before returning.
-    """
-    container = selector.css('main, article, [role="main"]')
-    if container:
-        node = container[0]
-    else:
-        body = selector.css("body")
-        if not body:
-            return None
-        node = body[0]
-    html = node.get()
+        html = lxml_html.tostring(container, encoding="unicode")
+    except Exception:
+        return None
     if not html or not html.strip():
         return None
-    return _strip_boilerplate_html(
-        html, strip_promo=strip_promo, extra_selectors=extra_selectors
-    )
+    return html
 
 
 def _fallback_extract_markdown(
@@ -1311,7 +1498,8 @@ def _fallback_extract_markdown(
         h.single_line_break = False
 
         md = h.handle(container_html)
-        md = re.sub(r'\n{3,}', '\n\n', md).strip()
+        md = _REPEATED_MD_IMAGE.sub(r"\1", md)
+        md = _dedupe_lines(re.sub(r'\n{3,}', '\n\n', md).strip())
         return md or None
     except Exception:
         return None
@@ -1327,31 +1515,36 @@ def extract_main_content_markdown(
     """Extract the main content as clean Markdown.
 
     Uses trafilatura's markdown output for site-agnostic extraction.
-    Like ``extract_main_content``, uses *word_count* to detect when
-    trafilatura is too aggressive and falls back to html2text.
+    Like ``extract_main_content``, measures the trafilatura pass against
+    the words in the stripped main container and falls back to html2text
+    when trafilatura is too aggressive.
     """
     raw_html = selector.get()
     if not raw_html:
         return None
 
-    _, md = _trafilatura_extract(
+    text, md = _trafilatura_extract(
         raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
-    traf_len = len(md) if md else 0
+    if md:
+        md = _dedupe_lines(md)
 
-    if traf_len == 0:
+    if not md:
         return _fallback_extract_markdown(
             selector, strip_promo=strip_promo, extra_selectors=extra_selectors
         )
 
-    traf_words = traf_len / 5 if traf_len else 0
-    page_words = word_count or 0
-
-    if page_words > 200 and traf_words < page_words * 0.20:
+    # Decide with the plain-text pass (markdown syntax inflates word counts)
+    # so text and markdown fall back together.
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    reference_words = len(_block_text(container).split()) if container is not None else 0
+    if _should_fall_back(_dedupe_lines(text) if text else None, reference_words):
         fallback_md = _fallback_extract_markdown(
             selector, strip_promo=strip_promo, extra_selectors=extra_selectors
         )
-        if fallback_md and len(fallback_md) > traf_len:
+        if fallback_md and len(fallback_md) > len(md):
             return fallback_md
 
     return md

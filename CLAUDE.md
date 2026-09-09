@@ -258,6 +258,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 6. **Headings dedup** — `extract_headings` skips headings inside `<template>`, `<noscript>`, `<svg>` to avoid SSR/framework duplicates.
 7. **URL issues as SEO problems** — Junk/malformed URLs are crawled and reported as SEO issues (not filtered), because if a crawler finds them, Google can too.
 8. **JS rendering auto-cap** — When a job has `render_js=true`, the worker automatically caps `CONCURRENT_REQUESTS` and `CONCURRENT_REQUESTS_PER_DOMAIN` to lower values (env-configurable) to prevent Chromium memory exhaustion. Jobs without JS are unaffected. See "Deployment: Local vs VPS" section.
+9. **Landmark-aware content extraction** — `_strip_boilerplate_html` removes
+   `<header>`/`<footer>` only when they are the page banner/contentinfo (not
+   nested in `main`/`article`/`section`, or explicit ARIA role). A hero
+   `<header>` inside `<main>` (Astro/Next/Nuxt pattern) is content; stripping
+   it blindly reduced whole pages to two words. Node removal keeps tail text.
+   The trafilatura-vs-fallback decision compares against the words in the
+   stripped main container (not body `word_count`), threshold 0.7; the
+   fallback flattens block by block and collapses marquee/animation repeats.
 
 ## Environment Variables
 
@@ -340,9 +348,10 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (88 cases, pytest): pure extractors
-(`test_extractors.py`), structured-data validation (`test_sd_validation.py`),
-and sitemap parsing (`test_sitemaps.py`). Run with
+Unit test suite at `tests/` (105 cases, pytest): pure extractors
+(`test_extractors.py`), main-content extraction / boilerplate stripping
+(`test_content_extraction.py`), structured-data validation
+(`test_sd_validation.py`), and sitemap parsing (`test_sitemaps.py`). Run with
 `pip install -r tests/requirements.txt && pytest`. The DB-touching analysis
 layer has no integration tests yet — it is verified with the SQL queries in
 `docs/AUDITORIA_Y_VERIFICACION.md`.
