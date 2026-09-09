@@ -247,6 +247,14 @@ def test_link_position_utility_classes_are_not_content_markers():
     assert ex._detect_link_position(s.css("a")[0]) == "footer"
 
 
+def test_link_position_camelcase_css_in_js_classes():
+    # styled-components glue words together; the token must still be found.
+    s = sel('<div class="NoJsNavigation-styles__NoJsListItemStyled-sc-a2077f0f-3 hKbV"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "nav"
+    s = sel('<div class="PageFooterStyled-sc-1"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+
+
 # ---------------------------------------------------------------------------
 # extract_headings  (skip template/noscript/svg, ordering)
 # ---------------------------------------------------------------------------

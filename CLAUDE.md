@@ -340,7 +340,7 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (87 cases, pytest): pure extractors
+Unit test suite at `tests/` (88 cases, pytest): pure extractors
 (`test_extractors.py`), structured-data validation (`test_sd_validation.py`),
 and sitemap parsing (`test_sitemaps.py`). Run with
 `pip install -r tests/requirements.txt && pytest`. The DB-touching analysis

@@ -389,7 +389,16 @@ _CONTENT_WEAK: frozenset[str] = frozenset({
 })
 _CONTENT_IDS: frozenset[str] = frozenset({"content", "main", "primary", "main-content", "page-content"})
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+# camelCase boundary: CSS-in-JS class names glue words together
+# ("NoJsNavigation-styles__NoJsListItemStyled").
+_CAMEL_SPLIT = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _TEMPLATE_KINDS = ("nav", "header", "footer", "sidebar")
+
+
+def _hint_tokens(hint: str) -> set[str]:
+    """Whole lowercase tokens of a class/id string, split on non-alphanumerics
+    and on camelCase boundaries."""
+    return set(_TOKEN_SPLIT.split(_CAMEL_SPLIT.sub(" ", hint).lower())) - {""}
 
 
 def _classify_node(node) -> tuple[str | None, bool]:
@@ -415,9 +424,10 @@ def _classify_node(node) -> tuple[str | None, bool]:
         kind = _POSITION_ROLES[role]
         return ("content+" if kind == "content" else kind), True
 
-    cls = (node.attrib.get("class", "") or "").lower()
-    node_id = (node.attrib.get("id", "") or "").strip().lower()
-    tokens = set(_TOKEN_SPLIT.split(cls + " " + node_id)) - {""}
+    raw_cls = node.attrib.get("class", "") or ""
+    raw_id = (node.attrib.get("id", "") or "").strip()
+    cls, node_id = raw_cls.lower(), raw_id.lower()
+    tokens = _hint_tokens(raw_cls + " " + raw_id)
     for kind, words in _POSITION_TOKENS.items():
         if tokens & words:
             return kind, False
