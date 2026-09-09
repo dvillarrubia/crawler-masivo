@@ -354,42 +354,135 @@ def extract_links(
     return results
 
 
+# Class/id tokens that reveal a template region. Matched as WHOLE tokens
+# (split on non-alphanumerics), never as substrings: "canvas" must not read
+# as nav, "elementor-widget" must not read as sidebar.
+_POSITION_TOKENS: dict[str, frozenset[str]] = {
+    "nav": frozenset({"nav", "navbar", "navigation", "menubar", "breadcrumb", "breadcrumbs"}),
+    "footer": frozenset({"footer", "colophon"}),
+    "header": frozenset({"header", "masthead", "topbar"}),
+    "sidebar": frozenset({"sidebar", "aside"}),
+}
+# WAI-ARIA landmark roles map 1:1 to regions.
+_POSITION_ROLES: dict[str, str] = {
+    "navigation": "nav", "menubar": "nav", "menu": "nav",
+    "banner": "header",
+    "contentinfo": "footer",
+    "complementary": "sidebar",
+    "main": "content",
+}
+# Content markers, matched on whole *whitespace-separated* class tokens so
+# that utility classes such as Bootstrap's ``justify-content-between`` or
+# Liferay's ``portlet-content`` never count.
+#   strong = the article/entry itself. A <header>/<footer> found inside one
+#            is the article's own (entry-header, card-footer), not the page's.
+#   weak   = site-level wrappers around the main region (#content,
+#            .site-content). Enough to stop the walk, not enough to demote
+#            a header/footer found inside them.
+_CONTENT_STRONG: frozenset[str] = frozenset({
+    "entry-content", "post-content", "post-body", "article-body", "article-content",
+    "entry", "article", "td-post-content", "elementor-widget-theme-post-content",
+})
+_CONTENT_WEAK: frozenset[str] = frozenset({
+    "content", "main", "main-content", "site-content", "site-main", "page-content",
+    "content-area", "layout-content", "primary",
+})
+_CONTENT_IDS: frozenset[str] = frozenset({"content", "main", "primary", "main-content", "page-content"})
+_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+_TEMPLATE_KINDS = ("nav", "header", "footer", "sidebar")
+
+
+def _classify_node(node) -> tuple[str | None, bool]:
+    """
+    Classify one ancestor element.
+
+    Returns ``(kind, structural)`` where ``kind`` is a link position
+    (``nav``/``header``/``footer``/``sidebar``/``content``), ``"content+"``
+    for a *strong* content marker, or ``None`` when the element says
+    nothing. ``structural`` is True when the verdict comes from the tag
+    name or an ARIA landmark role rather than from class/id hints.
+    """
+    tag = (node.xpath("name()").get() or "").lower()
+    if tag in ("nav", "header", "footer"):
+        return tag, True
+    if tag == "aside":
+        return "sidebar", True
+    if tag in ("main", "article"):
+        return "content+", True
+
+    role = (node.attrib.get("role", "") or "").strip().lower()
+    if role in _POSITION_ROLES:
+        kind = _POSITION_ROLES[role]
+        return ("content+" if kind == "content" else kind), True
+
+    cls = (node.attrib.get("class", "") or "").lower()
+    node_id = (node.attrib.get("id", "") or "").strip().lower()
+    tokens = set(_TOKEN_SPLIT.split(cls + " " + node_id)) - {""}
+    for kind, words in _POSITION_TOKENS.items():
+        if tokens & words:
+            return kind, False
+
+    class_tokens = set(cls.split())
+    if class_tokens & _CONTENT_STRONG:
+        return "content+", False
+    if class_tokens & _CONTENT_WEAK or node_id in _CONTENT_IDS:
+        return "content", False
+    return None, False
+
+
 def _detect_link_position(a_selector) -> str:
     """
-    Heuristic: classify a link by its nearest semantic ancestor.
+    Heuristic: classify a link by its nearest meaningful ancestor.
 
-    Walks the ancestor axis **nearest-first** so the closest container
-    wins.  This matters because the ancestor axis is returned in document
-    order (outermost first); checking it in that order would let a
-    top-level wrapper such as ``<div class="site-header">`` misclassify
-    every link on the page as ``header``.  For each ancestor level we check
-    the semantic tag name first, then id/class hints.  Falls back to
-    ``content``.
+    Returns one of ``nav``, ``header``, ``footer``, ``sidebar``, ``content``.
+
+    The ancestor axis is walked **nearest-first** (it comes back
+    outermost-first, so it is reversed; otherwise a top-level wrapper such
+    as ``<div class="site-header">`` would tag every link on the page as
+    ``header``). ``<html>`` and ``<body>`` never count: themes hang layout
+    flags on ``<body>`` (``ast-header-sticky``, ``has-sidebar``) that would
+    swallow the whole page.
+
+    Per ancestor, see :func:`_classify_node`; then:
+
+    * ``nav`` / ``sidebar`` win immediately.
+    * ``header`` / ``footer`` win unless a *strong* content marker (the
+      article itself) lies further out before any template region: then
+      it is the article's own header/footer and the walk continues.
+    * a content marker stops the walk with ``content`` unless a structural
+      template landmark (``<nav>``, ``<header>``, ``<footer>``, ``<aside>``
+      or an ARIA landmark) lies further out: mega menus built with a
+      misplaced ``<main>`` inside ``<nav>`` are still navigation.
+
+    Falls back to ``content``.
     """
-    ancestors = a_selector.xpath("ancestor::*")
-    # Reverse to walk from the link outward (nearest ancestor first).
-    for node in reversed(ancestors):
-        tag = (node.xpath("name()").get() or "").lower()
-        if tag == "nav":
-            return "nav"
-        if tag == "footer":
-            return "footer"
-        if tag == "header":
-            return "header"
-        if tag == "aside":
-            return "sidebar"
+    ancestors = [
+        n for n in a_selector.xpath("ancestor::*")
+        if (n.xpath("name()").get() or "").lower() not in ("html", "body")
+    ]
+    kinds = [_classify_node(n) for n in reversed(ancestors)]  # nearest-first
 
-        hint = ((node.attrib.get("class", "") or "") + " " + (node.attrib.get("id", "") or "")).lower()
-        if not hint.strip():
+    for i, (kind, _structural) in enumerate(kinds):
+        if kind is None:
             continue
-        if "nav" in hint:
-            return "nav"
-        if "footer" in hint:
-            return "footer"
-        if "header" in hint:
-            return "header"
-        if "sidebar" in hint:
-            return "sidebar"
+        outer = kinds[i + 1:]
+        if kind in ("nav", "sidebar"):
+            return kind
+        if kind in ("header", "footer"):
+            article_scoped = False
+            for okind, _ in outer:
+                if okind == "content+":
+                    article_scoped = True
+                    break
+                if okind in _TEMPLATE_KINDS:
+                    break
+            if article_scoped:
+                continue  # the article's own header/footer: keep walking
+            return kind
+        # content / content+
+        if any(ok in _TEMPLATE_KINDS and st for ok, st in outer):
+            continue  # content-looking block nested inside a real landmark
+        return "content"
 
     return "content"
 

@@ -183,6 +183,70 @@ def test_link_position_by_class_hint():
     assert ex._detect_link_position(s.css("a")[0]) == "sidebar"
 
 
+def test_link_position_ignores_body_and_html_classes():
+    # Astra/Elementor hang layout flags on <body>; they must not tag the page.
+    s = sel('<body class="ast-header-sticky has-sidebar"><main><p><a href="/x">L</a></p></main></body>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+
+
+def test_link_position_tokens_not_substrings():
+    s = sel('<div class="canvas-wrapper"><div class="unavailable"><a href="/x">L</a></div></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+    s = sel('<div class="elementor-widget"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+    # Underscore-joined CMS classes still expose whole tokens.
+    s = sel('<section class="portlet portlet_com_liferay_site_navigation_menu_web_portlet"><a href="/x">L</a></section>')
+    assert ex._detect_link_position(s.css("a")[0]) == "nav"
+    s = sel('<section class="tab-pane tab-footer-0-panel"><a href="/x">L</a></section>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+
+
+def test_link_position_article_scoped_header_footer_is_content():
+    s = sel('<article><header class="entry-header"><h1><a href="/x">Title</a></h1></header></article>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+    s = sel('<main><div class="card"><div class="card-footer"><a href="/x">L</a></div></div></main>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+    # ...but a real page footer outside main/article still wins.
+    s = sel('<div><footer><a href="/x">L</a></footer></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+
+
+def test_link_position_aria_roles():
+    s = sel('<div role="navigation"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "nav"
+    s = sel('<div role="contentinfo"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+    s = sel('<div role="banner"><a href="/x">L</a></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "header"
+    s = sel('<div class="site-header-wrap"><div role="main"><a href="/x">L</a></div></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+
+
+def test_link_position_content_region_stops_outer_wrappers():
+    # Outer wrapper carries "header" but the link sits in the content region.
+    s = sel('<div class="site-header-wrapper"><div class="entry-content"><a href="/x">L</a></div></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "content"
+    # Nav nested inside main (breadcrumbs) is still nav.
+    s = sel('<main><nav class="breadcrumb"><a href="/x">L</a></nav></main>')
+    assert ex._detect_link_position(s.css("a")[0]) == "nav"
+
+
+def test_link_position_liferay_mega_menu_with_main_inside_nav():
+    # Liferay builds the mega menu with <main> and .portlet-content inside <nav>.
+    s = sel('<header class="header"><nav class="navbar"><div class="portlet-content">'
+            '<main class="d-flex justify-content-between"><a href="/x">L</a></main>'
+            '</div></nav></header>')
+    assert ex._detect_link_position(s.css("a")[0]) == "nav"
+
+
+def test_link_position_utility_classes_are_not_content_markers():
+    s = sel('<footer><div class="d-flex justify-content-between"><a href="/x">L</a></div></footer>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+    # A site-level #content wrapper does not demote a footer nested in it.
+    s = sel('<div id="content"><footer class="site-footer"><a href="/x">L</a></footer></div>')
+    assert ex._detect_link_position(s.css("a")[0]) == "footer"
+
+
 # ---------------------------------------------------------------------------
 # extract_headings  (skip template/noscript/svg, ordering)
 # ---------------------------------------------------------------------------
