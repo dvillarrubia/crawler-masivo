@@ -266,6 +266,21 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    The trafilatura-vs-fallback decision compares against the words in the
    stripped main container (not body `word_count`), threshold 0.7; the
    fallback flattens block by block and collapses marquee/animation repeats.
+10. **Hero outside `<main>` is still content** — some landings put the `<h1>`
+   and the main claim in a `<section>` that is a *sibling* of `<main>` (often
+   wrapped in `<figure><figcaption>`). trafilatura and the fallback both stay
+   inside the chosen container, so that block used to vanish from
+   `page_content` — the page's headline and commercial promise, on exactly the
+   most important pages. `_hero_outside_container` recovers it when the `<h1>`
+   is outside the container, prepending only the lines not already present. A
+   `<figcaption>` containing headings is unwrapped to a `<div>`: it is a hero,
+   not a photo caption.
+11. **Browser TLS impersonation must be requested per-request** —
+   `scrapy-impersonate` only routes through curl_cffi when the request carries
+   `meta["impersonate"]`; the composite handler sets it for every non-Playwright
+   request. Without it everything silently falls back to Twisted's TLS and a
+   WAF like F5 BIG-IP ASM answers with binary garbage, ending the job with 1
+   URL and no error that looks like a block.
 
 ## Environment Variables
 
@@ -352,7 +367,10 @@ Unit test suite at `tests/` (105 cases, pytest): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
 (`test_sd_validation.py`), and sitemap parsing (`test_sitemaps.py`). Run with
-`pip install -r tests/requirements.txt && pytest`. The DB-touching analysis
+`pip install -r tests/requirements.txt && pytest`. `scripts/check_content_quality.py <job_id>` compares, per URL template,
+what the crawl stored against what the extractor, `extract_main_content` and a
+Chromium render see right now — it is how content loss is caught after a crawl.
+The DB-touching analysis
 layer has no integration tests yet — it is verified with the SQL queries in
 `docs/AUDITORIA_Y_VERIFICACION.md`.
 
