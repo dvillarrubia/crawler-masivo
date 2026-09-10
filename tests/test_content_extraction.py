@@ -185,3 +185,35 @@ def test_extract_main_content_markdown_recovers_hero_page():
 def test_dedupe_lines_does_not_accumulate_blanks_around_dropped_repeats():
     md = "# T\n\nT\n\nT\n\nT\n\nBody"
     assert ex._dedupe_lines(md) == "# T\n\nT\n\nBody"
+
+def test_hero_outside_main_is_kept():
+    """Landing con <section> hero hermano de <main>: el h1 y el claim cuentan."""
+    html = (
+        "<html><body>"
+        "<section class='landingpage'><figure><figcaption>"
+        "<h1>Aerotermia GeniaAir:</h1><h2>Disenada para ti.</h2>"
+        "<p>Una nueva generacion. Tres gamas. Flexibilidad sin limites.</p>"
+        "</figcaption></figure></section>"
+        "<main class='main__content'><p>"
+        + ("Texto largo del cuerpo de la pagina con suficientes palabras para "
+           "que el extractor lo tome como contenido principal. " * 6)
+        + "</p></main></body></html>"
+    )
+    out = ex.extract_main_content(sel(html))
+    assert out
+    assert "Aerotermia GeniaAir" in out
+    assert "Tres gamas" in out
+    assert "Texto largo del cuerpo" in out
+
+
+def test_hero_inside_main_is_not_duplicated():
+    html = (
+        "<html><body><main><header class='hero'><h1>Titular unico</h1>"
+        "<p>Claim de la pagina.</p></header><p>"
+        + ("Cuerpo con texto suficiente para que el extractor lo considere "
+           "contenido principal de verdad. " * 6)
+        + "</p></main></body></html>"
+    )
+    out = ex.extract_main_content(sel(html))
+    assert out
+    assert out.lower().count("titular unico") == 1

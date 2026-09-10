@@ -1215,6 +1215,24 @@ def _strip_boilerplate_html(
         for el in list(doc.iter("address")):
             el.tag = "p"
 
+        # 4b) Un <figcaption> con titulos dentro no es el pie de una foto: es
+        #     el hero de la pagina montado sobre la imagen de cabecera (patron
+        #     <section class=landingpage><figure><figcaption><h1>). trafilatura
+        #     tira los pies de figura, y con ellos se iba el h1 y la promesa
+        #     principal de las landings. Se desenvuelve a div para que el texto
+        #     cuente como contenido; el pie de foto de verdad (texto corto, sin
+        #     titulos) se sigue tratando como pie.
+        for el in list(doc.iter("figcaption")):
+            tiene_titulo = any(
+                True for _ in el.iter("h1", "h2", "h3")
+            )
+            if not tiene_titulo:
+                continue
+            el.tag = "div"
+            padre = el.getparent()
+            if padre is not None and padre.tag == "figure":
+                padre.tag = "div"
+
         # 5) Remove small blocks by text phrase (catches bespoke-class
         #    CTA/legal/social widgets that id/class patterns miss).
         if strip_promo:
@@ -1294,6 +1312,51 @@ def _block_text(el) -> str:
     walk(el, False)
     lines = [_WHITESPACE.sub(" ", ln).strip() for ln in "".join(parts).split("\n")]
     return _dedupe_lines("\n".join(ln for ln in lines if ln))
+
+
+def _hero_outside_container(container) -> str | None:
+    """Texto del bloque que contiene el <h1> cuando cae fuera del contenedor.
+
+    Hay plantillas (landings con imagen de cabecera: el patron
+    ``<section class=landingpage>`` + ``<main>`` como hermano) donde el h1 y la
+    promesa principal de la pagina viven FUERA de ``<main>``. Tanto trafilatura
+    como el fallback se ciñen al contenedor principal, asi que ese bloque
+    desaparecia del contenido guardado: justo el titular y el claim, que es lo
+    que mas pesa en una pagina comercial. Devuelve solo lo que no este ya en el
+    contenido, para no duplicar.
+    """
+    if container is None:
+        return None
+    try:
+        raiz = container.getroottree().getroot()
+    except Exception:
+        return None
+    for h1 in raiz.iter("h1"):
+        if container is h1 or container in h1.iterancestors():
+            return None  # el h1 esta dentro del contenedor: nada que recuperar
+        bloque = h1
+        padre = bloque.getparent()
+        while padre is not None and padre.tag not in ("body", "html"):
+            bloque = padre
+            padre = bloque.getparent()
+        if bloque is container or container in bloque.iterdescendants():
+            return None  # el bloque envuelve al contenedor: seria todo el texto
+        texto = _block_text(bloque)
+        return texto or None
+    return None
+
+
+def _prepend_hero(texto: str | None, hero: str | None) -> str | None:
+    """Pega delante las lineas del hero que no esten ya en el contenido."""
+    if not hero:
+        return texto
+    if not texto:
+        return hero
+    presentes = {l.strip().lower() for l in texto.splitlines() if l.strip()}
+    nuevas = [l for l in hero.splitlines() if l.strip() and l.strip().lower() not in presentes]
+    if not nuevas:
+        return texto
+    return "\n".join(nuevas) + "\n" + texto
 
 
 def _main_container(
@@ -1441,13 +1504,16 @@ def extract_main_content(
     fallback = _fallback_extract_text(
         selector, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
+    hero = _hero_outside_container(
+        _main_container(raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors)
+    )
     if not text:
-        return fallback
+        return _prepend_hero(fallback, hero)
 
     reference_words = len(fallback.split()) if fallback else 0
     if fallback and _should_fall_back(text, reference_words) and len(fallback) > len(text):
-        return fallback
-    return text
+        return _prepend_hero(fallback, hero)
+    return _prepend_hero(text, hero)
 
 
 def _get_main_container_html(
@@ -1540,14 +1606,15 @@ def extract_main_content_markdown(
         raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
     reference_words = len(_block_text(container).split()) if container is not None else 0
+    hero = _hero_outside_container(container)
     if _should_fall_back(_dedupe_lines(text) if text else None, reference_words):
         fallback_md = _fallback_extract_markdown(
             selector, strip_promo=strip_promo, extra_selectors=extra_selectors
         )
         if fallback_md and len(fallback_md) > len(md):
-            return fallback_md
+            return _prepend_hero(fallback_md, hero)
 
-    return md
+    return _prepend_hero(md, hero)
 
 
 def compute_indexability_status(
