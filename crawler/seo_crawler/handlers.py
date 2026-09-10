@@ -46,11 +46,16 @@ class CompositeDownloadHandler:
         return cls(crawler, pw, imp)
 
     async def download_request(self, request: Request, spider=None):
-        handler = (
-            self._playwright
-            if request.meta.get("playwright")
-            else self._impersonate
-        )
+        es_playwright = bool(request.meta.get("playwright"))
+        if not es_playwright and not request.meta.get("impersonate"):
+            # scrapy-impersonate solo usa curl_cffi si la peticion lleva
+            # meta["impersonate"]; sin esto caia al handler de Twisted y el
+            # fingerprint de Chrome no se aplicaba nunca (un F5 que responde
+            # basura a la TLS de Twisted tumbaba el rastreo entero).
+            request.meta["impersonate"] = self._crawler.settings.get(
+                "IMPERSONATE", "chrome124"
+            )
+        handler = self._playwright if es_playwright else self._impersonate
         # Sub-handlers may use old signature (request, spider) or new (request).
         # Always pass spider when we have it; fall back to crawler.spider.
         _spider = spider or getattr(self._crawler, "spider", None)
