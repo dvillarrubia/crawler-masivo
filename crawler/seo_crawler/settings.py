@@ -160,10 +160,18 @@ PLAYWRIGHT_CONTEXTS = {
 # Abort requests for resources we don't need for SEO analysis.
 # This dramatically speeds up JS rendering by skipping images, fonts,
 # media, and tracking pixels — only HTML/CSS/JS reach the browser.
-PLAYWRIGHT_ABORT_REQUEST = lambda req: req.resource_type in (
-    "image", "media", "font", "texttrack", "eventsource",
-    "websocket", "manifest", "other",
-)
+# La analitica y la publicidad entran como `script`/`xhr`, asi que el filtro
+# por tipo no las veia: la lista de dominios vive en `blocklist.py`, que es
+# una funcion pura y con tests. `PLAYWRIGHT_BLOCK_TRACKERS=0` lo desactiva.
+_BLOQUEAR_TRACKERS = os.getenv("PLAYWRIGHT_BLOCK_TRACKERS", "1") != "0"
+
+
+def PLAYWRIGHT_ABORT_REQUEST(req) -> bool:  # noqa: N802 (nombre de Scrapy)
+    from crawler.seo_crawler.blocklist import TIPOS_BLOQUEADOS, debe_abortarse
+
+    if not _BLOQUEAR_TRACKERS:
+        return req.resource_type in TIPOS_BLOQUEADOS
+    return debe_abortarse(req.resource_type, req.url)
 # Alineado con DOWNLOAD_TIMEOUT (30s). Estaba en 15s para acelerar, pero al
 # quedar POR DEBAJO del timeout de Scrapy, Playwright abandonaba la navegacion
 # antes de que Scrapy llegase a considerarlo un fallo: paginas que responden

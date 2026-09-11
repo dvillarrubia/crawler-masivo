@@ -14,6 +14,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import logging
+import os
 import re
 import time
 from typing import Any, Generator
@@ -125,6 +126,10 @@ def _hash_key(url_hash: str) -> int:
 # consent overlays, chat widgets, and ARIA modals so extractors only see
 # real page content.
 # ---------------------------------------------------------------------------
+# Espera fija para que los gestores de consentimiento inyecten su banner
+# antes de que corra el JS que los quita. Configurable para poder medirla.
+_ESPERA_BANNERS_MS = int(os.getenv("PLAYWRIGHT_BANNER_WAIT_MS", "2000"))
+
 _BOILERPLATE_REMOVAL_JS = """
 () => {
     const r = (s) => { try { document.querySelectorAll(s).forEach(e => e.remove()); } catch(_) {} };
@@ -400,7 +405,11 @@ class SeoSpider(scrapy.Spider):
             "playwright_page_methods": [
                 # Brief wait for consent-management scripts to inject their
                 # banners (they typically fire on DOMContentLoaded / load).
-                PageMethod("wait_for_timeout", 2000),
+                # Es la mayor parte del tiempo de render — en el censo de
+                # 2026-09-10 la mediana de una pagina fue 2672 ms, de los que
+                # 2000 eran esta espera. Ajustable para poder medir cuanto
+                # contenido se pierde al bajarla antes de cambiar el defecto.
+                PageMethod("wait_for_timeout", _ESPERA_BANNERS_MS),
                 PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
             ],
         }
