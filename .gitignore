@@ -38,3 +38,4 @@ export_*.html
 
 # Override local de docker compose (puertos propios de cada maquina)
 docker-compose.override.yml
+exports/saunierduval_md/

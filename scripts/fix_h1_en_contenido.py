@@ -64,6 +64,24 @@ def _falta_titular(contenido: str | None, titular: str) -> bool:
     return not any(_norm(ln) == objetivo for ln in contenido.splitlines())
 
 
+def _norm_md(linea: str) -> str:
+    """Normaliza una linea de markdown para compararla con un titular.
+
+    Quita la marca de encabezado (`# `), el subrayado y el enfasis: en
+    markdown el mismo titular puede venir de tres formas distintas y todas
+    cuentan como presente.
+    """
+    return _norm(linea.lstrip("#").strip(" *_"))
+
+
+def _falta_titular_md(md: str | None, titular: str) -> bool:
+    """True cuando el titular no figura en el markdown en ninguna forma."""
+    if not md:
+        return True
+    objetivo = _norm(titular)
+    return not any(_norm_md(ln) == objetivo for ln in md.splitlines())
+
+
 def _anteponer(contenido: str | None, titular: str) -> str:
     return f"{titular}\n{contenido}" if contenido else titular
 
@@ -140,6 +158,44 @@ def revertir_diario(sesion, diario: dict, *, dry_run: bool) -> tuple[int, int]:
     return len(titulares), revertidas
 
 
+def limpiar_md_duplicado(sesion, job_id: str, *, dry_run: bool) -> tuple[int, int]:
+    """Quita el `# Titular` antepuesto al markdown cuando ya estaba dentro.
+
+    Una pasada anterior decidia mirando solo `content_text`: si el titular
+    faltaba alli lo anteponia tambien al markdown, donde a veces ya estaba
+    como encabezado. Resultado: el titular dos veces seguidas.
+    """
+    titulares = _h1_por_url(sesion, job_id)
+    if not titulares:
+        return 0, 0
+
+    limpiadas = 0
+    ids = list(titulares)
+    for i in range(0, len(ids), 500):
+        contenidos = sesion.execute(
+            select(PageContent).where(PageContent.url_id.in_(ids[i : i + 500]))
+        ).scalars().all()
+        for pc in contenidos:
+            titular = titulares[pc.url_id]
+            md = pc.content_markdown
+            if not md or _norm_md(md.split(chr(10), 1)[0]) != _norm(titular):
+                continue
+            trozos = md.split(chr(10), 1)
+            resto = trozos[1].lstrip(chr(10)) if len(trozos) > 1 else ""
+            # Solo se quita si el titular sigue estando en el resto: si no,
+            # este encabezado es el unico que hay y debe quedarse.
+            if _falta_titular_md(resto, titular):
+                continue
+            pc.content_markdown = resto or None
+            limpiadas += 1
+        if dry_run:
+            sesion.expunge_all()
+        else:
+            sesion.commit()
+
+    return len(titulares), limpiadas
+
+
 def reparar_job(sesion, job_id: str, *, dry_run: bool) -> tuple[int, dict[int, str]]:
     """Devuelve (paginas con h1 examinadas, {url_id: titular} reparadas)."""
     titulares = _h1_por_url(sesion, job_id)
@@ -204,6 +260,11 @@ def main() -> int:
         help="deshacer la pasada anotada en ese fichero de diario (.json)",
     )
     parser.add_argument(
+        "--limpiar-md",
+        action="store_true",
+        help="quitar el titular duplicado que una pasada anterior antepuso al markdown",
+    )
+    parser.add_argument(
         "--diario",
         metavar="RUTA",
         help="donde escribir el diario de lo reparado "
@@ -224,6 +285,18 @@ def main() -> int:
             )
             verbo = "se revertirian" if args.dry_run else "revertidas"
             print(f"{verbo} {revertidas} de las {examinadas} paginas del diario")
+            return 0
+
+        if args.limpiar_md:
+            total = 0
+            for job_id in args.jobs:
+                examinadas, limpiadas = limpiar_md_duplicado(
+                    sesion, job_id, dry_run=args.dry_run
+                )
+                total += limpiadas
+                print(f"  {job_id[:8]}  {limpiadas:>5} / {examinadas:<5}")
+            verbo = "se limpiarian" if args.dry_run else "limpiadas"
+            print(f"\n{verbo} {total} paginas con el titular duplicado en markdown")
             return 0
 
         if args.todos:
