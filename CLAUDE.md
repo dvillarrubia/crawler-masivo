@@ -287,6 +287,25 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    reaparece a media frase). Medido: 3/20 paginas de control de otros clientes
    cambian, y en las tres el cambio es recuperar el h1 que faltaba.
 
+12. **La espera de render va por el DOM, no por reloj** — antes eran 2 s
+   fijos por pagina, y eran la mayor parte del tiempo de render: en el censo
+   del 2026-09-10, 44 de los 62 minutos se fueron esperando a paginas que ya
+   habian terminado. Ahora `_JS_ESPERAR_DOM_QUIETO` espera a que el DOM lleve
+   400 ms sin mutar, con tope en los mismos 2000 ms (el peor caso es lo que
+   costaba antes). 30% menos de tiempo con el mismo texto y los mismos
+   enlaces en 8 plantillas de 5 sitios. Va como `evaluate` y no como
+   `wait_for_load_state("networkidle")` porque un PageMethod no puede capturar
+   excepciones: un sitio cuya red no calla nunca se caeria por timeout. La
+   promesa siempre resuelve.
+
+13. **Los sitios varian solos: medir una vez no es medir** — al bajar la
+   espera, cst.gov.sa parecia perder enlaces; repitiendo 5 veces por modo se
+   vio que varia solo (90/99/90/90/90 con la espera de SIEMPRE). Y una pagina
+   del canario cayo de 156 a 52 enlaces: con espera fija y con 5 s daba
+   tambien 52 — habia cambiado el sitio. Antes de atribuir una diferencia a un
+   cambio del crawler, repetirla contra el estado ACTUAL del sitio con la
+   configuracion vieja.
+
 11. **Browser TLS impersonation must be requested per-request** —
    `scrapy-impersonate` only routes through curl_cffi when the request carries
    `meta["impersonate"]`; the composite handler sets it for every non-Playwright
@@ -316,6 +335,11 @@ API_PORT=8000
 JS_CONCURRENT_REQUESTS=8
 JS_CONCURRENT_PER_DOMAIN=4
 PLAYWRIGHT_MAX_PAGES=8
+
+# Render: espera y bloqueo de terceros
+PLAYWRIGHT_BANNER_WAIT_MS=2000   # tope de la espera a que el DOM se calme
+PLAYWRIGHT_DOM_QUIET_MS=400      # cuanto DOM quieto se considera "ha terminado"
+PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
