@@ -103,12 +103,54 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 
 ```bash
 pip install -r tests/requirements.txt
-pytest        # desde la raíz del repo — 56 casos, deben salir todos en verde
+pytest        # desde la raíz del repo — 128 casos, deben salir todos en verde
 ```
 Cubren las funciones puras de extracción y la validación de datos
 estructurados. La capa que toca base de datos (hreflang recíproco, inlinks,
 orphan, pagerank) NO es unit-testeable sin una BD: se verifica con las
 consultas SQL de la sección 9.
+
+### Resultado de la verificación — 2026-09-11
+
+El checklist se pasó contra **dos censos reales de producción** en lugar de
+crawls de prueba: `b8ea3e43` (Saunier Duval, `render_js=true`, 2876 URLs) y
+`1bd390c1` (Lopesan, sin JS, 4150 páginas con h1). Cubren el par "con y sin
+JS" que pedía este documento.
+
+| Consulta | Fix | Resultado |
+|---|---|---|
+| Q1 | 2.1, 2.4 | ✅ SD: 1064 indexables / 221 no. Sin el falso "Canonicalised" masivo |
+| Q2 | 2.3 | ✅ repartido: nav 53.636, content 16.036, footer 13.067, header 8.338, sidebar 4.032 |
+| Q3 | 3.1 | ✅ 1014 páginas (SD) y 1813 (Lopesan) con `inlinks_count > unique_inlinks_count` |
+| Q4 | 3.2 | ✅ 1304/1304 páginas JS con `response_time_ms > 0` |
+| Q4 | 3.3 | ⚠️ `http_version` NULL en el job con JS (4191/4191 poblado sin JS). Conocido, no es regresión |
+| Q6 | 2.2 | ✅ 0 enlaces mal formados en ambos censos |
+| Q7 | 4.1 | ✅ flags poblados. Los NULL son autorreferencias (`target_uid == url_id`), que es lo correcto |
+| Q8 | 4.2 | ✅ un solo `orphan_page`, en profundidad 1 y 200. La home no aparece |
+| Q9 | 4.3 | ✅ los 77 `low_word_count` son todos 200 |
+| Q10 | 4.4 | ✅ `validation_status` poblado: 1500 ok + 6 warning (SD), 33.927 ok (Lopesan) |
+| Q11 | 4.5 | ✅ los 897 `title_duplicate` son todos 200 |
+| Q13 | 8b.6 | ❌ **falla** con `meta robots` separado por barras — ver abajo |
+
+**Lo que falló (Q13).** `robots_tokens` separa por comas y espacios, pero no
+por barras, y hay plantillas que escriben `index/follow` y `noindex/nofollow`
+(68 + 1 páginas en este censo). El valor queda como un único token
+desconocido: no se detecta el `nofollow` y los 91 enlaces de esa página siguen
+contando como follow, inflando el PageRank.
+
+Ojo antes de "arreglarlo" tokenizando por barra: la sintaxis oficial es la
+coma, y si Google tampoco interpreta `noindex/nofollow`, entonces la página SÍ
+se indexa y marcarla como noindex sería un falso positivo — el cliente creería
+que está fuera del índice cuando no lo está. Lo valioso aquí es **avisar de la
+sintaxis inválida** como issue propio, sin cambiar la indexabilidad calculada:
+el hallazgo es que el bloqueo que el cliente cree tener no funciona.
+
+**Hallazgo lateral, no del crawler.** Los 402 `hreflang_missing_return` de SD
+no son un fallo del analizador: `saunierduval.es` (sin www) sirve 362 páginas
+con 200 y **sin canonical**, declarando hreflang hacia `www.`, que a su vez
+solo se declara a sí misma. El cálculo es correcto; lo que hay debajo es una
+duplicación de host sin canonicalizar, que es un hallazgo SEO de primer orden
+para ese cliente.
 
 ### Cómo usar el checklist
 
@@ -134,10 +176,10 @@ por SQL apuntan a las consultas **Q1–Q12** de la sección 9.
 
 | # | Bug | Arreglo | Verificación en producción | Estado |
 |---|-----|---------|-----------------------------|--------|
-| 2.1 | **Canonical relativo** (`href="/ruta"`) no se resolvía a absoluto → páginas auto-canónicas marcadas falsamente como "Canonicalised" / **no indexables** | `extract_meta` resuelve canonical/og:url/og:image/rel next-prev a absoluto respetando `<base href>` | Ver consulta SQL **Q1**. En un sitio con canonicals root-relative, la mayoría de páginas 200 deben quedar `indexable = true` | ☐ |
-| 2.2 | `<base href>` ignorado al resolver enlaces/recursos/hreflang | `extract_links`/`extract_resources`/`extract_hreflang` reciben el base efectivo | Crawl de una página con `<base href>`; confirma que las URLs de enlaces no están mal formadas (Q6) | ☐ |
-| 2.3 | Clasificación de posición de enlace invertida: un wrapper externo (`<div class="site-header">`) etiquetaba **todos** los enlaces como `header` | `_detect_link_position` gana el ancestro más cercano | Ver **Q2**: la distribución de `link_position` debe repartirse (content/nav/footer), no ser casi todo header | ☐ |
-| 2.4 | Analyzer comparaba canonical con igualdad exacta de strings | Normalización con w3lib (`_norm_url`) en `analyze_canonicals` e `analyze_indexability` | Q1 + revisar que `canonical_broken` no aparece para canonicals válidos con trailing slash | ☐ |
+| 2.1 | **Canonical relativo** (`href="/ruta"`) no se resolvía a absoluto → páginas auto-canónicas marcadas falsamente como "Canonicalised" / **no indexables** | `extract_meta` resuelve canonical/og:url/og:image/rel next-prev a absoluto respetando `<base href>` | Ver consulta SQL **Q1**. En un sitio con canonicals root-relative, la mayoría de páginas 200 deben quedar `indexable = true` | ✅ |
+| 2.2 | `<base href>` ignorado al resolver enlaces/recursos/hreflang | `extract_links`/`extract_resources`/`extract_hreflang` reciben el base efectivo | Crawl de una página con `<base href>`; confirma que las URLs de enlaces no están mal formadas (Q6) | ✅ |
+| 2.3 | Clasificación de posición de enlace invertida: un wrapper externo (`<div class="site-header">`) etiquetaba **todos** los enlaces como `header` | `_detect_link_position` gana el ancestro más cercano | Ver **Q2**: la distribución de `link_position` debe repartirse (content/nav/footer), no ser casi todo header | ✅ |
+| 2.4 | Analyzer comparaba canonical con igualdad exacta de strings | Normalización con w3lib (`_norm_url`) en `analyze_canonicals` e `analyze_indexability` | Q1 + revisar que `canonical_broken` no aparece para canonicals válidos con trailing slash | ✅ |
 
 ---
 
@@ -145,9 +187,9 @@ por SQL apuntan a las consultas **Q1–Q12** de la sección 9.
 
 | # | Bug | Arreglo | Verificación en producción | Estado |
 |---|-----|---------|-----------------------------|--------|
-| 3.1 | `extract_links` deduplicaba por página → `inlinks_count == unique_inlinks_count` siempre, y outlinks infravalorados | Se elimina el dedup; se conservan todas las instancias. El follow del spider deduplica su propio set | Ver **Q3**: deben existir páginas con `inlinks_count > unique_inlinks_count` | ☐ |
-| 3.2 | `response_time_ms = 0` en páginas renderizadas con JS (Playwright no setea `download_latency`) | El `CompositeDownloadHandler` mide el tiempo y rellena `download_latency` | Ver **Q4** en un job con `render_js=true`: `response_time_ms` > 0 en páginas HTML | ☐ |
-| 3.3 | `http_version` vacío en páginas JS | El handler preserva el protocolo en meta | **Q4**: revisar `http_version` en el job JS. ⚠️ Depende de lo que exponga scrapy-playwright; si sigue NULL, no es regresión (no se fabrica valor) | ☐ |
+| 3.1 | `extract_links` deduplicaba por página → `inlinks_count == unique_inlinks_count` siempre, y outlinks infravalorados | Se elimina el dedup; se conservan todas las instancias. El follow del spider deduplica su propio set | Ver **Q3**: deben existir páginas con `inlinks_count > unique_inlinks_count` | ✅ |
+| 3.2 | `response_time_ms = 0` en páginas renderizadas con JS (Playwright no setea `download_latency`) | El `CompositeDownloadHandler` mide el tiempo y rellena `download_latency` | Ver **Q4** en un job con `render_js=true`: `response_time_ms` > 0 en páginas HTML | ✅ |
+| 3.3 | `http_version` vacío en páginas JS | El handler preserva el protocolo en meta | **Q4**: revisar `http_version` en el job JS. ⚠️ Depende de lo que exponga scrapy-playwright; si sigue NULL, no es regresión (no se fabrica valor) | ⚠️ |
 | 3.4 | **Integridad**: `pipelines._flush` borraba hijos por `from_url_id` en cada batch de 200 → páginas con >200 enlaces perdían los insertados en batches previos | Cada `url_id` se limpia una sola vez por run | **Q5**: en una página con muchos enlaces, `COUNT(links)` debe coincidir aprox. con los `<a href>` reales del HTML | ☐ |
 
 ---
@@ -156,11 +198,11 @@ por SQL apuntan a las consultas **Q1–Q12** de la sección 9.
 
 | # | Bug | Arreglo | Verificación en producción | Estado |
 |---|-----|---------|-----------------------------|--------|
-| 4.1 | **hreflang recíproco muerto**: `return_tag_ok`/`lang_valid` no se escribían nunca → `hreflang_missing_return` jamás se emitía y los insights de i18n daban score ~0 | `analyze_hreflang` calcula y persiste ambos flags (validación recíproca real por URL normalizada) | Ver **Q7**: `hreflang.return_tag_ok` y `lang_valid` ya no son todo NULL; el score i18n en `/insights` deja de ser 0 con hreflang correcto | ☐ |
-| 4.2 | **Orphan pages con falsos positivos**: home/semillas y 404/redirect marcados huérfanos | Sólo páginas internas 200 con `crawl_depth > 0` | **Q8**: el issue `orphan_page` no debe incluir la home ni URLs 404 | ☐ |
-| 4.3 | Ruido de contenido: `low_word_count`/`text_ratio` en páginas 404/no-HTML | Restringido a internas 200 | **Q9**: `low_word_count` sólo sobre páginas 200 | ☐ |
-| 4.4 | **`analyze_structured_data` muerto**: `validation_status`/`validation_issues` no se escribían nunca → 0 issues siempre | Validación conservadora desde el JSON crudo (`@type` ausente = error; propiedad requerida faltante = warning). Persiste el resultado | **Q10**: en un sitio con datos estructurados, deben aparecer filas con `validation_status` poblado; los issues `structured_data_error/warning` aparecen sólo si hay errores reales | ☐ |
-| 4.5 | Duplicados de title/description incluían páginas no indexables/404 | Agrupación restringida a internas 200 | **Q11**: `title_duplicate` no debe incluir páginas 404 con título de plantilla | ☐ |
+| 4.1 | **hreflang recíproco muerto**: `return_tag_ok`/`lang_valid` no se escribían nunca → `hreflang_missing_return` jamás se emitía y los insights de i18n daban score ~0 | `analyze_hreflang` calcula y persiste ambos flags (validación recíproca real por URL normalizada) | Ver **Q7**: `hreflang.return_tag_ok` y `lang_valid` ya no son todo NULL; el score i18n en `/insights` deja de ser 0 con hreflang correcto | ✅ |
+| 4.2 | **Orphan pages con falsos positivos**: home/semillas y 404/redirect marcados huérfanos | Sólo páginas internas 200 con `crawl_depth > 0` | **Q8**: el issue `orphan_page` no debe incluir la home ni URLs 404 | ✅ |
+| 4.3 | Ruido de contenido: `low_word_count`/`text_ratio` en páginas 404/no-HTML | Restringido a internas 200 | **Q9**: `low_word_count` sólo sobre páginas 200 | ✅ |
+| 4.4 | **`analyze_structured_data` muerto**: `validation_status`/`validation_issues` no se escribían nunca → 0 issues siempre | Validación conservadora desde el JSON crudo (`@type` ausente = error; propiedad requerida faltante = warning). Persiste el resultado | **Q10**: en un sitio con datos estructurados, deben aparecer filas con `validation_status` poblado; los issues `structured_data_error/warning` aparecen sólo si hay errores reales | ✅ |
+| 4.5 | Duplicados de title/description incluían páginas no indexables/404 | Agrupación restringida a internas 200 | **Q11**: `title_duplicate` no debe incluir páginas 404 con título de plantilla | ✅ |
 | 4.6 | Rotación de User-Agent muerta (intencional con TLS impersonation) | Documentado en el docstring; NO se cambia el comportamiento (rotar UA con fingerprint TLS fijo delataría al crawler) | N/A — decisión de diseño documentada | ✅ |
 
 ---
@@ -219,7 +261,7 @@ Screaming Frog maneja y el crawler no manejaba.
 | 8b.3 | `content="none"` y `"noindex nofollow"` (sin comas) **no detectados** como noindex | Nuevo `robots_tokens()`: separa por comas Y espacios; `none` = noindex | Test unitario | ☐ |
 | 8b.4 | `<title>` de un **SVG inline** podía capturarse como título de página | El título se toma del primer `<title>` fuera de `ancestor::svg`, uniendo todos sus nodos de texto | Test unitario | ☐ |
 | 8b.5 | `word_count` contaba texto de `<template>` (DOM alternativo de frameworks JS, invisible) → conteos inflados | `<template>` excluido de word count y visible text (consistente con headings) | Test unitario; comparar word_count con SF en una página Vue/Nuxt | ☐ |
-| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` | ☐ |
+| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` | ❌ |
 | 8b.7 | No se extraían enlaces de `<area href>` (mapas de imagen); SF sí los cuenta | `extract_links` incluye `area[href]` con su `alt` como anchor | Test unitario | ☐ |
 | 8b.8 | Enlaces `href="#..."` (sólo fragmento) contaban como self-links, inflando inlinks al quitar el dedup | Se omiten los href que empiezan por `#` | Test unitario | ☐ |
 
@@ -385,6 +427,37 @@ otros sólo el análisis (basta re-analizar), otros sólo export/UI (nada).
 | **A — dato crudo corrupto** | 2.1 canonical, 2.3 posición enlace, 3.1 inlinks, 3.2/3.3 timing JS, 3.4 >200 enlaces | **Re-crawl limpio** (job nuevo). `Reanudar` NO vale: salta las páginas ya rastreadas y no reescribe el dato |
 | **B — sólo análisis** | 4.1 hreflang, 4.2 orphan, 4.3 contenido, 4.4 structured data, 4.5 duplicados | **Re-analizar**: `Reanudar` el job (re-ejecuta el análisis sobre el dato existente) |
 | **C — sólo export/UI** | 1.x export, 6.1 GSC, 8.x UI | Nada: re-exportar el CSV / recargar la página |
+
+### Diagnóstico ejecutado — 2026-09-11
+
+D1–D3 pasadas sobre **todos** los jobs de la base con más de 50 URLs:
+
+| Job | Fecha | Canonicals relativos | Inlinks por instancia |
+|---|---|---|---|
+| `b8ea3e43` Saunier Duval | 09-10 | 0 | 1013 ✅ |
+| `1bd390c1` Lopesan v3 | 09-09 | 0 | 1813 ✅ |
+| `60dc6c8d` Lopesan v2 | 09-08 | 0 | 1811 ✅ |
+| `29cffdc1` / `b396297f` / `c81ab228` Lopesan julio | 07-15 | 0 | **0** ❌ |
+| `d3fda8a5` / `065ef400` / `ece8b531` penguin | 07-13 | 0 | **0** ❌ |
+| `6bd60313` / `e96d7f44` CST | 06-25 | 0 | **0** ❌ |
+| `49ddb8f5` Salle (19.802 págs) | 05-11 | 0 | **0** ❌ |
+
+**Canonicals relativos: 0 en todos los jobs.** El bug 2.1, que era "el más
+impactante" de la auditoría, no llegó a contaminar ningún censo guardado — no
+hay nada que re-crawlear por ese motivo, y las indexabilidades viejas se
+pueden mirar sin sospecha. Esto retira el cubo A casi entero.
+
+**El que sí mordió es el 3.1 (dedup de inlinks).** Todo lo anterior al
+2026-09-08 tiene `inlinks_count == unique_inlinks_count` en todas sus páginas,
+que es la firma del bug: enlaces repetidos (nav, footer, migas) contados una
+sola vez. En esos censos los inlinks y outlinks están infravalorados y **el
+PageRank se calculó sobre un grafo incompleto**. Afecta a CST, Salle, penguin
+y a los tres Lopesan de julio.
+
+Consecuencia práctica: si de uno de esos censos solo se usan títulos, metas,
+contenido o códigos de estado, sirven tal cual. Si se usan métricas de
+enlazado interno o PageRank —que es justo para lo que se pidió el censo
+compartido de Saunier Duval— hay que re-crawlear.
 
 ### Consultas para MEDIR el daño en cada job existente
 
