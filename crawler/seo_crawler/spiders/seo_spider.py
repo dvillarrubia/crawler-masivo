@@ -126,9 +126,42 @@ def _hash_key(url_hash: str) -> int:
 # consent overlays, chat widgets, and ARIA modals so extractors only see
 # real page content.
 # ---------------------------------------------------------------------------
-# Espera fija para que los gestores de consentimiento inyecten su banner
-# antes de que corra el JS que los quita. Configurable para poder medirla.
-_ESPERA_BANNERS_MS = int(os.getenv("PLAYWRIGHT_BANNER_WAIT_MS", "2000"))
+# Antes de leer el HTML hay que dar tiempo a que el JS de la pagina termine:
+# los gestores de consentimiento inyectan su banner (para que el limpiador de
+# abajo pueda quitarlo) y muchas plantillas montan en cliente listados y
+# enlaces. Esto era una espera FIJA de 2 s por pagina, y era la mayor parte
+# del tiempo de render: en el censo del 2026-09-10 la mediana de una pagina
+# fue 2672 ms, de los que 2000 eran esta espera — 44 de los 62 minutos de
+# render, esperando a paginas que ya habian terminado.
+#
+# Ahora se espera a que el DOM lleve QUIETO_MS sin mutar, con tope en TOPE_MS.
+# Medido sobre 8 plantillas de 5 sitios (Astro, Next.js, Liferay, Symfony):
+# mismo texto y mismos enlaces en todas, 30% menos de tiempo.
+#
+# Va como `evaluate` y no como `wait_for_load_state("networkidle")` a
+# proposito: un PageMethod no puede capturar excepciones, asi que un sitio
+# cuya red no calla nunca (polling, chat, websockets) tumbaria la pagina por
+# timeout. Esta promesa SIEMPRE resuelve, y el tope la acota.
+_ESPERA_TOPE_MS = int(os.getenv("PLAYWRIGHT_BANNER_WAIT_MS", "2000"))
+_ESPERA_QUIETO_MS = int(os.getenv("PLAYWRIGHT_DOM_QUIET_MS", "400"))
+
+_JS_ESPERAR_DOM_QUIETO = """
+() => new Promise((resolve) => {
+    const TOPE = %d, QUIETO = %d;
+    let t = null;
+    const obs = new MutationObserver(() => reinicia());
+    const fin = () => {
+        clearTimeout(t); clearTimeout(tope);
+        try { obs.disconnect(); } catch (_) {}
+        resolve();
+    };
+    const reinicia = () => { clearTimeout(t); t = setTimeout(fin, QUIETO); };
+    const tope = setTimeout(fin, TOPE);
+    try { obs.observe(document, { childList: true, subtree: true }); }
+    catch (_) { fin(); return; }
+    reinicia();
+})
+""" % (_ESPERA_TOPE_MS, _ESPERA_QUIETO_MS)
 
 _BOILERPLATE_REMOVAL_JS = """
 () => {
@@ -403,13 +436,10 @@ class SeoSpider(scrapy.Spider):
                 "wait_until": "domcontentloaded",
             },
             "playwright_page_methods": [
-                # Brief wait for consent-management scripts to inject their
-                # banners (they typically fire on DOMContentLoaded / load).
-                # Es la mayor parte del tiempo de render — en el censo de
-                # 2026-09-10 la mediana de una pagina fue 2672 ms, de los que
-                # 2000 eran esta espera. Ajustable para poder medir cuanto
-                # contenido se pierde al bajarla antes de cambiar el defecto.
-                PageMethod("wait_for_timeout", _ESPERA_BANNERS_MS),
+                # Esperar a que la pagina termine de montarse (ver arriba) y
+                # solo entonces quitar banners: al reves, el limpiador correria
+                # antes de que el banner exista.
+                PageMethod("evaluate", _JS_ESPERAR_DOM_QUIETO),
                 PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
             ],
         }
