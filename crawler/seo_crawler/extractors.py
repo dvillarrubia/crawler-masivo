@@ -1359,6 +1359,55 @@ def _prepend_hero(texto: str | None, hero: str | None) -> str | None:
     return "\n".join(nuevas) + "\n" + texto
 
 
+# Al recuperar el bloque del <h1> se sube por los ancestros mientras el bloque
+# siga siendo pequeno frente al contenedor: un hero son el titular y un par de
+# lineas (categoria, fecha, claim), no el articulo entero.
+_HERO_MAX_SHARE = 0.3
+_HERO_MIN_WORDS_ABS = 60
+
+
+def _hero_dentro_perdido(container, texto: str | None) -> str | None:
+    """Texto del bloque del <h1> cuando esta DENTRO del contenedor y el
+    extractor lo ha tirado igualmente.
+
+    [[_hero_outside_container]] cubre el caso del h1 fuera de ``<main>``. Pero
+    hay plantillas (``<main><article><div class=hero><h1>``) donde el hero SI
+    esta dentro y trafilatura lo descarta por su pinta de cabecera. Si ademas
+    conserva bastante del resto del contenedor, la comprobacion de share no se
+    dispara y el titular de la pagina desaparece sin que nada lo avise. Se sube
+    desde el h1 mientras el bloque siga siendo una fraccion pequena del
+    contenedor, para arrastrar el subtitulo del hero pero no el articulo.
+    """
+    if container is None:
+        return None
+    h1 = next(container.iter("h1"), None)
+    if h1 is None:
+        return None
+    titulo = _WHITESPACE.sub(" ", h1.text_content()).strip()
+    if len(titulo) < 4:
+        return None
+    # Presente = el titular aparece como LINEA propia. Buscarlo como subcadena
+    # da falsos positivos: en un texto largo la marca o el nombre del producto
+    # reaparecen a media frase y el hero se daria por recuperado sin estarlo.
+    if texto and any(
+        _WHITESPACE.sub(" ", ln).strip().lower() == titulo.lower()
+        for ln in texto.splitlines()
+    ):
+        return None
+    tope = max(
+        _HERO_MIN_WORDS_ABS,
+        int(len(container.text_content().split()) * _HERO_MAX_SHARE),
+    )
+    bloque = h1
+    padre = bloque.getparent()
+    while padre is not None and padre is not container:
+        if len(padre.text_content().split()) > tope:
+            break
+        bloque = padre
+        padre = bloque.getparent()
+    return _block_text(bloque) or None
+
+
 def _main_container(
     html: str, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
 ):
@@ -1470,6 +1519,11 @@ def _should_fall_back(candidate: str | None, reference_words: int) -> bool:
 # Indexability analysis
 # ---------------------------------------------------------------------------
 
+def _con_hero(texto: str | None, container) -> str | None:
+    """Pega delante el hero interior si el extractor se lo ha dejado fuera."""
+    return _prepend_hero(texto, _hero_dentro_perdido(container, texto))
+
+
 def extract_main_content(
     selector,
     *,
@@ -1504,16 +1558,17 @@ def extract_main_content(
     fallback = _fallback_extract_text(
         selector, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
-    hero = _hero_outside_container(
-        _main_container(raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors)
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
+    hero = _hero_outside_container(container)
     if not text:
-        return _prepend_hero(fallback, hero)
+        return _con_hero(_prepend_hero(fallback, hero), container)
 
     reference_words = len(fallback.split()) if fallback else 0
     if fallback and _should_fall_back(text, reference_words) and len(fallback) > len(text):
-        return _prepend_hero(fallback, hero)
-    return _prepend_hero(text, hero)
+        return _con_hero(_prepend_hero(fallback, hero), container)
+    return _con_hero(_prepend_hero(text, hero), container)
 
 
 def _get_main_container_html(
@@ -1612,9 +1667,9 @@ def extract_main_content_markdown(
             selector, strip_promo=strip_promo, extra_selectors=extra_selectors
         )
         if fallback_md and len(fallback_md) > len(md):
-            return _prepend_hero(fallback_md, hero)
+            return _con_hero(_prepend_hero(fallback_md, hero), container)
 
-    return _prepend_hero(md, hero)
+    return _con_hero(_prepend_hero(md, hero), container)
 
 
 def compute_indexability_status(

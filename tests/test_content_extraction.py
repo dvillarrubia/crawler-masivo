@@ -217,3 +217,40 @@ def test_hero_inside_main_is_not_duplicated():
     out = ex.extract_main_content(sel(html))
     assert out
     assert out.lower().count("titular unico") == 1
+
+
+def test_hero_inside_main_discarded_by_trafilatura_is_recovered():
+    """Plantilla ``<main><article><div class=hero><h1>``: el hero esta DENTRO
+    del contenedor y aun asi trafilatura lo tira, sin que la comprobacion de
+    share salte porque conserva el resto del articulo."""
+    html = (
+        "<html><body><main><article>"
+        "<div class='hero hero--post'><div class='hero__content'>"
+        "<h1 class='hero__title'>Centro de XPERIENCIA Saunier Duval</h1>"
+        "<a class='category' href='/proyectos'>Proyectos</a>"
+        "</div></div>"
+        "<div class='post__body'><h2>Predicar con el ejemplo</h2><p>"
+        + ("Cuerpo del reportaje con palabras de sobra para que el extractor "
+           "lo tome por contenido principal y no se dispare el fallback. " * 8)
+        + "</p></div></article></main></body></html>"
+    )
+    out = ex.extract_main_content(sel(html))
+    assert out
+    assert out.splitlines()[0] == "Centro de XPERIENCIA Saunier Duval"
+    assert out.lower().count("centro de xperiencia saunier duval") == 1
+    assert "Predicar con el ejemplo" in out
+
+
+def test_hero_present_only_mid_sentence_still_counts_as_missing():
+    """El titular reaparece a media frase en el cuerpo: eso no es tenerlo."""
+    html = (
+        "<html><body><main><article>"
+        "<div class='hero'><h1>Centro de XPERIENCIA</h1></div>"
+        "<div class='post__body'><p>"
+        + ("Este parrafo menciona el Centro de XPERIENCIA a media frase y "
+           "sigue con mucho mas texto de relleno para el extractor. " * 8)
+        + "</p></div></article></main></body></html>"
+    )
+    out = ex.extract_main_content(sel(html))
+    assert out
+    assert out.splitlines()[0] == "Centro de XPERIENCIA"
