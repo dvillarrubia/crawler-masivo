@@ -275,6 +275,18 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    is outside the container, prepending only the lines not already present. A
    `<figcaption>` containing headings is unwrapped to a `<div>`: it is a hero,
    not a photo caption.
+10b. **El hero tambien se pierde estando DENTRO del contenedor** — el caso
+   contrario al anterior y mas comun: `<main><article><div class=hero><h1>`.
+   trafilatura lo descarta por su pinta de cabecera mientras conserva el resto
+   del articulo, asi que la comprobacion de share no salta (0.75 > 0.7) y el
+   titular desaparece sin aviso. `_hero_dentro_perdido` sube desde el `<h1>`
+   por los ancestros mientras el bloque siga siendo una fraccion pequena del
+   contenedor (30% / 60 palabras), para arrastrar la categoria o el subtitulo
+   del hero pero nunca el articulo. El titular se da por presente solo si
+   aparece como LINEA propia: como subcadena da falsos positivos (la marca
+   reaparece a media frase). Medido: 3/20 paginas de control de otros clientes
+   cambian, y en las tres el cambio es recuperar el h1 que faltaba.
+
 11. **Browser TLS impersonation must be requested per-request** —
    `scrapy-impersonate` only routes through curl_cffi when the request carries
    `meta["impersonate"]`; the composite handler sets it for every non-Playwright
