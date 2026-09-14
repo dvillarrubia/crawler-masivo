@@ -88,6 +88,7 @@ SORT_COLUMNS = {
     "external_outlinks_count": Url.external_outlinks_count,
     "unique_inlinks_count": Url.unique_inlinks_count,
     "pagerank": Url.pagerank,
+    "near_duplicate_count": Url.near_duplicate_count,
     "url_length": Url.url_length,
     "folder_depth": Url.folder_depth,
     "text_ratio": Url.text_ratio,
@@ -102,6 +103,8 @@ SORT_COLUMNS = {
 # Numeric range filters mapped to (model_column, requires_html_meta_join)
 _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "pagerank": (Url.pagerank, False),
+    "near_duplicate_count": (Url.near_duplicate_count, False),
+    "closest_similarity": (Url.closest_similarity, False),
     "content_length": (Url.content_length, False),
     "transfer_size": (Url.transfer_size, False),
     "word_count": (Url.word_count, False),
@@ -566,6 +569,8 @@ CSV_COLUMNS = [
     "external_outlinks_count",
     "pagerank",
     "in_sitemap",
+    "near_duplicate_count",
+    "closest_similarity",
     "title",
     "title_len",
     "title_pixel_width",
@@ -630,6 +635,8 @@ def _csv_row(url_obj: Url) -> list[str]:
         _val(url_obj.external_outlinks_count),
         _val(url_obj.pagerank),
         _val(url_obj.in_sitemap),
+        _val(url_obj.near_duplicate_count),
+        _val(url_obj.closest_similarity),
         # HtmlMeta fields
         _val(meta.title) if meta else "",
         _val(meta.title_len) if meta else "",

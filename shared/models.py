@@ -111,6 +111,10 @@ class Url(Base):
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
     pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
+    # Casi duplicados (MinHash). NULL = no se midio (sin contenido, o texto
+    # por debajo del minimo de palabras); 0 = se midio y no tiene ninguna.
+    near_duplicate_count = Column(Integer, nullable=True, default=None)
+    closest_similarity = Column(Float, nullable=True, default=None)
     # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
     in_sitemap = Column(Boolean, nullable=True, default=None)
 

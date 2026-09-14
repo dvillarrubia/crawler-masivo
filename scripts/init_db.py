@@ -26,6 +26,9 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS blocked_by_robots BOOLEAN"))
         # Sitemap ingestion: NULL = no sitemap data for the job
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS in_sitemap BOOLEAN"))
+        # Casi duplicados (MinHash): NULL = no medido, 0 = medido y sin ninguna
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS near_duplicate_count INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))
         # Comprobacion automatica de render JS por plantilla

@@ -566,12 +566,63 @@ Contenido como texto/markdown limpio, PageRank interno ponderado, análisis
 semántico (embeddings, clusters, canibalización), ejecución distribuida en
 servidor con API y UI multi-usuario.
 
+### Hecho desde entonces
+
+**Near-duplicate content (2026-09-14).** `analyze_near_duplicates()` +
+`analysis/near_duplicates.py`. MinHash sobre trigramas de
+`page_content.content_text` con LSH para los candidatos; umbral 0,9
+configurable por job (`analysis_thresholds.near_duplicate_similarity`).
+Rellena `urls.near_duplicate_count` y `urls.closest_similarity`, emite
+`near_duplicate_content` y sale en el export CSV y en la tabla de la UI.
+
+Se implementó con MinHash y no con simhash, como decía la nota original,
+porque la distancia de simhash no es reportable: sobre 300 palabras, cambiar
+10 da 0,81 de "similitud" cuando el solape real es del 97%. Ver decisiones
+16-18 de CLAUDE.md.
+
+**⚠️ Migración**: dos columnas nuevas en `urls`. Al desplegar,
+`docker compose exec api python scripts/init_db.py` (los `ALTER TABLE ... IF
+NOT EXISTS` ya están dentro).
+
+Sobre censos ya rastreados **no hace falta re-rastrear ni re-analizar entero**:
+
+```bash
+# Cuenta sin escribir
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id> --dry-run
+# Escribe solo las columnas y las incidencias near_duplicate_content
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id>
+# Sitios muy de plantilla: el umbral es el mando
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id> --umbral 0.85
+```
+
+```sql
+-- Q15. Casi duplicados. Sólo 200 HTML con texto medible entran en el reparto:
+-- NULL = no se pudo medir, 0 = medido y sin ninguna.
+SELECT
+  COUNT(*) FILTER (WHERE near_duplicate_count IS NULL)  AS sin_medir,
+  COUNT(*) FILTER (WHERE near_duplicate_count = 0)      AS unicas,
+  COUNT(*) FILTER (WHERE near_duplicate_count > 0)      AS con_casi_duplicadas,
+  COUNT(*) FILTER (WHERE closest_similarity >= 0.999)   AS identicas
+FROM urls WHERE job_id = '<JOB_ID>' AND is_html AND status_code = 200;
+
+-- Los peores casos, para mirarlos a ojo antes de contárselo al cliente.
+SELECT url, near_duplicate_count, ROUND(closest_similarity::numeric, 3) AS similitud
+FROM urls
+WHERE job_id = '<JOB_ID>' AND near_duplicate_count > 0
+ORDER BY closest_similarity DESC, near_duplicate_count DESC
+LIMIT 30;
+```
+
+Lo que hay que mirar con ojo crítico en el resultado: un paginado o un
+buscador interno saldrán como casi duplicados y **no siempre son un defecto**;
+lo que sí lo es son fichas o landings distintas con el mismo texto. Ver
+[[feedback_seo_audit_myths]] antes de subirlo a un informe como hallazgo.
+
 ### Gaps pendientes (de más a menos valor estimado)
 
 | Prioridad | Gap | Notas |
 |-----------|-----|-------|
 | ⭐⭐⭐ | **Custom extraction / custom search** (XPath/CSS/regex por job) | La feature de SF más usada en consultoría; encaja en `extraction` del job config |
-| ⭐⭐⭐ | **Near-duplicate content** (simhash) | Hoy sólo detectamos contenido byte-idéntico (`body_hash`) |
 | ⭐⭐ | **JavaScript tab** (HTML crudo vs renderizado) | Ya rastreamos con y sin JS; falta la doble captura y la comparación (palabras/enlaces solo-JS, render time) |
 | ⭐⭐ | **Pagination tab** | `rel_next/prev` ya se guardan; falta el análisis (bucles, secuencias, paginación no enlazada) |
 | ⭐⭐ | **PageSpeed tab** (API PSI / CWV) | Integración de API, no crawling; ~50 métricas |
@@ -599,8 +650,10 @@ servidor con API y UI multi-usuario.
   Rich Results. Ampliable por tipo si se necesita.
 - **`http_version` en JS**: depende de que scrapy-playwright exponga el
   protocolo; puede quedar NULL en algunas versiones (no es regresión).
-- **Near-duplicate content** (simhash) sigue sin existir; `analyze_duplicates`
-  sólo detecta contenido byte-idéntico (`body_hash`).
+- **Casi duplicados**: el LSH se deja ~1 de cada 25 parejas que caen justo en
+  el umbral (por encima, ninguna), y con umbral por debajo de 0,6 el recuento
+  deja de ser fiable (se registra un WARNING). La similitud es una estimación
+  con ~2 puntos de desvío, no un cálculo exacto.
 - **Tests de integración del analyzer** (con BD): no existen aún; la capa de
   análisis se valida con las consultas SQL de arriba. Candidato a añadir con
   SQLite/Postgres de test.

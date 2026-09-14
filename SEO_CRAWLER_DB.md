@@ -75,6 +75,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | external_outlinks_count | int | Outlinks externos |
 | unique_inlinks_count | int | Paginas unicas que enlazan aqui |
 | pagerank | float | PageRank interno (0-10) |
+| near_duplicate_count | int | Paginas con >= 90% del mismo contenido. NULL = no medido (sin texto o texto corto), 0 = medido y ninguna |
+| closest_similarity | float | Similitud con la pagina mas parecida, 0-1 (1 = contenido identico) |
 | url_length | int | Longitud de la URL en caracteres |
 | folder_depth | int | Segmentos en el path |
 

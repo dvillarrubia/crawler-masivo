@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, bindparam, delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from shared.config import (
@@ -30,6 +30,7 @@ from shared.config import (
     TITLE_MIN_LEN,
 )
 from analysis.sd_validation import validate_structured_data
+from analysis import near_duplicates as nd
 from shared.robots import hay_noindex, robots_bad_separators
 from shared.database import SessionLocal
 from shared.models import (
@@ -38,6 +39,7 @@ from shared.models import (
     Hreflang,
     Issue,
     Link,
+    PageContent,
     Resource,
     SecurityHeaders,
     StructuredData,
@@ -139,6 +141,9 @@ class SEOAnalyzer:
         self.min_word_count = t.get("min_word_count", LOW_WORD_COUNT_THRESHOLD)
         self.max_redirect_chain = t.get("max_redirect_chain_length", 2)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+        self.near_duplicate_similarity = t.get(
+            "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
+        )
 
     # -- public interface ---------------------------------------------------
 
@@ -158,6 +163,7 @@ class SEOAnalyzer:
         self.analyze_indexability()
         self.analyze_robots_syntax()
         self.analyze_duplicates()
+        self.analyze_near_duplicates()
         self.analyze_redirect_chains()
         self.analyze_images()
         self.analyze_security()
@@ -877,6 +883,109 @@ class SEOAnalyzer:
                     )
 
         self._flush_issues()
+
+    # -- Casi duplicados ----------------------------------------------------
+
+    def analyze_near_duplicates(self) -> None:
+        """Detectar paginas que comparten casi todo el texto.
+
+        `analyze_duplicates` solo ve el duplicado byte-identico, que en un
+        sitio real casi no existe: basta un precio distinto para que dos fichas
+        clonadas dejen de parecerlo. Aqui se mide la similitud real del
+        contenido (ver `analysis/near_duplicates.py`).
+
+        Se mide sobre `page_content.content_text` --el contenido sin plantilla--
+        y no sobre el body: con cabecera y pie dentro, todo el sitio saldria
+        duplicado de todo. Solo se miran las 200 HTML: un 404 o un redirect no
+        canibaliza a nadie.
+        """
+        logger.debug("Analyzing near-duplicate content ...")
+
+        if self.near_duplicate_similarity < nd.UMBRAL_MINIMO_FIABLE:
+            # Por debajo de ~0,6 el filtro por bandas empieza a dejarse parejas
+            # y "casi duplicado" deja de querer decir gran cosa. Se avisa y se
+            # mide igual: el umbral lo pone quien audita.
+            logger.warning(
+                "Umbral de casi duplicados muy bajo (%.2f): el recuento sera "
+                "incompleto y poco significativo",
+                self.near_duplicate_similarity,
+            )
+
+        stmt = (
+            select(Url.id, Url.url, PageContent.content_text)
+            .join(PageContent, PageContent.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+            )
+        )
+
+        firmas: dict[int, Any] = {}
+        urls: dict[int, str] = {}
+        # `yield_per` importa: el texto de un censo grande no cabe en memoria de
+        # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
+        for url_id, url, texto in self.session.execute(stmt.yield_per(BATCH_SIZE)):
+            f = nd.firma(texto)
+            if f is None:
+                continue
+            firmas[url_id] = f
+            urls[url_id] = url
+
+        if len(firmas) < 2:
+            return
+
+        resultado = nd.analizar(firmas, self.near_duplicate_similarity)
+
+        # Medida y sin ninguna es 0, no NULL: NULL queda para "no se pudo medir"
+        # (sin contenido guardado, o texto por debajo del minimo de palabras).
+        sin_duplicados = [uid for uid in firmas if uid not in resultado]
+        self._bulk_update_near_duplicates(
+            {uid: (0, None) for uid in sin_duplicados}
+        )
+        self._bulk_update_near_duplicates(
+            {uid: (dato["count"], dato["closest"]) for uid, dato in resultado.items()}
+        )
+
+        for url_id, dato in resultado.items():
+            self._add_issue(
+                url_id,
+                "near_duplicate_content",
+                "warning",
+                {
+                    "count": dato["count"],
+                    "closest_similarity": round(dato["closest"], 3),
+                    "threshold": self.near_duplicate_similarity,
+                    "matches": [
+                        {"url": urls[otro], "similarity": round(s, 3)}
+                        for otro, s in dato["ejemplos"]
+                    ],
+                },
+            )
+
+        self._flush_issues()
+
+    def _bulk_update_near_duplicates(
+        self, valores: dict[int, tuple[int, float | None]]
+    ) -> None:
+        """Guardar recuento y mejor similitud por URL, en lotes."""
+        if not valores:
+            return
+        filas = [
+            {
+                "_id": uid,
+                "near_duplicate_count": cuenta,
+                "closest_similarity": cercana,
+            }
+            for uid, (cuenta, cercana) in valores.items()
+        ]
+        for inicio in range(0, len(filas), BATCH_SIZE):
+            lote = filas[inicio : inicio + BATCH_SIZE]
+            self.session.execute(
+                update(Url).where(Url.id == bindparam("_id")),
+                lote,
+            )
+        self.session.flush()
 
     # -- Redirect Chains ----------------------------------------------------
 

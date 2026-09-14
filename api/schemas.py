@@ -348,6 +348,8 @@ class UrlResponse(BaseModel):
     unique_inlinks_count: int | None = None
     pagerank: float | None = None
     in_sitemap: bool | None = None
+    near_duplicate_count: int | None = None
+    closest_similarity: float | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
 

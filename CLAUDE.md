@@ -25,10 +25,10 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 |-----------|------|------------|-------------|
 | **API** | `api/` | FastAPI | Job CRUD, results, CSV export, real-time progress via Redis |
 | **Crawler** | `crawler/` | Scrapy + Playwright | SEO spider + Redis queue worker. Each crawl runs as **subprocess** |
-| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (16 check types). Triggered automatically by worker |
+| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (17 check types). Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
 | **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI |
-| **Scripts** | `scripts/` | Python | DB initialization (`init_db.py`) |
+| **Scripts** | `scripts/` | Python | DB init (`init_db.py`), verificación (`check_content_quality.py`, `check_js_templates.py`) y reparaciones sobre censos ya hechos (`fix_h1_en_contenido.py`, `near_duplicates.py`) |
 
 ### Docker Services (docker-compose.yml)
 - **postgres** — PostgreSQL 16 Alpine, port 5432, healthcheck via `pg_isready`
@@ -141,7 +141,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 ### Analysis (`analysis/`)
 | File | Description |
 |------|-------------|
-| `analyzer.py` | `SEOAnalyzer` class with 16 check methods + `run_analysis()` entry point |
+| `analyzer.py` | `SEOAnalyzer` class with 17 check methods + `run_analysis()` entry point |
+| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto |
+| `sd_validation.py` | Validación conservadora de datos estructurados |
 
 ### Shared (`shared/`)
 | File | Description |
@@ -209,7 +211,7 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 
 ## SEO Analysis Checks (`analyzer.py`)
 
-The `SEOAnalyzer` class runs 16 check methods and populates the `issues` table:
+The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 
 | Method | Issue Types Detected |
 |--------|---------------------|
@@ -222,7 +224,8 @@ The `SEOAnalyzer` class runs 16 check methods and populates the `issues` table:
 | `analyze_structured_data()` | structured data validation |
 | `analyze_indexability()` | indexability status |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
-| `analyze_duplicates()` | content duplicates |
+| `analyze_duplicates()` | content duplicates (byte-idénticos) |
+| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
 | `analyze_redirect_chains()` | redirect_chain |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
@@ -337,6 +340,33 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    y no indexable en `urls.indexable`. Arreglado al unificar: gana el
    tokenizado.
 
+16. **Casi duplicados con MinHash, no con simhash** — la nota antigua decía
+   "near-duplicates via simhash", y simhash es efectivamente más barato (un
+   entero por página). El problema es que su distancia no se le puede enseñar
+   a un cliente: medido sobre un texto de 300 palabras, cambiar 3 da 0,92 de
+   "similitud" y cambiar 10 ya da 0,81 — un informe que dice "estas dos se
+   parecen un 81%" cuando comparten el 97% del texto no se sostiene en una
+   reunión. La firma MinHash estima la Jaccard de los trigramas, que sí
+   significa lo que parece; contrastado contra la Jaccard exacta, el error se
+   queda en 1-3 puntos. Se mide sobre `page_content.content_text` (contenido
+   sin plantilla): con el body entero, cabecera y pie hacen que todo el sitio
+   salga duplicado de todo.
+
+17. **El reparto de bandas del LSH sigue al umbral** — con bandas fijas
+   pensadas para el 90%, bajar el umbral a 0,6 no encuentra ni una pareja más:
+   esas parejas no llegan siquiera a medirse, porque el filtro previo no las
+   propone. `reparto_bandas` elige entre 8×32, 16×16, 32×8 y 64×4 el de filas
+   más anchas que aún proponga el 95% de las parejas que están justo en el
+   umbral. Por debajo de 0,6 (`UMBRAL_MINIMO_FIABLE`) el recall cae y se
+   registra un WARNING: se mide igual, pero el recuento ya no es de fiar.
+
+18. **La firma son 256 muestras porque 64 cambiaban el veredicto** — el error
+   típico del estimador es sqrt(s(1-s)/n). Con 64 muestras, una pareja al 93%
+   real se reportaba al 87,5% y se caía del umbral del 90%: el mismo censo
+   marcaba o no marcaba una página según el ruido del muestreo. Con 256 el
+   desvío baja a ~2 puntos. Cuesta lineal y se midió: firmar 2.000 páginas de
+   400 palabras pasa de 1 s a 3,8 s (≈40 s en un censo de 20.000).
+
 ## Environment Variables
 
 See `.env.example`:
@@ -374,6 +404,9 @@ PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
 | `TITLE_MAX_LEN` | 60 |
 | `DESCRIPTION_MIN_LEN` | 50 |
 | `DESCRIPTION_MAX_LEN` | 160 |
+
+Umbral de casi duplicados: `job.config.analysis_thresholds.near_duplicate_similarity`
+(por defecto 0.9; ver decisiones 16-18).
 
 Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `LOW_TEXT_RATIO_THRESHOLD=10.0`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
@@ -423,10 +456,12 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (105 cases, pytest): pure extractors
+Unit test suite at `tests/` (166 cases, pytest): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
-(`test_sd_validation.py`), and sitemap parsing (`test_sitemaps.py`). Run with
+(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
+casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
+estimada contra la Jaccard exacta). Run with
 `pip install -r tests/requirements.txt && pytest`. `scripts/check_content_quality.py <job_id>` compares, per URL template,
 what the crawl stored against what the extractor, `extract_main_content` and a
 Chromium render see right now — it is how content loss is caught after a crawl.
@@ -450,8 +485,7 @@ order of priority:
    carry corrupted data (relative canonicals → false non-indexable). Measure
    before trusting/re-delivering old reports; re-crawl bucket-A jobs.
 3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
-   custom extraction (XPath/regex per job) ⭐⭐⭐, near-duplicates via simhash
-   ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
+   custom extraction (XPath/regex per job) ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
    PageSpeed/CWV API ⭐⭐, minor ones after.
 4. **Known limitations (section 11)**: backup is not truly streaming (OOM risk
    on huge jobs), word_count includes hidden text, SD validation is basic.
@@ -492,7 +526,6 @@ docker compose exec -T crawler python /app/scripts/check_js_templates.py <job_id
 - CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
-- Near-duplicate content detection (simhash)
 - Custom extraction / custom search (XPath/CSS/regex per job)
 - JavaScript comparison tab (raw HTML vs rendered)
 - Pagination (rel next/prev) analysis
