@@ -130,20 +130,42 @@ JS" que pedía este documento.
 | Q9 | 4.3 | ✅ los 77 `low_word_count` son todos 200 |
 | Q10 | 4.4 | ✅ `validation_status` poblado: 1500 ok + 6 warning (SD), 33.927 ok (Lopesan) |
 | Q11 | 4.5 | ✅ los 897 `title_duplicate` son todos 200 |
-| Q13 | 8b.6 | ❌ **falla** con `meta robots` separado por barras — ver abajo |
+| Q13 | 8b.6 | ✅ resuelto (2026-09-14): no era un fallo del crawler — ver abajo. Sigue sin verificarse contra un sitio con `nofollow` en sintaxis **válida** |
 
-**Lo que falló (Q13).** `robots_tokens` separa por comas y espacios, pero no
-por barras, y hay plantillas que escriben `index/follow` y `noindex/nofollow`
-(68 + 1 páginas en este censo). El valor queda como un único token
-desconocido: no se detecta el `nofollow` y los 91 enlaces de esa página siguen
-contando como follow, inflando el PageRank.
+**Q13, resuelto el 2026-09-14: no era un fallo.** `robots_tokens` separa por
+comas y espacios pero no por barras, y hay plantillas que escriben
+`index/follow` y `noindex/nofollow` (68 + 1 páginas en este censo). Parecía que
+se nos escapaba un `nofollow` y que 91 enlaces inflaban el PageRank.
 
-Ojo antes de "arreglarlo" tokenizando por barra: la sintaxis oficial es la
-coma, y si Google tampoco interpreta `noindex/nofollow`, entonces la página SÍ
-se indexa y marcarla como noindex sería un falso positivo — el cliente creería
-que está fuera del índice cuando no lo está. Lo valioso aquí es **avisar de la
-sintaxis inválida** como issue propio, sin cambiar la indexabilidad calculada:
-el hallazgo es que el bloqueo que el cliente cree tener no funciona.
+Verificado contra la documentación de Google antes de tocar nada: las reglas se
+combinan **con comas** o con varias etiquetas `meta`, y Google **ignora lo que
+no reconoce**. `noindex/nofollow` es un token desconocido: esa página se indexa
+y sus enlaces se siguen. Es decir, el comportamiento del crawler ya coincidía
+con el del buscador, y tokenizar por barra habría metido un falso positivo —
+marcaríamos como noindex una página que Google indexa. (Nota de John Mueller:
+`index` y `follow` "no tienen función, se ignoran por completo" incluso bien
+escritos; son el comportamiento por defecto.)
+
+Lo que sí faltaba era **reportarlo**. Añadido `analyze_robots_syntax()` →
+issue `robots_invalid_syntax`, con la severidad puesta en lo que se pierde de
+verdad:
+
+| Valor | Severidad | Por qué |
+|---|---|---|
+| `noindex/nofollow` | warning | hay una intención de bloqueo que no se aplica |
+| `index/follow` | info | sintaxis mala, pero no se pierde nada: es el defecto |
+
+De paso salió a la luz un desacuerdo entre componentes: el analyzer decidía la
+indexabilidad con `"noindex" in valor` (subcadena) mientras el extractor
+tokenizaba, así que con `noindex/nofollow` la misma página era indexable en
+`indexability_status` y **no** indexable en `urls.indexable`. Las reglas están
+ahora en `shared/robots.py`, una sola vez, y gana el tokenizado. En el censo de
+SD esto hace que **69 páginas pasen a contar como indexables**, que es su
+estado real en Google.
+
+**Sigue pendiente** la verificación original de 8b.6: un crawl de un sitio con
+páginas `nofollow` en sintaxis válida, para comprobar que la propagación a los
+enlaces funciona. Este censo no servía para eso.
 
 **Hallazgo lateral, no del crawler.** Los 402 `hreflang_missing_return` de SD
 no son un fallo del analizador: `saunierduval.es` (sin www) sirve 362 páginas
@@ -261,7 +283,7 @@ Screaming Frog maneja y el crawler no manejaba.
 | 8b.3 | `content="none"` y `"noindex nofollow"` (sin comas) **no detectados** como noindex | Nuevo `robots_tokens()`: separa por comas Y espacios; `none` = noindex | Test unitario | ☐ |
 | 8b.4 | `<title>` de un **SVG inline** podía capturarse como título de página | El título se toma del primer `<title>` fuera de `ancestor::svg`, uniendo todos sus nodos de texto | Test unitario | ☐ |
 | 8b.5 | `word_count` contaba texto de `<template>` (DOM alternativo de frameworks JS, invisible) → conteos inflados | `<template>` excluido de word count y visible text (consistente con headings) | Test unitario; comparar word_count con SF en una página Vue/Nuxt | ☐ |
-| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` | ❌ |
+| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` **en sintaxis válida** (el censo de SD solo tenía barras, que Google ignora) | ☐ |
 | 8b.7 | No se extraían enlaces de `<area href>` (mapas de imagen); SF sí los cuenta | `extract_links` incluye `area[href]` con su `alt` como anchor | Test unitario | ☐ |
 | 8b.8 | Enlaces `href="#..."` (sólo fragmento) contaban como self-links, inflando inlinks al quitar el dedup | Se omiten los href que empiezan por `#` | Test unitario | ☐ |
 

@@ -16,6 +16,14 @@ from urllib.parse import urljoin, urlparse
 
 from w3lib.url import canonicalize_url
 
+# Las reglas robots viven en `shared` porque el analyzer, cuya imagen no
+# copia `crawler/`, necesita leerlas igual. Se reexportan aqui para no
+# romper a quien ya importaba `extractors.robots_tokens`.
+from shared.robots import (  # noqa: F401
+    robots_bad_separators,
+    robots_tokens,
+)
+
 # ---- regex helpers ---------------------------------------------------------
 _WHITESPACE = re.compile(r"\s+")
 
@@ -23,18 +31,6 @@ _WHITESPACE = re.compile(r"\s+")
 # lower-case(); this is the standard workaround).
 _XP_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _XP_LOWER = "abcdefghijklmnopqrstuvwxyz"
-
-
-def robots_tokens(value: str | None) -> set[str]:
-    """Tokenise a robots directive string (meta robots / X-Robots-Tag).
-
-    Splits on commas AND whitespace so lenient real-world markup like
-    ``content="noindex nofollow"`` (no commas) is still understood, the way
-    Google and Screaming Frog parse it. Tokens are lowercased.
-    """
-    if not value:
-        return set()
-    return {t.strip().lower() for t in re.split(r"[,\s]+", value) if t.strip()}
 
 
 def _clean(text: str | None) -> str | None:

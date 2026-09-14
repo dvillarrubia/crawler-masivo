@@ -30,6 +30,7 @@ from shared.config import (
     TITLE_MIN_LEN,
 )
 from analysis.sd_validation import validate_structured_data
+from shared.robots import hay_noindex, robots_bad_separators
 from shared.database import SessionLocal
 from shared.models import (
     Heading,
@@ -155,6 +156,7 @@ class SEOAnalyzer:
         self.analyze_hreflang()
         self.analyze_structured_data()
         self.analyze_indexability()
+        self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_redirect_chains()
         self.analyze_images()
@@ -734,7 +736,7 @@ class SEOAnalyzer:
         non_indexable_ids: list[int] = []
 
         for url_id, page_url, status_code, meta_robots, x_robots, canonical_href in rows:
-            has_noindex = _contains_noindex(meta_robots) or _contains_noindex(x_robots)
+            has_noindex = hay_noindex(meta_robots) or hay_noindex(x_robots)
             canonical_ok = (
                 not canonical_href
                 or not canonical_href.strip()
@@ -753,6 +755,62 @@ class SEOAnalyzer:
         # Bulk-update the indexable column.
         self._bulk_update_indexable(indexable_ids, True)
         self._bulk_update_indexable(non_indexable_ids, False)
+
+        self._flush_issues()
+
+    # -- Sintaxis de las directivas robots -----------------------------------
+
+    def analyze_robots_syntax(self) -> None:
+        """Avisar de directivas robots pegadas con un separador invalido.
+
+        ``content="noindex/nofollow"`` no es sintaxis valida: la oficial separa
+        por comas. Google ignora lo que no reconoce, asi que esa pagina se
+        indexa y sus enlaces se siguen. No se toca la indexabilidad calculada
+        --interpretar la barra seria fabricar un bloqueo que el buscador no
+        aplica-- pero se reporta, porque el hallazgo es justamente ese: el
+        cliente cree tener un bloqueo que no funciona (decision 7 de CLAUDE.md,
+        lo roto se reporta, no se filtra).
+
+        La severidad depende de que directiva se este perdiendo: si es
+        restrictiva (``noindex``, ``nofollow``...) hay una intencion que no se
+        cumple; si es ``index/follow`` no se pierde nada, porque son el
+        comportamiento por defecto.
+        """
+        logger.debug("Analyzing robots directive syntax ...")
+
+        stmt = (
+            select(
+                Url.id,
+                HtmlMeta.meta_robots,
+                HtmlMeta.x_robots_tag,
+            )
+            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == self.job_id, Url.is_html.is_(True))
+        )
+
+        for url_id, meta_robots, x_robots in self.session.execute(stmt):
+            for fuente, valor in (
+                ("meta_robots", meta_robots),
+                ("x_robots_tag", x_robots),
+            ):
+                problemas = robots_bad_separators(valor)
+                if not problemas:
+                    continue
+
+                ignoradas = sorted(
+                    {d for p in problemas for d in p["ignoradas"]}
+                )
+                self._add_issue(
+                    url_id,
+                    "robots_invalid_syntax",
+                    "warning" if ignoradas else "info",
+                    {
+                        "source": fuente,
+                        "raw": valor,
+                        "tokens": [p["token"] for p in problemas],
+                        "ignored_directives": ignoradas,
+                    },
+                )
 
         self._flush_issues()
 
@@ -1461,13 +1519,6 @@ class SEOAnalyzer:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-
-def _contains_noindex(directive: str | None) -> bool:
-    """Return ``True`` if the robots directive string contains 'noindex'."""
-    if not directive:
-        return False
-    return "noindex" in directive.lower()
-
 
 # ---------------------------------------------------------------------------
 # Public entry point

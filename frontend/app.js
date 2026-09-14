@@ -55,6 +55,7 @@ const ISSUE_LABEL = {
   'structured_data_error': 'Error datos estructurados',
   'structured_data_warning': 'Aviso datos estructurados',
   'noindex_page': 'Pagina noindex',
+  'robots_invalid_syntax': 'Meta robots mal escrito',
   'duplicate_content': 'Contenido duplicado',
   'redirect_loop': 'Bucle de redireccion',
   'redirect_chain': 'Cadena de redirecciones',

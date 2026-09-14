@@ -410,6 +410,49 @@ def test_robots_tokens_helper():
     assert ex.robots_tokens(None) == set()
 
 
+# -- Sintaxis robots con separador invalido ---------------------------------
+# La barra no es sintaxis valida y Google ignora lo que no reconoce: la pagina
+# se indexa igual. Se reporta como problema de sintaxis, nunca se interpreta.
+
+@pytest.mark.parametrize("robots", ["noindex/nofollow", "noindex|nofollow", "NOINDEX/NOFOLLOW"])
+def test_robots_con_barra_no_saca_del_indice(robots):
+    ok, _ = ex.compute_indexability_status(200, robots, None, None, "https://e.com/p")
+    assert ok is True
+
+
+def test_robots_bad_separators_marca_lo_que_se_pierde():
+    [p] = ex.robots_bad_separators("noindex/nofollow")
+    assert p["token"] == "noindex/nofollow"
+    assert p["directivas"] == ["noindex", "nofollow"]
+    assert p["ignoradas"] == ["noindex", "nofollow"]
+
+
+def test_robots_bad_separators_index_follow_no_pierde_nada():
+    # `index` y `follow` son el comportamiento por defecto: la sintaxis esta
+    # mal, pero no hay ninguna intencion incumplida.
+    [p] = ex.robots_bad_separators("index/follow")
+    assert p["ignoradas"] == []
+
+
+@pytest.mark.parametrize("valor", [
+    None,
+    "",
+    "noindex, nofollow",                        # sintaxis correcta
+    "noindex nofollow",                         # tolerada por Google
+    "max-snippet:-1, max-image-preview:large",  # los dos puntos son validos
+    "unavailable_after: 30/06/2025",            # barra en una fecha, no directivas
+    "index",
+])
+def test_robots_bad_separators_no_da_falsos_positivos(valor):
+    assert ex.robots_bad_separators(valor) == []
+
+
+def test_robots_bad_separators_solo_la_parte_mala():
+    # Un valor mixto: la coma parte bien, y solo el token pegado se reporta.
+    problemas = ex.robots_bad_separators("noarchive, noindex/nofollow")
+    assert [p["token"] for p in problemas] == ["noindex/nofollow"]
+
+
 def test_extract_links_includes_area_maps():
     s = sel('<map><area href="/zone" alt="Zona norte"></map>')
     links = ex.extract_links(s, "https://e.com/", {"e.com"})

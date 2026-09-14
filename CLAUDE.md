@@ -25,7 +25,7 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 |-----------|------|------------|-------------|
 | **API** | `api/` | FastAPI | Job CRUD, results, CSV export, real-time progress via Redis |
 | **Crawler** | `crawler/` | Scrapy + Playwright | SEO spider + Redis queue worker. Each crawl runs as **subprocess** |
-| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (15 check types). Triggered automatically by worker |
+| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (16 check types). Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
 | **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI |
 | **Scripts** | `scripts/` | Python | DB initialization (`init_db.py`) |
@@ -141,7 +141,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 ### Analysis (`analysis/`)
 | File | Description |
 |------|-------------|
-| `analyzer.py` | `SEOAnalyzer` class with 15 check methods + `run_analysis()` entry point |
+| `analyzer.py` | `SEOAnalyzer` class with 16 check methods + `run_analysis()` entry point |
 
 ### Shared (`shared/`)
 | File | Description |
@@ -149,6 +149,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `models.py` | SQLAlchemy models: Job, Url (40+ fields), HtmlMeta, Heading, Link, Hreflang, StructuredData, Resource, PageContent, SecurityHeaders, Issue |
 | `database.py` | Engine + SessionLocal factory |
 | `config.py` | Env vars + SEO thresholds (title/description min/max lengths) |
+| `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
 
@@ -208,7 +209,7 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 
 ## SEO Analysis Checks (`analyzer.py`)
 
-The `SEOAnalyzer` class runs 15 check methods and populates the `issues` table:
+The `SEOAnalyzer` class runs 16 check methods and populates the `issues` table:
 
 | Method | Issue Types Detected |
 |--------|---------------------|
@@ -220,6 +221,7 @@ The `SEOAnalyzer` class runs 15 check methods and populates the `issues` table:
 | `analyze_hreflang()` | hreflang return tags, invalid langs |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_indexability()` | indexability status |
+| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
 | `analyze_duplicates()` | content duplicates |
 | `analyze_redirect_chains()` | redirect_chain |
 | `analyze_images()` | image_missing_alt |
@@ -312,6 +314,28 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    request. Without it everything silently falls back to Twisted's TLS and a
    WAF like F5 BIG-IP ASM answers with binary garbage, ending the job with 1
    URL and no error that looks like a block.
+
+14. **La barra en `meta robots` se avisa, no se interpreta** — hay plantillas
+   que escriben `index/follow` y `noindex/nofollow` (69 páginas en el censo de
+   Saunier Duval). La sintaxis oficial separa por comas, y Google ignora lo que
+   no reconoce, así que ese valor llega como un token desconocido: la página se
+   indexa y sus enlaces se siguen. Tokenizar por barra "arreglaría" el parser y
+   rompería el informe — marcaríamos como noindex una página que Google sí
+   indexa, y el cliente se quedaría creyendo que está fuera del índice. Lo que
+   se emite es `robots_invalid_syntax`, y su severidad depende de qué se
+   pierde: warning si la directiva ignorada era restrictiva (hay una intención
+   que no se cumple), info si era `index/follow` (el comportamiento por
+   defecto, no se pierde nada). Encaja con la decisión 7: lo roto se reporta,
+   no se filtra.
+
+15. **Las reglas robots viven en `shared/robots.py`, no en el extractor** — el
+   analyzer y el extractor las necesitan los dos y la imagen de `analysis/`
+   solo copia `shared/` y `analysis/`. Tenerlas por duplicado costó un
+   desacuerdo silencioso: el extractor tokenizaba (correcto) mientras el
+   analyzer hacía `"noindex" in valor` por subcadena, así que con
+   `noindex/nofollow` la misma página salía indexable en `indexability_status`
+   y no indexable en `urls.indexable`. Arreglado al unificar: gana el
+   tokenizado.
 
 ## Environment Variables
 
