@@ -370,6 +370,12 @@ def _run_job(job_id: str) -> None:
         crawl_behavior = job_config.get("crawl_behavior", {})
         if crawl_behavior.get("download_timeout", 30) != 30:
             cmd += ["-s", f"DOWNLOAD_TIMEOUT={crawl_behavior['download_timeout']}"]
+            # El timeout de navegacion de Playwright debe ir alineado con el de
+            # Scrapy (ver settings.py): si el job sube uno y no el otro, las
+            # paginas lentas siguen perdiendose con status NULL por el que quede
+            # corto. Solo se toca si el entorno no lo fijo a mano.
+            if not os.getenv("PLAYWRIGHT_NAV_TIMEOUT"):
+                cmd += ["-s", f"PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT={int(crawl_behavior['download_timeout']) * 1000}"]
         if crawl_behavior.get("retry_count", 2) != 2:
             cmd += ["-s", f"RETRY_TIMES={crawl_behavior['retry_count']}"]
         if crawl_behavior.get("request_delay", 0) > 0:
