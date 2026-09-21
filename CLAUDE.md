@@ -313,6 +313,31 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    WAF like F5 BIG-IP ASM answers with binary garbage, ending the job with 1
    URL and no error that looks like a block.
 
+14. **Los métodos de página de Playwright toleran una navegación** —
+   `PageMethod("evaluate", js)` reventaba con "Execution context was destroyed"
+   cuando la página redirigía por JS tras `domcontentloaded` (portales legado,
+   `index.html` que saltan a la sección). Tras unos cuantos cierres de pestaña
+   así, el navegador dejaba de servir páginas y el rastreo seguía "vivo" a 0
+   páginas/min. `_evaluar_tolerante` (callable como PageMethod) espera al nuevo
+   documento y reintenta. Medido en la UOC: 19 fallos y cuelgue total en 40 min.
+15. **Un estancamiento reencola el job, no lo cierra** — el vigilante del worker
+   mata el Scrapy que lleva `stall_timeout_minutes` sin latido y lo vuelve a
+   encolar hasta `STALL_AUTO_RESUME` veces (def. 3); el spider retoma desde la
+   frontera guardada en BD. Solo al agotar los intentos se cierra como `stalled`.
+16. **El log de Scrapy va a fichero, en vivo** — `-s LOG_FILE=$SCRAPY_LOG_DIR/<job>.log`
+   (def. `/tmp/scrapy-logs`, dentro del contenedor, modo append). Antes solo
+   existía en memoria hasta que el proceso acababa. Al matar un rastreo se
+   registra un resumen de sus líneas de error en WARNING.
+
+## Configuración por cliente (`projects/`)
+
+Todo lo específico de un cliente (filtros, selectores de plantilla, `templates`
+para el muestreo por plantilla, idioma, ritmo, semillas) vive en
+`projects/<cliente>/config.json`, que es el campo `config` de `POST /api/jobs`.
+Se lanza con `python scripts/lanzar_job.py <cliente> [--canary] [--set k=v]`.
+Solo `projects/_ejemplo/` se versiona; ver `projects/README.md`. **Nunca**
+reglas de un cliente en código.
+
 ## Environment Variables
 
 See `.env.example`:
@@ -340,6 +365,10 @@ PLAYWRIGHT_MAX_PAGES=8
 PLAYWRIGHT_BANNER_WAIT_MS=2000   # tope de la espera a que el DOM se calme
 PLAYWRIGHT_DOM_QUIET_MS=400      # cuanto DOM quieto se considera "ha terminado"
 PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
+
+# Worker
+STALL_AUTO_RESUME=3              # reanudaciones automaticas tras estancamiento (0 = ninguna)
+SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)

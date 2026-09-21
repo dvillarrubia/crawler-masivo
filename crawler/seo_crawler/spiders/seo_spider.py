@@ -143,6 +143,41 @@ def _hash_key(url_hash: str) -> int:
 # cuya red no calla nunca (polling, chat, websockets) tumbaria la pagina por
 # timeout. Esta promesa SIEMPRE resuelve, y el tope la acota.
 _ESPERA_TOPE_MS = int(os.getenv("PLAYWRIGHT_BANNER_WAIT_MS", "2000"))
+
+
+async def _evaluar_tolerante(page, js: str, intentos: int = 3):
+    """``page.evaluate`` que sobrevive a una navegacion en curso.
+
+    Un PageMethod("evaluate", ...) a secas revienta con "Execution context was
+    destroyed, most likely because of a navigation" cuando la pagina se redirige
+    por JavaScript justo despues de `domcontentloaded` (portales antiguos, paginas
+    "index.html" que saltan a la seccion, selectores de idioma). scrapy-playwright
+    cierra entonces la pestaña por error, y tras unos cuantos cierres asi el
+    navegador deja de servir paginas: el rastreo sigue "vivo" a 0 paginas/min
+    hasta que el vigilante lo mata. Medido: 19 fallos de este tipo y cuelgue total
+    en 40 minutos.
+
+    Aqui se espera a que el nuevo documento cargue y se reintenta; si no hay
+    manera, se devuelve None y la pagina se entrega tal cual, que siempre es mejor
+    que perderla. Va como callable porque PageMethod acepta uno (recibe la page).
+    """
+    from playwright.async_api import Error as PlaywrightError
+
+    for intento in range(intentos):
+        try:
+            return await page.evaluate(js)
+        except PlaywrightError as exc:
+            texto = str(exc)
+            if "Execution context was destroyed" not in texto and "navigation" not in texto:
+                raise
+            if intento == intentos - 1:
+                logger.debug("evaluate abandonado tras %d navegaciones: %s", intentos, page.url)
+                return None
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except PlaywrightError:
+                pass
+    return None
 _ESPERA_QUIETO_MS = int(os.getenv("PLAYWRIGHT_DOM_QUIET_MS", "400"))
 
 _JS_ESPERAR_DOM_QUIETO = """
@@ -439,8 +474,8 @@ class SeoSpider(scrapy.Spider):
                 # Esperar a que la pagina termine de montarse (ver arriba) y
                 # solo entonces quitar banners: al reves, el limpiador correria
                 # antes de que el banner exista.
-                PageMethod("evaluate", _JS_ESPERAR_DOM_QUIETO),
-                PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
+                PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
+                PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
             ],
         }
 
