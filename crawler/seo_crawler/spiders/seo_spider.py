@@ -73,6 +73,10 @@ from seo_crawler.items import (
 )
 
 logger = logging.getLogger(__name__)
+# trafilatura avisa con "empty link" por cada <a> sin texto (iconos, tarjetas
+# enteras enlazadas): decenas por pagina en cualquier sitio moderno, y tapa
+# los avisos que si importan (Playwright, spider). No es un error de nada.
+logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 # Extensions that never need JS rendering — skip Playwright for these URLs.
 _NON_HTML_EXTENSIONS = frozenset({
