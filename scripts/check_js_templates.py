@@ -83,8 +83,39 @@ REGLAS: list[tuple[str, str]] = [
 ]
 
 
-def clasificar(path: str) -> str:
-    for nombre, patron in REGLAS:
+def cargar_reglas(job_id: str) -> list[tuple[str, str]]:
+    """Reglas de plantilla del propio job (``config.templates``) o, si no las
+    trae, las genericas de arriba.
+
+    Las reglas por cliente viajan en el JSON del job (``projects/<cliente>/
+    config.json`` -> ``templates``), no en este fichero: asi cada cliente lleva
+    las suyas y el repo no cambia entre proyectos.
+    """
+    try:
+        from shared.database import SessionLocal
+        from shared.models import Job
+
+        sesion = SessionLocal()
+        try:
+            job = sesion.get(Job, job_id)
+            plantillas = ((job.config or {}).get("templates") if job else None) or []
+        finally:
+            sesion.close()
+    except Exception:
+        plantillas = []
+    reglas: list[tuple[str, str]] = []
+    for regla in plantillas:
+        if isinstance(regla, dict):
+            nombre, patron = regla.get("nombre") or regla.get("name"), regla.get("patron") or regla.get("pattern")
+        else:
+            nombre, patron = (list(regla) + [None, None])[:2]
+        if nombre and patron:
+            reglas.append((str(nombre), str(patron)))
+    return reglas or list(REGLAS)
+
+
+def clasificar(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
+    for nombre, patron in (reglas if reglas is not None else REGLAS):
         if re.search(patron, path, re.I):
             return nombre
     partes = [p for p in path.split("/") if p]
@@ -201,9 +232,10 @@ def comprobar(
 
     hosts = {re.sub(r"^https?://", "", u).split("/")[0] for u, _ in filas[:200]}
 
+    reglas = cargar_reglas(job_id)
     grupos: dict[str, list[str]] = defaultdict(list)
     for url, path in filas:
-        grupos[clasificar(path)].append(url)
+        grupos[clasificar(path, reglas)].append(url)
 
     ordenados = sorted(grupos.items(), key=lambda kv: -len(kv[1]))
     if plantillas_max:

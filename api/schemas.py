@@ -129,6 +129,15 @@ class AnalysisThresholdsConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Job configuration
 # ---------------------------------------------------------------------------
+class TemplateRule(BaseModel):
+    """Regla de plantilla: la primera cuyo ``patron`` (regex sobre el path)
+    casa da nombre a la plantilla. Las usan check_js_templates.py y
+    check_content_quality.py para muestrear por plantilla."""
+
+    nombre: str = Field(..., min_length=1, max_length=80)
+    patron: str = Field(..., min_length=1, max_length=500)
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -149,6 +158,10 @@ class JobConfig(BaseModel):
     impersonate: str = "chrome124"
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
+    use_sitemap: bool = True
+    sitemap_urls: list[str] = Field(default_factory=list)
+    # Reglas de plantilla por cliente (ver projects/README.md)
+    templates: list[TemplateRule] = Field(default_factory=list)
 
     # Advanced configuration sub-models
     resource_types: ResourceTypeConfig = Field(default_factory=ResourceTypeConfig)
