@@ -76,6 +76,40 @@ class EstancadoError(Exception):
     """El rastreo dejo de avanzar: latido sin moverse durante el margen dado."""
 
 
+STDERR_DIR = os.getenv("SCRAPY_STDERR_DIR", "/tmp/scrapy-stderr")
+
+
+def _guardar_stderr(job_id: str, error: str | None, motivo: str) -> None:
+    """Conserva el stderr de un Scrapy que se ha matado (estancamiento o tope
+    de horas). Antes se tiraba con el proceso, y un rastreo que se paraba solo
+    no dejaba ningun rastro de POR QUE: sin eso no hay forma de distinguir un
+    navegador colgado de un sitio que dejo de responder.
+
+    Se registra la cola en WARNING y el texto entero en un fichero por job.
+    """
+    if not error:
+        logger.warning("Job %s parado por %s: Scrapy no dejo stderr", job_id, motivo)
+        return
+    try:
+        os.makedirs(STDERR_DIR, exist_ok=True)
+        ruta = os.path.join(STDERR_DIR, f"{job_id}.log")
+        with open(ruta, "w", encoding="utf-8") as fh:
+            fh.write(error)
+    except OSError as exc:
+        ruta = f"(no se pudo escribir: {exc})"
+    # Las lineas de error del spider/Playwright son las que explican el
+    # cuelgue; se sacan aparte porque el final del log suele ser el cierre.
+    relevantes = [
+        ln for ln in error.splitlines()
+        if any(k in ln for k in ("ERROR", "Traceback", "Timeout", "crash", "closed", "disconnected"))
+    ]
+    logger.warning(
+        "Job %s parado por %s. stderr completo en %s. %d linea(s) de error; ultimas:\n%s\n--- cola del log ---\n%s",
+        job_id, motivo, ruta, len(relevantes),
+        "\n".join(relevantes[-15:]), error[-2500:],
+    )
+
+
 def _ejecutar_con_vigilancia(
     cmd: list[str],
     *,
@@ -119,7 +153,8 @@ def _ejecutar_con_vigilancia(
 
         if max_seconds and (ahora - inicio) > max_seconds:
             proc.kill()
-            proc.communicate()
+            _, error = proc.communicate()
+            _guardar_stderr(job_id, error, "tope de horas")
             raise subprocess.TimeoutExpired(cmd, max_seconds)
 
         if rc is None or stall_minutes <= 0:
@@ -142,7 +177,8 @@ def _ejecutar_con_vigilancia(
                 job_id, parado, stall_minutes,
             )
             proc.kill()
-            proc.communicate()
+            _, error = proc.communicate()
+            _guardar_stderr(job_id, error, "estancamiento")
             raise EstancadoError(f"{parado:.0f} min sin avanzar")
 
 
