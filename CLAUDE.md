@@ -329,6 +329,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    existía en memoria hasta que el proceso acababa. Al matar un rastreo se
    registra un resumen de sus líneas de error en WARNING.
 
+19. **robots.txt también en el destino de una redirección con render** — Chromium
+   sigue los 3xx por su cuenta, así que el host de destino nunca pasaba por el
+   middleware de robots: se guardaron 22 páginas de un SSO con `Disallow: /`.
+   Si el render acaba en otro host no interno, la petición se repite sin
+   render (misma ruta que `_sin_render`); y si robots corta una cadena de
+   redirecciones, `handle_error` registra los saltos con su código en vez de
+   dejar que la URL original desaparezca del informe.
+
 18. **La espera de render se ajusta por cliente** — los listados montados por
    XHR/GraphQL (AEM) pintan sus enlaces 2-3 s después de `domcontentloaded`;
    con el tope de 2 s se guardaban categorías con 0 enlaces a items y los

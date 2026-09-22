@@ -891,14 +891,33 @@ class SeoSpider(scrapy.Spider):
         # se guarda como 307 (la "redireccion interna" de Chromium al subir a
         # https), no como el 301 que devuelve el servidor. Es un artefacto del
         # navegador, no del sitio: tratar esos 307 http->https como 301.
-        if response.url.startswith("chrome-error://") and not response.meta.get(
-            "_sin_render"
-        ):
-            original = (response.meta.get("redirect_urls") or [response.url])[0]
-            logger.warning(
-                "Chromium acabo en pagina de error para %s: se repite sin render",
-                original,
+        # Con render, Chromium sigue las redirecciones por su cuenta: si la
+        # pagina acaba en OTRO host, Scrapy nunca ha pasado esa URL por el
+        # middleware de robots.txt del destino. Asi se guardaron con contenido
+        # 22 paginas de un SSO con "Disallow: /" (destino de 307 desde paginas
+        # personales). Se repite sin render: la cadena real queda registrada y
+        # el robots del destino se respeta como en el modo sin JS.
+        otro_host = (
+            response.meta.get("playwright")
+            and not response.meta.get("_sin_render")
+            and not response.url.startswith("chrome-error://")
+            and (urlparse(response.url).hostname or "") != (urlparse(response.request.url).hostname or "")
+            and not self._is_internal(response.url)
+        )
+        if otro_host:
+            logger.info(
+                "Render acabo en otro host (%s -> %s): se repite sin render para respetar su robots",
+                response.request.url, response.url,
             )
+        if otro_host or (
+            response.url.startswith("chrome-error://") and not response.meta.get("_sin_render")
+        ):
+            original = response.request.url if otro_host else (response.meta.get("redirect_urls") or [response.url])[0]
+            if not otro_host:
+                logger.warning(
+                    "Chromium acabo en pagina de error para %s: se repite sin render",
+                    original,
+                )
             meta = {
                 k: v for k, v in response.meta.items()
                 if not k.startswith("playwright") and k not in ("redirect_urls", "redirect_times", "redirect_reasons")
@@ -1339,6 +1358,37 @@ class SeoSpider(scrapy.Spider):
         status_group = "unknown"
         status_code = None
         if failure.check(scrapy.exceptions.IgnoreRequest):
+            # Normalmente es robots.txt. Si la URL bloqueada es el final de una
+            # cadena de redirecciones, la URL ORIGINAL (la nuestra) desaparecia
+            # del informe: nadie sabia que redirigia a algo prohibido. Se
+            # registran los saltos con su codigo; el destino bloqueado no se
+            # pide ni se guarda.
+            redirect_urls = request.meta.get("redirect_urls") or []
+            if redirect_urls:
+                reasons = request.meta.get("redirect_reasons") or []
+                chain = list(redirect_urls) + [url]
+                logger.info(
+                    "Cadena de redireccion cortada por robots.txt: %s -> %s", chain[0], url
+                )
+                for i in range(len(chain) - 1):
+                    hop_url, hop_dest = chain[i], chain[i + 1]
+                    hop_status = reasons[i] if i < len(reasons) else 301
+                    hp = urlparse(hop_url)
+                    self._crawled_count += 1
+                    yield PageItem(
+                        url=hop_url, url_hash=compute_url_hash(hop_url),
+                        host=hp.hostname or "", path=hp.path or "/", scheme=hp.scheme or "https",
+                        is_internal=self._is_internal(hop_url), crawl_depth=depth,
+                        content_type=None, content_length=0,
+                        status_code=hop_status, status_group=compute_status_group(hop_status),
+                        response_time_ms=0, is_html=False, resource_type="redirect",
+                        redirect_url=hop_dest, body_hash=None, job_id=self.job_id,
+                        url_length=len(hop_url), folder_depth=compute_folder_depth(hop_url),
+                        word_count=None, text_ratio=None, redirect_type=hop_status,
+                        status_text=http_status_text(hop_status), last_modified=None,
+                        http_version=None, transfer_size=0,
+                        indexability_status=f"Redirect ({hop_status})",
+                    )
             return
         from twisted.internet.error import (
             DNSLookupError,
