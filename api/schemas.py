@@ -149,7 +149,11 @@ class TemplateRule(BaseModel):
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
-    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=50)
+    # Tope 1000, no 50: en WordPress el paginador solo enlaza a la pagina
+    # siguiente, asi que /page/120/ esta a profundidad 120 de la home. Con 50
+    # se cortaba la cadena y los posts de las paginas profundas salian como
+    # huerfanos aunque estuvieran enlazados.
+    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=1000)
     # None = rastrear hasta agotar la frontera (comportamiento de Screaming
     # Frog). Antes era obligatorio con default 50.000, asi que habia que
     # adivinar el tamano del sitio ANTES de rastrearlo: quedarse corto truncaba
