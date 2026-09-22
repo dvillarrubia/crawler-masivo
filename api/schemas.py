@@ -83,6 +83,9 @@ class CrawlBehaviorConfig(BaseModel):
     # lote de siembra de la frontera, asi que un rastreo lento pero vivo no
     # se ve afectado.
     stall_timeout_minutes: int = Field(default=30, ge=0, le=1440)
+    # Al reanudar, repetir las paginas perdidas (status NULL), 5xx y las que
+    # Chromium dejo en pagina de error, en vez de darlas por rastreadas.
+    retry_failed_on_resume: bool = True
 
 
 class UrlFilterConfig(BaseModel):

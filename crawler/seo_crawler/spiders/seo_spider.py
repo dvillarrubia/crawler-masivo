@@ -398,12 +398,38 @@ class SeoSpider(scrapy.Spider):
             # start_requests via _iter_frontier(), sin cap ni carga completa.
             from shared.models import Url
 
+            # Paginas que se dan por NO rastreadas al reanudar, para que se
+            # repitan: perdidas (status NULL: timeout, error de red), 5xx
+            # (casi siempre transitorios: 183 de 183 respondian 200 al
+            # volver a pedirlas) y las que Chromium dejo en su pagina de error.
+            # Antes contaban como hechas y un resume no las tocaba, asi que el
+            # unico modo de completarlas era otro rastreo entero.
+            self._reintentar: list[tuple[str, int]] = []
+            if self.job_config.get("crawl_behavior", {}).get("retry_failed_on_resume", True):
+                from sqlalchemy import or_
+
+                self._reintentar = [
+                    (row[0], row[1] or 1)
+                    for row in session.query(Url.url, Url.crawl_depth)
+                    .filter(
+                        Url.job_id == self.job_id,
+                        or_(
+                            Url.status_code.is_(None),
+                            Url.status_code >= 500,
+                            Url.redirect_url.like("chrome-error://%"),
+                        ),
+                    )
+                    .yield_per(10_000)
+                ]
+            reintentar_hashes = {
+                _hash_key(compute_url_hash(normalize_url(u))) for u, _ in self._reintentar
+            }
             self._already_crawled_hashes = {
                 _hash_key(row[0])
                 for row in session.query(Url.url_hash)
                 .filter(Url.job_id == self.job_id)
                 .yield_per(10_000)
-            }
+            } - reintentar_hashes
             if self._already_crawled_hashes:
                 self._resume_mode = True
                 self._crawled_count = (
@@ -609,6 +635,25 @@ class SeoSpider(scrapy.Spider):
         # would require a join we don't pay for.
         if not self._resume_mode:
             return
+        if self._reintentar:
+            logger.warning(
+                "Resume: se repiten %d paginas perdidas, 5xx o con error de Chromium",
+                len(self._reintentar),
+            )
+        for url, depth in self._reintentar:
+            normalized = normalize_url(url)
+            if not self._should_follow(normalized):
+                continue
+            req_meta = {"depth": depth}
+            if self.render_js and _url_likely_html(normalized):
+                req_meta.update(self._playwright_meta())
+            yield scrapy.Request(
+                url=normalized,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=req_meta,
+                dont_filter=True,
+            )
         for url in self._iter_frontier():
             normalized = normalize_url(url)
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
