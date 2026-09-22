@@ -259,6 +259,43 @@ def _reencolar_tras_estancamiento(job_id: str, motivo: str) -> bool:
     return True
 
 
+def _reencolar_si_pedido(job_id: str) -> bool:
+    """True si alguien pidio reanudar el job mientras corria (ver el guard de
+    duplicados en el bucle principal): se deja en "pending" y se vuelve a
+    encolar sin analizar, porque el rastreo continua."""
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        if not rc.get(f"job:{job_id}:reencolar"):
+            return False
+        rc.delete(f"job:{job_id}:reencolar")
+    except Exception:
+        return False
+    from shared.database import SessionLocal
+    from shared.models import Job
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job is None:
+            return False
+        job.status = "pending"
+        job.completed_at = None
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Job %s: no se pudo dejar en pending para reencolar", job_id)
+        return False
+    finally:
+        session.close()
+    try:
+        rc.rpush(JOBS_QUEUE, job_id)
+    except Exception:
+        logger.exception("Job %s: no se pudo encolar en Redis", job_id)
+        return False
+    logger.warning("Job %s: reanudacion pedida durante la ejecucion, reencolado", job_id)
+    return True
+
+
 def _run_job(job_id: str) -> None:
     """Execute a single Scrapy crawl for *job_id* via subprocess."""
     from shared.database import SessionLocal
@@ -506,6 +543,9 @@ def _run_job(job_id: str) -> None:
     # an empty issues table. The intermediate 'analyzing' status also keeps
     # stale-job recovery (which only targets 'running') from re-queuing the
     # job while analysis runs with the spider — and its heartbeat — stopped.
+    if _reencolar_si_pedido(job_id):
+        return
+
     cancelled = False
     session = SessionLocal()
     try:
@@ -807,7 +847,20 @@ def main() -> None:
                 continue
 
             if job_id in active_futures:
-                logger.warning("Job %s is already running, skipping duplicate", job_id)
+                # Llega un resume (o una reanudacion automatica) mientras el
+                # Scrapy anterior todavia se esta cerrando. Tirar la entrada
+                # perdia la reanudacion: el proceso viejo acababa, el cierre
+                # ponia "completed" sobre el "pending" del resume y el job se
+                # quedaba parado con la cola llena. Se apunta y se reencola
+                # cuando el proceso actual termine.
+                logger.warning(
+                    "Job %s ya esta en marcha: se reencolara cuando termine el proceso actual",
+                    job_id,
+                )
+                try:
+                    rconn.set(f"job:{job_id}:reencolar", "1", ex=6 * 3600)
+                except Exception:
+                    logger.exception("Job %s: no se pudo anotar el reencolado", job_id)
                 continue
 
             logger.info("Dequeued job %s", job_id)
