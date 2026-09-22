@@ -465,7 +465,9 @@ order of priority:
    custom extraction (XPath/regex per job) ⭐⭐⭐, near-duplicates via simhash
    ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
    PageSpeed/CWV API ⭐⭐, minor ones after.
-4. **Known limitations (section 11)**: backup is not truly streaming (OOM risk
+4. **Known limitations (section 11)**: also, with `render_js` an `http://` URL of an
+   https site is recorded as **307** (Chromium's internal upgrade redirect), not the
+   server's real 301. Treat http→https 307s in JS crawls as 301.: backup is not truly streaming (OOM risk
    on huge jobs), word_count includes hidden text, SD validation is basic.
 
 ## Automatic JS-render check

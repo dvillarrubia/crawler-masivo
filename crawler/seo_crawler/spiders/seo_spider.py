@@ -869,11 +869,15 @@ class SeoSpider(scrapy.Spider):
 
         # Chromium ha acabado en su pagina de error (chrome-error://...): la
         # navegacion fallo DESPUES de una redireccion (p. ej. http -> https con
-        # ":443" explicito en Location, que Chromium no sigue). Sin esto se
-        # guardaba un 307 con destino "chrome-error://chromewebdata/" y la URL
-        # real quedaba sin estado ni destino. Medido: 537 URLs de un portal
-        # legado en un solo rastreo. Se repite la peticion sin render, que al
-        # menos deja el codigo y la cadena de redirecciones verdaderos.
+        # ":443" explicito en Location). Sin esto se guardaba un 307 con
+        # destino "chrome-error://chromewebdata/" y la URL real quedaba sin
+        # estado ni destino. Se repite la peticion sin render, que al menos
+        # deja el codigo y la cadena de redirecciones verdaderos.
+        #
+        # OJO, limitacion aparte: con render, una URL http:// de un sitio https
+        # se guarda como 307 (la "redireccion interna" de Chromium al subir a
+        # https), no como el 301 que devuelve el servidor. Es un artefacto del
+        # navegador, no del sitio: tratar esos 307 http->https como 301.
         if response.url.startswith("chrome-error://") and not response.meta.get(
             "_sin_render"
         ):
