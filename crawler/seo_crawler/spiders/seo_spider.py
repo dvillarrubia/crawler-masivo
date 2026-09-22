@@ -421,6 +421,19 @@ class SeoSpider(scrapy.Spider):
                     )
                     .yield_per(10_000)
                 ]
+            # Y las que casen con crawl_behavior.recrawl_patterns (regex sobre
+            # la URL): para repetir solo una plantilla (p. ej. los listados tras
+            # subir la espera de render) sin volver a rastrear el sitio entero.
+            patrones = (self.job_config.get("crawl_behavior") or {}).get("recrawl_patterns") or []
+            if patrones:
+                ya = {u for u, _ in self._reintentar}
+                for row in (
+                    session.query(Url.url, Url.crawl_depth)
+                    .filter(Url.job_id == self.job_id, Url.is_internal.is_(True))
+                    .yield_per(10_000)
+                ):
+                    if row[0] not in ya and any(re.search(pt, row[0]) for pt in patrones):
+                        self._reintentar.append((row[0], row[1] or 1))
             reintentar_hashes = {
                 _hash_key(compute_url_hash(normalize_url(u))) for u, _ in self._reintentar
             }

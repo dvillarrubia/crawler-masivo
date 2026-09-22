@@ -86,6 +86,11 @@ class CrawlBehaviorConfig(BaseModel):
     # Al reanudar, repetir las paginas perdidas (status NULL), 5xx y las que
     # Chromium dejo en pagina de error, en vez de darlas por rastreadas.
     retry_failed_on_resume: bool = True
+    # Al reanudar, volver a rastrear tambien las URLs que casen (regex).
+    recrawl_patterns: list[str] = Field(default_factory=list)
+    # Tope (ms) de la espera a que el DOM se calme tras domcontentloaded con
+    # render_js; 0/None = el del entorno (PLAYWRIGHT_BANNER_WAIT_MS, def. 2000).
+    render_wait_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
 class UrlFilterConfig(BaseModel):

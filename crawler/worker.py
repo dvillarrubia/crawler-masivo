@@ -341,6 +341,16 @@ def _run_job(job_id: str) -> None:
             env.get("PYTHONPATH", "")
         )
 
+        # Espera de render por job. El spider la lee de PLAYWRIGHT_BANNER_WAIT_MS
+        # al importarse, asi que va por entorno del subproceso. Los listados
+        # que se montan por XHR/GraphQL (AEM, headless CMS) pintan sus enlaces
+        # 2-3 s despues de domcontentloaded: con el tope de 2 s se guardaban
+        # paginas de categoria con 0 enlaces a items y hubs con menos de los
+        # que hay, y los huerfanos salian inflados sin que nada lo avisara.
+        render_wait = (job_config.get("crawl_behavior") or {}).get("render_wait_ms")
+        if render_wait:
+            env["PLAYWRIGHT_BANNER_WAIT_MS"] = str(int(render_wait))
+
         # Build Scrapy command with per-job overrides
         cmd = [
             sys.executable, "-m", "scrapy", "crawl", "seo",

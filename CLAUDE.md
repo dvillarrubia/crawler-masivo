@@ -329,6 +329,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    existía en memoria hasta que el proceso acababa. Al matar un rastreo se
    registra un resumen de sus líneas de error en WARNING.
 
+18. **La espera de render se ajusta por cliente** — los listados montados por
+   XHR/GraphQL (AEM) pintan sus enlaces 2-3 s después de `domcontentloaded`;
+   con el tope de 2 s se guardaban categorías con 0 enlaces a items y los
+   huérfanos salían inflados sin aviso. `crawl_behavior.render_wait_ms` fija
+   el tope por job y `crawl_behavior.recrawl_patterns` permite repetir solo
+   esa plantilla al reanudar. Medir con Playwright a 0/2/3/5/8 s antes de
+   afirmar que una página no enlaza algo.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -375,6 +383,8 @@ PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
 
 # Worker
 STALL_AUTO_RESUME=3              # reanudaciones automaticas tras estancamiento (0 = ninguna)
+# Por job (crawl_behavior): render_wait_ms sobreescribe PLAYWRIGHT_BANNER_WAIT_MS;
+# recrawl_patterns (regex) hace que un resume repita esas URLs; retry_failed_on_resume.
 SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
 ```
 
