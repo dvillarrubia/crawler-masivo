@@ -822,6 +822,35 @@ class SeoSpider(scrapy.Spider):
             self.crawler.engine.close_spider(self, "max_urls_reached")
             return
 
+        # Chromium ha acabado en su pagina de error (chrome-error://...): la
+        # navegacion fallo DESPUES de una redireccion (p. ej. http -> https con
+        # ":443" explicito en Location, que Chromium no sigue). Sin esto se
+        # guardaba un 307 con destino "chrome-error://chromewebdata/" y la URL
+        # real quedaba sin estado ni destino. Medido: 537 URLs de un portal
+        # legado en un solo rastreo. Se repite la peticion sin render, que al
+        # menos deja el codigo y la cadena de redirecciones verdaderos.
+        if response.url.startswith("chrome-error://") and not response.meta.get(
+            "_sin_render"
+        ):
+            original = (response.meta.get("redirect_urls") or [response.url])[0]
+            logger.warning(
+                "Chromium acabo en pagina de error para %s: se repite sin render",
+                original,
+            )
+            meta = {
+                k: v for k, v in response.meta.items()
+                if not k.startswith("playwright") and k not in ("redirect_urls", "redirect_times", "redirect_reasons")
+            }
+            meta["_sin_render"] = True
+            yield scrapy.Request(
+                url=original,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=meta,
+                dont_filter=True,
+            )
+            return
+
         self._crawled_count += 1
         self._update_redis_progress()
 

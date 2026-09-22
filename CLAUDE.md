@@ -329,6 +329,13 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    existía en memoria hasta que el proceso acababa. Al matar un rastreo se
    registra un resumen de sus líneas de error en WARNING.
 
+17. **Página de error de Chromium = repetir sin render** — cuando Playwright
+   acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
+   `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
+   una redirección que Chromium no sigue (http → `https://host:443/...` con el
+   puerto explícito). El spider repite la petición sin render (`_sin_render`),
+   que deja el código y la cadena de redirecciones reales.
+
 ## Configuración por cliente (`projects/`)
 
 Todo lo específico de un cliente (filtros, selectores de plantilla, `templates`
