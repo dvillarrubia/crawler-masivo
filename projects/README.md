@@ -24,7 +24,8 @@ projects/
 | `extraction.custom_boilerplate_selectors` | selectores CSS del ruido propio del cliente (modales, formularios, relacionados, pie dentro de `<main>`) |
 | `templates` | reglas `{nombre, patron}` (regex sobre el path, la primera que casa manda). Las usan `check_js_templates.py` (automático al acabar) y `check_content_quality.py` para muestrear por plantilla |
 | `http.accept_language`, `user_agent`, `impersonate` | identidad HTTP |
-| `concurrent_requests*`, `crawl_behavior.*` | ritmo; con WAF: 4 / 2 / `request_delay` 0.5 |
+| `concurrent_requests*`, `crawl_behavior.*` | ritmo; con WAF empezar en 4 / 2 / `request_delay` 0.5 |
+| `crawl_behavior.autothrottle_target_concurrency` | **la concurrencia efectiva**: AutoThrottle ajusta el retardo para mantener esta media, por debajo de `concurrent_requests*`. Un 2.0 heredado del canario dejó un rastreo con JS a 15 págs/min con 8/6 configurado. Ponlo igual que `concurrent_requests_per_domain` |
 
 ## Cómo lanzar
 

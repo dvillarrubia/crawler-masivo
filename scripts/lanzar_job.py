@@ -23,7 +23,13 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Un canario: pocas URLs, poca profundidad, una hora. Lo demas igual que el
 # rastreo completo para que valide la MISMA configuracion.
-CANARY = {"max_depth": 3, "max_urls": 300, "crawl_behavior.max_runtime_hours": 1}
+CANARY = {
+    "max_depth": 3, "max_urls": 300, "crawl_behavior.max_runtime_hours": 1,
+    # Suave a proposito: el canario mide como trata el WAF a un rastreador
+    # timido. OJO: AutoThrottle mantiene ESTA concurrencia media, por encima de
+    # concurrent_requests*; en el rastreo completo vale la del config.
+    "crawl_behavior.autothrottle_target_concurrency": 2.0,
+}
 
 
 def _poner(cfg: dict, clave: str, valor):

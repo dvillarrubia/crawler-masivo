@@ -40,7 +40,7 @@
     "retry_count": 2,
     "request_delay": 0.5,
     "autothrottle_enabled": true,
-    "autothrottle_target_concurrency": 2.0,
+    "autothrottle_target_concurrency": 4.0,
     "follow_nofollow": false,
     "crawl_subdomains": false,
     "max_runtime_hours": 48,
