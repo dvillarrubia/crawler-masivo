@@ -665,10 +665,16 @@ def _comprobar_render_js(job_id: str) -> None:
             return
 
         con_enlaces_ocultos = [r for r in resultados if r["enlaces_solo_js"] > 0]
+        # Plantillas cuyo render no fue tal (WAF, desafio, error): su "0 enlaces
+        # solo-JS" no cuenta. Si TODAS estan asi, el veredicto queda en None
+        # ("no se pudo comprobar"), nunca en "fiable".
+        sospechosas = [r for r in resultados if r.get("render_sospechoso")]
+        concluyentes = [r for r in resultados if not r.get("render_sospechoso")]
         resumen = {
             "plantillas": resultados,
             "enlaces_ocultos": bool(con_enlaces_ocultos),
-            "grafo_fiable": not con_enlaces_ocultos,
+            "grafo_fiable": (not con_enlaces_ocultos) if concluyentes else None,
+            "render_bloqueado": len(sospechosas),
         }
 
         session = SessionLocal()
@@ -680,6 +686,13 @@ def _comprobar_render_js(job_id: str) -> None:
         finally:
             session.close()
 
+        if sospechosas:
+            logger.warning(
+                "Job %s: en %d de %d plantilla(s) Chromium recibio una pagina sin "
+                "contenido (WAF/desafio/error): la comprobacion de render JS NO es "
+                "concluyente para ellas. Medir a mano antes de afirmar nada.",
+                job_id, len(sospechosas), len(resultados),
+            )
         if con_enlaces_ocultos:
             # WARNING: invalida el PageRank del rastreo, no es un detalle.
             logger.warning(
@@ -691,7 +704,7 @@ def _comprobar_render_js(job_id: str) -> None:
                 len(con_enlaces_ocultos),
                 ", ".join(r["plantilla"].split("  (")[0] for r in con_enlaces_ocultos),
             )
-        else:
+        elif concluyentes:
             logger.info(
                 "Job %s: ninguna plantilla esconde enlaces tras JS; el grafo y "
                 "el PageRank son fiables sin render.",

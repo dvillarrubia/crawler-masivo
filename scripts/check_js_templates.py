@@ -200,13 +200,23 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                 muestras_ok += 1
 
             if muestras_ok:
+                pc, pr = pal_crudo // muestras_ok, pal_render // muestras_ok
+                # Si Chromium trae MUCHO menos texto que el HTML crudo, no ha
+                # renderizado la pagina: le han servido un bloqueo del WAF, un
+                # desafio o un error. En ese caso "0 enlaces solo-JS" es trivial
+                # (la pagina renderizada no tiene enlaces) y NO prueba nada.
+                # Medido: dos rastreos con 75 palabras renderizadas en todas las
+                # plantillas frente a 800-1.800 crudas, y el veredicto "grafo
+                # fiable" salio igual. Se marca y el worker no concluye con ello.
+                render_sospechoso = pc >= 100 and pr < pc * 0.2
                 resultados.append(
                     {
                         "plantilla": plantilla,
                         "muestras": muestras_ok,
                         "enlaces_solo_js": enl_solo_js,
-                        "palabras_crudo": pal_crudo // muestras_ok,
-                        "palabras_render": pal_render // muestras_ok,
+                        "palabras_crudo": pc,
+                        "palabras_render": pr,
+                        "render_sospechoso": render_sospechoso,
                     }
                 )
         await navegador.close()
