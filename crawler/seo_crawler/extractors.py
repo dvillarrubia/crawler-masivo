@@ -1244,8 +1244,19 @@ def _strip_boilerplate_html(
                 if not text or len(text) > _PROMO_TEXT_MAX_LEN:
                     continue
                 lower = text.lower()
-                if any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
-                    doomed.append(el)
+                if not any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
+                    continue
+                # Un bloque con titulos o con varios parrafos es un articulo
+                # corto que CONTIENE el widget (el "Share on Mastodon" al pie
+                # de un post de video de 50 palabras), no el widget en si. Se
+                # llevaba el post entero: 554 paginas guardadas sin contenido
+                # en una red de blogs. El widget de verdad no tiene h1-h3 ni
+                # mas de dos parrafos.
+                if any(True for _ in el.iter("h1", "h2", "h3")):
+                    continue
+                if sum(1 for _ in el.iter("p")) > 2:
+                    continue
+                doomed.append(el)
             for el in doomed:
                 _remove_keep_tail(el)
 
