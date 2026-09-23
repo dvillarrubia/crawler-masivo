@@ -88,6 +88,9 @@ class CrawlBehaviorConfig(BaseModel):
     retry_failed_on_resume: bool = True
     # Al reanudar, volver a rastrear tambien las URLs que casen (regex).
     recrawl_patterns: list[str] = Field(default_factory=list)
+    # Al reanudar, repetir las HTML 200 internas guardadas sin contenido
+    # extraido (tras corregir el stripper o los selectores del cliente).
+    recrawl_empty_content: bool = False
     # Tope (ms) de la espera a que el DOM se calme tras domcontentloaded con
     # render_js; 0/None = el del entorno (PLAYWRIGHT_BANNER_WAIT_MS, def. 2000).
     render_wait_ms: int | None = Field(default=None, ge=0, le=60000)

@@ -434,6 +434,27 @@ class SeoSpider(scrapy.Spider):
                 ):
                     if row[0] not in ya and any(re.search(pt, row[0]) for pt in patrones):
                         self._reintentar.append((row[0], row[1] or 1))
+            # Y, si se pide, las HTML 200 internas que quedaron sin contenido
+            # extraido: tras corregir el stripper o los selectores del cliente,
+            # es la forma de completar esas paginas sin rastrear el sitio entero.
+            if (self.job_config.get("crawl_behavior") or {}).get("recrawl_empty_content"):
+                from sqlalchemy import func
+                from shared.models import PageContent
+
+                ya = {u for u, _ in self._reintentar}
+                filas = (
+                    session.query(Url.url, Url.crawl_depth)
+                    .outerjoin(PageContent, PageContent.url_id == Url.id)
+                    .filter(
+                        Url.job_id == self.job_id, Url.is_internal.is_(True),
+                        Url.is_html.is_(True), Url.status_code == 200,
+                        (PageContent.url_id.is_(None)) | (func.length(PageContent.content_text) < 50),
+                    )
+                    .yield_per(10_000)
+                )
+                for row in filas:
+                    if row[0] not in ya:
+                        self._reintentar.append((row[0], row[1] or 1))
             reintentar_hashes = {
                 _hash_key(compute_url_hash(normalize_url(u))) for u, _ in self._reintentar
             }
