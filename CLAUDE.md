@@ -27,7 +27,7 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 | **Crawler** | `crawler/` | Scrapy + Playwright | SEO spider + Redis queue worker. Each crawl runs as **subprocess** |
 | **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (15 check types). Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
-| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI |
+| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI. Two themes: `theme-terminal.css` (green-phosphor console, default) over `style.css` (light); toggle in the top bar, stored in `localStorage['seo-crawler-theme']` |
 | **Scripts** | `scripts/` | Python | DB initialization (`init_db.py`) |
 
 ### Docker Services (docker-compose.yml)

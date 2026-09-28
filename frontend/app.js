@@ -135,6 +135,7 @@ function app() {
   return {
     // Navegacion
     view: 'jobs',
+    theme: document.documentElement.dataset.theme || 'terminal',
     loading: false,
     error: null,
 
@@ -254,6 +255,31 @@ function app() {
       });
 
       this.$nextTick(() => lucide.createIcons());
+    },
+
+    // ------- Tema (terminal / claro) -------
+    toggleTheme() {
+      this.theme = this.theme === 'terminal' ? 'light' : 'terminal';
+      document.documentElement.dataset.theme = this.theme;
+      try { localStorage.setItem('seo-crawler-theme', this.theme); } catch (_) { /* sin storage */ }
+    },
+
+    // Los layouts de Plotly vienen del servidor con fondo blanco; en el tema
+    // terminal se vuelven transparentes y con texto verde.
+    plotLayout(layout) {
+      if (this.theme !== 'terminal') return layout;
+      const css = getComputedStyle(document.documentElement);
+      const text = css.getPropertyValue('--text').trim();
+      const grid = css.getPropertyValue('--border').trim();
+      const axis = (a) => ({ ...(a || {}), gridcolor: grid, zerolinecolor: grid, linecolor: grid });
+      return {
+        ...layout,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { ...(layout && layout.font), color: text, family: 'IBM Plex Mono, monospace' },
+        xaxis: axis(layout && layout.xaxis),
+        yaxis: axis(layout && layout.yaxis),
+      };
     },
 
     // ------- Toast notifications -------
@@ -765,12 +791,12 @@ function app() {
           const data = await api(`/jobs/${this.job.id}/semantic/ring-data`);
           await this.$nextTick();
           const el = document.getElementById('semantic-ring-chart');
-          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, this.plotLayout(data.layout), { responsive: true });
         } else if (type === 'scatter') {
           const data = await api(`/jobs/${this.job.id}/semantic/scatter-data`);
           await this.$nextTick();
           const el = document.getElementById('semantic-scatter-chart');
-          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, this.plotLayout(data.layout), { responsive: true });
         }
       } catch (e) { this.error = e.message; }
     },
@@ -822,7 +848,7 @@ function app() {
         this.$nextTick(() => {
           const el = document.getElementById('semantic-target-ring-chart');
           if (el && window.Plotly && this.targetResults.ring_map) {
-            Plotly.newPlot(el, this.targetResults.ring_map.data, this.targetResults.ring_map.layout, { responsive: true });
+            Plotly.newPlot(el, this.targetResults.ring_map.data, this.plotLayout(this.targetResults.ring_map.layout), { responsive: true });
           }
         });
       } catch (e) { this.error = e.message; }
