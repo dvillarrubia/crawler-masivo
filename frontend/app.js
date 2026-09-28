@@ -135,7 +135,7 @@ function app() {
   return {
     // Navegacion
     view: 'jobs',
-    theme: document.documentElement.dataset.theme || 'terminal',
+    theme: document.documentElement.dataset.theme || 'light',
     loading: false,
     error: null,
 

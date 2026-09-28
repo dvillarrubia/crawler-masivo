@@ -10,7 +10,7 @@
   <!-- Tema antes de pintar: evita el parpadeo del tema claro al cargar -->
   <script>
     (function () {
-      var t = 'terminal';
+      var t = 'light';  // el terminal es opcional: solo si se ha elegido
       try { t = localStorage.getItem('seo-crawler-theme') || t; } catch (_) {}
       document.documentElement.dataset.theme = t;
     })();
