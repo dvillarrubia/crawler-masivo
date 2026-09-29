@@ -200,6 +200,8 @@ class JobResponse(BaseModel):
     finish_reason: str | None = None
     # Comprobacion de render JS por plantilla (solo en rastreos sin render_js)
     js_check: dict[str, Any] | None = None
+    # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
+    pagerank_resumen: dict[str, Any] | None = None
     seeds: list[str]
     config: dict[str, Any]
     total_urls_discovered: int

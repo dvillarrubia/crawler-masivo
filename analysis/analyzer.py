@@ -31,6 +31,7 @@ from shared.config import (
 )
 from analysis.sd_validation import validate_structured_data
 from analysis import near_duplicates as nd
+from analysis import pagerank as prk
 from shared.robots import hay_noindex, robots_bad_separators
 from shared.database import SessionLocal
 from shared.models import (
@@ -1342,30 +1343,9 @@ class SEOAnalyzer:
 
     # -- PageRank -----------------------------------------------------------
 
-    # Peso por posicion del enlace: los de contenido valen mas que la plantilla
-    # que se repite en todas las paginas.
-    #
-    # La tabla cubre TODO el vocabulario que emite extract_links (nav, content,
-    # footer, header, sidebar, aside, form). Antes solo declaraba cuatro valores
-    # y el resto caia en un 0.5 por defecto — incluido `nav`, que en un sitio
-    # real era el 59,9% de los enlaces. Es decir: la mayoria del grafo pesaba
-    # 0.5, MAS que header (0.3) y footer (0.2), cuando el menu es plantilla pura
-    # y deberia pesar menos. Eso inflaba artificialmente lo que cuelga del menu
-    # (en un caso medido, el blog superaba a la portada en PageRank).
-    #
-    # Criterio: cuanto mas se repite un enlace en todo el sitio, menos senal
-    # aporta. El contenido es editorial y unico; nav/header/footer son
-    # boilerplate; form casi nunca es un enlace de recomendacion.
-    _POSITION_WEIGHT: dict[str | None, float] = {
-        "content": 1.0,
-        "sidebar": 0.4,
-        "aside": 0.35,
-        "nav": 0.25,
-        "header": 0.25,
-        "footer": 0.15,
-        "form": 0.1,
-        None: 0.3,
-    }
+    # La tabla de pesos por posicion vive en analysis/pagerank.py; se deja el
+    # alias por compatibilidad con quien la leia desde aqui.
+    _POSITION_WEIGHT = prk.PESO_POSICION
 
     def compute_pagerank(
         self,
@@ -1373,40 +1353,48 @@ class SEOAnalyzer:
         max_iter: int = 100,
         tol: float = 1e-6,
     ) -> None:
-        """PageRank interno ponderado por posicion del enlace.
+        """PageRank interno. El modelo esta en `analysis/pagerank.py`.
 
-        Las aristas se agregan EN SQL y se iteran vectorizadas con numpy. La
-        version anterior cargaba todas las filas de `links` en memoria y
-        construia dicts de Python: con 139 millones de enlaces internos (un
-        e-commerce real, ~2.300 por pagina por los megamenus) eran ~14 GB y
-        mataba el proceso. Agregar en SQL baja a ~20 M de aristas distintas, y
-        en arrays compactos eso son ~240 MB.
+        Aristas: enlaces follow internos pesados por su repeticion medida en
+        el sitio (la posicion solo desempata), mas salto -> destino en las
+        redirecciones, mas variante -> canonical en las paginas
+        canonicalizadas. Teletransporte y masa colgante solo entre paginas
+        200 indexables. Deja en `jobs.pagerank_resumen` cuanto PageRank acaba
+        en cada tipo de URL, y el desperdiciado.
 
-        La iteracion tambien era Python puro: 20 M de aristas x 100 vueltas son
-        2.000 millones de operaciones. Vectorizada es la misma cuenta en C.
+        Las aristas se agregan EN SQL y se iteran vectorizadas con numpy. Con
+        139 millones de enlaces internos (un e-commerce real, ~2.300 por pagina
+        por los megamenus) cargarlos como objetos de Python eran ~14 GB;
+        agregados en el servidor y leidos por bloques quedan en ~240 MB.
         """
         logger.debug("Computing PageRank ...")
 
         import numpy as np
 
-        # 1. Nodos internos del job
+        # 1. Nodos internos del job, con su categoria (ver prk.categoria)
         url_rows = self.session.execute(
-            select(Url.id).where(
-                Url.job_id == self.job_id, Url.is_internal.is_(True)
-            )
+            select(
+                Url.id, Url.status_code, Url.is_html, Url.indexable,
+                Url.redirect_url.isnot(None),
+            ).where(Url.job_id == self.job_id, Url.is_internal.is_(True))
         ).all()
         if not url_rows:
             return
         # Ordenados porque el mapeo id->indice se hace con searchsorted, que
         # exige orden. El indice i corresponde siempre a ids_ordenados[i].
-        ids_ordenados = np.sort(np.array([r[0] for r in url_rows], dtype=np.int64))
+        url_rows.sort(key=lambda r: r[0])
+        ids_ordenados = np.array([r[0] for r in url_rows], dtype=np.int64)
+        categorias = [
+            prk.categoria(r[1], r[2], r[3], "x" if r[4] else None)
+            for r in url_rows
+        ]
+        del url_rows
         n = len(ids_ordenados)
 
-        # 2. Aviso de posiciones sin peso declarado. Se consulta aparte porque
-        # el CASE de abajo las absorberia en el valor por defecto sin ruido, y
-        # asi fue como `nav` —el 59,9% de los enlaces de un sitio real— acabo
-        # pesando mas que header y footer.
-        conocidas = [p for p in self._POSITION_WEIGHT if p is not None]
+        # 2. Aviso de posiciones sin peso declarado: el CASE las absorberia en
+        # el valor por defecto sin ruido, y asi fue como `nav` acabo pesando
+        # mas que header y footer.
+        conocidas = [p for p in prk.PESO_POSICION if p is not None]
         desconocidas = self.session.execute(
             text(
                 """
@@ -1424,42 +1412,19 @@ class SEOAnalyzer:
             logger.warning(
                 "PageRank: posiciones de enlace sin peso declarado, entran con "
                 "el valor por defecto (%s) y pueden sesgar el reparto: %s",
-                self._POSITION_WEIGHT[None],
+                prk.PESO_POSICION[None],
                 ", ".join(f"{p}={c}" for p, c in desconocidas),
             )
 
-        # 3. Aristas agregadas EN EL SERVIDOR, a una tabla temporal.
-        #
-        # Agregar y traer en la misma consulta reventaba la memoria: son 38,5
-        # millones de aristas distintas y el driver materializa cada fila como
-        # objetos de Python (tres por arista, y el peso llegaba como Decimal,
-        # ~104 bytes cada uno). Materializar en el servidor y leer despues por
-        # bloques con cursor real deja el pico en unos cientos de MB.
-        casos = " ".join(
-            f"WHEN '{pos}' THEN {peso}"
-            for pos, peso in self._POSITION_WEIGHT.items() if pos is not None
-        )
-        defecto = self._POSITION_WEIGHT[None]
-        self.session.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
-        self.session.execute(text(
-            f"""
-            CREATE TEMP TABLE pr_edges_tmp AS
-            SELECT l.from_url_id AS src, u.id AS dst,
-                   MAX(CASE l.link_position {casos} ELSE {defecto} END)::real AS w
-            FROM links l
-            JOIN urls u ON u.url_hash = l.to_url_hash AND u.job_id = l.job_id
-            WHERE l.job_id = :jid AND l.is_internal AND l.follow
-              AND u.is_internal AND l.from_url_id <> u.id
-            GROUP BY 1, 2
-            """
-        ), {"jid": self.job_id})
-        # Redirecciones (3xx y meta refresh): arista salto -> destino con peso
-        # completo. Antes solo habia aristas desde `links`, asi que el PageRank
-        # que llegaba a una 301 quedaba colgante y se repartia a partes iguales
-        # entre TODAS las URLs en vez de pasar a su destino. Se une por la URL
-        # (no por hash) porque redirect_url se guarda ya normalizada y asi
-        # valen tambien los censos anteriores.
-        self.session.execute(text(
+        # 3. Aristas de enlaces, agregadas EN EL SERVIDOR a una tabla temporal
+        modo_peso = self._aristas_de_enlaces()
+
+        # 4. Redirecciones (3xx y meta refresh): arista salto -> destino con
+        # peso completo. Sin ella, el PageRank que llegaba a una 301 quedaba
+        # colgante y se repartia entre todas las URLs en vez de pasar a su
+        # destino. Se une por la URL (no por hash) porque redirect_url se
+        # guarda ya normalizada y asi valen tambien los censos anteriores.
+        aristas_redireccion = self.session.execute(text(
             """
             INSERT INTO pr_edges_tmp (src, dst, w)
             SELECT r.id, d.id, 1.0::real
@@ -1471,14 +1436,49 @@ class SEOAnalyzer:
                 SELECT 1 FROM pr_edges_tmp e WHERE e.src = r.id AND e.dst = d.id
               )
             """
+        ), {"jid": self.job_id}).rowcount
+
+        # 5. Canonicals: Google consolida las senales de la variante en la
+        # canonica. Antes `?orden=precio`, `/page/2` o `?utm=` retenian su
+        # PageRank y lo repartian por su cuenta. Se modela como una
+        # redireccion: la variante pierde sus enlaces salientes (son los de la
+        # canonica, casi siempre la misma plantilla) y pasa todo a la canonica.
+        # Solo si la canonica se rastreo y responde 200: si no, consolidar
+        # seria mandar el PageRank a un sitio que no existe.
+        self.session.execute(text("DROP TABLE IF EXISTS pr_canon_tmp"))
+        self.session.execute(text(
+            """
+            CREATE TEMP TABLE pr_canon_tmp AS
+            SELECT u.id AS src, d.id AS dst
+            FROM urls u
+            JOIN html_meta m ON m.url_id = u.id
+            JOIN urls d ON d.job_id = u.job_id AND d.url = m.canonical_href
+            WHERE u.job_id = :jid AND u.is_internal AND d.is_internal
+              AND u.indexability_status = 'Canonicalised'
+              AND d.status_code = 200 AND d.id <> u.id
+            """
         ), {"jid": self.job_id})
+        self.session.execute(text(
+            "DELETE FROM pr_edges_tmp e USING pr_canon_tmp c WHERE e.src = c.src"
+        ))
+        aristas_canonical = self.session.execute(text(
+            "INSERT INTO pr_edges_tmp (src, dst, w) "
+            "SELECT src, dst, 1.0::real FROM pr_canon_tmp"
+        )).rowcount
+        self.session.execute(text("DROP TABLE IF EXISTS pr_canon_tmp"))
+
         total = self.session.execute(
             text("SELECT COUNT(*) FROM pr_edges_tmp")
         ).scalar() or 0
         if not total:
             logger.info("PageRank: el job %s no tiene aristas", self.job_id)
+            self.session.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
             return
-        logger.info("PageRank: %d nodos, %d aristas agregadas", n, total)
+        logger.info(
+            "PageRank: %d nodos, %d aristas (peso por %s; %d de redireccion, "
+            "%d de canonical)",
+            n, total, modo_peso, aristas_redireccion, aristas_canonical,
+        )
 
         src = np.empty(total, dtype=np.int32)
         dst = np.empty(total, dtype=np.int32)
@@ -1507,27 +1507,35 @@ class SEOAnalyzer:
         cur.close()
         self.session.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
 
-        # 4. Metodo de la potencia, vectorizado
-        peso_saliente = np.bincount(src, weights=w, minlength=n).astype(np.float32)
-        colgantes = peso_saliente == 0          # sin enlaces salientes
-        w_norm = (w / peso_saliente[src]).astype(np.float32)
+        # 6. Iteracion, con el teletransporte solo entre paginas indexables
+        indexables = np.array([c == prk.INDEXABLE for c in categorias])
+        pr = prk.pagerank(
+            n, src, dst, w, teletransporte=indexables,
+            damping=damping, max_iter=max_iter, tol=tol,
+        )
+        reparto = prk.reparto(pr, categorias)
+        resumen = {
+            "peso": modo_peso,
+            "nodos": n,
+            "aristas": int(total),
+            "aristas_redireccion": int(aristas_redireccion or 0),
+            "aristas_canonical": int(aristas_canonical or 0),
+            "reparto": reparto,
+            "desperdiciado": prk.desperdiciado(reparto),
+        }
+        logger.info(
+            "PageRank: %.1f%% en paginas indexables, %.1f%% desperdiciado en "
+            "errores (job %s)",
+            reparto[prk.INDEXABLE] * 100, resumen["desperdiciado"] * 100,
+            self.job_id,
+        )
 
-        pr = np.full(n, 1.0 / n, dtype=np.float64)
-        for _ in range(max_iter):
-            aporte = np.bincount(dst, weights=pr[src] * w_norm, minlength=n)
-            nuevo = (1.0 - damping) / n + damping * aporte
-            nuevo += damping * pr[colgantes].sum() / n
-            dif = np.abs(nuevo - pr).max()
-            pr = nuevo
-            if dif < tol:
-                break
-
-        # 5. Normalizar a escala 0-10
+        # 7. Normalizar a escala 0-10
         maximo = pr.max()
         if maximo > 0:
             pr = pr / maximo * 10.0
 
-        # 6. Guardado en bloque. Antes se emitia una UPDATE por URL: en un job
+        # 8. Guardado en bloque. Antes se emitia una UPDATE por URL: en un job
         # de 60.000 paginas eran 60.000 consultas sueltas.
         self.session.execute(text(
             "CREATE TEMP TABLE pr_tmp (id BIGINT PRIMARY KEY, pr DOUBLE PRECISION) "
@@ -1543,8 +1551,117 @@ class SEOAnalyzer:
         self.session.execute(text(
             "UPDATE urls SET pagerank = pr_tmp.pr FROM pr_tmp WHERE urls.id = pr_tmp.id"
         ))
+        from shared.models import Job
+        self.session.execute(
+            update(Job).where(Job.id == self.job_id).values(pagerank_resumen=resumen)
+        )
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
+
+    def _aristas_de_enlaces(self) -> str:
+        """Crea `pr_edges_tmp` con las aristas de `links`. Devuelve el modo.
+
+        Peso por repeticion medida (ver `analysis/pagerank.py`): la fraccion
+        de paginas de origen que llevan el mismo enlace, destino + anchor, en
+        todo el sitio y en su seccion (host + primer segmento); cuenta la
+        mayor. Si hay menos de MIN_FUENTES_REPETICION paginas con enlaces, la
+        fraccion es ruido y se usa el peso por posicion.
+        """
+        jid = {"jid": self.job_id}
+        temporales = ("pr_fuentes_tmp", "pr_lk_tmp", "pr_rep_tmp", "pr_sec_tmp")
+        for tabla in ("pr_edges_tmp",) + temporales:
+            self.session.execute(text(f"DROP TABLE IF EXISTS {tabla}"))
+
+        self.session.execute(text(
+            r"""
+            CREATE TEMP TABLE pr_fuentes_tmp AS
+            SELECT u.id,
+                   COALESCE(substring(u.url FROM '^https?://[^/?#]+(?:/[^/?#]*)?'), '')
+                       AS sec
+            FROM urls u
+            WHERE u.job_id = :jid AND EXISTS (
+                SELECT 1 FROM links l
+                WHERE l.from_url_id = u.id AND l.job_id = :jid
+                  AND l.is_internal AND l.follow
+            )
+            """
+        ), jid)
+        self.session.execute(text("ANALYZE pr_fuentes_tmp"))
+        n_fuentes = self.session.execute(
+            text("SELECT COUNT(*) FROM pr_fuentes_tmp")
+        ).scalar() or 0
+
+        anchor = "COALESCE(lower(btrim(l.anchor_text)), '')"
+        if n_fuentes < prk.MIN_FUENTES_REPETICION:
+            self.session.execute(text(
+                f"""
+                CREATE TEMP TABLE pr_edges_tmp AS
+                SELECT l.from_url_id AS src, u.id AS dst,
+                       MAX({prk.sql_peso_posicion('l.link_position')})::real AS w
+                FROM links l
+                JOIN urls u ON u.url_hash = l.to_url_hash AND u.job_id = l.job_id
+                WHERE l.job_id = :jid AND l.is_internal AND l.follow
+                  AND u.is_internal AND l.from_url_id <> u.id
+                GROUP BY 1, 2
+                """
+            ), jid)
+            self.session.execute(text("DROP TABLE IF EXISTS pr_fuentes_tmp"))
+            return "posicion"
+
+        # Los enlaces, UNA vez, con el anchor y la seccion ya calculados. Unir
+        # por expresiones (`lower(btrim(anchor))`) dejaba al planificador sin
+        # estimacion: suponia 1 fila, elegia bucles anidados y recorria la
+        # tabla de fuentes 462.452 veces -- 116 s en Lopesan (150 k enlaces).
+        self.session.execute(text(
+            f"""
+            CREATE TEMP TABLE pr_lk_tmp AS
+            SELECT l.from_url_id AS src, l.to_url_hash AS h, {anchor} AS anc,
+                   l.link_position AS pos, f.sec
+            FROM links l JOIN pr_fuentes_tmp f ON f.id = l.from_url_id
+            WHERE l.job_id = :jid AND l.is_internal AND l.follow
+            """
+        ), jid)
+        self.session.execute(text("ANALYZE pr_lk_tmp"))
+        # Cuantas paginas de cada seccion llevan el enlace (c) y cuantas del
+        # sitio (cg). Cada pagina esta en una sola seccion, asi que el total
+        # del sitio es la suma de sus secciones.
+        self.session.execute(text(
+            """
+            CREATE TEMP TABLE pr_rep_tmp AS
+            SELECT h, anc, sec, c, SUM(c) OVER (PARTITION BY h, anc) AS cg
+            FROM (
+                SELECT h, anc, sec, COUNT(DISTINCT src) AS c
+                FROM pr_lk_tmp GROUP BY 1, 2, 3
+            ) x
+            """
+        ))
+        self.session.execute(text(
+            "CREATE TEMP TABLE pr_sec_tmp AS "
+            "SELECT sec, COUNT(*) AS n FROM pr_fuentes_tmp GROUP BY 1"
+        ))
+        for tabla in ("pr_rep_tmp", "pr_sec_tmp"):
+            self.session.execute(text(f"ANALYZE {tabla}"))
+
+        repeticion = (
+            "GREATEST(r.cg::float8 / :n_fuentes, "
+            "CASE WHEN sn.n >= :min_sec THEN r.c::float8 / sn.n ELSE 0.0 END)"
+        )
+        self.session.execute(text(
+            f"""
+            CREATE TEMP TABLE pr_edges_tmp AS
+            SELECT lk.src, u.id AS dst,
+                   MAX({prk.sql_peso_arista(repeticion, 'lk.pos')})::real AS w
+            FROM pr_lk_tmp lk
+            JOIN pr_rep_tmp r ON r.h = lk.h AND r.anc = lk.anc AND r.sec = lk.sec
+            JOIN pr_sec_tmp sn ON sn.sec = lk.sec
+            JOIN urls u ON u.job_id = :jid AND u.url_hash = lk.h
+            WHERE u.is_internal AND lk.src <> u.id
+            GROUP BY 1, 2
+            """
+        ), {**jid, "n_fuentes": n_fuentes, "min_sec": prk.MIN_FUENTES_SECCION})
+        for tabla in temporales:
+            self.session.execute(text(f"DROP TABLE IF EXISTS {tabla}"))
+        return "repeticion"
 
     # -- Link Analysis ------------------------------------------------------
 

@@ -395,6 +395,25 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `seo_crawler.*` suben al log del worker agrupados, con la ultima excepcion
    del traceback (`resumir_stderr`); antes solo subian los WARNING.
 
+21. **PageRank: la repeticion pone techo, no sustituye a la posicion** — el
+   peso por posicion se adivina por etiquetas y clases y falla con menus en
+   `div`, Tailwind o facetas (salian `content`, peso 1). Ahora se mide la
+   repeticion de cada enlace (destino + anchor) en el sitio y en su seccion
+   (host + primer segmento, desde 10 paginas), y lo repetido no pesa mas que
+   un enlace de menu: techo `0,1 / repeticion`, nunca por debajo de 0,25. #24
+   proponia `1 - sqrt(rep)`; se descarto porque lo que recibe un destino
+   (rep x peso) CAE a partir del 44%: estar enlazado desde todo el sitio
+   restaba. Con el techo el total nunca baja (hay test). Ademas: variante →
+   canonical (si la canonica se rastreo con 200) y salto → destino con peso 1;
+   el teletransporte y la masa colgante van solo a paginas 200 indexables, y
+   `jobs.pagerank_resumen` guarda cuanto acaba en cada tipo de URL. Medido en
+   seobide, workoholics, Lopesan y tucanaldesalud: las paginas legales siguen
+   arriba cuando todo el sitio las enlaza desde el pie; es un dato del sitio,
+   separarlas es trabajo del tipo de pagina (#12). Coste: 4-5 s con 150-180 k
+   aristas, 400 s en Quironsalud (7,7 M enlaces). Materializar los enlaces con el
+   anchor ya calculado es obligatorio: unir por `lower(btrim(anchor))` dejaba
+   al planificador sin estimacion y tardaba entre 30 y 80 veces mas.
+
 ## Environment Variables
 
 See `.env.example`:

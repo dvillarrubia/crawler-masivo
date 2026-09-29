@@ -46,6 +46,11 @@ class Job(Base):
     # contenido carga en cliente. NULL = no se llego a comprobar.
     js_check = Column(JSON, nullable=True)
 
+    # Resumen del PageRank (ver analysis/pagerank.py): que fraccion acaba en
+    # cada tipo de URL (indexable, redireccion, error...) y cuanta se
+    # desperdicia en errores. NULL = analisis anterior a este modelo.
+    pagerank_resumen = Column(JSON, nullable=True)
+
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
 
