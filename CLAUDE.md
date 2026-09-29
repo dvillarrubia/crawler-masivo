@@ -414,6 +414,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    anchor ya calculado es obligatorio: unir por `lower(btrim(anchor))` dejaba
    al planificador sin estimacion y tardaba entre 30 y 80 veces mas.
 
+22. **Los porcentajes de /insights van sobre paginas HTML 2xx y cuentan
+   paginas** — dividian por todas las URLs internas (saltos, PDFs, 404: donde
+   `indexable` es NULL) y sumaban incidencias, asi que una pagina con dos
+   problemas de title contaba doble y `pct_thin` pasaba del 100%. En i18n,
+   `return_tag_ok`/`lang_valid` NULL es "sin verificar", no fallo: un censo sin
+   verificar (Lopesan) salia con nota 0 y dos recomendaciones falsas de
+   prioridad alta. `h1_missing` ya no se emite en 4xx/5xx.
+
 ## Environment Variables
 
 See `.env.example`:
@@ -503,7 +511,7 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (202 cases, pytest): pure extractors
+Unit test suite at `tests/` (258 cases, pytest): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
 (`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
@@ -514,7 +522,11 @@ local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
 refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
 redireccion la sigue el navegador) y `test_analyzer_near_duplicates_db.py`, que
 pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
-(que errores del spider suben al log del worker). Run with
+(que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
+(modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
+de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el
+fichero; nunca apuntarlo a `crawler_db`). `test_insights.py` necesita FastAPI:
+se salta en la imagen del crawler, correrlo en la de la API. Run with
 `pip install -r tests/requirements.txt && pytest`. `scripts/check_content_quality.py <job_id>` compares, per URL template,
 what the crawl stored against what the extractor, `extract_main_content` and a
 Chromium render see right now — it is how content loss is caught after a crawl.

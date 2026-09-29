@@ -445,9 +445,12 @@ class SEOAnalyzer:
         for url_id, text in rows:
             h1_by_url[url_id].append(text or "")
 
-        # Get the full set of HTML URL ids so we can detect missing H1s.
+        # Get the full set of HTML URL ids so we can detect missing H1s. Solo
+        # 2xx: los headings solo se extraen de respuestas correctas, y sin este
+        # filtro cada 404 HTML salia "sin H1" (55 de 656 en Lopesan).
         html_url_ids_stmt = select(Url.id).where(
-            Url.job_id == self.job_id, Url.is_html.is_(True)
+            Url.job_id == self.job_id, Url.is_html.is_(True),
+            Url.status_code >= 200, Url.status_code < 300,
         )
         all_html_url_ids = {
             row[0] for row in self.session.execute(html_url_ids_stmt).all()

@@ -926,6 +926,30 @@ def _clamp_score(val: float) -> int:
     return max(0, min(100, round(val)))
 
 
+def _html_2xx(job_id: uuid.UUID, db: Session) -> int:
+    """Paginas HTML internas que responden 2xx.
+
+    Es el denominador de todo lo que depende del contenido: solo de ellas se
+    extraen title, h1 y texto, y solo ellas pueden ser indexables. Dividir
+    tambien por saltos 3xx, 404 y PDFs hundia los porcentajes.
+    """
+    return db.query(func.count(Url.id)).filter(
+        Url.job_id == job_id, Url.is_internal == True, Url.is_html == True,
+        Url.status_code >= 200, Url.status_code < 300,
+    ).scalar() or 0
+
+
+def _paginas_con(job_id: uuid.UUID, db: Session, tipos: list[str]) -> int:
+    """PAGINAS distintas con alguna de esas incidencias.
+
+    Sumar incidencias contaba dos veces una pagina con `title_too_long` y
+    `title_duplicate`, y `pct_thin` podia pasar del 100%.
+    """
+    return db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.issue_type.in_(tipos),
+    ).scalar() or 0
+
+
 def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Crawlability: status codes, indexability, redirects."""
     total = db.query(func.count(Url.id)).filter(
@@ -952,8 +976,11 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Url.job_id == job_id, Url.is_internal == True, Url.indexable == True,
     ).scalar() or 0
 
+    # Indexable solo puede serlo una pagina HTML que responde 2xx; en saltos,
+    # errores y PDFs `indexable` es NULL y contaban como "no indexables".
+    candidatas = _html_2xx(job_id, db)
     pct_2xx = _safe_pct(ok_2xx, total)
-    pct_indexable = _safe_pct(indexable_count, total)
+    pct_indexable = _safe_pct(indexable_count, candidatas)
     pct_redirects = _safe_pct(redirects_3xx, total)
     pct_4xx = _safe_pct(errors_4xx, total)
     pct_5xx = _safe_pct(errors_5xx, total)
@@ -983,11 +1010,11 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             affected_count=redirects_3xx,
             url_filter={"status_group": "3xx", "is_internal": "true"},
         ))
-    non_indexable = total - indexable_count
-    if total > 0 and pct_indexable < 80:
+    non_indexable = candidatas - indexable_count
+    if candidatas > 0 and pct_indexable < 80:
         recs.append(Recommendation(
             priority="media", title="Mejorar indexabilidad",
-            description=f"Solo el {pct_indexable}% de las URLs internas son indexables. Revisa las directivas noindex y canonicals para asegurar que las paginas importantes sean rastreables.",
+            description=f"Solo el {pct_indexable}% de las paginas HTML que responden 200 son indexables. Revisa las directivas noindex y canonicals para asegurar que las paginas importantes sean rastreables.",
             affected_count=non_indexable,
             url_filter={"indexable": "false", "is_internal": "true"},
         ))
@@ -996,7 +1023,8 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         key="crawlability", name="Rastreabilidad", icon="🔍",
         score=_clamp_score(score),
         metrics={
-            "total_internal": total, "pct_2xx": pct_2xx, "pct_indexable": pct_indexable,
+            "total_internal": total, "html_2xx": candidatas,
+            "pct_2xx": pct_2xx, "pct_indexable": pct_indexable,
             "pct_redirects": pct_redirects, "pct_4xx": pct_4xx, "pct_5xx": pct_5xx,
             "errors_4xx": errors_4xx, "errors_5xx": errors_5xx, "redirects_3xx": redirects_3xx,
         },
@@ -1006,9 +1034,7 @@ def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
 
 def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Content quality: titles, descriptions, word count, thin content."""
-    total_html = db.query(func.count(Url.id)).filter(
-        Url.job_id == job_id, Url.is_internal == True, Url.is_html == True,
-    ).scalar() or 0
+    total_html = _html_2xx(job_id, db)
 
     # Issue counts for content-related issues
     content_issue_types = [
@@ -1026,15 +1052,16 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     issue_map: dict[str, int] = {it: c for it, c in issue_rows}
 
     title_missing = issue_map.get("title_missing", 0)
-    title_problems = sum(issue_map.get(k, 0) for k in ["title_missing", "title_too_short", "title_too_long", "title_duplicate"])
+    title_problems = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate"])
     desc_missing = issue_map.get("description_missing", 0)
-    desc_problems = sum(issue_map.get(k, 0) for k in ["description_missing", "description_too_short", "description_too_long", "description_duplicate"])
-    h1_problems = sum(issue_map.get(k, 0) for k in ["h1_missing", "h1_multiple", "h1_duplicate"])
-    thin_content = sum(issue_map.get(k, 0) for k in ["low_word_count", "very_low_text_ratio", "low_text_ratio"])
+    desc_problems = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate"])
+    h1_problems = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate"])
+    thin_content = _paginas_con(job_id, db, ["low_word_count", "very_low_text_ratio", "low_text_ratio"])
 
     # Average word count
     avg_wc = float(db.query(func.avg(Url.word_count)).filter(
-        Url.job_id == job_id, Url.is_internal == True, Url.is_html == True, Url.word_count.isnot(None),
+        Url.job_id == job_id, Url.is_internal == True, Url.is_html == True,
+        Url.status_code >= 200, Url.status_code < 300, Url.word_count.isnot(None),
     ).scalar() or 0)
 
     pct_title_ok = _safe_pct(max(0, total_html - title_problems), total_html)
@@ -1096,9 +1123,8 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
 
 def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Links: orphan pages, inlinks distribution, nofollow, broken links."""
-    total_internal = db.query(func.count(Url.id)).filter(
-        Url.job_id == job_id, Url.is_internal == True, Url.is_html == True,
-    ).scalar() or 0
+    # Huerfana solo puede serlo una pagina 200 (ver analyze_links)
+    total_internal = _html_2xx(job_id, db)
 
     # Orphan pages (0 inlinks)
     orphan_count = db.query(func.count(Issue.id)).filter(
@@ -1353,36 +1379,56 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     )
     languages = [lang for lang, _ in lang_rows]
 
-    # Return tags OK / lang valid
-    return_ok = db.query(func.count(Hreflang.id)).join(
-        Url, Hreflang.url_id == Url.id,
-    ).filter(Url.job_id == job_id, Hreflang.return_tag_ok == True).scalar() or 0
+    # Return tags / lang valid. NULL es "sin verificar" (autorreferencia,
+    # x-default, destino no rastreado, o un analisis anterior), NO un fallo:
+    # antes `missing_return = total - ok` los contaba como "sin retorno", y un
+    # cluster de 3 idiomas perfecto con x-default salia al ~50% con una
+    # recomendacion de prioridad alta. En un censo sin verificar (Lopesan,
+    # 17.228 hreflang con NULL) daba nota 0 y dos recomendaciones falsas.
+    def _cuenta(col, valor):
+        return db.query(func.count(Hreflang.id)).join(
+            Url, Hreflang.url_id == Url.id,
+        ).filter(Url.job_id == job_id, col.is_(valor)).scalar() or 0
 
-    lang_valid = db.query(func.count(Hreflang.id)).join(
-        Url, Hreflang.url_id == Url.id,
-    ).filter(Url.job_id == job_id, Hreflang.lang_valid == True).scalar() or 0
+    return_ok = _cuenta(Hreflang.return_tag_ok, True)
+    missing_return = _cuenta(Hreflang.return_tag_ok, False)
+    lang_valid = _cuenta(Hreflang.lang_valid, True)
+    invalid_lang = _cuenta(Hreflang.lang_valid, False)
+    return_unknown = total_hreflang - return_ok - missing_return
+    lang_unknown = total_hreflang - lang_valid - invalid_lang
 
-    pct_return_ok = _safe_pct(return_ok, total_hreflang)
-    pct_lang_valid = _safe_pct(lang_valid, total_hreflang)
+    pct_return_ok = _safe_pct(return_ok, return_ok + missing_return)
+    pct_lang_valid = _safe_pct(lang_valid, lang_valid + invalid_lang)
 
-    score = pct_return_ok * 0.5 + pct_lang_valid * 0.5
+    # La nota solo con lo verificado. Sin nada verificado no hay nota que dar:
+    # se deja en 100 (nada que corregir que sepamos) y se avisa abajo.
+    partes = []
+    if return_ok + missing_return:
+        partes.append(pct_return_ok)
+    if lang_valid + invalid_lang:
+        partes.append(pct_lang_valid)
+    score = sum(partes) / len(partes) if partes else 100
 
     recs: list[Recommendation] = []
-    missing_return = total_hreflang - return_ok
     if missing_return > 0:
         recs.append(Recommendation(
             priority="alta", title="Corregir etiquetas hreflang sin retorno",
-            description=f"Hay {missing_return} etiquetas hreflang sin una etiqueta de retorno confirmada. Cada hreflang debe tener una referencia reciproca.",
+            description=f"Hay {missing_return} etiquetas hreflang cuya pagina de destino no enlaza de vuelta. Cada hreflang debe tener una referencia reciproca.",
             affected_count=missing_return,
             issue_types=["hreflang_missing_return"],
         ))
-    invalid_lang = total_hreflang - lang_valid
     if invalid_lang > 0:
         recs.append(Recommendation(
             priority="media", title="Corregir codigos de idioma invalidos",
             description=f"Hay {invalid_lang} etiquetas hreflang con codigos de idioma no validos. Usa codigos ISO 639-1 (ej: es, en, fr).",
             affected_count=invalid_lang,
             issue_types=["hreflang_invalid_lang"],
+        ))
+    if not partes:
+        recs.append(Recommendation(
+            priority="baja", title="Hreflang sin verificar",
+            description=f"Las {total_hreflang} etiquetas hreflang no se han podido verificar (retorno e idioma). Relanza el analisis del job para comprobarlas.",
+            affected_count=total_hreflang,
         ))
 
     return CategoryInsight(
@@ -1391,6 +1437,8 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         metrics={
             "total_hreflang": total_hreflang, "languages": languages,
             "pct_return_ok": pct_return_ok, "pct_lang_valid": pct_lang_valid,
+            "return_missing": missing_return, "return_unknown": return_unknown,
+            "invalid_lang": invalid_lang, "lang_unknown": lang_unknown,
         },
         recommendations=recs,
     )
