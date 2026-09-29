@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, bindparam, delete, func, select, text, update
+from sqlalchemy import and_, delete, func, select, text, update
 from sqlalchemy.orm import Session, aliased
 
 from shared.config import (
@@ -241,7 +241,9 @@ class SEOAnalyzer:
         else:
             stmt = select(Url).where(base_filter, *extra_filters)
 
-        result = self.session.execute(stmt.yield_per(BATCH_SIZE))
+        result = self.session.execute(
+            stmt.execution_options(yield_per=BATCH_SIZE)
+        )
         yield from result
 
     # ======================================================================
@@ -925,7 +927,9 @@ class SEOAnalyzer:
         urls: dict[int, str] = {}
         # `yield_per` importa: el texto de un censo grande no cabe en memoria de
         # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
-        for url_id, url, texto in self.session.execute(stmt.yield_per(BATCH_SIZE)):
+        for url_id, url, texto in self.session.execute(
+            stmt.execution_options(yield_per=BATCH_SIZE)
+        ):
             f = nd.firma(texto)
             if f is None:
                 continue
@@ -973,7 +977,7 @@ class SEOAnalyzer:
             return
         filas = [
             {
-                "_id": uid,
+                "id": uid,
                 "near_duplicate_count": cuenta,
                 "closest_similarity": cercana,
             }
@@ -981,10 +985,10 @@ class SEOAnalyzer:
         ]
         for inicio in range(0, len(filas), BATCH_SIZE):
             lote = filas[inicio : inicio + BATCH_SIZE]
-            self.session.execute(
-                update(Url).where(Url.id == bindparam("_id")),
-                lote,
-            )
+            # "ORM bulk UPDATE by primary key": sin WHERE y con `id` en cada
+            # fila. Con un WHERE sobre un bindparam, SQLAlchemy 2.x lanza
+            # InvalidRequestError y el analisis entero se caia aqui.
+            self.session.execute(update(Url), lote)
         self.session.flush()
 
     # -- Redirect Chains ----------------------------------------------------

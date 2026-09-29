@@ -383,6 +383,18 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `middlewares.DepthMiddleware`, que sustituye a la de Scrapy porque esa la
    pisaba (las URLs del sitemap entraban a profundidad 3 en vez de 1).
 
+20. **Un job solo es `completed` si su dato esta completo** — antes el worker
+   daba por bueno cualquier rastreo con codigo de salida 0 y un analisis que
+   reventaba se tragaba en el log: un censo de 289 URLs rastreadas y 0
+   guardadas (faltaba una columna) y todos los analisis fallando en
+   `analyze_near_duplicates` terminaron `completed`, sin issues ni PageRank,
+   que se lee como "sitio limpio". Ahora: si se rastrea y no se guarda nada, el
+   job es `failed` con `finish_reason=persistence_failed`; si falla el
+   analisis, `failed` conservando el `finish_reason` del rastreo (lo rastreado
+   vale; se relanza con `python -m analysis.analyzer <job_id>`). Los ERROR de
+   `seo_crawler.*` suben al log del worker agrupados, con la ultima excepcion
+   del traceback (`resumir_stderr`); antes solo subian los WARNING.
+
 ## Environment Variables
 
 See `.env.example`:
@@ -472,12 +484,18 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (166 cases, pytest): pure extractors
+Unit test suite at `tests/` (202 cases, pytest): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
 (`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
 casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
-estimada contra la Jaccard exacta). Run with
+estimada contra la Jaccard exacta) y un test de integracion del spider
+(`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
+local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
+refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
+redireccion la sigue el navegador) y `test_analyzer_near_duplicates_db.py`, que
+pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
+(que errores del spider suben al log del worker). Run with
 `pip install -r tests/requirements.txt && pytest`. `scripts/check_content_quality.py <job_id>` compares, per URL template,
 what the crawl stored against what the extractor, `extract_main_content` and a
 Chromium render see right now — it is how content loss is caught after a crawl.
