@@ -367,6 +367,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    desvío baja a ~2 puntos. Cuesta lineal y se midió: firmar 2.000 páginas de
    400 palabras pasa de 1 s a 3,8 s (≈40 s en un censo de 20.000).
 
+19. **Las redirecciones las sigue el spider, no Scrapy** — toda peticion de
+   pagina lleva `dont_redirect`. Si las sigue el `RedirectMiddleware`, la
+   peticion al destino pasa por el dupefilter y, si el destino ya se habia
+   visto, se descarta con la 301 dentro: el salto no llegaba a `parse`, no se
+   guardaba, y los enlaces que apuntaban a el desaparecian del grafo (faltaban
+   la mayoria de las 301 internas: http→https, barra final, www). Ahora cada
+   salto es su propia fila con `redirect_url`, el destino se pide con la
+   MISMA profundidad (una redireccion no es un clic: sumar uno le quitaba un
+   nivel entero al rastreo de una semilla `http://x.com`), y la meta refresh
+   con URL se trata igual. El PageRank anade la arista salto → destino con
+   peso 1 y el destino de una redireccion interna ya no sale huerfano. Con
+   render JS la redireccion la sigue el navegador: se registra el salto sin
+   codigo (`Redirect (JS)`). La profundidad la respeta
+   `middlewares.DepthMiddleware`, que sustituye a la de Scrapy porque esa la
+   pisaba (las URLs del sitemap entraban a profundidad 3 en vez de 1).
+
 ## Environment Variables
 
 See `.env.example`:

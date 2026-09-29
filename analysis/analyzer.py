@@ -21,7 +21,7 @@ from typing import Any, Sequence
 from urllib.parse import urlparse
 
 from sqlalchemy import and_, bindparam, delete, func, select, text, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from shared.config import (
     DESCRIPTION_MAX_LEN,
@@ -1449,6 +1449,25 @@ class SEOAnalyzer:
             GROUP BY 1, 2
             """
         ), {"jid": self.job_id})
+        # Redirecciones (3xx y meta refresh): arista salto -> destino con peso
+        # completo. Antes solo habia aristas desde `links`, asi que el PageRank
+        # que llegaba a una 301 quedaba colgante y se repartia a partes iguales
+        # entre TODAS las URLs en vez de pasar a su destino. Se une por la URL
+        # (no por hash) porque redirect_url se guarda ya normalizada y asi
+        # valen tambien los censos anteriores.
+        self.session.execute(text(
+            """
+            INSERT INTO pr_edges_tmp (src, dst, w)
+            SELECT r.id, d.id, 1.0::real
+            FROM urls r
+            JOIN urls d ON d.job_id = r.job_id AND d.url = r.redirect_url
+            WHERE r.job_id = :jid AND r.is_internal AND d.is_internal
+              AND r.redirect_url IS NOT NULL AND r.id <> d.id
+              AND NOT EXISTS (
+                SELECT 1 FROM pr_edges_tmp e WHERE e.src = r.id AND e.dst = d.id
+              )
+            """
+        ), {"jid": self.job_id})
         total = self.session.execute(
             text("SELECT COUNT(*) FROM pr_edges_tmp")
         ).scalar() or 0
@@ -1534,6 +1553,11 @@ class SEOAnalyzer:
         # inlinks and must not be flagged as orphans. Only 200-OK internal
         # pages are considered — a 404/redirect having no inlinks is not an
         # "orphan" in the SEO sense.
+        #
+        # Tampoco el destino de una redireccion interna: los enlaces apuntan a
+        # la URL vieja, asi que el destino tiene 0 inlinks y salia huerfano.
+        # Toda migracion o paso de http a https llenaba el informe de
+        # huerfanas falsas.
         stmt = (
             select(Url.id)
             .where(
@@ -1543,6 +1567,7 @@ class SEOAnalyzer:
                 Url.status_code == 200,
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+                ~_es_destino_de_redireccion(),
             )
         )
         rows = self.session.execute(stmt).all()
@@ -1603,6 +1628,7 @@ class SEOAnalyzer:
                 Url.status_code == 200,
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+                ~_es_destino_de_redireccion(),
             )
         ).all()
         for (url_id,) in rows:
@@ -1628,6 +1654,23 @@ class SEOAnalyzer:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+def _es_destino_de_redireccion():
+    """EXISTS: la fila de `Url` es el destino de una redireccion interna.
+
+    Los enlaces apuntan a la URL vieja, asi que el destino tiene 0 inlinks
+    propios aunque este perfectamente enlazado a traves del salto.
+    """
+    origen = aliased(Url)
+    return (
+        select(origen.id)
+        .where(
+            origen.job_id == Url.job_id,
+            origen.redirect_url == Url.url,
+            origen.is_internal.is_(True),
+        )
+        .exists()
+    )
 
 # ---------------------------------------------------------------------------
 # Public entry point

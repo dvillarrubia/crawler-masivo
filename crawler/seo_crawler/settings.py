@@ -75,6 +75,13 @@ ITEM_PIPELINES = {
 # ---------------------------------------------------------------------------
 # Downloader middlewares
 # ---------------------------------------------------------------------------
+# La profundidad la fija el spider (sitemaps a 1, destino de redireccion a la
+# del origen); la de Scrapy la pisaba. Ver middlewares.DepthMiddleware.
+SPIDER_MIDDLEWARES = {
+    "scrapy.spidermiddlewares.depth.DepthMiddleware": None,
+    "seo_crawler.middlewares.DepthMiddleware": 900,
+}
+
 DOWNLOADER_MIDDLEWARES = {
     # Disable the built-in UA middleware so ours takes precedence
     "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,

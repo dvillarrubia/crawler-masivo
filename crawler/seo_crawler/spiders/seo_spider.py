@@ -11,11 +11,9 @@ then performs a BFS crawl extracting all SEO-relevant data.
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import logging
 import os
-import re
 import time
 from typing import Any, Generator
 from urllib.parse import urljoin, urlparse
@@ -28,7 +26,9 @@ from scrapy.http import HtmlResponse, Response
 from scrapy_playwright.page import PageMethod
 
 from seo_crawler.extractors import (
+    absolutize_url,
     classify_resource_type,
+    compile_url_patterns,
     compute_folder_depth,
     compute_indexability_status,
     compute_status_group,
@@ -45,6 +45,7 @@ from seo_crawler.extractors import (
     extract_main_content_markdown,
     extract_meta,
     extract_meta_refresh,
+    extract_meta_refresh_target,
     extract_resources,
     extract_security_headers,
     extract_structured_data,
@@ -52,6 +53,7 @@ from seo_crawler.extractors import (
     extract_word_count,
     http_status_text,
     is_internal_url,
+    normalize_host,
     normalize_url,
     robots_tokens,
 )
@@ -118,6 +120,14 @@ def _hash_key(url_hash: str) -> int:
     de URLs: ~3e-8 (una colision = saltar una URL, aceptable).
     """
     return int(url_hash[:16], 16)
+
+
+def _safe_normalize(url: str) -> str:
+    """normalize_url que no lanza: una URL malformada se compara tal cual."""
+    try:
+        return normalize_url(url)
+    except ValueError:
+        return url
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +240,13 @@ class SeoSpider(scrapy.Spider):
         # None = sin tope (hasta agotar la frontera)
         self.max_urls: int | None = None
         self.follow_external: bool = False
-        self._exclude_patterns: list[str] = []
-        self._include_patterns: list[str] = []
+        # Comprobadores ya compilados (ver compile_url_patterns)
+        self._exclude_patterns: list = []
+        self._include_patterns: list = []
+        # Semillas normalizadas: para reconocer la que redirige a otro host
+        self._seed_keys: set[str] = set()
+        # Hosts cuyo robots.txt ya se pidio para descubrir sitemaps
+        self._robots_hosts: set[str] = set()
         self._crawled_count: int = 0
         self._redis: redis.Redis | None = None
         self._redis_update_interval: int = 50
@@ -250,6 +265,7 @@ class SeoSpider(scrapy.Spider):
         # parseados, la vista es parcial y no se puede afirmar que el resto de
         # URLs este fuera del sitemap.
         self._sitemap_requested: int = 0
+        self._sitemaps_pedidos: set[str] = set()
         # True si se alcanzo MAX_SITEMAP_FILES: la vista del sitemap es
         # parcial y no se puede afirmar que nada mas este fuera de el.
         self._sitemap_truncated: bool = False
@@ -281,17 +297,29 @@ class SeoSpider(scrapy.Spider):
             self.max_depth = self.job_config.get("max_depth", 3)
             self.max_urls = self.job_config.get("max_urls")
             self.follow_external = self.job_config.get("follow_external", False)
-            self._exclude_patterns = self.job_config.get("exclude_patterns", [])
-            self._include_patterns = self.job_config.get("include_patterns", [])
+            self._exclude_patterns, malos_ex = compile_url_patterns(
+                self.job_config.get("exclude_patterns", [])
+            )
+            self._include_patterns, malos_in = compile_url_patterns(
+                self.job_config.get("include_patterns", [])
+            )
+            for patron in malos_ex + malos_in:
+                logger.warning(
+                    "Patron de URL que no es una regex valida: %r. Sin prefijo "
+                    "se aplica solo como glob; con 're:' se descarta. Declara "
+                    "el tipo con 'glob:' o 're:'",
+                    patron,
+                )
             self.render_js = self.job_config.get("render_js", False)
 
             # Build allowed-hosts from seed URLs
+            self._seed_keys = set()
             for seed in self.seed_urls:
-                parsed = urlparse(seed)
-                if parsed.hostname:
-                    host = parsed.hostname.lower()
-                    self.allowed_hosts.add(host)
-                    self.allowed_hosts.add(host.removeprefix("www."))
+                self._add_allowed_host(urlparse(seed).hostname)
+                try:
+                    self._seed_keys.add(normalize_url(seed))
+                except ValueError:
+                    pass
 
             # User-agent override for middlewares
             if self.job_config.get("user_agent"):
@@ -528,41 +556,22 @@ class SeoSpider(scrapy.Spider):
             normalized = normalize_url(url)
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
-            req_meta: dict[str, Any] = {"depth": 0}
-            if self.render_js and _url_likely_html(normalized):
-                req_meta.update(self._playwright_meta())
-            # Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter,
-            # sino que ademas NO registra la peticion como vista. La semilla
-            # quedaba fuera del set, cualquier enlace interno a la home la
-            # volvia a rastrear a mayor profundidad y se perdia el depth 0.
-            yield scrapy.Request(
-                url=normalized,
-                callback=self.parse,
-                errback=self.handle_error,
-                meta=req_meta,
-            )
+            # Sin dont_filter (ver _page_request): la semilla quedaba fuera del
+            # set de vistas, cualquier enlace interno a la home la volvia a
+            # rastrear a mayor profundidad y se perdia el depth 0.
+            yield self._page_request(normalized, 0)
 
         # Sitemap discovery: robots.txt (Sitemap: directives) per seed host,
         # plus any explicitly configured sitemap URLs. Membership is recorded
         # for every listed URL and uncrawled ones are seeded, so pages only
         # reachable via the sitemap (true orphans) still get audited.
         if self._use_sitemap:
-            seen_hosts: set[str] = set()
             for seed in self.seed_urls:
-                parsed = urlparse(seed)
-                if not parsed.hostname or parsed.hostname in seen_hosts:
-                    continue
-                seen_hosts.add(parsed.hostname)
-                robots_url = f"{parsed.scheme or 'https'}://{parsed.netloc}/robots.txt"
-                yield scrapy.Request(
-                    url=robots_url,
-                    callback=self.parse_robots_for_sitemaps,
-                    errback=self.handle_robots_error,
-                    meta={"depth": 0},
-                    dont_filter=True,
-                )
+                req = self._robots_request(seed)
+                if req is not None:
+                    yield req
             for sm_url in self._extra_sitemap_urls:
-                yield self._sitemap_request(sm_url)
+                yield from self._sitemap_request(sm_url)
 
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
         # run, streamed lazily from DB. Emitted with depth=1 since we know
@@ -576,28 +585,26 @@ class SeoSpider(scrapy.Spider):
                 continue
             if not self._should_follow(normalized):
                 continue
-            req_meta = {"depth": 1}
-            if self.render_js and _url_likely_html(normalized):
-                req_meta.update(self._playwright_meta())
-            # Tampoco aqui: si un enlace redescubre una URL de la frontera,
-            # debe filtrarse como duplicada en vez de rastrearse dos veces.
-            yield scrapy.Request(
-                url=normalized,
-                callback=self.parse,
-                errback=self.handle_error,
-                meta=req_meta,
-            )
+            yield self._page_request(normalized, 1)
 
     # ------------------------------------------------------------------
     # Sitemap ingestion
     # ------------------------------------------------------------------
-    def _sitemap_request(self, url: str) -> Request:
+    def _sitemap_request(self, url: str) -> Generator[Request, None, None]:
+        # Cada fichero se pide una sola vez. El dupefilter descartaria la
+        # repeticion (dos robots.txt que declaran el mismo sitemap, como el de
+        # una semilla y el del host al que redirige), pero ya contada como
+        # pedida: al cerrar parecia un sitemap a medio leer.
+        clave = _safe_normalize(url)
+        if clave in self._sitemaps_pedidos:
+            return
+        self._sitemaps_pedidos.add(clave)
         # Se cuenta cada fichero de sitemap pedido para poder comparar al
         # cerrar con los realmente parseados: si no coinciden, la vista del
         # sitemap es parcial (tope alcanzado, crawl cerrado antes de leerlos
         # todos, o algun 404) y no se puede afirmar que el resto este fuera.
         self._sitemap_requested += 1
-        return scrapy.Request(
+        yield scrapy.Request(
             url=url,
             callback=self.parse_sitemap_response,
             errback=self.handle_sitemap_error,
@@ -612,14 +619,14 @@ class SeoSpider(scrapy.Spider):
             body_text = response.body.decode("utf-8", errors="ignore")
             sitemap_urls = parse_robots_sitemaps(body_text, response.url)
         if not sitemap_urls:
-            yield self._sitemap_request(urljoin(response.url, "/sitemap.xml"))
+            yield from self._sitemap_request(urljoin(response.url, "/sitemap.xml"))
             return
         for sm_url in sitemap_urls:
-            yield self._sitemap_request(sm_url)
+            yield from self._sitemap_request(sm_url)
 
     def handle_robots_error(self, failure) -> Generator:
         """robots.txt unreachable — still try the conventional location."""
-        yield self._sitemap_request(urljoin(failure.request.url, "/sitemap.xml"))
+        yield from self._sitemap_request(urljoin(failure.request.url, "/sitemap.xml"))
 
     def parse_sitemap_response(self, response: Response) -> Generator:
         """Parse a sitemap (urlset or index): record membership, seed
@@ -641,7 +648,7 @@ class SeoSpider(scrapy.Spider):
                     response.url, len(page_urls), len(child_sitemaps))
 
         for child in child_sitemaps:
-            yield self._sitemap_request(child)
+            yield from self._sitemap_request(child)
 
         for url in page_urls:
             normalized = normalize_url(url)
@@ -655,17 +662,10 @@ class SeoSpider(scrapy.Spider):
                 continue
             if not self._should_follow(normalized):
                 continue
-            req_meta: dict[str, Any] = {"depth": 1}
-            if self.render_js and _url_likely_html(normalized):
-                req_meta.update(self._playwright_meta())
             # The scheduler dupefilter drops these if link discovery already
-            # queued the same URL.
-            yield scrapy.Request(
-                url=normalized,
-                callback=self.parse,
-                errback=self.handle_error,
-                meta=req_meta,
-            )
+            # queued the same URL. La profundidad 1 se respeta gracias a
+            # middlewares.DepthMiddleware (la de Scrapy la pisaba).
+            yield self._page_request(normalized, 1)
 
     def handle_sitemap_error(self, failure) -> None:
         logger.debug("Sitemap fetch failed: %s", failure.request.url)
@@ -727,25 +727,71 @@ class SeoSpider(scrapy.Spider):
     # ------------------------------------------------------------------
     # URL filtering
     # ------------------------------------------------------------------
+    def _add_allowed_host(self, host: str | None) -> None:
+        host = normalize_host(host)
+        if host:
+            self.allowed_hosts.add(host)
+            self.allowed_hosts.add(host.removeprefix("www."))
+
     def _is_internal(self, url: str) -> bool:
         """Check if URL is internal, with subdomain support."""
         internal = is_internal_url(url, self.allowed_hosts)
         if not internal and self._crawl_subdomains and hasattr(self, "_root_domains"):
-            host = urlparse(url).hostname or ""
-            internal = any(host.endswith(rd) or host == rd for rd in self._root_domains)
+            try:
+                host = normalize_host(urlparse(url).hostname)
+            except ValueError:
+                return False
+            # Con punto delante: sin el, `notx.com` salia interno para `x.com`
+            internal = any(host == rd or host.endswith("." + rd) for rd in self._root_domains)
         return internal
+
+    def _page_request(self, url: str, depth: int) -> Request:
+        """Peticion de pagina con la redireccion desactivada.
+
+        `dont_redirect`: el spider sigue las redirecciones el mismo (ver
+        `_handle_redirect`). Si las sigue Scrapy, la peticion al destino pasa
+        por el dupefilter y, si el destino ya se habia visto, se descarta: la
+        301 de origen no llegaba nunca a `parse` y no quedaba registrada. Eso
+        vaciaba el informe de redirecciones (http→https, barra final, www) y
+        hacia desaparecer del grafo todos los enlaces que apuntaban a ellas.
+
+        Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter, sino
+        que ademas NO registra la peticion como vista, y la URL se rastrearia
+        otra vez al encontrarla enlazada.
+        """
+        meta: dict[str, Any] = {"depth": depth, "dont_redirect": True}
+        if self.render_js and _url_likely_html(url):
+            meta.update(self._playwright_meta())
+        return scrapy.Request(
+            url=url,
+            callback=self.parse,
+            errback=self.handle_error,
+            meta=meta,
+        )
+
+    def _robots_request(self, url: str) -> Request | None:
+        """robots.txt del host de `url`, para descubrir sus sitemaps (una vez)."""
+        parsed = urlparse(url)
+        host = normalize_host(parsed.hostname)
+        if not host or host in self._robots_hosts:
+            return None
+        self._robots_hosts.add(host)
+        return scrapy.Request(
+            url=f"{parsed.scheme or 'https'}://{parsed.netloc}/robots.txt",
+            callback=self.parse_robots_for_sitemaps,
+            errback=self.handle_robots_error,
+            meta={"depth": 0},
+            dont_filter=True,
+        )
 
     def _should_follow(self, url: str) -> bool:
         """Check exclude/include patterns and URL filters."""
-        if self._exclude_patterns:
-            for pattern in self._exclude_patterns:
-                if fnmatch.fnmatch(url, pattern) or re.search(pattern, url):
-                    return False
+        if any(casa(url) for casa in self._exclude_patterns):
+            return False
         if self._include_patterns:
-            for pattern in self._include_patterns:
-                if fnmatch.fnmatch(url, pattern) or re.search(pattern, url):
-                    return True
-            return False  # include patterns defined but none matched
+            # include patterns defined: only matching URLs pass
+            if not any(casa(url) for casa in self._include_patterns):
+                return False
         # URL length filter
         if self._max_url_length > 0 and len(url) > self._max_url_length:
             return False
@@ -753,6 +799,107 @@ class SeoSpider(scrapy.Spider):
         if self._max_folder_depth > 0 and compute_folder_depth(url) > self._max_folder_depth:
             return False
         return True
+
+    # ------------------------------------------------------------------
+    # Redirects
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _redirect_location(response: Response) -> str | None:
+        """Destino absoluto de un 3xx con Location, o None si no redirige."""
+        if not (300 <= response.status < 400) or response.status == 304:
+            return None
+        raw = response.headers.get(b"Location")
+        if not raw:
+            return None
+        try:
+            location = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            location = raw.decode("latin-1")
+        return absolutize_url(response.url, location.strip())
+
+    def _handle_redirect(
+        self,
+        response: Response,
+        location: str,
+        depth: int,
+        response_time_ms: float,
+        content_type: str,
+    ) -> Generator:
+        """Registra un salto 3xx como su propia fila y sigue el destino."""
+        url = response.url
+        status = response.status
+        parsed = urlparse(url)
+        yield PageItem(
+            url=url,
+            url_hash=compute_url_hash(url),
+            host=parsed.hostname or "",
+            path=parsed.path or "/",
+            scheme=parsed.scheme or "https",
+            is_internal=self._is_internal(url),
+            crawl_depth=depth,
+            content_type=content_type or None,
+            content_length=len(response.body),
+            status_code=status,
+            status_group=compute_status_group(status),
+            response_time_ms=round(response_time_ms, 2),
+            is_html=False,
+            resource_type="redirect",
+            redirect_url=location,
+            body_hash=None,
+            job_id=self.job_id,
+            url_length=len(url),
+            folder_depth=compute_folder_depth(url),
+            word_count=None,
+            text_ratio=None,
+            redirect_type=status,
+            status_text=http_status_text(status),
+            last_modified=None,
+            http_version=response.meta.get("http_protocol") or getattr(response, "protocol", None),
+            transfer_size=len(response.body),
+            indexability_status=f"Redirect ({status})",
+            blocked_by_robots=response.meta.get("blocked_by_robots"),
+        )
+        yield from self._follow_redirect(url, location, depth)
+
+    def _adoptar_host_de_semilla(self, origen: str, destino: str) -> Generator:
+        """Si una semilla redirige a otro host, ese host pasa a ser interno.
+
+        Semilla que redirige a otro dominio (x.com → x.es): sin esto la pagina
+        final salia externa, no se seguia ningun enlace y el job terminaba con
+        1 URL sin ningun error. Vale para cadenas: el destino de una semilla
+        cuenta como semilla.
+        """
+        if _safe_normalize(origen) not in self._seed_keys:
+            return
+        self._seed_keys.add(_safe_normalize(destino))
+        if self._is_internal(destino):
+            return
+        logger.warning(
+            "La semilla %s redirige a otro host (%s): se rastrea como interno",
+            origen, destino,
+        )
+        self._add_allowed_host(urlparse(destino).hostname)
+        if self._use_sitemap:
+            req = self._robots_request(destino)
+            if req is not None:
+                yield req
+
+    def _follow_redirect(self, origen: str, destino: str, depth: int) -> Generator:
+        """Sigue el destino de una redireccion (HTTP o meta refresh).
+
+        Misma profundidad que el origen: una redireccion no es un clic. Si
+        sumara un nivel, una semilla `http://x.com` → `https://x.com/` le
+        quitaria al rastreo un nivel entero con el max_depth por defecto.
+        """
+        yield from self._adoptar_host_de_semilla(origen, destino)
+        if not (self._is_internal(destino) or self.follow_external):
+            return
+        if not self._should_follow(destino):
+            return
+        if self._already_crawled_hashes and \
+                _hash_key(compute_url_hash(destino)) in self._already_crawled_hashes:
+            return
+        yield self._page_request(destino, depth)
 
     # ------------------------------------------------------------------
     # Main parse
@@ -797,31 +944,59 @@ class SeoSpider(scrapy.Spider):
         resource_type = classify_resource_type(content_type, url)
         internal = self._is_internal(url)
 
+        # Redireccion HTTP: se registra el salto y se sigue el destino a mano
+        # (ver _page_request). Va antes del filtro de tipo: un 301 no es un
+        # PDF ni una imagen aunque la URL acabe en .pdf.
+        location = self._redirect_location(response)
+        if location is not None:
+            yield from self._handle_redirect(response, location, depth,
+                                             response_time_ms, content_type)
+            return
+
         # Resource type filter: skip types not enabled in config
         if resource_type not in self._allowed_resource_types:
             return
 
-        # Detect redirect: store where this page redirects TO
-        # Also yield separate PageItems for each intermediate redirect hop.
-        redirect_url = None
+        # Cadena de redirecciones seguida fuera del spider (con render JS la
+        # sigue el navegador): un PageItem por salto. La pagina de este
+        # response es SIEMPRE la final: con ella se compara el canonical.
+        # Compararlo con la URL pedida marcaba la pagina final de toda
+        # redireccion como "Canonicalised" (R5).
+        url_for_record = url
         redirect_urls = response.request.meta.get("redirect_urls")
         redirect_reasons = response.request.meta.get("redirect_reasons", [])
+        if (
+            not redirect_urls
+            and response.meta.get("playwright")
+            and _safe_normalize(response.request.url) != _safe_normalize(url)
+        ):
+            # Con render JS, scrapy-playwright rellena redirect_urls con las
+            # redirecciones HTTP que sigue el navegador, pero no con las que
+            # hace la propia pagina por JavaScript (location.href). Sin esto
+            # la URL pedida desaparecia y con ella los enlaces que apuntaban a
+            # ella. No hay codigo HTTP que registrar.
+            redirect_urls = [response.request.url]
+            redirect_reasons = [None]
         if redirect_urls:
-            # redirect_urls is the chain of original URLs before the final one.
-            # The original requested URL is redirect_urls[0].
-            # response.url is the final destination.
-            # For the PageItem we record the original URL and where it ended up.
-            original_url = redirect_urls[0]
-            url_for_record = original_url
-            redirect_url = response.url  # final destination
-
             # Yield separate PageItems for each redirect hop in the chain
             # so the UI shows 301/302/etc. entries (Screaming Frog parity)
             chain = list(redirect_urls) + [response.url]
             for i in range(len(chain) - 1):
                 hop_url = chain[i]
                 hop_dest = chain[i + 1]
-                hop_status = redirect_reasons[i] if i < len(redirect_reasons) else 301
+                # Scrapy guarda el codigo (int) en los 3xx pero el texto
+                # "meta refresh" en las meta refresh: pasarlo tal cual como
+                # status reventaba compute_status_group con TypeError y no se
+                # guardaba ni la pagina ni su destino.
+                reason = redirect_reasons[i] if i < len(redirect_reasons) else None
+                hop_status = reason if isinstance(reason, int) else None
+                if reason == "meta refresh":
+                    hop_status = 200
+                    hop_label = "Redirect (meta refresh)"
+                elif hop_status is None:
+                    hop_label = "Redirect (JS)"
+                else:
+                    hop_label = f"Redirect ({hop_status})"
                 hop_parsed = urlparse(hop_url)
                 hop_hash = compute_url_hash(hop_url)
                 yield PageItem(
@@ -835,7 +1010,10 @@ class SeoSpider(scrapy.Spider):
                     content_type=content_type,
                     content_length=0,
                     status_code=hop_status,
-                    status_group=compute_status_group(hop_status),
+                    status_group=(
+                        compute_status_group(hop_status)
+                        if hop_status is not None and hop_status >= 300 else "3xx"
+                    ),
                     response_time_ms=0,
                     is_html=False,
                     resource_type="redirect",
@@ -846,17 +1024,14 @@ class SeoSpider(scrapy.Spider):
                     folder_depth=compute_folder_depth(hop_url),
                     word_count=None,
                     text_ratio=None,
-                    redirect_type=hop_status,
-                    status_text=http_status_text(hop_status),
+                    redirect_type=hop_status if hop_status and hop_status >= 300 else None,
+                    status_text=http_status_text(hop_status) if hop_status else None,
                     last_modified=None,
                     http_version=None,
                     transfer_size=0,
-                    indexability_status=f"Redirect ({hop_status})",
+                    indexability_status=hop_label,
                 )
-        else:
-            url_for_record = url
-
-        url_hash = compute_url_hash(url_for_record)
+            yield from self._adoptar_host_de_semilla(chain[0], url)
 
         # Body hash for duplicate content detection
         body_hash = None
@@ -865,9 +1040,6 @@ class SeoSpider(scrapy.Spider):
 
         # -- Screaming Frog extended fields --------------------------------
         # Redirect type: the HTTP status code of the first redirect hop
-        redirect_type_val = None
-        if redirect_urls and redirect_reasons:
-            redirect_type_val = redirect_reasons[0]
 
         last_modified_val = (
             response.headers.get(b"Last-Modified", b"").decode("utf-8", errors="ignore") or None
@@ -888,8 +1060,11 @@ class SeoSpider(scrapy.Spider):
         x_robots = None
         canonical_header = None
 
-        # Only extract HTML content from successful responses (2xx)
-        is_success = 200 <= status_code < 400
+        # Only extract HTML content from successful responses (2xx). Antes
+        # era <400: el cuerpo de un 304 o de un 300 sin Location se analizaba
+        # como una pagina y se seguian sus enlaces.
+        is_success = 200 <= status_code < 300
+        refresh_target = None
 
         if is_html and is_success:
             selector = response.selector
@@ -929,6 +1104,15 @@ class SeoSpider(scrapy.Spider):
                 url_for_record,
             )
             indexability_status_val = "Indexable" if is_indexable else reason
+
+            # Meta refresh con destino: es una redireccion (Google trata la
+            # inmediata como permanente). Se guarda como redirect_url para que
+            # la cadena y el PageRank lleguen al destino, y se sigue abajo.
+            refresh_target = extract_meta_refresh_target(selector, base_url)
+            if refresh_target == _safe_normalize(url_for_record):
+                refresh_target = None
+            if refresh_target:
+                indexability_status_val = "Redirect (meta refresh)"
         elif not is_success:
             # Non-2xx: mark indexability accordingly
             if 300 <= status_code < 400:
@@ -942,7 +1126,7 @@ class SeoSpider(scrapy.Spider):
         # For redirected URLs, this records the FINAL destination with its
         # actual status code (usually 200).  The redirect hops were already
         # yielded above.
-        final_url = response.url if redirect_urls else url_for_record
+        final_url = url_for_record
         final_hash = compute_url_hash(final_url)
         final_parsed = urlparse(final_url)
         yield PageItem(
@@ -960,7 +1144,7 @@ class SeoSpider(scrapy.Spider):
             response_time_ms=round(response_time_ms, 2),
             is_html=is_html,
             resource_type=resource_type,
-            redirect_url=None,  # This is the final destination
+            redirect_url=refresh_target,  # destino final, salvo meta refresh
             body_hash=body_hash,
             job_id=self.job_id,
             # Screaming Frog parity fields
@@ -976,6 +1160,9 @@ class SeoSpider(scrapy.Spider):
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
         )
+
+        if refresh_target:
+            yield from self._follow_redirect(url_for_record, refresh_target, depth)
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         if not is_html or not is_success:
@@ -1185,15 +1372,7 @@ class SeoSpider(scrapy.Spider):
                         if self._already_crawled_hashes and \
                                 _hash_key(link_hash) in self._already_crawled_hashes:
                             continue
-                        follow_meta: dict[str, Any] = {"depth": depth + 1}
-                        if self.render_js and _url_likely_html(link["url"]):
-                            follow_meta.update(self._playwright_meta())
-                        yield scrapy.Request(
-                            url=link["url"],
-                            callback=self.parse,
-                            errback=self.handle_error,
-                            meta=follow_meta,
-                        )
+                        yield self._page_request(link["url"], depth + 1)
 
     # ------------------------------------------------------------------
     # Error handling

@@ -8,11 +8,12 @@ extraction logic testable without bringing in a full Scrapy response.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
 from w3lib.url import canonicalize_url
 
@@ -62,9 +63,93 @@ def compute_url_hash(url: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def normalize_host(host: str | None) -> str:
+    """Forma comparable de un host: minusculas, sin punto final y en IDNA.
+
+    Sin esto, una semilla `https://españa.com/` guardaba el host en unicode
+    mientras los enlaces (normalizados por w3lib) salian en `xn--espaa-rta.com`:
+    ningun enlace casaba con la semilla y el rastreo moria en la primera pagina.
+    """
+    if not host:
+        return ""
+    host = host.strip().lower().rstrip(".")
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return host
+
+
+def _remove_dot_segments(path: str) -> str:
+    """RFC 3986 5.2.4: resolver `/./` y `/../` de una ruta absoluta."""
+    if "/." not in path:
+        return path
+    salida: list[str] = []
+    segmentos = path.split("/")
+    for i, seg in enumerate(segmentos):
+        if seg == ".":
+            if i == len(segmentos) - 1:
+                salida.append("")
+            continue
+        if seg == "..":
+            if len(salida) > 1:
+                salida.pop()
+            if i == len(segmentos) - 1:
+                salida.append("")
+            continue
+        salida.append(seg)
+    resultado = "/".join(salida)
+    return resultado if resultado.startswith("/") else "/" + resultado
+
+
 def normalize_url(url: str) -> str:
-    """Canonicalize a URL using w3lib for consistent dedup."""
-    return canonicalize_url(url, keep_fragments=False)
+    """Canonicalize a URL using w3lib for consistent dedup.
+
+    Encima de w3lib: quita el puerto por defecto y el punto final del host, y
+    resuelve `/./` y `/../`. `https://x.com:443/a` y `https://x.com/a` daban
+    hashes distintos y la misma pagina se rastreaba dos veces.
+    """
+    canon = canonicalize_url(url, keep_fragments=False)
+    parts = urlsplit(canon)
+    host = parts.hostname
+    if not host:
+        return canon
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    netloc = parts.netloc
+    if (port is not None and port == _DEFAULT_PORTS.get(parts.scheme)) or host.endswith("."):
+        userinfo = netloc.rpartition("@")[0]
+        host_limpio = host.rstrip(".")
+        if ":" in host_limpio:  # IPv6
+            host_limpio = f"[{host_limpio}]"
+        netloc = host_limpio
+        if port is not None and port != _DEFAULT_PORTS.get(parts.scheme):
+            netloc += f":{port}"
+        if userinfo:
+            netloc = f"{userinfo}@{netloc}"
+    path = _remove_dot_segments(parts.path)
+    if netloc == parts.netloc and path == parts.path:
+        return canon
+    return urlunsplit((parts.scheme, netloc, path, parts.query, parts.fragment))
+
+
+def absolutize_url(base_url: str, href: str) -> str | None:
+    """`href` resuelto contra `base_url` y normalizado, o None si no es una URL.
+
+    `urljoin` lanza ValueError con hrefs como `https://[LINK]/x` o
+    `http://ex.com]/x`. Sin capturarlo aqui, UN enlace malformado cortaba la
+    extraccion entera de la pagina: se perdian enlaces, hreflang, datos
+    estructurados, contenido y el seguimiento BFS, y la pagina quedaba sin
+    aristas salientes en el PageRank.
+    """
+    try:
+        return normalize_url(urljoin(base_url, href))
+    except ValueError:
+        return None
 
 
 def compute_status_group(status_code: int | None) -> str:
@@ -119,12 +204,15 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
 
 def is_internal_url(url: str, allowed_hosts: set[str]) -> bool:
     """Check whether *url* belongs to one of the *allowed_hosts*."""
-    host = urlparse(url).hostname
-    if host is None:
+    try:
+        host = normalize_host(urlparse(url).hostname)
+    except ValueError:
+        return False
+    if not host:
         return False
     # Strip leading www. for comparison
-    bare = host.lower().removeprefix("www.")
-    return bare in allowed_hosts or host.lower() in allowed_hosts
+    bare = host.removeprefix("www.")
+    return bare in allowed_hosts or host in allowed_hosts
 
 
 def effective_base_url(selector, page_url: str) -> str:
@@ -160,6 +248,64 @@ def _resolve(base_url: str | None, href: str | None) -> str | None:
         return urljoin(base_url, href)
     except Exception:
         return href
+
+
+def compile_url_patterns(patterns: list[str] | None) -> tuple[list, list[str]]:
+    """Compila los `include/exclude_patterns` de un job a comprobadores.
+
+    Devuelve `(comprobadores, invalidos)`. Cada comprobador recibe una URL y
+    dice si casa. El tipo se puede declarar con prefijo:
+
+    - `glob:*/tag/*` — comodines de shell (fnmatch) sobre la URL entera.
+    - `re:/tag/\\d+` — expresion regular, buscada en cualquier punto.
+    - sin prefijo — como siempre: casa si casa como glob O como regex.
+
+    Antes el patron se compilaba en cada URL dentro del callback: un glob como
+    `*/tag/*` o `?sort=` no es una regex valida, lanzaba `re.error` y ninguna
+    pagina seguia enlaces — el job acababa con una URL y sin error visible.
+    Ahora un patron sin prefijo que no compila como regex se usa solo como
+    glob, y se devuelve en `invalidos` para avisar. Un `re:` que no compila no
+    se puede reinterpretar: se descarta y tambien se avisa.
+    """
+    comprobadores: list = []
+    invalidos: list[str] = []
+    for patron in patterns or []:
+        if not isinstance(patron, str) or not patron:
+            continue
+        if patron.startswith("glob:"):
+            glob = patron[5:]
+            comprobadores.append(lambda url, g=glob: fnmatch.fnmatchcase(url, g))
+            continue
+        if patron.startswith("re:"):
+            try:
+                rx = re.compile(patron[3:])
+            except re.error:
+                invalidos.append(patron)
+                continue
+            comprobadores.append(lambda url, r=rx: r.search(url) is not None)
+            continue
+        try:
+            rx = re.compile(patron)
+        except re.error:
+            invalidos.append(patron)
+            comprobadores.append(lambda url, g=patron: fnmatch.fnmatchcase(url, g))
+            continue
+        comprobadores.append(
+            lambda url, g=patron, r=rx: fnmatch.fnmatchcase(url, g) or r.search(url) is not None
+        )
+    return comprobadores, invalidos
+
+
+def rel_tokens(rel: str | None) -> set[str]:
+    """Tokens de un atributo `rel`, en minusculas.
+
+    La sintaxis es por espacios, pero hay plantillas que escriben
+    `rel="nofollow,noopener"`: separando solo por espacios salia un unico token
+    `nofollow,noopener` y el enlace contaba como follow.
+    """
+    if not rel:
+        return set()
+    return {t for t in re.split(r"[\s,]+", rel.lower()) if t}
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +440,9 @@ def extract_links(
         if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
             continue
 
-        absolute = urljoin(base_url, raw_href)
-        normalized = normalize_url(absolute)
+        normalized = absolutize_url(base_url, raw_href)
+        if normalized is None:
+            continue
 
         tag_name = (a.xpath("name()").get() or "a").lower()
         if tag_name == "area":
@@ -322,8 +469,7 @@ def extract_links(
 
         # Follow: True unless rel contains "nofollow" or the page itself is
         # marked nofollow (meta robots / X-Robots-Tag).
-        rel_tokens = {t.strip().lower() for t in (rel or "").split()} if rel else set()
-        follow = "nofollow" not in rel_tokens and not page_nofollow
+        follow = "nofollow" not in rel_tokens(rel) and not page_nofollow
 
         # Link type classification
         has_child_imgs = len(child_imgs) > 0
@@ -572,8 +718,11 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
     ):
         if not raw_url:
             return
-        absolute = urljoin(base_url, raw_url.strip())
-        normalized = normalize_url(absolute)
+        try:
+            absolute = urljoin(base_url, raw_url.strip())
+            normalized = normalize_url(absolute)
+        except ValueError:
+            return
         if normalized in seen:
             return
         seen.add(normalized)
@@ -616,7 +765,10 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
     # srcset images (first URL only per element for simplicity)
     for img in selector.css("[srcset]"):
         srcset = img.attrib.get("srcset", "")
-        first_url = srcset.split(",")[0].strip().split()[0] if srcset else ""
+        # srcset=" " o "," no tiene candidatos: split()[0] lanzaba IndexError
+        # y se perdia la extraccion de toda la pagina.
+        candidato = srcset.split(",")[0].split()
+        first_url = candidato[0] if candidato else ""
         _add(
             first_url,
             "image",
@@ -818,6 +970,29 @@ def extract_meta_refresh(selector) -> str | None:
     return _clean(content)
 
 
+_REFRESH_URL_RE = re.compile(r"""^\s*[\d.]*\s*[;,]?\s*(?:url\s*=\s*)?(.*)$""", re.I | re.S)
+
+
+def extract_meta_refresh_target(selector, base_url: str) -> str | None:
+    """Destino absoluto y normalizado de una meta refresh, o None.
+
+    Una refresh sin URL (`content="300"`) solo recarga la pagina: no es una
+    redireccion. Se ignoran las que estan dentro de `<noscript>`, como hace
+    Scrapy: solo aplican con JavaScript desactivado.
+    """
+    content = selector.xpath(
+        f"//meta[translate(@http-equiv, '{_XP_UPPER}', '{_XP_LOWER}') = 'refresh']"
+        "[not(ancestor::noscript)]/@content"
+    ).get()
+    if not content:
+        return None
+    m = _REFRESH_URL_RE.match(content)
+    destino = (m.group(1) if m else "").strip().strip("'\"").strip()
+    if not destino:
+        return None
+    return absolutize_url(base_url, destino)
+
+
 def detect_mixed_content(selector, page_url: str) -> list[str]:
     """Detect HTTP resources loaded on an HTTPS page (mixed content).
 
@@ -854,7 +1029,10 @@ def detect_mixed_content(selector, page_url: str) -> list[str]:
             raw_url = (element.attrib.get(attr) or "").strip()
             if not raw_url:
                 continue
-            absolute = urljoin(page_url, raw_url)
+            try:
+                absolute = urljoin(page_url, raw_url)
+            except ValueError:
+                continue
             if absolute in seen:
                 continue
             seen.add(absolute)
