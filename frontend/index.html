@@ -6,8 +6,17 @@
   <title>SEO Crawler</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=VT323&display=swap" rel="stylesheet">
+  <!-- Tema antes de pintar: evita el parpadeo del tema claro al cargar -->
+  <script>
+    (function () {
+      var t = 'light';  // el terminal es opcional: solo si se ha elegido
+      try { t = localStorage.getItem('seo-crawler-theme') || t; } catch (_) {}
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/theme-terminal.css">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
@@ -40,6 +49,10 @@
           <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajos
         </button>
       </template>
+      <button class="btn btn-sm" @click="toggleTheme()" :data-tip="theme === 'terminal' ? 'Cambiar al tema claro' : 'Cambiar al tema terminal'" style="display:flex;align-items:center;gap:.35rem">
+        <i data-lucide="contrast" style="width:14px;height:14px"></i>
+        <span x-text="theme === 'terminal' ? 'Claro' : 'Terminal'"></span>
+      </button>
       <button class="btn btn-sm" @click="showImportModal = true" data-tip="Importar un backup ZIP de un rastreo" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup
       </button>
@@ -171,7 +184,7 @@
     <template x-if="view === 'detail' && job">
       <div>
         <!-- Hero gradient header -->
-        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:#f0f1f3;border-bottom:1px solid var(--border)">
+        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:var(--bg);border-bottom:1px solid var(--border)">
           <!-- Cabecera -->
           <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
             <div>
@@ -2495,7 +2508,7 @@
                               <span x-text="sd.schema_type || '(sin tipo)'"></span>
                               <span class="text-dim" style="font-weight:400" x-text="'· ' + sd.format"></span>
                             </div>
-                            <pre style="background:#f7f8fa;padding:.5rem;border-radius:3px;font-size:.72rem;max-height:200px;overflow:auto" x-text="JSON.stringify(sd.raw, null, 2)"></pre>
+                            <pre style="background:var(--bg-input);padding:.5rem;border-radius:3px;font-size:.72rem;max-height:200px;overflow:auto" x-text="JSON.stringify(sd.raw, null, 2)"></pre>
                           </div>
                         </template>
                       </div>
