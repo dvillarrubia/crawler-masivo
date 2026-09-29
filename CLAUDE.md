@@ -409,7 +409,12 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `jobs.pagerank_resumen` guarda cuanto acaba en cada tipo de URL. Medido en
    seobide, workoholics, Lopesan y tucanaldesalud: las paginas legales siguen
    arriba cuando todo el sitio las enlaza desde el pie; es un dato del sitio,
-   separarlas es trabajo del tipo de pagina (#12). Coste: 4-5 s con 150-180 k
+   separarlas es trabajo del tipo de pagina (#12). Si la home baja, mirar de
+   donde le llegaba: en re-magazine era 1.a solo por el logo de un aviso de
+   navegador antiguo (`body > div.deprecation-notice`, fuera de header/nav/
+   footer, clasificado `content`) presente en 181 de 183 paginas; con techo
+   es 13.a y arriba quedan los tags, que ademas del menu reciben enlaces
+   dentro de los articulos. Es B1 funcionando. Coste: 4-5 s con 150-180 k
    aristas, 400 s en Quironsalud (7,7 M enlaces). Materializar los enlaces con el
    anchor ya calculado es obligatorio: unir por `lower(btrim(anchor))` dejaba
    al planificador sin estimacion y tardaba entre 30 y 80 veces mas.
