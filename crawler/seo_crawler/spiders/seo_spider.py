@@ -184,23 +184,88 @@ async def _evaluar_tolerante(page, js: str, intentos: int = 3):
     return None
 _ESPERA_QUIETO_MS = int(os.getenv("PLAYWRIGHT_DOM_QUIET_MS", "400"))
 
+# Piso: por debajo de esto no se da por terminada una pagina aunque el DOM
+# lleve quieto desde el primer instante.
+#
+# Mirar SOLO el DOM tiene un punto ciego que costaba paginas enteras: mientras
+# una peticion XHR esta EN VUELO no hay mutaciones, asi que el DOM parece
+# "quieto" y la espera resolvia antes de que la respuesta llegase a pintar
+# nada. Medido en un rastreo real de 9.895 noticias: 6.555 se guardaron con
+# 5-6 bloques de datos estructurados y solo 1.965 con los 7 que tiene la
+# pagina montada — faltaba el modulo de relacionadas, y con el ~20 enlaces y
+# ~20% del texto. La misma pagina, en frio, se estabiliza a los 500-1.000 ms:
+# no era el sitio, era la carrera.
+#
+# Ahora el temporizador lo reinicia tambien cada recurso que TERMINA
+# (PerformanceObserver), que es la senal de que la respuesta de ese XHR acaba
+# de llegar y el DOM esta a punto de moverse. Es la semantica de "networkidle"
+# sin su riesgo: sigue siendo una promesa que resuelve siempre, acotada por el
+# tope, asi que un sitio cuya red no calla nunca no tumba la pagina.
+_ESPERA_PISO_MS = int(os.getenv("PLAYWRIGHT_MIN_WAIT_MS", "600"))
+
 _JS_ESPERAR_DOM_QUIETO = """
 () => new Promise((resolve) => {
-    const TOPE = %d, QUIETO = %d;
-    let t = null;
-    const obs = new MutationObserver(() => reinicia());
+    const TOPE = %d, QUIETO = %d, PISO = %d;
+    const t0 = Date.now();
+    let t = null, obs = null, po = null, forzado = false;
     const fin = () => {
         clearTimeout(t); clearTimeout(tope);
-        try { obs.disconnect(); } catch (_) {}
+        try { if (obs) obs.disconnect(); } catch (_) {}
+        try { if (po) po.disconnect(); } catch (_) {}
         resolve();
     };
-    const reinicia = () => { clearTimeout(t); t = setTimeout(fin, QUIETO); };
-    const tope = setTimeout(fin, TOPE);
-    try { obs.observe(document, { childList: true, subtree: true }); }
-    catch (_) { fin(); return; }
+    // Con una peticion en vuelo la pagina NO esta terminada, por mucho que el
+    // DOM lleve quieto: la respuesta aun tiene que llegar y pintar. El
+    // contador lo instala seo_crawler/render.py antes de navegar; si no
+    // estuviera, esto vale 0 y el comportamiento es el de solo-DOM.
+    const enVuelo = () => (window.__enVuelo | 0) > 0;
+    const termina = () => {
+        if (!forzado && enVuelo()) { reinicia(); return; }
+        fin();
+    };
+    const reinicia = () => {
+        clearTimeout(t);
+        // Nunca antes del piso, aunque no haya pasado nada todavia.
+        const espera = Math.max(QUIETO, PISO - (Date.now() - t0));
+        t = setTimeout(termina, espera);
+    };
+    const tope = setTimeout(() => { forzado = true; fin(); }, TOPE);
+    try {
+        obs = new MutationObserver(reinicia);
+        obs.observe(document, { childList: true, subtree: true });
+    } catch (_) { obs = null; }
+    try {
+        po = new PerformanceObserver(reinicia);
+        po.observe({ type: "resource", buffered: false });
+    } catch (_) { po = null; }
+    if (!obs && !po) { fin(); return; }
     reinicia();
 })
-""" % (_ESPERA_TOPE_MS, _ESPERA_QUIETO_MS)
+""" % (_ESPERA_TOPE_MS, _ESPERA_QUIETO_MS, _ESPERA_PISO_MS)
+
+# Version HTTP real de la navegacion. Chromium no la expone en el objeto
+# respuesta, pero si en Navigation Timing: "h2", "h3", "http/1.1". Por el
+# camino de curl_cffi no hay forma de sacarla sin reimplementar el handler de
+# scrapy-impersonate, que la descarta; por eso la columna solo se rellena en
+# rastreos con render (antes estaba vacia SIEMPRE, en los dos modos).
+_JS_PROTOCOLO = (
+    "() => { try { const n = performance.getEntriesByType('navigation')[0];"
+    " return n ? n.nextHopProtocol : null; } catch (e) { return null; } }"
+)
+
+_PROTOCOLO_LEGIBLE = {
+    "h2": "HTTP/2",
+    "h3": "HTTP/3",
+    "http/1.1": "HTTP/1.1",
+    "http/1.0": "HTTP/1.0",
+}
+
+
+def _normaliza_protocolo(valor) -> str | None:
+    if not valor or not isinstance(valor, str):
+        return None
+    return _PROTOCOLO_LEGIBLE.get(valor.lower().strip(), valor.strip())
+
 
 _BOILERPLATE_REMOVAL_JS = """
 () => {
@@ -540,6 +605,8 @@ class SeoSpider(scrapy.Spider):
                 # antes de que el banner exista.
                 PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
                 PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
+                # Ultimo: su resultado se lee luego desde response.meta.
+                PageMethod(_evaluar_tolerante, _JS_PROTOCOLO),
             ],
         }
 
@@ -1002,11 +1069,15 @@ class SeoSpider(scrapy.Spider):
                     scheme=hop_parsed.scheme or "https",
                     is_internal=self._is_internal(hop_url),
                     crawl_depth=depth,
-                    content_type=content_type,
-                    content_length=0,
+                    # El salto no tiene cuerpo propio: heredar el content-type
+                    # de la respuesta FINAL hacia que un 301 se listase como
+                    # "text/html", y los ceros se leen como "0 bytes" cuando
+                    # lo cierto es que no se midio.
+                    content_type=None,
+                    content_length=None,
                     status_code=hop_status,
                     status_group=compute_status_group(hop_status),
-                    response_time_ms=0,
+                    response_time_ms=None,
                     is_html=False,
                     resource_type="redirect",
                     redirect_url=hop_dest,
@@ -1020,13 +1091,21 @@ class SeoSpider(scrapy.Spider):
                     status_text=http_status_text(hop_status),
                     last_modified=None,
                     http_version=None,
-                    transfer_size=0,
+                    transfer_size=None,
                     indexability_status=f"Redirect ({hop_status})",
                 )
         else:
             url_for_record = url
 
         url_hash = compute_url_hash(url_for_record)
+
+        # URL que se guarda de verdad: la ULTIMA de la cadena de
+        # redirecciones. Todo lo que se calcule sobre la pagina —el canonical
+        # el primero— tiene que compararse contra esta, no contra la original:
+        # comparar contra la de partida marcaba como "Canonicalised" toda
+        # pagina alcanzada por un 301 (medido: 1.254 de 34.704 en un rastreo,
+        # el 100% de ellas con canonical identico a su propia URL).
+        final_url = response.url if redirect_urls else url_for_record
 
         # Body hash for duplicate content detection
         body_hash = None
@@ -1047,7 +1126,15 @@ class SeoSpider(scrapy.Spider):
         # HTTP version. Scrapy does not reliably expose this on custom
         # download handlers, so the composite handler stashes it in meta when
         # the sub-handler provides it; fall back to response.protocol.
-        http_version_val = response.meta.get("http_protocol") or getattr(response, "protocol", None)
+        http_version_val = _normaliza_protocolo(
+            response.meta.get("http_protocol") or getattr(response, "protocol", None)
+        )
+        if not http_version_val:
+            # Con render la da el ultimo PageMethod (Navigation Timing).
+            for metodo in response.meta.get("playwright_page_methods") or []:
+                if getattr(metodo, "args", None) and _JS_PROTOCOLO in metodo.args:
+                    http_version_val = _normaliza_protocolo(metodo.result)
+                    break
 
         # HTML-specific fields computed before PageItem yield so that all
         # Screaming Frog parity fields can be included in the single yield.
@@ -1096,7 +1183,7 @@ class SeoSpider(scrapy.Spider):
                 meta.get("meta_robots"),
                 x_robots,
                 meta.get("canonical_href"),
-                url_for_record,
+                final_url,
             )
             indexability_status_val = "Indexable" if is_indexable else reason
         elif not is_success:
@@ -1112,7 +1199,6 @@ class SeoSpider(scrapy.Spider):
         # For redirected URLs, this records the FINAL destination with its
         # actual status code (usually 200).  The redirect hops were already
         # yielded above.
-        final_url = response.url if redirect_urls else url_for_record
         final_hash = compute_url_hash(final_url)
         final_parsed = urlparse(final_url)
         yield PageItem(

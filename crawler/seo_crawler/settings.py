@@ -181,6 +181,10 @@ PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = int(
     os.getenv("PLAYWRIGHT_NAV_TIMEOUT", "30000")
 )
 
+# Se ejecuta al crear cada pestaña, ANTES de navegar: instala el contador de
+# peticiones en vuelo que usa la espera de render (ver seo_crawler/render.py).
+PLAYWRIGHT_PAGE_INIT_CALLBACK = "seo_crawler.render.preparar_pagina"
+
 # ---------------------------------------------------------------------------
 # Misc
 # ---------------------------------------------------------------------------
