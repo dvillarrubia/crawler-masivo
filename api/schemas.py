@@ -296,7 +296,6 @@ class ResourceResponse(BaseModel):
     resource_url: str
     resource_type: str
     alt_text: str | None = None
-    size_bytes: int | None = None
     width: int | None = None
     height: int | None = None
     is_mixed_content: bool | None = None

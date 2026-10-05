@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
@@ -44,6 +45,16 @@ def get_progress(
     # aparentaba un rastreo estancado cuando iba fino. El de BD se refresca
     # cada 5s y cuadra con lo que luego se ve en los resultados.
     crawled_count = job.total_urls_crawled or 0
+    if job.status in ("completed", "failed", "cancelled", "stalled"):
+        # Terminado: la verdad son las filas guardadas. El contador de la
+        # tuberia se escribia por proceso, asi que los rastreos reanudados
+        # ANTES del arreglo se quedaron con la cuenta del ultimo tramo (802
+        # frente a 34.704 filas reales en uno medido). Una consulta indexada
+        # por job_id, y solo cuando el rastreo ya no se mueve.
+        reales = (
+            db.query(func.count(Url.id)).filter(Url.job_id == job_id).scalar() or 0
+        )
+        crawled_count = max(crawled_count, reales)
     live_count = None
     try:
         r = get_redis()
