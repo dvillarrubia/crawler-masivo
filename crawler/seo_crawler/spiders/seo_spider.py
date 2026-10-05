@@ -1664,14 +1664,17 @@ class SeoSpider(scrapy.Spider):
                         url=hop_url, url_hash=compute_url_hash(hop_url),
                         host=hp.hostname or "", path=hp.path or "/", scheme=hp.scheme or "https",
                         is_internal=self._is_internal(hop_url), crawl_depth=depth,
-                        content_type=None, content_length=0,
+                        # NULL, no 0: de este salto no se llego a medir nada
+                        # (la cadena la corto robots.txt). Un 0 en el CSV se
+                        # lee como "0 bytes medidos".
+                        content_type=None, content_length=None,
                         status_code=hop_status, status_group=compute_status_group(hop_status),
-                        response_time_ms=0, is_html=False, resource_type="redirect",
+                        response_time_ms=None, is_html=False, resource_type="redirect",
                         redirect_url=hop_dest, body_hash=None, job_id=self.job_id,
                         url_length=len(hop_url), folder_depth=compute_folder_depth(hop_url),
                         word_count=None, text_ratio=None, redirect_type=hop_status,
                         status_text=http_status_text(hop_status), last_modified=None,
-                        http_version=None, transfer_size=0,
+                        http_version=None, transfer_size=None,
                         indexability_status=f"Redirect ({hop_status})",
                     )
             return

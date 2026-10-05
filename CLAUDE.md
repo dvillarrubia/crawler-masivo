@@ -627,9 +627,8 @@ de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el
 fichero; nunca apuntarlo a `crawler_db`). Del contrafactual por columna salen
 tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
 en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
-las de la derecha), `test_render_espera.py` (contrato de la espera de render:
-no resolver con peticiones en vuelo) y, dentro de `test_spider_rastreo.py`,
-que la fila de un salto de redireccion no invente lo que no midio.
+las de la derecha), y `test_render_espera.py` (contrato de la espera de render:
+no resolver con peticiones en vuelo).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

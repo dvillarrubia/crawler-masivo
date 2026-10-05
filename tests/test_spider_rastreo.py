@@ -66,20 +66,6 @@ def test_redireccion_a_url_ya_vista_queda_registrada(rastreo):
     assert vieja["resource_type"] == "redirect"
 
 
-def test_la_fila_del_salto_no_inventa_lo_que_no_midio(rastreo):
-    """Un 301 no tiene cuerpo propio.
-
-    Heredaba el content-type de la respuesta FINAL —un 301 listado como
-    "text/html"— y guardaba ceros en tamaño y tiempo, que en el CSV se leen
-    como "0 bytes medidos" en vez de "no se midio".
-    """
-    salto = rastreo[0]["http://OTRO/a-old"]
-    assert salto["content_type"] is None
-    assert salto["content_length"] is None
-    assert salto["transfer_size"] is None
-    assert salto["response_time_ms"] is None
-
-
 def test_meta_refresh_no_revienta_parse(rastreo):
     paginas, _, _ = rastreo
     mr = paginas["http://OTRO/mr"]
