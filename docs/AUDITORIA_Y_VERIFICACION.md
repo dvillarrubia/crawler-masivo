@@ -130,20 +130,42 @@ JS" que pedía este documento.
 | Q9 | 4.3 | ✅ los 77 `low_word_count` son todos 200 |
 | Q10 | 4.4 | ✅ `validation_status` poblado: 1500 ok + 6 warning (SD), 33.927 ok (Lopesan) |
 | Q11 | 4.5 | ✅ los 897 `title_duplicate` son todos 200 |
-| Q13 | 8b.6 | ❌ **falla** con `meta robots` separado por barras — ver abajo |
+| Q13 | 8b.6 | ✅ resuelto (2026-09-14): no era un fallo del crawler — ver abajo. Sigue sin verificarse contra un sitio con `nofollow` en sintaxis **válida** |
 
-**Lo que falló (Q13).** `robots_tokens` separa por comas y espacios, pero no
-por barras, y hay plantillas que escriben `index/follow` y `noindex/nofollow`
-(68 + 1 páginas en este censo). El valor queda como un único token
-desconocido: no se detecta el `nofollow` y los 91 enlaces de esa página siguen
-contando como follow, inflando el PageRank.
+**Q13, resuelto el 2026-09-14: no era un fallo.** `robots_tokens` separa por
+comas y espacios pero no por barras, y hay plantillas que escriben
+`index/follow` y `noindex/nofollow` (68 + 1 páginas en este censo). Parecía que
+se nos escapaba un `nofollow` y que 91 enlaces inflaban el PageRank.
 
-Ojo antes de "arreglarlo" tokenizando por barra: la sintaxis oficial es la
-coma, y si Google tampoco interpreta `noindex/nofollow`, entonces la página SÍ
-se indexa y marcarla como noindex sería un falso positivo — el cliente creería
-que está fuera del índice cuando no lo está. Lo valioso aquí es **avisar de la
-sintaxis inválida** como issue propio, sin cambiar la indexabilidad calculada:
-el hallazgo es que el bloqueo que el cliente cree tener no funciona.
+Verificado contra la documentación de Google antes de tocar nada: las reglas se
+combinan **con comas** o con varias etiquetas `meta`, y Google **ignora lo que
+no reconoce**. `noindex/nofollow` es un token desconocido: esa página se indexa
+y sus enlaces se siguen. Es decir, el comportamiento del crawler ya coincidía
+con el del buscador, y tokenizar por barra habría metido un falso positivo —
+marcaríamos como noindex una página que Google indexa. (Nota de John Mueller:
+`index` y `follow` "no tienen función, se ignoran por completo" incluso bien
+escritos; son el comportamiento por defecto.)
+
+Lo que sí faltaba era **reportarlo**. Añadido `analyze_robots_syntax()` →
+issue `robots_invalid_syntax`, con la severidad puesta en lo que se pierde de
+verdad:
+
+| Valor | Severidad | Por qué |
+|---|---|---|
+| `noindex/nofollow` | warning | hay una intención de bloqueo que no se aplica |
+| `index/follow` | info | sintaxis mala, pero no se pierde nada: es el defecto |
+
+De paso salió a la luz un desacuerdo entre componentes: el analyzer decidía la
+indexabilidad con `"noindex" in valor` (subcadena) mientras el extractor
+tokenizaba, así que con `noindex/nofollow` la misma página era indexable en
+`indexability_status` y **no** indexable en `urls.indexable`. Las reglas están
+ahora en `shared/robots.py`, una sola vez, y gana el tokenizado. En el censo de
+SD esto hace que **69 páginas pasen a contar como indexables**, que es su
+estado real en Google.
+
+**Sigue pendiente** la verificación original de 8b.6: un crawl de un sitio con
+páginas `nofollow` en sintaxis válida, para comprobar que la propagación a los
+enlaces funciona. Este censo no servía para eso.
 
 **Hallazgo lateral, no del crawler.** Los 402 `hreflang_missing_return` de SD
 no son un fallo del analizador: `saunierduval.es` (sin www) sirve 362 páginas
@@ -261,7 +283,7 @@ Screaming Frog maneja y el crawler no manejaba.
 | 8b.3 | `content="none"` y `"noindex nofollow"` (sin comas) **no detectados** como noindex | Nuevo `robots_tokens()`: separa por comas Y espacios; `none` = noindex | Test unitario | ☐ |
 | 8b.4 | `<title>` de un **SVG inline** podía capturarse como título de página | El título se toma del primer `<title>` fuera de `ancestor::svg`, uniendo todos sus nodos de texto | Test unitario | ☐ |
 | 8b.5 | `word_count` contaba texto de `<template>` (DOM alternativo de frameworks JS, invisible) → conteos inflados | `<template>` excluido de word count y visible text (consistente con headings) | Test unitario; comparar word_count con SF en una página Vue/Nuxt | ☐ |
-| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` | ❌ |
+| 8b.6 | **Nofollow de página no propagado**: con `meta robots nofollow`, SF marca TODOS los enlaces de la página como nofollow; nosotros los dejábamos follow → PageRank y conteos follow inflados | `extract_links(..., page_nofollow=)` calculado en el spider desde meta robots + X-Robots-Tag | Ver **Q13** tras un crawl de un sitio con páginas `nofollow` **en sintaxis válida** (el censo de SD solo tenía barras, que Google ignora) | ☐ |
 | 8b.7 | No se extraían enlaces de `<area href>` (mapas de imagen); SF sí los cuenta | `extract_links` incluye `area[href]` con su `alt` como anchor | Test unitario | ☐ |
 | 8b.8 | Enlaces `href="#..."` (sólo fragmento) contaban como self-links, inflando inlinks al quitar el dedup | Se omiten los href que empiezan por `#` | Test unitario | ☐ |
 
@@ -544,12 +566,63 @@ Contenido como texto/markdown limpio, PageRank interno ponderado, análisis
 semántico (embeddings, clusters, canibalización), ejecución distribuida en
 servidor con API y UI multi-usuario.
 
+### Hecho desde entonces
+
+**Near-duplicate content (2026-09-14).** `analyze_near_duplicates()` +
+`analysis/near_duplicates.py`. MinHash sobre trigramas de
+`page_content.content_text` con LSH para los candidatos; umbral 0,9
+configurable por job (`analysis_thresholds.near_duplicate_similarity`).
+Rellena `urls.near_duplicate_count` y `urls.closest_similarity`, emite
+`near_duplicate_content` y sale en el export CSV y en la tabla de la UI.
+
+Se implementó con MinHash y no con simhash, como decía la nota original,
+porque la distancia de simhash no es reportable: sobre 300 palabras, cambiar
+10 da 0,81 de "similitud" cuando el solape real es del 97%. Ver decisiones
+16-18 de CLAUDE.md.
+
+**⚠️ Migración**: dos columnas nuevas en `urls`. Al desplegar,
+`docker compose exec api python scripts/init_db.py` (los `ALTER TABLE ... IF
+NOT EXISTS` ya están dentro).
+
+Sobre censos ya rastreados **no hace falta re-rastrear ni re-analizar entero**:
+
+```bash
+# Cuenta sin escribir
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id> --dry-run
+# Escribe solo las columnas y las incidencias near_duplicate_content
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id>
+# Sitios muy de plantilla: el umbral es el mando
+docker compose exec -T crawler python /app/scripts/near_duplicates.py <job_id> --umbral 0.85
+```
+
+```sql
+-- Q15. Casi duplicados. Sólo 200 HTML con texto medible entran en el reparto:
+-- NULL = no se pudo medir, 0 = medido y sin ninguna.
+SELECT
+  COUNT(*) FILTER (WHERE near_duplicate_count IS NULL)  AS sin_medir,
+  COUNT(*) FILTER (WHERE near_duplicate_count = 0)      AS unicas,
+  COUNT(*) FILTER (WHERE near_duplicate_count > 0)      AS con_casi_duplicadas,
+  COUNT(*) FILTER (WHERE closest_similarity >= 0.999)   AS identicas
+FROM urls WHERE job_id = '<JOB_ID>' AND is_html AND status_code = 200;
+
+-- Los peores casos, para mirarlos a ojo antes de contárselo al cliente.
+SELECT url, near_duplicate_count, ROUND(closest_similarity::numeric, 3) AS similitud
+FROM urls
+WHERE job_id = '<JOB_ID>' AND near_duplicate_count > 0
+ORDER BY closest_similarity DESC, near_duplicate_count DESC
+LIMIT 30;
+```
+
+Lo que hay que mirar con ojo crítico en el resultado: un paginado o un
+buscador interno saldrán como casi duplicados y **no siempre son un defecto**;
+lo que sí lo es son fichas o landings distintas con el mismo texto. Ver
+[[feedback_seo_audit_myths]] antes de subirlo a un informe como hallazgo.
+
 ### Gaps pendientes (de más a menos valor estimado)
 
 | Prioridad | Gap | Notas |
 |-----------|-----|-------|
 | ⭐⭐⭐ | **Custom extraction / custom search** (XPath/CSS/regex por job) | La feature de SF más usada en consultoría; encaja en `extraction` del job config |
-| ⭐⭐⭐ | **Near-duplicate content** (simhash) | Hoy sólo detectamos contenido byte-idéntico (`body_hash`) |
 | ⭐⭐ | **JavaScript tab** (HTML crudo vs renderizado) | Ya rastreamos con y sin JS; falta la doble captura y la comparación (palabras/enlaces solo-JS, render time) |
 | ⭐⭐ | **Pagination tab** | `rel_next/prev` ya se guardan; falta el análisis (bucles, secuencias, paginación no enlazada) |
 | ⭐⭐ | **PageSpeed tab** (API PSI / CWV) | Integración de API, no crawling; ~50 métricas |
@@ -577,13 +650,39 @@ servidor con API y UI multi-usuario.
   Rich Results. Ampliable por tipo si se necesita.
 - **`http_version` en JS**: depende de que scrapy-playwright exponga el
   protocolo; puede quedar NULL en algunas versiones (no es regresión).
-- **Near-duplicate content** (simhash) sigue sin existir; `analyze_duplicates`
-  sólo detecta contenido byte-idéntico (`body_hash`).
+- **Casi duplicados**: el LSH se deja ~1 de cada 25 parejas que caen justo en
+  el umbral (por encima, ninguna), y con umbral por debajo de 0,6 el recuento
+  deja de ser fiable (se registra un WARNING). La similitud es una estimación
+  con ~2 puntos de desvío, no un cálculo exacto.
 - **Tests de integración del analyzer** (con BD): no existen aún; la capa de
   análisis se valida con las consultas SQL de arriba. Candidato a añadir con
   SQLite/Postgres de test.
 - **`word_count`** cuenta texto de elementos ocultos (`display:none`); paridad
   aproximada con Screaming Frog.
+
+---
+
+## 12. Referencia de commits
+
+Todos en la rama `claude/crawler-export-issues-oi77bm` (PR #5). Para ver el
+detalle de un commit: `git show <hash>`.
+
+| Commit | Contenido | Secciones |
+|--------|-----------|-----------|
+| `9d86f11` | Export CSV: columna duplicada, BOM UTF-8, export de enlaces y contenido | 1 |
+| `8828ec8` | Resolución de URLs relativas (canonical/hreflang/og) + posición de enlace | 2 |
+| `bec997c` | Inlinks reales, timing/HTTP en JS, borrado de hijos seguro, heartbeat | 3, 5 |
+| `804a04f` | hreflang recíproco, orphan sin falsos positivos, ruido de contenido | 4 |
+| `2f5c03f` | Validación de structured data + duplicados/UA | 4 |
+| `cb43664` | Suite de tests unitarios (56 casos) + refactors de apoyo | tests |
+| `922645a` | Heartbeat anti doble-crawl, parar crawl al borrar, este documento | 5 |
+| `24c7376` | CTR/posición GSC bien ponderados + doc backup/semantic | 6, 7 |
+| `2761ee2` | Estado `analyzing` (issues vacías), fuga de timer semántico | 8 |
+| `b2f9804` | Segunda pasada extractor: meta case-insensitive, robots múltiples/none, SVG title, template, nofollow de página, area, fragmentos | 8b |
+| `4b2b456` | Feature: ingestión de sitemaps XML (robots.txt, urlset, sitemapindex, gzip) + sitemap_orphan/not_in_sitemap | 8c |
+
+> Nota: los hashes pueden variar si la rama se rebasa. Usa
+> `git log --oneline origin/master..HEAD` para ver la lista actual.
 
 ---
 
@@ -651,25 +750,3 @@ blogs.uoc.edu es del sitio, que no manda la cabecera.
   de `scrapy-impersonate`, que descarta el dato.
 
 ---
-
-## 12. Referencia de commits
-
-Todos en la rama `claude/crawler-export-issues-oi77bm` (PR #5). Para ver el
-detalle de un commit: `git show <hash>`.
-
-| Commit | Contenido | Secciones |
-|--------|-----------|-----------|
-| `9d86f11` | Export CSV: columna duplicada, BOM UTF-8, export de enlaces y contenido | 1 |
-| `8828ec8` | Resolución de URLs relativas (canonical/hreflang/og) + posición de enlace | 2 |
-| `bec997c` | Inlinks reales, timing/HTTP en JS, borrado de hijos seguro, heartbeat | 3, 5 |
-| `804a04f` | hreflang recíproco, orphan sin falsos positivos, ruido de contenido | 4 |
-| `2f5c03f` | Validación de structured data + duplicados/UA | 4 |
-| `cb43664` | Suite de tests unitarios (56 casos) + refactors de apoyo | tests |
-| `922645a` | Heartbeat anti doble-crawl, parar crawl al borrar, este documento | 5 |
-| `24c7376` | CTR/posición GSC bien ponderados + doc backup/semantic | 6, 7 |
-| `2761ee2` | Estado `analyzing` (issues vacías), fuga de timer semántico | 8 |
-| `b2f9804` | Segunda pasada extractor: meta case-insensitive, robots múltiples/none, SVG title, template, nofollow de página, area, fragmentos | 8b |
-| `4b2b456` | Feature: ingestión de sitemaps XML (robots.txt, urlset, sitemapindex, gzip) + sitemap_orphan/not_in_sitemap | 8c |
-
-> Nota: los hashes pueden variar si la rama se rebasa. Usa
-> `git log --oneline origin/master..HEAD` para ver la lista actual.

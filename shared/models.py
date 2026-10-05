@@ -46,6 +46,11 @@ class Job(Base):
     # contenido carga en cliente. NULL = no se llego a comprobar.
     js_check = Column(JSON, nullable=True)
 
+    # Resumen del PageRank (ver analysis/pagerank.py): que fraccion acaba en
+    # cada tipo de URL (indexable, redireccion, error...) y cuanta se
+    # desperdicia en errores. NULL = analisis anterior a este modelo.
+    pagerank_resumen = Column(JSON, nullable=True)
+
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
 
@@ -111,6 +116,10 @@ class Url(Base):
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
     pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
+    # Casi duplicados (MinHash). NULL = no se midio (sin contenido, o texto
+    # por debajo del minimo de palabras); 0 = se midio y no tiene ninguna.
+    near_duplicate_count = Column(Integer, nullable=True, default=None)
+    closest_similarity = Column(Float, nullable=True, default=None)
     # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
     in_sitemap = Column(Boolean, nullable=True, default=None)
 

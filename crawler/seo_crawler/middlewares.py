@@ -206,3 +206,46 @@ class HttpConfigMiddleware:
             request.headers[b"Authorization"] = f"Basic {cred}".encode()
 
         return None
+
+
+# ---------------------------------------------------------------------------
+# Spider middleware
+# ---------------------------------------------------------------------------
+class DepthMiddleware:
+    """Sustituye al DepthMiddleware de Scrapy respetando la profundidad del spider.
+
+    El de Scrapy PISA ``meta["depth"]`` con la del response + 1 en toda
+    peticion que sale de un callback. Con los sitemaps eso era robots.txt (0)
+    → indice (1) → sitemap hijo (2) → URL (3): las URLs del sitemap entraban
+    con profundidad 3 aunque el spider les pusiera 1, y con el ``max_depth=3``
+    por defecto no se rastreaba ni un enlace suyo. Afectaba a cualquier sitio
+    con indice de sitemap (Yoast, Liferay). Lo mismo con las redirecciones,
+    cuyo destino debe conservar la profundidad del origen.
+
+    El spider fija la profundidad de todas sus peticiones; aqui solo se rellena
+    la que falte (response + 1, como Scrapy) y se aplica ``DEPTH_PRIORITY``.
+    No aplica ``DEPTH_LIMIT``: el tope lo controla el spider con ``max_depth``.
+    """
+
+    def __init__(self, prio: int):
+        self._prio = prio
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler.settings.getint("DEPTH_PRIORITY"))
+
+    def _procesar(self, response: Response, item):
+        if isinstance(item, Request):
+            if "depth" not in item.meta:
+                item.meta["depth"] = response.meta.get("depth", 0) + 1
+            if self._prio:
+                item.priority -= item.meta["depth"] * self._prio
+        return item
+
+    def process_spider_output(self, response, result, spider=None):
+        for item in result:
+            yield self._procesar(response, item)
+
+    async def process_spider_output_async(self, response, result, spider=None):
+        async for item in result:
+            yield self._procesar(response, item)

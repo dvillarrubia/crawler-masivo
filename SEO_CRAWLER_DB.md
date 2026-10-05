@@ -44,6 +44,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | seeds | JSON | Lista de seed URLs |
 | config | JSON | Configuracion completa del crawl |
 | total_urls_crawled | int | URLs crawleadas |
+| pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 
 ### `urls` — Todas las URLs crawleadas
@@ -74,7 +75,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | outlinks_count | int | Total outlinks internos |
 | external_outlinks_count | int | Outlinks externos |
 | unique_inlinks_count | int | Paginas unicas que enlazan aqui |
-| pagerank | float | PageRank interno (0-10) |
+| pagerank | float | PageRank interno, 0-10 relativo a la URL mas fuerte del job (no comparable entre jobs). Enlaces follow internos con peso por posicion y techo por repeticion, mas arista salto → destino en redirecciones y variante → canonical. El salto aleatorio solo va a paginas 200 indexables: un 404 recibe por sus enlaces entrantes pero no por azar. Modelo en `analysis/pagerank.py` |
+| near_duplicate_count | int | Paginas con >= 90% del mismo contenido. NULL = no medido (sin texto o texto corto), 0 = medido y ninguna |
+| closest_similarity | float | Similitud con la pagina mas parecida, 0-1 (1 = contenido identico) |
 | url_length | int | Longitud de la URL en caracteres |
 | folder_depth | int | Segmentos en el path |
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -328,6 +329,8 @@ def _run_job(job_id: str) -> None:
     final_status = "completed"
     timed_out = False
     stalled = False
+    sin_guardar = False
+    analisis_ok = True
     max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 72)), 720))
     # 0 = sin vigilancia. Por defecto 30 min: el latido se estampa cada 50
     # URLs y en cada lote de siembra, asi que media hora sin moverse es un
@@ -475,16 +478,7 @@ def _run_job(job_id: str) -> None:
         # deprecaciones de Scrapy ni el ruido de librerias. Se agrupan por tipo
         # de mensaje para que un crawl con cientos de fallos no inunde el log.
         if result.stderr:
-            avisos: dict[str, list[str]] = {}
-            for ln in result.stderr.splitlines():
-                # "[seo_crawler." con corchete: es el nombre del logger. Sin el
-                # corchete tambien casaria la ruta del fichero que imprime
-                # py.warnings en las deprecaciones de Scrapy.
-                if "WARNING" not in ln or "[seo_crawler." not in ln:
-                    continue
-                msg = ln.split("WARNING:", 1)[-1].strip()
-                clave = msg.split(":", 1)[0][:60]
-                avisos.setdefault(clave, []).append(msg)
+            avisos, errores = resumir_stderr(result.stderr)
             for clave, msgs in avisos.items():
                 logger.warning(
                     "Job %s: %d aviso(s) de '%s'. Ejemplo: %s",
@@ -492,6 +486,14 @@ def _run_job(job_id: str) -> None:
                     len(msgs),
                     clave,
                     msgs[0][:180],
+                )
+            for clave, msgs in errores.items():
+                logger.error(
+                    "Job %s: %d error(es) de '%s'. Ejemplo: %s",
+                    job_id,
+                    len(msgs),
+                    clave,
+                    msgs[0][:400],
                 )
 
         # Always log last portion of stderr for debugging
@@ -512,6 +514,20 @@ def _run_job(job_id: str) -> None:
             final_status = "failed"
         else:
             logger.info("Scrapy crawl finished successfully for job %s", job_id)
+            # Rastrear no es guardar. Si el pipeline falla en cada escritura
+            # (una columna que falta, la BD caida a mitad), Scrapy termina con
+            # codigo 0 y el job quedaba `completed` con cero filas. Medido: un
+            # censo de 289 URLs rastreadas y 0 guardadas, sin un solo aviso.
+            rastreadas, guardadas = _rastreadas_y_guardadas(job_id)
+            if rastreadas and not guardadas:
+                logger.error(
+                    "Job %s: se rastrearon %d URLs y no se guardo NINGUNA. El "
+                    "pipeline fallo al escribir (ver errores arriba); el job se "
+                    "marca como fallido",
+                    job_id, rastreadas,
+                )
+                final_status = "failed"
+                sin_guardar = True
 
     except EstancadoError as exc:
         # Un estancamiento casi siempre es el navegador (Playwright) que se ha
@@ -576,7 +592,7 @@ def _run_job(job_id: str) -> None:
 
     # -- Trigger analysis (best-effort) while status is 'analyzing' --
     if final_status == "completed" and not cancelled:
-        _trigger_analysis(job_id)
+        analisis_ok = _trigger_analysis(job_id)
         if not job_config.get("render_js", False):
             _comprobar_render_js(job_id)
 
@@ -588,6 +604,13 @@ def _run_job(job_id: str) -> None:
             # A cancel that arrived during analysis still wins.
             if job.status == "cancelled":
                 final_status = "cancelled"
+            elif not analisis_ok:
+                # Un job `completed` sin issues ni PageRank se lee como "sitio
+                # limpio". Si el analisis revienta, el job no ha terminado: se
+                # marca fallido. Lo rastreado es valido (finish_reason sigue
+                # diciendo como acabo el rastreo) y el analisis se puede
+                # relanzar con `python -m analysis.analyzer <job_id>`.
+                final_status = "failed"
             job.status = final_status
             job.completed_at = datetime.now(timezone.utc)
 
@@ -598,12 +621,15 @@ def _run_job(job_id: str) -> None:
             # OJO con el orden: el timeout manda. Antes se ponia "finished"
             # por defecto, asi que un rastreo cortado por tiempo afirmaba haber
             # agotado la frontera teniendo 1.051 URLs pendientes.
-            motivo = ("stalled" if stalled
+            motivo = ("persistence_failed" if sin_guardar
+                      else "stalled" if stalled
                       else "max_runtime_reached" if timed_out
                       else "finished")
             try:
                 rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
-                if rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached":
+                # Si no se guardo nada, eso manda sobre como acabo el rastreo
+                if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
+                        and not sin_guardar):
                     motivo = "max_urls_reached"
                 rc.delete(f"job:{job_id}:finish_reason")
             except Exception:
@@ -715,8 +741,8 @@ def _comprobar_render_js(job_id: str) -> None:
         logger.exception("Comprobacion de render JS fallida para el job %s", job_id)
 
 
-def _trigger_analysis(job_id: str) -> None:
-    """Import and invoke the analyzer."""
+def _trigger_analysis(job_id: str) -> bool:
+    """Import and invoke the analyzer. False si el analisis ha fallado."""
     try:
         from analysis.analyzer import run_analysis
 
@@ -729,7 +755,85 @@ def _trigger_analysis(job_id: str) -> None:
             job_id,
         )
     except Exception:
-        logger.exception("Analysis failed for job %s", job_id)
+        logger.exception(
+            "Analysis failed for job %s: el job se marca como fallido. Lo "
+            "rastreado es valido; relanzar con `python -m analysis.analyzer %s`",
+            job_id, job_id,
+        )
+        return False
+    return True
+
+
+def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int]:
+    """URLs que el spider dice haber rastreado y filas que hay en `urls`."""
+    from shared.database import SessionLocal
+    from shared.models import Url
+
+    rastreadas = 0
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+        rastreadas = int(rc.get(f"job:{job_id}:crawled_count") or 0)
+    except Exception:
+        pass
+    session = SessionLocal()
+    try:
+        guardadas = session.query(Url.id).filter(Url.job_id == job_id).limit(1).count()
+    except Exception:
+        # Si ni siquiera se puede contar, no se afirma nada: se deja pasar.
+        guardadas = 1
+    finally:
+        session.close()
+    return rastreadas, guardadas
+
+
+_LINEA_DE_LOG = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+# `modulo.Clase: mensaje`, `ValueError: ...`. No vale "la ultima linea sin
+# sangria": SQLAlchemy cierra con "(Background on this error at: <url>)".
+_LINEA_DE_EXCEPCION = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt)\b")
+
+
+def resumir_stderr(stderr: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Avisos y errores del crawler en la salida de Scrapy, agrupados por tipo.
+
+    Solo los loggers `seo_crawler.*`: se deja fuera el ruido de Scrapy y de
+    las librerias. Los errores llevan pegada la ultima linea de su traceback
+    (`psycopg2.errors.UndefinedColumn: ...`), que es la que dice que ha pasado.
+
+    Antes solo se miraban los WARNING: los fallos del pipeline van por
+    `logger.exception` (nivel ERROR) y se perdian enteros, asi que un job que
+    no guardaba ni una fila terminaba sin rastro en el log.
+    """
+    avisos: dict[str, list[str]] = {}
+    errores: dict[str, list[str]] = {}
+    lineas = stderr.splitlines()
+    for i, ln in enumerate(lineas):
+        # "[seo_crawler." con corchete: es el nombre del logger. Sin el
+        # corchete tambien casaria la ruta del fichero que imprime
+        # py.warnings en las deprecaciones de Scrapy.
+        if "[seo_crawler." not in ln:
+            continue
+        if "WARNING:" in ln:
+            destino, nivel = avisos, "WARNING:"
+        elif "ERROR:" in ln:
+            destino, nivel = errores, "ERROR:"
+        elif "CRITICAL:" in ln:
+            destino, nivel = errores, "CRITICAL:"
+        else:
+            continue
+        msg = ln.split(nivel, 1)[-1].strip()
+        clave = msg.split(":", 1)[0][:60]
+        if destino is errores:
+            # Ultima excepcion del traceback que sigue al mensaje
+            causa = None
+            for siguiente in lineas[i + 1:]:
+                if _LINEA_DE_LOG.match(siguiente):
+                    break
+                if _LINEA_DE_EXCEPCION.match(siguiente):
+                    causa = siguiente.strip()
+            if causa:
+                msg = f"{msg} -> {causa}"
+        destino.setdefault(clave, []).append(msg)
+    return avisos, errores
 
 
 # ---------------------------------------------------------------------------

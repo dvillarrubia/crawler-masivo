@@ -1,0 +1,395 @@
+/* =====================================================================
+   Tema "terminal" — fósforo verde sobre negro, estilo consola retro.
+   Todo va bajo html[data-theme="terminal"], así que style.css sigue
+   siendo el tema claro y el conmutador de la barra superior alterna
+   entre ambos sin recargar.
+   ===================================================================== */
+html[data-theme="terminal"]{
+  --bg:        #020805;
+  --bg-card:   #04110a;
+  --bg-hover:  #0a2414;
+  --bg-input:  #030d07;
+  --bg-head:   #06180d;
+  --border:    #1c5a2c;
+  --border-hi: #2f9a49;
+  --text:      #b4ffb4;
+  --text-dim:  #5fb26c;
+  --accent:    #3dff6a;
+  --accent-h:  #8bff9f;
+  --accent-ink:#021006;
+  --accent-glow:   rgba(61,255,106,.25);
+  --accent-subtle: rgba(61,255,106,.10);
+  --green:     #3dff6a;
+  --green-bg:  rgba(61,255,106,.08);
+  --red:       #ff4f4f;
+  --red-bg:    rgba(255,79,79,.10);
+  --orange:    #ffc233;
+  --orange-bg: rgba(255,194,51,.10);
+  --blue:      #3fe0ff;
+  --blue-bg:   rgba(63,224,255,.08);
+  --radius:    0;
+  --radius-lg: 0;
+  --shadow:    0 0 0 1px rgba(61,255,106,.04), 0 0 12px rgba(61,255,106,.05);
+  --shadow-lg: 0 0 18px rgba(61,255,106,.12);
+  --font-pixel:'VT323','IBM Plex Mono',ui-monospace,monospace;
+  --font-mono: 'IBM Plex Mono',ui-monospace,'Consolas','Menlo',monospace;
+  --glow:      0 0 6px rgba(61,255,106,.55);
+  color-scheme:dark;
+}
+
+html[data-theme="terminal"] body{
+  font-family:var(--font-mono);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(61,255,106,.07), transparent 60%),
+    var(--bg);
+  color:var(--text);
+}
+/* Scanlines del CRT: una capa fija que no intercepta clics */
+html[data-theme="terminal"] body::after{
+  content:'';
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:9999;
+  background:repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0) 0,
+    rgba(0,0,0,0) 2px,
+    rgba(0,0,0,.18) 3px
+  );
+}
+@media (prefers-reduced-motion:no-preference){
+  html[data-theme="terminal"] .badge-running::before{box-shadow:0 0 6px var(--blue)}
+}
+
+html[data-theme="terminal"] a{color:var(--accent)}
+html[data-theme="terminal"] a:hover{color:var(--accent-h);text-shadow:var(--glow)}
+html[data-theme="terminal"] ::selection{background:var(--accent);color:var(--accent-ink)}
+html[data-theme="terminal"] ::-webkit-scrollbar-track{background:var(--bg)}
+html[data-theme="terminal"] ::-webkit-scrollbar-thumb{background:var(--border)}
+html[data-theme="terminal"] ::-webkit-scrollbar-thumb:hover{background:var(--border-hi)}
+html[data-theme="terminal"] *{scrollbar-color:var(--border) var(--bg)}
+
+/* ----- Tipografía pixel en títulos, pestañas y botones ----- */
+html[data-theme="terminal"] h1,
+html[data-theme="terminal"] h2,
+html[data-theme="terminal"] h3,
+html[data-theme="terminal"] .btn,
+html[data-theme="terminal"] .tab,
+html[data-theme="terminal"] .exp-tab,
+html[data-theme="terminal"] .exp-detail-tab,
+html[data-theme="terminal"] .stat-value,
+html[data-theme="terminal"] .metric-value,
+html[data-theme="terminal"] .seo-section-title,
+html[data-theme="terminal"] .config-section,
+html[data-theme="terminal"] .exp-sidebar-header{
+  font-family:var(--font-pixel);
+  letter-spacing:.06em;
+}
+html[data-theme="terminal"] h1,
+html[data-theme="terminal"] h2,
+html[data-theme="terminal"] h3{font-weight:400;text-transform:uppercase}
+html[data-theme="terminal"] .card-header h2{font-size:1.25rem}
+html[data-theme="terminal"] .modal-header h3{font-size:1.3rem}
+
+/* ----- Barra superior ----- */
+html[data-theme="terminal"] .topbar{
+  background:linear-gradient(to bottom,#06180d,#030c06);
+  border-top:3px solid var(--accent) !important;
+  border-bottom:1px solid var(--border-hi);
+  box-shadow:0 1px 0 rgba(61,255,106,.15),0 4px 18px rgba(0,0,0,.6);
+}
+html[data-theme="terminal"] .topbar h1{font-size:1.6rem}
+html[data-theme="terminal"] .topbar h1 span,
+html[data-theme="terminal"] .topbar-icon{
+  color:var(--accent) !important;
+  text-shadow:var(--glow);
+  font-weight:400 !important;
+}
+html[data-theme="terminal"] .topbar h1 span::after{
+  content:'_';
+  animation:termBlink 1s steps(1) infinite;
+  margin-left:.1rem;
+}
+@keyframes termBlink{50%{opacity:0}}
+
+/* ----- Botones: cajas con borde, rellenas al pasar ----- */
+html[data-theme="terminal"] .btn{
+  font-size:1.05rem;
+  line-height:1.1;
+  text-transform:uppercase;
+  border:1px solid var(--border-hi);
+  background:var(--bg-card);
+  color:var(--text);
+  border-radius:0;
+}
+html[data-theme="terminal"] .btn:hover{
+  background:var(--bg-hover);
+  border-color:var(--accent);
+  color:var(--accent);
+  box-shadow:0 0 8px var(--accent-glow);
+}
+html[data-theme="terminal"] .btn:active{background:var(--accent);color:var(--accent-ink)}
+html[data-theme="terminal"] .btn-primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:var(--accent-ink);
+  box-shadow:0 0 10px var(--accent-glow);
+}
+html[data-theme="terminal"] .btn-primary:hover{
+  background:var(--accent-h);
+  border-color:var(--accent-h);
+  color:var(--accent-ink);
+}
+html[data-theme="terminal"] .btn-danger{background:transparent;border-color:var(--red);color:var(--red)}
+html[data-theme="terminal"] .btn-danger:hover{background:var(--red);color:#000;box-shadow:0 0 8px rgba(255,79,79,.4)}
+html[data-theme="terminal"] .btn-sm{font-size:.98rem;padding:.28rem .6rem}
+html[data-theme="terminal"] .btn-icon{border-radius:0}
+
+/* ----- Tarjetas y paneles ----- */
+html[data-theme="terminal"] .card,
+html[data-theme="terminal"] .stat-card,
+html[data-theme="terminal"] .insight-card,
+html[data-theme="terminal"] .insights-header,
+html[data-theme="terminal"] .url-detail-panel{
+  background:var(--bg-card);
+  border:1px solid var(--border-hi);
+  box-shadow:var(--shadow);
+}
+html[data-theme="terminal"] .card:hover,
+html[data-theme="terminal"] .stat-card:hover,
+html[data-theme="terminal"] .insight-card:hover,
+html[data-theme="terminal"] .metric-item:hover,
+html[data-theme="terminal"] .seo-value-box:hover{border-color:var(--accent)}
+html[data-theme="terminal"] .card-header{padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+html[data-theme="terminal"] .stat-value{font-size:2rem;font-weight:400;text-shadow:0 0 8px currentColor}
+html[data-theme="terminal"] .stat-label,
+html[data-theme="terminal"] .metric-label{color:var(--text-dim)}
+html[data-theme="terminal"] .metric-value{font-size:1.35rem;font-weight:400}
+html[data-theme="terminal"] .metric-item{background:var(--bg-input);border-color:var(--border)}
+
+/* ----- Tablas ----- */
+html[data-theme="terminal"] .table-wrap{border-color:var(--border-hi)}
+html[data-theme="terminal"] table{font-family:var(--font-mono)}
+html[data-theme="terminal"] thead{background:var(--bg-head)}
+html[data-theme="terminal"] th{
+  color:var(--accent);
+  border-bottom:1px solid var(--border-hi);
+  border-right:1px solid var(--border);
+}
+html[data-theme="terminal"] td{border-bottom:1px solid rgba(28,90,44,.45);border-right:1px solid rgba(28,90,44,.3)}
+html[data-theme="terminal"] tbody tr:nth-child(even) td{background:rgba(61,255,106,.025)}
+html[data-theme="terminal"] tr:hover td{background:var(--bg-hover)}
+html[data-theme="terminal"] .row-selected td,
+html[data-theme="terminal"] .exp-table tbody tr.exp-row-selected td{
+  background:var(--accent) !important;
+  color:var(--accent-ink);
+}
+html[data-theme="terminal"] .exp-table tbody tr.exp-row-selected td *{color:var(--accent-ink) !important;background:transparent !important}
+
+/* ----- Etiquetas de estado ----- */
+html[data-theme="terminal"] .badge,
+html[data-theme="terminal"] .priority-badge,
+html[data-theme="terminal"] .exp-status{border-radius:0}
+html[data-theme="terminal"] .badge-pending{background:rgba(95,178,108,.08);border-color:var(--border)}
+html[data-theme="terminal"] .badge-running{border-color:rgba(63,224,255,.4)}
+html[data-theme="terminal"] .badge-completed{border-color:rgba(61,255,106,.4)}
+html[data-theme="terminal"] .badge-failed{border-color:rgba(255,79,79,.45)}
+html[data-theme="terminal"] .badge-cancelled{border-color:rgba(255,194,51,.45)}
+html[data-theme="terminal"] .priority-alta{border-color:rgba(255,79,79,.45)}
+html[data-theme="terminal"] .priority-media{border-color:rgba(255,194,51,.45)}
+html[data-theme="terminal"] .priority-baja{border-color:rgba(63,224,255,.4)}
+html[data-theme="terminal"] .exp-status-2xx{color:var(--green);background:var(--green-bg)}
+html[data-theme="terminal"] .exp-status-3xx{color:var(--blue);background:var(--blue-bg)}
+html[data-theme="terminal"] .exp-status-4xx{color:var(--orange);background:var(--orange-bg)}
+html[data-theme="terminal"] .exp-status-5xx{color:var(--red);background:var(--red-bg)}
+
+/* ----- Formularios ----- */
+html[data-theme="terminal"] input[type="text"],
+html[data-theme="terminal"] input[type="number"],
+html[data-theme="terminal"] input[type="url"],
+html[data-theme="terminal"] input[type="password"],
+html[data-theme="terminal"] input[type="date"],
+html[data-theme="terminal"] textarea,
+html[data-theme="terminal"] select,
+html[data-theme="terminal"] .exp-search,
+html[data-theme="terminal"] .exp-filter-input,
+html[data-theme="terminal"] .exp-filter-op{
+  background-color:var(--bg-input);
+  border:1px solid var(--border-hi);
+  border-radius:0;
+  color:var(--text);
+  font-family:var(--font-mono);
+  caret-color:var(--accent);
+}
+html[data-theme="terminal"] input:hover:not(:focus),
+html[data-theme="terminal"] textarea:hover:not(:focus),
+html[data-theme="terminal"] select:hover:not(:focus){border-color:var(--accent)}
+html[data-theme="terminal"] input:focus,
+html[data-theme="terminal"] textarea:focus,
+html[data-theme="terminal"] select:focus,
+html[data-theme="terminal"] .exp-search:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent),0 0 10px var(--accent-glow);
+}
+html[data-theme="terminal"] ::placeholder{color:#3b7a47}
+html[data-theme="terminal"] .exp-filter-input::placeholder{color:#3b7a47}
+html[data-theme="terminal"] .exp-filter-op{
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='%233dff6a' d='M5 7L1 3h8z'/></svg>");
+}
+html[data-theme="terminal"] .exp-filter-input.has-value,
+html[data-theme="terminal"] .exp-filter-op.has-value{background-color:var(--accent-subtle);border-color:var(--accent)}
+html[data-theme="terminal"] .form-group label{color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}
+html[data-theme="terminal"] input[type="checkbox"]{accent-color:var(--accent)}
+
+/* ----- Pestañas: cajas, la activa rellena en verde ----- */
+html[data-theme="terminal"] .tabs,
+html[data-theme="terminal"] .exp-detail-tabs,
+html[data-theme="terminal"] .modal-body .config-tabs{
+  background:transparent;
+  border-bottom:1px solid var(--border-hi);
+  gap:.25rem;
+}
+html[data-theme="terminal"] .tab,
+html[data-theme="terminal"] .exp-detail-tab{
+  font-size:1.05rem;
+  text-transform:uppercase;
+  color:var(--text);
+  border:1px solid var(--border);
+  border-bottom:none;
+  background:var(--bg-card);
+  margin-bottom:0;
+}
+html[data-theme="terminal"] .tab:hover,
+html[data-theme="terminal"] .exp-detail-tab:hover{background:var(--bg-hover);color:var(--accent)}
+html[data-theme="terminal"] .tab.active,
+html[data-theme="terminal"] .exp-detail-tab.active,
+html[data-theme="terminal"] .modal-body .config-tabs .tab.active{
+  background:var(--accent);
+  color:var(--accent-ink);
+  border-color:var(--accent);
+  font-weight:400;
+  box-shadow:0 0 10px var(--accent-glow);
+}
+html[data-theme="terminal"] .tab .count{background:rgba(61,255,106,.12);color:var(--text);font-family:var(--font-mono);border-radius:0}
+html[data-theme="terminal"] .tab.active .count{background:var(--accent-ink);color:var(--accent)}
+
+/* ----- Modal ----- */
+html[data-theme="terminal"] .modal-backdrop{background:rgba(0,6,2,.78)}
+html[data-theme="terminal"] .modal{
+  background:var(--bg-card);
+  border:1px solid var(--accent);
+  border-radius:0;
+  box-shadow:0 0 0 1px rgba(61,255,106,.2),0 0 40px rgba(61,255,106,.15);
+}
+html[data-theme="terminal"] .modal-header,
+html[data-theme="terminal"] .modal-footer{background:var(--bg-head);border-color:var(--border-hi)}
+
+/* ----- Barras y progreso ----- */
+html[data-theme="terminal"] .progress-bar{
+  height:12px;
+  background:var(--bg-input);
+  border:1px solid var(--border-hi);
+  border-radius:0;
+}
+html[data-theme="terminal"] .progress-fill{
+  border-radius:0;
+  background:repeating-linear-gradient(90deg,var(--accent) 0 8px,rgba(61,255,106,.65) 8px 10px);
+  box-shadow:0 0 8px var(--accent-glow);
+}
+html[data-theme="terminal"] .bar-track,
+html[data-theme="terminal"] .insight-score-bar{background:var(--bg-input);border:1px solid var(--border);border-radius:0}
+html[data-theme="terminal"] .bar-fill,
+html[data-theme="terminal"] .insight-score-fill{border-radius:0;box-shadow:0 0 6px rgba(61,255,106,.25)}
+
+/* ----- Carga ----- */
+html[data-theme="terminal"] .spinner{border-color:var(--border);border-top-color:var(--accent)}
+
+/* ----- Tooltips ----- */
+html[data-theme="terminal"] [data-tip]:hover::after{
+  background:#010603;
+  color:var(--text);
+  border:1px solid var(--accent);
+  border-radius:0;
+  font-family:var(--font-mono);
+  box-shadow:0 0 12px var(--accent-glow);
+}
+html[data-theme="terminal"] [data-tip]:hover::before{border-top-color:var(--accent)}
+html[data-theme="terminal"] .stat-card[data-tip]:hover::before,
+html[data-theme="terminal"] th[data-tip]:hover::before,
+html[data-theme="terminal"] .tab[data-tip]:hover::before,
+html[data-theme="terminal"] .topbar [data-tip]:hover::before{border-top-color:transparent;border-bottom-color:var(--accent)}
+
+/* ----- Detalle de URL, contenido, markdown ----- */
+html[data-theme="terminal"] .detail-row,
+html[data-theme="terminal"] .exp-detail-row,
+html[data-theme="terminal"] .exp-detail-body .exp-link-item{border-bottom-color:rgba(28,90,44,.5)}
+html[data-theme="terminal"] .exp-detail-row:hover,
+html[data-theme="terminal"] .exp-detail-body .exp-link-item:hover{background:var(--bg-hover)}
+html[data-theme="terminal"] .seo-section-title{font-size:1.2rem;font-weight:400;text-transform:uppercase}
+html[data-theme="terminal"] .heading-tag{color:var(--accent)}
+html[data-theme="terminal"] .content-preview,
+html[data-theme="terminal"] .seo-value-box,
+html[data-theme="terminal"] .markdown-body,
+html[data-theme="terminal"] .recommendation{border-radius:0}
+html[data-theme="terminal"] .markdown-body code{background:var(--bg-hover)}
+html[data-theme="terminal"] .markdown-body pre{background:#010603;border-color:var(--border)}
+html[data-theme="terminal"] .markdown-body th{background:var(--bg-head)}
+html[data-theme="terminal"] .markdown-body a{color:var(--blue)}
+
+/* ----- Explorador (vista tipo Screaming Frog) ----- */
+html[data-theme="terminal"] .exp-sidebar,
+html[data-theme="terminal"] .exp-toolbar,
+html[data-theme="terminal"] .exp-statusbar,
+html[data-theme="terminal"] .exp-detail-header{background:var(--bg-head);border-color:var(--border-hi)}
+html[data-theme="terminal"] .exp-sidebar-header{font-size:1.1rem;font-weight:400;color:var(--accent)}
+html[data-theme="terminal"] .exp-tab{font-size:1.02rem;text-transform:uppercase}
+html[data-theme="terminal"] .exp-tab:hover{background:var(--bg-hover);color:var(--accent)}
+html[data-theme="terminal"] .exp-tab.active{
+  background:var(--accent);
+  color:var(--accent-ink);
+  border-left-color:var(--accent-h);
+  font-weight:400;
+}
+html[data-theme="terminal"] .exp-tab.active .exp-tab-badge{background:var(--accent-ink);color:var(--accent)}
+html[data-theme="terminal"] .exp-tab-badge{font-family:var(--font-mono);border-radius:0;background:rgba(61,255,106,.1)}
+html[data-theme="terminal"] .exp-toolbar-btn,
+html[data-theme="terminal"] .exp-back,
+html[data-theme="terminal"] .exp-pager button{
+  background:var(--bg-card);
+  border:1px solid var(--border-hi);
+  border-radius:0;
+  color:var(--text);
+}
+html[data-theme="terminal"] .exp-toolbar-btn:hover,
+html[data-theme="terminal"] .exp-back:hover,
+html[data-theme="terminal"] .exp-pager button:hover:not(:disabled){background:var(--bg-hover);color:var(--accent);border-color:var(--accent)}
+html[data-theme="terminal"] .exp-toolbar-btn .badge-inline{background:var(--accent);color:var(--accent-ink);border-radius:0}
+html[data-theme="terminal"] .exp-col-picker{background:var(--bg-card);border-color:var(--accent);border-radius:0;box-shadow:0 0 20px var(--accent-glow)}
+html[data-theme="terminal"] .exp-filter-hint{background:var(--accent-subtle);border-bottom-color:var(--border);color:var(--text)}
+html[data-theme="terminal"] .exp-filter-hint strong{background:var(--accent);color:var(--accent-ink);border-radius:0}
+html[data-theme="terminal"] .exp-table-wrap,
+html[data-theme="terminal"] .exp-detail{background:var(--bg)}
+html[data-theme="terminal"] .exp-table th{
+  background:var(--bg-head);
+  color:var(--accent);
+  border-bottom:1px solid var(--border-hi);
+  border-right:1px solid var(--border);
+}
+html[data-theme="terminal"] .exp-table th[data-sortable="1"]:hover,
+html[data-theme="terminal"] .exp-table th.sorted{background:var(--bg-hover);color:var(--accent-h)}
+html[data-theme="terminal"] .exp-table thead tr.exp-filter-row th,
+html[data-theme="terminal"] .exp-table thead tr.exp-filter-row th:hover{
+  background:#030e07;
+  border-bottom:1px solid var(--accent);
+  border-right-color:var(--border);
+}
+html[data-theme="terminal"] .exp-table td{border-bottom-color:rgba(28,90,44,.45);border-right:1px solid rgba(28,90,44,.3)}
+html[data-theme="terminal"] .exp-table tbody tr:nth-child(even) td{background:rgba(61,255,106,.025)}
+html[data-theme="terminal"] .exp-table tbody tr:hover td,
+html[data-theme="terminal"] .exp-table tbody tr:nth-child(even):hover td{background:var(--bg-hover)}
+html[data-theme="terminal"] .exp-detail{border-top:1px solid var(--accent)}
+html[data-theme="terminal"] .exp-detail-url{font-family:var(--font-mono);color:var(--accent)}
+
+/* ----- Foco visible ----- */
+html[data-theme="terminal"] :focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:0}

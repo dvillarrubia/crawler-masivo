@@ -25,10 +25,10 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 |-----------|------|------------|-------------|
 | **API** | `api/` | FastAPI | Job CRUD, results, CSV export, real-time progress via Redis |
 | **Crawler** | `crawler/` | Scrapy + Playwright | SEO spider + Redis queue worker. Each crawl runs as **subprocess** |
-| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (15 check types). Triggered automatically by worker |
+| **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (17 check types). Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
-| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI |
-| **Scripts** | `scripts/` | Python | DB initialization (`init_db.py`) |
+| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI. Light theme (`style.css`) is the default; `theme-terminal.css` (green-phosphor console) is opt-in; toggle in the top bar, stored in `localStorage['seo-crawler-theme']` |
+| **Scripts** | `scripts/` | Python | DB init (`init_db.py`), verificación (`check_content_quality.py`, `check_js_templates.py`) y reparaciones sobre censos ya hechos (`fix_h1_en_contenido.py`, `near_duplicates.py`) |
 
 ### Docker Services (docker-compose.yml)
 - **postgres** — PostgreSQL 16 Alpine, port 5432, healthcheck via `pg_isready`
@@ -141,7 +141,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 ### Analysis (`analysis/`)
 | File | Description |
 |------|-------------|
-| `analyzer.py` | `SEOAnalyzer` class with 15 check methods + `run_analysis()` entry point |
+| `analyzer.py` | `SEOAnalyzer` class with 17 check methods + `run_analysis()` entry point |
+| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto |
+| `sd_validation.py` | Validación conservadora de datos estructurados |
 
 ### Shared (`shared/`)
 | File | Description |
@@ -149,6 +151,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `models.py` | SQLAlchemy models: Job, Url (40+ fields), HtmlMeta, Heading, Link, Hreflang, StructuredData, Resource, PageContent, SecurityHeaders, Issue |
 | `database.py` | Engine + SessionLocal factory |
 | `config.py` | Env vars + SEO thresholds (title/description min/max lengths) |
+| `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
 
@@ -208,7 +211,7 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 
 ## SEO Analysis Checks (`analyzer.py`)
 
-The `SEOAnalyzer` class runs 15 check methods and populates the `issues` table:
+The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 
 | Method | Issue Types Detected |
 |--------|---------------------|
@@ -220,7 +223,9 @@ The `SEOAnalyzer` class runs 15 check methods and populates the `issues` table:
 | `analyze_hreflang()` | hreflang return tags, invalid langs |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_indexability()` | indexability status |
-| `analyze_duplicates()` | content duplicates |
+| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
+| `analyze_duplicates()` | content duplicates (byte-idénticos) |
+| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
 | `analyze_redirect_chains()` | redirect_chain |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
@@ -391,6 +396,115 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    tuberia arranca ahora leyendo lo que ya hay guardado del job y solo suma
    URLs nuevas.
 
+22. **La barra en `meta robots` se avisa, no se interpreta** — hay plantillas
+   que escriben `index/follow` y `noindex/nofollow` (69 páginas en el censo de
+   Saunier Duval). La sintaxis oficial separa por comas, y Google ignora lo que
+   no reconoce, así que ese valor llega como un token desconocido: la página se
+   indexa y sus enlaces se siguen. Tokenizar por barra "arreglaría" el parser y
+   rompería el informe — marcaríamos como noindex una página que Google sí
+   indexa, y el cliente se quedaría creyendo que está fuera del índice. Lo que
+   se emite es `robots_invalid_syntax`, y su severidad depende de qué se
+   pierde: warning si la directiva ignorada era restrictiva (hay una intención
+   que no se cumple), info si era `index/follow` (el comportamiento por
+   defecto, no se pierde nada). Encaja con la decisión 7: lo roto se reporta,
+   no se filtra.
+
+23. **Las reglas robots viven en `shared/robots.py`, no en el extractor** — el
+   analyzer y el extractor las necesitan los dos y la imagen de `analysis/`
+   solo copia `shared/` y `analysis/`. Tenerlas por duplicado costó un
+   desacuerdo silencioso: el extractor tokenizaba (correcto) mientras el
+   analyzer hacía `"noindex" in valor` por subcadena, así que con
+   `noindex/nofollow` la misma página salía indexable en `indexability_status`
+   y no indexable en `urls.indexable`. Arreglado al unificar: gana el
+   tokenizado.
+
+24. **Casi duplicados con MinHash, no con simhash** — la nota antigua decía
+   "near-duplicates via simhash", y simhash es efectivamente más barato (un
+   entero por página). El problema es que su distancia no se le puede enseñar
+   a un cliente: medido sobre un texto de 300 palabras, cambiar 3 da 0,92 de
+   "similitud" y cambiar 10 ya da 0,81 — un informe que dice "estas dos se
+   parecen un 81%" cuando comparten el 97% del texto no se sostiene en una
+   reunión. La firma MinHash estima la Jaccard de los trigramas, que sí
+   significa lo que parece; contrastado contra la Jaccard exacta, el error se
+   queda en 1-3 puntos. Se mide sobre `page_content.content_text` (contenido
+   sin plantilla): con el body entero, cabecera y pie hacen que todo el sitio
+   salga duplicado de todo.
+
+25. **El reparto de bandas del LSH sigue al umbral** — con bandas fijas
+   pensadas para el 90%, bajar el umbral a 0,6 no encuentra ni una pareja más:
+   esas parejas no llegan siquiera a medirse, porque el filtro previo no las
+   propone. `reparto_bandas` elige entre 8×32, 16×16, 32×8 y 64×4 el de filas
+   más anchas que aún proponga el 95% de las parejas que están justo en el
+   umbral. Por debajo de 0,6 (`UMBRAL_MINIMO_FIABLE`) el recall cae y se
+   registra un WARNING: se mide igual, pero el recuento ya no es de fiar.
+
+26. **La firma son 256 muestras porque 64 cambiaban el veredicto** — el error
+   típico del estimador es sqrt(s(1-s)/n). Con 64 muestras, una pareja al 93%
+   real se reportaba al 87,5% y se caía del umbral del 90%: el mismo censo
+   marcaba o no marcaba una página según el ruido del muestreo. Con 256 el
+   desvío baja a ~2 puntos. Cuesta lineal y se midió: firmar 2.000 páginas de
+   400 palabras pasa de 1 s a 3,8 s (≈40 s en un censo de 20.000).
+
+27. **Las redirecciones las sigue el spider, no Scrapy** — toda peticion de
+   pagina lleva `dont_redirect`. Si las sigue el `RedirectMiddleware`, la
+   peticion al destino pasa por el dupefilter y, si el destino ya se habia
+   visto, se descarta con la 301 dentro: el salto no llegaba a `parse`, no se
+   guardaba, y los enlaces que apuntaban a el desaparecian del grafo (faltaban
+   la mayoria de las 301 internas: http→https, barra final, www). Ahora cada
+   salto es su propia fila con `redirect_url`, el destino se pide con la
+   MISMA profundidad (una redireccion no es un clic: sumar uno le quitaba un
+   nivel entero al rastreo de una semilla `http://x.com`), y la meta refresh
+   con URL se trata igual. El PageRank anade la arista salto → destino con
+   peso 1 y el destino de una redireccion interna ya no sale huerfano. Con
+   render JS la redireccion la sigue el navegador: se registra el salto sin
+   codigo (`Redirect (JS)`). La profundidad la respeta
+   `middlewares.DepthMiddleware`, que sustituye a la de Scrapy porque esa la
+   pisaba (las URLs del sitemap entraban a profundidad 3 en vez de 1).
+
+28. **Un job solo es `completed` si su dato esta completo** — antes el worker
+   daba por bueno cualquier rastreo con codigo de salida 0 y un analisis que
+   reventaba se tragaba en el log: un censo de 289 URLs rastreadas y 0
+   guardadas (faltaba una columna) y todos los analisis fallando en
+   `analyze_near_duplicates` terminaron `completed`, sin issues ni PageRank,
+   que se lee como "sitio limpio". Ahora: si se rastrea y no se guarda nada, el
+   job es `failed` con `finish_reason=persistence_failed`; si falla el
+   analisis, `failed` conservando el `finish_reason` del rastreo (lo rastreado
+   vale; se relanza con `python -m analysis.analyzer <job_id>`). Los ERROR de
+   `seo_crawler.*` suben al log del worker agrupados, con la ultima excepcion
+   del traceback (`resumir_stderr`); antes solo subian los WARNING.
+
+29. **PageRank: la repeticion pone techo, no sustituye a la posicion** — el
+   peso por posicion se adivina por etiquetas y clases y falla con menus en
+   `div`, Tailwind o facetas (salian `content`, peso 1). Ahora se mide la
+   repeticion de cada enlace (destino + anchor) en el sitio y en su seccion
+   (host + primer segmento, desde 10 paginas), y lo repetido no pesa mas que
+   un enlace de menu: techo `0,1 / repeticion`, nunca por debajo de 0,25. #24
+   proponia `1 - sqrt(rep)`; se descarto porque lo que recibe un destino
+   (rep x peso) CAE a partir del 44%: estar enlazado desde todo el sitio
+   restaba. Con el techo el total nunca baja (hay test). Ademas: variante →
+   canonical (si la canonica se rastreo con 200) y salto → destino con peso 1;
+   el teletransporte y la masa colgante van solo a paginas 200 indexables, y
+   `jobs.pagerank_resumen` guarda cuanto acaba en cada tipo de URL. Medido en
+   seobide, workoholics, Lopesan y tucanaldesalud: las paginas legales siguen
+   arriba cuando todo el sitio las enlaza desde el pie; es un dato del sitio,
+   separarlas es trabajo del tipo de pagina (#12). Si la home baja, mirar de
+   donde le llegaba: en re-magazine era 1.a solo por el logo de un aviso de
+   navegador antiguo (`body > div.deprecation-notice`, fuera de header/nav/
+   footer, clasificado `content`) presente en 181 de 183 paginas; con techo
+   es 13.a y arriba quedan los tags, que ademas del menu reciben enlaces
+   dentro de los articulos. Es B1 funcionando. Coste: 4-5 s con 150-180 k
+   aristas, 400 s en Quironsalud (7,7 M enlaces). Materializar los enlaces con el
+   anchor ya calculado es obligatorio: unir por `lower(btrim(anchor))` dejaba
+   al planificador sin estimacion y tardaba entre 30 y 80 veces mas.
+
+30. **Los porcentajes de /insights van sobre paginas HTML 2xx y cuentan
+   paginas** — dividian por todas las URLs internas (saltos, PDFs, 404: donde
+   `indexable` es NULL) y sumaban incidencias, asi que una pagina con dos
+   problemas de title contaba doble y `pct_thin` pasaba del 100%. En i18n,
+   `return_tag_ok`/`lang_valid` NULL es "sin verificar", no fallo: un censo sin
+   verificar (Lopesan) salia con nota 0 y dos recomendaciones falsas de
+   prioridad alta. `h1_missing` ya no se emite en 4xx/5xx.
+
 ## Configuración por cliente (`projects/`)
 
 Todo lo específico de un cliente (filtros, selectores de plantilla, `templates`
@@ -445,6 +559,9 @@ SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
 | `DESCRIPTION_MIN_LEN` | 50 |
 | `DESCRIPTION_MAX_LEN` | 160 |
 
+Umbral de casi duplicados: `job.config.analysis_thresholds.near_duplicate_similarity`
+(por defecto 0.9; ver decisiones 16-18).
+
 Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `LOW_TEXT_RATIO_THRESHOLD=10.0`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
 ## Code Conventions
@@ -493,23 +610,36 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (138 cases, pytest): pure extractors
+Unit test suite at `tests/` (268 casos: 258 en la imagen del crawler y 10 mas —`test_insights.py` y `test_export_csv.py`— que necesitan FastAPI y se corren en la de la API): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
-(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`), the main CSV
-export (`test_export_csv.py` — cada columna declarada tiene su valor en la
-fila; sin esto, anadir una columna y olvidar el dato desplaza en silencio
-todas las de la derecha), el contrato de la espera de render
-(`test_render_espera.py`) y la indexabilidad tras una redireccion
-(`test_spider_indexabilidad.py`, el unico que ejercita `parse()` del spider). Run with
+(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
+casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
+estimada contra la Jaccard exacta) y un test de integracion del spider
+(`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
+local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
+refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
+redireccion la sigue el navegador) y `test_analyzer_near_duplicates_db.py`, que
+pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
+(que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
+(modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
+de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el
+fichero; nunca apuntarlo a `crawler_db`). Del contrafactual por columna salen
+tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
+en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
+las de la derecha), `test_render_espera.py` (contrato de la espera de render:
+no resolver con peticiones en vuelo) y, dentro de `test_spider_rastreo.py`,
+que la fila de un salto de redireccion no invente lo que no midio.
+Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
 contenido que llega por XHR (laboratorio con retardo, o URLs reales).
 `scripts/check_content_quality.py <job_id>` compares, per URL template,
 what the crawl stored against what the extractor, `extract_main_content` and a
 Chromium render see right now — it is how content loss is caught after a crawl.
-The DB-touching analysis
-layer has no integration tests yet — it is verified with the SQL queries in
+De la capa de analisis contra BD ya hay tres tests
+(`test_analyzer_headings_db.py`, `test_analyzer_near_duplicates_db.py` y
+`test_pagerank_db.py`); el resto se sigue verificando con las consultas SQL de
 `docs/AUDITORIA_Y_VERIFICACION.md`.
 
 ## PENDING WORK — read before adding features
@@ -528,8 +658,7 @@ order of priority:
    carry corrupted data (relative canonicals → false non-indexable). Measure
    before trusting/re-delivering old reports; re-crawl bucket-A jobs.
 3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
-   custom extraction (XPath/regex per job) ⭐⭐⭐, near-duplicates via simhash
-   ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
+   custom extraction (XPath/regex per job) ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
    PageSpeed/CWV API ⭐⭐, minor ones after.
 4. **Known limitations (section 11)**: also, with `render_js` an `http://` URL of an
    https site is recorded as **307** (Chromium's internal upgrade redirect), not the
@@ -578,7 +707,6 @@ docker compose exec -T crawler python /app/scripts/check_js_templates.py <job_id
 - CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
-- Near-duplicate content detection (simhash)
 - Custom extraction / custom search (XPath/CSS/regex per job)
 - JavaScript comparison tab (raw HTML vs rendered)
 - Pagination (rel next/prev) analysis

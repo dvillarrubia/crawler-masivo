@@ -55,7 +55,9 @@ const ISSUE_LABEL = {
   'structured_data_error': 'Error datos estructurados',
   'structured_data_warning': 'Aviso datos estructurados',
   'noindex_page': 'Pagina noindex',
+  'robots_invalid_syntax': 'Meta robots mal escrito',
   'duplicate_content': 'Contenido duplicado',
+  'near_duplicate_content': 'Contenido casi duplicado',
   'redirect_loop': 'Bucle de redireccion',
   'redirect_chain': 'Cadena de redirecciones',
   'image_missing_alt': 'Imagen sin alt',
@@ -135,6 +137,7 @@ function app() {
   return {
     // Navegacion
     view: 'jobs',
+    theme: document.documentElement.dataset.theme || 'light',
     loading: false,
     error: null,
 
@@ -254,6 +257,31 @@ function app() {
       });
 
       this.$nextTick(() => lucide.createIcons());
+    },
+
+    // ------- Tema (terminal / claro) -------
+    toggleTheme() {
+      this.theme = this.theme === 'terminal' ? 'light' : 'terminal';
+      document.documentElement.dataset.theme = this.theme;
+      try { localStorage.setItem('seo-crawler-theme', this.theme); } catch (_) { /* sin storage */ }
+    },
+
+    // Los layouts de Plotly vienen del servidor con fondo blanco; en el tema
+    // terminal se vuelven transparentes y con texto verde.
+    plotLayout(layout) {
+      if (this.theme !== 'terminal') return layout;
+      const css = getComputedStyle(document.documentElement);
+      const text = css.getPropertyValue('--text').trim();
+      const grid = css.getPropertyValue('--border').trim();
+      const axis = (a) => ({ ...(a || {}), gridcolor: grid, zerolinecolor: grid, linecolor: grid });
+      return {
+        ...layout,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { ...(layout && layout.font), color: text, family: 'IBM Plex Mono, monospace' },
+        xaxis: axis(layout && layout.xaxis),
+        yaxis: axis(layout && layout.yaxis),
+      };
     },
 
     // ------- Toast notifications -------
@@ -765,12 +793,12 @@ function app() {
           const data = await api(`/jobs/${this.job.id}/semantic/ring-data`);
           await this.$nextTick();
           const el = document.getElementById('semantic-ring-chart');
-          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, this.plotLayout(data.layout), { responsive: true });
         } else if (type === 'scatter') {
           const data = await api(`/jobs/${this.job.id}/semantic/scatter-data`);
           await this.$nextTick();
           const el = document.getElementById('semantic-scatter-chart');
-          if (el && window.Plotly) Plotly.newPlot(el, data.data, data.layout, { responsive: true });
+          if (el && window.Plotly) Plotly.newPlot(el, data.data, this.plotLayout(data.layout), { responsive: true });
         }
       } catch (e) { this.error = e.message; }
     },
@@ -822,7 +850,7 @@ function app() {
         this.$nextTick(() => {
           const el = document.getElementById('semantic-target-ring-chart');
           if (el && window.Plotly && this.targetResults.ring_map) {
-            Plotly.newPlot(el, this.targetResults.ring_map.data, this.targetResults.ring_map.layout, { responsive: true });
+            Plotly.newPlot(el, this.targetResults.ring_map.data, this.plotLayout(this.targetResults.ring_map.layout), { responsive: true });
           }
         });
       } catch (e) { this.error = e.message; }
@@ -1696,6 +1724,8 @@ const EXP_COLUMN_DEFS = {
   outlinks_count:       { label: 'Outlinks',         type: 'numeric', sortable: true,  filterKey: 'outlinks_count',          width: 130, fmt: r => r.outlinks_count != null ? r.outlinks_count.toLocaleString('es-ES') : '' },
   external_outlinks_count: { label: 'Outlinks ext.', type: 'numeric', sortable: true,  filterKey: 'external_outlinks_count', width: 140, fmt: r => r.external_outlinks_count != null ? r.external_outlinks_count.toLocaleString('es-ES') : '' },
   pagerank:             { label: 'PageRank',         type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
+  near_duplicate_count: { label: 'Casi duplicadas', type: 'numeric', sortable: true,  filterKey: 'near_duplicate_count',    width: 150, fmt: r => r.near_duplicate_count ?? '' },
+  closest_similarity:   { label: 'Similitud máx.', type: 'numeric', sortable: true,  filterKey: 'closest_similarity',      width: 150, fmt: r => r.closest_similarity != null ? (r.closest_similarity * 100).toFixed(1) + '%' : '' },
   redirect_url:         { label: 'Redirige a',      type: 'string',  sortable: false, filterKey: 'redirect_url_contains',   width: 260, fmt: r => r.redirect_url ?? '' },
   redirect_type:        { label: 'Cód. redir.',     type: 'numeric', sortable: false, filterKey: 'redirect_type',            width: 130, fmt: r => r.redirect_type ?? '' },
   indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },

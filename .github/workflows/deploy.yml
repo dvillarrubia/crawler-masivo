@@ -117,7 +117,17 @@ jobs:
           cd /opt/crawler-masivo
           git fetch origin master
           git reset --hard origin/master
-          docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+          # Build first, migrate, THEN swap containers. init_db.py only
+          # creates missing tables, never missing columns: on 2026-09-29 a
+          # model with a new column (jobs.pagerank_resumen) went live before
+          # the column existed and /api/jobs returned 500 for ~2.5 h. The
+          # migration runs with the NEW image while the old containers keep
+          # serving; if it fails, set -e stops here and nothing is swapped.
+          # It only ever ADDs columns, so re-running it is a no-op.
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml build
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml run --rm --no-deps -T \
+            --entrypoint python crawler scripts/migrate_add_missing_columns.py </dev/null
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
           # init_db.py is idempotent (CREATE TABLE IF NOT EXISTS, etc.)
           # so re-running it on every deploy is safe and applies any
           # pending schema migrations without a manual SSH step.

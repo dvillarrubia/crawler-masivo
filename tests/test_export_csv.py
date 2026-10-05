@@ -28,7 +28,8 @@ def _url_falsa(**extra):
         http_version="HTTP/2", inlinks_count=3, unique_inlinks_count=2,
         outlinks_count=10, external_outlinks_count=1, pagerank=1.5,
         in_sitemap=True, blocked_by_robots=None, body_hash="abc",
-        last_crawled_at=None, html_meta=None, page_content=None, security=None,
+        last_crawled_at=None, near_duplicate_count=0, closest_similarity=None,
+        html_meta=None, page_content=None, security=None,
     )
     base.update(extra)
     return types.SimpleNamespace(**base)

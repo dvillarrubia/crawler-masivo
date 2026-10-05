@@ -410,6 +410,49 @@ def test_robots_tokens_helper():
     assert ex.robots_tokens(None) == set()
 
 
+# -- Sintaxis robots con separador invalido ---------------------------------
+# La barra no es sintaxis valida y Google ignora lo que no reconoce: la pagina
+# se indexa igual. Se reporta como problema de sintaxis, nunca se interpreta.
+
+@pytest.mark.parametrize("robots", ["noindex/nofollow", "noindex|nofollow", "NOINDEX/NOFOLLOW"])
+def test_robots_con_barra_no_saca_del_indice(robots):
+    ok, _ = ex.compute_indexability_status(200, robots, None, None, "https://e.com/p")
+    assert ok is True
+
+
+def test_robots_bad_separators_marca_lo_que_se_pierde():
+    [p] = ex.robots_bad_separators("noindex/nofollow")
+    assert p["token"] == "noindex/nofollow"
+    assert p["directivas"] == ["noindex", "nofollow"]
+    assert p["ignoradas"] == ["noindex", "nofollow"]
+
+
+def test_robots_bad_separators_index_follow_no_pierde_nada():
+    # `index` y `follow` son el comportamiento por defecto: la sintaxis esta
+    # mal, pero no hay ninguna intencion incumplida.
+    [p] = ex.robots_bad_separators("index/follow")
+    assert p["ignoradas"] == []
+
+
+@pytest.mark.parametrize("valor", [
+    None,
+    "",
+    "noindex, nofollow",                        # sintaxis correcta
+    "noindex nofollow",                         # tolerada por Google
+    "max-snippet:-1, max-image-preview:large",  # los dos puntos son validos
+    "unavailable_after: 30/06/2025",            # barra en una fecha, no directivas
+    "index",
+])
+def test_robots_bad_separators_no_da_falsos_positivos(valor):
+    assert ex.robots_bad_separators(valor) == []
+
+
+def test_robots_bad_separators_solo_la_parte_mala():
+    # Un valor mixto: la coma parte bien, y solo el token pegado se reporta.
+    problemas = ex.robots_bad_separators("noarchive, noindex/nofollow")
+    assert [p["token"] for p in problemas] == ["noindex/nofollow"]
+
+
 def test_extract_links_includes_area_maps():
     s = sel('<map><area href="/zone" alt="Zona norte"></map>')
     links = ex.extract_links(s, "https://e.com/", {"e.com"})
@@ -443,3 +486,80 @@ def test_word_count_excludes_template():
     )
     assert ex.extract_word_count(s) == 3
     assert "hidden" not in ex.extract_visible_text(s)
+
+
+# ---------------------------------------------------------------------------
+# Normalizacion y enlaces que perdian paginas (issue #25)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("url,esperada", [
+    ("https://x.com:443/a", "https://x.com/a"),
+    ("http://x.com:80/a", "http://x.com/a"),
+    ("https://x.com:8443/a", "https://x.com:8443/a"),
+    ("https://x.com./a", "https://x.com/a"),
+    ("https://x.com/a/../b/./c", "https://x.com/b/c"),
+    ("https://x.com/a/..", "https://x.com/"),
+])
+def test_normalize_url_puerto_punto_final_y_segmentos(url, esperada):
+    assert ex.normalize_url(url) == esperada
+
+
+def test_normalize_url_no_toca_las_urls_normales():
+    # El hash de las URLs corrientes no puede cambiar: rompería el resume
+    assert ex.normalize_url("https://x.com/a?b=1") == "https://x.com/a?b=1"
+
+
+def test_is_internal_url_con_dominio_idn():
+    hosts = {ex.normalize_host("españa.com")}
+    enlace = ex.normalize_url("https://españa.com/a")
+    assert ex.is_internal_url(enlace, hosts) is True
+    assert ex.is_internal_url("https://ESPAÑA.com./b", hosts) is True
+
+
+@pytest.mark.parametrize("href", ["https://[LINK]/x", "http://ex.com]/x"])
+def test_extract_links_ignora_href_malformado_y_sigue(href):
+    sel = Selector(text=f'<a href="{href}">roto</a><a href="/ok">ok</a>')
+    links = ex.extract_links(sel, "https://e.com/", {"e.com"})
+    assert [l["url"] for l in links] == ["https://e.com/ok"]
+
+
+def test_extract_resources_srcset_vacio_no_lanza():
+    sel = Selector(text='<img srcset=" "><img src="https://[bad/x.png"><img src="/a.png">')
+    urls = [r["url"] for r in ex.extract_resources(sel, "https://e.com/")]
+    assert urls == ["https://e.com/a.png"]
+
+
+@pytest.mark.parametrize("rel", ["nofollow,noopener", "noopener, NOFOLLOW", "nofollow"])
+def test_extract_links_rel_separado_por_comas(rel):
+    sel = Selector(text=f'<a href="/x" rel="{rel}">x</a>')
+    (link,) = ex.extract_links(sel, "https://e.com/", {"e.com"})
+    assert link["follow"] is False
+
+
+@pytest.mark.parametrize("content,destino", [
+    ("0; url=/dest", "https://e.com/dest"),
+    ("5;URL='https://e.com/otra'", "https://e.com/otra"),
+    ("0; /dest", "https://e.com/dest"),
+    ("300", None),
+])
+def test_extract_meta_refresh_target(content, destino):
+    sel = Selector(text=f'<head><meta http-equiv="Refresh" content="{content}"></head>')
+    assert ex.extract_meta_refresh_target(sel, "https://e.com/p") == destino
+
+
+def test_extract_meta_refresh_target_ignora_noscript():
+    sel = Selector(text='<noscript><meta http-equiv="refresh" content="0;url=/x"></noscript>')
+    assert ex.extract_meta_refresh_target(sel, "https://e.com/") is None
+
+
+def test_compile_url_patterns():
+    casan, invalidos = ex.compile_url_patterns(
+        ["*/tag/*", "glob:*.pdf", r"re:/p/\d+$", "re:(", r"\?sort="]
+    )
+    assert invalidos == ["*/tag/*", "re:("]
+    comprueba = lambda u: [c(u) for c in casan]  # noqa: E731
+    assert comprueba("https://e.com/tag/x") == [True, False, False, False]
+    assert comprueba("https://e.com/doc.pdf") == [False, True, False, False]
+    assert comprueba("https://e.com/mapdfx") == [False, False, False, False]
+    assert comprueba("https://e.com/p/12") == [False, False, True, False]
+    assert comprueba("https://e.com/c?sort=1") == [False, False, False, True]
