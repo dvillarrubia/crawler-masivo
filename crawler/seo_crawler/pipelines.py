@@ -87,9 +87,26 @@ class PostgresPipeline:
     # ------------------------------------------------------------------
     def open_spider(self, spider: Spider):
         from shared.database import SessionLocal
+        from shared.models import Url
 
         self.session = SessionLocal()
-        logger.info("PostgresPipeline: database session opened")
+        # El contador arranca en lo que YA hay guardado de este job, no en
+        # cero. Cada reanudacion abre un proceso de Scrapy nuevo con su propia
+        # tuberia, y al cerrar escribia su cuenta local en
+        # `jobs.total_urls_crawled`: un rastreo con 34.704 filas reales se
+        # reportaba como 802 (las del ultimo tramo) y /stats devolvia las dos
+        # cifras a la vez, contradiciendose.
+        try:
+            self._pages_committed = (
+                self.session.query(Url).filter(Url.job_id == spider.job_id).count()
+            )
+        except Exception:
+            self._pages_committed = 0
+            logger.debug("No se pudo leer el contador previo del job")
+        logger.info(
+            "PostgresPipeline: database session opened (%d URLs ya guardadas)",
+            self._pages_committed,
+        )
 
     def close_spider(self, spider: Spider):
         self._flush(spider)
@@ -103,7 +120,7 @@ class PostgresPipeline:
         if self.session:
             self.session.close()
             logger.info(
-                "PostgresPipeline: session closed, %d pages committed",
+                "PostgresPipeline: session closed, %d URLs del job guardadas",
                 self._pages_committed,
             )
 
@@ -203,9 +220,11 @@ class PostgresPipeline:
                 self.session.add(url_obj)
                 self.session.flush()
                 url_id = url_obj.id
+                # Solo las URLs nuevas suman: re-rastrear una pagina ya
+                # guardada no la convierte en dos.
+                self._pages_committed += 1
 
             self._url_id_cache[url_hash] = url_id
-            self._pages_committed += 1
             self._maybe_commit()
             self._update_job_counter(spider)
         except Exception:
@@ -492,7 +511,7 @@ class PostgresPipeline:
     # Job counter
     # ------------------------------------------------------------------
     def _update_job_counter(self, spider: Spider, force: bool = False):
-        """Update job.total_urls_crawled every 100 pages (or on close)."""
+        """Refresca job.total_urls_crawled (cada 5 s o al cerrar)."""
         now = time.monotonic()
         if not force and (now - self._last_job_update) < 5.0:
             return

@@ -83,8 +83,39 @@ REGLAS: list[tuple[str, str]] = [
 ]
 
 
-def clasificar(path: str) -> str:
-    for nombre, patron in REGLAS:
+def cargar_reglas(job_id: str) -> list[tuple[str, str]]:
+    """Reglas de plantilla del propio job (``config.templates``) o, si no las
+    trae, las genericas de arriba.
+
+    Las reglas por cliente viajan en el JSON del job (``projects/<cliente>/
+    config.json`` -> ``templates``), no en este fichero: asi cada cliente lleva
+    las suyas y el repo no cambia entre proyectos.
+    """
+    try:
+        from shared.database import SessionLocal
+        from shared.models import Job
+
+        sesion = SessionLocal()
+        try:
+            job = sesion.get(Job, job_id)
+            plantillas = ((job.config or {}).get("templates") if job else None) or []
+        finally:
+            sesion.close()
+    except Exception:
+        plantillas = []
+    reglas: list[tuple[str, str]] = []
+    for regla in plantillas:
+        if isinstance(regla, dict):
+            nombre, patron = regla.get("nombre") or regla.get("name"), regla.get("patron") or regla.get("pattern")
+        else:
+            nombre, patron = (list(regla) + [None, None])[:2]
+        if nombre and patron:
+            reglas.append((str(nombre), str(patron)))
+    return reglas or list(REGLAS)
+
+
+def clasificar(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
+    for nombre, patron in (reglas if reglas is not None else REGLAS):
         if re.search(patron, path, re.I):
             return nombre
     partes = [p for p in path.split("/") if p]
@@ -169,13 +200,23 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                 muestras_ok += 1
 
             if muestras_ok:
+                pc, pr = pal_crudo // muestras_ok, pal_render // muestras_ok
+                # Si Chromium trae MUCHO menos texto que el HTML crudo, no ha
+                # renderizado la pagina: le han servido un bloqueo del WAF, un
+                # desafio o un error. En ese caso "0 enlaces solo-JS" es trivial
+                # (la pagina renderizada no tiene enlaces) y NO prueba nada.
+                # Medido: dos rastreos con 75 palabras renderizadas en todas las
+                # plantillas frente a 800-1.800 crudas, y el veredicto "grafo
+                # fiable" salio igual. Se marca y el worker no concluye con ello.
+                render_sospechoso = pc >= 100 and pr < pc * 0.2
                 resultados.append(
                     {
                         "plantilla": plantilla,
                         "muestras": muestras_ok,
                         "enlaces_solo_js": enl_solo_js,
-                        "palabras_crudo": pal_crudo // muestras_ok,
-                        "palabras_render": pal_render // muestras_ok,
+                        "palabras_crudo": pc,
+                        "palabras_render": pr,
+                        "render_sospechoso": render_sospechoso,
                     }
                 )
         await navegador.close()
@@ -201,9 +242,10 @@ def comprobar(
 
     hosts = {re.sub(r"^https?://", "", u).split("/")[0] for u, _ in filas[:200]}
 
+    reglas = cargar_reglas(job_id)
     grupos: dict[str, list[str]] = defaultdict(list)
     for url, path in filas:
-        grupos[clasificar(path)].append(url)
+        grupos[clasificar(path, reglas)].append(url)
 
     ordenados = sorted(grupos.items(), key=lambda kv: -len(kv[1]))
     if plantillas_max:

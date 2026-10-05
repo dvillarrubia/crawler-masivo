@@ -683,3 +683,70 @@ detalle de un commit: `git show <hash>`.
 
 > Nota: los hashes pueden variar si la rama se rebasa. Usa
 > `git log --oneline origin/master..HEAD` para ver la lista actual.
+
+---
+
+## 13. Contrafactual por columna (2026-09-24)
+
+Pregunta: *¿recuperamos bien cada columna, y la sacamos bien?* Metodo: dos
+rastreos terminados (`blogs.uoc.edu` sin JS, 34.704 filas; `www.uoc.edu` con
+JS, 28.712), las 11 tablas medidas columna a columna, 18 paginas vueltas a
+descargar y re-extraidas campo a campo, y los tres CSV descargados de la API.
+
+**Lo que estaba bien** (no tocar sin motivo): el mapeo HTML→columna. En el
+rastreo sin JS, los ~50 campos comparados coincidieron 10/10 con la pagina
+viva. Las derivadas tampoco fallaban: recalculados `inlinks`,
+`unique_inlinks`, `outlinks` y `external_outlinks` sobre 3,4 M de enlaces,
+**cero** desviaciones en 34.704 URLs.
+
+**Arreglado:**
+
+| Hallazgo | Medida antes | Arreglo | Comprobacion |
+|---|---|---|---|
+| Paginas guardadas antes de hidratar (render) | 6.555/9.895 noticias sin el bloque `ItemList`; mediana 109 enlaces frente a 129 en vivo | contador de XHR/fetch en vuelo (`seo_crawler/render.py`) + `PerformanceObserver` + piso `PLAYWRIGHT_MIN_WAIT_MS` | `scripts/prueba_espera_render.py`: con XHR a 700/1.200 ms la espera vieja perdia los 10 enlaces, la nueva los coge. Coste: +500/900 ms por pagina |
+| `Canonicalised` falso en URLs alcanzadas por 301 | 1.254 (blogs) + 1.329 (uoc), el 100% llegadas por redireccion | el spider compara contra la URL FINAL; el analizador recalcula y repara lo ya rastreado | 1.254 → 0 tras re-analizar |
+| `indexable` NULL en 404/3xx/no-HTML | 4.899 de 34.704 | `analyze_indexability` con LEFT JOIN, cubre todas las URLs del job | 4.899 → 0; contradicciones entre las dos columnas: 0 |
+| Contador del job tras reanudacion | `/stats` devolvia 34.704 URLs y 802 rastreadas a la vez | la tuberia arranca leyendo lo ya guardado y solo suma URLs nuevas | — |
+| CSV principal sin H1/H2, og, twitter, hreflang, datos estructurados ni seguridad | 43 columnas | 75 columnas, agregadas por lote | ida y vuelta viva→BD→CSV: 20 campos × 10 paginas, 0 desviaciones |
+| `content_text` recortado a 500 sin avisar | 276/304 filas al tope con `content_char_count` completo al lado | la columna se llama `content_text_first_500` | — |
+| `http_version` siempre vacia | 0% en los dos rastreos | Navigation Timing en el camino de render | solo con `render_js` (ver 11) |
+| `resources.size_bytes` muerta | 0% y una columna "Tamaño" vacia en la UI | fuera del schema de la API y de la UI | — |
+| Filas de salto de redireccion | heredaban el `content-type` de la respuesta final y guardaban ceros | `NULL` donde no se midio | — |
+
+**Verificacion sobre datos nuevos** (canario de 300 URLs de www.uoc.edu con
+`render_js`, lanzado con el codigo ya arreglado):
+
+| Comprobacion | Resultado |
+|---|---|
+| Falsos `Canonicalised` | 0 de 301 (13 canonicalizadas de verdad, ninguna con canonical propio) |
+| `indexable` nulo / columnas que se contradicen | 0 / 0 |
+| `http_version` | 300 de 301 filas (la que falta es un salto de redireccion, que no se renderiza) |
+| Contador del job vs filas | 301 = 301 |
+| Fila de salto de redireccion | sin `content_type` heredado ni tamaños a cero |
+| Contrafactual viva→BD→CSV, 8 paginas | meta, h1, hreflang, datos estructurados, seguridad y las 20 columnas del CSV: 0 desviaciones |
+
+Los unicos numeros que no cuadraban en ese contrafactual eran los recursos
+(58 guardados frente a 72 en vivo) y resultaron ser **terceros bloqueados a
+proposito**: el desglose por tipo da 27 js guardados frente a 41 en vivo, con
+imagenes (24) y CSS (7) identicos. El render de control no bloquea trackers y
+el rastreo si (`PLAYWRIGHT_BLOCK_TRACKERS=1`). Conviene recordarlo al comparar:
+un contrafactual honesto tiene que bloquear lo mismo que el rastreo.
+
+**Comprobado y correcto, pese a la pinta** (no arreglar): `return_tag_ok` esta
+sin calcular en el 69% de las filas de hreflang **a proposito** — solo se
+decide cuando el destino se rastreo; los avisos `hreflang_missing_return`
+salen unicamente de los casos decidibles. Y `last_modified` vacio en
+blogs.uoc.edu es del sitio, que no manda la cabecera.
+
+**Pendiente, decidido no hacer ahora:**
+
+- Los decimales salen con punto y el separador es coma: Google Sheets lo abre
+  bien, Excel en español lee los numeros como texto. Un `?excel_es=1` que
+  cambie a `;` y coma decimal es media hora.
+- `resources.size_bytes` se podria rellenar uniendo `resource_url` con
+  `urls.content_length` de los recursos ya rastreados (no requiere descargar
+  nada nuevo).
+- `http_version` por el camino de curl_cffi obliga a reimplementar el handler
+  de `scrapy-impersonate`, que descarta el dato.
+
+---

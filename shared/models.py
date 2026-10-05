@@ -112,7 +112,7 @@ class Url(Base):
     indexability_status = Column(String(64), nullable=True)  # reason: "Canonicalised", "Noindex", etc.
     blocked_by_robots = Column(Boolean, nullable=True)       # only set in robots_mode="audit"
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
-    outlinks_count = Column(Integer, default=0)              # total outlinks from this URL
+    outlinks_count = Column(Integer, default=0)              # outlinks INTERNOS (los externos, aparte)
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
     pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
@@ -270,6 +270,9 @@ class Resource(Base):
     resource_url = Column(Text, nullable=False)
     resource_type = Column(String(20), nullable=False)  # image, css, js, pdf, font, other
     alt_text = Column(Text, nullable=True)
+    # Sin rellenar: el rastreo no descarga el cuerpo de los recursos. El dato
+    # existiria uniendo resource_url con urls.content_length cuando el recurso
+    # se haya rastreado como URL; hasta entonces la columna no se expone.
     size_bytes = Column(BigInteger, nullable=True)
 
     # --- Screaming Frog extended fields ---

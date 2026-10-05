@@ -523,7 +523,15 @@ def get_stats(
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
-        total_urls_crawled=job.total_urls_crawled,
+        # En un rastreo terminado la verdad son las filas guardadas: el
+        # contador de la tuberia se escribia por proceso y los rastreos
+        # reanudados antes del arreglo se quedaron con el ultimo tramo (802
+        # frente a 34.704 reales). `total_urls` ya esta contado aqui arriba.
+        total_urls_crawled=(
+            max(job.total_urls_crawled or 0, total_urls)
+            if job.status in ("completed", "failed", "cancelled", "stalled")
+            else job.total_urls_crawled
+        ),
         total_urls_failed=job.total_urls_failed,
         urls_by_status_group=urls_by_status,
         issues_by_type=issues_by_type,
@@ -578,10 +586,50 @@ CSV_COLUMNS = [
     "meta_description_len",
     "meta_description_pixel_width",
     "meta_robots",
+    "x_robots_tag",
     "canonical_href",
+    "canonical_header",
+    "meta_keywords",
+    "rel_next",
+    "rel_prev",
     "meta_refresh",
     "has_meta_outside_head",
-    "content_text",
+    # Encabezados: lo primero que mira cualquier auditoria y lo unico que
+    # obligaba a abrir el backup ZIP para verlo.
+    "h1_count",
+    "h1_1",
+    "h1_2",
+    "h2_count",
+    "h2_1",
+    "h2_2",
+    # Social
+    "og_title",
+    "og_description",
+    "og_image",
+    "og_type",
+    "twitter_card",
+    "twitter_title",
+    "twitter_description",
+    # Internacionalizacion
+    "hreflang_count",
+    "hreflang_langs",
+    # Datos estructurados
+    "structured_data_count",
+    "structured_data_types",
+    "structured_data_status",
+    # Imagenes
+    "images_count",
+    "images_missing_alt",
+    # Seguridad
+    "is_https",
+    "has_hsts",
+    "has_csp",
+    "has_mixed_content",
+    # Otros
+    "blocked_by_robots",
+    "body_hash",
+    "last_crawled_at",
+    "content_text_first_500",
     "content_char_count",
 ]
 
@@ -593,12 +641,22 @@ def _val(v) -> str:
     return str(v)
 
 
-def _csv_row(url_obj: Url) -> list[str]:
-    """Build a flat CSV row from a Url + optional HtmlMeta + PageContent."""
+def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
+    """Build a flat CSV row from a Url + optional HtmlMeta + PageContent.
+
+    *extras* trae lo agregado por lote (encabezados, hreflang, datos
+    estructurados, imagenes): recorrerlo por relacion ORM haria una consulta
+    por URL y por tabla.
+    """
     meta: HtmlMeta | None = url_obj.html_meta
     pc: PageContent | None = url_obj.page_content
+    sec: SecurityHeaders | None = url_obj.security
+    ex = extras or {}
 
-    # Truncate content_text to 500 chars for CSV
+    # El texto va recortado a 500 caracteres a proposito (el CSV completo es
+    # /content/export). La columna lo dice en el nombre: antes se llamaba
+    # "content_text" y al lado iba la longitud COMPLETA, asi que parecia el
+    # texto entero recortado por Excel.
     content_text_val = ""
     if pc and pc.content_text:
         content_text_val = pc.content_text[:500]
@@ -645,13 +703,126 @@ def _csv_row(url_obj: Url) -> list[str]:
         _val(meta.meta_description_len) if meta else "",
         _val(meta.meta_description_pixel_width) if meta else "",
         _val(meta.meta_robots) if meta else "",
+        _val(meta.x_robots_tag) if meta else "",
         _val(meta.canonical_href) if meta else "",
+        _val(meta.canonical_header) if meta else "",
+        _val(meta.meta_keywords) if meta else "",
+        _val(meta.rel_next) if meta else "",
+        _val(meta.rel_prev) if meta else "",
         _val(meta.meta_refresh) if meta else "",
         _val(meta.has_meta_outside_head) if meta else "",
+        # Encabezados
+        _val(ex.get("h1_count", 0)),
+        _val(ex.get("h1_1")),
+        _val(ex.get("h1_2")),
+        _val(ex.get("h2_count", 0)),
+        _val(ex.get("h2_1")),
+        _val(ex.get("h2_2")),
+        # Social
+        _val(meta.og_title) if meta else "",
+        _val(meta.og_description) if meta else "",
+        _val(meta.og_image) if meta else "",
+        _val(meta.og_type) if meta else "",
+        _val(meta.twitter_card) if meta else "",
+        _val(meta.twitter_title) if meta else "",
+        _val(meta.twitter_description) if meta else "",
+        # Hreflang
+        _val(ex.get("hreflang_count", 0)),
+        _val(ex.get("hreflang_langs")),
+        # Datos estructurados
+        _val(ex.get("sd_count", 0)),
+        _val(ex.get("sd_types")),
+        _val(ex.get("sd_status")),
+        # Imagenes
+        _val(ex.get("img_count", 0)),
+        _val(ex.get("img_sin_alt", 0)),
+        # Seguridad
+        _val(sec.is_https) if sec else "",
+        _val(sec.has_hsts) if sec else "",
+        _val(sec.has_csp) if sec else "",
+        _val(sec.has_mixed_content) if sec else "",
+        # Otros
+        _val(url_obj.blocked_by_robots),
+        _val(url_obj.body_hash),
+        _val(url_obj.last_crawled_at.isoformat() if url_obj.last_crawled_at else None),
         # PageContent fields
         content_text_val,
         _val(pc.content_length) if pc else "",
     ]
+
+
+_ORDEN_VALIDACION = {"error": 0, "warning": 1, "ok": 2}
+
+
+def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Agrega encabezados, hreflang, datos estructurados e imagenes del lote.
+
+    Cuatro consultas por ventana de 1.000 URLs en lugar de cuatro por URL:
+    recorrerlo por relaciones ORM son 4.000 consultas por ventana y convierte
+    un export de 30.000 paginas en una espera de minutos.
+    """
+    extras: dict[int, dict[str, Any]] = {uid: {} for uid in url_ids}
+    if not url_ids:
+        return extras
+
+    # Encabezados: solo h1/h2 y en orden de documento; guardamos los dos
+    # primeros de cada uno, como hace Screaming Frog.
+    filas = (
+        session.query(Heading.url_id, Heading.tag, Heading.text)
+        .filter(Heading.url_id.in_(url_ids), Heading.tag.in_(("h1", "h2")))
+        .order_by(Heading.url_id, Heading.position)
+        .all()
+    )
+    for url_id, tag, texto in filas:
+        d = extras[url_id]
+        clave_n = f"{tag}_count"
+        d[clave_n] = d.get(clave_n, 0) + 1
+        if d[clave_n] <= 2:
+            d[f"{tag}_{d[clave_n]}"] = texto
+
+    for url_id, n_hl, langs in (
+        session.query(
+            Hreflang.url_id,
+            func.count(Hreflang.id),
+            func.string_agg(Hreflang.lang.distinct(), "|"),
+        )
+        .filter(Hreflang.url_id.in_(url_ids))
+        .group_by(Hreflang.url_id)
+        .all()
+    ):
+        extras[url_id].update(hreflang_count=n_hl, hreflang_langs=langs)
+
+    for url_id, n_sd, tipos, estados in (
+        session.query(
+            StructuredData.url_id,
+            func.count(StructuredData.id),
+            func.string_agg(StructuredData.schema_type.distinct(), "|"),
+            func.string_agg(StructuredData.validation_status.distinct(), "|"),
+        )
+        .filter(StructuredData.url_id.in_(url_ids))
+        .group_by(StructuredData.url_id)
+        .all()
+    ):
+        peor = None
+        if estados:
+            peor = sorted(estados.split("|"), key=lambda e: _ORDEN_VALIDACION.get(e, 9))[0]
+        extras[url_id].update(sd_count=n_sd, sd_types=tipos, sd_status=peor)
+
+    for url_id, n_img, sin_alt in (
+        session.query(
+            Resource.url_id,
+            func.count(Resource.id),
+            func.count(Resource.id).filter(
+                or_(Resource.alt_text.is_(None), Resource.alt_text == "")
+            ),
+        )
+        .filter(Resource.url_id.in_(url_ids), Resource.resource_type == "image")
+        .group_by(Resource.url_id)
+        .all()
+    ):
+        extras[url_id].update(img_count=n_img, img_sin_alt=sin_alt)
+
+    return extras
 
 
 def _stream_csv(job_id: uuid.UUID):
@@ -674,7 +845,11 @@ def _stream_csv(job_id: uuid.UUID):
         try:
             rows = (
                 session.query(Url)
-                .options(joinedload(Url.html_meta), joinedload(Url.page_content))
+                .options(
+                    joinedload(Url.html_meta),
+                    joinedload(Url.page_content),
+                    joinedload(Url.security),
+                )
                 .filter(Url.job_id == job_id, Url.id > last_id)
                 .order_by(Url.id)
                 .limit(batch_size)
@@ -684,10 +859,12 @@ def _stream_csv(job_id: uuid.UUID):
             if not rows:
                 break
 
+            extras = _extras_por_lote(session, [r.id for r in rows])
+
             buf = io.StringIO()
             writer = csv.writer(buf)
             for row in rows:
-                writer.writerow(_csv_row(row))
+                writer.writerow(_csv_row(row, extras.get(row.id)))
                 last_id = row.id
 
             yield buf.getvalue()

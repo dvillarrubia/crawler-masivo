@@ -243,9 +243,18 @@ def comprobar(job_id: str, muestras: int, espera_ms: int, semilla: int,
         print("El job no tiene paginas HTML 200 internas.")
         return []
     hosts = {p["url"].split("/")[2] for p in paginas}
+    # Si el job trae reglas de plantilla (config.templates), se agrupa con
+    # ellas para que las cifras salgan con los mismos nombres que en js_check;
+    # si no, por la forma de la URL.
+    try:
+        from check_js_templates import cargar_reglas, clasificar
+        reglas = cargar_reglas(job_id)
+    except Exception:
+        reglas = []
     por_plantilla = defaultdict(list)
     for pag in paginas:
-        por_plantilla[firma(pag["path"])].append(pag)
+        clave = clasificar(pag["path"], reglas) if reglas else firma(pag["path"])
+        por_plantilla[clave].append(pag)
     ordenados = sorted(por_plantilla.items(), key=lambda kv: len(kv[1]), reverse=True)
     if plantillas_max:
         ordenados = ordenados[:plantillas_max]

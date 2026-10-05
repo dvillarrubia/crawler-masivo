@@ -1,0 +1,61 @@
+{
+  "_seeds": [
+    "https://www.ejemplo.com/"
+  ],
+  "_doc": "Copia esta carpeta como projects/<cliente>/ y ajusta. Las claves que empiezan por _ no se envian a la API.",
+  "max_depth": 6,
+  "max_urls": 60000,
+  "follow_external": false,
+  "robots_mode": "respect",
+  "render_js": false,
+  "impersonate": "chrome124",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "concurrent_requests": 4,
+  "concurrent_requests_per_domain": 2,
+  "exclude_patterns": [],
+  "include_patterns": [],
+  "use_sitemap": true,
+  "templates": [
+    {
+      "nombre": "legal",
+      "patron": "(aviso-legal|privacidad|privacy|cookies)"
+    },
+    {
+      "nombre": "home",
+      "patron": "^/?$|^/[a-z]{2}/?$"
+    }
+  ],
+  "resource_types": {
+    "crawl_images": false,
+    "crawl_css": false,
+    "crawl_js": false,
+    "crawl_pdfs": false,
+    "crawl_fonts": false,
+    "crawl_svg": false,
+    "crawl_other": false,
+    "check_external_resources": false
+  },
+  "crawl_behavior": {
+    "download_timeout": 30,
+    "retry_count": 2,
+    "request_delay": 0.5,
+    "autothrottle_enabled": true,
+    "autothrottle_target_concurrency": 4.0,
+    "follow_nofollow": false,
+    "crawl_subdomains": false,
+    "max_runtime_hours": 48,
+    "stall_timeout_minutes": 30
+  },
+  "extraction": {
+    "extract_structured_data": true,
+    "extract_hreflang": true,
+    "extract_security_headers": true,
+    "extract_page_content": true,
+    "strip_promo_blocks": true,
+    "custom_boilerplate_selectors": [],
+    "store_raw_html": false
+  },
+  "http": {
+    "accept_language": "es,en;q=0.8"
+  }
+}

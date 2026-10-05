@@ -77,6 +77,65 @@ class EstancadoError(Exception):
     """El rastreo dejo de avanzar: latido sin moverse durante el margen dado."""
 
 
+# Scrapy escribe su log en un fichero por job, EN VIVO (-s LOG_FILE), en vez
+# de en el stderr del subproceso. Antes el log solo existia en memoria hasta que
+# el proceso acababa: con un rastreo de horas no habia forma de ver que estaba
+# pasando (una pagina que cae a status NULL, un navegador que empieza a fallar)
+# hasta que terminaba o se mataba. Se abre en modo append para que las
+# reanudaciones automaticas del mismo job queden en el mismo fichero.
+LOG_DIR = os.getenv("SCRAPY_LOG_DIR", "/tmp/scrapy-logs")
+
+
+def _ruta_log(job_id: str) -> str:
+    return os.path.join(LOG_DIR, f"{job_id}.log")
+
+
+def _leer_log(job_id: str, ultimos_bytes: int = 2_000_000) -> str:
+    """Cola del log en fichero del job ('' si no existe)."""
+    try:
+        with open(_ruta_log(job_id), "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            tam = fh.tell()
+            fh.seek(max(0, tam - ultimos_bytes))
+            return fh.read().decode("utf-8", "ignore")
+    except OSError:
+        return ""
+
+
+def _guardar_stderr(job_id: str, error: str | None, motivo: str) -> None:
+    """Deja rastro de POR QUE se ha matado un Scrapy (estancamiento o tope de
+    horas): sin esto no hay forma de distinguir un navegador colgado de un
+    sitio que dejo de responder.
+
+    El log vive ya en fichero (ver LOG_DIR); si por lo que sea no esta, se
+    guarda el stderr. En ambos casos se registra un resumen en WARNING.
+    """
+    ruta = _ruta_log(job_id)
+    if not error:
+        error = _leer_log(job_id)
+    if not error:
+        logger.warning("Job %s parado por %s: Scrapy no dejo log", job_id, motivo)
+        return
+    if not os.path.exists(ruta):
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            with open(ruta, "w", encoding="utf-8") as fh:
+                fh.write(error)
+        except OSError as exc:
+            ruta = f"(no se pudo escribir: {exc})"
+    # Las lineas de error del spider/Playwright son las que explican el
+    # cuelgue; se sacan aparte porque el final del log suele ser el cierre.
+    relevantes = [
+        ln for ln in error.splitlines()
+        if any(k in ln for k in ("ERROR", "Traceback", "Timeout", "crash", "closed", "disconnected"))
+    ]
+    logger.warning(
+        "Job %s parado por %s. stderr completo en %s. %d linea(s) de error; ultimas:\n%s\n--- cola del log ---\n%s",
+        job_id, motivo, ruta, len(relevantes),
+        "\n".join(relevantes[-15:]), error[-2500:],
+    )
+
+
 def _ejecutar_con_vigilancia(
     cmd: list[str],
     *,
@@ -120,7 +179,8 @@ def _ejecutar_con_vigilancia(
 
         if max_seconds and (ahora - inicio) > max_seconds:
             proc.kill()
-            proc.communicate()
+            _, error = proc.communicate()
+            _guardar_stderr(job_id, error, "tope de horas")
             raise subprocess.TimeoutExpired(cmd, max_seconds)
 
         if rc is None or stall_minutes <= 0:
@@ -143,8 +203,98 @@ def _ejecutar_con_vigilancia(
                 job_id, parado, stall_minutes,
             )
             proc.kill()
-            proc.communicate()
+            _, error = proc.communicate()
+            _guardar_stderr(job_id, error, "estancamiento")
             raise EstancadoError(f"{parado:.0f} min sin avanzar")
+
+
+STALL_AUTO_RESUME = int(os.getenv("STALL_AUTO_RESUME", "3"))
+
+
+def _reencolar_tras_estancamiento(job_id: str, motivo: str) -> bool:
+    """Devuelve True si el job se ha vuelto a encolar para que continue.
+
+    El contador vive en Redis (job:<id>:reanudaciones) y se borra al terminar
+    el job por cualquier otra via. No se reencola si el job fue cancelado
+    mientras tanto ni si se agotaron los intentos.
+    """
+    if STALL_AUTO_RESUME <= 0:
+        return False
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        intentos = int(rc.incr(f"job:{job_id}:reanudaciones"))
+    except Exception:
+        return False
+    if intentos > STALL_AUTO_RESUME:
+        logger.warning(
+            "Job %s: %d reanudaciones automaticas agotadas, se cierra como stalled",
+            job_id, STALL_AUTO_RESUME,
+        )
+        return False
+    from shared.database import SessionLocal
+    from shared.models import Job
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job is None or job.status == "cancelled":
+            return False
+        job.status = "pending"
+        job.completed_at = None
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Job %s: no se pudo reencolar tras estancamiento", job_id)
+        return False
+    finally:
+        session.close()
+    try:
+        rc.rpush(JOBS_QUEUE, job_id)
+    except Exception:
+        logger.exception("Job %s: no se pudo encolar en Redis", job_id)
+        return False
+    logger.warning(
+        "Job %s ESTANCADO (%s): reanudacion automatica %d/%d desde la frontera guardada",
+        job_id, motivo, intentos, STALL_AUTO_RESUME,
+    )
+    return True
+
+
+def _reencolar_si_pedido(job_id: str) -> bool:
+    """True si alguien pidio reanudar el job mientras corria (ver el guard de
+    duplicados en el bucle principal): se deja en "pending" y se vuelve a
+    encolar sin analizar, porque el rastreo continua."""
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        if not rc.get(f"job:{job_id}:reencolar"):
+            return False
+        rc.delete(f"job:{job_id}:reencolar")
+    except Exception:
+        return False
+    from shared.database import SessionLocal
+    from shared.models import Job
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job is None:
+            return False
+        job.status = "pending"
+        job.completed_at = None
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Job %s: no se pudo dejar en pending para reencolar", job_id)
+        return False
+    finally:
+        session.close()
+    try:
+        rc.rpush(JOBS_QUEUE, job_id)
+    except Exception:
+        logger.exception("Job %s: no se pudo encolar en Redis", job_id)
+        return False
+    logger.warning("Job %s: reanudacion pedida durante la ejecucion, reencolado", job_id)
+    return True
 
 
 def _run_job(job_id: str) -> None:
@@ -194,11 +344,27 @@ def _run_job(job_id: str) -> None:
             env.get("PYTHONPATH", "")
         )
 
+        # Espera de render por job. El spider la lee de PLAYWRIGHT_BANNER_WAIT_MS
+        # al importarse, asi que va por entorno del subproceso. Los listados
+        # que se montan por XHR/GraphQL (AEM, headless CMS) pintan sus enlaces
+        # 2-3 s despues de domcontentloaded: con el tope de 2 s se guardaban
+        # paginas de categoria con 0 enlaces a items y hubs con menos de los
+        # que hay, y los huerfanos salian inflados sin que nada lo avisara.
+        render_wait = (job_config.get("crawl_behavior") or {}).get("render_wait_ms")
+        if render_wait:
+            env["PLAYWRIGHT_BANNER_WAIT_MS"] = str(int(render_wait))
+
         # Build Scrapy command with per-job overrides
         cmd = [
             sys.executable, "-m", "scrapy", "crawl", "seo",
             "-a", f"job_id={job_id}",
         ]
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            cmd += ["-s", f"LOG_FILE={_ruta_log(job_id)}", "-s", "LOG_FILE_APPEND=True"]
+            logger.info("Job %s: log de Scrapy en %s", job_id, _ruta_log(job_id))
+        except OSError as exc:
+            logger.warning("Sin directorio de logs (%s): Scrapy escribe en stderr", exc)
 
         # -- Concurrencia efectiva ---------------------------------------
         # Con render_js el tope se aplica como min() sobre lo que pida el job,
@@ -254,6 +420,12 @@ def _run_job(job_id: str) -> None:
         crawl_behavior = job_config.get("crawl_behavior", {})
         if crawl_behavior.get("download_timeout", 30) != 30:
             cmd += ["-s", f"DOWNLOAD_TIMEOUT={crawl_behavior['download_timeout']}"]
+            # El timeout de navegacion de Playwright debe ir alineado con el de
+            # Scrapy (ver settings.py): si el job sube uno y no el otro, las
+            # paginas lentas siguen perdiendose con status NULL por el que quede
+            # corto. Solo se toca si el entorno no lo fijo a mano.
+            if not os.getenv("PLAYWRIGHT_NAV_TIMEOUT"):
+                cmd += ["-s", f"PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT={int(crawl_behavior['download_timeout']) * 1000}"]
         if crawl_behavior.get("retry_count", 2) != 2:
             cmd += ["-s", f"RETRY_TIMES={crawl_behavior['retry_count']}"]
         if crawl_behavior.get("request_delay", 0) > 0:
@@ -287,6 +459,15 @@ def _run_job(job_id: str) -> None:
             stall_minutes=stall_minutes,
             max_seconds=3600 * max_runtime_hours,
         )
+
+        # Con LOG_FILE el stderr viene vacio: el log esta en el fichero. Se
+        # usa como si fuera el stderr para que el resumen de avisos siga igual.
+        if not result.stderr:
+            texto_log = _leer_log(job_id)
+            if texto_log:
+                result = subprocess.CompletedProcess(
+                    result.args, result.returncode, result.stdout, texto_log
+                )
 
         # Avisos del spider. Su salida es la de un subproceso que aqui se
         # vuelca en DEBUG, asi que sin esto no aparecen en ningun sitio: una
@@ -349,9 +530,13 @@ def _run_job(job_id: str) -> None:
                 sin_guardar = True
 
     except EstancadoError as exc:
-        # Igual que el tope de tiempo: lo rastreado es valido y se analiza. Lo
-        # que NO se hace es fingir que el rastreo termino bien — finish_reason
-        # queda en "stalled" para que el dato no se confunda con uno completo.
+        # Un estancamiento casi siempre es el navegador (Playwright) que se ha
+        # quedado colgado, no el sitio: el spider retoma desde la frontera que
+        # dejo en la BD, asi que lo barato es volver a encolar el job y seguir.
+        # Se reintenta STALL_AUTO_RESUME veces (def. 3); solo despues se cierra
+        # como "stalled" y se analiza lo obtenido, sin fingir que termino bien.
+        if _reencolar_tras_estancamiento(job_id, str(exc)):
+            return
         logger.warning(
             "Job %s detenido por estancamiento (%s): se analiza lo obtenido",
             job_id, exc,
@@ -384,6 +569,9 @@ def _run_job(job_id: str) -> None:
     # an empty issues table. The intermediate 'analyzing' status also keeps
     # stale-job recovery (which only targets 'running') from re-queuing the
     # job while analysis runs with the spider — and its heartbeat — stopped.
+    if _reencolar_si_pedido(job_id):
+        return
+
     cancelled = False
     session = SessionLocal()
     try:
@@ -448,6 +636,12 @@ def _run_job(job_id: str) -> None:
                 pass
             job.finish_reason = motivo
             session.commit()
+            try:
+                redis_lib.Redis.from_url(REDIS_URL, decode_responses=True).delete(
+                    f"job:{job_id}:reanudaciones"
+                )
+            except Exception:
+                pass
             if motivo in ("max_urls_reached", "max_runtime_reached", "stalled"):
                 logger.warning(
                     "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
@@ -497,10 +691,16 @@ def _comprobar_render_js(job_id: str) -> None:
             return
 
         con_enlaces_ocultos = [r for r in resultados if r["enlaces_solo_js"] > 0]
+        # Plantillas cuyo render no fue tal (WAF, desafio, error): su "0 enlaces
+        # solo-JS" no cuenta. Si TODAS estan asi, el veredicto queda en None
+        # ("no se pudo comprobar"), nunca en "fiable".
+        sospechosas = [r for r in resultados if r.get("render_sospechoso")]
+        concluyentes = [r for r in resultados if not r.get("render_sospechoso")]
         resumen = {
             "plantillas": resultados,
             "enlaces_ocultos": bool(con_enlaces_ocultos),
-            "grafo_fiable": not con_enlaces_ocultos,
+            "grafo_fiable": (not con_enlaces_ocultos) if concluyentes else None,
+            "render_bloqueado": len(sospechosas),
         }
 
         session = SessionLocal()
@@ -512,6 +712,13 @@ def _comprobar_render_js(job_id: str) -> None:
         finally:
             session.close()
 
+        if sospechosas:
+            logger.warning(
+                "Job %s: en %d de %d plantilla(s) Chromium recibio una pagina sin "
+                "contenido (WAF/desafio/error): la comprobacion de render JS NO es "
+                "concluyente para ellas. Medir a mano antes de afirmar nada.",
+                job_id, len(sospechosas), len(resultados),
+            )
         if con_enlaces_ocultos:
             # WARNING: invalida el PageRank del rastreo, no es un detalle.
             logger.warning(
@@ -523,7 +730,7 @@ def _comprobar_render_js(job_id: str) -> None:
                 len(con_enlaces_ocultos),
                 ", ".join(r["plantilla"].split("  (")[0] for r in con_enlaces_ocultos),
             )
-        else:
+        elif concluyentes:
             logger.info(
                 "Job %s: ninguna plantilla esconde enlaces tras JS; el grafo y "
                 "el PageRank son fiables sin render.",
@@ -767,7 +974,20 @@ def main() -> None:
                 continue
 
             if job_id in active_futures:
-                logger.warning("Job %s is already running, skipping duplicate", job_id)
+                # Llega un resume (o una reanudacion automatica) mientras el
+                # Scrapy anterior todavia se esta cerrando. Tirar la entrada
+                # perdia la reanudacion: el proceso viejo acababa, el cierre
+                # ponia "completed" sobre el "pending" del resume y el job se
+                # quedaba parado con la cola llena. Se apunta y se reencola
+                # cuando el proceso actual termine.
+                logger.warning(
+                    "Job %s ya esta en marcha: se reencolara cuando termine el proceso actual",
+                    job_id,
+                )
+                try:
+                    rconn.set(f"job:{job_id}:reencolar", "1", ex=6 * 3600)
+                except Exception:
+                    logger.exception("Job %s: no se pudo anotar el reencolado", job_id)
                 continue
 
             logger.info("Dequeued job %s", job_id)

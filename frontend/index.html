@@ -1922,7 +1922,6 @@
                             <th>Tipo</th>
                             <th>URL</th>
                             <th>Alt</th>
-                            <th>Tamano</th>
                             <th>Dimensiones</th>
                             <th>Mixto</th>
                           </tr>
@@ -1933,7 +1932,6 @@
                               <td><span class="badge badge-pending" x-text="r.resource_type"></span></td>
                               <td style="max-width:400px" :title="r.resource_url"><div class="truncate" x-text="r.resource_url"></div></td>
                               <td style="max-width:150px" :title="r.alt_text || ''"><div class="truncate" x-text="r.alt_text || '—'"></div></td>
-                              <td x-text="fmt.bytes(r.size_bytes)"></td>
                               <td x-text="r.width && r.height ? r.width + 'x' + r.height : '—'"></td>
                               <td :class="r.is_mixed_content ? 'severity-error' : ''" x-text="r.is_mixed_content ? 'Si' : '—'"></td>
                             </tr>
@@ -2474,7 +2472,6 @@
                                 <th>Recurso</th>
                                 <th style="width:80px">Tipo</th>
                                 <th style="width:160px">Alt</th>
-                                <th style="width:80px">Tamaño</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -2487,7 +2484,6 @@
                                   <td :title="r.alt_text || ''" style="max-width:160px">
                                     <div class="truncate" x-text="r.alt_text || '—'"></div>
                                   </td>
-                                  <td x-text="r.size_bytes != null ? fmt.bytes(r.size_bytes) : '—'"></td>
                                 </tr>
                               </template>
                             </tbody>

@@ -730,31 +730,65 @@ class SEOAnalyzer:
         """
         logger.debug("Analyzing indexability ...")
 
+        # LEFT JOIN y sin filtrar por is_html a proposito: con INNER JOIN solo
+        # entraban las paginas HTML que llegaron a tener metadatos, y todo lo
+        # demas —404, redirecciones, PDFs, imagenes— se quedaba en NULL en vez
+        # de en False. Medido: 4.899 de 34.704 filas de un rastreo sin valor,
+        # con `indexability_status` diciendo "Client Error (404)" al lado. El
+        # filtro ?indexable=false de la API las perdia y el CSV las dejaba en
+        # blanco, que se lee como "no se sabe".
         stmt = (
             select(
                 Url.id,
                 Url.url,
                 Url.status_code,
+                Url.indexability_status,
+                Url.blocked_by_robots,
                 HtmlMeta.meta_robots,
                 HtmlMeta.x_robots_tag,
                 HtmlMeta.canonical_href,
             )
-            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
-            .where(Url.job_id == self.job_id, Url.is_html.is_(True))
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
         indexable_ids: list[int] = []
         non_indexable_ids: list[int] = []
 
-        for url_id, page_url, status_code, meta_robots, x_robots, canonical_href in rows:
+        # Motivos que decide esta funcion. Los demas ("Redirect (301)",
+        # "Client Error (404)"...) los escribe el rastreo con el codigo exacto
+        # y se respetan tal cual: aqui solo se corrigen los de una pagina 200.
+        _MOTIVOS_PROPIOS = {"Indexable", "Canonicalised", "Noindex"}
+        estados_por_motivo: dict[str, list[int]] = {}
+
+        for (
+            url_id,
+            page_url,
+            status_code,
+            estado_actual,
+            bloqueada_robots,
+            meta_robots,
+            x_robots,
+            canonical_href,
+        ) in rows:
             has_noindex = hay_noindex(meta_robots) or hay_noindex(x_robots)
             canonical_ok = (
                 not canonical_href
                 or not canonical_href.strip()
                 or _norm_url(canonical_href) == _norm_url(page_url)
             )
-            is_indexable = status_code == 200 and not has_noindex and canonical_ok
+            # Bloqueada por robots.txt no es indexable por mucho que el
+            # servidor devolviera 200: el rastreo la alcanzo por el destino de
+            # una redireccion, Google no. Sin esto quedaban 22 paginas de un
+            # SSO marcadas indexables con el motivo "Blocked by robots.txt" al
+            # lado, las dos columnas diciendo lo contrario.
+            bloqueada = bool(bloqueada_robots) or (estado_actual or "").startswith(
+                "Blocked"
+            )
+            is_indexable = (
+                status_code == 200 and not has_noindex and canonical_ok and not bloqueada
+            )
 
             if is_indexable:
                 indexable_ids.append(url_id)
@@ -764,11 +798,46 @@ class SEOAnalyzer:
             if has_noindex:
                 self._add_issue(url_id, "noindex_page", "info")
 
+            # El motivo tambien se recalcula aqui, y no solo en el rastreo.
+            # El spider lo computaba contra la URL de PARTIDA de una cadena de
+            # redirecciones mientras guardaba la de destino: toda pagina
+            # alcanzada por un 301 salia como "Canonicalised" con un canonical
+            # identico a su propia URL (1.254 de 34.704 en un rastreo medido, y
+            # 1.329 en otro; el 100% llegadas por redireccion). Arreglado en el
+            # spider, pero los rastreos ya guardados solo se reparan desde
+            # aqui: re-analizar un job corrige el dato. Ademas evita que las
+            # dos columnas del mismo CSV se contradigan.
+            if estado_actual is None or estado_actual in _MOTIVOS_PROPIOS:
+                if is_indexable:
+                    nuevo = "Indexable"
+                elif has_noindex:
+                    nuevo = "Noindex"
+                elif not canonical_ok:
+                    nuevo = "Canonicalised"
+                else:
+                    nuevo = estado_actual  # 200 no indexable por otro motivo
+                if nuevo and nuevo != estado_actual:
+                    estados_por_motivo.setdefault(nuevo, []).append(url_id)
+
         # Bulk-update the indexable column.
         self._bulk_update_indexable(indexable_ids, True)
         self._bulk_update_indexable(non_indexable_ids, False)
+        for motivo, ids in estados_por_motivo.items():
+            self._bulk_update_estado(ids, motivo)
+            logger.info("indexability_status corregido a %r en %d URLs", motivo, len(ids))
 
         self._flush_issues()
+
+    def _bulk_update_estado(self, url_ids: list[int], estado: str) -> None:
+        """Escribe ``Url.indexability_status`` por lotes."""
+        for start in range(0, len(url_ids), BATCH_SIZE):
+            batch = url_ids[start : start + BATCH_SIZE]
+            self.session.execute(
+                update(Url)
+                .where(Url.id.in_(batch))
+                .values(indexability_status=estado)
+            )
+        self.session.flush()
 
     # -- Sintaxis de las directivas robots -----------------------------------
 

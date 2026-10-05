@@ -75,6 +75,10 @@ from seo_crawler.items import (
 )
 
 logger = logging.getLogger(__name__)
+# trafilatura avisa con "empty link" por cada <a> sin texto (iconos, tarjetas
+# enteras enlazadas): decenas por pagina en cualquier sitio moderno, y tapa
+# los avisos que si importan (Playwright, spider). No es un error de nada.
+logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 # Extensions that never need JS rendering — skip Playwright for these URLs.
 _NON_HTML_EXTENSIONS = frozenset({
@@ -153,25 +157,125 @@ def _safe_normalize(url: str) -> str:
 # cuya red no calla nunca (polling, chat, websockets) tumbaria la pagina por
 # timeout. Esta promesa SIEMPRE resuelve, y el tope la acota.
 _ESPERA_TOPE_MS = int(os.getenv("PLAYWRIGHT_BANNER_WAIT_MS", "2000"))
+
+
+async def _evaluar_tolerante(page, js: str, intentos: int = 3):
+    """``page.evaluate`` que sobrevive a una navegacion en curso.
+
+    Un PageMethod("evaluate", ...) a secas revienta con "Execution context was
+    destroyed, most likely because of a navigation" cuando la pagina se redirige
+    por JavaScript justo despues de `domcontentloaded` (portales antiguos, paginas
+    "index.html" que saltan a la seccion, selectores de idioma). scrapy-playwright
+    cierra entonces la pestaña por error, y tras unos cuantos cierres asi el
+    navegador deja de servir paginas: el rastreo sigue "vivo" a 0 paginas/min
+    hasta que el vigilante lo mata. Medido: 19 fallos de este tipo y cuelgue total
+    en 40 minutos.
+
+    Aqui se espera a que el nuevo documento cargue y se reintenta; si no hay
+    manera, se devuelve None y la pagina se entrega tal cual, que siempre es mejor
+    que perderla. Va como callable porque PageMethod acepta uno (recibe la page).
+    """
+    from playwright.async_api import Error as PlaywrightError
+
+    for intento in range(intentos):
+        try:
+            return await page.evaluate(js)
+        except PlaywrightError as exc:
+            texto = str(exc)
+            if "Execution context was destroyed" not in texto and "navigation" not in texto:
+                raise
+            if intento == intentos - 1:
+                logger.debug("evaluate abandonado tras %d navegaciones: %s", intentos, page.url)
+                return None
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except PlaywrightError:
+                pass
+    return None
 _ESPERA_QUIETO_MS = int(os.getenv("PLAYWRIGHT_DOM_QUIET_MS", "400"))
+
+# Piso: por debajo de esto no se da por terminada una pagina aunque el DOM
+# lleve quieto desde el primer instante.
+#
+# Mirar SOLO el DOM tiene un punto ciego que costaba paginas enteras: mientras
+# una peticion XHR esta EN VUELO no hay mutaciones, asi que el DOM parece
+# "quieto" y la espera resolvia antes de que la respuesta llegase a pintar
+# nada. Medido en un rastreo real de 9.895 noticias: 6.555 se guardaron con
+# 5-6 bloques de datos estructurados y solo 1.965 con los 7 que tiene la
+# pagina montada — faltaba el modulo de relacionadas, y con el ~20 enlaces y
+# ~20% del texto. La misma pagina, en frio, se estabiliza a los 500-1.000 ms:
+# no era el sitio, era la carrera.
+#
+# Ahora el temporizador lo reinicia tambien cada recurso que TERMINA
+# (PerformanceObserver), que es la senal de que la respuesta de ese XHR acaba
+# de llegar y el DOM esta a punto de moverse. Es la semantica de "networkidle"
+# sin su riesgo: sigue siendo una promesa que resuelve siempre, acotada por el
+# tope, asi que un sitio cuya red no calla nunca no tumba la pagina.
+_ESPERA_PISO_MS = int(os.getenv("PLAYWRIGHT_MIN_WAIT_MS", "600"))
 
 _JS_ESPERAR_DOM_QUIETO = """
 () => new Promise((resolve) => {
-    const TOPE = %d, QUIETO = %d;
-    let t = null;
-    const obs = new MutationObserver(() => reinicia());
+    const TOPE = %d, QUIETO = %d, PISO = %d;
+    const t0 = Date.now();
+    let t = null, obs = null, po = null, forzado = false;
     const fin = () => {
         clearTimeout(t); clearTimeout(tope);
-        try { obs.disconnect(); } catch (_) {}
+        try { if (obs) obs.disconnect(); } catch (_) {}
+        try { if (po) po.disconnect(); } catch (_) {}
         resolve();
     };
-    const reinicia = () => { clearTimeout(t); t = setTimeout(fin, QUIETO); };
-    const tope = setTimeout(fin, TOPE);
-    try { obs.observe(document, { childList: true, subtree: true }); }
-    catch (_) { fin(); return; }
+    // Con una peticion en vuelo la pagina NO esta terminada, por mucho que el
+    // DOM lleve quieto: la respuesta aun tiene que llegar y pintar. El
+    // contador lo instala seo_crawler/render.py antes de navegar; si no
+    // estuviera, esto vale 0 y el comportamiento es el de solo-DOM.
+    const enVuelo = () => (window.__enVuelo | 0) > 0;
+    const termina = () => {
+        if (!forzado && enVuelo()) { reinicia(); return; }
+        fin();
+    };
+    const reinicia = () => {
+        clearTimeout(t);
+        // Nunca antes del piso, aunque no haya pasado nada todavia.
+        const espera = Math.max(QUIETO, PISO - (Date.now() - t0));
+        t = setTimeout(termina, espera);
+    };
+    const tope = setTimeout(() => { forzado = true; fin(); }, TOPE);
+    try {
+        obs = new MutationObserver(reinicia);
+        obs.observe(document, { childList: true, subtree: true });
+    } catch (_) { obs = null; }
+    try {
+        po = new PerformanceObserver(reinicia);
+        po.observe({ type: "resource", buffered: false });
+    } catch (_) { po = null; }
+    if (!obs && !po) { fin(); return; }
     reinicia();
 })
-""" % (_ESPERA_TOPE_MS, _ESPERA_QUIETO_MS)
+""" % (_ESPERA_TOPE_MS, _ESPERA_QUIETO_MS, _ESPERA_PISO_MS)
+
+# Version HTTP real de la navegacion. Chromium no la expone en el objeto
+# respuesta, pero si en Navigation Timing: "h2", "h3", "http/1.1". Por el
+# camino de curl_cffi no hay forma de sacarla sin reimplementar el handler de
+# scrapy-impersonate, que la descarta; por eso la columna solo se rellena en
+# rastreos con render (antes estaba vacia SIEMPRE, en los dos modos).
+_JS_PROTOCOLO = (
+    "() => { try { const n = performance.getEntriesByType('navigation')[0];"
+    " return n ? n.nextHopProtocol : null; } catch (e) { return null; } }"
+)
+
+_PROTOCOLO_LEGIBLE = {
+    "h2": "HTTP/2",
+    "h3": "HTTP/3",
+    "http/1.1": "HTTP/1.1",
+    "http/1.0": "HTTP/1.0",
+}
+
+
+def _normaliza_protocolo(valor) -> str | None:
+    if not valor or not isinstance(valor, str):
+        return None
+    return _PROTOCOLO_LEGIBLE.get(valor.lower().strip(), valor.strip())
+
 
 _BOILERPLATE_REMOVAL_JS = """
 () => {
@@ -387,12 +491,72 @@ class SeoSpider(scrapy.Spider):
             # start_requests via _iter_frontier(), sin cap ni carga completa.
             from shared.models import Url
 
+            # Paginas que se dan por NO rastreadas al reanudar, para que se
+            # repitan: perdidas (status NULL: timeout, error de red), 5xx
+            # (casi siempre transitorios: 183 de 183 respondian 200 al
+            # volver a pedirlas) y las que Chromium dejo en su pagina de error.
+            # Antes contaban como hechas y un resume no las tocaba, asi que el
+            # unico modo de completarlas era otro rastreo entero.
+            self._reintentar: list[tuple[str, int]] = []
+            if self.job_config.get("crawl_behavior", {}).get("retry_failed_on_resume", True):
+                from sqlalchemy import or_
+
+                self._reintentar = [
+                    (row[0], row[1] or 1)
+                    for row in session.query(Url.url, Url.crawl_depth)
+                    .filter(
+                        Url.job_id == self.job_id,
+                        or_(
+                            Url.status_code.is_(None),
+                            Url.status_code >= 500,
+                            Url.redirect_url.like("chrome-error://%"),
+                        ),
+                    )
+                    .yield_per(10_000)
+                ]
+            # Y las que casen con crawl_behavior.recrawl_patterns (regex sobre
+            # la URL): para repetir solo una plantilla (p. ej. los listados tras
+            # subir la espera de render) sin volver a rastrear el sitio entero.
+            patrones = (self.job_config.get("crawl_behavior") or {}).get("recrawl_patterns") or []
+            if patrones:
+                ya = {u for u, _ in self._reintentar}
+                for row in (
+                    session.query(Url.url, Url.crawl_depth)
+                    .filter(Url.job_id == self.job_id, Url.is_internal.is_(True))
+                    .yield_per(10_000)
+                ):
+                    if row[0] not in ya and any(re.search(pt, row[0]) for pt in patrones):
+                        self._reintentar.append((row[0], row[1] or 1))
+            # Y, si se pide, las HTML 200 internas que quedaron sin contenido
+            # extraido: tras corregir el stripper o los selectores del cliente,
+            # es la forma de completar esas paginas sin rastrear el sitio entero.
+            if (self.job_config.get("crawl_behavior") or {}).get("recrawl_empty_content"):
+                from sqlalchemy import func
+                from shared.models import PageContent
+
+                ya = {u for u, _ in self._reintentar}
+                filas = (
+                    session.query(Url.url, Url.crawl_depth)
+                    .outerjoin(PageContent, PageContent.url_id == Url.id)
+                    .filter(
+                        Url.job_id == self.job_id, Url.is_internal.is_(True),
+                        Url.is_html.is_(True), Url.status_code == 200,
+                        (PageContent.url_id.is_(None)) | (func.length(PageContent.content_text) < 50),
+                    )
+                    .yield_per(10_000)
+                )
+                for row in filas:
+                    if row[0] not in ya:
+                        self._reintentar.append((row[0], row[1] or 1))
+            reintentar_hashes = {
+                _hash_key(compute_url_hash(normalize_url(u))) for u, _ in self._reintentar
+            }
             self._already_crawled_hashes = {
                 _hash_key(row[0])
                 for row in session.query(Url.url_hash)
                 .filter(Url.job_id == self.job_id)
                 .yield_per(10_000)
-            }
+            } - reintentar_hashes
             if self._already_crawled_hashes:
                 self._resume_mode = True
                 self._crawled_count = (
@@ -467,8 +631,10 @@ class SeoSpider(scrapy.Spider):
                 # Esperar a que la pagina termine de montarse (ver arriba) y
                 # solo entonces quitar banners: al reves, el limpiador correria
                 # antes de que el banner exista.
-                PageMethod("evaluate", _JS_ESPERAR_DOM_QUIETO),
-                PageMethod("evaluate", _BOILERPLATE_REMOVAL_JS),
+                PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
+                PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
+                # Ultimo: su resultado se lee luego desde response.meta.
+                PageMethod(_evaluar_tolerante, _JS_PROTOCOLO),
             ],
         }
 
@@ -579,6 +745,25 @@ class SeoSpider(scrapy.Spider):
         # would require a join we don't pay for.
         if not self._resume_mode:
             return
+        if self._reintentar:
+            logger.warning(
+                "Resume: se repiten %d paginas perdidas, 5xx o con error de Chromium",
+                len(self._reintentar),
+            )
+        for url, depth in self._reintentar:
+            normalized = normalize_url(url)
+            if not self._should_follow(normalized):
+                continue
+            req_meta = {"depth": depth}
+            if self.render_js and _url_likely_html(normalized):
+                req_meta.update(self._playwright_meta())
+            yield scrapy.Request(
+                url=normalized,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=req_meta,
+                dont_filter=True,
+            )
         for url in self._iter_frontier():
             normalized = normalize_url(url)
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
@@ -930,6 +1115,58 @@ class SeoSpider(scrapy.Spider):
             self.crawler.engine.close_spider(self, "max_urls_reached")
             return
 
+        # Chromium ha acabado en su pagina de error (chrome-error://...): la
+        # navegacion fallo DESPUES de una redireccion (p. ej. http -> https con
+        # ":443" explicito en Location). Sin esto se guardaba un 307 con
+        # destino "chrome-error://chromewebdata/" y la URL real quedaba sin
+        # estado ni destino. Se repite la peticion sin render, que al menos
+        # deja el codigo y la cadena de redirecciones verdaderos.
+        #
+        # OJO, limitacion aparte: con render, una URL http:// de un sitio https
+        # se guarda como 307 (la "redireccion interna" de Chromium al subir a
+        # https), no como el 301 que devuelve el servidor. Es un artefacto del
+        # navegador, no del sitio: tratar esos 307 http->https como 301.
+        # Con render, Chromium sigue las redirecciones por su cuenta: si la
+        # pagina acaba en OTRO host, Scrapy nunca ha pasado esa URL por el
+        # middleware de robots.txt del destino. Asi se guardaron con contenido
+        # 22 paginas de un SSO con "Disallow: /" (destino de 307 desde paginas
+        # personales). Se repite sin render: la cadena real queda registrada y
+        # el robots del destino se respeta como en el modo sin JS.
+        otro_host = (
+            response.meta.get("playwright")
+            and not response.meta.get("_sin_render")
+            and not response.url.startswith("chrome-error://")
+            and (urlparse(response.url).hostname or "") != (urlparse(response.request.url).hostname or "")
+            and not self._is_internal(response.url)
+        )
+        if otro_host:
+            logger.info(
+                "Render acabo en otro host (%s -> %s): se repite sin render para respetar su robots",
+                response.request.url, response.url,
+            )
+        if otro_host or (
+            response.url.startswith("chrome-error://") and not response.meta.get("_sin_render")
+        ):
+            original = response.request.url if otro_host else (response.meta.get("redirect_urls") or [response.url])[0]
+            if not otro_host:
+                logger.warning(
+                    "Chromium acabo en pagina de error para %s: se repite sin render",
+                    original,
+                )
+            meta = {
+                k: v for k, v in response.meta.items()
+                if not k.startswith("playwright") and k not in ("redirect_urls", "redirect_times", "redirect_reasons")
+            }
+            meta["_sin_render"] = True
+            yield scrapy.Request(
+                url=original,
+                callback=self.parse,
+                errback=self.handle_error,
+                meta=meta,
+                dont_filter=True,
+            )
+            return
+
         self._crawled_count += 1
         self._update_redis_progress()
 
@@ -1007,14 +1244,18 @@ class SeoSpider(scrapy.Spider):
                     scheme=hop_parsed.scheme or "https",
                     is_internal=self._is_internal(hop_url),
                     crawl_depth=depth,
-                    content_type=content_type,
-                    content_length=0,
+                    # El salto no tiene cuerpo propio: heredar el content-type
+                    # de la respuesta FINAL hacia que un 301 se listase como
+                    # "text/html", y los ceros se leen como "0 bytes" cuando
+                    # lo cierto es que no se midio.
+                    content_type=None,
+                    content_length=None,
                     status_code=hop_status,
                     status_group=(
                         compute_status_group(hop_status)
                         if hop_status is not None and hop_status >= 300 else "3xx"
                     ),
-                    response_time_ms=0,
+                    response_time_ms=None,
                     is_html=False,
                     resource_type="redirect",
                     redirect_url=hop_dest,
@@ -1028,10 +1269,17 @@ class SeoSpider(scrapy.Spider):
                     status_text=http_status_text(hop_status) if hop_status else None,
                     last_modified=None,
                     http_version=None,
-                    transfer_size=0,
+                    transfer_size=None,
                     indexability_status=hop_label,
                 )
             yield from self._adoptar_host_de_semilla(chain[0], url)
+
+        # La URL que se guarda, declarada aqui arriba porque todo lo que se
+        # calcula sobre la pagina —el canonical el primero— se compara contra
+        # ella. Medido antes de arreglarlo: 1.254 de 34.704 paginas de un
+        # rastreo y 1.329 de 28.712 de otro marcadas "Canonicalised" con un
+        # canonical identico a su propia URL, el 100% alcanzadas por un 301.
+        final_url = url_for_record
 
         # Body hash for duplicate content detection
         body_hash = None
@@ -1049,7 +1297,15 @@ class SeoSpider(scrapy.Spider):
         # HTTP version. Scrapy does not reliably expose this on custom
         # download handlers, so the composite handler stashes it in meta when
         # the sub-handler provides it; fall back to response.protocol.
-        http_version_val = response.meta.get("http_protocol") or getattr(response, "protocol", None)
+        http_version_val = _normaliza_protocolo(
+            response.meta.get("http_protocol") or getattr(response, "protocol", None)
+        )
+        if not http_version_val:
+            # Con render la da el ultimo PageMethod (Navigation Timing).
+            for metodo in response.meta.get("playwright_page_methods") or []:
+                if getattr(metodo, "args", None) and _JS_PROTOCOLO in metodo.args:
+                    http_version_val = _normaliza_protocolo(metodo.result)
+                    break
 
         # HTML-specific fields computed before PageItem yield so that all
         # Screaming Frog parity fields can be included in the single yield.
@@ -1101,7 +1357,7 @@ class SeoSpider(scrapy.Spider):
                 meta.get("meta_robots"),
                 x_robots,
                 meta.get("canonical_href"),
-                url_for_record,
+                final_url,
             )
             indexability_status_val = "Indexable" if is_indexable else reason
 
@@ -1126,7 +1382,6 @@ class SeoSpider(scrapy.Spider):
         # For redirected URLs, this records the FINAL destination with its
         # actual status code (usually 200).  The redirect hops were already
         # yielded above.
-        final_url = url_for_record
         final_hash = compute_url_hash(final_url)
         final_parsed = urlparse(final_url)
         yield PageItem(
@@ -1388,6 +1643,40 @@ class SeoSpider(scrapy.Spider):
         status_group = "unknown"
         status_code = None
         if failure.check(scrapy.exceptions.IgnoreRequest):
+            # Normalmente es robots.txt. Si la URL bloqueada es el final de una
+            # cadena de redirecciones, la URL ORIGINAL (la nuestra) desaparecia
+            # del informe: nadie sabia que redirigia a algo prohibido. Se
+            # registran los saltos con su codigo; el destino bloqueado no se
+            # pide ni se guarda.
+            redirect_urls = request.meta.get("redirect_urls") or []
+            if redirect_urls:
+                reasons = request.meta.get("redirect_reasons") or []
+                chain = list(redirect_urls) + [url]
+                logger.info(
+                    "Cadena de redireccion cortada por robots.txt: %s -> %s", chain[0], url
+                )
+                for i in range(len(chain) - 1):
+                    hop_url, hop_dest = chain[i], chain[i + 1]
+                    hop_status = reasons[i] if i < len(reasons) else 301
+                    hp = urlparse(hop_url)
+                    self._crawled_count += 1
+                    yield PageItem(
+                        url=hop_url, url_hash=compute_url_hash(hop_url),
+                        host=hp.hostname or "", path=hp.path or "/", scheme=hp.scheme or "https",
+                        is_internal=self._is_internal(hop_url), crawl_depth=depth,
+                        # NULL, no 0: de este salto no se llego a medir nada
+                        # (la cadena la corto robots.txt). Un 0 en el CSV se
+                        # lee como "0 bytes medidos".
+                        content_type=None, content_length=None,
+                        status_code=hop_status, status_group=compute_status_group(hop_status),
+                        response_time_ms=None, is_html=False, resource_type="redirect",
+                        redirect_url=hop_dest, body_hash=None, job_id=self.job_id,
+                        url_length=len(hop_url), folder_depth=compute_folder_depth(hop_url),
+                        word_count=None, text_ratio=None, redirect_type=hop_status,
+                        status_text=http_status_text(hop_status), last_modified=None,
+                        http_version=None, transfer_size=None,
+                        indexability_status=f"Redirect ({hop_status})",
+                    )
             return
         from twisted.internet.error import (
             DNSLookupError,

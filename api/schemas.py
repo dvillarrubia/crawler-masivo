@@ -83,6 +83,17 @@ class CrawlBehaviorConfig(BaseModel):
     # lote de siembra de la frontera, asi que un rastreo lento pero vivo no
     # se ve afectado.
     stall_timeout_minutes: int = Field(default=30, ge=0, le=1440)
+    # Al reanudar, repetir las paginas perdidas (status NULL), 5xx y las que
+    # Chromium dejo en pagina de error, en vez de darlas por rastreadas.
+    retry_failed_on_resume: bool = True
+    # Al reanudar, volver a rastrear tambien las URLs que casen (regex).
+    recrawl_patterns: list[str] = Field(default_factory=list)
+    # Al reanudar, repetir las HTML 200 internas guardadas sin contenido
+    # extraido (tras corregir el stripper o los selectores del cliente).
+    recrawl_empty_content: bool = False
+    # Tope (ms) de la espera a que el DOM se calme tras domcontentloaded con
+    # render_js; 0/None = el del entorno (PLAYWRIGHT_BANNER_WAIT_MS, def. 2000).
+    render_wait_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
 class UrlFilterConfig(BaseModel):
@@ -129,10 +140,23 @@ class AnalysisThresholdsConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Job configuration
 # ---------------------------------------------------------------------------
+class TemplateRule(BaseModel):
+    """Regla de plantilla: la primera cuyo ``patron`` (regex sobre el path)
+    casa da nombre a la plantilla. Las usan check_js_templates.py y
+    check_content_quality.py para muestrear por plantilla."""
+
+    nombre: str = Field(..., min_length=1, max_length=80)
+    patron: str = Field(..., min_length=1, max_length=500)
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
-    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=50)
+    # Tope 1000, no 50: en WordPress el paginador solo enlaza a la pagina
+    # siguiente, asi que /page/120/ esta a profundidad 120 de la home. Con 50
+    # se cortaba la cadena y los posts de las paginas profundas salian como
+    # huerfanos aunque estuvieran enlazados.
+    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=1000)
     # None = rastrear hasta agotar la frontera (comportamiento de Screaming
     # Frog). Antes era obligatorio con default 50.000, asi que habia que
     # adivinar el tamano del sitio ANTES de rastrearlo: quedarse corto truncaba
@@ -149,6 +173,10 @@ class JobConfig(BaseModel):
     impersonate: str = "chrome124"
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
+    use_sitemap: bool = True
+    sitemap_urls: list[str] = Field(default_factory=list)
+    # Reglas de plantilla por cliente (ver projects/README.md)
+    templates: list[TemplateRule] = Field(default_factory=list)
 
     # Advanced configuration sub-models
     resource_types: ResourceTypeConfig = Field(default_factory=ResourceTypeConfig)
@@ -270,7 +298,6 @@ class ResourceResponse(BaseModel):
     resource_url: str
     resource_type: str
     alt_text: str | None = None
-    size_bytes: int | None = None
     width: int | None = None
     height: int | None = None
     is_mixed_content: bool | None = None

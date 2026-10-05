@@ -1281,6 +1281,21 @@ def _remove_keep_tail(el) -> None:
     parent.remove(el)
 
 
+_PROSA_MIN_PARRAFOS = 5
+_PROSA_MIN_PALABRAS = 20
+
+
+def _tiene_prosa(el) -> bool:
+    """True si el elemento contiene al menos 5 <p> de 20+ palabras."""
+    n = 0
+    for p in el.iter("p"):
+        if len((p.text_content() or "").split()) >= _PROSA_MIN_PALABRAS:
+            n += 1
+            if n >= _PROSA_MIN_PARRAFOS:
+                return True
+    return False
+
+
 def _is_page_level_landmark(el) -> bool:
     """True when a <header>/<footer> is the site banner / contentinfo.
 
@@ -1373,6 +1388,13 @@ def _strip_boilerplate_html(
                 continue
             role = (el.get("role") or "").strip().lower()
             if tag in _NON_CONTENT_TAGS or tag in _ALWAYS_STRIP_TAGS:
+                # Un <nav> o <form> con varios parrafos largos no es plantilla:
+                # es contenido que un editor pego con su HTML de origen (visto
+                # en WordPress: el cuerpo entero de un post dentro de
+                # <header class=site-header><nav>). Un menu real, aunque
+                # tenga cientos de enlaces, no tiene parrafos de 20 palabras.
+                if tag in ("nav", "form") and _tiene_prosa(el):
+                    continue
                 doomed.append(el)
             elif tag in ("header", "footer"):
                 if _is_page_level_landmark(el) and not (
@@ -1418,8 +1440,19 @@ def _strip_boilerplate_html(
                 if not text or len(text) > _PROMO_TEXT_MAX_LEN:
                     continue
                 lower = text.lower()
-                if any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
-                    doomed.append(el)
+                if not any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
+                    continue
+                # Un bloque con titulos o con varios parrafos es un articulo
+                # corto que CONTIENE el widget (el "Share on Mastodon" al pie
+                # de un post de video de 50 palabras), no el widget en si. Se
+                # llevaba el post entero: 554 paginas guardadas sin contenido
+                # en una red de blogs. El widget de verdad no tiene h1-h3 ni
+                # mas de dos parrafos.
+                if any(True for _ in el.iter("h1", "h2", "h3")):
+                    continue
+                if sum(1 for _ in el.iter("p")) > 2:
+                    continue
+                doomed.append(el)
             for el in doomed:
                 _remove_keep_tail(el)
 
