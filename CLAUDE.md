@@ -165,7 +165,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
-| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) |
+| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — 75 columnas: URL + metadatos + **h1/h2**, og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad, agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
 
 ## Database (PostgreSQL)
 
@@ -298,6 +298,24 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    excepciones: un sitio cuya red no calla nunca se caeria por timeout. La
    promesa siempre resuelve.
 
+12b. **Mirar solo el DOM tiene un punto ciego: la peticion EN VUELO** —
+   mientras un XHR viaja no hay mutaciones, asi que el DOM parecia "quieto" y
+   la espera resolvia antes de que llegase nada. No se ve en los datos: la
+   pagina se guarda con 200, titulo y texto, solo que sin el modulo que monta
+   ese XHR. Medido en www.uoc.edu: de 9.895 noticias, 6.555 quedaron con 5-6
+   bloques de datos estructurados y solo 1.965 con los 7 de la pagina montada
+   — faltaba el de relacionadas y con el ~20 enlaces y ~20% del texto. Que
+   unas si y otras no, en el MISMO rastreo, es la firma de una carrera, no de
+   un cambio del sitio. Ahora `seo_crawler/render.py` instala un contador de
+   fetch/XHR en vuelo con `add_init_script` (antes de navegar, para ver
+   tambien la primera peticion) y la espera solo resuelve con ese contador a
+   cero, ademas de reiniciarse con cada recurso que termina
+   (`PerformanceObserver`) y de un piso de `PLAYWRIGHT_MIN_WAIT_MS`. El tope
+   sigue acotandolo todo. Comprobable: `scripts/prueba_espera_render.py`
+   (laboratorio con XHR retardado: con 700 ms la espera vieja se dejaba los 10
+   enlaces, la nueva los coge). Coste medido en 3 paginas reales: +500/900 ms
+   por pagina. Si una plantilla necesita mas que el tope, `render_wait_ms`.
+
 13. **Los sitios varian solos: medir una vez no es medir** — al bajar la
    espera, cst.gov.sa parecia perder enlaces; repitiendo 5 veces por modo se
    vio que varia solo (90/99/90/90/90 con la espera de SIEMPRE). Y una pagina
@@ -352,6 +370,27 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    puerto explícito). El spider repite la petición sin render (`_sin_render`),
    que deja el código y la cadena de redirecciones reales.
 
+20. **La indexabilidad la decide el analizador, y repara lo ya rastreado** —
+   se calculaba dos veces con dos criterios y las dos columnas acababan
+   contradiciendose en el mismo CSV. El spider comparaba el canonical contra
+   la URL de PARTIDA de la cadena de redirecciones mientras guardaba la de
+   destino: toda pagina alcanzada por un 301 salia "Canonicalised" con un
+   canonical identico a su propia URL (1.254 de 34.704 en blogs.uoc.edu, 1.329
+   en www.uoc.edu; el 100% llegadas por redireccion). Y `indexable` solo
+   existia para HTML con metadatos, asi que 404, 3xx y PDFs quedaban en NULL
+   en vez de en `false` — el filtro `?indexable=false` los perdia. Ahora el
+   spider compara contra la URL final, y `analyze_indexability` escribe
+   `indexable` Y `indexability_status` para TODAS las URLs del job,
+   respetando los motivos con codigo exacto del rastreo ("Redirect (301)",
+   "Client Error (404)"). Re-analizar un job viejo lo corrige sin re-rastrear.
+
+21. **El contador del job contaba solo el ultimo tramo** — cada reanudacion
+   abre un proceso de Scrapy nuevo, con su tuberia y su cuenta desde cero, y
+   al cerrar la escribia en `jobs.total_urls_crawled`: un rastreo con 34.704
+   filas se reportaba como 802 y `/stats` devolvia las dos cifras a la vez. La
+   tuberia arranca ahora leyendo lo que ya hay guardado del job y solo suma
+   URLs nuevas.
+
 ## Configuración por cliente (`projects/`)
 
 Todo lo específico de un cliente (filtros, selectores de plantilla, `templates`
@@ -387,6 +426,7 @@ PLAYWRIGHT_MAX_PAGES=8
 # Render: espera y bloqueo de terceros
 PLAYWRIGHT_BANNER_WAIT_MS=2000   # tope de la espera a que el DOM se calme
 PLAYWRIGHT_DOM_QUIET_MS=400      # cuanto DOM quieto se considera "ha terminado"
+PLAYWRIGHT_MIN_WAIT_MS=600       # piso: nunca se da por terminada antes de esto
 PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
 
 # Worker
@@ -453,11 +493,19 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (105 cases, pytest): pure extractors
+Unit test suite at `tests/` (138 cases, pytest): pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
-(`test_sd_validation.py`), and sitemap parsing (`test_sitemaps.py`). Run with
-`pip install -r tests/requirements.txt && pytest`. `scripts/check_content_quality.py <job_id>` compares, per URL template,
+(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`), the main CSV
+export (`test_export_csv.py` — cada columna declarada tiene su valor en la
+fila; sin esto, anadir una columna y olvidar el dato desplaza en silencio
+todas las de la derecha), el contrato de la espera de render
+(`test_render_espera.py`) y la indexabilidad tras una redireccion
+(`test_spider_indexabilidad.py`, el unico que ejercita `parse()` del spider). Run with
+`pip install -r tests/requirements.txt && pytest`.
+`scripts/prueba_espera_render.py` mide si la espera de render pierde el
+contenido que llega por XHR (laboratorio con retardo, o URLs reales).
+`scripts/check_content_quality.py <job_id>` compares, per URL template,
 what the crawl stored against what the extractor, `extract_main_content` and a
 Chromium render see right now — it is how content loss is caught after a crawl.
 The DB-touching analysis
@@ -487,6 +535,12 @@ order of priority:
    https site is recorded as **307** (Chromium's internal upgrade redirect), not the
    server's real 301. Treat http→https 307s in JS crawls as 301.: backup is not truly streaming (OOM risk
    on huge jobs), word_count includes hidden text, SD validation is basic.
+   Dos columnas mas con relleno parcial, a proposito: `urls.http_version` solo
+   se rellena con `render_js` (Navigation Timing; por el camino de curl_cffi
+   habria que reimplementar el handler de scrapy-impersonate, que la
+   descarta), y `resources.size_bytes` no se recoge — el rastreo no descarga
+   el cuerpo de los recursos; el dato saldria de unir `resource_url` con
+   `urls.content_length` de los recursos que si se rastrearon.
 
 ## Automatic JS-render check
 
