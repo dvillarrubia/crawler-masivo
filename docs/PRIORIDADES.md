@@ -4,6 +4,35 @@
 > GitHub; esto explica **por qué** ese orden y qué cifra lo sostiene.
 > `docs/AUDITORIA_Y_VERIFICACION.md` sigue siendo el detalle técnico.
 
+## Regla 0: todo lleva criterio SEO
+
+Antes que el orden está el criterio. Ninguna issue de este plan se cierra
+—ni se abre— sin responder **qué decide Google con ese dato**. No es retórica:
+es lo que separa un arreglo de un cambio de números.
+
+Tres ejemplos de este mismo plan, para que se vea la diferencia:
+
+- **`high_outlink_count`** no se arregla "deduplicando", se arregla preguntando
+  qué le preocupa a Google: la dilución del presupuesto de rastreo y del reparto
+  de autoridad por enlaces **editoriales**. Un megamenú de 500 enlaces repetido
+  en todo el sitio es un hecho de la plantilla, no un problema de cada página.
+  Contar solo `link_position='content'` no es una optimización del contador: es
+  la única lectura que significa algo. (7.011 páginas → 51.)
+- **`inlinks_count`** no es un número, son tres preguntas distintas metidas en
+  una columna: *¿está enlazada?* (huérfana: cuenta cualquier enlace interno,
+  incluso `nofollow`, porque la página SÍ está enlazada, solo que sin respaldo),
+  *¿recibe autoridad?* (PageRank: ahí `nofollow` no cuenta) y *¿desde dónde?*
+  (si todos sus enlaces vienen de páginas noindex o 404, el hallazgo es ese y no
+  "tiene 12 inlinks"). Colapsarlas en un entero es lo que hoy tapa 6.925
+  páginas.
+- **El contenido recortado a 500 caracteres** del export no era un bug de
+  formato: un informe de contenido que parece completo y no lo es hace que se
+  descarte una página por "thin content" que no lo es.
+
+Corolario operativo: cada issue de `M1` dice en su cuerpo qué decisión SEO
+depende de ese dato, y cada arreglo se mide **antes y después sobre un censo
+real**, no sobre un caso inventado (lección 13 del `CLAUDE.md`).
+
 ## Cómo está organizado GitHub
 
 **Milestones** (secuencia, no prioridad): `M1 · Dato fiable` → `M2 · Decisiones:
