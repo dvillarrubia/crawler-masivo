@@ -25,7 +25,14 @@ env:
   VPS_PATH: /opt/crawler-masivo
 
 jobs:
+  # Candado: un despliegue no sale sin la suite en verde. Antes de esto, el
+  # 5-oct-2026 se desplego a produccion sin ejecutar un solo test (la suite
+  # tarda 4 s, no ejecutarla no ahorraba nada). Ver #41.
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   deploy:
+    needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

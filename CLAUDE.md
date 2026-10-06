@@ -700,10 +700,30 @@ Run it by hand against any finished job:
 docker compose exec -T crawler python /app/scripts/check_js_templates.py <job_id> --muestras 2
 ```
 
+## CI y despliegue
+
+`.github/workflows/tests.yml` corre la suite en cada PR y en cada push a
+`master`, en dos trabajos porque las dependencias no son las mismas: el del
+crawler instala `crawler/` + `analysis/` (los tests del spider lanzan el
+`SeoSpider` real contra un sitio local, necesitan scrapy de verdad; Playwright
+se instala pero no se baja el navegador) y el de la API solo FastAPI,
+SQLAlchemy y Pydantic (`api/requirements.txt` entero compila umap-learn y
+hdbscan: minutos por nada). El trabajo del crawler levanta un Postgres de
+servicio, que destapa los tests marcados que sin `PAGERANK_TEST_DATABASE_URL`
+se saltaban SIEMPRE.
+
+`deploy.yml` **depende** de ese workflow (`needs: tests`): si la suite falla,
+el VPS no se toca. Antes no era asi — el 5-oct-2026 un merge desplego a
+produccion sin ejecutar un solo test.
+
+Lo que dispara despliegue es el filtro de `paths` de `deploy.yml`:
+`crawler/**`, `api/**`, `analysis/**`, `shared/**`, `frontend/**`,
+`scripts/**`, los `docker-compose*.yml` y el propio workflow. `docs/**` y los
+`.md` de la raiz **no** despliegan.
+
 ## What Does NOT Exist Yet
 
 - Authentication/authorization
-- CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
 - Custom extraction / custom search (XPath/CSS/regex per job)
