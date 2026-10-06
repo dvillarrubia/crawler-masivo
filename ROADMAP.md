@@ -3,7 +3,12 @@
 Qué hace hoy el crawler y qué viene después, contado por funcionalidades. El
 detalle técnico de cada punto está en la issue de GitHub enlazada.
 
-Estado a 5 de octubre de 2026.
+Estado a 6 de octubre de 2026.
+
+Este documento cuenta **qué hay y qué viene**, en lenguaje de producto.
+`docs/PRIORIDADES.md` cuenta **por qué ese orden y con qué cifra**, y los
+milestones de GitHub son la secuencia viva. Si los tres no coinciden, manda el
+milestone.
 
 ---
 
@@ -44,6 +49,24 @@ Estado a 5 de octubre de 2026.
 - Informe con puntuaciones y recomendaciones.
 - Exportaciones: listado de URLs con 75 columnas, enlaces, contenido y copia de
   seguridad.
+- HTML de cada pagina guardado a peticion (`store_raw_html`), para re-extraer
+  contenido sin volver a rastrear y para auditar por que una pagina salio
+  vacia. Apagado por defecto: son 170 kB por pagina.
+
+### Fiabilidad del dato (6 de octubre)
+
+- Los tests se ejecutan en cada cambio y **bloquean el despliegue** si fallan.
+  Antes se desplegaba a produccion sin ejecutar ninguno.
+- Dos analisis del mismo rastreo ya no se pisan ni duplican incidencias.
+- Un sitemap comprimido gigante no puede tumbar al worker.
+- El aviso de «demasiados enlaces salientes» cuenta solo los enlaces del
+  contenido, no el menu: pasa de avisar en 7.011 paginas de un censo a 51.
+- Las paginas huerfanas ya no se tapan con sus propios autoenlaces: en el censo
+  de blogs.uoc.edu aparecieron 4.783 paginas de adjunto de WordPress sin un
+  solo enlace editorial.
+- Los datos estructurados se validan contra los requisitos reales de Google,
+  distinguiendo lo obligatorio (sin eso no hay resultado enriquecido) de lo
+  recomendado (sale, pero peor).
 
 ---
 
@@ -141,3 +164,10 @@ se lanza solo.
 - Google Search Console y Google Analytics 4.
 - Análisis semántico (`POC_centro_semantico/`): era una prueba y no se va a
   continuar.
+- La rama `v2-experimental` (6 de octubre). Su motor ya estaba en master y mas
+  nuevo; de sus arreglos se rescataron cuatro y tres no aplicaban
+  ([#42](https://github.com/dvillarrubia/crawler-masivo/issues/42) tiene el
+  inventario). Queda archivada en la etiqueta `archivo/v2-experimental`. Lo que
+  tenia en exclusiva —GSC/GA4, entidades, grafo— esta aparcado o descrito mejor
+  en [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36) y
+  [#6](https://github.com/dvillarrubia/crawler-masivo/issues/6).
