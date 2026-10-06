@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from shared.cola import encolar
 from shared.database import get_session
 from shared.models import Job, Url, Issue, Link
 
@@ -135,7 +136,7 @@ def create_job(
 
     # Push the job id onto the Redis pending queue so a worker picks it up.
     r = get_redis()
-    r.rpush("jobs:pending", str(job.id))
+    encolar(r, job.id)
 
     return job
 
@@ -280,7 +281,7 @@ def resume_job(
         r.delete(f"job:{job_id}:cancel")
     except Exception:
         pass
-    r.rpush("jobs:pending", str(job.id))
+    encolar(r, job.id)
 
     return job
 

@@ -101,7 +101,7 @@ def construir_sitio(port: int) -> dict:
     }
 
 
-def servir() -> tuple[ThreadingHTTPServer, int]:
+def servir(robots_prohibe_todo: bool = False) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -121,6 +121,12 @@ def servir() -> tuple[ThreadingHTTPServer, int]:
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     rutas.update(construir_sitio(port))
+    if robots_prohibe_todo:
+        # Un robots.txt que lo prohibe todo: el caso que acababa como un job
+        # "completado" con cero URLs, indistinguible de un sitio limpio (#37).
+        rutas["/robots.txt"] = (
+            200, {"Content-Type": "text/plain"}, b"User-agent: *\nDisallow: /\n",
+        )
     Thread(target=srv.serve_forever, daemon=True).start()
     return srv, port
 
@@ -171,7 +177,7 @@ class Recolector:
 
 def main() -> None:
     entrada = json.loads(sys.argv[1])
-    srv, port = servir()
+    srv, port = servir(entrada.get("robots_prohibe_todo", False))
 
     import shared.database
     from scrapy.crawler import CrawlerProcess
@@ -202,7 +208,9 @@ def main() -> None:
     proceso = CrawlerProcess({
         "LOG_LEVEL": "WARNING",
         "TELNETCONSOLE_ENABLED": False,
-        "ROBOTSTXT_OBEY": False,
+        # Por defecto apagado para que el sitio de pruebas se rastree entero;
+        # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
+        "ROBOTSTXT_OBEY": entrada.get("robots_prohibe_todo", False),
         "HTTPERROR_ALLOW_ALL": True,
         "DEPTH_PRIORITY": 1,
         "REQUEST_FINGERPRINTER_IMPLEMENTATION": "2.7",
