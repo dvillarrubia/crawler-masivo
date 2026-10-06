@@ -158,3 +158,31 @@ def test_los_conteos_viejos_no_sobreviven_a_un_reanalisis():
     s.refresh(a)
     assert a.inlinks_count == 0, "conteo rancio: la pagina ya no tiene inlinks"
     assert a.unique_inlinks_count == 0
+
+
+def test_el_filtro_del_job_va_en_links_no_en_urls():
+    """La tabla de enlaces guarda los de TODOS los rastreos.
+
+    Poner el job en el lado de `urls` (uniendo) deja el filtro fuera del
+    alcance del indice y Postgres recorre la tabla entera: medido con EXPLAIN
+    sobre una instalacion con 46 GB y 181 millones de filas, coste 6.189.456
+    frente a 122.247 filtrando por `links.job_id`. En tiempo real,
+    `analyze_links` paso de minutos a 1,7 s (blogs) y 11,2 s (uoc).
+
+    Se comprueba sobre el SQL generado porque en SQLite no hay plan que medir.
+    """
+    import re
+
+    s, j = _montar()
+    analizador = SEOAnalyzer(s, j.id)
+    analizador.max_outlinks = 100
+
+    # El `select` de los enlaces de contenido no puede unir con `urls`.
+    import inspect
+
+    fuente = inspect.getsource(analizador.analyze_links)
+    bloque = fuente.split("enlaces_de_contenido")[1].split(")\n\n")[0]
+    assert "Link.job_id == self.job_id" in bloque, "el filtro tiene que ir en links"
+    assert not re.search(r"\.join\(\s*Url", bloque), (
+        "unir con urls para filtrar por job recorre la tabla de enlaces entera"
+    )

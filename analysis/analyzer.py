@@ -1877,14 +1877,19 @@ class SEOAnalyzer:
         # 7.011 paginas, el 24% de las HTML; deduplicando, 6.578 —apenas
         # ayuda, porque lo que infla es la plantilla—; contando solo contenido,
         # 51. El 99,3% del aviso era ruido que el cliente leia como problemas.
+        # Se filtra por `links.job_id` y NO uniendo con `urls`: la tabla de
+        # enlaces guarda los de TODOS los rastreos —46 GB y 181 millones de
+        # filas en esta instalacion— y poner el job en el lado de `urls` deja
+        # el filtro fuera del alcance del indice. Medido con EXPLAIN: recorrido
+        # secuencial de la tabla entera, coste 6.189.456, frente a 122.247
+        # filtrando aqui. Cincuenta veces.
         enlaces_de_contenido = (
             select(
                 Link.from_url_id.label("url_id"),
                 func.count(func.distinct(Link.to_url_hash)).label("destinos"),
             )
-            .join(Url, Url.id == Link.from_url_id)
             .where(
-                Url.job_id == self.job_id,
+                Link.job_id == self.job_id,
                 Link.is_internal.is_(True),
                 Link.link_position == "content",
                 # Un nofollow no reparte autoridad: no diluye nada.

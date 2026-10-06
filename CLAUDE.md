@@ -371,6 +371,16 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
    calculo no abre el endpoint del job.
 
+37. **El job se filtra en `links`, nunca uniendo con `urls`** — la tabla de
+   enlaces guarda los de TODOS los rastreos: 46 GB y 181 millones de filas en
+   la instalacion de produccion. Poner el `job_id` en el lado de `urls` deja
+   el filtro fuera del alcance del indice y Postgres recorre la tabla entera.
+   Medido con EXPLAIN en la consulta nueva de `high_outlink`: coste 6.189.456
+   uniendo, 122.247 filtrando por `links.job_id`. Cincuenta veces, y en tiempo
+   real `analyze_links` paso de minutos a 1,7 s en blogs.uoc.edu y 11,2 s en
+   www.uoc.edu. Lo pille porque un re-analisis que antes tardaba 219 s llevaba
+   doce minutos sin terminar.
+
 36. **Un aviso por hallazgo, no dos** — las URLs del sitemap sin inlinks
    recibian `orphan_page` y `sitemap_orphan` a la vez. Dicen lo mismo y el
    segundo es mas fuerte (esta declarada para indexar y aun asi nadie la
