@@ -371,6 +371,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
    calculo no abre el endpoint del job.
 
+38. **Un enlace desde una pagina `noindex` no cuenta como entrante** (C3 de
+   #24, criterio decidido el 7-oct-2026). Google acaba tratando los enlaces de
+   una noindex como nofollow, asi que una pagina cuyos unicos enlaces vienen de
+   ahi no esta enlazada a efectos de buscador: cuelga de paginas que el
+   buscador va a dejar de rastrear. El `noindex` se materializa en
+   `urls.noindex`, separado de `indexable` —que tambien es False por canonical
+   o por codigo— y no se puede deducir en SQL: buscar la subcadena marcaria
+   `noindex/nofollow`, que Google NO interpreta (decision 23). Si el dato no se
+   conoce (NULL) el enlace cuenta: no se descarta por desconocimiento.
+   Medido en blogs.uoc.edu: 1.813 paginas noindex, y 992 URLs cuyos unicos
+   enlaces venian de ellas — 824 con parametros (busquedas internas, trampas de
+   rastreo) y 168 sin ellos, que son el hallazgo: categorias con 400-800
+   palabras, fuera del sitemap, colgando solo de su paginacion noindex.
+
 37. **El job se filtra en `links`, nunca uniendo con `urls`** — la tabla de
    enlaces guarda los de TODOS los rastreos: 46 GB y 181 millones de filas en
    la instalacion de produccion. Poner el `job_id` en el lado de `urls` deja

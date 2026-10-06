@@ -186,3 +186,51 @@ def test_el_filtro_del_job_va_en_links_no_en_urls():
     assert not re.search(r"\.join\(\s*Url", bloque), (
         "unir con urls para filtrar por job recorre la tabla de enlaces entera"
     )
+
+
+def test_un_enlace_desde_una_noindex_no_cuenta_como_entrante():
+    """C3 de #24, criterio SEO decidido el 7-oct-2026.
+
+    Google acaba tratando los enlaces de una pagina `noindex` como nofollow, asi
+    que una pagina cuyos unicos enlaces vienen de ahi no esta enlazada a efectos
+    de buscador: cuelga de paginas que el buscador va a dejar de rastrear.
+    Decirlo es el hallazgo; contarla como enlazada lo tapaba.
+    """
+    s, j = _montar()
+    destino = _url(s, j, "/destino")
+    normal = _url(s, j, "/normal")
+    tapadera = _url(s, j, "/noindex")
+    tapadera.noindex = True
+    normal.noindex = False
+    _enlace(s, j, tapadera, "/destino")
+    s.commit()
+
+    SEOAnalyzer(s, j.id).compute_link_counts()
+    s.commit()
+    s.refresh(destino)
+    assert destino.inlinks_count == 0, "solo la enlaza una noindex: esta huerfana"
+    assert destino.unique_inlinks_count == 0
+
+    # Y con un enlace de una pagina normal, si cuenta.
+    _enlace(s, j, normal, "/destino")
+    s.commit()
+    SEOAnalyzer(s, j.id).compute_link_counts()
+    s.commit()
+    s.refresh(destino)
+    assert destino.inlinks_count == 1
+
+
+def test_una_noindex_si_puede_recibir_enlaces():
+    """El filtro es sobre el ORIGEN, no sobre el destino."""
+    s, j = _montar()
+    noindex = _url(s, j, "/noindex")
+    noindex.noindex = True
+    origen = _url(s, j, "/origen")
+    origen.noindex = False
+    _enlace(s, j, origen, "/noindex")
+    s.commit()
+
+    SEOAnalyzer(s, j.id).compute_link_counts()
+    s.commit()
+    s.refresh(noindex)
+    assert noindex.inlinks_count == 1
