@@ -10,7 +10,9 @@ Google extensions, and Screaming Frog accepts them all.
 from __future__ import annotations
 
 import gzip
+import logging
 import os
+import zlib
 from urllib.parse import urljoin
 
 _GZIP_MAGIC = b"\x1f\x8b"
@@ -23,8 +25,15 @@ _GZIP_MAGIC = b"\x1f\x8b"
 # numero adecuado depende del sitio. El tope sigue existiendo como proteccion
 # ante un arbol de sitemaps hostil o roto; cuando se alcanza, el spider deja la
 # membresia en NULL en vez de afirmar que las URLs no estan en el sitemap.
+logger = logging.getLogger(__name__)
+
 MAX_SITEMAP_FILES = int(os.getenv("MAX_SITEMAP_FILES", "500"))
 MAX_URLS_PER_SITEMAP = int(os.getenv("MAX_URLS_PER_SITEMAP", "50000"))
+# Tope del XML ya descomprimido. Scrapy acota la DESCARGA (1 GB por defecto),
+# que no sirve de nada frente a una bomba gzip: lo que hay que acotar es lo
+# que sale.
+MAX_SITEMAP_BYTES = int(os.getenv("MAX_SITEMAP_BYTES", str(50 * 1024 * 1024)))
+_TROZO = 256 * 1024
 
 
 def parse_robots_sitemaps(robots_txt: str, base_url: str = "") -> list[str]:
@@ -56,13 +65,43 @@ def parse_robots_sitemaps(robots_txt: str, base_url: str = "") -> list[str]:
 
 
 def _maybe_gunzip(body: bytes) -> bytes:
-    """Transparently decompress a gzipped sitemap body (.xml.gz files)."""
-    if body[:2] == _GZIP_MAGIC:
-        try:
-            return gzip.decompress(body)
-        except Exception:
-            return body
-    return body
+    """Descomprime un sitemap .xml.gz, con tope.
+
+    `gzip.decompress()` a secas descomprime lo que haga falta: unos pocos KB
+    comprimidos pueden ser gigas en memoria del worker (una bomba gzip se
+    escribe en una linea, y `MAX_SITEMAP_BYTES` de XML repetido comprime a
+    casi nada). No hace falta mala fe: un sitemap de verdad de un sitio enorme
+    tambien puede no caber. Y el parser va con `huge_tree=True`, que apaga las
+    protecciones de libxml2, asi que el tope tiene que estar aqui.
+
+    Se descomprime a trozos y se para al pasar el tope. Lo que se corta se
+    AVISA en el log y se devuelve vacio en vez de medio XML: medio sitemap
+    parsea "bien" y se queda con las URLs que entraron, que es justo el fallo
+    silencioso que no queremos (decision 7: lo roto se reporta, no se filtra).
+    """
+    if body[:2] != _GZIP_MAGIC:
+        return body
+    try:
+        descompresor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        trozos: list[bytes] = []
+        total = 0
+        for inicio in range(0, len(body), _TROZO):
+            trozo = descompresor.decompress(body[inicio : inicio + _TROZO], _TROZO * 8)
+            while trozo:
+                total += len(trozo)
+                if total > MAX_SITEMAP_BYTES:
+                    logger.warning(
+                        "Sitemap comprimido descartado: pasa de %d bytes al "
+                        "descomprimir (%d comprimidos). Sube MAX_SITEMAP_BYTES "
+                        "si el sitio lo tiene asi de verdad.",
+                        MAX_SITEMAP_BYTES, len(body),
+                    )
+                    return b""
+                trozos.append(trozo)
+                trozo = descompresor.flush(_TROZO * 8)
+        return b"".join(trozos)
+    except Exception:
+        return body
 
 
 def _localname(tag) -> str:

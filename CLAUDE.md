@@ -548,6 +548,11 @@ STALL_AUTO_RESUME=3              # reanudaciones automaticas tras estancamiento 
 # Por job (crawl_behavior): render_wait_ms sobreescribe PLAYWRIGHT_BANNER_WAIT_MS;
 # recrawl_patterns (regex) hace que un resume repita esas URLs; retry_failed_on_resume.
 SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
+
+# Sitemaps
+MAX_SITEMAP_FILES=500            # cuantos ficheros de sitemap se siguen
+MAX_URLS_PER_SITEMAP=50000       # URLs por fichero
+MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
