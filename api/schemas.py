@@ -133,7 +133,11 @@ class AnalysisThresholdsConfig(BaseModel):
     description_min_length: int = Field(default=50, ge=0, le=500)
     description_max_length: int = Field(default=160, ge=1, le=1000)
     min_word_count: int = Field(default=200, ge=0, le=10000)
-    max_redirect_chain_length: int = Field(default=2, ge=1, le=20)
+    # Saltos de redireccion que se consideran aceptables. Uno es una
+    # redireccion normal; dos encadenadas (A->B->C) ya son algo que arreglar y
+    # es lo que Google pide evitar. Estaba en 2 —o sea, hacian falta tres— y
+    # eso dejaba sin reportar 372 cadenas de dos saltos en un solo censo.
+    max_redirect_chain_length: int = Field(default=1, ge=1, le=20)
     max_outlinks: int = Field(default=100, ge=1, le=10000)
 
 
