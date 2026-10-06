@@ -94,6 +94,10 @@ class Url(Base):
     redirect_url = Column(Text, nullable=True)
 
     indexable = Column(Boolean, nullable=True)
+    # Directiva `noindex` de la propia pagina (meta robots o X-Robots-Tag),
+    # separada de `indexable` —que tambien es False por canonical o por codigo—
+    # porque de esto depende si sus enlaces cuentan como entrantes (C3 de #24).
+    noindex = Column(Boolean, nullable=True)
     body_hash = Column(String(64), nullable=True)  # for duplicate content detection
 
     first_seen_at = Column(DateTime(timezone=True), default=_utcnow)

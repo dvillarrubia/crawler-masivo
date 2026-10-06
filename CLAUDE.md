@@ -371,6 +371,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
    calculo no abre el endpoint del job.
 
+38. **Un enlace desde una pagina `noindex` no cuenta como entrante** (C3 de
+   #24, criterio decidido el 7-oct-2026). Google acaba tratando los enlaces de
+   una noindex como nofollow, asi que una pagina cuyos unicos enlaces vienen de
+   ahi no esta enlazada a efectos de buscador: cuelga de paginas que el
+   buscador va a dejar de rastrear. El `noindex` se materializa en
+   `urls.noindex`, separado de `indexable` —que tambien es False por canonical
+   o por codigo— y no se puede deducir en SQL: buscar la subcadena marcaria
+   `noindex/nofollow`, que Google NO interpreta (decision 23). Si el dato no se
+   conoce (NULL) el enlace cuenta: no se descarta por desconocimiento.
+   Medido en blogs.uoc.edu: 1.813 paginas noindex, y 992 URLs cuyos unicos
+   enlaces venian de ellas — 824 con parametros (busquedas internas, trampas de
+   rastreo) y 168 sin ellos, que son el hallazgo: categorias con 400-800
+   palabras, fuera del sitemap, colgando solo de su paginacion noindex.
+
 37. **El job se filtra en `links`, nunca uniendo con `urls`** — la tabla de
    enlaces guarda los de TODOS los rastreos: 46 GB y 181 millones de filas en
    la instalacion de produccion. Poner el `job_id` en el lado de `urls` deja
@@ -575,6 +589,23 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `return_tag_ok`/`lang_valid` NULL es "sin verificar", no fallo: un censo sin
    verificar (Lopesan) salia con nota 0 y dos recomendaciones falsas de
    prioridad alta. `h1_missing` ya no se emite en 4xx/5xx.
+
+## Al operar: reconstruir el contenedor mata el rastreo en marcha
+
+`docker compose up -d --build crawler` recrea el contenedor, y con el se va el
+subproceso de Scrapy del rastreo que estuviera corriendo **y el directorio de
+logs** (`/tmp/scrapy-logs`, que vive dentro). El job se queda en `running` sin
+nadie detras hasta que el vigilante lo recupera por latido viejo
+(`STALE_JOB_MINUTES`, 30 por defecto).
+
+Pasa con cualquier cambio de codigo que obligue a reconstruir —una migracion de
+esquema, por ejemplo— y es facil confundirlo con un bloqueo del sitio: un
+canario que se para en seco a las 199 URLs parece un WAF y era esto. Antes de
+reconstruir, mirar si hay algo rastreando:
+
+```bash
+curl -s "$API/api/jobs?status=running" | python -c "import json,sys;print([j['name'] for j in json.load(sys.stdin)['items']])"
+```
 
 ## Configuración por cliente (`projects/`)
 

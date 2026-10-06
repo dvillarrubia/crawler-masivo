@@ -22,6 +22,7 @@ from typing import Any, Sequence
 from urllib.parse import urlparse
 
 from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session, aliased
 
 from shared.config import (
@@ -756,6 +757,12 @@ class SEOAnalyzer:
 
         indexable_ids: list[int] = []
         non_indexable_ids: list[int] = []
+        # Se materializa el `noindex` aparte: de el depende si los enlaces de
+        # esa pagina cuentan como entrantes (C3 de #24), y no se puede deducir
+        # en SQL sin tokenizar la directiva (decision 23: `noindex/nofollow`
+        # separado por barra NO es noindex, y buscar la subcadena lo seria).
+        noindex_ids: list[int] = []
+        con_indice_ids: list[int] = []
 
         # Motivos que decide esta funcion. Los demas ("Redirect (301)",
         # "Client Error (404)"...) los escribe el rastreo con el codigo exacto
@@ -796,6 +803,7 @@ class SEOAnalyzer:
             else:
                 non_indexable_ids.append(url_id)
 
+            (noindex_ids if has_noindex else con_indice_ids).append(url_id)
             if has_noindex:
                 self._add_issue(url_id, "noindex_page", "info")
 
@@ -823,11 +831,22 @@ class SEOAnalyzer:
         # Bulk-update the indexable column.
         self._bulk_update_indexable(indexable_ids, True)
         self._bulk_update_indexable(non_indexable_ids, False)
+        self._bulk_update_campo(noindex_ids, Url.noindex, True)
+        self._bulk_update_campo(con_indice_ids, Url.noindex, False)
         for motivo, ids in estados_por_motivo.items():
             self._bulk_update_estado(ids, motivo)
             logger.info("indexability_status corregido a %r en %d URLs", motivo, len(ids))
 
         self._flush_issues()
+
+    def _bulk_update_campo(self, url_ids: list[int], columna, valor) -> None:
+        """Escribe una columna de `urls` por lotes."""
+        for start in range(0, len(url_ids), BATCH_SIZE):
+            batch = url_ids[start : start + BATCH_SIZE]
+            self.session.execute(
+                update(Url).where(Url.id.in_(batch)).values({columna: valor})
+            )
+        self.session.flush()
 
     def _bulk_update_estado(self, url_ids: list[int], estado: str) -> None:
         """Escribe ``Url.indexability_status`` por lotes."""
@@ -1360,6 +1379,17 @@ class SEOAnalyzer:
         # (es alcanzable, no es huerfana), solo que sin respaldo. Quien quiera
         # autoridad mira el PageRank, que construye su propio grafo y excluye
         # los nofollow. Son dos preguntas distintas y no caben en un entero.
+        #
+        # Lo que NO cuenta es un enlace desde una pagina `noindex` (C3 de #24,
+        # criterio SEO decidido el 7-oct-2026). Google acaba tratando los
+        # enlaces de una noindex como nofollow, asi que una pagina cuyos unicos
+        # enlaces vienen de ahi no esta enlazada a efectos de buscador: esta
+        # colgando de paginas que el buscador va a dejar de rastrear. Decirlo
+        # es el hallazgo; contarla como enlazada lo tapaba.
+        # `isnot(True)` y no `is_(False)`: si no se sabe (NULL, porque el
+        # analisis de indexabilidad no llego a esa fila) el enlace cuenta. No
+        # se descarta dato por desconocimiento.
+        origen = aliased(Url)
         inlinks_subq = (
             select(
                 Url.id.label("url_id"),
@@ -1370,7 +1400,8 @@ class SEOAnalyzer:
                 Link.job_id == Url.job_id,
                 Link.from_url_id != Url.id,
             ))
-            .where(Url.job_id == self.job_id)
+            .join(origen, origen.id == Link.from_url_id)
+            .where(Url.job_id == self.job_id, origen.noindex.isnot(True))
             .group_by(Url.id)
         ).subquery()
 
@@ -1391,7 +1422,8 @@ class SEOAnalyzer:
                 Link.job_id == Url.job_id,
                 Link.from_url_id != Url.id,
             ))
-            .where(Url.job_id == self.job_id)
+            .join(origen, origen.id == Link.from_url_id)
+            .where(Url.job_id == self.job_id, origen.noindex.isnot(True))
             .group_by(Url.id)
         ).subquery()
 
