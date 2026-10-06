@@ -636,6 +636,7 @@ These markdown files are available in the project root for consultation:
 
 | File | Description |
 |------|-------------|
+| **`ROADMAP.md`** | Funcionalidades hechas y en cola, en lenguaje no técnico, con enlace a la issue de cada punto. Actualizarlo al cerrar o abrir una funcionalidad. |
 | **`SEO_CRAWLER_DB.md`** | Complete database schema, connection strings, example SQL queries, relationship diagram. Use this for DB access from external tools. |
 | **`modelo-de-datos.md`** | Original data model design — tables, calculations, Screaming Frog tab mapping. Design spec that guided implementation. |
 | **`stack-de-ingenieria.md`** | Engineering stack design doc — architecture decisions, component breakdown, scaling strategy, monitoring plan. |
