@@ -32,6 +32,7 @@ from seo_crawler.extractors import (
     compute_folder_depth,
     compute_status_group,
     compute_text_ratio,
+    contar_palabras,
     compute_url_hash,
     detect_mixed_content,
     effective_base_url,
@@ -1311,6 +1312,8 @@ class SeoSpider(scrapy.Spider):
         # Screaming Frog parity fields can be included in the single yield.
         word_count_val = None
         text_ratio_val = None
+        content_word_count_val = None
+        main_content = None
         indexability_status_val = None
         meta = None
         x_robots = None
@@ -1354,6 +1357,22 @@ class SeoSpider(scrapy.Spider):
             word_count_val = extract_word_count(selector)
             visible_text = extract_visible_text(selector)
             text_ratio_val = compute_text_ratio(response.text, visible_text)
+
+            # Palabras del contenido PRINCIPAL, no del body. word_count incluye
+            # el menu, el pie y el megamenu: medido en un censo, eso son mas de
+            # 200 palabras por pagina, asi que una ficha con dos frases pasaba
+            # el umbral de thin content sin que nadie lo viera. Lo que Google
+            # valora es el contenido, no la plantilla repetida en todas.
+            # Se calcula aqui, antes del PageItem, y se reutiliza en el
+            # ContentItem de mas abajo: el contenido se extrae una sola vez.
+            if self._extraction.get("extract_page_content", True):
+                main_content = extract_main_content(
+                    selector,
+                    word_count=word_count_val,
+                    strip_promo=self._extraction.get("strip_promo_blocks", True),
+                    extra_selectors=self._extraction.get("custom_boilerplate_selectors") or None,
+                )
+                content_word_count_val = contar_palabras(main_content)
 
             # Indexabilidad: una sola funcion, compartida con el analyzer
             # (shared/indexabilidad.py). Tenerla por duplicado hacia que la
@@ -1417,6 +1436,7 @@ class SeoSpider(scrapy.Spider):
             url_length=len(final_url),
             folder_depth=compute_folder_depth(final_url),
             word_count=word_count_val,
+            content_word_count=content_word_count_val,
             text_ratio=text_ratio_val,
             redirect_type=None,
             status_text=status_text_val,
@@ -1598,12 +1618,8 @@ class SeoSpider(scrapy.Spider):
         if self._extraction.get("extract_page_content", True):
             strip_promo = self._extraction.get("strip_promo_blocks", True)
             extra_selectors = self._extraction.get("custom_boilerplate_selectors") or None
-            main_content = extract_main_content(
-                selector,
-                word_count=word_count_val,
-                strip_promo=strip_promo,
-                extra_selectors=extra_selectors,
-            )
+            # main_content ya se extrajo arriba, para que content_word_count
+            # viaje en el PageItem.
             # El HTML crudo solo si el job lo pide: medido en un censo real,
             # 170 kB de media por pagina — 29.808 paginas son 4,9 GB antes de
             # que Postgres lo comprima.

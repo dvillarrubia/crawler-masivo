@@ -69,7 +69,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | redirect_url | text | Destino si es redireccion |
 | body_hash | varchar(64) | SHA-256 del body (deteccion duplicados) |
 | word_count | int | Palabras en texto visible |
-| text_ratio | float | % texto visible vs HTML total |
+| text_ratio | float | % texto visible vs HTML total (metrica, ya no genera issue) |
+| content_word_count | int | palabras del contenido principal, sin menu ni pie |
 | indexability_status | varchar(64) | Indexable, Noindex, Canonicalised, Redirect... |
 | inlinks_count | int | Total inlinks recibidos |
 | outlinks_count | int | Total outlinks internos |
@@ -187,7 +188,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | details | JSON | Detalles adicionales |
 | detected_at | timestamptz | |
 
-**Issue types:** missing_title, title_too_short, title_too_long, duplicate_title, missing_description, description_too_short, description_too_long, duplicate_description, missing_h1, multiple_h1, status_4xx, status_5xx, redirect_chain, image_missing_alt, http_url, mixed_content, missing_hsts, missing_csp, low_word_count, low_text_ratio, url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count
+**Issue types:** missing_title, title_too_short, title_too_long, duplicate_title, missing_description, description_too_short, description_too_long, duplicate_description, missing_h1, multiple_h1, status_4xx, status_5xx, redirect_chain, image_missing_alt, http_url, mixed_content, missing_hsts, missing_csp, low_word_count, url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count
 
 ---
 

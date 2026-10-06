@@ -254,3 +254,102 @@ def test_hero_present_only_mid_sentence_still_counts_as_missing():
     out = ex.extract_main_content(sel(html))
     assert out
     assert out.splitlines()[0] == "Centro de XPERIENCIA"
+
+
+# ---------------------------------------------------------------------------
+# Metricas de texto: word_count, text_ratio y texto oculto (#27)
+# ---------------------------------------------------------------------------
+
+
+def test_word_count_japones_no_da_una_palabra():
+    """Sin espacios entre palabras, split() daba 1 y TODA pagina CJK era thin."""
+    html = (
+        "<html><body>\n     <div>\n"
+        "         東京は日本の首都です。人口は約1400万人です。\n"
+        "     </div>\n </body></html>"
+    )
+    assert ex.extract_word_count(sel(html)) > 10
+
+
+def test_word_count_chino_y_tailandes():
+    assert ex.contar_palabras("北京是中国的首都") == 8
+    assert ex.contar_palabras("กรุงเทพมหานคร") == 13
+    # El latino sigue contando por tokens, no por caracteres.
+    assert ex.contar_palabras("Madrid es la capital") == 4
+
+
+def test_contar_palabras_ignora_los_signos_sueltos():
+    """Los separadores suelen ir en su propio nodo: cada uno sumaba 1."""
+    assert ex.contar_palabras("Zapatillas — € | Nike") == 2
+    assert ex.contar_palabras("1.299 €") == 1
+    assert ex.contar_palabras("") == 0
+    assert ex.contar_palabras(None) == 0
+
+
+def test_text_ratio_no_mide_la_indentacion():
+    """Los nodos de solo espacios contaban como texto: 67,6 % en vez de 5 %."""
+    html = (
+        "<html><head><title>x</title></head><body>\n"
+        + " " * 12 + "<div class='wrap'>\n"
+        + " " * 16 + "<div class='inner'>\n"
+        + " " * 20 + "<p>Hola mundo.</p>\n"
+        + " " * 16 + "</div>\n" + " " * 12 + "</div>\n" + " " * 8 + "</body></html>"
+    )
+    visible = ex.extract_visible_text(sel(html))
+    assert visible == "Hola mundo."
+    assert ex.compute_text_ratio(html, visible) < 8.0
+
+
+def test_texto_oculto_fuera_de_word_count():
+    html = (
+        "<html><body>"
+        "<p>Texto visible real</p>"
+        "<p hidden>palabra oculta uno</p>"
+        '<div style="display: none">otra oculta aqui</div>'
+        '<span style="visibility:hidden">tambien oculta</span>'
+        "<svg><title>icono de carrito</title></svg>"
+        '<iframe src="x">Tu navegador no soporta iframes</iframe>'
+        "</body></html>"
+    )
+    s = sel(html)
+    assert ex.extract_word_count(s) == 3
+    visible = ex.extract_visible_text(s)
+    for fuera in ("oculta", "carrito", "iframes"):
+        assert fuera not in visible
+
+
+def test_hidden_until_found_si_es_contenido():
+    """El navegador lo revela al buscar en la pagina y Google lo indexa."""
+    html = '<html><body><p hidden="until-found">esto si cuenta</p></body></html>'
+    assert ex.extract_word_count(sel(html)) == 3
+
+
+def test_elementos_en_linea_no_parten_la_palabra():
+    """Unir los nodos con espacio daba "Zapa tillas": 2 palabras donde hay 1."""
+    html = "<html><body><h2>Zapa<span>tillas</span></h2><p>Pre<span>cio</span></p></body></html>"
+    s = sel(html)
+    assert ex.extract_word_count(s) == 2
+    assert ex.extract_visible_text(s).splitlines() == ["Zapatillas", "Precio"]
+
+
+def test_la_cola_de_un_nodo_oculto_si_cuenta():
+    """El texto que va DESPUES del nodo oculto se pinta: no puede desaparecer."""
+    html = "<html><body><p><span hidden>oculto</span>visible de verdad</p></body></html>"
+    assert ex.extract_visible_text(sel(html)) == "visible de verdad"
+
+
+def test_contenido_principal_sin_el_modal_oculto():
+    """Login, carrito y promos van en modales ocultos: no son el contenido."""
+    html = (
+        "<html><body><main><article>"
+        "<h1>Ficha del producto</h1>"
+        '<div class="modal" style="display:none"><p>Accede a tu cuenta</p>'
+        "<p>El login con Facebook ha sido deshabilitado</p></div>"
+        "<p>" + ("Descripcion real del producto con texto de sobra. " * 10) + "</p>"
+        "</article></main></body></html>"
+    )
+    out = ex.extract_main_content(sel(html))
+    assert out
+    assert "Descripcion real del producto" in out
+    assert "Facebook" not in out
+    assert "Accede a tu cuenta" not in out

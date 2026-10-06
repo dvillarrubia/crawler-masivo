@@ -791,50 +791,158 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
 # Screaming-Frog-style extraction helpers
 # ---------------------------------------------------------------------------
 
-# Tags whose text content should be excluded from visible-text counts.
-_INVISIBLE_TAGS = frozenset({"script", "style", "noscript"})
-
-
-# Text nodes under these ancestors are never rendered, so they must not count
-# as visible text. <template> matters especially: JS frameworks ship entire
-# alternate DOMs inside it, which used to double word counts.
-_INVISIBLE_TEXT_XPATH = (
-    ".//text()[not(ancestor::script)"
-    " and not(ancestor::style)"
-    " and not(ancestor::noscript)"
-    " and not(ancestor::template)]"
+# Escrituras que no separan las palabras con espacios: sin un diccionario de
+# segmentacion lo unico que se puede medir es el numero de caracteres, que es
+# lo que cuenta Screaming Frog y lo que usan las herramientas de traduccion.
+# Antes se contaba con split(), asi que una pagina japonesa entera daba 1
+# palabra: TODAS las paginas CJK salian como low_word_count y quedaban fuera
+# del analisis semantico. Un ideograma no es exactamente una palabra (en chino
+# una palabra son ~1,5 caracteres, en japones ~2 kana), asi que el recuento
+# queda por encima del real; el error es conocido y acotado, y es mucho menor
+# que el de contar 1.
+_CARACTERES_SIN_ESPACIOS = (
+    "\u3040-\u30ff"  # hiragana y katakana
+    "\u3400-\u4dbf"  # Han, extension A
+    "\u4e00-\u9fff"  # Han, CJK unificado
+    "\uf900-\ufaff"  # Han, formas de compatibilidad
+    "\u0e00-\u0e7f"  # tailandes
+    "\u0e80-\u0eff"  # lao
+    "\u1000-\u109f"  # birmano
+    "\u1780-\u17ff"  # jemer
 )
+_RE_SIN_ESPACIOS = re.compile(f"[{_CARACTERES_SIN_ESPACIOS}]")
+
+# Un token sin ninguna letra ni cifra no es una palabra. Los separadores
+# suelen ir en su propio nodo de texto ("Zapatillas" | "-" | "Nike", "1.299"
+# " EUR "), de modo que cada guion y cada simbolo sumaba una palabra.
+_RE_ALGO_QUE_LEER = re.compile(r"[^\W_]", re.UNICODE)
+
+
+def contar_palabras(texto: str | None) -> int:
+    """Cuenta palabras tolerando escrituras sin espacios y descartando signos.
+
+    Las escrituras sin espacios (han, kana, tailandes, lao, birmano, jemer)
+    se cuentan por caracteres; el resto por tokens, ignorando los que no
+    tienen ninguna letra ni cifra.
+    """
+    if not texto:
+        return 0
+    caracteres = 0
+    if _RE_SIN_ESPACIOS.search(texto):
+        caracteres = len(_RE_SIN_ESPACIOS.findall(texto))
+        texto = _RE_SIN_ESPACIOS.sub(" ", texto)
+    palabras = 0
+    for token in texto.split():
+        if _RE_ALGO_QUE_LEER.search(token):
+            palabras += 1
+    return palabras + caracteres
+
+
+# Etiquetas cuyo texto el navegador no pinta nunca. ``template`` importa
+# especialmente: los frameworks meten dentro un DOM alternativo completo, que
+# duplicaba el recuento. ``title`` y ``desc`` dentro del body solo aparecen
+# dentro de un ``svg`` (son el tooltip del icono). ``iframe`` solo contiene el
+# texto de respaldo para navegadores sin soporte.
+_TAGS_NO_RENDERIZADOS: frozenset[str] = frozenset({
+    "script", "style", "noscript", "template", "iframe", "title", "desc",
+})
+
+
+def _nodo_oculto(node) -> bool:
+    """True si el navegador no pinta el nodo (etiqueta, ``hidden`` o estilo).
+
+    Solo ve el ``display:none`` escrito en linea: el que viene de una clase CSS
+    necesitaria el render con hojas de estilo aplicadas. Es un subconjunto,
+    pero es el que usan los acordeones y los menus moviles de los frameworks.
+    ``hidden="until-found"`` SI es contenido: el navegador lo revela al buscar
+    en la pagina, y Google lo indexa.
+    """
+    if node.tag in _TAGS_NO_RENDERIZADOS:
+        return True
+    oculto = node.get("hidden")
+    if oculto is not None and oculto.strip().lower() != "until-found":
+        return True
+    estilo = node.get("style")
+    if estilo:
+        comprimido = _WHITESPACE.sub("", estilo).lower()
+        if "display:none" in comprimido or "visibility:hidden" in comprimido:
+            return True
+    return False
+
+
+def _lineas_visibles(el) -> list[str]:
+    """Aplana un elemento lxml a lineas de texto visible, una por bloque.
+
+    Mantener las fronteras de bloque es lo que distingue ``Zapa<span>tillas``
+    (una palabra) de ``<p>Precio<p>Oferta`` (dos lineas): un ``//text()`` pelado
+    unido con espacios partia la primera en dos palabras y pegaba la segunda en
+    una sola linea. Los espacios de indentacion se colapsan, asi que el texto
+    que sale es el que se lee, no el sangrado de la plantilla.
+    """
+    partes: list[str] = []
+
+    def anda(node, con_cola: bool) -> None:
+        if not isinstance(node.tag, str):  # comentario / PI
+            if con_cola and node.tail:
+                partes.append(node.tail)
+            return
+        if _nodo_oculto(node):
+            # El nodo no se pinta, pero su cola va DESPUES de el y si se pinta.
+            if con_cola and node.tail:
+                partes.append(node.tail)
+            return
+        bloque = node.tag in _BLOCK_TAGS
+        if bloque:
+            partes.append("\n")
+        if node.text:
+            partes.append(node.text)
+        for hijo in node:
+            anda(hijo, True)
+        if bloque:
+            partes.append("\n")
+        if con_cola and node.tail:
+            partes.append(node.tail)
+
+    anda(el, False)
+    lineas = [_WHITESPACE.sub(" ", ln).strip() for ln in "".join(partes).split("\n")]
+    return [ln for ln in lineas if ln]
+
+
+def _raiz_del_body(selector):
+    """Elemento lxml del ``<body>``, o None si el documento no tiene body."""
+    body = selector.css("body")
+    if not body:
+        return None
+    raiz = body[0].root
+    return raiz if hasattr(raiz, "tag") else None
 
 
 def extract_word_count(selector) -> int:
-    """Count words in visible body text, excluding script/style/noscript/template.
+    """Cuenta las palabras del texto visible del ``<body>``.
 
-    Uses XPath to pull all text nodes inside ``<body>`` that are not
-    descendants of invisible elements.
+    Excluye lo que el navegador no pinta (script, style, noscript, template,
+    iframe, el title de un svg, lo marcado con ``hidden`` o con un
+    ``display:none`` en linea) y cuenta por caracteres las escrituras que no
+    separan palabras con espacios.
     """
-    body = selector.css("body")
-    if not body:
+    raiz = _raiz_del_body(selector)
+    if raiz is None:
         return 0
-
-    word_count = 0
-    for text_piece in body.xpath(_INVISIBLE_TEXT_XPATH).getall():
-        words = text_piece.split()
-        word_count += len(words)
-
-    return word_count
+    return contar_palabras("\n".join(_lineas_visibles(raiz)))
 
 
 def extract_visible_text(selector) -> str:
-    """Extract concatenated visible text from the ``<body>`` element.
+    """Texto visible del ``<body>``, una linea por bloque.
 
-    Returns an empty string when no ``<body>`` is found.
+    Devuelve cadena vacia cuando no hay ``<body>``. Los nodos que solo tienen
+    espacios se descartan: cuando se incluian, ``text_ratio`` media sobre todo
+    la indentacion de la plantilla (una pagina con "Hola mundo." daba 67,6 %
+    en vez de 5,0 %) y por eso ``low_text_ratio`` casi nunca saltaba.
     """
-    body = selector.css("body")
-    if not body:
+    raiz = _raiz_del_body(selector)
+    if raiz is None:
         return ""
-
-    parts = body.xpath(_INVISIBLE_TEXT_XPATH).getall()
-    return " ".join(parts)
+    return "\n".join(_lineas_visibles(raiz))
 
 
 def compute_text_ratio(html_text: str, visible_text: str) -> float:
@@ -1296,7 +1404,7 @@ def _tiene_prosa(el) -> bool:
     """True si el elemento contiene al menos 5 <p> de 20+ palabras."""
     n = 0
     for p in el.iter("p"):
-        if len((p.text_content() or "").split()) >= _PROSA_MIN_PALABRAS:
+        if contar_palabras(p.text_content()) >= _PROSA_MIN_PALABRAS:
             n += 1
             if n >= _PROSA_MIN_PARRAFOS:
                 return True
@@ -1324,7 +1432,7 @@ def _looks_like_hero(header_el) -> bool:
     if header_el.find(".//h1") is None:
         return False
     for p in header_el.iter("p"):
-        if len(p.text_content().split()) >= _HERO_MIN_PARAGRAPH_WORDS:
+        if contar_palabras(p.text_content()) >= _HERO_MIN_PARAGRAPH_WORDS:
             return True
     return False
 
@@ -1503,29 +1611,13 @@ def _block_text(el) -> str:
     Keeps paragraph boundaries (so later consumers — dedupe, chunking for
     RAG, diffing — see structure) instead of the space-joined blob a bare
     ``//text()`` produces.  Repeated lines are collapsed.
+
+    Comparte el recorrido con ``extract_visible_text``, asi que el contenido
+    guardado y las metricas de texto ven lo mismo: ni el texto de respaldo de
+    un ``iframe``, ni el ``title`` de un icono svg, ni lo que lleva
+    ``hidden`` o un ``display:none`` en linea.
     """
-    parts: list[str] = []
-
-    def walk(node, include_tail: bool) -> None:
-        if not isinstance(node.tag, str):  # comment / PI
-            if include_tail and node.tail:
-                parts.append(node.tail)
-            return
-        block = node.tag in _BLOCK_TAGS
-        if block:
-            parts.append("\n")
-        if node.text:
-            parts.append(node.text)
-        for child in node:
-            walk(child, True)
-        if block:
-            parts.append("\n")
-        if include_tail and node.tail:
-            parts.append(node.tail)
-
-    walk(el, False)
-    lines = [_WHITESPACE.sub(" ", ln).strip() for ln in "".join(parts).split("\n")]
-    return _dedupe_lines("\n".join(ln for ln in lines if ln))
+    return _dedupe_lines("\n".join(_lineas_visibles(el)))
 
 
 def _hero_outside_container(container) -> str | None:
@@ -1610,12 +1702,12 @@ def _hero_dentro_perdido(container, texto: str | None) -> str | None:
         return None
     tope = max(
         _HERO_MIN_WORDS_ABS,
-        int(len(container.text_content().split()) * _HERO_MAX_SHARE),
+        int(contar_palabras(container.text_content()) * _HERO_MAX_SHARE),
     )
     bloque = h1
     padre = bloque.getparent()
     while padre is not None and padre is not container:
-        if len(padre.text_content().split()) > tope:
+        if contar_palabras(padre.text_content()) > tope:
             break
         bloque = padre
         padre = bloque.getparent()
@@ -1725,7 +1817,7 @@ def _should_fall_back(candidate: str | None, reference_words: int) -> bool:
     """Trafilatura kept too small a share of the main container's words."""
     if reference_words < _FALLBACK_MIN_CONTAINER_WORDS:
         return False
-    kept = len(candidate.split()) if candidate else 0
+    kept = contar_palabras(candidate)
     return kept < reference_words * _FALLBACK_MIN_SHARE
 
 
@@ -1779,7 +1871,7 @@ def extract_main_content(
     if not text:
         return _con_hero(_prepend_hero(fallback, hero), container)
 
-    reference_words = len(fallback.split()) if fallback else 0
+    reference_words = contar_palabras(fallback)
     if fallback and _should_fall_back(text, reference_words) and len(fallback) > len(text):
         return _con_hero(_prepend_hero(fallback, hero), container)
     return _con_hero(_prepend_hero(text, hero), container)
@@ -1874,7 +1966,7 @@ def extract_main_content_markdown(
     container = _main_container(
         raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
     )
-    reference_words = len(_block_text(container).split()) if container is not None else 0
+    reference_words = contar_palabras(_block_text(container)) if container is not None else 0
     hero = _hero_outside_container(container)
     if _should_fall_back(_dedupe_lines(text) if text else None, reference_words):
         fallback_md = _fallback_extract_markdown(

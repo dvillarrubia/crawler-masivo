@@ -107,6 +107,9 @@ class Url(Base):
     url_length = Column(Integer)                             # character count of URL
     folder_depth = Column(Integer)                           # number of path segments
     word_count = Column(Integer, nullable=True)              # words in body text
+    # Palabras del contenido principal (sin menu ni pie). Es la cifra con la
+    # que se juzga el thin content: word_count incluye la plantilla.
+    content_word_count = Column(Integer, nullable=True)
     text_ratio = Column(Float, nullable=True)                # text/HTML ratio percentage
     redirect_type = Column(Integer, nullable=True)           # HTTP redirect code (301, 302, 307, 308)
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"
