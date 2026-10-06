@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -1918,18 +1919,91 @@ def _es_destino_de_redireccion():
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _clave_candado(job_id: str) -> int:
+    """Clave estable de 63 bits para el advisory lock, a partir del UUID."""
+    import hashlib
+
+    return int.from_bytes(hashlib.sha1(str(job_id).encode()).digest()[:8], "big") & 0x7FFFFFFFFFFFFFFF
+
+
+@contextmanager
+def candado_de_job(job_id: str):
+    """Serializa el analisis de un job. Cede True si se ha tomado el candado.
+
+    Dos analisis del mismo job a la vez se pisan en el DELETE+INSERT de
+    `issues` y DUPLICAN filas: medido en v2-experimental, 1.390 incidencias
+    distintas acabaron como 4.170 filas. Pasa de verdad — un resume que
+    reencola el job mientras el analisis anterior sigue vivo, o dos
+    lanzamientos a mano.
+
+    Dos detalles que parecen de fontaneria y son justo donde falla:
+
+    1. La conexion es DEDICADA, no la sesion del analisis. Un advisory lock de
+       sesion se suelta en la conexion que lo pidio, y la sesion del analyzer
+       hace docenas de commits que la devuelven al pool: el unlock podia caer
+       en otra conexion y fallar en silencio.
+    2. El motor es `NullPool`, para que cerrar cierre DE VERDAD. Con el pool
+       normal, `close()` solo devuelve la conexion y la sesion de Postgres
+       sigue viva con el candado puesto — comprobado con un test: el job se
+       quedaba sin poder analizarse nunca mas. Asi, si el proceso revienta sin
+       soltarlo, el candado se va con la conexion.
+
+    En SQLite no hay advisory locks: cede True sin serializar (los tests del
+    analyzer corren ahi).
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    from shared.database import engine as motor_app
+
+    motor = conexion = None
+    try:
+        motor = create_engine(motor_app.url, poolclass=NullPool)
+        conexion = motor.connect()
+        if not conexion.dialect.name.startswith("postgres"):
+            yield True
+            return
+        clave = _clave_candado(job_id)
+        if not conexion.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": clave}).scalar():
+            logger.warning(
+                "El job %s ya se esta analizando: se omite esta ejecucion para no "
+                "duplicar incidencias", job_id,
+            )
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                conexion.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave})
+            except Exception:
+                pass  # al cerrar la conexion se suelta igual
+    except Exception:
+        logger.debug("Sin candado disponible; el analisis sigue sin serializar")
+        yield True
+    finally:
+        if conexion is not None:
+            conexion.close()
+        if motor is not None:
+            motor.dispose()
+
+
 def run_analysis(job_id: str) -> None:
     """Entry point called by the crawler worker after a crawl completes.
 
     Creates its own database session, runs every analysis check, and
-    ensures the session is closed on exit.
+    ensures the session is closed on exit. Serializado por job: ver
+    ``candado_de_job``.
     """
-    session = SessionLocal()
-    try:
-        analyzer = SEOAnalyzer(session, job_id)
-        analyzer.run_all()
-    finally:
-        session.close()
+    with candado_de_job(job_id) as puedo:
+        if not puedo:
+            return
+        session = SessionLocal()
+        try:
+            analyzer = SEOAnalyzer(session, job_id)
+            analyzer.run_all()
+        finally:
+            session.close()
 
 
 if __name__ == "__main__":
