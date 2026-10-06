@@ -294,6 +294,15 @@ class PageContent(Base):
     content_length = Column(Integer, nullable=True)
     content_markdown = Column(Text, nullable=True)
 
+    # HTML tal como lo vio el extractor. Solo con `extraction.store_raw_html`,
+    # y por algo viene apagado: medido en un censo real, 170 kB de media por
+    # pagina — 29.808 paginas son 4,9 GB antes de que Postgres lo comprima.
+    # Sirve para re-extraer contenido sin volver a rastrear y para auditar por
+    # que una pagina salio vacia. OJO con render: ahi es el DOM renderizado y
+    # YA limpio de banners, no el HTML de origen (es lo que vio el extractor,
+    # que es justo lo que hace falta para re-extraer).
+    raw_html = Column(Text, nullable=True)
+
     # Post-crawl cleaning: originals kept for revert; cleaned_at marks state.
     content_text_original = Column(Text, nullable=True)
     content_markdown_original = Column(Text, nullable=True)

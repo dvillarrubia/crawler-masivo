@@ -168,6 +168,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
+| GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
 | GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — 75 columnas: URL + metadatos + **h1/h2**, og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad, agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
 
 ## Database (PostgreSQL)
@@ -548,6 +549,11 @@ STALL_AUTO_RESUME=3              # reanudaciones automaticas tras estancamiento 
 # Por job (crawl_behavior): render_wait_ms sobreescribe PLAYWRIGHT_BANNER_WAIT_MS;
 # recrawl_patterns (regex) hace que un resume repita esas URLs; retry_failed_on_resume.
 SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
+
+# Sitemaps
+MAX_SITEMAP_FILES=500            # cuantos ficheros de sitemap se siguen
+MAX_URLS_PER_SITEMAP=50000       # URLs por fichero
+MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
@@ -701,10 +707,30 @@ Run it by hand against any finished job:
 docker compose exec -T crawler python /app/scripts/check_js_templates.py <job_id> --muestras 2
 ```
 
+## CI y despliegue
+
+`.github/workflows/tests.yml` corre la suite en cada PR y en cada push a
+`master`, en dos trabajos porque las dependencias no son las mismas: el del
+crawler instala `crawler/` + `analysis/` (los tests del spider lanzan el
+`SeoSpider` real contra un sitio local, necesitan scrapy de verdad; Playwright
+se instala pero no se baja el navegador) y el de la API solo FastAPI,
+SQLAlchemy y Pydantic (`api/requirements.txt` entero compila umap-learn y
+hdbscan: minutos por nada). El trabajo del crawler levanta un Postgres de
+servicio, que destapa los tests marcados que sin `PAGERANK_TEST_DATABASE_URL`
+se saltaban SIEMPRE.
+
+`deploy.yml` **depende** de ese workflow (`needs: tests`): si la suite falla,
+el VPS no se toca. Antes no era asi — el 5-oct-2026 un merge desplego a
+produccion sin ejecutar un solo test.
+
+Lo que dispara despliegue es el filtro de `paths` de `deploy.yml`:
+`crawler/**`, `api/**`, `analysis/**`, `shared/**`, `frontend/**`,
+`scripts/**`, los `docker-compose*.yml` y el propio workflow. `docs/**` y los
+`.md` de la raiz **no** despliegan.
+
 ## What Does NOT Exist Yet
 
 - Authentication/authorization
-- CI/CD pipeline
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
 - Custom extraction / custom search (XPath/CSS/regex per job)

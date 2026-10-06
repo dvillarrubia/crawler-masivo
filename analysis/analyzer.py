@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -1331,7 +1332,34 @@ class SEOAnalyzer:
         """
         logger.debug("Computing link counts ...")
 
-        # --- Inlinks: count of Link rows where to_url_hash matches url.url_hash ---
+        # A cero antes de agregar. Los cuatro UPDATE de abajo solo tocan filas
+        # con coincidencia en su subconsulta, asi que una URL que perdio todos
+        # sus inlinks entre dos rastreos conservaba el conteo viejo: salia con
+        # 12 inlinks cuando ya no tenia ninguno, y por tanto no salia como
+        # huerfana. Un dato rancio que se lee como dato bueno.
+        self.session.execute(
+            update(Url)
+            .where(Url.job_id == self.job_id)
+            .values(
+                inlinks_count=0,
+                unique_inlinks_count=0,
+                outlinks_count=0,
+                external_outlinks_count=0,
+            )
+        )
+
+        # --- Inlinks: enlaces internos que apuntan a esta URL ---
+        #
+        # Criterio SEO: la pregunta es "esta enlazada desde el sitio". Un
+        # enlace de una pagina a si misma no responde a eso —ningun buscador
+        # lo lee como respaldo— y era ruido medible: 62.326 de los 2.342.192
+        # inlinks de blogs.uoc.edu (un 2,7%), concentrados ademas en las
+        # paginas con menu o migas que se enlazan a si mismas.
+        #
+        # Los `nofollow` SI cuentan aqui, a proposito: la pagina esta enlazada
+        # (es alcanzable, no es huerfana), solo que sin respaldo. Quien quiera
+        # autoridad mira el PageRank, que construye su propio grafo y excluye
+        # los nofollow. Son dos preguntas distintas y no caben en un entero.
         inlinks_subq = (
             select(
                 Url.id.label("url_id"),
@@ -1340,6 +1368,7 @@ class SEOAnalyzer:
             .join(Link, and_(
                 Link.to_url_hash == Url.url_hash,
                 Link.job_id == Url.job_id,
+                Link.from_url_id != Url.id,
             ))
             .where(Url.job_id == self.job_id)
             .group_by(Url.id)
@@ -1360,6 +1389,7 @@ class SEOAnalyzer:
             .join(Link, and_(
                 Link.to_url_hash == Url.url_hash,
                 Link.job_id == Url.job_id,
+                Link.from_url_id != Url.id,
             ))
             .where(Url.job_id == self.job_id)
             .group_by(Url.id)
@@ -1768,22 +1798,42 @@ class SEOAnalyzer:
         for (url_id,) in rows:
             self._add_issue(url_id, "orphan_page", "warning")
 
-        # Pages with very high outlinks (> threshold).
-        stmt = (
-            select(Url.id, Url.outlinks_count)
+        # Demasiados enlaces salientes, contando solo los EDITORIALES.
+        #
+        # Criterio SEO: lo que preocupa de una pagina con cientos de enlaces es
+        # que diluya el presupuesto de rastreo y el reparto de autoridad entre
+        # sus enlaces propios. Un megamenu de 500 entradas repetido en todo el
+        # sitio no es eso: es un hecho de la plantilla, igual en todas las
+        # paginas, y no dice nada de ninguna. Por eso se cuentan destinos
+        # DISTINTOS en `content` y no instancias en toda la pagina.
+        #
+        # Medido en blogs.uoc.edu (34.704 URLs): con `outlinks_count` avisaban
+        # 7.011 paginas, el 24% de las HTML; deduplicando, 6.578 —apenas
+        # ayuda, porque lo que infla es la plantilla—; contando solo contenido,
+        # 51. El 99,3% del aviso era ruido que el cliente leia como problemas.
+        enlaces_de_contenido = (
+            select(
+                Link.from_url_id.label("url_id"),
+                func.count(func.distinct(Link.to_url_hash)).label("destinos"),
+            )
+            .join(Url, Url.id == Link.from_url_id)
             .where(
                 Url.job_id == self.job_id,
-                Url.outlinks_count > self.max_outlinks,
+                Link.is_internal.is_(True),
+                Link.link_position == "content",
+                # Un nofollow no reparte autoridad: no diluye nada.
+                Link.follow.is_(True),
             )
+            .group_by(Link.from_url_id)
+            .having(func.count(func.distinct(Link.to_url_hash)) > self.max_outlinks)
         )
-        rows = self.session.execute(stmt).all()
 
-        for url_id, outlink_count in rows:
+        for url_id, destinos in self.session.execute(enlaces_de_contenido).all():
             self._add_issue(
                 url_id,
                 "high_outlink_count",
                 "info",
-                {"count": outlink_count},
+                {"count": destinos, "criterio": "destinos distintos en contenido"},
             )
 
         self._flush_issues()
@@ -1869,18 +1919,91 @@ def _es_destino_de_redireccion():
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _clave_candado(job_id: str) -> int:
+    """Clave estable de 63 bits para el advisory lock, a partir del UUID."""
+    import hashlib
+
+    return int.from_bytes(hashlib.sha1(str(job_id).encode()).digest()[:8], "big") & 0x7FFFFFFFFFFFFFFF
+
+
+@contextmanager
+def candado_de_job(job_id: str):
+    """Serializa el analisis de un job. Cede True si se ha tomado el candado.
+
+    Dos analisis del mismo job a la vez se pisan en el DELETE+INSERT de
+    `issues` y DUPLICAN filas: medido en v2-experimental, 1.390 incidencias
+    distintas acabaron como 4.170 filas. Pasa de verdad — un resume que
+    reencola el job mientras el analisis anterior sigue vivo, o dos
+    lanzamientos a mano.
+
+    Dos detalles que parecen de fontaneria y son justo donde falla:
+
+    1. La conexion es DEDICADA, no la sesion del analisis. Un advisory lock de
+       sesion se suelta en la conexion que lo pidio, y la sesion del analyzer
+       hace docenas de commits que la devuelven al pool: el unlock podia caer
+       en otra conexion y fallar en silencio.
+    2. El motor es `NullPool`, para que cerrar cierre DE VERDAD. Con el pool
+       normal, `close()` solo devuelve la conexion y la sesion de Postgres
+       sigue viva con el candado puesto — comprobado con un test: el job se
+       quedaba sin poder analizarse nunca mas. Asi, si el proceso revienta sin
+       soltarlo, el candado se va con la conexion.
+
+    En SQLite no hay advisory locks: cede True sin serializar (los tests del
+    analyzer corren ahi).
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    from shared.database import engine as motor_app
+
+    motor = conexion = None
+    try:
+        motor = create_engine(motor_app.url, poolclass=NullPool)
+        conexion = motor.connect()
+        if not conexion.dialect.name.startswith("postgres"):
+            yield True
+            return
+        clave = _clave_candado(job_id)
+        if not conexion.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": clave}).scalar():
+            logger.warning(
+                "El job %s ya se esta analizando: se omite esta ejecucion para no "
+                "duplicar incidencias", job_id,
+            )
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                conexion.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave})
+            except Exception:
+                pass  # al cerrar la conexion se suelta igual
+    except Exception:
+        logger.debug("Sin candado disponible; el analisis sigue sin serializar")
+        yield True
+    finally:
+        if conexion is not None:
+            conexion.close()
+        if motor is not None:
+            motor.dispose()
+
+
 def run_analysis(job_id: str) -> None:
     """Entry point called by the crawler worker after a crawl completes.
 
     Creates its own database session, runs every analysis check, and
-    ensures the session is closed on exit.
+    ensures the session is closed on exit. Serializado por job: ver
+    ``candado_de_job``.
     """
-    session = SessionLocal()
-    try:
-        analyzer = SEOAnalyzer(session, job_id)
-        analyzer.run_all()
-    finally:
-        session.close()
+    with candado_de_job(job_id) as puedo:
+        if not puedo:
+            return
+        session = SessionLocal()
+        try:
+            analyzer = SEOAnalyzer(session, job_id)
+            analyzer.run_all()
+        finally:
+            session.close()
 
 
 if __name__ == "__main__":
