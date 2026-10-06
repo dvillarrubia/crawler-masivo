@@ -1593,19 +1593,32 @@ class SeoSpider(scrapy.Spider):
                 strip_promo=strip_promo,
                 extra_selectors=extra_selectors,
             )
-            if main_content:
+            # El HTML crudo solo si el job lo pide: medido en un censo real,
+            # 170 kB de media por pagina — 29.808 paginas son 4,9 GB antes de
+            # que Postgres lo comprima.
+            guardar_html = self._extraction.get("store_raw_html", False)
+            html_crudo = response.text if guardar_html else None
+
+            # Se emite la fila tambien SIN contenido extraido cuando se pide el
+            # HTML. Es justo al reves de lo que parece: una pagina que sale con
+            # 0 palabras es la que hay que poder auditar, y si no se guarda su
+            # HTML no hay forma de saber si fallo el extractor o la pagina esta
+            # vacia de verdad. Sin el flag se mantiene el comportamiento de
+            # siempre: sin contenido, no hay fila.
+            if main_content or guardar_html:
                 content_md = extract_main_content_markdown(
                     selector,
                     word_count=word_count_val,
                     strip_promo=strip_promo,
                     extra_selectors=extra_selectors,
-                )
+                ) if main_content else None
                 yield ContentItem(
                     url_hash=final_hash,
                     job_id=self.job_id,
                     content_text=main_content,
-                    content_length=len(main_content),
+                    content_length=len(main_content) if main_content else 0,
                     content_markdown=content_md,
+                    raw_html=html_crudo,
                 )
 
         # -- Follow links (BFS) -----------------------------------------

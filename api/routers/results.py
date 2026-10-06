@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, exists, func, or_
 from sqlalchemy.orm import Session, joinedload, subqueryload
@@ -974,6 +974,41 @@ def export_links_csv(
             "Content-Disposition": f"attachment; filename=job_{job_id}_links.csv",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/{url_id}/raw-html  --  el HTML tal cual
+# ---------------------------------------------------------------------------
+@router.get("/urls/{url_id}/raw-html", response_class=PlainTextResponse)
+def get_raw_html(
+    job_id: uuid.UUID,
+    url_id: int,
+    db: Session = Depends(get_session),
+):
+    """HTML guardado de una URL, si el job se lanzo con `store_raw_html`.
+
+    Endpoint aparte y no un campo del detalle de la URL a proposito: son 170 kB
+    de media por pagina, y el detalle lo pide la interfaz cada vez que se abre
+    una fila. Devolverlo ahi dentro convertiria una ficha en una descarga.
+    """
+    _get_job_or_404(job_id, db)
+    fila = (
+        db.query(PageContent.raw_html)
+        .join(Url, Url.id == PageContent.url_id)
+        .filter(Url.job_id == job_id, Url.id == url_id)
+        .first()
+    )
+    if fila is None:
+        raise HTTPException(status_code=404, detail="URL no encontrada en este rastreo")
+    if not fila[0]:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Sin HTML guardado: el rastreo no se lanzo con "
+                "extraction.store_raw_html"
+            ),
+        )
+    return fila[0]
 
 
 # ---------------------------------------------------------------------------
