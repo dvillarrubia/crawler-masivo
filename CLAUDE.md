@@ -348,6 +348,38 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    mata el Scrapy que lleva `stall_timeout_minutes` sin latido y lo vuelve a
    encolar hasta `STALL_AUTO_RESUME` veces (def. 3); el spider retoma desde la
    frontera guardada en BD. Solo al agotar los intentos se cierra como `stalled`.
+34. **El PageRank en tres columnas, porque son tres preguntas** — la escala
+   0-10 lineal no distingue la pagina 250 de la 25.000: la mas fuerte vale 10
+   y el resto se apelotona en 0,00xx (medido en blogs.uoc.edu: 29.483 de
+   34.704 por debajo de 0,1, el 85% indistinguible). Ahora
+   `pagerank_raw` es la probabilidad —por el numero de nodos da "veces la
+   pagina media", comparable entre sitios de tamano distinto—, y
+   `pagerank_score` es 0-100 logaritmica anclada al MAXIMO del sitio, donde
+   cada 25 puntos son una decada. Es la que hay que leer y ordenar.
+   `pagerank` se queda en 0-10 por compatibilidad con informes entregados.
+   La primera version la ancle con min-max sobre los logaritmos y el 78% de
+   las paginas acabo en el decil mas alto: el minimo de la distribucion es una
+   pagina aislada que estira la escala entera. Con el maximo como ancla, el
+   mismo censo cubre los diez tramos. Las cuatro decadas no son arbitrarias:
+   el maximo es 393 veces la mediana y 4.515 veces el percentil 25.
+
+35. **El aviso de que el grafo no es fiable viaja CON el dato** — si
+   `jobs.js_check.grafo_fiable` es false hay plantillas que montan sus enlaces
+   con JavaScript y el PageRank sale de un grafo incompleto. Antes eso solo
+   existia como WARNING en el log del worker y la cifra se entregaba como si
+   nada. Ahora esta en `jobs.pagerank_resumen` y en una columna del CSV
+   (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
+   calculo no abre el endpoint del job.
+
+36. **Un aviso por hallazgo, no dos** — las URLs del sitemap sin inlinks
+   recibian `orphan_page` y `sitemap_orphan` a la vez. Dicen lo mismo y el
+   segundo es mas fuerte (esta declarada para indexar y aun asi nadie la
+   enlaza), asi que el informe parecia tener el doble de problemas. Medido:
+   en www.uoc.edu, 8.045 + 7.475 filas para unas 8.000 paginas pasan a 15 +
+   6.498. `orphan_page` se reserva para las que NO estan en el sitemap, y de
+   esas se siguen excluyendo los destinos de redireccion (555 de 570 en ese
+   censo) para no llenar el informe de huerfanas falsas tras una migracion.
+
 31. **La cola de rastreos es una cola, no una pila** — `rpush` + `brpop`
    trabajan sobre el MISMO extremo de la lista, asi que el ultimo job creado
    adelantaba a todos y lo recuperado tras un reinicio se ponia delante de lo
