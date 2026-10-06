@@ -4,8 +4,9 @@ name: Tests
 # antes de tocar el VPS. Un despliegue no puede salir sin que esto este verde.
 on:
   pull_request:
-  push:
-    branches: [master]
+  # En `master` NO hace falta: deploy.yml llama a este mismo workflow con
+  # `workflow_call` antes de tocar el VPS, asi que un push a master los
+  # ejecutaba DOS veces (medido en el merge del PR #44).
   workflow_call:
 
 jobs:

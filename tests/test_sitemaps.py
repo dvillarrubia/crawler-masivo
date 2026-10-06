@@ -123,3 +123,50 @@ def test_parse_malformed_xml_recovers():
     xml = "<urlset><url><loc>https://e.com/ok</loc></url><url><loc>https://e.com/broken"
     urls, _ = parse_sitemap(xml)
     assert "https://e.com/ok" in urls
+
+
+# ---------------------------------------------------------------------------
+# Bombas: unos KB comprimidos no pueden ser gigas en memoria del worker
+# ---------------------------------------------------------------------------
+def test_una_bomba_gzip_no_se_descomprime_entera(caplog):
+    """`gzip.decompress()` a secas descomprime lo que haga falta.
+
+    Scrapy acota la DESCARGA (1 GB por defecto), que no sirve frente a esto:
+    lo que hay que acotar es la salida. Y el parser va con `huge_tree=True`,
+    que apaga las protecciones de libxml2, asi que el tope tiene que estar en
+    la descompresion.
+    """
+    import gzip
+    import logging
+
+    from seo_crawler import sitemaps as sm
+
+    bomba = gzip.compress(b"0" * (sm.MAX_SITEMAP_BYTES + 1024))
+    assert len(bomba) < 1024 * 1024, "la bomba de prueba deberia ser pequena"
+    with caplog.at_level(logging.WARNING):
+        assert sm._maybe_gunzip(bomba) == b""
+    assert "descartado" in caplog.text, "cortar en silencio es el fallo que evitamos"
+
+
+def test_el_sitemap_gzipeado_normal_sigue_funcionando():
+    import gzip
+
+    xml = (
+        '<?xml version="1.0"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        "<url><loc>https://x.com/a</loc></url>"
+        "<url><loc>https://x.com/b</loc></url>"
+        "</urlset>"
+    ).encode()
+    paginas, hijos = parse_sitemap(gzip.compress(xml))
+    assert paginas == ["https://x.com/a", "https://x.com/b"]
+    assert hijos == []
+
+
+def test_un_gzip_roto_no_tumba_el_rastreo():
+    from seo_crawler import sitemaps as sm
+
+    # Cabecera de gzip valida y basura detras: antes devolvia el cuerpo tal
+    # cual y el parser se quedaba en ([], []). Sigue sin reventar.
+    assert parse_sitemap(b"\x1f\x8b" + b"basura que no es gzip") == ([], [])
+    assert sm._maybe_gunzip(b"\x1f\x8b" + b"basura") is not None
