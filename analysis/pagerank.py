@@ -203,3 +203,40 @@ def reparto(pr: np.ndarray, categorias: Sequence[str]) -> dict[str, float]:
 def desperdiciado(reparto_: Mapping[str, float]) -> float:
     """Fraccion del PageRank que acaba en errores o URLs sin respuesta."""
     return round(sum(reparto_.get(c, 0.0) for c in DESPERDICIADO), 4)
+
+
+# Decadas de PageRank que cubre la escala 0-100. Cada 25 puntos son "diez
+# veces menos autoridad que la pagina mas fuerte del sitio".
+#
+# Cuatro, y no es arbitrario: medido en blogs.uoc.edu (34.704 paginas), el
+# maximo es 393 veces la mediana y 4.515 veces el percentil 25, o sea entre 2,6
+# y 3,7 decadas de rango util. Con 4 cabe el sitio entero y queda margen; con
+# menos, media web se pegaria al 0.
+DECADAS_ESCALA = 4.0
+
+
+def puntuacion_log(pr):
+    """PageRank a una escala 0-100 logaritmica relativa al MAXIMO del sitio.
+
+    La escala 0-10 lineal de siempre no distingue la pagina 250 de la 25.000:
+    la mas fuerte vale 10 y el resto se apelotona en 0,00xx — medido, 29.483 de
+    34.704 paginas por debajo de 0,1, el 85% indistinguible entre si.
+
+    Relativa al maximo y no min-max sobre los logaritmos: probado con min-max,
+    el 78% de las paginas acababa en el decil mas alto, porque el minimo de la
+    distribucion es un valor extremo (una pagina aislada) que estira la escala
+    entera. Al anclarla al maximo, cada 25 puntos son una decada y el numero
+    significa lo mismo en cualquier censo.
+
+    Las paginas con 0 se quedan en 0: no reciben nada y eso es el dato.
+    """
+    import numpy as np
+
+    crudo = np.asarray(pr, dtype=np.float64)
+    maximo = crudo.max() if crudo.size else 0.0
+    if maximo <= 0:
+        return np.zeros(crudo.shape)
+    with np.errstate(divide="ignore"):
+        decadas = np.log10(np.where(crudo > 0, crudo, np.nan) / maximo)
+    puntos = np.round(np.clip(1.0 + decadas / DECADAS_ESCALA, 0.0, 1.0) * 100.0)
+    return np.where(crudo > 0, np.nan_to_num(puntos), 0.0)

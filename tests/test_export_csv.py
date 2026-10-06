@@ -27,6 +27,7 @@ def _url_falsa(**extra):
         folder_depth=1, word_count=500, text_ratio=20.0, last_modified=None,
         http_version="HTTP/2", inlinks_count=3, unique_inlinks_count=2,
         outlinks_count=10, external_outlinks_count=1, pagerank=1.5,
+        pagerank_score=62, pagerank_raw=0.000123,
         in_sitemap=True, blocked_by_robots=None, body_hash="abc",
         last_crawled_at=None, near_duplicate_count=0, closest_similarity=None,
         html_meta=None, page_content=None, security=None,
@@ -74,6 +75,17 @@ def test_el_texto_va_recortado_y_la_columna_lo_dice():
     assert "content_text_first_500" in CSV_COLUMNS
     assert len(fila["content_text_first_500"]) == 500
     assert fila["content_char_count"] == "900"
+
+
+def test_la_escala_que_hay_que_leer_va_en_el_csv():
+    """0-10 aplasta el 97,8% del sitio en 0,00xx; 0-100 logaritmica, no."""
+    fila = dict(zip(CSV_COLUMNS, _csv_row(
+        _url_falsa(), {"pagerank_fiable": False})))
+    assert fila["pagerank_score"] == "62"
+    assert fila["pagerank_raw"] == "0.000123"
+    # Y el aviso viaja en cada fila: quien ordena por PageRank en una hoja de
+    # calculo no abre el endpoint del job.
+    assert fila["pagerank_fiable"] == "False"
 
 
 def test_sin_tablas_hijas_las_columnas_salen_vacias_no_desplazadas():

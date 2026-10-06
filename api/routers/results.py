@@ -576,6 +576,14 @@ CSV_COLUMNS = [
     "outlinks_count",
     "external_outlinks_count",
     "pagerank",
+    # La que hay que leer: 0-100 logaritmica. La de 0-10 se queda por
+    # compatibilidad, pero aplasta el 97,8% del sitio en 0,00xx.
+    "pagerank_score",
+    "pagerank_raw",
+    # False = hay plantillas que montan enlaces con JavaScript y el rastreo fue
+    # sin render: el grafo esta incompleto y estas cifras salen de un grafo
+    # parcial. Vacio = no se llego a comprobar.
+    "pagerank_fiable",
     "in_sitemap",
     "near_duplicate_count",
     "closest_similarity",
@@ -692,6 +700,9 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(url_obj.outlinks_count),
         _val(url_obj.external_outlinks_count),
         _val(url_obj.pagerank),
+        _val(url_obj.pagerank_score),
+        _val(url_obj.pagerank_raw),
+        _val(ex.get("pagerank_fiable")),
         _val(url_obj.in_sitemap),
         _val(url_obj.near_duplicate_count),
         _val(url_obj.closest_similarity),
@@ -825,6 +836,22 @@ def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str
     return extras
 
 
+def _pagerank_fiable(session: Session, job_id: uuid.UUID):
+    """Si el grafo de enlaces del job es fiable (A7 de #24).
+
+    Va en cada fila del CSV a proposito: quien ordena por PageRank en una hoja
+    de calculo no abre el endpoint del job, y sin esto se lleva unas cifras
+    calculadas sobre un grafo incompleto sin saberlo.
+    """
+    resumen = session.query(Job.pagerank_resumen).filter(Job.id == job_id).scalar()
+    if isinstance(resumen, dict) and "grafo_fiable" in resumen:
+        return resumen["grafo_fiable"]
+    js_check = session.query(Job.js_check).filter(Job.id == job_id).scalar()
+    if isinstance(js_check, dict):
+        return js_check.get("grafo_fiable")
+    return None
+
+
 def _stream_csv(job_id: uuid.UUID):
     """Generator that yields CSV content in chunks using windowed queries."""
     # Each chunk opens its own session so we do not hold one long transaction.
@@ -860,6 +887,9 @@ def _stream_csv(job_id: uuid.UUID):
                 break
 
             extras = _extras_por_lote(session, [r.id for r in rows])
+            fiable = _pagerank_fiable(session, job_id)
+            for datos in extras.values():
+                datos["pagerank_fiable"] = fiable
 
             buf = io.StringIO()
             writer = csv.writer(buf)

@@ -115,7 +115,24 @@ class Url(Base):
     outlinks_count = Column(Integer, default=0)              # outlinks INTERNOS (los externos, aparte)
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
     unique_inlinks_count = Column(Integer, default=0)        # unique source pages linking in
-    pagerank = Column(Float, nullable=True, default=None)    # internal PageRank score (0-10)
+    # Tres columnas porque son tres preguntas distintas, y meterlas en una
+    # era el problema (C4 de #24):
+    #
+    #   pagerank_raw    ¿cuanta autoridad interna tiene del total? Es la
+    #                   probabilidad: todas las paginas suman 1. Multiplicada
+    #                   por el numero de nodos da "veces la pagina media", que
+    #                   SI es comparable entre sitios de tamaño distinto.
+    #   pagerank_score  ¿esta arriba o abajo? 0-100 en escala logaritmica, el
+    #                   equivalente al Link Score de Screaming Frog. Es la que
+    #                   hay que leer y la que se ordena en un informe.
+    #   pagerank        la escala 0-10 lineal de siempre, que se mantiene por
+    #                   compatibilidad con informes ya entregados. No la uses
+    #                   para decidir: la home vale 10 y el resto del sitio se
+    #                   apelotona en 0,00xx, asi que no distingue la pagina
+    #                   250 de la 25.000.
+    pagerank = Column(Float, nullable=True, default=None)    # 0-10 lineal (compatibilidad)
+    pagerank_raw = Column(Float, nullable=True, default=None)    # probabilidad, suma 1
+    pagerank_score = Column(Integer, nullable=True, default=None)  # 0-100 logaritmico
     # Casi duplicados (MinHash). NULL = no se midio (sin contenido, o texto
     # por debajo del minimo de palabras); 0 = se midio y no tiene ninguna.
     near_duplicate_count = Column(Integer, nullable=True, default=None)

@@ -1625,6 +1625,14 @@ class SEOAnalyzer:
             "reparto": reparto,
             "desperdiciado": prk.desperdiciado(reparto),
         }
+        # A7 de #24: si la comprobacion automatica vio plantillas que montan
+        # sus enlaces con JavaScript, el grafo esta incompleto y el PageRank se
+        # calcula igual. Antes solo quedaba un WARNING en el log del worker, y
+        # el numero se entregaba como si nada. Ahora el aviso viaja CON el
+        # dato: en jobs.pagerank_resumen, en el endpoint del job y en una
+        # columna del CSV, para que quien ordene por PageRank en una hoja de
+        # calculo lo vea.
+        resumen.update(self._fiabilidad_del_grafo())
         logger.info(
             "PageRank: %.1f%% en paginas indexables, %.1f%% desperdiciado en "
             "errores (job %s)",
@@ -1632,7 +1640,21 @@ class SEOAnalyzer:
             self.job_id,
         )
 
-        # 7. Normalizar a escala 0-10
+        # 7. Tres escalas, porque son tres preguntas (C4 de #24)
+        #
+        # La de siempre, 0-10 lineal, no distingue la pagina 250 de la 25.000:
+        # la home vale 10 porque es el maximo y el resto del sitio se apelotona
+        # en 0,00xx. Medido en blogs.uoc.edu: 33.956 de 34.704 paginas por
+        # debajo de 0,1, o sea el 97,8% indistinguible entre si.
+        #
+        # `pagerank_raw` es la probabilidad tal cual (suma 1): por el numero de
+        # nodos da "veces la pagina media", que si se puede comparar entre
+        # sitios de tamaño distinto. `pagerank_score` es 0-100 en logaritmico
+        # —el equivalente al Link Score de Screaming Frog— y es la que hay que
+        # leer: reparte la cola larga en vez de aplastarla.
+        crudo = pr.copy()
+        puntuacion = prk.puntuacion_log(crudo)
+
         maximo = pr.max()
         if maximo > 0:
             pr = pr / maximo * 10.0
@@ -1640,18 +1662,21 @@ class SEOAnalyzer:
         # 8. Guardado en bloque. Antes se emitia una UPDATE por URL: en un job
         # de 60.000 paginas eran 60.000 consultas sueltas.
         self.session.execute(text(
-            "CREATE TEMP TABLE pr_tmp (id BIGINT PRIMARY KEY, pr DOUBLE PRECISION) "
-            "ON COMMIT DROP"
+            "CREATE TEMP TABLE pr_tmp (id BIGINT PRIMARY KEY, pr DOUBLE PRECISION, "
+            "crudo DOUBLE PRECISION, score INTEGER) ON COMMIT DROP"
         ))
-        filas = [{"id": int(i), "pr": round(float(v), 4)}
-                 for i, v in zip(ids_ordenados, pr)]
+        filas = [{"id": int(i), "pr": round(float(v), 4),
+                  "crudo": float(c), "score": int(sc)}
+                 for i, v, c, sc in zip(ids_ordenados, pr, crudo, puntuacion)]
         for i in range(0, len(filas), 10_000):
             self.session.execute(
-                text("INSERT INTO pr_tmp (id, pr) VALUES (:id, :pr)"),
+                text("INSERT INTO pr_tmp (id, pr, crudo, score) "
+                     "VALUES (:id, :pr, :crudo, :score)"),
                 filas[i:i + 10_000],
             )
         self.session.execute(text(
-            "UPDATE urls SET pagerank = pr_tmp.pr FROM pr_tmp WHERE urls.id = pr_tmp.id"
+            "UPDATE urls SET pagerank = pr_tmp.pr, pagerank_raw = pr_tmp.crudo, "
+            "pagerank_score = pr_tmp.score FROM pr_tmp WHERE urls.id = pr_tmp.id"
         ))
         from shared.models import Job
         self.session.execute(
@@ -1659,6 +1684,41 @@ class SEOAnalyzer:
         )
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
+
+    def _fiabilidad_del_grafo(self) -> dict:
+        """Dice si el grafo de enlaces es fiable, segun la comprobacion de render.
+
+        `jobs.js_check` lo rellena `scripts/check_js_templates.py` al cerrar un
+        rastreo SIN `render_js`: si alguna plantilla esconde enlaces en
+        JavaScript, el grafo esta incompleto y el PageRank sale de un grafo
+        parcial. NULL = no se llego a comprobar (p. ej. el rastreo ya iba con
+        render), y entonces no se afirma nada.
+        """
+        from shared.models import Job
+
+        js_check = self.session.execute(
+            select(Job.js_check).where(Job.id == self.job_id)
+        ).scalar()
+        if not isinstance(js_check, dict):
+            return {"grafo_fiable": None}
+        fiable = js_check.get("grafo_fiable")
+        if fiable is False:
+            plantillas = [
+                p.get("plantilla")
+                for p in (js_check.get("plantillas") or [])
+                if p.get("enlaces_solo_js")
+            ]
+            return {
+                "grafo_fiable": False,
+                "aviso": (
+                    "PageRank calculado sin render: hay plantillas con enlaces "
+                    "solo en JavaScript, asi que el grafo esta incompleto. "
+                    "Re-rastrear con render_js=true antes de fiarse de estas "
+                    "cifras."
+                ),
+                "plantillas_con_enlaces_js": [p for p in plantillas if p][:10],
+            }
+        return {"grafo_fiable": bool(fiable)}
 
     def _aristas_de_enlaces(self) -> str:
         """Crea `pr_edges_tmp` con las aristas de `links`. Devuelve el modo.
@@ -1791,6 +1851,12 @@ class SEOAnalyzer:
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
                 ~_es_destino_de_redireccion(),
+                # Las que estan en el sitemap las cuenta `analyze_sitemap` como
+                # `sitemap_orphan`, que dice lo mismo pero mas fuerte: esta
+                # declarada para indexar y aun asi nadie la enlaza. Emitir los
+                # dos avisos sobre la misma URL es ruido, y hacia que el
+                # informe pareciera tener el doble de problemas.
+                (Url.in_sitemap.isnot(True)),
             )
         )
         rows = self.session.execute(stmt).all()

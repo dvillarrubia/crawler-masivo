@@ -139,3 +139,70 @@ def test_reparto_y_desperdiciado():
 
 def test_grafo_vacio():
     assert prk.pagerank(0, [], [], []).size == 0
+
+
+# ---------------------------------------------------------------------------
+# Escala 0-100 (C4 de #24)
+# ---------------------------------------------------------------------------
+def test_la_escala_reparte_en_vez_de_aplastar():
+    """La de 0-10 lineal no distingue la pagina 250 de la 25.000.
+
+    Medido en blogs.uoc.edu: 29.483 de 34.704 paginas por debajo de 0,1 en la
+    escala vieja, el 85% indistinguible. Con esta, cada 25 puntos son una
+    decada: el maximo es 100, diez veces menos es 75, cien veces menos 50.
+    """
+    import numpy as np
+
+    from analysis.pagerank import puntuacion_log
+
+    pr = np.array([1e-3, 1e-4, 1e-5, 1e-6, 1e-7])
+    assert list(puntuacion_log(pr)) == [100.0, 75.0, 50.0, 25.0, 0.0]
+
+
+def test_no_se_ancla_al_minimo_porque_el_minimo_es_un_extremo():
+    """La regresion que hubo que arreglar midiendo.
+
+    Con min-max sobre los logaritmos, el 78% de las paginas de un censo real
+    acababa en el decil mas alto: el minimo de la distribucion es una pagina
+    aislada que estira la escala entera. Anclada al maximo, el reparto del
+    mismo censo cubre los diez tramos.
+    """
+    import numpy as np
+
+    from analysis.pagerank import puntuacion_log
+
+    # Una pagina aislada con un valor absurdamente pequeno no puede mover la
+    # puntuacion de las demas.
+    sin_extremo = puntuacion_log(np.array([1e-3, 1e-4, 1e-5]))
+    con_extremo = puntuacion_log(np.array([1e-3, 1e-4, 1e-5, 1e-30]))
+    assert list(sin_extremo) == list(con_extremo[:3])
+
+
+def test_lo_que_no_recibe_nada_se_queda_en_cero():
+    import numpy as np
+
+    from analysis.pagerank import puntuacion_log
+
+    puntos = puntuacion_log(np.array([1e-3, 0.0]))
+    assert puntos[1] == 0.0
+
+
+def test_mas_de_cuatro_decadas_abajo_tambien_es_cero():
+    """Se recorta en 0 en vez de dar negativo."""
+    import numpy as np
+
+    from analysis.pagerank import puntuacion_log
+
+    assert puntuacion_log(np.array([1.0, 1e-9]))[1] == 0.0
+
+
+def test_casos_degenerados():
+    import numpy as np
+
+    from analysis.pagerank import puntuacion_log
+
+    # Todas iguales: 100 a todas antes que un 0 enganoso.
+    assert list(puntuacion_log(np.array([5.0, 5.0]))) == [100.0, 100.0]
+    # Todo a cero (un grafo sin aristas ni teletransporte).
+    assert list(puntuacion_log(np.array([0.0, 0.0]))) == [0.0, 0.0]
+    assert list(puntuacion_log(np.array([]))) == []
