@@ -19,9 +19,9 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session, aliased
 
@@ -98,7 +98,10 @@ _MULTIPLE_SLASHES_RE = re.compile(r"(?<!:)//+")
 # These waste crawl budget and pollute the index when discoverable.
 _NON_SEO_FRIENDLY_RE = re.compile(
     r";jsessionid="                 # Java session IDs leaked into URLs
-    r"|%5Cu\d{4}"                   # un-decoded JS unicode escapes (%5Cu002F)
+    # Escapes unicode de JavaScript sin decodificar. Pedia \d{4} —solo
+    # digitos— asi que el ejemplo del propio comentario, %5Cu002F, NO casaba:
+    # la letra final lo tumbaba. Son hexadecimales.
+    r"|%5Cu[0-9a-fA-F]{4}"
     r"|\\u[0-9a-fA-F]{4}"          # raw JS unicode escapes
     r"|%00"                         # null bytes in URL
     , re.IGNORECASE,
@@ -107,9 +110,15 @@ _NON_SEO_FRIENDLY_RE = re.compile(
 # Heuristic: path segments that look like CMS internal/faceted navigation.
 # Matches paths containing encoded semicolons, pipe chars, or long
 # percent-encoded sequences typical of filter/tag pages.
+# `/-/` es el prefijo que Liferay pone a sus rutas de "friendly URL" de
+# portlet, y `/-/categories/123` es la faceta de verdad: no la cazaba ninguna de
+# las alternativas de abajo. En cambio `/elem_entry_list/` si la cazaba por
+# `/ELEM_ENTRY` con IGNORECASE, y un listado no es una faceta: se exige el
+# limite de palabra para que solo case el nombre exacto del portlet.
 _CMS_FACETED_RE = re.compile(
     r"[.;|](?:categorias|categories|tags|labels|filters?|facets?|taxonomy)/"
-    r"|/ELEM_ENTRY|/BP_Categories/"   # Liferay-specific
+    r"|/-/(?:categories|categorias|tags|labels)(?:/|$)"   # faceta de Liferay
+    r"|/ELEM_ENTRY\b|/BP_Categories/"
     , re.IGNORECASE,
 )
 
@@ -143,7 +152,11 @@ class SEOAnalyzer:
         self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
         self.desc_max_len = t.get("description_max_length", DESCRIPTION_MAX_LEN)
         self.min_word_count = t.get("min_word_count", LOW_WORD_COUNT_THRESHOLD)
-        self.max_redirect_chain = t.get("max_redirect_chain_length", 2)
+        # Cadena a partir de DOS saltos (A->B->C). Estaba en 2 con la
+        # comparacion `hops > 2`, asi que hacian falta TRES saltos para que
+        # saltara y A->B->C —la cadena mas comun, y la que Google pide evitar—
+        # no se reportaba nunca. Un salto solo es una redireccion normal.
+        self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
@@ -1085,7 +1098,13 @@ class SEOAnalyzer:
     # -- Redirect Chains ----------------------------------------------------
 
     def analyze_redirect_chains(self) -> None:
-        """Detect redirect chains longer than 2 hops and redirect loops."""
+        """Cadenas de redireccion de dos saltos o mas, y bucles.
+
+        Criterio SEO: una redireccion es normal; dos encadenadas ya son algo que
+        arreglar —Google las sigue pero pierde parte de la senal y gasta
+        presupuesto de rastreo—, y un bucle es un error. Lo que se reporta es la
+        cadena entera, para que se vea donde cortarla.
+        """
         logger.debug("Analyzing redirect chains ...")
 
         # Build an in-memory redirect graph: url -> redirect_url.
@@ -1289,9 +1308,21 @@ class SEOAnalyzer:
         """URL tab equivalent -- flag structural problems in URLs."""
         logger.debug("Analyzing URL issues ...")
 
+        # Solo documentos internos, y nunca los saltos de una redireccion.
+        #
+        # Criterio SEO: estos avisos se arreglan cambiando la URL de una pagina.
+        # En un salto de redireccion no hay nada que arreglar —la URL se esta
+        # yendo, y su destino ya se revisa por separado—, y en una imagen, un
+        # CSS o un JS la forma de la URL no es una decision editorial. Los PDF
+        # SI entran: son documentos que Google indexa.
         stmt = (
             select(Url.id, Url.url, Url.path)
-            .where(Url.job_id == self.job_id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.resource_type != "redirect",
+                or_(Url.is_html.is_(True), Url.resource_type == "pdf"),
+            )
         )
         rows = self.session.execute(stmt).all()
 
@@ -1307,8 +1338,11 @@ class SEOAnalyzer:
                     {"length": url_len},
                 )
 
-            # URL contains non-ASCII characters.
-            if url_str and _NON_ASCII_RE.search(url_str):
+            # Caracteres no ASCII. Hay que DECODIFICAR antes: Scrapy guarda
+            # las URLs escapadas (`caf%C3%A9`), que es puro ASCII, asi que este
+            # aviso no saltaba nunca — ni en un censo con URLs en catalan,
+            # castellano o arabe.
+            if url_str and _NON_ASCII_RE.search(unquote(url_str)):
                 self._add_issue(url_id, "url_non_ascii", "warning")
 
             # Path-specific checks (only when path is available).

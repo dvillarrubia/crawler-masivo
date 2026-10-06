@@ -388,6 +388,33 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    SQLite. Los indices de la temporal van con nombre, porque
    `CREATE INDEX ON tabla (col)` es sintaxis solo de Postgres.
 
+42. **Los avisos sobre la forma de la URL casaban mal, y uno no salto nunca**
+   (#29). Cuatro cosas, medidas en blogs.uoc.edu (34.704 URLs):
+
+   - `url_non_ascii` comprobaba la URL **escapada**, que es ASCII puro, asi que
+     no salto en ningun censo: 0 -> **337 paginas**. Hay que decodificar antes.
+   - La regex de escapes de JavaScript pedia `%5Cu\d{4}` —solo digitos— asi que
+     `%5Cu002F`, el ejemplo de su propio comentario, NO casaba. Son
+     hexadecimales.
+   - `/-/categories/123`, la faceta de verdad de Liferay, no la cazaba ninguna
+     alternativa; y `/elem_entry_list/` si la cazaba por `/ELEM_ENTRY` con
+     IGNORECASE. Un listado de contenidos no es una faceta, y marcarlo manda al
+     cliente a bloquear algo que quiere indexar.
+   - Los checks se aplicaban a CUALQUIER fila: saltos de redireccion, imagenes,
+     CSS. En un salto no hay nada que arreglar —la URL se esta yendo— y en una
+     imagen la forma de la URL no es una decision editorial. Ahora solo
+     documentos internos (HTML y PDF, que Google indexa). Efecto: `url_too_long`
+     4.984 -> 4.623, `url_underscores` 1.950 -> 1.545, `url_uppercase` 693 ->
+     563, `url_multiple_slashes` 8 -> 0.
+
+43. **Una cadena de redirecciones empieza en DOS saltos** — el umbral por
+   defecto era 2 con la comparacion `hops > 2`, asi que hacian falta TRES y
+   A->B->C, la cadena mas comun y la que Google pide evitar, no se reportaba
+   nunca. Medido en el mismo censo: habia 2.731 redirecciones de un salto
+   (normales), **372 de dos** y 3 de tres o mas; los avisos pasan de 3 a 375. El
+   valor manda desde `api/schemas.py`, no desde la config del cliente: ahi
+   estaba el 2.
+
 39. **Una sola funcion de indexabilidad, en `shared/`** (#26) — el spider y el
    analyzer repetian las reglas y discrepaban: 1.254 paginas de un censo eran
    "Canonicalised" para uno e "Indexable" para el otro. `shared/indexabilidad.py`
