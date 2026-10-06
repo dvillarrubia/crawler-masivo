@@ -168,6 +168,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
+| GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
 | GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — 75 columnas: URL + metadatos + **h1/h2**, og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad, agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
 
 ## Database (PostgreSQL)
