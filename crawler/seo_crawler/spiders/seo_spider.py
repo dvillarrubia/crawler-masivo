@@ -30,7 +30,6 @@ from seo_crawler.extractors import (
     classify_resource_type,
     compile_url_patterns,
     compute_folder_depth,
-    compute_indexability_status,
     compute_status_group,
     compute_text_ratio,
     compute_url_hash,
@@ -62,6 +61,7 @@ from seo_crawler.sitemaps import (
     parse_robots_sitemaps,
     parse_sitemap,
 )
+from shared.indexabilidad import estado_indexabilidad
 from seo_crawler.items import (
     ContentItem,
     HeadingItem,
@@ -1333,11 +1333,15 @@ class SeoSpider(scrapy.Spider):
             # self-referencing canonicals are not misread as canonicalised.
             meta = extract_meta(selector, base_url=base_url)
 
-            # X-Robots-Tag header
-            x_robots = (
-                response.headers.get(b"X-Robots-Tag", b"").decode("utf-8", errors="ignore")
-                or None
-            )
+            # X-Robots-Tag: TODAS las cabeceras, no solo la ultima. Un
+            # servidor puede mandar dos (`noindex` y `noarchive`) y con
+            # `headers.get` la pagina salia indexable.
+            cabeceras_robots = [
+                valor.decode("utf-8", errors="ignore")
+                for valor in response.headers.getlist(b"X-Robots-Tag")
+                if valor
+            ]
+            x_robots = ", ".join(cabeceras_robots) or None
 
             # Canonical from Link header
             link_header = response.headers.get(b"Link", b"").decode("utf-8", errors="ignore")
@@ -1351,15 +1355,22 @@ class SeoSpider(scrapy.Spider):
             visible_text = extract_visible_text(selector)
             text_ratio_val = compute_text_ratio(response.text, visible_text)
 
-            # Indexability
-            is_indexable, reason = compute_indexability_status(
+            # Indexabilidad: una sola funcion, compartida con el analyzer
+            # (shared/indexabilidad.py). Tenerla por duplicado hacia que la
+            # misma pagina fuese "Canonicalised" para uno e "Indexable" para el
+            # otro.
+            is_indexable, indexability_status_val = estado_indexabilidad(
                 status_code,
-                meta.get("meta_robots"),
-                x_robots,
-                meta.get("canonical_href"),
-                final_url,
+                meta_robots={
+                    "robots": meta.get("meta_robots"),
+                    "googlebot": meta.get("meta_robots_googlebot"),
+                },
+                x_robots=cabeceras_robots,
+                canonical_href=meta.get("canonical_href"),
+                page_url=final_url,
+                canonical_header=canonical_header,
+                bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
             )
-            indexability_status_val = "Indexable" if is_indexable else reason
 
             # Meta refresh con destino: es una redireccion (Google trata la
             # inmediata como permanente). Se guarda como redirect_url para que
@@ -1369,14 +1380,14 @@ class SeoSpider(scrapy.Spider):
                 refresh_target = None
             if refresh_target:
                 indexability_status_val = "Redirect (meta refresh)"
-        elif not is_success:
-            # Non-2xx: mark indexability accordingly
-            if 300 <= status_code < 400:
-                indexability_status_val = f"Redirect ({status_code})"
-            elif 400 <= status_code < 500:
-                indexability_status_val = f"Client Error ({status_code})"
-            else:
-                indexability_status_val = f"Server Error ({status_code})"
+        else:
+            # No es HTML, o no es 2xx: la misma funcion decide, sin duplicar
+            # aqui la escala de codigos.
+            _, indexability_status_val = estado_indexabilidad(
+                status_code,
+                page_url=url_for_record,
+                bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
+            )
 
         # -- PageItem for the final destination (always yielded) -----------
         # For redirected URLs, this records the FINAL destination with its

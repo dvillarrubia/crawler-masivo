@@ -371,6 +371,35 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
    calculo no abre el endpoint del job.
 
+39. **Una sola funcion de indexabilidad, en `shared/`** (#26) — el spider y el
+   analyzer repetian las reglas y discrepaban: 1.254 paginas de un censo eran
+   "Canonicalised" para uno e "Indexable" para el otro. `shared/indexabilidad.py`
+   tiene `estado_indexabilidad()` y una tabla de 32 casos en
+   `tests/test_indexabilidad.py`. Lo que arregla, cada cosa con su criterio:
+   robots dirigido a un bot (`<meta name="googlebot" content="noindex">` saca
+   la pagina del indice aunque el generico diga `index`), TODAS las cabeceras
+   `X-Robots-Tag` y no solo la ultima (`noindex` + `noarchive` salia
+   indexable), el canonical de la cabecera HTTP `Link` (se extraia y nadie lo
+   miraba), y el 204 —una respuesta sin contenido no se indexa— que el spider
+   daba por indexable y el analyzer no.
+
+   Comparar URLs tiene su propia regla, y es SEO, no fontaneria: el puerto por
+   defecto, la caja del host y el fragmento NO cuentan; `www` frente a sin
+   `www` y `http` frente a `https` SI, porque ahi hay una canonicalizacion de
+   verdad. Y el escapado por ciento tampoco cuenta: `intel%C2%B7ligencia` y
+   `intel·ligencia` son la misma URL, y no normalizarlo marcaba 83 paginas
+   autocanonicas de un censo como "Canonicalised" (pasa en catalan y en
+   cualquier idioma con acentos en la URL). Cambio real al unificar: 0,2% de
+   las filas en blogs.uoc.edu y 0,7% en www.uoc.edu.
+
+40. **Un candado no puede tragarse los errores de lo que protege** — la primera
+   version de `candado_de_job` tenia el `yield` dentro de un `try/except`
+   amplio: cuando el analisis de dentro reventaba, la excepcion entraba por el
+   yield, la cazaba ese except y se cedia por segunda vez, asi que Python
+   lanzaba `generator didn't stop after throw()` y el error ORIGINAL
+   desaparecia. Medido: el analisis de un censo de 60.399 URLs fallo y el log
+   solo decia eso. Un solo `yield`, y el `except` del montaje no lo envuelve.
+
 38. **Un enlace desde una pagina `noindex` no cuenta como entrante** (C3 de
    #24, criterio decidido el 7-oct-2026). Google acaba tratando los enlaces de
    una noindex como nofollow, asi que una pagina cuyos unicos enlaces vienen de

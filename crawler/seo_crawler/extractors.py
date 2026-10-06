@@ -355,6 +355,12 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     robots_vals = _meta_all("robots")
     meta_robots = ", ".join(robots_vals) if robots_vals else None
 
+    # Robots dirigido a un bot concreto: `<meta name="googlebot" content="noindex">`
+    # saca la pagina del indice de Google aunque el `robots` generico diga
+    # `index`. Antes solo se leia el generico, asi que ese noindex no contaba.
+    googlebot_vals = _meta_all("googlebot")
+    meta_robots_googlebot = ", ".join(googlebot_vals) if googlebot_vals else None
+
     canonical = _resolve(base_url, _clean(selector.css('link[rel="canonical"]::attr(href)').get()))
 
     return {
@@ -364,6 +370,7 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         "meta_description_len": len(desc) if desc else None,
         "meta_keywords": _meta("keywords"),
         "meta_robots": meta_robots,
+        "meta_robots_googlebot": meta_robots_googlebot,
         "canonical_href": canonical,
         # OG
         "og_title": _meta("og:title"),

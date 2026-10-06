@@ -34,7 +34,8 @@ from shared.config import (
 from analysis.sd_validation import validate_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
-from shared.robots import hay_noindex, robots_bad_separators
+from shared.indexabilidad import es_noindex, estado_indexabilidad
+from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
 from shared.models import (
     Heading,
@@ -780,23 +781,28 @@ class SEOAnalyzer:
             x_robots,
             canonical_href,
         ) in rows:
-            has_noindex = hay_noindex(meta_robots) or hay_noindex(x_robots)
-            canonical_ok = (
-                not canonical_href
-                or not canonical_href.strip()
-                or _norm_url(canonical_href) == _norm_url(page_url)
+            # Una sola funcion, la misma que usa el spider
+            # (shared/indexabilidad.py). Antes aqui se repetian las reglas con
+            # otro normalizador de URLs —w3lib, que no quita el puerto por
+            # defecto— y la misma pagina salia "Canonicalised" para el analyzer
+            # e "Indexable" para el spider.
+            es_indexable_calc, motivo_calc = estado_indexabilidad(
+                status_code,
+                meta_robots=meta_robots,
+                x_robots=x_robots,
+                canonical_href=canonical_href,
+                page_url=page_url,
+                bloqueada_por_robots=bool(bloqueada_robots)
+                or (estado_actual or "").startswith("Blocked"),
             )
+            has_noindex = es_noindex(meta_robots=meta_robots, x_robots=x_robots)
+            canonical_ok = motivo_calc != "Canonicalised"
             # Bloqueada por robots.txt no es indexable por mucho que el
             # servidor devolviera 200: el rastreo la alcanzo por el destino de
             # una redireccion, Google no. Sin esto quedaban 22 paginas de un
             # SSO marcadas indexables con el motivo "Blocked by robots.txt" al
             # lado, las dos columnas diciendo lo contrario.
-            bloqueada = bool(bloqueada_robots) or (estado_actual or "").startswith(
-                "Blocked"
-            )
-            is_indexable = (
-                status_code == 200 and not has_noindex and canonical_ok and not bloqueada
-            )
+            is_indexable = es_indexable_calc
 
             if is_indexable:
                 indexable_ids.append(url_id)
@@ -817,16 +823,8 @@ class SEOAnalyzer:
             # aqui: re-analizar un job corrige el dato. Ademas evita que las
             # dos columnas del mismo CSV se contradigan.
             if estado_actual is None or estado_actual in _MOTIVOS_PROPIOS:
-                if is_indexable:
-                    nuevo = "Indexable"
-                elif has_noindex:
-                    nuevo = "Noindex"
-                elif not canonical_ok:
-                    nuevo = "Canonicalised"
-                else:
-                    nuevo = estado_actual  # 200 no indexable por otro motivo
-                if nuevo and nuevo != estado_actual:
-                    estados_por_motivo.setdefault(nuevo, []).append(url_id)
+                if motivo_calc and motivo_calc != estado_actual:
+                    estados_por_motivo.setdefault(motivo_calc, []).append(url_id)
 
         # Bulk-update the indexable column.
         self._bulk_update_indexable(indexable_ids, True)
@@ -2039,7 +2037,7 @@ def candado_de_job(job_id: str):
     reencola el job mientras el analisis anterior sigue vivo, o dos
     lanzamientos a mano.
 
-    Dos detalles que parecen de fontaneria y son justo donde falla:
+    Tres detalles que parecen de fontaneria y son justo donde falla:
 
     1. La conexion es DEDICADA, no la sesion del analisis. Un advisory lock de
        sesion se suelta en la conexion que lo pidio, y la sesion del analyzer
@@ -2047,9 +2045,14 @@ def candado_de_job(job_id: str):
        en otra conexion y fallar en silencio.
     2. El motor es `NullPool`, para que cerrar cierre DE VERDAD. Con el pool
        normal, `close()` solo devuelve la conexion y la sesion de Postgres
-       sigue viva con el candado puesto — comprobado con un test: el job se
-       quedaba sin poder analizarse nunca mas. Asi, si el proceso revienta sin
-       soltarlo, el candado se va con la conexion.
+       sigue viva con el candado puesto.
+    3. UN SOLO `yield`, y el `except` del montaje no lo envuelve. La primera
+       version tenia el yield dentro de un try/except amplio: cuando el
+       analisis de dentro reventaba, la excepcion entraba por el yield, la
+       cazaba ese except y se cedia por segunda vez, asi que Python lanzaba
+       `generator didn't stop after throw()` y el error ORIGINAL desaparecia.
+       Medido: el analisis de un censo de 60.399 URLs fallo y el log solo
+       decia eso. Un candado no puede tragarse los errores de lo que protege.
 
     En SQLite no hay advisory locks: cede True sin serializar (los tests del
     analyzer corren ahi).
@@ -2060,32 +2063,38 @@ def candado_de_job(job_id: str):
     from shared.database import engine as motor_app
 
     motor = conexion = None
+    clave = _clave_candado(job_id)
+    es_postgres = False
+    tomado = True
     try:
         motor = create_engine(motor_app.url, poolclass=NullPool)
         conexion = motor.connect()
-        if not conexion.dialect.name.startswith("postgres"):
-            yield True
-            return
-        clave = _clave_candado(job_id)
-        if not conexion.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": clave}).scalar():
-            logger.warning(
-                "El job %s ya se esta analizando: se omite esta ejecucion para no "
-                "duplicar incidencias", job_id,
+        es_postgres = conexion.dialect.name.startswith("postgres")
+        if es_postgres:
+            tomado = bool(
+                conexion.execute(
+                    text("SELECT pg_try_advisory_lock(:k)"), {"k": clave}
+                ).scalar()
             )
-            yield False
-            return
-        try:
-            yield True
-        finally:
-            try:
-                conexion.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave})
-            except Exception:
-                pass  # al cerrar la conexion se suelta igual
+            if not tomado:
+                logger.warning(
+                    "El job %s ya se esta analizando: se omite esta ejecucion "
+                    "para no duplicar incidencias", job_id,
+                )
     except Exception:
         logger.debug("Sin candado disponible; el analisis sigue sin serializar")
-        yield True
+        tomado = True
+        es_postgres = False
+
+    try:
+        yield tomado
     finally:
         if conexion is not None:
+            if es_postgres and tomado:
+                try:
+                    conexion.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave})
+                except Exception:
+                    pass  # al cerrar la conexion se suelta igual
             conexion.close()
         if motor is not None:
             motor.dispose()
