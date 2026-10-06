@@ -1,13 +1,20 @@
-"""Unit tests for structured-data validation (``analysis.sd_validation``).
+"""Validacion de datos estructurados (``analysis.sd_validation``).
 
-Pins the conservative validation behaviour: missing ``@type`` is an error,
-missing a required property for a known rich-result type is a warning, and
-anything else (unknown types, odd shapes) is valid — no false positives.
+Criterio SEO que fija esta suite: faltar una propiedad OBLIGATORIA no es un
+aviso de estilo, es que la pagina **no sale como resultado enriquecido** —el
+marcado esta puesto y no sirve de nada—, asi que es `error`. Faltar una
+RECOMENDADA si es un aviso: sale, pero mas pobre (sin precio, sin estrellas,
+sin imagen). Antes los dos casos eran `warning` y la tabla pedia propiedades
+que no faltan nunca (`Product` solo pedia `name`), de modo que 459.510 bloques
+de un censo real salian todos "ok".
+
+Sigue siendo conservadora: tipo desconocido o forma rara, nunca se marca.
 """
 
 from __future__ import annotations
 
 from analysis.sd_validation import (
+    requisitos_de,
     sd_item_types,
     validate_sd_item,
     validate_structured_data,
@@ -21,55 +28,104 @@ def test_sd_item_types_variants():
     assert sd_item_types({"name": "x"}) == []
 
 
-def test_valid_product_is_ok():
-    assert validate_structured_data({"@type": "Product", "name": "Widget"}) == ("ok", [])
+def test_un_product_solo_con_nombre_no_es_resultado_enriquecido():
+    """El caso que antes salia "ok" y es el que de verdad falla en los sitios.
+
+    Google pide, ademas del nombre, al menos una de `offers`, `review` o
+    `aggregateRating`: sin precio, resena ni valoracion no hay ficha de
+    producto en el buscador.
+    """
+    estado, problemas = validate_structured_data({"@type": "Product", "name": "Widget"})
+    assert estado == "error"
+    assert any("offers" in p for p in problemas)
 
 
-def test_product_missing_name_is_warning():
-    status, issues = validate_structured_data({"@type": "Product", "image": "a.png"})
-    assert status == "warning"
-    assert any("name" in i for i in issues)
+def test_un_product_completo_si_lo_es():
+    estado, problemas = validate_structured_data({
+        "@type": "Product", "name": "Widget",
+        "offers": {"@type": "Offer", "price": "9.99"},
+        "image": "a.png", "brand": "Acme", "description": "d",
+    })
+    assert (estado, problemas) == ("ok", [])
 
 
-def test_missing_type_is_error():
-    status, issues = validate_structured_data({"name": "x"})
-    assert status == "error"
-    assert issues == ["missing @type"]
+def test_basta_una_del_grupo():
+    for propiedad in ("offers", "review", "aggregateRating"):
+        estado, _ = validate_structured_data({
+            "@type": "Product", "name": "W", propiedad: {"x": 1},
+            "image": "a.png", "brand": "b", "description": "d",
+        })
+        assert estado == "ok", f"{propiedad} deberia bastar"
 
 
-def test_unknown_type_is_ok():
-    # Types we don't have rules for must never be flagged.
+def test_falta_una_obligatoria_es_error_no_aviso():
+    estado, problemas = validate_structured_data({"@type": "Product", "image": "a.png"})
+    assert estado == "error"
+    assert any("name" in p and "obligatoria" in p for p in problemas)
+
+
+def test_solo_faltan_recomendadas_es_aviso():
+    """Sale como resultado enriquecido, pero mas pobre: eso es un warning."""
+    estado, problemas = validate_structured_data({"@type": "Article", "headline": "h"})
+    assert estado == "warning"
+    assert all("recomendada" in p for p in problemas)
+    assert any("image" in p for p in problemas)
+
+
+def test_sin_tipo_es_error():
+    estado, problemas = validate_structured_data({"name": "x"})
+    assert estado == "error"
+    assert problemas == ["sin @type: el bloque no identifica ninguna entidad"]
+
+
+def test_tipo_desconocido_nunca_se_marca():
     assert validate_structured_data({"@type": "WebPage", "foo": 1}) == ("ok", [])
 
 
-def test_graph_container_aggregates_children():
+def test_los_subtipos_heredan_los_requisitos():
+    # Un NewsArticle se valida como Article; un Restaurant, como LocalBusiness.
+    assert requisitos_de("NewsArticle") == requisitos_de("Article")
+    assert requisitos_de("Restaurant") == requisitos_de("LocalBusiness")
+    # Y con la URL completa de schema.org, que es como lo escriben muchos CMS.
+    assert requisitos_de("https://schema.org/BlogPosting") == requisitos_de("Article")
+    estado, problemas = validate_structured_data({"@type": "NewsArticle", "foo": 1})
+    assert estado == "error"
+    assert any("headline" in p for p in problemas)
+
+
+def test_el_grafo_agrega_a_sus_hijos_y_manda_el_peor():
     raw = {"@graph": [
-        {"@type": "Article", "headline": "h"},   # ok
-        {"@type": "Product"},                      # missing name -> warning
+        {"@type": "Article", "headline": "h", "image": "i", "datePublished": "d",
+         "author": "a", "dateModified": "m"},                       # ok
+        {"@type": "Product", "name": "p", "offers": {"price": 1},
+         "image": "i", "brand": "b"},                               # falta description
     ]}
-    status, issues = validate_structured_data(raw)
-    assert status == "warning"
-    assert any("Product" in i and "name" in i for i in issues)
+    estado, problemas = validate_structured_data(raw)
+    assert estado == "warning"
+    assert any("description" in p for p in problemas)
 
 
-def test_graph_with_missing_type_is_error():
-    raw = {"@graph": [{"@type": "Article", "headline": "h"}, {"name": "no type"}]}
-    status, _ = validate_structured_data(raw)
-    assert status == "error"
+def test_un_hijo_sin_tipo_hace_error_todo_el_bloque():
+    raw = {"@graph": [{"@type": "Article", "headline": "h"}, {"name": "sin tipo"}]}
+    estado, _ = validate_structured_data(raw)
+    assert estado == "error"
 
 
-def test_bare_list_of_items():
+def test_lista_suelta_de_entidades():
     raw = [{"@type": "Organization", "name": "Acme"}, {"@type": "Person", "name": "Ann"}]
-    assert validate_structured_data(raw) == ("ok", [])
+    estado, problemas = validate_structured_data(raw)
+    # Organization tiene recomendadas (url, logo...), Person no tiene ninguna.
+    assert estado == "warning"
+    assert all("Organization" in p for p in problemas)
 
 
-def test_non_dict_non_list_is_ok():
+def test_lo_que_no_es_dict_ni_lista_nunca_se_marca():
     assert validate_structured_data("nonsense") == ("ok", [])
     assert validate_structured_data(None) == ("ok", [])
 
 
-def test_multi_type_checks_each_known_type():
-    # Missing headline for the Article side of a multi-type node.
-    # validate_sd_item returns a flat list of problem strings.
-    issues = validate_sd_item({"@type": ["Article", "CreativeWork"], "name": "x"})
-    assert any("Article" in i and "headline" in i for i in issues)
+def test_en_un_nodo_multitipo_se_revisa_cada_tipo_conocido():
+    problemas = validate_sd_item({"@type": ["Article", "CreativeWork"], "name": "x"})
+    assert any("Article" in m and "headline" in m for _, m in problemas)
+    # CreativeWork no tiene reglas: no aporta problemas.
+    assert not any("CreativeWork" in m for _, m in problemas)
