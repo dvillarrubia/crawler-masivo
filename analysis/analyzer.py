@@ -1343,17 +1343,26 @@ class SEOAnalyzer:
     # -- Link Counts --------------------------------------------------------
 
     def compute_link_counts(self) -> None:
-        """Populate inlinks_count, outlinks_count, external_outlinks_count,
-        and unique_inlinks_count on the Url table using efficient SQL
-        aggregation queries.
+        """Rellena inlinks, unique_inlinks, outlinks y external_outlinks.
+
+        UNA sola lectura de `links`, no cuatro. La tabla guarda los enlaces de
+        TODOS los rastreos —46 GB y 181 millones de filas en produccion— y el
+        planificador la recorre entera para sacar los de un job: cuatro
+        agregados eran cuatro recorridos. Medido en el censo de penguin
+        (10,3 M enlaces del job), el analisis completo pasaba de 4 minutos a
+        mas de 25.
+
+        Ahora las aristas del job se materializan una vez en una temporal
+        —lo mismo que ya hacia `compute_pagerank` con `pr_edges_tmp`— y los
+        cuatro conteos salen de ahi, que es pequena y cabe en memoria.
         """
         logger.debug("Computing link counts ...")
 
-        # A cero antes de agregar. Los cuatro UPDATE de abajo solo tocan filas
-        # con coincidencia en su subconsulta, asi que una URL que perdio todos
-        # sus inlinks entre dos rastreos conservaba el conteo viejo: salia con
-        # 12 inlinks cuando ya no tenia ninguno, y por tanto no salia como
-        # huerfana. Un dato rancio que se lee como dato bueno.
+        # A cero antes de agregar. Los UPDATE de abajo solo tocan filas con
+        # coincidencia, asi que una URL que perdio todos sus inlinks entre dos
+        # rastreos conservaba el conteo viejo: salia con 12 inlinks cuando ya no
+        # tenia ninguno, y por tanto no salia como huerfana. Dato rancio que se
+        # lee como dato bueno.
         self.session.execute(
             update(Url)
             .where(Url.job_id == self.job_id)
@@ -1365,112 +1374,109 @@ class SEOAnalyzer:
             )
         )
 
-        # --- Inlinks: enlaces internos que apuntan a esta URL ---
+        # --- La unica lectura de `links` -----------------------------------
         #
-        # Criterio SEO: la pregunta es "esta enlazada desde el sitio". Un
-        # enlace de una pagina a si misma no responde a eso —ningun buscador
-        # lo lee como respaldo— y era ruido medible: 62.326 de los 2.342.192
-        # inlinks de blogs.uoc.edu (un 2,7%), concentrados ademas en las
-        # paginas con menu o migas que se enlazan a si mismas.
+        # Se resuelve aqui el id del DESTINO (no solo su hash) para que los
+        # agregados de abajo no tengan que volver a `urls` ni filtrar por job:
+        # la temporal ya solo tiene las aristas de este rastreo.
         #
-        # Los `nofollow` SI cuentan aqui, a proposito: la pagina esta enlazada
-        # (es alcanzable, no es huerfana), solo que sin respaldo. Quien quiera
-        # autoridad mira el PageRank, que construye su propio grafo y excluye
-        # los nofollow. Son dos preguntas distintas y no caben en un entero.
+        # Criterio SEO de lo que entra:
         #
-        # Lo que NO cuenta es un enlace desde una pagina `noindex` (C3 de #24,
-        # criterio SEO decidido el 7-oct-2026). Google acaba tratando los
-        # enlaces de una noindex como nofollow, asi que una pagina cuyos unicos
-        # enlaces vienen de ahi no esta enlazada a efectos de buscador: esta
-        # colgando de paginas que el buscador va a dejar de rastrear. Decirlo
-        # es el hallazgo; contarla como enlazada lo tapaba.
-        # `isnot(True)` y no `is_(False)`: si no se sabe (NULL, porque el
-        # analisis de indexabilidad no llego a esa fila) el enlace cuenta. No
-        # se descarta dato por desconocimiento.
+        # - Un enlace de una pagina a SI MISMA no dice que este enlazada. Eran
+        #   62.326 de los 2.342.192 inlinks de blogs.uoc.edu, concentrados en
+        #   las paginas con menu o migas que se enlazan a si mismas.
+        # - Un enlace desde una pagina `noindex` tampoco cuenta (C3 de #24):
+        #   Google acaba tratandolos como nofollow, asi que una pagina que solo
+        #   cuelga de noindex no esta enlazada a efectos de buscador.
+        # - Los `nofollow` SI cuentan: la pagina esta enlazada, solo que sin
+        #   respaldo. La autoridad se mira en el PageRank, que lleva su propio
+        #   grafo. Son dos preguntas distintas y no caben en un entero.
+        #
+        # Se construye con tipos de SQLAlchemy y no con SQL a mano: el `job_id`
+        # es un UUID y comparado como cadena no liga igual en todos los
+        # motores, asi que la primera version de esto no actualizaba ni una
+        # fila en los tests contra SQLite.
+        from sqlalchemy import BigInteger, Boolean, Column, MetaData, Table, insert
+
+        self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
+        aristas = Table(
+            "aristas_tmp", MetaData(),
+            Column("destino_id", BigInteger),
+            Column("origen_id", BigInteger),
+            Column("es_interno", Boolean),
+            Column("origen_cuenta", Boolean),
+            prefixes=["TEMPORARY"],
+        )
+        aristas.create(self.session.connection())
+
         origen = aliased(Url)
-        inlinks_subq = (
-            select(
-                Url.id.label("url_id"),
-                func.count(Link.id).label("inlinks"),
+        destino = aliased(Url)
+        self.session.execute(
+            insert(aristas).from_select(
+                ["destino_id", "origen_id", "es_interno", "origen_cuenta"],
+                select(
+                    destino.id, Link.from_url_id, Link.is_internal,
+                    origen.noindex.isnot(True),
+                )
+                .join(origen, origen.id == Link.from_url_id)
+                .outerjoin(destino, and_(
+                    destino.url_hash == Link.to_url_hash,
+                    destino.job_id == Link.job_id,
+                ))
+                .where(Link.job_id == self.job_id),
             )
-            .join(Link, and_(
-                Link.to_url_hash == Url.url_hash,
-                Link.job_id == Url.job_id,
-                Link.from_url_id != Url.id,
-            ))
-            .join(origen, origen.id == Link.from_url_id)
-            .where(Url.job_id == self.job_id, origen.noindex.isnot(True))
-            .group_by(Url.id)
-        ).subquery()
+        )
+        self.session.execute(text(
+            "CREATE INDEX ix_aristas_tmp_destino ON aristas_tmp (destino_id)"
+        ))
+        self.session.execute(text(
+            "CREATE INDEX ix_aristas_tmp_origen ON aristas_tmp (origen_id)"
+        ))
 
+        # --- Salientes: internos y externos, de una pasada sobre la temporal -
+        salientes = (
+            select(
+                aristas.c.origen_id.label("url_id"),
+                func.count().filter(aristas.c.es_interno).label("internos"),
+                func.count().filter(~aristas.c.es_interno).label("externos"),
+            )
+            .group_by(aristas.c.origen_id)
+            .subquery()
+        )
         self.session.execute(
             update(Url)
-            .where(Url.id == inlinks_subq.c.url_id)
-            .values(inlinks_count=inlinks_subq.c.inlinks)
+            .where(Url.id == salientes.c.url_id)
+            .values(
+                outlinks_count=salientes.c.internos,
+                external_outlinks_count=salientes.c.externos,
+            )
         )
 
-        # --- Unique inlinks: count of DISTINCT from_url_id in Link where to_url_hash matches ---
-        unique_inlinks_subq = (
+        # --- Entrantes: totales y origenes distintos, otra pasada ------------
+        entrantes = (
             select(
-                Url.id.label("url_id"),
-                func.count(func.distinct(Link.from_url_id)).label("unique_inlinks"),
+                aristas.c.destino_id.label("url_id"),
+                func.count().label("entrantes"),
+                func.count(func.distinct(aristas.c.origen_id)).label("origenes"),
             )
-            .join(Link, and_(
-                Link.to_url_hash == Url.url_hash,
-                Link.job_id == Url.job_id,
-                Link.from_url_id != Url.id,
-            ))
-            .join(origen, origen.id == Link.from_url_id)
-            .where(Url.job_id == self.job_id, origen.noindex.isnot(True))
-            .group_by(Url.id)
-        ).subquery()
-
-        self.session.execute(
-            update(Url)
-            .where(Url.id == unique_inlinks_subq.c.url_id)
-            .values(unique_inlinks_count=unique_inlinks_subq.c.unique_inlinks)
-        )
-
-        # --- Internal outlinks: count of Link rows where from_url_id = url.id AND is_internal=True ---
-        outlinks_subq = (
-            select(
-                Link.from_url_id.label("url_id"),
-                func.count(Link.id).label("outlinks"),
-            )
-            .join(Url, Url.id == Link.from_url_id)
             .where(
-                Url.job_id == self.job_id,
-                Link.is_internal.is_(True),
+                aristas.c.origen_cuenta,
+                aristas.c.destino_id.isnot(None),
+                aristas.c.origen_id != aristas.c.destino_id,
             )
-            .group_by(Link.from_url_id)
-        ).subquery()
-
+            .group_by(aristas.c.destino_id)
+            .subquery()
+        )
         self.session.execute(
             update(Url)
-            .where(Url.id == outlinks_subq.c.url_id)
-            .values(outlinks_count=outlinks_subq.c.outlinks)
+            .where(Url.id == entrantes.c.url_id)
+            .values(
+                inlinks_count=entrantes.c.entrantes,
+                unique_inlinks_count=entrantes.c.origenes,
+            )
         )
 
-        # --- External outlinks: count of Link rows where from_url_id = url.id AND is_internal=False ---
-        ext_outlinks_subq = (
-            select(
-                Link.from_url_id.label("url_id"),
-                func.count(Link.id).label("ext_outlinks"),
-            )
-            .join(Url, Url.id == Link.from_url_id)
-            .where(
-                Url.job_id == self.job_id,
-                Link.is_internal.is_(False),
-            )
-            .group_by(Link.from_url_id)
-        ).subquery()
-
-        self.session.execute(
-            update(Url)
-            .where(Url.id == ext_outlinks_subq.c.url_id)
-            .values(external_outlinks_count=ext_outlinks_subq.c.ext_outlinks)
-        )
-
+        self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         self.session.flush()
 
     # -- PageRank -----------------------------------------------------------
