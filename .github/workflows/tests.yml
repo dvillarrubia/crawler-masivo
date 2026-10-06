@@ -14,6 +14,12 @@ jobs:
     name: Suite del crawler (extractores, spider, analisis)
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
       postgres:
         image: postgres:16-alpine
         env:
@@ -46,6 +52,10 @@ jobs:
         # cabecera del test lo advierte porque borra y escribe.
         env:
           PAGERANK_TEST_DATABASE_URL: postgresql+psycopg2://crawler:crawler@localhost:5432/crawler_test
+          # Destapa el test de la cola contra Redis de verdad: lo demas usa un
+          # doble, y el fallo (rpush+brpop es una pila) estaba justo en la
+          # semantica real.
+          REDIS_TEST_URL: redis://localhost:6379/9
         run: python -m pytest -q -rs --durations=5
 
   api:

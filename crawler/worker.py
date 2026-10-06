@@ -37,6 +37,9 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# Despues de arreglar sys.path, no antes.
+from shared.cola import COLA_JOBS, encolar, siguiente  # noqa: E402
+
 # Nivel configurable por entorno. La salida de Scrapy se registra en DEBUG, y
 # como el subproceso no escribe en el stdout del worker, con INFO no habia
 # forma de diagnosticar un crawl raro sin tocar codigo: LOG_LEVEL=DEBUG lo
@@ -54,7 +57,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
 BRPOP_TIMEOUT = int(os.getenv("BRPOP_TIMEOUT", "5"))
 STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
-JOBS_QUEUE = "jobs:pending"
+# El nombre y el orden de la cola viven en shared/cola.py: estaban
+# escritos a mano en cinco sitios y el orden salia al reves.
+JOBS_QUEUE = COLA_JOBS
 
 # Path to the crawler directory (where scrapy.cfg lives)
 _CRAWLER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -249,7 +254,7 @@ def _reencolar_tras_estancamiento(job_id: str, motivo: str) -> bool:
     finally:
         session.close()
     try:
-        rc.rpush(JOBS_QUEUE, job_id)
+        encolar(rc, job_id)
     except Exception:
         logger.exception("Job %s: no se pudo encolar en Redis", job_id)
         return False
@@ -289,7 +294,7 @@ def _reencolar_si_pedido(job_id: str) -> bool:
     finally:
         session.close()
     try:
-        rc.rpush(JOBS_QUEUE, job_id)
+        encolar(rc, job_id)
     except Exception:
         logger.exception("Job %s: no se pudo encolar en Redis", job_id)
         return False
@@ -330,6 +335,8 @@ def _run_job(job_id: str) -> None:
     timed_out = False
     stalled = False
     sin_guardar = False
+    # Motivo de un rastreo con CERO URLs ("sin_urls" / "robots_bloquea_todo").
+    razon_cero = ""
     analisis_ok = True
     max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 72)), 720))
     # 0 = sin vigilancia. Por defecto 30 min: el latido se estampa cada 50
@@ -528,6 +535,23 @@ def _run_job(job_id: str) -> None:
                 )
                 final_status = "failed"
                 sin_guardar = True
+            elif not guardadas:
+                # Cero rastreadas y cero guardadas: el rastreo no llego a
+                # empezar. Scrapy termina con codigo 0 —no ha "fallado"— y el
+                # job quedaba `completed` con 0 URLs, que es exactamente como
+                # se lee un sitio vacio y limpio. El caso tipico es un
+                # robots.txt con `Disallow: /` y `robots_mode=respect`: la
+                # semilla se descarta con IgnoreRequest y no queda ni rastro.
+                # Con la comparacion entre censos (#32) esto declararia
+                # desaparecido el sitio entero.
+                final_status = "failed"
+                sin_guardar = True
+                razon_cero = _por_que_cero_urls(job_id)
+                logger.error(
+                    "Job %s: termino con CERO URLs (%s). Se marca como fallido: "
+                    "un rastreo vacio no es un sitio limpio",
+                    job_id, razon_cero,
+                )
 
     except EstancadoError as exc:
         # Un estancamiento casi siempre es el navegador (Playwright) que se ha
@@ -621,7 +645,8 @@ def _run_job(job_id: str) -> None:
             # OJO con el orden: el timeout manda. Antes se ponia "finished"
             # por defecto, asi que un rastreo cortado por tiempo afirmaba haber
             # agotado la frontera teniendo 1.051 URLs pendientes.
-            motivo = ("persistence_failed" if sin_guardar
+            motivo = (razon_cero if razon_cero
+                      else "persistence_failed" if sin_guardar
                       else "stalled" if stalled
                       else "max_runtime_reached" if timed_out
                       else "finished")
@@ -764,6 +789,22 @@ def _trigger_analysis(job_id: str) -> bool:
     return True
 
 
+def _por_que_cero_urls(job_id: str) -> str:
+    """Motivo para `finish_reason` cuando un rastreo acaba sin una sola URL.
+
+    Distinguir "robots.txt lo bloquea todo" de "no se sabe" importa: lo
+    primero es un hallazgo que se cuenta al cliente en una frase, y lo segundo
+    hay que mirarlo.
+    """
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        if rc.get(f"job:{job_id}:robots_bloquea_semillas"):
+            return "robots_bloquea_todo"
+    except Exception:
+        pass
+    return "sin_urls"
+
+
 def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int]:
     """URLs que el spider dice haber rastreado y filas que hay en `urls`."""
     from shared.database import SessionLocal
@@ -889,7 +930,7 @@ def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
         session.commit()
 
         for job in stale:
-            rconn.rpush(JOBS_QUEUE, str(job.id))
+            encolar(rconn, job.id)
 
         if stale:
             logger.info("Recovered %d stale job(s)", len(stale))
@@ -960,15 +1001,14 @@ def main() -> None:
             # exits, the container restarts, and any in-flight crawl is killed
             # in a crash loop. Swallow them and keep polling.
             try:
-                result = rconn.brpop(JOBS_QUEUE, timeout=BRPOP_TIMEOUT)
+                job_id = siguiente(rconn, timeout=BRPOP_TIMEOUT)
             except (redis_lib.exceptions.TimeoutError, redis_lib.exceptions.ConnectionError) as exc:
                 logger.warning("Redis poll error (%s); retrying", exc)
                 time.sleep(1)
                 continue
-            if result is None:
+            if job_id is None:
                 continue
 
-            _, job_id = result
             job_id = job_id.strip()
             if not job_id:
                 continue

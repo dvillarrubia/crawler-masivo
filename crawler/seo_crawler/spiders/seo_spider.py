@@ -1661,6 +1661,19 @@ class SeoSpider(scrapy.Spider):
             # del informe: nadie sabia que redirigia a algo prohibido. Se
             # registran los saltos con su codigo; el destino bloqueado no se
             # pide ni se guarda.
+            # Si lo que robots.txt tumba es una SEMILLA, el rastreo no va a
+            # empezar: se deja la marca para que el worker pueda decir por que
+            # el job acabo con cero URLs en vez de darlo por completado (#37).
+            if _safe_normalize(url) in getattr(self, "_seed_keys", set()):
+                logger.warning(
+                    "robots.txt prohibe la semilla %s: el rastreo no puede empezar", url,
+                )
+                if self._redis is not None:
+                    try:
+                        self._redis.set(f"job:{self.job_id}:robots_bloquea_semillas", 1)
+                    except Exception:
+                        pass
+
             redirect_urls = request.meta.get("redirect_urls") or []
             if redirect_urls:
                 reasons = request.meta.get("redirect_reasons") or []

@@ -348,6 +348,34 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    mata el Scrapy que lleva `stall_timeout_minutes` sin latido y lo vuelve a
    encolar hasta `STALL_AUTO_RESUME` veces (def. 3); el spider retoma desde la
    frontera guardada en BD. Solo al agotar los intentos se cierra como `stalled`.
+31. **La cola de rastreos es una cola, no una pila** — `rpush` + `brpop`
+   trabajan sobre el MISMO extremo de la lista, asi que el ultimo job creado
+   adelantaba a todos y lo recuperado tras un reinicio se ponia delante de lo
+   que llevaba horas esperando. No se habia notado porque en el uso normal hay
+   un job a la vez. El nombre de la cola estaba escrito a mano en cinco
+   sitios; ahora el orden y el nombre viven en `shared/cola.py` (`encolar` /
+   `siguiente`, FIFO con `rpush` + `blpop`) y el FIFO vale para TODO, tambien
+   para reanudaciones y recuperaciones: adelantarlas significaria que un job
+   que se atasca y se reencola hasta `STALL_AUTO_RESUME` veces pisa
+   indefinidamente a los que esperan.
+
+32. **Un rastreo con cero URLs no es un sitio limpio** — con `Disallow: /` y
+   `robots_mode=respect`, Scrapy descarta la semilla con `IgnoreRequest`,
+   `handle_error` no registraba nada y Scrapy terminaba con codigo 0: el job
+   quedaba `completed` con 0 URLs, que se lee igual que un sitio vacio y en
+   orden (y con la comparacion entre censos de #32 declararia desaparecido el
+   sitio entero). Ahora es `failed`, y el motivo distingue
+   `robots_bloquea_todo` —un hallazgo que se cuenta en una frase— de
+   `sin_urls`, que hay que mirar. El spider deja la marca en Redis cuando lo
+   prohibido es una SEMILLA.
+
+33. **Pydantic v2 tira en silencio lo que no esta declarado** — el formulario
+   enviaba `use_sitemap`, `JobConfig` no lo declaraba y el spider leia
+   `job_config.get("use_sitemap", True)`: desmarcar la casilla no tenia NINGUN
+   efecto y nadie se enteraba. Le pasa a cualquier clave nueva. Hay un test
+   que se mantiene solo (`test_jobconfig_claves.py`): saca por regex las
+   claves que lee el spider —hoy 14— y falla si alguna no esta en el schema.
+
 16. **El log de Scrapy va a fichero, en vivo** — `-s LOG_FILE=$SCRAPY_LOG_DIR/<job>.log`
    (def. `/tmp/scrapy-logs`, dentro del contenedor, modo append). Antes solo
    existía en memoria hasta que el proceso acababa. Al matar un rastreo se
