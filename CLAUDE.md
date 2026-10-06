@@ -371,6 +371,23 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
    calculo no abre el endpoint del job.
 
+41. **Los conteos de enlaces leen `links` UNA vez, no cuatro** (#52) — la
+   tabla guarda los enlaces de TODOS los rastreos (46 GB y 181.695.835 filas en
+   produccion) y el planificador la recorre entera para sacar los de un job:
+   cuatro agregados eran cuatro recorridos. Ahora las aristas del censo se
+   materializan una vez en una temporal —lo mismo que ya hacia
+   `compute_pagerank`— con el id del DESTINO ya resuelto, asi que los conteos
+   no vuelven a `urls` ni filtran por job. Medido en penguin (10,3 M enlaces
+   del job): **400,8 s -> 57,0 s, siete veces**, y las tres cifras de control
+   (6.227.726 inlinks, 19.495 paginas sin entrantes, 9.600.373 outlinks) salen
+   IDENTICAS: es una optimizacion, no un cambio de criterio disfrazado.
+
+   La temporal se construye con tipos de SQLAlchemy y no con SQL a mano: el
+   `job_id` es un UUID y comparado como cadena no liga igual en todos los
+   motores — la primera version no actualizaba ni una fila en los tests contra
+   SQLite. Los indices de la temporal van con nombre, porque
+   `CREATE INDEX ON tabla (col)` es sintaxis solo de Postgres.
+
 39. **Una sola funcion de indexabilidad, en `shared/`** (#26) — el spider y el
    analyzer repetian las reglas y discrepaban: 1.254 paginas de un censo eran
    "Canonicalised" para uno e "Indexable" para el otro. `shared/indexabilidad.py`
