@@ -622,6 +622,39 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    dos rastreos). Los rastreos anteriores a la columna caen a `body_hash` con un
    aviso en el log.
 
+48. **Lo que robots.txt prohíbe existe, y el modo auditoría estaba muerto** —
+   las URLs que el sitio enlaza y robots.txt bloquea no llegaban a la base de
+   datos: el `IgnoreRequest` se descartaba y la URL no aparecía en ningún
+   informe, ni bloqueada ni enlazada. Google las lista en Search Console y
+   Screaming Frog también: o el bloqueo es un error sobre contenido que debería
+   posicionar, o es intencionado y entonces son enlaces internos gastando
+   presupuesto de rastreo. Ahora se guardan con `status_code` NULL (no se
+   pidieron; un 0 en el CSV se lee como «respondió 0»), `status_group="blocked"`
+   e `indexability_status="Blocked by robots.txt"`, y el worker distingue
+   «filas» de «filas con respuesta» para que un `Disallow: /` siga sin pasar por
+   un rastreo correcto (#37). Y el modo `audit` no funcionaba en absoluto:
+   `RobotsAuditMiddleware` replicaba a ojo el `__init__` del middleware de
+   Scrapy y se dejaba `self._stats`, así que la **primera** petición moría con
+   `AttributeError`, el rastreo se quedaba a cero páginas y el vigilante lo
+   mataba por estancamiento media hora después. Hay un test que compara los dos
+   conjuntos de atributos, de modo que si una versión de Scrapy añade otro lo
+   canta el test y no un rastreo de 40 minutos.
+
+49. **El alcance del rastreo va por la Public Suffix List, y una `<base href>`
+   no navegable se ignora** — `crawl_subdomains` tomaba como raíz las dos
+   últimas etiquetas del host, así que para una semilla `.co.uk` la raíz era
+   `co.uk` y **cualquier** sitio `.co.uk` entraba en el rastreo y en el informe
+   del cliente. Ahora `dominio_registrable()` usa la PSL con `tldextract`, que
+   ya viene con Scrapy, sin red (`suffix_list_urls=()`) y con los sufijos
+   privados activados, de modo que `usuario.github.io` y `cliente.myshopify.com`
+   son sitios distintos y `localhost`/`127.0.0.1` se devuelven tal cual.
+   Y una `<base href="javascript:void(0)">` —común en portales antiguos y en
+   SPA— dejaba TODOS los enlaces relativos de esa página sin resolver, marcados
+   como externos y sin rastrear: el grafo interno de esas páginas desaparecía.
+   Comprobado en Chromium: el navegador ignora una base `javascript:` o `data:`
+   y mantiene la URL del documento, así que es exactamente lo que se hace ahora
+   (solo se acepta una base que resuelva a http/https).
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

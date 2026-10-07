@@ -525,7 +525,7 @@ def _run_job(job_id: str) -> None:
             # (una columna que falta, la BD caida a mitad), Scrapy termina con
             # codigo 0 y el job quedaba `completed` con cero filas. Medido: un
             # censo de 289 URLs rastreadas y 0 guardadas, sin un solo aviso.
-            rastreadas, guardadas = _rastreadas_y_guardadas(job_id)
+            rastreadas, guardadas, recuperadas = _rastreadas_y_guardadas(job_id)
             if rastreadas and not guardadas:
                 logger.error(
                     "Job %s: se rastrearon %d URLs y no se guardo NINGUNA. El "
@@ -535,13 +535,15 @@ def _run_job(job_id: str) -> None:
                 )
                 final_status = "failed"
                 sin_guardar = True
-            elif not guardadas:
+            elif not recuperadas:
                 # Cero rastreadas y cero guardadas: el rastreo no llego a
                 # empezar. Scrapy termina con codigo 0 —no ha "fallado"— y el
                 # job quedaba `completed` con 0 URLs, que es exactamente como
                 # se lee un sitio vacio y limpio. El caso tipico es un
                 # robots.txt con `Disallow: /` y `robots_mode=respect`: la
-                # semilla se descarta con IgnoreRequest y no queda ni rastro.
+                # semilla se descarta con IgnoreRequest. Ahora la fila SI queda
+                # (marcada "Blocked by robots.txt"), pero sin respuesta: por eso
+                # la condicion mira `recuperadas` y no las filas a secas.
                 # Con la comparacion entre censos (#32) esto declararia
                 # desaparecido el sitio entero.
                 final_status = "failed"
@@ -805,8 +807,15 @@ def _por_que_cero_urls(job_id: str) -> str:
     return "sin_urls"
 
 
-def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int]:
-    """URLs que el spider dice haber rastreado y filas que hay en `urls`."""
+def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int, int]:
+    """Rastreadas segun el spider, filas en `urls`, y filas con respuesta.
+
+    `recuperadas` cuenta solo las filas con `status_code`: las que robots.txt
+    bloquea se guardan (es un hallazgo, no un hueco) pero no se piden, asi que
+    un sitio con `Disallow: /` deja filas y ninguna respuesta. Sin esa
+    distincion, guardar la semilla bloqueada hacia pasar por "rastreo correcto"
+    justo el caso que #37 queria no confundir con un sitio limpio.
+    """
     from shared.database import SessionLocal
     from shared.models import Url
 
@@ -819,12 +828,18 @@ def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int]:
     session = SessionLocal()
     try:
         guardadas = session.query(Url.id).filter(Url.job_id == job_id).limit(1).count()
+        recuperadas = (
+            session.query(Url.id)
+            .filter(Url.job_id == job_id, Url.status_code.isnot(None))
+            .limit(1)
+            .count()
+        )
     except Exception:
         # Si ni siquiera se puede contar, no se afirma nada: se deja pasar.
-        guardadas = 1
+        guardadas = recuperadas = 1
     finally:
         session.close()
-    return rastreadas, guardadas
+    return rastreadas, guardadas, recuperadas
 
 
 _LINEA_DE_LOG = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")

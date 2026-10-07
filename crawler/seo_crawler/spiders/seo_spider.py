@@ -54,6 +54,7 @@ from seo_crawler.extractors import (
     extract_word_count,
     http_status_text,
     is_internal_url,
+    dominio_registrable,
     normalize_host,
     normalize_url,
     robots_tokens,
@@ -513,11 +514,12 @@ class SeoSpider(scrapy.Spider):
 
             # -- Subdomain crawling: expand allowed hosts --
             if self._crawl_subdomains:
-                self._root_domains: set[str] = set()
-                for host in list(self.allowed_hosts):
-                    parts = host.split(".")
-                    if len(parts) >= 2:
-                        self._root_domains.add(".".join(parts[-2:]))
+                # Por la Public Suffix List, no por las dos ultimas etiquetas:
+                # `www.competidor.co.uk` daba raiz `co.uk` y cualquier sitio
+                # `.co.uk` entraba en el rastreo y en el informe del cliente.
+                self._root_domains: set[str] = {
+                    dominio_registrable(host) for host in self.allowed_hosts
+                } - {""}
 
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
@@ -1747,6 +1749,34 @@ class SeoSpider(scrapy.Spider):
                         self._redis.set(f"job:{self.job_id}:robots_bloquea_semillas", 1)
                     except Exception:
                         pass
+
+            # La URL bloqueada SI se guarda, como hace Screaming Frog. No se
+            # pide —robots.txt se respeta— pero existe, el sitio la enlaza y el
+            # cliente necesita la lista: o es un bloqueo por error sobre
+            # contenido que deberia posicionar, o es intencionado y entonces son
+            # enlaces internos gastando presupuesto de rastreo. Antes el
+            # IgnoreRequest se descartaba aqui y la URL no aparecia en ningun
+            # informe: ni bloqueada, ni enlazada, ni nada.
+            # status_code va NULL a proposito: no se llego a pedir, y un 0 en el
+            # CSV se lee como "respondio 0".
+            if self._is_internal(url) and not request.meta.get("es_robots_txt"):
+                self._crawled_count += 1
+                yield PageItem(
+                    url=url, url_hash=url_hash,
+                    host=parsed.hostname or "", path=parsed.path or "/",
+                    scheme=parsed.scheme or "https",
+                    is_internal=True, crawl_depth=depth,
+                    content_type=None, content_length=None,
+                    status_code=None, status_group="blocked",
+                    response_time_ms=None, is_html=False, resource_type="blocked",
+                    redirect_url=None, body_hash=None, job_id=self.job_id,
+                    url_length=len(url), folder_depth=compute_folder_depth(url),
+                    word_count=None, text_ratio=None, redirect_type=None,
+                    status_text="Blocked by robots.txt", last_modified=None,
+                    http_version=None, transfer_size=None,
+                    indexability_status="Blocked by robots.txt",
+                    blocked_by_robots=True,
+                )
 
             redirect_urls = request.meta.get("redirect_urls") or []
             if redirect_urls:

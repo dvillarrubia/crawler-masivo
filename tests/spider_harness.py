@@ -60,7 +60,7 @@ def _html(cuerpo: str, head: str = "") -> bytes:
     ).encode("utf-8")
 
 
-def construir_sitio(port: int) -> dict:
+def construir_sitio(port: int, con_privado: bool = False) -> dict:
     otro = f"http://127.0.0.1:{port}"
     return {
         # Semilla en localhost que redirige a otro host (127.0.0.1)
@@ -71,7 +71,9 @@ def construir_sitio(port: int) -> dict:
             '<a href="/mr">meta refresh</a>'
             '<a href="/bad">malformado</a>'
             '<a href="/tag/x">excluida</a>'
-            '<a href="/rel">rel con comas</a>',
+            '<a href="/rel">rel con comas</a>'
+            + ('<a href="/privado/x">privada por robots</a>'
+               '<a href="/publica-tras-privada">publica</a>' if con_privado else ''),
             f'<link rel="canonical" href="{otro}/home">',
         )),
         "/a": (200, {}, _html("<p>a</p>")),
@@ -98,10 +100,13 @@ def construir_sitio(port: int) -> dict:
         ).encode()),
         "/solo-sitemap": (200, {}, _html('<a href="/nivel2">n2</a>')),
         "/nivel2": (200, {}, _html("<p>n2</p>")),
+        "/privado/x": (200, {}, _html("<p>no deberia pedirse en modo respect</p>")),
+        "/publica-tras-privada": (200, {}, _html("<p>si</p>")),
     }
 
 
-def servir(robots_prohibe_todo: bool = False) -> tuple[ThreadingHTTPServer, int]:
+def servir(robots_prohibe_todo: bool = False,
+           robots_bloquea_privado: bool = False) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -120,7 +125,14 @@ def servir(robots_prohibe_todo: bool = False) -> tuple[ThreadingHTTPServer, int]
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
-    rutas.update(construir_sitio(port))
+    rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado))
+    if robots_bloquea_privado:
+        # Un robots.txt que prohibe una carpeta concreta: el caso del informe
+        # "Blocked by robots.txt" (R6 de #25). La URL la enlaza /home.
+        rutas["/robots.txt"] = (
+            200, {"Content-Type": "text/plain"},
+            b"User-agent: *\nDisallow: /privado/\n",
+        )
     if robots_prohibe_todo:
         # Un robots.txt que lo prohibe todo: el caso que acababa como un job
         # "completado" con cero URLs, indistinguible de un sitio limpio (#37).
@@ -177,7 +189,8 @@ class Recolector:
 
 def main() -> None:
     entrada = json.loads(sys.argv[1])
-    srv, port = servir(entrada.get("robots_prohibe_todo", False))
+    srv, port = servir(entrada.get("robots_prohibe_todo", False),
+                       entrada.get("robots_bloquea_privado", False))
 
     import shared.database
     from scrapy.crawler import CrawlerProcess
@@ -210,7 +223,13 @@ def main() -> None:
         "TELNETCONSOLE_ENABLED": False,
         # Por defecto apagado para que el sitio de pruebas se rastree entero;
         # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
-        "ROBOTSTXT_OBEY": entrada.get("robots_prohibe_todo", False),
+        "ROBOTSTXT_OBEY": bool(
+            entrada.get("robots_prohibe_todo") or entrada.get("robots_bloquea_privado")
+        ) and entrada.get("robots_mode") != "audit",
+        "ROBOTS_MODE": entrada.get("robots_mode", "respect"),
+        "DOWNLOADER_MIDDLEWARES": {
+            "seo_crawler.middlewares.RobotsAuditMiddleware": 100,
+        },
         "HTTPERROR_ALLOW_ALL": True,
         "DEPTH_PRIORITY": 1,
         "REQUEST_FINGERPRINTER_IMPLEMENTATION": "2.7",
@@ -231,6 +250,7 @@ def main() -> None:
         fila = {k: v for k, v in it.items() if k in (
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
+            "blocked_by_robots", "status_group",
         )}
         for k in ("url", "redirect_url", "to_url"):
             if fila.get(k):

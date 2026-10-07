@@ -646,3 +646,48 @@ def test_hash_de_contenido_ignora_espacios_y_caja():
     assert a != ex.hash_de_contenido("Politica de privacidad. Otro texto.")
     assert ex.hash_de_contenido(None) is None
     assert ex.hash_de_contenido("   ") is None
+
+
+# ---------------------------------------------------------------------------
+# Alcance del rastreo: Public Suffix List y <base href> roto (#25)
+# ---------------------------------------------------------------------------
+def test_dominio_registrable_usa_la_public_suffix_list():
+    """Cortar por las dos ultimas etiquetas daba `co.uk` como raiz, asi que
+    cualquier sitio `.co.uk` salia interno para una semilla `.co.uk`: el rastreo
+    se metia en la competencia y sus paginas entraban en el informe."""
+    assert ex.dominio_registrable("www.competidor.co.uk") == "competidor.co.uk"
+    assert ex.dominio_registrable("tienda.cliente.com.au") == "cliente.com.au"
+    assert ex.dominio_registrable("blogs.uoc.edu") == "uoc.edu"
+    assert ex.dominio_registrable("www.x.com") == "x.com"
+    # `notx.com` no es un subdominio de `x.com`
+    assert ex.dominio_registrable("notx.com") == "notx.com"
+    # Sufijos privados: dos usuarios de github.io son dos sitios distintos
+    assert ex.dominio_registrable("usuario.github.io") == "usuario.github.io"
+    # Hosts sin sufijo publico: tal cual (los usan los tests y las redes internas)
+    assert ex.dominio_registrable("localhost") == "localhost"
+    assert ex.dominio_registrable("127.0.0.1") == "127.0.0.1"
+    assert ex.dominio_registrable("") == ""
+
+
+def test_una_base_href_no_navegable_se_ignora():
+    """Comprobado en Chromium: con `javascript:` o `data:` la base se ignora y
+    sigue siendo la URL del documento; con `mailto:` el navegador deja los
+    enlaces sin resolver, o sea roto para todos. Antes se aceptaba cualquier
+    cosa y en esas plantillas TODOS los enlaces relativos salian externos y sin
+    rastrear: el grafo interno de la pagina desaparecia."""
+    for base in ("javascript:void(0)", "mailto:x@y.com", "data:text/html,x"):
+        s = sel(f"<html><head><base href='{base}'></head><body>"
+                "<a href='/pagina'>p</a></body></html>")
+        assert ex.effective_base_url(s, "https://x.com/seccion/") == "https://x.com/seccion/"
+        enlace = ex.extract_links(s, ex.effective_base_url(s, "https://x.com/seccion/"),
+                                  {"x.com"})[0]
+        assert enlace["url"] == "https://x.com/pagina"
+        assert enlace["is_internal"] is True
+
+
+def test_una_base_href_valida_se_respeta():
+    for base, esperada in (("/es/", "https://x.com/es/"),
+                           ("https://otro.com/", "https://otro.com/"),
+                           ("//cdn.x.com/", "https://cdn.x.com/")):
+        s = sel(f"<html><head><base href='{base}'></head><body></body></html>")
+        assert ex.effective_base_url(s, "https://x.com/seccion/") == esperada

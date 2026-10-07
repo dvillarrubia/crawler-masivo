@@ -33,11 +33,16 @@ def _rastrear(**extra):
     return items, proc.stdout + proc.stderr
 
 
-def test_con_disallow_total_no_se_guarda_ninguna_pagina():
+def test_con_disallow_total_solo_queda_la_semilla_bloqueada():
+    """La semilla bloqueada SI se guarda —es el hallazgo— pero sin respuesta:
+    `status_code` NULL. El worker mira eso y no las filas a secas, asi que el
+    job sigue sin pasar por un rastreo correcto (#37)."""
     items, salida = _rastrear(robots_prohibe_todo=True, config={"max_depth": 1,
                                                                 "robots_mode": "respect"})
     paginas = [i for i in items if i["_tipo"] == "PageItem"]
-    assert paginas == [], "robots.txt prohibe todo: no deberia guardarse nada"
+    assert [p["indexability_status"] for p in paginas] == ["Blocked by robots.txt"]
+    assert paginas[0]["status_code"] is None
+    assert paginas[0]["blocked_by_robots"] is True
     # Y el spider lo dice, que es lo que permite al worker distinguir
     # "robots lo bloquea todo" de "no se sabe por que".
     assert "robots.txt prohibe la semilla" in salida
