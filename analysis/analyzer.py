@@ -1635,6 +1635,11 @@ class SEOAnalyzer:
         # - Un enlace desde una pagina `noindex` tampoco cuenta (C3 de #24):
         #   Google acaba tratandolos como nofollow, asi que una pagina que solo
         #   cuelga de noindex no esta enlazada a efectos de buscador.
+        # - Ni desde una pagina que no responde 200. Un 404 o un 500 sale del
+        #   indice y se lleva sus enlaces con el: lo que solo cuelga de ahi no
+        #   esta enlazado. Medido en www.uoc.edu: **503 paginas que devuelven
+        #   500** aportaban 264.991 enlaces, y 137 URLs tenian TODOS sus
+        #   entrantes internos ahi — huerfanas de hecho que salian enlazadas.
         # - Los `nofollow` SI cuentan: la pagina esta enlazada, solo que sin
         #   respaldo. La autoridad se mira en el PageRank, que lleva su propio
         #   grafo. Son dos preguntas distintas y no caben en un entero.
@@ -1663,7 +1668,7 @@ class SEOAnalyzer:
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta"],
                 select(
                     destino.id, Link.from_url_id, Link.is_internal,
-                    origen.noindex.isnot(True),
+                    and_(origen.noindex.isnot(True), origen.status_code == 200),
                 )
                 .join(origen, origen.id == Link.from_url_id)
                 .outerjoin(destino, and_(
@@ -2024,7 +2029,7 @@ class SEOAnalyzer:
                    COALESCE(substring(u.url FROM '^https?://[^/?#]+(?:/[^/?#]*)?'), '')
                        AS sec
             FROM urls u
-            WHERE u.job_id = :jid AND EXISTS (
+            WHERE u.job_id = :jid AND u.status_code = 200 AND EXISTS (
                 SELECT 1 FROM links l
                 WHERE l.from_url_id = u.id AND l.job_id = :jid
                   AND l.is_internal AND l.follow
@@ -2045,8 +2050,10 @@ class SEOAnalyzer:
                        MAX({prk.sql_peso_posicion('l.link_position')})::real AS w
                 FROM links l
                 JOIN urls u ON u.url_hash = l.to_url_hash AND u.job_id = l.job_id
+                JOIN urls o ON o.id = l.from_url_id
                 WHERE l.job_id = :jid AND l.is_internal AND l.follow
                   AND u.is_internal AND l.from_url_id <> u.id
+                  AND o.status_code = 200
                 GROUP BY 1, 2
                 """
             ), jid)
