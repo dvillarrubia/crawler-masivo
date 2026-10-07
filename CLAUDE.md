@@ -422,9 +422,17 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    dominante ya no es este sino `compute_pagerank`**: unos 35 de esos 43
    minutos se van en montar SU propia materializacion de aristas
    (`pr_lk_tmp` -> `pr_rep_tmp` -> `pr_edges_tmp`). Las dos materializan casi
-   la misma tabla dos veces en el mismo analisis; compartirla es el siguiente
-   paso evidente y esta anotado en #52, pero exige comprobar que ninguna de las
-   dos cifras cambia.
+   la misma tabla dos veces en el mismo analisis, **pero compartirla ahorraria
+   poco**: cronometrando cada sentencia de `_aristas_de_enlaces` en Druni, el
+   recorrido de `links` (`pr_lk_tmp`) son **114,9 s de 1.770,9 — el 6,5%**,
+   mientras que las ventanas de repeticion (`pr_rep_tmp`) son 781,6 s (44%) y
+   la agregacion final por (origen, destino) con el peso (`pr_edges_tmp`) otros
+   862,3 s (49%). El coste esta en las dos agregaciones sobre 37,5 millones de
+   filas, no en leer la tabla. La direccion que si tendria efecto —anotada en
+   #52— es que `pr_lk_tmp` guarda una fila por INSTANCIA de enlace y la tabla
+   final es por (origen, destino), que son muchisimas menos: agregar antes del
+   join atacaria los dos pasos caros a la vez, pero toca el criterio y necesita
+   su propia comprobacion de que las cifras no se mueven.
 
 42. **Los avisos sobre la forma de la URL casaban mal, y uno no salto nunca**
    (#29). Cuatro cosas, medidas en blogs.uoc.edu (34.704 URLs):
