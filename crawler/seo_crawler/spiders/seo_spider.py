@@ -33,6 +33,7 @@ from seo_crawler.extractors import (
     compute_status_group,
     compute_text_ratio,
     contar_palabras,
+    hash_de_contenido,
     compute_url_hash,
     detect_mixed_content,
     effective_base_url,
@@ -1355,6 +1356,7 @@ class SeoSpider(scrapy.Spider):
         word_count_val = None
         text_ratio_val = None
         content_word_count_val = None
+        content_hash_val = None
         main_content = None
         indexability_status_val = None
         meta = None
@@ -1415,6 +1417,7 @@ class SeoSpider(scrapy.Spider):
                     extra_selectors=self._extraction.get("custom_boilerplate_selectors") or None,
                 )
                 content_word_count_val = contar_palabras(main_content)
+                content_hash_val = hash_de_contenido(main_content)
 
             # Indexabilidad: una sola funcion, compartida con el analyzer
             # (shared/indexabilidad.py). Tenerla por duplicado hacia que la
@@ -1479,6 +1482,7 @@ class SeoSpider(scrapy.Spider):
             folder_depth=compute_folder_depth(final_url),
             word_count=word_count_val,
             content_word_count=content_word_count_val,
+            content_hash=content_hash_val,
             text_ratio=text_ratio_val,
             redirect_type=None,
             status_text=status_text_val,

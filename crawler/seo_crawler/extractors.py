@@ -914,6 +914,25 @@ _RE_SIN_ESPACIOS = re.compile(f"[{_CARACTERES_SIN_ESPACIOS}]")
 _RE_ALGO_QUE_LEER = re.compile(r"[^\W_]", re.UNICODE)
 
 
+def hash_de_contenido(texto: str | None) -> str | None:
+    """SHA-256 del contenido normalizado: minusculas y espacios colapsados.
+
+    `body_hash` es el hash de los BYTES de la respuesta, asi que un token CSRF,
+    un nonce de CSP o una marca de tiempo en el HTML hacen que dos paginas
+    identicas tengan hashes distintos: en un CMS moderno el duplicado exacto
+    por bytes practicamente no existe y `analyze_duplicates` no encontraba
+    nada. Google compara el contenido, no los bytes. Se normaliza solo caja y
+    espacios: un precio o una fecha distintos SI son una diferencia, y de la
+    similitud parcial se encarga MinHash (`analyze_near_duplicates`).
+    """
+    if not texto:
+        return None
+    normalizado = _WHITESPACE.sub(" ", texto).strip().casefold()
+    if not normalizado:
+        return None
+    return hashlib.sha256(normalizado.encode("utf-8")).hexdigest()
+
+
 def contar_palabras(texto: str | None) -> int:
     """Cuenta palabras tolerando escrituras sin espacios y descartando signos.
 

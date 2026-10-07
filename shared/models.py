@@ -110,6 +110,10 @@ class Url(Base):
     # Palabras del contenido principal (sin menu ni pie). Es la cifra con la
     # que se juzga el thin content: word_count incluye la plantilla.
     content_word_count = Column(Integer, nullable=True)
+    # SHA-256 del contenido principal normalizado. `body_hash` es el de los
+    # bytes: con un token CSRF o un nonce dentro, dos paginas identicas nunca
+    # coincidian y los duplicados exactos no se detectaban en ningun CMS.
+    content_hash = Column(String(64), nullable=True, index=True)
     text_ratio = Column(Float, nullable=True)                # text/HTML ratio percentage
     redirect_type = Column(Integer, nullable=True)           # HTTP redirect code (301, 302, 307, 308)
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"

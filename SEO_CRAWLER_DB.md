@@ -71,6 +71,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | word_count | int | Palabras en texto visible |
 | text_ratio | float | % texto visible vs HTML total (metrica, ya no genera issue) |
 | content_word_count | int | palabras del contenido principal, sin menu ni pie |
+| content_hash | varchar(64) | SHA-256 del contenido principal normalizado (caja y espacios). Es el que detecta duplicados exactos; `body_hash` cambia con cualquier token de la pagina |
 | indexability_status | varchar(64) | Indexable, Noindex, Canonicalised, Redirect... |
 | inlinks_count | int | Total inlinks recibidos |
 | outlinks_count | int | Total outlinks internos |

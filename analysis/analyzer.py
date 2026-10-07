@@ -171,13 +171,17 @@ class SEOAnalyzer:
         self.clear_existing_issues()
 
         self.analyze_status_codes()
+        # La indexabilidad va ANTES que los titulos, las descripciones y los
+        # duplicados: los tres agrupan solo paginas indexables y necesitan
+        # `Url.indexable` escrito. Estaba despues, asi que la columna era NULL y
+        # el filtro no habria hecho nada.
+        self.analyze_indexability()
         self.analyze_titles()
         self.analyze_descriptions()
         self.analyze_headings()
         self.analyze_canonicals()
         self.analyze_hreflang()
         self.analyze_structured_data()
-        self.analyze_indexability()
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()
@@ -328,7 +332,8 @@ class SEOAnalyzer:
 
         # Join Url with HtmlMeta for all HTML pages in the job.
         stmt = (
-            select(Url.id, HtmlMeta.title, HtmlMeta.title_len, Url.status_code, Url.is_internal)
+            select(Url.id, HtmlMeta.title, HtmlMeta.title_len, Url.status_code,
+                   Url.is_internal, Url.indexable)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -337,7 +342,7 @@ class SEOAnalyzer:
         # Track titles for duplicate detection.
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, title, title_len, status_code, is_internal in rows:
+        for url_id, title, title_len, status_code, is_internal, indexable in rows:
             if not title or not title.strip():
                 self._add_issue(url_id, "title_missing", "warning")
                 continue
@@ -363,7 +368,15 @@ class SEOAnalyzer:
             # Only real, served internal pages count toward duplicate groups;
             # otherwise 404/redirect/external pages sharing a boilerplate
             # title bury the genuine duplicates.
-            if status_code == 200 and is_internal:
+            # Los grupos de duplicados solo miran paginas INDEXABLES, y es
+            # la unica forma de que el aviso signifique algo: dos variantes
+            # `?utm`, dos ordenaciones de un listado o un `/page/2` comparten
+            # titulo a proposito y estan canonicalizadas o en noindex, asi que
+            # no compiten con nadie. Lo que importa es que dos paginas que
+            # Google SI puede posicionar se pisen entre ellas. Por eso
+            # `analyze_indexability` corre antes en `run_all`: aqui se necesita
+            # `Url.indexable` ya escrito.
+            if status_code == 200 and is_internal and indexable:
                 title_to_url_ids[clean_title.lower()].append(url_id)
 
         # Duplicate titles: only flag groups with 2+ pages sharing the same title.
@@ -388,7 +401,8 @@ class SEOAnalyzer:
         logger.debug("Analyzing meta descriptions ...")
 
         stmt = (
-            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len, Url.status_code, Url.is_internal)
+            select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len,
+                   Url.status_code, Url.is_internal, Url.indexable)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -396,7 +410,7 @@ class SEOAnalyzer:
 
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, description, desc_len, status_code, is_internal in rows:
+        for url_id, description, desc_len, status_code, is_internal, indexable in rows:
             if not description or not description.strip():
                 self._add_issue(url_id, "description_missing", "warning")
                 continue
@@ -419,8 +433,9 @@ class SEOAnalyzer:
                     {"length": effective_len, "max": self.desc_max_len},
                 )
 
-            # Restrict duplicate grouping to real, served internal pages.
-            if status_code == 200 and is_internal:
+            # Restrict duplicate grouping to real, served internal pages,
+            # and solo indexables: ver la nota en `analyze_titles`.
+            if status_code == 200 and is_internal and indexable:
                 desc_to_url_ids[clean_desc.lower()].append(url_id)
 
         for desc_text, url_ids in desc_to_url_ids.items():
@@ -445,7 +460,7 @@ class SEOAnalyzer:
 
         # Get all H1 headings for HTML pages in this job.
         stmt = (
-            select(Url.id, Heading.text)
+            select(Url.id, Heading.text, Url.indexable)
             .join(Heading, Heading.url_id == Url.id)
             .where(
                 Url.job_id == self.job_id,
@@ -462,8 +477,10 @@ class SEOAnalyzer:
 
         # Group H1s per URL.
         h1_by_url: dict[int, list[str]] = defaultdict(list)
-        for url_id, text in rows:
+        indexable_por_url: dict[int, bool] = {}
+        for url_id, text, indexable in rows:
             h1_by_url[url_id].append(text or "")
+            indexable_por_url[url_id] = bool(indexable)
 
         # Get the full set of HTML URL ids so we can detect missing H1s. Solo
         # 2xx: los headings solo se extraen de respuestas correctas, y sin este
@@ -494,6 +511,9 @@ class SEOAnalyzer:
         # Duplicate H1 text across different URLs.
         h1_text_to_url_ids: dict[str, list[int]] = defaultdict(list)
         for url_id, h1_texts in h1_by_url.items():
+            # Solo indexables: ver la nota en `analyze_titles`.
+            if not indexable_por_url.get(url_id):
+                continue
             for text in h1_texts:
                 if text.strip():
                     h1_text_to_url_ids[text.strip().lower()].append(url_id)
@@ -944,43 +964,73 @@ class SEOAnalyzer:
     # -- Duplicate Content --------------------------------------------------
 
     def analyze_duplicates(self) -> None:
-        """Detect pages with identical body content via body_hash."""
+        """Paginas que sirven EXACTAMENTE el mismo contenido.
+
+        Se compara `content_hash` —el SHA-256 del contenido principal con la
+        caja y los espacios normalizados— y no `body_hash`, que es el de los
+        bytes de la respuesta: un token CSRF, un nonce de CSP o una marca de
+        tiempo en el HTML bastaban para que dos paginas identicas tuvieran
+        hashes distintos, asi que en un CMS moderno esto no encontraba nada.
+        Google compara el contenido, no los bytes.
+
+        Solo paginas indexables: dos variantes `?utm` o dos ordenaciones de un
+        listado sirven el mismo contenido a proposito y estan canonicalizadas,
+        de modo que no compiten con nadie. Lo que hay que ver es que dos URLs
+        que Google SI puede posicionar sirvan lo mismo.
+
+        Los rastreos anteriores a la columna no tienen `content_hash`: ahi se
+        cae a `body_hash`, que es lo que habia.
+        """
         logger.debug("Analyzing duplicate content ...")
 
-        # Find body_hash values shared by two or more URLs.
-        dup_stmt = (
-            select(Url.body_hash)
-            .where(
-                Url.job_id == self.job_id,
-                Url.body_hash.isnot(None),
-                Url.body_hash != "",
+        columna = Url.content_hash
+        hay_content_hash = self.session.execute(
+            select(func.count(Url.id)).where(
+                Url.job_id == self.job_id, Url.content_hash.isnot(None)
             )
-            .group_by(Url.body_hash)
+        ).scalar()
+        if not hay_content_hash:
+            columna = Url.body_hash
+            logger.info(
+                "El job no tiene content_hash (rastreo anterior a la columna): "
+                "los duplicados exactos se miran sobre body_hash, que cambia "
+                "con cualquier token de la pagina"
+            )
+
+        condiciones = (
+            Url.job_id == self.job_id,
+            columna.isnot(None),
+            columna != "",
+            Url.is_html.is_(True),
+            Url.is_internal.is_(True),
+            Url.status_code == 200,
+            Url.indexable.is_(True),
+        )
+
+        dup_stmt = (
+            select(columna)
+            .where(*condiciones)
+            .group_by(columna)
             .having(func.count(Url.id) > 1)
         )
-        dup_hashes = [
-            row[0] for row in self.session.execute(dup_stmt).all()
-        ]
+        dup_hashes = [row[0] for row in self.session.execute(dup_stmt).all()]
 
         if not dup_hashes:
+            self._flush_issues()
             return
 
-        # For each duplicate hash, fetch the URL ids sharing it.
         for hash_batch_start in range(0, len(dup_hashes), BATCH_SIZE):
             hash_batch = dup_hashes[hash_batch_start : hash_batch_start + BATCH_SIZE]
 
             rows = self.session.execute(
-                select(Url.id, Url.body_hash).where(
-                    Url.job_id == self.job_id,
-                    Url.body_hash.in_(hash_batch),
-                )
+                select(Url.id, columna).where(*condiciones, columna.in_(hash_batch))
             ).all()
 
             hash_to_ids: dict[str, list[int]] = defaultdict(list)
-            for url_id, body_hash in rows:
-                hash_to_ids[body_hash].append(url_id)
+            for url_id, valor in rows:
+                hash_to_ids[valor].append(url_id)
 
-            for body_hash, url_ids in hash_to_ids.items():
+            for valor, url_ids in hash_to_ids.items():
                 if len(url_ids) < 2:
                     continue
                 for uid in url_ids:
@@ -989,7 +1039,7 @@ class SEOAnalyzer:
                         uid,
                         "duplicate_content",
                         "warning",
-                        {"body_hash": body_hash, "duplicate_urls": other_ids},
+                        {"content_hash": valor, "duplicate_urls": other_ids},
                     )
 
         self._flush_issues()

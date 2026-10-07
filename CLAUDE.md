@@ -602,6 +602,26 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    palabras están dentro de enlaces: con `<div class="top-bar"><h1 class=logo>`
    se antepone el megamenú entero al contenido.
 
+47. **Un duplicado solo importa entre páginas que Google puede posicionar, y
+   se mide por contenido, no por bytes** — los grupos de título, description y
+   h1 duplicados incluían las variantes `?utm`, las ordenaciones de un listado y
+   los `/page/2`, que comparten título a propósito y están canonicalizadas o en
+   noindex: no compiten con nadie y enterraban las que sí. Medido en tres censos,
+   las páginas avisadas por título duplicado pasan de 5.936 a 2.788, de 14.580 a
+   5.299 y de 5.557 a 1.417; las de description de 2.807 a 659; las de h1 de
+   15.235 a 10.838. Por eso `analyze_indexability` corre ahora ANTES de títulos y
+   descripciones en `run_all`: estaba después, así que `Url.indexable` era NULL
+   cuando se agrupaba. Y el duplicado exacto se compara con `urls.content_hash`
+   —SHA-256 del contenido principal con caja y espacios normalizados— en vez de
+   `body_hash`, que es el de los bytes de la respuesta: con un token CSRF o un
+   nonce de CSP dentro, dos páginas idénticas nunca coincidían. En blogs.uoc.edu
+   el hash de bytes encontraba **0** duplicados y el del contenido encuentra
+   **745 páginas en 304 grupos**, entre ellos la misma política de privacidad de
+   652 palabras publicada e indexable en decenas de blogs del multisite.
+   `body_hash` se conserva: responde a otra pregunta (si la página cambió entre
+   dos rastreos). Los rastreos anteriores a la columna caen a `body_hash` con un
+   aviso en el log.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
