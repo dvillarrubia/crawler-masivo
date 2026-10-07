@@ -11,6 +11,8 @@ import json
 import logging
 import uuid
 import zipfile
+
+from sqlalchemy import select
 from datetime import datetime, timezone
 from typing import Any, Generator
 
@@ -85,6 +87,18 @@ def _row_to_dict(row: Any, exclude: set[str] | None = None) -> dict[str, Any]:
     return d
 
 
+def _fila_cruda_a_dict(fila, columnas) -> dict[str, Any]:
+    """Igual que `_row_to_dict` pero desde una fila de Core.
+
+    Leer con `select(tabla)` en vez de `query(Modelo)` evita construir un
+    objeto del ORM por fila —con su mapa de identidad— para algo que solo se
+    va a serializar y tirar. En un censo con 1,6 millones de enlaces eso es la
+    diferencia entre que el pico de memoria crezca con el censo o no.
+    """
+    m = fila._mapping
+    return {c: m[c] for c in columnas}
+
+
 def _ndjson_line(d: dict[str, Any]) -> str:
     return json.dumps(d, default=_json_default, ensure_ascii=False) + "\n"
 
@@ -109,21 +123,21 @@ def _iter_table(
     while True:
         session = SessionLocal()
         try:
-            q = (
-                session.query(model)
-                .filter(getattr(model, filter_col) == job_id)
-                .filter(pk_col > last_id)
-                .order_by(pk_col)
+            tabla = model.__table__
+            columnas = [c.name for c in tabla.columns]
+            clave = tabla.c[pk_col.key]
+            rows = session.execute(
+                select(tabla)
+                .where(tabla.c[filter_col] == job_id, clave > last_id)
+                .order_by(clave)
                 .limit(batch_size)
-            )
-            rows = q.all()
+            ).all()
             if not rows:
                 break
             for row in rows:
-                d = _row_to_dict(row)
-                yield d
+                yield _fila_cruda_a_dict(row, columnas)
                 count += 1
-                last_id = getattr(row, pk_col.key)
+                last_id = row._mapping[pk_col.key]
         finally:
             session.close()
     return count
@@ -137,18 +151,18 @@ def _iter_urls(
     while True:
         session = SessionLocal()
         try:
-            rows = (
-                session.query(Url)
-                .filter(Url.job_id == job_id, Url.id > last_id)
-                .order_by(Url.id)
+            tabla = Url.__table__
+            columnas = [c.name for c in tabla.columns]
+            rows = session.execute(
+                select(tabla)
+                .where(tabla.c.job_id == job_id, tabla.c.id > last_id)
+                .order_by(tabla.c.id)
                 .limit(batch_size)
-                .all()
-            )
+            ).all()
             if not rows:
                 break
             for row in rows:
-                d = _row_to_dict(row)
-                yield d
+                yield _fila_cruda_a_dict(row, columnas)
                 count += 1
                 last_id = row.id
         finally:
@@ -172,36 +186,87 @@ def _iter_child_by_url(
     while True:
         session = SessionLocal()
         try:
-            rows = (
-                session.query(model)
-                .join(Url, model.url_id == Url.id)
-                .filter(Url.job_id == job_id)
-                .filter(pk_col > last_id)
-                .order_by(pk_col)
+            tabla = model.__table__
+            columnas = [c.name for c in tabla.columns]
+            clave = tabla.c[pk_col.key]
+            rows = session.execute(
+                select(tabla)
+                .join(Url.__table__, tabla.c.url_id == Url.__table__.c.id)
+                .where(Url.__table__.c.job_id == job_id, clave > last_id)
+                .order_by(clave)
                 .limit(batch_size)
-                .all()
-            )
+            ).all()
             if not rows:
                 break
             for row in rows:
-                d = _row_to_dict(row)
-                yield d
+                yield _fila_cruda_a_dict(row, columnas)
                 count += 1
-                last_id = getattr(row, pk_col.key)
+                last_id = row._mapping[pk_col.key]
         finally:
             session.close()
     return count
+
+
+class _SalidaPorTrozos:
+    """Destino de solo escritura que va soltando lo escrito por trozos.
+
+    `zipfile` necesita `write`, `flush` y `tell`. Al NO tener `seek` se da
+    cuenta de que el destino no es navegable y escribe los descriptores de
+    datos correspondientes, que es justo lo que permite ir sirviendo el ZIP
+    mientras se genera en vez de montarlo entero en memoria.
+    """
+
+    def __init__(self) -> None:
+        self._trozos: list[bytes] = []
+        self._escrito = 0
+        self.pendiente = 0
+
+    def write(self, datos) -> int:
+        datos = bytes(datos)
+        self._trozos.append(datos)
+        self._escrito += len(datos)
+        self.pendiente += len(datos)
+        return len(datos)
+
+    def tell(self) -> int:
+        return self._escrito
+
+    def flush(self) -> None:  # pragma: no cover - lo pide zipfile
+        pass
+
+    def recoger(self) -> bytes:
+        if not self._trozos:
+            return b""
+        datos = b"".join(self._trozos)
+        self._trozos.clear()
+        self.pendiente = 0
+        return datos
+
+
+# Cuanto se acumula antes de soltar un trozo al cliente. Con 1 MB el pico de
+# memoria no depende del tamano del censo.
+_TROZO = 1 << 20
 
 
 def stream_backup_zip(
     job_id: uuid.UUID,
     include_content: bool = True,
 ) -> Generator[bytes, None, None]:
-    """Generate ZIP bytes as a stream."""
-    buf = io.BytesIO()
+    """Genera el ZIP del censo **de verdad por trozos**.
+
+    Antes se llamaba "stream" pero no lo era: cada tabla se acumulaba entera en
+    una lista de strings, se unia en otro string y todo iba a un `BytesIO` que
+    solo se soltaba al final, asi que el pico de memoria era el censo entero
+    varias veces. Con 87.570 URLs y sus enlaces eso no cabe en un VPS que
+    comparte 8 GB con otros cuatro servicios: el backup del censo de CST
+    (12.112 URLs) ya tardaba 253 s y 168 MB, y el de penguin no era abordable.
+
+    Ahora cada fila se escribe directamente en la entrada del ZIP y se suelta
+    un trozo cada `_TROZO` bytes. Las consultas ya iban por lotes de 1.000.
+    """
     row_counts: dict[str, int] = {}
 
-    # Load job info in a short-lived session
+    # El job, en una sesion corta y aparte.
     session = SessionLocal()
     try:
         job = session.query(Job).filter(Job.id == job_id).first()
@@ -213,52 +278,37 @@ def stream_backup_zip(
     finally:
         session.close()
 
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # job.json
-        zf.writestr("job.json", json.dumps(job_dict, default=_json_default, ensure_ascii=False, indent=2))
+    salida = _SalidaPorTrozos()
 
-        # urls.jsonl
-        lines: list[str] = []
-        count = 0
-        for d in _iter_urls(job_id):
-            lines.append(_ndjson_line(d))
-            count += 1
-        zf.writestr("urls.jsonl", "".join(lines))
-        row_counts["urls"] = count
-
-        # 1:1 child tables (filter via url join)
+    def _tablas():
+        yield "urls", _iter_urls(job_id)
         for fname, model, _has_job in _CHILD_TABLES_1TO1:
             if fname == "page_content" and not include_content:
                 continue
-            lines = []
-            count = 0
-            for d in _iter_child_by_url(job_id, model):
-                lines.append(_ndjson_line(d))
-                count += 1
-            zf.writestr(f"{fname}.jsonl", "".join(lines))
-            row_counts[fname] = count
-
-        # 1:N child tables (filter via url join)
+            yield fname, _iter_child_by_url(job_id, model)
         for fname, model, _has_job in _CHILD_TABLES_1TON:
-            lines = []
-            count = 0
-            for d in _iter_child_by_url(job_id, model):
-                lines.append(_ndjson_line(d))
-                count += 1
-            zf.writestr(f"{fname}.jsonl", "".join(lines))
-            row_counts[fname] = count
-
-        # Tables with job_id column (issues, links)
+            yield fname, _iter_child_by_url(job_id, model)
         for fname, model, _url_fk in _CHILD_TABLES_JOB:
-            lines = []
-            count = 0
-            for d in _iter_table(job_id, model, "job_id"):
-                lines.append(_ndjson_line(d))
-                count += 1
-            zf.writestr(f"{fname}.jsonl", "".join(lines))
-            row_counts[fname] = count
+            yield fname, _iter_table(job_id, model, "job_id")
 
-        # manifest.json
+    with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "job.json",
+            json.dumps(job_dict, default=_json_default, ensure_ascii=False, indent=2),
+        )
+
+        for fname, filas in _tablas():
+            count = 0
+            with zf.open(f"{fname}.jsonl", "w") as fh:
+                for d in filas:
+                    fh.write(_ndjson_line(d).encode("utf-8"))
+                    count += 1
+                    if salida.pendiente >= _TROZO:
+                        yield salida.recoger()
+            row_counts[fname] = count
+            if salida.pendiente:
+                yield salida.recoger()
+
         manifest = {
             "format_version": FORMAT_VERSION,
             "export_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -270,8 +320,11 @@ def stream_backup_zip(
         }
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
-    # Yield complete ZIP bytes
-    yield buf.getvalue()
+    # Lo que quede: el directorio central del ZIP lo escribe el `close()` del
+    # `with`, asi que este ultimo trozo no es opcional.
+    resto = salida.recoger()
+    if resto:
+        yield resto
 
 
 # ---------------------------------------------------------------------------
