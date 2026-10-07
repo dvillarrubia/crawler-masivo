@@ -64,36 +64,14 @@ RE_IDIOMA = re.compile(r"^[a-z]{2}(-[a-z]{2})?$")
 
 
 def firma(path: str) -> str:
-    """Forma de la URL, no la URL: /2018-05-17/dia-del-reciclaje -> /:fecha/...
+    """Forma de la ruta (ver `shared/plantillas.py`).
 
-    Deliberadamente generico: nada de reglas por cliente. Dos paginas con la
-    misma forma casi siempre salen de la misma plantilla, y cuando no, se ve en
-    las cifras y se afina subiendo --muestras.
+    Se comparte con `check_js_templates.py` para que las dos herramientas
+    agrupen igual y sus cifras se puedan comparar entre si.
     """
-    trozos = [t for t in path.strip("/").split("/") if t]
-    if not trozos:
-        return "/ (home)"
-    partes = []
-    for t in trozos:
-        t_l = t.lower()
-        if RE_FECHA.match(t_l):
-            partes.append(":fecha")
-        elif RE_NUM.match(t_l):
-            partes.append(":num")
-        elif RE_IDIOMA.match(t_l) and not partes:
-            partes.append(":idioma")
-        elif "." in t_l:
-            partes.append(":fichero" + os.path.splitext(t_l)[1])
-        else:
-            partes.append(t_l)
-    # El ultimo tramo identifica la pagina concreta, no la plantilla: si no se
-    # normaliza, cada articulo sale como plantilla propia. Los tramos de arriba
-    # (hasta tres) son los que dan la forma.
-    if len(partes) > 1:
-        forma = partes[:-1][:3] + [":slug"]
-    else:
-        forma = partes
-    return "/" + "/".join(forma) + f" ({len(partes)}n)"
+    from shared.plantillas import firma_de_ruta
+
+    return firma_de_ruta(path)
 
 
 def descargar_crudo(url: str, timeout: int = 40) -> str:
@@ -138,8 +116,15 @@ def cargar_paginas(job_id: str):
                 .filter(HtmlMeta.url_id.in_(ids))
                 .all()
             )
+            # DISTINTOS, no filas: `extract_links` devuelve cada instancia de
+            # href (nav + contenido + pie son tres filas del mismo enlace) y
+            # aqui se compara contra un CONJUNTO de URLs. Contando filas, lo
+            # guardado salia siempre mayor que lo extraido —5 frente a 2 en una
+            # pagina normal— y la alarma "se han perdido enlaces" no saltaba
+            # nunca, que es justo para lo que existe el script.
             for url_id, n in (
-                sesion.query(Link.from_url_id, func.count(Link.id))
+                sesion.query(Link.from_url_id,
+                             func.count(func.distinct(Link.to_url_hash)))
                 .filter(Link.from_url_id.in_(ids))
                 .group_by(Link.from_url_id)
                 .all()

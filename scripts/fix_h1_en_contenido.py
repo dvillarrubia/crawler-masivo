@@ -56,12 +56,48 @@ def _norm(linea: str) -> str:
     return _WHITESPACE.sub(" ", linea).strip().lower()
 
 
+# Puntuacion con la que una plantilla cierra un titular y que no lo cambia:
+# "Hola mundo." y "Hola mundo" son el mismo titular. Sin quitarla, el titular
+# salia como ausente y se anteponia DUPLICADO.
+_PUNTUACION_FINAL = " .:;,!?·|-–—"
+
+
+def _norm_titular(linea: str) -> str:
+    return _norm(linea).strip(_PUNTUACION_FINAL)
+
+
 def _falta_titular(contenido: str | None, titular: str) -> bool:
-    """True cuando *titular* no figura como linea propia de *contenido*."""
+    """True cuando *titular* no figura como linea propia de *contenido*.
+
+    Dos formas cuentan como presente, y las dos fallaban antes:
+
+    - la linea con la puntuacion de cierre que le ponga la plantilla
+      ("Hola mundo." frente al h1 "Hola mundo");
+    - el titular partido en dos lineas por un `<br>` ("Hola" / "mundo"), que es
+      como lo deja el aplanado por bloques.
+
+    Como SUBCADENA no vale (decision 10b): la marca reaparece a media frase y
+    daria por presente un titular que no esta.
+    """
     if not contenido:
         return True
-    objetivo = _norm(titular)
-    return not any(_norm(ln) == objetivo for ln in contenido.splitlines())
+    objetivo = _norm_titular(titular)
+    if not objetivo:
+        return False
+    lineas = [_norm_titular(ln) for ln in contenido.splitlines() if ln.strip()]
+    if any(ln == objetivo for ln in lineas):
+        return False
+    # Partido por un <br>: se unen las lineas consecutivas de las primeras
+    # posiciones, que es donde esta el hero.
+    for i in range(min(len(lineas), 4)):
+        acumulado = lineas[i]
+        for j in range(i + 1, min(len(lineas), i + 4)):
+            acumulado = f"{acumulado} {lineas[j]}".strip()
+            if acumulado == objetivo:
+                return False
+            if len(acumulado) > len(objetivo):
+                break
+    return True
 
 
 def _norm_md(linea: str) -> str:
@@ -126,15 +162,24 @@ def revertir_diario(sesion, diario: dict, *, dry_run: bool) -> tuple[int, int]:
     coincide con el h1 borraria el titular de las paginas que YA lo tenian
     bien puesto — que son la mayoria. Solo se toca lo que consta escrito.
     """
-    titulares = {int(k): v for k, v in diario["paginas"].items()}
+    # El diario viejo anotaba solo el titular; el nuevo, tambien las columnas
+    # que se tocaron. Se admiten los dos para poder deshacer pasadas anteriores.
+    anotado: dict[int, dict] = {}
+    for clave, valor in diario["paginas"].items():
+        if isinstance(valor, dict):
+            anotado[int(clave)] = valor
+        else:
+            anotado[int(clave)] = {"titular": valor, "columnas": None}
     revertidas = 0
-    ids = list(titulares)
+    ids = list(anotado)
     for i in range(0, len(ids), 500):
         contenidos = sesion.execute(
             select(PageContent).where(PageContent.url_id.in_(ids[i : i + 500]))
         ).scalars().all()
         for pc in contenidos:
-            titular = titulares[pc.url_id]
+            entrada = anotado[pc.url_id]
+            titular = entrada["titular"]
+            columnas = entrada.get("columnas")
             texto = _quitar_primera_linea(pc.content_text, titular)
             if texto == pc.content_text:
                 continue  # esta pagina no la habiamos tocado
@@ -143,19 +188,25 @@ def revertir_diario(sesion, diario: dict, *, dry_run: bool) -> tuple[int, int]:
             pc.content_markdown = _quitar_primera_linea(
                 pc.content_markdown, f"# {titular}"
             )
-            pc.content_text_original = _quitar_primera_linea(
-                pc.content_text_original, titular
-            )
-            pc.content_markdown_original = _quitar_primera_linea(
-                pc.content_markdown_original, f"# {titular}"
-            )
+            # Las copias "original" solo se deshacen si consta que se
+            # parchearon: quitarles la primera linea a ciegas borraba el titular
+            # de las paginas que ya lo tenian bien puesto. Sin anotacion (diario
+            # viejo) no se tocan, que es el lado seguro.
+            if columnas and "content_text_original" in columnas:
+                pc.content_text_original = _quitar_primera_linea(
+                    pc.content_text_original, titular
+                )
+            if columnas and "content_markdown_original" in columnas:
+                pc.content_markdown_original = _quitar_primera_linea(
+                    pc.content_markdown_original, f"# {titular}"
+                )
             revertidas += 1
         if dry_run:
             sesion.expunge_all()
         else:
             sesion.commit()
 
-    return len(titulares), revertidas
+    return len(anotado), revertidas
 
 
 def limpiar_md_duplicado(sesion, job_id: str, *, dry_run: bool) -> tuple[int, int]:
@@ -196,11 +247,13 @@ def limpiar_md_duplicado(sesion, job_id: str, *, dry_run: bool) -> tuple[int, in
     return len(titulares), limpiadas
 
 
-def reparar_job(sesion, job_id: str, *, dry_run: bool) -> tuple[int, dict[int, str]]:
-    """Devuelve (paginas con h1 examinadas, {url_id: titular} reparadas)."""
+def reparar_job(sesion, job_id: str, *, dry_run: bool) -> tuple[int, dict[int, dict]]:
+    """Devuelve (paginas con h1 examinadas, {url_id: {titular, columnas}})."""
     titulares = _h1_por_url(sesion, job_id)
     if not titulares:
-        return 0, 0
+        # Un dict vacio, no un 0: el llamador hace `len(tocadas)`, asi que con
+        # `--todos` un solo job sin h1 abortaba la pasada entera con TypeError.
+        return 0, {}
 
     tocadas: dict[int, str] = {}
     ids = list(titulares)
@@ -228,15 +281,26 @@ def reparar_job(sesion, job_id: str, *, dry_run: bool) -> tuple[int, dict[int, s
             # Si la pagina paso por una limpieza post-crawl, parchear tambien
             # la copia original: si no, revertir la limpieza reintroduce el
             # hueco que acabamos de tapar.
+            columnas = ["content_text", "content_markdown"]
             if pc.content_text_original is not None and _falta_titular(
                 pc.content_text_original, titular
             ):
                 pc.content_text_original = _anteponer(pc.content_text_original, titular)
-            if pc.content_markdown_original:
+                columnas.append("content_text_original")
+            # La comprobacion estaba en `content_text_original` y no aqui, asi
+            # que una pagina cuyo markdown original YA llevaba el titular se
+            # quedaba con dos.
+            if pc.content_markdown_original and _falta_titular_md(
+                pc.content_markdown_original, titular
+            ):
                 pc.content_markdown_original = (
                     f"# {titular}\n\n{pc.content_markdown_original}"
                 )
-            tocadas[pc.url_id] = titular
+                columnas.append("content_markdown_original")
+            # El diario anota QUE columnas se tocaron: al revertir, quitar la
+            # primera linea de una columna que no habiamos parcheado borraba un
+            # titular legitimo.
+            tocadas[pc.url_id] = {"titular": titular, "columnas": columnas}
         if dry_run:
             sesion.expunge_all()
         else:

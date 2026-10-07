@@ -717,7 +717,26 @@ def _comprobar_render_js(job_id: str) -> None:
         if not resultados:
             return
 
-        con_enlaces_ocultos = [r for r in resultados if r["enlaces_solo_js"] > 0]
+        # Un enlace escondido no invalida un grafo: lo que lo invalida es que
+        # una plantilla monte con JavaScript una parte que PESA. Con el umbral
+        # en "mayor que cero", el enlace que inyecta cualquier widget —un
+        # gestor de consentimiento, un chat, un "volver arriba"— marcaba el
+        # grafo como no fiable y ponia el PageRank bajo sospecha en sitios donde
+        # estaba bien. Se pide una fraccion del grafo de la plantilla (10%) o el
+        # caso que de verdad importa: una plantilla con CERO enlaces en crudo que
+        # al renderizar aparecen (el listado montado por XHR de la decision 18).
+        def _esconde_enlaces(r: dict) -> bool:
+            solo_js = r.get("enlaces_solo_js") or 0
+            if not solo_js:
+                return False
+            crudo = r.get("enlaces_crudo")
+            if crudo is None:
+                return solo_js > 0  # resultados de antes de medir el crudo
+            if crudo == 0:
+                return True
+            return solo_js >= max(3, crudo * 0.1)
+
+        con_enlaces_ocultos = [r for r in resultados if _esconde_enlaces(r)]
         # Plantillas cuyo render no fue tal (WAF, desafio, error): su "0 enlaces
         # solo-JS" no cuenta. Si TODAS estan asi, el veredicto queda en None
         # ("no se pudo comprobar"), nunca en "fiable".
