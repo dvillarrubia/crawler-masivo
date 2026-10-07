@@ -1268,12 +1268,15 @@ De la capa de analisis contra BD ya hay tres tests
 order of priority:
 
 1. **Verification checklist (sections 0–8c)**: ~30 fixes from the 2026-07
-   audit branch (`claude/crawler-export-issues-oi77bm`, PR #5) that have NOT
-   yet been verified against a real crawl. Run it top-to-bottom on first
-   deployment (two test crawls: with and without `render_js`). ⚠️ Requires
-   `docker compose up -d --build` (worker image changed: `analyzing` status,
-   heartbeat) and re-running `scripts/init_db.py` (new `urls.in_sitemap`
-   column).
+   audit branch (`claude/crawler-export-issues-oi77bm`, PR #5). **Ya está
+   pasado**: el 2026-09-11 contra dos censos reales de produccion (Saunier
+   Duval con `render_js` y Lopesan sin JS) en vez de crawls de prueba, y el
+   ultimo punto que quedaba —8b.6, la propagacion del `nofollow` de pagina a
+   sus enlaces— se cerro el 2026-10-07 con el censo de progym: 1.157 paginas
+   con `noindex,nofollow` en sintaxis valida y sus 267.063 enlaces en
+   `follow=false`, sin tocar los del resto del sitio. Lo unico abierto de esa
+   seccion es `http_version`, que solo se rellena con `render_js` y esta en las
+   limitaciones conocidas. No hay que volver a pasarlo.
 2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: old crawls may
    carry corrupted data (relative canonicals → false non-indexable). Measure
    before trusting/re-delivering old reports; re-crawl bucket-A jobs.

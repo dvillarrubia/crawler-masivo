@@ -163,9 +163,19 @@ ahora en `shared/robots.py`, una sola vez, y gana el tokenizado. En el censo de
 SD esto hace que **69 páginas pasen a contar como indexables**, que es su
 estado real en Google.
 
-**Sigue pendiente** la verificación original de 8b.6: un crawl de un sitio con
-páginas `nofollow` en sintaxis válida, para comprobar que la propagación a los
-enlaces funciona. Este censo no servía para eso.
+**8b.6 cerrado el 2026-10-07.** Hacía falta un censo con páginas `nofollow` en
+sintaxis **válida**, y el de progym lo tiene: 1.157 páginas con
+`<meta name="robots" content="noindex,nofollow">` (con coma, no con barra).
+
+| | enlaces `follow = true` | `follow = false` |
+|---|---|---|
+| desde esas 1.157 páginas | **0** | **267.063** |
+| desde el resto del sitio | 692.389 | 8.903 (su propio `rel`) |
+
+La propagación funciona y **no** es global: el resto del sitio conserva sus
+enlaces follow, y los 8.903 que no lo son llevan su propio `rel="nofollow"`.
+Es también la explicación de por qué C2 (ver `PRIORIDADES.md`) mueve tan poco:
+esas 1.157 páginas no reparten nada hoy porque ya son colgantes.
 
 **Hallazgo lateral, no del crawler.** Los 402 `hreflang_missing_return` de SD
 no son un fallo del analizador: `saunierduval.es` (sin www) sirve 362 páginas
