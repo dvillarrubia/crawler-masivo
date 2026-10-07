@@ -101,3 +101,66 @@ def test_val_no_confunde_cero_con_vacio():
     assert _val(0) == "0"
     assert _val(False) == "False"
     assert _val(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# El aviso de "este PageRank no es de fiar" tiene que viajar con el dato (#35)
+# ---------------------------------------------------------------------------
+class _Consulta:
+    """Imita `session.query(Columna).filter(...).scalar()`."""
+
+    def __init__(self, valor):
+        self._valor = valor
+
+    def filter(self, *a, **k):
+        return self
+
+    def scalar(self):
+        return self._valor
+
+
+class _Sesion:
+    def __init__(self, resumen=None, js_check=None, config=None):
+        from shared.models import Job
+
+        self._por_columna = {
+            Job.pagerank_resumen: resumen,
+            Job.js_check: js_check,
+            Job.config: config,
+        }
+
+    def query(self, columna):
+        return _Consulta(self._por_columna.get(columna))
+
+
+def _fiable(**kw):
+    from api.routers.results import _pagerank_fiable
+
+    return _pagerank_fiable(_Sesion(**kw), "job")
+
+
+def test_el_resumen_manda_cuando_tiene_respuesta():
+    assert _fiable(resumen={"grafo_fiable": False}, js_check={"grafo_fiable": True}) is False
+
+
+def test_un_none_en_el_resumen_no_es_una_respuesta():
+    """El analisis escribe `pagerank_resumen` ANTES de que corra la
+    comprobacion de render, asi que en un rastreo recien terminado la clave
+    existe con valor None. Mirando solo si la clave estaba, la columna salia
+    VACIA en las 4.320 filas del censo de progym con `js_check` diciendo que
+    si."""
+    assert _fiable(resumen={"grafo_fiable": None}, js_check={"grafo_fiable": True}) is True
+    assert _fiable(resumen={"grafo_fiable": None}, js_check={"grafo_fiable": False}) is False
+
+
+def test_sin_js_check_un_rastreo_con_render_es_fiable():
+    """La comprobacion de render solo corre en los rastreos SIN render, asi que
+    con `render_js` no hay js_check que mirar. Un rastreo que renderiza ya ha
+    visto los enlaces que monta el JavaScript, que es lo unico que mide."""
+    assert _fiable(resumen={"grafo_fiable": None}, js_check=None,
+                   config={"render_js": True}) is True
+
+
+def test_sin_nada_que_mirar_se_queda_sin_respuesta():
+    """Vacio es "no se sabe", y es distinto de "no es fiable"."""
+    assert _fiable(resumen=None, js_check=None, config={"render_js": False}) is None
