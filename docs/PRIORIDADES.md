@@ -1,6 +1,6 @@
 # Plan de prioridades
 
-> Estado a 2026-10-06. La fuente de verdad del *orden* son los milestones de
+> Estado a 2026-10-07. La fuente de verdad del *orden* son los milestones de
 > GitHub; esto explica **por qué** ese orden y qué cifra lo sostiene.
 > `docs/AUDITORIA_Y_VERIFICACION.md` sigue siendo el detalle técnico.
 
@@ -68,6 +68,34 @@ Lo que corrompe o tapa dato **hoy**, en los censos que ya se entregan.
 enlaces se pueden recalcular dos veces y dan lo mismo, y un rastreo bloqueado
 por robots.txt no se entrega como sitio limpio.
 
+### Estado a 2026-10-07: la parte determinista de M1 está cerrada
+
+Los tres puntos de la definición de hecho se cumplen: la CI bloquea el
+despliegue (`deploy.yml` depende de `tests.yml`), `compute_link_counts` pone los
+conteos a cero antes de agregar —así que un re-análisis no deja cifras rancias—
+y un `Disallow: /` deja el job en `failed` con motivo `robots_bloquea_todo`.
+
+Lo entregado, con la medición de cada cosa, está en las decisiones 44-57 del
+`CLAUDE.md` y en los comentarios de #24 a #30. Resumen de lo que más movía:
+
+| Qué estaba mal | Medido |
+|---|---|
+| Páginas guardadas con **0 palabras** por una clase en el `<body>`, o porque el limpiador del navegador borraba la página entera (texto, enlaces y titulares) | reproducido en Chromium: el HTML capturado era `<html><head></head></html>` |
+| El aviso de contenido escaso se medía sobre el body, con el menú dentro | 997 → **10.433** páginas escasas en un censo; 4.736 de ellas indexables |
+| El ratio texto/HTML generaba issue en el 97% de un sitio | `pct_thin` 97,3% → **2,1%** en blogs.uoc.edu |
+| El `@graph` de Yoast dejaba sin tipo los datos estructurados | **30.701 bloques en 29.803 páginas**: el 100% de un censo |
+| Los duplicados incluían variantes `?utm` y noindex, y el exacto se medía por bytes | title_duplicate 14.580 → 5.299; duplicado exacto **0 → 745 páginas** |
+| Cabeceras de seguridad avisadas por página | **266.504** avisos que eran uno por sitio |
+| Títulos «demasiado largos» medidos por caracteres | el **29%** de esos avisos era falso (Google corta por píxeles) |
+| Enlaces desde páginas rotas y noindex contaban como respaldo | −240.543 entrantes en www.uoc.edu; **6 puntos** de PageRank pasan de noindex a indexables en blogs.uoc.edu |
+
+**Lo que queda abierto en esas issues es juicio**, y por eso va a M3/M4: si un
+carrusel o un bloque de suscripción es contenido (#15), si un parámetro de URL
+es legítimo (#12, #22), qué tipo de página es cada plantilla (#12). Y dos
+decisiones de modelo que son tuyas: **C2** (si el peso de un `nofollow` se
+evapora o se reparte) y la revisión a mano del top 50 por PageRank de los tres
+censos, que ya está sacado.
+
 ## M2 · Decisiones: base (F0)
 
 #40 (botón bajo demanda con coste estimado), #7 (cliente de Jev vía OpenRouter,
@@ -103,6 +131,18 @@ este bloque. #31, #32, #33, #34, #35 son P2.
   tres meses más nuevo; su superficie de producto la describen mejor #36 y #6.
   Pendiente de ejecutar el rescate de seis arreglos (#42).
 - **2026-10-06: nada de M2-M4 empieza antes de cerrar M1.**
+- **2026-10-07: C3 también en el PageRank.** Una página `noindex` recibe pero no
+  reparte: sus enlaces no pasan autoridad (Google acaba tratándolos como
+  nofollow) y su masa acumulada va al teletransporte, no a sus destinos. Que sí
+  reciba es deliberado: un enlace a una noindex es autoridad que se tira, y eso
+  es lo que mide `reparto["no_indexable"]`. En blogs.uoc.edu mueve **6 puntos**
+  de PageRank; el orden del top 50 no cambia en ninguno de los tres censos.
+- **2026-10-07: el ratio texto/HTML deja de generar issue.** No es una señal de
+  Google y, bien medido, salta en el 97% de las páginas de un sitio moderno. La
+  columna se sigue calculando y exportando.
+- **2026-10-07: las cabeceras de seguridad se avisan por host, no por página.**
+  Son una propiedad del servidor y no afectan al posicionamiento; `unsafe_crossorigin`
+  desaparece (los navegadores aplican `noopener` por defecto desde 2021).
 
 ## Lo que no está en ninguna issue y conviene recordar
 
