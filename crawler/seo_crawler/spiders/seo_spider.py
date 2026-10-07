@@ -1213,9 +1213,6 @@ class SeoSpider(scrapy.Spider):
             )
             return
 
-        self._crawled_count += 1
-        self._update_redis_progress()
-
         url = response.url
         parsed = urlparse(url)
         content_type = response.headers.get(b"Content-Type", b"").decode("utf-8", errors="ignore")
@@ -1232,13 +1229,24 @@ class SeoSpider(scrapy.Spider):
         # PDF ni una imagen aunque la URL acabe en .pdf.
         location = self._redirect_location(response)
         if location is not None:
+            # Un salto 3xx SI cuenta: escribe su fila y gasta presupuesto.
+            self._crawled_count += 1
+            self._update_redis_progress()
             yield from self._handle_redirect(response, location, depth,
                                              response_time_ms, content_type)
             return
 
         # Resource type filter: skip types not enabled in config
         if resource_type not in self._allowed_resource_types:
+            # Sin contar: el contador es el que gasta `max_urls`, y cinco PDFs
+            # filtrados agotaban un `max_urls=5` sin guardar una sola pagina.
+            # Lo descargado ya no se puede deshacer (el filtro es posterior a la
+            # descarga), pero al menos no consume el presupuesto del rastreo.
+            logger.debug("Tipo %s filtrado: %s", resource_type, url)
             return
+
+        self._crawled_count += 1
+        self._update_redis_progress()
 
         # Cadena de redirecciones seguida fuera del spider (con render JS la
         # sigue el navegador): un PageItem por salto. La pagina de este

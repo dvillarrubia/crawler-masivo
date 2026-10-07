@@ -60,7 +60,8 @@ def _html(cuerpo: str, head: str = "") -> bytes:
     ).encode("utf-8")
 
 
-def construir_sitio(port: int, con_privado: bool = False) -> dict:
+def construir_sitio(port: int, con_privado: bool = False,
+                    con_recursos: bool = False) -> dict:
     otro = f"http://127.0.0.1:{port}"
     return {
         # Semilla en localhost que redirige a otro host (127.0.0.1)
@@ -72,6 +73,7 @@ def construir_sitio(port: int, con_privado: bool = False) -> dict:
             '<a href="/bad">malformado</a>'
             '<a href="/tag/x">excluida</a>'
             '<a href="/rel">rel con comas</a>'
+            + ('<a href="/recursos">recursos</a>' if con_recursos else '')
             + ('<a href="/privado/x">privada por robots</a>'
                '<a href="/publica-tras-privada">publica</a>' if con_privado else ''),
             f'<link rel="canonical" href="{otro}/home">',
@@ -102,11 +104,25 @@ def construir_sitio(port: int, con_privado: bool = False) -> dict:
         "/nivel2": (200, {}, _html("<p>n2</p>")),
         "/privado/x": (200, {}, _html("<p>no deberia pedirse en modo respect</p>")),
         "/publica-tras-privada": (200, {}, _html("<p>si</p>")),
+        # Recursos para el filtro por tipo: enlazados desde /recursos
+        "/recursos": (200, {}, _html(
+            '<a href="/doc1.pdf">1</a><a href="/doc2.pdf">2</a>'
+            '<a href="/descarga-1">d1</a><a href="/descarga-2">d2</a>'
+            '<a href="/logo.svg">logo</a><a href="/pagina-real">real</a>')),
+        "/doc1.pdf": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4 x"),
+        # Sin extension: el filtro de seguimiento no puede saber que es un
+        # PDF hasta descargarlo, que es cuando el tipo gastaba presupuesto.
+        "/descarga-1": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4 d1"),
+        "/descarga-2": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4 d2"),
+        "/doc2.pdf": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4 y"),
+        "/logo.svg": (200, {"Content-Type": "image/svg+xml"}, b"<svg/>"),
+        "/pagina-real": (200, {}, _html("<p>contenido</p>")),
     }
 
 
 def servir(robots_prohibe_todo: bool = False,
-           robots_bloquea_privado: bool = False) -> tuple[ThreadingHTTPServer, int]:
+           robots_bloquea_privado: bool = False,
+           con_recursos: bool = False) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -125,7 +141,8 @@ def servir(robots_prohibe_todo: bool = False,
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
-    rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado))
+    rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado,
+                                 con_recursos=con_recursos))
     if robots_bloquea_privado:
         # Un robots.txt que prohibe una carpeta concreta: el caso del informe
         # "Blocked by robots.txt" (R6 de #25). La URL la enlaza /home.
@@ -190,7 +207,8 @@ class Recolector:
 def main() -> None:
     entrada = json.loads(sys.argv[1])
     srv, port = servir(entrada.get("robots_prohibe_todo", False),
-                       entrada.get("robots_bloquea_privado", False))
+                       entrada.get("robots_bloquea_privado", False),
+                       entrada.get("con_recursos", False))
 
     import shared.database
     from scrapy.crawler import CrawlerProcess

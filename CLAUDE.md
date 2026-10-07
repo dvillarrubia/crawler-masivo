@@ -655,6 +655,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    y mantiene la URL del documento, así que es exactamente lo que se hace ahora
    (solo se acepta una base que resuelva a http/https).
 
+50. **Un sitemap de texto, un RSS o un Atom daban cero URLs, y los recursos
+   filtrados gastaban presupuesto** — el protocolo de sitemaps.org incluye el
+   fichero de texto plano (una URL por línea) y Google acepta además RSS 2.0 y
+   Atom como sitemap. `parse_sitemap` solo entendía `<urlset>` y
+   `<sitemapindex>`, así que con cualquiera de los otros tres la lista salía
+   **vacía** — y con ella `in_sitemap` en falso para TODAS las URLs del sitio,
+   de donde salen los huérfanos inflados y una lista de «URLs del sitemap sin
+   rastrear» vacía. El de texto exige que la línea empiece por http(s) y no
+   tenga espacios ni `<`, para que un HTML de error no pase por sitemap.
+   Aparte: el contador de páginas se incrementaba ANTES del filtro por tipo de
+   recurso, así que un PDF o una fuente que el job excluye gastaba `max_urls`
+   sin dejar una sola fila (medido contra el código anterior: el contador subía
+   a 1 con un PDF filtrado). Y `crawl_svg` no hacía nada, porque el SVG se
+   clasificaba como `image` tanto por `Content-Type` como por extensión: ahora
+   es su propio tipo.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

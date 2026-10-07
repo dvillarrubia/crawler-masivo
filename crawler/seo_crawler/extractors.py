@@ -214,6 +214,11 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
 
     if "html" in ct:
         return "html"
+    # El SVG es su propio tipo. Clasificado como "image" (lo hacen tanto el
+    # Content-Type `image/svg+xml` como la extension), `crawl_svg` no tenia
+    # ningun efecto: no habia forma de excluirlo ni de incluirlo.
+    if "svg" in ct:
+        return "svg"
     if ct.startswith("image/"):
         return "image"
     if "css" in ct:
@@ -232,7 +237,7 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
         ".css": "css",
         ".js": "js", ".mjs": "js",
         ".jpg": "image", ".jpeg": "image", ".png": "image",
-        ".gif": "image", ".svg": "image", ".webp": "image", ".ico": "image",
+        ".gif": "image", ".svg": "svg", ".webp": "image", ".ico": "image",
         ".pdf": "pdf",
         ".woff": "font", ".woff2": "font", ".ttf": "font", ".eot": "font",
     }
