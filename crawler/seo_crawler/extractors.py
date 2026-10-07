@@ -239,21 +239,39 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
         return "font"
 
     # Fallback: look at extension
-    path = urlparse(url).path.lower()
-    ext_map = {
-        ".html": "html", ".htm": "html",
-        ".css": "css",
-        ".js": "js", ".mjs": "js",
-        ".jpg": "image", ".jpeg": "image", ".png": "image",
-        ".gif": "image", ".svg": "svg", ".webp": "image", ".ico": "image",
-        ".pdf": "pdf",
-        ".woff": "font", ".woff2": "font", ".ttf": "font", ".eot": "font",
-    }
-    for ext, rtype in ext_map.items():
-        if path.endswith(ext):
-            return rtype
+    tipo = tipo_por_extension(url)
+    return tipo or "other"
 
-    return "other"
+
+# Extension -> tipo, solo para las que lo identifican sin dudas. Separado de
+# `classify_resource_type` porque hay una decision que depende de distinguir
+# "la extension dice que es una imagen" de "no se sabe": pre-filtrar una
+# peticion. `producto-2.5-kg` tiene un punto y no es ningun recurso.
+_TIPO_POR_EXTENSION: dict[str, str] = {
+    ".html": "html", ".htm": "html",
+    ".css": "css",
+    ".js": "js", ".mjs": "js",
+    ".jpg": "image", ".jpeg": "image", ".png": "image",
+    ".gif": "image", ".webp": "image", ".ico": "image", ".avif": "image",
+    ".svg": "svg",
+    ".pdf": "pdf",
+    ".woff": "font", ".woff2": "font", ".ttf": "font", ".eot": "font", ".otf": "font",
+}
+
+
+def tipo_por_extension(url: str) -> str | None:
+    """Tipo de recurso segun la extension de la URL, o None si no la identifica.
+
+    Devolver None cuando no se sabe es la mitad importante: con `"other"` como
+    respuesta por defecto, cualquier URL con un punto en el ultimo tramo
+    —`producto-2.5-kg`, `v1.2-guia`— pasaria por recurso.
+    """
+    ruta = urlparse(url).path.lower()
+    segmento = ruta.rstrip("/").rsplit("/", 1)[-1]
+    punto = segmento.rfind(".")
+    if punto <= 0:
+        return None
+    return _TIPO_POR_EXTENSION.get(segmento[punto:])
 
 
 def is_internal_url(url: str, allowed_hosts: set[str]) -> bool:
