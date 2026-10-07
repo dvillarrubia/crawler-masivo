@@ -669,7 +669,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    sin dejar una sola fila (medido contra el código anterior: el contador subía
    a 1 con un PDF filtrado). Y `crawl_svg` no hacía nada, porque el SVG se
    clasificaba como `image` tanto por `Content-Type` como por extensión: ahora
-   es su propio tipo.
+   es su propio tipo. Y los dos tamaños estaban **cambiados**: Scrapy
+   descomprime el cuerpo pero no toca la cabecera, así que `Content-Length` son
+   los bytes del cable y `len(response.body)` el recurso descomprimido —medido:
+   143 contra 28.055 en una respuesta gzip—. Se guardaba el comprimido como
+   `content_length` y el descomprimido como `transfer_size`. En el censo de
+   www.uoc.edu la media de `content_length` era **45 kB** para páginas de
+   **760 kB**, con 15.330 filas donde el «transferido» superaba al «tamaño» más
+   del doble.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

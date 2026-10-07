@@ -62,7 +62,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | status_code | int | Codigo HTTP (200, 301, 404...) |
 | status_group | varchar(10) | 2xx, 3xx, 4xx, 5xx, timeout, dns_error |
 | content_type | varchar(256) | Content-Type header |
-| content_length | bigint | Tamano en bytes |
+| content_length | bigint | Tamano del recurso en bytes, ya descomprimido |
 | response_time_ms | float | Tiempo de respuesta |
 | is_html | bool | Si es pagina HTML |
 | resource_type | varchar(20) | html, image, css, js, pdf, redirect, other |

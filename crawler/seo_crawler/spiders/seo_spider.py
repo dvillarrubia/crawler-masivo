@@ -1086,7 +1086,7 @@ class SeoSpider(scrapy.Spider):
             status_text=http_status_text(status),
             last_modified=None,
             http_version=response.meta.get("http_protocol") or getattr(response, "protocol", None),
-            transfer_size=len(response.body),
+            transfer_size=int(response.headers.get(b"Content-Length", 0) or 0) or len(response.body),
             indexability_status=f"Redirect ({status})",
             blocked_by_robots=response.meta.get("blocked_by_robots"),
         )
@@ -1216,7 +1216,16 @@ class SeoSpider(scrapy.Spider):
         url = response.url
         parsed = urlparse(url)
         content_type = response.headers.get(b"Content-Type", b"").decode("utf-8", errors="ignore")
-        content_length = int(response.headers.get(b"Content-Length", 0) or 0)
+        # Los dos tamanos estaban cambiados: `Content-Length` es lo que viaja
+        # por el cable (Scrapy descomprime el cuerpo pero NO toca la cabecera,
+        # comprobado: 143 bytes de cabecera para un cuerpo de 28.055), y
+        # `len(response.body)` es el recurso ya descomprimido. Asi que
+        # `content_length` daba el tamano comprimido —el peso de la pagina
+        # quedaba dividido por 4 o 5 en cualquier sitio con gzip— y
+        # `transfer_size`, que es lo que pesa para el rastreo y para las Core
+        # Web Vitals, daba el descomprimido.
+        bytes_del_cable = int(response.headers.get(b"Content-Length", 0) or 0)
+        content_length = len(response.body)
         status_code = response.status
         depth = response.meta.get("depth", 0)
         response_time_ms = response.meta.get("download_latency", 0) * 1000
@@ -1478,7 +1487,7 @@ class SeoSpider(scrapy.Spider):
             is_internal=self._is_internal(final_url),
             crawl_depth=depth,
             content_type=content_type,
-            content_length=content_length or len(response.body),
+            content_length=content_length,
             status_code=status_code,
             status_group=compute_status_group(status_code),
             response_time_ms=round(response_time_ms, 2),
@@ -1498,7 +1507,8 @@ class SeoSpider(scrapy.Spider):
             status_text=status_text_val,
             last_modified=last_modified_val,
             http_version=http_version_val,
-            transfer_size=len(response.body),
+            # Sin cabecera (respuesta troceada) no se sabe: se usa el cuerpo.
+            transfer_size=bytes_del_cable or len(response.body),
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
         )

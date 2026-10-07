@@ -119,7 +119,11 @@ class Url(Base):
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"
     last_modified = Column(String(128), nullable=True)       # Last-Modified header
     http_version = Column(String(16), nullable=True)         # "HTTP/1.1", "HTTP/2"
-    transfer_size = Column(BigInteger, nullable=True)        # compressed transfer size
+    # Bytes que viajan por el cable (comprimidos): es el peso que cuenta para el
+    # presupuesto de rastreo y para las Core Web Vitals. `content_length` es el
+    # recurso ya descomprimido. Estaban cambiados: en un sitio con gzip,
+    # content_length daba el tamano comprimido (dividido por 4 o 5).
+    transfer_size = Column(BigInteger, nullable=True)
     indexability_status = Column(String(64), nullable=True)  # reason: "Canonicalised", "Noindex", etc.
     blocked_by_robots = Column(Boolean, nullable=True)       # only set in robots_mode="audit"
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
