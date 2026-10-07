@@ -858,6 +858,31 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    con `ugc`, ninguno con `sponsored` y solo 12 internos — corrección de
    criterio, no de volumen.
 
+58. **Un menú en un `<div class="main-menu">` no es la cabecera** — la
+   auditoría midió que `link_position` fallaba en **13 de 24** plantillas
+   realistas. Al escribir esos 24 casos como test salían ya **20/24** (los
+   arreglos de octubre —tokens por palabra entera, camelCase, landmarks— habían
+   resuelto la mayoría) y los cuatro que quedaban se arreglaron: el token `menu`
+   y sus variantes entran en la lista de navegación —`main-menu`,
+   `primary-menu`, `mobile-menu` y `menu-item` salían como **contenido**, y un
+   menú contado como editorial es justo lo que hacía saltar
+   `high_outlink_count` en todas las páginas—; `id="secondary"` es la barra
+   lateral de los temas de WordPress, pero solo como **id**, porque como clase
+   el `btn-secondary` de Bootstrap marcaría de barra lateral los enlaces de
+   cualquier botón; y un `<aside>` dentro de `article`/`main` es contenido, la
+   misma regla de landmark de las decisiones 9 y 45.
+   Medido en las 58 páginas de control: `nav` 3.467 → 7.113 y `header` 3.772 →
+   325, casi todo el movimiento siendo **header → nav** (3.447 enlaces del menú
+   que vive dentro del `<header>`). Para el PageRank eso no cambia nada —`nav` y
+   `header` pesan 0,25 los dos— y `content` se mueve 2 enlaces, así que
+   `high_outlink_count` tampoco; lo que se arregla es la posición que se
+   **exporta** y con la que se analiza el anchor text: un enlace de menú ahora
+   dice que es de menú. Lo que sí cambia peso son los 199 enlaces que pasan de
+   footer (0,15), sidebar (0,4) o content (1,0) a nav.
+   Riesgo conocido y asumido, escrito en el test: el `class="menu"` de una carta
+   de restaurante se clasifica como navegación. Equivocarse al otro lado afecta a
+   todas las páginas del sitio; este caso, a una.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
