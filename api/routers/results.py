@@ -639,6 +639,7 @@ CSV_COLUMNS = [
     # Otros
     "blocked_by_robots",
     "body_hash",
+    "content_hash",
     "last_crawled_at",
     "content_text_first_500",
     "content_char_count",
@@ -759,6 +760,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         # Otros
         _val(url_obj.blocked_by_robots),
         _val(url_obj.body_hash),
+        _val(url_obj.content_hash),
         _val(url_obj.last_crawled_at.isoformat() if url_obj.last_crawled_at else None),
         # PageContent fields
         content_text_val,

@@ -369,6 +369,7 @@ class UrlResponse(BaseModel):
     folder_depth: int | None = None
     word_count: int | None = None
     content_word_count: int | None = None
+    content_hash: str | None = None
     text_ratio: float | None = None
     redirect_type: int | None = None
     status_text: str | None = None

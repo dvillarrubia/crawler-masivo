@@ -33,6 +33,10 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_word_count INTEGER"))
         # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.
         conn.execute(text("ALTER TABLE headings ADD COLUMN IF NOT EXISTS oculto BOOLEAN"))
+        # Hash del contenido normalizado: el de los bytes no detecta duplicados
+        # en ningun CMS moderno (un token CSRF cambia el hash).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))

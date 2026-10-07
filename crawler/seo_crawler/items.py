@@ -34,6 +34,7 @@ class PageItem(scrapy.Item):
     folder_depth = scrapy.Field()
     word_count = scrapy.Field()
     content_word_count = scrapy.Field()
+    content_hash = scrapy.Field()
     text_ratio = scrapy.Field()
     redirect_type = scrapy.Field()
     status_text = scrapy.Field()

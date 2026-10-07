@@ -634,3 +634,15 @@ def test_template_y_noscript_no_aportan_enlaces_ni_imagenes():
         "https://x.com/real"]
     assert [r["url"] for r in ex.extract_resources(s, "https://x.com/")] == [
         "https://x.com/r.png"]
+
+
+def test_hash_de_contenido_ignora_espacios_y_caja():
+    """`body_hash` es el de los bytes: un token CSRF o un nonce bastaban para
+    que dos paginas identicas no coincidieran. En un censo real encontraba 0
+    duplicados donde hay 745 paginas duplicadas."""
+    a = ex.hash_de_contenido("Politica de privacidad\nEste sitio usa datos.")
+    b = ex.hash_de_contenido("  politica de PRIVACIDAD   Este sitio usa datos. ")
+    assert a == b
+    assert a != ex.hash_de_contenido("Politica de privacidad. Otro texto.")
+    assert ex.hash_de_contenido(None) is None
+    assert ex.hash_de_contenido("   ") is None
