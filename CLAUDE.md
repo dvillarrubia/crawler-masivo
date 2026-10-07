@@ -232,8 +232,9 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
-| `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count |
-| `analyze_links()` | link graph metrics (inlinks, outlinks, pagerank) |
+| `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
+| `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
+| `analyze_sitemap()` | sitemap_orphan, not_in_sitemap |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
 
