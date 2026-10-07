@@ -6,6 +6,45 @@ manos de un cliente decían cosas que hoy sabemos que son falsas?**
 
 Esto lo responde con datos, no con suposiciones.
 
+## Antes de leer nada: qué prueba esto y qué no
+
+**Los cuatro censos comparados son anteriores a los arreglos del extractor**
+(Lopesan 6-oct, Saunier 10-sep, penguin 13-jul, CST 25-jun; los arreglos
+entraron el 7-oct). Y un re-análisis **solo aplica los arreglos del análisis**:
+lo que el extractor guardó mal el día del rastreo sigue guardado mal.
+
+| | lo arregla un re-análisis | hace falta re-rastrear |
+|---|---|---|
+| duplicados solo entre indexables | ✅ | |
+| cabeceras de seguridad, una por host | ✅ | |
+| el ratio texto/HTML, retirado | ✅ | |
+| alcance de los avisos de URL, cadenas de redirección | ✅ | |
+| enlaces desde páginas rotas o `noindex` | ✅ | |
+| severidad del canonical, agrupación de imágenes | ✅ | |
+| **el texto propio de la página** (sin menú ni pie) | | ❌ |
+| **títulos por anchura en píxeles** | | ❌ |
+| **el `@graph` abierto en entidades** | | ❌ |
+| **imágenes reales en vez del placeholder** | | ❌ |
+| **URLs bloqueadas por robots, formatos de sitemap** | | ❌ |
+
+Así que lo que miden estas comparaciones es **«qué diría hoy el análisis sobre
+los mismos datos»**, que no es lo mismo que «qué diría un rastreo de hoy».
+
+**Lo que sí se puede afirmar:** los avisos que DESAPARECEN son casi todos del
+análisis, así que esos informes sí tenían esas líneas de más.
+
+**Lo que NO se puede afirmar:** que las notas nuevas sean las que saldrían hoy.
+En particular —y esto corrige una lectura que hice primero— **la subida de la
+categoría «Contenido» no significa que el contenido estuviera infravalorado**.
+La nota usa `pct_thin`, que cuenta las páginas con `low_word_count`,
+`low_text_ratio` y `very_low_text_ratio`; al retirar los dos del ratio (que no
+son señal de Google) la nota sube sola. Ninguno de los tres censos tiene la
+columna del texto propio (0 de 8.049, 0 de 4.318 y 0 de 1.304 páginas), así que
+el escaso se sigue midiendo sobre el body **con el menú dentro**. Cuando se
+mide bien, aparecen MÁS páginas escasas, no menos: medido en otro censo, 997
+por body contra 10.433 por contenido propio. **Un rastreo nuevo probablemente
+baje esa nota, no la suba.**
+
 ## Cómo está medido
 
 Sin tocar producción. Para cada censo:
