@@ -278,9 +278,51 @@ def _normaliza_protocolo(valor) -> str | None:
     return _PROTOCOLO_LEGIBLE.get(valor.lower().strip(), valor.strip())
 
 
+# Esta limpieza se ejecuta en el NAVEGADOR y antes de capturar el HTML, asi que
+# un falso positivo aqui no se lleva solo el texto: se lleva los enlaces de esa
+# zona, y el rastreo no vuelve a verlos. Los patrones casan por subcadena, de
+# modo que `cookie-policy` o `privacy-notice` casan con el contenedor del
+# contenido de la propia pagina de cookies o de privacidad —las que tienen que
+# estar indexadas tal cual—. Las dos mismas salvaguardas que en Python
+# (`_TAGS_INTOCABLES` y `_MAX_SHARE_PLANTILLA` de extractors.py): no se toca la
+# pagina entera, y un bloque que se lleva mas del 40% de las palabras no es un
+# aviso de cookies, es la pagina.
 _BOILERPLATE_REMOVAL_JS = """
 () => {
-    const r = (s) => { try { document.querySelectorAll(s).forEach(e => e.remove()); } catch(_) {} };
+    const INTOCABLES = new Set(['HTML', 'BODY', 'MAIN', 'ARTICLE']);
+    const MAX_SHARE = 0.4;
+    // Palabras visibles, sin el texto de script/style/noscript/template.
+    const palabras = (el) => {
+        if (!el) return 0;
+        let n = 0;
+        try {
+            const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+                acceptNode: (t) => {
+                    const p = t.parentElement;
+                    if (!p) return NodeFilter.FILTER_REJECT;
+                    const tg = p.tagName;
+                    return (tg === 'SCRIPT' || tg === 'STYLE' || tg === 'NOSCRIPT'
+                            || tg === 'TEMPLATE')
+                        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            while (w.nextNode()) {
+                const m = (w.currentNode.nodeValue || '').match(/\\S+/g);
+                if (m) n += m.length;
+            }
+        } catch (_) {}
+        return n;
+    };
+    const total = palabras(document.body);
+    const r = (s) => {
+        try {
+            document.querySelectorAll(s).forEach(e => {
+                if (INTOCABLES.has(e.tagName)) return;
+                if (total > 0 && palabras(e) / total > MAX_SHARE) return;
+                e.remove();
+            });
+        } catch(_) {}
+    };
 
     // ---- Known consent-management libraries ----
     ['#CybotCookiebotDialog', '#CybotCookiebotDialogBodyUnderlay',

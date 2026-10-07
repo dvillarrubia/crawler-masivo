@@ -1449,6 +1449,18 @@ _PROMO_TEXT_PHRASES: list[str] = [
 
 _PROMO_TEXT_MAX_LEN = 400  # chars — only prune small blocks
 
+# Cuantas veces la frase puede caber en el bloque para que el bloque SEA la
+# frase y no un texto que la MENCIONA. Sin esto, cualquier parrafo de menos de
+# 400 caracteres que dijera "politica de cookies" desaparecia: medido en 58
+# paginas de control, se borraban 526 bloques y entre ellos los parrafos del
+# cuerpo de las paginas de cookies y de privacidad —el contenido por el que esas
+# paginas existen—, y un bloque con el h2 "Quienes somos" porque acababa en
+# "Siguenos en LinkedIn". El corte sale de los datos: todo lo que esta por
+# debajo de 6 es un reclamo ("Suscribete a las novedades y gestiona tus
+# intereses", 5,1) y a partir de 7,7 ya es prosa ("Esta Politica de Cookies
+# podra ser modificada o actualizada en cualquier momento...", 8,4).
+_PROMO_TEXT_MAX_FACTOR = 6.0
+
 _PROMO_TEXT_TAGS: frozenset[str] = frozenset({
     "div", "section", "p", "span", "li", "a", "button",
 })
@@ -1779,7 +1791,12 @@ def _strip_boilerplate_html(
                 if not text or len(text) > _PROMO_TEXT_MAX_LEN:
                     continue
                 lower = text.lower()
-                if not any(phrase in lower for phrase in _PROMO_TEXT_PHRASES):
+                frase = next((p for p in _PROMO_TEXT_PHRASES if p in lower), None)
+                if frase is None:
+                    continue
+                # El bloque tiene que SER el reclamo, no mencionarlo.
+                limpio = _WHITESPACE.sub(" ", text).strip()
+                if len(limpio) > _PROMO_TEXT_MAX_FACTOR * len(frase):
                     continue
                 # Un bloque con titulos o con varios parrafos es un articulo
                 # corto que CONTIENE el widget (el "Share on Mastodon" al pie

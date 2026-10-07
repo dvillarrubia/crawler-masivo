@@ -485,3 +485,24 @@ def test_el_ciclo_de_dos_lineas_sigue_colapsando():
     """`A B A B …` de una animacion de letras: una vuelta y fuera."""
     texto = "\n".join(["Digital by nature", "nature"] * 5 + ["Linea unica"])
     assert ex._dedupe_lines(texto) == "Digital by nature\nnature\nLinea unica"
+
+
+def test_un_parrafo_que_menciona_las_cookies_no_es_un_aviso_de_cookies():
+    """Cualquier parrafo de menos de 400 caracteres que dijera "politica de
+    cookies" desaparecia: el cuerpo de las paginas de cookies y privacidad se
+    iba parrafo a parrafo, y ahi la salvaguarda por tamano de bloque no llega
+    porque cada parrafo es pequeno. El bloque tiene que SER el reclamo."""
+    html = _pagina(
+        f"<h1>Politica de cookies</h1><p>{_CUERPO}</p>"
+        "<p>Esta Politica de Cookies podra ser modificada o actualizada en "
+        "cualquier momento. Por ello, recomendamos que la revises cada vez que "
+        "accedas a nuestra web.</p>")
+    out = ex.extract_main_content(sel(html)) or ""
+    assert "modificada o actualizada" in out
+
+
+def test_el_reclamo_puro_sigue_fuera():
+    for reclamo in ("Suscribete a las novedades", "Siguenos en redes",
+                    "Aceptar cookies"):
+        html = _pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p><div><p>{reclamo}</p></div>")
+        assert reclamo not in (ex.extract_main_content(sel(html)) or "")
