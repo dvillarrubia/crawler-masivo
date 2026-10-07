@@ -623,9 +623,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (c) `role="heading"` con `aria-level` cuenta como titular de ese nivel (2 por
    defecto, según ARIA); (d) un enlace de icono sin texto usa su `aria-label`,
    su `title` o la etiqueta de su `<svg>` — es lo que anuncia un lector de
-   pantalla y lo que Google toma como ancla: **1.783 → 155 anclas vacías** en 58
-   páginas de control, y el ancla pesa en el agrupamiento por repetición del
-   PageRank (decisión 29) y en todo análisis de anchor text. Además, lo que vive
+   pantalla y lo que Google toma como ancla: **3.438 → 1.276 anclas vacías** en
+   58 páginas de control (2.915 → 1.056 contando solo los enlaces internos). El
+   ancla pesa en el agrupamiento por repetición del PageRank (decisión 29) y en
+   todo análisis de anchor text. *(Esas cifras corrigen las de la primera
+   versión de esta nota —«1.783 → 155»—, que no se reproducen con ninguna de
+   las dos definiciones; estas salen de volver a pasar cada versión del
+   extractor sobre las mismas 58 páginas. Ver la decisión 61, que baja las
+   1.276 a 208.)* Además, lo que vive
    en `<template>` o `<noscript>` ya no aporta enlaces ni imágenes: no está en el
    DOM, y el `<noscript><img>` de la carga diferida duplicaba la imagen real
    (583 de 4.409 imágenes en las mismas 58 páginas). El hero fuera del
@@ -911,6 +916,24 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    sobre 100** como máximo, sin una sola página moviéndose 5. No se toca. Si
    alguna vez se toca, la masa perdida va al teletransporte, igual que la de las
    `noindex` (decisión 29 y C3).
+
+61. **El alt de la imagen es el ancla del enlace de imagen** — Google lo
+   documenta («if the link is an image, the alt text acts as the anchor text») y
+   es el caso de la ficha de un listado, donde el enlace envuelve la foto y el
+   nombre del producto está en el `alt`, y del logo que enlaza a la home. El
+   respaldo del ancla llegaba hasta `aria-label`, `title` y la etiqueta del
+   `<svg>` (decisión 46) y ahí se paraba. Medido sobre las mismas 58 páginas de
+   control: **1.276 → 208 enlaces sin ancla**, y los 208 que quedan son iconos
+   de redes sociales sin `alt`, sin `aria-label` y sin `title` — no los rotula
+   nada. Contando solo los internos, **1.056 → 39**. Ninguna ancla que ya tenía
+   texto cambia, y el `link_type` tampoco: un `<a><img></a>` sigue siendo
+   `image` aunque su ancla salga del `alt`, porque el tipo describe el marcado.
+   El `alt` va en último lugar a propósito: `aria-label` y `title` los escribe
+   alguien para anunciar el ENLACE, el `alt` describe la IMAGEN.
+   De paso, el mismo `alt` repetido deja de duplicarse: un enlace con el clon
+   de móvil y el de escritorio de la misma imagen daba
+   `"voto femenino voto femenino"` — 7 de las 58 páginas, y 504 valores de
+   `links.alt_text` corregidos.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

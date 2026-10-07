@@ -620,6 +620,60 @@ def test_anchor_de_icono_no_es_un_anchor_vacio():
     assert anchors == ["Zapatillas", "Ir al carrito", "Ver la ficha", "Buscar", "Mi cuenta"]
 
 
+def test_el_alt_de_la_imagen_es_el_ancla_de_un_enlace_de_imagen():
+    """Google: "if the link is an image, the alt text acts as the anchor text".
+
+    Es el caso de la ficha de un listado —imagen + nombre en el alt— y de un
+    logo que enlaza a la home. Medido en 58 paginas de control de tres
+    clientes: de 1.276 enlaces sin ancla, 1.068 la recuperan de aqui.
+    """
+    s = sel("<a href='/ficha'><img src='p.jpg' alt='Zapatilla de trail 42'></a>"
+            "<a href='/'><img src='logo.svg' alt='Logo de la marca'></a>")
+    anchors = [l["anchor_text"] for l in ex.extract_links(s, "https://x.com/", {"x.com"})]
+    assert anchors == ["Zapatilla de trail 42", "Logo de la marca"]
+
+
+def test_el_alt_es_el_ultimo_recurso_y_no_pisa_nada():
+    """El texto visible y los atributos que ANUNCIAN el enlace van antes: el
+    alt describe la imagen, no el destino."""
+    s = sel("<a href='/a'>Ver la ficha<img src='p.jpg' alt='Foto del producto'></a>"
+            "<a href='/b' aria-label='Ir al carrito'><img src='c.svg' alt='carrito'></a>"
+            "<a href='/c' title='Ver la ficha'><img src='p.jpg' alt='Foto'></a>")
+    anchors = [l["anchor_text"] for l in ex.extract_links(s, "https://x.com/", {"x.com"})]
+    assert anchors == ["Ver la ficha", "Ir al carrito", "Ver la ficha"]
+
+
+def test_un_enlace_de_imagen_sigue_siendo_de_tipo_imagen():
+    """El `link_type` describe el marcado, no de donde salio el ancla."""
+    (enlace,) = ex.extract_links(
+        sel("<a href='/ficha'><img src='p.jpg' alt='Nombre'></a>"),
+        "https://x.com/", {"x.com"},
+    )
+    assert enlace["anchor_text"] == "Nombre"
+    assert enlace["link_type"] == "image"
+
+
+def test_el_clon_responsive_no_duplica_el_alt():
+    """Un enlace con la imagen de movil y la de escritorio llevaba el mismo alt
+    dos veces: "voto femenino voto femenino". Pasaba en 7 de las 58 paginas de
+    control, y cambiaba 504 valores de `alt_text`."""
+    (enlace,) = ex.extract_links(
+        sel("<a href='/a'><img src='m.jpg' alt='voto femenino' class='d-md-none'>"
+            "<img src='d.jpg' alt='voto femenino'></a>"),
+        "https://x.com/", {"x.com"},
+    )
+    assert enlace["alt_text"] == "voto femenino"
+    assert enlace["anchor_text"] == "voto femenino"
+
+
+def test_dos_imagenes_distintas_si_suman_su_alt():
+    (enlace,) = ex.extract_links(
+        sel("<a href='/a'><img src='1.jpg' alt='Antes'><img src='2.jpg' alt='Despues'></a>"),
+        "https://x.com/", {"x.com"},
+    )
+    assert enlace["alt_text"] == "Antes Despues"
+
+
 # ---------------------------------------------------------------------------
 # template / noscript no estan en el DOM (#27)
 # ---------------------------------------------------------------------------
