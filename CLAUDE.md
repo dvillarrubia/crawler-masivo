@@ -445,8 +445,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    desaparecia. Medido: el analisis de un censo de 60.399 URLs fallo y el log
    solo decia eso. Un solo `yield`, y el `except` del montaje no lo envuelve.
 
-38. **Un enlace desde una pagina `noindex` no cuenta como entrante** (C3 de
-   #24, criterio decidido el 7-oct-2026). Google acaba tratando los enlaces de
+38. **Una pagina `noindex` no enlaza: ni como entrante ni en el PageRank**
+   (C3 de #24, criterio decidido el 7-oct-2026). Google acaba tratando los enlaces de
    una noindex como nofollow, asi que una pagina cuyos unicos enlaces vienen de
    ahi no esta enlazada a efectos de buscador: cuelga de paginas que el
    buscador va a dejar de rastrear. El `noindex` se materializa en
@@ -458,6 +458,21 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    enlaces venian de ellas — 824 con parametros (busquedas internas, trampas de
    rastreo) y 168 sin ellos, que son el hallazgo: categorias con 400-800
    palabras, fuera del sitemap, colgando solo de su paginacion noindex.
+
+   El mismo criterio vale en el PageRank: una noindex **recibe pero no
+   reparte**. Lo que ya tenia acumulado no se pierde —queda colgante y su masa
+   va al teletransporte, o sea al conjunto de indexables— pero no va a los
+   destinos concretos que ella enlazaba. Que SI reciba es deliberado: un enlace
+   a una noindex es autoridad que se tira, y eso es justo lo que mide
+   `reparto["no_indexable"]`. Cuantas paginas son fuente de verdad del grafo
+   cambia muchisimo por sitio y no se puede estimar con `outlinks_count` (que no
+   filtra por `follow`): medido con los enlaces del grafo, blogs.uoc.edu tiene
+   **1.758 paginas noindex que enlazan 203.380 veces** a 7.400 destinos,
+   www.uoc.edu solo 44 (10.775 enlaces) y progym 3 (519). Por eso el efecto
+   tambien cambia: en www.uoc.edu quita 7.496 aristas de 2.013.337 y mueve el
+   reparto 7 centesimas (84,02% -> 84,09% indexable), sin que entre ni salga
+   nadie del top 50 y con 2 puestos de movimiento maximo; en progym, 474 aristas
+   de 582.205 y el reparto no se mueve.
 
 37. **El job se filtra en `links`, nunca uniendo con `urls`** — la tabla de
    enlaces guarda los de TODOS los rastreos: 46 GB y 181 millones de filas en
