@@ -816,7 +816,16 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (el origen tiene que ser 200) y en `compute_pagerank` (una página que no
    responde 200 no entra como fuente, así que no reparte autoridad que no tiene).
    El modelo de nofollow (C2) y el de `noindex,follow` en el PageRank siguen
-   siendo decisión abierta.
+   siendo decisión abierta. Re-analizado el censo con el arreglo: **240.543
+   enlaces entrantes menos** (el 6,7% del total) y **19 páginas más** que
+   aparecen con cero entrantes; `orphan_page` se queda en 370 porque esas 19
+   están declaradas en el sitemap y por eso van a `sitemap_orphan` (decisión 36:
+   un aviso por hallazgo, y ese es el más fuerte de los dos).
+   Lo mismo con `rel="ugc"` y `rel="sponsored"`, que Google documenta como la
+   misma pista que `nofollow`: se leía solo `nofollow`, así que un enlace
+   patrocinado sumaba autoridad. Medido en cuatro censos (28,4 M enlaces): 224
+   con `ugc`, ninguno con `sponsored` y solo 12 internos — corrección de
+   criterio, no de volumen.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
