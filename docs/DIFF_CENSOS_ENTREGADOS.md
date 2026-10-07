@@ -218,3 +218,60 @@ Es exactamente el caso de uso de
 programados y alertas cuando algo se rompe—, y este incidente es el argumento
 más fuerte que hay para priorizarlo: el valor no estuvo en el informe, estuvo
 en **tener un censo del momento exacto**.
+
+---
+
+## CST · `e96d7f44` · 12.112 URLs · `www.cst.gov.sa/en`, render JS
+
+El único sitio no europeo que hay, y por eso el que más interesaba: es donde
+los arreglos de escrituras no latinas se encuentran con algo real en vez de con
+un test escrito por quien hizo el arreglo.
+
+Copia verificada: nota 74 en el VPS y 74 en la copia.
+
+| categoría | entregado | ahora | |
+|---|---|---|---|
+| **GLOBAL** | **74** | **77** | +3 |
+| **Contenido** | **17** | **33** | **+16** |
+| Enlaces | 100 | 95 | −5 |
+| Datos Estructurados | 100 | 100 | — |
+| Rastreabilidad / Seguridad | 83 / 92 | iguales | — |
+| Internacionalización | 100 | 99 | −1 |
+
+**88.986 → 49.207 incidencias.** `image_missing_alt` 27.705 → 2.585, el ratio
+texto/HTML 8.045 → 0, las cabeceras 8.051 → 1. Y aparecen 1.595 casi
+duplicados, 166 hreflang sin retorno y **3.939 páginas a las que solo se llega
+por una redirección**.
+
+### El susto, y lo que enseñó
+
+El primer re-análisis dio **`structured_data_error`: 0 → 88.838** y tumbó la
+categoría de 100 a 60. Son 88.838 de los 88.842 bloques del censo: el 99,99%.
+Un sitio con el 100% del marcado roto no existe; eso era un falso positivo
+nuestro.
+
+Mirando el dato guardado, los 88.838 son de `format=rdfa` y sin `@type`:
+
+- **81.023** son atributos de accesibilidad — `<div role="alert">` deja un nodo
+  con `http://www.w3.org/1999/xhtml/vocab#role`;
+- **7.815** son Open Graph — `<meta property="og:title">` deja
+  `http://ogp.me/ns#title`, que además ya se extrae aparte a `html_meta.og_*`.
+
+Ninguna de las dos cosas es marcado de schema.org: es lo que un lector de RDFa
+saca de cualquier página normal. **El extractor de hoy ya no los guarda**
+(comprobado con las dos clases), pero el censo es de junio y los lleva dentro.
+
+Arreglado en el validador: un nodo cuyas propiedades son todas de vocabularios
+ajenos (XHTML, Open Graph, Dublin Core) no es un bloque roto, no es un bloque.
+Con eso, CST vuelve a **100 en datos estructurados y 0 errores**, y su nota
+global sube como la de los demás en vez de bajar.
+
+### La lección, que vale para todo este documento
+
+**Un re-análisis arregla lo que decide el análisis; lo que el extractor guardó
+mal sigue mal.** Ya había pasado con `urls.noindex` (que al materializarse
+cambia el PageRank de un censo viejo) y vuelve a pasar aquí. Al re-analizar un
+censo anterior a un arreglo del extractor hay que mirar si lo que aparece es un
+hallazgo del sitio o un resto de cómo se guardó — y la pista es siempre la
+misma: **una cifra que sale al 99% de algo no es un hallazgo, es un error de
+medida.**
