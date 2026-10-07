@@ -118,6 +118,13 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
     ``<sitemapindex>`` (index files: returns child sitemap URLs). Gzip
     bodies are decompressed automatically. Returns ``([], [])`` on any
     parse failure — a broken sitemap must never break the crawl.
+
+    Tambien los otros tres formatos que Google acepta como sitemap y que antes
+    daban CERO URLs: el de texto plano (una URL por linea, esta en el propio
+    protocolo de sitemaps.org), RSS 2.0 y Atom. Que den cero no es inocuo: la
+    membresia `in_sitemap` queda en falso para TODAS las URLs del sitio, y de
+    ahi salen los huerfanos inflados y la lista de "URLs del sitemap sin
+    rastrear" vacia.
     """
     if isinstance(body, str):
         raw = body.encode("utf-8", errors="ignore")
@@ -131,11 +138,18 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
         # recover=True tolerates the malformed XML that real sites serve.
         root = etree.fromstring(raw, parser=etree.XMLParser(recover=True, huge_tree=True))
     except Exception:
-        return ([], [])
+        return (_parse_sitemap_texto(raw, base_url), [])
     if root is None:
-        return ([], [])
+        return (_parse_sitemap_texto(raw, base_url), [])
 
     root_kind = _localname(root.tag)
+    if root_kind in ("rss", "feed"):
+        return (_parse_feed(root, base_url), [])
+    if root_kind not in ("urlset", "sitemapindex"):
+        # Ni sitemap ni feed: puede ser el de texto plano (y tambien un HTML de
+        # error, que no dara ninguna linea con pinta de URL).
+        return (_parse_sitemap_texto(raw, base_url), [])
+
     page_urls: list[str] = []
     child_sitemaps: list[str] = []
     seen: set[str] = set()
@@ -166,3 +180,76 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
             break
 
     return (page_urls, child_sitemaps)
+
+
+def _parse_sitemap_texto(raw: bytes, base_url: str = "") -> list[str]:
+    """Sitemap de texto plano: una URL absoluta por linea.
+
+    Esta en el protocolo (sitemaps.org) y Google lo acepta. Se exige que la
+    linea empiece por http:// o https:// para no confundir un HTML de error o
+    un JSON con un sitemap.
+    """
+    try:
+        texto = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return []
+    urls: list[str] = []
+    vistas: set[str] = set()
+    for linea in texto.splitlines():
+        candidata = linea.strip()
+        if not candidata or not candidata.lower().startswith(("http://", "https://")):
+            continue
+        if " " in candidata or "<" in candidata:
+            continue
+        if candidata in vistas:
+            continue
+        vistas.add(candidata)
+        urls.append(candidata)
+        if len(urls) >= MAX_URLS_PER_SITEMAP:
+            break
+    return urls
+
+
+def _parse_feed(root, base_url: str = "") -> list[str]:
+    """URLs de un RSS 2.0 o de un Atom, que Google acepta como sitemap.
+
+    RSS: ``<rss><channel><item><link>texto</link>``.
+    Atom: ``<feed><entry><link href="..."/>`` (el `rel="alternate"`, que es el
+    de la pagina; se ignoran `enclosure`, `self` y demas).
+    """
+    urls: list[str] = []
+    vistas: set[str] = set()
+
+    def anadir(valor: str | None) -> None:
+        if not valor:
+            return
+        candidata = valor.strip()
+        if not candidata:
+            return
+        url = urljoin(base_url, candidata) if base_url else candidata
+        if url in vistas:
+            return
+        vistas.add(url)
+        urls.append(url)
+
+    for elemento in root.iter():
+        nombre = _localname(elemento.tag)
+        if nombre == "item":  # RSS
+            for hijo in elemento:
+                if _localname(hijo.tag) == "link":
+                    anadir(hijo.text or hijo.get("href"))
+                    break
+        elif nombre == "entry":  # Atom
+            alternativa = None
+            for hijo in elemento:
+                if _localname(hijo.tag) != "link":
+                    continue
+                rel = (hijo.get("rel") or "alternate").strip().lower()
+                if rel != "alternate":
+                    continue
+                alternativa = hijo.get("href")
+                break
+            anadir(alternativa)
+        if len(urls) >= MAX_URLS_PER_SITEMAP:
+            break
+    return urls

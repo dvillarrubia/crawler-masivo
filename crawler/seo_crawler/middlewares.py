@@ -144,13 +144,32 @@ class RobotsAuditMiddleware(RobotsTxtMiddleware):
     """
 
     def __init__(self, crawler):
-        # Bypass parent's ROBOTSTXT_OBEY check; replicate its setup.
+        # El padre aborta si ROBOTSTXT_OBEY es False, y en modo auditoria es
+        # False a proposito, asi que no se puede llamar a su __init__: hay que
+        # replicarlo. Replicarlo a ojo es como se quedo fuera `self._stats`, que
+        # el padre usa al descargar robots.txt: la PRIMERA peticion moria con
+        # `AttributeError: 'RobotsAuditMiddleware' object has no attribute
+        # '_stats'`, el rastreo se quedaba a cero paginas y el vigilante lo
+        # mataba por estancamiento media hora despues. Reproducido con el
+        # arnes: en modo auditoria no se guardaba ni una pagina.
+        # Por eso se copian todos los atributos que crea el padre y hay un test
+        # que compara los dos conjuntos: si una version de Scrapy anade otro,
+        # el test lo canta en vez de que lo cante un rastreo de 40 minutos.
         self._default_useragent = crawler.settings.get("USER_AGENT", "Scrapy")
         self._robotstxt_useragent = crawler.settings.get("ROBOTSTXT_USER_AGENT", None)
         self.crawler = crawler
+        self._stats = crawler.stats
         self._parsers = {}
         self._parserimpl = load_object(crawler.settings.get("ROBOTSTXT_PARSER"))
-        self._parserimpl.from_crawler(crawler, b"")
+        # Scrapy 2.12 movio la construccion del parser a `build_from_crawler`;
+        # `from_crawler` sigue existiendo en el parser, pero se usa la via
+        # oficial cuando esta.
+        try:
+            from scrapy.utils.misc import build_from_crawler
+
+            build_from_crawler(self._parserimpl, crawler, b"")
+        except ImportError:  # pragma: no cover - Scrapy < 2.12
+            self._parserimpl.from_crawler(crawler, b"")
 
     @classmethod
     def from_crawler(cls, crawler: Crawler):

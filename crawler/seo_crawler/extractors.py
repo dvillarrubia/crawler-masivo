@@ -66,6 +66,47 @@ def compute_url_hash(url: str) -> str:
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
+# La Public Suffix List, sin red: tldextract viene con Scrapy y trae una copia
+# empotrada. `suffix_list_urls=()` le prohibe salir a internet (un rastreo no
+# puede depender de eso) y `include_psl_private_domains=True` hace que
+# `usuario.github.io` o `cliente.myshopify.com` cuenten como dominios distintos,
+# que es lo correcto: son sitios distintos.
+_PSL = None
+
+
+def dominio_registrable(host: str) -> str:
+    """Dominio que se puede registrar, segun la Public Suffix List.
+
+    Cortar por las dos ultimas etiquetas daba `co.uk` para
+    `www.competidor.co.uk`, asi que cualquier `.co.uk` salia interno para una
+    semilla `.co.uk`: el rastreo se metia en el sitio de la competencia y sus
+    paginas entraban en el informe del cliente. Devuelve el host tal cual si la
+    lista no reconoce el sufijo (IPs, `localhost`, hosts internos).
+    """
+    global _PSL
+    if not host:
+        return ""
+    if _PSL is None:
+        try:
+            import tldextract
+
+            _PSL = tldextract.TLDExtract(
+                suffix_list_urls=(), include_psl_private_domains=True
+            )
+        except Exception:  # pragma: no cover - sin tldextract
+            _PSL = False
+    if _PSL is False:
+        partes = host.split(".")
+        return ".".join(partes[-2:]) if len(partes) >= 2 else host
+    try:
+        extraido = _PSL(host)
+    except Exception:
+        return host
+    if extraido.domain and extraido.suffix:
+        return f"{extraido.domain}.{extraido.suffix}"
+    return host
+
+
 def normalize_host(host: str | None) -> str:
     """Forma comparable de un host: minusculas, sin punto final y en IDNA.
 
@@ -173,6 +214,11 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
 
     if "html" in ct:
         return "html"
+    # El SVG es su propio tipo. Clasificado como "image" (lo hacen tanto el
+    # Content-Type `image/svg+xml` como la extension), `crawl_svg` no tenia
+    # ningun efecto: no habia forma de excluirlo ni de incluirlo.
+    if "svg" in ct:
+        return "svg"
     if ct.startswith("image/"):
         return "image"
     if "css" in ct:
@@ -191,7 +237,7 @@ def classify_resource_type(content_type: str | None, url: str) -> str:
         ".css": "css",
         ".js": "js", ".mjs": "js",
         ".jpg": "image", ".jpeg": "image", ".png": "image",
-        ".gif": "image", ".svg": "image", ".webp": "image", ".ico": "image",
+        ".gif": "image", ".svg": "svg", ".webp": "image", ".ico": "image",
         ".pdf": "pdf",
         ".woff": "font", ".woff2": "font", ".ttf": "font", ".eot": "font",
     }
@@ -222,6 +268,15 @@ def effective_base_url(selector, page_url: str) -> str:
     page URL), matching how browsers -- and Screaming Frog -- resolve
     relative URLs.  Falls back to *page_url* when no usable base tag
     exists, so callers can always pass the result straight to ``urljoin``.
+
+    Solo se acepta la base si resuelve a una URL http(s). Comprobado en
+    Chromium: una `<base href="javascript:void(0)">` o `data:` se IGNORA y la
+    base sigue siendo la URL del documento; con `mailto:` el navegador deja los
+    enlaces relativos sin resolver, o sea roto para todos. Antes se aceptaba
+    cualquier cosa, asi que en esas plantillas —comunes en portales antiguos y
+    en SPA— todos los enlaces relativos se quedaban relativos, salian como
+    externos y no se rastreaba ninguno: el grafo interno de esas paginas
+    desaparecia.
     """
     try:
         base_href = selector.css("base[href]::attr(href)").get()
@@ -229,9 +284,11 @@ def effective_base_url(selector, page_url: str) -> str:
         base_href = None
     if base_href and base_href.strip():
         try:
-            return urljoin(page_url, base_href.strip())
+            resuelta = urljoin(page_url, base_href.strip())
         except Exception:
             return page_url
+        if urlparse(resuelta).scheme in ("http", "https"):
+            return resuelta
     return page_url
 
 

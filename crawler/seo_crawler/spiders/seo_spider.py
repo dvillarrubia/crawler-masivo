@@ -54,6 +54,7 @@ from seo_crawler.extractors import (
     extract_word_count,
     http_status_text,
     is_internal_url,
+    dominio_registrable,
     normalize_host,
     normalize_url,
     robots_tokens,
@@ -513,11 +514,12 @@ class SeoSpider(scrapy.Spider):
 
             # -- Subdomain crawling: expand allowed hosts --
             if self._crawl_subdomains:
-                self._root_domains: set[str] = set()
-                for host in list(self.allowed_hosts):
-                    parts = host.split(".")
-                    if len(parts) >= 2:
-                        self._root_domains.add(".".join(parts[-2:]))
+                # Por la Public Suffix List, no por las dos ultimas etiquetas:
+                # `www.competidor.co.uk` daba raiz `co.uk` y cualquier sitio
+                # `.co.uk` entraba en el rastreo y en el informe del cliente.
+                self._root_domains: set[str] = {
+                    dominio_registrable(host) for host in self.allowed_hosts
+                } - {""}
 
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
@@ -1084,7 +1086,7 @@ class SeoSpider(scrapy.Spider):
             status_text=http_status_text(status),
             last_modified=None,
             http_version=response.meta.get("http_protocol") or getattr(response, "protocol", None),
-            transfer_size=len(response.body),
+            transfer_size=int(response.headers.get(b"Content-Length", 0) or 0) or len(response.body),
             indexability_status=f"Redirect ({status})",
             blocked_by_robots=response.meta.get("blocked_by_robots"),
         )
@@ -1211,13 +1213,19 @@ class SeoSpider(scrapy.Spider):
             )
             return
 
-        self._crawled_count += 1
-        self._update_redis_progress()
-
         url = response.url
         parsed = urlparse(url)
         content_type = response.headers.get(b"Content-Type", b"").decode("utf-8", errors="ignore")
-        content_length = int(response.headers.get(b"Content-Length", 0) or 0)
+        # Los dos tamanos estaban cambiados: `Content-Length` es lo que viaja
+        # por el cable (Scrapy descomprime el cuerpo pero NO toca la cabecera,
+        # comprobado: 143 bytes de cabecera para un cuerpo de 28.055), y
+        # `len(response.body)` es el recurso ya descomprimido. Asi que
+        # `content_length` daba el tamano comprimido —el peso de la pagina
+        # quedaba dividido por 4 o 5 en cualquier sitio con gzip— y
+        # `transfer_size`, que es lo que pesa para el rastreo y para las Core
+        # Web Vitals, daba el descomprimido.
+        bytes_del_cable = int(response.headers.get(b"Content-Length", 0) or 0)
+        content_length = len(response.body)
         status_code = response.status
         depth = response.meta.get("depth", 0)
         response_time_ms = response.meta.get("download_latency", 0) * 1000
@@ -1230,13 +1238,24 @@ class SeoSpider(scrapy.Spider):
         # PDF ni una imagen aunque la URL acabe en .pdf.
         location = self._redirect_location(response)
         if location is not None:
+            # Un salto 3xx SI cuenta: escribe su fila y gasta presupuesto.
+            self._crawled_count += 1
+            self._update_redis_progress()
             yield from self._handle_redirect(response, location, depth,
                                              response_time_ms, content_type)
             return
 
         # Resource type filter: skip types not enabled in config
         if resource_type not in self._allowed_resource_types:
+            # Sin contar: el contador es el que gasta `max_urls`, y cinco PDFs
+            # filtrados agotaban un `max_urls=5` sin guardar una sola pagina.
+            # Lo descargado ya no se puede deshacer (el filtro es posterior a la
+            # descarga), pero al menos no consume el presupuesto del rastreo.
+            logger.debug("Tipo %s filtrado: %s", resource_type, url)
             return
+
+        self._crawled_count += 1
+        self._update_redis_progress()
 
         # Cadena de redirecciones seguida fuera del spider (con render JS la
         # sigue el navegador): un PageItem por salto. La pagina de este
@@ -1468,7 +1487,7 @@ class SeoSpider(scrapy.Spider):
             is_internal=self._is_internal(final_url),
             crawl_depth=depth,
             content_type=content_type,
-            content_length=content_length or len(response.body),
+            content_length=content_length,
             status_code=status_code,
             status_group=compute_status_group(status_code),
             response_time_ms=round(response_time_ms, 2),
@@ -1488,7 +1507,8 @@ class SeoSpider(scrapy.Spider):
             status_text=status_text_val,
             last_modified=last_modified_val,
             http_version=http_version_val,
-            transfer_size=len(response.body),
+            # Sin cabecera (respuesta troceada) no se sabe: se usa el cuerpo.
+            transfer_size=bytes_del_cable or len(response.body),
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
         )
@@ -1747,6 +1767,34 @@ class SeoSpider(scrapy.Spider):
                         self._redis.set(f"job:{self.job_id}:robots_bloquea_semillas", 1)
                     except Exception:
                         pass
+
+            # La URL bloqueada SI se guarda, como hace Screaming Frog. No se
+            # pide —robots.txt se respeta— pero existe, el sitio la enlaza y el
+            # cliente necesita la lista: o es un bloqueo por error sobre
+            # contenido que deberia posicionar, o es intencionado y entonces son
+            # enlaces internos gastando presupuesto de rastreo. Antes el
+            # IgnoreRequest se descartaba aqui y la URL no aparecia en ningun
+            # informe: ni bloqueada, ni enlazada, ni nada.
+            # status_code va NULL a proposito: no se llego a pedir, y un 0 en el
+            # CSV se lee como "respondio 0".
+            if self._is_internal(url) and not request.meta.get("es_robots_txt"):
+                self._crawled_count += 1
+                yield PageItem(
+                    url=url, url_hash=url_hash,
+                    host=parsed.hostname or "", path=parsed.path or "/",
+                    scheme=parsed.scheme or "https",
+                    is_internal=True, crawl_depth=depth,
+                    content_type=None, content_length=None,
+                    status_code=None, status_group="blocked",
+                    response_time_ms=None, is_html=False, resource_type="blocked",
+                    redirect_url=None, body_hash=None, job_id=self.job_id,
+                    url_length=len(url), folder_depth=compute_folder_depth(url),
+                    word_count=None, text_ratio=None, redirect_type=None,
+                    status_text="Blocked by robots.txt", last_modified=None,
+                    http_version=None, transfer_size=None,
+                    indexability_status="Blocked by robots.txt",
+                    blocked_by_robots=True,
+                )
 
             redirect_urls = request.meta.get("redirect_urls") or []
             if redirect_urls:

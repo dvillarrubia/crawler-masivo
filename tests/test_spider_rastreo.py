@@ -138,3 +138,53 @@ def test_navegador_meta_refresh_seguida_queda_como_salto(rastreo_navegador):
     assert mr["status_code"] == 200
     assert mr["redirect_url"] == "http://OTRO/mr-dest"
     assert mr["indexability_status"] == "Redirect (meta refresh)"
+
+
+# ---------------------------------------------------------------------------
+# robots.txt (R6 de #25)
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def rastreo_robots():
+    """robots.txt prohibe /privado/, que /home enlaza."""
+    return _rastrear(robots_bloquea_privado=True)
+
+
+@pytest.fixture(scope="module")
+def rastreo_robots_auditoria():
+    return _rastrear(robots_bloquea_privado=True, robots_mode="audit")
+
+
+def test_la_url_que_robots_prohibe_se_guarda(rastreo_robots):
+    """Como hace Screaming Frog. No se pide —robots.txt se respeta— pero existe
+    y el sitio la enlaza: o es un bloqueo por error sobre contenido que deberia
+    posicionar, o es intencionado y son enlaces gastando presupuesto de rastreo.
+    Antes el IgnoreRequest se descartaba y la URL no aparecia en ningun sitio.
+    """
+    paginas, _, _ = rastreo_robots
+    bloqueada = paginas["http://OTRO/privado/x"]
+    assert bloqueada["blocked_by_robots"] is True
+    assert bloqueada["indexability_status"] == "Blocked by robots.txt"
+    # NULL, no 0: no se llego a pedir. Un 0 en el CSV se lee como "respondio 0".
+    assert bloqueada["status_code"] is None
+    assert bloqueada["status_group"] == "blocked"
+
+
+def test_el_bloqueo_de_una_url_no_para_el_resto(rastreo_robots):
+    paginas, _, _ = rastreo_robots
+    assert "http://OTRO/publica-tras-privada" in paginas
+    assert "http://OTRO/a" in paginas
+
+
+def test_el_modo_auditoria_rastrea_y_marca(rastreo_robots_auditoria):
+    """Reproducido antes del arreglo: `RobotsAuditMiddleware` no definia
+    `self._stats`, asi que la PRIMERA peticion moria con AttributeError y el
+    rastreo se quedaba a cero paginas hasta que el vigilante lo mataba por
+    estancamiento."""
+    paginas, _, _ = rastreo_robots_auditoria
+    assert len(paginas) > 5
+    # En auditoria si se pide: el informe dice que esta bloqueada, pero el dato
+    # de la pagina esta, que es para lo que existe el modo.
+    bloqueada = paginas["http://OTRO/privado/x"]
+    assert bloqueada["blocked_by_robots"] is True
+    assert bloqueada["status_code"] == 200
+    assert paginas["http://OTRO/home"]["blocked_by_robots"] is False

@@ -1774,6 +1774,9 @@ const EXP_TABS = [
   { key: '_div3', divider: true },
   { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true }, columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','pagerank','canonical_href'] },
   { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
+  // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
+  // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
+  { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','crawl_depth'] },
 ];
 
 function _freshForm() {

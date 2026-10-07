@@ -170,3 +170,45 @@ def test_un_gzip_roto_no_tumba_el_rastreo():
     # cual y el parser se quedaba en ([], []). Sigue sin reventar.
     assert parse_sitemap(b"\x1f\x8b" + b"basura que no es gzip") == ([], [])
     assert sm._maybe_gunzip(b"\x1f\x8b" + b"basura") is not None
+
+
+# ---------------------------------------------------------------------------
+# Los otros tres formatos que Google acepta como sitemap (R21 de #25)
+# ---------------------------------------------------------------------------
+def test_sitemap_de_texto_plano():
+    """Esta en el protocolo de sitemaps.org y Google lo acepta. Antes daba CERO
+    URLs, y con cero la membresia `in_sitemap` queda en falso para todo el
+    sitio: de ahi salen los huerfanos inflados."""
+    cuerpo = b"https://x.com/a\nhttps://x.com/b\n\nhttps://x.com/a\nhttps://x.com/c\n"
+    paginas, hijos = parse_sitemap(cuerpo, "https://x.com/sitemap.txt")
+    assert paginas == ["https://x.com/a", "https://x.com/b", "https://x.com/c"]
+    assert hijos == []
+
+
+def test_un_html_de_error_no_es_un_sitemap_de_texto():
+    """Se exige que la linea empiece por http(s) y no tenga espacios ni `<`."""
+    cuerpo = b'<html><body><h1>404</h1><a href="https://x.com/z">z</a></body></html>'
+    assert parse_sitemap(cuerpo, "https://x.com/sitemap.xml") == ([], [])
+
+
+def test_sitemap_rss():
+    cuerpo = (
+        b'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>'
+        b"<item><title>a</title><link>https://x.com/post-a</link></item>"
+        b"<item><title>b</title><link>https://x.com/post-b</link></item>"
+        b"</channel></rss>"
+    )
+    paginas, hijos = parse_sitemap(cuerpo, "https://x.com/feed")
+    assert paginas == ["https://x.com/post-a", "https://x.com/post-b"]
+    assert hijos == []
+
+
+def test_sitemap_atom_usa_el_link_alternate():
+    cuerpo = (
+        b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
+        b'<entry><link rel="edit" href="https://x.com/edit/1"/>'
+        b'<link href="https://x.com/e1"/></entry>'
+        b'<entry><link rel="alternate" href="/e2"/></entry></feed>'
+    )
+    paginas, _ = parse_sitemap(cuerpo, "https://x.com/feed.atom")
+    assert paginas == ["https://x.com/e1", "https://x.com/e2"]
