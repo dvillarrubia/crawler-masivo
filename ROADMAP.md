@@ -121,6 +121,38 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
+### Lo que salió al comparar dos censos del mismo sitio (7 de octubre, tarde)
+
+Re-rastreamos progym con el código ya arreglado y comparamos **las mismas
+3.581 páginas** contra el censo de la víspera. De esa comparación salieron
+cuatro cosas más:
+
+- **El nombre del producto volvía a la ficha.** En un listado, el enlace
+  envuelve la foto y el nombre del producto está en el `alt` de la imagen —que
+  es de donde Google lo lee—, pero el enlace se guardaba **sin texto**. En 58
+  páginas de control, los enlaces sin anclaje pasan de **1.276 a 208**, y los
+  que quedan son iconos de redes sociales que no llevan ninguna etiqueta. En
+  progym se recuperan **9.502** anclajes en el próximo rastreo.
+- **El aviso de «este PageRank no es de fiar» no llegaba al Excel.** La columna
+  salía vacía en las 4.320 filas del CSV aunque la comprobación sí tuviera
+  respuesta: es un problema de orden entre el análisis y la comprobación de
+  JavaScript. Quien ordena por PageRank en una hoja de cálculo no abre la ficha
+  del trabajo, así que el aviso tiene que ir en cada fila.
+- **La tabla de URLs mostraba el PageRank que no se puede leer.** Las nueve
+  primeras filas de un censo se leían `0,4 0,0 0,0 0,2 0,0 0,3 0,0 3,2 7,1` y
+  ahora `65 38 38 58 20 63 20 88 96`. La escala buena ya existía; la pantalla
+  seguía enseñando la vieja.
+- **La herramienta que avisa de pérdidas de contenido se avisaba a sí misma.**
+  Si el sitio le contesta con un muro de WAF (un `Just a moment...` con 200 y
+  cero palabras), lo comparaba como si fuera la página y decía que se había
+  perdido todo. Ahora lo distingue y lo dice: «no se pudo comprobar», que es
+  distinto de «está mal».
+
+Y dos de higiene: el lanzador avisa si la API ha descartado alguna clave de la
+configuración del cliente (pasaba en silencio, y el rastreo salía con otros
+ajustes), y la lista de trabajos ya no dice «en curso» de un trabajo
+terminado.
+
 ---
 
 ## En cola

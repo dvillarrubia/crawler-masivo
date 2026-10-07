@@ -414,6 +414,17 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    SQLite. Los indices de la temporal van con nombre, porque
    `CREATE INDEX ON tabla (col)` es sintaxis solo de Postgres.
 
+   Cronometrado tambien en Druni (60.399 URLs, **37,5 millones de enlaces**,
+   3,6 veces penguin): `compute_link_counts` **299,3 s** y el `run_all` entero
+   **2.585,8 s (43 min)**. O sea que el agregado de enlaces escala razonable
+   (3,6x las aristas -> 5,2x el tiempo) y en un censo de ese tamano **el coste
+   dominante ya no es este sino `compute_pagerank`**: unos 35 de esos 43
+   minutos se van en montar SU propia materializacion de aristas
+   (`pr_lk_tmp` -> `pr_rep_tmp` -> `pr_edges_tmp`). Las dos materializan casi
+   la misma tabla dos veces en el mismo analisis; compartirla es el siguiente
+   paso evidente y esta anotado en #52, pero exige comprobar que ninguna de las
+   dos cifras cambia.
+
 42. **Los avisos sobre la forma de la URL casaban mal, y uno no salto nunca**
    (#29). Cuatro cosas, medidas en blogs.uoc.edu (34.704 URLs):
 
