@@ -1717,6 +1717,7 @@ const EXP_COLUMN_DEFS = {
   crawl_depth:          { label: 'Prof.',            type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 130, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
   word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
+  content_word_count:   { label: 'Palabras contenido', type: 'numeric', sortable: true, filterKey: 'content_word_count',   width: 170, fmt: r => r.content_word_count != null ? r.content_word_count.toLocaleString('es-ES') : '' },
   text_ratio:           { label: '% texto',          type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
   url_length:           { label: 'Long. URL',        type: 'numeric', sortable: true,  filterKey: 'url_length',              width: 140, fmt: r => r.url_length ?? '' },
   inlinks_count:        { label: 'Inlinks',          type: 'numeric', sortable: true,  filterKey: 'inlinks_count',           width: 130, fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },

@@ -33,6 +33,7 @@ class PageItem(scrapy.Item):
     url_length = scrapy.Field()
     folder_depth = scrapy.Field()
     word_count = scrapy.Field()
+    content_word_count = scrapy.Field()
     text_ratio = scrapy.Field()
     redirect_type = scrapy.Field()
     status_text = scrapy.Field()
@@ -88,6 +89,7 @@ class HeadingItem(scrapy.Item):
     tag = scrapy.Field()
     position = scrapy.Field()
     text = scrapy.Field()
+    oculto = scrapy.Field()
 
 
 class LinkItem(scrapy.Item):

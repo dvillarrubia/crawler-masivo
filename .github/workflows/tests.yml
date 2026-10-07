@@ -41,11 +41,18 @@ jobs:
           python -m pip install -q --upgrade pip
           # El crawler entero: los tests del spider lanzan el SeoSpider real
           # contra un sitio local (tests/spider_harness.py), asi que necesitan
-          # scrapy de verdad. Playwright se instala como paquete pero NO se
-          # baja el navegador: ningun test unitario renderiza.
+          # scrapy de verdad.
           pip install -q -r crawler/requirements.txt
           pip install -q -r analysis/requirements.txt
           pip install -q -r tests/requirements.txt
+      - name: Instalar Chromium
+        # Solo por tests/test_limpiador_navegador.py, que es el unico sitio
+        # donde se comprueba el limpiador que corre EN EL NAVEGADOR. Con el
+        # codigo anterior, `<body class="cookie-bar-active">` hacia que ese
+        # limpiador borrase el body entero: la pagina se guardaba sin contenido,
+        # sin enlaces y sin titulares, y nada lo marcaba. Sin navegador en CI
+        # ese test se salta y el fallo vuelve sin que nadie se entere.
+        run: python -m playwright install --with-deps chromium
       - name: pytest
         # La URL de Postgres destapa los tests marcados que hoy se saltan
         # SIEMPRE (test_pagerank_db.py). Nunca apuntar a crawler_db: la propia

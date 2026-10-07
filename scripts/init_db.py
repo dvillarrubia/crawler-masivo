@@ -28,6 +28,11 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS in_sitemap BOOLEAN"))
         # Casi duplicados (MinHash): NULL = no medido, 0 = medido y sin ninguna
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS near_duplicate_count INTEGER"))
+        # Palabras del contenido principal: con las del body entero el
+        # megamenu tapaba las paginas escasas (997 vs 10.433 en un censo).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_word_count INTEGER"))
+        # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.
+        conn.execute(text("ALTER TABLE headings ADD COLUMN IF NOT EXISTS oculto BOOLEAN"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))

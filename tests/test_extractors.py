@@ -256,9 +256,11 @@ def test_link_position_camelcase_css_in_js_classes():
 
 
 # ---------------------------------------------------------------------------
-# extract_headings  (skip template/noscript/svg, ordering)
+# extract_headings  (marca template/noscript/svg, ordering)
 # ---------------------------------------------------------------------------
-def test_extract_headings_order_and_skips_hidden():
+def test_extract_headings_order_and_flags_hidden():
+    """Los de template/noscript se guardan MARCADOS, no se tiran en silencio:
+    los enlaces y las imagenes de esos mismos elementos si se guardaban."""
     s = sel(
         "<h1>Title</h1>"
         "<template><h2>Tmpl</h2></template>"
@@ -266,8 +268,12 @@ def test_extract_headings_order_and_skips_hidden():
         "<h2>Sub</h2>"
     )
     heads = ex.extract_headings(s)
-    assert [(h["tag"], h["text"]) for h in heads] == [("h1", "Title"), ("h2", "Sub")]
-    assert [h["position"] for h in heads] == [0, 1]
+    visibles = [(h["tag"], h["text"]) for h in heads if not h["oculto"]]
+    assert visibles == [("h1", "Title"), ("h2", "Sub")]
+    assert [(h["tag"], h["oculto"]) for h in heads] == [
+        ("h1", False), ("h2", True), ("h3", True), ("h2", False)
+    ]
+    assert [h["position"] for h in heads] == [0, 1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -563,3 +569,68 @@ def test_compile_url_patterns():
     assert comprueba("https://e.com/mapdfx") == [False, False, False, False]
     assert comprueba("https://e.com/p/12") == [False, False, True, False]
     assert comprueba("https://e.com/c?sort=1") == [False, False, False, True]
+
+
+# ---------------------------------------------------------------------------
+# Titulares: ocultos, clones y texto que se lee (#27)
+# ---------------------------------------------------------------------------
+def test_headings_clones_movil_escritorio_no_dan_multiple_h1():
+    """Un `d-none` y un `aria-hidden` con el mismo titular daban 3 h1 donde
+    hay 1. Se guardan los tres, marcados: el que cuenta es uno."""
+    s = sel("<h1 class='d-none'>Zapatillas</h1>"
+            "<h1 aria-hidden='true'>Zapatillas</h1>"
+            "<h1>Zapatillas running</h1>")
+    heads = ex.extract_headings(s)
+    assert len(heads) == 3
+    assert [h["oculto"] for h in heads] == [True, True, False]
+    # El texto del oculto tambien se guarda: lo que no se guarda no se audita.
+    assert heads[0]["text"] == "Zapatillas"
+
+
+def test_heading_sin_script_y_sin_partir_palabras():
+    s = sel("<h1>Zapa<span>tillas</span><script>var x=1;</script></h1>")
+    assert ex.extract_headings(s)[0]["text"] == "Zapatillas"
+
+
+def test_heading_de_solo_logo_usa_el_alt():
+    """Es de donde lo lee Google; antes salia vacio."""
+    s = sel("<h1><a href='/'><img src='l.svg' alt='Acme Deportes'></a></h1>")
+    assert ex.extract_headings(s)[0]["text"] == "Acme Deportes"
+
+
+def test_role_heading_con_aria_level_cuenta():
+    s = sel("<div role='heading' aria-level='1'>Titular ARIA</div>"
+            "<div role='heading'>Sin nivel</div>")
+    heads = ex.extract_headings(s)
+    assert [(h["tag"], h["text"]) for h in heads] == [
+        ("h1", "Titular ARIA"), ("h2", "Sin nivel")  # ARIA: sin aria-level es 2
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Anclas: el texto que anuncia un lector de pantalla (#27)
+# ---------------------------------------------------------------------------
+def test_anchor_de_icono_no_es_un_anchor_vacio():
+    s = sel("<a href='/a'>Zapa<span>tillas</span><script>var x=1</script></a>"
+            "<a href='/b' aria-label='Ir al carrito'><svg><path/></svg></a>"
+            "<a href='/c' title='Ver la ficha'><i class='icon'></i></a>"
+            "<a href='/d'><svg aria-label='Buscar'><path/></svg></a>"
+            "<a href='/e'><svg><title>Mi cuenta</title></svg></a>")
+    anchors = [l["anchor_text"] for l in ex.extract_links(s, "https://x.com/", {"x.com"})]
+    assert anchors == ["Zapatillas", "Ir al carrito", "Ver la ficha", "Buscar", "Mi cuenta"]
+
+
+# ---------------------------------------------------------------------------
+# template / noscript no estan en el DOM (#27)
+# ---------------------------------------------------------------------------
+def test_template_y_noscript_no_aportan_enlaces_ni_imagenes():
+    """El `<noscript><img>` de la carga diferida duplicaba la imagen real: 583
+    de 4.409 en 58 paginas de control, cada una un `image_missing_alt` posible
+    sobre una imagen que nadie ve."""
+    s = sel("<a href='/real'>Real</a><template><a href='/tpl'>Tpl</a></template>"
+            "<noscript><img src='/n.png'></noscript><img src='/r.png' alt='Real'>"
+            "<template><img src='/t.png'></template>")
+    assert [l["url"] for l in ex.extract_links(s, "https://x.com/", {"x.com"})] == [
+        "https://x.com/real"]
+    assert [r["url"] for r in ex.extract_resources(s, "https://x.com/")] == [
+        "https://x.com/r.png"]

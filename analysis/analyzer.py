@@ -77,8 +77,8 @@ def _norm_url(url: str | None) -> str | None:
 BATCH_SIZE = 1000
 
 LOW_WORD_COUNT_THRESHOLD = 200
-LOW_TEXT_RATIO_THRESHOLD = 10.0
-VERY_LOW_TEXT_RATIO_THRESHOLD = 5.0
+# El ratio texto/HTML se sigue midiendo y exportando, pero ya no genera issue:
+# ver analyze_content. No queda umbral porque no hay decision que tomar con el.
 URL_MAX_LENGTH = 115
 HIGH_OUTLINK_THRESHOLD = 100
 
@@ -451,6 +451,10 @@ class SEOAnalyzer:
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
                 Heading.tag == "h1",
+                # Los que no se pintan no cuentan: el clon movil y el de
+                # escritorio del mismo titular daban 3 h1 donde hay 1, con un
+                # `h1_multiple` falso. Siguen guardados, marcados.
+                Heading.oculto.isnot(True),
             )
             .order_by(Url.id)
         )
@@ -1256,49 +1260,58 @@ class SEOAnalyzer:
     # -- Content ------------------------------------------------------------
 
     def analyze_content(self) -> None:
-        """Content tab equivalent -- flag pages with low word count or low text-to-HTML ratio."""
+        """Contenido escaso: paginas indexables con poco texto PROPIO.
+
+        Tres decisiones, con lo que decide Google detras de cada una:
+
+        1. Se mide ``content_word_count`` (el contenido principal) y no
+           ``word_count`` (todo el body). El menu, el megamenu y el pie son la
+           misma plantilla en todas las paginas: Google los trata como
+           boilerplate y no los cuenta como contenido de la pagina. Medido en
+           dos censos: por body salian 997 de 29.808 paginas escasas, por
+           contenido 10.433 — 9.436 fichas y archivos con dos frases propias
+           que el menu disfrazaba de pagina completa.
+        2. Solo se avisa de las paginas INDEXABLES. Que una pagina noindex o
+           canonicalizada tenga poco texto no decide nada: Google no la va a
+           posicionar. De 10.433 escasas, 4.736 son indexables; las otras 5.697
+           solo tapaban las que importan.
+        3. No se emite ``low_text_ratio`` ni ``very_low_text_ratio``. El ratio
+           texto/HTML no es una senal de Google, y bien medido (antes contaba la
+           indentacion de la plantilla como texto) salta en la mayoria de las
+           paginas de cualquier sitio moderno: 29.005 de 29.808 en un censo,
+           12 de 20 paginas de control. Lo que insinuaba —pagina escasa o
+           montada con JS— ya lo responden el contenido y ``js_check``. La
+           columna ``text_ratio`` se sigue calculando y exportando.
+        """
         logger.debug("Analyzing content ...")
 
         # Only real, served HTML pages qualify: a 404/redirect body having
         # few words is not a "thin content" problem, and flagging it just
         # buries the genuine low-content pages in noise.
         stmt = (
-            select(Url.id, Url.word_count, Url.text_ratio)
+            select(Url.id, Url.word_count, Url.content_word_count)
             .where(
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
                 Url.is_internal.is_(True),
                 Url.status_code == 200,
+                Url.indexable.is_(True),
             )
         )
         rows = self.session.execute(stmt).all()
 
-        for url_id, word_count, text_ratio in rows:
-            # Low word count.
-            if word_count is not None and word_count < self.min_word_count:
-                self._add_issue(
-                    url_id,
-                    "low_word_count",
-                    "warning",
-                    {"word_count": word_count},
-                )
-
-            # Text-to-HTML ratio checks (very low takes priority over low).
-            if text_ratio is not None:
-                if text_ratio < VERY_LOW_TEXT_RATIO_THRESHOLD:
-                    self._add_issue(
-                        url_id,
-                        "very_low_text_ratio",
-                        "warning",
-                        {"text_ratio": text_ratio},
-                    )
-                elif text_ratio < LOW_TEXT_RATIO_THRESHOLD:
-                    self._add_issue(
-                        url_id,
-                        "low_text_ratio",
-                        "info",
-                        {"text_ratio": text_ratio},
-                    )
+        for url_id, word_count, content_word_count in rows:
+            # content_word_count es None en los rastreos anteriores a la
+            # columna y en los jobs que no extraen contenido: ahi se cae al
+            # recuento del body, que es lo que habia.
+            palabras = content_word_count if content_word_count is not None else word_count
+            if palabras is None or palabras >= self.min_word_count:
+                continue
+            detalle = {"word_count": palabras}
+            if content_word_count is not None:
+                detalle = {"content_word_count": content_word_count,
+                           "body_word_count": word_count}
+            self._add_issue(url_id, "low_word_count", "warning", detalle)
 
         self._flush_issues()
 

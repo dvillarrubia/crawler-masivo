@@ -107,6 +107,9 @@ class Url(Base):
     url_length = Column(Integer)                             # character count of URL
     folder_depth = Column(Integer)                           # number of path segments
     word_count = Column(Integer, nullable=True)              # words in body text
+    # Palabras del contenido principal (sin menu ni pie). Es la cifra con la
+    # que se juzga el thin content: word_count incluye la plantilla.
+    content_word_count = Column(Integer, nullable=True)
     text_ratio = Column(Float, nullable=True)                # text/HTML ratio percentage
     redirect_type = Column(Integer, nullable=True)           # HTTP redirect code (301, 302, 307, 308)
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"
@@ -213,6 +216,11 @@ class Heading(Base):
     tag = Column(String(4), nullable=False)  # h1, h2, h3 …
     position = Column(Integer, nullable=False)
     text = Column(Text, nullable=True)
+    # El titular esta en la pagina pero no se pinta (hidden, display:none,
+    # clase de utilidad, aria-hidden, dentro de template/noscript/svg). Se
+    # guarda igual: lo que no se guarda no se puede auditar. Los checks de h1
+    # cuentan solo los que SI se pintan, que es lo que ve el usuario.
+    oculto = Column(Boolean, nullable=True)
 
     url_rel = relationship("Url", back_populates="headings")
 

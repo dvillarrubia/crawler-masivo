@@ -203,7 +203,8 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 | `extract_hreflang(selector)` | list[dict] — lang, href |
 | `extract_structured_data(html, url)` | list[dict] — raw, format (jsonld/microdata/rdfa), schema_type |
 | `extract_resources(selector, base_url)` | list[dict] — url, type, alt, width, height, mixed_content |
-| `extract_word_count(selector)` | int |
+| `contar_palabras(texto)` | int — tokens, y caracteres en las escrituras sin espacios (CJK, tailandes) |
+| `extract_word_count(selector)` | int — palabras del texto visible del body |
 | `extract_visible_text(selector)` | str |
 | `extract_main_content(selector)` | str or None — boilerplate-free text |
 | `extract_main_content_markdown(selector)` | str or None — content as Markdown |
@@ -230,7 +231,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_redirect_chains()` | redirect_chain |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
-| `analyze_content()` | low_word_count, low_text_ratio |
+| `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count |
 | `analyze_links()` | link graph metrics (inlinks, outlinks, pagerank) |
 
@@ -526,6 +527,81 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    esa plantilla al reanudar. Medir con Playwright a 0/2/3/5/8 s antes de
    afirmar que una página no enlaza algo.
 
+44. **El texto que no se pinta no es contenido, y el menú no es contenido
+   de la página** — tres medidas que decidían cosas distintas estaban mal:
+   `word_count` contaba con `split()`, así que una página japonesa entera daba
+   **1 palabra** y todo sitio CJK salía como thin content; `text_ratio` medía
+   sobre `extract_visible_text`, que incluía los nodos de solo espacios, así
+   que medía la indentación de la plantilla (31% medido en la home de un
+   cliente, 6,7% real); y el recuento era del `<body>` entero, de modo que el
+   megamenú y el pie —boilerplate para Google— tapaban las páginas escasas:
+   997 avisos de 29.808 páginas midiendo el body contra **10.433** midiendo el
+   contenido propio, 4.736 de ellas indexables. Ahora un solo recorrido del
+   árbol (`_lineas_visibles`) alimenta `word_count`, `text_ratio` y
+   `page_content`: fuera lo que el navegador no pinta (`hidden`,
+   `display:none` en línea, `title` de un svg, respaldo de un `iframe`),
+   `hidden="until-found"` sí es contenido, y las fronteras de bloque evitan que
+   `Zapa<span>tillas` cuente como dos palabras. Nueva columna
+   `urls.content_word_count`. Medido en 51 páginas de control de tres clientes:
+   10 cambian su contenido guardado y en las 10 lo único que sale es interfaz
+   oculta (modal de login, menú de cuenta, promo de la app). `low_text_ratio` y
+   `very_low_text_ratio` dejan de emitirse: el ratio texto/HTML no es una señal
+   de Google y, bien medido, salta en 21 de 30 páginas de control.
+
+45. **El limpiador de plantilla no puede borrar la página, y deduplicar no
+   puede desalinear una tabla** — tres fallos del extractor de contenido, los
+   tres reproducidos: (a) las listas de nombres de plantilla casaban por
+   **subcadena sobre cualquier elemento, `body` incluido**, así que
+   `<body class="cookie-bar-active">` dejaba la página en **0 palabras**, y
+   `cookie-policy` o `privacy-notice-content` borraban el cuerpo de las propias
+   páginas legales —las que tienen que estar indexadas tal cual—; (b) `<form>`
+   se quitaba siempre, y en ASP.NET WebForms la página entera va dentro de
+   `<form id="aspnetForm">`: 0 palabras otra vez; (c) `_dedupe_lines` miraba una
+   ventana de 4 líneas sin saber de dónde venían, así que de 8 celdas `Sí` de
+   una tabla comparativa quedaba 1 y **las filas salían desplazadas**: el
+   informe decía lo contrario que la página. Ahora: `_TAGS_INTOCABLES`
+   (`html`, `body`, `main`, `article`) no se borran nunca; un bloque cuyo nombre
+   casa pero que se lleva más del 40% de las palabras de la página es la página,
+   no plantilla (`_MAX_SHARE_PLANTILLA`); un `<aside>` o un
+   `role="complementary"` DENTRO de `main`/`article`/`section` es contenido —la
+   misma regla de landmark de la decisión 9— y se desenvuelve a `<div>` porque
+   trafilatura tira todo `<aside>` por su cuenta; y una repetición solo se
+   colapsa si no viene de una celda o un item (`_TAGS_DATO`) y si entre las dos
+   apariciones hay 2 líneas distintas como mucho, que es la forma de una
+   marquesina (`A A A`) o de una animación (`A B A B`), no la de una tabla.
+   Además lo que no se pinta se quita también del HTML que lee trafilatura, no
+   solo al contar: `d-none` (Bootstrap), `hidden` (Tailwind), `is-hidden`,
+   `hide` e `invisible` se casan por token completo, de modo que `d-md-none`
+   —que oculta solo a partir de cierto ancho— sigue siendo contenido. Medido en
+   las mismas 58 páginas de control: cambia el contenido de 41, se recuperan
+   hasta **+1.414 palabras** en los listados de blog (las fichas repetidas que
+   el deduplicador borraba) y se van hasta **−7.117** de megamenú oculto en un
+   artículo de comercio electrónico, con **0 líneas de prosa perdidas**.
+
+46. **Un titular oculto no es un titular, y un icono con `aria-label` no es un
+   enlace sin ancla** — cuatro cosas que el extractor leía mal y que acababan en
+   el informe: (a) los clones móvil/escritorio del mismo `<h1>` (uno con
+   `d-none`, otro con `aria-hidden`) contaban como tres h1 y producían un
+   `h1_multiple` falso, mientras que los de `template`/`noscript` se tiraban en
+   silencio —al revés de lo que se hacía con sus enlaces e imágenes—; ahora se
+   guardan TODOS con una marca `headings.oculto` y los checks de h1 y el CSV
+   cuentan solo los que se pintan; (b) el texto del titular se armaba uniendo
+   nodos con espacio, así que `Zapa<span>tillas` daba `"Zapa tillas"` y un
+   `<script>` dentro del `<h1>` acababa en el texto; un `<h1>` que solo lleva el
+   logo ahora usa el `alt` de la imagen, que es de donde lo lee Google;
+   (c) `role="heading"` con `aria-level` cuenta como titular de ese nivel (2 por
+   defecto, según ARIA); (d) un enlace de icono sin texto usa su `aria-label`,
+   su `title` o la etiqueta de su `<svg>` — es lo que anuncia un lector de
+   pantalla y lo que Google toma como ancla: **1.783 → 155 anclas vacías** en 58
+   páginas de control, y el ancla pesa en el agrupamiento por repetición del
+   PageRank (decisión 29) y en todo análisis de anchor text. Además, lo que vive
+   en `<template>` o `<noscript>` ya no aporta enlaces ni imágenes: no está en el
+   DOM, y el `<noscript><img>` de la carga diferida duplicaba la imagen real
+   (583 de 4.409 imágenes en las mismas 58 páginas). El hero fuera del
+   contenedor (decisión 10) rechaza el bloque cuando más de la mitad de sus
+   palabras están dentro de enlaces: con `<div class="top-bar"><h1 class=logo>`
+   se antepone el megamenú entero al contenido.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -742,7 +818,7 @@ MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 Umbral de casi duplicados: `job.config.analysis_thresholds.near_duplicate_similarity`
 (por defecto 0.9; ver decisiones 16-18).
 
-Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `LOW_TEXT_RATIO_THRESHOLD=10.0`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
+Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
 ## Code Conventions
 
