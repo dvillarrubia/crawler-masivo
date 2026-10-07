@@ -1137,7 +1137,24 @@ These markdown files are available in the project root for consultation:
 
 ## Testing
 
-Unit test suite at `tests/` (268 casos: 258 en la imagen del crawler y 10 mas —`test_insights.py` y `test_export_csv.py`— que necesitan FastAPI y se corren en la de la API): pure extractors
+Unit test suite at `tests/` (**480 casos**: 466 en la imagen del crawler y 14
+mas —`test_insights.py`, `test_export_csv.py` y `test_raw_html.py`— que
+necesitan FastAPI y se corren en la de la API). Los 466 incluyen 32 que SOLO
+corren con servicios de verdad: `test_pagerank_db.py` (27, Postgres) y el de la
+cola contra Redis. Para destaparlos en local:
+
+```bash
+docker compose exec -T postgres createdb -U crawler crawler_test
+docker run --rm --network crawler-masivo_default -v "$PWD":/repo -w /repo \
+  -e PYTHONPATH=/repo:/repo/crawler:/repo/tests \
+  -e PAGERANK_TEST_DATABASE_URL=postgresql+psycopg2://crawler:crawler@postgres:5432/crawler_test \
+  -e REDIS_TEST_URL=redis://redis:6379/9 \
+  crawler-masivo-crawler bash -lc "pip install -q pytest; python -m pytest /repo/tests -q"
+```
+
+Sin la red de compose y los nombres de servicio no valen: apuntar
+`REDIS_TEST_URL` a `127.0.0.1` desde otro contenedor hace fallar el test de la
+cola, y parece un fallo del codigo. Lo que cubren: pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
 (`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
