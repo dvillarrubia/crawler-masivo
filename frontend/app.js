@@ -82,6 +82,7 @@ const ISSUE_LABEL = {
   'orphan_page': 'Pagina huerfana',
   'high_outlink_count': 'Demasiados enlaces salientes',
   'sitemap_orphan': 'Huerfana (solo en sitemap)',
+  'solo_enlazada_por_redireccion': 'Solo se llega por una redireccion',
   'not_in_sitemap': 'No incluida en el sitemap',
 };
 
