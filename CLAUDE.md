@@ -900,6 +900,18 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    de pedir. Perder páginas de producto en silencio es mucho peor que descargar
    una imagen.
 
+60. **Un `nofollow` no diluye, y está medido que da igual** (C2 de #24) — hoy
+   los enlaces `nofollow` no entran en el grafo ni en el denominador, así que los
+   `follow` de esa página se reparten el 100%. Es el *PageRank sculpting* que
+   Google desactivó en 2009; su criterio sería que el `nofollow` consume su parte
+   y se tira. Probados los dos modelos sobre los tres censos
+   (`docs/experimentos/c2_nofollow.py`), incluido un e-commerce donde el **28,7%**
+   de los enlaces internos son `nofollow`: el peso que se movería es del 0,9% al
+   2,0%, el top 50 coincide en 49 de 50 y `pagerank_score` cambia **2-3 puntos
+   sobre 100** como máximo, sin una sola página moviéndose 5. No se toca. Si
+   alguna vez se toca, la masa perdida va al teletransporte, igual que la de las
+   `noindex` (decisión 29 y C3).
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

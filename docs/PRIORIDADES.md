@@ -91,10 +91,38 @@ Lo entregado, con la medición de cada cosa, está en las decisiones 44-57 del
 
 **Lo que queda abierto en esas issues es juicio**, y por eso va a M3/M4: si un
 carrusel o un bloque de suscripción es contenido (#15), si un parámetro de URL
-es legítimo (#12, #22), qué tipo de página es cada plantilla (#12). Y dos
-decisiones de modelo que son tuyas: **C2** (si el peso de un `nofollow` se
-evapora o se reparte) y la revisión a mano del top 50 por PageRank de los tres
-censos, que ya está sacado.
+es legítimo (#12, #22), qué tipo de página es cada plantilla (#12). Queda tuya la revisión a mano
+del top 50 por PageRank de los tres censos, que ya está sacado.
+
+### C2 medida: da igual, y por eso se queda como está
+
+**C2** era «si el peso de un `nofollow` se evapora o se reparte entre los
+`follow`». Hoy el código no lo cuenta en el reparto, así que los `follow` se
+llevan el 100% — el *PageRank sculpting* que Google desactivó en 2009. El
+criterio de Google diría que el `nofollow` consume su parte y esa parte se
+tira. Medido con los dos modelos sobre los tres censos
+(`docs/experimentos/c2_nofollow.py`):
+
+| censo | `nofollow` internos | peso que se perdería | top 50 en común | `pagerank_score` (0-100): cambio medio / máximo | páginas que cambian ≥5 puntos |
+|---|---|---|---|---|---|
+| blogs.uoc.edu (34.704) | 0,65% de 2,7 M enlaces | 0,9% | 49/50 | 0,18 / **2** | **0** |
+| www.uoc.edu (28.497) | 3,4% de 3,9 M | 0,9% | 49/50, top 10 idéntico | — | — |
+| progym, e-commerce (4.869) | **28,7%** de 920 k | 2,0% | 49/50 | 1,32 / **3** | **0** |
+
+Elegí a propósito el caso que más debería notarlo: en el e-commerce, **28,7%**
+de los enlaces internos son `nofollow` (los filtros de navegación facetada) y
+1.157 páginas nofollowean la mitad o más de sus enlaces. Aun así el peso que se
+movería es el **2,0%**, porque las páginas que nofollowean *todo* ya no reparten
+nada hoy (son colgantes) y a las de plantilla el techo por repetición les deja
+poco peso. La estimación va además del lado seguro: supone que un `nofollow`
+pesa lo mismo que un `follow` de su misma página, cuando los enlaces de filtro
+—repetidos en todo el sitio— pesarían menos.
+
+**Conclusión: la decisión no cambia ninguna recomendación.** El número que se
+entrega se mueve 2-3 puntos sobre 100 en el peor caso y ninguna página se mueve
+5. No merece la pena tocar el modelo. Si algún día se toca, la masa perdida debe
+ir al teletransporte (como masa colgante), que es lo que ya hace C3 con las
+`noindex`.
 
 ## M2 · Decisiones: base (F0)
 

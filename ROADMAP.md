@@ -114,6 +114,12 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   creía que ninguna página estaba en el sitemap.
 - **El peso de las páginas estaba dividido por 16** en los sitios con
   compresión: se confundían el tamaño de la página y los bytes que viajan.
+- **Un tercio de las descargas se tiraba.** El filtro de «qué tipos de archivo
+  rastrear» se aplicaba después de descargar, así que una imagen o un CSS
+  excluidos se pedían, se descargaban y se descartaban. Medido en un rastreo de
+  e-commerce en marcha: de 5.269 respuestas, **1.878 (el 35,6%) no dejaban
+  ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
+  por minuto.
 
 ---
 
