@@ -392,30 +392,99 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     }
 
 
-def extract_headings(selector) -> list[dict[str, Any]]:
-    """Return an ordered list of heading dicts ``{tag, position, text}`` in document order.
+def _texto_de_heading(nodo_lxml) -> str | None:
+    """Texto de un titular tal como se lee.
 
-    Headings inside ``<template>``, ``<noscript>``, and ``<svg>`` elements
-    are excluded because they are not visible to users and would otherwise
-    duplicate headings rendered by JavaScript frameworks or SSR.
+    Tres cosas que un ``//text()`` pelado hacia mal: un ``<script>`` o un
+    ``<style>`` dentro del titular acababan en el texto; unir los nodos con
+    espacio partia las palabras (``Zapa<span>tillas`` daba ``"Zapa tillas"`` y
+    ``Pre<span>cio``, ``"Pre cio"``, lo que corrompia ``h1_duplicate`` y los
+    recuentos); y un ``<h1>`` que solo lleva el logo quedaba vacio cuando el
+    titular esta en el ``alt`` de la imagen, que es de donde lo lee Google.
+    """
+    texto = " ".join(_lineas_visibles(nodo_lxml, forzar_raiz=True)).strip()
+    if texto:
+        return _clean(texto)
+    # Sin texto propio: el titular puede estar en el alt de la imagen o en el
+    # aria-label del propio heading.
+    for img in nodo_lxml.iter("img"):
+        alt = (img.get("alt") or "").strip()
+        if alt:
+            return _clean(alt)
+    return _clean(nodo_lxml.get("aria-label"))
+
+
+# Un titular marcado `aria-hidden` no esta en el arbol de accesibilidad: es la
+# copia movil o de escritorio de otro, o un adorno. Contarlo daba 3 h1 donde
+# hay 1, con un `multiple_h1` falso. Se guarda igual, marcado, para no perder
+# el dato: la decision de ignorarlo la toma el analyzer.
+def _heading_oculto(nodo_lxml) -> bool:
+    """True si el titular no se pinta o no cuenta como titular."""
+    for el in (nodo_lxml, *nodo_lxml.iterancestors()):
+        if not isinstance(el.tag, str):
+            continue
+        if el.tag in ("template", "noscript", "svg"):
+            return True
+        if _nodo_oculto(el):
+            return True
+        if (el.get("aria-hidden") or "").strip().lower() == "true":
+            return True
+    return False
+
+
+def extract_headings(selector) -> list[dict[str, Any]]:
+    """Titulares en orden de documento: ``{tag, position, text, oculto}``.
+
+    Se devuelven TODOS, incluidos los que no se pintan (``hidden``,
+    ``display:none`` en linea, clase de utilidad, ``aria-hidden``, dentro de
+    ``template``/``noscript``/``svg``), marcados con ``oculto``. Antes se
+    descartaban en silencio los de ``template``/``noscript``/``svg`` —mientras
+    que los enlaces y las imagenes de esos mismos elementos si se guardaban— y
+    en cambio los ocultos por ``hidden`` o ``aria-hidden`` si contaban, que es
+    justo al reves: de ahi salian los ``multiple_h1`` falsos.
+
+    ``role="heading"`` con ``aria-level`` tambien cuenta: para quien lee la
+    pagina con un lector de pantalla ES un titular, y su nivel es el que
+    declara (2 por defecto, segun la especificacion ARIA).
     """
     results: list[dict[str, Any]] = []
     pos = 0
-    for node in selector.css("h1, h2, h3, h4, h5, h6"):
-        # Skip headings inside invisible / framework-duplicated elements
-        if node.xpath("ancestor::template | ancestor::noscript | ancestor::svg"):
+    consulta = (
+        "descendant-or-self::*[self::h1 or self::h2 or self::h3 or self::h4"
+        " or self::h5 or self::h6 or @role='heading']"
+    )
+    for node in selector.xpath(consulta):
+        raiz = node.root
+        if not hasattr(raiz, "tag") or not isinstance(raiz.tag, str):
             continue
-        tag_name = node.xpath("name()").get()
-        if tag_name and tag_name.lower().startswith("h"):
-            inner = " ".join(node.css("::text").getall())
-            results.append({
-                "tag": tag_name.lower(),
-                "position": pos,
-                "text": _clean(inner),
-            })
-            pos += 1
+        tag_name = raiz.tag.lower()
+        if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            etiqueta = tag_name
+        else:
+            nivel = (raiz.get("aria-level") or "2").strip()
+            etiqueta = f"h{nivel}" if nivel in ("1", "2", "3", "4", "5", "6") else "h2"
+        results.append({
+            "tag": etiqueta,
+            "position": pos,
+            "text": _texto_de_heading(raiz),
+            "oculto": _heading_oculto(raiz),
+        })
+        pos += 1
     return results
 
+
+
+def _etiqueta_de_svg(nodo_lxml) -> str | None:
+    """``aria-label`` o ``<title>`` de un svg dentro del elemento."""
+    for svg in nodo_lxml.iter("svg"):
+        etiqueta = (svg.get("aria-label") or "").strip()
+        if etiqueta:
+            return etiqueta
+        for titulo in svg.iter("title"):
+            texto = (titulo.text or "").strip()
+            if texto:
+                return texto
+    return None
 
 
 def extract_links(
@@ -442,7 +511,10 @@ def extract_links(
     """
     results: list[dict[str, Any]] = []
 
-    for a in selector.css("a[href], area[href]"):
+    for a in selector.xpath(
+        f"descendant-or-self::a[@href]{_XPATH_FUERA_DEL_DOM}"
+        f" | descendant-or-self::area[@href]{_XPATH_FUERA_DEL_DOM}"
+    ):
         raw_href = a.attrib.get("href", "").strip()
         if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
             continue
@@ -456,7 +528,21 @@ def extract_links(
             # Image-map areas have no text content; alt is their anchor.
             anchor_text = _clean(a.attrib.get("alt", ""))
         else:
-            anchor_text = _clean(" ".join(a.css("::text").getall()))
+            # El texto que se LEE: un `<script>` dentro del enlace acababa en el
+            # anchor, y unir los nodos con espacio partia las palabras.
+            anchor_text = _clean(" ".join(_lineas_visibles(a.root, forzar_raiz=True)))
+            if not anchor_text:
+                # Un enlace de icono no es un "anchor vacio" si lleva su texto
+                # en un atributo: eso es lo que anuncia un lector de pantalla y
+                # lo que Google usa como ancla.
+                for alternativa in (
+                    a.attrib.get("aria-label"),
+                    a.attrib.get("title"),
+                    _etiqueta_de_svg(a.root),
+                ):
+                    anchor_text = _clean(alternativa)
+                    if anchor_text:
+                        break
         rel = _clean(a.attrib.get("rel", ""))
 
         # Heuristic link position
@@ -752,7 +838,7 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
         })
 
     # Images
-    for img in selector.css("img[src]"):
+    for img in selector.xpath(f"descendant-or-self::img[@src]{_XPATH_FUERA_DEL_DOM}"):
         _add(
             img.attrib.get("src", ""),
             "image",
@@ -770,7 +856,7 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
         _add(script.attrib.get("src", ""), "js")
 
     # srcset images (first URL only per element for simplicity)
-    for img in selector.css("[srcset]"):
+    for img in selector.xpath(f"descendant-or-self::*[@srcset]{_XPATH_FUERA_DEL_DOM}"):
         srcset = img.attrib.get("srcset", "")
         # srcset=" " o "," no tiene candidatos: split()[0] lanzaba IndexError
         # y se perdia la extraccion de toda la pagina.
@@ -790,6 +876,16 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Screaming-Frog-style extraction helpers
 # ---------------------------------------------------------------------------
+
+# Lo que vive dentro de `<template>` o `<noscript>` no esta en el DOM: la
+# plantilla de un framework no se pinta hasta que JS la clona (y entonces el
+# clon SI aparece, asi que contar las dos es contar doble), y el `<noscript>`
+# es el respaldo para quien no ejecuta JS, que no es el caso de Googlebot. Medido
+# en 58 paginas de control: 583 de 4.409 imagenes eran el respaldo de la carga
+# diferida, cada una duplicando la imagen real y pudiendo inventar un
+# `image_missing_alt` sobre una imagen que nadie ve.
+_XPATH_FUERA_DEL_DOM = "[not(ancestor::template) and not(ancestor::noscript)]"
+
 
 # Escrituras que no separan las palabras con espacios: sin un diccionario de
 # segmentacion lo unico que se puede medir es el numero de caracteres, que es
@@ -885,7 +981,7 @@ def _nodo_oculto(node) -> bool:
     return False
 
 
-def _segmentos_visibles(el) -> list[tuple[str, str | None]]:
+def _segmentos_visibles(el, forzar_raiz: bool = False) -> list[tuple[str, str | None]]:
     """Aplana un elemento lxml a (linea, etiqueta del bloque que la abre).
 
     Mantener las fronteras de bloque es lo que distingue ``Zapa<span>tillas``
@@ -899,12 +995,12 @@ def _segmentos_visibles(el) -> list[tuple[str, str | None]]:
     """
     partes: list[tuple[str, str | None]] = []
 
-    def anda(node, con_cola: bool, tag_padre: str | None) -> None:
+    def anda(node, con_cola: bool, tag_padre: str | None, es_raiz: bool = False) -> None:
         if not isinstance(node.tag, str):  # comentario / PI
             if con_cola and node.tail:
                 partes.append((node.tail, None))
             return
-        if _nodo_oculto(node):
+        if _nodo_oculto(node) and not (es_raiz and forzar_raiz):
             # El nodo no se pinta, pero su cola va DESPUES de el y si se pinta.
             if con_cola and node.tail:
                 partes.append((node.tail, None))
@@ -923,7 +1019,7 @@ def _segmentos_visibles(el) -> list[tuple[str, str | None]]:
         if con_cola and node.tail:
             partes.append((node.tail, None))
 
-    anda(el, False, None)
+    anda(el, False, None, es_raiz=True)
 
     salida: list[tuple[str, str | None]] = []
     acumulado: list[str] = []
@@ -945,9 +1041,13 @@ def _segmentos_visibles(el) -> list[tuple[str, str | None]]:
     return salida
 
 
-def _lineas_visibles(el) -> list[str]:
-    """Las lineas de ``_segmentos_visibles``, sin la etiqueta."""
-    return [linea for linea, _ in _segmentos_visibles(el)]
+def _lineas_visibles(el, forzar_raiz: bool = False) -> list[str]:
+    """Las lineas de ``_segmentos_visibles``, sin la etiqueta.
+
+    ``forzar_raiz`` lee el elemento aunque sea el que esta oculto: lo usan los
+    titulares, que se guardan con su texto y una marca, no vacios.
+    """
+    return [linea for linea, _ in _segmentos_visibles(el, forzar_raiz=forzar_raiz)]
 
 
 def _raiz_del_body(selector):
@@ -1782,6 +1882,23 @@ def _block_text(el) -> str:
     return _dedupe_segmentos(_segmentos_visibles(el))
 
 
+# Por encima de esta fraccion de palabras dentro de enlaces, el bloque es
+# navegacion y no un hero: un titular con su claim trae texto corrido y, como
+# mucho, un boton; una barra superior con el logo en un `<h1 class="logo">` trae
+# el megamenu entero. Sin esta comprobacion, el menu completo se antepone al
+# contenido de la pagina (reproducido con `<div class="top-bar"><h1>Acme</h1>`).
+_HERO_MAX_DENSIDAD_ENLACES = 0.5
+
+
+def _densidad_de_enlaces(el) -> float:
+    """Fraccion de las palabras del bloque que estan dentro de un ``<a>``."""
+    total = contar_palabras(el.text_content())
+    if not total:
+        return 0.0
+    en_enlaces = sum(contar_palabras(a.text_content()) for a in el.iter("a"))
+    return en_enlaces / total
+
+
 def _hero_outside_container(container) -> str | None:
     """Texto del bloque que contiene el <h1> cuando cae fuera del contenedor.
 
@@ -1809,6 +1926,8 @@ def _hero_outside_container(container) -> str | None:
             padre = bloque.getparent()
         if bloque is container or container in bloque.iterdescendants():
             return None  # el bloque envuelve al contenedor: seria todo el texto
+        if _densidad_de_enlaces(bloque) > _HERO_MAX_DENSIDAD_ENLACES:
+            return None  # es la barra de navegacion, no el hero de la pagina
         texto = _block_text(bloque)
         return texto or None
     return None

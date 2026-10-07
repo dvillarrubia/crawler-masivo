@@ -113,6 +113,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | tag | varchar(4) | h1, h2, h3... |
 | position | int | Orden en el documento (0-based) |
 | text | text | Texto del heading |
+| oculto | bool | El titular esta en el HTML pero no se pinta (hidden, display:none, clase de utilidad, aria-hidden, template/noscript/svg). Los checks de h1 cuentan solo `oculto IS NOT TRUE` |
 
 ### `links` — Grafo de enlaces
 | Columna | Tipo | Descripcion |

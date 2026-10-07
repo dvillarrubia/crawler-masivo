@@ -451,6 +451,10 @@ class SEOAnalyzer:
                 Url.job_id == self.job_id,
                 Url.is_html.is_(True),
                 Heading.tag == "h1",
+                # Los que no se pintan no cuentan: el clon movil y el de
+                # escritorio del mismo titular daban 3 h1 donde hay 1, con un
+                # `h1_multiple` falso. Siguen guardados, marcados.
+                Heading.oculto.isnot(True),
             )
             .order_by(Url.id)
         )

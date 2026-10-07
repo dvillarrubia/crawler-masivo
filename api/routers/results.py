@@ -784,7 +784,10 @@ def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str
     # primeros de cada uno, como hace Screaming Frog.
     filas = (
         session.query(Heading.url_id, Heading.tag, Heading.text)
-        .filter(Heading.url_id.in_(url_ids), Heading.tag.in_(("h1", "h2")))
+        .filter(Heading.url_id.in_(url_ids), Heading.tag.in_(("h1", "h2")),
+                # Los que no se pintan no son el titular de la pagina: el CSV
+                # daria el clon movil como h1_1 segun el orden del DOM.
+                Heading.oculto.isnot(True))
         .order_by(Heading.url_id, Heading.position)
         .all()
     )

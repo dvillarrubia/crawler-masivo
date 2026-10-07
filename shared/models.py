@@ -216,6 +216,11 @@ class Heading(Base):
     tag = Column(String(4), nullable=False)  # h1, h2, h3 …
     position = Column(Integer, nullable=False)
     text = Column(Text, nullable=True)
+    # El titular esta en la pagina pero no se pinta (hidden, display:none,
+    # clase de utilidad, aria-hidden, dentro de template/noscript/svg). Se
+    # guarda igual: lo que no se guarda no se puede auditar. Los checks de h1
+    # cuentan solo los que SI se pintan, que es lo que ve el usuario.
+    oculto = Column(Boolean, nullable=True)
 
     url_rel = relationship("Url", back_populates="headings")
 

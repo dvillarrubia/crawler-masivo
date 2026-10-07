@@ -441,6 +441,7 @@ class PostgresPipeline:
             tag=data.get("tag"),
             position=data.get("position", 0),
             text=data.get("text"),
+            oculto=data.get("oculto"),
         )
 
     def _make_hreflang(self, data: dict):

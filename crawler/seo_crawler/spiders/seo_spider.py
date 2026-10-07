@@ -1502,6 +1502,7 @@ class SeoSpider(scrapy.Spider):
                 tag=heading["tag"],
                 position=heading["position"],
                 text=heading["text"],
+                oculto=heading.get("oculto"),
             )
 
         # Page-level nofollow: meta robots / X-Robots-Tag "nofollow" (or

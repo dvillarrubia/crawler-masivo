@@ -89,6 +89,7 @@ class HeadingItem(scrapy.Item):
     tag = scrapy.Field()
     position = scrapy.Field()
     text = scrapy.Field()
+    oculto = scrapy.Field()
 
 
 class LinkItem(scrapy.Item):

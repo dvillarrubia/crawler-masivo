@@ -293,6 +293,7 @@ class HeadingResponse(BaseModel):
     tag: str
     position: int
     text: str | None = None
+    oculto: bool | None = None
 
 
 class ResourceResponse(BaseModel):

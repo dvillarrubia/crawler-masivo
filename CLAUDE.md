@@ -578,6 +578,30 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    el deduplicador borraba) y se van hasta **−7.117** de megamenú oculto en un
    artículo de comercio electrónico, con **0 líneas de prosa perdidas**.
 
+46. **Un titular oculto no es un titular, y un icono con `aria-label` no es un
+   enlace sin ancla** — cuatro cosas que el extractor leía mal y que acababan en
+   el informe: (a) los clones móvil/escritorio del mismo `<h1>` (uno con
+   `d-none`, otro con `aria-hidden`) contaban como tres h1 y producían un
+   `h1_multiple` falso, mientras que los de `template`/`noscript` se tiraban en
+   silencio —al revés de lo que se hacía con sus enlaces e imágenes—; ahora se
+   guardan TODOS con una marca `headings.oculto` y los checks de h1 y el CSV
+   cuentan solo los que se pintan; (b) el texto del titular se armaba uniendo
+   nodos con espacio, así que `Zapa<span>tillas` daba `"Zapa tillas"` y un
+   `<script>` dentro del `<h1>` acababa en el texto; un `<h1>` que solo lleva el
+   logo ahora usa el `alt` de la imagen, que es de donde lo lee Google;
+   (c) `role="heading"` con `aria-level` cuenta como titular de ese nivel (2 por
+   defecto, según ARIA); (d) un enlace de icono sin texto usa su `aria-label`,
+   su `title` o la etiqueta de su `<svg>` — es lo que anuncia un lector de
+   pantalla y lo que Google toma como ancla: **1.783 → 155 anclas vacías** en 58
+   páginas de control, y el ancla pesa en el agrupamiento por repetición del
+   PageRank (decisión 29) y en todo análisis de anchor text. Además, lo que vive
+   en `<template>` o `<noscript>` ya no aporta enlaces ni imágenes: no está en el
+   DOM, y el `<noscript><img>` de la carga diferida duplicaba la imagen real
+   (583 de 4.409 imágenes en las mismas 58 páginas). El hero fuera del
+   contenedor (decisión 10) rechaza el bloque cuando más de la mitad de sus
+   palabras están dentro de enlaces: con `<div class="top-bar"><h1 class=logo>`
+   se antepone el megamenú entero al contenido.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
