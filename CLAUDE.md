@@ -371,7 +371,18 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    existia como WARNING en el log del worker y la cifra se entregaba como si
    nada. Ahora esta en `jobs.pagerank_resumen` y en una columna del CSV
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
-   calculo no abre el endpoint del job. Y en el frontend, que es donde se mira
+   calculo no abre el endpoint del job.
+   Ojo al ORDEN, que durante un tiempo dejo esa columna vacia en todas las
+   filas: el analisis escribe `pagerank_resumen` **antes** de que el worker
+   lance la comprobacion de render, asi que en un rastreo recien terminado la
+   clave existe con valor `None`. El CSV miraba si la clave estaba, no su
+   valor, y devolvia ese None sin llegar a consultar el `js_check`. Medido en
+   el censo de progym: 4.320 filas sin el aviso teniendo
+   `js_check.grafo_fiable = true`. Un `None` es «aun no se sabe». Y con
+   `render_js` la comprobacion no llega a correr —existe para los rastreos SIN
+   render—, asi que ahi la respuesta es que si: un rastreo que renderiza ya ha
+   visto los enlaces que monta el JavaScript, que es lo unico que mide esta
+   columna. Y en el frontend, que es donde se mira
    un rastreo: un aviso en la ficha del job cuando `grafo_fiable` es false, con
    las plantillas afectadas, y otro distinto cuando es null (no se pudo
    comprobar porque Chromium no recibio contenido). Ademas la tabla pinta
