@@ -1202,6 +1202,15 @@ reconstruir, mirar si hay algo rastreando:
 curl -s "$API/api/jobs?status=running" | python -c "import json,sys;print([j['name'] for j in json.load(sys.stdin)['items']])"
 ```
 
+Y lo mismo vale para cualquier cosa larga contra la API: **mergear una PR
+dispara un despliegue, y el despliegue recrea el contenedor de la API**, asi
+que se lleva por delante la descarga que estuviera en curso. Medido el
+2026-10-07: el backup del censo de CST murio con `curl 92` (error de framing
+HTTP/2) **once segundos antes** de que terminara el despliegue de un merge
+hecho mientras tanto. No fue memoria ni un fallo del endpoint; fue el
+despliegue. Antes de bajar un censo grande, mirar que no haya un merge en
+vuelo (`gh run list --workflow=deploy.yml --limit 1`).
+
 Y **nunca** copiar ficheros al contenedor que esta rastreando (`docker cp`): si
 el spider y los extractores quedan descasados, la siguiente reanudacion del job
 muere con un ImportError. Para probar codigo nuevo contra el sitio de pruebas o
