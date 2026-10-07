@@ -128,3 +128,48 @@ def test_sin_content_hash_se_cae_a_los_bytes():
     SEOAnalyzer(s, j.id).analyze_duplicates()
     s.flush()
     assert sorted(_tipos(s, j, "duplicate_content")) == sorted([a.id, b.id])
+
+
+def _detalles(s, j, tipo):
+    return [i.details for i in s.query(Issue).filter(
+        Issue.job_id == j.id, Issue.issue_type == tipo).all()]
+
+
+def test_un_grupo_grande_no_se_guarda_entero_en_cada_fila():
+    """Cada fila llevaba la lista de TODAS las demas del grupo: N x N.
+
+    Medido en el censo de CST, donde 7.511 paginas comparten la misma
+    description: esa sola clase de incidencia ocupaba **431 MB** de la columna
+    `details`, con filas de hasta 59 kB. Los censos sin un grupo gigante
+    estaban en 8, 7 y 0,8 MB. Y no lo leia nadie: cuatro sitios lo escribian y
+    ninguno lo consumia.
+    """
+    s, j = _montar()
+    desc = "La misma description en todas, de sobra larga para pasar el minimo exigido"
+    for i in range(60):
+        _url(s, j, f"/p{i}", desc=desc)
+    s.flush()
+
+    SEOAnalyzer(s, j.id).analyze_descriptions()
+    s.flush()
+
+    detalles = _detalles(s, j, "description_duplicate")
+    assert len(detalles) == 60
+    for det in detalles:
+        assert det["duplicate_count"] == 59, "la cuenta real del grupo se conserva"
+        assert len(det["duplicate_urls"]) == 20, "solo una muestra"
+        assert det["duplicate_urls_truncada"] is True
+
+
+def test_un_grupo_pequenno_se_guarda_entero_y_sin_marca():
+    s, j = _montar()
+    desc = "Otra description compartida, tambien lo bastante larga para valer aqui"
+    for i in range(3):
+        _url(s, j, f"/q{i}", desc=desc)
+    s.flush()
+    SEOAnalyzer(s, j.id).analyze_descriptions()
+    s.flush()
+    for det in _detalles(s, j, "description_duplicate"):
+        assert det["duplicate_count"] == 2
+        assert len(det["duplicate_urls"]) == 2
+        assert "duplicate_urls_truncada" not in det

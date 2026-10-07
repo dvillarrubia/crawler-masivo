@@ -234,6 +234,28 @@ class SEOAnalyzer:
         )
         self.session.flush()
 
+    # Cuantas URLs del grupo se guardan en los detalles. El grupo entero no:
+    # cada fila llevaba la lista de TODAS las demas, asi que un grupo de N
+    # paginas gastaba N x N identificadores. Medido en el censo de CST, donde
+    # 7.511 paginas comparten la misma description: esa sola clase de
+    # incidencia ocupaba **431 MB** de la columna `details` (9 kB por fila, la
+    # mayor de 59 kB), frente a 8 MB, 7 MB y 0,8 MB en los censos sin un grupo
+    # gigante. Y no lo lee nadie: cuatro sitios lo escriben y ninguno lo
+    # consume. Con la cuenta y una muestra se responde lo mismo —"esta
+    # description la comparten 7.511 paginas, por ejemplo estas"— y el resto
+    # se saca con una consulta por el valor compartido.
+    _MUESTRA_DUPLICADOS = 20
+
+    def _detalle_duplicados(self, otros: list[int], **extra) -> dict[str, Any]:
+        detalle: dict[str, Any] = {
+            "duplicate_count": len(otros),
+            "duplicate_urls": otros[: self._MUESTRA_DUPLICADOS],
+        }
+        if len(otros) > self._MUESTRA_DUPLICADOS:
+            detalle["duplicate_urls_truncada"] = True
+        detalle.update(extra)
+        return detalle
+
     def _add_issue(
         self,
         url_id: int,
@@ -430,7 +452,7 @@ class SEOAnalyzer:
                     uid,
                     "title_duplicate",
                     "warning",
-                    {"duplicate_urls": other_ids},
+                    self._detalle_duplicados(other_ids),
                 )
 
         self._flush_issues()
@@ -501,7 +523,7 @@ class SEOAnalyzer:
                     uid,
                     "description_duplicate",
                     "warning",
-                    {"duplicate_urls": other_ids},
+                    self._detalle_duplicados(other_ids),
                 )
 
         self._flush_issues()
@@ -584,7 +606,7 @@ class SEOAnalyzer:
                     uid,
                     "h1_duplicate",
                     "info",
-                    {"duplicate_urls": other_ids},
+                    self._detalle_duplicados(other_ids),
                 )
 
         self._flush_issues()
@@ -1174,7 +1196,7 @@ class SEOAnalyzer:
                         uid,
                         "duplicate_content",
                         "warning",
-                        {"content_hash": valor, "duplicate_urls": other_ids},
+                        self._detalle_duplicados(other_ids, content_hash=valor),
                     )
 
         self._flush_issues()

@@ -1048,6 +1048,37 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    rotos, 4 canonical rotos). **Las notas de `/insights` no se mueven** (88 y
    77 antes y después): esto no cambia la valoración, cambia qué se ve.
 
+65. **El backup decía «stream» y montaba el censo entero en memoria, y los
+   duplicados se guardaban al cuadrado** — las dos salieron de lo mismo:
+   intentar traerme un censo de producción para compararlo y que no cupiera.
+   (a) `stream_backup_zip` acumulaba **cada tabla entera** en una lista de
+   cadenas, la unía en otra cadena y lo metía todo en un `BytesIO` que solo se
+   soltaba al final, con un único `yield`. Ahora cada fila se escribe
+   directamente en la entrada del ZIP (`zf.open(name, "w")`) sobre un destino
+   **sin `seek`** —así `zipfile` escribe descriptores de datos y el ZIP se
+   puede servir mientras se genera— y se suelta un trozo cada MB.
+   (b) Lo que de verdad pesaba no era el ZIP: cada incidencia de duplicado
+   guardaba `duplicate_urls` con **la lista de TODAS las demás del grupo**, o
+   sea N×N identificadores. Medido en el censo de CST, donde **7.511 páginas
+   comparten la misma description**: esa sola clase ocupaba **431 MB** de la
+   columna `details` (9 kB por fila, la mayor de 59 kB), frente a 8, 7 y 0,8 MB
+   en censos sin un grupo gigante. Y **no lo leía nadie**: cuatro sitios lo
+   escribían y ninguno lo consumía. Ahora va la cuenta real
+   (`duplicate_count`), una muestra de 20 y una marca si está recortada; el
+   grupo entero se saca con una consulta por el valor compartido.
+   Medido, pico de memoria del proceso que exporta:
+
+   | censo | antes | ahora |
+   |---|---|---|
+   | Saunier Duval (2.876 URLs) | 264 MB | **97 MB** |
+   | CST (12.112 URLs) | 1.450 MB | **92 MB** |
+
+   Y la columna `details` de CST: **434 MB → 4,3 MB** con las mismas 49.207
+   incidencias. Lo importante del segundo par de cifras es que **ya no crece
+   con el censo**: 97 MB con 2.876 URLs y 92 MB con 12.112. El ZIP sale **byte
+   a byte idéntico** en los dos censos (comprobado entrada por entrada), así
+   que es la misma copia hecha de otra manera.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
