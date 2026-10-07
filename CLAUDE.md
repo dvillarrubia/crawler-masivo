@@ -499,6 +499,15 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    o por codigo— y no se puede deducir en SQL: buscar la subcadena marcaria
    `noindex/nofollow`, que Google NO interpreta (decision 23). Si el dato no se
    conoce (NULL) el enlace cuenta: no se descarta por desconocimiento.
+   **Ojo al re-analizar un censo anterior a la columna**: `urls.noindex` la
+   materializa `analyze_indexability`, asi que en un rastreo viejo estaba a
+   NULL —y `NULL IS NOT TRUE` es cierto, o sea que esas paginas SI repartian—.
+   Al re-analizarlo se rellena y salen del grafo: en Druni, un censo de hace
+   dos meses, aparecieron **9.771 paginas noindex** y con ellas se fueron sus
+   aristas. El PageRank de un censo viejo CAMBIA al re-analizarlo, y no es un
+   fallo: antes se calculaba con todas repartiendo. Si se vuelve a entregar un
+   informe de enlazado de un censo anterior, las cifras no cuadraran con las de
+   la primera entrega y la explicacion es esta.
    Medido en blogs.uoc.edu: 1.813 paginas noindex, y 992 URLs cuyos unicos
    enlaces venian de ellas — 824 con parametros (busquedas internas, trampas de
    rastreo) y 168 sin ellos, que son el hallazgo: categorias con 400-800
