@@ -548,6 +548,36 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `very_low_text_ratio` dejan de emitirse: el ratio texto/HTML no es una señal
    de Google y, bien medido, salta en 21 de 30 páginas de control.
 
+45. **El limpiador de plantilla no puede borrar la página, y deduplicar no
+   puede desalinear una tabla** — tres fallos del extractor de contenido, los
+   tres reproducidos: (a) las listas de nombres de plantilla casaban por
+   **subcadena sobre cualquier elemento, `body` incluido**, así que
+   `<body class="cookie-bar-active">` dejaba la página en **0 palabras**, y
+   `cookie-policy` o `privacy-notice-content` borraban el cuerpo de las propias
+   páginas legales —las que tienen que estar indexadas tal cual—; (b) `<form>`
+   se quitaba siempre, y en ASP.NET WebForms la página entera va dentro de
+   `<form id="aspnetForm">`: 0 palabras otra vez; (c) `_dedupe_lines` miraba una
+   ventana de 4 líneas sin saber de dónde venían, así que de 8 celdas `Sí` de
+   una tabla comparativa quedaba 1 y **las filas salían desplazadas**: el
+   informe decía lo contrario que la página. Ahora: `_TAGS_INTOCABLES`
+   (`html`, `body`, `main`, `article`) no se borran nunca; un bloque cuyo nombre
+   casa pero que se lleva más del 40% de las palabras de la página es la página,
+   no plantilla (`_MAX_SHARE_PLANTILLA`); un `<aside>` o un
+   `role="complementary"` DENTRO de `main`/`article`/`section` es contenido —la
+   misma regla de landmark de la decisión 9— y se desenvuelve a `<div>` porque
+   trafilatura tira todo `<aside>` por su cuenta; y una repetición solo se
+   colapsa si no viene de una celda o un item (`_TAGS_DATO`) y si entre las dos
+   apariciones hay 2 líneas distintas como mucho, que es la forma de una
+   marquesina (`A A A`) o de una animación (`A B A B`), no la de una tabla.
+   Además lo que no se pinta se quita también del HTML que lee trafilatura, no
+   solo al contar: `d-none` (Bootstrap), `hidden` (Tailwind), `is-hidden`,
+   `hide` e `invisible` se casan por token completo, de modo que `d-md-none`
+   —que oculta solo a partir de cierto ancho— sigue siendo contenido. Medido en
+   las mismas 58 páginas de control: cambia el contenido de 41, se recuperan
+   hasta **+1.414 palabras** en los listados de blog (las fichas repetidas que
+   el deduplicador borraba) y se van hasta **−7.117** de megamenú oculto en un
+   artículo de comercio electrónico, con **0 líneas de prosa perdidas**.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

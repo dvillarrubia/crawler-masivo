@@ -353,3 +353,135 @@ def test_contenido_principal_sin_el_modal_oculto():
     assert "Descripcion real del producto" in out
     assert "Facebook" not in out
     assert "Accede a tu cuenta" not in out
+
+
+# ---------------------------------------------------------------------------
+# El limpiador de plantilla no puede borrar la pagina (#27, alta)
+# ---------------------------------------------------------------------------
+
+_CUERPO = "Texto real del articulo con palabras de sobra para ser contenido. " * 6
+
+
+def _pagina(main_html: str, body_attr: str = "") -> str:
+    return f"<html><body {body_attr}><main>{main_html}</main></body></html>"
+
+
+def test_una_clase_de_estado_en_el_body_no_borra_la_pagina():
+    """`cookie-bar-active` dice que la barra esta abierta, no que la pagina sea
+    la barra. Casaba por subcadena sobre cualquier elemento, body incluido, y
+    dejaba la pagina a 0 palabras."""
+    for clase in ("cookie-bar-active", "has-lightbox", "newsletter-popup-open",
+                  "subscriptions-page", "signup-page"):
+        html = _pagina(f"<h1>Titular</h1><p>{_CUERPO}</p>", f"class='{clase}'")
+        out = ex.extract_main_content(sel(html)) or ""
+        assert len(out.split()) > 50, f"{clase} dejo {len(out.split())} palabras"
+
+
+def test_la_pagina_legal_no_se_borra_a_si_misma():
+    """`id="cookie-policy"` en la pagina de politica de cookies, o
+    `privacy-notice-content` en la de privacidad, ES el contenido."""
+    html = ("<html><body><main id='cookie-policy'><h1>Politica de cookies</h1>"
+            f"<p>{_CUERPO}</p></main></body></html>")
+    assert "Texto real" in (ex.extract_main_content(sel(html)) or "")
+    html = _pagina(f"<h1>Privacidad</h1><div class='privacy-notice-content'><p>{_CUERPO}</p></div>")
+    assert "Texto real" in (ex.extract_main_content(sel(html)) or "")
+    html = _pagina(f"<h1>Planes</h1><div class='subscription-plans'><p>{_CUERPO}</p></div>")
+    assert "Texto real" in (ex.extract_main_content(sel(html)) or "")
+
+
+def test_la_barra_de_cookies_de_verdad_sigue_fuera():
+    """La proteccion es por tamano: un banner real es una fraccion pequena."""
+    html = ("<html><body><div class='cookie-banner'><p>Utilizamos cookies propias "
+            "y de terceros. Aceptar cookies</p></div>"
+            f"<main><h1>Titular</h1><p>{_CUERPO}</p></main></body></html>")
+    out = ex.extract_main_content(sel(html)) or ""
+    assert "cookies" not in out.lower()
+    assert "Texto real" in out
+
+
+def test_la_pagina_entera_dentro_de_un_form_no_desaparece():
+    """ASP.NET WebForms envuelve TODO en <form id="aspnetForm">: esos sitios
+    salian a 0 palabras."""
+    html = (f"<html><body><form id='aspnetForm'><main><h1>Producto</h1><p>{_CUERPO}</p>"
+            "</main></form></body></html>")
+    assert "Texto real" in (ex.extract_main_content(sel(html)) or "")
+
+
+def test_un_buscador_sigue_siendo_plantilla():
+    html = (f"<html><body><main><h1>Ficha</h1><p>{_CUERPO}</p></main>"
+            "<form action='/buscar'><input name='q'><button>Buscar en la web</button>"
+            "</form></body></html>")
+    out = ex.extract_main_content(sel(html)) or ""
+    assert "Buscar en la web" not in out
+
+
+def test_un_aside_dentro_del_articulo_es_contenido():
+    """Un destacado o las especificaciones de un producto no son la barra
+    lateral del sitio: misma regla de landmark que header/footer."""
+    html = _pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p>"
+                   "<aside class='callout'><p>Dato importante dentro del articulo.</p></aside>")
+    assert "Dato importante" in (ex.extract_main_content(sel(html)) or "")
+    html = _pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p>"
+                   "<div role='complementary'><p>Especificaciones: 120x80 cm, 45 kg.</p></div>")
+    assert "Especificaciones" in (ex.extract_main_content(sel(html)) or "")
+
+
+def test_la_barra_lateral_del_sitio_sigue_fuera():
+    html = (f"<html><body><main><h1>Ficha</h1><p>{_CUERPO}</p></main>"
+            "<aside class='sidebar'><p>Lo mas leido de la semana en el blog, con "
+            "bastante texto para que no sea un bloque corto.</p></aside></body></html>")
+    assert "Lo mas leido" not in (ex.extract_main_content(sel(html)) or "")
+
+
+def test_las_clases_de_utilidad_de_los_frameworks_ocultan():
+    """`d-none` es display:none en todas las versiones de Bootstrap. En un
+    cliente real el megamenu entero viajaba asi en el contenido de cada pagina,
+    con bloques de depuracion incluidos."""
+    html = _pagina("<h1>Ficha</h1><div class='d-none debugging'>null</div>"
+                   "<div class='mega-menu hidden'><a>Novela romantica</a></div>"
+                   f"<p>{_CUERPO}</p>")
+    out = ex.extract_main_content(sel(html)) or ""
+    assert "null" not in out
+    assert "Novela romantica" not in out
+    assert "Texto real" in out
+    # Pero una variante por anchura oculta solo a partir de ese ancho: es visible.
+    html = _pagina(f"<h1>Ficha</h1><div class='d-md-none'>Menu movil visible</div><p>{_CUERPO}</p>")
+    assert "Menu movil visible" in ex.extract_visible_text(sel(html))
+
+
+# ---------------------------------------------------------------------------
+# Deduplicar no puede desalinear una tabla ni cambiar de ficha un precio
+# ---------------------------------------------------------------------------
+
+
+def test_la_tabla_comparativa_conserva_todas_sus_celdas():
+    """De 8 celdas `Si` quedaba 1 y las filas salian desplazadas: el informe
+    decia lo contrario de lo que pone la pagina."""
+    filas = "".join(f"<tr><td>Fila {f}</td><td>Si</td><td>Si</td><td>No</td></tr>"
+                    for f in range(4))
+    html = _pagina(f"<table><tr><th>Caracteristica</th><th>Basico</th><th>Pro</th></tr>{filas}</table>")
+    texto = ex._block_text(sel(html).css("main")[0].root)
+    assert texto.count("Si") == 8
+    assert texto.count("No") == 4
+    for f in range(4):
+        assert f"Fila {f}" in texto
+
+
+def test_las_fichas_conservan_cada_precio():
+    items = "".join(f"<li><h3>Producto {i}</h3><span>19,99 €</span></li>" for i in range(8))
+    html = _pagina(f"<ul>{items}</ul>")
+    texto = ex._block_text(sel(html).css("main")[0].root)
+    assert texto.count("19,99 €") == 8
+
+
+def test_la_marquesina_sigue_colapsando():
+    html = _pagina("<div>" + "<div><span>Diseño</span></div>" * 6 + "</div>"
+                   f"<p>{_CUERPO}</p>")
+    texto = ex._block_text(sel(html).css("main")[0].root)
+    assert texto.count("Diseño") == 1
+
+
+def test_el_ciclo_de_dos_lineas_sigue_colapsando():
+    """`A B A B …` de una animacion de letras: una vuelta y fuera."""
+    texto = "\n".join(["Digital by nature", "nature"] * 5 + ["Linea unica"])
+    assert ex._dedupe_lines(texto) == "Digital by nature\nnature\nLinea unica"

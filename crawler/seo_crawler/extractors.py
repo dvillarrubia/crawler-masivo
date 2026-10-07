@@ -848,12 +848,24 @@ _TAGS_NO_RENDERIZADOS: frozenset[str] = frozenset({
 })
 
 
-def _nodo_oculto(node) -> bool:
-    """True si el navegador no pinta el nodo (etiqueta, ``hidden`` o estilo).
+# Clases de utilidad cuyo significado lo fija el framework, no el sitio:
+# `d-none` es `display:none !important` en todas las versiones de Bootstrap,
+# `hidden` lo mismo en Tailwind, `is-hidden` en Bulma, `invisible` es
+# `visibility:hidden` en los dos. Se casan por TOKEN completo para no tocar las
+# variantes por anchura (`d-md-none` oculta solo a partir de md). Lo demas que
+# oculte desde una hoja de estilos necesita el render y no se puede saber aqui.
+_CLASES_OCULTAS: frozenset[str] = frozenset({
+    "d-none", "hidden", "hide", "is-hidden", "invisible",
+})
 
-    Solo ve el ``display:none`` escrito en linea: el que viene de una clase CSS
-    necesitaria el render con hojas de estilo aplicadas. Es un subconjunto,
-    pero es el que usan los acordeones y los menus moviles de los frameworks.
+
+def _nodo_oculto(node) -> bool:
+    """True si el navegador no pinta el nodo (etiqueta, ``hidden``, clase o estilo).
+
+    Ve el ``display:none`` escrito en linea y las clases de utilidad de los
+    frameworks (``_CLASES_OCULTAS``); el que viene de una hoja de estilos propia
+    necesitaria el render. Es un subconjunto, pero es el que usan los
+    acordeones, los menus moviles y los bloques de depuracion.
     ``hidden="until-found"`` SI es contenido: el navegador lo revela al buscar
     en la pagina, y Google lo indexa.
     """
@@ -861,6 +873,9 @@ def _nodo_oculto(node) -> bool:
         return True
     oculto = node.get("hidden")
     if oculto is not None and oculto.strip().lower() != "until-found":
+        return True
+    clase = node.get("class")
+    if clase and not _CLASES_OCULTAS.isdisjoint(clase.lower().split()):
         return True
     estilo = node.get("style")
     if estilo:
@@ -870,42 +885,69 @@ def _nodo_oculto(node) -> bool:
     return False
 
 
-def _lineas_visibles(el) -> list[str]:
-    """Aplana un elemento lxml a lineas de texto visible, una por bloque.
+def _segmentos_visibles(el) -> list[tuple[str, str | None]]:
+    """Aplana un elemento lxml a (linea, etiqueta del bloque que la abre).
 
     Mantener las fronteras de bloque es lo que distingue ``Zapa<span>tillas``
     (una palabra) de ``<p>Precio<p>Oferta`` (dos lineas): un ``//text()`` pelado
     unido con espacios partia la primera en dos palabras y pegaba la segunda en
     una sola linea. Los espacios de indentacion se colapsan, asi que el texto
     que sale es el que se lee, no el sangrado de la plantilla.
-    """
-    partes: list[str] = []
 
-    def anda(node, con_cola: bool) -> None:
+    La etiqueta viaja con la linea porque una celda de tabla y un titular
+    repetido no se tratan igual al deduplicar (ver ``_dedupe_segmentos``).
+    """
+    partes: list[tuple[str, str | None]] = []
+
+    def anda(node, con_cola: bool, tag_padre: str | None) -> None:
         if not isinstance(node.tag, str):  # comentario / PI
             if con_cola and node.tail:
-                partes.append(node.tail)
+                partes.append((node.tail, None))
             return
         if _nodo_oculto(node):
             # El nodo no se pinta, pero su cola va DESPUES de el y si se pinta.
             if con_cola and node.tail:
-                partes.append(node.tail)
+                partes.append((node.tail, None))
             return
         bloque = node.tag in _BLOCK_TAGS
         if bloque:
-            partes.append("\n")
+            partes.append(("\n", node.tag))
         if node.text:
-            partes.append(node.text)
+            partes.append((node.text, None))
+        hijo_tag = node.tag if bloque else tag_padre
         for hijo in node:
-            anda(hijo, True)
+            anda(hijo, True, hijo_tag)
         if bloque:
-            partes.append("\n")
+            # Al cerrar el bloque, lo que venga despues pertenece al padre.
+            partes.append(("\n", tag_padre))
         if con_cola and node.tail:
-            partes.append(node.tail)
+            partes.append((node.tail, None))
 
-    anda(el, False)
-    lineas = [_WHITESPACE.sub(" ", ln).strip() for ln in "".join(partes).split("\n")]
-    return [ln for ln in lineas if ln]
+    anda(el, False, None)
+
+    salida: list[tuple[str, str | None]] = []
+    acumulado: list[str] = []
+    tag_actual: str | None = None
+
+    def volcar() -> None:
+        linea = _WHITESPACE.sub(" ", "".join(acumulado)).strip()
+        acumulado.clear()
+        if linea:
+            salida.append((linea, tag_actual))
+
+    for texto, tag in partes:
+        if texto == "\n":
+            volcar()
+            tag_actual = tag
+        else:
+            acumulado.append(texto)
+    volcar()
+    return salida
+
+
+def _lineas_visibles(el) -> list[str]:
+    """Las lineas de ``_segmentos_visibles``, sin la etiqueta."""
+    return [linea for linea, _ in _segmentos_visibles(el)]
 
 
 def _raiz_del_body(selector):
@@ -1327,6 +1369,22 @@ _SECTIONING_TAGS: frozenset[str] = frozenset({"main", "article", "section"})
 # Removed anywhere: they never carry indexable prose.
 _ALWAYS_STRIP_TAGS: frozenset[str] = frozenset({"form", "nav", "aside"})
 
+# Nunca se borran, pase lo que pase: son la pagina, no un bloque de la pagina.
+# Una clase en el ``<body>`` describe el ESTADO de la pagina ("la barra de
+# cookies esta abierta"), no que la pagina sea una barra de cookies: con
+# `<body class="cookie-bar-active">` el contenido salia a 0 palabras. Igual con
+# `has-lightbox`, `newsletter-popup-open`, `subscriptions-page` y `signup-page`.
+_TAGS_INTOCABLES: frozenset[str] = frozenset({"html", "body", "main", "article"})
+
+# Un bloque de plantilla no es la mitad de la pagina. Una barra de cookies, un
+# aviso de newsletter o un chat son una fraccion pequena; cuando el bloque que
+# casa por nombre se lleva mas que esto, lo que casa es la pagina misma:
+# `privacy-notice-content` ES el cuerpo de la pagina de privacidad,
+# `subscription-plans` son los precios de un SaaS, `newsletter-archive` es el
+# archivo que da sentido a la URL. Borrarlos deja la pagina en blanco justo en
+# las paginas legales, que son las que tienen que estar indexadas tal cual.
+_MAX_SHARE_PLANTILLA = 0.4
+
 # Never content, whatever their position.
 # ``<video>``/``<audio>``/``<canvas>`` inner text is browser fallback copy
 # ("Your browser does not support video") -- never rendered, never content.
@@ -1411,6 +1469,16 @@ def _tiene_prosa(el) -> bool:
     return False
 
 
+def _es_intocable(el) -> bool:
+    """True si el elemento es la pagina entera y no un bloque suyo."""
+    return isinstance(el.tag, str) and el.tag in _TAGS_INTOCABLES
+
+
+def _palabras_visibles(el) -> int:
+    """Palabras del texto que se pinta dentro del elemento."""
+    return contar_palabras("\n".join(_lineas_visibles(el)))
+
+
 def _is_page_level_landmark(el) -> bool:
     """True when a <header>/<footer> is the site banner / contentinfo.
 
@@ -1469,10 +1537,34 @@ def _strip_boilerplate_html(
         css_selectors = list(_BOILERPLATE_CSS_SELECTORS)
         if extra_selectors:
             css_selectors += list(extra_selectors)
+        # El total de palabras visibles se mide UNA vez, sobre el documento
+        # entero y antes de borrar nada: es el denominador de la fraccion que
+        # decide si un bloque es plantilla o es la pagina.
+        total_palabras = _palabras_visibles(doc)
+
+        def es_la_pagina(el) -> bool:
+            """True si el bloque se lleva una fraccion grande de la pagina."""
+            if total_palabras <= 0:
+                return False
+            return _palabras_visibles(el) / total_palabras > _MAX_SHARE_PLANTILLA
+
+        # 0) Fuera lo que el navegador no pinta, con la MISMA regla que usan
+        #    word_count y text_ratio (`_nodo_oculto`). Hace falta hacerlo aqui
+        #    y no solo al aplanar el texto porque trafilatura lee este HTML y no
+        #    sabe nada de `hidden` ni de `d-none`: en un cliente real el
+        #    megamenu entero (con sus volcados de depuracion) salia en el
+        #    contenido de todas las paginas, hasta 7.117 palabras en una.
+        doomed = [el for el in doc.iter()
+                  if isinstance(el.tag, str) and not _es_intocable(el) and _nodo_oculto(el)]
+        for el in doomed:
+            _remove_keep_tail(el)
+
         for css in css_selectors:
             try:
                 sel = CSSSelector(css)
                 for el in list(sel(doc)):
+                    if _es_intocable(el):
+                        continue
                     _remove_keep_tail(el)
             except Exception:
                 pass
@@ -1484,6 +1576,8 @@ def _strip_boilerplate_html(
             patterns += _PROMO_ID_CLASS_PATTERNS
         doomed = []
         for el in doc.iter():
+            if _es_intocable(el):
+                continue
             el_id = (el.get("id") or "").lower()
             el_class = (el.get("class") or "").lower()
             if not el_id and not el_class:
@@ -1493,6 +1587,11 @@ def _strip_boilerplate_html(
                     doomed.append(el)
                     break
         for el in doomed:
+            # El nombre casa, pero si el bloque es la pagina lo que hay es un
+            # falso positivo del nombre: `id="cookie-policy"` en la pagina de
+            # politica de cookies, `privacy-notice-content` en la de privacidad.
+            if es_la_pagina(el):
+                continue
             _remove_keep_tail(el)
 
         # 3) Remove non-content tags and template regions (landmark-aware).
@@ -1500,6 +1599,8 @@ def _strip_boilerplate_html(
         for el in doc.iter():
             tag = el.tag
             if not isinstance(tag, str):
+                continue
+            if _es_intocable(el):
                 continue
             role = (el.get("role") or "").strip().lower()
             if tag in _NON_CONTENT_TAGS or tag in _ALWAYS_STRIP_TAGS:
@@ -1510,6 +1611,24 @@ def _strip_boilerplate_html(
                 # tenga cientos de enlaces, no tiene parrafos de 20 palabras.
                 if tag in ("nav", "form") and _tiene_prosa(el):
                     continue
+                # En ASP.NET WebForms la pagina ENTERA va dentro de
+                # <form id="aspnetForm">: quitar todo <form> dejaba esos sitios
+                # a 0 palabras. Un formulario de verdad (buscador, contacto,
+                # filtros) es una fraccion pequena de la pagina.
+                if tag == "form" and es_la_pagina(el):
+                    continue
+                # Un <aside> DENTRO de main/article/section es el aside de esa
+                # seccion —un destacado, una nota al margen, las
+                # especificaciones de un producto—, no la barra lateral del
+                # sitio. Es la misma regla que header/footer (decision 9) y la
+                # que aplica _detect_link_position a los enlaces.
+                if tag == "aside" and not _is_page_level_landmark(el):
+                    # Y se desenvuelve a <div>: trafilatura tira todo <aside>
+                    # por su cuenta, asi que dejarlo en pie no bastaba. Es el
+                    # mismo arreglo que el <figcaption> con titulos de 4b.
+                    el.tag = "div"
+                    el.attrib.pop("role", None)
+                    continue
                 doomed.append(el)
             elif tag in ("header", "footer"):
                 if _is_page_level_landmark(el) and not (
@@ -1517,6 +1636,11 @@ def _strip_boilerplate_html(
                 ):
                     doomed.append(el)
             elif role in _TEMPLATE_ROLES:
+                # role="complementary" puesto sobre las especificaciones de un
+                # producto dentro del articulo es contenido, igual que el
+                # <aside> anidado.
+                if role == "complementary" and not _is_page_level_landmark(el):
+                    continue
                 doomed.append(el)
         for el in doomed:
             _remove_keep_tail(el)
@@ -1567,6 +1691,8 @@ def _strip_boilerplate_html(
                     continue
                 if sum(1 for _ in el.iter("p")) > 2:
                     continue
+                if es_la_pagina(el):
+                    continue
                 doomed.append(el)
             for el in doomed:
                 _remove_keep_tail(el)
@@ -1576,33 +1702,69 @@ def _strip_boilerplate_html(
         return html  # on any failure, return original HTML unchanged
 
 
-def _dedupe_lines(text: str) -> str:
-    """Collapse lines repeated within a short window (see ``_DEDUPE_WINDOW``).
+# Etiquetas que llevan DATOS, no prosa: una celda o un item repetido es un
+# valor mas, no una repeticion que sobre. Deduplicarlas desalineaba las filas
+# de una tabla comparativa (de 8 celdas `Si` quedaba 1) y atribuia el precio de
+# una ficha a la ficha de al lado.
+_TAGS_DATO: frozenset[str] = frozenset({"td", "th", "li", "dd", "dt", "option"})
 
-    Blank lines are kept (squeezed to one) so Markdown paragraphs survive.
-    Comparison is whitespace-normalised and case-insensitive.
+# Cuantas lineas distintas puede haber en la ventana para que una repeticion se
+# considere un ciclo. Una marquesina o una animacion de letras repite 1 o 2
+# lineas una y otra vez; una tabla o un listado alternan muchas.
+_DEDUPE_MAX_DISTINTAS = 2
+
+
+def _dedupe_segmentos(segmentos: list[tuple[str, str | None]]) -> str:
+    """Colapsa las repeticiones que son un ciclo, no las que son datos.
+
+    Dos condiciones para tirar una linea repetida, y las dos salen de para que
+    existe esto (decision 9: marquesinas, animaciones de letras y clones
+    movil/escritorio):
+
+    1. No puede venir de una celda ni de un item de lista (``_TAGS_DATO``).
+    2. Entre la vez anterior y esta no hay mas de ``_DEDUPE_MAX_DISTINTAS``
+       lineas distintas, es decir, lo que se repite es un ciclo corto
+       (``A A A`` o ``A B A B``). Con la ventana de 4 a secas, una tabla con
+       ``Si``/``No`` perdia 7 de cada 8 celdas y las filas quedaban
+       desplazadas: el informe decia lo contrario de lo que pone la pagina.
+
+    Las lineas en blanco se conservan (apretadas a una) para que los parrafos
+    de Markdown sobrevivan. La comparacion normaliza espacios y mayusculas.
     """
     out: list[str] = []
-    recent: list[str] = []
+    recientes: list[str] = []
     prev_blank = False
-    for raw in text.split("\n"):
-        line = raw.strip()
-        if not line:
+    for linea, tag in segmentos:
+        if not linea:
             if out and not prev_blank:
                 out.append("")
             prev_blank = True
             continue
-        key = _WHITESPACE.sub(" ", line).casefold()
-        if key in recent:
-            continue  # dropped repeat: the pending blank stays pending
-        recent.append(key)
-        if len(recent) > _DEDUPE_WINDOW:
-            recent.pop(0)
-        out.append(line)
+        clave = _WHITESPACE.sub(" ", linea).casefold()
+        if clave in recientes and tag not in _TAGS_DATO:
+            # El ciclo es lo que va desde la ULTIMA aparicion hasta aqui: asi
+            # `A B A B` se colapsa desde el primer rebote aunque antes hubiera
+            # otras lineas en la ventana.
+            ciclo = recientes[len(recientes) - 1 - recientes[::-1].index(clave):]
+            if len(set(ciclo)) <= _DEDUPE_MAX_DISTINTAS:
+                continue  # repeticion de ciclo: la linea en blanco sigue pendiente
+        recientes.append(clave)
+        if len(recientes) > _DEDUPE_WINDOW:
+            recientes.pop(0)
+        out.append(linea)
         prev_blank = False
     while out and out[-1] == "":
         out.pop()
     return "\n".join(out)
+
+
+def _dedupe_lines(text: str) -> str:
+    """``_dedupe_segmentos`` sobre texto suelto, sin etiquetas que mirar.
+
+    Es la via de la salida de trafilatura, que ya viene aplanada. Ahi las
+    tablas llegan como una fila por linea, asi que la regla del ciclo basta.
+    """
+    return _dedupe_segmentos([(raw.strip(), None) for raw in text.split("\n")])
 
 
 def _block_text(el) -> str:
@@ -1617,7 +1779,7 @@ def _block_text(el) -> str:
     un ``iframe``, ni el ``title`` de un icono svg, ni lo que lleva
     ``hidden`` o un ``display:none`` en linea.
     """
-    return _dedupe_lines("\n".join(_lineas_visibles(el)))
+    return _dedupe_segmentos(_segmentos_visibles(el))
 
 
 def _hero_outside_container(container) -> str | None:
