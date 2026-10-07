@@ -536,6 +536,12 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    efecto y nadie se enteraba. Le pasa a cualquier clave nueva. Hay un test
    que se mantiene solo (`test_jobconfig_claves.py`): saca por regex las
    claves que lee el spider —hoy 14— y falla si alguna no esta en el schema.
+   Ese cubre lo que lee el CODIGO; lo que escribe una PERSONA lo cubren
+   `tests/test_lanzador.py` (las claves de los `projects/*/config.json` contra
+   las que `JobConfig` declara, leidas del AST) y `scripts/lanzar_job.py`, que
+   tras crear el job compara lo enviado con lo guardado y sale con **3** si la
+   API ha tirado algo, nombrando la clave. Con los cinco configs de hoy no
+   salta: es un cable trampa, no un lobo que grita.
 
 16. **El log de Scrapy va a fichero, en vivo** — `-s LOG_FILE=$SCRAPY_LOG_DIR/<job>.log`
    (def. `/tmp/scrapy-logs`, dentro del contenedor, modo append). Antes solo
