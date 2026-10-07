@@ -527,6 +527,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    www.uoc.edu. Lo pille porque un re-analisis que antes tardaba 219 s llevaba
    doce minutos sin terminar.
 
+63. **Lo que solo se alcanza por un salto tampoco puede quedarse sin aviso**
+   — excluir los destinos de redireccion de `orphan_page` (decision 36) evita
+   llenar el informe de huerfanas falsas tras una migracion, pero abrio un
+   agujero: una pagina **indexable, con 200 y cero enlaces internos**, a la que
+   solo se llega a traves de un 301, no recibia NINGUN aviso. Medido sobre los
+   tres censos: **522 en www.uoc.edu (363 declaradas en el sitemap)**, 109 en
+   blogs.uoc.edu y 1 en progym; ninguna con un solo issue. La de progym es
+   ademas la pagina **mas fuerte del sitio por PageRank**: hereda el de la URL
+   vieja, que es la que todo el mundo sigue enlazando, y en el CSV se leia como
+   «PageRank 100, enlaces entrantes 0».
+   No es `orphan_page` —la pagina es alcanzable y por el salto le llega casi
+   toda la senal—: lo que hay que arreglar es concreto y distinto, que los
+   enlaces internos apunten a la URL final, porque Google acaba dejando de
+   rastrear la vieja. Si ademas esta en el sitemap, se declara para indexar algo
+   que el propio sitio no enlaza: `warning`; sin sitemap, `info`.
+
 36. **Un aviso por hallazgo, no dos** — las URLs del sitemap sin inlinks
    recibian `orphan_page` y `sitemap_orphan` a la vez. Dicen lo mismo y el
    segundo es mas fuerte (esta declarada para indexar y aun asi nadie la

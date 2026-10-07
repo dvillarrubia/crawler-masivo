@@ -2165,6 +2165,8 @@ class SEOAnalyzer:
         for (url_id,) in rows:
             self._add_issue(url_id, "orphan_page", "warning")
 
+        self._avisar_solo_por_redireccion()
+
         # Demasiados enlaces salientes, contando solo los EDITORIALES.
         #
         # Criterio SEO: lo que preocupa de una pagina con cientos de enlaces es
@@ -2209,6 +2211,65 @@ class SEOAnalyzer:
             )
 
         self._flush_issues()
+
+    def _avisar_solo_por_redireccion(self) -> None:
+        """Paginas a las que SOLO se llega por un salto: ni un enlace directo.
+
+        Excluir los destinos de redireccion de `orphan_page` (decision 36) evita
+        llenar el informe de huerfanas falsas tras una migracion, pero abrio un
+        agujero: una pagina indexable, con 200 y CERO enlaces internos, a la que
+        solo se llega a traves de un 301, no recibia ningun aviso. Medido
+        sobre los tres censos: **522 paginas asi en www.uoc.edu, 363 de ellas
+        declaradas en el sitemap**, 109 en blogs.uoc.edu (las 109 en sitemap) y
+        1 en progym —que resulta ser la pagina MAS fuerte del sitio por
+        PageRank, porque hereda el de la URL vieja que todo el mundo sigue
+        enlazando—. Ninguna tenia un solo issue antes de esto.
+
+        No es `orphan_page`: la pagina es alcanzable, y por el salto le llega
+        casi toda la senal. Lo que hay que arreglar es otra cosa y es concreta:
+        los enlaces internos apuntan a la URL vieja, y Google acaba dejando de
+        rastrearla. Si ademas esta en el sitemap, se esta declarando para
+        indexar algo que el propio sitio no enlaza: eso es `warning`; sin
+        sitemap, `info`.
+        """
+        origen = aliased(Url)
+        filas = self.session.execute(
+            select(
+                Url.id,
+                Url.in_sitemap,
+                func.count(origen.id).label("saltos"),
+                func.min(origen.url).label("ejemplo"),
+            )
+            .join(
+                origen,
+                and_(
+                    origen.job_id == Url.job_id,
+                    origen.redirect_url == Url.url,
+                    origen.is_internal.is_(True),
+                ),
+            )
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+                (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+            )
+            .group_by(Url.id, Url.in_sitemap)
+        ).all()
+
+        for url_id, en_sitemap, saltos, ejemplo in filas:
+            self._add_issue(
+                url_id,
+                "solo_enlazada_por_redireccion",
+                "warning" if en_sitemap else "info",
+                {
+                    "saltos_que_apuntan": saltos,
+                    "ejemplo_origen": ejemplo,
+                    "en_sitemap": bool(en_sitemap),
+                },
+            )
 
     # -- Sitemap --------------------------------------------------------------
 
