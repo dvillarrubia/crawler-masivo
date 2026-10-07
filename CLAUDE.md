@@ -804,6 +804,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `<meta property="description">` —que es RDFa, no una meta description—
    contaba como la description de la página.
 
+57. **Un enlace desde una página rota no enlaza nada** — un 404 o un 500 sale
+   del índice y se lleva sus enlaces con él, así que lo que solo cuelga de ahí no
+   está enlazado a efectos de buscador. Es el mismo criterio que la decisión 38
+   aplicó a las `noindex`, y faltaba para los códigos de error. Medido en
+   www.uoc.edu: **503 páginas que devuelven HTTP 500**, cada una con su menú
+   completo, aportaban **264.991 enlaces** a 2.775 destinos, y **137 URLs tenían
+   TODOS sus entrantes internos ahí** — huérfanas de hecho que salían enlazadas y
+   por tanto no aparecían en el informe de huérfanas. En progym, 0 casos, que es
+   lo que tiene que pasar en un sitio sano. Se aplica en `compute_link_counts`
+   (el origen tiene que ser 200) y en `compute_pagerank` (una página que no
+   responde 200 no entra como fuente, así que no reparte autoridad que no tiene).
+   El modelo de nofollow (C2) y el de `noindex,follow` en el PageRank siguen
+   siendo decisión abierta.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -956,6 +970,18 @@ reconstruir, mirar si hay algo rastreando:
 
 ```bash
 curl -s "$API/api/jobs?status=running" | python -c "import json,sys;print([j['name'] for j in json.load(sys.stdin)['items']])"
+```
+
+Y **nunca** copiar ficheros al contenedor que esta rastreando (`docker cp`): si
+el spider y los extractores quedan descasados, la siguiente reanudacion del job
+muere con un ImportError. Para probar codigo nuevo contra el sitio de pruebas o
+contra un script, levantar un contenedor efimero con el repo montado, que no
+toca al que trabaja:
+
+```bash
+docker run --rm --network host -v "$PWD":/repo -w /repo \
+  -e PYTHONPATH=/repo:/repo/crawler:/repo/tests \
+  crawler-masivo-crawler bash -lc "pip install -q pytest; python -m pytest /repo/tests -q"
 ```
 
 ## Configuración por cliente (`projects/`)
