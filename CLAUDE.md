@@ -935,6 +935,23 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `"voto femenino voto femenino"` — 7 de las 58 páginas, y 504 valores de
    `links.alt_text` corregidos.
 
+62. **El comprobador de contenido no puede dar la alarma cuando el bloqueado
+   es él** (#30) — `check_content_quality.py` es la herramienta con la que se
+   caza la pérdida de contenido después de un rastreo, y descargaba la página
+   con `r.text` **sin mirar el código**. Un 403, o un muro de WAF que responde
+   **200** con 5-6 kB de HTML y cero palabras de la página, se comparaba como si
+   fuera la página: el informe decía «aquí se ha perdido todo el contenido»
+   sobre un extractor que funciona. Lo tengo reproducido con progym, que desde
+   mi IP contesta `Just a moment...` al mismo camino (curl_cffi + chrome124) que
+   usa el script. Ahora un código distinto de 200, o un `<title>` de los nueve
+   muros conocidos, es `NoEsLaPagina` y la muestra se descarta.
+   Y lo que se descarta **se cuenta y se imprime**: antes, una plantilla cuyas
+   muestras fallaban todas desaparecía de la tabla, y una tabla corta se lee
+   como «aquí no hay problemas». Si no se pudo comprobar ni una, lo dice con
+   todas las letras en vez de imprimir una tabla vacía. El filtro casa el
+   título por subcadena pero solo contra muros reales: «Checklist de seguridad
+   web» es un artículo y pasa, y una página sin `<title>` no se tira por eso.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

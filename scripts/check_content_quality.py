@@ -74,11 +74,43 @@ def firma(path: str) -> str:
     return firma_de_ruta(path)
 
 
+# Titulos con los que un WAF responde 200 a una peticion que ha bloqueado.
+# La respuesta trae 5-6 kB de HTML sin una palabra de la pagina, asi que el
+# comparador la leia como "aqui se ha perdido todo el contenido".
+_TITULOS_DE_BLOQUEO = (
+    "just a moment",
+    "access denied",
+    "pardon our interruption",
+    "attention required",
+    "request unsuccessful",
+    "are you a robot",
+    "checking your browser",
+    "security check",
+    "403 forbidden",
+)
+
+
+class NoEsLaPagina(RuntimeError):
+    """La respuesta no es la pagina: un codigo de error o un muro de un WAF.
+
+    Se distingue a proposito de un fallo de red. Este script existe para avisar
+    de que se ha perdido contenido, asi que confundir "el sitio no me deja
+    verla" con "el rastreo no la guardo" es su peor fallo posible: da la alarma
+    sobre un extractor que funciona.
+    """
+
+
 def descargar_crudo(url: str, timeout: int = 40) -> str:
     """Mismo camino que el rastreo: curl_cffi con fingerprint de Chrome."""
     from curl_cffi import requests as cr
+    from parsel import Selector
 
     r = cr.get(url, impersonate=os.getenv("IMPERSONATE", "chrome124"), timeout=timeout)
+    if r.status_code != 200:
+        raise NoEsLaPagina(f"HTTP {r.status_code}")
+    titulo = (Selector(text=r.text).css("title::text").get() or "").strip().lower()
+    if any(t in titulo for t in _TITULOS_DE_BLOQUEO):
+        raise NoEsLaPagina(f"muro del WAF (titulo: {titulo[:40]!r})")
     return r.text
 
 
@@ -166,12 +198,14 @@ async def analizar(grupos, espera_ms: int, hosts: set[str]):
         for plantilla, paginas in grupos:
             acc: dict[str, int] = defaultdict(int)
             ok = 0
+            sin_comprobar = 0
             peores = []
             for pag in paginas:
                 url = pag["url"]
                 try:
                     html_crudo = descargar_crudo(url)
                 except Exception as exc:
+                    sin_comprobar += 1
                     print(f"    aviso: no se pudo descargar {url[:70]} ({exc})")
                     continue
                 contexto = await navegador.new_context(user_agent=UA)
@@ -181,6 +215,7 @@ async def analizar(grupos, espera_ms: int, hosts: set[str]):
                     await pagina_pw.wait_for_timeout(espera_ms)
                     html_render = await pagina_pw.content()
                 except Exception as exc:
+                    sin_comprobar += 1
                     print(f"    aviso: no se pudo renderizar {url[:70]} ({exc})")
                     await contexto.close()
                     continue
@@ -213,10 +248,18 @@ async def analizar(grupos, espera_ms: int, hosts: set[str]):
                     {
                         "plantilla": plantilla,
                         "muestras": ok,
+                        "sin_comprobar": sin_comprobar,
                         **{k: v // ok for k, v in acc.items()},
                         "peor": peores[0],
                     }
                 )
+            else:
+                # Un grupo sin una sola muestra desaparecia de la tabla, y una
+                # tabla corta se lee como "aqui no hay problemas".
+                print(f"    SIN COMPROBAR: {plantilla} -- ninguna de sus "
+                      f"{sin_comprobar} muestras se pudo descargar o renderizar")
+                resultados.append({"plantilla": plantilla, "muestras": 0,
+                                   "sin_comprobar": sin_comprobar})
         await navegador.close()
     return resultados
 
@@ -275,19 +318,31 @@ def main() -> None:
     print("\n" + cab)
     print("-" * len(cab))
     for r in resultados:
+        if not r["muestras"]:
+            print(f"{r['plantilla'][:37]:<38}{0:>3}"
+                  f"   -- sin comprobar ({r['sin_comprobar']} intentos) --")
+            continue
+        aviso = f"  (!{r['sin_comprobar']} sin comprobar)" if r.get("sin_comprobar") else ""
         print(
             f"{r['plantilla'][:37]:<38}{r['muestras']:>3}{r['wc_guardado']:>10}"
             f"{r['pal_contenido']:>10}{r['pal_crudo']:>8}{r['pal_main']:>7}"
             f"{r['pal_render']:>8}{r['enl_guardados']:>7}{r['enl_crudo']:>7}"
-            f"{r['enl_solo_js']:>8}"
+            f"{r['enl_solo_js']:>8}{aviso}"
         )
     print("\nLectura:")
     print("  guardado ~ crudo         -> el rastreo se llevo el texto de la pagina")
     print("  contenido < crudo        -> normal (quita plantilla); si es ~0, se perdio")
     print("  render >> crudo          -> esa plantilla necesita render_js")
     print("  enl.g < enl.c            -> se guardaron menos enlaces de los que hay")
+    comprobadas = [r for r in resultados if r["muestras"]]
+    if not comprobadas:
+        print("\nNINGUNA muestra se pudo comprobar: el sitio no deja descargar "
+              "sus paginas por este camino (WAF, geobloqueo o caida). Esto NO "
+              "dice nada del rastreo -- no hay comparacion que leer.")
+        return
+
     print("\nPeor muestra por plantilla (palabras crudo -> contenido guardado):")
-    for r in resultados:
+    for r in comprobadas:
         _perdido, url, pal_crudo, pal_cont, pal_main = r["peor"]
         print(
             f"  {r['plantilla'][:32]:<34} {pal_crudo:>6} -> {pal_cont:<6} "
