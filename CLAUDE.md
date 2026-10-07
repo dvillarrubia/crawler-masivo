@@ -736,6 +736,38 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (ideogramas y kana de ancho completo, hangul, tailandés, árabe, hebreo,
    emoji) y un emoji compuesto cuenta como un glifo.
 
+55. **Los scripts de control mentían, y uno de ellos escribe en la base de
+   datos** — `fix_h1_en_contenido.py` es el único script que **modifica**
+   `page_content`, así que un fallo suyo no da un dato raro: corrompe el
+   contenido guardado. Tenía tres: devolvía `0` donde el llamador hace `len(...)`,
+   de modo que con `--todos` **un solo job sin h1 abortaba la pasada entera**;
+   `_falta_titular` exigía una línea idéntica, así que «Hola mundo.» frente al h1
+   «Hola mundo» —o el titular partido por un `<br>`— se daba por ausente y se
+   anteponía **duplicado**; y al revertir se quitaba la primera línea de
+   `content_text_original` aunque no se hubiera parcheado, **borrando un titular
+   legítimo** (ahora el diario anota qué columnas se tocaron). 6 de los 8 tests
+   nuevos fallan contra el código anterior.
+   `check_js_templates.py`, que es quien decide `grafo_fiable` y por tanto si el
+   PageRank es de fiar: los hosts no incluían la variante sin `www`, así que en
+   un rastreo de `www.x.com` un enlace a `x.com` salía **externo** y no contaba;
+   no se limpiaban los banners antes de comparar, así que el enlace que inyecta
+   OneTrust o Cookiebot contaba como enlace escondido tras JavaScript y
+   **cualquier sitio con gestor de consentimiento salía con el grafo no fiable**;
+   el umbral era «mayor que cero», ahora pide el 10% del grafo de la plantilla o
+   el caso que importa (cero enlaces en crudo y alguno al renderizar); `/tv/`
+   pasaba por home y `/es/productos/galletas-cookies/` por página legal; y las
+   reglas de producto estaban escritas para un cliente de hoteles, así que en
+   cualquier otro sitio todo caía en «otras · N niveles». El repuesto ahora es la
+   forma de la ruta (`shared/plantillas.py`, compartida con
+   `check_content_quality.py`).
+   `check_content_quality.py` comparaba **cifras incomparables**: filas de
+   `links` con repeticiones contra un conjunto de URLs sin repetir, de modo que
+   lo guardado salía siempre mayor y la alarma «se han perdido enlaces» no
+   saltaba nunca — que es justo para lo que existe el script.
+   `export_markdown.py` comparaba cada ruta con todas las demás (O(n²): 2.500
+   millones de comparaciones con 50.000 URLs, 0,45 s medidos ya con 2.789) y
+   exportaba 404 y noindex como si fueran contenido publicado.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

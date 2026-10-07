@@ -60,6 +60,27 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Codigos de idioma de verdad: con `^/[a-z]{2}/?$` a secas, `/tv/` salia como
+# "home" y se comparaba la portada del sitio con una seccion de video. La lista
+# vive en `shared/plantillas.py`, que es donde la usa el agrupamiento por forma.
+from shared.plantillas import IDIOMAS  # noqa: E402
+
+_IDIOMAS_ALT = "|".join(sorted(IDIOMAS))
+
+# Una pagina legal es la que SE LLAMA asi, no la que menciona la palabra: el
+# patron de antes casaba `/es/productos/galletas-cookies/` y
+# `/es/privacy-shield-producto` por llevar "cookies" o "privacy" dentro. Se
+# exige que el ultimo tramo este hecho SOLO de palabras de pagina legal.
+_PALABRAS_LEGALES = (
+    "politica politiques policy policies privacidad privacitat privacy "
+    "datenschutz datenschutzerklaerung impressum cookies cookie galletes "
+    "aviso avis legal notice terminos termes terms condiciones condicions "
+    "conditions uso us use of and y i de del la el les los las general "
+    "generales mentions mentions-legales nota-legal disclaimer"
+).split()
+_LEGAL_ALT = "|".join(sorted(set(_PALABRAS_LEGALES), key=len, reverse=True))
+_LEGAL_PATRON = rf"(?:^|/)(?:{_LEGAL_ALT})(?:[-_](?:{_LEGAL_ALT}))*/?$"
+
 # Reglas de clasificacion, en orden: la primera que casa manda. Estan pensadas
 # para sitios multiidioma con seccion de producto y blog; ajustar por proyecto.
 REGLAS: list[tuple[str, str]] = [
@@ -70,16 +91,17 @@ REGLAS: list[tuple[str, str]] = [
     # replican, que es justo como se detecto este caso.
     ("cms · asset publisher", r"/-/asset_publisher/"),
     ("cms · otros portlets",  r"/-/[a-z_]+/"),
-    ("home",              r"^/?$|^/[a-z]{2}/?$"),
+    ("home",              r"^/?$|^/(?:" + _IDIOMAS_ALT + r")(?:-[a-z]{2})?/?$"),
     ("blog · post",       r"^/blog/.+/.+"),
     ("blog · categoria",  r"^/blog/[^/]+/?$"),
     ("blog · indice",     r"^/blog/?$"),
-    ("ficha de producto", r"^/[a-z]{2}/(hoteles|hotels)/[^/]+/[^/]+/"),
-    ("categoria nivel 2", r"^/[a-z]{2}/(hoteles|hotels)/[^/]+/[^/]+/?$"),
-    ("categoria nivel 1", r"^/[a-z]{2}/(hoteles|hotels)/[^/]+/?$"),
-    ("listado producto",  r"^/[a-z]{2}/(hoteles|hotels)/?$"),
-    ("marca",             r"^/[a-z]{2}/[a-z0-9-]*(hotels|resorts|collection)[a-z0-9-]*/?$"),
-    ("legal",             r"(privacidad|privacy|datenschutz|aviso-legal|cookies|terminos)"),
+    # Las de producto estaban escritas para un cliente de hoteles
+    # (`/es/hoteles/...`), asi que en cualquier otro sitio no casaba ninguna y
+    # todo caia en "otras · N niveles", que junta plantillas que no tienen nada
+    # que ver. Lo especifico de cada cliente va en `config.templates` del job
+    # (`projects/<cliente>/config.json`); aqui solo lo que vale en cualquier
+    # sitio, y lo que no case se agrupa por la FORMA de la ruta.
+    ("legal",             _LEGAL_PATRON),
 ]
 
 
@@ -118,8 +140,12 @@ def clasificar(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
     for nombre, patron in (reglas if reglas is not None else REGLAS):
         if re.search(patron, path, re.I):
             return nombre
-    partes = [p for p in path.split("/") if p]
-    return f"otras · {len(partes)} niveles"
+    # Por la FORMA de la ruta, no por el numero de tramos: "otras · 2 niveles"
+    # metia en el mismo monton una ficha de producto y una pagina legal, y lo
+    # que se muestreaba era azar.
+    from shared.plantillas import firma_de_ruta
+
+    return firma_de_ruta(path)
 
 
 def descargar_crudo(url: str, timeout: int = 40) -> str:
@@ -168,7 +194,7 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
         for plantilla, urls in urls_por_plantilla:
-            enl_solo_js = pal_crudo = pal_render = muestras_ok = 0
+            enl_solo_js = enl_crudo = pal_crudo = pal_render = muestras_ok = 0
             for url in urls:
                 try:
                     html_crudo = descargar_crudo(url)
@@ -179,6 +205,16 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                 try:
                     await pagina.goto(url, wait_until="domcontentloaded", timeout=45000)
                     await pagina.wait_for_timeout(espera_ms)
+                    # La MISMA limpieza que hace el rastreo con render. Sin
+                    # ella, el enlace a "Politica de cookies" que inyecta
+                    # OneTrust o Cookiebot solo existe en el render y se
+                    # contaba como enlace escondido tras JavaScript: cualquier
+                    # sitio con gestor de consentimiento salia con el grafo no
+                    # fiable y con el PageRank bajo sospecha sin motivo.
+                    try:
+                        await pagina.evaluate(_LIMPIADOR_DE_BANNERS)
+                    except Exception:
+                        pass
                     html_render = await pagina.content()
                 except Exception as exc:
                     print(f"    aviso: no se pudo renderizar {url[:70]} ({exc})")
@@ -195,6 +231,7 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                     l["url"] for l in extract_links(sel_render, url, hosts) if l["is_internal"]
                 }
                 enl_solo_js += len(enlaces_render - enlaces_crudo)
+                enl_crudo += len(enlaces_crudo)
                 pal_crudo += extract_word_count(sel_crudo)
                 pal_render += extract_word_count(sel_render)
                 muestras_ok += 1
@@ -214,6 +251,9 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                         "plantilla": plantilla,
                         "muestras": muestras_ok,
                         "enlaces_solo_js": enl_solo_js,
+                        # Hace falta para saber si esos enlaces escondidos son
+                        # una fraccion que importa o el ruido de un widget.
+                        "enlaces_crudo": enl_crudo,
                         "palabras_crudo": pc,
                         "palabras_render": pr,
                         "render_sospechoso": render_sospechoso,
@@ -221,6 +261,31 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                 )
         await navegador.close()
     return resultados
+
+
+def _cargar_limpiador() -> str:
+    """El limpiador de banners del spider, para comparar lo mismo que el rastreo.
+
+    Se lee del fuente en vez de importar el spider porque importarlo arrastra
+    Scrapy y scrapy-playwright enteros, y este script corre suelto.
+    """
+    ruta = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "crawler", "seo_crawler", "spiders", "seo_spider.py",
+    )
+    try:
+        fuente = open(ruta, encoding="utf-8").read()
+        encontrado = re.search(r'_BOILERPLATE_REMOVAL_JS = """(.*?)"""', fuente, re.S)
+        if not encontrado:
+            return "() => {}"
+        ns: dict = {}
+        exec(f'_JS = """{encontrado.group(1)}"""', ns)
+        return ns["_JS"]
+    except Exception:
+        return "() => {}"
+
+
+_LIMPIADOR_DE_BANNERS = _cargar_limpiador()
 
 
 def comprobar(
@@ -240,7 +305,20 @@ def comprobar(
     if not filas:
         return []
 
-    hosts = {re.sub(r"^https?://", "", u).split("/")[0] for u, _ in filas[:200]}
+    # Las dos variantes de cada host: `is_internal_url` compara el host y el
+    # host sin `www.`, asi que en un rastreo de `www.x.com` un enlace a
+    # `x.com` salia EXTERNO y no se contaba como enlace oculto. Y sobre todas
+    # las filas, no las 200 primeras: un sitio con subdominios perdia los que
+    # no aparecen al principio.
+    hosts: set[str] = set()
+    for u, _ in filas:
+        host = re.sub(r"^https?://", "", u).split("/")[0].lower()
+        if not host:
+            continue
+        hosts.add(host)
+        hosts.add(host.removeprefix("www."))
+        if not host.startswith("www."):
+            hosts.add("www." + host)
 
     reglas = cargar_reglas(job_id)
     grupos: dict[str, list[str]] = defaultdict(list)

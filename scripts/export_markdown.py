@@ -38,6 +38,11 @@ def main() -> int:
         action="store_true",
         help="no anteponer el front-matter con la URL y el titulo",
     )
+    parser.add_argument(
+        "--todo",
+        action="store_true",
+        help="incluir tambien 404, noindex y canonicalizadas (por defecto no)",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -52,16 +57,36 @@ def main() -> int:
             .filter(Url.job_id == args.job_id)
             .filter(PageContent.content_markdown.isnot(None))
             .filter(PageContent.content_markdown != "")
+            # Lo que se exporta es el contenido que el sitio PUBLICA: una 404 con
+            # cuerpo, una pagina noindex o una canonicalizada no lo son, y
+            # colarlas en el export las mete en el analisis semantico y en
+            # cualquier base de conocimiento que se monte encima.
+            # `--todo` las incluye para cuando lo que se quiere es auditar.
+            .filter(*([] if args.todo else [
+                Url.status_code == 200,
+                Url.is_html.is_(True),
+                Url.indexable.isnot(False),
+            ]))
             .all()
         )
 
         # Pre-compute which paths have children, so they need ``index.md``
         # instead of clashing with a folder of the same name.
+        # O(n), no O(n^2): antes se comparaba cada ruta con todas las demas,
+        # que con 50.000 URLs son 2.500 millones de comparaciones. Basta
+        # anotar la ruta del padre de cada una.
         path_set = {urlparse(u).path.rstrip("/") for u, _, _ in rows}
+        con_hijos: set[str] = set()
+        for ruta in path_set:
+            padre = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
+            while padre:
+                if padre in con_hijos:
+                    break
+                con_hijos.add(padre)
+                padre = padre.rsplit("/", 1)[0] if "/" in padre else ""
 
         def has_children(p: str) -> bool:
-            prefix = p + "/"
-            return any(other.startswith(prefix) for other in path_set if other != p)
+            return p in con_hijos
 
         used_paths: set[str] = set()
         for url, md, title in rows:
