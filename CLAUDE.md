@@ -1277,9 +1277,18 @@ order of priority:
    `follow=false`, sin tocar los del resto del sitio. Lo unico abierto de esa
    seccion es `http_version`, que solo se rellena con `render_js` y esta en las
    limitaciones conocidas. No hay que volver a pasarlo.
-2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: old crawls may
-   carry corrupted data (relative canonicals → false non-indexable). Measure
-   before trusting/re-delivering old reports; re-crawl bucket-A jobs.
+2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: tambien
+   **ejecutado** (2026-09-11, sobre todos los jobs de mas de 50 URLs), con el
+   resultado ya escrito ahi. Lo que hay que saber sin abrir el documento: los
+   canonicals relativos —el bug que parecia el peor— **no contaminaron ningun
+   censo** (0 en todos), asi que las indexabilidades viejas se pueden mirar sin
+   sospecha. El que si mordio es el dedup de inlinks: **todo lo anterior al
+   2026-09-08** (CST, Salle, penguin y los tres Lopesan de julio) tiene
+   `inlinks_count == unique_inlinks_count` en todas sus paginas, con los
+   enlaces infravalorados y **el PageRank calculado sobre un grafo
+   incompleto**. De esos censos, titulos, metas, contenido y codigos de estado
+   valen tal cual; cualquier metrica de enlazado interno o PageRank exige
+   re-rastrear. Las consultas D1-D7 estan ahi para medir un job concreto.
 3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
    custom extraction (XPath/regex per job) ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
    PageSpeed/CWV API ⭐⭐, minor ones after.
