@@ -151,8 +151,15 @@
                         <template x-if="j.started_at && j.completed_at">
                           <span x-text="fmt.ms(new Date(j.completed_at) - new Date(j.started_at))"></span>
                         </template>
-                        <template x-if="j.started_at && !j.completed_at">
+                        <template x-if="j.started_at && !j.completed_at && ['running','analyzing','pending'].includes(j.status)">
                           <span class="text-dim">en curso...</span>
+                        </template>
+                        <!-- Terminado y sin marca de fin: rastreos viejos y los
+                             que murieron sin cerrar. Decir "en curso" de un job
+                             completado es mentir sobre lo unico que mira ahi
+                             quien pasa la vista por la lista. -->
+                        <template x-if="j.started_at && !j.completed_at && !['running','analyzing','pending'].includes(j.status)">
+                          <span class="text-dim" title="Terminado sin marca de fin">&mdash;</span>
                         </template>
                         <template x-if="!j.started_at">
                           <span class="text-dim">&mdash;</span>
