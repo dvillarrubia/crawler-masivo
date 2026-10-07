@@ -162,3 +162,51 @@ criterio:
    (266.504 → una por host): `image_missing_alt` con 287.175 líneas no es
    accionable, entierra el resto, y pide un resumen por plantilla o por imagen
    repetida en vez de una línea por aparición.
+
+---
+
+## El caso Lopesan, cerrado: una regresión de horas cazada por casualidad
+
+Al revisar lo anterior con el cliente resultó que **no era una configuración
+vieja: era un error que acababa de entrar en producción**. Esto es lo que el
+censo permite afirmar con fecha y hora.
+
+**Qué pasó.** El canonical de las fichas de hotel apuntaba a
+`https://webserver-lopesan-prd.lfr.cloud/…`, el servidor de origen de Liferay,
+en vez de al dominio público.
+
+**A qué afectó** — prácticamente la sección de hoteles entera, en los tres
+idiomas:
+
+| idioma | sección | con canonical al origen | páginas de la sección |
+|---|---|---|---|
+| es | `/hoteles` | **772** | 776 |
+| en | `/hotels` | **716** | 720 |
+| de | `/hotels` | **681** | 685 |
+
+Más ~86 de corporativa y 9 de políticas de privacidad. **2.367 en total**, de
+las que **2.169 son fichas de hotel** — el 99,5% de esa sección. Para una
+cadena hotelera, las páginas que venden.
+
+**Cuándo.** El rastreo corrió el **2026-10-06 de 09:00:04 a 11:30:56 UTC** y
+las páginas afectadas se vieron entre las **09:49:08 y las 11:25:58**.
+
+**Por qué era grave y no cosmético.** `webserver-lopesan-prd.lfr.cloud`
+**responde HTTP 200 al público**. No era un canonical a un host inaccesible que
+Google acabaría ignorando: era una invitación a indexar el host de origen en
+lugar de la marca.
+
+**Estado actual.** Comprobado en vivo el 2026-10-07: las seis páginas afectadas
+con más enlaces entrantes sirven ya el canonical correcto. Está arreglado.
+
+### La lección, que es de producto
+
+Esto se cazó **por casualidad**: el rastreo coincidió con la ventana en que el
+error estuvo vivo. Un fallo que dura unas horas y se arregla no deja rastro en
+ningún sitio salvo que alguien esté rastreando justo entonces.
+
+Es exactamente el caso de uso de
+[#36](https://github.com/dvillarrubia/crawler-masivo/issues/36) —rastreos
+programados y alertas cuando algo se rompe—, y este incidente es el argumento
+más fuerte que hay para priorizarlo: el valor no estuvo en el informe, estuvo
+en **tener un censo del momento exacto**.
