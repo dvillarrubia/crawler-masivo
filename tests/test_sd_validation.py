@@ -88,8 +88,10 @@ def test_los_subtipos_heredan_los_requisitos():
     assert requisitos_de("Restaurant") == requisitos_de("LocalBusiness")
     # Y con la URL completa de schema.org, que es como lo escriben muchos CMS.
     assert requisitos_de("https://schema.org/BlogPosting") == requisitos_de("Article")
+    # Google no exige ninguna propiedad para Article, asi que un NewsArticle
+    # pelado es un aviso (sale, pero pobre), no un error.
     estado, problemas = validate_structured_data({"@type": "NewsArticle", "foo": 1})
-    assert estado == "error"
+    assert estado == "warning"
     assert any("headline" in p for p in problemas)
 
 
@@ -129,3 +131,47 @@ def test_en_un_nodo_multitipo_se_revisa_cada_tipo_conocido():
     assert any("Article" in m and "headline" in m for _, m in problemas)
     # CreativeWork no tiene reglas: no aporta problemas.
     assert not any("CreativeWork" in m for _, m in problemas)
+
+
+# ---------------------------------------------------------------------------
+# Casos de la auditoria (#28)
+# ---------------------------------------------------------------------------
+def test_una_miga_de_pan_sin_eslabones_no_esta_bien():
+    """`itemListElement: []` daba "ok": la propiedad esta, pero vacia no genera
+    ningun resultado enriquecido."""
+    estado, problemas = validate_structured_data(
+        {"@type": "BreadcrumbList", "itemListElement": []})
+    assert estado == "error"
+    assert any("itemlistelement" in p for p in problemas)
+    assert validate_structured_data(
+        {"@type": "BreadcrumbList",
+         "itemListElement": [{"@type": "ListItem", "name": "a"}]}) == ("ok", [])
+
+
+def test_un_name_en_blanco_es_un_name_que_falta():
+    estado, _ = validate_structured_data({"@type": "Organization", "name": "   "})
+    assert estado == "error"
+
+
+def test_un_nodo_de_referencia_no_es_un_bloque_roto():
+    """En el `@graph` de Yoast estan por todas partes; salian como "sin @type"."""
+    assert validate_structured_data({"@id": "https://x.com/#org"}) == ("ok", [])
+    assert validate_structured_data({"@graph": []}) == ("ok", [])
+    assert validate_structured_data(
+        {"@context": "https://schema.org", "@graph": []}) == ("ok", [])
+
+
+def test_una_entidad_anidada_tambien_se_valida():
+    """Un Product dentro de `WebPage.mainEntity` es el producto de la pagina:
+    sus requisitos son los mismos. Shopify y los constructores de paginas
+    anidan, y asi no se validaba nada."""
+    estado, problemas = validate_structured_data(
+        {"@type": "WebPage", "name": "p",
+         "mainEntity": {"@type": "Product", "name": "X"}})
+    assert estado == "error"
+    assert any("offers" in p for p in problemas)
+    # Y si la anidada esta completa, no se inventa nada.
+    assert validate_structured_data(
+        {"@type": "WebPage", "name": "p",
+         "mainEntity": {"@type": "Product", "name": "X", "offers": {"price": 1},
+                        "image": "i", "brand": "b", "description": "d"}}) == ("ok", [])

@@ -1284,14 +1284,16 @@ function app() {
     securityScore() {
       if (!this.urlDetail?.security) return null;
       const s = this.urlDetail.security;
-      let score = 0, total = 7;
+      // `has_unsafe_crossorigin` ya no cuenta: desde 2021 los navegadores
+      // aplican `noopener` por defecto a target="_blank". El dato se sigue
+      // guardando, pero no es un fallo que arreglar.
+      let score = 0, total = 6;
       if (s.is_https) score++;
       if (!s.has_mixed_content) score++;
       if (s.has_hsts) score++;
       if (s.has_csp) score++;
       if (s.has_x_content_type_options) score++;
       if (s.has_x_frame_options) score++;
-      if (!s.has_unsafe_crossorigin) score++;
       return { score, total, pct: Math.round(score / total * 100) };
     },
 

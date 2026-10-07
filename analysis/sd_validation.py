@@ -35,9 +35,13 @@ REQUISITOS: dict[str, dict[str, list]] = {
         "uno_de": [["offers", "review", "aggregaterating"]],
         "recomendadas": ["image", "brand", "description"],
     },
+    # Google no documenta NINGUNA propiedad obligatoria para Article: todas son
+    # recomendadas. Pedir `headline` como obligatoria convertia en error algo
+    # que no impide el resultado enriquecido.
     "article": {
-        "obligatorias": ["headline"],
-        "recomendadas": ["image", "datepublished", "author", "datemodified"],
+        "obligatorias": [],
+        "recomendadas": ["headline", "image", "datepublished", "author",
+                         "datemodified"],
     },
     "recipe": {
         "obligatorias": ["name", "image"],
@@ -120,42 +124,106 @@ def sd_item_types(item: dict) -> list[str]:
     return [str(t)]
 
 
-def validate_sd_item(item: dict) -> list[tuple[str, str]]:
+def _tiene_valor(item: dict, prop: str) -> bool:
+    """La propiedad esta Y lleva algo dentro.
+
+    `itemListElement: []` o `name: ""` es lo mismo que no estar: Google no
+    genera resultado enriquecido con una lista vacia, y mirar solo la clave
+    daba "ok" a una miga de pan sin ningun eslabon.
+    """
+    for clave, valor in item.items():
+        if clave.lower() != prop:
+            continue
+        if valor is None:
+            return False
+        if isinstance(valor, (str, list, tuple, dict)) and len(valor) == 0:
+            return False
+        if isinstance(valor, str) and not valor.strip():
+            return False
+        return True
+    return False
+
+
+def _es_referencia(item: dict) -> bool:
+    """Nodo que solo apunta a otro (`{"@id": ...}`): no es una entidad.
+
+    En el `@graph` de Yoast estan por todas partes y salian como un bloque
+    "sin @type", que es un error inventado.
+    """
+    claves = {k for k in item.keys() if k != "@context"}
+    return bool(claves) and claves <= {"@id", "id"}
+
+
+def _entidades_anidadas(item: dict, profundidad: int = 0):
+    """Entidades con `@type` dentro de otra (`WebPage.mainEntity`, `itemListElement`).
+
+    Un Product dentro de un WebPage es el producto de la pagina y sus
+    requisitos son los mismos; no validarlo dejaba fuera a los sitios que
+    anidan (Shopify y los constructores de paginas lo hacen). Se limita la
+    profundidad para que un `@graph` enorme no se vuelva cuadratico.
+    """
+    if profundidad >= 3:
+        return
+    for valor in item.values():
+        candidatos = valor if isinstance(valor, list) else [valor]
+        for candidato in candidatos:
+            if not isinstance(candidato, dict) or _es_referencia(candidato):
+                continue
+            if sd_item_types(candidato) and requisitos_de(sd_item_types(candidato)[0]):
+                yield candidato
+            yield from _entidades_anidadas(candidato, profundidad + 1)
+
+
+def validate_sd_item(item: dict, incluir_anidadas: bool = True) -> list[tuple[str, str]]:
     """Problemas de una entidad, como ``(nivel, mensaje)``.
 
     *nivel* es ``"error"`` (sin esto no hay resultado enriquecido) o
     ``"warning"`` (sale, pero peor).
     """
+    if _es_referencia(item):
+        return []
     if not sd_item_types(item):
+        # Un bloque vacio (`{}` o `{"@graph": []}`, que es lo que deja un Yoast
+        # sin nada que declarar) no declara nada, pero tampoco es un marcado
+        # roto: decir "sin @type" era inventarse un error.
+        resto = {k for k in item.keys() if k != "@context"}
+        if not resto or (resto == {"@graph"} and not item.get("@graph")):
+            return []
         return [("error", "sin @type: el bloque no identifica ninguna entidad")]
 
-    presentes = {k.lower() for k in item.keys()}
     problemas: list[tuple[str, str]] = []
     for tipo in sd_item_types(item):
         reqs = requisitos_de(tipo)
         if not reqs:
             continue
         for prop in reqs.get("obligatorias", []):
-            if prop not in presentes:
+            if not _tiene_valor(item, prop):
                 problemas.append((
                     "error",
                     f"{tipo}: falta la propiedad obligatoria '{prop}'; sin ella "
                     f"no sale como resultado enriquecido",
                 ))
         for grupo in reqs.get("uno_de", []):
-            if not any(p in presentes for p in grupo):
+            if not any(_tiene_valor(item, p) for p in grupo):
                 problemas.append((
                     "error",
                     f"{tipo}: hace falta al menos una de {', '.join(grupo)}; "
                     f"sin ninguna no sale como resultado enriquecido",
                 ))
         for prop in reqs.get("recomendadas", []):
-            if prop not in presentes:
+            if not _tiene_valor(item, prop):
                 problemas.append((
                     "warning",
                     f"{tipo}: falta la propiedad recomendada '{prop}'; sale "
                     f"como resultado enriquecido, pero mas pobre",
                 ))
+    if incluir_anidadas:
+        vistos = set(problemas)
+        for anidada in _entidades_anidadas(item):
+            for problema in validate_sd_item(anidada, incluir_anidadas=False):
+                if problema not in vistos:
+                    vistos.add(problema)
+                    problemas.append(problema)
     return problemas
 
 

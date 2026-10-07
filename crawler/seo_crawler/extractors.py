@@ -43,12 +43,20 @@ def _clean(text: str | None) -> str | None:
 
 
 def _parse_int(value: str | None) -> int | None:
-    """Safely parse an integer from an HTML attribute value."""
+    """Pixeles de un atributo HTML. Un porcentaje NO son pixeles.
+
+    `width="100%"` se leia como 100 px, que es lo contrario de lo que significa
+    (ocupa todo el ancho). Mejor no saberlo que saberlo mal: con 100 px se
+    descarta una imagen grande por pequena.
+    """
     if not value:
         return None
-    cleaned = value.strip().rstrip("px%").strip()
+    limpio = value.strip()
+    if limpio.endswith("%"):
+        return None
+    limpio = limpio.rstrip("px").strip()
     try:
-        return int(cleaned)
+        return int(limpio)
     except (ValueError, TypeError):
         return None
 
@@ -804,11 +812,69 @@ def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, An
     return results
 
 
+# El CDATA es sintaxis de XHTML y hay plantillas (Drupal, portales antiguos)
+# que envuelven el JSON-LD en el. extruct no lo parsea y el bloque entero
+# desaparecia sin aviso: cero datos estructurados en una pagina que si los
+# lleva.
+_RE_CDATA = re.compile(
+    r"(<script[^>]*type\s*=\s*[\"\']application/ld\+json[\"\'][^>]*>)(.*?)(</script>)",
+    re.S | re.I,
+)
+_RE_CDATA_MARCAS = re.compile(r"\s*(?://\s*)?(?:<!\[CDATA\[|\]\]>)\s*")
+
+
+def _limpiar_cdata(html_body: str) -> str:
+    """Quita los envoltorios CDATA de los bloques `application/ld+json`."""
+    if "CDATA" not in html_body:
+        return html_body
+
+    def sustituir(m):
+        return m.group(1) + _RE_CDATA_MARCAS.sub("", m.group(2)) + m.group(3)
+
+    return _RE_CDATA.sub(sustituir, html_body)
+
+
+def _tipo_normalizado(valor) -> str | None:
+    """`@type` como nombre corto: `https://schema.org/Product` -> `Product`.
+
+    RDFa guarda el tipo como IRI completo y JSON-LD y microdatos como nombre
+    corto, asi que el mismo tipo salia con dos nombres distintos y ni los
+    filtros ni la validacion por tipo casaban.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, list):
+        partes = [_tipo_normalizado(v) for v in valor]
+        limpias = [p for p in partes if p]
+        return ", ".join(limpias) if limpias else None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    if "://" in texto or texto.startswith("schema.org"):
+        texto = texto.rstrip("/").rsplit("/", 1)[-1]
+    return texto.lstrip("@") or None
+
+
+def _es_solo_referencia(item: dict) -> bool:
+    """Un nodo que solo apunta a otro (`{"@id": ...}`) no es una entidad.
+
+    En el `@graph` de Yoast estan por todas partes. Antes salian como un bloque
+    "sin @type", que es un error inventado.
+    """
+    claves = {k for k in item.keys() if k not in ("@context",)}
+    return bool(claves) and claves <= {"@id", "id"}
+
+
 def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any]]:
     """
     Extract JSON-LD, Microdata, and RDFa using *extruct*.
 
     Returns a list of dicts with: raw, format, schema_type.
+
+    Un `@graph` se abre en una entidad por nodo. Antes el bloque entero daba una
+    sola fila con `schema_type` NULL, y el `@graph` es exactamente lo que emite
+    Yoast: en casi todo WordPress no habia forma de filtrar ni de informar por
+    tipo, ni de validar cada entidad por separado.
     """
     results: list[dict[str, Any]] = []
 
@@ -816,7 +882,7 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
         import extruct
 
         data = extruct.extract(
-            html_body,
+            _limpiar_cdata(html_body),
             base_url=url,
             syntaxes=["json-ld", "microdata", "rdfa"],
             uniform=True,
@@ -827,25 +893,96 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
     for fmt, items in data.items():
         if not isinstance(items, list):
             continue
+        formato = fmt.replace("-", "")  # jsonld, microdata, rdfa
         for item in items:
-            schema_type = None
-            if isinstance(item, dict):
-                schema_type = item.get("@type")
-                if isinstance(schema_type, list):
-                    schema_type = ", ".join(str(t) for t in schema_type)
-                elif schema_type is not None:
-                    schema_type = str(schema_type)
-            # RDFa items without a schema type are xhtml/ARIA role
-            # annotations (tabs, dialogs, buttons) — noise on any site.
-            if fmt == "rdfa" and not schema_type:
+            if not isinstance(item, dict):
+                results.append({"raw": item, "format": formato, "schema_type": None})
                 continue
-            results.append({
-                "raw": item,
-                "format": fmt.replace("-", ""),  # jsonld, microdata, rdfa
-                "schema_type": schema_type,
-            })
+            grafo = item.get("@graph")
+            nodos = (
+                [g for g in grafo if isinstance(g, dict)]
+                if isinstance(grafo, list) and grafo
+                else [item]
+            )
+            for nodo in nodos:
+                if _es_solo_referencia(nodo):
+                    continue
+                schema_type = _tipo_normalizado(nodo.get("@type"))
+                # RDFa items without a schema type are xhtml/ARIA role
+                # annotations (tabs, dialogs, buttons) — noise on any site.
+                if formato == "rdfa" and not schema_type:
+                    continue
+                results.append({
+                    "raw": nodo,
+                    "format": formato,
+                    "schema_type": schema_type,
+                })
 
     return results
+
+
+# Atributos donde los cargadores diferidos esconden la imagen DE VERDAD mientras
+# `src` lleva un placeholder `data:`. Sin mirarlos, lo que se auditaba era el
+# placeholder y la imagen real no aparecia en ningun informe.
+_ATRIBUTOS_DIFERIDOS = (
+    "data-src", "data-original", "data-lazy-src", "data-lazy",
+    "data-echo", "data-url", "data-img",
+)
+_ATRIBUTOS_DIFERIDOS_SRCSET = ("data-srcset", "data-lazy-srcset")
+
+# `url(...)` dentro de un atributo style: tambien es una peticion del navegador
+# y tambien puede ser contenido mixto.
+_RE_URL_CSS = re.compile(r"url\(\s*[\'\"]?([^\)\'\"]+)[\'\"]?\s*\)", re.I)
+
+
+def parse_srcset(srcset: str) -> list[str]:
+    """URLs de un `srcset`, respetando las comas de un `data:` URI.
+
+    `srcset.split(",")[0]` partia un `data:image/gif;base64,R0lG...` justo en su
+    coma interna y guardaba `data:image/gif;base64` como si fuera una imagen.
+    """
+    if not srcset or not srcset.strip():
+        return []
+    piezas = [p.strip() for p in srcset.split(",")]
+    candidatos: list[str] = []
+    pendiente = ""
+    for pieza in piezas:
+        trozo = (pendiente + "," + pieza) if pendiente else pieza
+        pendiente = ""
+        if not trozo:
+            continue
+        # Un data: URI sin su carga util: la coma que lo parte es suya.
+        primero = trozo.split()[0] if trozo.split() else ""
+        if primero.lower().startswith("data:") and "," not in primero:
+            pendiente = trozo
+            continue
+        if primero:
+            candidatos.append(primero)
+    if pendiente:
+        trozos = pendiente.split()
+        if trozos:
+            candidatos.append(trozos[0])
+    return candidatos
+
+
+def _alt_de_la_imagen_hermana(nodo) -> str | None:
+    """Alt del `<img>` del `<picture>` al que pertenece un `<source>`.
+
+    Un `<source>` no lleva alt nunca —no existe el atributo— asi que cada
+    `<picture>` con imagen responsive generaba un `image_missing_alt` falso. El
+    alt que cuenta es el del `<img>`, que es el que Google y los lectores de
+    pantalla leen.
+    """
+    padre = nodo.getparent()
+    while padre is not None and isinstance(padre.tag, str):
+        if padre.tag in ("picture", "figure"):
+            for img in padre.iter("img"):
+                return img.get("alt")
+            return None
+        if padre.tag in ("body", "html"):
+            break
+        padre = padre.getparent()
+    return None
 
 
 def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
@@ -855,9 +992,9 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
     Returns a list of dicts with: url, resource_type, alt_text, width,
     height, is_mixed_content.
     """
-    is_https = base_url.startswith("https://")
+    is_https = urlparse(base_url).scheme == "https"
     results: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    por_url: dict[str, dict[str, Any]] = {}
 
     def _add(
         raw_url: str,
@@ -868,16 +1005,17 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
     ):
         if not raw_url:
             return
+        limpio = raw_url.strip()
+        # Un `data:` URI no es un recurso que se pueda auditar: va dentro del
+        # HTML, no se pide, y no tiene nada que mirar.
+        if limpio[:5].lower() == "data:":
+            return
         try:
-            absolute = urljoin(base_url, raw_url.strip())
+            absolute = urljoin(base_url, limpio)
             normalized = normalize_url(absolute)
         except ValueError:
             return
-        if normalized in seen:
-            return
-        seen.add(normalized)
 
-        mixed = is_https and absolute.startswith("http://")
         # OJO: alt="" y alt ausente NO son lo mismo. Un alt vacio marca la
         # imagen como decorativa, que es lo CORRECTO segun WCAG para iconos y
         # adornos; que falte el atributo si es un fallo. _clean("") devuelve
@@ -885,23 +1023,60 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
         # "sin alt" miles de imagenes correctamente marcadas como decorativas.
         # Se conserva la cadena vacia tal cual para poder distinguirlos.
         alt_text = "" if (alt is not None and not alt.strip()) else _clean(alt)
-        results.append({
+
+        anterior = por_url.get(normalized)
+        if anterior is not None:
+            # La misma imagen aparece dos veces y solo una lleva alt: la que
+            # vale es la que lo lleva. Quedarse con la primera inventaba un
+            # "sin alt" sobre una imagen que si lo tiene en otro sitio.
+            if anterior.get("alt_text") is None and alt_text is not None:
+                anterior["alt_text"] = alt_text
+            if anterior.get("width") is None:
+                anterior["width"] = _parse_int(width)
+            if anterior.get("height") is None:
+                anterior["height"] = _parse_int(height)
+            return
+
+        fila = {
             "url": normalized,
             "resource_type": rtype,
             "alt_text": alt_text,
             "width": _parse_int(width),
             "height": _parse_int(height),
-            "is_mixed_content": mixed,
-        })
+            # En mayusculas (`HTTP://`) no casaba: se compara el esquema ya
+            # parseado, no el prefijo de la cadena.
+            "is_mixed_content": is_https and urlparse(absolute).scheme == "http",
+        }
+        por_url[normalized] = fila
+        results.append(fila)
+
+    def _url_de_imagen(nodo) -> str:
+        """`src`, y si es un placeholder `data:`, el atributo diferido."""
+        src = (nodo.get("src") or "").strip()
+        if src and src[:5].lower() != "data:":
+            return src
+        for atributo in _ATRIBUTOS_DIFERIDOS:
+            valor = (nodo.get(atributo) or "").strip()
+            if valor:
+                return valor
+        for atributo in _ATRIBUTOS_DIFERIDOS_SRCSET:
+            candidatos = parse_srcset(nodo.get(atributo) or "")
+            if candidatos:
+                return candidatos[0]
+        return src
 
     # Images
-    for img in selector.xpath(f"descendant-or-self::img[@src]{_XPATH_FUERA_DEL_DOM}"):
+    for img in selector.xpath(
+        f"descendant-or-self::img[@src or @data-src or @data-original"
+        f" or @data-lazy-src or @data-srcset]{_XPATH_FUERA_DEL_DOM}"
+    ):
+        nodo = img.root
         _add(
-            img.attrib.get("src", ""),
+            _url_de_imagen(nodo),
             "image",
-            img.attrib.get("alt"),
-            img.attrib.get("width"),
-            img.attrib.get("height"),
+            nodo.get("alt"),
+            nodo.get("width"),
+            nodo.get("height"),
         )
 
     # Stylesheets
@@ -912,20 +1087,34 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
     for script in selector.css("script[src]"):
         _add(script.attrib.get("src", ""), "js")
 
+    # Otros recursos que el navegador pide y que tambien pueden ser contenido
+    # mixto: video, audio, iconos, precargas y los `url()` de un style en linea.
+    for medio in selector.css("video[src], audio[src], video source[src], audio source[src]"):
+        _add(medio.attrib.get("src", ""), "media")
+    for link in selector.css("link[rel][href]"):
+        rel = (link.attrib.get("rel") or "").lower()
+        if any(t in rel for t in ("preload", "icon", "apple-touch-icon", "manifest")):
+            _add(link.attrib.get("href", ""), "other")
+    for nodo in selector.css("[style]"):
+        for encontrada in _RE_URL_CSS.findall(nodo.attrib.get("style") or ""):
+            _add(encontrada, "image")
+
     # srcset images (first URL only per element for simplicity)
     for img in selector.xpath(f"descendant-or-self::*[@srcset]{_XPATH_FUERA_DEL_DOM}"):
-        srcset = img.attrib.get("srcset", "")
-        # srcset=" " o "," no tiene candidatos: split()[0] lanzaba IndexError
-        # y se perdia la extraccion de toda la pagina.
-        candidato = srcset.split(",")[0].split()
-        first_url = candidato[0] if candidato else ""
-        _add(
-            first_url,
-            "image",
-            img.attrib.get("alt"),
-            img.attrib.get("width"),
-            img.attrib.get("height"),
-        )
+        nodo = img.root
+        # El primero que no sea un `data:` (los placeholders de la carga
+        # diferida van ahi, y el que hay que auditar es el siguiente).
+        candidatos = [c for c in parse_srcset(nodo.get("srcset") or "")
+                      if c[:5].lower() != "data:"]
+        if not candidatos:
+            continue
+        # Un `<source>` no tiene alt: el que cuenta es el del `<img>` del
+        # `<picture>`. Sin esto, cada imagen responsive generaba un
+        # `image_missing_alt` falso.
+        alt = nodo.get("alt")
+        if alt is None and nodo.tag == "source":
+            alt = _alt_de_la_imagen_hermana(nodo)
+        _add(candidatos[0], "image", alt, nodo.get("width"), nodo.get("height"))
 
     return results
 
@@ -1240,6 +1429,53 @@ _ARIAL_20PX_WIDTHS: dict[str, float] = {
 # Fallback width for characters not in the lookup table.
 _ARIAL_20PX_DEFAULT: float = 9.6
 
+# Anchos por rango Unicode para lo que no esta en la tabla de Arial. El 9,6 px
+# por caracter de antes daba 221 px para un titulo japones de 23 caracteres que
+# en pantalla mide unos 460: la mitad. Como Google corta el titulo por PIXELES,
+# ningun titulo CJK salia como truncado.
+#
+# Los ideogramas y los kana son de ancho completo (la mitad de la caja de texto
+# los llama "fullwidth"): ~20 px a 20 px de cuerpo, el doble que una letra
+# latina. El tailandes, el arabe y el hebreo son algo mas estrechos que el
+# latino. Un emoji ocupa como un ideograma.
+_ANCHOS_POR_RANGO: tuple[tuple[int, int, float], ...] = (
+    (0x0590, 0x05FF, 8.5),    # hebreo
+    (0x0600, 0x06FF, 8.5),    # arabe
+    (0x0E00, 0x0E7F, 8.0),    # tailandes
+    (0x1100, 0x11FF, 20.0),   # jamo hangul
+    (0x2E80, 0x303F, 20.0),   # radicales y puntuacion CJK
+    (0x3040, 0x30FF, 20.0),   # hiragana y katakana
+    (0x3100, 0x312F, 20.0),   # bopomofo
+    (0x3130, 0x318F, 20.0),   # compatibilidad hangul
+    (0x3400, 0x4DBF, 20.0),   # Han, extension A
+    (0x4E00, 0x9FFF, 20.0),   # Han, CJK unificado
+    (0xA960, 0xA97F, 20.0),   # jamo extendido
+    (0xAC00, 0xD7AF, 20.0),   # silabas hangul
+    (0xF900, 0xFAFF, 20.0),   # Han, compatibilidad
+    (0xFF01, 0xFF60, 20.0),   # formas de ancho completo
+    (0x1F300, 0x1FAFF, 20.0),  # emoji
+    (0x2600, 0x27BF, 20.0),   # simbolos y dingbats que se pintan como emoji
+)
+
+# Caracteres que no ocupan nada: el selector de variacion y el unificador de
+# cero ancho con los que se construye un emoji de familia o de bandera. Sin
+# esto, un emoji compuesto se contaba como tres o cuatro caracteres anchos.
+_SIN_ANCHO = frozenset({"\u200d", "\ufe0f", "\ufe0e", "\u200b", "\u2060"})
+
+
+def _ancho_de_caracter(ch: str) -> float:
+    """Ancho en pixeles del caracter a 20 px de cuerpo."""
+    ancho = _ARIAL_20PX_WIDTHS.get(ch)
+    if ancho is not None:
+        return ancho
+    if ch in _SIN_ANCHO:
+        return 0.0
+    punto = ord(ch)
+    for inicio, fin, valor in _ANCHOS_POR_RANGO:
+        if inicio <= punto <= fin:
+            return valor
+    return _ARIAL_20PX_DEFAULT
+
 
 def _estimate_pixel_width(text: str, scale: float = 1.0) -> int:
     """Sum per-character pixel widths using the Arial 20px table.
@@ -1260,9 +1496,15 @@ def _estimate_pixel_width(text: str, scale: float = 1.0) -> int:
     if not text:
         return 0
     total = 0.0
+    anterior = ""
     for ch in text:
-        width = _ARIAL_20PX_WIDTHS.get(ch, _ARIAL_20PX_DEFAULT)
-        total += width * scale
+        # Un emoji compuesto (familia, bandera, profesion) es UN glifo: los
+        # trozos que van detras de un unificador de cero ancho no ocupan mas.
+        if anterior == "\u200d":
+            anterior = ch
+            continue
+        total += _ancho_de_caracter(ch) * scale
+        anterior = ch
     return round(total)
 
 
@@ -1391,16 +1633,38 @@ def extract_security_headers(headers: dict) -> dict:
         X-Frame-Options, and the ``Referrer-Policy`` value (or ``None``).
     """
     # Build a lower-cased lookup for case-insensitive matching.
-    lower_headers: dict[str, str] = {
-        k.lower(): v for k, v in headers.items()
-    }
+    lower_headers: dict[str, str] = {}
+    for clave, valor in headers.items():
+        if isinstance(valor, bytes):
+            valor = valor.decode("utf-8", errors="ignore")
+        lower_headers[str(clave).lower()] = valor if isinstance(valor, str) else str(valor)
+
+    def presente(nombre: str) -> bool:
+        """La cabecera esta Y dice algo.
+
+        Un `X-Frame-Options:` vacio no protege de nada y se contaba como
+        presente, de modo que el informe decia que estaba puesta.
+        """
+        return bool((lower_headers.get(nombre) or "").strip())
+
+    # `max-age=0` es como no tener HSTS: le dice al navegador que OLVIDE la
+    # politica. Se contaba como presente.
+    hsts = lower_headers.get("strict-transport-security") or ""
+    hsts_valido = bool(hsts.strip()) and not re.search(
+        r"max-age\s*=\s*0(?!\d)", hsts, re.I
+    )
+    # Con `frame-ancestors` en la CSP, X-Frame-Options es redundante: los
+    # navegadores modernos hacen caso a la CSP y la ignoran a ella. Pedir las
+    # dos era un aviso sobre algo que ya esta resuelto.
+    csp = lower_headers.get("content-security-policy") or ""
+    tiene_frame_ancestors = "frame-ancestors" in csp.lower()
 
     return {
-        "has_hsts": "strict-transport-security" in lower_headers,
-        "has_csp": "content-security-policy" in lower_headers,
-        "has_x_content_type_options": "x-content-type-options" in lower_headers,
-        "has_x_frame_options": "x-frame-options" in lower_headers,
-        "referrer_policy": lower_headers.get("referrer-policy") or None,
+        "has_hsts": hsts_valido,
+        "has_csp": presente("content-security-policy"),
+        "has_x_content_type_options": presente("x-content-type-options"),
+        "has_x_frame_options": presente("x-frame-options") or tiene_frame_ancestors,
+        "referrer_policy": (lower_headers.get("referrer-policy") or "").strip() or None,
     }
 
 
