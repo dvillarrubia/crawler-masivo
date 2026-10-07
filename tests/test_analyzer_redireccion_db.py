@@ -120,3 +120,17 @@ def test_una_huerfana_de_verdad_sigue_siendo_huerfana():
     s.commit()
     assert [a[0] for a in _issues(s, j, "orphan_page")] == [sola.id]
     assert _issues(s, j, "solo_enlazada_por_redireccion") == []
+
+
+def test_la_semilla_no_se_reporta():
+    """Sembrar con `http://` y que el sitio salte a `https://` deja la home como
+    destino de un salto y con 0 entrantes descubiertos. Decir de ella que "solo
+    se llega por una redireccion" es falso: es la puerta de entrada."""
+    s, j = _montar()
+    _url(s, j, "/", crawl_depth=0, in_sitemap=True)
+    _url(s, j, "/http", status_code=301, indexable=False, is_html=False,
+         redirect_url="https://x.com/")
+    s.commit()
+    SEOAnalyzer(s, j.id).analyze_links()
+    s.commit()
+    assert _issues(s, j, "solo_enlazada_por_redireccion") == []

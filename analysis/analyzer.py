@@ -2255,6 +2255,13 @@ class SEOAnalyzer:
                 Url.status_code == 200,
                 Url.indexable.is_(True),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+                # La semilla no: es la puerta de entrada del rastreo y no tiene
+                # entrantes DESCUBIERTOS por definicion. Pasa en cuanto se
+                # siembra con `http://` y el sitio salta a `https://`: el
+                # destino es la home, es destino de un salto, y decir de ella
+                # que "solo se llega por una redireccion" es falso. Misma
+                # exclusion que `orphan_page`.
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
             )
             .group_by(Url.id, Url.in_sitemap)
         ).all()
