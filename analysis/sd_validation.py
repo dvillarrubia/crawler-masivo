@@ -154,6 +154,24 @@ def _es_referencia(item: dict) -> bool:
     return bool(claves) and claves <= {"@id", "id"}
 
 
+# Vocabularios que un lector de RDFa encuentra en cualquier pagina y que no
+# son datos estructurados: los atributos de accesibilidad (`role`, `rel`) y el
+# Open Graph, que ya se extrae a `html_meta.og_*`.
+_VOCABULARIOS_AJENOS = (
+    "http://www.w3.org/1999/xhtml/vocab#",
+    "http://ogp.me/ns#",
+    "http://purl.org/dc/terms/",
+)
+
+
+def _solo_vocabularios_ajenos(claves: set[str]) -> bool:
+    """True si TODAS las propiedades (sin contar `@id`) son de esos vocabularios."""
+    propias = {k for k in claves if k not in ("@id", "id")}
+    return bool(propias) and all(
+        k.startswith(_VOCABULARIOS_AJENOS) for k in propias
+    )
+
+
 # Propiedades que el ANIDAMIENTO ya resuelve. Una `Review` dentro de un
 # `Product` no necesita `itemReviewed`: lo reseñado es el producto que la
 # contiene, y Google documenta que no hay que repetirlo. Validarla como si
@@ -208,6 +226,21 @@ def validate_sd_item(
         # roto: decir "sin @type" era inventarse un error.
         resto = {k for k in item.keys() if k != "@context"}
         if not resto or (resto == {"@graph"} and not item.get("@graph")):
+            return []
+        # Un nodo que solo tiene propiedades de vocabularios que NO son
+        # schema.org no es marcado roto: es lo que un lector de RDFa saca de
+        # una pagina normal. `role="alert"` deja
+        # `http://www.w3.org/1999/xhtml/vocab#role` y un `<meta
+        # property="og:title">` deja `http://ogp.me/ns#title` —y el Open Graph
+        # ya se extrae aparte, a `html_meta.og_*`—.
+        #
+        # Medido al re-analizar el censo de CST (junio, extractor anterior):
+        # **88.838 "errores" de los que 81.023 eran atributos `role` y 7.815
+        # Open Graph**. El 100% de los errores de datos estructurados de ese
+        # informe, y su nota bajaba de 100 a 60 por ellos. El extractor de hoy
+        # ya no los guarda, pero los censos viejos los llevan dentro y
+        # re-analizarlos los convertia en un informe falso.
+        if _solo_vocabularios_ajenos(resto):
             return []
         return [("error", "sin @type: el bloque no identifica ninguna entidad")]
 

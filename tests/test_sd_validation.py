@@ -214,3 +214,51 @@ def test_una_entidad_anidada_no_avisa_de_lo_recomendado():
     estado, problemas = validate_structured_data(ficha)
     assert estado == "error"
     assert any("name" in p for p in problemas)
+
+
+# ---------------------------------------------------------------------------
+# Lo que un lector de RDFa saca de una pagina normal no son datos estructurados
+# ---------------------------------------------------------------------------
+def test_un_role_de_accesibilidad_no_es_un_bloque_roto():
+    """`<div role="alert">` deja un nodo RDFa con la propiedad del vocabulario
+    XHTML y sin `@type`. No es marcado roto: no es marcado.
+
+    Medido al re-analizar el censo de CST: **88.838 "errores" de los que 81.023
+    eran atributos `role`**, el 100% de los errores de datos estructurados de
+    ese informe, y la nota de la categoria caia de 100 a 60 por ellos.
+    """
+    item = {
+        "@id": "https://x.com/p#__next-route-announcer__",
+        "http://www.w3.org/1999/xhtml/vocab#role": [
+            {"@id": "http://www.w3.org/1999/xhtml/vocab#alert"}
+        ],
+    }
+    assert validate_sd_item(item) == []
+
+
+def test_el_open_graph_leido_como_rdfa_tampoco():
+    """Un `<meta property="og:title">` deja `http://ogp.me/ns#title`. El Open
+    Graph ya se extrae aparte, a `html_meta.og_*`: contarlo aqui es contarlo
+    dos veces y ademas como error. Eran 7.815 en el mismo censo."""
+    item = {
+        "@id": "https://x.com/p",
+        "http://ogp.me/ns#title": [{"@value": "Un anuncio"}],
+        "http://ogp.me/ns#type": [{"@value": "article"}],
+    }
+    assert validate_sd_item(item) == []
+
+
+def test_un_bloque_de_schema_sin_tipo_SI_es_un_error():
+    """La guarda no puede tragarse el caso de verdad: un bloque con
+    propiedades de schema.org y sin `@type` no declara ninguna entidad."""
+    item = {"name": "Algo", "description": "sin @type"}
+    assert any(sev == "error" and "@type" in msg for sev, msg in validate_sd_item(item))
+
+
+def test_mezclar_schema_con_un_vocabulario_ajeno_sigue_siendo_error():
+    item = {
+        "@id": "https://x.com/p",
+        "http://ogp.me/ns#title": [{"@value": "x"}],
+        "name": "y",
+    }
+    assert any(sev == "error" and "@type" in msg for sev, msg in validate_sd_item(item))
