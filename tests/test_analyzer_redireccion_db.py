@@ -134,3 +134,52 @@ def test_la_semilla_no_se_reporta():
     SEOAnalyzer(s, j.id).analyze_links()
     s.commit()
     assert _issues(s, j, "solo_enlazada_por_redireccion") == []
+
+
+# ---------------------------------------------------------------------------
+# Ruido: un aviso por imagen, no por aparicion
+# ---------------------------------------------------------------------------
+def test_la_misma_imagen_sin_alt_en_mil_paginas_es_UN_aviso():
+    """La unidad de trabajo es la imagen, no la pagina.
+
+    El logo del pie sin alt se arregla una vez. En el informe de un cliente
+    salia 10.990 veces (2.198 paginas x 5 variantes responsive del mismo logo),
+    y `image_missing_alt` se llevaba el 91% de las 315.119 incidencias del
+    censo, enterrando lo demas. Misma cura que la decision 53.
+    """
+    from shared.models import Resource
+
+    s, j = _montar()
+    Base.metadata.create_all(s.get_bind(), tables=[Resource.__table__])
+    paginas = [_url(s, j, f"/p{i}") for i in range(5)]
+    for p in paginas:
+        s.add(Resource(url_id=p.id, resource_url="https://x.com/logo.png",
+                       resource_type="image", alt_text=None))
+    # Y una imagen distinta, en una sola pagina
+    s.add(Resource(url_id=paginas[0].id, resource_url="https://x.com/foto.jpg",
+                   resource_type="image", alt_text=None))
+    s.commit()
+
+    SEOAnalyzer(s, j.id).analyze_images()
+    s.commit()
+
+    avisos = _issues(s, j, "image_missing_alt")
+    assert len(avisos) == 2, "una por imagen distinta, no una por aparicion"
+    por_imagen = {a[2]["image_url"]: a[2] for a in avisos}
+    assert por_imagen["https://x.com/logo.png"]["paginas_afectadas"] == 5
+    assert por_imagen["https://x.com/foto.jpg"]["paginas_afectadas"] == 1
+
+
+def test_un_alt_vacio_no_es_una_imagen_sin_alt():
+    """`alt=""` declara la imagen como decorativa y es lo correcto segun WCAG."""
+    from shared.models import Resource
+
+    s, j = _montar()
+    Base.metadata.create_all(s.get_bind(), tables=[Resource.__table__])
+    p = _url(s, j, "/p")
+    s.add(Resource(url_id=p.id, resource_url="https://x.com/adorno.png",
+                   resource_type="image", alt_text=""))
+    s.commit()
+    SEOAnalyzer(s, j.id).analyze_images()
+    s.commit()
+    assert _issues(s, j, "image_missing_alt") == []

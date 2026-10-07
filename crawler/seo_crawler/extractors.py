@@ -20,6 +20,7 @@ from w3lib.url import canonicalize_url
 # Las reglas robots viven en `shared` porque el analyzer, cuya imagen no
 # copia `crawler/`, necesita leerlas igual. Se reexportan aqui para no
 # romper a quien ya importaba `extractors.robots_tokens`.
+from shared.dominios import dominio_registrable  # noqa: F401
 from shared.robots import (  # noqa: F401
     robots_bad_separators,
     robots_tokens,
@@ -79,42 +80,6 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 # puede depender de eso) y `include_psl_private_domains=True` hace que
 # `usuario.github.io` o `cliente.myshopify.com` cuenten como dominios distintos,
 # que es lo correcto: son sitios distintos.
-_PSL = None
-
-
-def dominio_registrable(host: str) -> str:
-    """Dominio que se puede registrar, segun la Public Suffix List.
-
-    Cortar por las dos ultimas etiquetas daba `co.uk` para
-    `www.competidor.co.uk`, asi que cualquier `.co.uk` salia interno para una
-    semilla `.co.uk`: el rastreo se metia en el sitio de la competencia y sus
-    paginas entraban en el informe del cliente. Devuelve el host tal cual si la
-    lista no reconoce el sufijo (IPs, `localhost`, hosts internos).
-    """
-    global _PSL
-    if not host:
-        return ""
-    if _PSL is None:
-        try:
-            import tldextract
-
-            _PSL = tldextract.TLDExtract(
-                suffix_list_urls=(), include_psl_private_domains=True
-            )
-        except Exception:  # pragma: no cover - sin tldextract
-            _PSL = False
-    if _PSL is False:
-        partes = host.split(".")
-        return ".".join(partes[-2:]) if len(partes) >= 2 else host
-    try:
-        extraido = _PSL(host)
-    except Exception:
-        return host
-    if extraido.domain and extraido.suffix:
-        return f"{extraido.domain}.{extraido.suffix}"
-    return host
-
-
 def normalize_host(host: str | None) -> str:
     """Forma comparable de un host: minusculas, sin punto final y en IDNA.
 

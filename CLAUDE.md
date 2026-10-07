@@ -1019,6 +1019,35 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    título por subcadena pero solo contra muros reales: «Checklist de seguridad
    web» es un artículo y pasa, y una página sin `<title>` no se tira por eso.
 
+64. **La severidad es la consecuencia, y un aviso que sale en todas las
+   páginas deja de ser un aviso** — las dos salieron del mismo sitio: un
+   informe entregado de 315.119 incidencias donde el hallazgo más grave del
+   sitio estaba archivado como `info`.
+   (a) **`canonical_cross_domain` se decide por dominio REGISTRABLE, no por
+   host.** A otro subdominio de la misma casa (`comein.uoc.edu` desde
+   `www.uoc.edu`) es consolidación de contenido: `info`. A otro dominio
+   registrable la página se saca del índice en favor de un sitio que no es el
+   suyo: **`error`**. Medido: en www.uoc.edu hay 3.551 canonicals a otro host y
+   **3.550 se quedan dentro de uoc.edu** —con el criterio de host eran 3.411
+   líneas de ruido—, mientras que en Lopesan los 2.367 iban a
+   `*.lfr.cloud`, el servidor de origen de Liferay, y eran el **99,5% de su
+   sección de hoteles**. Para eso `dominio_registrable()` se muda a
+   `shared/dominios.py`: lo necesitan el spider (alcance del rastreo) y el
+   analyzer (si un canonical se va de casa), y la imagen del análisis solo
+   copia `shared/` y `analysis/` — el mismo motivo que la decisión 23.
+   (b) **`image_missing_alt` va por IMAGEN, no por aparición.** La unidad de
+   trabajo es la imagen: ponerle el alt al logo del pie se hace una vez, no
+   10.990 —que es las veces que salía, repartido en cinco variantes responsive
+   del MISMO logo—. Medido en cinco censos: **287.175 → 19.287 (−93%)** en el
+   peor y entre −30% y −75% en los otros. No se pierde nada: la fila lleva
+   `paginas_afectadas` y `resources` conserva todas las apariciones. Misma cura
+   que la decisión 53 con las cabeceras.
+   Efecto conjunto sobre el informe entregado de Lopesan: **315.119 → 38.922
+   incidencias**, y los errores pasan a ser los cinco que hay que leer
+   (4.716 de datos estructurados, 2.367 de canonical, 32 4xx, 12 hreflang
+   rotos, 4 canonical rotos). **Las notas de `/insights` no se mueven** (88 y
+   77 antes y después): esto no cambia la valoración, cambia qué se ve.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

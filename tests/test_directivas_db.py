@@ -96,6 +96,50 @@ def test_a_otro_dominio_de_verdad_si_se_avisa():
     assert "canonical_cross_domain" in _tipos(s, j, u.id)
 
 
+def _severidad(s, j, url_id, tipo):
+    from shared.models import Issue
+    from sqlalchemy import select as sel
+
+    return s.execute(
+        sel(Issue.severity, Issue.details)
+        .where(Issue.job_id == j.id, Issue.url_id == url_id, Issue.issue_type == tipo)
+    ).first()
+
+
+def test_irse_a_otro_dominio_registrable_es_un_error():
+    """La pagina se saca del indice en favor de un sitio que no es el suyo.
+
+    Es lo que le paso a un cliente: 2.367 paginas —el 99,5% de su seccion de
+    hoteles— con el canonical al servidor de origen de Liferay
+    (`*.lfr.cloud`). Estaba en el informe entregado, archivado como `info`
+    entre 315.119 incidencias, y no lo vio nadie.
+    """
+    s, j = _montar()
+    u = _url(s, j, "https://cliente.com/a",
+             canonical="https://webserver-cliente-prd.lfr.cloud/a", cuantos=1)
+    SEOAnalyzer(s, j.id).analyze_canonicals()
+    s.flush()
+    sev, det = _severidad(s, j, u.id, "canonical_cross_domain")
+    assert sev == "error"
+    assert det["otro_dominio_registrable"] is True
+
+
+def test_a_un_subdominio_de_la_misma_casa_es_informativo():
+    """`comein.uoc.edu` desde `www.uoc.edu` es consolidacion de contenido: una
+    decision que conviene ver, no una alarma. Medido en ese censo: 3.551
+    canonicals a otro host y 3.550 se quedan dentro de uoc.edu, asi que con el
+    criterio de host eran 3.411 lineas de ruido tapando el unico que si salia.
+    """
+    s, j = _montar()
+    u = _url(s, j, "https://www.uoc.edu/a", canonical="https://comein.uoc.edu/a",
+             cuantos=1)
+    SEOAnalyzer(s, j.id).analyze_canonicals()
+    s.flush()
+    sev, det = _severidad(s, j, u.id, "canonical_cross_domain")
+    assert sev == "info"
+    assert det["otro_dominio_registrable"] is False
+
+
 def test_un_canonical_a_http_desde_https_se_avisa():
     s, j = _montar()
     u = _url(s, j, "https://x.com/a", canonical="http://x.com/a", cuantos=1)

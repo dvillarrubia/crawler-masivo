@@ -39,6 +39,7 @@ from analysis import pagerank as prk
 from shared.indexabilidad import es_noindex, estado_indexabilidad
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
+from shared.dominios import dominio_registrable
 from shared.models import (
     Heading,
     HtmlMeta,
@@ -657,16 +658,40 @@ class SEOAnalyzer:
             # resolviendo su propia variante, que es justo para lo que existe el
             # canonical. Marcarlo como "canonical a otro dominio" convertia la
             # solucion en un problema en el informe.
+            #
+            # Y la SEVERIDAD depende de a donde va, que es lo que decide lo que
+            # se pierde (mismo criterio que la decision 22):
+            #
+            # - A otro subdominio de la misma casa (`comein.uoc.edu` desde
+            #   `www.uoc.edu`) es consolidacion de contenido: una decision que
+            #   conviene ver, no una alarma. Se queda en `info`.
+            # - A otro dominio REGISTRABLE la pagina se esta sacando del indice
+            #   en favor de un sitio que no es el suyo. Eso es un error.
+            #
+            # Medido: en www.uoc.edu hay 3.551 canonicals a otro host y **3.550
+            # se quedan dentro de uoc.edu**; con el criterio de host eran 3.411
+            # lineas de ruido. En Lopesan, 2.367 apuntaban al servidor de origen
+            # de Liferay (`*.lfr.cloud`, otro dominio registrable) y eran el
+            # 99,5% de la seccion de hoteles: el hallazgo mas grave del informe,
+            # archivado como "informativo".
             if (
                 canonical_host
                 and page_host
                 and canonical_host.removeprefix("www.") != page_host.removeprefix("www.")
             ):
+                fuera = (
+                    dominio_registrable(canonical_host)
+                    != dominio_registrable(page_host)
+                )
                 self._add_issue(
                     url_id,
                     "canonical_cross_domain",
-                    "info",
-                    {"canonical": canonical, "canonical_host": canonical_host},
+                    "error" if fuera else "info",
+                    {
+                        "canonical": canonical,
+                        "canonical_host": canonical_host,
+                        "otro_dominio_registrable": fuera,
+                    },
                 )
 
             # Un canonical a http desde una pagina https manda a Google a la
@@ -1352,12 +1377,29 @@ class SEOAnalyzer:
         )
         rows = self.session.execute(stmt).all()
 
+        # UNA incidencia por IMAGEN, no por aparicion. La unidad de trabajo es
+        # la imagen: ponerle el alt al logo del pie se hace una vez, no 10.990
+        # —que es las veces que salia en el informe de un cliente, repartido en
+        # cinco variantes responsive del MISMO logo—. Es la misma cura que la
+        # decision 53 aplico a las cabeceras de seguridad.
+        #
+        # Medido sobre cinco censos: 287.175 -> 19.287 avisos (-93%) en el peor,
+        # y entre el 30% y el 75% menos en los otros cuatro. No se pierde nada:
+        # la fila va con cuantas paginas la llevan y un ejemplo, y `resources`
+        # sigue teniendo todas las apariciones.
+        por_imagen: dict[str, list[int]] = {}
         for url_id, resource_url in rows:
+            por_imagen.setdefault(resource_url, []).append(url_id)
+
+        for resource_url, paginas in por_imagen.items():
             self._add_issue(
-                url_id,
+                paginas[0],
                 "image_missing_alt",
                 "warning",
-                {"image_url": resource_url},
+                {
+                    "image_url": resource_url,
+                    "paginas_afectadas": len(paginas),
+                },
             )
 
         self._flush_issues()
