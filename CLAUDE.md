@@ -678,6 +678,24 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    **760 kB**, con 15.330 filas donde el «transferido» superaba al «tamaño» más
    del doble.
 
+51. **El `@graph` de Yoast dejaba ciego a todo WordPress** — un bloque con
+   `@graph` se guardaba como UNA fila con `schema_type` NULL, así que las 2-6
+   entidades de dentro no existían: ni filtro por tipo, ni informe por tipo, ni
+   validación por entidad. Medido en blogs.uoc.edu: **30.701 bloques en 29.803
+   páginas** —el 100% del censo— con el tipo a NULL. Ahora el `@graph` se abre
+   en una entidad por nodo. Con él, cuatro arreglos más del mismo sitio: el
+   `@type` se normaliza a nombre corto (RDFa lo escribía como IRI completo y
+   JSON-LD/microdatos como nombre corto, así que el mismo tipo salía con dos
+   nombres y los filtros no casaban); el JSON-LD envuelto en `//<![CDATA[`
+   —Drupal, portales antiguos— se lee en vez de desaparecer sin aviso; un nodo
+   que solo es una referencia (`{"@id": …}`) no es un bloque roto; y una
+   propiedad obligatoria presente pero **vacía** cuenta como ausente
+   (`itemListElement: []` daba «ok» a una miga de pan sin eslabones). Las
+   entidades anidadas también se validan: un Product dentro de
+   `WebPage.mainEntity` es el producto de la página. Y `Article` deja de exigir
+   `headline`: Google no documenta ninguna propiedad obligatoria para Article,
+   así que es un aviso, no un error.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

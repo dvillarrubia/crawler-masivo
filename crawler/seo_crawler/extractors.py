@@ -804,11 +804,69 @@ def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, An
     return results
 
 
+# El CDATA es sintaxis de XHTML y hay plantillas (Drupal, portales antiguos)
+# que envuelven el JSON-LD en el. extruct no lo parsea y el bloque entero
+# desaparecia sin aviso: cero datos estructurados en una pagina que si los
+# lleva.
+_RE_CDATA = re.compile(
+    r"(<script[^>]*type\s*=\s*[\"\']application/ld\+json[\"\'][^>]*>)(.*?)(</script>)",
+    re.S | re.I,
+)
+_RE_CDATA_MARCAS = re.compile(r"\s*(?://\s*)?(?:<!\[CDATA\[|\]\]>)\s*")
+
+
+def _limpiar_cdata(html_body: str) -> str:
+    """Quita los envoltorios CDATA de los bloques `application/ld+json`."""
+    if "CDATA" not in html_body:
+        return html_body
+
+    def sustituir(m):
+        return m.group(1) + _RE_CDATA_MARCAS.sub("", m.group(2)) + m.group(3)
+
+    return _RE_CDATA.sub(sustituir, html_body)
+
+
+def _tipo_normalizado(valor) -> str | None:
+    """`@type` como nombre corto: `https://schema.org/Product` -> `Product`.
+
+    RDFa guarda el tipo como IRI completo y JSON-LD y microdatos como nombre
+    corto, asi que el mismo tipo salia con dos nombres distintos y ni los
+    filtros ni la validacion por tipo casaban.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, list):
+        partes = [_tipo_normalizado(v) for v in valor]
+        limpias = [p for p in partes if p]
+        return ", ".join(limpias) if limpias else None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    if "://" in texto or texto.startswith("schema.org"):
+        texto = texto.rstrip("/").rsplit("/", 1)[-1]
+    return texto.lstrip("@") or None
+
+
+def _es_solo_referencia(item: dict) -> bool:
+    """Un nodo que solo apunta a otro (`{"@id": ...}`) no es una entidad.
+
+    En el `@graph` de Yoast estan por todas partes. Antes salian como un bloque
+    "sin @type", que es un error inventado.
+    """
+    claves = {k for k in item.keys() if k not in ("@context",)}
+    return bool(claves) and claves <= {"@id", "id"}
+
+
 def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any]]:
     """
     Extract JSON-LD, Microdata, and RDFa using *extruct*.
 
     Returns a list of dicts with: raw, format, schema_type.
+
+    Un `@graph` se abre en una entidad por nodo. Antes el bloque entero daba una
+    sola fila con `schema_type` NULL, y el `@graph` es exactamente lo que emite
+    Yoast: en casi todo WordPress no habia forma de filtrar ni de informar por
+    tipo, ni de validar cada entidad por separado.
     """
     results: list[dict[str, Any]] = []
 
@@ -816,7 +874,7 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
         import extruct
 
         data = extruct.extract(
-            html_body,
+            _limpiar_cdata(html_body),
             base_url=url,
             syntaxes=["json-ld", "microdata", "rdfa"],
             uniform=True,
@@ -827,23 +885,30 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
     for fmt, items in data.items():
         if not isinstance(items, list):
             continue
+        formato = fmt.replace("-", "")  # jsonld, microdata, rdfa
         for item in items:
-            schema_type = None
-            if isinstance(item, dict):
-                schema_type = item.get("@type")
-                if isinstance(schema_type, list):
-                    schema_type = ", ".join(str(t) for t in schema_type)
-                elif schema_type is not None:
-                    schema_type = str(schema_type)
-            # RDFa items without a schema type are xhtml/ARIA role
-            # annotations (tabs, dialogs, buttons) — noise on any site.
-            if fmt == "rdfa" and not schema_type:
+            if not isinstance(item, dict):
+                results.append({"raw": item, "format": formato, "schema_type": None})
                 continue
-            results.append({
-                "raw": item,
-                "format": fmt.replace("-", ""),  # jsonld, microdata, rdfa
-                "schema_type": schema_type,
-            })
+            grafo = item.get("@graph")
+            nodos = (
+                [g for g in grafo if isinstance(g, dict)]
+                if isinstance(grafo, list) and grafo
+                else [item]
+            )
+            for nodo in nodos:
+                if _es_solo_referencia(nodo):
+                    continue
+                schema_type = _tipo_normalizado(nodo.get("@type"))
+                # RDFa items without a schema type are xhtml/ARIA role
+                # annotations (tabs, dialogs, buttons) — noise on any site.
+                if formato == "rdfa" and not schema_type:
+                    continue
+                results.append({
+                    "raw": nodo,
+                    "format": formato,
+                    "schema_type": schema_type,
+                })
 
     return results
 

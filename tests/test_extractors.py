@@ -691,3 +691,49 @@ def test_una_base_href_valida_se_respeta():
                            ("//cdn.x.com/", "https://cdn.x.com/")):
         s = sel(f"<html><head><base href='{base}'></head><body></body></html>")
         assert ex.effective_base_url(s, "https://x.com/seccion/") == esperada
+
+
+# ---------------------------------------------------------------------------
+# Datos estructurados: @graph, CDATA y el tipo con dos nombres (#28)
+# ---------------------------------------------------------------------------
+_YOAST = """<html><head><script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+ {"@type":"WebPage","@id":"https://x.com/#webpage","url":"https://x.com/","name":"Home"},
+ {"@type":"Organization","@id":"https://x.com/#org","name":"Acme"},
+ {"@type":["Article","BlogPosting"],"@id":"https://x.com/#art","headline":"T"},
+ {"@id":"https://x.com/#ref"}
+]}</script></head><body>x</body></html>"""
+
+
+def test_el_grafo_de_yoast_da_una_entidad_por_nodo():
+    """Antes el bloque entero daba UNA fila con schema_type NULL. El `@graph`
+    es lo que emite Yoast: en casi todo WordPress no habia forma de filtrar ni
+    de informar por tipo, ni de validar cada entidad por separado."""
+    items = ex.extract_structured_data(_YOAST, "https://x.com/")
+    assert [i["schema_type"] for i in items] == [
+        "WebPage", "Organization", "Article, BlogPosting"
+    ]
+    # El nodo que solo es una referencia (`{"@id": ...}`) no es una entidad.
+    assert all(i["raw"].get("@type") for i in items)
+
+
+def test_el_json_ld_envuelto_en_cdata_se_lee():
+    """Sintaxis de XHTML que usan Drupal y los portales antiguos: el bloque
+    entero desaparecia sin aviso."""
+    html = ('<html><head><script type="application/ld+json">//<![CDATA[\n'
+            '{"@context":"https://schema.org","@type":"Product","name":"X"}\n'
+            '//]]></script></head><body>x</body></html>')
+    items = ex.extract_structured_data(html, "https://x.com/")
+    assert [i["schema_type"] for i in items] == ["Product"]
+
+
+def test_el_tipo_se_guarda_con_el_mismo_nombre_en_los_tres_formatos():
+    """RDFa lo escribe como IRI completo y los otros dos como nombre corto, asi
+    que el mismo tipo salia con dos nombres y los filtros no casaban."""
+    rdfa = ('<html><body><div vocab="https://schema.org/" typeof="Product">'
+            '<span property="name">X</span></div></body></html>')
+    micro = ('<html><body><div itemscope itemtype="https://schema.org/Product">'
+             '<span itemprop="name">X</span></div></body></html>')
+    tipos = {ex.extract_structured_data(h, "https://x.com/")[0]["schema_type"]
+             for h in (rdfa, micro)}
+    assert tipos == {"Product"}
