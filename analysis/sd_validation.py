@@ -154,6 +154,18 @@ def _es_referencia(item: dict) -> bool:
     return bool(claves) and claves <= {"@id", "id"}
 
 
+# Propiedades que el ANIDAMIENTO ya resuelve. Una `Review` dentro de un
+# `Product` no necesita `itemReviewed`: lo reseñado es el producto que la
+# contiene, y Google documenta que no hay que repetirlo. Validarla como si
+# estuviera suelta producia 675 errores falsos en un censo de 4.785 paginas de
+# comercio electronico — justo las fichas de producto con resenas, que es donde
+# el marcado esta BIEN.
+IMPLICITAS_AL_ANIDAR: dict[str, set[str]] = {
+    "review": {"itemreviewed"},
+    "aggregaterating": {"itemreviewed"},
+}
+
+
 def _entidades_anidadas(item: dict, profundidad: int = 0):
     """Entidades con `@type` dentro de otra (`WebPage.mainEntity`, `itemListElement`).
 
@@ -174,11 +186,19 @@ def _entidades_anidadas(item: dict, profundidad: int = 0):
             yield from _entidades_anidadas(candidato, profundidad + 1)
 
 
-def validate_sd_item(item: dict, incluir_anidadas: bool = True) -> list[tuple[str, str]]:
+def validate_sd_item(
+    item: dict, incluir_anidadas: bool = True, anidada: bool = False
+) -> list[tuple[str, str]]:
     """Problemas de una entidad, como ``(nivel, mensaje)``.
 
     *nivel* es ``"error"`` (sin esto no hay resultado enriquecido) o
     ``"warning"`` (sale, pero peor).
+
+    `anidada` cambia dos cosas, y las dos salen de medir en un censo real:
+    no se exige lo que el anidamiento ya resuelve (`IMPLICITAS_AL_ANIDAR`) y no
+    se avisa de las propiedades RECOMENDADAS. Una `Organization` puesta como
+    marca de un producto no necesita logo ni perfiles sociales: lo recomendado
+    pesa en la entidad principal de la pagina, que es la de primer nivel.
     """
     if _es_referencia(item):
         return []
@@ -196,7 +216,11 @@ def validate_sd_item(item: dict, incluir_anidadas: bool = True) -> list[tuple[st
         reqs = requisitos_de(tipo)
         if not reqs:
             continue
+        clave = (tipo or "").rsplit("/", 1)[-1].lstrip("@").lower()
+        implicitas = IMPLICITAS_AL_ANIDAR.get(clave, set()) if anidada else set()
         for prop in reqs.get("obligatorias", []):
+            if prop in implicitas:
+                continue
             if not _tiene_valor(item, prop):
                 problemas.append((
                     "error",
@@ -210,6 +234,8 @@ def validate_sd_item(item: dict, incluir_anidadas: bool = True) -> list[tuple[st
                     f"{tipo}: hace falta al menos una de {', '.join(grupo)}; "
                     f"sin ninguna no sale como resultado enriquecido",
                 ))
+        if anidada:
+            continue
         for prop in reqs.get("recomendadas", []):
             if not _tiene_valor(item, prop):
                 problemas.append((
@@ -220,7 +246,9 @@ def validate_sd_item(item: dict, incluir_anidadas: bool = True) -> list[tuple[st
     if incluir_anidadas:
         vistos = set(problemas)
         for anidada in _entidades_anidadas(item):
-            for problema in validate_sd_item(anidada, incluir_anidadas=False):
+            for problema in validate_sd_item(
+                anidada, incluir_anidadas=False, anidada=True
+            ):
                 if problema not in vistos:
                     vistos.add(problema)
                     problemas.append(problema)

@@ -175,3 +175,42 @@ def test_una_entidad_anidada_tambien_se_valida():
         {"@type": "WebPage", "name": "p",
          "mainEntity": {"@type": "Product", "name": "X", "offers": {"price": 1},
                         "image": "i", "brand": "b", "description": "d"}}) == ("ok", [])
+
+
+def test_una_resena_dentro_de_un_producto_no_necesita_itemreviewed():
+    """Lo resenado es el producto que la contiene y Google documenta que no hay
+    que repetirlo. Validarla como si estuviera suelta producia **675 errores
+    falsos** en un censo de 4.785 paginas de comercio electronico, justo en las
+    fichas con resenas: donde el marcado esta BIEN."""
+    ficha = {
+        "@type": "Product", "name": "X", "offers": {"@type": "Offer", "price": "1"},
+        "image": "i", "brand": {"@type": "Organization", "name": "Acme"},
+        "description": "d",
+        "review": [{"@type": "Review", "reviewRating": {"ratingValue": 5},
+                    "author": {"@type": "Person", "name": "A"}}],
+    }
+    assert validate_structured_data(ficha) == ("ok", [])
+
+
+def test_una_resena_suelta_si_necesita_itemreviewed():
+    suelta = {"@type": "Review", "reviewRating": {"ratingValue": 5},
+              "author": {"@type": "Person", "name": "A"}}
+    estado, problemas = validate_structured_data(suelta)
+    assert estado == "error"
+    assert any("itemreviewed" in p for p in problemas)
+
+
+def test_una_entidad_anidada_no_avisa_de_lo_recomendado():
+    """Una Organization puesta como marca de un producto no necesita logo ni
+    perfiles sociales: lo recomendado pesa en la entidad principal."""
+    ficha = {
+        "@type": "Product", "name": "X", "offers": {"@type": "Offer", "price": "1"},
+        "image": "i", "description": "d",
+        "brand": {"@type": "Organization", "name": "Acme"},
+    }
+    assert validate_structured_data(ficha) == ("ok", [])
+    # Pero una obligatoria que falta en la anidada sigue siendo error.
+    ficha["brand"] = {"@type": "Organization", "url": "https://acme.com"}
+    estado, problemas = validate_structured_data(ficha)
+    assert estado == "error"
+    assert any("name" in p for p in problemas)
