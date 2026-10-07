@@ -177,3 +177,53 @@ def test_sql_del_peso_coincide_con_python(sesion, posicion, rep):
         {"rep": rep, "pos": posicion},
     ).scalar()
     assert float(valor) == pytest.approx(prk.peso_arista(posicion, rep))
+
+
+def test_repetir_el_mismo_enlace_no_cambia_nada(sesion, job):
+    """El mismo enlace N veces en una pagina pesa lo que pesa una vez.
+
+    `links` guarda una fila por INSTANCIA, y de ahi sale que `pr_lk_tmp` se
+    pueda deduplicar antes de los dos pasos caros (#52): la repeticion cuenta
+    origenes DISTINTOS y el peso de la arista es el MAXIMO por (origen,
+    destino), asi que las copias no aportan. Medido en Druni, deduplicar pasa
+    de 115.821.074 filas a 34.344.051.
+
+    Este test no falla contra el codigo anterior —tambien era invariante— y por
+    eso esta: fija la propiedad de la que depende la optimizacion. El dia que
+    alguien cambie ese MAX por una suma, o la repeticion por un COUNT(*), el
+    DISTINCT dejaria de ser gratis y tiene que cantarlo este test y no un censo
+    con las cifras movidas.
+    """
+    from analysis.analyzer import SEOAnalyzer
+
+    j, filas = job
+    SEOAnalyzer(sesion, str(j.id)).compute_pagerank()
+    sesion.commit()
+    antes = dict(sesion.execute(
+        select(Url.url, Url.pagerank_raw).where(Url.job_id == j.id)).all())
+
+    # Cada enlace del censo, cuatro veces mas, identico en todo.
+    originales = sesion.execute(select(Link).where(Link.job_id == j.id)).scalars().all()
+    for enlace in list(originales):
+        for _ in range(4):
+            sesion.add(Link(
+                job_id=enlace.job_id, from_url_id=enlace.from_url_id,
+                to_url=enlace.to_url, to_url_hash=enlace.to_url_hash,
+                anchor_text=enlace.anchor_text, is_internal=enlace.is_internal,
+                follow=enlace.follow, link_position=enlace.link_position,
+            ))
+    sesion.commit()
+    assert sesion.execute(
+        select(Url.id).where(Url.job_id == j.id)).scalars().all()  # sanidad
+
+    SEOAnalyzer(sesion, str(j.id)).compute_pagerank()
+    sesion.commit()
+    despues = dict(sesion.execute(
+        select(Url.url, Url.pagerank_raw).where(Url.job_id == j.id)).all())
+
+    assert set(antes) == set(despues)
+    for url, valor in antes.items():
+        if valor is None:
+            assert despues[url] is None, url
+            continue
+        assert abs(despues[url] - valor) < 1e-12, url

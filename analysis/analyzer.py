@@ -2075,10 +2075,18 @@ class SEOAnalyzer:
         # por expresiones (`lower(btrim(anchor))`) dejaba al planificador sin
         # estimacion: suponia 1 fila, elegia bucles anidados y recorria la
         # tabla de fuentes 462.452 veces -- 116 s en Lopesan (150 k enlaces).
+        # DISTINCT, y no es un detalle: `links` guarda una fila por INSTANCIA
+        # de enlace, y los dos pasos caros que vienen detras no miran las
+        # repeticiones. `pr_rep_tmp` cuenta origenes DISTINTOS y `pr_edges_tmp`
+        # se queda con el MAXIMO del peso por (origen, destino), asi que dos
+        # filas con el mismo (origen, destino, ancla, posicion) dan exactamente
+        # el mismo resultado que una. Medido en Druni: **115.821.074 instancias
+        # -> 34.344.051 distintas**, 3,4 veces menos, sobre los dos pasos que se
+        # llevan el 93% del tiempo de esta funcion.
         self.session.execute(text(
             f"""
             CREATE TEMP TABLE pr_lk_tmp AS
-            SELECT l.from_url_id AS src, l.to_url_hash AS h, {anchor} AS anc,
+            SELECT DISTINCT l.from_url_id AS src, l.to_url_hash AS h, {anchor} AS anc,
                    l.link_position AS pos, f.sec
             FROM links l JOIN pr_fuentes_tmp f ON f.id = l.from_url_id
             WHERE l.job_id = :jid AND l.is_internal AND l.follow
