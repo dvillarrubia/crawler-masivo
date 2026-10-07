@@ -856,12 +856,26 @@ def _pagerank_fiable(session: Session, job_id: uuid.UUID):
     de calculo no abre el endpoint del job, y sin esto se lleva unas cifras
     calculadas sobre un grafo incompleto sin saberlo.
     """
+    # OJO con el orden: el analisis escribe `pagerank_resumen` ANTES de que el
+    # worker lance la comprobacion de render, asi que en un rastreo recien
+    # terminado la clave existe con valor None. Mirar solo si la clave esta
+    # dejaba la columna VACIA en todas las filas del CSV aunque el `js_check`
+    # dijera luego que si: medido en el censo de progym, 4.320 filas sin el
+    # aviso con `js_check.grafo_fiable = true`. Un None es "aun no se sabe", no
+    # una respuesta.
     resumen = session.query(Job.pagerank_resumen).filter(Job.id == job_id).scalar()
-    if isinstance(resumen, dict) and "grafo_fiable" in resumen:
+    if isinstance(resumen, dict) and resumen.get("grafo_fiable") is not None:
         return resumen["grafo_fiable"]
     js_check = session.query(Job.js_check).filter(Job.id == job_id).scalar()
-    if isinstance(js_check, dict):
-        return js_check.get("grafo_fiable")
+    if isinstance(js_check, dict) and js_check.get("grafo_fiable") is not None:
+        return js_check["grafo_fiable"]
+    # Con `render_js` la comprobacion no llega a correr —existe justamente para
+    # los rastreos SIN render—, asi que no hay js_check que mirar y la columna
+    # se quedaba vacia tambien ahi. Un rastreo que renderiza ya ha visto los
+    # enlaces que monta el JavaScript, que es lo unico que esta columna dice.
+    config = session.query(Job.config).filter(Job.id == job_id).scalar()
+    if isinstance(config, dict) and config.get("render_js"):
+        return True
     return None
 
 
