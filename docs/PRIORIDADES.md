@@ -91,8 +91,16 @@ Lo entregado, con la medición de cada cosa, está en las decisiones 44-57 del
 
 **Lo que queda abierto en esas issues es juicio**, y por eso va a M3/M4: si un
 carrusel o un bloque de suscripción es contenido (#15), si un parámetro de URL
-es legítimo (#12, #22), qué tipo de página es cada plantilla (#12). Queda tuya la revisión a mano
-del top 50 por PageRank de los tres censos, que ya está sacado.
+es legítimo (#12, #22), qué tipo de página es cada plantilla (#12). La revisión del top 50 por PageRank de
+los tres censos **está hecha** y vive en
+[`docs/REVISION_PAGERANK.md`](REVISION_PAGERANK.md): el modelo no produce
+ninguna anomalía, y los tres casos llamativos resultaron ser hallazgos del
+sitio (una `noindex` recibiendo el 0,51% de todo el PageRank de www.uoc.edu
+desde 20.255 enlaces de pie, la página más fuerte de progym sin un solo enlace
+entrante, y 5 redirecciones en el top 50 de blogs.uoc.edu). De ahí sale una
+propuesta pendiente de decisión: avisar cuando el orden del top **no
+discrimina** —en progym, del 2.º al 50.º todo son 3.572 enlaces y 95 puntos—,
+porque si no se lee como una prioridad algo que es un empate.
 
 ### C2 medida: da igual, y por eso se queda como está
 
