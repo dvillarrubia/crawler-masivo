@@ -234,3 +234,26 @@ def test_una_noindex_si_puede_recibir_enlaces():
     s.commit()
     s.refresh(noindex)
     assert noindex.inlinks_count == 1
+
+
+def test_un_enlace_desde_una_pagina_rota_no_cuenta():
+    """Un 404 o un 500 sale del indice y se lleva sus enlaces con el: lo que
+    solo cuelga de ahi no esta enlazado. Medido en www.uoc.edu: **503 paginas
+    que devuelven 500** aportaban 264.991 enlaces, y 137 URLs tenian TODOS sus
+    entrantes internos ahi — huerfanas de hecho que salian enlazadas."""
+    s, j = _montar()
+    roto = _url(s, j, "/error", status=500)
+    buena = _url(s, j, "/indice")
+    destino = _url(s, j, "/ficha")
+    _enlace(s, j, roto, "/ficha")
+    s.flush()
+    analizador = SEOAnalyzer(s, j.id)
+    analizador.compute_link_counts()
+    s.flush()
+    assert s.get(Url, destino.id).inlinks_count == 0
+    # Y con un enlace desde una pagina buena, si cuenta.
+    _enlace(s, j, buena, "/ficha")
+    s.flush()
+    analizador.compute_link_counts()
+    s.flush()
+    assert s.get(Url, destino.id).inlinks_count == 1
