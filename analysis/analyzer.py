@@ -1752,6 +1752,16 @@ class SEOAnalyzer:
         200 indexables. Deja en `jobs.pagerank_resumen` cuanto PageRank acaba
         en cada tipo de URL, y el desperdiciado.
 
+        Una pagina NO reparte autoridad si no responde 200 o si lleva
+        `noindex` (C3 de #24, el mismo criterio que la decision 38 aplica a los
+        enlaces entrantes): Google acaba tratando los enlaces de una noindex
+        como nofollow, asi que lo que recibe de ella no es autoridad real. Lo
+        que ya tenia acumulado no se pierde: la pagina queda colgante y su masa
+        va al teletransporte, o sea al conjunto de paginas indexables, en vez de
+        a los destinos concretos que ella enlazaba. Ser noindex NO impide
+        recibir —un enlace a una noindex es autoridad que se tira, y eso es
+        justo lo que mide `reparto["no_indexable"]`.
+
         Las aristas se agregan EN SQL y se iteran vectorizadas con numpy. Con
         139 millones de enlaces internos (un e-commerce real, ~2.300 por pagina
         por los megamenus) cargarlos como objetos de Python eran ~14 GB;
@@ -2029,7 +2039,8 @@ class SEOAnalyzer:
                    COALESCE(substring(u.url FROM '^https?://[^/?#]+(?:/[^/?#]*)?'), '')
                        AS sec
             FROM urls u
-            WHERE u.job_id = :jid AND u.status_code = 200 AND EXISTS (
+            WHERE u.job_id = :jid AND u.status_code = 200
+              AND u.noindex IS NOT TRUE AND EXISTS (
                 SELECT 1 FROM links l
                 WHERE l.from_url_id = u.id AND l.job_id = :jid
                   AND l.is_internal AND l.follow
@@ -2053,7 +2064,7 @@ class SEOAnalyzer:
                 JOIN urls o ON o.id = l.from_url_id
                 WHERE l.job_id = :jid AND l.is_internal AND l.follow
                   AND u.is_internal AND l.from_url_id <> u.id
-                  AND o.status_code = 200
+                  AND o.status_code = 200 AND o.noindex IS NOT TRUE
                 GROUP BY 1, 2
                 """
             ), jid)

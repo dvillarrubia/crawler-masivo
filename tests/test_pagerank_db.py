@@ -59,10 +59,10 @@ def job(sesion):
     filas: dict[str, Url] = {}
 
     def url(ruta, status=200, html=True, indexable=True, estado=None,
-            redirect=None, depth=1):
+            redirect=None, depth=1, noindex=False):
         u = Url(job_id=j.id, url=BASE + ruta, url_hash=_h(BASE + ruta),
                 is_internal=True, status_code=status, is_html=html,
-                indexable=indexable, indexability_status=estado,
+                indexable=indexable, indexability_status=estado, noindex=noindex,
                 redirect_url=redirect, crawl_depth=depth)
         sesion.add(u)
         filas[ruta] = u
@@ -76,6 +76,9 @@ def job(sesion):
     url("/viejo", status=301, html=False, indexable=False,
         estado="3xx Redirect", redirect=BASE + "/blog/a2")
     url("/roto", status=404, indexable=False, estado="4xx Client Error")
+    # Una pagina noindex que enlaza a un articulo: sus enlaces NO pasan
+    # autoridad (C3 de #24), pero ella si recibe.
+    url("/tag/x", indexable=False, estado="Noindex", noindex=True)
     sesion.flush()
     sesion.add(HtmlMeta(url_id=filas["/blog/a1?orden=precio"].id,
                         canonical_href=BASE + "/blog/a1"))
@@ -99,6 +102,9 @@ def job(sesion):
     # La variante enlaza a a9: al consolidarse en la canonica, ese enlace no
     # debe contar (son los enlaces de la canonica, no se suman dos veces)
     enlace("/blog/a1?orden=precio", "/blog/a9", "solo en la variante", "content")
+    # La noindex recibe un enlace y enlaza a a7: lo primero cuenta, lo segundo no
+    enlace("/blog/a6", "/tag/x", "etiqueta", "content")
+    enlace("/tag/x", "/blog/a7", "desde una noindex", "content")
     sesion.commit()
     yield j, filas
     sesion.delete(sesion.get(Job, j.id))
@@ -129,6 +135,32 @@ def test_pagerank_con_repeticion_canonical_y_sumideros(sesion, job):
     assert articulo(2) > articulo(6)
     # El enlace que solo tenia la variante no cuenta tras consolidar
     assert articulo(9) == pytest.approx(articulo(6), rel=0.01)
+
+
+def test_una_pagina_noindex_recibe_pero_no_reparte(sesion, job):
+    """C3 de #24: Google acaba tratando los enlaces de una noindex como
+    nofollow, asi que lo que llega desde ella no es autoridad real. Es el mismo
+    criterio que la decision 38 aplica a los enlaces entrantes.
+
+    Lo que ya tenia acumulado no se pierde: la pagina queda colgante y su masa
+    va al teletransporte (el conjunto de indexables) y no a sus destinos.
+    """
+    from analysis.analyzer import SEOAnalyzer
+
+    j, filas = job
+    SEOAnalyzer(sesion, str(j.id)).compute_pagerank()
+    sesion.commit()
+
+    pr = dict(sesion.execute(
+        select(Url.url, Url.pagerank_raw).where(Url.job_id == j.id)).all())
+    articulo = lambda i: pr[f"{BASE}/blog/a{i}"]  # noqa: E731
+
+    # La noindex SI recibe: su enlace entrante es autoridad que se tira, y eso
+    # es justo lo que hay que poder medir.
+    assert pr[f"{BASE}/tag/x"] > 0
+    # Pero a7, que solo recibe desde la noindex, no queda por encima de sus
+    # hermanos que no reciben nada de ahi.
+    assert articulo(7) == pytest.approx(articulo(6), rel=0.02)
 
 
 @pytest.mark.parametrize("posicion", ["content", "nav", "footer", "desconocida", None])
