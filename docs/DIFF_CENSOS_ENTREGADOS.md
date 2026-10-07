@@ -21,6 +21,14 @@ Sin tocar producción. Para cada censo:
 El paso 3 no es ceremonia: sin él, cualquier diferencia podría ser del
 transporte y no del análisis.
 
+Está automatizado en
+[`docs/experimentos/diff_censo_entregado.py`](experimentos/diff_censo_entregado.py),
+que aborta si la copia no sale fiel:
+
+```bash
+python docs/experimentos/diff_censo_entregado.py <job_id_del_vps>
+```
+
 ---
 
 ## Saunier Duval · `b8ea3e43` · 2.876 URLs · rastreo con render JS
