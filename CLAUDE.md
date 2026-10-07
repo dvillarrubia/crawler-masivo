@@ -364,13 +364,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    mismo censo cubre los diez tramos. Las cuatro decadas no son arbitrarias:
    el maximo es 393 veces la mediana y 4.515 veces el percentil 25.
 
-35. **El aviso de que el grafo no es fiable viaja CON el dato** — si
+35. **El aviso de que el grafo no es fiable viaja CON el dato, tambien en
+   pantalla** — si
    `jobs.js_check.grafo_fiable` es false hay plantillas que montan sus enlaces
    con JavaScript y el PageRank sale de un grafo incompleto. Antes eso solo
    existia como WARNING en el log del worker y la cifra se entregaba como si
    nada. Ahora esta en `jobs.pagerank_resumen` y en una columna del CSV
    (`pagerank_fiable`), porque quien ordena por PageRank en una hoja de
-   calculo no abre el endpoint del job.
+   calculo no abre el endpoint del job. Y en el frontend, que es donde se mira
+   un rastreo: un aviso en la ficha del job cuando `grafo_fiable` es false, con
+   las plantillas afectadas, y otro distinto cuando es null (no se pudo
+   comprobar porque Chromium no recibio contenido). Ademas la tabla pinta
+   `pagerank_score` —la escala 0-100 de la decision 34— en vez de la 0-10 con
+   cuatro decimales, que era la unica que habia: con esa, el 85% de las paginas
+   de un censo queda en 0,00xx y no se distingue la 250 de la 25.000. Para eso
+   hacia falta exponer `pagerank_score` y `pagerank_raw` en la respuesta de
+   `/urls`, que solo llevaba `pagerank`.
 
 41. **Los conteos de enlaces leen `links` UNA vez, no cuatro** (#52) — la
    tabla guarda los enlaces de TODOS los rastreos (46 GB y 181.695.835 filas en

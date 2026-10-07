@@ -89,6 +89,8 @@ SORT_COLUMNS = {
     "external_outlinks_count": Url.external_outlinks_count,
     "unique_inlinks_count": Url.unique_inlinks_count,
     "pagerank": Url.pagerank,
+    "pagerank_score": Url.pagerank_score,
+    "pagerank_raw": Url.pagerank_raw,
     "near_duplicate_count": Url.near_duplicate_count,
     "url_length": Url.url_length,
     "folder_depth": Url.folder_depth,
@@ -104,6 +106,8 @@ SORT_COLUMNS = {
 # Numeric range filters mapped to (model_column, requires_html_meta_join)
 _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "pagerank": (Url.pagerank, False),
+    "pagerank_score": (Url.pagerank_score, False),
+    "pagerank_raw": (Url.pagerank_raw, False),
     "near_duplicate_count": (Url.near_duplicate_count, False),
     "closest_similarity": (Url.closest_similarity, False),
     "content_length": (Url.content_length, False),

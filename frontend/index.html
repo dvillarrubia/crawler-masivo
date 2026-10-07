@@ -265,6 +265,42 @@
           </div>
         </template>
 
+        <!-- Aviso de grafo incompleto por JavaScript. El PageRank se calcula
+             igual y antes se entregaba sin decir nada: el aviso solo existia en
+             el log del worker y en una columna del CSV, que no abre quien mira
+             el job en pantalla (decision 35). -->
+        <template x-if="job.js_check && job.js_check.grafo_fiable === false">
+          <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)">
+            <div class="text-sm">
+              <strong>El PageRank no es fiable: faltan enlaces.</strong>
+              Este rastreo se hizo sin render de JavaScript y hay plantillas que
+              montan sus enlaces con JS, asi que el grafo esta incompleto y el
+              PageRank sale de el.
+              <template x-if="(job.js_check.plantillas || []).some(p => p.enlaces_solo_js > 0)">
+                <span>
+                  Plantillas afectadas:
+                  <span x-text="(job.js_check.plantillas || []).filter(p => p.enlaces_solo_js > 0).map(p => p.plantilla.split('  (')[0]).join(', ')"></span>.
+                </span>
+              </template>
+              Relanza con <code>render_js</code> antes de usar estas cifras de
+              enlazado en un informe.
+            </div>
+          </div>
+        </template>
+
+        <!-- Lo contrario: no se pudo comprobar. Tampoco es "fiable". -->
+        <template x-if="job.js_check && job.js_check.grafo_fiable === null">
+          <div class="card mb-2" style="border-left:3px solid var(--muted,#6b7280)">
+            <div class="text-sm">
+              <strong>No se pudo comprobar si faltan enlaces.</strong>
+              En las plantillas muestreadas, Chromium no recibio una pagina con
+              contenido (bloqueo del WAF, desafio o error), asi que el
+              <em>grafo fiable</em> queda sin determinar: ni se afirma que falten
+              enlaces ni que no falten.
+            </div>
+          </div>
+        </template>
+
         <!-- Tarjetas de estadisticas -->
         <template x-if="stats">
           <div class="stats-grid">

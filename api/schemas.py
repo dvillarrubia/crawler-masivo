@@ -383,6 +383,11 @@ class UrlResponse(BaseModel):
     external_outlinks_count: int | None = None
     unique_inlinks_count: int | None = None
     pagerank: float | None = None
+    # La escala que hay que leer y ordenar (decision 34). Sin esto en la
+    # respuesta, la tabla solo podia pintar la 0-10 con cuatro decimales, donde
+    # el 85% de las paginas de un censo queda en 0,00xx.
+    pagerank_score: int | None = None
+    pagerank_raw: float | None = None
     in_sitemap: bool | None = None
     near_duplicate_count: int | None = None
     closest_similarity: float | None = None
