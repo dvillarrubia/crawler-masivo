@@ -472,7 +472,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    tambien cambia: en www.uoc.edu quita 7.496 aristas de 2.013.337 y mueve el
    reparto 7 centesimas (84,02% -> 84,09% indexable), sin que entre ni salga
    nadie del top 50 y con 2 puestos de movimiento maximo; en progym, 474 aristas
-   de 582.205 y el reparto no se mueve.
+   de 582.205 y el reparto no se mueve; pero en blogs.uoc.edu quita **127.360
+   aristas de 1.517.272** (el 8,4% del grafo) y pasa **seis puntos** de PageRank
+   de las noindex a las indexables (no_indexable 8,46% -> 2,29%, indexable
+   87,22% -> 93,12%). Son sus 1.758 paginas de paginacion de categoria
+   enlazandose entre ellas: la autoridad circulaba en un circuito cerrado que
+   Google va a dejar de rastrear. El ORDEN casi no se mueve en ninguno de los
+   tres —del top 50 no entra ni sale nadie— pero los valores absolutos suben (el
+   1.º de blogs pasa de 108,3x a 119,9x la pagina media).
 
 37. **El job se filtra en `links`, nunca uniendo con `urls`** — la tabla de
    enlaces guarda los de TODOS los rastreos: 46 GB y 181 millones de filas en
