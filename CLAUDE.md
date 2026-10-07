@@ -358,6 +358,11 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `pagerank_score` es 0-100 logaritmica anclada al MAXIMO del sitio, donde
    cada 25 puntos son una decada. Es la que hay que leer y ordenar.
    `pagerank` se queda en 0-10 por compatibilidad con informes entregados.
+   El 0-100 es lo que se ve en la tabla de URLs y en la ficha de una URL; el
+   0-10 solo aparece en la ficha, en gris, rotulado «antiguo». Que la columna
+   de la tabla siguiera siendo la de 0-10 hacia invisible el arreglo entero:
+   las nueve primeras filas de blogs.uoc.edu se leian
+   `0,4 0,0 0,0 0,2 0,0 0,3 0,0 3,2 7,1` y ahora `65 38 38 58 20 63 20 88 96`.
    La primera version la ancle con min-max sobre los logaritmos y el 78% de
    las paginas acabo en el decil mas alto: el minimo de la distribucion es una
    pagina aislada que estira la escala entera. Con el maximo como ancla, el
