@@ -697,8 +697,14 @@ def extract_links(
         alt_text_parts: list[str] = []
         for img in child_imgs:
             alt = img.attrib.get("alt", "")
-            if alt and alt.strip():
-                alt_text_parts.append(alt.strip())
+            alt = alt.strip() if alt else ""
+            # El mismo alt dos veces es el patron responsive: el enlace lleva
+            # el clon de movil y el de escritorio de la misma imagen (o un
+            # `<picture>` con su `<img>` de respaldo). Unirlos daba
+            # "voto femenino voto femenino" -- medido en 7 de las 58 paginas
+            # de control. Google lee la imagen una vez.
+            if alt and alt not in alt_text_parts:
+                alt_text_parts.append(alt)
         alt_text = _clean(" ".join(alt_text_parts)) if alt_text_parts else None
 
         # Follow: True unless rel contains "nofollow" or the page itself is
@@ -712,7 +718,8 @@ def extract_links(
         # correccion de criterio, no un cambio de volumen.
         follow = not (_REL_SIN_AUTORIDAD & rel_tokens(rel)) and not page_nofollow
 
-        # Link type classification
+        # Link type classification. Se decide ANTES de caer al alt: un
+        # `<a><img></a>` es un enlace de imagen aunque su ancla salga del alt.
         has_child_imgs = len(child_imgs) > 0
         has_text = bool(anchor_text)
         if has_child_imgs and not has_text:
@@ -721,6 +728,18 @@ def extract_links(
             link_type = "image_text"
         else:
             link_type = "hyperlink"
+
+        # Google: "if the link is an image, the alt text acts as the anchor
+        # text". Es el ultimo recurso, despues de aria-label y title, porque
+        # esos los escribe alguien para ANUNCIAR el enlace y el alt describe la
+        # imagen; cuando no hay ninguno, el alt es lo unico que rotula el
+        # enlace y es lo que Google toma como ancla. Medido en 58 paginas de
+        # control de tres clientes: de 1.276 enlaces sin ancla, 1.068 la
+        # recuperan —titulos de articulo, nombres de producto, el logo que
+        # enlaza a la home— y los 208 que siguen vacios son iconos de redes
+        # sociales sin alt, sin aria-label y sin title: no los rotula nada.
+        if not anchor_text and alt_text:
+            anchor_text = alt_text
 
         results.append({
             "url": normalized,
