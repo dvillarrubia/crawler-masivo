@@ -32,6 +32,7 @@ from seo_crawler.extractors import (
     compute_folder_depth,
     compute_status_group,
     compute_text_ratio,
+    canonical_de_cabecera,
     contar_palabras,
     hash_de_contenido,
     compute_url_hash,
@@ -1409,12 +1410,11 @@ class SeoSpider(scrapy.Spider):
             ]
             x_robots = ", ".join(cabeceras_robots) or None
 
-            # Canonical from Link header
+            # Canonical de la cabecera Link (RFC 8288). Antes se cogia el
+            # primer enlace de la cabecera fuera el que fuera, asi que un
+            # `rel=preload` delante se guardaba como canonical de la pagina.
             link_header = response.headers.get(b"Link", b"").decode("utf-8", errors="ignore")
-            if 'rel="canonical"' in link_header:
-                parts = link_header.split(";")
-                if parts:
-                    canonical_header = parts[0].strip().strip("<>")
+            canonical_header = canonical_de_cabecera(link_header, base_url)
 
             # Word count and text ratio
             word_count_val = extract_word_count(selector)
@@ -1536,6 +1536,8 @@ class SeoSpider(scrapy.Spider):
             meta_robots=meta["meta_robots"],
             x_robots_tag=x_robots,
             canonical_href=meta["canonical_href"],
+            canonical_count=meta.get("canonical_count"),
+            canonical_in_body=meta.get("canonical_in_body"),
             canonical_header=canonical_header,
             og_title=meta["og_title"],
             og_description=meta["og_description"],

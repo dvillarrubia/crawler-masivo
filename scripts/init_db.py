@@ -36,6 +36,9 @@ if __name__ == "__main__":
         # Hash del contenido normalizado: el de los bytes no detecta duplicados
         # en ningun CMS moderno (un token CSRF cambia el hash).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"))
+        # Varios canonicals, o uno en el body: Google los ignora.
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_count INTEGER"))
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_in_body BOOLEAN"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado

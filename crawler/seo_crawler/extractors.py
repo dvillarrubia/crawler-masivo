@@ -377,6 +377,33 @@ def rel_tokens(rel: str | None) -> set[str]:
 # HTML extraction
 # ---------------------------------------------------------------------------
 
+def _links_por_rel(selector, token: str, solo_head: bool = False) -> list[str]:
+    """``href`` de los ``<link>`` cuyo ``rel`` contiene *token*.
+
+    `rel` es una lista de tokens separados por espacios y no distingue
+    mayusculas (`rel="Alternate canonical"` es valido). Comparar la cadena
+    entera, como se hacia, dejaba fuera todo lo que no fuera exactamente el
+    token en minusculas.
+    """
+    ambito = "//head//link" if solo_head else "//link"
+    minuscula = f"translate(@rel, '{_XP_UPPER}', '{_XP_LOWER}')"
+    # Se rodea de espacios para comparar por token entero y no por subcadena:
+    # `rel="canonicalize"` no es un canonical.
+    consulta = (
+        f"{ambito}[@href and contains(concat(' ', normalize-space({minuscula}), ' '), $t)]"
+        "/@href"
+    )
+    return [h for h in selector.xpath(consulta, t=f" {token.lower()} ").getall() if h]
+
+
+def _primero_resuelto(base_url: str, hrefs: list[str]) -> str | None:
+    for href in hrefs:
+        resuelto = _resolve(base_url, _clean(href))
+        if resuelto:
+            return resuelto
+    return None
+
+
 def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     """
     Extract SEO-relevant <head> metadata from a *parsel.Selector*.
@@ -389,20 +416,32 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
 
     Returns a flat dict that maps 1-to-1 with ``HtmlMetaItem`` fields.
     """
-    def _meta_all(name: str) -> list[str]:
-        """All content="" values of <meta name|property="...">, matching the
-        attribute value case-insensitively (real-world markup uses
-        ``name="Description"``, ``name="ROBOTS"``, etc. — Screaming Frog and
-        Google both match these)."""
-        vals = selector.xpath(
-            f"//meta[translate(@name, '{_XP_UPPER}', '{_XP_LOWER}') = $n"
-            f" or translate(@property, '{_XP_UPPER}', '{_XP_LOWER}') = $n]/@content",
-            n=name.lower(),
-        ).getall()
+    def _meta_all(name: str, con_property: bool = False) -> list[str]:
+        """All content="" values of <meta name="...">, case-insensitively.
+
+        El nombre se compara con `normalize-space`: `name=" robots"` con un
+        espacio delante no se detectaba, y es un fallo de plantilla comun.
+
+        `con_property` solo para Open Graph y Twitter: `property` es el atributo
+        de OG y de RDFa, no de las metas clasicas, asi que un
+        `<meta property="description">` —que es RDFa y Google no lee como meta
+        description— se contaba como la description de la pagina.
+        """
+        consulta = (
+            f"//meta[normalize-space(translate(@name, '{_XP_UPPER}', '{_XP_LOWER}')) = $n]"
+            "/@content"
+        )
+        if con_property:
+            consulta = (
+                f"//meta[normalize-space(translate(@name, '{_XP_UPPER}', '{_XP_LOWER}')) = $n"
+                f" or normalize-space(translate(@property, '{_XP_UPPER}', '{_XP_LOWER}')) = $n]"
+                "/@content"
+            )
+        vals = selector.xpath(consulta, n=name.lower()).getall()
         return [v for v in (_clean(x) for x in vals) if v]
 
-    def _meta(name: str) -> str | None:
-        vals = _meta_all(name)
+    def _meta(name: str, con_property: bool = False) -> str | None:
+        vals = _meta_all(name, con_property=con_property)
         return vals[0] if vals else None
 
     # Title: first <title> that is NOT inside an inline <svg> (SVG has its own
@@ -426,7 +465,14 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     googlebot_vals = _meta_all("googlebot")
     meta_robots_googlebot = ", ".join(googlebot_vals) if googlebot_vals else None
 
-    canonical = _resolve(base_url, _clean(selector.css('link[rel="canonical"]::attr(href)').get()))
+    # `rel` es una lista de tokens y no distingue mayusculas: `rel="Canonical"`,
+    # `rel="canonical "` y `rel="alternate canonical"` son canonicals validos
+    # para Google y antes daban None, de modo que la pagina salia sin canonical.
+    canonicals_head = _links_por_rel(selector, "canonical", solo_head=True)
+    canonicals_todos = _links_por_rel(selector, "canonical")
+    # Google IGNORA un canonical que esta en el body: no se usa como valor, pero
+    # se cuenta para poder avisar.
+    canonical = _resolve(base_url, _clean(canonicals_head[0])) if canonicals_head else None
 
     return {
         "title": title_text,
@@ -437,22 +483,28 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         "meta_robots": meta_robots,
         "meta_robots_googlebot": meta_robots_googlebot,
         "canonical_href": canonical,
+        # Con varios canonicals Google los ignora todos, y en el body tambien:
+        # el analyzer necesita saberlo para avisar en vez de quedarse con el
+        # primero en silencio.
+        "canonical_count": len(canonicals_todos),
+        "canonical_in_body": len(canonicals_todos) > len(canonicals_head),
         # OG
-        "og_title": _meta("og:title"),
-        "og_description": _meta("og:description"),
-        "og_image": _resolve(base_url, _meta("og:image")),
-        "og_url": _resolve(base_url, _meta("og:url")),
-        "og_type": _meta("og:type"),
+        "og_title": _meta("og:title", con_property=True),
+        "og_description": _meta("og:description", con_property=True),
+        "og_image": _resolve(base_url, _meta("og:image", con_property=True)),
+        "og_url": _resolve(base_url, _meta("og:url", con_property=True)),
+        "og_type": _meta("og:type", con_property=True),
         # Twitter
-        "twitter_card": _meta("twitter:card"),
-        "twitter_title": _meta("twitter:title"),
-        "twitter_description": _meta("twitter:description"),
+        "twitter_card": _meta("twitter:card", con_property=True),
+        "twitter_title": _meta("twitter:title", con_property=True),
+        "twitter_description": _meta("twitter:description", con_property=True),
         # Pagination
-        "rel_next": _resolve(
-            base_url, _clean(selector.css('link[rel="next"]::attr(href)').get())
-        ),
-        "rel_prev": _resolve(
-            base_url, _clean(selector.css('link[rel="prev"]::attr(href)').get())
+        "rel_next": _primero_resuelto(base_url, _links_por_rel(selector, "next")),
+        # `previous` es el sinonimo historico de `prev` y las plantillas lo
+        # escriben: daba None y la paginacion salia sin enlace anterior.
+        "rel_prev": _primero_resuelto(
+            base_url,
+            _links_por_rel(selector, "prev") or _links_por_rel(selector, "previous"),
         ),
     }
 
@@ -1536,11 +1588,14 @@ def extract_meta_refresh(selector) -> str | None:
 
     Returns ``None`` when no refresh directive is present.
     """
-    # http-equiv is case-insensitive in HTML; try common variants.
-    content = selector.css(
-        'meta[http-equiv="refresh"]::attr(content), '
-        'meta[http-equiv="Refresh"]::attr(content), '
-        'meta[http-equiv="REFRESH"]::attr(content)'
+    # http-equiv no distingue mayusculas. Probar tres variantes a mano dejaba
+    # fuera `REFresh` y cualquier otra mezcla, que es lo que escriben las
+    # plantillas antiguas; la pagina salia sin meta refresh y su destino no se
+    # seguia. El extractor del DESTINO ya lo hacia bien con translate(), asi que
+    # las dos funciones se contradecian sobre la misma pagina.
+    content = selector.xpath(
+        f"//meta[normalize-space(translate(@http-equiv, '{_XP_UPPER}', '{_XP_LOWER}'))"
+        " = 'refresh']/@content"
     ).get()
     return _clean(content)
 
@@ -1615,6 +1670,60 @@ def detect_mixed_content(selector, page_url: str) -> list[str]:
                 http_resources.append(absolute)
 
     return http_resources
+
+
+def canonical_de_cabecera(valor_link: str | None, base_url: str = "") -> str | None:
+    """Canonical declarado en la cabecera HTTP ``Link`` (RFC 8288).
+
+    Se cogia el PRIMER enlace de la cabecera fuera el que fuera, asi que con
+    `</style.css>; rel=preload, <https://x.com/a>; rel="canonical"` se guardaba
+    `/style.css` como canonical de la pagina. Tampoco se reconocia `rel=canonical`
+    sin comillas —que es valido— ni se resolvia un valor relativo.
+
+    Es la unica forma de declarar un canonical en un PDF o una imagen, asi que
+    leerla mal es decir que un PDF canonicaliza a una hoja de estilos.
+    """
+    if not valor_link:
+        return None
+    for entrada in _separar_cabecera_link(valor_link):
+        partes = [p.strip() for p in entrada.split(";")]
+        if not partes or not partes[0].startswith("<") or ">" not in partes[0]:
+            continue
+        destino = partes[0][1:partes[0].index(">")].strip()
+        for parametro in partes[1:]:
+            if "=" not in parametro:
+                continue
+            nombre, _, bruto = parametro.partition("=")
+            if nombre.strip().lower() != "rel":
+                continue
+            tokens = bruto.strip().strip('"\'').lower().split()
+            if "canonical" in tokens:
+                return _resolve(base_url, destino) if base_url else destino
+    return None
+
+
+def _separar_cabecera_link(valor: str) -> list[str]:
+    """Separa los enlaces de una cabecera ``Link`` por las comas de FUERA de <>.
+
+    Una URL puede llevar comas (`<https://x.com/a,b>`), asi que partir por coma
+    a secas rompe el enlace en dos.
+    """
+    entradas: list[str] = []
+    actual: list[str] = []
+    dentro = False
+    for ch in valor:
+        if ch == "<":
+            dentro = True
+        elif ch == ">":
+            dentro = False
+        if ch == "," and not dentro:
+            entradas.append("".join(actual))
+            actual = []
+            continue
+        actual.append(ch)
+    if actual:
+        entradas.append("".join(actual))
+    return [e for e in (x.strip() for x in entradas) if e]
 
 
 def extract_security_headers(headers: dict) -> dict:

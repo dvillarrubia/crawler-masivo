@@ -86,9 +86,28 @@ HIGH_OUTLINK_THRESHOLD = 100
 
 # BCP 47 language tag pattern (simplified but covers common cases).
 # Matches things like "en", "en-US", "zh-Hant-TW", "x-default".
+#
+# IGNORECASE porque hreflang no distingue mayusculas: `X-Default` es valido y
+# se marcaba como idioma invalido, que es el valor que escriben media docena de
+# plugins de WordPress.
 _LANG_TAG_RE = re.compile(
-    r"^(?:x-default|[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8})*)$"
+    r"^(?:x-default|[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8})*)$", re.I
 )
+
+# Regiones que la gente escribe y no existen en ISO 3166-1. `en-UK` es el error
+# clasico —el codigo de Reino Unido es GB— y Google ignora el hreflang entero,
+# asi que ese idioma queda sin anotacion y nadie se entera. `uk` SOLO es error
+# como REGION: como idioma es ucraniano y es valido.
+_REGIONES_INVENTADAS: dict[str, str] = {
+    "uk": "GB",   # Reino Unido
+    "eu": "",     # la UE no es un pais; para idioma se usa `eu` = euskera
+    "ue": "",
+    "la": "",     # Latinoamerica no es un pais (Google usa `es-419`)
+    "sa": "",     # (South America; SA es Arabia Saudi)
+    "en": "",     # `xx-EN` no existe: EN es un idioma, no una region
+    "sp": "ES",
+    "po": "PT",
+}
 
 # Regex to detect non-ASCII characters in a URL.
 _NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
@@ -593,13 +612,28 @@ class SEOAnalyzer:
 
         # Iterate HTML pages with their canonical information.
         stmt = (
-            select(Url.id, Url.url, Url.host, HtmlMeta.canonical_href)
+            select(Url.id, Url.url, Url.host, HtmlMeta.canonical_href,
+                   HtmlMeta.canonical_count, HtmlMeta.canonical_in_body)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
         rows = self.session.execute(stmt).all()
 
-        for url_id, page_url, page_host, canonical_href in rows:
+        for (url_id, page_url, page_host, canonical_href, canonical_count,
+             canonical_in_body) in rows:
+            # Con VARIOS canonicals Google los ignora todos y elige el por su
+            # cuenta: la pagina esta sin canonicalizar, aunque el informe
+            # mostrara el primero como si valiera.
+            if (canonical_count or 0) > 1:
+                self._add_issue(
+                    url_id, "canonical_multiple", "warning",
+                    {"cuantos": canonical_count},
+                )
+            # Un canonical en el `<body>` Google lo ignora SIEMPRE: solo cuenta
+            # en el `<head>`.
+            if canonical_in_body:
+                self._add_issue(url_id, "canonical_in_body", "warning")
+
             if not canonical_href or not canonical_href.strip():
                 self._add_issue(url_id, "canonical_missing", "info")
                 continue
@@ -619,12 +653,32 @@ class SEOAnalyzer:
             except Exception:
                 canonical_host = ""
 
-            if canonical_host and page_host and canonical_host != page_host:
+            # `www.x.com` y `x.com` no son otro dominio: son el mismo sitio
+            # resolviendo su propia variante, que es justo para lo que existe el
+            # canonical. Marcarlo como "canonical a otro dominio" convertia la
+            # solucion en un problema en el informe.
+            if (
+                canonical_host
+                and page_host
+                and canonical_host.removeprefix("www.") != page_host.removeprefix("www.")
+            ):
                 self._add_issue(
                     url_id,
                     "canonical_cross_domain",
                     "info",
                     {"canonical": canonical, "canonical_host": canonical_host},
+                )
+
+            # Un canonical a http desde una pagina https manda a Google a la
+            # version sin cifrar: o se indexa la http (perdiendo la senal de
+            # HTTPS) o se ignora el canonical. Pasa al migrar a https y dejar la
+            # plantilla con la URL vieja escrita a mano.
+            if (
+                canonical_parsed.scheme == "http"
+                and urlparse(page_url).scheme == "https"
+            ):
+                self._add_issue(
+                    url_id, "canonical_a_http", "warning", {"canonical": canonical},
                 )
 
             # Canonical pointing to a non-200 URL (only if we crawled it).
@@ -689,6 +743,12 @@ class SEOAnalyzer:
 
             # Language code validity (x-default is always valid).
             lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
+            region_mala = None
+            if lang_is_valid and "-" in (lang or ""):
+                region = lang.split("-")[-1].lower()
+                if region in _REGIONES_INVENTADAS and len(region) == 2:
+                    region_mala = region
+                    lang_is_valid = False
 
             # Reciprocal return tag. Only decidable when the target page was
             # crawled; x-default entries need no reciprocal.
@@ -708,6 +768,23 @@ class SEOAnalyzer:
                 .values(lang_valid=lang_is_valid, return_tag_ok=return_ok)
             )
 
+            # Si el destino no responde 200 no se puede saber si devuelve el
+            # enlace: reportar las dos cosas a la vez (destino roto Y sin
+            # retorno) es contar el mismo hallazgo dos veces, y lo que hay que
+            # arreglar es el destino. El docstring ya decia que en ese caso se
+            # deja "unknown"; el codigo no lo hacia.
+            estado_destino = url_status.get(href)
+            if estado_destino is None:
+                estado_destino = url_status.get(norm_href)
+            destino_roto = estado_destino is not None and estado_destino != 200
+            if destino_roto:
+                return_ok = None
+                self.session.execute(
+                    update(Hreflang)
+                    .where(Hreflang.id == hreflang_id)
+                    .values(return_tag_ok=None)
+                )
+
             if return_ok is False:
                 self._add_issue(
                     url_id,
@@ -717,23 +794,22 @@ class SEOAnalyzer:
                 )
 
             if not lang_is_valid:
-                self._add_issue(
-                    url_id,
-                    "hreflang_invalid_lang",
-                    "warning",
-                    {"lang": lang},
-                )
+                detalle = {"lang": lang}
+                if region_mala:
+                    sugerida = _REGIONES_INVENTADAS.get(region_mala) or None
+                    detalle["motivo"] = (
+                        f"'{region_mala.upper()}' no es un codigo de pais ISO 3166-1"
+                        + (f"; el de ese pais es '{sugerida}'" if sugerida else "")
+                    )
+                self._add_issue(url_id, "hreflang_invalid_lang", "warning", detalle)
 
             # Target URL not returning 200.
-            target_status = url_status.get(href)
-            if target_status is None:
-                target_status = url_status.get(norm_href)
-            if target_status is not None and target_status != 200:
+            if destino_roto:
                 self._add_issue(
                     url_id,
                     "hreflang_broken_target",
                     "error",
-                    {"href": href, "target_status": target_status},
+                    {"href": href, "target_status": estado_destino},
                 )
 
         self.session.flush()

@@ -60,6 +60,8 @@ class HtmlMetaItem(scrapy.Item):
     x_robots_tag = scrapy.Field()
 
     canonical_href = scrapy.Field()
+    canonical_count = scrapy.Field()
+    canonical_in_body = scrapy.Field()
     canonical_header = scrapy.Field()
 
     og_title = scrapy.Field()
