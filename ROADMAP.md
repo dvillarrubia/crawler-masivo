@@ -3,7 +3,7 @@
 Qué hace hoy el crawler y qué viene después, contado por funcionalidades. El
 detalle técnico de cada punto está en la issue de GitHub enlazada.
 
-Estado a 6 de octubre de 2026.
+Estado a 7 de octubre de 2026.
 
 Este documento cuenta **qué hay y qué viene**, en lenguaje de producto.
 `docs/PRIORIDADES.md` cuenta **por qué ese orden y con qué cifra**, y los
@@ -68,6 +68,53 @@ milestone.
   distinguiendo lo obligatorio (sin eso no hay resultado enriquecido) de lo
   recomendado (sale, pero peor).
 
+### Fiabilidad del dato (7 de octubre)
+
+Una pasada entera sobre lo que el crawler **lee** y lo que **reporta**, con la
+medición de cada arreglo sobre censos reales o sobre 58 páginas de control de
+tres clientes. Lo que se arregló, en lenguaje de producto:
+
+- **Páginas que salían vacías.** Una clase como `cookie-bar-active` en el
+  `<body>`, o una página de ASP.NET (donde todo va dentro de un formulario),
+  dejaban la página guardada con **0 palabras**. Y el limpiador que corre en el
+  navegador llegaba a borrar la página entera —texto, enlaces y titulares— sin
+  que nada lo marcara.
+- **El menú ya no cuenta como contenido de la página.** El aviso de contenido
+  escaso se mide sobre el texto propio: pasa de avisar en 997 páginas de un
+  censo a **10.433**, y se limita a las indexables (4.736), que son las que
+  Google puede posicionar.
+- **Chino, japonés y tailandés.** Una página japonesa entera contaba como
+  **1 palabra**, así que cualquier sitio en esos idiomas salía como contenido
+  escaso de principio a fin.
+- **Tablas y listados.** El deduplicador borraba celdas repetidas: de 8 «Sí» de
+  una tabla comparativa quedaba 1 y las filas salían desplazadas, o sea que el
+  informe decía lo contrario que la página.
+- **El título se corta por píxeles, no por letras.** El 29% de los avisos de
+  «título demasiado largo» era falso: títulos de 65 letras estrechas que en el
+  resultado de Google caben enteros.
+- **Duplicados que importan.** Los grupos de título y description duplicados
+  incluían variantes con `?utm` y páginas en noindex, que no compiten con nadie:
+  los avisos bajan a menos de la mitad. Y el duplicado exacto se mide ahora por
+  contenido y no por bytes: en una red de blogs pasó de encontrar **0** a
+  encontrar **745 páginas**, entre ellas la misma política de privacidad
+  publicada e indexable en decenas de blogs.
+- **WordPress ya no es invisible.** Los datos estructurados que genera Yoast
+  (un bloque con varias entidades dentro) se guardaban como una sola fila sin
+  tipo: el 100% de las páginas de un censo. Ahora cada entidad se guarda y se
+  valida por separado.
+- **Imágenes.** Se auditaba la imagen de relleno de la carga diferida y no la
+  real; un `<picture>` generaba avisos de «imagen sin alt» en todas las páginas
+  con imágenes responsive.
+- **266.000 avisos que eran uno por sitio.** Las cabeceras de seguridad son del
+  servidor, no de cada página: ahora va un aviso por sitio.
+- **Lo que robots.txt bloquea aparece en el listado**, como en Search Console.
+- **El informe de un sitio `.co.uk` ya no incluye a la competencia** (el
+  alcance por subdominios se calculaba mal).
+- **Sitemaps de texto, RSS y Atom.** Daban cero URLs, y con cero el crawler
+  creía que ninguna página estaba en el sitemap.
+- **El peso de las páginas estaba dividido por 16** en los sitios con
+  compresión: se confundían el tamaño de la página y los bytes que viajan.
+
 ---
 
 ## En cola
@@ -84,6 +131,13 @@ después lo nuevo.
 ### 2. Arreglos pendientes de la auditoría
 
 Índice: [#23](https://github.com/dvillarrubia/crawler-masivo/issues/23).
+
+De #24 a #30, **la parte determinista está hecha** (ver «Fiabilidad del dato,
+7 de octubre» arriba). Lo que queda en cada una es juicio —decidir si un
+carrusel es contenido, si un parámetro de URL es legítimo, qué tipo de página
+es cada plantilla— y va con
+[#15](https://github.com/dvillarrubia/crawler-masivo/issues/15) y
+[#12](https://github.com/dvillarrubia/crawler-masivo/issues/12).
 
 - [#24](https://github.com/dvillarrubia/crawler-masivo/issues/24) Rematar el
   PageRank: mostrarlo en una escala más fácil de leer y avisar en el propio dato
