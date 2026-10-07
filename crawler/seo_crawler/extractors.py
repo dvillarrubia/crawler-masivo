@@ -723,11 +723,28 @@ def extract_links(
 # (split on non-alphanumerics), never as substrings: "canvas" must not read
 # as nav, "elementor-widget" must not read as sidebar.
 _POSITION_TOKENS: dict[str, frozenset[str]] = {
-    "nav": frozenset({"nav", "navbar", "navigation", "menubar", "breadcrumb", "breadcrumbs"}),
+    # `menu` entra porque `<div class="main-menu">`, `primary-menu`,
+    # `mobile-menu` y `menu-item` son el patron mas comun de menu en HTML y
+    # salian como CONTENIDO: un menu de cientos de enlaces contado como
+    # editorial es justo lo que hacia saltar `high_outlink_count` en todas las
+    # paginas del sitio. El riesgo conocido es el `class="menu"` de una carta de
+    # restaurante; se asume, porque equivocarse al otro lado afecta a todas las
+    # paginas y este caso a una.
+    "nav": frozenset({
+        "nav", "navbar", "navigation", "menubar", "menu", "megamenu",
+        "submenu", "topnav", "mainnav", "sitenav",
+        "breadcrumb", "breadcrumbs",
+    }),
     "footer": frozenset({"footer", "colophon"}),
     "header": frozenset({"header", "masthead", "topbar"}),
     "sidebar": frozenset({"sidebar", "aside"}),
 }
+
+# Ids —no clases— que en los temas de WordPress son la barra lateral. Como id
+# es inequivoco (`#secondary` es el aside en los temas Twenty*); como CLASE
+# seria un desastre, porque `btn-secondary` de Bootstrap marcaria de barra
+# lateral los enlaces de cualquier boton.
+_SIDEBAR_IDS: frozenset[str] = frozenset({"secondary", "sidebar", "widgets"})
 # WAI-ARIA landmark roles map 1:1 to regions.
 _POSITION_ROLES: dict[str, str] = {
     "navigation": "nav", "menubar": "nav", "menu": "nav",
@@ -797,6 +814,9 @@ def _classify_node(node) -> tuple[str | None, bool]:
         if tokens & words:
             return kind, False
 
+    if node_id in _SIDEBAR_IDS:
+        return "sidebar", False
+
     class_tokens = set(cls.split())
     if class_tokens & _CONTENT_STRONG:
         return "content+", False
@@ -841,7 +861,23 @@ def _detect_link_position(a_selector) -> str:
         if kind is None:
             continue
         outer = kinds[i + 1:]
-        if kind in ("nav", "sidebar"):
+        if kind == "nav":
+            return kind
+        if kind == "sidebar":
+            # Un `<aside>` DENTRO de article/main es el aside de esa seccion —un
+            # destacado, una nota al margen, las especificaciones de un
+            # producto—, no la barra lateral del sitio: sus enlaces son
+            # editoriales. Es la misma regla de landmark que ya se aplica a
+            # header/footer aqui abajo y al extraer el contenido (decision 45).
+            article_scoped = False
+            for okind, _ in outer:
+                if okind == "content+":
+                    article_scoped = True
+                    break
+                if okind in _TEMPLATE_KINDS:
+                    break
+            if article_scoped:
+                continue
             return kind
         if kind in ("header", "footer"):
             article_scoped = False
