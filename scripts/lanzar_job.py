@@ -8,6 +8,9 @@
 
 Todo lo que es del cliente (filtros, selectores de plantilla, plantillas, idioma,
 ritmo) vive en su JSON; este script solo lo envia a la API. Sin dependencias.
+
+Sale con 3 si la API ha descartado alguna clave de la configuracion: el job
+queda encolado, pero NO con lo que se pidio.
 """
 
 from __future__ import annotations
@@ -38,6 +41,32 @@ def _poner(cfg: dict, clave: str, valor):
     for p in partes[:-1]:
         d = d.setdefault(p, {})
     d[partes[-1]] = valor
+
+
+def _claves(d, prefijo=""):
+    """Todas las rutas de claves de un dict anidado: {"a": {"b": 1}} -> {"a.b"}."""
+    salida = set()
+    for k, v in d.items():
+        ruta = f"{prefijo}{k}"
+        if isinstance(v, dict) and v:
+            salida |= _claves(v, ruta + ".")
+        else:
+            salida.add(ruta)
+    return salida
+
+
+def _lo_que_la_api_no_guardo(enviado: dict, guardado: dict) -> list[str]:
+    """Claves que se enviaron y la API no guardo.
+
+    Pydantic v2 descarta en SILENCIO lo que no esta declarado en `JobConfig`
+    (decision 33): el formulario mandaba `use_sitemap`, el schema no lo
+    declaraba, y desmarcar la casilla no tenia NINGUN efecto. Le pasa a
+    cualquier clave nueva y a cualquier error de tecleo, en el config de un
+    cliente o en un `--set`. Un rastreo que no es el que se pidio da un informe
+    que nadie sabe que esta leyendo mal, asi que se dice aqui, que es el unico
+    momento en que alguien esta mirando.
+    """
+    return sorted(_claves(enviado) - _claves(guardado))
 
 
 def _parsear_valor(texto: str):
@@ -108,6 +137,19 @@ def main() -> int:
         print(f"HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:800]}", file=sys.stderr)
         return 1
     print(f"{datos.get('id')} {datos.get('status')}  ->  {args.api.rstrip('/')}/api/jobs/{datos.get('id')}")
+
+    tiradas = _lo_que_la_api_no_guardo(cfg, datos.get("config") or {})
+    if tiradas:
+        print("\n*** La API NO ha guardado estas claves de la configuracion:",
+              file=sys.stderr)
+        for k in tiradas:
+            print(f"      {k}", file=sys.stderr)
+        print("    El rastreo se ha encolado SIN ellas. Si es un error de tecleo,"
+              " corrige el config y relanza;\n    si son claves nuevas, hay que "
+              "declararlas en `JobConfig` (api/schemas.py).\n    Cancelar: "
+              f"curl -X PATCH {args.api.rstrip('/')}/api/jobs/{datos.get('id')}/cancel",
+              file=sys.stderr)
+        return 3
     return 0
 
 
