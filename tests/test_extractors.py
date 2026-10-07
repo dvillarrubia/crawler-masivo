@@ -823,3 +823,84 @@ def test_el_ancho_en_pixeles_de_un_titulo_cjk_no_es_el_de_uno_latino():
     assert ex.estimate_title_pixel_width("東") > ex.estimate_title_pixel_width("a") * 1.8
     # Y un emoji compuesto es UN glifo, no cuatro.
     assert ex.estimate_title_pixel_width("👨‍👩‍👧‍👦") < 30
+
+
+# ---------------------------------------------------------------------------
+# Directivas: rel por tokens, http-equiv y canonical de cabecera (#26)
+# ---------------------------------------------------------------------------
+def test_el_rel_es_una_lista_de_tokens_y_no_distingue_mayusculas():
+    """`rel="Canonical"`, `rel="canonical "` y `rel="alternate canonical"` son
+    canonicals validos para Google y daban None: la pagina salia sin canonical."""
+    for rel in ("canonical", "Canonical", "canonical ", "alternate canonical",
+                "CANONICAL"):
+        html = f'<html><head><link rel="{rel}" href="/bien"></head><body></body></html>'
+        meta = ex.extract_meta(sel(html), base_url="https://x.com/p")
+        assert meta["canonical_href"] == "https://x.com/bien", rel
+    # Pero por token entero: `canonicalize` no es un canonical.
+    html = '<html><head><link rel="canonicalize" href="/no"></head><body></body></html>'
+    assert ex.extract_meta(sel(html), base_url="https://x.com/p")["canonical_href"] is None
+
+
+def test_la_paginacion_acepta_previous_y_mayusculas():
+    for rel, clave in (("Next", "rel_next"), ("prev", "rel_prev"),
+                       ("previous", "rel_prev")):
+        html = f'<html><head><link rel="{rel}" href="/p2"></head><body></body></html>'
+        meta = ex.extract_meta(sel(html), base_url="https://x.com/p")
+        assert meta[clave] == "https://x.com/p2", rel
+
+
+def test_el_canonical_del_body_no_cuenta_pero_se_cuenta():
+    """Google ignora un canonical fuera del `<head>`; con varios, los ignora
+    todos. Antes se cogia el primero en silencio."""
+    html = ('<html><head><link rel="canonical" href="/uno">'
+            '<link rel="canonical" href="/dos"></head>'
+            '<body><link rel="canonical" href="/tres"></body></html>')
+    meta = ex.extract_meta(sel(html), base_url="https://x.com/p")
+    assert meta["canonical_href"] == "https://x.com/uno"
+    assert meta["canonical_count"] == 3
+    assert meta["canonical_in_body"] is True
+    # Solo en el body: no hay canonical valido.
+    html = '<html><head></head><body><link rel="canonical" href="/x"></body></html>'
+    meta = ex.extract_meta(sel(html), base_url="https://x.com/p")
+    assert meta["canonical_href"] is None
+    assert meta["canonical_in_body"] is True
+
+
+def test_el_nombre_de_una_meta_se_normaliza_y_property_no_es_name():
+    """`name=" robots"` con un espacio no se detectaba, y un
+    `<meta property="description">` —que es RDFa— contaba como la meta
+    description de la pagina."""
+    html = ('<html><head><meta name=" robots" content="noindex">'
+            '<meta property="description" content="X"></head><body></body></html>')
+    meta = ex.extract_meta(sel(html), base_url="https://x.com/p")
+    assert meta["meta_robots"] == "noindex"
+    assert meta["meta_description"] is None
+    # Open Graph SI usa property.
+    html = '<html><head><meta property="og:title" content="T"></head><body></body></html>'
+    assert ex.extract_meta(sel(html), base_url="https://x.com/p")["og_title"] == "T"
+
+
+def test_el_http_equiv_del_refresh_no_distingue_mayusculas():
+    """Se probaban tres variantes a mano, asi que `REFresh` quedaba fuera: la
+    pagina salia sin meta refresh mientras el extractor del DESTINO si lo veia,
+    o sea las dos funciones se contradecian sobre la misma pagina."""
+    html = '<html><head><meta http-equiv="REFresh" content="0; url=/dest"></head><body></body></html>'
+    assert ex.extract_meta_refresh(sel(html)) == "0; url=/dest"
+    assert ex.extract_meta_refresh_target(sel(html), "https://x.com/p") == "https://x.com/dest"
+
+
+def test_el_canonical_de_la_cabecera_link_se_parsea_de_verdad():
+    """Se cogia el PRIMER enlace de la cabecera fuera el que fuera, asi que un
+    `rel=preload` delante se guardaba como canonical. Es la unica forma de
+    declarar canonical en un PDF."""
+    c = ex.canonical_de_cabecera
+    assert c('</style.css>; rel=preload, <https://x.com/a>; rel="canonical"',
+             "https://x.com/p") == "https://x.com/a"
+    # Sin comillas tambien es valido.
+    assert c("<https://x.com/a>; rel=canonical", "https://x.com/p") == "https://x.com/a"
+    # Relativo: se resuelve.
+    assert c('</rel>; rel="canonical"', "https://x.com/p") == "https://x.com/rel"
+    # Una URL con comas dentro no se parte.
+    assert c("<https://x.com/a,b>; rel=canonical", "https://x.com/p") == "https://x.com/a,b"
+    assert c("</style.css>; rel=preload", "https://x.com/p") is None
+    assert c(None, "https://x.com/p") is None

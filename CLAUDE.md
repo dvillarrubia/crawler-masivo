@@ -768,6 +768,42 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    millones de comparaciones con 50.000 URLs, 0,45 s medidos ya con 2.789) y
    exportaba 404 y noindex como si fueran contenido publicado.
 
+56. **`rel` es una lista de tokens, y lo que Google ignora hay que decirlo** —
+   el canonical, la paginación y el hreflang se buscaban comparando el atributo
+   `rel` entero y en minúsculas, así que `rel="Canonical"`, `rel="canonical "` y
+   `rel="alternate canonical"` —los tres válidos y los tres escritos por CMS
+   reales— daban **None**: la página salía sin canonical y, con ella, sin
+   `canonical_missing` tampoco donde debía. Ahora se compara por token entero
+   (`canonicalize` no cuenta), `rel="Next"` y `rel="previous"` valen, y
+   `http-equiv="REFresh"` también: ese se probaba con tres variantes escritas a
+   mano, de modo que `extract_meta_refresh` decía que no había meta refresh
+   mientras `extract_meta_refresh_target` sí veía el destino — las dos funciones
+   contradiciéndose sobre la misma página.
+   Lo que Google ignora ahora se reporta en vez de taparse: un canonical en el
+   `<body>` (`canonical_in_body`) y **varios** canonicals (`canonical_multiple`,
+   con los que Google los descarta todos y elige por su cuenta) se quedaban en
+   «el primero manda» en silencio; hacen falta `html_meta.canonical_count` y
+   `canonical_in_body` para poder verlo. Un canonical a `http` desde una página
+   `https` es ahora `canonical_a_http`. Y al revés: de `www.x.com` a `x.com` ya
+   no es «canonical a otro dominio» —es el mismo sitio resolviendo su variante,
+   que es para lo que existe el canonical—, aunque en los tres censos medidos no
+   había ni un caso, así que es corrección de criterio y no una cifra.
+   El canonical de la cabecera `Link` se parseaba cogiendo el **primer** enlace
+   de la cabecera fuera el que fuera: con `</style.css>; rel=preload, <…>;
+   rel="canonical"` se guardaba la hoja de estilos como canonical de la página.
+   Es la única forma de declarar canonical en un PDF.
+   En hreflang: `X-Default` se marcaba como idioma inválido por la caja (lo
+   escriben media docena de plugins de WordPress), `en-UK` pasaba por válido
+   cuando el código de Reino Unido es `GB` —Google ignora la anotación entera y
+   ese idioma se queda sin hreflang—, y un destino que no responde 200 generaba
+   **dos** avisos del mismo hallazgo (`hreflang_broken_target` y
+   `hreflang_missing_return`): medido, 282 + 38 + 44 páginas con los dos a la
+   vez. Si el destino está roto, el retorno no se sabe; lo que hay que arreglar
+   es el destino. `uk` como IDIOMA sigue siendo válido: es ucraniano.
+   También: `name=" robots"` con un espacio delante no se detectaba, y un
+   `<meta property="description">` —que es RDFa, no una meta description—
+   contaba como la description de la página.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

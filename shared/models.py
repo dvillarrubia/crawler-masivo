@@ -189,6 +189,12 @@ class HtmlMeta(Base):
     x_robots_tag = Column(String(256), nullable=True)
 
     canonical_href = Column(Text, nullable=True)
+    # Cuantos `rel=canonical` lleva la pagina y si alguno esta en el body.
+    # Con varios, Google los ignora TODOS; los del body los ignora siempre.
+    # Antes se guardaba el primero en silencio y la pagina salia canonicalizada
+    # a una URL que Google no usa.
+    canonical_count = Column(Integer, nullable=True)
+    canonical_in_body = Column(Boolean, nullable=True)
     canonical_header = Column(Text, nullable=True)
 
     og_title = Column(Text, nullable=True)

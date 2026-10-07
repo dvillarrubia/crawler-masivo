@@ -99,6 +99,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | meta_robots | varchar(256) | Contenido de meta robots |
 | x_robots_tag | varchar(256) | Header X-Robots-Tag |
 | canonical_href | text | `<link rel="canonical">` href |
+| canonical_count | int | Cuantos `rel=canonical` lleva la pagina. Con mas de uno Google los ignora todos |
+| canonical_in_body | bool | Hay algun canonical fuera del `<head>`: Google lo ignora siempre |
 | canonical_header | text | Canonical via Link header HTTP |
 | og_title / og_description / og_image / og_url / og_type | text | Open Graph |
 | twitter_card / twitter_title / twitter_description | text | Twitter Cards |
