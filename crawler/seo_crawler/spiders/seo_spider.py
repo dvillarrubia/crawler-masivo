@@ -28,6 +28,7 @@ from scrapy_playwright.page import PageMethod
 from seo_crawler.extractors import (
     absolutize_url,
     classify_resource_type,
+    tipo_por_extension,
     compile_url_patterns,
     compute_folder_depth,
     compute_status_group,
@@ -1016,8 +1017,29 @@ class SeoSpider(scrapy.Spider):
             dont_filter=True,
         )
 
+    def _tipo_excluido_por_la_url(self, url: str) -> bool:
+        """True si la extension de la URL dice que es un tipo que el job excluye.
+
+        El filtro por tipo de recurso es POSTERIOR a la descarga: hay que ver el
+        `Content-Type` para clasificar. Pero cuando la extension ya lo dice
+        —`.jpg`, `.pdf`, `.css`— se puede ahorrar la peticion entera, que es lo
+        que de verdad cuesta. Medido en el rastreo de un e-commerce: el sitio
+        responde a 2,7 s de media y 28 respuestas de cada minuto se descargaban
+        para tirarlas, con el ritmo cayendo de 50 a 10 paginas por minuto.
+
+        Solo se decide cuando la extension es concluyente: sin extension, o con
+        una que no mapea a ningun tipo, la peticion se hace igual y el filtro de
+        siempre decide con el `Content-Type`.
+        """
+        tipo = tipo_por_extension(url)
+        if tipo is None or tipo == "html":
+            return False  # no se sabe, o es una pagina: se pide
+        return tipo not in self._allowed_resource_types
+
     def _should_follow(self, url: str) -> bool:
         """Check exclude/include patterns and URL filters."""
+        if self._tipo_excluido_por_la_url(url):
+            return False
         if any(casa(url) for casa in self._exclude_patterns):
             return False
         if self._include_patterns:

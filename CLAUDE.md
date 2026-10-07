@@ -883,6 +883,23 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    de restaurante se clasifica como navegación. Equivocarse al otro lado afecta a
    todas las páginas del sitio; este caso, a una.
 
+59. **Lo que la extensión ya dice no hace falta descargarlo** (R12 de #25) —
+   el filtro por tipo de recurso necesita el `Content-Type`, así que se aplica
+   **después** de la descarga: se pedía la imagen, se descargaba y se tiraba.
+   Visto en vivo en el re-rastreo de progym: el sitio responde a **2,7 s de
+   media** y, con 2 peticiones por dominio, **28 de cada 60 respuestas** eran
+   recursos que se descargaban para descartarlos — el ritmo cayó de 50 a 10
+   páginas por minuto y el contador de items de Scrapy se quedó clavado mientras
+   el de páginas seguía subiendo, que es la firma de esto. Ahora, cuando la
+   extensión identifica el tipo sin dudas y el job lo excluye, la petición no se
+   hace.
+   La mitad importante del arreglo es `tipo_por_extension()` devolviendo
+   **None** cuando no sabe: la clasificación por extensión respondía `"other"`
+   por defecto, así que cualquier URL con un punto en el último tramo
+   —`producto-2.5-kg`, `v1.2-guia`— habría pasado por recurso y se habría dejado
+   de pedir. Perder páginas de producto en silencio es mucho peor que descargar
+   una imagen.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

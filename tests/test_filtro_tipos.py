@@ -66,3 +66,51 @@ def test_el_svg_es_su_propio_tipo():
     assert classify_resource_type("image/svg+xml", "https://x.com/logo.svg") == "svg"
     assert classify_resource_type(None, "https://x.com/logo.svg") == "svg"
     assert classify_resource_type("image/png", "https://x.com/a.png") == "image"
+
+
+# ---------------------------------------------------------------------------
+# Lo que la extension ya dice no hace falta descargarlo (R12 de #25)
+# ---------------------------------------------------------------------------
+def test_la_extension_ahorra_la_peticion(spider):
+    """El filtro por tipo necesita el `Content-Type`, pero cuando la extension
+    ya lo dice se puede ahorrar la peticion entera, que es lo que cuesta.
+    Medido en el rastreo de un e-commerce: el sitio responde a 2,7 s de media y
+    28 de cada 60 respuestas se descargaban para tirarlas, con el ritmo cayendo
+    de 50 a 10 paginas por minuto."""
+    spider._exclude_patterns = []
+    spider._include_patterns = []
+    spider._max_url_length = 0
+    spider._max_folder_depth = 0
+    for url in ("https://x.com/foto.jpg", "https://x.com/doc.pdf",
+                "https://x.com/estilo.css", "https://x.com/app.js",
+                "https://x.com/logo.svg"):
+        assert spider._should_follow(url) is False, url
+    # Con el tipo permitido, se pide.
+    spider._allowed_resource_types = {"html", "redirect", "image", "pdf", "css", "js", "svg"}
+    for url in ("https://x.com/foto.jpg", "https://x.com/doc.pdf"):
+        assert spider._should_follow(url) is True, url
+
+
+def test_un_punto_en_el_slug_no_es_una_extension(spider):
+    """`producto-2.5-kg` o `v1.2-guia` son paginas. Con `"other"` como respuesta
+    por defecto de la clasificacion por extension, se habrian dejado de pedir:
+    perder paginas de producto en silencio es peor que descargar una imagen."""
+    spider._exclude_patterns = []
+    spider._include_patterns = []
+    spider._max_url_length = 0
+    spider._max_folder_depth = 0
+    for url in ("https://x.com/producto-2.5-kg", "https://x.com/v1.2-guia",
+                "https://x.com/mancuerna-2-5-kgs.html", "https://x.com/pagina",
+                "https://x.com/descarga?id=1"):
+        assert spider._should_follow(url) is True, url
+
+
+def test_tipo_por_extension_dice_no_se_cuando_no_se_sabe():
+    from seo_crawler.extractors import tipo_por_extension
+
+    assert tipo_por_extension("https://x.com/a.jpg") == "image"
+    assert tipo_por_extension("https://x.com/a.svg") == "svg"
+    assert tipo_por_extension("https://x.com/a.html") == "html"
+    assert tipo_por_extension("https://x.com/producto-2.5-kg") is None
+    assert tipo_por_extension("https://x.com/pagina") is None
+    assert tipo_por_extension("https://x.com/") is None
