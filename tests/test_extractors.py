@@ -904,3 +904,16 @@ def test_el_canonical_de_la_cabecera_link_se_parsea_de_verdad():
     assert c("<https://x.com/a,b>; rel=canonical", "https://x.com/p") == "https://x.com/a,b"
     assert c("</style.css>; rel=preload", "https://x.com/p") is None
     assert c(None, "https://x.com/p") is None
+
+
+def test_ugc_y_sponsored_no_pasan_autoridad():
+    """Google documenta que trata `ugc` y `sponsored` como `nofollow`: un enlace
+    patrocinado o de contenido de usuario no suma al PageRank del destino.
+    Medido en cuatro censos (28,4 M enlaces): 224 con `ugc`, 0 con `sponsored` y
+    solo 12 internos, asi que es correccion de criterio y no de volumen."""
+    html = ('<a href="/a" rel="nofollow">a</a><a href="/b" rel="ugc">b</a>'
+            '<a href="/c" rel="sponsored">c</a><a href="/d" rel="noopener">d</a>'
+            '<a href="/e" rel="UGC">e</a>')
+    enlaces = {l["url"][-1]: l["follow"]
+               for l in ex.extract_links(sel(html), "https://x.com/", {"x.com"})}
+    assert enlaces == {"a": False, "b": False, "c": False, "d": True, "e": False}
