@@ -696,6 +696,46 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `headline`: Google no documenta ninguna propiedad obligatoria para Article,
    así que es un aviso, no un error.
 
+52. **Las imágenes que se auditaban no eran las de la página** — cuatro
+   fallos que se tapaban entre sí: un `<source>` de `<picture>` se registraba
+   como imagen sin alt (no existe el atributo en `<source>`: el alt que cuenta
+   es el del `<img>`), el placeholder `data:` de la carga diferida se guardaba
+   en lugar de la imagen real —medido en 58 páginas de control: **142 `data:`
+   URIs guardadas como imágenes y 140 imágenes reales que nadie veía**—, un
+   `srcset` con un `data:` se partía en su coma interna, y la deduplicación se
+   quedaba con la primera aparición aunque fuera la que no lleva alt. Además el
+   contenido mixto no se detectaba con `HTTP://` en mayúsculas ni en `<video>`,
+   `<audio>`, `link[rel=preload|icon]` o un `url()` en línea (0 → 3 en las
+   mismas páginas), `width="100%"` se leía como 100 px, y un pixel de 1×1 —un
+   contador, nunca contenido— salía como imagen sin alt.
+
+53. **Las cabeceras de seguridad son del servidor, no de la página** — HSTS,
+   CSP, X-Frame-Options y X-Content-Type-Options son la misma respuesta en las
+   29.808 páginas del sitio y no afectan al posicionamiento, pero se emitían una
+   vez por página: en los censos guardados, **131.096 avisos de
+   `unsafe_crossorigin`, 93.545 de `missing_csp` y 41.863 de
+   `missing_x_frame_options`**, tapando los hallazgos reales. Ahora va un aviso
+   por HOST con el número de páginas en los detalles, y `unsafe_crossorigin`
+   desaparece: desde 2021 todos los navegadores aplican `noopener` por defecto a
+   `target="_blank"`, así que no había nada que arreglar. `http_url` y
+   `mixed_content` siguen siendo por página, porque sí lo son. Y el extractor
+   daba por bueno un HSTS con `max-age=0` (que le dice al navegador que OLVIDE la
+   política) y un `X-Frame-Options` vacío, y pedía X-Frame-Options aunque la CSP
+   ya llevara `frame-ancestors`.
+
+54. **El título se corta por píxeles, no por caracteres** — Google trunca el
+   título del resultado hacia los 580 px y el fragmento hacia los 985: 65 letras
+   estrechas caben y 55 en mayúsculas no. Medido en tres censos, **8.801 títulos
+   pasaban de 60 caracteres sin pasar del ancho en píxeles** —o sea, sin
+   truncarse—, el 29% de los avisos de título; al contrario solo ocurría en 3
+   páginas de más de 80.000. `title_too_long` y `description_too_long` van ahora
+   por `*_pixel_width`, cayendo a caracteres en los rastreos que no lo midieron.
+   Y la estimación de ancho estaba ciega fuera del latino: 9,6 px por carácter
+   daba 202 px para un título japonés de 21 caracteres que mide unos 420, así que
+   **ningún título CJK salía como truncado**. Hay tabla por rango Unicode
+   (ideogramas y kana de ancho completo, hangul, tailandés, árabe, hebreo,
+   emoji) y un emoji compuesto cuenta como un glifo.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -905,7 +945,9 @@ MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 | Constant | Value |
 |----------|-------|
 | `TITLE_MIN_LEN` | 10 |
-| `TITLE_MAX_LEN` | 60 |
+| `TITLE_MAX_LEN` | 60 (solo si no hay ancho en pixeles medido) |
+| `TITLE_MAX_PIXELS` | 580 |
+| `DESCRIPTION_MAX_PIXELS` | 985 |
 | `DESCRIPTION_MIN_LEN` | 50 |
 | `DESCRIPTION_MAX_LEN` | 160 |
 

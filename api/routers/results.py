@@ -1335,7 +1335,7 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     if title_problems - title_missing > 0:
         recs.append(Recommendation(
             priority="media", title="Optimizar titulos",
-            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico y tenga entre 30-60 caracteres.",
+            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico, tenga al menos 10 caracteres y no pase de 580 pixeles de ancho (que es por donde Google lo corta).",
             affected_count=title_problems - title_missing,
             issue_types=["title_too_short", "title_too_long", "title_duplicate"],
         ))

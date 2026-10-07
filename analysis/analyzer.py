@@ -27,8 +27,10 @@ from sqlalchemy.orm import Session, aliased
 
 from shared.config import (
     DESCRIPTION_MAX_LEN,
+    DESCRIPTION_MAX_PIXELS,
     DESCRIPTION_MIN_LEN,
     TITLE_MAX_LEN,
+    TITLE_MAX_PIXELS,
     TITLE_MIN_LEN,
 )
 from analysis.sd_validation import validate_structured_data
@@ -151,6 +153,8 @@ class SEOAnalyzer:
         self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
         self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
         self.desc_max_len = t.get("description_max_length", DESCRIPTION_MAX_LEN)
+        self.title_max_px = t.get("title_max_pixels", TITLE_MAX_PIXELS)
+        self.desc_max_px = t.get("description_max_pixels", DESCRIPTION_MAX_PIXELS)
         self.min_word_count = t.get("min_word_count", LOW_WORD_COUNT_THRESHOLD)
         # Cadena a partir de DOS saltos (A->B->C). Estaba en 2 con la
         # comparacion `hops > 2`, asi que hacian falta TRES saltos para que
@@ -332,7 +336,8 @@ class SEOAnalyzer:
 
         # Join Url with HtmlMeta for all HTML pages in the job.
         stmt = (
-            select(Url.id, HtmlMeta.title, HtmlMeta.title_len, Url.status_code,
+            select(Url.id, HtmlMeta.title, HtmlMeta.title_len,
+                   HtmlMeta.title_pixel_width, Url.status_code,
                    Url.is_internal, Url.indexable)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
@@ -342,7 +347,8 @@ class SEOAnalyzer:
         # Track titles for duplicate detection.
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, title, title_len, status_code, is_internal, indexable in rows:
+        for (url_id, title, title_len, title_px, status_code, is_internal,
+             indexable) in rows:
             if not title or not title.strip():
                 self._add_issue(url_id, "title_missing", "warning")
                 continue
@@ -357,6 +363,21 @@ class SEOAnalyzer:
                     "warning",
                     {"length": effective_len, "min": self.title_min_len},
                 )
+            # Demasiado largo = SE TRUNCA en el resultado, y Google trunca por
+            # pixeles: un titulo de 65 letras estrechas cabe y uno de 55 en
+            # mayusculas no. Medido en tres censos, 8.801 titulos pasaban de 60
+            # caracteres sin pasar del ancho de pixeles —o sea sin truncarse—,
+            # el 29% de los avisos. Si el ancho no esta medido (rastreos
+            # antiguos) se cae a los caracteres, que es lo que habia.
+            elif title_px is not None:
+                if title_px > self.title_max_px:
+                    self._add_issue(
+                        url_id,
+                        "title_too_long",
+                        "warning",
+                        {"pixels": title_px, "max_pixels": self.title_max_px,
+                         "length": effective_len},
+                    )
             elif effective_len > self.title_max_len:
                 self._add_issue(
                     url_id,
@@ -402,6 +423,7 @@ class SEOAnalyzer:
 
         stmt = (
             select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len,
+                   HtmlMeta.meta_description_pixel_width,
                    Url.status_code, Url.is_internal, Url.indexable)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
@@ -410,7 +432,8 @@ class SEOAnalyzer:
 
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
-        for url_id, description, desc_len, status_code, is_internal, indexable in rows:
+        for (url_id, description, desc_len, desc_px, status_code, is_internal,
+             indexable) in rows:
             if not description or not description.strip():
                 self._add_issue(url_id, "description_missing", "warning")
                 continue
@@ -425,6 +448,17 @@ class SEOAnalyzer:
                     "warning",
                     {"length": effective_len, "min": self.desc_min_len},
                 )
+            # Por pixeles, como el titulo: es lo que decide si el fragmento se
+            # corta en el resultado.
+            elif desc_px is not None:
+                if desc_px > self.desc_max_px:
+                    self._add_issue(
+                        url_id,
+                        "description_too_long",
+                        "warning",
+                        {"pixels": desc_px, "max_pixels": self.desc_max_px,
+                         "length": effective_len},
+                    )
             elif effective_len > self.desc_max_len:
                 self._add_issue(
                     url_id,
@@ -1231,6 +1265,13 @@ class SEOAnalyzer:
                 # masa (medido en un sitio real: 791.455 avisos, el 94% del
                 # total de incidencias del rastreo).
                 Resource.alt_text.is_(None),
+                # Un 1x1 es un pixel de seguimiento o un espaciador, nunca
+                # contenido: no hay nada que describir en el y el aviso solo
+                # tapa las imagenes de verdad.
+                or_(
+                    Resource.width.is_(None), Resource.height.is_(None),
+                    Resource.width > 1, Resource.height > 1,
+                ),
             )
         )
         rows = self.session.execute(stmt).all()
@@ -1248,62 +1289,95 @@ class SEOAnalyzer:
     # -- Security -----------------------------------------------------------
 
     def analyze_security(self) -> None:
-        """Security tab equivalent -- flag HTTP URLs, mixed content, and missing security headers."""
+        """Seguridad: lo que decide algo por pagina, por pagina; lo demas, una vez.
+
+        Criterio SEO: HTTPS es senal de ranking y el contenido mixto rompe el
+        candado y puede bloquear recursos, asi que esos dos son problemas DE LA
+        PAGINA. Las cabeceras de seguridad (HSTS, CSP, X-Frame-Options,
+        X-Content-Type-Options) no afectan al posicionamiento y, sobre todo, son
+        una propiedad del SERVIDOR: la misma respuesta en las 29.808 paginas del
+        sitio. Emitirlas por pagina multiplicaba el recuento sin anadir nada —
+        medido en los censos guardados: 131.096 avisos de `unsafe_crossorigin`,
+        93.545 de `missing_csp` y 41.863 de `missing_x_frame_options`— y tapaba
+        los hallazgos reales. Ahora va UN aviso por host, con el numero de
+        paginas en los detalles.
+
+        `unsafe_crossorigin` desaparece: desde 2021 todos los navegadores
+        aplican `noopener` por defecto a `target="_blank"`, asi que no hay nada
+        que arreglar. Era el aviso mas numeroso de todos.
+        """
         logger.debug("Analyzing security ...")
 
         stmt = (
             select(
                 Url.id,
+                Url.host,
                 SecurityHeaders.is_https,
                 SecurityHeaders.has_mixed_content,
                 SecurityHeaders.has_hsts,
                 SecurityHeaders.has_csp,
                 SecurityHeaders.has_x_content_type_options,
                 SecurityHeaders.has_x_frame_options,
-                SecurityHeaders.has_unsafe_crossorigin,
             )
             .join(SecurityHeaders, SecurityHeaders.url_id == Url.id)
             .where(Url.job_id == self.job_id)
         )
         rows = self.session.execute(stmt).all()
 
+        # Por host: (primera url_id vista, paginas, paginas sin cada cabecera).
+        por_host: dict[str, dict] = {}
+
         for (
             url_id,
+            host,
             is_https,
             has_mixed_content,
             has_hsts,
             has_csp,
             has_x_content_type_options,
             has_x_frame_options,
-            has_unsafe_crossorigin,
         ) in rows:
-            # HTTP URL (scheme != "https").
+            # HTTP URL (scheme != "https"). Es de la pagina: esa URL concreta
+            # va sin cifrar y es la que hay que redirigir.
             if is_https is False:
                 self._add_issue(url_id, "http_url", "warning")
 
-            # Mixed content (HTTPS page loading HTTP resources).
+            # Mixed content (HTTPS page loading HTTP resources). Tambien es de
+            # la pagina: depende de lo que esa pagina incruste.
             if has_mixed_content is True:
                 self._add_issue(url_id, "mixed_content", "warning")
 
-            # Missing Strict-Transport-Security header.
-            if has_hsts is False:
-                self._add_issue(url_id, "missing_hsts", "info")
-
-            # Missing Content-Security-Policy header.
+            resumen = por_host.setdefault(
+                host or "", {"url_id": url_id, "paginas": 0,
+                             "missing_hsts": 0, "missing_csp": 0,
+                             "missing_x_content_type_options": 0,
+                             "missing_x_frame_options": 0}
+            )
+            resumen["paginas"] += 1
+            # HSTS solo tiene sentido sobre https: en http el navegador ignora
+            # la cabecera, asi que avisarlo ahi era pedir algo que no aplica.
+            if has_hsts is False and is_https is not False:
+                resumen["missing_hsts"] += 1
             if has_csp is False:
-                self._add_issue(url_id, "missing_csp", "info")
-
-            # Missing X-Content-Type-Options header.
+                resumen["missing_csp"] += 1
             if has_x_content_type_options is False:
-                self._add_issue(url_id, "missing_x_content_type_options", "info")
-
-            # Missing X-Frame-Options header.
+                resumen["missing_x_content_type_options"] += 1
             if has_x_frame_options is False:
-                self._add_issue(url_id, "missing_x_frame_options", "info")
+                resumen["missing_x_frame_options"] += 1
 
-            # Unsafe cross-origin (target=_blank without rel=noopener).
-            if has_unsafe_crossorigin is True:
-                self._add_issue(url_id, "unsafe_crossorigin", "warning")
+        for host, resumen in por_host.items():
+            for tipo in ("missing_hsts", "missing_csp",
+                         "missing_x_content_type_options",
+                         "missing_x_frame_options"):
+                if not resumen[tipo]:
+                    continue
+                self._add_issue(
+                    resumen["url_id"],
+                    tipo,
+                    "info",
+                    {"host": host, "paginas_afectadas": resumen[tipo],
+                     "paginas_del_host": resumen["paginas"]},
+                )
 
         self._flush_issues()
 

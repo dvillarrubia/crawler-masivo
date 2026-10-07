@@ -737,3 +737,89 @@ def test_el_tipo_se_guarda_con_el_mismo_nombre_en_los_tres_formatos():
     tipos = {ex.extract_structured_data(h, "https://x.com/")[0]["schema_type"]
              for h in (rdfa, micro)}
     assert tipos == {"Product"}
+
+
+# ---------------------------------------------------------------------------
+# Imagenes y recursos (#28)
+# ---------------------------------------------------------------------------
+def _recursos(html: str, base: str = "https://x.com/p"):
+    return ex.extract_resources(sel(html), base)
+
+
+def test_un_source_de_picture_hereda_el_alt_del_img():
+    """`<source>` no tiene atributo alt: cada imagen responsive generaba un
+    `image_missing_alt` falso."""
+    rec = _recursos('<picture><source srcset="/a.webp" type="image/webp">'
+                    '<img src="/a.jpg" alt="Perro"></picture>')
+    assert {r["url"] for r in rec} == {"https://x.com/a.jpg", "https://x.com/a.webp"}
+    assert all(r["alt_text"] == "Perro" for r in rec)
+
+
+def test_la_imagen_diferida_es_la_real_y_no_el_placeholder():
+    """Se auditaba el `data:` del placeholder y la imagen de verdad no aparecia
+    en ningun informe. Medido en 58 paginas de control: 142 `data:` guardados
+    como imagenes y 140 imagenes reales que nadie veia."""
+    rec = _recursos('<img data-src="/real.jpg" src="data:image/gif;base64,R0lGOD" alt="Real">')
+    assert [r["url"] for r in rec] == ["https://x.com/real.jpg"]
+
+
+def test_un_data_uri_no_es_un_recurso():
+    assert _recursos('<img src="data:image/gif;base64,R0lGOD">') == []
+
+
+def test_el_srcset_no_se_parte_en_la_coma_de_un_data_uri():
+    rec = _recursos('<img srcset="data:image/gif;base64,R0lG,/real-2x.jpg 2x" alt="A">')
+    assert [r["url"] for r in rec] == ["https://x.com/real-2x.jpg"]
+    assert ex.parse_srcset("/a.jpg 1x, /b.jpg 2x") == ["/a.jpg", "/b.jpg"]
+    assert ex.parse_srcset("  ") == []
+    assert ex.parse_srcset(",") == []
+
+
+def test_la_misma_imagen_con_alt_en_otro_sitio_no_sale_sin_alt():
+    """La deduplicacion se quedaba con la primera aparicion, que podia ser la
+    que no lleva alt."""
+    rec = _recursos('<img src="/a.jpg"><div><img src="/a.jpg" alt="Perro"></div>')
+    assert len(rec) == 1
+    assert rec[0]["alt_text"] == "Perro"
+
+
+def test_el_contenido_mixto_se_detecta_en_mayusculas_y_en_mas_sitios():
+    rec = _recursos('<img src="HTTP://x.com/a.jpg" alt="A">'
+                    '<video src="http://x.com/v.mp4"></video>'
+                    '<link rel="preload" href="http://x.com/f.woff2">'
+                    '<div style="background:url(http://x.com/bg.png)"></div>')
+    assert len(rec) == 4
+    assert all(r["is_mixed_content"] for r in rec)
+
+
+def test_un_ancho_en_porcentaje_no_son_pixeles():
+    """`width="100%"` se leia como 100 px, que es lo contrario de lo que dice."""
+    assert ex._parse_int("100%") is None
+    assert ex._parse_int("100px") == 100
+    assert ex._parse_int("100") == 100
+
+
+def test_las_cabeceras_de_seguridad_tienen_que_decir_algo():
+    e = ex.extract_security_headers
+    # max-age=0 le dice al navegador que OLVIDE la politica: es no tener HSTS.
+    assert e({"Strict-Transport-Security": "max-age=31536000"})["has_hsts"] is True
+    assert e({"Strict-Transport-Security": "max-age=0"})["has_hsts"] is False
+    assert e({"Strict-Transport-Security": "max-age=0; includeSubDomains"})["has_hsts"] is False
+    # Una cabecera vacia no protege de nada.
+    assert e({"X-Frame-Options": "  "})["has_x_frame_options"] is False
+    assert e({"X-Frame-Options": "SAMEORIGIN"})["has_x_frame_options"] is True
+    # Con frame-ancestors en la CSP, X-Frame-Options es redundante.
+    assert e({"Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'"}
+             )["has_x_frame_options"] is True
+
+
+def test_el_ancho_en_pixeles_de_un_titulo_cjk_no_es_el_de_uno_latino():
+    """A 9,6 px por caracter, un titulo japones de 21 caracteres daba 202 px
+    cuando en pantalla mide unos 420: como Google corta por pixeles, ningun
+    titulo CJK salia como truncado."""
+    japones = "東京で学ぶオンライン大学の修士課程について"
+    assert ex.estimate_title_pixel_width(japones) > 380
+    # Un ideograma es de ancho completo: el doble que una letra latina.
+    assert ex.estimate_title_pixel_width("東") > ex.estimate_title_pixel_width("a") * 1.8
+    # Y un emoji compuesto es UN glifo, no cuatro.
+    assert ex.estimate_title_pixel_width("👨‍👩‍👧‍👦") < 30
