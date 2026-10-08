@@ -12,4 +12,8 @@ RUN pip install --no-cache-dir -r analysis/requirements.txt
 COPY shared/ /app/shared/
 COPY analysis/ /app/analysis/
 
+# El despliegue pasa el SHA del commit; en local queda "dev".
+ARG CRAWLER_VERSION=dev
+ENV CRAWLER_VERSION=$CRAWLER_VERSION
+
 CMD ["python", "-m", "analysis.analyzer"]

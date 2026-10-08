@@ -120,3 +120,55 @@ def test_el_bucle_del_worker_llama_al_vigilante_periodicamente():
         "el vigilante tiene que correr dentro del bucle; si solo corre al "
         "arrancar, un job huerfano no se recupera nunca"
     )
+
+
+# ---------------------------------------------------------------------------
+# Cada rastreo queda sellado con la version que lo hizo (#32)
+# ---------------------------------------------------------------------------
+def test_el_job_guarda_con_que_version_se_rastreo(monkeypatch):
+    """Sin esto, comparar dos censos del mismo sitio no puede distinguir
+    "lo cambio el sitio" de "lo cambiamos nosotros".
+
+    Me paso dos veces el mismo dia: el grafo de Druni bajo de 37,5 a 32,1
+    millones de aristas entre dos medidas (era que `analyze_indexability`
+    habia materializado 9.771 noindex, no un cambio del sitio), y el censo de
+    CST dio 88.838 "errores" de datos estructurados que eran basura guardada
+    por un extractor de junio.
+    """
+    import crawler.worker as w
+
+    assert hasattr(w, "CRAWLER_VERSION")
+    # Se lee del entorno, que es lo que el Dockerfile rellena con el SHA.
+    monkeypatch.setenv("CRAWLER_VERSION", "abc1234")
+    import importlib
+    recargado = importlib.reload(w)
+    try:
+        assert recargado.CRAWLER_VERSION == "abc1234"
+    finally:
+        monkeypatch.delenv("CRAWLER_VERSION", raising=False)
+        importlib.reload(w)
+
+
+def test_sin_sello_queda_dev():
+    import importlib
+    import os
+
+    import crawler.worker as w
+
+    previo = os.environ.pop("CRAWLER_VERSION", None)
+    try:
+        recargado = importlib.reload(w)
+        assert recargado.CRAWLER_VERSION == "dev", (
+            "en local, sin argumento de construccion, tiene que quedar 'dev' "
+            "y no una cadena vacia que parezca una version"
+        )
+    finally:
+        if previo is not None:
+            os.environ["CRAWLER_VERSION"] = previo
+        importlib.reload(w)
+
+
+def test_el_modelo_tiene_la_columna():
+    from shared.models import Job
+
+    assert "crawler_version" in Job.__table__.columns

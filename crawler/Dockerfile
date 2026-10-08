@@ -31,4 +31,8 @@ COPY analysis/ /app/analysis/
 # El worker ejecuta scripts/check_js_templates.py al cerrar un rastreo sin JS.
 COPY scripts/ /app/scripts/
 
+# El despliegue pasa el SHA del commit; en local queda "dev".
+ARG CRAWLER_VERSION=dev
+ENV CRAWLER_VERSION=$CRAWLER_VERSION
+
 CMD ["python", "crawler/worker.py"]

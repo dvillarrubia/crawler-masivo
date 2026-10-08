@@ -57,6 +57,18 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
 BRPOP_TIMEOUT = int(os.getenv("BRPOP_TIMEOUT", "5"))
 STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
+# Con que version del codigo se rastrea. La imagen la recibe como argumento de
+# construccion y el despliegue le pasa el SHA del commit; en local, sin ese
+# argumento, queda "dev".
+#
+# Por que hace falta: comparar dos censos del mismo sitio solo significa algo
+# si se sabe si entre medias cambio el sitio o cambiamos nosotros. Sin esto me
+# paso dos veces el mismo dia (decision 66): el grafo de Druni bajo de 37,5 a
+# 32,1 millones de aristas entre dos medidas —era que `analyze_indexability`
+# habia materializado 9.771 noindex, no un cambio del sitio—, y el censo de
+# CST dio 88.838 "errores" de datos estructurados que eran basura guardada por
+# un extractor de junio.
+CRAWLER_VERSION = os.getenv("CRAWLER_VERSION", "dev")
 # Cada cuanto se vuelve a mirar si hay jobs huerfanos. Ver `_quizas_recuperar`.
 RECOVERY_INTERVAL_SECONDS = int(os.getenv("RECOVERY_INTERVAL_SECONDS", "300"))
 # El nombre y el orden de la cola viven en shared/cola.py: estaban
@@ -322,6 +334,7 @@ def _run_job(job_id: str) -> None:
         # Mark running
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
+        job.crawler_version = CRAWLER_VERSION
         job_config = job.config if job.config else {}  # save before closing session
         session.commit()
         logger.info("Job %s marked as running", job_id)
