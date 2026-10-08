@@ -584,11 +584,19 @@ def test_el_analizador_sella_la_version_al_terminar(monkeypatch):
     import importlib
     import uuid
 
+    import pytest
     from sqlalchemy import BigInteger, create_engine
     from sqlalchemy.ext.compiler import compiles
     from sqlalchemy.orm import sessionmaker
 
     from shared.models import Base, Job
+
+    # El analyzer vive en la imagen del crawler y arrastra numpy (el PageRank
+    # y los casi duplicados). Este fichero corre tambien en la de la API desde
+    # la decision 69, y alli no esta. El salto es simetrico al de `fastapi`
+    # unas lineas mas abajo, y no esconde nada: el trabajo del crawler de CI
+    # ejecuta este test.
+    pytest.importorskip("numpy")
 
     @compiles(BigInteger, "sqlite")
     def _bigint3(tipo, compilador, **kw):
