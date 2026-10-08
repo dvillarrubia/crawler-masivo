@@ -465,6 +465,95 @@ def list_links(
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/stats
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/diff/{otro_id}  --  que cambio entre dos censos
+# ---------------------------------------------------------------------------
+def _paginas_para_comparar(job_id: uuid.UUID, db: Session) -> list[dict]:
+    """Las paginas HTML de un censo con los campos que se comparan.
+
+    Solo HTML: comparar el `title` de un PDF o de una imagen no dice nada, y
+    el ruido taparia los cambios que si importan.
+    """
+    filas = (
+        db.query(
+            Url.url, Url.status_code, Url.indexability_status, Url.word_count,
+            HtmlMeta.canonical_href, HtmlMeta.title,
+        )
+        .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+        .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
+        .all()
+    )
+    # El primer h1 que se PINTA de cada pagina (decision 46: los ocultos se
+    # guardan pero no cuentan).
+    h1s = dict(
+        db.query(Url.url, func.min(Heading.text))
+        .join(Heading, Heading.url_id == Url.id)
+        .filter(
+            Url.job_id == job_id, Heading.tag == "h1",
+            or_(Heading.oculto.is_(False), Heading.oculto.is_(None)),
+        )
+        .group_by(Url.url)
+        .all()
+    )
+    return [
+        {
+            "url": f.url, "status_code": f.status_code,
+            "indexability_status": f.indexability_status,
+            "canonical_href": f.canonical_href, "title": f.title,
+            "h1": h1s.get(f.url), "word_count": f.word_count,
+        }
+        for f in filas
+    ]
+
+
+def _resumen_de_job(job: Job) -> dict:
+    return {
+        "semilla": (job.seeds or [None])[0],
+        "status": job.status,
+        "finish_reason": job.finish_reason,
+        "crawler_version": job.crawler_version,
+        "nombre": job.name,
+        "fecha": job.started_at.isoformat() if job.started_at else None,
+    }
+
+
+@router.get("/diff/{otro_id}")
+def get_diff(
+    job_id: uuid.UUID,
+    otro_id: uuid.UUID,
+    map_host: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """Que cambio entre este censo y otro del mismo sitio.
+
+    `map_host=pre.x.com=x.com` reescribe el host del primero, para comparar
+    preproduccion contra produccion; sin el, dos origenes distintos se
+    rechazan en vez de devolver "ha desaparecido el sitio entero" (#32).
+    """
+    from shared.comparacion import comparar_censos
+
+    a = _get_job_or_404(job_id, db)
+    b = _get_job_or_404(otro_id, db)
+
+    mapa: dict[str, str] = {}
+    if map_host:
+        for par in map_host.split(","):
+            if "=" in par:
+                origen, destino = par.split("=", 1)
+                mapa[origen.strip().lower()] = destino.strip().lower()
+
+    resultado = comparar_censos(
+        _paginas_para_comparar(job_id, db),
+        _paginas_para_comparar(otro_id, db),
+        job_a=_resumen_de_job(a),
+        job_b=_resumen_de_job(b),
+        mapa_hosts=mapa,
+    )
+    resultado["antes"] = _resumen_de_job(a)
+    resultado["ahora"] = _resumen_de_job(b)
+    return resultado
+
+
 @router.get("/stats", response_model=JobStats)
 def get_stats(
     job_id: uuid.UUID,
