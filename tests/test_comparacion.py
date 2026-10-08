@@ -552,3 +552,75 @@ def test_un_censo_en_analisis_no_puede_afirmar_ausencias():
     r2 = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
                          job_a=JOB_OK, job_b=ya_cerrado)
     assert r2["concluyente"] is True and r2["urls"]["desaparecidas"] == 1
+
+
+def test_dos_censos_analizados_con_codigo_distinto_se_avisan():
+    """`crawler_version` dice con que se RASTREO; esto, con que se ANALIZO.
+
+    Son dos preguntas y hacen falta las dos: un re-analisis cambia las cifras
+    de un censo **sin que cambie el sitio ni el rastreo**. Medido en penguin,
+    un censo de julio re-analizado con el codigo de octubre.
+    """
+    a = {**JOB_OK, "analisis_version": "aaa1111"}
+    b = {**JOB_LUEGO, "analisis_version": "bbb2222"}
+    r = comparar_censos([_pag("/a")], [_pag("/a")], job_a=a, job_b=b)
+    assert any("ANALIZARON con versiones distintas" in x for x in r["avisos"])
+
+    # Misma version de analisis: nada que decir.
+    r2 = comparar_censos([_pag("/a")], [_pag("/a")],
+                         job_a=a, job_b={**JOB_LUEGO, "analisis_version": "aaa1111"})
+    assert not any("ANALIZARON" in x for x in r2["avisos"])
+
+
+def test_el_analizador_sella_la_version_al_terminar(monkeypatch):
+    """Si no, la columna se queda a NULL y el aviso no puede saltar nunca.
+
+    Se EJECUTA `run_all`, no se lee su fuente. La primera version de este test
+    comprobaba que el texto `analisis_version` aparecia en el metodo, y pasaba
+    tan ricamente mientras el metodo reventaba con `NameError: name 'Job' is
+    not defined` — el analyzer importa `Job` dentro de cada metodo que lo usa
+    y a ese se me olvido. Un test que mira el fuente da confianza, no cobertura.
+    """
+    import importlib
+    import uuid
+
+    import pytest
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.models import Base, Job
+
+    # El analyzer vive en la imagen del crawler y arrastra numpy (el PageRank
+    # y los casi duplicados). Este fichero corre tambien en la de la API desde
+    # la decision 69, y alli no esta. El salto es simetrico al de `fastapi`
+    # unas lineas mas abajo, y no esconde nada: el trabajo del crawler de CI
+    # ejecuta este test.
+    pytest.importorskip("numpy")
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint3(tipo, compilador, **kw):
+        return "INTEGER"
+
+    monkeypatch.setenv("CRAWLER_VERSION", "sello99")
+    import shared.version
+    importlib.reload(shared.version)
+    try:
+        from analysis.analyzer import SEOAnalyzer
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        s = sessionmaker(bind=engine)()
+        jid = uuid.uuid4()
+        j = Job(id=jid, name="t", status="analyzing", seeds=["https://x.com/"],
+                config={})
+        s.add(j)
+        s.commit()
+
+        SEOAnalyzer(s, jid).run_all()
+
+        s.refresh(j)
+        assert j.analisis_version == "sello99"
+    finally:
+        monkeypatch.delenv("CRAWLER_VERSION", raising=False)
+        importlib.reload(shared.version)

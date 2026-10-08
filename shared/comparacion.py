@@ -276,6 +276,19 @@ def comparar_censos(
             f"sitio."
         )
 
+    # Con que se ANALIZO es otra pregunta, y hace falta igual: un re-analisis
+    # cambia las cifras de un censo sin que cambie el sitio ni el rastreo.
+    # Medido en penguin, un censo de julio re-analizado con el codigo de
+    # octubre. Solo se avisa cuando se SABE que difieren: aqui, a diferencia
+    # del rastreo, el desconocido ya lo cubre el aviso de arriba.
+    ana_a, ana_b = job_a.get("analisis_version"), job_b.get("analisis_version")
+    if ana_a and ana_b and ana_a != ana_b:
+        avisos.append(
+            f"Los dos censos se ANALIZARON con versiones distintas ({ana_a} y "
+            f"{ana_b}): un re-analisis cambia las cifras sin que cambie el "
+            f"sitio, asi que parte de la diferencia puede ser nuestra."
+        )
+
     def indexar(paginas):
         return {
             _norm(_aplicar_mapa(p["url"], mapa_hosts)): p
@@ -588,6 +601,7 @@ def resumen_de_job(job) -> dict[str, Any]:
         "status": job.status,
         "finish_reason": job.finish_reason,
         "crawler_version": job.crawler_version,
+        "analisis_version": getattr(job, "analisis_version", None),
         "nombre": job.name,
         "fecha": job.started_at.isoformat() if job.started_at else None,
     }

@@ -47,6 +47,8 @@ if __name__ == "__main__":
         # Comprobacion automatica de render JS por plantilla
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS js_check JSON"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS comparacion JSON"))
+        conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS analisis_version VARCHAR(64)"))
 
         # Indices de claves foraneas que faltaban. create_all() solo crea
         # indices al crear la tabla, asi que en instalaciones ya existentes hay

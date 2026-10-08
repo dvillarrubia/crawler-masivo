@@ -221,9 +221,27 @@ class SEOAnalyzer:
 
         # Flush any remaining buffered issues.
         self._flush_issues()
+        self._sellar_version()
         self.session.commit()
 
         logger.info("SEO analysis completed for job %s", self.job_id)
+
+    def _sellar_version(self) -> None:
+        """Con que version del codigo se calcularon estas cifras.
+
+        `jobs.crawler_version` dice con que se RASTREO; esto, con que se
+        ANALIZO, que es otra pregunta y hace falta igual: un re-analisis cambia
+        las cifras de un censo sin que cambie el sitio ni el rastreo. Medido en
+        penguin, un censo de julio: 959.633 incidencias antes de re-analizarlo
+        con el codigo de octubre. Comparar dos censos analizados con codigo
+        distinto sin decirlo atribuye al cliente un cambio que es nuestro.
+        """
+        from shared.models import Job
+        from shared.version import VERSION
+
+        self.session.execute(
+            update(Job).where(Job.id == self.job_id).values(analisis_version=VERSION)
+        )
 
     # -- helpers ------------------------------------------------------------
 

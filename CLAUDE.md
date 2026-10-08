@@ -1223,6 +1223,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    el worker, y tenerlas por duplicado es como se llega a dos cifras que dicen
    medir lo mismo y no coinciden (decisiones 23 y 39).
 
+72. **Con qué se rastreó y con qué se ANALIZÓ son dos preguntas** — la
+   decisión 66 selló el rastreo y dejó abierto el otro lado, que es el que más
+   muerde: **un re-análisis cambia las cifras de un censo sin que cambie el
+   sitio ni el rastreo**. Medido en penguin, un censo de julio con **959.633
+   incidencias** entregadas, re-analizado con el código de octubre. Comparar
+   dos censos analizados con código distinto sin decirlo atribuye al cliente un
+   cambio que es nuestro. `jobs.analisis_version` lo sella al terminar
+   `run_all`, y la comparación avisa cuando difieren.
+   La constante se muda a `shared/version.py` porque ahora la escriben los dos
+   —el worker al marcar `running`, el analizador al cerrar su pasada— y dos
+   copias de «qué versión soy» pueden decir cosas distintas, que es justo lo
+   que estas columnas existen para evitar. Solo se avisa de la diferencia
+   cuando se CONOCEN las dos: el desconocido ya lo cubre el aviso del rastreo.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
