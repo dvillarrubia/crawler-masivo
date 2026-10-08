@@ -1224,6 +1224,21 @@ logs** (`/tmp/scrapy-logs`, que vive dentro). El job se queda en `running` sin
 nadie detras hasta que el vigilante lo recupera por latido viejo
 (`STALE_JOB_MINUTES`, 30 por defecto).
 
+Y ojo, que eso **no era verdad hasta el 2026-10-08**: `_recover_stale_jobs`
+corria UNA sola vez, al arrancar el worker, asi que no cubria el caso que mas
+lo necesita. Si el contenedor se reinicia DENTRO de los primeros 30 minutos de
+un rastreo —justo cuando lo pilla un despliegue—, el job recien empezado no
+llega al umbral, no es candidato, y como nadie vuelve a mirar se queda
+huerfano **para siempre**. Medido en carne propia: un rastreo lanzado a las
+22:22:01 y un despliegue que recreo el contenedor a las 22:22:39 dejaron el
+job colgado **7 h 40 min con 39 URLs**, sin proceso de Scrapy y sin que el
+vigilante lo tocara. Ahora pasa cada `RECOVERY_INTERVAL_SECONDS` (300) dentro
+del bucle.
+
+**Y antes de lanzar un rastreo, mirar que no haya un despliegue en vuelo**, no
+solo antes de bajar un censo: `gh run list --workflow=deploy.yml --limit 1`.
+Mergear una PR y lanzar un rastreo en el mismo minuto es matarlo.
+
 Pasa con cualquier cambio de codigo que obligue a reconstruir —una migracion de
 esquema, por ejemplo— y es facil confundirlo con un bloqueo del sitio: un
 canario que se para en seco a las 199 URLs parece un WAF y era esto. Antes de

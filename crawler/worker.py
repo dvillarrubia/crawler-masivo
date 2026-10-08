@@ -57,6 +57,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
 BRPOP_TIMEOUT = int(os.getenv("BRPOP_TIMEOUT", "5"))
 STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
+# Cada cuanto se vuelve a mirar si hay jobs huerfanos. Ver `_quizas_recuperar`.
+RECOVERY_INTERVAL_SECONDS = int(os.getenv("RECOVERY_INTERVAL_SECONDS", "300"))
 # El nombre y el orden de la cola viven en shared/cola.py: estaban
 # escritos a mano en cinco sitios y el orden salia al reves.
 JOBS_QUEUE = COLA_JOBS
@@ -914,6 +916,26 @@ def resumir_stderr(stderr: str) -> tuple[dict[str, list[str]], dict[str, list[st
 # ---------------------------------------------------------------------------
 # Stale job recovery
 # ---------------------------------------------------------------------------
+def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
+    """Pasa el vigilante si toca, y devuelve cuando fue la ultima pasada.
+
+    El vigilante corria **una sola vez, al arrancar el worker**, y por eso no
+    servia para el caso que mas lo necesita: si el contenedor se reinicia
+    DENTRO de los primeros `STALE_JOB_MINUTES` de un rastreo —que es justo
+    cuando lo pilla un despliegue—, el job recien empezado no llega al umbral,
+    no es candidato, y como nadie vuelve a mirar se queda en `running` sin
+    nadie detras **para siempre**.
+
+    Medido: un rastreo lanzado a las 22:22:01 y un despliegue que recreo el
+    contenedor a las 22:22:39 dejaron el job colgado 7 h 40 min con 39 URLs,
+    sin proceso de Scrapy y sin que el vigilante lo tocara.
+    """
+    if ahora - ultima_vez < RECOVERY_INTERVAL_SECONDS:
+        return ultima_vez
+    _recover_stale_jobs(rconn)
+    return ahora
+
+
 def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
     """Re-queue jobs stuck in 'running' with no recent activity.
 
@@ -1007,12 +1029,17 @@ def main() -> None:
         sys.exit(1)
 
     _recover_stale_jobs(rconn)
+    ultima_recuperacion = time.time()
 
     executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
     active_futures: dict[str, Future] = {}
 
     try:
         while not _shutdown_event.is_set():
+            ultima_recuperacion = _quizas_recuperar(
+                rconn, ultima_recuperacion, time.time()
+            )
+
             # Clean up finished futures
             done_ids = [
                 jid for jid, fut in active_futures.items() if fut.done()
