@@ -1131,7 +1131,14 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    Compara `status_code`, `indexability_status`, `canonical_href`, `title`,
    el primer h1 que se pinta y `word_count` (con un umbral del 20%, que por
    debajo es ruido de plantilla). Solo páginas HTML: el `title` de un PDF no
-   dice nada. Endpoint `GET /api/jobs/{id}/diff/{otro_id}`.
+   dice nada. Endpoint `GET /api/jobs/{id}/diff/{otro_id}` y pestaña
+   **Comparar** en la ficha del rastreo, que solo ofrece rastreos completados
+   del mismo host.
+   El umbral de palabras se mide sobre el **mayor** de los dos valores, no
+   sobre el «antes»: si no, comparar A con B y B con A da resultados
+   distintos. Lo vi usando la vista con dos censos reales de progym —1.639
+   páginas en un sentido y 439 en el otro, con los mismos datos—, y pasar de
+   100 a 130 palabras es el mismo cambio que de 130 a 100.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

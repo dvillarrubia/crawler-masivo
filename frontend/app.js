@@ -115,6 +115,14 @@ const fmt = {
   },
   status: s => STATUS_LABEL[s] || s,
   issue: t => ISSUE_LABEL[t] || t.replaceAll('_', ' '),
+  campoDiff: c => ({
+    status_code: 'Codigo de respuesta',
+    indexability_status: 'Indexabilidad',
+    canonical_href: 'Canonical',
+    title: 'Titulo',
+    h1: 'H1',
+    word_count: 'Palabras (cambio de mas del 20%)',
+  }[c] || c),
   severity: s => SEVERITY_LABEL[s] || s,
   position: p => POSITION_LABEL[p] || p || '—',
 };
@@ -535,6 +543,40 @@ function app() {
     },
 
     // ------- Pestanas -------
+    // ------- Comparar con otro censo (#32) -------
+    diff: null,
+    diffOtro: '',
+    diffCandidatos: [],
+    diffCargando: false,
+
+    async cargarCandidatosDiff() {
+      // Solo rastreos COMPLETADOS del mismo host: comparar con uno truncado
+      // se puede, pero el resultado no afirma ausencias, y comparar con otro
+      // sitio lo rechaza el servidor.
+      if (!this.job) return;
+      const miHost = (this.job.seeds && this.job.seeds[0] || '').replace(/^https?:\/\//, '').split('/')[0];
+      const d = await api('/jobs?page=1&page_size=100');
+      this.diffCandidatos = (d.items || []).filter(j => {
+        if (j.id === this.job.id) return false;
+        if (j.status !== 'completed') return false;
+        const h = (j.seeds && j.seeds[0] || '').replace(/^https?:\/\//, '').split('/')[0];
+        return h && h === miHost;
+      });
+    },
+
+    async cargarDiff() {
+      if (!this.job || !this.diffOtro) { this.diff = null; return; }
+      this.diffCargando = true;
+      try {
+        this.diff = await api(`/jobs/${this.job.id}/diff/${this.diffOtro}`);
+      } catch (e) {
+        this.diff = { comparable: false, motivo: 'No se pudo comparar: ' + e };
+      } finally {
+        this.diffCargando = false;
+        this.$nextTick(() => lucide.createIcons());
+      }
+    },
+
     async switchTab(tab) {
       this.detailTab = tab;
       if (tab === 'urls' && this.urls.length === 0) this.loadUrls();
@@ -543,6 +585,7 @@ function app() {
       if (tab === 'insights' && !this.insights) this.loadInsights();
       if (tab === 'semantic') this.loadSemantic();
       if (tab === 'cleaning') this.loadCleaning();
+      if (tab === 'diff' && !this.diffCandidatos.length) this.cargarCandidatosDiff();
       this.$nextTick(() => lucide.createIcons());
     },
 
