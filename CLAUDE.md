@@ -1199,6 +1199,30 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    (decisión 35). Eso último no está medido —ninguna pareja de censos difiere
    en el render— y sale de ese mecanismo, no de una cifra.
 
+71. **Una alerta a la que hay que ir no es una alerta** (#36) — la comparación
+   de #32 solo existía si alguien entraba en la pestaña y elegía dos censos en
+   un desplegable. Nadie hace eso para enterarse de que media sección se ha ido
+   del índice: en Lopesan pasó y se entregó como un aviso `info` entre 315.119
+   incidencias. Ahora, al cerrar un rastreo, el worker lo compara con el censo
+   anterior del mismo sitio (`_comparar_con_el_censo_anterior`, junto a
+   `_comprobar_render_js`), guarda el veredicto en `jobs.comparacion` y lo pinta
+   **arriba del todo** en la ficha del rastreo, antes de las cifras. Las alertas
+   críticas suben además al log del worker.
+   Es best-effort a propósito: si falla, el job NO se marca fallido. Lo
+   rastreado y lo analizado valen igual, y la comparación se puede pedir
+   después por el endpoint; lo contrario sería dejar en `failed` un censo
+   correcto por no poder compararse con otro.
+   El censo de referencia se busca **en lotes, de más reciente a más antiguo**,
+   no con un `limit`: con un tope fijo, en una instalación con varios clientes
+   los rastreos de los demás se comen la ventana y el censo anterior de ESE
+   sitio queda fuera — y la ausencia de alerta se lee igual que «no ha cambiado
+   nada». El host no se puede filtrar en SQL sin atarse a Postgres, porque
+   `seeds` es JSON y la primera semilla no es una columna.
+   Y las dos consultas que leen un censo (`paginas_de_censo`, `resumen_de_job`)
+   se mudan del router a `shared/comparacion.py`: las necesitan el endpoint y
+   el worker, y tenerlas por duplicado es como se llega a dos cifras que dicen
+   medir lo mismo y no coinciden (decisiones 23 y 39).
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
