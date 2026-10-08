@@ -1237,6 +1237,29 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    que estas columnas existen para evitar. Solo se avisa de la diferencia
    cuando se CONOCEN las dos: el desconocido ya lo cubre el aviso del rastreo.
 
+73. **Los datos estructurados también son un aviso por hallazgo** — el mismo
+   criterio de la decisión 64b con las imágenes y la 53 con las cabeceras, que
+   faltaba aquí. Un bloque de plantilla —el `Organization` del pie, la miga de
+   pan— es el MISMO en todo el sitio y se arregla una vez, y se emitía una
+   incidencia por bloque. Medido en tres censos, corriendo el código nuevo
+   sobre los datos guardados en producción y deshaciendo la escritura:
+
+   | censo | bloques | incidencias antes | después |
+   |---|---|---|---|
+   | penguin (87.531 páginas) | 377.171 | **226.651** | **4** |
+   | Lopesan | 45.774 | 11.186 | **13** |
+   | Saunier Duval | 1.685 | 288 | **7** |
+
+   En penguin esas 226.651 filas eran el **39% de las incidencias del censo
+   entero** diciendo cuatro cosas: 84.305 páginas con un `Organization` sin
+   `sameAs`, 83.764 con uno sin `name`, 58.552 `Product` sin `brand` y 30
+   `Review` sin `itemReviewed`. No se pierde nada: cada fila lleva
+   `paginas_afectadas` y cinco URLs de ejemplo, y `structured_data` conserva
+   todos los bloques con su validación.
+   De paso, la validación se escribía con **un UPDATE por bloque**: 226.651
+   sentencias para grabar cuatro valores distintos. Ahora va por lotes
+   agrupados por veredicto, y el chequeo entero tarda **33,9 s** en ese censo.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
