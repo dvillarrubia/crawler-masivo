@@ -65,3 +65,58 @@ def test_resumir_stderr_error_sin_traceback():
         "2026-09-28 11:03:03 [seo_crawler.pipelines] INFO: ok\n"
     )
     assert errores == {"Batch flush failed for 3 items": ["Batch flush failed for 3 items"]}
+
+
+# ---------------------------------------------------------------------------
+# El vigilante de jobs huerfanos tiene que volver a pasar (#37)
+# ---------------------------------------------------------------------------
+def test_el_vigilante_vuelve_a_pasar_cuando_toca(monkeypatch):
+    """Corria UNA sola vez, al arrancar el worker.
+
+    Por eso no servia para el caso que mas lo necesita: si el contenedor se
+    reinicia DENTRO de los primeros `STALE_JOB_MINUTES` de un rastreo —que es
+    justo cuando lo pilla un despliegue—, el job recien empezado no llega al
+    umbral, no es candidato, y como nadie vuelve a mirar se queda en `running`
+    sin nadie detras para siempre.
+
+    Medido: un rastreo lanzado a las 22:22:01 y un despliegue que recreo el
+    contenedor a las 22:22:39 dejaron el job colgado 7 h 40 min con 39 URLs y
+    sin proceso de Scrapy.
+    """
+    import crawler.worker as w
+
+    pasadas = []
+    monkeypatch.setattr(w, "_recover_stale_jobs", lambda rc: pasadas.append(rc))
+    monkeypatch.setattr(w, "RECOVERY_INTERVAL_SECONDS", 300)
+
+    t0 = 1000.0
+    ultima = t0
+    # Justo despues de arrancar no toca.
+    ultima = w._quizas_recuperar("rc", ultima, t0 + 1)
+    assert pasadas == [] and ultima == t0
+    # Ni a falta de un segundo.
+    ultima = w._quizas_recuperar("rc", ultima, t0 + 299)
+    assert pasadas == []
+    # Al cumplirse el intervalo, si.
+    ultima = w._quizas_recuperar("rc", ultima, t0 + 300)
+    assert pasadas == ["rc"] and ultima == t0 + 300
+    # Y vuelve a pasar al siguiente intervalo, no solo una vez.
+    ultima = w._quizas_recuperar("rc", ultima, t0 + 600)
+    assert len(pasadas) == 2
+
+
+def test_el_bucle_del_worker_llama_al_vigilante_periodicamente():
+    """Que la llamada este DENTRO del bucle, no solo antes de el."""
+    import inspect
+
+    import crawler.worker as w
+
+    fuente = inspect.getsource(w.main) if hasattr(w, "main") else ""
+    if not fuente:
+        import pathlib
+        fuente = pathlib.Path(w.__file__).read_text()
+    bucle = fuente[fuente.index("while not _shutdown_event.is_set():"):]
+    assert "_quizas_recuperar" in bucle, (
+        "el vigilante tiene que correr dentro del bucle; si solo corre al "
+        "arrancar, un job huerfano no se recupera nunca"
+    )
