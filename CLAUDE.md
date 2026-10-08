@@ -1104,6 +1104,35 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    arregla lo que decide el análisis, no lo que el extractor guardó mal**, así
    que una comparación debe distinguir «re-analizado» de «re-rastreado».
 
+67. **Comparar dos censos: lo que no se puede afirmar pesa más que lo que
+   sí** (#32) — `shared/comparacion.py` responde «qué cambió entre estos dos
+   rastreos del mismo sitio», y vive en `shared/` porque lo necesitan la API
+   (que no lleva `analysis/` en su imagen) y el worker. Lo interesante son las
+   cuatro cosas que se **niega** a decir:
+   - **Un censo truncado no permite afirmar ausencias.** Si uno paró por
+     `max_urls`, por tiempo o estancado, «han desaparecido 4.000 URLs» es
+     falso: no se llegó a ellas. El resultado se marca no concluyente y las
+     ausencias se cuentan aparte, sin afirmarlas.
+   - **Dos orígenes distintos no se comparan**, y la comprobación es por HOST
+     y no por dominio registrable: `pre.x.com` y `x.com` comparten dominio
+     pero no casa ni una URL, así que el resultado sería «ha desaparecido el
+     sitio entero». Con `map_host=pre.x.com=x.com` sí, porque entonces es
+     explícito. Comprobado contra datos reales: se niega a comparar el censo
+     de Saunier con el de Lopesan.
+   - **Si no se sabe con qué versión se hizo alguno de los dos, se dice.**
+     Desconocido no es igual: callarse equivale a afirmar que se hicieron con
+     el mismo código. Medido con dos censos reales de progym anteriores al
+     sello (decisión 66): **439 páginas cambian su recuento de palabras y el
+     cambio es NUESTRO** —la extracción de contenido de M1—, no del sitio.
+   - **La barra final SÍ hace dos URLs.** `/a` y `/a/` pueden servir cosas
+     distintas y normalmente una redirige a la otra; emparejarlas taparía que
+     un sitio ha cambiado de convención. El orden de los parámetros no, que
+     eso sí es la misma URL.
+   Compara `status_code`, `indexability_status`, `canonical_href`, `title`,
+   el primer h1 que se pinta y `word_count` (con un umbral del 20%, que por
+   debajo es ruido de plantilla). Solo páginas HTML: el `title` de un PDF no
+   dice nada. Endpoint `GET /api/jobs/{id}/diff/{otro_id}`.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
