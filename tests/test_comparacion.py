@@ -572,13 +572,47 @@ def test_dos_censos_analizados_con_codigo_distinto_se_avisan():
     assert not any("ANALIZARON" in x for x in r2["avisos"])
 
 
-def test_el_analizador_sella_la_version_al_terminar():
-    """Si no, la columna se queda a NULL y el aviso no puede saltar nunca."""
-    import inspect
+def test_el_analizador_sella_la_version_al_terminar(monkeypatch):
+    """Si no, la columna se queda a NULL y el aviso no puede saltar nunca.
 
-    from analysis.analyzer import SEOAnalyzer
+    Se EJECUTA `run_all`, no se lee su fuente. La primera version de este test
+    comprobaba que el texto `analisis_version` aparecia en el metodo, y pasaba
+    tan ricamente mientras el metodo reventaba con `NameError: name 'Job' is
+    not defined` — el analyzer importa `Job` dentro de cada metodo que lo usa
+    y a ese se me olvido. Un test que mira el fuente da confianza, no cobertura.
+    """
+    import importlib
+    import uuid
 
-    fuente = inspect.getsource(SEOAnalyzer.run_all)
-    assert "_sellar_version()" in fuente
-    sello = inspect.getsource(SEOAnalyzer._sellar_version)
-    assert "analisis_version" in sello
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.models import Base, Job
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint3(tipo, compilador, **kw):
+        return "INTEGER"
+
+    monkeypatch.setenv("CRAWLER_VERSION", "sello99")
+    import shared.version
+    importlib.reload(shared.version)
+    try:
+        from analysis.analyzer import SEOAnalyzer
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        s = sessionmaker(bind=engine)()
+        jid = uuid.uuid4()
+        j = Job(id=jid, name="t", status="analyzing", seeds=["https://x.com/"],
+                config={})
+        s.add(j)
+        s.commit()
+
+        SEOAnalyzer(s, jid).run_all()
+
+        s.refresh(j)
+        assert j.analisis_version == "sello99"
+    finally:
+        monkeypatch.delenv("CRAWLER_VERSION", raising=False)
+        importlib.reload(shared.version)

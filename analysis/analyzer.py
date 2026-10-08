@@ -236,6 +236,7 @@ class SEOAnalyzer:
         con el codigo de octubre. Comparar dos censos analizados con codigo
         distinto sin decirlo atribuye al cliente un cambio que es nuestro.
         """
+        from shared.models import Job
         from shared.version import VERSION
 
         self.session.execute(
