@@ -530,3 +530,25 @@ def test_el_primer_censo_de_un_sitio_no_inventa_una_comparacion():
     s.add(j)
     s.flush()
     assert comparar_con_el_anterior(s, j) is None
+
+
+def test_un_censo_en_analisis_no_puede_afirmar_ausencias():
+    """Por que la comparacion va DESPUES de escribir el estado final.
+
+    Para la comparacion, cualquier estado que no sea `completed` es un censo
+    truncado (decision 67). Llamandola junto a la comprobacion de render, la
+    fila del job todavia dice `analyzing`: el censo de ahora se daria por
+    incompleto SIEMPRE y nunca se podria afirmar que una pagina ha
+    desaparecido. Este test fija el motivo, para que mover la llamada "a un
+    sitio mas logico" no lo rompa en silencio.
+    """
+    en_analisis = {**JOB_LUEGO, "status": "analyzing"}
+    r = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
+                        job_a=JOB_OK, job_b=en_analisis)
+    assert r["concluyente"] is False
+    assert r["urls"]["desaparecidas"] is None
+
+    ya_cerrado = {**JOB_LUEGO, "status": "completed"}
+    r2 = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
+                         job_a=JOB_OK, job_b=ya_cerrado)
+    assert r2["concluyente"] is True and r2["urls"]["desaparecidas"] == 1

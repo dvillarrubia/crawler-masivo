@@ -636,7 +636,6 @@ def _run_job(job_id: str) -> None:
         analisis_ok = _trigger_analysis(job_id)
         if not job_config.get("render_js", False):
             _comprobar_render_js(job_id)
-        _comparar_con_el_censo_anterior(job_id)
 
     # -- Finalise status --
     session = SessionLocal()
@@ -698,6 +697,16 @@ def _run_job(job_id: str) -> None:
         logger.exception("Failed to finalise job %s", job_id)
     finally:
         session.close()
+
+    # La comparacion con el censo anterior va DESPUES de escribir el estado
+    # final, y no junto a la comprobacion de render. En ese punto la fila del
+    # job todavia dice `analyzing`, y para la comparacion cualquier estado que
+    # no sea `completed` es un censo truncado (decision 67): el censo de ahora
+    # se daria por incompleto SIEMPRE, de modo que nunca se podria afirmar que
+    # una pagina ha desaparecido — justo el aviso que mas cuesta reconstruir
+    # luego.
+    if final_status == "completed":
+        _comparar_con_el_censo_anterior(job_id)
 
 
 def _comparar_con_el_censo_anterior(job_id: str) -> None:
