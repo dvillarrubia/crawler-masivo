@@ -374,3 +374,52 @@ Para **decidir** si un informe entregado merece revisión: re-analizar, que
 cuesta minutos. Para **entregar** cualquier cifra: re-rastrear. Y nunca
 presentar como hallazgo del sitio algo que un re-análisis hace aparecer, sin
 comprobar antes que no es un resto de cómo se guardó.
+
+---
+
+## Lopesan re-rastreado: el arreglo del cliente, medido
+
+El censo `08e6d5eb` repite el de `b4b1b081` con las 3.040 semillas y las 20
+claves de configuración originales, dos días después y con el código de M1.
+En medio, el cliente arregló el canonical.
+
+| categoría | entregado | re-analizado | **rastreo nuevo** |
+|---|---|---|---|
+| **GLOBAL** | **82** | 88 | **90** |
+| Rastreabilidad | 73 | 73 | **84** |
+| Contenido | 64 | 97 | **93** |
+| Datos Estructurados | 100 | 85 | **88** |
+| **incidencias** | **315.119** | 38.922 | **23.161** |
+
+### Lo primero: el arreglo funcionó, y se puede demostrar
+
+| | entregado | rastreo nuevo |
+|---|---|---|
+| `canonical_cross_domain` | **2.367** | **51** |
+| páginas indexables | 46,6% | **84,1%** (3.237 de 3.848) |
+| PageRank que llega a páginas indexables | **27,5%** | **78,6%** |
+
+De volcar casi tres cuartas partes de su autoridad interna en páginas que no
+podía indexar, a que el 78,6% llegue donde tiene que llegar. **Eso es lo que
+valía el arreglo**, y sin volver a rastrear no habría forma de ponerle número.
+
+**Pero quedan 51 páginas** con el canonical apuntando todavía a
+`webserver-lopesan-prd.lfr.cloud`. El mismo fallo, sin terminar de limpiar.
+
+### Lo segundo: arreglar algo hace aparecer lo que tapaba
+
+| | re-analizado | rastreo nuevo |
+|---|---|---|
+| `title_duplicate` | 2 | **178** |
+| `h1_duplicate` | 2 | **249** |
+
+No es un empeoramiento: es que esas páginas **antes no las podía posicionar
+Google** —estaban canonicalizadas fuera— y por eso sus títulos repetidos no
+competían con nadie (decisión 47). Ahora que son indexables, sí. Es el efecto
+secundario normal de arreglar un canonical, y conviene contarlo antes de que
+el cliente lo lea como una regresión.
+
+### Y la confirmación de lo que ya se sabía
+
+`image_missing_alt`: **287.175 entregados → 19.287 agrupando → 3.997 reales**.
+El 98,6% de lo que se entregó al cliente sobre imágenes no existía.
