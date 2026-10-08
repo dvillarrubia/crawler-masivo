@@ -314,3 +314,63 @@ censo anterior a un arreglo del extractor hay que mirar si lo que aparece es un
 hallazgo del sitio o un resto de cómo se guardó — y la pista es siempre la
 misma: **una cifra que sale al 99% de algo no es un hallazgo, es un error de
 medida.**
+
+---
+
+## La prueba que faltaba: re-rastrear Saunier Duval
+
+Todo lo anterior compara **lo entregado** con **lo que dice re-analizar los
+mismos datos**. Faltaba la tercera cifra: **lo que dice un rastreo de hoy**.
+Se lanzó con las 1.678 semillas y las 17 claves de configuración originales,
+cambiando solo el nombre (job `40ea596f`, 2.916 URLs frente a 2.876: +1,4%).
+
+| categoría | entregado | re-analizado | **rastreo nuevo** |
+|---|---|---|---|
+| **GLOBAL** | **72** | 77 | **76** |
+| Rastreabilidad | 90 | 100 | 100 |
+| **Contenido** | **23** | 43 | **38** |
+| Enlaces | 94 | 91 | 88 |
+| **Datos Estructurados** | **97** | 82 | **85** |
+| Seguridad | 85 | 85 | 86 |
+| Internacionalización | 50 | 50 | 50 |
+
+| | entregado | re-analizado | **rastreo nuevo** |
+|---|---|---|---|
+| **incidencias** | **15.550** | 10.637 | **8.612** |
+
+### Qué contesta esto
+
+**1. El re-análisis es una buena aproximación, no la respuesta.** La nota
+global se queda a un punto (77 contra 76), pero por categoría se desvía hasta
+**5 puntos**. Sirve para decidir si merece la pena re-rastrear; no para
+entregarlo.
+
+**2. La corrección sobre «Contenido» era correcta.** Se avisó arriba de que la
+subida a 43 no significaba que el contenido estuviera infravalorado, sino que
+habíamos retirado dos avisos que no son señal de Google, y que al medir el
+texto propio aparecerían **más** páginas escasas. El rastreo nuevo lo confirma:
+**43 → 38**. Sigue muy por encima del 23 entregado, pero cinco puntos por
+debajo de lo que sugería el re-análisis.
+
+**3. Hay hallazgos que SOLO aparecen re-rastreando.** Los dos más claros:
+
+| incidencia | entregado | re-analizado | rastreo nuevo |
+|---|---|---|---|
+| `image_missing_alt` | 4.849 | 3.338 | **73** |
+| `duplicate_content` | 0 | 0 | **695** |
+
+- Las imágenes sin alt eran **casi todas un artefacto del extractor viejo**
+  (`<source>` de `<picture>` y placeholders de carga diferida contados como
+  imágenes). El re-análisis solo pudo agruparlas; hacía falta volver a mirar la
+  página para que desaparecieran. De 4.849 avisos entregados, los reales son
+  **73**.
+- Los **695 duplicados exactos** no podían verse de ninguna forma sin
+  re-rastrear: el hash del contenido es una columna que no existía. Son 695
+  páginas con el contenido principal idéntico a otra.
+
+### La regla práctica
+
+Para **decidir** si un informe entregado merece revisión: re-analizar, que
+cuesta minutos. Para **entregar** cualquier cifra: re-rastrear. Y nunca
+presentar como hallazgo del sitio algo que un re-análisis hace aparecer, sin
+comprobar antes que no es un resto de cómo se guardó.
