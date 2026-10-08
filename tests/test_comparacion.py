@@ -370,19 +370,16 @@ def test_un_censo_con_render_y_otro_sin_el_se_avisa():
     assert not any("renderiza JavaScript" in a for a in r2["avisos"])
 
 
-def test_el_endpoint_envia_las_semillas_y_el_render():
+def test_el_resumen_del_job_lleva_las_semillas_y_el_render():
     """El guardia de alcance vive en la funcion pura, pero los datos los pone
-    el endpoint: si deja de enviarlos, la comprobacion no salta y nada lo dice.
-    Es el mismo agujero que el de `w3lib` (decision 69), en el otro extremo.
+    quien la llama: si dejan de enviarse, la comprobacion no salta y nada lo
+    dice. Es el mismo agujero que el de `w3lib` (decision 69), en el otro
+    extremo. Ahora el resumen es UNO —lo usan el endpoint y el worker— porque
+    dos copias es como se llega a dos cifras que dicen medir lo mismo.
     """
-    import pytest
     from types import SimpleNamespace
 
-    # El endpoint vive en la imagen de la API y el crawler no lleva FastAPI.
-    # El salto no esconde nada: el trabajo de la API de CI corre este fichero
-    # desde la decision 69, y ahi el import sale adelante.
-    pytest.importorskip("fastapi")
-    from api.routers.results import _resumen_de_job
+    from shared.comparacion import resumen_de_job as _resumen_de_job
 
     job = SimpleNamespace(
         seeds=["https://x.com/a", "https://x.com/b"], status="completed",
@@ -391,3 +388,167 @@ def test_el_endpoint_envia_las_semillas_y_el_render():
     r = _resumen_de_job(job)
     assert r["semillas"] == ["https://x.com/a", "https://x.com/b"]
     assert r["render_js"] is True
+
+
+# --- La comparacion automatica al cerrar un rastreo (#36) -------------------
+
+def test_el_censo_anterior_es_el_mas_reciente_del_mismo_sitio():
+    """Un rastreo de otro sitio no sirve, y uno posterior tampoco."""
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.comparacion import censo_anterior
+    from shared.models import Base, Job
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[Job.__table__])
+    s = sessionmaker(bind=engine)()
+
+    def job(nombre, semilla, dia, estado="completed"):
+        j = Job(id=uuid.uuid4(), name=nombre, status=estado, seeds=[semilla],
+                config={}, started_at=datetime(2026, 1, dia))
+        s.add(j)
+        s.flush()
+        return j
+
+    job("otro sitio", "https://otro.com/", 5)
+    viejo = job("el viejo", "https://x.com/", 1)
+    medio = job("el de en medio", "https://x.com/", 5)
+    actual = job("el actual", "https://x.com/", 10)
+    job("posterior", "https://x.com/", 20)
+
+    assert censo_anterior(s, actual).id == medio.id
+    assert censo_anterior(s, medio).id == viejo.id
+    assert censo_anterior(s, viejo) is None, "el primero de un sitio no tiene con que"
+
+
+def test_un_rastreo_sin_terminar_no_sirve_de_referencia():
+    """Comparar contra uno truncado o fallido no permitiria afirmar nada."""
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.comparacion import censo_anterior
+    from shared.models import Base, Job
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[Job.__table__])
+    s = sessionmaker(bind=engine)()
+    for nombre, dia, estado in [("fallido", 1, "failed"), ("cancelado", 2, "cancelled"),
+                                ("corriendo", 3, "running")]:
+        s.add(Job(id=uuid.uuid4(), name=nombre, status=estado,
+                  seeds=["https://x.com/"], config={}, started_at=datetime(2026, 1, dia)))
+    actual = Job(id=uuid.uuid4(), name="actual", status="completed",
+                 seeds=["https://x.com/"], config={}, started_at=datetime(2026, 1, 9))
+    s.add(actual)
+    s.flush()
+    assert censo_anterior(s, actual) is None
+
+
+def test_la_comparacion_automatica_de_extremo_a_extremo():
+    """Del rastreo cerrado a la alerta guardada, con filas de verdad.
+
+    El gancho del worker es fino a proposito, asi que lo que hay que probar es
+    este camino: dos censos en base de datos -> `comparar_con_el_anterior` ->
+    una alerta critica con su denominador. Es el caso de Lopesan en pequeno.
+    """
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.comparacion import comparar_con_el_anterior
+    from shared.models import Base, Heading, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        Job.__table__, Url.__table__, HtmlMeta.__table__, Heading.__table__])
+    s = sessionmaker(bind=engine)()
+
+    def censo(nombre, dia, canonical_a_staging):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 1, dia), crawler_version="abc1234")
+        s.add(j)
+        s.flush()
+        for i in range(30):
+            ruta = f"/hotel{i}"
+            u = Url(job_id=j.id, url=f"https://x.com{ruta}", url_hash=f"{nombre}{ruta}",
+                    is_internal=True, is_html=True, status_code=200,
+                    indexability_status="Indexable", word_count=500)
+            s.add(u)
+            s.flush()
+            can = (f"https://origen.lfr.cloud{ruta}" if canonical_a_staging
+                   else f"https://x.com{ruta}")
+            s.add(HtmlMeta(url_id=u.id, title="Titulo", canonical_href=can))
+        s.flush()
+        return j
+
+    censo("el anterior", 1, False)
+    actual = censo("el nuevo", 5, True)
+
+    r = comparar_con_el_anterior(s, actual)
+    assert r is not None and r["comparable"] is True
+    assert r["comparado_con"] and r["nombre_anterior"] == "el anterior"
+    criticas = [a for a in r["alertas"] if a["severidad"] == "critical"]
+    assert [a["regla"] for a in criticas] == ["canonical_a_otro_host"]
+    assert (criticas[0]["paginas"], criticas[0]["de"]) == (30, 30)
+
+
+def test_el_primer_censo_de_un_sitio_no_inventa_una_comparacion():
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.comparacion import comparar_con_el_anterior
+    from shared.models import Base, Heading, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint2(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        Job.__table__, Url.__table__, HtmlMeta.__table__, Heading.__table__])
+    s = sessionmaker(bind=engine)()
+    j = Job(id=uuid.uuid4(), name="el unico", status="completed",
+            seeds=["https://x.com/"], config={}, started_at=datetime(2026, 1, 1))
+    s.add(j)
+    s.flush()
+    assert comparar_con_el_anterior(s, j) is None
+
+
+def test_un_censo_en_analisis_no_puede_afirmar_ausencias():
+    """Por que la comparacion va DESPUES de escribir el estado final.
+
+    Para la comparacion, cualquier estado que no sea `completed` es un censo
+    truncado (decision 67). Llamandola junto a la comprobacion de render, la
+    fila del job todavia dice `analyzing`: el censo de ahora se daria por
+    incompleto SIEMPRE y nunca se podria afirmar que una pagina ha
+    desaparecido. Este test fija el motivo, para que mover la llamada "a un
+    sitio mas logico" no lo rompa en silencio.
+    """
+    en_analisis = {**JOB_LUEGO, "status": "analyzing"}
+    r = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
+                        job_a=JOB_OK, job_b=en_analisis)
+    assert r["concluyente"] is False
+    assert r["urls"]["desaparecidas"] is None
+
+    ya_cerrado = {**JOB_LUEGO, "status": "completed"}
+    r2 = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
+                         job_a=JOB_OK, job_b=ya_cerrado)
+    assert r2["concluyente"] is True and r2["urls"]["desaparecidas"] == 1

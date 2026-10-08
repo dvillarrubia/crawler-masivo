@@ -272,6 +272,38 @@
           </div>
         </template>
 
+        <!-- Que cambio respecto al censo anterior del mismo sitio, calculado
+             al cerrar el rastreo. Va ARRIBA y antes que las cifras: una
+             alerta a la que hay que ir no es una alerta. En Lopesan, media
+             seccion canonicalizada a un servidor de pruebas se entrego como
+             un aviso `info` entre 315.119 incidencias. -->
+        <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
+          <div class="card mb-2"
+               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
+            <div class="text-sm">
+              <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
+              Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
+              (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
+            </div>
+            <template x-for="al in job.comparacion.alertas" :key="al.regla">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
+                            + fmt.colorSeveridad(al.severidad)">
+                <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
+                  <strong x-text="fmt.reglaDiff(al.regla)"></strong>
+                  <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
+                    <strong x-text="fmt.num(al.paginas)"></strong>
+                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
+                  </span>
+                </div>
+                <div class="text-sm" x-text="al.que_decide_google"></div>
+              </div>
+            </template>
+            <div class="text-dim" style="font-size:.78rem;margin-top:.5rem">
+              El detalle, con ejemplos y plantillas, en la pestana Comparar.
+            </div>
+          </div>
+        </template>
+
         <!-- Aviso de grafo incompleto por JavaScript. El PageRank se calcula
              igual y antes se entregaba sin decir nada: el aviso solo existia en
              el log del worker y en una columna del CSV, que no abre quien mira
@@ -417,7 +449,7 @@
                      grande de las indexables no es trabajo editorial. -->
                 <template x-for="al in (diff.alertas || [])" :key="al.regla">
                   <div class="card"
-                       :style="'margin-bottom:.75rem;border-left:3px solid var(--' + (al.severidad === 'critical' ? 'red' : al.severidad === 'warning' ? 'orange' : 'blue') + ')'">
+                       :style="'margin-bottom:.75rem;border-left:3px solid ' + fmt.colorSeveridad(al.severidad)">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
                       <strong x-text="fmt.reglaDiff(al.regla)"></strong>
                       <span style="white-space:nowrap;font-variant-numeric:tabular-nums">

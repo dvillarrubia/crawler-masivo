@@ -233,6 +233,7 @@ class JobResponse(BaseModel):
     crawler_version: str | None = None
     # Comprobacion de render JS por plantilla (solo en rastreos sin render_js)
     js_check: dict[str, Any] | None = None
+    comparacion: dict[str, Any] | None = None
     # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
     pagerank_resumen: dict[str, Any] | None = None
     seeds: list[str]

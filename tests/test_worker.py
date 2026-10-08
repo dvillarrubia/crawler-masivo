@@ -172,3 +172,30 @@ def test_el_modelo_tiene_la_columna():
     from shared.models import Job
 
     assert "crawler_version" in Job.__table__.columns
+
+
+def test_la_comparacion_va_despues_de_escribir_el_estado_final():
+    """El ORDEN es el contrato, y un comentario no lo sujeta.
+
+    Para la comparacion, un job que no esta `completed` es un censo truncado
+    (decision 67). Si la llamada se hace junto a `_comprobar_render_js`, la
+    fila todavia dice `analyzing` y el censo de ahora se da por incompleto
+    SIEMPRE: nunca se podria afirmar que una pagina ha desaparecido, y la
+    ausencia de ese aviso se lee como que no falta ninguna.
+    """
+    import inspect
+    import re
+
+    import worker
+
+    fuente = inspect.getsource(worker._run_job)
+    pos_render = fuente.index("_comprobar_render_js(job_id)")
+    pos_comparar = fuente.index("_comparar_con_el_censo_anterior(job_id)")
+    pos_estado = fuente.index("job.status = final_status")
+    assert pos_render < pos_estado < pos_comparar, (
+        "la comparacion tiene que ir despues de escribir el estado final"
+    )
+    # Y solo cuando el rastreo ha ido bien: comparar un job fallido no dice
+    # nada y el aviso sonaria como si el sitio hubiera cambiado.
+    guarda = fuente[fuente.rindex("\n", 0, pos_comparar - 60):pos_comparar]
+    assert re.search(r'final_status == "completed"', guarda)

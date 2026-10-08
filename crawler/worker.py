@@ -698,6 +698,63 @@ def _run_job(job_id: str) -> None:
     finally:
         session.close()
 
+    # La comparacion con el censo anterior va DESPUES de escribir el estado
+    # final, y no junto a la comprobacion de render. En ese punto la fila del
+    # job todavia dice `analyzing`, y para la comparacion cualquier estado que
+    # no sea `completed` es un censo truncado (decision 67): el censo de ahora
+    # se daria por incompleto SIEMPRE, de modo que nunca se podria afirmar que
+    # una pagina ha desaparecido — justo el aviso que mas cuesta reconstruir
+    # luego.
+    if final_status == "completed":
+        _comparar_con_el_censo_anterior(job_id)
+
+
+def _comparar_con_el_censo_anterior(job_id: str) -> None:
+    """Compara el rastreo recien cerrado con el anterior del mismo sitio.
+
+    Es lo que convierte la comparacion de #32 en una ALERTA: nadie va a entrar
+    a elegir dos censos en un desplegable para enterarse de que media seccion
+    se ha ido del indice. En Lopesan paso exactamente eso —2.367 paginas
+    canonicalizadas a un servidor de pruebas— y se entrego como un aviso
+    `info` entre 315.119 incidencias.
+
+    Best-effort: si revienta, el job NO se marca fallido. Lo rastreado y lo
+    analizado valen igual, y la comparacion se puede pedir despues por el
+    endpoint. Lo contrario seria que un censo correcto quedase en `failed` por
+    no poder compararse con otro.
+    """
+    from shared.comparacion import comparar_con_el_anterior
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).one_or_none()
+        if job is None:
+            return
+        resultado = comparar_con_el_anterior(session, job)
+        if resultado is None:
+            logger.info("Job %s: no hay censo anterior del mismo sitio", job_id)
+            return
+        job.comparacion = resultado
+        session.commit()
+        criticas = [a for a in resultado.get("alertas", [])
+                    if a.get("severidad") == "critical"]
+        if criticas:
+            logger.warning(
+                "Job %s: %d ALERTA(S) CRITICA(S) respecto al censo anterior (%s): %s",
+                job_id, len(criticas), resultado.get("nombre_anterior"),
+                "; ".join(f"{a['regla']} {a['paginas']}/{a['de']} ({a['pct']}%)"
+                          for a in criticas),
+            )
+        else:
+            logger.info("Job %s: comparado con %s, %d alerta(s)", job_id,
+                        resultado.get("comparado_con"),
+                        len(resultado.get("alertas", [])))
+    except Exception:
+        session.rollback()
+        logger.exception("Job %s: fallo al comparar con el censo anterior", job_id)
+    finally:
+        session.close()
+
 
 def _comprobar_render_js(job_id: str) -> None:
     """Comprueba, plantilla a plantilla, que se pierde por no renderizar JS.

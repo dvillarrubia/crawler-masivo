@@ -523,3 +523,136 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
         })
     orden = {"critical": 0, "warning": 1, "info": 2}
     return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))
+
+
+# --- Acceso a base de datos -------------------------------------------------
+#
+# Las dos consultas viven aqui y no en el router de la API porque las necesitan
+# los DOS: el endpoint y el worker, que compara cada rastreo recien terminado
+# con el anterior del mismo sitio. Tenerlas por duplicado es como se llega a un
+# desacuerdo silencioso entre dos cifras que dicen medir lo mismo (decisiones
+# 23 y 39).
+
+
+def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
+    """Las páginas HTML de un censo con los campos que se comparan.
+
+    Solo HTML: comparar el `title` de un PDF o de una imagen no dice nada, y
+    el ruido taparía los cambios que sí importan.
+    """
+    from sqlalchemy import func, or_
+
+    from shared.models import Heading, HtmlMeta, Url
+
+    filas = (
+        db.query(
+            Url.url, Url.status_code, Url.indexability_status, Url.word_count,
+            HtmlMeta.canonical_href, HtmlMeta.title,
+        )
+        .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+        .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
+        .all()
+    )
+    # El primer h1 que se PINTA de cada página (decisión 46: los ocultos se
+    # guardan pero no cuentan).
+    h1s = dict(
+        db.query(Url.url, func.min(Heading.text))
+        .join(Heading, Heading.url_id == Url.id)
+        .filter(
+            Url.job_id == job_id, Heading.tag == "h1",
+            or_(Heading.oculto.is_(False), Heading.oculto.is_(None)),
+        )
+        .group_by(Url.url)
+        .all()
+    )
+    return [
+        {
+            "url": f.url, "status_code": f.status_code,
+            "indexability_status": f.indexability_status,
+            "canonical_href": f.canonical_href, "title": f.title,
+            "h1": h1s.get(f.url), "word_count": f.word_count,
+        }
+        for f in filas
+    ]
+
+
+def resumen_de_job(job) -> dict[str, Any]:
+    """Lo que la comparación necesita saber del rastreo, no de sus páginas."""
+    return {
+        "semilla": (job.seeds or [None])[0],
+        # Las semillas ENTERAS, no solo la primera: dos rastreos del mismo host
+        # pueden tener dos alcances distintos, y entonces lo que "falta" puede
+        # no haber estado nunca en el alcance (decisión 70).
+        "semillas": list(job.seeds or []),
+        "render_js": (job.config or {}).get("render_js"),
+        "status": job.status,
+        "finish_reason": job.finish_reason,
+        "crawler_version": job.crawler_version,
+        "nombre": job.name,
+        "fecha": job.started_at.isoformat() if job.started_at else None,
+    }
+
+
+def censo_anterior(db, job):
+    """El rastreo completado más reciente del mismo sitio ANTES que este.
+
+    Mismo host de semilla y completado: con otra cosa la comparación o se
+    rechaza (otro origen) o no puede afirmar ausencias (truncado). Devuelve
+    None si no hay ninguno, que es el caso normal del primer censo de un sitio.
+    """
+    from shared.models import Job
+
+    if not job.seeds or not job.started_at:
+        return None
+    host = _host(job.seeds[0])
+    if not host:
+        return None
+    # Se recorre de más reciente a más antiguo y se para en el primero del
+    # mismo host. En lotes y no con un `limit`: con un tope fijo, en una
+    # instalación con varios clientes los rastreos de los demás se comen la
+    # ventana y el censo anterior de ESTE sitio queda fuera — y la ausencia de
+    # alerta se lee igual que «no ha cambiado nada». El host no se puede filtrar
+    # en SQL sin atarse a Postgres: `seeds` es JSON y la primera semilla no es
+    # una columna.
+    consulta = (
+        db.query(Job)
+        .filter(Job.id != job.id, Job.status == "completed",
+                Job.started_at.isnot(None), Job.started_at < job.started_at)
+        .order_by(Job.started_at.desc())
+    )
+    for c in consulta.yield_per(200):
+        if c.seeds and _host(c.seeds[0]) == host:
+            return c
+    return None
+
+
+def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
+    """Compara un rastreo recién terminado con el anterior del mismo sitio.
+
+    Es lo que convierte la comparación en una alerta: nadie va a entrar a
+    elegir dos censos en un desplegable para enterarse de que media sección se
+    ha ido del índice. En Lopesan eso pasó y se entregó como un aviso `info`
+    entre 315.119 incidencias.
+    """
+    anterior = censo_anterior(db, job)
+    if anterior is None:
+        return None
+    r = comparar_censos(
+        paginas_de_censo(db, anterior.id),
+        paginas_de_censo(db, job.id),
+        job_a=resumen_de_job(anterior),
+        job_b=resumen_de_job(job),
+    )
+    # Lo que se guarda es el veredicto, no el censo entero: los ejemplos y las
+    # plantillas ya van dentro de cada alerta.
+    return {
+        "comparado_con": str(anterior.id),
+        "nombre_anterior": anterior.name,
+        "fecha_anterior": resumen_de_job(anterior)["fecha"],
+        "comparable": r.get("comparable", False),
+        "motivo": r.get("motivo"),
+        "concluyente": r.get("concluyente"),
+        "avisos": r.get("avisos", []),
+        "urls": r.get("urls"),
+        "alertas": r.get("alertas", []),
+    }

@@ -468,62 +468,6 @@ def list_links(
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/diff/{otro_id}  --  que cambio entre dos censos
 # ---------------------------------------------------------------------------
-def _paginas_para_comparar(job_id: uuid.UUID, db: Session) -> list[dict]:
-    """Las paginas HTML de un censo con los campos que se comparan.
-
-    Solo HTML: comparar el `title` de un PDF o de una imagen no dice nada, y
-    el ruido taparia los cambios que si importan.
-    """
-    filas = (
-        db.query(
-            Url.url, Url.status_code, Url.indexability_status, Url.word_count,
-            HtmlMeta.canonical_href, HtmlMeta.title,
-        )
-        .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
-        .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
-        .all()
-    )
-    # El primer h1 que se PINTA de cada pagina (decision 46: los ocultos se
-    # guardan pero no cuentan).
-    h1s = dict(
-        db.query(Url.url, func.min(Heading.text))
-        .join(Heading, Heading.url_id == Url.id)
-        .filter(
-            Url.job_id == job_id, Heading.tag == "h1",
-            or_(Heading.oculto.is_(False), Heading.oculto.is_(None)),
-        )
-        .group_by(Url.url)
-        .all()
-    )
-    return [
-        {
-            "url": f.url, "status_code": f.status_code,
-            "indexability_status": f.indexability_status,
-            "canonical_href": f.canonical_href, "title": f.title,
-            "h1": h1s.get(f.url), "word_count": f.word_count,
-        }
-        for f in filas
-    ]
-
-
-def _resumen_de_job(job: Job) -> dict:
-    return {
-        "semilla": (job.seeds or [None])[0],
-        # Las semillas ENTERAS, no solo la primera: dos rastreos del mismo host
-        # pueden tener dos alcances distintos, y entonces lo que "falta" puede
-        # no haber estado nunca en el alcance. Medido con los dos censos de
-        # cst.gov.sa del mismo dia (castellano e ingles): 0 semillas en comun
-        # de 4.780, y 834 paginas declaradas desaparecidas.
-        "semillas": list(job.seeds or []),
-        "render_js": (job.config or {}).get("render_js"),
-        "status": job.status,
-        "finish_reason": job.finish_reason,
-        "crawler_version": job.crawler_version,
-        "nombre": job.name,
-        "fecha": job.started_at.isoformat() if job.started_at else None,
-    }
-
-
 @router.get("/diff/{otro_id}")
 def get_diff(
     job_id: uuid.UUID,
@@ -537,7 +481,7 @@ def get_diff(
     preproduccion contra produccion; sin el, dos origenes distintos se
     rechazan en vez de devolver "ha desaparecido el sitio entero" (#32).
     """
-    from shared.comparacion import comparar_censos
+    from shared.comparacion import comparar_censos, paginas_de_censo, resumen_de_job
 
     a = _get_job_or_404(job_id, db)
     b = _get_job_or_404(otro_id, db)
@@ -550,10 +494,10 @@ def get_diff(
                 mapa[origen.strip().lower()] = destino.strip().lower()
 
     resultado = comparar_censos(
-        _paginas_para_comparar(job_id, db),
-        _paginas_para_comparar(otro_id, db),
-        job_a=_resumen_de_job(a),
-        job_b=_resumen_de_job(b),
+        paginas_de_censo(db, job_id),
+        paginas_de_censo(db, otro_id),
+        job_a=resumen_de_job(a),
+        job_b=resumen_de_job(b),
         mapa_hosts=mapa,
     )
     # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban

@@ -49,6 +49,9 @@ class Job(Base):
     # esconde enlaces (el grafo y el PageRank no serian fiables) y cuanto
     # contenido carga en cliente. NULL = no se llego a comprobar.
     js_check = Column(JSON, nullable=True)
+    # Que cambio respecto al censo anterior del mismo sitio, calculado al
+    # cerrar el rastreo. Es la alerta que nadie tiene que ir a buscar.
+    comparacion = Column(JSON, nullable=True)
 
     # Resumen del PageRank (ver analysis/pagerank.py): que fraccion acaba en
     # cada tipo de URL (indexable, redireccion, error...) y cuanta se

@@ -121,6 +121,17 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
+### El rastreo se compara solo con el anterior (9 de octubre)
+
+Primer trozo de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36).
+Al terminar un rastreo ya no hay que ir a compararlo con nada: se compara solo
+con el censo anterior del mismo sitio y, si algo ha cambiado a lo grande, lo
+dice **arriba del todo en la ficha del rastreo**, antes que ninguna cifra.
+
+Es el remate de lo de abajo. Una comparación que hay que ir a pedir no sirve
+para enterarse de que media sección se ha ido del índice: hay que estar
+mirando. Ahora te lo encuentras.
+
 ### Comparar dos rastreos del mismo sitio, y que avise solo (9 de octubre)
 
 Cierra [#32](https://github.com/dvillarrubia/crawler-masivo/issues/32). En la
