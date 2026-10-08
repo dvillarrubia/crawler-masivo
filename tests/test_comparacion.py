@@ -552,3 +552,33 @@ def test_un_censo_en_analisis_no_puede_afirmar_ausencias():
     r2 = comparar_censos([_pag("/a"), _pag("/b")], [_pag("/a")],
                          job_a=JOB_OK, job_b=ya_cerrado)
     assert r2["concluyente"] is True and r2["urls"]["desaparecidas"] == 1
+
+
+def test_dos_censos_analizados_con_codigo_distinto_se_avisan():
+    """`crawler_version` dice con que se RASTREO; esto, con que se ANALIZO.
+
+    Son dos preguntas y hacen falta las dos: un re-analisis cambia las cifras
+    de un censo **sin que cambie el sitio ni el rastreo**. Medido en penguin,
+    un censo de julio re-analizado con el codigo de octubre.
+    """
+    a = {**JOB_OK, "analisis_version": "aaa1111"}
+    b = {**JOB_LUEGO, "analisis_version": "bbb2222"}
+    r = comparar_censos([_pag("/a")], [_pag("/a")], job_a=a, job_b=b)
+    assert any("ANALIZARON con versiones distintas" in x for x in r["avisos"])
+
+    # Misma version de analisis: nada que decir.
+    r2 = comparar_censos([_pag("/a")], [_pag("/a")],
+                         job_a=a, job_b={**JOB_LUEGO, "analisis_version": "aaa1111"})
+    assert not any("ANALIZARON" in x for x in r2["avisos"])
+
+
+def test_el_analizador_sella_la_version_al_terminar():
+    """Si no, la columna se queda a NULL y el aviso no puede saltar nunca."""
+    import inspect
+
+    from analysis.analyzer import SEOAnalyzer
+
+    fuente = inspect.getsource(SEOAnalyzer.run_all)
+    assert "_sellar_version()" in fuente
+    sello = inspect.getsource(SEOAnalyzer._sellar_version)
+    assert "analisis_version" in sello

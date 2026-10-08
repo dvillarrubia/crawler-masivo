@@ -52,6 +52,9 @@ class Job(Base):
     # Que cambio respecto al censo anterior del mismo sitio, calculado al
     # cerrar el rastreo. Es la alerta que nadie tiene que ir a buscar.
     comparacion = Column(JSON, nullable=True)
+    # Con que version se ANALIZO, que no es lo mismo que con cual se rastreo:
+    # un re-analisis cambia las cifras sin que cambie el sitio (decision 66).
+    analisis_version = Column(String(64), nullable=True)
 
     # Resumen del PageRank (ver analysis/pagerank.py): que fraccion acaba en
     # cada tipo de URL (indexable, redireccion, error...) y cuanta se

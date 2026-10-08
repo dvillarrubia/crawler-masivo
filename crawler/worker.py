@@ -39,6 +39,7 @@ if _PROJECT_ROOT not in sys.path:
 
 # Despues de arreglar sys.path, no antes.
 from shared.cola import COLA_JOBS, encolar, siguiente  # noqa: E402
+from shared.version import VERSION as _VERSION
 
 # Nivel configurable por entorno. La salida de Scrapy se registra en DEBUG, y
 # como el subproceso no escribe en el stdout del worker, con INFO no habia
@@ -68,7 +69,9 @@ STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
 # habia materializado 9.771 noindex, no un cambio del sitio—, y el censo de
 # CST dio 88.838 "errores" de datos estructurados que eran basura guardada por
 # un extractor de junio.
-CRAWLER_VERSION = os.getenv("CRAWLER_VERSION", "dev")
+# La misma constante que usa el analizador para sellar su pasada:
+# `shared/version.py`, para que no puedan decir cosas distintas.
+CRAWLER_VERSION = _VERSION
 # Cada cuanto se vuelve a mirar si hay jobs huerfanos. Ver `_quizas_recuperar`.
 RECOVERY_INTERVAL_SECONDS = int(os.getenv("RECOVERY_INTERVAL_SECONDS", "300"))
 # El nombre y el orden de la cola viven en shared/cola.py: estaban

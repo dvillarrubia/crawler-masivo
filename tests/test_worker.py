@@ -135,17 +135,25 @@ def test_el_job_guarda_con_que_version_se_rastreo(monkeypatch):
     CST dio 88.838 "errores" de datos estructurados que eran basura guardada
     por un extractor de junio.
     """
+    import importlib
+
     import crawler.worker as w
+    import shared.version as v
 
     assert hasattr(w, "CRAWLER_VERSION")
-    # Se lee del entorno, que es lo que el Dockerfile rellena con el SHA.
+    # Se lee del entorno, que es lo que el Dockerfile rellena con el SHA. Y se
+    # lee en `shared/version.py`, porque la escriben DOS: el worker al empezar
+    # el rastreo y el analizador al terminar su pasada. Por eso hay que
+    # recargar ese modulo y no solo el del worker.
     monkeypatch.setenv("CRAWLER_VERSION", "abc1234")
-    import importlib
-    recargado = importlib.reload(w)
     try:
+        importlib.reload(v)
+        recargado = importlib.reload(w)
         assert recargado.CRAWLER_VERSION == "abc1234"
+        assert v.VERSION == "abc1234", "el analizador lee la misma constante"
     finally:
         monkeypatch.delenv("CRAWLER_VERSION", raising=False)
+        importlib.reload(v)
         importlib.reload(w)
 
 
@@ -154,9 +162,11 @@ def test_sin_sello_queda_dev():
     import os
 
     import crawler.worker as w
+    import shared.version as v
 
     previo = os.environ.pop("CRAWLER_VERSION", None)
     try:
+        importlib.reload(v)
         recargado = importlib.reload(w)
         assert recargado.CRAWLER_VERSION == "dev", (
             "en local, sin argumento de construccion, tiene que quedar 'dev' "
@@ -165,13 +175,22 @@ def test_sin_sello_queda_dev():
     finally:
         if previo is not None:
             os.environ["CRAWLER_VERSION"] = previo
+        importlib.reload(v)
         importlib.reload(w)
 
 
-def test_el_modelo_tiene_la_columna():
+def test_el_modelo_tiene_las_dos_columnas_de_version():
+    """Con que se RASTREO y con que se ANALIZO son dos preguntas distintas.
+
+    Un re-analisis cambia las cifras de un censo sin que cambie el sitio ni el
+    rastreo: medido en penguin, un censo de julio con 959.633 incidencias
+    re-analizado con el codigo de octubre. Comparar dos censos analizados con
+    codigo distinto sin decirlo atribuye al cliente un cambio que es nuestro.
+    """
     from shared.models import Job
 
     assert "crawler_version" in Job.__table__.columns
+    assert "analisis_version" in Job.__table__.columns
 
 
 def test_la_comparacion_va_despues_de_escribir_el_estado_final():
