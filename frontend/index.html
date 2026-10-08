@@ -278,15 +278,16 @@
              seccion canonicalizada a un servidor de pruebas se entrego como
              un aviso `info` entre 315.119 incidencias. -->
         <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
-          <div class="card mb-2" style="border-left:3px solid var(--red,#d32f2f)">
+          <div class="card mb-2"
+               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
             <div class="text-sm">
               <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
               Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
               (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
             </div>
             <template x-for="al in job.comparacion.alertas" :key="al.regla">
-              <div style="margin-top:.5rem;padding-left:.6rem"
-                   :style="'border-left:2px solid var(--' + (al.severidad === 'critical' ? 'red' : al.severidad === 'warning' ? 'orange' : 'blue') + ')'">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
+                            + fmt.colorSeveridad(al.severidad)">
                 <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
                   <strong x-text="fmt.reglaDiff(al.regla)"></strong>
                   <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
@@ -448,7 +449,7 @@
                      grande de las indexables no es trabajo editorial. -->
                 <template x-for="al in (diff.alertas || [])" :key="al.regla">
                   <div class="card"
-                       :style="'margin-bottom:.75rem;border-left:3px solid var(--' + (al.severidad === 'critical' ? 'red' : al.severidad === 'warning' ? 'orange' : 'blue') + ')'">
+                       :style="'margin-bottom:.75rem;border-left:3px solid ' + fmt.colorSeveridad(al.severidad)">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
                       <strong x-text="fmt.reglaDiff(al.regla)"></strong>
                       <span style="white-space:nowrap;font-variant-numeric:tabular-nums">

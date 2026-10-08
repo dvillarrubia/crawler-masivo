@@ -136,6 +136,14 @@ const fmt = {
     desaparecen: 'Paginas que ya no se encuentran en el sitio',
     entran_en_el_indice: 'Paginas que han entrado en el indice',
   }[r] || r),
+  // El color de una alerta sale de SU severidad. La tarjeta de la ficha
+  // llevaba el rojo fijo, asi que un aviso se pintaba como una critica: si
+  // todo es rojo, el rojo no significa nada.
+  colorSeveridad: s => ({
+    critical: 'var(--red,#d32f2f)',
+    warning: 'var(--orange,#e67e22)',
+    info: 'var(--blue,#2979b5)',
+  }[s] || 'var(--muted,#6b7280)'),
   severity: s => SEVERITY_LABEL[s] || s,
   position: p => POSITION_LABEL[p] || p || '—',
 };
