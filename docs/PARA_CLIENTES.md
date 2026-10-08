@@ -141,6 +141,48 @@ La nota global pasa de **72 a 76**.
 
 ---
 
+## Penguin Libros
+
+El censo entregado (87.531 páginas, julio) listaba **959.633 incidencias**.
+Re-analizado con el código de hoy, y aplicando el agrupamiento de datos
+estructurados, quedan unas **348.000**. Casi todo lo que sobra era ruido
+nuestro:
+
+| | en el informe | real |
+|---|---|---|
+| imágenes sin texto alternativo | 445.718 | **45.745** |
+| cabeceras de seguridad | 168.607 | **1** |
+| «demasiados enlaces salientes» | 27.656 | **0** |
+| páginas huérfanas | 26.116 | **639** |
+| datos estructurados | 226.651 | **4** |
+
+Lo de «demasiados enlaces salientes» saltaba en **todas** las páginas porque
+contábamos el megamenú como enlaces editoriales. Y las huérfanas eran un 98%
+falsas.
+
+### Lo que sí hay que contarles
+
+**Cuatro problemas de datos estructurados, y los cuatro son de plantilla:**
+
+- **83.764 páginas** declaran un `Organization` **sin `name`**. Sin esa
+  propiedad Google no genera el resultado enriquecido: es el bloque entero
+  tirado a la basura.
+- 84.305 páginas con un `Organization` sin `sameAs` ni `contactPoint` (sale,
+  pero más pobre).
+- 58.552 fichas de producto sin `brand`.
+- 30 reseñas sin `itemReviewed`.
+
+**1.144 páginas de autor con el título vacío.** El `<title>` es literalmente
+`| Penguin Libros ES`: la plantilla es `{autor} | Penguin Libros ES` y el
+nombre no se rellena. Hay además 64 con el literal «Autor sin nombre».
+
+**50.760 páginas indexables compiten entre sí por el título** — 14.396 parejas
+y 6.089 grupos de tres a cinco. En una librería esto es esperable (la misma
+obra en varias ediciones), pero es decisión suya cuál debe posicionar: hoy
+Google elige por su cuenta.
+
+---
+
 ## Lo que yo propondría
 
 - **Lopesan**: avisar de las 51 que quedan, y aprovechar para re-emitir con los
