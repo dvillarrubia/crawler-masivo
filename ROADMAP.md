@@ -121,6 +121,30 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
+### El informe de penguin: 959.633 incidencias, unas 348.000 reales (9 de octubre)
+
+Tercer censo entregado que revisamos, y el más grande: 87.531 páginas. Casi
+dos tercios de lo que listaba el informe era ruido nuestro, ya arreglado.
+
+| | en el informe | real |
+|---|---|---|
+| imágenes sin texto alternativo | 445.718 | **45.745** |
+| datos estructurados | 226.651 | **4** |
+| cabeceras de seguridad | 168.607 | **1** |
+| «demasiados enlaces salientes» | 27.656 | **0** |
+| páginas huérfanas | 26.116 | **639** |
+
+«Demasiados enlaces salientes» saltaba en **todas** las páginas porque
+contábamos el megamenú como enlaces del texto. Las huérfanas eran un 98%
+falsas. Y las 226.651 de datos estructurados decían **cuatro cosas**: es el
+mismo bloque de la plantilla contado una vez por página, la misma cura que ya
+aplicamos a las imágenes y a las cabeceras.
+
+Lo que sí hay que contarle al cliente está en `docs/PARA_CLIENTES.md`; lo más
+gordo, 83.764 páginas con un bloque `Organization` **sin nombre** —sin eso
+Google no genera el resultado enriquecido— y 1.144 páginas de autor cuyo
+título es literalmente `| Penguin Libros ES`, con el nombre sin rellenar.
+
 ### El rastreo se compara solo con el anterior (9 de octubre)
 
 Primer trozo de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36).
