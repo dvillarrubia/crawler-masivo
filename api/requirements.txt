@@ -4,6 +4,16 @@ sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
 redis>=5.0.0
 pydantic>=2.9.0
+# Para `shared/comparacion.py`: sin w3lib el emparejado de URLs entre dos
+# censos cambia de criterio en silencio (`?a=1&b=2` deja de casar con
+# `?b=2&a=1`, y `/a/` empieza a casar con `/a`). Es pura Python.
+w3lib>=2.1.2
+# La Public Suffix List de `shared/dominios.py`. Se declara aqui y no se
+# hereda de Scrapy: sin ella `dominio_registrable` volvia a las dos
+# ultimas etiquetas —`co.uk` para `www.competidor.co.uk`— que es la regla
+# que la decision 49 descarto porque metia a la competencia en el
+# informe del cliente.
+tldextract>=5.1
 python-multipart>=0.0.12
 pgvector>=0.3.0
 numpy>=1.26.0

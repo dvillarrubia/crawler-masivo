@@ -971,3 +971,27 @@ def test_ugc_y_sponsored_no_pasan_autoridad():
     enlaces = {l["url"][-1]: l["follow"]
                for l in ex.extract_links(sel(html), "https://x.com/", {"x.com"})}
     assert enlaces == {"a": False, "b": False, "c": False, "d": True, "e": False}
+
+
+def test_la_psl_no_tiene_respaldo_silencioso():
+    """Si falta `tldextract`, revienta; no vuelve a las dos ultimas etiquetas.
+
+    Habia un `except Exception: _PSL = False` que caia justo a la regla que
+    esta funcion existe para no usar (`co.uk` para `www.competidor.co.uk`), de
+    modo que un fallo de empaquetado reaparecia como un criterio de SEO
+    distinto segun la imagen donde corriera el codigo — y ninguna de las tres
+    declaraba la dependencia: el crawler la heredaba de Scrapy, `analysis/` no
+    la tenia y la API tampoco.
+    """
+    import shared.dominios as dom
+
+    guardado = dom._PSL
+    try:
+        dom._PSL = None
+        assert dom.dominio_registrable("www.competidor.co.uk") == "competidor.co.uk"
+    finally:
+        dom._PSL = guardado
+    import inspect
+
+    fuente = inspect.getsource(dom.dominio_registrable)
+    assert "_PSL = False" not in fuente, "el respaldo silencioso ha vuelto"

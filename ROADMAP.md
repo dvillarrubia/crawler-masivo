@@ -121,6 +121,40 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
+### Comparar dos rastreos del mismo sitio, y que avise solo (9 de octubre)
+
+Cierra [#32](https://github.com/dvillarrubia/crawler-masivo/issues/32). En la
+ficha de un rastreo hay una pestaña **Comparar**: se elige otro rastreo
+completado del mismo sitio y se ve qué cambió entre los dos.
+
+Lo que lo motivó: en Lopesan, **2.367 páginas** pasaron de un día para otro a
+declarar como suya una URL de un servidor de pruebas, lo que para Google
+significa sacarlas del índice. Estaba en nuestro informe, como un aviso de
+prioridad baja entre 315.119 incidencias de las que el 91% eran imágenes sin
+texto alternativo. Nadie lo iba a ver.
+
+Ahora un cambio que afecta a una parte grande de las páginas que pueden
+posicionar sale **arriba del todo y en rojo**, con qué decide Google con eso y
+sobre cuántas páginas se mide: «2.367 páginas» no dice nada sin «de 2.379».
+Probado contra seis parejas de censos reales: dos rastreos del mismo sitio con
+un día de diferencia **no disparan nada**, y con un mes tampoco; el fallo de
+Lopesan dispara con **2.319 de 4.193 páginas (55,3%)** y plantillas enteras al
+100%.
+
+Tres cosas que salieron al construirlo:
+
+- **El informe dependía de cuál eligieras primero.** La misma pareja de censos
+  daba 1.639 páginas con el texto cambiado en un sentido y 439 en el otro. Y lo
+  mismo con el rótulo «antes»: elegir el censo viejo en el desplegable daba la
+  vuelta al informe entero. Ahora el orden lo pone la fecha.
+- **Al comparar se emparejaban mal las URLs**, y solo en la parte del programa
+  que atiende a la web: faltaba una librería y, sin ella, `/pagina/` y
+  `/pagina` pasaban por la misma (normalmente una redirige a la otra) mientras
+  que la misma dirección con los parámetros en otro orden pasaba por dos.
+- **Y faltaba otra librería en los tres sitios**, la que distingue un dominio
+  de verdad de un sufijo como `.co.uk`. Sin ella, la regla que vuelve es la que
+  metía a la competencia en el informe del cliente.
+
 ### Lo que salió al comparar dos censos del mismo sitio (7 de octubre, tarde)
 
 Re-rastreamos progym con el código ya arreglado y comparamos **las mismas
@@ -202,8 +236,6 @@ es cada plantilla— y va con
   como centro**: rastreos programados, alertas cuando algo se rompe, informe por
   cliente con su evolución, y rastreos incrementales que solo vuelven a pedir lo
   que cambia.
-- [#32](https://github.com/dvillarrubia/crawler-masivo/issues/32) **Comparar
-  dos rastreos** del mismo sitio: qué se arregló, qué apareció y qué cambió.
 - [#31](https://github.com/dvillarrubia/crawler-masivo/issues/31) **Backlinks**
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
   mapas de redirección para recuperar enlaces perdidos.

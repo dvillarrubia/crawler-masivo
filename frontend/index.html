@@ -400,9 +400,48 @@
 
             <template x-if="diff && diff.comparable">
               <div>
+                <div class="text-dim" style="font-size:.8rem;margin-bottom:.6rem"
+                     x-show="diff.antes && diff.ahora">
+                  Antes: <strong x-text="(diff.antes.fecha || '').slice(0,10)"></strong>
+                  <span x-text="diff.antes.nombre"></span>
+                  · Ahora: <strong x-text="(diff.ahora.fecha || '').slice(0,10)"></strong>
+                  <span x-text="diff.ahora.nombre"></span>
+                </div>
                 <template x-for="aviso in diff.avisos" :key="aviso">
                   <div class="card" style="border-left:3px solid var(--orange);margin-bottom:.75rem">
                     <div style="font-size:.85rem" x-text="aviso"></div>
+                  </div>
+                </template>
+
+                <!-- Las alertas primero: un cambio que afecta a una parte
+                     grande de las indexables no es trabajo editorial. -->
+                <template x-for="al in (diff.alertas || [])" :key="al.regla">
+                  <div class="card"
+                       :style="'margin-bottom:.75rem;border-left:3px solid var(--' + (al.severidad === 'critical' ? 'red' : al.severidad === 'warning' ? 'orange' : 'blue') + ')'">
+                    <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
+                      <strong x-text="fmt.reglaDiff(al.regla)"></strong>
+                      <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
+                        <strong x-text="fmt.num(al.paginas)"></strong>
+                        <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
+                      </span>
+                    </div>
+                    <div style="font-size:.85rem;margin-top:.35rem" x-text="al.que_decide_google"></div>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.4rem"
+                         x-show="al.por === 'plantilla'">
+                      Diluido en el total del sitio: salta por plantilla.
+                    </div>
+                    <template x-for="pl in al.plantillas.slice(0,4)" :key="pl.plantilla">
+                      <div class="text-dim" style="font-size:.78rem;margin-left:.6rem">
+                        <code x-text="pl.plantilla"></code>
+                        <span x-text="' ' + fmt.num(pl.paginas) + '/' + fmt.num(pl.de) + ' = ' + pl.pct + '%'"></span>
+                      </div>
+                    </template>
+                    <template x-for="e in al.ejemplos.slice(0,3)" :key="e.url">
+                      <div class="text-dim" style="font-size:.75rem;margin-left:.6rem;margin-top:.15rem">
+                        <span x-text="e.url.replace(/^https?:\/\//,'').slice(0,70)"></span>
+                        <span x-show="e.ahora !== undefined">: <s x-text="String(e.antes ?? '—').slice(0,36)"></s> → <strong x-text="String(e.ahora ?? '—').slice(0,36)"></strong></span>
+                      </div>
+                    </template>
                   </div>
                 </template>
 

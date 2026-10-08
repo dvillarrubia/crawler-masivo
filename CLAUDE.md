@@ -1139,6 +1139,49 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    distintos. Lo vi usando la vista con dos censos reales de progym —1.639
    páginas en un sentido y 439 en el otro, con los mismos datos—, y pasar de
    100 a 130 palabras es el mismo cambio que de 130 a 100.
+   «Antes» y «ahora» los pone la **fecha**, no el orden de los parámetros: una
+   página que sale del índice y una que entra son hallazgos opuestos, y el
+   endpoint los rotulaba por el orden de los argumentos, así que elegir el
+   censo viejo en el desplegable daba la vuelta al informe entero.
+
+68. **Un cambio que afecta a una parte grande de las indexables no es trabajo
+   editorial** — es una plantilla, una configuración o un despliegue, y tiene
+   que verse como una alerta, no como una fila más del diff. En Lopesan, 2.367
+   páginas canonicalizadas a `webserver-lopesan-prd.lfr.cloud` se entregaron
+   como un aviso `info` entre 315.119 incidencias, el 91% de ellas
+   `image_missing_alt`. `shared/comparacion.py` emite nueve reglas, cada una
+   con **qué decide Google** (regla 0) y con su denominador: «2.367 páginas» no
+   dice nada sin «de 2.379», y el conjunto no es el mismo para todas (una
+   página que ENTRA en el índice se cuenta sobre las que no estaban).
+   Umbral: 5% de las indexables con un piso de 20 páginas —en un censo de 30
+   URLs «el 10%» son tres— **o** el 50% de una forma de ruta, porque una
+   plantilla entera rota se diluye en el total: las 2.367 de Lopesan son el
+   99,5% de su plantilla y el 11% del sitio. Un aviso por hallazgo (decisión
+   36): la página que pierde el índice *porque* le pusieron un canonical fuera
+   no se cuenta además en `salen_del_indice`.
+   Medido contra seis parejas de censos reales. El control —Lopesan 8-sep
+   contra 9-sep, un día de diferencia— **no dispara nada**, y Saunier con un
+   mes de diferencia tampoco; el fallo real dispara `canonical_a_otro_host`
+   con **2.319 de 4.193 (55,3%)** y plantillas enteras al 100%.
+   `canonical_a_otro_host` es la única que NO exige que la página fuera
+   indexable: lo que abandona el sitio es el **destino** de la consolidación.
+   De las 2.367 de Lopesan, **1.832 ya estaban canonicalizadas** a una URL
+   legítima, así que la regla de «era indexable y deja de serlo» las descartaba
+   y la alerta decía 476 de 2.271 (21%) en vez de 55,3%.
+
+69. **Una dependencia que falta no puede reaparecer como otro criterio de SEO**
+   — `_norm` tenía un `except` que caía a `url.strip().rstrip("/")` y la imagen
+   de la API **no llevaba `w3lib`**: el endpoint de comparación emparejaba las
+   URLs con el criterio CONTRARIO al documentado en los dos casos que importan
+   —`?a=1&b=2` dejaba de casar con `?b=2&a=1`, y `/a/` sí casaba con `/a`— sin
+   que nada lo dijera. Lo mismo en `dominio_registrable`, cuyo `except` volvía
+   a las dos últimas etiquetas, que es exactamente la regla que la decisión 49
+   descartó; y **ninguna de las tres imágenes declaraba `tldextract`**: el
+   crawler lo heredaba de Scrapy, `analysis/` no lo tenía y la API tampoco. Los
+   dos respaldos fuera, las dos dependencias declaradas donde se usan. CI
+   tampoco lo habría cazado, porque `test_comparacion.py` solo corría en el
+   trabajo del crawler, que sí lleva w3lib: ahora corre también en el de la
+   API, que es donde vive el endpoint.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
