@@ -315,3 +315,79 @@ def test_w3lib_esta_disponible_donde_corre_la_comparacion():
     from w3lib.url import canonicalize_url
 
     assert canonicalize_url("https://x.com/a?b=2&a=1") == "https://x.com/a?a=1&b=2"
+
+
+# --- Alcance: dos rastreos del mismo host no son el mismo censo -------------
+
+def test_dos_alcances_distintos_no_permiten_afirmar_ausencias():
+    """Medido con los dos censos de cst.gov.sa del mismo dia: uno sembrado en
+    el arbol castellano y otro en el ingles, **0 semillas en comun de 4.780**.
+    La comparacion afirmaba que habian desaparecido 834 paginas que nunca
+    estuvieron en el alcance, y 3.839 que "entraban en el indice".
+    """
+    es = {**JOB_OK, "semillas": ["https://x.com/es/a", "https://x.com/es/b"]}
+    en = {**JOB_LUEGO, "semillas": ["https://x.com/en/a", "https://x.com/en/b"]}
+    r = comparar_censos([_pag("/es/a"), _pag("/es/b")], [_pag("/en/a")],
+                        job_a=es, job_b=en)
+    assert r["comparable"] is True, "mismo host: las URLs comunes si se comparan"
+    assert r["concluyente"] is False
+    assert r["urls"]["desaparecidas"] is None
+    assert any("ALCANCES DISTINTOS" in a for a in r["avisos"])
+
+
+def test_un_censo_que_amplia_el_alcance_si_permite_afirmar_ausencias():
+    """Lo normal al re-rastrear: el sitemap ha crecido. Medido en Lopesan,
+    2.935 de 2.935 semillas del censo viejo siguen en el nuevo; y el canario de
+    penguin, 1.950 de 1.950 en su censo completo. Con Jaccard ese segundo caso
+    daria 0,022 y se rechazaria: lo que importa es la CONTENCION."""
+    antes = {**JOB_OK, "semillas": ["https://x.com/a"]}
+    despues = {**JOB_LUEGO, "semillas": ["https://x.com/a", "https://x.com/b"]}
+    r = comparar_censos([_pag("/a"), _pag("/viejo")], [_pag("/a")],
+                        job_a=antes, job_b=despues)
+    assert r["concluyente"] is True
+    assert r["urls"]["desaparecidas"] == 1
+    assert not any("ALCANCES" in a for a in r["avisos"])
+
+
+def test_las_semillas_no_viajan_en_la_respuesta():
+    """Son 87.429 en el censo de penguin. Queda el recuento."""
+    muchas = {**JOB_OK, "semillas": [f"https://x.com/s{i}" for i in range(500)]}
+    r = comparar_censos([_pag("/a")], [_pag("/a")],
+                        job_a=muchas, job_b={**muchas, "fecha": JOB_LUEGO["fecha"]})
+    assert "semillas" not in r["antes"] and r["antes"]["n_semillas"] == 500
+
+
+def test_un_censo_con_render_y_otro_sin_el_se_avisa():
+    """El que renderiza ve enlaces que el otro no llega a ver: es lo que mide
+    `js_check` (decision 35)."""
+    r = comparar_censos([_pag("/a")], [_pag("/a")],
+                        job_a={**JOB_OK, "render_js": False},
+                        job_b={**JOB_LUEGO, "render_js": True})
+    assert any("renderiza JavaScript" in a for a in r["avisos"])
+    r2 = comparar_censos([_pag("/a")], [_pag("/a")],
+                         job_a={**JOB_OK, "render_js": True},
+                         job_b={**JOB_LUEGO, "render_js": True})
+    assert not any("renderiza JavaScript" in a for a in r2["avisos"])
+
+
+def test_el_endpoint_envia_las_semillas_y_el_render():
+    """El guardia de alcance vive en la funcion pura, pero los datos los pone
+    el endpoint: si deja de enviarlos, la comprobacion no salta y nada lo dice.
+    Es el mismo agujero que el de `w3lib` (decision 69), en el otro extremo.
+    """
+    import pytest
+    from types import SimpleNamespace
+
+    # El endpoint vive en la imagen de la API y el crawler no lleva FastAPI.
+    # El salto no esconde nada: el trabajo de la API de CI corre este fichero
+    # desde la decision 69, y ahi el import sale adelante.
+    pytest.importorskip("fastapi")
+    from api.routers.results import _resumen_de_job
+
+    job = SimpleNamespace(
+        seeds=["https://x.com/a", "https://x.com/b"], status="completed",
+        finish_reason="finished", crawler_version="abc1234", name="censo",
+        started_at=None, config={"render_js": True})
+    r = _resumen_de_job(job)
+    assert r["semillas"] == ["https://x.com/a", "https://x.com/b"]
+    assert r["render_js"] is True

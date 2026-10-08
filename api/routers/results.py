@@ -509,6 +509,13 @@ def _paginas_para_comparar(job_id: uuid.UUID, db: Session) -> list[dict]:
 def _resumen_de_job(job: Job) -> dict:
     return {
         "semilla": (job.seeds or [None])[0],
+        # Las semillas ENTERAS, no solo la primera: dos rastreos del mismo host
+        # pueden tener dos alcances distintos, y entonces lo que "falta" puede
+        # no haber estado nunca en el alcance. Medido con los dos censos de
+        # cst.gov.sa del mismo dia (castellano e ingles): 0 semillas en comun
+        # de 4.780, y 834 paginas declaradas desaparecidas.
+        "semillas": list(job.seeds or []),
+        "render_js": (job.config or {}).get("render_js"),
         "status": job.status,
         "finish_reason": job.finish_reason,
         "crawler_version": job.crawler_version,

@@ -19,7 +19,18 @@ distinta de mentir:
 4. **La versión del código viaja en el resultado** (decisión 66). Si los dos
    censos se hicieron con código distinto, una diferencia puede ser nuestra y
    no del sitio; eso hay que decirlo antes de atribuir nada.
-5. **El orden lo pone la FECHA, no quién llame.** «Antes» y «ahora» no pueden
+5. **Dos ALCANCES distintos tampoco se comparan del todo.** El guardia del
+   punto 3 mira el host, y dos rastreos del mismo host pueden ser dos cosas
+   distintas: medido con los dos censos de cst.gov.sa del mismo día, uno
+   sembrado en el árbol castellano y otro en el inglés, **0 semillas en común**
+   de 4.780 — y la comparación afirmaba que habían desaparecido 834 páginas que
+   nunca estuvieron en el alcance. Las ausencias solo se pueden afirmar si cada
+   semilla del censo ANTERIOR está también en el posterior. No es un umbral: es
+   una contención, y distingue los casos buenos sin ajustar nada (Lopesan
+   2.935/2.935, el canario de penguin 1.950/1.950, CST 0/4.780). La Jaccard
+   serviría de poco: el canario de penguin da 0,022 contra su censo completo y
+   es un subconjunto limpio.
+6. **El orden lo pone la FECHA, no quién llame.** «Antes» y «ahora» no pueden
    depender de qué censo se elija primero en un desplegable: una página que
    sale del índice y una que entra son hallazgos opuestos. Si no se sabe la
    fecha de alguno de los dos, no se afirma ninguna dirección y no se emite
@@ -199,7 +210,12 @@ def comparar_censos(
     concluyente = not (truncado_a or truncado_b)
 
     avisos: list[str] = []
-    if not concluyente:
+
+    if truncado_a or truncado_b:
+        # Solo cuando algo esta DE VERDAD truncado: `concluyente` tambien lo
+        # pone a False el guardia de alcance, y con el mensaje colgado de ahi
+        # salia un "NO CONCLUYENTE:  no termino entero" sin sujeto, repitiendo
+        # ademas lo que el otro aviso ya decia mejor.
         cual = []
         if truncado_a:
             cual.append(f"el primero ({job_a.get('finish_reason') or job_a.get('status')})")
@@ -208,6 +224,36 @@ def comparar_censos(
         avisos.append(
             "NO CONCLUYENTE: " + " y ".join(cual) + " no termino entero, asi que "
             "no se puede afirmar que falte ninguna URL ni que se haya resuelto nada."
+        )
+    # Dos rastreos del MISMO host pueden tener dos alcances distintos. Las
+    # ausencias solo se pueden afirmar si cada semilla del censo anterior esta
+    # tambien en el posterior: si no, lo que "falta" puede no haber estado
+    # nunca en el alcance.
+    sem_a, sem_b = job_a.get("semillas"), job_b.get("semillas")
+    if sem_a is not None and sem_b is not None:
+        conj_b = {_norm(_aplicar_mapa(u, mapa_hosts)) for u in sem_b}
+        fuera = [u for u in sem_a
+                 if _norm(_aplicar_mapa(u, mapa_hosts)) not in conj_b]
+        if fuera:
+            concluyente = False
+            avisos.append(
+                f"ALCANCES DISTINTOS: {len(fuera)} de las {len(sem_a)} semillas "
+                f"del censo anterior no estan en el posterior (p. ej. "
+                f"{fuera[0]}), asi que no se puede afirmar que falte ninguna "
+                f"URL: puede no haber estado nunca en el alcance."
+            )
+
+    # El render cambia lo que se ve, no lo que hay: una plantilla que monta sus
+    # enlaces con JavaScript solo los enseña al rastreo que renderiza, que es
+    # justo lo que mide `js_check` (decision 35). No hay en los datos ninguna
+    # pareja de censos que difiera en esto, asi que el aviso sale de ese
+    # mecanismo y no de una medida.
+    if (job_a.get("render_js") is not None and job_b.get("render_js") is not None
+            and bool(job_a["render_js"]) != bool(job_b["render_js"])):
+        avisos.append(
+            "Uno de los dos censos renderiza JavaScript y el otro no: el que "
+            "renderiza ve enlaces y texto que el otro no llega a ver, asi que "
+            "una diferencia puede ser del render y no del sitio."
         )
     ver_a, ver_b = job_a.get("crawler_version"), job_b.get("crawler_version")
     if not ver_a or not ver_b:
@@ -290,8 +336,8 @@ def comparar_censos(
         "comparable": True,
         "concluyente": concluyente,
         "avisos": avisos,
-        "antes": job_a,
-        "ahora": job_b,
+        "antes": _sin_semillas(job_a),
+        "ahora": _sin_semillas(job_b),
         "direccion_sabida": direccion_sabida,
         "urls": {
             "en_ambos": len(comunes),
@@ -316,6 +362,20 @@ def comparar_censos(
             "son hallazgos opuestos."
         )
     return resultado
+
+
+def _sin_semillas(job: dict[str, Any]) -> dict[str, Any]:
+    """El resumen del job sin la lista de semillas, que puede ser enorme.
+
+    Se necesitan para comprobar el alcance, pero devolverlas serian 87.429
+    URLs en la respuesta del censo de penguin. Queda el recuento, que es lo
+    unico que alguien va a leer.
+    """
+    if "semillas" not in job:
+        return job
+    recortado = dict(job)
+    recortado["n_semillas"] = len(recortado.pop("semillas") or [])
+    return recortado
 
 
 def _era_indexable(pagina: dict[str, Any]) -> bool:
