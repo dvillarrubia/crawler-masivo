@@ -363,10 +363,91 @@
           <div class="tab" :class="detailTab === 'semantic' && 'active'" @click="switchTab('semantic')" data-tip="Mapa semantico vectorial con embeddings, clustering y canibalizacion" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="orbit" style="width:14px;height:14px"></i> Semantico
           </div>
+          <div class="tab" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado entre este rastreo y otro del mismo sitio" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
+          </div>
           <div class="tab" :class="detailTab === 'cleaning' && 'active'" @click="switchTab('cleaning')" data-tip="Limpieza opcional del contenido extraido por grupos de URL" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="eraser" style="width:14px;height:14px"></i> Limpieza
           </div>
         </div>
+
+        <!-- ===== PESTANA: COMPARAR ===== -->
+        <template x-if="detailTab === 'diff'">
+          <div>
+            <div class="card" style="margin-bottom:1rem">
+              <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+                <span style="font-size:.85rem">Comparar con:</span>
+                <select @change="diffOtro = $el.value; cargarDiff()" style="padding:.35rem .5rem;font-size:.85rem;max-width:34rem">
+                  <option value="">— elige otro rastreo del mismo sitio —</option>
+                  <template x-for="j in diffCandidatos" :key="j.id">
+                    <option :value="j.id" :selected="j.id === diffOtro"
+                            x-text="j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.date(j.created_at)"></option>
+                  </template>
+                </select>
+                <span x-show="diffCargando" class="text-dim" style="font-size:.8rem">comparando…</span>
+              </div>
+              <div x-show="!diffCandidatos.length" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
+                No hay otro rastreo completado del mismo sitio con el que comparar.
+              </div>
+            </div>
+
+            <template x-if="diff && !diff.comparable">
+              <div class="card" style="border-left:3px solid var(--red)">
+                <strong>No se pueden comparar</strong>
+                <div style="margin-top:.35rem;font-size:.85rem" x-text="diff.motivo"></div>
+              </div>
+            </template>
+
+            <template x-if="diff && diff.comparable">
+              <div>
+                <template x-for="aviso in diff.avisos" :key="aviso">
+                  <div class="card" style="border-left:3px solid var(--orange);margin-bottom:.75rem">
+                    <div style="font-size:.85rem" x-text="aviso"></div>
+                  </div>
+                </template>
+
+                <div class="stats-grid" style="margin-bottom:1rem">
+                  <div class="stat-card">
+                    <div class="stat-value" x-text="fmt.num(diff.urls.en_ambos)"></div>
+                    <div class="stat-label">en los dos</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-value" x-text="fmt.num(diff.urls.nuevas)"></div>
+                    <div class="stat-label">nuevas</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-value"
+                         x-text="diff.urls.desaparecidas === null ? '—' : fmt.num(diff.urls.desaparecidas)"></div>
+                    <div class="stat-label" x-text="diff.urls.desaparecidas === null ? 'desaparecidas (no afirmable)' : 'desaparecidas'"></div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <table style="width:100%;font-size:.85rem">
+                    <thead><tr><th style="text-align:left">que cambio</th><th style="text-align:right;width:7rem">paginas</th></tr></thead>
+                    <tbody>
+                      <template x-for="[campo, v] in Object.entries(diff.cambios)" :key="campo">
+                        <tr :style="v.total ? '' : 'opacity:.45'">
+                          <td>
+                            <div x-text="fmt.campoDiff(campo)"></div>
+                            <template x-for="e in v.ejemplos.slice(0,3)" :key="e.url">
+                              <div class="text-dim" style="font-size:.75rem;margin-left:.6rem">
+                                <span x-text="e.url.replace(/^https?:\/\//,'').slice(0,70)"></span>
+                                <span x-show="campo !== 'word_count'">: <s x-text="String(e.antes ?? '—').slice(0,40)"></s> → <strong x-text="String(e.ahora ?? '—').slice(0,40)"></strong></span>
+                                <span x-show="campo === 'word_count'">: <s x-text="e.antes"></s> → <strong x-text="e.ahora"></strong> palabras</span>
+                              </div>
+                            </template>
+                          </td>
+                          <td style="text-align:right;vertical-align:top" x-text="fmt.num(v.total)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
 
         <!-- ===== PESTANA: RESUMEN ===== -->
         <template x-if="detailTab === 'overview' && stats">

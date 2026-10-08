@@ -172,7 +172,13 @@ def comparar_censos(
             if va != vb:
                 cambios[campo].append({"url": pb.get("url"), "antes": va, "ahora": vb})
         wa, wb = pa.get("word_count") or 0, pb.get("word_count") or 0
-        if wa and abs(wb - wa) / wa >= umbral_palabras:
+        # El denominador es el MAYOR de los dos, no el "antes": si no,
+        # comparar A con B y B con A da resultados distintos. Medido con dos
+        # censos reales de progym: 1.639 paginas en un sentido y 439 en el
+        # otro, con los mismos datos. Pasar de 100 a 130 palabras y de 130 a
+        # 100 es el mismo cambio y tiene que contarse igual.
+        mayor = max(wa, wb)
+        if mayor and abs(wb - wa) / mayor >= umbral_palabras:
             cambios["word_count"].append({"url": pb.get("url"), "antes": wa, "ahora": wb})
 
     nuevas = sorted(b.keys() - a.keys())

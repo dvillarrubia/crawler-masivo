@@ -138,3 +138,25 @@ def test_el_caso_lopesan_sale_como_cambio_de_canonical():
     r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_OK)
     assert r["cambios"]["canonical_href"]["total"] == 5
     assert r["cambios"]["indexability_status"]["total"] == 5
+
+
+def test_comparar_en_un_sentido_y_en_el_otro_da_lo_mismo():
+    """Si no, el informe depende de cual pongas primero.
+
+    Lo vi usando la vista: dos censos reales de progym daban 1.639 paginas
+    con el texto cambiado en un sentido y 439 en el otro, con los mismos
+    datos. El umbral se medi­a sobre el "antes"; ahora sobre el mayor de los
+    dos, que es simetrico.
+    """
+    a = [_pag("/a", word_count=100)]
+    b = [_pag("/a", word_count=130)]
+    ida = comparar_censos(a, b, job_a=JOB_OK, job_b=JOB_OK)
+    vuelta = comparar_censos(b, a, job_a=JOB_OK, job_b=JOB_OK)
+    assert (ida["cambios"]["word_count"]["total"]
+            == vuelta["cambios"]["word_count"]["total"] == 1)
+
+    # Y justo por debajo del umbral, tampoco en ninguno de los dos sentidos.
+    c = [_pag("/a", word_count=100)]
+    d = [_pag("/a", word_count=115)]
+    assert comparar_censos(c, d, job_a=JOB_OK, job_b=JOB_OK)["cambios"]["word_count"]["total"] == 0
+    assert comparar_censos(d, c, job_a=JOB_OK, job_b=JOB_OK)["cambios"]["word_count"]["total"] == 0
