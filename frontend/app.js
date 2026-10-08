@@ -123,6 +123,19 @@ const fmt = {
     h1: 'H1',
     word_count: 'Palabras (cambio de mas del 20%)',
   }[c] || c),
+  // El titular de cada alerta, en castellano llano: quien abre esto quiere
+  // saber que ha pasado, no el nombre de la regla.
+  reglaDiff: r => ({
+    canonical_a_otro_host: 'El canonical se ha ido a otro host',
+    canonical_a_otra_url: 'Paginas canonicalizadas a otra URL',
+    rotas: 'Paginas que ahora responden con error',
+    salen_del_indice: 'Paginas que han salido del indice',
+    redirigidas: 'Paginas que ahora redirigen',
+    pierden_contenido: 'Paginas que han perdido texto',
+    cambia_el_titulo: 'Paginas que han cambiado de titulo',
+    desaparecen: 'Paginas que ya no se encuentran en el sitio',
+    entran_en_el_indice: 'Paginas que han entrado en el indice',
+  }[r] || r),
   severity: s => SEVERITY_LABEL[s] || s,
   position: p => POSITION_LABEL[p] || p || '—',
 };

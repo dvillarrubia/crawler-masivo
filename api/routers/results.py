@@ -549,8 +549,9 @@ def get_diff(
         job_b=_resumen_de_job(b),
         mapa_hosts=mapa,
     )
-    resultado["antes"] = _resumen_de_job(a)
-    resultado["ahora"] = _resumen_de_job(b)
+    # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban
+    # por el orden de los parametros, asi que elegir el censo viejo en el
+    # desplegable daba la vuelta al informe entero.
     return resultado
 
 

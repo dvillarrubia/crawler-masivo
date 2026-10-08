@@ -19,13 +19,25 @@ distinta de mentir:
 4. **La versión del código viaja en el resultado** (decisión 66). Si los dos
    censos se hicieron con código distinto, una diferencia puede ser nuestra y
    no del sitio; eso hay que decirlo antes de atribuir nada.
+5. **El orden lo pone la FECHA, no quién llame.** «Antes» y «ahora» no pueden
+   depender de qué censo se elija primero en un desplegable: una página que
+   sale del índice y una que entra son hallazgos opuestos. Si no se sabe la
+   fecha de alguno de los dos, no se afirma ninguna dirección y no se emite
+   ninguna alerta.
+
+Y la capa de alertas, que es lo que convierte una lista de diferencias en algo
+que alguien mira: un cambio que afecta a una **parte grande de las páginas
+indexables** no es trabajo editorial, es una plantilla, una configuración o un
+despliegue. Ver `REGLAS` y la decisión 68.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 from shared.dominios import dominio_registrable
+from shared.plantillas import firma_de_ruta
 
 # Motivos de cierre que dejan un censo incompleto: con cualquiera de ellos no
 # se puede afirmar que una URL haya desaparecido.
@@ -42,17 +54,73 @@ MUESTRA = 10
 # "hace 3 días"), y la decisión 13 ya avisa de que los sitios varían solos.
 UMBRAL_PALABRAS = 0.20
 
+# Cuándo un cambio deja de ser trabajo de una página y pasa a ser una alerta.
+# El 5% de las indexables, con un piso de 20 páginas porque en un censo de 30
+# URLs «el 10%» son tres y no significa nada. Medido contra los pares de censos
+# reales disponibles: con estos valores no salta ninguna alerta por la variación
+# normal de un sitio entre dos rastreos (decisión 13) y sí salta el caso de
+# Lopesan, 2.367 páginas canonicalizadas a un host de preproducción.
+PCT_ALERTA = 0.05
+MINIMO_PAGINAS = 20
+# Una plantilla entera rota se diluye en el total: las 2.367 de Lopesan son el
+# 99,5% de su plantilla y el 11% del sitio. Por eso también se mira por forma de
+# ruta, con un umbral alto porque ahí el denominador es pequeño.
+PCT_ALERTA_PLANTILLA = 0.50
+
+# Qué decide Google con cada cosa. Sin esta columna una alerta es un número
+# (regla 0 de docs/PRIORIDADES.md).
+REGLAS: dict[str, tuple[str, str]] = {
+    "canonical_a_otro_host": ("critical",
+        "Google consolida estas páginas en una URL de OTRO host: dejan de "
+        "aparecer en resultados y su autoridad se va fuera del sitio. Suele ser "
+        "una fuga de un entorno de preproducción o de un CDN."),
+    # Esta no mira si la página era indexable, porque lo que se va fuera del
+    # sitio es el DESTINO de la consolidación. Medido en Lopesan: de las 2.367
+    # páginas que acabaron apuntando a `webserver-lopesan-prd.lfr.cloud`, 1.832
+    # ya estaban canonicalizadas a una URL legítima del sitio, así que la regla
+    # de «era indexable y deja de serlo» las descartaba enteras.
+    "canonical_a_otra_url": ("critical",
+        "Google consolida estas páginas en la URL del canonical: dejan de "
+        "aparecer en resultados y su autoridad pasa a la otra."),
+    "rotas": ("critical",
+        "Una página que responde 4xx o 5xx sale del índice, y con ella sus "
+        "enlaces internos (decisión 57)."),
+    "salen_del_indice": ("critical",
+        "Google las saca del índice por algún otro motivo (noindex, robots): "
+        "dejan de poder aparecer en resultados."),
+    "redirigidas": ("warning",
+        "Google indexa el destino, no esta URL. Si la redirección es "
+        "intencionada no hay nada que arreglar; si no, son páginas perdidas."),
+    "pierden_contenido": ("warning",
+        "Menos texto en la misma URL es menos contenido que posicionar. Mirar "
+        "antes si el cambio es nuestro: lo dice el aviso de versión."),
+    "cambia_el_titulo": ("warning",
+        "El título es el enlace del resultado: Google lo vuelve a evaluar y el "
+        "CTR se mueve. Un cambio masivo es una plantilla, no una redacción."),
+    "desaparecen": ("warning",
+        "Ya no se llega a ellas desde el sitio, así que Google tampoco: dejan "
+        "de recibir enlaces internos y acaban saliendo del índice."),
+    "entran_en_el_indice": ("info",
+        "Páginas que antes no podían aparecer en resultados y ahora sí. Si no "
+        "era lo que se buscaba, es contenido entrando al índice sin querer."),
+}
+
 
 def _norm(url: str | None) -> str:
-    """Forma comparable de una URL, la misma que usa el deduplicador."""
+    """Forma comparable de una URL, la misma que usa el deduplicador.
+
+    Sin `w3lib` el criterio NO es parecido, es el contrario en los dos casos
+    que importan: `?a=1&b=2` deja de casar con `?b=2&a=1` (dos URLs donde hay
+    una) y `/a/` empieza a casar con `/a` (una donde hay dos, y normalmente
+    una redirige a la otra). Estuvo así en la imagen de la API, que no llevaba
+    w3lib, de modo que el mismo par de censos se comparaba con un criterio
+    distinto según dónde corriera el código. No se tapa: si falta, revienta.
+    """
     if not url:
         return ""
-    try:
-        from w3lib.url import canonicalize_url
+    from w3lib.url import canonicalize_url
 
-        return canonicalize_url(url, keep_fragments=False)
-    except Exception:
-        return url.strip().rstrip("/")
+    return canonicalize_url(url, keep_fragments=False)
 
 
 def _host(url: str | None) -> str:
@@ -94,6 +162,17 @@ def comparar_censos(
     `canonical_href`, `title`, `h1`, `word_count`.
     """
     mapa_hosts = mapa_hosts or {}
+
+    # El orden lo pone la FECHA. Si no, "antes" y "ahora" los decide el
+    # desplegable: la misma pareja de censos diria que 2.367 paginas salen del
+    # indice o que entran, segun cual se eligiera primero. Es el mismo error que
+    # tenia el umbral de palabras, que daba 1.639 cambios en un sentido y 439 en
+    # el otro.
+    fa, fb = job_a.get("fecha"), job_b.get("fecha")
+    direccion_sabida = bool(fa and fb and fa != fb)
+    if direccion_sabida and fa > fb:
+        paginas_a, paginas_b = paginas_b, paginas_a
+        job_a, job_b = job_b, job_a
 
     # Se compara el HOST, no el dominio registrable: `pre.x.com` y `x.com`
     # comparten dominio pero sus URLs no casan ni una, asi que el resultado
@@ -165,6 +244,17 @@ def comparar_censos(
         "status_code": [], "indexability_status": [], "canonical_href": [],
         "title": [], "h1": [], "word_count": [],
     }
+    # Páginas por regla de alerta, y el denominador de cada regla: cuántas
+    # podían haberle pasado. "2.367 páginas" no dice nada sin "de 2.379".
+    afectadas: dict[str, list[dict[str, Any]]] = {r: [] for r in REGLAS}
+    # Por forma de ruta, para poder decir "99,5% de ESTA plantilla".
+    bases: dict[str, dict[str, int]] = {
+        "era_indexable": defaultdict(int),
+        "no_era_indexable": defaultdict(int),
+        "era_indexable_en_el_primero": defaultdict(int),
+        "todas_las_comunes": defaultdict(int),
+    }
+
     for clave in sorted(comunes):
         pa, pb = a[clave], b[clave]
         for campo in ("status_code", "indexability_status", "canonical_href", "title", "h1"):
@@ -181,13 +271,28 @@ def comparar_censos(
         if mayor and abs(wb - wa) / mayor >= umbral_palabras:
             cambios["word_count"].append({"url": pb.get("url"), "antes": wa, "ahora": wb})
 
+        _clasificar(pa, pb, afectadas, bases, umbral_palabras)
+
     nuevas = sorted(b.keys() - a.keys())
     desaparecidas = sorted(a.keys() - b.keys()) if concluyente else []
+    if concluyente:
+        # Solo las que podían aparecer en resultados: que deje de estar
+        # enlazada una `?utm` o un `/page/2` no es un hallazgo. El denominador
+        # es todo el primer censo, no solo las comunes: una URL que desaparece
+        # no está en las comunes por definición.
+        for pagina in a.values():
+            if _era_indexable(pagina):
+                bases["era_indexable_en_el_primero"][_firma(pagina.get("url"))] += 1
+        afectadas["desaparecen"] = [
+            {"url": a[k]["url"]} for k in desaparecidas if _era_indexable(a[k])]
 
-    return {
+    resultado = {
         "comparable": True,
         "concluyente": concluyente,
         "avisos": avisos,
+        "antes": job_a,
+        "ahora": job_b,
+        "direccion_sabida": direccion_sabida,
         "urls": {
             "en_ambos": len(comunes),
             "nuevas": len(nuevas),
@@ -201,3 +306,160 @@ def comparar_censos(
             for campo, filas in cambios.items()
         },
     }
+    if direccion_sabida:
+        resultado["alertas"] = _alertas(afectadas, bases)
+    else:
+        resultado["alertas"] = []
+        avisos.append(
+            "No se emiten alertas: sin la fecha de los dos censos no se sabe "
+            "cual es el ANTES, y una pagina que sale del indice y una que entra "
+            "son hallazgos opuestos."
+        )
+    return resultado
+
+
+def _era_indexable(pagina: dict[str, Any]) -> bool:
+    """Si Google podía posicionarla: 200 y sin nada que la saque del índice."""
+    return (pagina.get("status_code") == 200
+            and (pagina.get("indexability_status") or "") == "Indexable")
+
+
+def _canonical_a_otra(pagina: dict[str, Any]) -> str | None:
+    """El canonical de la página si apunta a OTRA URL; None si es la suya."""
+    can = pagina.get("canonical_href")
+    if not can:
+        return None
+    return can if _norm(can) != _norm(pagina.get("url")) else None
+
+
+# A qué conjunto de páginas se compara cada regla. "2.367 páginas" no dice
+# nada sin "de 2.379", y el conjunto no es el mismo para todas: una página que
+# ENTRA en el índice se cuenta sobre las que no estaban, no sobre las que sí.
+BASE_DE_LA_REGLA: dict[str, str] = {
+    "canonical_a_otro_host": "todas_las_comunes",
+    "canonical_a_otra_url": "era_indexable",
+    "rotas": "era_indexable",
+    "salen_del_indice": "era_indexable",
+    "redirigidas": "era_indexable",
+    "pierden_contenido": "era_indexable",
+    "cambia_el_titulo": "era_indexable",
+    "entran_en_el_indice": "no_era_indexable",
+    "desaparecen": "era_indexable_en_el_primero",
+}
+
+
+def _canonical_fuera(pagina: dict[str, Any]) -> str | None:
+    """El canonical si apunta a un host distinto del de la propia página."""
+    can = pagina.get("canonical_href")
+    hc = _host(can)
+    return can if can and hc and hc != _host(pagina.get("url")) else None
+
+
+def _firma(url: str | None) -> str:
+    from urllib.parse import urlparse
+    try:
+        return firma_de_ruta(urlparse(url or "").path)
+    except Exception:
+        return "?"
+
+
+def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
+    """Pone una página en la regla que nombra su CAUSA, y solo en una.
+
+    Un aviso por hallazgo (decisión 36): una página que pierde el índice porque
+    le han puesto un canonical a otra URL no se cuenta además en
+    `salen_del_indice`, que diría lo mismo sin decir qué arreglar.
+    """
+    url = pb.get("url")
+    bases["todas_las_comunes"][_firma(url)] += 1
+
+    # El canonical se va a otro host: se mira ANTES de todo lo demás y sin
+    # exigir que la página fuera indexable. Lo que abandona el sitio es el
+    # destino de la consolidación, no esta página.
+    fuera_antes = _canonical_fuera(pa)
+    fuera_ahora = _canonical_fuera(pb)
+    if fuera_ahora and not fuera_antes:
+        afectadas["canonical_a_otro_host"].append(
+            {"url": url, "antes": pa.get("canonical_href"), "ahora": fuera_ahora})
+
+    if not _era_indexable(pa):
+        bases["no_era_indexable"][_firma(url)] += 1
+        if _era_indexable(pb):
+            afectadas["entran_en_el_indice"].append({"url": url})
+        return
+
+    bases["era_indexable"][_firma(url)] += 1
+
+    codigo = pb.get("status_code")
+    can_antes, can_ahora = _canonical_a_otra(pa), _canonical_a_otra(pb)
+    if can_ahora and not can_antes:
+        # Si el destino está fuera del sitio ya se contó arriba: un aviso por
+        # hallazgo (decisión 36), y el de fuera dice qué arreglar.
+        if not fuera_ahora:
+            afectadas["canonical_a_otra_url"].append(
+                {"url": url, "antes": pa.get("canonical_href"), "ahora": can_ahora})
+    elif codigo and 400 <= codigo < 600:
+        afectadas["rotas"].append({"url": url, "antes": 200, "ahora": codigo})
+    elif codigo and 300 <= codigo < 400:
+        afectadas["redirigidas"].append({"url": url, "antes": 200, "ahora": codigo})
+    elif not _era_indexable(pb):
+        afectadas["salen_del_indice"].append(
+            {"url": url, "antes": pa.get("indexability_status"),
+             "ahora": pb.get("indexability_status")})
+    else:
+        # Sigue indexable: los cambios de grado, que no la sacan del índice.
+        wa, wb = pa.get("word_count") or 0, pb.get("word_count") or 0
+        if wa and (wa - wb) / wa >= umbral_palabras:
+            afectadas["pierden_contenido"].append(
+                {"url": url, "antes": wa, "ahora": wb})
+        if pa.get("title") != pb.get("title"):
+            afectadas["cambia_el_titulo"].append(
+                {"url": url, "antes": pa.get("title"), "ahora": pb.get("title")})
+
+
+def _alertas(afectadas, bases) -> list[dict[str, Any]]:
+    """Las reglas que superan el umbral, en el sitio o en una plantilla.
+
+    Dos disparadores, porque una plantilla entera rota se diluye en el total:
+    las 2.367 páginas de Lopesan son el 99,5% de su plantilla y el 11% del
+    sitio. Si solo se mirara el total, el fallo más grave que hemos encontrado
+    en un cliente no habría disparado nada.
+    """
+    salida = []
+    for regla, (severidad, que_decide) in REGLAS.items():
+        filas = afectadas[regla]
+        base = bases[BASE_DE_LA_REGLA[regla]]
+        de = sum(base.values())
+        if not filas or not de:
+            continue
+
+        por_plantilla: dict[str, int] = {}
+        for f in filas:
+            firma = _firma(f.get("url"))
+            por_plantilla[firma] = por_plantilla.get(firma, 0) + 1
+        plantillas = sorted(
+            ({"plantilla": k, "paginas": v, "de": base.get(k, v),
+              "pct": round(100 * v / max(1, base.get(k, v)), 1)}
+             for k, v in por_plantilla.items()),
+            key=lambda d: (-d["pct"], -d["paginas"]))
+
+        pct = len(filas) / de
+        salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
+        salta_plantilla = any(
+            p["paginas"] >= MINIMO_PAGINAS and p["pct"] >= PCT_ALERTA_PLANTILLA * 100
+            for p in plantillas)
+        if not (salta_sitio or salta_plantilla):
+            continue
+        salida.append({
+            "regla": regla,
+            "severidad": severidad,
+            "que_decide_google": que_decide,
+            "paginas": len(filas),
+            "de": de,
+            "pct": round(pct * 100, 1),
+            "por": "sitio" if salta_sitio else "plantilla",
+            "plantillas": plantillas[:5],
+            "ejemplos": filas[:MUESTRA],
+        })
+    orden = {"critical": 0, "warning": 1, "info": 2}
+    return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))

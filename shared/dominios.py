@@ -25,17 +25,19 @@ def dominio_registrable(host: str) -> str:
     if not host:
         return ""
     if _PSL is None:
-        try:
-            import tldextract
+        # Sin respaldo a proposito. Habia un `except` que caia a las dos
+        # ultimas etiquetas, que es EXACTAMENTE la regla que esta funcion
+        # existe para no usar: con ella, cualquier `.co.uk` sale interno para
+        # una semilla `.co.uk`. Un fallo de empaquetado tiene que verse como
+        # un fallo de empaquetado, no reaparecer como un criterio de SEO
+        # distinto segun la imagen donde corra el codigo. Ninguna de las tres
+        # imagenes la declaraba: el crawler la heredaba de Scrapy, `analysis/`
+        # no la tenia y la API tampoco.
+        import tldextract
 
-            _PSL = tldextract.TLDExtract(
-                suffix_list_urls=(), include_psl_private_domains=True
-            )
-        except Exception:  # pragma: no cover - sin tldextract
-            _PSL = False
-    if _PSL is False:
-        partes = host.split(".")
-        return ".".join(partes[-2:]) if len(partes) >= 2 else host
+        _PSL = tldextract.TLDExtract(
+            suffix_list_urls=(), include_psl_private_domains=True
+        )
     try:
         extraido = _PSL(host)
     except Exception:
