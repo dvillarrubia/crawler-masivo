@@ -1183,6 +1183,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    trabajo del crawler, que sí lleva w3lib: ahora corre también en el de la
    API, que es donde vive el endpoint.
 
+70. **Dos rastreos del mismo host pueden ser dos censos distintos** — el
+   guardia de #32 mira el host (decisión 3) y los dos censos de cst.gov.sa del
+   mismo día lo pasaban: uno sembrado en el árbol castellano y otro en el
+   inglés, **0 semillas en común de 4.780**. La comparación afirmaba que
+   **habían desaparecido 834 páginas** que nunca estuvieron en el alcance.
+   Las ausencias solo se afirman si **cada semilla del censo anterior está
+   también en el posterior**. No es un umbral, es una contención, y separa los
+   casos sin ajustar nada: Lopesan 2.935/2.935, el canario de penguin
+   1.950/1.950, CST 0/4.780. La Jaccard no sirve aquí — el canario de penguin
+   da 0,022 contra su censo completo y es un subconjunto limpio. Las semillas
+   viajan al comparador pero no a la respuesta (87.429 en penguin): queda
+   `n_semillas`. Y si los dos censos difieren en `render_js`, un aviso: el que
+   renderiza ve enlaces que el otro no, que es lo que mide `js_check`
+   (decisión 35). Eso último no está medido —ninguna pareja de censos difiere
+   en el render— y sale de ese mecanismo, no de una cifra.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

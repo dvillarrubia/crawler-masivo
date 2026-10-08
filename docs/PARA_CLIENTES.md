@@ -29,8 +29,75 @@ Lo arreglaron. Medido con el mismo rastreo, misma configuración:
 | páginas que Google puede indexar | 46,6% | **84,1%** |
 | fuerza interna que llega a páginas indexables | 27,5% | **78,6%** |
 
-**Quedan 51 páginas** con el canonical viejo. Es lo primero que hay que
-decirles, y es un arreglo de minutos para ellos.
+**Quedan 51 páginas** con el canonical viejo (rastreo del 8 de octubre). Es lo
+primero que hay que decirles, y es un arreglo de minutos para ellos.
+
+El detalle que lo hace fácil de explicar: en las 51 **la ruta es idéntica y
+solo cambia el host**. Cada una declara como canónica *a sí misma, pero en el
+servidor de pruebas*. No se están consolidando en otra página: se están
+consolidando en su propia copia alojada donde no toca.
+
+Están repartidas casi a partes iguales entre los tres idiomas —18 en alemán, 17
+en inglés, 16 en castellano—, así que son más o menos las mismas 17 páginas en
+sus tres versiones: 13 de habitaciones, 3 de gastronomía y el resto ofertas y
+landings (bodas, excursiones en barco, pago seguro, informes de
+sostenibilidad).
+
+<details><summary>Las 51 rutas</summary>
+
+- `/de/angebote-geburstag-om-thalasso-villa-del-conde`
+- `/de/angebote-om-spa-costa-meloneras-geburstag`
+- `/de/angebote-pool-meer-blick-om-thalsso-villa-del-conde`
+- `/de/angebote-wellness-pakete-om-spa-costa-meloneras`
+- `/de/angebote-wellness-pakete-om-thalasso-villa-del-conde`
+- `/de/boots-ausflug`
+- `/de/boots-ausflug/`
+- `/de/hochzeiten`
+- `/de/hochzeiten/`
+- `/de/hotels/dominikanische-republik/punta-cana/playa-bavaro/splash-cove/zimmer/junior-suite-swim-up-queen`
+- `/de/hotels/spanien/gran-canaria/meloneras/baobab-resort/zimmer/doppelzimmer-standard-blick`
+- `/de/hotels/spanien/gran-canaria/playa-del-ingles/abora-buenaventura/zimmer`
+- `/de/hotels/spanien/gran-canaria/playa-del-ingles/abora-catarina/gastronomie`
+- `/de/hotels/spanien/gran-canaria/playa-del-ingles/abora-catarina/zimmer`
+- `/de/hotels/spanien/gran-canaria/san-agustin/abora-interclub-atlantic/zimmer/angepasstes-doppelzimmer-familie`
+- `/de/sicher-online-bezahlen`
+- `/de/sicher-online-bezahlen/`
+- `/de/unternehmen/lopesan-for-good/nachhaltigkeitsberichte`
+- `/en/boats-trips`
+- `/en/boats-trips/`
+- `/en/corporate/lopesan-for-good/sustainability-reports`
+- `/en/hotels/dominican-republic/punta-cana/playa-bavaro/splash-cove/rooms/junior-suite-swim-up-queen`
+- `/en/hotels/spain/gran-canaria/playa-del-ingles/abora-buenaventura/rooms`
+- `/en/hotels/spain/gran-canaria/playa-del-ingles/abora-catarina/gastronomy`
+- `/en/hotels/spain/gran-canaria/playa-del-ingles/abora-catarina/rooms`
+- `/en/hotels/spain/gran-canaria/san-agustin/abora-interclub-atlantic/rooms/double-family-adapted`
+- `/en/offer-birthday-om-thalasso-villa-del-conde`
+- `/en/offer-om-spa-costa-meloneras-birthday`
+- `/en/offer-packs-wellness-om-spa-costa-meloneras`
+- `/en/offer-pool-sea-view-om-thalsso-villa-del-conde`
+- `/en/offer-wellness-packs-om-thalasso-villa-del-conde`
+- `/en/online-secure-payment`
+- `/en/online-secure-payment/`
+- `/en/weddings`
+- `/en/weddings/`
+- `/es/bodas`
+- `/es/bodas/`
+- `/es/corporativa/lopesan-for-good/memorias-sostenibilidad`
+- `/es/hoteles/espana/gran-canaria/playa-del-ingles/abora-buenaventura/habitaciones`
+- `/es/hoteles/espana/gran-canaria/playa-del-ingles/abora-catarina/gastronomia`
+- `/es/hoteles/espana/gran-canaria/playa-del-ingles/abora-catarina/habitaciones`
+- `/es/hoteles/espana/gran-canaria/san-agustin/abora-interclub-atlantic/habitaciones/doble-familiar-adaptada`
+- `/es/hoteles/republica-dominicana/punta-cana/playa-bavaro/splash-cove/habitaciones/junior-suite-swim-up-queen`
+- `/es/nautica-excursiones-en-barco`
+- `/es/nautica-excursiones-en-barco/`
+- `/es/oferta-cumpleanos-om-thalasso-villa-del-conde`
+- `/es/oferta-om-spa-costa-meloneras-cumpleanos`
+- `/es/oferta-packs-de-bienestar-om-spa-costa-meloneras`
+- `/es/oferta-packs-de-bienestar-om-thalasso-villa-del-conde`
+- `/es/oferta-piscina-vista-mar-om-thalsso-villa-del-conde`
+- `/es/pago-seguro-online`
+
+</details>
 
 ### 2. El informe que tienen exagera, y mucho
 
