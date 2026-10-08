@@ -131,7 +131,11 @@ jobs:
           # migration runs with the NEW image while the old containers keep
           # serving; if it fails, set -e stops here and nothing is swapped.
           # It only ever ADDs columns, so re-running it is a no-op.
-          docker compose -f docker-compose.yml -f docker-compose.vps.yml build
+          # El SHA viaja a la imagen para que cada rastreo quede sellado con
+          # la version que lo hizo (decision 66): sin eso, comparar dos censos
+          # no puede distinguir un cambio del sitio de un cambio nuestro.
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml build \
+            --build-arg CRAWLER_VERSION="$(git rev-parse --short HEAD)"
           docker compose -f docker-compose.yml -f docker-compose.vps.yml run --rm --no-deps -T \
             --entrypoint python crawler scripts/migrate_add_missing_columns.py </dev/null
           docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d

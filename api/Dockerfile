@@ -27,4 +27,8 @@ COPY scripts/ /app/scripts/
 
 EXPOSE 8000
 
+# El despliegue pasa el SHA del commit; en local queda "dev".
+ARG CRAWLER_VERSION=dev
+ENV CRAWLER_VERSION=$CRAWLER_VERSION
+
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

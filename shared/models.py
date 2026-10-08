@@ -39,6 +39,10 @@ class Job(Base):
     # habia forma de saber que el grafo de enlaces —y por tanto el PageRank—
     # se calculo sobre una parte del sitio.
     finish_reason = Column(String(32), nullable=True)
+    # Con que version del codigo se hizo este rastreo. Sin esto, comparar dos
+    # censos del mismo sitio no puede distinguir "lo cambio el sitio" de "lo
+    # cambiamos nosotros" (decision 66).
+    crawler_version = Column(String(64), nullable=True)
 
     # Resultado de la comprobacion automatica de render JS por plantilla. Se
     # rellena al cerrar un rastreo SIN render_js: dice si alguna plantilla

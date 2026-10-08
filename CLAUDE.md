@@ -1079,6 +1079,31 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    a byte idéntico** en los dos censos (comprobado entrada por entrada), así
    que es la misma copia hecha de otra manera.
 
+66. **Cada rastreo queda sellado con la versión que lo hizo** — comparar dos
+   censos del mismo sitio solo significa algo si se sabe si entre medias cambió
+   **el sitio** o cambiamos **nosotros**, y con lo que se guardaba no había
+   forma de contestarlo. Me pasó dos veces el mismo día:
+   - el grafo de Druni bajó de 37,5 a 32,1 millones de aristas entre dos
+     medidas, y parecía efecto de una optimización mía; era que
+     `analyze_indexability` había materializado **9.771 páginas noindex** que
+     antes repartían autoridad. Costó repetir una medición de 30 minutos
+     descartarlo;
+   - el censo de CST dio **88.838 «errores» de datos estructurados** que eran
+     basura guardada por el extractor de junio, no un sitio roto.
+   Ahora `jobs.crawler_version` guarda el SHA del commit: el `ARG` del
+   Dockerfile lo recibe al construir (`--build-arg`, que el despliegue rellena
+   con `git rev-parse --short HEAD`), queda en el entorno de la imagen y el
+   worker lo escribe al marcar el job como `running`. En local, sin argumento,
+   queda **`dev`** y no una cadena vacía que parezca una versión. Comprobado de
+   extremo a extremo: imagen construida con un valor de prueba → el código lo
+   reporta.
+   Es la decisión 13 llevada a su conclusión («antes de atribuir una diferencia
+   a un cambio del crawler, repetirla con la configuración vieja»): para eso
+   hay que saber cuál era la configuración vieja **y cuál era el código viejo**.
+   Y hay un caso que el sello no cubre y conviene recordar: **un re-análisis
+   arregla lo que decide el análisis, no lo que el extractor guardó mal**, así
+   que una comparación debe distinguir «re-analizado» de «re-rastreado».
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
