@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 import re
@@ -905,32 +906,68 @@ class SEOAnalyzer:
         )
         rows = self.session.execute(stmt).all()
 
+        # UNA incidencia por HALLAZGO, no por bloque. La misma cura que la
+        # decision 64b aplico a las imagenes y la 53 a las cabeceras: un aviso
+        # que sale en todas las paginas deja de ser un aviso.
+        #
+        # Un bloque de plantilla —el `Organization` del pie, la miga de pan— es
+        # el MISMO en todo el sitio y se arregla una vez. Medido en tres
+        # censos: penguin tiene **226.651 filas para 4 hallazgos distintos**,
+        # Lopesan 11.186 para 13 y Saunier 288 para 7. En penguin eso es el 39%
+        # de las incidencias del censo entero diciendo cuatro cosas.
+        #
+        # No se pierde nada: cada fila lleva cuantas paginas la llevan y hasta
+        # cinco ejemplos, y `structured_data` conserva TODOS los bloques con su
+        # validacion.
+        por_hallazgo: dict[tuple, list[int]] = {}
+        # Los ids de bloque agrupados por veredicto, para no hacer un UPDATE
+        # por bloque: en penguin eran 226.651 sentencias para escribir cuatro
+        # valores distintos.
+        por_veredicto: dict[tuple, list[int]] = {}
+
         for sd_id, url_id, schema_type, raw in rows:
             status, issues = validate_structured_data(raw)
+            clave = (status, json.dumps(issues or None, sort_keys=True))
+            por_veredicto.setdefault(clave, []).append(sd_id)
+            if status in ("error", "warning"):
+                por_hallazgo.setdefault(
+                    (status, schema_type, tuple(issues or ())), []
+                ).append(url_id)
 
-            self.session.execute(
-                update(StructuredData)
-                .where(StructuredData.id == sd_id)
-                .values(validation_status=status, validation_issues=issues or None)
+        for (status, issues_json), ids in por_veredicto.items():
+            valores = {"validation_status": status,
+                       "validation_issues": json.loads(issues_json)}
+            for i in range(0, len(ids), 5000):
+                self.session.execute(
+                    update(StructuredData)
+                    .where(StructuredData.id.in_(ids[i:i + 5000]))
+                    .values(**valores)
+                )
+
+        for (status, schema_type, issues), paginas in por_hallazgo.items():
+            self._add_issue(
+                paginas[0],
+                f"structured_data_{status}",
+                status,
+                {
+                    "schema_type": schema_type,
+                    "validation_issues": list(issues),
+                    "paginas_afectadas": len(paginas),
+                    "paginas_ejemplo": self._urls_de(paginas[:5]),
+                },
             )
-
-            if status == "error":
-                self._add_issue(
-                    url_id,
-                    "structured_data_error",
-                    "error",
-                    {"schema_type": schema_type, "validation_issues": issues},
-                )
-            elif status == "warning":
-                self._add_issue(
-                    url_id,
-                    "structured_data_warning",
-                    "warning",
-                    {"schema_type": schema_type, "validation_issues": issues},
-                )
 
         self.session.flush()
         self._flush_issues()
+
+    def _urls_de(self, url_ids: list[int]) -> list[str]:
+        """Las URLs de unos cuantos ids, para poder ir a mirar la pagina."""
+        if not url_ids:
+            return []
+        filas = self.session.execute(
+            select(Url.url).where(Url.id.in_(url_ids))
+        ).all()
+        return [f[0] for f in filas]
 
     # -- Indexability --------------------------------------------------------
 
