@@ -218,3 +218,95 @@ def test_la_comparacion_va_despues_de_escribir_el_estado_final():
     # nada y el aviso sonaria como si el sitio hubiera cambiado.
     guarda = fuente[fuente.rindex("\n", 0, pos_comparar - 60):pos_comparar]
     assert re.search(r'final_status == "completed"', guarda)
+
+
+def test_la_comparacion_automatica_se_EJECUTA_sin_reventar(monkeypatch, tmp_path):
+    """Se llama a la funcion de verdad, no se lee su fuente.
+
+    La primera version reventaba en produccion con `NameError: name
+    'SessionLocal' is not defined` —el worker importa esa fabrica DENTRO de
+    cada funcion que la usa, y a esta se me olvido—, y el test que tenia
+    comprobaba el ORDEN de las llamadas leyendo el codigo con `inspect`. Pasaba
+    perfectamente mientras la funcion no llegaba a la segunda linea.
+
+    Es el mismo error que ya cometi con `_sellar_version` del analizador en la
+    misma tarde. Un test que mira el fuente comprueba que escribiste algo, no
+    que funcione.
+    """
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import worker
+    from shared.models import Base, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_worker(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine)
+    monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
+
+    s = Sesion()
+
+    def censo(nombre, dia, canonical_fuera):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 1, dia), crawler_version="abc1234")
+        s.add(j)
+        s.flush()
+        for i in range(30):
+            u = Url(job_id=j.id, url=f"https://x.com/p{i}", url_hash=f"{nombre}{i}",
+                    is_internal=True, is_html=True, status_code=200,
+                    indexability_status="Indexable", word_count=400)
+            s.add(u)
+            s.flush()
+            s.add(HtmlMeta(url_id=u.id, title="T", canonical_href=(
+                f"https://pruebas.ajeno.com/p{i}" if canonical_fuera
+                else f"https://x.com/p{i}")))
+        s.commit()
+        return j.id
+
+    censo("el anterior", 1, False)
+    jid = censo("el nuevo", 5, True)
+    s.close()
+
+    # Se pasa el UUID y no la cadena que usa produccion: el tipo `Uuid` de
+    # SQLAlchemy acepta una cadena contra Postgres y la rechaza contra SQLite.
+    # Es un detalle del dialecto, no de lo que se prueba aqui, que es si la
+    # funcion llega al final y guarda algo.
+    worker._comparar_con_el_censo_anterior(jid)
+
+    s2 = Sesion()
+    guardado = s2.query(Job).filter(Job.id == jid).one().comparacion
+    assert guardado is not None, "no se ha guardado nada: la funcion no llego al final"
+    assert guardado["nombre_anterior"] == "el anterior"
+    criticas = [a for a in guardado["alertas"] if a["severidad"] == "critical"]
+    assert [a["regla"] for a in criticas] == ["canonical_a_otro_host"]
+    assert criticas[0]["paginas"] == 30
+    s2.close()
+
+
+def test_si_la_comparacion_falla_el_rastreo_no_se_pierde(monkeypatch, caplog):
+    """Best-effort de verdad: que reviente no puede tumbar nada.
+
+    Y tiene que cubrir TODA la funcion, no solo el cuerpo: el fallo real de
+    produccion estuvo en la linea que montaba la sesion, que estaba FUERA del
+    try.
+    """
+    import logging
+
+    import worker
+
+    def explota(*a, **kw):
+        raise RuntimeError("la base de datos no responde")
+
+    monkeypatch.setattr("shared.database.SessionLocal", explota, raising=False)
+    with caplog.at_level(logging.ERROR):
+        worker._comparar_con_el_censo_anterior("da39a3ee-5e6b-4b0d-3255-bfef95601890")
+    assert any("fallo al comparar" in r.message for r in caplog.records)
