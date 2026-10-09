@@ -192,6 +192,13 @@ falsas.
 `| Penguin Libros ES`: la plantilla es `{autor} | Penguin Libros ES` y el
 nombre no se rellena. Hay además 64 con el literal «Autor sin nombre».
 
+**19.109 páginas indexables de `/es` no declaran canonical.** Es lo más
+accionable de todo el censo: el sitio tiene **438.957 anotaciones de hreflang**
+a seis variantes de español (es-ES, es-PE, es-UY, es-CL, es-CO, es-AR) con
+contenido casi idéntico, y sin canonical es Google quien decide cuál de las
+seis posiciona en cada búsqueda. Son 24.906 páginas sin canonical en total y
+24.900 están bajo `/es`.
+
 **50.760 páginas indexables compiten entre sí por el título** — 14.396 parejas
 y 6.089 grupos de tres a cinco. En una librería esto es esperable (la misma
 obra en varias ediciones), pero es decisión suya cuál debe posicionar: hoy
