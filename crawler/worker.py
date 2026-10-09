@@ -72,6 +72,11 @@ STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "30"))
 # La misma constante que usa el analizador para sellar su pasada:
 # `shared/version.py`, para que no puedan decir cosas distintas.
 CRAWLER_VERSION = _VERSION
+# Cada cuanto se mira si toca lanzar algun rastreo programado. Un minuto: los
+# rastreos se programan por horas o dias, asi que llegar hasta un minuto tarde
+# no significa nada, y sondear mas a menudo solo gasta consultas.
+PROGRAMACION_INTERVAL_SECONDS = int(
+    os.getenv("PROGRAMACION_INTERVAL_SECONDS", "60"))
 # Cada cuanto se vuelve a mirar si hay jobs huerfanos. Ver `_quizas_recuperar`.
 RECOVERY_INTERVAL_SECONDS = int(os.getenv("RECOVERY_INTERVAL_SECONDS", "300"))
 # El nombre y el orden de la cola viven en shared/cola.py: estaban
@@ -998,6 +1003,100 @@ def resumir_stderr(stderr: str) -> tuple[dict[str, list[str]], dict[str, list[st
 
 
 # ---------------------------------------------------------------------------
+# Rastreos programados
+# ---------------------------------------------------------------------------
+def _quizas_programar(rconn, ultima_vez: float, ahora: float) -> float:
+    """Pasa el planificador si toca, y devuelve cuando fue la ultima pasada.
+
+    Va en el bucle y no en un hilo de APScheduler a proposito: este proceso
+    lanza Scrapy como SUBPROCESO y maneja senales, y meter ahi un hilo que
+    dispara cosas por su cuenta es buscarse una carrera entre el fork y el
+    disparo. De APScheduler se usa solo el motor de tiempos (`CronTrigger`),
+    que es la parte que no quiero escribir a mano: el dia 31 en meses de 30 y
+    el domingo en que las 2:30 no existe o existe dos veces.
+    """
+    if ahora - ultima_vez < PROGRAMACION_INTERVAL_SECONDS:
+        return ultima_vez
+    try:
+        _lanzar_programados(rconn)
+    except Exception:
+        # Que el planificador reviente no puede tumbar el worker: dejaria de
+        # atender la cola, que es lo que de verdad hace.
+        logger.exception("Fallo la pasada del planificador")
+    return ahora
+
+
+def _lanzar_programados(rconn) -> None:
+    """Encola los rastreos cuya hora ha llegado."""
+    from datetime import datetime, timezone
+
+    from shared.cola import encolar
+    from shared.database import SessionLocal
+    from shared.models import Job, Programacion
+    from shared.programaciones import (
+        hay_rastreo_vivo, job_desde_programacion, proxima_desde, toca_lanzar,
+    )
+
+    session = None
+    try:
+        session = SessionLocal()
+        ahora = datetime.now(timezone.utc)
+        pendientes = (
+            session.query(Programacion)
+            .filter(Programacion.activa.is_(True),
+                    Programacion.proxima_ejecucion.isnot(None),
+                    Programacion.proxima_ejecucion <= ahora)
+            .all()
+        )
+        for prog in pendientes:
+            proxima = prog.proxima_ejecucion
+            if proxima is not None and proxima.tzinfo is None:
+                # Postgres devuelve timestamptz con zona, pero SQLite no: sin
+                # esto la comparacion revienta en los tests y, peor, en
+                # cualquier motor que no guarde la zona.
+                proxima = proxima.replace(tzinfo=timezone.utc)
+
+            lanzar, motivo = toca_lanzar(proxima, ahora)
+            if lanzar and hay_rastreo_vivo(session, prog):
+                lanzar, motivo = False, (
+                    "el rastreo anterior de esta programacion sigue sin "
+                    "terminar; no se encola otro encima")
+
+            if lanzar:
+                datos = job_desde_programacion(prog)
+                job = Job(name=datos["name"], client_id=datos["client_id"],
+                          seeds=datos["seeds"], config=datos["config"],
+                          status="pending")
+                session.add(job)
+                session.flush()
+                encolar(rconn, job.id)
+                prog.ultima_ejecucion = ahora
+                prog.ultimo_job_id = job.id
+                logger.info(
+                    "Programacion %s (%s): encolado %s — %s",
+                    prog.id, prog.nombre, job.id, motivo)
+            else:
+                logger.info("Programacion %s (%s): no se lanza — %s",
+                            prog.id, prog.nombre, motivo)
+
+            prog.ultimo_motivo = motivo
+            # La proxima se recalcula SIEMPRE, se haya lanzado o no. Si no, una
+            # programacion que se salta un disparo se queda con la hora pasada
+            # y vuelve a intentarlo en cada vuelta del bucle, cada minuto.
+            prog.proxima_ejecucion = proxima_desde(
+                prog.cron, prog.zona_horaria, ahora)
+        if pendientes:
+            session.commit()
+    except Exception:
+        if session is not None:
+            session.rollback()
+        raise
+    finally:
+        if session is not None:
+            session.close()
+
+
+# ---------------------------------------------------------------------------
 # Stale job recovery
 # ---------------------------------------------------------------------------
 def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
@@ -1114,6 +1213,10 @@ def main() -> None:
 
     _recover_stale_jobs(rconn)
     ultima_recuperacion = time.time()
+    # A cero para que la primera vuelta ya mire las programaciones: si el
+    # worker arranca justo despues de un despliegue, el disparo perdido de ese
+    # rato se recupera en el acto y no al minuto siguiente.
+    ultima_programacion = 0.0
 
     executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
     active_futures: dict[str, Future] = {}
@@ -1122,6 +1225,9 @@ def main() -> None:
         while not _shutdown_event.is_set():
             ultima_recuperacion = _quizas_recuperar(
                 rconn, ultima_recuperacion, time.time()
+            )
+            ultima_programacion = _quizas_programar(
+                rconn, ultima_programacion, time.time()
             )
 
             # Clean up finished futures

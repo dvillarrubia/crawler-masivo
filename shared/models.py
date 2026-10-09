@@ -22,6 +22,45 @@ def _uuid():
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+class Programacion(Base):
+    """Un rastreo que se repite: cuando toca y que lanzar.
+
+    Lleva sus propias `seeds` y `config` en vez de apuntar a
+    `projects/<cliente>/config.json`: esos ficheros viven en la maquina de
+    quien lanza los rastreos y la imagen del worker no los tiene. Asi la
+    programacion es autosuficiente y se crea con el mismo cuerpo que un
+    `POST /api/jobs`.
+    """
+
+    __tablename__ = "programaciones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    nombre = Column(String(512), nullable=False)
+    client_id = Column(String(128), nullable=True, index=True)
+    seeds = Column(JSON, nullable=False)
+    config = Column(JSON, nullable=True)
+
+    # Expresion de cinco campos (`m h dom mes dsem`) y la zona en la que se
+    # lee: un "todos los lunes a las 3:00" sin zona se desplaza una hora en
+    # verano y nadie lo nota hasta que falta un censo.
+    cron = Column(String(128), nullable=False)
+    zona_horaria = Column(String(64), nullable=True)
+    activa = Column(Boolean, default=True, nullable=False)
+
+    # En UTC. Se recalcula cada vez que se dispara, y tambien al activar o
+    # editar: si se quedara con la de antes, un cambio de horario no tendria
+    # efecto hasta el siguiente disparo.
+    proxima_ejecucion = Column(DateTime(timezone=True), nullable=True, index=True)
+    ultima_ejecucion = Column(DateTime(timezone=True), nullable=True)
+    ultimo_job_id = Column(UUID(as_uuid=True), nullable=True)
+    # Por que no se disparo la ultima vez que tocaba, si no se disparo. Una
+    # programacion que deja de lanzarse sin decir por que es indistinguible de
+    # una que nadie miro.
+    ultimo_motivo = Column(String(512), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

@@ -194,6 +194,101 @@ class JobConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Job create / response
 # ---------------------------------------------------------------------------
+def _validar_expresion_cron(v: str) -> str:
+    """Se valida al ESCRIBIRLA, no al dispararla.
+
+    Una expresion que no se puede interpretar, guardada, es una programacion
+    que no se dispara nunca — y eso se lee igual que un sitio que no cambia.
+    El error tiene que salir cuando alguien la escribe.
+    """
+    from shared.programaciones import cron_valido
+
+    if not cron_valido(v):
+        raise ValueError(
+            f"'{v}' no es una expresion cron valida de cinco campos "
+            f"(minuto hora dia-del-mes mes dia-de-semana). "
+            f"Por ejemplo: '0 3 * * 1' es todos los lunes a las 3:00"
+        )
+    return v.strip()
+
+
+def _validar_zona(v: str | None) -> str | None:
+    if v is None:
+        return v
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(v)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"zona horaria desconocida: {v!r}") from exc
+    return v
+
+
+class ProgramacionCreate(BaseModel):
+    """Un rastreo que se repite. Mismo cuerpo que un job, mas el cuando."""
+
+    nombre: str = Field(..., min_length=1, max_length=512)
+    seeds: list[str] = Field(..., min_length=1)
+    client_id: str | None = Field(default=None, max_length=128)
+    config: JobConfig = Field(default_factory=JobConfig)
+    # Expresion de cinco campos: `minuto hora dia-del-mes mes dia-de-semana`.
+    cron: str = Field(..., min_length=1, max_length=128)
+    zona_horaria: str | None = Field(default=None, max_length=64)
+    activa: bool = True
+
+    @field_validator("cron")
+    @classmethod
+    def validar_cron(cls, v: str) -> str:
+        return _validar_expresion_cron(v)
+
+    @field_validator("zona_horaria")
+    @classmethod
+    def validar_zona_horaria(cls, v: str | None) -> str | None:
+        return _validar_zona(v)
+
+    @field_validator("seeds", mode="before")
+    @classmethod
+    def validar_semillas(cls, v: list[str]) -> list[str]:
+        return JobCreate.validate_seeds(v)
+
+
+class ProgramacionUpdate(BaseModel):
+    """Lo que se puede cambiar de una programacion ya creada."""
+
+    nombre: str | None = Field(default=None, min_length=1, max_length=512)
+    cron: str | None = Field(default=None, min_length=1, max_length=128)
+    zona_horaria: str | None = Field(default=None, max_length=64)
+    activa: bool | None = None
+
+    @field_validator("cron")
+    @classmethod
+    def validar_cron(cls, v: str | None) -> str | None:
+        return None if v is None else _validar_expresion_cron(v)
+
+    @field_validator("zona_horaria")
+    @classmethod
+    def validar_zona_horaria(cls, v: str | None) -> str | None:
+        return _validar_zona(v)
+
+
+class ProgramacionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    nombre: str
+    client_id: str | None = None
+    seeds: list[str]
+    config: dict[str, Any] | None = None
+    cron: str
+    zona_horaria: str | None = None
+    activa: bool
+    proxima_ejecucion: datetime | None = None
+    ultima_ejecucion: datetime | None = None
+    ultimo_job_id: uuid.UUID | None = None
+    ultimo_motivo: str | None = None
+    created_at: datetime | None = None
+
+
 class JobCreate(BaseModel):
     """Payload to create a new crawl job."""
 

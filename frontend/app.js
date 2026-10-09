@@ -148,6 +148,28 @@ const fmt = {
   position: p => POSITION_LABEL[p] || p || '—',
 };
 
+// El `detail` de un error de validacion de FastAPI (422) es una LISTA de
+// objetos, no una cadena: `new Error(lista)` daba literalmente
+// "[object Object]". Le pasaba a cualquier error de validacion de toda la
+// aplicacion, asi que el mensaje que el servidor se molesta en redactar
+// —«'todos los lunes' no es una expresion cron valida…»— no llegaba nunca a
+// quien lo necesitaba.
+function mensajeDeError(err) {
+  const d = err && err.detail;
+  if (!d) return 'Error en la peticion';
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map(e => {
+      // `loc` es ['body', 'cron']: interesa el campo, no que venga del cuerpo.
+      const campo = (e.loc || []).filter(x => x !== 'body').join('.');
+      const texto = (e.msg || '').replace(/^Value error,\s*/, '');
+      return campo ? `${campo}: ${texto}` : texto;
+    }).join(' · ');
+  }
+  return typeof d === 'object' ? JSON.stringify(d) : String(d);
+}
+
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -155,7 +177,7 @@ async function api(path, opts = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Error en la peticion');
+    throw new Error(mensajeDeError(err));
   }
   if (res.status === 204) return null;
   return res.json();
@@ -167,6 +189,18 @@ function app() {
   return {
     // Navegacion
     view: 'jobs',
+    programaciones: [],
+    programarAbierto: false,
+    programarNombre: '',
+    programarCron: '0 3 * * 1',
+    programarZona: 'Europe/Madrid',
+    programarError: '',
+    cadencias: [
+      { etiqueta: 'Cada dia',      cron: '0 3 * * *' },
+      { etiqueta: 'Cada lunes',    cron: '0 3 * * 1' },
+      { etiqueta: 'Cada 15 dias',  cron: '0 3 1,15 * *' },
+      { etiqueta: 'Cada mes',      cron: '0 3 1 * *' },
+    ],
     theme: document.documentElement.dataset.theme || 'light',
     loading: false,
     error: null,
@@ -569,6 +603,79 @@ function app() {
     diffOtro: '',
     diffCandidatos: [],
     diffCargando: false,
+
+    // --- Rastreos programados ---
+    abrirProgramar() {
+      // El nombre por defecto quita la fecha del rastreo de origen: la
+      // programacion le pone la suya a cada ejecucion.
+      this.programarNombre = (this.job.name || '').replace(/\s*[·-]\s*\d{4}-\d{2}-\d{2}.*$/, '');
+      this.programarError = '';
+      this.programarAbierto = true;
+    },
+
+    async guardarProgramacion() {
+      this.programarError = '';
+      try {
+        await api('/programaciones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nombre: this.programarNombre,
+            client_id: this.job.client_id,
+            seeds: this.job.seeds,
+            config: this.job.config || {},
+            cron: this.programarCron,
+            zona_horaria: this.programarZona,
+          }),
+        });
+        this.programarAbierto = false;
+        await this.verProgramados();
+      } catch (e) {
+        // El mensaje se queda EN el modal: si se cierra, quien escribio una
+        // expresion mal no ve por que no se guardo.
+        this.programarError = e.message;
+      }
+    },
+    async verProgramados() {
+      this.view = 'programados';
+      await this.cargarProgramaciones();
+    },
+
+    async cargarProgramaciones() {
+      try {
+        this.programaciones = await api('/programaciones');
+      } catch (e) {
+        this.programaciones = [];
+        this.error = 'No se pudieron cargar las programaciones: ' + e.message;
+      }
+    },
+
+    async alternarProgramacion(p) {
+      try {
+        await api('/programaciones/' + p.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ activa: !p.activa }),
+        });
+        await this.cargarProgramaciones();
+      } catch (e) {
+        this.error = 'No se pudo cambiar: ' + e.message;
+      }
+    },
+
+    async borrarProgramacion(p) {
+      // Se avisa de lo que NO se borra: los rastreos que ya lanzo son
+      // censos entregados o comparables, y tirarlos por cambiar de idea
+      // sobre la hora seria perder el historico del cliente.
+      if (!confirm('Quitar la programacion "' + p.nombre + '"?\n\n'
+          + 'Los rastreos que ya ha lanzado NO se borran.')) return;
+      try {
+        await api('/programaciones/' + p.id, { method: 'DELETE' });
+        await this.cargarProgramaciones();
+      } catch (e) {
+        this.error = 'No se pudo borrar: ' + e.message;
+      }
+    },
 
     async cargarCandidatosDiff() {
       // Solo rastreos COMPLETADOS del mismo host: comparar con uno truncado

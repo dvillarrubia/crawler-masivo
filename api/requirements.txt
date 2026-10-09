@@ -14,6 +14,10 @@ w3lib>=2.1.2
 # que la decision 49 descarto porque metia a la competencia en el
 # informe del cliente.
 tldextract>=5.1
+# Para validar la expresion cron de una programacion antes de guardarla:
+# guardar una que no se puede interpretar es una programacion que no se
+# dispara nunca y nadie se entera.
+apscheduler>=3.10
 python-multipart>=0.0.12
 pgvector>=0.3.0
 numpy>=1.26.0

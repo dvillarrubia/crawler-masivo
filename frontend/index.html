@@ -53,6 +53,13 @@
         <i data-lucide="contrast" style="width:14px;height:14px"></i>
         <span x-text="theme === 'terminal' ? 'Claro' : 'Terminal'"></span>
       </button>
+      <template x-if="view === 'jobs' || view === 'programados'">
+        <button class="btn btn-sm" @click="view === 'programados' ? (view = 'jobs') : verProgramados()"
+                data-tip="Rastreos que se repiten solos" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="calendar-clock" style="width:14px;height:14px"></i>
+          <span x-text="view === 'programados' ? 'Rastreos' : 'Programados'"></span>
+        </button>
+      </template>
       <button class="btn btn-sm" @click="showImportModal = true" data-tip="Importar un backup ZIP de un rastreo" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup
       </button>
@@ -75,6 +82,127 @@
     <!-- ============================================================ -->
     <!--                  VISTA: LISTA DE TRABAJOS                    -->
     <!-- ============================================================ -->
+    <!-- ===== MODAL: PROGRAMAR ESTE RASTREO ===== -->
+    <template x-if="programarAbierto && job">
+      <div class="modal-backdrop" @click.self="programarAbierto = false">
+        <div class="modal" style="max-width:34rem">
+          <div class="modal-header">
+            <h2 style="display:flex;align-items:center;gap:.4rem">
+              <i data-lucide="calendar-clock" style="width:18px;height:18px"></i> Repetir este rastreo
+            </h2>
+          </div>
+          <div class="modal-body">
+            <p class="text-dim text-sm" style="margin-bottom:.8rem">
+              Se repetira con las mismas semillas y la misma configuracion que
+              <strong x-text="job.name"></strong>, y cada vez se comparara con el
+              censo anterior del mismo sitio.
+            </p>
+
+            <label class="text-sm">Nombre</label>
+            <input type="text" x-model="programarNombre" style="width:100%;margin-bottom:.8rem">
+
+            <label class="text-sm">Cada cuanto</label>
+            <div class="flex gap-1" style="flex-wrap:wrap;margin-bottom:.5rem">
+              <template x-for="o in cadencias" :key="o.cron">
+                <button class="btn btn-sm" :class="programarCron === o.cron ? 'btn-primary' : ''"
+                        @click="programarCron = o.cron" x-text="o.etiqueta"></button>
+              </template>
+            </div>
+            <input type="text" x-model="programarCron" style="width:100%;font-family:monospace"
+                   placeholder="minuto hora dia-del-mes mes dia-de-semana">
+            <div class="text-dim" style="font-size:.76rem;margin:.3rem 0 .8rem">
+              Cinco campos, como un crontab. <code>0 3 * * 1</code> son los lunes a las 3:00.
+            </div>
+
+            <label class="text-sm">Zona horaria</label>
+            <input type="text" x-model="programarZona" style="width:100%;margin-bottom:.4rem">
+            <div class="text-dim" style="font-size:.76rem">
+              La hora se lee en esta zona, con su cambio de horario.
+            </div>
+            <div x-show="programarError" class="card"
+                 style="border-left:3px solid var(--red,#d32f2f);margin-top:.8rem">
+              <div class="text-sm" x-text="programarError"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" @click="programarAbierto = false">Cancelar</button>
+            <button class="btn btn-primary" @click="guardarProgramacion()">Programar</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== RASTREOS PROGRAMADOS ===== -->
+    <template x-if="view === 'programados'">
+      <div>
+        <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
+          <span class="text-dim text-sm">Rastreos que se repiten solos. Los dispara el worker;
+            cada uno se compara con el censo anterior del mismo sitio al terminar.</span>
+          <span class="text-dim text-sm" style="margin-left:auto"
+                x-text="programaciones.length + ' programaciones'"></span>
+        </div>
+
+        <template x-if="!programaciones.length">
+          <div class="empty" style="padding:2.5rem 1.5rem">
+            <h3 style="margin-bottom:.5rem;font-size:1.05rem">No hay ningun rastreo programado</h3>
+            <p class="text-dim" style="max-width:420px;line-height:1.5">
+              Mientras no los haya, de un cambio en un sitio te enteras cuando se te ocurre mirar.
+            </p>
+          </div>
+        </template>
+
+        <template x-if="programaciones.length">
+          <div class="card">
+            <table style="width:100%;font-size:.85rem">
+              <thead><tr>
+                <th style="text-align:left">nombre</th>
+                <th style="text-align:left">cuando</th>
+                <th style="text-align:left">proximo</th>
+                <th style="text-align:left">ultimo</th>
+                <th style="width:7rem"></th>
+              </tr></thead>
+              <tbody>
+                <template x-for="p in programaciones" :key="p.id">
+                  <tr :style="p.activa ? '' : 'opacity:.5'">
+                    <td>
+                      <div x-text="p.nombre"></div>
+                      <div class="text-dim" style="font-size:.75rem"
+                           x-text="(p.seeds || []).join(', ').slice(0, 70)"></div>
+                    </td>
+                    <td>
+                      <code x-text="p.cron"></code>
+                      <div class="text-dim" style="font-size:.75rem" x-text="p.zona_horaria || 'Europe/Madrid'"></div>
+                    </td>
+                    <td>
+                      <span x-text="p.activa ? fmt.date(p.proxima_ejecucion) : 'en pausa'"></span>
+                    </td>
+                    <td>
+                      <template x-if="p.ultimo_job_id">
+                        <a href="#" @click.prevent="openJob(p.ultimo_job_id)"
+                           x-text="fmt.date(p.ultima_ejecucion)"></a>
+                      </template>
+                      <template x-if="!p.ultimo_job_id"><span class="text-dim">nunca</span></template>
+                      <!-- Por que no se lanzo la ultima vez. Una programacion que
+                           deja de dispararse sin decir por que es indistinguible
+                           de una que nadie miro. -->
+                      <div class="text-dim" style="font-size:.73rem" x-show="p.ultimo_motivo"
+                           x-text="p.ultimo_motivo"></div>
+                    </td>
+                    <td style="text-align:right;white-space:nowrap">
+                      <button class="btn btn-sm" @click="alternarProgramacion(p)"
+                              x-text="p.activa ? 'Pausar' : 'Reanudar'"></button>
+                      <button class="btn btn-sm" @click="borrarProgramacion(p)"
+                              data-tip="Quita el calendario. Los rastreos que ya lanzo NO se borran">&times;</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </div>
+    </template>
+
     <template x-if="view === 'jobs'">
       <div>
         <!-- Filtros -->
@@ -215,6 +343,13 @@
               </template>
               <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
+              </button>
+              <!-- Se programa DESDE un rastreo que ya salio bien: sus semillas y
+                   su configuracion son las buenas, y repetirlas es un clic. Un
+                   formulario en blanco obligaria a reescribir lo que ya existe. -->
+              <button class="btn btn-sm" @click="abrirProgramar()" style="display:flex;align-items:center;gap:.3rem"
+                      data-tip="Repetir este mismo rastreo cada cierto tiempo">
+                <i data-lucide="calendar-clock" style="width:13px;height:13px"></i> Programar
               </button>
               <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta todas las URLs con sus metadatos SEO a CSV (compatible con Excel)">
                 <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
