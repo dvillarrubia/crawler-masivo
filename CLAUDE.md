@@ -1289,6 +1289,50 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    ocurrió en la línea que montaba la sesión, que estaba fuera, así que el
    «best-effort» no cubría precisamente la línea que falló.
 
+75. **Los rastreos se programan, y el planificador vive DENTRO del worker**
+   (#36) — un `crontab` en el servidor se salta todo lo que el worker ya
+   resuelve: la cola FIFO (decisión 31), el candado del análisis, el vigilante
+   de estancamientos y el problema de que un despliegue recree el contenedor a
+   media faena. Y no se ve desde ningún sitio. `shared/programaciones.py` +
+   `_quizas_programar` en el bucle del worker, al lado del vigilante; lo que se
+   dispara es un `encolar()`, no un rastreo, así que todo lo anterior sigue
+   mandando. De APScheduler se usa **solo el motor de tiempos**: un hilo suyo
+   en un proceso que lanza Scrapy como subproceso y maneja señales es una
+   carrera esperando.
+   Cuatro criterios: un disparo perdido se lanza tarde dentro de una ventana de
+   12 h (cubre un despliegue —2-3 min medidos— y un reinicio, no un fin de
+   semana caído; es un juicio, no una medida); **no se encola si el rastreo
+   anterior de esa programación sigue vivo**, porque uno semanal que tarda
+   nueve días encolaría el siguiente encima y en 2 vCPU se caen los dos; la
+   próxima se recalcula SIEMPRE, se haya lanzado o no, porque si no se queda
+   con la hora pasada y reintenta cada minuto para siempre; y el motivo de no
+   lanzar se guarda en `ultimo_motivo`, porque una programación que deja de
+   dispararse sin decir por qué es indistinguible de una que nadie miró.
+
+76. **`CronTrigger.from_crontab` de APScheduler NO es cron** — su día de la
+   semana es 0=lunes, así que `0 3 * * 1` —«lunes a las 3:00» en cualquier
+   crontab— le sale **martes**, y el 7 (domingo, válido en cron) lo rechaza con
+   un error. Contrastado contra `croniter` el 2026-10-09:
+
+   | campo | `from_crontab` | cron real |
+   |---|---|---|
+   | 0 | lunes | **domingo** |
+   | 1 | **martes** | **lunes** |
+   | 6 | domingo | **sábado** |
+   | 7 | error | domingo |
+
+   Es el fallo perfecto para no enterarse: la programación se dispara, solo que
+   un día tarde, todas las semanas, para siempre. `_dia_de_semana` traduce los
+   números a nombres (`mon`, `tue`…), que sí significan lo mismo en los dos, y
+   despliega `*/N` antes de traducir porque un paso sobre otra numeración no da
+   los mismos días. Hay un test parametrizado que contrasta 15 expresiones
+   contra `croniter`.
+   Y la próxima vez es **estrictamente posterior**: preguntado con
+   `(None, ahora)`, APScheduler incluye el instante exacto —a las 12:00:00 en
+   punto, `*/15` devuelve las 12:00:00—, y como al disparar se recalcula desde
+   la hora actual, un disparo que cayera justo en el minuto se quedaría con su
+   propia hora y se repetiría en cada vuelta del bucle.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

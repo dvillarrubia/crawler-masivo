@@ -16,3 +16,9 @@ scrapy-playwright>=0.0.40
 scrapy-impersonate
 html2text>=2024.2
 trafilatura>=2.0
+# Solo por su `CronTrigger`: es el motor de tiempos de las programaciones
+# (`shared/programaciones.py`). NO se usa su planificador en segundo plano —
+# este proceso lanza Scrapy como subproceso y maneja senales, y un hilo que
+# dispara cosas ahi es una carrera esperando. Lo que no quiero escribir a
+# mano es el dia 31 en meses de 30 y el domingo del cambio de hora.
+apscheduler>=3.10

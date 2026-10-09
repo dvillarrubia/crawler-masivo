@@ -145,6 +145,26 @@ gordo, 83.764 páginas con un bloque `Organization` **sin nombre** —sin eso
 Google no genera el resultado enriquecido— y 1.144 páginas de autor cuyo
 título es literalmente `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Rastreos programados (9 de octubre)
+
+Resto de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36). Desde
+la ficha de un rastreo que ha salido bien, un botón **Programar** lo repite cada
+semana (o cada día, o cada mes) con las mismas semillas y la misma
+configuración. Hay una vista con todas las programaciones, cuándo toca la
+próxima y cuándo fue la última.
+
+Con esto se cierra la cadena: rastreo semanal → se compara solo con el anterior
+→ si media plantilla se ha ido del índice, el aviso está esperándote. Hasta
+ahora las alertas existían pero dependían de que alguien se acordara de lanzar
+el rastreo; el fallo de Lopesan lo pillamos de casualidad.
+
+Lo construí sobre una librería para no escribir a mano el día 31 en meses de 30
+y el domingo del cambio de hora — **y la librería tenía una trampa**: su
+función para leer expresiones cron numera los días de la semana distinto, así
+que «todos los lunes» le salía **martes**. Un rastreo que se dispara un día
+tarde, todas las semanas, no lo nota nadie. Está contrastado con otra librería
+sobre quince expresiones.
+
 ### El rastreo se compara solo con el anterior (9 de octubre)
 
 Primer trozo de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36).
