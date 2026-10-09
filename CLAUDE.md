@@ -1333,6 +1333,27 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    la hora actual, un disparo que cayera justo en el minuto se quedaría con su
    propia hora y se repetiría en cada vuelta del bucle.
 
+77. **Una alerta que espera a que alguien entre no avisa** — la última pieza
+   de la cadena, y la que faltaba: el aviso crítico salía en la ficha del
+   rastreo y había que abrir el panel. El fallo de Lopesan lo pillamos porque
+   re-rastreamos ese día por otro motivo. `shared/avisos.py` manda un
+   **webhook genérico** cuando la comparación encuentra alertas críticas.
+   Genérico y no una integración con Slack ni un servidor de correo por dos
+   razones: el VPS ya ejecuta n8n, así que desde ahí se enruta a donde haga
+   falta sin meter credenciales en el crawler, y el cuerpo lleva `text` con el
+   resumen, de modo que apuntarlo a un *incoming webhook* de Slack también
+   vale. Con `urllib` y no `requests`: una dependencia menos en el camino que
+   corre después de CADA rastreo.
+   Dos criterios: **solo las críticas** —un aviso que llega cada semana con
+   cosas que no hay que mirar se deja de leer, y entonces no avisa de nada— y
+   el aviso dice **qué pasa y sobre cuántas páginas**, con lo que decide
+   Google, no «hay 3 alertas»: uno que obliga a abrir otra cosa para
+   entenderlo avisa a medias, que es el problema que viene a resolver.
+   Best-effort con el `try` cubriendo la función entera (decisión 74): esto
+   corre al cerrar un rastreo, y que un webhook caído dejara un censo en
+   `failed` sería cambiar un problema por otro peor.
+
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -1560,6 +1581,16 @@ PLAYWRIGHT_BANNER_WAIT_MS=2000   # tope de la espera a que el DOM se calme
 PLAYWRIGHT_DOM_QUIET_MS=400      # cuanto DOM quieto se considera "ha terminado"
 PLAYWRIGHT_MIN_WAIT_MS=600       # piso: nunca se da por terminada antes de esto
 PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
+
+# Avisos fuera de la interfaz (solo alertas CRITICAS de la comparacion)
+ALERTA_WEBHOOK_URL=              # vacio = no se avisa
+ALERTA_TIMEOUT_SEGUNDOS=10
+API_PUBLIC_URL=                  # para el enlace del aviso
+
+# Programaciones
+PROGRAMACION_INTERVAL_SECONDS=60 # cada cuanto mira el worker si toca lanzar
+PROGRAMACION_GRACIA_HORAS=12     # cuanto puede llegar tarde un disparo perdido
+PROGRAMACION_ZONA=Europe/Madrid
 
 # Worker
 STALL_AUTO_RESUME=3              # reanudaciones automaticas tras estancamiento (0 = ninguna)

@@ -735,6 +735,7 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
     # no estan en el ambito del modulo y la primera version de esto reventaba
     # con `NameError: name 'SessionLocal' is not defined` en produccion, en el
     # primer rastreo que la ejecuto.
+    from shared.avisos import avisar_de_alertas
     from shared.comparacion import comparar_con_el_anterior
     from shared.database import SessionLocal
     from shared.models import Job
@@ -762,6 +763,13 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
                 "; ".join(f"{a['regla']} {a['paginas']}/{a['de']} ({a['pct']}%)"
                           for a in criticas),
             )
+            # Y fuera, si hay a donde. Una alerta que espera en la interfaz
+            # solo sirve si alguien entra: el fallo de Lopesan lo pillamos
+            # porque re-rastreamos ese dia por otro motivo.
+            #
+            # SOLO las criticas. Un aviso que llega cada semana con cosas que
+            # no hay que mirar se deja de leer, y entonces no avisa de nada.
+            avisar_de_alertas(job_id, job.name, criticas)
         else:
             logger.info("Job %s: comparado con %s, %d alerta(s)", job_id,
                         resultado.get("comparado_con"),

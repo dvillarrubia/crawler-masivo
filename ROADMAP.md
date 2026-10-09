@@ -154,6 +154,28 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### El aviso sale del panel (9 de octubre)
+
+Cuando un rastreo encuentra algo grave —media plantilla fuera del índice, una
+sección entera apuntando a otro servidor— ya no se queda esperando a que
+alguien abra el panel: se manda fuera.
+
+Es un **webhook**, no un correo ni una integración con Slack. Como el servidor
+ya ejecuta n8n, desde ahí se reenvía a correo, a Slack o a donde haga falta sin
+meter contraseñas en el crawler. Se configura con una variable
+(`ALERTA_WEBHOOK_URL`); vacía, no se avisa.
+
+El aviso dice **qué pasa y sobre cuántas páginas**, no «hay 3 alertas». Así
+llegaría el de Lopesan:
+
+> **lopesan.com (censo v4)**: algo ha cambiado respecto al rastreo anterior.
+> • **2319** de 4193 páginas (55,3%) — Google consolida estas páginas en una
+> URL de OTRO host: dejan de aparecer en resultados y su autoridad se va fuera
+> del sitio.
+
+Solo salen las **críticas**: un aviso que llega cada semana con cosas que no
+hay que mirar se deja de leer, y entonces no avisa de nada.
+
 ### Rastreos programados (9 de octubre)
 
 Resto de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36). Desde

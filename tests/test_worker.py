@@ -310,3 +310,116 @@ def test_si_la_comparacion_falla_el_rastreo_no_se_pierde(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR):
         worker._comparar_con_el_censo_anterior("da39a3ee-5e6b-4b0d-3255-bfef95601890")
     assert any("fallo al comparar" in r.message for r in caplog.records)
+
+
+def test_el_worker_avisa_fuera_de_las_alertas_criticas(monkeypatch, tmp_path):
+    """Se EJECUTA la comparacion y se mira que el aviso sale, con que sale.
+
+    El otro test de esto mira el fuente para comprobar el ORDEN (que se filtra
+    antes de avisar); este comprueba que la llamada ocurre de verdad y con los
+    datos buenos. Decision 74: mirar el fuente no puede sustituir a ejecutar.
+    """
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import worker
+    from shared.models import Base, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_aviso(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/avisos.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine)
+    monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
+
+    avisos = []
+    monkeypatch.setattr(
+        "shared.avisos.avisar_de_alertas",
+        lambda job_id, nombre, alertas: avisos.append((nombre, alertas)))
+
+    s = Sesion()
+
+    def censo(nombre, dia, fuera):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 3, dia), crawler_version="abc1234")
+        s.add(j)
+        s.flush()
+        for i in range(30):
+            u = Url(job_id=j.id, url=f"https://x.com/p{i}", url_hash=f"{nombre}{i}",
+                    is_internal=True, is_html=True, status_code=200,
+                    indexability_status="Indexable", word_count=400)
+            s.add(u)
+            s.flush()
+            s.add(HtmlMeta(url_id=u.id, title=f"T{i}", canonical_href=(
+                f"https://pruebas.ajeno.com/p{i}" if fuera
+                else f"https://x.com/p{i}")))
+        s.commit()
+        return j.id
+
+    censo("el anterior", 1, False)
+    jid = censo("el nuevo", 5, True)
+    s.close()
+
+    worker._comparar_con_el_censo_anterior(jid)
+
+    assert len(avisos) == 1, "un rastreo con alertas criticas avisa una vez"
+    nombre, alertas = avisos[0]
+    assert nombre == "el nuevo"
+    assert [a["regla"] for a in alertas] == ["canonical_a_otro_host"]
+    assert all(a["severidad"] == "critical" for a in alertas), (
+        "solo las criticas: un aviso semanal con cosas que no hay que mirar "
+        "se deja de leer")
+
+
+def test_sin_alertas_criticas_no_se_avisa_fuera(monkeypatch, tmp_path):
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import worker
+    from shared.models import Base, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_sin(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/sin.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine)
+    monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
+    avisos = []
+    monkeypatch.setattr("shared.avisos.avisar_de_alertas",
+                        lambda *a: avisos.append(a))
+
+    s = Sesion()
+    ids = []
+    for nombre, dia in [("anterior", 1), ("nuevo", 5)]:
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 4, dia), crawler_version="abc1234")
+        s.add(j)
+        s.flush()
+        for i in range(30):
+            u = Url(job_id=j.id, url=f"https://x.com/p{i}", url_hash=f"{nombre}{i}",
+                    is_internal=True, is_html=True, status_code=200,
+                    indexability_status="Indexable", word_count=400)
+            s.add(u)
+            s.flush()
+            s.add(HtmlMeta(url_id=u.id, title=f"T{i}",
+                           canonical_href=f"https://x.com/p{i}"))
+        ids.append(j.id)
+    s.commit()
+    s.close()
+
+    worker._comparar_con_el_censo_anterior(ids[1])
+    assert avisos == [], "sin nada grave no se molesta a nadie"
