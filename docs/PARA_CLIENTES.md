@@ -1,20 +1,33 @@
 # Qué contarle a cada cliente, y con qué números
 
-Los cuatro censos entregados, re-analizados el 9 de octubre de 2026 con el
-código de hoy y **sellados con la versión que calculó las cifras** (`146c8ed`),
-para que dentro de un mes se pueda distinguir un cambio del sitio de un cambio
-nuestro:
+## Importante antes de usar ninguna cifra: re-analizar no es re-rastrear
 
-| cliente | en el informe entregado | con el código de hoy |
-|---|---|---|
-| penguin (87.531 páginas) | 959.633 | **347.936** |
-| CST, árbol en castellano | 97.524 | **54.095** |
-| Lopesan | 315.119 | **11.988** |
-| Saunier Duval | 15.550 | **8.399** |
+**Un re-análisis arregla lo que decide el análisis, no lo que el extractor
+guardó mal.** Dos de los cuatro censos están solo re-analizados, y sus cifras
+no son comparables con las de los otros dos:
 
-En los cuatro, la mayor parte de lo que sobraba es la misma clase de error:
-**el mismo hallazgo contado una vez por página** en vez de una vez por cosa que
-hay que arreglar — imágenes, cabeceras de seguridad y datos estructurados.
+| cliente | entregado | hoy | cómo se obtuvo |
+|---|---|---|---|
+| **Lopesan** | 315.119 | **11.988** | **re-rastreado** el 8-oct con el código actual |
+| **Saunier Duval** | 15.550 | **8.399** | **re-rastreado** el 8-oct con el código actual |
+| penguin (87.531 págs) | 959.633 | ~347.936 | *solo re-analizado*; el rastreo es del 13-jul |
+| CST, árbol en castellano | 97.524 | ~54.095 | *solo re-analizado*; el rastreo es del 25-jun |
+
+Las dos primeras son sólidas. Las dos últimas **no**, y está medido:
+
+- **No tienen ni una sola** de las columnas de contenido de M1: `content_word_count`
+  y `content_hash` están a cero en las 87.531 páginas de penguin y en las 8.838
+  de CST. Eso significa que «contenido escaso» se sigue midiendo sobre el cuerpo
+  entero —megamenú y pie incluidos— y que el duplicado exacto cae al hash de los
+  bytes, que no encuentra nada (decisiones 44 y 47).
+- En CST, **el 89% de los títulos tiene hoy un ancho en píxeles distinto** del
+  guardado, con desviaciones de hasta 205 px sobre un umbral de 580. Es un sitio
+  en árabe y el estimador viejo estaba ciego fuera del alfabeto latino
+  (decisión 54). Lo escribe el spider, así que re-analizar no lo toca.
+
+**Para esos dos clientes no hay informe correcto sin volver a rastrear.** Lo
+que sigue de penguin se mantiene porque lo he comprobado contra el sitio en
+vivo, una por una, y no depende de nada que el extractor guardara mal.
 
 Material para decidir si se re-emiten los informes. **Nada de esto se ha
 enviado**: son los hechos ordenados, con la fuente de cada cifra.
@@ -176,7 +189,11 @@ Lo de «demasiados enlaces salientes» saltaba en **todas** las páginas porque
 contábamos el megamenú como enlaces editoriales. Y las huérfanas eran un 98%
 falsas.
 
-### Lo que sí hay que contarles
+### Lo que sí hay que contarles (comprobado contra el sitio en vivo)
+
+Estos tres los he verificado pidiendo las páginas hoy, no fiándome del censo de
+julio. El recuento total de incidencias, en cambio, no es de fiar hasta
+re-rastrear.
 
 **Cuatro problemas de datos estructurados, y los cuatro son de plantilla:**
 

@@ -121,10 +121,18 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
-### El informe de penguin: 959.633 incidencias, 347.936 reales (9 de octubre)
+### El informe de penguin: 959.633 incidencias, y por qué todavía no sé cuántas son reales (9 de octubre)
 
 Tercer censo entregado que revisamos, y el más grande: 87.531 páginas. Casi
 dos tercios de lo que listaba el informe era ruido nuestro, ya arreglado.
+
+**Pero ese censo solo está re-analizado, no re-rastreado**, y eso tiene un
+límite que conviene decir antes que nada: volver a analizar arregla lo que
+decide el análisis, no lo que se guardó mal al rastrear. Ese censo es de julio
+y no tiene ni una sola de las columnas de contenido que añadimos después, así
+que «contenido escaso» se sigue midiendo sobre el cuerpo entero —megamenú
+incluido— y el duplicado exacto no encuentra nada. La cifra de abajo sirve
+para ver **qué clase de ruido había**, no como recuento para un cliente.
 
 | | en el informe | real |
 |---|---|---|
@@ -140,10 +148,11 @@ falsas. Y las 226.651 de datos estructurados decían **cuatro cosas**: es el
 mismo bloque de la plantilla contado una vez por página, la misma cura que ya
 aplicamos a las imágenes y a las cabeceras.
 
-Lo que sí hay que contarle al cliente está en `docs/PARA_CLIENTES.md`; lo más
-gordo, 83.764 páginas con un bloque `Organization` **sin nombre** —sin eso
-Google no genera el resultado enriquecido— y 1.144 páginas de autor cuyo
-título es literalmente `| Penguin Libros ES`, con el nombre sin rellenar.
+Lo que sí hay que contarle al cliente está en `docs/PARA_CLIENTES.md`, y son
+hallazgos que he comprobado **pidiendo las páginas hoy**, no fiándome del censo
+de julio: 19.109 páginas indexables sin canonical en un sitio con seis
+variantes de español, y 1.144 páginas de autor cuyo título es literalmente
+`| Penguin Libros ES`, con el nombre sin rellenar.
 
 ### Rastreos programados (9 de octubre)
 
