@@ -804,6 +804,9 @@ class SEOAnalyzer:
             if nh:
                 targets_by_page[page_id].add(nh)
 
+        # Anotaciones agrupadas por veredicto, para escribirlas por lotes.
+        por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
+
         for hreflang_id, url_id, lang, href in rows:
             norm_href = _norm_url(href)
 
@@ -827,13 +830,6 @@ class SEOAnalyzer:
             else:
                 return_ok = page_norm in targets_by_page.get(target_uid, set())
 
-            # Persist the computed flags (consumed by the i18n insights).
-            self.session.execute(
-                update(Hreflang)
-                .where(Hreflang.id == hreflang_id)
-                .values(lang_valid=lang_is_valid, return_tag_ok=return_ok)
-            )
-
             # Si el destino no responde 200 no se puede saber si devuelve el
             # enlace: reportar las dos cosas a la vez (destino roto Y sin
             # retorno) es contar el mismo hallazgo dos veces, y lo que hay que
@@ -845,11 +841,15 @@ class SEOAnalyzer:
             destino_roto = estado_destino is not None and estado_destino != 200
             if destino_roto:
                 return_ok = None
-                self.session.execute(
-                    update(Hreflang)
-                    .where(Hreflang.id == hreflang_id)
-                    .values(return_tag_ok=None)
-                )
+
+            # El veredicto se apunta y se escribe al final, por lotes. Se
+            # escribia con un UPDATE POR ANOTACION —y con DOS cuando el destino
+            # estaba roto, porque el segundo pisaba al primero—, y de ahi solo
+            # salen SEIS combinaciones distintas: valido o no, por devuelve el
+            # enlace / no lo devuelve / no se sabe. En el censo de penguin eso
+            # son 438.957 sentencias para escribir seis valores.
+            por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
+                hreflang_id)
 
             if return_ok is False:
                 self._add_issue(
@@ -876,6 +876,14 @@ class SEOAnalyzer:
                     "hreflang_broken_target",
                     "error",
                     {"href": href, "target_status": estado_destino},
+                )
+
+        for (lang_valid, return_ok), ids in por_veredicto.items():
+            for i in range(0, len(ids), 5000):
+                self.session.execute(
+                    update(Hreflang)
+                    .where(Hreflang.id.in_(ids[i:i + 5000]))
+                    .values(lang_valid=lang_valid, return_tag_ok=return_ok)
                 )
 
         self.session.flush()

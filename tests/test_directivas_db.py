@@ -197,3 +197,50 @@ def test_uk_como_idioma_es_ucraniano_y_es_valido():
     SEOAnalyzer(s, j.id).analyze_hreflang()
     s.flush()
     assert "hreflang_invalid_lang" not in _tipos(s, j, a.id)
+
+
+def test_los_veredictos_de_hreflang_se_guardan_en_TODAS_las_filas():
+    """Las columnas, no solo las incidencias.
+
+    `lang_valid` y `return_tag_ok` los consumen los porcentajes de `/insights`
+    (decision 30) y no los mira ningun otro test: se comprobaban los avisos y
+    las columnas iban por libre. Importa porque se escriben POR LOTES —antes
+    era un UPDATE por anotacion, y DOS cuando el destino estaba roto: 438.957
+    sentencias en el censo de penguin para grabar seis valores distintos— y un
+    agrupamiento mal hecho deja filas sin tocar sin que nada lo diga.
+
+    Los cinco casos que hay, cada uno con su veredicto:
+    """
+    s, j = _montar()
+    es = _url(s, j, "https://x.com/es/", canonical="https://x.com/es/", cuantos=1)
+    en = _url(s, j, "https://x.com/en/", canonical="https://x.com/en/", cuantos=1)
+    _url(s, j, "https://x.com/de/", canonical="https://x.com/de/", cuantos=1,
+         status=404)
+    # Reciproco de verdad: las dos se apuntan.
+    s.add(Hreflang(url_id=es.id, lang="en", href="https://x.com/en/"))
+    s.add(Hreflang(url_id=en.id, lang="es", href="https://x.com/es/"))
+    # Solo de ida: `en` no apunta a `fr`, y `fr` ni se rastreo.
+    s.add(Hreflang(url_id=en.id, lang="pt", href="https://x.com/pt/"))
+    # x-default: no necesita retorno.
+    s.add(Hreflang(url_id=es.id, lang="x-default", href="https://x.com/"))
+    # Destino roto: no se puede saber si devuelve el enlace.
+    s.add(Hreflang(url_id=es.id, lang="de", href="https://x.com/de/"))
+    # Idioma invalido.
+    s.add(Hreflang(url_id=es.id, lang="en-UK", href="https://x.com/uk/"))
+    s.flush()
+
+    SEOAnalyzer(s, j.id).analyze_hreflang()
+    s.flush()
+
+    filas = {(h.url_id, h.lang): h for h in s.query(Hreflang).all()}
+    assert len(filas) == 6, "ninguna fila se queda fuera del lote"
+
+    assert filas[(es.id, "en")].return_tag_ok is True, "reciproco"
+    assert filas[(en.id, "es")].return_tag_ok is True
+    assert filas[(en.id, "pt")].return_tag_ok is None, "destino sin rastrear"
+    assert filas[(es.id, "x-default")].return_tag_ok is None, "no necesita retorno"
+    assert filas[(es.id, "de")].return_tag_ok is None, "destino roto: no se sabe"
+
+    assert filas[(es.id, "en-UK")].lang_valid is False
+    assert all(filas[k].lang_valid is True
+               for k in filas if k != (es.id, "en-UK"))
