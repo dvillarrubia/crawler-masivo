@@ -1267,6 +1267,28 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    IDÉNTICOS (42 / 5.743 / 433.172) y las mismas incidencias — que es lo que
    lo convierte en una optimización y no en un cambio de criterio disfrazado.
 
+74. **Un test que lee el fuente comprueba que escribiste algo, no que
+   funcione** — me pasó DOS VECES la misma tarde, con el mismo final: el
+   analizador escribía `analisis_version` con `Job` sin importar
+   (`NameError`), y el worker montaba su sesión con `SessionLocal` sin
+   importar (`NameError`). Los dos métodos importan sus dependencias **dentro**
+   de la función, como el resto de esos ficheros, y a los dos se me olvidó. Los
+   dos tenían test. Los dos pasaban: uno comprobaba que la cadena
+   `analisis_version` aparecía en el fuente del método, el otro el ORDEN de las
+   llamadas con `inspect`. El segundo llegó a producción y lo cazó el primer
+   rastreo que lo ejecutó.
+   La regla no es «nunca mires el fuente»: los tres `inspect.getsource` que
+   quedan comprueban **forma** que no se puede observar ejecutando —que el SQL
+   de `analyze_links` no una con `urls` (decisión 37, y en SQLite no hay plan
+   que medir), que no haya vuelto el respaldo silencioso de
+   `dominio_registrable` (69), que la comparación vaya después del estado
+   final (71)—. La regla es que **mirar el fuente no puede sustituir a
+   ejecutar**: esas tres van ahora acompañadas de un test que llama a la
+   función de verdad contra SQLite y lee lo que quedó escrito.
+   Y el `try` tiene que cubrir la función ENTERA. El fallo de producción
+   ocurrió en la línea que montaba la sesión, que estaba fuera, así que el
+   «best-effort» no cubría precisamente la línea que falló.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

@@ -726,10 +726,19 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
     endpoint. Lo contrario seria que un censo correcto quedase en `failed` por
     no poder compararse con otro.
     """
+    # `SessionLocal` y `Job` se importan DENTRO, como en el resto del fichero:
+    # no estan en el ambito del modulo y la primera version de esto reventaba
+    # con `NameError: name 'SessionLocal' is not defined` en produccion, en el
+    # primer rastreo que la ejecuto.
     from shared.comparacion import comparar_con_el_anterior
+    from shared.database import SessionLocal
+    from shared.models import Job
 
-    session = SessionLocal()
+    # El montaje tambien va dentro del try: estaba fuera, asi que el
+    # "best-effort" no cubria la linea que fallo.
+    session = None
     try:
+        session = SessionLocal()
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         if job is None:
             return
@@ -753,10 +762,12 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
                         resultado.get("comparado_con"),
                         len(resultado.get("alertas", [])))
     except Exception:
-        session.rollback()
+        if session is not None:
+            session.rollback()
         logger.exception("Job %s: fallo al comparar con el censo anterior", job_id)
     finally:
-        session.close()
+        if session is not None:
+            session.close()
 
 
 def _comprobar_render_js(job_id: str) -> None:
