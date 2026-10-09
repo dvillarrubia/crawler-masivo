@@ -1259,6 +1259,13 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    De paso, la validación se escribía con **un UPDATE por bloque**: 226.651
    sentencias para grabar cuatro valores distintos. Ahora va por lotes
    agrupados por veredicto, y el chequeo entero tarda **33,9 s** en ese censo.
+   Lo mismo en `analyze_hreflang`, que lo hacía igual y encima escribía DOS
+   veces la misma fila cuando el destino estaba roto (la segunda poniendo
+   `return_tag_ok` a NULL, que es lo que ya decide la decisión 56). Penguin
+   tiene 438.957 anotaciones y de ahí salen seis veredictos. Medido sobre los
+   mismos datos: **284,9 s → 20,3 s, catorce veces**, con los veredictos
+   IDÉNTICOS (42 / 5.743 / 433.172) y las mismas incidencias — que es lo que
+   lo convierte en una optimización y no en un cambio de criterio disfrazado.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

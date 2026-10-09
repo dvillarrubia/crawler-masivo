@@ -121,7 +121,7 @@ tres clientes. Lo que se arregló, en lenguaje de producto:
   ninguna fila**, a 2,7 s cada una. El rastreo había bajado de 50 a 10 páginas
   por minuto.
 
-### El informe de penguin: 959.633 incidencias, unas 348.000 reales (9 de octubre)
+### El informe de penguin: 959.633 incidencias, 347.936 reales (9 de octubre)
 
 Tercer censo entregado que revisamos, y el más grande: 87.531 páginas. Casi
 dos tercios de lo que listaba el informe era ruido nuestro, ya arreglado.

@@ -1,5 +1,21 @@
 # Qué contarle a cada cliente, y con qué números
 
+Los cuatro censos entregados, re-analizados el 9 de octubre de 2026 con el
+código de hoy y **sellados con la versión que calculó las cifras** (`146c8ed`),
+para que dentro de un mes se pueda distinguir un cambio del sitio de un cambio
+nuestro:
+
+| cliente | en el informe entregado | con el código de hoy |
+|---|---|---|
+| penguin (87.531 páginas) | 959.633 | **347.936** |
+| CST, árbol en castellano | 97.524 | **54.095** |
+| Lopesan | 315.119 | **11.988** |
+| Saunier Duval | 15.550 | **8.399** |
+
+En los cuatro, la mayor parte de lo que sobraba es la misma clase de error:
+**el mismo hallazgo contado una vez por página** en vez de una vez por cosa que
+hay que arreglar — imágenes, cabeceras de seguridad y datos estructurados.
+
 Material para decidir si se re-emiten los informes. **Nada de esto se ha
 enviado**: son los hechos ordenados, con la fuente de cada cifra.
 
@@ -144,8 +160,8 @@ La nota global pasa de **72 a 76**.
 ## Penguin Libros
 
 El censo entregado (87.531 páginas, julio) listaba **959.633 incidencias**.
-Re-analizado con el código de hoy, y aplicando el agrupamiento de datos
-estructurados, quedan unas **348.000**. Casi todo lo que sobra era ruido
+Re-analizado con el código de hoy quedan **347.936**, y el censo guardado
+ya lleva esa cifra sellada con la versión que la calculó. Casi todo lo que sobra era ruido
 nuestro:
 
 | | en el informe | real |
@@ -175,6 +191,13 @@ falsas.
 **1.144 páginas de autor con el título vacío.** El `<title>` es literalmente
 `| Penguin Libros ES`: la plantilla es `{autor} | Penguin Libros ES` y el
 nombre no se rellena. Hay además 64 con el literal «Autor sin nombre».
+
+**19.109 páginas indexables de `/es` no declaran canonical.** Es lo más
+accionable de todo el censo: el sitio tiene **438.957 anotaciones de hreflang**
+a seis variantes de español (es-ES, es-PE, es-UY, es-CL, es-CO, es-AR) con
+contenido casi idéntico, y sin canonical es Google quien decide cuál de las
+seis posiciona en cada búsqueda. Son 24.906 páginas sin canonical en total y
+24.900 están bajo `/es`.
 
 **50.760 páginas indexables compiten entre sí por el título** — 14.396 parejas
 y 6.089 grupos de tres a cinco. En una librería esto es esperable (la misma
