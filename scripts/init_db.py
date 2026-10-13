@@ -10,7 +10,8 @@ from sqlalchemy import text
 # Force registration of semantic models so their tables are created
 import shared.semantic_models  # noqa: F401
 
-if __name__ == "__main__":
+
+def main() -> None:
     # Enable pgvector extension before creating tables
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -85,4 +86,78 @@ if __name__ == "__main__":
         conn.commit()
     print("Migrations applied.")
 
+    migrar_clientes()
+
     print("Done.")
+
+
+def migrar_clientes() -> None:
+    """Clientes como entidad (#36, F1). Idempotente.
+
+    Las tablas `clients` y `crawl_profiles` las crea `init_db()` (create_all).
+    Aqui va lo que create_all NO hace en una instalacion existente: las
+    columnas nuevas de `jobs` y `programaciones`, sus indices y sus claves
+    foraneas, y convertir los `client_id` de texto en filas de `clients`.
+
+    `jobs.client_id` (texto) NO se convierte en FK: se anade `cliente_id` al
+    lado. Asi los jobs viejos se siguen abriendo igual, los scripts que mandan
+    texto siguen funcionando, y si la conversion sale mal se repite sin haber
+    perdido el dato original.
+    """
+    from shared.clientes import migrar_client_id_texto
+    from shared.database import SessionLocal
+
+    ddl = [
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cliente_id UUID",
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS profile_id UUID",
+        "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS cliente_id UUID",
+        "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS profile_id UUID",
+        # Mismos nombres que generaria create_all en una instalacion nueva, para
+        # no acabar con el indice dos veces.
+        "CREATE INDEX IF NOT EXISTS ix_jobs_cliente_id ON jobs (cliente_id)",
+        "CREATE INDEX IF NOT EXISTS ix_jobs_profile_id ON jobs (profile_id)",
+        "CREATE INDEX IF NOT EXISTS ix_programaciones_cliente_id ON programaciones (cliente_id)",
+        "CREATE INDEX IF NOT EXISTS ix_programaciones_profile_id ON programaciones (profile_id)",
+    ]
+    # Claves foraneas: Postgres no tiene ADD CONSTRAINT IF NOT EXISTS, asi que
+    # se mira el catalogo. Los nombres son los que pone create_all por
+    # convencion, para que una instalacion nueva y una migrada acaben iguales.
+    fks = [
+        ("jobs", "jobs_cliente_id_fkey", "cliente_id", "clients", "SET NULL"),
+        ("jobs", "jobs_profile_id_fkey", "profile_id", "crawl_profiles", "SET NULL"),
+        ("programaciones", "programaciones_cliente_id_fkey", "cliente_id", "clients", "SET NULL"),
+        ("programaciones", "programaciones_profile_id_fkey", "profile_id",
+         "crawl_profiles", "SET NULL"),
+        ("crawl_profiles", "fk_profiles_last_job", "last_job_id", "jobs", "SET NULL"),
+    ]
+    with engine.begin() as conn:
+        for sentencia in ddl:
+            conn.execute(text(sentencia))
+        for tabla, nombre, columna, destino, al_borrar in fks:
+            existe = conn.execute(
+                text("SELECT 1 FROM pg_constraint WHERE conname = :n"), {"n": nombre}
+            ).first()
+            if not existe:
+                conn.execute(text(
+                    f"ALTER TABLE {tabla} ADD CONSTRAINT {nombre} FOREIGN KEY "
+                    f"({columna}) REFERENCES {destino}(id) ON DELETE {al_borrar}"))
+
+    session = SessionLocal()
+    try:
+        resultado = migrar_client_id_texto(session)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    print(
+        f"Clientes: {resultado['creados']} creados; colgados de su cliente "
+        f"{resultado['jobs']} jobs y {resultado['programaciones']} programaciones.")
+    # Se imprimen para revisarlos a mano: no se fusionan erratas en silencio.
+    for slug, textos in sorted(resultado["colisiones"].items()):
+        print(f"  ATENCION: textos distintos colapsan en el cliente '{slug}': {textos}")
+
+
+if __name__ == "__main__":
+    main()

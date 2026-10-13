@@ -122,15 +122,44 @@ def create_job(
     payload: JobCreate,
     db: Session = Depends(get_session),
 ):
+    from api.routers.clientes import resolver_cliente_y_perfil, resolver_config
+
+    cliente, perfil = resolver_cliente_y_perfil(
+        db, cliente_id=payload.cliente_id, profile_id=payload.profile_id,
+        client_id_texto=payload.client_id)
+
+    if cliente is None:
+        # Sin cliente, exactamente lo de siempre: el JobConfig entero.
+        config = payload.config.model_dump()
+    else:
+        # Con cliente, solo lo que el job CAMBIA se pone encima de lo heredado.
+        config = resolver_config(
+            cliente, perfil, payload.config.model_dump(exclude_unset=True))
+
+    seeds = payload.seeds or (list(perfil.seeds or []) if perfil else [])
+    if not seeds:
+        raise HTTPException(
+            status_code=422, detail="At least one valid seed URL is required")
+
     job = Job(
         id=uuid.uuid4(),
         name=payload.name,
-        seeds=payload.seeds,
-        client_id=payload.client_id,
+        seeds=seeds,
+        # El texto se conserva como etiqueta: con cliente, su slug, para que
+        # quien siga filtrando por texto (scripts, informes) vea lo mismo.
+        client_id=cliente.slug if cliente else payload.client_id,
+        cliente_id=cliente.id if cliente else None,
+        profile_id=perfil.id if perfil else None,
         status="pending",
-        config=payload.config.model_dump(),
+        config=config,
     )
     db.add(job)
+    db.flush()
+    if perfil is not None:
+        # Despues del flush: el UPDATE del perfil apunta a un job que tiene que
+        # existir ya, y sin relacion entre los dos modelos SQLAlchemy no sabe
+        # en que orden mandarlos.
+        perfil.last_job_id = job.id
     db.commit()
     db.refresh(job)
 
@@ -138,7 +167,20 @@ def create_job(
     r = get_redis()
     encolar(r, job.id)
 
-    return job
+    return _con_cliente(db, [job])[0]
+
+
+def _con_cliente(db: Session, jobs: list[Job]) -> list[JobResponse]:
+    """JobResponse con el nombre del cliente, en UNA consulta para la pagina."""
+    from api.routers.clientes import nombres_de_clientes
+
+    nombres = nombres_de_clientes(db, (j.cliente_id for j in jobs))
+    salida = []
+    for j in jobs:
+        r = JobResponse.model_validate(j)
+        r.cliente_nombre = nombres.get(j.cliente_id)
+        salida.append(r)
+    return salida
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +191,9 @@ def list_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
-    client_id: str | None = Query(None),
+    client_id: str | None = Query(
+        None, description="UUID del cliente, su slug o el texto de siempre"),
+    profile_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_session),
 ):
     q = db.query(Job)
@@ -157,7 +201,9 @@ def list_jobs(
     if status is not None:
         q = q.filter(Job.status == status)
     if client_id is not None:
-        q = q.filter(Job.client_id == client_id)
+        q = q.filter(_filtro_cliente(db, client_id))
+    if profile_id is not None:
+        q = q.filter(Job.profile_id == profile_id)
 
     total = q.count()
     pages = max(1, -(-total // page_size))  # ceiling division
@@ -170,12 +216,36 @@ def list_jobs(
     )
 
     return PaginatedResponse[JobResponse](
-        items=[JobResponse.model_validate(j) for j in items],
+        items=_con_cliente(db, items),
         total=total,
         page=page,
         page_size=page_size,
         pages=pages,
     )
+
+
+def _filtro_cliente(db: Session, valor: str):
+    """`?client_id=` acepta el UUID del cliente, su slug o el texto viejo.
+
+    Por slug o texto se casan TAMBIEN los jobs que aun no tienen `cliente_id`
+    pero llevan ese texto exacto: si la migracion no ha pasado todavia (o un
+    job entro por un camino que no resuelve cliente), filtrar solo por la FK
+    los haria desaparecer de la lista de su cliente.
+    """
+    from sqlalchemy import or_
+
+    from shared.clientes import slugificar
+    from shared.models import Client
+
+    try:
+        return Job.cliente_id == uuid.UUID(valor)
+    except ValueError:
+        pass
+    cliente = db.query(Client).filter(Client.slug == slugificar(valor)).one_or_none()
+    if cliente is None:
+        return Job.client_id == valor
+    return or_(Job.cliente_id == cliente.id,
+               (Job.cliente_id.is_(None)) & (Job.client_id == valor))
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +259,7 @@ def get_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return _con_cliente(db, [job])[0]
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +367,16 @@ def delete_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    borrar_job(db, job)
+    return None
 
+
+def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
+    """Borra un job y todo lo suyo. Lo usa tambien el borrado de un cliente
+    con `con_jobs=true`; `confirmar=False` deja el commit a quien llama."""
+    from shared.models import CrawlProfile
+
+    job_id = job.id
     # If the job is still active, signal the crawler to stop first so it does
     # not keep writing rows (with a now-dangling job_id FK) while we delete.
     if job.status in ("pending", "running"):
@@ -306,15 +385,20 @@ def delete_job(
         except Exception:
             pass
 
+    # El perfil que lo tenia como ultimo rastreo se queda sin el, no roto.
+    # A mano y no solo por el ON DELETE SET NULL: igual en cualquier motor.
+    db.query(CrawlProfile).filter(CrawlProfile.last_job_id == job_id).update(
+        {CrawlProfile.last_job_id: None}, synchronize_session=False)
     # Delete associated records in bulk (faster than cascade for large sets).
     db.query(Link).filter(Link.job_id == job_id).delete(synchronize_session=False)
     db.query(Issue).filter(Issue.job_id == job_id).delete(synchronize_session=False)
     # Urls cascade handles html_meta, headings, etc. via DB-level ON DELETE CASCADE.
     db.query(Url).filter(Url.job_id == job_id).delete(synchronize_session=False)
     db.delete(job)
-    db.commit()
-
-    return None
+    if confirmar:
+        db.commit()
+    else:
+        db.flush()
 
 
 # ---------------------------------------------------------------------------

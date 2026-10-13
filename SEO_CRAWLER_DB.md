@@ -39,13 +39,44 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 |---|---|---|
 | id | UUID (PK) | ID del job |
 | name | varchar(512) | Nombre del proyecto |
-| client_id | varchar(128) | ID del cliente (opcional) |
+| client_id | varchar(128) | Texto libre de siempre (etiqueta). Con cliente, su slug. No es la FK |
+| cliente_id | UUID (FK → clients, ON DELETE SET NULL) | Cliente del job. NULL = sin cliente |
+| profile_id | UUID (FK → crawl_profiles, ON DELETE SET NULL) | Perfil del que salio. NULL = rastreo puntual |
 | status | varchar(20) | pending, running, completed, failed, cancelled |
 | seeds | JSON | Lista de seed URLs |
-| config | JSON | Configuracion completa del crawl |
+| config | JSON | Configuracion completa del crawl. Con cliente, ya resuelta (defaults ← cliente ← perfil ← job) en el momento de crearlo |
 | total_urls_crawled | int | URLs crawleadas |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
+
+### `clients` — Clientes (#36)
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | UUID (PK) | |
+| nombre | varchar(256) | Nombre visible |
+| slug | varchar(128), unico | Identificador estable. Con el se casa el cliente al importar un backup |
+| dominios | JSON | Lista de hosts (`www.cliente.com`) |
+| zona_horaria | varchar(64) | Def. `Europe/Madrid` |
+| config_defecto | JSON | Configuracion PARCIAL de `JobConfig`: solo lo que el cliente fija. `null` en una clave = quitar lo heredado |
+| integraciones | JSON | Lista de `{tipo, etiqueta, parametros, credencial_env, activa}`. **Sin secretos**: `credencial_env` es el NOMBRE de la variable de entorno con la clave (decision 83 de CLAUDE.md) |
+| notas | text | |
+| created_at / updated_at | timestamptz | |
+
+### `crawl_profiles` — Perfiles de rastreo de un cliente
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | UUID (PK) | |
+| cliente_id | UUID (FK → clients, ON DELETE CASCADE) | |
+| nombre | varchar(256) | Unico por cliente (`uq_profile_cliente_nombre`) |
+| rol | varchar(16) | `propio` o `competidor` |
+| seeds | JSON | Semillas por defecto de los jobs del perfil |
+| config | JSON | Configuracion PARCIAL, encima de la del cliente |
+| notas | text | |
+| activo | bool | |
+| last_job_id | UUID (FK → jobs, ON DELETE SET NULL) | Ultimo job lanzado desde el perfil |
+| created_at / updated_at | timestamptz | |
+
+`programaciones` tiene tambien `cliente_id` y `profile_id` (FK, SET NULL): los jobs que dispara salen colgados de ese cliente y perfil.
 
 ### `urls` — Todas las URLs crawleadas
 | Columna | Tipo | Descripcion |
@@ -298,6 +329,10 @@ WHERE u.job_id = 'UUID-AQUI'
 ## Diagrama de relaciones
 
 ```
+clients (1) ──── (*) crawl_profiles
+   │ (1)               │ (1)
+   └──── (*) jobs (*) ─┘
+
 jobs (1) ──── (*) urls (1) ──── (1) html_meta
                     │ (1) ──── (1) page_content
                     │ (1) ──── (1) security_headers

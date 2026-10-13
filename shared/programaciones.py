@@ -200,6 +200,8 @@ def job_desde_programacion(programacion) -> dict[str, Any]:
     return {
         "name": f"{programacion.nombre} · {hoy}",
         "client_id": programacion.client_id,
+        "cliente_id": getattr(programacion, "cliente_id", None),
+        "profile_id": getattr(programacion, "profile_id", None),
         "seeds": list(programacion.seeds or []),
         "config": dict(programacion.config or {}),
     }

@@ -20,6 +20,94 @@ def _uuid():
 
 
 # ---------------------------------------------------------------------------
+# Clientes y perfiles de rastreo (#36, F1)
+# ---------------------------------------------------------------------------
+class Client(Base):
+    """El cliente como entidad, en vez de un texto libre en cada job.
+
+    Antes `jobs.client_id` era lo que se escribiera en el modal: una errata
+    creaba otro cliente y no habia donde guardar nada que fuera DEL cliente y
+    no de un rastreo concreto (sus dominios, su configuracion por defecto, sus
+    integraciones con GSC o DataForSEO).
+
+    `config_defecto` es un dict PARCIAL de `JobConfig`: solo lo que el cliente
+    fija. Guardar el `JobConfig` entero rellenaria todos los valores por
+    defecto y, al heredar, pisaria lo que el perfil o el job quisieran cambiar.
+
+    `integraciones` no guarda NINGUN secreto (decision 83): la API no tiene
+    autenticacion, asi que lo que se guarda aqui lo puede leer cualquiera que
+    llegue al puerto. Se guarda el tipo, los parametros publicos y el NOMBRE de
+    la variable de entorno que tiene la clave.
+    """
+
+    __tablename__ = "clients"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    nombre = Column(String(256), nullable=False)
+    # Lo que casa dos instalaciones (backup/importacion) y lo que se escribia
+    # antes como `client_id`. Unico: dos clientes con el mismo slug son una
+    # errata, no dos clientes.
+    slug = Column(String(128), nullable=False, unique=True, index=True)
+    dominios = Column(JSON, nullable=False, default=list)
+    zona_horaria = Column(String(64), nullable=True, default="Europe/Madrid")
+    config_defecto = Column(JSON, nullable=False, default=dict)
+    integraciones = Column(JSON, nullable=False, default=list)
+    notas = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    perfiles = relationship(
+        "CrawlProfile", back_populates="cliente",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class CrawlProfile(Base):
+    """Un rastreo de un cliente: el sitio principal, el blog, un competidor.
+
+    En F1 es «que semillas y que configuracion»: lanzar un job desde un perfil
+    hereda cliente -> perfil -> lo que se cambie en el modal, y lo resuelto se
+    copia en `jobs.config`. La programacion, los umbrales de alerta y el modo
+    incremental son de F2/F4 y no estan aqui todavia: anadir columnas que
+    nadie lee invita a creer que hacen algo.
+    """
+
+    __tablename__ = "crawl_profiles"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "nombre", name="uq_profile_cliente_nombre"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    # `cliente_id` y no `client_id`: en este esquema `client_id` es el texto
+    # libre de siempre (jobs, programaciones) y `cliente_id` la FK de verdad.
+    # Llamar igual a las dos cosas es como se acaba filtrando por la que no es.
+    cliente_id = Column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    nombre = Column(String(256), nullable=False)
+    # propio | competidor. Un competidor no abrira incidentes en F2: sus
+    # cambios son informacion, no problemas.
+    rol = Column(String(16), nullable=False, default="propio")
+    seeds = Column(JSON, nullable=False, default=list)
+    config = Column(JSON, nullable=False, default=dict)
+    notas = Column(Text, nullable=True)
+    activo = Column(Boolean, nullable=False, default=True)
+    # `use_alter`: jobs.profile_id apunta aqui y esto apunta a jobs. Sin el,
+    # create_all no sabe en que orden crear las dos tablas.
+    last_job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL", use_alter=True,
+                   name="fk_profiles_last_job"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    cliente = relationship("Client", back_populates="perfiles")
+
+
+# ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
 class Programacion(Base):
@@ -37,6 +125,17 @@ class Programacion(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     nombre = Column(String(512), nullable=False)
     client_id = Column(String(128), nullable=True, index=True)
+    # El cliente y el perfil, si se conocen. La programacion sigue llevando
+    # sus propias `seeds` y `config` (autosuficiente, ver arriba): esto solo
+    # dice de quien es, para que los jobs que dispare salgan colgados de el.
+    cliente_id = Column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    profile_id = Column(
+        UUID(as_uuid=True), ForeignKey("crawl_profiles.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     seeds = Column(JSON, nullable=False)
     config = Column(JSON, nullable=True)
 
@@ -66,7 +165,21 @@ class Job(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     name = Column(String(512), nullable=False)
+    # El texto libre de siempre. Se conserva como etiqueta: los scripts lo
+    # siguen enviando (`lanzar_job.py`) y los jobs viejos lo tienen como unica
+    # pista de su cliente. Lo que manda es `cliente_id`.
     client_id = Column(String(128), nullable=True, index=True)
+    # FK de verdad a `clients` (#36). NULL = job sin cliente. Borrar el
+    # cliente deja el job sin cliente, no lo borra: es un censo entregado.
+    cliente_id = Column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    # De que perfil salio, si salio de uno. NULL = rastreo puntual.
+    profile_id = Column(
+        UUID(as_uuid=True), ForeignKey("crawl_profiles.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     owner_id = Column(String(128), nullable=True)
     # Que programacion lo lanzo, si lo lanzo alguna. Es lo que permite
     # compararlo con el anterior de SU serie en vez de con lo ultimo que

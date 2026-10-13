@@ -44,9 +44,16 @@ def _recalcular(prog: Programacion) -> None:
 def crear_programacion(
     cuerpo: ProgramacionCreate, db: Session = Depends(get_session)
 ):
+    from api.routers.clientes import resolver_cliente_y_perfil
+
+    cliente, perfil = resolver_cliente_y_perfil(
+        db, cliente_id=cuerpo.cliente_id, profile_id=cuerpo.profile_id,
+        client_id_texto=cuerpo.client_id)
     prog = Programacion(
         nombre=cuerpo.nombre,
-        client_id=cuerpo.client_id,
+        client_id=cliente.slug if cliente else cuerpo.client_id,
+        cliente_id=cliente.id if cliente else None,
+        profile_id=perfil.id if perfil else None,
         seeds=cuerpo.seeds,
         config=cuerpo.config.model_dump(exclude_none=True),
         cron=cuerpo.cron,

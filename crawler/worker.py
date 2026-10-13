@@ -1100,11 +1100,26 @@ def _lanzar_programados(rconn) -> None:
 
             if lanzar:
                 datos = job_desde_programacion(prog)
+                # El cliente y el perfil se copian tal cual de la programacion
+                # (#36). El worker NO crea clientes a partir del texto: si la
+                # programacion es anterior a la migracion, el job sale solo
+                # con su `client_id` y la siguiente pasada de `init_db.py` lo
+                # cuelga de su cliente. Crear filas desde aqui haria que un
+                # fallo de esa tabla impidiera lanzar el rastreo.
                 job = Job(name=datos["name"], client_id=datos["client_id"],
+                          cliente_id=datos.get("cliente_id"),
+                          profile_id=datos.get("profile_id"),
                           seeds=datos["seeds"], config=datos["config"],
                           status="pending", programacion_id=prog.id)
                 session.add(job)
                 session.flush()
+                if job.profile_id is not None:
+                    from shared.models import CrawlProfile
+
+                    session.query(CrawlProfile).filter(
+                        CrawlProfile.id == job.profile_id
+                    ).update({CrawlProfile.last_job_id: job.id},
+                             synchronize_session=False)
                 encolar(rconn, job.id)
                 prog.ultima_ejecucion = ahora
                 prog.ultimo_job_id = job.id

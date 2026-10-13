@@ -154,6 +154,30 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Clientes como entidad (13 de octubre)
+
+Primera fase de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36).
+Hay una sección **Clientes**: se da de alta un cliente con sus dominios, sus
+notas y una configuración de rastreo por defecto, y debajo sus **perfiles**
+(el sitio principal, el blog, otro idioma, un competidor), cada uno con sus
+semillas y lo que cambie respecto al cliente. Un rastreo lanzado desde un
+perfil sale ya configurado: hereda lo del cliente, lo del perfil y lo que se
+toque en el modal, y queda guardado así en el rastreo, de modo que cambiar la
+configuración del cliente mañana no altera lo que dice un censo de ayer.
+
+En el modal de nuevo rastreo el cliente **se elige de una lista** en vez de
+escribirse a mano: con texto libre, una errata creaba otro cliente. Los rastreos
+antiguos que tenían un cliente escrito a mano se cuelgan de su cliente solos al
+desplegar, y si varios textos distintos acaban en el mismo cliente («Acme»,
+«acme », «Ácme») se avisa para revisarlo, no se fusiona a ciegas.
+
+Cada cliente puede declarar sus **integraciones** (Search Console, DataForSEO,
+Ahrefs, Semrush…), que es lo que permitirá cruzarlas con el rastreo en las
+fases siguientes. **Las claves no se guardan en el crawler**: la aplicación no
+tiene usuarios ni contraseña, así que cualquier cosa guardada ahí la podría leer
+quien llegue a ella. Se apunta el *nombre* de la variable del servidor que tiene
+la clave y la ficha dice si está puesta o no, nunca su valor.
+
 ### El aviso sale del panel (9 de octubre)
 
 Cuando un rastreo encuentra algo grave —media plantilla fuera del índice, una

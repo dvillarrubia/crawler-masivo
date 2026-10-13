@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared.config import (
     DEFAULT_CONCURRENT_REQUESTS,
@@ -230,6 +231,10 @@ class ProgramacionCreate(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=512)
     seeds: list[str] = Field(..., min_length=1)
     client_id: str | None = Field(default=None, max_length=128)
+    # De quien es (#36). Los jobs que dispare salen colgados de este cliente
+    # y perfil; la configuracion sigue siendo la suya propia.
+    cliente_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
     config: JobConfig = Field(default_factory=JobConfig)
     # Expresion de cinco campos: `minuto hora dia-del-mes mes dia-de-semana`.
     cron: str = Field(..., min_length=1, max_length=128)
@@ -277,6 +282,8 @@ class ProgramacionResponse(BaseModel):
     id: uuid.UUID
     nombre: str
     client_id: str | None = None
+    cliente_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
     seeds: list[str]
     config: dict[str, Any] | None = None
     cron: str
@@ -289,28 +296,54 @@ class ProgramacionResponse(BaseModel):
     created_at: datetime | None = None
 
 
+def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list[str]:
+    cleaned: list[str] = []
+    for url in v or []:
+        url = url.strip()
+        if not url:
+            continue
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Seed URL must start with http:// or https://: {url}")
+        cleaned.append(url)
+    if obligatorias and not cleaned:
+        raise ValueError("At least one valid seed URL is required")
+    return cleaned
+
+
 class JobCreate(BaseModel):
-    """Payload to create a new crawl job."""
+    """Payload to create a new crawl job.
+
+    Con cliente (#36): `cliente_id` y/o `profile_id`. La configuracion que
+    llega aqui es solo lo que el job CAMBIA: se fusiona encima de la del
+    cliente y la del perfil (`shared/clientes.fusionar_config`) y lo resuelto
+    se copia en `jobs.config`. Por eso se lee con `exclude_unset`: si se
+    leyera el `JobConfig` entero, sus valores por defecto pisarian todo lo
+    heredado. Sin perfil, las semillas son obligatorias; con perfil, si no se
+    mandan se usan las del perfil.
+
+    `client_id` (texto) se mantiene por compatibilidad —`lanzar_job.py` y los
+    backups viejos lo mandan—: se resuelve por slug y, si no existe, se crea el
+    cliente.
+    """
 
     name: str = Field(..., min_length=1, max_length=512)
-    seeds: list[str] = Field(..., min_length=1)
+    seeds: list[str] = Field(default_factory=list)
     client_id: str | None = Field(default=None, max_length=128)
+    cliente_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
     config: JobConfig = Field(default_factory=JobConfig)
 
     @field_validator("seeds", mode="before")
     @classmethod
+    def _semillas(cls, v: list[str] | None) -> list[str]:
+        # Vacias se permiten AQUI: con perfil salen del perfil. El endpoint
+        # comprueba que al final haya alguna.
+        return _limpiar_semillas(v, obligatorias=False)
+
+    @classmethod
     def validate_seeds(cls, v: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        for url in v:
-            url = url.strip()
-            if not url:
-                continue
-            if not url.startswith(("http://", "https://")):
-                raise ValueError(f"Seed URL must start with http:// or https://: {url}")
-            cleaned.append(url)
-        if not cleaned:
-            raise ValueError("At least one valid seed URL is required")
-        return cleaned
+        """Semillas obligatorias. Lo reutilizan las programaciones."""
+        return _limpiar_semillas(v, obligatorias=True)
 
 
 class JobResponse(BaseModel):
@@ -321,6 +354,11 @@ class JobResponse(BaseModel):
     id: uuid.UUID
     name: str
     client_id: str | None
+    cliente_id: uuid.UUID | None = None
+    # Lo rellena el endpoint con una consulta aparte: una relacion cargada en
+    # cada `query(Job)` seria un JOIN en el worker y el analizador para nada.
+    cliente_nombre: str | None = None
+    profile_id: uuid.UUID | None = None
     owner_id: str | None
     status: str
     # "finished" = frontera agotada; "max_urls_reached" = truncado
@@ -591,6 +629,302 @@ class PaginatedResponse(BaseModel, Generic[T]):
     page: int
     page_size: int
     pages: int
+
+
+# ---------------------------------------------------------------------------
+# Clientes, perfiles e integraciones (#36, F1)
+# ---------------------------------------------------------------------------
+# Dicts que son DATOS del usuario: sus claves no las declara ningun schema.
+_DICTS_DE_DATOS = {"http.custom_headers", "http.cookies"}
+
+
+def _claves(d: Any, prefijo: str = "") -> set[str]:
+    """Rutas de las claves de un dict anidado: `{"a": {"b": 1}}` -> {a, a.b}."""
+    if not isinstance(d, dict):
+        return set()
+    rutas: set[str] = set()
+    for k, v in d.items():
+        ruta = f"{prefijo}{k}"
+        rutas.add(ruta)
+        if ruta not in _DICTS_DE_DATOS:
+            rutas |= _claves(v, ruta + ".")
+    return rutas
+
+
+def _separar_nones(d: dict, prefijo: str = "") -> tuple[dict, list[str]]:
+    """`{"a": None, "b": {"c": None, "d": 1}}` -> `({"b": {"d": 1}}, ["a", "b.c"])`."""
+    valores: dict = {}
+    borrados: list[str] = []
+    for k, v in d.items():
+        ruta = f"{prefijo}{k}"
+        if v is None:
+            borrados.append(ruta)
+        elif isinstance(v, dict) and ruta not in _DICTS_DE_DATOS:
+            sub, sub_borrados = _separar_nones(v, ruta + ".")
+            valores[k] = sub
+            borrados += sub_borrados
+        else:
+            valores[k] = v
+    return valores, borrados
+
+
+def validar_config_parcial(d: dict[str, Any] | None) -> dict[str, Any]:
+    """Valida una configuracion PARCIAL (la de un cliente o un perfil) y
+    devuelve solo lo que fija, ya normalizado.
+
+    Dos cosas que `JobConfig.model_validate(d).model_dump()` haria mal:
+
+    - rellenaria todos los valores por defecto, asi que un cliente que solo
+      fija `render_js` «fijaria» tambien `max_depth=3` y pisaria al perfil;
+    - **tiraria en silencio lo que no esta declarado** (decision 33). En un job
+      eso ya costo `use_sitemap`; en la configuracion de un cliente, que se
+      escribe una vez y se hereda en cada rastreo, seria peor. Aqui una clave
+      desconocida es un error que se nombra.
+
+    Ademas, la contrasena de autenticacion basica no se acepta en un cliente
+    ni en un perfil: se guardaria en la base de datos para siempre y saldria
+    por `GET /api/clients` a cualquiera (decision 83). En un job puntual sigue
+    pudiendo ir, como hasta ahora.
+    """
+    d = d or {}
+    if not isinstance(d, dict):
+        raise ValueError("la configuracion tiene que ser un objeto")
+    # Un `None` explicito significa «quitar lo heredado» (un perfil que deja
+    # sin tope de URLs a un cliente que lo fija). No es un valor, asi que no
+    # se valida contra JobConfig —`render_js: None` no lo aceptaria—, pero se
+    # GUARDA: es la unica forma de expresar esa intencion.
+    valores, borrados = _separar_nones(d)
+    modelo = JobConfig.model_validate(valores)
+    parcial = modelo.model_dump(exclude_unset=True, mode="json")
+    tiradas = sorted((_claves(valores) - _claves(parcial))
+                     | (set(borrados) - _claves(JobConfig().model_dump())))
+    if tiradas:
+        raise ValueError(
+            "claves de configuracion desconocidas (no tendrian ningun efecto): "
+            + ", ".join(tiradas))
+    for ruta in borrados:
+        destino = parcial
+        *padres, hoja = ruta.split(".")
+        for p in padres:
+            destino = destino.setdefault(p, {})
+        destino[hoja] = None
+    if (parcial.get("http") or {}).get("basic_auth_password"):
+        raise ValueError(
+            "http.basic_auth_password no se guarda en un cliente ni en un "
+            "perfil: la API no tiene autenticacion y se podria leer. Ponla en "
+            "el rastreo concreto")
+    return parcial
+
+
+class Integracion(BaseModel):
+    """Una API externa del cliente. **Sin secretos** (decision 83).
+
+    `credencial_env` es el NOMBRE de la variable de entorno del servidor que
+    tiene la clave (`DATAFORSEO_LIN3S`), no la clave. Tiene que empezar por el
+    prefijo de su tipo (`shared/credenciales.PREFIJOS`).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: Literal["gsc", "dataforseo", "ahrefs", "semrush", "majestic", "pagespeed"]
+    etiqueta: str | None = Field(default=None, max_length=128)
+    # Parametros publicos: propiedad de GSC, ubicacion e idioma de DataForSEO...
+    parametros: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    credencial_env: str | None = Field(default=None, max_length=128)
+    activa: bool = True
+
+    @field_validator("credencial_env", mode="before")
+    @classmethod
+    def _vacio_es_none(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        return v or None
+
+    @field_validator("parametros")
+    @classmethod
+    def _sin_secretos(cls, v: dict) -> dict:
+        from shared.credenciales import parametro_sospechoso
+
+        clave = parametro_sospechoso(v)
+        if clave:
+            raise ValueError(
+                f"el parametro {clave!r} parece un secreto. Los secretos no se "
+                "guardan en la base de datos: van en una variable de entorno "
+                "del servidor y aqui se pone su nombre en credencial_env")
+        return v
+
+    @model_validator(mode="after")
+    def _variable_valida(self):
+        from shared.credenciales import error_en_variable
+
+        error = error_en_variable(self.tipo, self.credencial_env)
+        if error:
+            raise ValueError(error)
+        return self
+
+
+class IntegracionResponse(BaseModel):
+    """Lo que se devuelve de una integracion: nunca el valor del secreto."""
+
+    tipo: str
+    etiqueta: str | None = None
+    parametros: dict[str, Any] = Field(default_factory=dict)
+    credencial_env: str | None = None
+    activa: bool = True
+    # Si la variable existe y no esta vacia en el entorno de la API.
+    configurada: bool = False
+
+
+_PATRON_DOMINIO = re.compile(
+    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$")
+
+
+def _validar_dominios(v: list[str] | None) -> list[str]:
+    """`https://WWW.X.com/blog` -> `www.x.com`. Sin duplicados, en orden."""
+    vistos: list[str] = []
+    for d in v or []:
+        d = (d or "").strip().lower()
+        if not d:
+            continue
+        d = re.sub(r"^[a-z][a-z0-9+.-]*://", "", d).split("/", 1)[0].split(":", 1)[0]
+        if d != "localhost" and not _PATRON_DOMINIO.match(d):
+            raise ValueError(f"{d!r} no es un dominio")
+        if d not in vistos:
+            vistos.append(d)
+    return vistos
+
+
+class _ClienteCampos(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("slug", check_fields=False)
+    @classmethod
+    def _slug(cls, v: str | None) -> str | None:
+        from shared.clientes import slug_valido
+
+        if v is None:
+            return v
+        v = v.strip()
+        if not slug_valido(v):
+            raise ValueError(
+                f"{v!r} no es un slug valido: minusculas, digitos y guiones")
+        return v
+
+    @field_validator("dominios", check_fields=False)
+    @classmethod
+    def _dominios(cls, v):
+        return None if v is None else _validar_dominios(v)
+
+    @field_validator("zona_horaria", check_fields=False)
+    @classmethod
+    def _zona(cls, v):
+        return _validar_zona(v)
+
+    @field_validator("config_defecto", check_fields=False)
+    @classmethod
+    def _config(cls, v):
+        return None if v is None else validar_config_parcial(v)
+
+
+class ClientCreate(_ClienteCampos):
+    nombre: str = Field(..., min_length=1, max_length=256)
+    # Si no se manda, sale del nombre.
+    slug: str | None = Field(default=None, max_length=128)
+    dominios: list[str] = Field(default_factory=list)
+    zona_horaria: str | None = Field(default="Europe/Madrid", max_length=64)
+    config_defecto: dict[str, Any] = Field(default_factory=dict)
+    integraciones: list[Integracion] = Field(default_factory=list)
+    notas: str | None = None
+
+
+class ClientUpdate(_ClienteCampos):
+    nombre: str | None = Field(default=None, min_length=1, max_length=256)
+    slug: str | None = Field(default=None, max_length=128)
+    dominios: list[str] | None = None
+    zona_horaria: str | None = Field(default=None, max_length=64)
+    config_defecto: dict[str, Any] | None = None
+    # Se sustituye la lista entera: es como la edita la interfaz.
+    integraciones: list[Integracion] | None = None
+    notas: str | None = None
+
+
+class ClientResponse(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    slug: str
+    dominios: list[str] = Field(default_factory=list)
+    zona_horaria: str | None = None
+    config_defecto: dict[str, Any] = Field(default_factory=dict)
+    integraciones: list[IntegracionResponse] = Field(default_factory=list)
+    notas: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    n_perfiles: int = 0
+    n_jobs: int = 0
+    ultimo_job_at: datetime | None = None
+
+
+class _PerfilCampos(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("seeds", check_fields=False, mode="before")
+    @classmethod
+    def _semillas(cls, v):
+        return None if v is None else _limpiar_semillas(v, obligatorias=True)
+
+    @field_validator("config", check_fields=False)
+    @classmethod
+    def _config(cls, v):
+        return None if v is None else validar_config_parcial(v)
+
+
+class ProfileCreate(_PerfilCampos):
+    nombre: str = Field(..., min_length=1, max_length=256)
+    rol: Literal["propio", "competidor"] = "propio"
+    seeds: list[str] = Field(..., min_length=1)
+    config: dict[str, Any] = Field(default_factory=dict)
+    notas: str | None = None
+    activo: bool = True
+
+
+class ProfileUpdate(_PerfilCampos):
+    nombre: str | None = Field(default=None, min_length=1, max_length=256)
+    rol: Literal["propio", "competidor"] | None = None
+    seeds: list[str] | None = None
+    config: dict[str, Any] | None = None
+    notas: str | None = None
+    activo: bool | None = None
+
+
+class ProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    cliente_id: uuid.UUID
+    nombre: str
+    rol: str
+    seeds: list[str] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+    notas: str | None = None
+    activo: bool = True
+    last_job_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ConfigResueltaResponse(BaseModel):
+    """La configuracion que tendria un job lanzado ahora desde este cliente
+    (y perfil): para precargar el modal con lo heredado."""
+
+    cliente_id: uuid.UUID
+    profile_id: uuid.UUID | None = None
+    seeds: list[str] = Field(default_factory=list)
+    # Completa: lo que tendria el job (defaults incluidos).
+    config: dict[str, Any]
+    # Solo lo que fijan cliente y perfil, sin los defaults. Es lo que precarga
+    # el modal: con la completa, un default de la API (el UA `SEOCrawler/1.0`)
+    # pisaria el del formulario sin que nadie lo hubiera elegido.
+    config_heredada: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

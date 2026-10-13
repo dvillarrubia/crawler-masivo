@@ -1,0 +1,189 @@
+"""El cliente como entidad (#36, F1): slugs, herencia de configuracion y la
+migracion de los `client_id` de texto.
+
+Vive en `shared/` porque lo necesitan tres sitios: la API (alta de clientes y
+creacion de jobs), `scripts/init_db.py` (la migracion) y la importacion de
+backups. Nada de aqui importa Pydantic: la imagen del worker no lo lleva.
+
+Tres criterios, cada uno evitando una forma de fallar en silencio:
+
+1. **El slug quita acentos y caja, y nada mas.** `Ácme`, `acme ` y `ACME` son
+   el mismo cliente escrito tres veces; `acme` y `acme-canary` NO, porque eso
+   no se puede decidir mirando el texto. La migracion imprime los textos que
+   colapsan en el mismo slug para revisarlos a mano: fusionar erratas sin
+   decirlo es cambiar el historico de un cliente sin que nadie lo sepa.
+2. **La herencia se resuelve AL CREAR el job y se copia en `jobs.config`.**
+   El crawler y el analizador siguen leyendo `job.config` sin saber que existe
+   el cliente: un job es una foto reproducible, y editar la configuracion del
+   cliente manana no puede cambiar lo que dice un censo de ayer.
+3. **La fusion es profunda y `None` borra.** Los dicts se fusionan clave a
+   clave (`crawl_behavior.render_wait_ms` del perfil no pisa el
+   `crawl_behavior.download_timeout` del cliente); listas y escalares, gana la
+   ultima capa; un `None` explicito quita la clave y deja que mande el valor
+   por defecto. Sin lo ultimo no habria forma de que un job dijera «sin tope de
+   URLs» cuando el cliente fija uno.
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+import re
+import unicodedata
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+SLUG_MAX = 128
+_PATRON_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def slugificar(texto: str | None) -> str:
+    """`'Ácme Hoteles '` -> `'acme-hoteles'`.
+
+    Sin la extension `unaccent` en Postgres, el slug se calcula en Python con
+    `unicodedata`: descomponer y tirar las marcas combinantes deja `a` de `á`
+    y `n` de `ñ`. Lo que no sea letra o digito ASCII se vuelve guion.
+    """
+    texto = unicodedata.normalize("NFKD", texto or "")
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = re.sub(r"[^a-z0-9]+", "-", texto.lower()).strip("-")
+    return texto[:SLUG_MAX].strip("-")
+
+
+def slug_valido(slug: str) -> bool:
+    return bool(slug) and len(slug) <= SLUG_MAX and bool(_PATRON_SLUG.match(slug))
+
+
+# ---------------------------------------------------------------------------
+# Herencia de configuracion
+# ---------------------------------------------------------------------------
+def fusionar_config(*capas: dict | None) -> dict:
+    """Fusion profunda de configuraciones parciales, de la mas general a la
+    mas concreta (cliente, perfil, job). No modifica las capas.
+
+    - dict con dict: se fusionan clave a clave;
+    - cualquier otra cosa (lista, escalar): gana la ultima capa;
+    - `None` explicito: se quita la clave, y manda el valor por defecto de
+      `JobConfig` al validar.
+
+    Las listas se SUSTITUYEN, no se suman: si el cliente excluye `/carrito/` y
+    el perfil del blog pone sus propios `exclude_patterns`, sumar haria
+    imposible quitar un patron del cliente desde el perfil.
+    """
+    resultado: dict = {}
+    for capa in capas:
+        if capa:
+            _fusionar_en(resultado, capa)
+    return resultado
+
+
+def _fusionar_en(destino: dict, capa: dict) -> None:
+    for clave, valor in capa.items():
+        if valor is None:
+            destino.pop(clave, None)
+        elif isinstance(valor, dict) and isinstance(destino.get(clave), dict):
+            _fusionar_en(destino[clave], valor)
+        elif isinstance(valor, dict):
+            destino[clave] = {}
+            _fusionar_en(destino[clave], valor)
+        else:
+            destino[clave] = copy.deepcopy(valor)
+
+
+# ---------------------------------------------------------------------------
+# Cliente a partir de un texto (compatibilidad con `client_id`)
+# ---------------------------------------------------------------------------
+def cliente_por_texto(db, texto: str | None, *, crear: bool = True):
+    """El cliente que corresponde a un `client_id` de texto, creandolo si falta.
+
+    Es el camino de compatibilidad: `scripts/lanzar_job.py`, los backups de
+    formato 1 y quien llame a la API como antes siguen mandando un texto. Si no
+    se resolviera aqui, cada job nuevo lanzado asi quedaria sin cliente hasta
+    la siguiente migracion. Devuelve None si el texto no da un slug.
+    """
+    from shared.models import Client
+
+    texto = (texto or "").strip()
+    slug = slugificar(texto)
+    if not slug:
+        return None
+    cliente = db.query(Client).filter(Client.slug == slug).one_or_none()
+    if cliente is None and crear:
+        cliente = Client(nombre=texto[:256], slug=slug, dominios=[],
+                         config_defecto={}, integraciones=[])
+        db.add(cliente)
+        db.flush()
+        logger.warning(
+            "Cliente %r creado a partir del client_id de texto %r", slug, texto)
+    return cliente
+
+
+# ---------------------------------------------------------------------------
+# Migracion: los client_id de texto pasan a filas de `clients`
+# ---------------------------------------------------------------------------
+def migrar_client_id_texto(db) -> dict[str, Any]:
+    """Crea un cliente por cada slug distinto de `jobs.client_id` y
+    `programaciones.client_id`, y cuelga de el los jobs y programaciones que
+    aun no tienen `cliente_id`.
+
+    Idempotente: solo toca filas con `cliente_id` NULL, y un cliente que ya
+    existe por slug se reutiliza. No confirma la transaccion: lo hace quien
+    llama, para que la migracion entera sea todo o nada.
+
+    Devuelve `{"creados", "jobs", "programaciones", "colisiones"}`;
+    `colisiones` son los slugs a los que llegan VARIOS textos distintos
+    (`'Acme'`, `'acme '`, `'Ácme'`), para revisarlos a mano.
+    """
+    from shared.models import Client, Job, Programacion
+
+    textos: set[str] = set()
+    for modelo in (Job, Programacion):
+        filas = (
+            db.query(modelo.client_id)
+            .filter(modelo.client_id.isnot(None), modelo.cliente_id.is_(None))
+            .distinct()
+            .all()
+        )
+        textos.update(t for (t,) in filas if t and t.strip())
+
+    por_slug: dict[str, set[str]] = {}
+    for texto in textos:
+        slug = slugificar(texto)
+        if slug:
+            por_slug.setdefault(slug, set()).add(texto)
+
+    existentes = {
+        c.slug: c for c in db.query(Client).filter(Client.slug.in_(list(por_slug))).all()
+    } if por_slug else {}
+
+    creados = 0
+    contados = {"jobs": 0, "programaciones": 0}
+    for slug, variantes in sorted(por_slug.items()):
+        cliente = existentes.get(slug)
+        if cliente is None:
+            # El nombre: la variante mas frecuente no se sabe sin otra
+            # consulta; la mas larga suele ser la que lleva acentos y
+            # mayusculas, que es como se escribe el nombre de verdad.
+            nombre = max((v.strip() for v in variantes), key=lambda v: (len(v), v))
+            cliente = Client(nombre=nombre[:256], slug=slug, dominios=[],
+                             config_defecto={}, integraciones=[])
+            db.add(cliente)
+            db.flush()
+            creados += 1
+        for texto in variantes:
+            contados["jobs"] += (
+                db.query(Job)
+                .filter(Job.client_id == texto, Job.cliente_id.is_(None))
+                .update({Job.cliente_id: cliente.id}, synchronize_session=False)
+            )
+            contados["programaciones"] += (
+                db.query(Programacion)
+                .filter(Programacion.client_id == texto,
+                        Programacion.cliente_id.is_(None))
+                .update({Programacion.cliente_id: cliente.id},
+                        synchronize_session=False)
+            )
+
+    colisiones = {s: sorted(v) for s, v in por_slug.items() if len(v) > 1}
+    return {"creados": creados, **contados, "colisiones": colisiones}
