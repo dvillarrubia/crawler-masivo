@@ -227,6 +227,59 @@ def _h1s(db: Session, ids: list[int]) -> dict[int, tuple[str | None, int]]:
     return salida
 
 
+def _referencia(db: Session, job_id: uuid.UUID, con: str | None) -> uuid.UUID | None:
+    """El censo contra el que se compara: `?con=` o el de la comparacion
+    automatica que guardo el worker (decision 71)."""
+    if con:
+        try:
+            return uuid.UUID(con)
+        except ValueError:
+            return None
+    job = db.get(Job, job_id)
+    comp = job.comparacion if job is not None and isinstance(job.comparacion, dict) else {}
+    try:
+        return uuid.UUID(comp["comparado_con"]) if comp.get("comparado_con") else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _cambios(db: Session, ref: uuid.UUID | None, urls: list) -> dict[int, str | None]:
+    """Que cambio cada URL frente al mismo `url_hash` en el censo `ref`.
+
+    Mismos campos y criterio que la comparacion de censos (decision 67):
+    codigo, indexabilidad, titulo, canonical y palabras si cambian mas de un
+    20% sobre el MAYOR de los dos (si no, A->B y B->A dirian cosas distintas).
+    """
+    if ref is None or not urls:
+        return {}
+    antes = {
+        u.url_hash: u for u in db.query(Url).options(joinedload(Url.html_meta))
+        .filter(Url.job_id == ref, Url.url_hash.in_([u.url_hash for u in urls]))
+    }
+    salida: dict[int, str | None] = {}
+    for u in urls:
+        a = antes.get(u.url_hash)
+        if a is None:
+            salida[u.id] = "nueva"
+            continue
+        partes = []
+        if a.status_code != u.status_code:
+            partes.append(f"{a.status_code or '—'}→{u.status_code or '—'}")
+        if a.indexable != u.indexable and None not in (a.indexable, u.indexable):
+            partes.append("entra en el índice" if u.indexable else "sale del índice")
+        ma, mu = a.html_meta, u.html_meta
+        if ma is not None and mu is not None:
+            if (ma.title or "").strip() != (mu.title or "").strip():
+                partes.append("título")
+            if (ma.canonical_href or "") != (mu.canonical_href or ""):
+                partes.append("canonical")
+        pa, pu = a.content_word_count or a.word_count, u.content_word_count or u.word_count
+        if pa is not None and pu is not None and max(pa, pu) and abs(pa - pu) / max(pa, pu) > 0.2:
+            partes.append(f"palabras {pa}→{pu}")
+        salida[u.id] = "; ".join(partes) or None
+    return salida
+
+
 def _anotar_uso(qp, *, csv: bool = False) -> None:
     """Cuenta la consulta si viene del Explorador (`?vista=explorador`).
     Nunca falla: ver api/uso.py."""
@@ -239,6 +292,23 @@ def _anotar_uso(qp, *, csv: bool = False) -> None:
         uso.anotar(get_redis(), qp, csv=csv)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _clausula_contiene(col_expr, valor):
+    """`a|b` -> contiene a O b; `!a` -> no contiene a (o esta vacio).
+    Se pueden mezclar: `!null|undefined` no es valido; la negacion vale para
+    toda la expresion: `!a|b` = no contiene ni a ni b."""
+    if valor in (None, ""):
+        return None
+    valor = str(valor)
+    negar = valor.startswith("!")
+    if negar:
+        valor = valor[1:]
+    partes = [p for p in (x.strip() for x in valor.split("|")) if p]
+    if not partes:
+        return None
+    contiene = or_(*[col_expr.ilike(f"%{p}%") for p in partes])
+    return or_(col_expr.is_(None), ~contiene) if negar else contiene
 
 
 def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
@@ -273,12 +343,14 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
             continue  # numero mal escrito: se ignora
         necesita_meta |= needs_meta
 
-    # 2) «Contiene»
+    # 2) «Contiene». `a|b` = contiene a o b; `!a` = no contiene a (#131).
+    #    Sin expresiones regulares: SQLite (los tests) no las tiene y en un
+    #    filtro de tabla bastan estas dos.
     for param_name, (col_expr, needs_meta) in _STRING_CONTAINS_FILTERS.items():
-        val = qp.get(param_name)
-        if val in (None, ""):
+        clausula = _clausula_contiene(col_expr, qp.get(param_name))
+        if clausula is None:
             continue
-        clauses.append(col_expr.ilike(f"%{val}%"))
+        clauses.append(clausula)
         necesita_meta |= needs_meta
 
     # 3) Vacio / con valor
@@ -304,9 +376,11 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         v = _bool(qp.get(campo))
         if v is not None:
             q = q.filter(col == v)
+    # Varios codigos a la vez: `301,302`.
     if qp.get("status_code") not in (None, ""):
         try:
-            q = q.filter(Url.status_code == int(qp.get("status_code")))
+            codigos = [int(c) for c in str(qp.get("status_code")).split(",") if c.strip()]
+            q = q.filter(Url.status_code.in_(codigos))
         except ValueError:
             pass
 
@@ -355,13 +429,15 @@ def list_urls(
     sort_by: str | None = Query(None),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     indexable: bool | None = Query(None),
-    status_code: int | None = Query(None),
+    status_code: str | None = Query(None, description="Uno o varios codigos: 301,302"),
     issue_type: str | None = Query(None, description="Uno o varios tipos separados por comas"),
     severity: str | None = Query(None),
     in_sitemap: bool | None = Query(None),
     ligero: bool = Query(False, description="Sin page_content: es el 89% del peso y la tabla no lo usa"),
     origenes: bool = Query(False, description="Anade enlazada_desde y origenes a cada fila"),
     h1: bool = Query(False, description="Anade el primer H1 visible y cuantos hay"),
+    cambios: bool = Query(False, description="Anade que cambio frente al censo de referencia"),
+    con: str | None = Query(None, description="Censo de referencia para `cambios` (por defecto, el de la comparacion automatica)"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -407,6 +483,10 @@ def list_urls(
         hs = _h1s(db, [r.id for r in rows])
         for it, r in zip(items, rows):
             it.h1, it.h1_count = hs.get(r.id, (None, 0))
+    if cambios:
+        cs = _cambios(db, _referencia(db, job_id, con), rows)
+        for it, r in zip(items, rows):
+            it.cambio = cs.get(r.id)
 
     return _paginate(
         items=items,
@@ -582,6 +662,7 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "origenes": ("Páginas que la enlazan", lambda u: getattr(u, "_origen", (None, 0))[1]),
     "h1": ("H1", lambda u: getattr(u, "_h1", (None, 0))[0]),
     "h1_count": ("Nº de H1", lambda u: getattr(u, "_h1", (None, 0))[1]),
+    "cambio": ("Cambio frente al anterior", lambda u: getattr(u, "_cambio", None)),
 }
 
 
@@ -618,6 +699,7 @@ def export_vista(
     else:
         q = q.order_by(Url.id)
     ids = [i for (i,) in q.with_entities(Url.id).all()]
+    ref = _referencia(db, job_id, request.query_params.get("con")) if "cambio" in claves else None
     # Sesiones por tramo sobre el MISMO motor que la peticion (en los tests,
     # SQLite): SessionLocal iria siempre a la BD configurada.
     from sqlalchemy.orm import sessionmaker
@@ -638,6 +720,10 @@ def export_vista(
                     o = _origenes(s, job_id, [u.url_hash for u in por_id.values()])
                     for u in por_id.values():
                         u._origen = o.get(u.url_hash, (None, 0))
+                if "cambio" in claves:
+                    cs = _cambios(s, ref, list(por_id.values()))
+                    for u in por_id.values():
+                        u._cambio = cs.get(u.id)
                 if {"h1", "h1_count"} & set(claves):
                     hs = _h1s(s, list(por_id))
                     for u in por_id.values():

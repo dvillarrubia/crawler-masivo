@@ -1164,9 +1164,11 @@ function app() {
     // y no dicen que es irreversible con el peso que merece.
     // `escribir`: texto que hay que teclear para habilitar el boton (borrados
     // que se llevan mucho por delante). Devuelve true/false.
-    preguntar({ titulo, mensaje, aceptar = 'Aceptar', peligro = false, escribir = '', solo_aviso = false }) {
+    // `pedir`: etiqueta de un campo de texto libre; entonces devuelve el texto
+    // escrito (o false si se cancela).
+    preguntar({ titulo, mensaje, aceptar = 'Aceptar', peligro = false, escribir = '', solo_aviso = false, pedir = '', valor = '' }) {
       return new Promise(resolver => {
-        this.dialogo = { titulo, mensaje, aceptar, peligro, escribir, entrada: '', solo_aviso, resolver };
+        this.dialogo = { titulo, mensaje, aceptar, peligro, escribir, entrada: valor, solo_aviso, pedir, resolver };
         this.$nextTick(() => {
           const el = document.querySelector('.dialogo [data-foco]');
           if (el) el.focus();
@@ -1180,8 +1182,9 @@ function app() {
       const d = this.dialogo;
       if (!d) return;
       if (respuesta && d.escribir && d.entrada.trim() !== d.escribir) return;
+      if (respuesta && d.pedir && !d.entrada.trim()) return;
       this.dialogo = null;
-      d.resolver(!!respuesta);
+      d.resolver(d.pedir ? (respuesta ? d.entrada.trim() : false) : !!respuesta);
     },
 
     // ------- Nombre, tipo y cliente (UX-07/08) -------
@@ -2381,6 +2384,7 @@ function app() {
     expGravedad: '',            // severity del mismo filtro
     expBuscarColumna: '',       // buscador del selector de columnas
     expAgrupar: false,          // vista agrupada por plantilla (forma de ruta)
+    expVistas: [],              // vistas guardadas del cliente del rastreo
     expPlantillas: null,        // respuesta de /urls/plantillas
     expPlantilla: '',           // plantilla elegida: filtra la tabla
     EXP_GRUPOS_COLUMNAS,
@@ -2411,6 +2415,7 @@ function app() {
       this.expColumnPickerOpen = false;
       this.expColumnsByTab = this._loadExpColumnPrefs();
       if ((this.expProblema || EXP_TABS.find(t => t.key === this.expTab)?.ambito) && !this.issuesResumen) this.loadIssuesResumen();
+      this.cargarVistas();
       this._bindExplorerKeyNav();
       this.loadExplorerBadges();
       this.loadExplorerUrls();
@@ -2459,6 +2464,47 @@ function app() {
       this.expSelectedIndex = -1;
       this.expColumnPickerOpen = false;
       this.loadExplorerUrls();
+    },
+
+    // ---- Vistas guardadas por cliente (#131) ----
+    // Una vista es la consulta de la URL (#/rastreos/<id>/explorador?...),
+    // guardada en el cliente: vale para cualquier censo suyo, y asi se repite
+    // el mismo analisis cada mes.
+    async cargarVistas() {
+      this.expVistas = [];
+      if (!this.job || !this.job.cliente_id) return;
+      try { this.expVistas = await api(`/clients/${this.job.cliente_id}/vistas`); } catch (_) { /* sin vistas */ }
+    },
+
+    async guardarVista() {
+      if (!this.job || !this.job.cliente_id) return;
+      const nombre = await this.preguntar({
+        titulo: 'Guardar esta vista',
+        mensaje: `Se guarda en el cliente «${this.job.cliente_nombre || ''}» y se podrá abrir en cualquier censo suyo: pestaña, problema, filtros, orden y agrupación.`,
+        aceptar: 'Guardar', pedir: 'Nombre de la vista',
+        valor: (EXP_TABS.find(t => t.key === this.expTab) || {}).label || '',
+      });
+      if (!nombre) return;
+      try {
+        await api(`/clients/${this.job.cliente_id}/vistas`, {
+          method: 'POST', body: JSON.stringify({ nombre, consulta: this._estadoExplorador() }),
+        });
+        await this.cargarVistas();
+        this.showToast('Vista guardada');
+      } catch (e) { this.avisar('No se pudo guardar', e.message); }
+    },
+
+    abrirVista(v) {
+      this.openExplorer(this._preajusteExplorador(new URLSearchParams(v.consulta)));
+    },
+
+    async borrarVista(v) {
+      if (!await this.preguntar({ titulo: `Borrar la vista «${v.nombre}»`, mensaje: 'Se borra para todos los censos del cliente.',
+                                 aceptar: 'Borrar', peligro: true })) return;
+      try {
+        await api(`/clients/${this.job.cliente_id}/vistas/${v.id}`, { method: 'DELETE' });
+        await this.cargarVistas();
+      } catch (e) { this.avisar('No se pudo borrar', e.message); }
     },
 
     // ---- Agrupar por plantilla (#131) ----
@@ -2609,6 +2655,7 @@ function app() {
       if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'h1')) params.set('h1', 'true');
+      if (this.getExpColumns().includes('cambio')) params.set('cambios', 'true');
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
       if (tabCfg.filter) {
@@ -2807,14 +2854,14 @@ function app() {
         return ({
           '>=': 'al menos…',
           '>':  'mayor que…',
-          '=':  'igual a…',
+          '=':  def.exact ? 'igual a… (301,302)' : 'igual a…',
           '<=': 'máximo…',
           '<':  'menor que…',
         })[op] || 'núm';
       }
       if (def.type === 'string') {
         const op = this.expCurrentOp(col);
-        return op === 'vacio' ? '(vacío)' : op === 'con_valor' ? '(con valor)' : 'contiene…';
+        return op === 'vacio' ? '(vacío)' : op === 'con_valor' ? '(con valor)' : 'contiene… (a|b, !a)';
       }
       return '';
     },
@@ -2972,6 +3019,9 @@ const EXP_COLUMN_DEFS = {
   // redireccion es lo que dice DONDE hay que corregir.
   h1:                   { label: 'H1',               type: 'string',  sortable: false, calculada: 'h1', width: 260, fmt: r => r.h1 ?? '' },
   h1_count:             { label: 'Nº de H1',         type: 'numeric', sortable: false, calculada: 'h1', width: 110, fmt: r => r.h1_count ?? '' },
+  // Frente al censo de la comparacion automatica (decision 71): «nueva»,
+  // «200→404», «sale del índice», «título», «canonical», «palabras a→b».
+  cambio:               { label: 'Cambio frente al anterior', type: 'string', sortable: false, calculada: 'cambios', width: 240, fmt: r => r.cambio ?? '' },
   enlazada_desde:       { label: 'Enlazada desde',  type: 'string',  sortable: false, calculada: 'origenes', width: 280, fmt: r => r.enlazada_desde ? (() => { try { return new URL(r.enlazada_desde).pathname; } catch { return r.enlazada_desde; } })() : '' },
   origenes:             { label: 'Páginas que la enlazan', type: 'numeric', sortable: false, calculada: 'origenes', width: 170, fmt: r => r.origenes ?? '' },
   last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
@@ -2987,6 +3037,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
+  ['Frente al censo anterior', ['cambio']],
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
 

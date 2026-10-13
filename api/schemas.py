@@ -607,6 +607,10 @@ class UrlResponse(BaseModel):
     # ocultos no cuentan, decision 46).
     h1: str | None = None
     h1_count: int | None = None
+    # Solo con `?cambios=true`: que cambio esta URL frente al censo de
+    # referencia (el de la comparacion automatica o `?con=<job>`). «nueva» si
+    # no estaba; None si no cambio nada de lo que se compara.
+    cambio: str | None = None
 
 
 class UrlDetailResponse(UrlResponse):
