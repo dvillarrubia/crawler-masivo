@@ -4,7 +4,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.database import init_db, engine
+from shared.database import init_db, engine, limitar_espera_de_bloqueos
 from sqlalchemy import text
 
 # Force registration of semantic models so their tables are created
@@ -12,6 +12,7 @@ import shared.semantic_models  # noqa: F401
 
 
 def main() -> None:
+    limitar_espera_de_bloqueos()
     # Enable pgvector extension before creating tables
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))

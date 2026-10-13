@@ -36,3 +36,30 @@ def init_db():
         SemanticCannibalization, GscJobData,
     )
     Base.metadata.create_all(bind=engine)
+
+
+def limitar_espera_de_bloqueos(segundos: int = 15) -> None:
+    """Las migraciones del despliegue no esperan a un candado indefinidamente.
+
+    Un `ALTER TABLE jobs` pide un candado exclusivo y, mientras espera, Postgres
+    pone en cola DETRAS de el todas las lecturas de la tabla: con un analisis en
+    marcha (que tiene `jobs` con `FOR UPDATE` toda la pasada) la API dejo de
+    responder a `/api/jobs` el 2026-10-13 mientras la migracion esperaba. Con
+    `lock_timeout` la migracion falla en segundos, `set -e` para el despliegue
+    antes de cambiar contenedores y produccion sigue con el codigo anterior.
+    Se llama solo desde los scripts de migracion, antes de abrir conexion.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _lock_timeout(dbapi_conn, _record):
+        # En autocommit: dentro de la transaccion implicita de psycopg2, el
+        # rollback con que el pool devuelve la conexion deshace el SET.
+        autocommit = dbapi_conn.autocommit
+        dbapi_conn.autocommit = True
+        cur = dbapi_conn.cursor()
+        cur.execute(f"SET lock_timeout = '{int(segundos)}s'")
+        cur.close()
+        dbapi_conn.autocommit = autocommit
