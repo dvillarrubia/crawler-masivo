@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import contextmanager
 import re
 from collections import defaultdict
@@ -212,6 +213,7 @@ class SEOAnalyzer:
         """Run every analysis check and persist results to the issues table."""
         logger.info("Starting SEO analysis for job %s", self.job_id)
 
+        self.actualizar_estadisticas()
         self.clear_existing_issues()
 
         self.analyze_status_codes()
@@ -264,6 +266,53 @@ class SEOAnalyzer:
         )
 
     # -- helpers ------------------------------------------------------------
+
+    def actualizar_estadisticas(self) -> None:
+        """Dice a Postgres cuantas filas acaba de insertar el rastreo.
+
+        El rastreo mete millones de enlaces y el planificador no se entera
+        hasta que el autovacuum pasa por ahi. Como las filas nuevas son de un
+        `job_id` que no existia cuando se tomaron las ultimas estadisticas, la
+        estimacion para ese job es **1 fila** — y con eso Postgres elige planes
+        de bucle anidado para agregaciones de millones.
+
+        Medido en produccion el 2026-10-13 con el censo semanal de Lopesan
+        (5.276 URLs, 1.431.667 enlaces): la materializacion de aristas llevaba
+        **1 h 3 min sin terminar** y hubo que cancelarla. El `EXPLAIN` de
+        `count(*) FROM links WHERE job_id=...` estimaba **1 fila** (coste 8,58);
+        tras un `ANALYZE`, 1,43 M de filas (coste 342.082). Relanzado con las
+        estadisticas frescas, el analisis ENTERO del mismo censo tarda
+        **107 segundos**.
+
+        Y llevaba funcionando por suerte: el censo del mismo sitio del 8 de
+        octubre salio en 2 h porque el `autoanalyze` de Postgres salto a las
+        16:31, en mitad de aquel rastreo. El umbral por defecto para una tabla
+        de 20 M de filas son ~2 M de modificaciones, y entre censo y censo no
+        siempre se llega.
+
+        No es best-effort por capricho: si el motor no es Postgres (los tests
+        corren contra SQLite) o el usuario no puede analizar la tabla, el
+        analisis tiene que seguir. Lo unico que se pierde es velocidad.
+        """
+        from sqlalchemy import text
+
+        if self.session.bind is None or self.session.bind.dialect.name != "postgresql":
+            return
+        for tabla in ("links", "urls"):
+            try:
+                inicio = time.time()
+                # `ANALYZE` a secas, sin transaccion larga: no bloquea lecturas
+                # ni escrituras, solo conflige con otro ANALYZE o VACUUM.
+                self.session.execute(text(f"ANALYZE {tabla}"))
+                self.session.commit()
+                logger.info("Estadisticas de `%s` actualizadas en %.1f s",
+                            tabla, time.time() - inicio)
+            except Exception:
+                self.session.rollback()
+                logger.warning(
+                    "No se pudieron actualizar las estadisticas de `%s`; el "
+                    "analisis sigue, pero puede ir MUCHO mas lento", tabla,
+                    exc_info=True)
 
     def clear_existing_issues(self) -> None:
         """Remove all issues previously generated for this job."""
