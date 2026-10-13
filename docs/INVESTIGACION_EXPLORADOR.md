@@ -223,5 +223,5 @@ Todo lo recomendado está hecho y desplegado (#132-#136), en una noche:
 | Filtros `a|b`, `!a`, varios códigos | #136 | «4xx sin null»: 26 de 32 |
 
 Lo siguiente con fundamento es **leer `/api/uso/explorador` dentro de un par
-de semanas** y quitar lo que no se use: diez vistas por ámbito y 52 columnas
+de semanas** y quitar lo que no se use: diez vistas por ámbito y 54 columnas
 son muchas, y ahora se puede saber cuáles sobran.
