@@ -182,3 +182,99 @@ def test_una_programacion_futura_no_se_toca(entorno):
     assert cola.encolados == []
     assert prog.ultimo_motivo is None, "ni se mira: la consulta ya la descarta"
     s2.close()
+
+
+# --- Con qué censo se compara un rastreo programado ------------------------
+
+def test_un_rastreo_programado_se_compara_con_el_anterior_de_SU_serie(entorno):
+    """La regla del host sola elige mal en cuanto alguien lanza algo a mano.
+
+    Comprobado en produccion el 2026-10-09: el segundo canario de Lopesan se
+    comparo con el primero —117 URLs en comun de 250— en vez de con el censo
+    completo. Llevado a un rastreo semanal de 5.000 paginas, se compararia
+    contra un canario de 250 que alguien lanzo el martes.
+
+    Y no es cosmetico: las alertas se miden sobre las paginas que estan en los
+    DOS censos. Si la referencia cubre 250 y el fallo afecta a 2.319 que no
+    estan entre ellas, la alerta no salta — y un silencio se lee igual que "no
+    ha cambiado nada".
+    """
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+    pid = uuid.uuid4()
+
+    def job(nombre, dia, programacion=None):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://www.progym.es/"],
+                config={}, started_at=datetime(2026, 5, dia, tzinfo=timezone.utc),
+                programacion_id=programacion)
+        s.add(j)
+        s.flush()
+        return j
+
+    job("semanal del 1", 1, pid)
+    job("semanal del 8", 8, pid)
+    job("CANARIO que alguien lanzo a mano", 14)   # mismo host, sin programacion
+    actual = job("semanal del 15", 15, pid)
+    s.commit()
+
+    elegido = censo_anterior(s, actual)
+    assert elegido.name == "semanal del 8", (
+        "se compara con el anterior de su serie, no con el canario del martes")
+    s.close()
+
+
+def test_la_primera_vez_de_una_serie_cae_a_la_regla_del_host(entorno):
+    """Comparar con algo del mismo sitio es mejor que no comparar con nada: el
+    guardia de alcance (decision 70) ya dira si los alcances no casan."""
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+    pid = uuid.uuid4()
+    anterior = Job(id=uuid.uuid4(), name="censo suelto de hace meses",
+                   status="completed", finish_reason="finished",
+                   seeds=["https://www.progym.es/"], config={},
+                   started_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    primera = Job(id=uuid.uuid4(), name="semanal, primera vez",
+                  status="completed", finish_reason="finished",
+                  seeds=["https://www.progym.es/"], config={},
+                  started_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+                  programacion_id=pid)
+    s.add_all([anterior, primera])
+    s.commit()
+
+    assert censo_anterior(s, primera).name == "censo suelto de hace meses"
+    s.close()
+
+
+def test_un_rastreo_a_mano_sigue_con_la_regla_del_host(entorno):
+    """Es lo unico que se sabe de el."""
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+    s.add(Job(id=uuid.uuid4(), name="el de la semana pasada", status="completed",
+              finish_reason="finished", seeds=["https://www.progym.es/"],
+              config={}, started_at=datetime(2026, 5, 1, tzinfo=timezone.utc)))
+    suelto = Job(id=uuid.uuid4(), name="lanzado a mano", status="completed",
+                 finish_reason="finished", seeds=["https://www.progym.es/"],
+                 config={}, started_at=datetime(2026, 5, 9, tzinfo=timezone.utc))
+    s.add(suelto)
+    s.commit()
+    assert censo_anterior(s, suelto).name == "el de la semana pasada"
+    s.close()
+
+
+def test_el_job_que_lanza_la_programacion_queda_ligado_a_ella(entorno):
+    """Sin esto la preferencia por la serie no puede funcionar: el enlace lo
+    tiene que escribir quien crea el job."""
+    s = entorno()
+    pid = _programacion(s, proxima=datetime.now(timezone.utc) - timedelta(minutes=1))
+    s.close()
+
+    _lanzar(ColaFalsa())
+
+    s2 = entorno()
+    job = s2.query(Job).one()
+    assert job.programacion_id == pid
+    s2.close()

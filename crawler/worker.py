@@ -1074,7 +1074,7 @@ def _lanzar_programados(rconn) -> None:
                 datos = job_desde_programacion(prog)
                 job = Job(name=datos["name"], client_id=datos["client_id"],
                           seeds=datos["seeds"], config=datos["config"],
-                          status="pending")
+                          status="pending", programacion_id=prog.id)
                 session.add(job)
                 session.flush()
                 encolar(rconn, job.id)
