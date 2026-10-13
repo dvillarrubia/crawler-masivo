@@ -72,7 +72,8 @@ def test_de_dos_censos_a_que_se_arreglo():
     s.commit()
 
     r = comparar_incidencias(incidencias_de_censo(s, viejo),
-                             incidencias_de_censo(s, nuevo))
+                             incidencias_de_censo(s, nuevo),
+                             analisis_a="abc1234", analisis_b="abc1234")
 
     tipos_resueltos = {f["tipo"] for f in r["resueltas"]["por_tipo"]}
     assert "title_duplicate" in tipos_resueltos, (

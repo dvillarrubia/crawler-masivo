@@ -573,6 +573,8 @@ def comparar_incidencias(
     mapa_hosts: dict[str, str] | None = None,
     puede_afirmar_resueltas: bool = True,
     urls_del_nuevo: set[str] | None = None,
+    analisis_a: str | None = None,
+    analisis_b: str | None = None,
 ) -> dict[str, Any]:
     """Qué se arregló, qué apareció y qué sigue, entre dos censos.
 
@@ -593,6 +595,32 @@ def comparar_incidencias(
     eran páginas que sencillamente no se volvieron a visitar. Decírselo así a
     un cliente es felicitarle por un trabajo que no ha hecho.
     """
+    # Dos censos analizados con codigo distinto NO se comparan por incidencias.
+    # Un aviso no basta: no impide que la cifra sea falsa ni que alguien la
+    # copie a un informe. Medido el 2026-10-13, el dia que se anadio
+    # `group_key`: el censo de referencia de Lopesan tenia 11.414 incidencias
+    # y CERO claves, y el siguiente las tendria todas. Ningun hallazgo
+    # agrupado —duplicados, hreflang, imagenes, datos estructurados— habria
+    # casado, y los miles afectados habrian salido como "resuelto" y "nuevo" a
+    # la vez. Es la misma regla que las ausencias de un censo truncado
+    # (decision 67): lo que no se puede afirmar, no se afirma.
+    #
+    # Desconocido tampoco vale. Un censo anterior al sello (decision 72) pudo
+    # analizarse con cualquier cosa, y callarse equivale a afirmar que fue con
+    # el mismo codigo.
+    if not (analisis_a and analisis_b and analisis_a == analisis_b):
+        cual = (f"{analisis_a or 'desconocida'} y {analisis_b or 'desconocida'}")
+        return {
+            "comparable": False,
+            "motivo": (
+                f"los dos censos se analizaron con versiones distintas del "
+                f"codigo ({cual}), asi que un hallazgo puede aparecer como "
+                f"resuelto solo porque la regla que lo emitia ha cambiado. "
+                f"Para compararlos, vuelve a analizar el mas antiguo con el "
+                f"codigo de hoy."
+            ),
+        }
+
     mapa_hosts = mapa_hosts or {}
 
     def clave(i):
@@ -625,6 +653,7 @@ def comparar_incidencias(
                       key=lambda f: (orden.get(f["severidad"], 3), -f["total"]))
 
     resultado = {
+        "comparable": True,
         "nuevas": {"total": len(nuevas), "por_tipo": por_tipo(nuevas),
                    "ejemplos": [i["url"] for i in nuevas[:MUESTRA]]},
         "siguen": {"total": len(siguen), "por_tipo": por_tipo(siguen)},
@@ -833,6 +862,8 @@ def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
                 incidencias_de_censo(db, job.id),
                 puede_afirmar_resueltas=anterior_entero,
                 urls_del_nuevo={_norm(p["url"]) for p in paginas_nuevas},
+                analisis_a=resumen_anterior.get("analisis_version"),
+                analisis_b=getattr(job, "analisis_version", None),
             )
         except Exception:
             logger.exception(

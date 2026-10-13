@@ -1816,6 +1816,25 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    las alertas críticas de página —media sección fuera del índice— son lo que
    hay que entregar aunque el recuento falle.
 
+91. **Dos censos analizados con código distinto no se comparan por
+   incidencias** — un aviso no basta. La decisión 72 ya avisaba de que las
+   versiones diferían, y el aviso no impide que la cifra sea falsa ni que
+   alguien la copie a un informe. Medido el 2026-10-13, el día que se añadió
+   `group_key` (decisión 88): el censo de referencia de Lopesan tenía **11.414
+   incidencias y CERO claves**, y el siguiente las tendría todas. Ningún
+   hallazgo agrupado —duplicados, hreflang, imágenes, datos estructurados—
+   habría casado, y los miles afectados habrían salido como «resuelto» **y**
+   «nuevo» a la vez, en el primer informe automático.
+   Es la misma regla que las ausencias de un censo truncado (decisión 67): lo
+   que no se puede afirmar, no se afirma. Y **desconocido tampoco vale**: un
+   censo anterior al sello pudo analizarse con cualquier cosa, y callarse
+   equivale a decir que fue con el mismo código.
+   El motivo que se devuelve dice **cómo arreglarlo** —volver a analizar el más
+   antiguo con el código de hoy—, porque es barato: 246 s en ese censo. Un «no
+   se puede» sin salida convierte la función en un adorno. La comparación de
+   PÁGINAS sigue, y con ella las alertas críticas: esas salen del rastreo, no
+   del análisis.
+
 90. **La profundidad se cuenta en clics desde la home, no desde las semillas**
    — `crawl_depth` son los saltos del rastreador desde donde empezo: cada
    semilla es 0 y lo del sitemap 1. Con un censo sembrado desde la home se

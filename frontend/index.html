@@ -1136,7 +1136,20 @@
                      paginas no contesta "que arreglo el cliente desde la
                      auditoria anterior", que es para lo que se mira un
                      seguimiento mensual. -->
-                <template x-if="diff.incidencias">
+                <!-- Dos censos analizados con codigo distinto no se comparan
+                     por incidencias: un hallazgo puede salir "resuelto" solo
+                     porque la regla que lo emitia ha cambiado. Se dice, con
+                     el motivo y como arreglarlo. -->
+                <template x-if="diff.incidencias && diff.incidencias.comparable === false">
+                  <div class="card mb-2" style="border-left:3px solid var(--muted,#6b7280)">
+                    <div class="text-sm">
+                      <strong>No se pueden comparar las incidencias.</strong>
+                      <span x-text="diff.incidencias.motivo"></span>
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="diff.incidencias && diff.incidencias.comparable !== false">
                   <div class="stats-grid" style="margin-bottom:1rem">
                     <div class="stat-card" style="border-top:2px solid var(--green,#2e8b57)">
                       <div class="stat-value"
@@ -1155,7 +1168,7 @@
                   </div>
                 </template>
 
-                <template x-if="diff.incidencias">
+                <template x-if="diff.incidencias && diff.incidencias.comparable !== false">
                   <div class="card" style="margin-bottom:1rem">
                     <table style="width:100%;font-size:.85rem">
                       <thead><tr>
