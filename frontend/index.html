@@ -1132,6 +1132,71 @@
                   </div>
                 </div>
 
+                <!-- Que se arreglo, que aparecio y que sigue (#32). Comparar
+                     paginas no contesta "que arreglo el cliente desde la
+                     auditoria anterior", que es para lo que se mira un
+                     seguimiento mensual. -->
+                <template x-if="diff.incidencias">
+                  <div class="stats-grid" style="margin-bottom:1rem">
+                    <div class="stat-card" style="border-top:2px solid var(--green,#2e8b57)">
+                      <div class="stat-value"
+                           x-text="diff.incidencias.resueltas ? fmt.num(diff.incidencias.resueltas.total) : '—'"></div>
+                      <div class="stat-label"
+                           x-text="diff.incidencias.resueltas ? 'resueltas' : 'resueltas (no afirmable)'"></div>
+                    </div>
+                    <div class="stat-card" style="border-top:2px solid var(--red,#d32f2f)">
+                      <div class="stat-value" x-text="fmt.num(diff.incidencias.nuevas.total)"></div>
+                      <div class="stat-label">nuevas</div>
+                    </div>
+                    <div class="stat-card">
+                      <div class="stat-value" x-text="fmt.num(diff.incidencias.siguen.total)"></div>
+                      <div class="stat-label">siguen</div>
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="diff.incidencias">
+                  <div class="card" style="margin-bottom:1rem">
+                    <table style="width:100%;font-size:.85rem">
+                      <thead><tr>
+                        <th style="text-align:left">incidencias por tipo</th>
+                        <th style="text-align:right;width:6rem">resueltas</th>
+                        <th style="text-align:right;width:6rem">nuevas</th>
+                        <th style="text-align:right;width:6rem">siguen</th>
+                      </tr></thead>
+                      <tbody>
+                        <template x-for="t in tiposDeIncidencia()" :key="t.tipo">
+                          <tr>
+                            <td>
+                              <span x-text="fmt.issue(t.tipo)"></span>
+                              <span class="text-dim" style="font-size:.75rem"
+                                    x-text="' · ' + fmt.severity(t.severidad)"></span>
+                            </td>
+                            <td style="text-align:right;color:var(--green,#2e8b57)"
+                                x-text="t.resueltas || ''"></td>
+                            <td style="text-align:right;color:var(--red,#d32f2f)"
+                                x-text="t.nuevas || ''"></td>
+                            <td style="text-align:right" class="text-dim"
+                                x-text="t.siguen || ''"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
+                         x-show="diff.incidencias.sin_pagina_en_el_nuevo">
+                      <span x-text="fmt.num(diff.incidencias.sin_pagina_en_el_nuevo)"></span>
+                      incidencias mas estaban en paginas que este rastreo no ha
+                      visitado: no se sabe si se arreglaron.
+                    </div>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
+                         x-show="diff.incidencias.resueltas_no_afirmables">
+                      <span x-text="fmt.num(diff.incidencias.resueltas_no_afirmables)"></span>
+                      incidencias no aparecen ahora, pero el censo anterior esta
+                      truncado: pueden no haberse resuelto, sino no haberse visto.
+                    </div>
+                  </div>
+                </template>
+
                 <div class="card">
                   <table style="width:100%;font-size:.85rem">
                     <thead><tr><th style="text-align:left">que cambio</th><th style="text-align:right;width:7rem">paginas</th></tr></thead>

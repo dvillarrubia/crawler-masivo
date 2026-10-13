@@ -47,8 +47,13 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+import logging
+
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
+
+logger = logging.getLogger(__name__)
+
 
 # Motivos de cierre que dejan un censo incompleto: con cualquiera de ellos no
 # se puede afirmar que una URL haya desaparecido.
@@ -538,6 +543,107 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
     return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))
 
 
+def incidencias_de_censo(db, job_id) -> list[dict[str, Any]]:
+    """Las incidencias de un censo con lo que las identifica entre censos.
+
+    «El mismo hallazgo» es `(issue_type, url, group_key)` (#32). Con tipo y
+    URL no basta: un hreflang mal escrito emite una incidencia por código de
+    idioma, y un título duplicado pertenece a un grupo. La URL va por su
+    TEXTO, no por `urls.id`, que cambia entre censos.
+    """
+    from shared.models import Issue, Url
+
+    filas = (
+        db.query(Issue.issue_type, Issue.severity, Issue.group_key, Url.url)
+        .join(Url, Url.id == Issue.url_id)
+        .filter(Issue.job_id == job_id)
+        .all()
+    )
+    return [
+        {"issue_type": f.issue_type, "severity": f.severity,
+         "group_key": f.group_key, "url": f.url}
+        for f in filas
+    ]
+
+
+def comparar_incidencias(
+    incidencias_a: list[dict[str, Any]],
+    incidencias_b: list[dict[str, Any]],
+    *,
+    mapa_hosts: dict[str, str] | None = None,
+    puede_afirmar_resueltas: bool = True,
+    urls_del_nuevo: set[str] | None = None,
+) -> dict[str, Any]:
+    """Qué se arregló, qué apareció y qué sigue, entre dos censos.
+
+    Es lo que convierte una auditoría suelta en un seguimiento: «qué arregló
+    el cliente desde la vez pasada» no se puede contestar comparando páginas.
+
+    `puede_afirmar_resueltas` es la decisión 2 de #32 llevada a las
+    incidencias: si el censo ANTERIOR está truncado, que un hallazgo no
+    aparezca ahora puede ser que no se llegara a su página. Se cuentan aparte
+    y no se llaman «resueltas».
+
+    `urls_del_nuevo` cierra el mismo agujero por el otro lado, y hace falta
+    aunque los dos censos terminen enteros: **una incidencia en una página que
+    ya no está en el censo no está resuelta, no se sabe**. Medido con dos
+    censos reales de progym en los que desaparecieron 1.205 URLs: sin esto el
+    informe decía **4.794 resueltas** y las tres primeras clases —1.152
+    `noindex_page`, 1.146 `canonical_missing`, 938 `hreflang_missing_return`—
+    eran páginas que sencillamente no se volvieron a visitar. Decírselo así a
+    un cliente es felicitarle por un trabajo que no ha hecho.
+    """
+    mapa_hosts = mapa_hosts or {}
+
+    def clave(i):
+        return (i["issue_type"],
+                _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts)),
+                i.get("group_key"))
+
+    a = {clave(i): i for i in incidencias_a}
+    b = {clave(i): i for i in incidencias_b}
+
+    nuevas = [b[k] for k in b.keys() - a.keys()]
+    siguen = [b[k] for k in a.keys() & b.keys()]
+
+    idas, sin_pagina = [], []
+    for k in a.keys() - b.keys():
+        if urls_del_nuevo is not None and k[1] not in urls_del_nuevo:
+            sin_pagina.append(a[k])      # su pagina no se volvio a visitar
+        else:
+            idas.append(a[k])
+
+    def por_tipo(lista):
+        cuenta: dict[str, dict[str, Any]] = {}
+        for i in lista:
+            fila = cuenta.setdefault(
+                i["issue_type"], {"tipo": i["issue_type"],
+                                  "severidad": i.get("severity"), "total": 0})
+            fila["total"] += 1
+        orden = {"error": 0, "warning": 1, "info": 2}
+        return sorted(cuenta.values(),
+                      key=lambda f: (orden.get(f["severidad"], 3), -f["total"]))
+
+    resultado = {
+        "nuevas": {"total": len(nuevas), "por_tipo": por_tipo(nuevas),
+                   "ejemplos": [i["url"] for i in nuevas[:MUESTRA]]},
+        "siguen": {"total": len(siguen), "por_tipo": por_tipo(siguen)},
+    }
+    resultado["sin_pagina_en_el_nuevo"] = len(sin_pagina)
+    if puede_afirmar_resueltas:
+        resultado["resueltas"] = {
+            "total": len(idas), "por_tipo": por_tipo(idas),
+            "ejemplos": [i["url"] for i in idas[:MUESTRA]]}
+        resultado["resueltas_no_afirmables"] = 0
+    else:
+        # Ni se enumeran: una lista de "quizas resueltas" se lee como una
+        # lista de resueltas en cuanto alguien la copia a un informe.
+        resultado["resueltas"] = None
+        resultado["resueltas_no_afirmables"] = len(idas) + len(sin_pagina)
+        resultado["sin_pagina_en_el_nuevo"] = 0
+    return resultado
+
+
 # --- Acceso a base de datos -------------------------------------------------
 #
 # Las dos consultas viven aqui y no en el router de la API porque las necesitan
@@ -700,15 +806,42 @@ def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
     anterior = censo_anterior(db, job)
     if anterior is None:
         return None
+    resumen_anterior = resumen_de_job(anterior)
     r = comparar_censos(
         paginas_de_censo(db, anterior.id),
         paginas_de_censo(db, job.id),
-        job_a=resumen_de_job(anterior),
+        job_a=resumen_anterior,
         job_b=resumen_de_job(job),
     )
+    incidencias = None
+    if r.get("comparable"):
+        # El diff de incidencias va aparte y NO puede tumbar el de paginas: las
+        # alertas criticas —media seccion fuera del indice— son lo que hay que
+        # entregar aunque el recuento de "que se arreglo" falle. Antes de esto,
+        # cualquier problema con `issues` habria dejado `comparacion` a NULL
+        # por el best-effort del worker, y con ella las alertas.
+        try:
+            # «Resuelta» solo se puede afirmar si el censo ANTERIOR esta
+            # entero: si paro por `max_urls`, que un hallazgo no aparezca ahora
+            # puede ser que no se llegara a su pagina.
+            anterior_entero = not _truncado(
+                resumen_anterior.get("status"),
+                resumen_anterior.get("finish_reason"))
+            paginas_nuevas = paginas_de_censo(db, job.id)
+            incidencias = comparar_incidencias(
+                incidencias_de_censo(db, anterior.id),
+                incidencias_de_censo(db, job.id),
+                puede_afirmar_resueltas=anterior_entero,
+                urls_del_nuevo={_norm(p["url"]) for p in paginas_nuevas},
+            )
+        except Exception:
+            logger.exception(
+                "No se pudo comparar las incidencias de %s con %s; las alertas "
+                "de pagina siguen", job.id, anterior.id)
     # Lo que se guarda es el veredicto, no el censo entero: los ejemplos y las
     # plantillas ya van dentro de cada alerta.
     return {
+        "incidencias": incidencias,
         "comparado_con": str(anterior.id),
         "nombre_anterior": anterior.name,
         "fecha_anterior": resumen_de_job(anterior)["fecha"],

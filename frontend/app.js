@@ -795,6 +795,28 @@ function app() {
     diffCandidatos: [],
     diffCargando: false,
 
+    // Las tres columnas (resueltas / nuevas / siguen) en una sola fila por
+    // tipo: tres tablas separadas obligan a cruzarlas a ojo, que es lo que
+    // nadie hace.
+    tiposDeIncidencia() {
+      const inc = this.diff && this.diff.incidencias;
+      if (!inc) return [];
+      const filas = {};
+      const meter = (lista, campo) => (lista || []).forEach(f => {
+        const fila = filas[f.tipo] || (filas[f.tipo] = {
+          tipo: f.tipo, severidad: f.severidad,
+          resueltas: 0, nuevas: 0, siguen: 0,
+        });
+        fila[campo] = f.total;
+      });
+      meter(inc.resueltas && inc.resueltas.por_tipo, 'resueltas');
+      meter(inc.nuevas && inc.nuevas.por_tipo, 'nuevas');
+      meter(inc.siguen && inc.siguen.por_tipo, 'siguen');
+      const orden = { error: 0, warning: 1, info: 2 };
+      return Object.values(filas).sort((a, b) =>
+        (orden[a.severidad] ?? 3) - (orden[b.severidad] ?? 3)
+        || (b.nuevas + b.resueltas) - (a.nuevas + a.resueltas));
+    },
     // --- Rastreos programados ---
     abrirProgramar() {
       // El nombre por defecto quita la fecha del rastreo de origen: la

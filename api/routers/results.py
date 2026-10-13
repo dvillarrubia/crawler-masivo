@@ -481,7 +481,10 @@ def get_diff(
     preproduccion contra produccion; sin el, dos origenes distintos se
     rechazan en vez de devolver "ha desaparecido el sitio entero" (#32).
     """
-    from shared.comparacion import comparar_censos, paginas_de_censo, resumen_de_job
+    from shared.comparacion import (
+        _truncado, comparar_censos, comparar_incidencias,
+        incidencias_de_censo, paginas_de_censo, resumen_de_job,
+    )
 
     a = _get_job_or_404(job_id, db)
     b = _get_job_or_404(otro_id, db)
@@ -500,10 +503,42 @@ def get_diff(
         job_b=resumen_de_job(b),
         mapa_hosts=mapa,
     )
+    # Que se arreglo, que aparecio y que sigue. Comparar paginas no contesta
+    # "que arreglo el cliente desde la auditoria anterior", que es para lo que
+    # se mira un seguimiento mensual (#32).
+    if resultado.get("comparable"):
+        from shared.comparacion import _aplicar_mapa
+
+        def _aplicar(u):
+            return _aplicar_mapa(u, mapa)
+
+        antes, ahora = resultado["antes"], resultado["ahora"]
+        # Las paginas vienen ordenadas por fecha, asi que hay que mirar CUAL de
+        # los dos jobs es el anterior, no el primer parametro.
+        viejo_id = job_id if antes.get("fecha") == _resumen_fecha(a) else otro_id
+        nuevo_id = otro_id if viejo_id == job_id else job_id
+        from shared.comparacion import _norm
+
+        resultado["incidencias"] = comparar_incidencias(
+            incidencias_de_censo(db, viejo_id),
+            incidencias_de_censo(db, nuevo_id),
+            mapa_hosts=mapa,
+            puede_afirmar_resueltas=not _truncado(
+                antes.get("status"), antes.get("finish_reason")),
+            # Una incidencia cuya pagina ya no esta en el censo no esta
+            # resuelta: no se sabe.
+            urls_del_nuevo={_norm(_aplicar(p["url"]))
+                            for p in paginas_de_censo(db, nuevo_id)},
+        )
+
     # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban
     # por el orden de los parametros, asi que elegir el censo viejo en el
     # desplegable daba la vuelta al informe entero.
     return resultado
+
+
+def _resumen_fecha(job) -> str | None:
+    return job.started_at.isoformat() if job.started_at else None
 
 
 @router.get("/stats", response_model=JobStats)

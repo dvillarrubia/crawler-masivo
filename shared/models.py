@@ -595,6 +595,11 @@ class Issue(Base):
     issue_type = Column(String(64), nullable=False)
     severity = Column(String(10), nullable=False)  # error, warning, info
     details = Column(JSON, nullable=True)
+    # Que distingue dos hallazgos del MISMO tipo en la MISMA URL: el codigo de
+    # hreflang, el grupo de un duplicado, la imagen sin alt. Sin ella no se
+    # puede decir "esto se arreglo" entre dos censos (#32). NULL en las reglas
+    # que emiten como mucho una incidencia por URL.
+    group_key = Column(String(64), nullable=True)
     detected_at = Column(DateTime(timezone=True), default=_utcnow)
 
     url_rel = relationship("Url", back_populates="issues")

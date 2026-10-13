@@ -56,6 +56,10 @@ def main() -> None:
         # Comprobacion automatica de render JS por plantilla
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS js_check JSON"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS comparacion JSON"))
+        # La clave que distingue dos hallazgos del mismo tipo en la misma
+        # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
+        # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).
+        conn.execute(text("ALTER TABLE issues ADD COLUMN IF NOT EXISTS group_key TEXT"))
         conn.execute(text(
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS programacion_id UUID"))
         conn.execute(text(

@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -56,6 +57,27 @@ from shared.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _clave_de_grupo(valor: str | None) -> str | None:
+    """La clave estable de un hallazgo dentro de su tipo y su URL (#32).
+
+    Se guarda un **hash**, no el valor: una description duplicada puede tener
+    1.000 caracteres y la clave se repite en cada fila del grupo. Con SHA-256
+    truncado a 16 hexadecimales la colision es despreciable para lo que se usa
+    —comparar dos censos del mismo sitio— y la columna no engorda la tabla.
+
+    Se normaliza la caja y los espacios por la misma razon que el
+    `content_hash` de la decision 47: dos valores que solo se diferencian en
+    eso son el MISMO hallazgo, y tratarlos como distintos diria que uno se
+    resolvio y apareció otro.
+    """
+    if valor is None:
+        return None
+    texto = " ".join(str(valor).split()).casefold()
+    if not texto:
+        return None
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
 
 
 def _clave(url: str | None):
@@ -349,8 +371,22 @@ class SEOAnalyzer:
         issue_type: str,
         severity: str,
         details: dict[str, Any] | None = None,
+        group_key: str | None = None,
     ) -> None:
-        """Buffer an issue for bulk insertion."""
+        """Buffer an issue for bulk insertion.
+
+        `group_key` distingue dos hallazgos del MISMO tipo en la MISMA URL, que
+        es lo que hace falta para poder decir «esto se arregló» entre dos
+        censos (#32). Con tipo y URL no basta: un hreflang mal escrito emite
+        una incidencia por código de idioma, y un título duplicado pertenece a
+        un grupo que puede cambiar de miembros sin dejar de existir.
+
+        Va a NULL en las reglas que emiten como mucho una incidencia por URL
+        —un 404, un título largo, una URL con mayúsculas—: ahí el par
+        (tipo, URL) ya identifica el hallazgo y una clave inventada solo sería
+        ruido que puede cambiar entre versiones del código y fingir que el
+        problema se resolvió.
+        """
         self._pending_issues.append(
             {
                 "job_id": self.job_id,
@@ -358,6 +394,7 @@ class SEOAnalyzer:
                 "issue_type": issue_type,
                 "severity": severity,
                 "details": details,
+                "group_key": group_key,
                 "detected_at": datetime.now(timezone.utc),
             }
         )
@@ -550,6 +587,7 @@ class SEOAnalyzer:
                     "title_duplicate",
                     "warning",
                     self._detalle_duplicados(other_ids),
+                    group_key=_clave_de_grupo(title_text),
                 )
 
         self._flush_issues()
@@ -629,6 +667,7 @@ class SEOAnalyzer:
                     "description_duplicate",
                     "warning",
                     self._detalle_duplicados(other_ids),
+                    group_key=_clave_de_grupo(desc_text),
                 )
 
         self._flush_issues()
@@ -712,6 +751,7 @@ class SEOAnalyzer:
                     "h1_duplicate",
                     "info",
                     self._detalle_duplicados(other_ids),
+                    group_key=_clave_de_grupo(h1_text),
                 )
 
         self._flush_issues()
@@ -822,6 +862,7 @@ class SEOAnalyzer:
                         "canonical_host": canonical_host,
                         "otro_dominio_registrable": fuera,
                     },
+                    group_key=_clave_de_grupo(canonical_host),
                 )
 
             # Un canonical a http desde una pagina https manda a Google a la
@@ -969,6 +1010,7 @@ class SEOAnalyzer:
                     "hreflang_missing_return",
                     "warning",
                     {"lang": lang, "href": href},
+                    group_key=_clave_de_grupo(lang),
                 )
 
             if not lang_is_valid:
@@ -984,7 +1026,8 @@ class SEOAnalyzer:
                         f"'{region_mala.upper()}' no es un codigo de pais ISO 3166-1"
                         + (f"; el de ese pais es '{sugerida}'" if sugerida else "")
                     )
-                self._add_issue(url_id, "hreflang_invalid_lang", "warning", detalle)
+                self._add_issue(url_id, "hreflang_invalid_lang", "warning",
+                                detalle, group_key=_clave_de_grupo(lang))
 
             # Target URL not returning 200.
             if destino_roto:
@@ -993,6 +1036,7 @@ class SEOAnalyzer:
                     "hreflang_broken_target",
                     "error",
                     {"href": href, "target_status": estado_destino},
+                    group_key=_clave_de_grupo(lang),
                 )
 
         for url_id, langs in en_body_por_pagina.items():
@@ -1081,7 +1125,8 @@ class SEOAnalyzer:
                 paginas[0],
                 f"structured_data_{status}",
                 status,
-                {
+                group_key=_clave_de_grupo(f"{schema_type}|" + "|".join(issues)),
+                details={
                     "schema_type": schema_type,
                     "validation_issues": list(issues),
                     "paginas_afectadas": len(paginas),
@@ -1401,6 +1446,9 @@ class SEOAnalyzer:
                         "duplicate_content",
                         "warning",
                         self._detalle_duplicados(other_ids, content_hash=valor),
+                        # El hash del contenido YA es la clave del grupo: no
+                        # hace falta volver a resumirlo.
+                        group_key=(valor or None),
                     )
 
         self._flush_issues()
@@ -1470,6 +1518,11 @@ class SEOAnalyzer:
             {uid: (dato["count"], dato["closest"]) for uid, dato in resultado.items()}
         )
 
+        # Sin `group_key` a proposito: un casi duplicado no pertenece a un
+        # grupo estable, sino a un conjunto de parecidos que cambia con cada
+        # censo. Inventar una clave aqui haria que el mismo problema pareciera
+        # resolverse y reaparecer cada semana — exactamente la mentira que la
+        # clave existe para evitar. La URL y el tipo ya lo identifican.
         for url_id, dato in resultado.items():
             self._add_issue(
                 url_id,
@@ -1626,6 +1679,7 @@ class SEOAnalyzer:
                     "image_url": resource_url,
                     "paginas_afectadas": len(paginas),
                 },
+                group_key=_clave_de_grupo(resource_url),
             )
 
         self._flush_issues()
@@ -1721,6 +1775,7 @@ class SEOAnalyzer:
                     "info",
                     {"host": host, "paginas_afectadas": resumen[tipo],
                      "paginas_del_host": resumen["paginas"]},
+                    group_key=_clave_de_grupo(host),
                 )
 
         self._flush_issues()
