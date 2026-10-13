@@ -27,59 +27,56 @@
 
 <div class="app">
 
-  <!-- ===== BARRA SUPERIOR ===== -->
+  <!-- ===== BARRA SUPERIOR =====
+       La misma en todas las vistas (UX-06): antes cambiaba de botones segun
+       donde estuvieras, y desde la ficha de un rastreo no habia forma de ir a
+       Clientes ni a Programados. Las secciones son enlaces de verdad (#/...),
+       asi que se pueden abrir en otra pestana y el boton atras funciona. -->
   <header class="topbar" style="border-top: 3px solid #5BAE23;">
-    <h1 data-tip="Panel de control del rastreador SEO" style="display:flex;align-items:center;gap:.5rem">
+    <a href="#/rastreos" class="topbar-brand" title="Ir a la lista de rastreos">
       <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#5BAE23"></i>
-      <span style="color:#5BAE23;font-weight:800;">SEO Crawler</span>
-    </h1>
+      <span>SEO Crawler</span>
+    </a>
+    <nav class="topnav" aria-label="Secciones">
+      <a href="#/rastreos" :class="seccion() === 'rastreos' && 'active'" :aria-current="seccion() === 'rastreos' ? 'page' : null">
+        <i data-lucide="list" style="width:14px;height:14px"></i> Rastreos</a>
+      <a href="#/clientes" :class="seccion() === 'clientes' && 'active'" :aria-current="seccion() === 'clientes' ? 'page' : null">
+        <i data-lucide="building-2" style="width:14px;height:14px"></i> Clientes</a>
+      <a href="#/programados" :class="seccion() === 'programados' && 'active'" :aria-current="seccion() === 'programados' ? 'page' : null">
+        <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
+    </nav>
     <div class="topbar-actions">
-      <template x-if="view === 'explorer'">
-        <button class="btn btn-sm" @click="backFromExplorer()" data-tip="Volver al detalle del trabajo" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajo
-        </button>
-      </template>
-      <template x-if="view === 'url-detail'">
-        <button class="btn btn-sm" @click="backToDetail()" data-tip="Volver al trabajo" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajo
-        </button>
-      </template>
-      <template x-if="view === 'detail'">
-        <button class="btn btn-sm" @click="backToJobs()" data-tip="Volver a la lista de trabajos" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Trabajos
-        </button>
-      </template>
-      <button class="btn btn-sm" @click="toggleTheme()" :data-tip="theme === 'terminal' ? 'Cambiar al tema claro' : 'Cambiar al tema terminal'" style="display:flex;align-items:center;gap:.35rem">
-        <i data-lucide="contrast" style="width:14px;height:14px"></i>
-        <span x-text="theme === 'terminal' ? 'Claro' : 'Terminal'"></span>
-      </button>
-      <template x-if="view === 'client'">
-        <button class="btn btn-sm" @click="verClientes()" data-tip="Volver a la lista de clientes" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Clientes
-        </button>
-      </template>
-      <template x-if="['jobs', 'programados', 'clients'].includes(view)">
-        <button class="btn btn-sm" @click="view === 'clients' ? (view = 'jobs') : verClientes()"
-                data-tip="Clientes: sus dominios, sus perfiles de rastreo y sus integraciones" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="building-2" style="width:14px;height:14px"></i>
-          <span x-text="view === 'clients' ? 'Rastreos' : 'Clientes'"></span>
-        </button>
-      </template>
-      <template x-if="view === 'jobs' || view === 'programados'">
-        <button class="btn btn-sm" @click="view === 'programados' ? (view = 'jobs') : verProgramados()"
-                data-tip="Rastreos que se repiten solos" style="display:flex;align-items:center;gap:.35rem">
-          <i data-lucide="calendar-clock" style="width:14px;height:14px"></i>
-          <span x-text="view === 'programados' ? 'Rastreos' : 'Programados'"></span>
-        </button>
-      </template>
-      <button class="btn btn-sm" @click="showImportModal = true" data-tip="Importar un backup ZIP de un rastreo" style="display:flex;align-items:center;gap:.35rem">
-        <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup
-      </button>
-      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo SEO de un sitio web" style="display:flex;align-items:center;gap:.35rem">
+      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo (atajo: n)" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
       </button>
+      <div class="menu-wrap" @click.outside="menuAbierto === 'app' && (menuAbierto = '')">
+        <button class="btn btn-sm btn-icon-only" @click="menuAbierto = menuAbierto === 'app' ? '' : 'app'"
+                aria-haspopup="menu" :aria-expanded="menuAbierto === 'app'" aria-label="Más opciones" title="Más opciones">
+          <i data-lucide="more-horizontal" style="width:16px;height:16px"></i>
+        </button>
+        <div class="menu" x-show="menuAbierto === 'app'" x-transition.opacity role="menu">
+          <button role="menuitem" @click="menuAbierto = ''; showImportModal = true">
+            <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup de un rastreo</button>
+          <button role="menuitem" @click="menuAbierto = ''; toggleTheme()">
+            <i data-lucide="contrast" style="width:14px;height:14px"></i>
+            <span x-text="theme === 'terminal' ? 'Tema claro' : 'Tema terminal'"></span></button>
+        </div>
+      </div>
     </div>
   </header>
+
+  <!-- Miga de pan: donde estoy y como vuelvo. Sustituye a los botones
+       «← Trabajo» / «← Trabajos» / «← Clientes» que cambiaban por vista. -->
+  <template x-if="migas().length">
+    <nav class="breadcrumbs" aria-label="Ruta">
+      <template x-for="(m, i) in migas()" :key="i">
+        <span class="crumb">
+          <template x-if="m.href && i < migas().length - 1"><a :href="m.href" x-text="m.texto" :title="m.texto"></a></template>
+          <template x-if="!m.href || i === migas().length - 1"><span x-text="m.texto" :title="m.texto" aria-current="page"></span></template>
+        </span>
+      </template>
+    </nav>
+  </template>
 
   <main class="main">
 
@@ -716,41 +713,53 @@
                   <i data-lucide="play-circle" style="width:13px;height:13px"></i> Reanudar
                 </button>
               </template>
-              <button class="btn btn-sm btn-primary" @click="openExplorer()" style="display:flex;align-items:center;gap:.3rem">
-                <i data-lucide="table-2" style="width:13px;height:13px"></i> Explorador
-              </button>
               <!-- Se programa DESDE un rastreo que ya salio bien: sus semillas y
-                   su configuracion son las buenas, y repetirlas es un clic. Un
-                   formulario en blanco obligaria a reescribir lo que ya existe. -->
+                   su configuracion son las buenas, y repetirlas es un clic. -->
               <button class="btn btn-sm" @click="abrirProgramar()" style="display:flex;align-items:center;gap:.3rem"
                       data-tip="Repetir este mismo rastreo cada cierto tiempo">
                 <i data-lucide="calendar-clock" style="width:13px;height:13px"></i> Programar
               </button>
-              <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta todas las URLs con sus metadatos SEO a CSV (compatible con Excel)">
-                <i data-lucide="download" style="width:13px;height:13px"></i> Exportar CSV
-              </button>
-              <button class="btn btn-sm" @click="exportLinksCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el grafo de enlaces (origen, destino, anchor, rel, follow) a CSV">
-                <i data-lucide="link" style="width:13px;height:13px"></i> Enlaces CSV
-              </button>
-              <button class="btn btn-sm" @click="exportContentCSV()" style="display:flex;align-items:center;gap:.3rem" data-tip="Exporta el contenido de texto y markdown de cada pagina a CSV">
-                <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido CSV
-              </button>
-              <template x-if="['completed','failed','cancelled'].includes(job.status)">
-                <button class="btn btn-sm" @click="exportBackup()" style="display:flex;align-items:center;gap:.3rem">
-                  <i data-lucide="archive" style="width:13px;height:13px"></i> Backup
-                </button>
-              </template>
               <!-- Analisis enriquecido (#40): lo UNICO que gasta dinero, siempre a
-                   mano y con el coste a la vista antes de confirmar. Solo sobre
-                   un rastreo completado (el analisis determinista ya termino). -->
+                   mano y con el coste a la vista antes de confirmar. -->
               <button class="btn btn-sm" @click="abrirEnriquecido()" :disabled="job.status !== 'completed'"
                       style="display:flex;align-items:center;gap:.3rem"
                       :data-tip="job.status === 'completed' ? 'Preguntas a un modelo sobre las URLs, con el coste estimado antes de lanzar' : 'Solo con el rastreo completado y analizado'">
                 <i data-lucide="sparkles" style="width:13px;height:13px"></i> Análisis enriquecido
               </button>
-              <button class="btn btn-sm btn-danger" @click="deleteJob()" style="display:flex;align-items:center;gap:.3rem">
-                <i data-lucide="trash-2" style="width:13px;height:13px"></i> Eliminar
-              </button>
+              <!-- Las cuatro descargas en un menu (UX-09): sueltas ocupaban
+                   media cabecera y competian con lo que se usa a diario. -->
+              <div class="menu-wrap" @click.outside="menuAbierto === 'exportar' && (menuAbierto = '')">
+                <button class="btn btn-sm" @click="menuAbierto = menuAbierto === 'exportar' ? '' : 'exportar'"
+                        aria-haspopup="menu" :aria-expanded="menuAbierto === 'exportar'" style="display:flex;align-items:center;gap:.3rem">
+                  <i data-lucide="download" style="width:13px;height:13px"></i> Exportar
+                  <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
+                </button>
+                <div class="menu" x-show="menuAbierto === 'exportar'" x-transition.opacity role="menu" style="min-width:19rem">
+                  <button role="menuitem" @click="menuAbierto = ''; exportCSV()">
+                    <i data-lucide="table" style="width:14px;height:14px"></i>
+                    <span>URLs con sus metadatos (CSV)<span class="menu-sub">Una fila por URL, compatible con Excel</span></span></button>
+                  <button role="menuitem" @click="menuAbierto = ''; exportLinksCSV()">
+                    <i data-lucide="link" style="width:14px;height:14px"></i>
+                    <span>Enlaces (CSV)<span class="menu-sub">Origen, destino, ancla, rel y follow</span></span></button>
+                  <button role="menuitem" @click="menuAbierto = ''; exportContentCSV()">
+                    <i data-lucide="file-text" style="width:14px;height:14px"></i>
+                    <span>Contenido (CSV)<span class="menu-sub">Texto y markdown de cada página</span></span></button>
+                  <hr>
+                  <button role="menuitem" @click="menuAbierto = ''; exportBackup()" :disabled="!['completed','failed','cancelled'].includes(job.status)">
+                    <i data-lucide="archive" style="width:14px;height:14px"></i>
+                    <span>Backup completo (ZIP)<span class="menu-sub">Para importarlo en otra instalación</span></span></button>
+                </div>
+              </div>
+              <div class="menu-wrap" @click.outside="menuAbierto === 'mas' && (menuAbierto = '')">
+                <button class="btn btn-sm btn-icon-only" @click="menuAbierto = menuAbierto === 'mas' ? '' : 'mas'"
+                        aria-haspopup="menu" :aria-expanded="menuAbierto === 'mas'" aria-label="Más acciones" title="Más acciones">
+                  <i data-lucide="more-horizontal" style="width:16px;height:16px"></i>
+                </button>
+                <div class="menu" x-show="menuAbierto === 'mas'" x-transition.opacity role="menu">
+                  <button role="menuitem" class="danger" @click="menuAbierto = ''; deleteJob()">
+                    <i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar este rastreo</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -858,69 +867,95 @@
           </div>
         </template>
 
-        <!-- Tarjetas de estadisticas -->
+        <!-- Tarjetas (UX-13). Antes eran «URLs totales» y «Procesadas» con
+             la misma cifra, y «Fallidas 0» en rojo. Ahora cada una contesta
+             una pregunta y lleva a donde se mira el detalle. -->
         <template x-if="stats">
           <div class="stats-grid">
-            <div class="stat-card" data-tip="Numero total de URLs unicas almacenadas">
-              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
-                <i data-lucide="link" style="width:16px;height:16px;color:var(--accent);opacity:.7"></i>
-                <div class="stat-value" x-text="fmt.num(stats.total_urls)"></div>
-              </div>
-              <div class="stat-label">URLs totales</div>
-            </div>
-            <div class="stat-card" data-tip="URLs procesadas por el crawler">
-              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
-                <i data-lucide="check-circle" style="width:16px;height:16px;color:var(--green);opacity:.7"></i>
-                <div class="stat-value green" x-text="fmt.num(stats.total_urls_crawled)"></div>
-              </div>
-              <div class="stat-label">Procesadas</div>
-            </div>
-            <div class="stat-card" data-tip="URLs con error: timeouts, DNS, conexion rechazada, 5xx">
-              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
-                <i data-lucide="alert-triangle" style="width:16px;height:16px;color:var(--red);opacity:.7"></i>
-                <div class="stat-value red" x-text="fmt.num(stats.total_urls_failed)"></div>
-              </div>
-              <div class="stat-label">Fallidas</div>
-            </div>
-            <div class="stat-card" data-tip="Problemas SEO detectados por el analizador">
-              <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
-                <i data-lucide="alert-circle" style="width:16px;height:16px;color:var(--orange);opacity:.7"></i>
-                <div class="stat-value orange"
-                  x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0))"></div>
-              </div>
-              <div class="stat-label">Problemas</div>
-            </div>
+            <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('html')"
+                    data-tip="Páginas HTML internas que responden 2xx: lo que el buscador puede indexar">
+              <div class="stat-value" x-text="fmt.num(stats.paginas_html)"></div>
+              <div class="stat-label">Páginas HTML</div>
+              <div class="stat-sub" x-text="'de ' + fmt.num(stats.total_urls) + ' URLs rastreadas'"></div>
+            </button>
+            <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('noindex')"
+                    data-tip="Páginas HTML que el buscador puede indexar; el resto lleva noindex, canonical a otra URL o similar">
+              <div class="stat-value" :class="stats.paginas_html && stats.indexables / stats.paginas_html < .5 ? 'orange' : 'green'"
+                   x-text="fmt.num(stats.indexables)"></div>
+              <div class="stat-label">Indexables</div>
+              <div class="stat-sub" x-show="stats.paginas_html"
+                   x-text="Math.round(stats.indexables / Math.max(1, stats.paginas_html) * 100) + ' % · ' + fmt.num(stats.no_indexables) + ' no indexables'"></div>
+            </button>
+            <button class="stat-card stat-link" @click="issueFilters.severity = 'error'; issueFilters.issue_type = ''; issues = []; switchTab('issues')"
+                    data-tip="Incidencias de gravedad error: lo primero que hay que mirar">
+              <div class="stat-value" :class="erroresDelJob() ? 'red' : 'green'" x-text="fmt.num(erroresDelJob())"></div>
+              <div class="stat-label">Errores</div>
+              <div class="stat-sub" x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0)) + ' incidencias en total'"></div>
+            </button>
+            <button class="stat-card stat-link" @click="switchTab('diff')"
+                    data-tip="Lo que ha cambiado respecto al censo anterior del mismo sitio">
+              <template x-if="job.comparacion && job.comparacion.comparable">
+                <div>
+                  <div class="stat-value" :class="(job.comparacion.alertas || []).length ? 'orange' : 'green'"
+                       x-text="(job.comparacion.alertas || []).length ? (job.comparacion.alertas || []).length + ' alertas' : 'Sin alertas'"></div>
+                  <div class="stat-label">Frente al censo anterior</div>
+                  <div class="stat-sub" x-text="fmt.dia(job.comparacion.fecha_anterior)"></div>
+                </div>
+              </template>
+              <template x-if="!(job.comparacion && job.comparacion.comparable)">
+                <div>
+                  <div class="stat-value" style="color:var(--text-dim)">—</div>
+                  <div class="stat-label">Frente al censo anterior</div>
+                  <div class="stat-sub" x-text="job.comparacion ? 'no comparable' : 'sin comparación automática'"></div>
+                </div>
+              </template>
+            </button>
           </div>
         </template>
 
-        <!-- Pestanas -->
-        <div class="tabs">
-          <div class="tab" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')" style="display:flex;align-items:center;gap:.35rem">
+        <!-- Pestanas (UX-09/10/11). Cinco de uso diario y lo especializado
+             bajo «Avanzado». La antigua pestana URLs era una version pobre
+             del Explorador: ahora la pestana Explorador abre el de verdad. -->
+        <div class="tabs tabs-main" role="tablist">
+          <button class="tab" role="tab" :aria-selected="detailTab === 'overview'" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')">
             <i data-lucide="layout-dashboard" style="width:14px;height:14px"></i> Resumen
-          </div>
-          <div class="tab" :class="detailTab === 'urls' && 'active'" @click="switchTab('urls')" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="link" style="width:14px;height:14px"></i> URLs <span class="count" x-text="(urlsTotal || stats?.total_urls) ? fmt.num(urlsTotal || stats.total_urls) : ''"></span>
-          </div>
-          <div class="tab" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0))"></span>
-          </div>
-          <div class="tab" :class="detailTab === 'links' && 'active'" @click="switchTab('links')" style="display:flex;align-items:center;gap:.35rem">
+          </button>
+          <button class="tab" role="tab" aria-selected="false" @click="openExplorer()" data-tip="Todas las URLs, con filtros por columna">
+            <i data-lucide="table-2" style="width:14px;height:14px"></i> Explorador
+            <span class="count" x-text="stats ? fmt.num(stats.total_urls) : ''"></span>
+          </button>
+          <button class="tab" role="tab" :aria-selected="detailTab === 'issues'" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')">
+            <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0)"></span>
+          </button>
+          <button class="tab" role="tab" :aria-selected="detailTab === 'links'" :class="detailTab === 'links' && 'active'" @click="switchTab('links')">
             <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal ? fmt.num(linksTotal) : ''"></span>
-          </div>
-          <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
-          </div>
-          <div class="tab" :class="detailTab === 'semantic' && 'active'" @click="switchTab('semantic')" data-tip="Mapa semantico vectorial con embeddings, clustering y canibalizacion" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="orbit" style="width:14px;height:14px"></i> Semantico
-          </div>
-          <div class="tab" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado entre este rastreo y otro del mismo sitio" style="display:flex;align-items:center;gap:.35rem">
+          </button>
+          <button class="tab" role="tab" :aria-selected="detailTab === 'diff'" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
             <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
-          </div>
-          <div class="tab" :class="detailTab === 'enriquecido' && 'active'" @click="switchTab('enriquecido')" data-tip="Ejecuciones del analisis enriquecido: progreso, coste y resultados" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="sparkles" style="width:14px;height:14px"></i> Enriquecido <span class="count" x-text="enriqRuns.length || ''"></span>
-          </div>
-          <div class="tab" :class="detailTab === 'cleaning' && 'active'" @click="switchTab('cleaning')" data-tip="Limpieza opcional del contenido extraido por grupos de URL" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="eraser" style="width:14px;height:14px"></i> Limpieza
+          </button>
+          <button class="tab" role="tab" :aria-selected="detailTab === 'insights'" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones">
+            <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
+          </button>
+          <div class="menu-wrap" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
+            <button class="tab" role="tab" :aria-selected="['semantic','enriquecido','cleaning'].includes(detailTab)"
+                    :class="['semantic','enriquecido','cleaning'].includes(detailTab) && 'active'"
+                    @click="menuAbierto = menuAbierto === 'avanzado' ? '' : 'avanzado'" aria-haspopup="menu">
+              <i data-lucide="flask-conical" style="width:14px;height:14px"></i>
+              <span x-text="({semantic:'Semántico', enriquecido:'Enriquecido', cleaning:'Limpieza'})[detailTab] || 'Avanzado'"></span>
+              <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
+            </button>
+            <div class="menu" x-show="menuAbierto === 'avanzado'" x-transition.opacity role="menu" style="left:0;right:auto;min-width:20rem">
+              <button role="menuitem" @click="menuAbierto = ''; switchTab('semantic')">
+                <i data-lucide="orbit" style="width:14px;height:14px"></i>
+                <span>Semántico<span class="menu-sub">Mapa de temas, canibalización y huecos de contenido</span></span></button>
+              <button role="menuitem" @click="menuAbierto = ''; switchTab('enriquecido')">
+                <i data-lucide="sparkles" style="width:14px;height:14px"></i>
+                <span>Enriquecido <span class="text-dim" x-show="enriqRuns.length" x-text="'(' + enriqRuns.length + ')'"></span>
+                  <span class="menu-sub">Ejecuciones del análisis con modelo: progreso, coste y resultados</span></span></button>
+              <button role="menuitem" @click="menuAbierto = ''; switchTab('cleaning')">
+                <i data-lucide="eraser" style="width:14px;height:14px"></i>
+                <span>Limpieza<span class="menu-sub">Quitar texto de plantilla del contenido extraído</span></span></button>
+            </div>
           </div>
         </div>
 
@@ -1331,114 +1366,20 @@
           </div>
         </template>
 
-        <!-- ===== PESTANA: URLs ===== -->
-        <template x-if="detailTab === 'urls'">
-          <div>
-            <div class="flex gap-1 mb-2" style="flex-wrap:wrap">
-              <select @change="urlFilters.status_group = $el.value; applyUrlFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
-                <option value="">Todos los estados</option>
-                <option value="2xx">2xx - Exito</option>
-                <option value="3xx">3xx - Redireccion</option>
-                <option value="4xx">4xx - No encontrado</option>
-                <option value="5xx">5xx - Error servidor</option>
-              </select>
-              <select @change="urlFilters.is_internal = $el.value; applyUrlFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
-                <option value="">Internas / Externas</option>
-                <option value="true">Internas</option>
-                <option value="false">Externas</option>
-              </select>
-              <span class="text-dim text-sm" style="margin-left:auto;align-self:center" x-text="fmt.num(urlsTotal) + ' URLs'"></span>
-            </div>
-
-            <template x-if="loading">
-              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
-            </template>
-
-            <template x-if="!loading && urls.length === 0">
-              <div class="empty"><h3>No se encontraron URLs</h3></div>
-            </template>
-
-            <template x-if="urls.length > 0">
-              <div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th data-tip="Direccion completa de la pagina rastreada">URL</th>
-                        <th data-tip="Codigo de respuesta HTTP (200, 301, 404, 500, etc.)">Estado</th>
-                        <th data-tip="Etiqueta title de la pagina">Titulo</th>
-                        <th data-tip="Numero de palabras visibles en la pagina">Palabras</th>
-                        <th data-tip="Tiempo de respuesta del servidor">Tiempo</th>
-                        <th data-tip="Tamano de la respuesta HTTP">Tamano</th>
-                        <th data-tip="Clics desde la home (o desde la portada de cada idioma), siguiendo enlaces internos follow. Vacio: no hay ningun camino de enlaces desde la home, o el censo es anterior a esta columna y no se ha re-analizado">Clics</th>
-                        <th data-tip="Inlinks: enlaces internos que apuntan a esta URL">In</th>
-                        <th data-tip="Outlinks: enlaces que salen de esta URL">Out</th>
-                        <th data-tip="PageRank interno en escala 0-100: mide la importancia de la pagina segun cuantos enlaces internos recibe y de que paginas. Es logaritmica y esta anclada al maximo del sitio, asi que cada 25 puntos son diez veces menos autoridad que la pagina mas fuerte. La escala 0-10 de siempre apelotonaba el 85% del sitio por debajo de 0,1; esta los separa.">PR</th>
-                        <th data-tip="Problemas SEO detectados en esta URL">Issues</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <template x-for="u in urls" :key="u.id">
-                        <tr @click="openUrlDetail(u.id)" style="cursor:pointer">
-                          <td style="max-width:350px" :title="u.url">
-                            <div class="truncate" x-text="u.url"></div>
-                          </td>
-                          <td>
-                            <span :class="{'severity-error': u.status_group === '5xx' || u.status_group === '4xx', 'severity-warning': u.status_group === '3xx'}"
-                              x-text="u.status_code || u.status_group || '—'"></span>
-                          </td>
-                          <td style="max-width:200px" :title="u.html_meta?.title || ''">
-                            <div class="truncate" x-text="u.html_meta?.title || '—'"></div>
-                          </td>
-                          <td x-text="fmt.num(u.word_count)"></td>
-                          <td x-text="fmt.ms(u.response_time_ms)"></td>
-                          <td x-text="fmt.bytes(u.content_length)"></td>
-                          <td x-text="u.click_depth ?? '—'"></td>
-                          <td x-text="fmt.num(u.inlinks_count)"></td>
-                          <td x-text="fmt.num(u.outlinks_count)"></td>
-                          <td>
-                            <div style="display:flex;align-items:center;gap:6px">
-                              <div style="width:40px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-                                <div :style="'width:' + (u.pagerank_score ?? 0) + '%;background:var(--accent);height:100%;border-radius:3px'"></div>
-                              </div>
-                              <span x-text="u.pagerank_score != null ? u.pagerank_score : (u.pagerank != null ? u.pagerank.toFixed(1) : '—')" style="font-size:.75rem;min-width:24px"></span>
-                            </div>
-                          </td>
-                          <td>
-                            <span class="text-dim" x-text="'—'"></span>
-                          </td>
-                        </tr>
-                      </template>
-                    </tbody>
-                  </table>
-                </div>
-
-                <div class="pagination">
-                  <span>Pagina <strong x-text="urlsPage"></strong> de <strong x-text="urlsPages"></strong> &middot; <span x-text="fmt.num(urlsTotal)"></span> en total</span>
-                  <div class="pagination-buttons">
-                    <button class="btn btn-sm" :disabled="urlsPage <= 1" @click="setUrlsPage(urlsPage - 1)">&laquo;</button>
-                    <button class="btn btn-sm" :disabled="urlsPage >= urlsPages" @click="setUrlsPage(urlsPage + 1)">&raquo;</button>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </template>
-
         <!-- ===== PESTANA: PROBLEMAS ===== -->
         <template x-if="detailTab === 'issues'">
           <div>
             <div class="flex gap-1 mb-2" style="flex-wrap:wrap">
-              <select @change="issueFilters.severity = $el.value; applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+              <select x-model="issueFilters.severity" @change="applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
                 <option value="">Todas las gravedades</option>
                 <option value="error">Error</option>
                 <option value="warning">Aviso</option>
                 <option value="info">Info</option>
               </select>
-              <select @change="issueFilters.issue_type = $el.value; applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+              <select x-model="issueFilters.issue_type" @change="applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
                 <option value="">Todos los tipos</option>
                 <template x-for="t in issueTypes" :key="t">
-                  <option :value="t" x-text="fmt.issue(t)"></option>
+                  <option :value="t" :selected="t === issueFilters.issue_type" x-text="fmt.issue(t)"></option>
                 </template>
               </select>
               <span class="text-dim text-sm" style="margin-left:auto;align-self:center" x-text="fmt.num(issuesTotal) + ' problemas'"></span>

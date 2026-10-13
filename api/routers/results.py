@@ -625,6 +625,17 @@ def get_stats(
     ).scalar() or 0
     external_count = total_urls - internal_count
 
+    # Paginas HTML internas con 2xx y cuantas son indexables. `indexable` NULL
+    # (rastreo sin analizar) no cuenta en ninguno de los dos lados.
+    paginas_html, indexables, no_indexables = db.query(
+        func.count(Url.id),
+        func.count(Url.id).filter(Url.indexable.is_(True)),
+        func.count(Url.id).filter(Url.indexable.is_(False)),
+    ).filter(
+        Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True),
+        Url.status_group == "2xx",
+    ).one()
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -644,6 +655,9 @@ def get_stats(
         urls_by_resource_type=urls_by_rt,
         internal_count=internal_count,
         external_count=external_count,
+        paginas_html=paginas_html or 0,
+        indexables=indexables or 0,
+        no_indexables=no_indexables or 0,
     )
 
 

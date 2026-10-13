@@ -99,14 +99,17 @@ html[data-theme="terminal"] .topbar{
   border-bottom:1px solid var(--border-hi);
   box-shadow:0 1px 0 rgba(61,255,106,.15),0 4px 18px rgba(0,0,0,.6);
 }
-html[data-theme="terminal"] .topbar h1{font-size:1.6rem}
+html[data-theme="terminal"] .topbar h1,
+html[data-theme="terminal"] .topbar-brand{font-size:1.6rem}
 html[data-theme="terminal"] .topbar h1 span,
+html[data-theme="terminal"] .topbar-brand span,
 html[data-theme="terminal"] .topbar-icon{
   color:var(--accent) !important;
   text-shadow:var(--glow);
   font-weight:400 !important;
 }
-html[data-theme="terminal"] .topbar h1 span::after{
+html[data-theme="terminal"] .topbar h1 span::after,
+html[data-theme="terminal"] .topbar-brand span::after{
   content:'_';
   animation:termBlink 1s steps(1) infinite;
   margin-left:.1rem;
@@ -395,3 +398,9 @@ html[data-theme="terminal"] .exp-detail-url{font-family:var(--font-mono);color:v
 
 /* ----- Foco visible ----- */
 html[data-theme="terminal"] :focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:0}
+
+/* ----- M6: navegacion, menus y miga de pan ----- */
+html[data-theme="terminal"] .topnav a{text-transform:uppercase;font-size:1.05rem}
+html[data-theme="terminal"] .topnav a.active{background:transparent;color:var(--accent);text-shadow:var(--glow)}
+html[data-theme="terminal"] .menu{background:var(--bg-card);border-color:var(--border-hi)}
+html[data-theme="terminal"] .breadcrumbs{background:transparent}

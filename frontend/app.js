@@ -94,6 +94,13 @@ const POSITION_LABEL = {
   header: 'Cabecera', sidebar: 'Lateral',
 };
 
+// Pestanas de la ficha <-> tramo de la URL (#/rastreos/<id>/<tramo>)
+const TAB_SLUG = {
+  overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'informe',
+  semantic: 'semantico', diff: 'comparar', enriquecido: 'enriquecido', cleaning: 'limpieza',
+};
+const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k]));
+
 // Helpers
 const fmt = {
   // `useGrouping: 'always'`: en es-ES Intl no agrupa los numeros de cuatro
@@ -271,6 +278,10 @@ function app() {
       { etiqueta: 'Cada mes',      cron: '0 3 1 * *' },
     ],
     theme: document.documentElement.dataset.theme || 'light',
+    menuAbierto: '',          // '' | 'app' | 'exportar' | 'mas'
+    urlDetailId: null,
+    urlDetailDesde: 'detail', // a donde vuelve la ficha de URL: 'detail' | 'explorer'
+    _aplicandoRuta: false,
     loading: false,
     error: null,
 
@@ -392,10 +403,23 @@ function app() {
 
     // ------- Init -------
     init() {
-      this.loadJobs();
+      // La ruta manda (UX-03): un enlace pegado, una recarga o el boton atras
+      // llevan a la misma vista. Sin hash, la lista de rastreos.
+      const inicial = location.hash && location.hash !== '#/' ? location.hash : '#/rastreos';
+      history.replaceState(null, '', inicial);
+      this._irARuta(inicial);
+      window.addEventListener('popstate', () => this._irARuta(location.hash));
+      // Cualquier cambio de vista, rastreo, pestana o filtro se refleja en la
+      // URL. Un solo vigilante en vez de acordarse en cada metodo.
+      this.$watch('_ruta()', h => {
+        if (!h || location.hash === h) return;
+        if (this._aplicandoRuta) history.replaceState(null, '', h);
+        else history.pushState(null, '', h);
+      });
 
       // Keyboard shortcut: 'n' to open create modal
       document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.menuAbierto) { this.menuAbierto = ''; return; }
         if (e.key === 'n' && !this.showCreate && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
           this.openCreate();
         }
@@ -426,6 +450,131 @@ function app() {
           }
         }
       }).observe(document.body, { childList: true, subtree: true });
+    },
+
+    // ------- Rutas (UX-03) -------
+    // #/rastreos                       lista de rastreos (?estado=)
+    // #/rastreos/<id>[/<pestana>]      ficha; pestanas en castellano (TAB_SLUG)
+    // #/rastreos/<id>/problemas?tipo=&gravedad=
+    // #/rastreos/<id>/explorador
+    // #/rastreos/<id>/url/<url_id>
+    // #/clientes · #/clientes/<id> · #/clientes/nuevo · #/programados
+    _ruta() {
+      const v = this.view;
+      if (v === 'jobs') return '#/rastreos' + (this.jobsFilter ? '?estado=' + this.jobsFilter : '');
+      if (v === 'clients') return '#/clientes';
+      if (v === 'client') return this.cliente ? '#/clientes/' + this.cliente.id : '#/clientes/nuevo';
+      if (v === 'programados') return '#/programados';
+      if (!this.job) return '';
+      const base = '#/rastreos/' + this.job.id;
+      if (v === 'explorer') return base + '/explorador';
+      if (v === 'url-detail') return this.urlDetailId ? base + '/url/' + this.urlDetailId : base;
+      if (v !== 'detail') return '';
+      const t = this.detailTab;
+      if (t === 'overview') return base;
+      let h = base + '/' + (TAB_SLUG[t] || t);
+      if (t === 'issues') {
+        const q = new URLSearchParams();
+        if (this.issueFilters.issue_type) q.set('tipo', this.issueFilters.issue_type);
+        if (this.issueFilters.severity) q.set('gravedad', this.issueFilters.severity);
+        if (q.toString()) h += '?' + q.toString();
+      }
+      return h;
+    },
+
+    async _irARuta(hash) {
+      const [ruta, qs] = (hash || '').replace(/^#/, '').split('?');
+      const q = new URLSearchParams(qs || '');
+      const p = ruta.split('/').filter(Boolean);
+      this._aplicandoRuta = true;
+      try {
+        if (!p.length || (p[0] === 'rastreos' && p.length === 1)) {
+          const estado = q.get('estado') || '';
+          if (this.view !== 'jobs' || this.jobsFilter !== estado || !this.jobs.length) {
+            this._salirDeJob();
+            this.view = 'jobs';
+            this.jobsFilter = estado;
+            this.jobsPage = 1;
+            await this.loadJobs();
+          }
+        } else if (p[0] === 'clientes') {
+          if (!p[1]) await this.verClientes();
+          else if (p[1] === 'nuevo') this.nuevoCliente();
+          else if (!this.cliente || this.cliente.id !== p[1] || this.view !== 'client') await this.abrirCliente(p[1]);
+        } else if (p[0] === 'programados') {
+          await this.verProgramados();
+        } else if (p[0] === 'rastreos') {
+          if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
+          if (!this.job) return;
+          const sub = p[2];
+          if (sub === 'explorador') {
+            if (this.view !== 'explorer') this.openExplorer();
+          } else if (sub === 'url' && p[3]) {
+            if (this.view !== 'url-detail' || String(this.urlDetailId) !== p[3]) await this.openUrlDetail(+p[3]);
+          } else {
+            if (this.view === 'explorer') this._unbindExplorerKeyNav();
+            this.view = 'detail';
+            const tab = SLUG_TAB[sub] || 'overview';
+            if (tab === 'issues') {
+              const tipo = q.get('tipo') || '', grav = q.get('gravedad') || '';
+              if (tipo !== this.issueFilters.issue_type || grav !== this.issueFilters.severity) {
+                this.issueFilters.issue_type = tipo;
+                this.issueFilters.severity = grav;
+                this.issues = [];
+                this.issuesPage = 1;
+              }
+            }
+            await this.switchTab(tab);
+          }
+        } else {
+          history.replaceState(null, '', '#/rastreos');
+          await this._irARuta('#/rastreos');
+        }
+      } finally {
+        // El vigilante de la ruta corre en un microtask: se suelta el
+        // indicador despues, para que lo que dispare esta navegacion
+        // reemplace la entrada del historial en vez de apilar otra.
+        await this.$nextTick();
+        this._aplicandoRuta = false;
+      }
+    },
+
+    // Seccion de la barra superior que se marca como activa.
+    seccion() {
+      if (['clients', 'client'].includes(this.view)) return 'clientes';
+      if (this.view === 'programados') return 'programados';
+      return 'rastreos';
+    },
+
+    // Miga de pan: donde estoy y por donde vuelvo.
+    migas() {
+      const m = [];
+      const v = this.view;
+      if (v === 'client') {
+        m.push({ texto: 'Clientes', href: '#/clientes' });
+        m.push({ texto: this.cliente ? this.cliente.nombre : 'Nuevo cliente' });
+      }
+      if (['detail', 'explorer', 'url-detail'].includes(v) && this.job) {
+        m.push({ texto: 'Rastreos', href: '#/rastreos' });
+        if (this.job.cliente_id) m.push({ texto: this.job.cliente_nombre || this.job.client_id, href: '#/clientes/' + this.job.cliente_id });
+        m.push({ texto: this.job.name, href: '#/rastreos/' + this.job.id });
+        if (v === 'explorer') m.push({ texto: 'Explorador' });
+        if (v === 'url-detail') {
+          if (this.urlDetailDesde === 'explorer') m.push({ texto: 'Explorador', href: '#/rastreos/' + this.job.id + '/explorador' });
+          const u = this.urlDetail && this.urlDetail.url;
+          m.push({ texto: u ? u.replace(/^https?:\/\/[^/]+/, '') || '/' : 'URL' });
+        }
+      }
+      return m;
+    },
+
+    // Lo que hay que parar al dejar la ficha de un rastreo.
+    _salirDeJob() {
+      this._stopProgress();
+      this._stopSemanticPoll();
+      this._pararEnriq();
+      if (this.view === 'explorer') this._unbindExplorerKeyNav();
+      this.job = null;
     },
 
     // ------- Tema (terminal / claro) -------
@@ -761,6 +910,9 @@ function app() {
       this._pararEnriq();
       this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null;
       this.urls = []; this.issues = []; this.links = [];
+      this.issueFilters = { severity: '', issue_type: '' };
+      this.linksPage = 1; this.issuesPage = 1;
+      this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
       try {
@@ -775,11 +927,8 @@ function app() {
     },
 
     backToJobs() {
-      this._stopProgress();
-      this._stopSemanticPoll();
-      this._pararEnriq();
+      this._salirDeJob();
       this.view = 'jobs';
-      this.job = null;
       this.loadJobs();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
@@ -1390,6 +1539,9 @@ function app() {
       this.urlDetailLoading = true;
       this.urlDetailTab = 'general';
       this.urlDetail = null;
+      if (this.view === 'explorer') { this.urlDetailDesde = 'explorer'; this._unbindExplorerKeyNav(); }
+      else if (this.view === 'detail') this.urlDetailDesde = 'detail';
+      this.urlDetailId = urlId;
       this.view = 'url-detail';
       try {
         this.urlDetail = await api(`/jobs/${this.job.id}/urls/${urlId}`);
@@ -1400,8 +1552,14 @@ function app() {
     },
 
     backToDetail() {
-      this.view = 'detail';
       this.urlDetail = null;
+      this.urlDetailId = null;
+      if (this.urlDetailDesde === 'explorer') {
+        this.view = 'explorer';
+        this._bindExplorerKeyNav();
+        return;
+      }
+      this.view = 'detail';
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
@@ -1855,6 +2013,11 @@ function app() {
 
     issueBarColor(sev) {
       return { error:'var(--red)', warning:'var(--orange)', info:'var(--blue)' }[sev] || 'var(--text-dim)';
+    },
+
+    erroresDelJob() {
+      if (!this.stats) return 0;
+      return this.stats.issues_by_type.filter(i => i.severity === 'error').reduce((a, i) => a + i.count, 0);
     },
 
     get issueTypes() {
