@@ -154,6 +154,25 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Análisis enriquecido: la base y el botón (13 de octubre)
+
+[#7](https://github.com/dvillarrubia/crawler-masivo/issues/7) y
+[#40](https://github.com/dvillarrubia/crawler-masivo/issues/40). En la ficha de
+un rastreo hay un botón **Análisis enriquecido**: se eligen los módulos y a qué
+páginas aplicarlos, se ve antes de lanzar cuántas llamadas, cuánto dinero y
+cuánto tiempo costará frente al tope mensual del cliente, y se lanza con un
+presupuesto. Corre en el worker por una cola propia, así que no quita sitio a
+los rastreos; al llegar a cualquier tope se para y se queda con lo hecho.
+Repetirlo sin que haya cambiado el sitio sale gratis: las respuestas se guardan
+y se reutilizan. Lanzar exige un token, y sin token configurado en el servidor
+el botón está desactivado: nada de pago se puede disparar por accidente.
+
+Hoy solo hay un módulo de ejemplo («¿es una página legal?»). Los que dan valor
+—tipo de página, soft 404, intención— salen del catálogo de preguntas
+([#9](https://github.com/dvillarrubia/crawler-masivo/issues/9)) y ninguno se
+usa para decidir nada sin pasar antes por el juego de evaluación
+([#8](https://github.com/dvillarrubia/crawler-masivo/issues/8)).
+
 ### Clientes como entidad (13 de octubre)
 
 Primera fase de [#36](https://github.com/dvillarrubia/crawler-masivo/issues/36).
