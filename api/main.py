@@ -73,9 +73,33 @@ def healthcheck():
     return {"status": "ok"}
 
 
+class _EstaticosQueRevalidan(StaticFiles):
+    """Estáticos con `Cache-Control: no-cache`.
+
+    Sin esa cabecera el navegador decide por su cuenta cuánto se fía de su
+    copia, y sirve un `app.js` de hace días junto a un `index.html` recién
+    desplegado. El síntoma es una consola llena de
+    `ReferenceError: <funcion> is not defined` para funciones que SÍ están en
+    el fichero que sirve el servidor, y no hay forma de distinguirlo de un
+    fallo de código sin ir a mirar lo que se sirve de verdad.
+
+    `no-cache` no es «no guardes»: es «guárdalo, pero pregunta antes de
+    usarlo». Como ya se manda `etag`, la pregunta se contesta con un 304 de
+    unos cientos de bytes — el fichero entero son 100 kB, así que lo que se
+    paga es una petición condicional por carga y lo que se gana es no servir
+    nunca una mezcla de dos versiones.
+    """
+
+    async def get_response(self, path: str, scope):
+        respuesta = await super().get_response(path, scope)
+        respuesta.headers.setdefault("Cache-Control", "no-cache")
+        return respuesta
+
+
 # Static files & SPA fallback
 if FRONTEND_DIR.is_dir():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+    app.mount("/static", _EstaticosQueRevalidan(directory=str(FRONTEND_DIR)),
+              name="static")
 
     # Well-known files that browsers and crawlers fetch from the site root.
     # Serving them from a real path with a proper content-type avoids the
@@ -119,4 +143,7 @@ if FRONTEND_DIR.is_dir():
             ext = last.rsplit(".", 1)[-1].lower()
             if ext in _NON_HTML_EXTS:
                 return Response(status_code=404)
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        # El HTML, nunca de cache: es quien referencia al resto, y si se sirve
+        # uno viejo todo lo demas da igual.
+        return FileResponse(str(FRONTEND_DIR / "index.html"),
+                            headers={"Cache-Control": "no-cache"})

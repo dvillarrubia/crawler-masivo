@@ -1766,6 +1766,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    mis semillas y alguna más, las páginas comunes siguen siendo todas las
    mías.
 
+87. **Un estático sin `Cache-Control` mezcla dos versiones de la aplicación**
+   — tras un despliegue, la consola de un navegador salía llena de
+   `Uncaught ReferenceError: verClientes is not defined` para funciones que
+   **sí estaban** en el `app.js` que servía el servidor. El `index.html` venía
+   nuevo y el `app.js` de la caché, y no hay forma de distinguir eso de un
+   fallo de código sin ir a mirar lo que se sirve de verdad: la primera
+   reacción siempre es sospechar del despliegue. A mí me pasó seis veces en un
+   día y lo fui tapando con recargas forzadas en vez de arreglarlo.
+   El servidor mandaba `etag` y `last-modified` pero **no `Cache-Control`**, y
+   sin esa cabecera el navegador decide por su cuenta cuánto se fía de su
+   copia. Ahora los estáticos y el HTML van con `no-cache`, que no es «no
+   guardes» sino «guárdalo, pero pregunta antes de usarlo»: con el `etag` que
+   ya se mandaba, la pregunta se contesta con un **304** de unos cientos de
+   bytes frente a los 100 kB del fichero. Se paga una petición condicional por
+   carga y se gana no servir nunca una mezcla de dos versiones.
+
 88. **Comparar páginas no contesta «qué arregló el cliente»** (#32) — la
    comparación entre censos miraba `status_code`, canonical, título, h1 y
    palabras, que dice qué cambió en el SITIO. Lo que se mira en un seguimiento
