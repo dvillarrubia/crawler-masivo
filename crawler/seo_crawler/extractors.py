@@ -437,6 +437,18 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     )
     desc = _meta("description")
 
+    # Cuantos `<title>` y cuantas meta description hay, VACIOS INCLUIDOS. El
+    # valor se sigue cogiendo como antes —el primer `<title>`, la primera
+    # description con texto—, pero con dos no se sabe cual usara Google, y un
+    # `<title></title>` vacio delante del bueno (dos plugins de SEO peleandose
+    # por la cabecera) se saltaba en silencio. Screaming Frog lo reporta como
+    # «multiple»; el analyzer emite `title_multiple` / `description_multiple`.
+    title_count = len(title_nodes)
+    description_count = len(selector.xpath(
+        f"//meta[normalize-space(translate(@name, '{_XP_UPPER}', '{_XP_LOWER}'))"
+        " = 'description']"
+    ))
+
     # Robots: a page may carry SEVERAL robots meta tags; directives combine
     # and the most restrictive wins downstream, so join all of them.
     robots_vals = _meta_all("robots")
@@ -460,8 +472,10 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     return {
         "title": title_text,
         "title_len": len(title_text) if title_text else None,
+        "title_count": title_count,
         "meta_description": desc,
         "meta_description_len": len(desc) if desc else None,
+        "meta_description_count": description_count,
         "meta_keywords": _meta("keywords"),
         "meta_robots": meta_robots,
         "meta_robots_googlebot": meta_robots_googlebot,
@@ -915,7 +929,16 @@ def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, An
         lang = _clean(link.attrib.get("hreflang", ""))
         href = _resolve(base_url, _clean(link.attrib.get("href", "")))
         if lang and href:
-            results.append({"lang": lang, "href": href})
+            results.append({
+                "lang": lang,
+                "href": href,
+                # Google solo lee el hreflang del `<head>` (o de la cabecera
+                # HTTP o el sitemap): uno en el `<body>` lo ignora, igual que el
+                # canonical (decision 56). Se guarda marcado, no se tira, para
+                # que el analyzer pueda decir por que ese idioma no esta
+                # anotado aunque la plantilla lo escriba.
+                "en_body": not link.xpath("ancestor::head"),
+            })
     return results
 
 

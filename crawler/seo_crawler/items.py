@@ -53,8 +53,10 @@ class HtmlMetaItem(scrapy.Item):
 
     title = scrapy.Field()
     title_len = scrapy.Field()
+    title_count = scrapy.Field()
     meta_description = scrapy.Field()
     meta_description_len = scrapy.Field()
+    meta_description_count = scrapy.Field()
     meta_keywords = scrapy.Field()
     meta_robots = scrapy.Field()
     meta_robots_googlebot = scrapy.Field()
@@ -122,6 +124,7 @@ class HreflangItem(scrapy.Item):
     job_id = scrapy.Field()
     lang = scrapy.Field()
     href = scrapy.Field()
+    en_body = scrapy.Field()  # fuera del <head>: Google lo ignora
 
 
 class StructuredDataItem(scrapy.Item):

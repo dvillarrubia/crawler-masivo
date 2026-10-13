@@ -235,8 +235,13 @@ class HtmlMeta(Base):
 
     title = Column(Text, nullable=True)
     title_len = Column(Integer, nullable=True)
+    # Cuantos `<title>` / meta description hay, vacios incluidos: con dos no se
+    # sabe cual usa Google (`title_multiple`, `description_multiple`). NULL =
+    # rastreo anterior a la columna.
+    title_count = Column(Integer, nullable=True)
     meta_description = Column(Text, nullable=True)
     meta_description_len = Column(Integer, nullable=True)
+    meta_description_count = Column(Integer, nullable=True)
     meta_keywords = Column(Text, nullable=True)
     meta_robots = Column(String(256), nullable=True)
     # `<meta name="googlebot">`. Sin guardarlo, el analyzer recalculaba la
@@ -339,6 +344,10 @@ class Hreflang(Base):
     href = Column(Text, nullable=False)
     return_tag_ok = Column(Boolean, nullable=True)
     lang_valid = Column(Boolean, nullable=True)
+    # Anotacion fuera del `<head>`: Google la ignora, asi que no cuenta como
+    # retorno de nadie y se avisa con `hreflang_in_body`. NULL = rastreo
+    # anterior a la columna (no se sabe; se trata como del head).
+    en_body = Column(Boolean, nullable=True)
 
     url_rel = relationship("Url", back_populates="hreflangs")
 
