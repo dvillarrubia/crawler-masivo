@@ -104,6 +104,7 @@ jobs:
           tests/test_decisiones_api.py tests/test_decisiones.py tests/test_llm.py
           tests/test_enriquecido.py tests/test_enriquecido_api.py
           tests/test_stats_api.py tests/test_rastreos_y_panel_api.py
+          tests/test_explorador_api.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales

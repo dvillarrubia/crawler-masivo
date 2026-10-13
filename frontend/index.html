@@ -1563,9 +1563,17 @@
                         <li><a :href="'#/rastreos/' + job.id + '/url/' + e.url_id" x-text="e.url" :title="e.url"></a></li>
                       </template>
                     </ul>
-                    <button class="btn btn-sm mt-1" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
-                      Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
-                    </button>
+                    <div class="flex gap-1 mt-1" style="flex-wrap:wrap">
+                      <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
+                        Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
+                      </button>
+                      <!-- Las paginas afectadas con todas sus columnas, filtrables y
+                           exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
+                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)">
+                        <i data-lucide="table-2" style="width:13px;height:13px"></i>
+                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en el Explorador
+                      </button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -3294,6 +3302,28 @@
               <i data-lucide="search"></i>
               <input type="text" class="exp-search" placeholder="Buscar URL o título..." x-model="expSearch" @input="explorerSearchInput()">
             </div>
+            <!-- «Con el problema…» (docs/INVESTIGACION_EXPLORADOR.md): el puente con
+                 Problemas. El servidor ya filtraba /urls por issue_type y la
+                 interfaz no lo ofrecia. -->
+            <select class="exp-problema" :class="(expProblema || expGravedad) && 'has-value'" aria-label="Filtrar por problema"
+                    @focus="!issuesResumen && loadIssuesResumen()"
+                    @change="setExpProblema($event.target.value)">
+              <option value="" :selected="!expValorProblema()">Con cualquier problema o ninguno</option>
+              <option value="sev:error" :selected="expValorProblema() === 'sev:error'">Con algún error</option>
+              <option value="sev:warning" :selected="expValorProblema() === 'sev:warning'">Con algún aviso</option>
+              <template x-for="g in [['error','Errores'],['warning','Avisos'],['info','Info']]" :key="g[0]">
+                <optgroup :label="g[1]">
+                  <template x-for="r in resumenIssues(g[0])" :key="r.issue_type">
+                    <option :value="r.issue_type" :selected="expProblema === r.issue_type"
+                            x-text="fmt.issue(r.issue_type) + ' · ' + fmt.num(r.paginas)"></option>
+                  </template>
+                </optgroup>
+              </template>
+              <!-- Si se llega con un problema y aun no hay resumen cargado, que se vea cual. -->
+              <template x-if="expProblema && !(issuesResumen || []).some(r => r.issue_type === expProblema)">
+                <option :value="expProblema" selected x-text="expProblema.split(',').map(fmt.issue).join(', ')"></option>
+              </template>
+            </select>
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
 
             <!-- Active filter chip -->
@@ -3317,18 +3347,30 @@
                     <span>Columnas visibles</span>
                     <button class="exp-col-picker-reset" @click="resetExpColumns()">Restaurar predeterminadas</button>
                   </div>
-                  <template x-for="key in getExpAllColumnKeys()" :key="key">
-                    <label class="exp-col-picker-item">
-                      <input type="checkbox" :checked="isExpColumnActive(key)" @change="toggleExpColumn(key)">
-                      <span x-text="EXP_COLUMN_DEFS[key]?.label || key"></span>
-                    </label>
+                  <input type="search" class="exp-col-buscar" placeholder="Buscar columna…" x-model="expBuscarColumna" aria-label="Buscar columna">
+                  <template x-for="g in expGruposVisibles()" :key="g[0]">
+                    <div class="exp-col-grupo">
+                      <div class="exp-col-grupo-titulo" x-text="g[0]"></div>
+                      <template x-for="key in g[1]" :key="key">
+                        <label class="exp-col-picker-item">
+                          <input type="checkbox" :checked="isExpColumnActive(key)" @change="toggleExpColumn(key)">
+                          <span x-text="EXP_COLUMN_DEFS[key]?.label || key"></span>
+                        </label>
+                      </template>
+                    </div>
                   </template>
+                  <div class="exp-col-nota" x-show="!expBuscarColumna">
+                    «Otros»: la escala 0-10 del PageRank y el % de texto no sirven para decidir (decisiones 34 y 44).
+                  </div>
                 </div>
               </template>
             </div>
 
-            <button class="btn btn-sm" @click="exportCSV()" style="display:flex;align-items:center;gap:.25rem">
-              <i data-lucide="download" style="width:12px;height:12px"></i> CSV
+            <!-- El CSV de esta vista: filtros, orden y columnas visibles. El censo
+                 entero sigue en Exportar, en la ficha del rastreo. -->
+            <button class="btn btn-sm" @click="exportarVista()" style="display:flex;align-items:center;gap:.25rem"
+                    :data-tip="'Descarga las ' + fmt.num(expTotal) + ' URLs de esta vista con las columnas visibles'">
+              <i data-lucide="download" style="width:12px;height:12px"></i> CSV de esta vista
             </button>
           </div>
 
@@ -3338,7 +3380,8 @@
             <span>
               Filtra cada columna debajo de su nombre. En las numéricas, elige el operador
               (<strong>≥</strong> al menos, <strong>&gt;</strong> mayor que, <strong>=</strong> igual,
-              <strong>≤</strong> máximo, <strong>&lt;</strong> menor que) y escribe el valor.
+              <strong>≤</strong> máximo, <strong>&lt;</strong> menor que) y escribe el valor. En las de texto,
+              <strong>∅</strong> busca las vacías y <strong>≠∅</strong> las que tienen valor.
               Usa ↑↓ para moverte por las filas.
             </span>
           </div>
@@ -3389,6 +3432,16 @@
                                 <option value="<"  title="menor que">&lt;</option>
                               </select>
                             </template>
+                            <template x-if="EXP_COLUMN_DEFS[col].type === 'string' && EXP_COLUMN_DEFS[col].vacio">
+                              <select class="exp-filter-op exp-filter-op-texto"
+                                      :class="['vacio','con_valor'].includes(expColumnFilters[col]?.op) && 'has-value'"
+                                      :value="expCurrentOp(col)" title="contiene · vacío · con valor"
+                                      @change="expColumnFilterInput(col, { op: $event.target.value, value: $event.target.value === 'contiene' ? (expColumnFilters[col]?.value || '') : '' })">
+                                <option value="contiene" title="contiene">∋</option>
+                                <option value="vacio" title="vacío">∅</option>
+                                <option value="con_valor" title="con valor">≠∅</option>
+                              </select>
+                            </template>
                             <template x-if="EXP_COLUMN_DEFS[col].type === 'boolean'">
                               <select class="exp-filter-input"
                                       :class="expColumnFilters[col]?.value && 'has-value'"
@@ -3408,6 +3461,7 @@
                                      :placeholder="expFilterPlaceholder(col)"
                                      :title="(EXP_COLUMN_DEFS[col].label || col) + ': ' + expFilterPlaceholder(col)"
                                      :value="expColumnFilters[col]?.value || ''"
+                                     :disabled="['vacio','con_valor'].includes(expColumnFilters[col]?.op)"
                                      @input="expColumnFilterInput(col, { value: $event.target.value })">
                             </template>
                           </div>
@@ -3454,6 +3508,9 @@
                 <button class="exp-detail-close" @click="closeExplorerDetail()">&times;</button>
               </div>
               <div class="exp-detail-tabs">
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'resumen' && 'active'" @click="expDetailTab = 'resumen'">
+                  Resumen SEO
+                </button>
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">
                   Contenido
                 </button>
@@ -3486,6 +3543,47 @@
                 </template>
                 <template x-if="expUrlDetail">
                   <div>
+                    <!-- Resumen SEO: lo primero que se busca al seleccionar una fila
+                         (antes abria en el markdown del contenido). -->
+                    <template x-if="expDetailTab === 'resumen'">
+                      <dl class="exp-resumen">
+                        <dt>Indexabilidad</dt>
+                        <dd :class="expUrlDetail.indexable ? 'green' : (expUrlDetail.indexable === false ? 'orange' : '')"
+                            x-text="expUrlDetail.indexability_status || (expUrlDetail.indexable ? 'Indexable' : '—')"></dd>
+                        <dt>Título</dt>
+                        <dd>
+                          <span x-text="expUrlDetail.html_meta?.title || '(sin título)'"></span>
+                          <span class="text-dim" x-show="expUrlDetail.html_meta?.title_pixel_width"
+                                :class="expUrlDetail.html_meta?.title_pixel_width > 580 && 'orange'"
+                                x-text="' · ' + expUrlDetail.html_meta?.title_pixel_width + ' px' + (expUrlDetail.html_meta?.title_pixel_width > 580 ? ' (Google lo corta)' : '')"></span>
+                        </dd>
+                        <dt>Descripción</dt>
+                        <dd>
+                          <span x-text="expUrlDetail.html_meta?.meta_description || '(sin descripción)'"></span>
+                          <span class="text-dim" x-show="expUrlDetail.html_meta?.meta_description_pixel_width"
+                                :class="expUrlDetail.html_meta?.meta_description_pixel_width > 985 && 'orange'"
+                                x-text="' · ' + expUrlDetail.html_meta?.meta_description_pixel_width + ' px'"></span>
+                        </dd>
+                        <dt>H1</dt>
+                        <dd x-text="((expUrlDetail.headings || []).filter(h => h.tag === 'h1' && !h.oculto).map(h => h.text).join(' · ')) || '(sin H1 visible)'"></dd>
+                        <dt>Canonical</dt>
+                        <dd class="truncate" :title="expUrlDetail.html_meta?.canonical_href || ''"
+                            x-text="expUrlDetail.html_meta?.canonical_href ? (expUrlDetail.html_meta.canonical_href === expUrlDetail.url ? 'a sí misma' : expUrlDetail.html_meta.canonical_href) : '(sin canonical)'"></dd>
+                        <dt>Robots</dt>
+                        <dd x-text="[expUrlDetail.html_meta?.meta_robots, expUrlDetail.html_meta?.x_robots_tag && ('X-Robots-Tag: ' + expUrlDetail.html_meta.x_robots_tag)].filter(Boolean).join(' · ') || '—'"></dd>
+                        <dt>Enlazado</dt>
+                        <dd x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(expUrlDetail.unique_inlinks_count ?? expUrlDetail.inlinks_count ?? 0) + (expUrlDetail.click_depth != null ? expUrlDetail.click_depth + ' clics desde la home' : 'sin profundidad calculada') + (expUrlDetail.pagerank_score != null ? ' · PageRank ' + expUrlDetail.pagerank_score : '') + (expUrlDetail.in_sitemap ? ' · en el sitemap' : ' · fuera del sitemap')"></dd>
+                        <dt>Problemas</dt>
+                        <dd>
+                          <template x-if="!(expUrlDetail.issues || []).length"><span class="green">Ninguno</span></template>
+                          <template x-for="(i, n) in [...(expUrlDetail.issues || [])].sort((a, b) => ({error:0,warning:1,info:2}[a.severity] ?? 3) - ({error:0,warning:1,info:2}[b.severity] ?? 3))" :key="n">
+                            <div><span class="sev-chip" :class="'sev-' + i.severity" x-text="fmt.severity(i.severity)"></span>
+                              <span x-text="fmt.issue(i.issue_type)"></span>
+                              <span class="text-dim text-sm" x-text="fmt.detalles(i.details) ? '· ' + fmt.detalles(i.details) : ''"></span></div>
+                          </template>
+                        </dd>
+                      </dl>
+                    </template>
                     <!-- Content tab: full text + markdown -->
                     <template x-if="expDetailTab === 'content'">
                       <div>

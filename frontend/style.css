@@ -1287,3 +1287,17 @@ button.exp-tab:focus-visible,button.exp-detail-tab:focus-visible,.insight-card-h
 @media(max-width:768px){.ficha-cabecera{margin:-.75rem -.75rem 1rem;padding:.75rem}}
 /* El explorador ocupa el alto que queda: con miga de pan, 29 px menos */
 body:has(.breadcrumbs){--alto-migas:29px}
+
+/* Explorador (docs/INVESTIGACION_EXPLORADOR.md, #131) */
+.exp-problema{max-width:17rem;padding:.25rem .4rem;font-size:.78rem;border:1px solid var(--border);border-radius:var(--radius);background:#fff;color:var(--text)}
+.exp-problema.has-value{border-color:var(--accent);background:var(--accent-subtle)}
+.exp-col-buscar{width:calc(100% - 1rem);margin:.35rem .5rem;padding:.3rem .45rem;font-size:.78rem;border:1px solid var(--border);border-radius:var(--radius)}
+.exp-col-grupo{padding:.15rem 0}
+.exp-col-grupo-titulo{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);padding:.35rem .6rem .1rem}
+.exp-col-nota{font-size:.7rem;color:var(--text-dim);padding:.4rem .6rem .5rem;border-top:1px solid var(--border);margin-top:.25rem}
+.exp-filter-op-texto{min-width:2.4rem}
+.exp-filter-input:disabled{background:var(--bg-hover);color:var(--text-dim)}
+.exp-resumen{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1rem;font-size:.8rem;padding:.25rem 0}
+.exp-resumen dt{color:var(--text-dim)}
+.exp-resumen dd{min-width:0}
+.exp-resumen .green{color:var(--green)}.exp-resumen .orange{color:var(--orange)}

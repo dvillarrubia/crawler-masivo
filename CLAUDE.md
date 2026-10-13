@@ -183,7 +183,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
 | DELETE | `/api/jobs/{id}` | Delete job + cascade |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
-| GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`) |
+| GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`). El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista |
+| GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA`) |
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`), por gravedad y tipo |
 | GET | `/api/jobs/{id}/issues/resumen` | Una fila por tipo: incidencias, páginas distintas y ejemplos (vista agrupada de Problemas) |
 | GET | `/api/jobs/{id}/links` | Link graph |
