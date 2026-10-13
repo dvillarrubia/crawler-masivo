@@ -1005,8 +1005,10 @@ class SEOAnalyzer:
                 Url.indexability_status,
                 Url.blocked_by_robots,
                 HtmlMeta.meta_robots,
+                HtmlMeta.meta_robots_googlebot,
                 HtmlMeta.x_robots_tag,
                 HtmlMeta.canonical_href,
+                HtmlMeta.canonical_header,
             )
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id)
@@ -1034,20 +1036,33 @@ class SEOAnalyzer:
             status_code,
             estado_actual,
             bloqueada_robots,
-            meta_robots,
+            meta_robots_generico,
+            meta_robots_googlebot,
             x_robots,
             canonical_href,
+            canonical_header,
         ) in rows:
             # Una sola funcion, la misma que usa el spider
             # (shared/indexabilidad.py). Antes aqui se repetian las reglas con
             # otro normalizador de URLs —w3lib, que no quita el puerto por
             # defecto— y la misma pagina salia "Canonicalised" para el analyzer
             # e "Indexable" para el spider.
+            #
+            # Y con los MISMOS datos que el spider: antes aqui no llegaban ni el
+            # `<meta name="googlebot">` ni el canonical de la cabecera `Link`,
+            # asi que una pagina que el rastreo marcaba "Noindex" o
+            # "Canonicalised" por cualquiera de los dos volvia a "Indexable" al
+            # analizar, porque este paso reescribe la columna en todas (#26).
+            meta_robots = {
+                "robots": meta_robots_generico,
+                "googlebot": meta_robots_googlebot,
+            }
             es_indexable_calc, motivo_calc = estado_indexabilidad(
                 status_code,
                 meta_robots=meta_robots,
                 x_robots=x_robots,
                 canonical_href=canonical_href,
+                canonical_header=canonical_header,
                 page_url=page_url,
                 bloqueada_por_robots=bool(bloqueada_robots)
                 or (estado_actual or "").startswith("Blocked"),
@@ -1138,15 +1153,17 @@ class SEOAnalyzer:
             select(
                 Url.id,
                 HtmlMeta.meta_robots,
+                HtmlMeta.meta_robots_googlebot,
                 HtmlMeta.x_robots_tag,
             )
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
 
-        for url_id, meta_robots, x_robots in self.session.execute(stmt):
+        for url_id, meta_robots, meta_googlebot, x_robots in self.session.execute(stmt):
             for fuente, valor in (
                 ("meta_robots", meta_robots),
+                ("meta_robots_googlebot", meta_googlebot),
                 ("x_robots_tag", x_robots),
             ):
                 problemas = robots_bad_separators(valor)

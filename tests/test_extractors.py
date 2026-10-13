@@ -287,6 +287,17 @@ def test_extract_hreflang_resolves_href():
     assert langs["en"] == "https://e.com/en"
 
 
+def test_extract_hreflang_lee_rel_por_tokens():
+    """`rel` es una lista de tokens sin caja (decision 56), tambien aqui (#26)."""
+    s = sel(
+        '<link rel="Alternate" hreflang="es" href="/es">'
+        '<link rel="alternate nofollow" hreflang="en" href="/en">'
+        '<link rel="canonical" hreflang="fr" href="/fr">'
+    )
+    langs = {r["lang"] for r in ex.extract_hreflang(s, base_url="https://e.com/x")}
+    assert langs == {"es", "en"}
+
+
 # ---------------------------------------------------------------------------
 # extract_resources  (mixed content, srcset)
 # ---------------------------------------------------------------------------

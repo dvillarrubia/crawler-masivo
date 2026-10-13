@@ -97,7 +97,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | meta_description_pixel_width | int | Ancho en px en SERP (Arial 14px) |
 | meta_keywords | text | Meta keywords |
 | meta_robots | varchar(256) | Contenido de meta robots |
-| x_robots_tag | varchar(256) | Header X-Robots-Tag |
+| meta_robots_googlebot | varchar(256) | `<meta name="googlebot">` (manda sobre el `robots` generico para Google) |
+| x_robots_tag | varchar(256) | Cabeceras X-Robots-Tag, **una por linea** (cada una puede ir a un bot; antes de oct-2026, unidas por coma) |
 | canonical_href | text | `<link rel="canonical">` href |
 | canonical_count | int | Cuantos `rel=canonical` lleva la pagina. Con mas de uno Google los ignora todos |
 | canonical_in_body | bool | Hay algun canonical fuera del `<head>`: Google lo ignora siempre |

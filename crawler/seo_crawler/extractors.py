@@ -907,7 +907,11 @@ def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, An
     so reciprocal (return-tag) validation can match them reliably.
     """
     results: list[dict[str, Any]] = []
-    for link in selector.css('link[rel="alternate"][hreflang]'):
+    # `rel` es una lista de tokens y sin caja (decision 56): con el selector
+    # exacto, `rel="Alternate"` o `rel="alternate nofollow"` daban cero hreflang.
+    for link in selector.css("link[hreflang]"):
+        if "alternate" not in rel_tokens(link.attrib.get("rel")):
+            continue
         lang = _clean(link.attrib.get("hreflang", ""))
         href = _resolve(base_url, _clean(link.attrib.get("href", "")))
         if lang and href:

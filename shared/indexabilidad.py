@@ -37,6 +37,14 @@ BOT_POR_DEFECTO = "googlebot"
 
 _PUERTOS_POR_DEFECTO = {"http": "80", "https": "443"}
 
+# Las cabeceras `X-Robots-Tag` se guardan en UNA columna separadas por salto de
+# linea, no por coma. Cada cabecera puede ir dirigida a un bot
+# (`googlebot: noindex`) y unidas con coma se perdia donde acababa cada una:
+# `bingbot: noindex, googlebot: noindex` se leia como una sola dirigida a
+# bingbot y la pagina salia indexable. El salto de linea no puede aparecer
+# dentro de una cabecera HTTP, y `robots_tokens` lo trata como separador.
+SEPARADOR_CABECERAS = "\n"
+
 
 def misma_url(a: str | None, b: str | None) -> bool:
     """¿Son la misma URL a efectos de canonical?
@@ -90,7 +98,11 @@ def _directivas(meta_robots, x_robots, bot: str) -> set[str]:
     else:
         tokens |= robots_tokens(meta_robots)
 
-    cabeceras = x_robots if isinstance(x_robots, (list, tuple)) else [x_robots]
+    if isinstance(x_robots, (list, tuple)):
+        cabeceras = list(x_robots)
+    else:
+        # Lo guardado en BD: una cadena con una cabecera por linea.
+        cabeceras = (x_robots or "").split(SEPARADOR_CABECERAS)
     for cabecera in cabeceras:
         if not cabecera:
             continue
@@ -162,4 +174,17 @@ def es_noindex(meta_robots=None, x_robots=None, bot: str = BOT_POR_DEFECTO) -> b
     return "noindex" in tokens or "none" in tokens
 
 
-__all__ = ["estado_indexabilidad", "es_noindex", "misma_url", "hay_noindex"]
+def es_nofollow(meta_robots=None, x_robots=None, bot: str = BOT_POR_DEFECTO) -> bool:
+    """¿La directiva de pagina convierte todos sus enlaces en nofollow?
+
+    Con las mismas reglas que el `noindex`: un `<meta name="googlebot"
+    content="nofollow">` cuenta, y un `X-Robots-Tag: bingbot: nofollow` no.
+    """
+    tokens = _directivas(meta_robots, x_robots, bot)
+    return "nofollow" in tokens or "none" in tokens
+
+
+__all__ = [
+    "estado_indexabilidad", "es_noindex", "es_nofollow", "misma_url", "hay_noindex",
+    "SEPARADOR_CABECERAS",
+]

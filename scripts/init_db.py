@@ -39,6 +39,8 @@ if __name__ == "__main__":
         # Varios canonicals, o uno en el body: Google los ignora.
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_in_body BOOLEAN"))
+        # Robots dirigido a Google: lo necesita el analyzer al recalcular (#26).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_robots_googlebot VARCHAR(256)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
