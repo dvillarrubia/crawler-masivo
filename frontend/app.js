@@ -34,37 +34,37 @@ const STATUS_LABEL = {
 const ISSUE_LABEL = {
   '4xx_error': 'Error 4xx',
   '5xx_error': 'Error 5xx',
-  'connection_error': 'Error de conexion',
-  'title_missing': 'Sin titulo',
-  'title_too_short': 'Titulo muy corto',
-  'title_too_long': 'Titulo muy largo',
-  'title_duplicate': 'Titulo duplicado',
-  'description_missing': 'Sin meta descripcion',
-  'description_too_short': 'Descripcion muy corta',
-  'description_too_long': 'Descripcion muy larga',
-  'description_duplicate': 'Descripcion duplicada',
+  'connection_error': 'Error de conexión',
+  'title_missing': 'Sin título',
+  'title_too_short': 'Título muy corto',
+  'title_too_long': 'Título muy largo',
+  'title_duplicate': 'Título duplicado',
+  'description_missing': 'Sin meta descripción',
+  'description_too_short': 'Descripción muy corta',
+  'description_too_long': 'Descripción muy larga',
+  'description_duplicate': 'Descripción duplicada',
   'h1_missing': 'Sin H1',
-  'h1_multiple': 'Multiples H1',
+  'h1_multiple': 'Múltiples H1',
   'h1_duplicate': 'H1 duplicado',
   'canonical_missing': 'Sin canonical',
   'canonical_cross_domain': 'Canonical externo',
   'canonical_broken': 'Canonical roto',
   'hreflang_missing_return': 'Hreflang sin retorno',
-  'hreflang_invalid_lang': 'Hreflang idioma invalido',
+  'hreflang_invalid_lang': 'Hreflang idioma inválido',
   'hreflang_broken_target': 'Hreflang destino roto',
   'structured_data_error': 'Error datos estructurados',
   'structured_data_warning': 'Aviso datos estructurados',
-  'noindex_page': 'Pagina noindex',
+  'noindex_page': 'Página noindex',
   'robots_invalid_syntax': 'Meta robots mal escrito',
   'duplicate_content': 'Contenido duplicado',
   'near_duplicate_content': 'Contenido casi duplicado',
-  'redirect_loop': 'Bucle de redireccion',
+  'redirect_loop': 'Bucle de redirección',
   'redirect_chain': 'Cadena de redirecciones',
   'image_missing_alt': 'Imagen sin alt',
   'http_url': 'URL sin HTTPS',
   'mixed_content': 'Contenido mixto',
   'missing_hsts': 'Sin cabecera HSTS',
-  'missing_csp': 'Sin politica CSP',
+  'missing_csp': 'Sin política CSP',
   'missing_x_content_type_options': 'Sin X-Content-Type-Options',
   'missing_x_frame_options': 'Sin X-Frame-Options',
   'unsafe_crossorigin': 'Crossorigin inseguro',
@@ -73,16 +73,16 @@ const ISSUE_LABEL = {
   'low_text_ratio': 'Ratio texto bajo',
   'url_too_long': 'URL muy larga',
   'url_non_ascii': 'URL con caracteres no ASCII',
-  'url_uppercase': 'URL con mayusculas',
+  'url_uppercase': 'URL con mayúsculas',
   'url_underscores': 'URL con guiones bajos',
-  'url_multiple_slashes': 'URL con barras multiples',
-  'url_has_parameters': 'URL con parametros',
+  'url_multiple_slashes': 'URL con barras múltiples',
+  'url_has_parameters': 'URL con parámetros',
   'url_non_seo_friendly': 'URL no SEO-friendly',
   'url_cms_faceted': 'URL de filtro/CMS (crawl budget)',
-  'orphan_page': 'Pagina huerfana',
+  'orphan_page': 'Página huérfana',
   'high_outlink_count': 'Demasiados enlaces salientes',
-  'sitemap_orphan': 'Huerfana (solo en sitemap)',
-  'solo_enlazada_por_redireccion': 'Solo se llega por una redireccion',
+  'sitemap_orphan': 'Huérfana (solo en sitemap)',
+  'solo_enlazada_por_redireccion': 'Solo se llega por una redirección',
   'not_reachable_from_home': 'Sin camino de enlaces desde la home',
   'not_in_sitemap': 'No incluida en el sitemap',
 };
@@ -90,7 +90,7 @@ const ISSUE_LABEL = {
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
 
 const POSITION_LABEL = {
-  nav: 'Navegacion', footer: 'Pie de pagina', content: 'Contenido',
+  nav: 'Navegación', footer: 'Pie de página', content: 'Contenido',
   header: 'Cabecera', sidebar: 'Lateral',
 };
 
@@ -230,10 +230,10 @@ const fmt = {
   },
   respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : r,
   campoDiff: c => ({
-    status_code: 'Codigo de respuesta',
+    status_code: 'Código de respuesta',
     indexability_status: 'Indexabilidad',
     canonical_href: 'Canonical',
-    title: 'Titulo',
+    title: 'Título',
     h1: 'H1',
     word_count: 'Palabras (cambio de mas del 20%)',
   }[c] || c),
@@ -241,14 +241,14 @@ const fmt = {
   // saber que ha pasado, no el nombre de la regla.
   reglaDiff: r => ({
     canonical_a_otro_host: 'El canonical se ha ido a otro host',
-    canonical_a_otra_url: 'Paginas canonicalizadas a otra URL',
-    rotas: 'Paginas que ahora responden con error',
-    salen_del_indice: 'Paginas que han salido del indice',
-    redirigidas: 'Paginas que ahora redirigen',
-    pierden_contenido: 'Paginas que han perdido texto',
-    cambia_el_titulo: 'Paginas que han cambiado de titulo',
-    desaparecen: 'Paginas que ya no se encuentran en el sitio',
-    entran_en_el_indice: 'Paginas que han entrado en el indice',
+    canonical_a_otra_url: 'Páginas canonicalizadas a otra URL',
+    rotas: 'Páginas que ahora responden con error',
+    salen_del_indice: 'Páginas que han salido del índice',
+    redirigidas: 'Páginas que ahora redirigen',
+    pierden_contenido: 'Páginas que han perdido texto',
+    cambia_el_titulo: 'Páginas que han cambiado de título',
+    desaparecen: 'Páginas que ya no se encuentran en el sitio',
+    entran_en_el_indice: 'Páginas que han entrado en el índice',
   }[r] || r),
   // El color de una alerta sale de SU severidad. La tarjeta de la ficha
   // llevaba el rojo fijo, asi que un aviso se pintaba como una critica: si
@@ -317,6 +317,7 @@ function app() {
     ],
     theme: document.documentElement.dataset.theme || 'light',
     menuAbierto: '',
+    dialogo: null,            // { titulo, mensaje, aceptar, peligro, escribir, entrada, solo_aviso }
     editarJob: null,          // { name, tipo, cliente_id } mientras el dialogo esta abierto
     editarError: '',          // '' | 'app' | 'exportar' | 'mas'
     urlDetailId: null,
@@ -928,11 +929,13 @@ function app() {
       // Se pide el slug escrito: un borrado que se lleva perfiles e
       // integraciones no puede salir de un clic suelto. Los rastreos NO se
       // borran desde aqui: son censos entregados y quedan sin cliente.
-      const slug = prompt(
-        `Borrar el cliente "${this.cliente.nombre}" y sus perfiles.\n\n`
-        + `Sus ${this.cliente.n_jobs} rastreos NO se borran: quedan sin cliente.\n\n`
-        + `Escribe su slug (${this.cliente.slug}) para confirmar:`);
-      if (slug === null) return;
+      const ok = await this.preguntar({
+        titulo: `Borrar el cliente «${this.cliente.nombre}»`,
+        mensaje: `Se borran el cliente y sus perfiles. Sus ${this.cliente.n_jobs} rastreos NO se borran: quedan sin cliente.`,
+        aceptar: 'Borrar cliente', peligro: true, escribir: this.cliente.slug,
+      });
+      if (!ok) return;
+      const slug = this.cliente.slug;
       try {
         await api(`/clients/${this.cliente.id}?confirmar=${encodeURIComponent(slug)}`, { method: 'DELETE' });
         this.cliente = null;
@@ -979,7 +982,8 @@ function app() {
     },
 
     async borrarPerfil(p) {
-      if (!confirm(`Borrar el perfil "${p.nombre}"?\n\nSus rastreos NO se borran: quedan colgados del cliente.`)) return;
+      if (!await this.preguntar({ titulo: `Borrar el perfil «${p.nombre}»`,
+        mensaje: 'Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Borrar perfil', peligro: true })) return;
       try {
         await api(`/clients/${this.cliente.id}/profiles/${p.id}`, { method: 'DELETE' });
         await this.abrirCliente(this.cliente.id, 'rastreos');
@@ -1114,6 +1118,32 @@ function app() {
       if (this.semanticPollTimer) { clearInterval(this.semanticPollTimer); this.semanticPollTimer = null; }
     },
 
+    // ------- Dialogos propios (UX-21) -------
+    // Sustituyen a confirm(), alert() y prompt(): los nativos bloquean la
+    // pagina entera (y las pruebas automaticas), no se pueden leer con calma
+    // y no dicen que es irreversible con el peso que merece.
+    // `escribir`: texto que hay que teclear para habilitar el boton (borrados
+    // que se llevan mucho por delante). Devuelve true/false.
+    preguntar({ titulo, mensaje, aceptar = 'Aceptar', peligro = false, escribir = '', solo_aviso = false }) {
+      return new Promise(resolver => {
+        this.dialogo = { titulo, mensaje, aceptar, peligro, escribir, entrada: '', solo_aviso, resolver };
+        this.$nextTick(() => {
+          const el = document.querySelector('.dialogo [data-foco]');
+          if (el) el.focus();
+        });
+      });
+    },
+    avisar(titulo, mensaje) {
+      return this.preguntar({ titulo, mensaje, aceptar: 'Entendido', solo_aviso: true });
+    },
+    cerrarDialogo(respuesta) {
+      const d = this.dialogo;
+      if (!d) return;
+      if (respuesta && d.escribir && d.entrada.trim() !== d.escribir) return;
+      this.dialogo = null;
+      d.resolver(!!respuesta);
+    },
+
     // ------- Nombre, tipo y cliente (UX-07/08) -------
     async abrirEditarJob() {
       if (!this.job) return;
@@ -1142,20 +1172,24 @@ function app() {
 
     // ------- Cancelar / Eliminar -------
     async cancelJob() {
-      if (!this.job || !confirm('¿Cancelar este rastreo? El crawler se detendrá en cuanto procese la señal.')) return;
+      if (!this.job || !await this.preguntar({ titulo: 'Cancelar este rastreo',
+        mensaje: 'El crawler se detendrá en cuanto procese la señal. Lo rastreado hasta ahora se conserva y se puede reanudar.',
+        aceptar: 'Cancelar el rastreo', peligro: true })) return;
       try {
         this.job = await api(`/jobs/${this.job.id}/cancel`, { method: 'PATCH' });
         this._stopProgress();
-      } catch (e) { alert(e.message); }
+      } catch (e) { this.avisar('No se pudo cancelar', e.message); }
     },
 
     async deleteJob() {
-      if (!this.job || !confirm('¿Eliminar este trabajo y todos sus datos? Esta acción no se puede deshacer.')) return;
+      if (!this.job || !await this.preguntar({ titulo: 'Eliminar este rastreo',
+        mensaje: `Se borran «${this.job.name}» y todos sus datos: URLs, enlaces, incidencias y comparaciones. No se puede deshacer. Si es un censo entregado, descarga antes el backup (Exportar → Backup completo).`,
+        aceptar: 'Eliminar para siempre', peligro: true, escribir: 'eliminar' })) return;
       try {
         await api(`/jobs/${this.job.id}`, { method: 'DELETE' });
         this.showToast('Trabajo eliminado', 'info');
         this.backToJobs();
-      } catch (e) { alert(e.message); }
+      } catch (e) { this.avisar('No se pudo eliminar', e.message); }
     },
 
     // ------- Pestanas -------
@@ -1252,8 +1286,8 @@ function app() {
       // Se avisa de lo que NO se borra: los rastreos que ya lanzo son
       // censos entregados o comparables, y tirarlos por cambiar de idea
       // sobre la hora seria perder el historico del cliente.
-      if (!confirm('Quitar la programacion "' + p.nombre + '"?\n\n'
-          + 'Los rastreos que ya ha lanzado NO se borran.')) return;
+      if (!await this.preguntar({ titulo: `Quitar la programación «${p.nombre}»`,
+        mensaje: 'Deja de lanzarse sola. Los rastreos que ya ha lanzado NO se borran.', aceptar: 'Quitar', peligro: true })) return;
       try {
         await api('/programaciones/' + p.id, { method: 'DELETE' });
         await this.cargarProgramaciones();
@@ -1531,7 +1565,8 @@ function app() {
     },
 
     async deleteGeminiAccount(id) {
-      if (!confirm('Eliminar esta API key? Los analisis pasados conservaran el id pero no podran re-embebir queries.')) return;
+      if (!await this.preguntar({ titulo: 'Eliminar esta API key',
+        mensaje: 'Los análisis pasados conservan su resultado, pero no podrán volver a calcular embeddings de consultas.', aceptar: 'Eliminar', peligro: true })) return;
       try {
         await api(`/semantic/gemini-accounts/${id}`, { method: 'DELETE' });
         this.geminiAccounts = await api('/semantic/gemini-accounts');
@@ -1545,14 +1580,14 @@ function app() {
       const labels = {
         starting: 'Iniciando...',
         loading_data: 'Cargando datos de la BD...',
-        filtering: 'Filtrando paginas...',
+        filtering: 'Filtrando páginas...',
         embedding: 'Generando embeddings (esto puede tardar)...',
         weighting: 'Calculando pesos...',
         centroid: 'Calculando centroide...',
         dimensionality_reduction: 'Reduccion dimensional (PCA + UMAP)...',
         clustering: 'Clustering HDBSCAN...',
         classification: 'Clasificando anillos...',
-        cannibalization: 'Detectando canibalizacion...',
+        cannibalization: 'Detectando canibalización...',
         done: 'Completado',
       };
       return labels[stage] || stage || 'Procesando...';
@@ -1869,7 +1904,8 @@ function app() {
       if (!this._cleaningValidRules()) { this.cleaningError = 'Añade al menos una regla con valor'; return; }
       const group = this.cleaningGroups.find(g => g.group_key === this.cleaningSelectedGroup);
       const pages = group ? fmt.num(group.pages) : '?';
-      if (!confirm(`¿Aplicar las reglas de limpieza al grupo "${this.cleaningSelectedGroup}" (${pages} páginas)? Los originales se conservan y podrás revertir.`)) return;
+      if (!await this.preguntar({ titulo: 'Aplicar la limpieza',
+        mensaje: `Se aplican las reglas al grupo «${this.cleaningSelectedGroup}» (${pages} páginas). Los originales se conservan y se puede revertir.`, aceptar: 'Aplicar' })) return;
       this.cleaningApplying = true;
       this.cleaningError = null;
       this.cleaningMessage = null;
@@ -1888,7 +1924,8 @@ function app() {
     },
 
     async revertCleaning() {
-      if (!confirm(`¿Revertir la limpieza del grupo "${this.cleaningSelectedGroup}"? Se restaurará el contenido original.`)) return;
+      if (!await this.preguntar({ titulo: 'Revertir la limpieza',
+        mensaje: `Se restaura el contenido original del grupo «${this.cleaningSelectedGroup}».`, aceptar: 'Revertir' })) return;
       this.cleaningReverting = true;
       this.cleaningError = null;
       this.cleaningMessage = null;
@@ -1971,7 +2008,7 @@ function app() {
         // Restart progress polling
         this._startProgress();
       } catch (e) {
-        alert(e.message);
+        this.avisar('No se pudo reanudar', e.message);
       }
       this.resuming = false;
     },
