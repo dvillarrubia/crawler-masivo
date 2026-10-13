@@ -1223,3 +1223,34 @@ button.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .veredicto-valor.orange{color:var(--orange)}
 .veredicto-lista{list-style:none;display:flex;flex-direction:column;gap:.25rem;font-size:.85rem}
 .veredicto-lista li{display:flex;gap:.5rem;align-items:center}
+
+/* Panel de clientes (UX-07) */
+.panel-clientes{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.75rem}
+.panel-cliente{display:flex;flex-direction:column;gap:.5rem;color:var(--text)}
+.panel-cliente:hover{border-color:var(--accent);color:var(--text)}
+.panel-cliente-cab{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.panel-cifras{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-top:.4rem}
+.panel-num{font-size:1.25rem;font-weight:700}
+.panel-num.red{color:var(--red)}.panel-num.green{color:var(--green)}.panel-num.orange{color:var(--orange)}
+.panel-lbl{font-size:.72rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.03em}
+.delta{font-size:.72rem;margin-left:.2rem;text-transform:none;letter-spacing:0}
+.delta.peor{color:var(--red)}.delta.mejor{color:var(--green)}
+.panel-alerta{font-size:.8rem;padding:.3rem .5rem;border-radius:var(--radius);background:var(--orange-bg);color:var(--orange)}
+.panel-alerta.critica{background:var(--red-bg);color:var(--red)}
+.panel-integ{display:flex;gap:.25rem;flex-wrap:wrap}
+.aviso-sin-cliente{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:var(--text);border-left:3px solid var(--orange)}
+.aviso-sin-cliente:hover{border-color:var(--orange);color:var(--text)}
+
+/* Lista de rastreos (UX-07) */
+.filtros-rastreos{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.filtros-rastreos select{width:auto;padding:.35rem .5rem;font-size:.8rem}
+.grupo-chips{display:flex;gap:.25rem}
+.tipo-chip{font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;padding:.05rem .35rem;
+  margin-left:.35rem;border-radius:3px;background:var(--bg-hover);color:var(--text-dim);border:1px solid var(--border);vertical-align:middle}
+.text-red{color:var(--red)}
+
+/* Nuevo rastreo: lo tecnico plegado (UX-19) */
+.config-avanzada{margin-top:.5rem;border-top:1px solid var(--border);padding-top:.5rem}
+.config-avanzada > summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline;
+  font-weight:600;font-size:.85rem;padding:.35rem 0;list-style:revert}
+.config-avanzada[open] > summary{margin-bottom:.5rem}

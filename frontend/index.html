@@ -37,15 +37,15 @@
        Clientes ni a Programados. Las secciones son enlaces de verdad (#/...),
        asi que se pueden abrir en otra pestana y el boton atras funciona. -->
   <header class="topbar" style="border-top: 3px solid #5BAE23;">
-    <a href="#/rastreos" class="topbar-brand" title="Ir a la lista de rastreos">
+    <a href="#/clientes" class="topbar-brand" title="Ir al panel de clientes">
       <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#5BAE23"></i>
       <span>SEO Crawler</span>
     </a>
     <nav class="topnav" aria-label="Secciones">
-      <a href="#/rastreos" :class="seccion() === 'rastreos' && 'active'" :aria-current="seccion() === 'rastreos' ? 'page' : null">
-        <i data-lucide="list" style="width:14px;height:14px"></i> Rastreos</a>
       <a href="#/clientes" :class="seccion() === 'clientes' && 'active'" :aria-current="seccion() === 'clientes' ? 'page' : null">
         <i data-lucide="building-2" style="width:14px;height:14px"></i> Clientes</a>
+      <a href="#/rastreos" :class="seccion() === 'rastreos' && 'active'" :aria-current="seccion() === 'rastreos' ? 'page' : null">
+        <i data-lucide="list" style="width:14px;height:14px"></i> Rastreos</a>
       <a href="#/programados" :class="seccion() === 'programados' && 'active'" :aria-current="seccion() === 'programados' ? 'page' : null">
         <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
     </nav>
@@ -145,6 +145,53 @@
       </div>
     </template>
 
+    <!-- ===== MODAL: NOMBRE, TIPO Y CLIENTE DE UN RASTREO (UX-07/08) ===== -->
+    <template x-if="editarJob && job">
+      <div class="modal-backdrop" @click.self="editarJob = null" @keydown.escape.window="editarJob = null">
+        <div class="modal" style="max-width:32rem" role="dialog" aria-modal="true" aria-labelledby="titulo-editar-job">
+          <div class="modal-header">
+            <h2 id="titulo-editar-job" style="display:flex;align-items:center;gap:.4rem">
+              <i data-lucide="pencil" style="width:18px;height:18px"></i> Ordenar este rastreo
+            </h2>
+          </div>
+          <div class="modal-body">
+            <p class="text-dim text-sm" style="margin-bottom:.8rem">
+              No cambia nada de lo rastreado ni de lo analizado: solo dónde aparece y cómo se compara.
+            </p>
+            <label class="text-sm" for="ej-nombre">Nombre</label>
+            <input id="ej-nombre" type="text" x-model="editarJob.name" style="width:100%;margin-bottom:.8rem">
+
+            <label class="text-sm">Tipo</label>
+            <div class="grupo-chips" style="margin-bottom:.3rem" role="radiogroup">
+              <template x-for="t in [['censo', 'Censo'], ['canario', 'Canario'], ['prueba', 'Prueba']]" :key="t[0]">
+                <button class="btn btn-sm chip" role="radio" :aria-checked="editarJob.tipo === t[0]"
+                        :class="editarJob.tipo === t[0] && 'chip-on'" @click="editarJob.tipo = t[0]" x-text="t[1]"></button>
+              </template>
+            </div>
+            <div class="text-dim" style="font-size:.76rem;margin-bottom:.8rem">
+              Solo los censos cuentan en la evolución del cliente y en el panel. Ahora:
+              <span x-text="job.tipo ? 'marcado a mano' : 'deducido del nombre'"></span>.
+            </div>
+
+            <label class="text-sm" for="ej-cliente">Cliente</label>
+            <select id="ej-cliente" x-model="editarJob.cliente_id" style="width:100%">
+              <option value="">Sin cliente</option>
+              <template x-for="c in clientes" :key="c.id">
+                <option :value="c.id" :selected="c.id === editarJob.cliente_id" x-text="c.nombre"></option>
+              </template>
+            </select>
+            <div x-show="editarError" class="card" style="border-left:3px solid var(--red);margin-top:.8rem">
+              <div class="text-sm" x-text="editarError"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" @click="editarJob = null">Cancelar</button>
+            <button class="btn btn-primary" @click="guardarJob()">Guardar</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- ===== RASTREOS PROGRAMADOS ===== -->
     <template x-if="view === 'programados'">
       <div>
@@ -224,8 +271,8 @@
     <template x-if="view === 'clients'">
       <div>
         <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
-          <span class="text-dim text-sm">Cada cliente con sus dominios, sus perfiles de rastreo y sus
-            integraciones. Un rastreo lanzado desde un cliente hereda su configuracion.</span>
+          <span class="text-dim text-sm">El último censo de cada cliente y cómo ha cambiado desde el anterior.
+            Un rastreo lanzado desde un cliente hereda su configuración.</span>
           <button class="btn btn-primary btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:.35rem"
                   @click="nuevoCliente()">
             <i data-lucide="plus" style="width:14px;height:14px"></i> Nuevo cliente
@@ -242,41 +289,69 @@
           </div>
         </template>
 
+        <!-- Rastreos sin cliente (UX-08): los anteriores a la decision 83 y
+             los lanzados sin elegir cliente. Mientras no se asignen, no
+             cuentan en la serie de nadie. -->
+        <template x-if="panelClientes && panelClientes.rastreos_sin_cliente">
+          <a class="card mb-2 aviso-sin-cliente" href="#/rastreos?cliente=ninguno">
+            <i data-lucide="link-2-off" style="width:16px;height:16px"></i>
+            <span><strong x-text="fmt.num(panelClientes.rastreos_sin_cliente)"></strong>
+              rastreos no tienen cliente y no cuentan en la evolución de nadie. Asígnalos desde su ficha (menú ⋯).</span>
+          </a>
+        </template>
+
+        <!-- Panel (UX-07): cada cliente con su ultimo CENSO y la diferencia con
+             el anterior. Los canarios y las pruebas no cuentan. -->
         <template x-if="clientes.length">
-          <div class="table-wrap">
-            <table>
-              <thead><tr>
-                <th>Cliente</th>
-                <th>Dominios</th>
-                <th data-tip="Perfiles de rastreo: el sitio principal, el blog, un competidor...">Perfiles</th>
-                <th>Rastreos</th>
-                <th>Ultimo rastreo</th>
-                <th data-tip="Integraciones con APIs externas y si su credencial esta puesta en el servidor">Integraciones</th>
-              </tr></thead>
-              <tbody>
-                <template x-for="c in clientes" :key="c.id">
-                  <tr @click="abrirCliente(c.id)" style="cursor:pointer">
-                    <td>
-                      <div style="font-weight:500" x-text="c.nombre"></div>
-                      <div class="text-dim text-sm" x-text="c.slug"></div>
-                    </td>
-                    <td class="text-sm" x-text="(c.dominios || []).join(', ') || '—'"></td>
-                    <td x-text="c.n_perfiles"></td>
-                    <td x-text="fmt.num(c.n_jobs)"></td>
-                    <td x-text="c.ultimo_job_at ? fmt.ago(c.ultimo_job_at) : '—'"></td>
-                    <td>
-                      <template x-for="i in c.integraciones" :key="i.tipo + (i.credencial_env || '')">
-                        <span class="badge" :class="i.configurada ? 'badge-completed' : 'badge-pending'"
-                              style="margin-right:.25rem"
-                              :data-tip="i.configurada ? 'Credencial puesta en el servidor' : 'Falta la variable ' + (i.credencial_env || '') + ' en el .env del servidor'"
-                              x-text="i.tipo"></span>
-                      </template>
-                      <span class="text-dim" x-show="!(c.integraciones || []).length">—</span>
-                    </td>
-                  </tr>
+          <div class="panel-clientes">
+            <template x-for="p in (panelClientes ? panelClientes.clientes : [])" :key="p.id">
+              <a class="card panel-cliente" :href="'#/clientes/' + p.id">
+                <div class="panel-cliente-cab">
+                  <strong x-text="p.nombre"></strong>
+                  <span class="text-dim text-sm" x-text="p.n_rastreos + (p.n_rastreos === 1 ? ' rastreo' : ' rastreos')"></span>
+                </div>
+                <template x-if="!p.ultimo">
+                  <div class="text-dim text-sm">Sin ningún censo completado todavía.</div>
                 </template>
-              </tbody>
-            </table>
+                <template x-if="p.ultimo">
+                  <div>
+                    <div class="text-sm text-dim truncate" :title="p.ultimo.name"
+                         x-text="'Último censo: ' + fmt.dia(p.ultimo.created_at)"></div>
+                    <div class="panel-cifras">
+                      <div>
+                        <div class="panel-num" x-text="fmt.num(p.ultimo.paginas_html)"></div>
+                        <div class="panel-lbl">páginas</div>
+                      </div>
+                      <div>
+                        <div class="panel-num" :class="p.ultimo.paginas_html && p.ultimo.indexables / p.ultimo.paginas_html < .5 ? 'orange' : ''"
+                             x-text="p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></div>
+                        <div class="panel-lbl">indexables</div>
+                      </div>
+                      <div>
+                        <div class="panel-num" :class="p.ultimo.errores ? 'red' : 'green'" x-text="fmt.num(p.ultimo.errores)"></div>
+                        <div class="panel-lbl">
+                          errores
+                          <template x-if="p.anterior">
+                            <span class="delta" :class="p.ultimo.errores > p.anterior.errores ? 'peor' : (p.ultimo.errores < p.anterior.errores ? 'mejor' : '')"
+                                  :title="'El censo anterior (' + fmt.dia(p.anterior.created_at) + ') tenía ' + fmt.num(p.anterior.errores)"
+                                  x-text="p.ultimo.errores === p.anterior.errores ? '=' : (p.ultimo.errores > p.anterior.errores ? '▲ ' : '▼ ') + fmt.num(Math.abs(p.ultimo.errores - p.anterior.errores))"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                    <template x-if="p.ultimo.alertas">
+                      <div class="panel-alerta" :class="p.ultimo.alertas_criticas ? 'critica' : ''"
+                           x-text="(p.ultimo.alertas_criticas ? p.ultimo.alertas_criticas + ' críticas · ' : '') + p.ultimo.alertas + (p.ultimo.alertas === 1 ? ' alerta' : ' alertas') + ' frente al censo anterior'"></div>
+                    </template>
+                  </div>
+                </template>
+                <div class="panel-integ">
+                  <template x-for="i in ((clientes.find(c => c.id === p.id) || {}).integraciones || [])" :key="i.tipo + (i.credencial_env || '')">
+                    <span class="badge" :class="i.configurada ? 'badge-completed' : 'badge-pending'" x-text="i.tipo"></span>
+                  </template>
+                </div>
+              </a>
+            </template>
           </div>
         </template>
       </div>
@@ -368,31 +443,64 @@
             </div>
 
             <div class="card">
-              <h3 style="font-size:1rem" class="mb-1">Rastreos del cliente</h3>
-              <template x-if="!clienteJobs.length">
-                <div class="text-dim text-sm">Ningun rastreo todavia.</div>
+              <!-- La serie (UX-08): cada rastreo con las cifras que se comparan
+                   de un censo a otro. La diferencia de errores se mide contra el
+                   censo ANTERIOR (no contra el canario de en medio). -->
+              <div class="flex items-center mb-1" style="gap:.5rem;flex-wrap:wrap">
+                <h3 style="font-size:1rem">Evolución de los rastreos</h3>
+                <label class="checkbox-label text-sm" style="margin-left:auto">
+                  <input type="checkbox" x-model="serieSoloCensos"> Solo censos
+                </label>
+              </div>
+              <template x-if="!clienteSerie.length">
+                <div class="text-dim text-sm">Ningún rastreo todavía.</div>
               </template>
-              <template x-if="clienteJobs.length">
+              <template x-if="clienteSerie.length">
+                <div class="table-wrap">
                 <table style="width:100%;font-size:.85rem">
                   <thead><tr>
-                    <th style="text-align:left">nombre</th>
-                    <th style="text-align:left">perfil</th>
-                    <th style="text-align:left">estado</th>
-                    <th style="text-align:left">rastreadas</th>
-                    <th style="text-align:left">creado</th>
+                    <th style="text-align:left">fecha</th>
+                    <th style="text-align:left">rastreo</th>
+                    <th style="text-align:right">URLs</th>
+                    <th style="text-align:right">páginas</th>
+                    <th style="text-align:right">indexables</th>
+                    <th style="text-align:right">errores</th>
+                    <th style="text-align:right">avisos</th>
+                    <th style="text-align:left">frente al anterior</th>
                   </tr></thead>
                   <tbody>
-                    <template x-for="j in clienteJobs" :key="j.id">
-                      <tr @click="openJob(j.id)" style="cursor:pointer">
-                        <td x-text="j.name"></td>
-                        <td class="text-dim" x-text="nombreDePerfil(j.profile_id) || 'puntual'"></td>
-                        <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
-                        <td x-text="fmt.num(j.total_urls_crawled)"></td>
-                        <td x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
+                    <template x-for="(j, n) in serieVisible()" :key="j.id">
+                      <tr @click="location.hash = '#/rastreos/' + j.id" style="cursor:pointer">
+                        <td style="white-space:nowrap" x-text="fmt.dia(j.created_at)" :title="fmt.date(j.created_at)"></td>
+                        <td>
+                          <span x-text="j.name"></span>
+                          <span class="tipo-chip" x-show="j.tipo !== 'censo'" x-text="j.tipo"></span>
+                          <span class="badge" :class="statusColor(j.status)" x-show="j.status !== 'completed'" x-text="fmt.status(j.status)"></span>
+                        </td>
+                        <td style="text-align:right" x-text="fmt.num(j.urls)"></td>
+                        <td style="text-align:right" x-text="fmt.num(j.paginas_html)"></td>
+                        <td style="text-align:right" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
+                        <td style="text-align:right;white-space:nowrap">
+                          <span x-text="fmt.num(j.errores)"></span>
+                          <template x-if="censoAnterior(j)">
+                            <span class="delta" :class="j.errores > censoAnterior(j).errores ? 'peor' : (j.errores < censoAnterior(j).errores ? 'mejor' : '')"
+                                  x-text="j.errores === censoAnterior(j).errores ? '=' : (j.errores > censoAnterior(j).errores ? '▲' : '▼') + fmt.num(Math.abs(j.errores - censoAnterior(j).errores))"></span>
+                          </template>
+                        </td>
+                        <td style="text-align:right" x-text="fmt.num(j.avisos)"></td>
+                        <td class="text-sm">
+                          <template x-if="j.alertas === null"><span class="text-dim">—</span></template>
+                          <template x-if="j.alertas !== null">
+                            <a :href="'#/rastreos/' + j.id + '/comparar'" @click.stop
+                               :class="j.alertas_criticas ? 'text-red' : ''"
+                               x-text="j.alertas ? j.alertas + (j.alertas === 1 ? ' alerta' : ' alertas') : 'sin alertas'"></a>
+                          </template>
+                        </td>
                       </tr>
                     </template>
                   </tbody>
                 </table>
+                </div>
               </template>
             </div>
           </div>
@@ -566,27 +674,33 @@
 
     <template x-if="view === 'jobs'">
       <div>
-        <!-- Filtros -->
-        <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
-          <span class="text-dim text-sm" style="margin-right:.25rem;display:flex;align-items:center;gap:.25rem" data-tip="Filtra los trabajos por su estado actual">
-            <i data-lucide="filter" style="width:13px;height:13px"></i> Filtrar:
-          </span>
-          <template x-for="s in ['pending','running','analyzing','completed','failed','cancelled']">
-            <button class="btn btn-sm"
-              :class="jobsFilter === s ? 'btn-primary' : ''"
-              :data-tip="({
-                pending:   'Trabajos en cola esperando a ser procesados por un worker',
-                running:   'Trabajos que se estan rastreando ahora mismo',
-                completed: 'Trabajos que terminaron correctamente con analisis SEO',
-                failed:    'Trabajos que fallaron por error de red, timeout u otro problema',
-                cancelled: 'Trabajos cancelados manualmente por el usuario'
-              })[s]"
-              @click="filterJobs(s)" x-text="fmt.status(s)"></button>
-          </template>
-          <template x-if="jobsFilter">
-            <button class="btn btn-sm" @click="filterJobs('')" data-tip="Quitar el filtro y mostrar todos los trabajos">Limpiar</button>
-          </template>
-          <span class="text-dim text-sm" style="margin-left:auto" x-text="jobsTotal + ' trabajos'"></span>
+        <!-- Filtros (UX-07): buscar, cliente, tipo y estado. Todo va a la
+             URL, asi que «los canarios de Lopesan» es un enlace. -->
+        <div class="filtros-rastreos mb-2">
+          <div class="exp-search-wrap" style="max-width:320px">
+            <i data-lucide="search"></i>
+            <input type="search" class="exp-search" placeholder="Buscar por nombre o dominio…"
+                   x-model="jobsBuscar" @input.debounce.400ms="jobsPage = 1; loadJobs()" aria-label="Buscar rastreos">
+          </div>
+          <select x-model="jobsCliente" @change="jobsPage = 1; loadJobs()" aria-label="Cliente">
+            <option value="">Todos los clientes</option>
+            <option value="ninguno">Sin cliente</option>
+            <template x-for="c in clientes" :key="c.id">
+              <option :value="c.id" :selected="c.id === jobsCliente" x-text="c.nombre"></option>
+            </template>
+          </select>
+          <div class="grupo-chips" role="group" aria-label="Tipo">
+            <template x-for="t in [['', 'Todos'], ['censo', 'Censos'], ['canario', 'Canarios'], ['prueba', 'Pruebas']]" :key="t[0]">
+              <button class="btn btn-sm chip" :class="jobsTipo === t[0] && 'chip-on'" @click="jobsTipo = t[0]; jobsPage = 1; loadJobs()" x-text="t[1]"></button>
+            </template>
+          </div>
+          <select x-model="jobsFilter" @change="jobsPage = 1; loadJobs()" aria-label="Estado">
+            <option value="">Cualquier estado</option>
+            <template x-for="st in ['pending','running','analyzing','completed','failed','cancelled']" :key="st">
+              <option :value="st" :selected="st === jobsFilter" x-text="fmt.status(st)"></option>
+            </template>
+          </select>
+          <span class="text-dim text-sm" style="margin-left:auto" x-text="fmt.num(jobsTotal) + (jobsTotal === 1 ? ' rastreo' : ' rastreos')"></span>
         </div>
 
         <!-- Cargando -->
@@ -629,7 +743,10 @@
                   <template x-for="j in jobs" :key="j.id">
                     <tr @click="openJob(j.id)" style="cursor:pointer">
                       <td>
-                        <div style="font-weight:500" x-text="j.name"></div>
+                        <div style="font-weight:500">
+                          <span x-text="j.name"></span>
+                          <span class="tipo-chip" x-show="j.tipo_efectivo && j.tipo_efectivo !== 'censo'" x-text="j.tipo_efectivo"></span>
+                        </div>
                         <div class="text-dim text-sm truncate" style="max-width:250px" x-text="j.seeds?.[0] || ''"></div>
                       </td>
                       <td>
@@ -760,6 +877,9 @@
                   <i data-lucide="more-horizontal" style="width:16px;height:16px"></i>
                 </button>
                 <div class="menu" x-show="menuAbierto === 'mas'" x-transition.opacity role="menu">
+                  <button role="menuitem" @click="menuAbierto = ''; abrirEditarJob()">
+                    <i data-lucide="pencil" style="width:14px;height:14px"></i> Nombre, tipo y cliente</button>
+                  <hr>
                   <button role="menuitem" class="danger" @click="menuAbierto = ''; deleteJob()">
                     <i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar este rastreo</button>
                 </div>
@@ -3615,15 +3735,6 @@
           <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="createError"></div>
         </template>
 
-        <!-- Campos siempre visibles -->
-        <div class="form-group">
-          <label>Nombre del trabajo *</label>
-          <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
-        </div>
-        <div class="form-group">
-          <label>URLs semilla * (una por linea)</label>
-          <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
-        </div>
         <!-- El cliente se elige, no se escribe: con texto libre una errata
              creaba otro cliente (#36). Al elegirlo, el formulario se precarga
              con su configuracion y la del perfil. -->
@@ -3655,6 +3766,23 @@
           se hereda igual.
         </div>
 
+        <!-- Campos siempre visibles -->
+        <div class="form-group">
+          <label>Nombre del trabajo *</label>
+          <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
+        </div>
+        <div class="form-group">
+          <label>URLs semilla * (una por linea)</label>
+          <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
+        </div>
+        <!-- Lo tecnico, plegado (UX-19): seis pestanas de spider, HTTP y
+             velocidad delante de quien solo quiere lanzar el censo de un
+             cliente con su perfil. El resumen dice lo que se va a usar. -->
+        <details class="config-avanzada" :open="!createForm.cliente_id">
+          <summary>
+            <span>Configuración avanzada</span>
+            <span class="text-dim text-sm" x-text="resumenConfig()"></span>
+          </summary>
         <!-- Barra de pestanas -->
         <div class="config-tabs">
           <div class="tab" :class="createForm.configTab === 'general' && 'active'" @click="createForm.configTab = 'general'" style="display:flex;align-items:center;gap:.3rem">
@@ -3940,9 +4068,17 @@
           </div>
         </div>
 
+        </details>
       </div>
       <div class="modal-footer">
         <button class="btn" @click="showCreate = false">Cancelar</button>
+        <!-- El canario antes que el censo: 250 URLs para ver si el sitio
+             bloquea, si hace falta render y cuanto tarda (crawl-domains). -->
+        <button class="btn" @click="lanzarCanario()" :disabled="creating || !createForm.seeds"
+                data-tip="Lanza primero 250 URLs para comprobar bloqueos, render y ritmo antes del censo"
+                style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="bird" style="width:14px;height:14px"></i> Lanzar canario
+        </button>
         <button class="btn btn-primary" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds" style="display:flex;align-items:center;gap:.4rem">
           <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="rocket" style="width:14px;height:14px" x-show="!creating"></i>

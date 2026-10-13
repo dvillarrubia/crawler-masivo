@@ -316,7 +316,9 @@ function app() {
       { etiqueta: 'Cada mes',      cron: '0 3 1 * *' },
     ],
     theme: document.documentElement.dataset.theme || 'light',
-    menuAbierto: '',          // '' | 'app' | 'exportar' | 'mas'
+    menuAbierto: '',
+    editarJob: null,          // { name, tipo, cliente_id } mientras el dialogo esta abierto
+    editarError: '',          // '' | 'app' | 'exportar' | 'mas'
     urlDetailId: null,
     urlDetailDesde: 'detail', // a donde vuelve la ficha de URL: 'detail' | 'explorer'
     _aplicandoRuta: false,
@@ -332,9 +334,15 @@ function app() {
     jobsPages: 1,
     jobsTotal: 0,
     jobsFilter: '',
+    jobsBuscar: '',
+    jobsCliente: '',          // id de cliente | 'ninguno' | ''
+    jobsTipo: '',
 
     // Clientes (#36)
     clientes: [],
+    panelClientes: null,
+    clienteSerie: [],
+    serieSoloCensos: true,
     cliente: null,
     clienteTab: 'rastreos',
     clienteForm: _formCliente(null),
@@ -447,7 +455,9 @@ function app() {
     init() {
       // La ruta manda (UX-03): un enlace pegado, una recarga o el boton atras
       // llevan a la misma vista. Sin hash, la lista de rastreos.
-      const inicial = location.hash && location.hash !== '#/' ? location.hash : '#/rastreos';
+      // Sin hash, el panel de clientes (UX-07): la pregunta del dia a dia es
+      // «como estan mis clientes», no «cual fue el ultimo rastreo».
+      const inicial = location.hash && location.hash !== '#/' ? location.hash : '#/clientes';
       history.replaceState(null, '', inicial);
       this._irARuta(inicial);
       window.addEventListener('popstate', () => this._irARuta(location.hash));
@@ -503,7 +513,15 @@ function app() {
     // #/clientes · #/clientes/<id> · #/clientes/nuevo · #/programados
     _ruta() {
       const v = this.view;
-      if (v === 'jobs') return '#/rastreos' + (this.jobsFilter ? '?estado=' + this.jobsFilter : '');
+      if (v === 'jobs') {
+        const q = new URLSearchParams();
+        if (this.jobsBuscar.trim()) q.set('buscar', this.jobsBuscar.trim());
+        if (this.jobsCliente) q.set('cliente', this.jobsCliente);
+        if (this.jobsTipo) q.set('tipo', this.jobsTipo);
+        if (this.jobsFilter) q.set('estado', this.jobsFilter);
+        if (this.jobsPage > 1) q.set('pagina', this.jobsPage);
+        return '#/rastreos' + (q.toString() ? '?' + q : '');
+      }
       if (v === 'clients') return '#/clientes';
       if (v === 'client') return this.cliente ? '#/clientes/' + this.cliente.id : '#/clientes/nuevo';
       if (v === 'programados') return '#/programados';
@@ -534,13 +552,20 @@ function app() {
       const p = ruta.split('/').filter(Boolean);
       this._aplicandoRuta = true;
       try {
-        if (!p.length || (p[0] === 'rastreos' && p.length === 1)) {
-          const estado = q.get('estado') || '';
-          if (this.view !== 'jobs' || this.jobsFilter !== estado || !this.jobs.length) {
+        if (!p.length) {
+          p.push('clientes');
+          history.replaceState(null, '', '#/clientes');
+        }
+        if (p[0] === 'rastreos' && p.length === 1) {
+          const f = { estado: q.get('estado') || '', buscar: q.get('buscar') || '',
+                      cliente: q.get('cliente') || '', tipo: q.get('tipo') || '', pagina: +(q.get('pagina') || 1) };
+          const igual = this.jobsFilter === f.estado && this.jobsBuscar === f.buscar
+            && this.jobsCliente === f.cliente && this.jobsTipo === f.tipo && this.jobsPage === f.pagina;
+          if (this.view !== 'jobs' || !igual || !this.jobs.length) {
             this._salirDeJob();
             this.view = 'jobs';
-            this.jobsFilter = estado;
-            this.jobsPage = 1;
+            this.jobsFilter = f.estado; this.jobsBuscar = f.buscar;
+            this.jobsCliente = f.cliente; this.jobsTipo = f.tipo; this.jobsPage = f.pagina;
             await this.loadJobs();
           }
         } else if (p[0] === 'clientes') {
@@ -666,8 +691,14 @@ function app() {
       this.loading = true;
       this.error = null;
       try {
-        const f = this.jobsFilter ? `&status=${this.jobsFilter}` : '';
-        const data = await api(`/jobs?page=${this.jobsPage}&page_size=20${f}`);
+        const q = new URLSearchParams({ page: this.jobsPage, page_size: 20 });
+        if (this.jobsFilter) q.set('status', this.jobsFilter);
+        if (this.jobsBuscar.trim()) q.set('buscar', this.jobsBuscar.trim());
+        if (this.jobsTipo) q.set('tipo', this.jobsTipo);
+        if (this.jobsCliente === 'ninguno') q.set('sin_cliente', 'true');
+        else if (this.jobsCliente) q.set('client_id', this.jobsCliente);
+        if (!this.clientes.length) api('/clients').then(c => { this.clientes = c; }).catch(() => {});
+        const data = await api(`/jobs?${q}`);
         this.jobs = data.items;
         this.jobsPages = data.pages;
         this.jobsTotal = data.total;
@@ -749,6 +780,30 @@ function app() {
       } catch (e) { this.createError = e.message; }
     },
 
+    // Una linea con lo que se va a usar, para no tener que abrir las seis
+    // pestanas para saberlo (UX-19).
+    resumenConfig() {
+      const f = this.createForm;
+      const partes = [
+        'profundidad ' + f.max_depth,
+        f.max_urls ? fmt.num(+f.max_urls) + ' URLs' : 'sin tope de URLs',
+        f.render_js ? 'con render JS' : 'sin render JS',
+        'robots: ' + ({ respect: 'respetar', ignore: 'ignorar', audit: 'auditar' }[f.robots_mode] || f.robots_mode),
+      ];
+      return partes.join(' · ');
+    },
+
+    // El mismo rastreo con 250 URLs y «CANARY» en el nombre: se reconoce
+    // como canario (tipo deducido) y no entra en la evolucion del cliente.
+    async lanzarCanario() {
+      const original = { name: this.createForm.name, max_urls: this.createForm.max_urls };
+      const host = (this.createForm.seeds.split('\n')[0] || '').replace(/^https?:\/\//, '').split('/')[0];
+      this.createForm.name = 'CANARY - ' + (original.name || host);
+      this.createForm.max_urls = 250;
+      await this.submitCreate();
+      if (this.showCreate) Object.assign(this.createForm, original);  // fallo: se deja como estaba
+    },
+
     async submitCreate() {
       this.creating = true;
       this.createError = null;
@@ -778,7 +833,9 @@ function app() {
 
     async cargarClientes() {
       try {
-        this.clientes = await api('/clients');
+        const [clientes, panel] = await Promise.all([api('/clients'), api('/clients/panel')]);
+        this.clientes = clientes;
+        this.panelClientes = panel;
       } catch (e) {
         this.clientes = [];
         this.error = 'No se pudieron cargar los clientes: ' + e.message;
@@ -790,14 +847,16 @@ function app() {
       this.clienteTab = tab;
       this.clienteError = '';
       try {
-        const [c, perfiles, jobs] = await Promise.all([
+        const [c, perfiles, jobs, serie] = await Promise.all([
           api(`/clients/${id}`),
           api(`/clients/${id}/profiles`),
           api(`/jobs?client_id=${id}&page_size=100`),
+          api(`/clients/${id}/serie`),
         ]);
         this.cliente = c;
         this.clientePerfiles = perfiles;
         this.clienteJobs = jobs.items || [];
+        this.clienteSerie = serie || [];
         this.clienteForm = _formCliente(c);
       } catch (e) { this.error = e.message; }
     },
@@ -927,6 +986,17 @@ function app() {
       } catch (e) { this.clienteError = e.message; }
     },
 
+    serieVisible() {
+      return this.serieSoloCensos ? this.clienteSerie.filter(j => j.tipo === 'censo') : this.clienteSerie;
+    },
+
+    // El censo completado anterior a este en la serie: es contra el que se
+    // mide la diferencia de errores, saltandose canarios y pruebas.
+    censoAnterior(j) {
+      const i = this.clienteSerie.indexOf(j);
+      return this.clienteSerie.slice(i + 1).find(x => x.tipo === 'censo' && x.status === 'completed') || null;
+    },
+
     nombreDePerfil(id) {
       const p = this.clientePerfiles.find(x => x.id === id);
       return p ? p.nombre : '';
@@ -1042,6 +1112,32 @@ function app() {
 
     _stopSemanticPoll() {
       if (this.semanticPollTimer) { clearInterval(this.semanticPollTimer); this.semanticPollTimer = null; }
+    },
+
+    // ------- Nombre, tipo y cliente (UX-07/08) -------
+    async abrirEditarJob() {
+      if (!this.job) return;
+      this.editarError = '';
+      try { if (!this.clientes.length) this.clientes = await api('/clients'); } catch (_) {}
+      this.editarJob = {
+        name: this.job.name,
+        tipo: this.job.tipo_efectivo || 'censo',
+        cliente_id: this.job.cliente_id || '',
+      };
+    },
+
+    async guardarJob() {
+      const e = this.editarJob;
+      const cuerpo = { name: e.name, cliente_id: e.cliente_id || null };
+      // Solo se marca a mano si cambia lo deducido: asi un rastreo que se
+      // llama «CANARY» y se deja como canario sigue deduciendose del nombre.
+      if (e.tipo !== this.job.tipo_efectivo || this.job.tipo) cuerpo.tipo = e.tipo;
+      try {
+        this.job = await api(`/jobs/${this.job.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+        this.editarJob = null;
+        this.panelClientes = null;
+        this.showToast('Rastreo actualizado');
+      } catch (err) { this.editarError = err.message; }
     },
 
     // ------- Cancelar / Eliminar -------

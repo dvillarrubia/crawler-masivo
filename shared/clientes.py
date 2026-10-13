@@ -26,6 +26,27 @@ Tres criterios, cada uno evitando una forma de fallar en silencio:
 
 from __future__ import annotations
 
+# Tipos de rastreo (UX-07, docs/AUDITORIA_UX.md). Lo que se ha marcado a mano
+# manda; si no, el nombre: es como se han distinguido siempre a ojo.
+TIPOS_DE_RASTREO = ("censo", "canario", "prueba")
+# Subcadenas en minusculas. Las mismas que usa el filtro SQL de la API
+# (`api/routers/jobs.py::_tipo_sql`): dos reglas distintas darian un tipo en
+# la ficha y otro en el filtro.
+PISTAS_CANARIO = ("canary", "canario")
+PISTAS_PRUEBA = ("prueba", "test", "validacion", "validación", "muestra", "sondeo")
+
+
+def tipo_de_rastreo(nombre: str | None, tipo: str | None) -> str:
+    """El tipo de un rastreo: el marcado o, si no hay, el que dice su nombre."""
+    if tipo in TIPOS_DE_RASTREO:
+        return tipo
+    nombre = (nombre or "").lower()
+    if any(p in nombre for p in PISTAS_CANARIO):
+        return "canario"
+    if any(p in nombre for p in PISTAS_PRUEBA):
+        return "prueba"
+    return "censo"
+
 import copy
 import logging
 import re

@@ -31,6 +31,9 @@ from shared.database import get_session
 from shared.models import Client, CrawlProfile, Job, Programacion
 
 from api.schemas import (
+    CensoDeSerie,
+    PanelCliente,
+    PanelResponse,
     ClientCreate,
     ClientResponse,
     ClientUpdate,
@@ -200,6 +203,106 @@ def _commit(db: Session) -> None:
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"Conflicto al guardar: {exc.orig}")
+
+
+# ---------------------------------------------------------------------------
+# Serie de censos y panel de portada (UX-07/08, docs/AUDITORIA_UX.md)
+# ---------------------------------------------------------------------------
+def _cifras_de_jobs(db: Session, ids: list[uuid.UUID]) -> dict:
+    """Paginas HTML, indexables, errores y avisos de varios jobs en DOS
+    consultas agrupadas, no dos por job. Mismo criterio que /stats: paginas
+    HTML internas con 2xx."""
+    from shared.models import Issue, Url
+
+    cifras = {i: {"urls": 0, "paginas_html": 0, "indexables": 0, "errores": 0, "avisos": 0} for i in ids}
+    if not ids:
+        return cifras
+    # Las filas, no `total_urls_crawled`: en los reanudados antes de la
+    # decision 21 ese contador es solo el ultimo tramo (802 de 34.704).
+    for jid, n in db.query(Url.job_id, func.count(Url.id)).filter(Url.job_id.in_(ids)).group_by(Url.job_id):
+        cifras[jid]["urls"] = n
+    for jid, html, idx in (
+        db.query(Url.job_id, func.count(Url.id), func.count(Url.id).filter(Url.indexable.is_(True)))
+        .filter(Url.job_id.in_(ids), Url.is_internal.is_(True), Url.is_html.is_(True),
+                Url.status_group == "2xx")
+        .group_by(Url.job_id)
+    ):
+        cifras[jid].update(paginas_html=html, indexables=idx)
+    for jid, err, avi in (
+        db.query(Issue.job_id,
+                 func.count(Issue.id).filter(Issue.severity == "error"),
+                 func.count(Issue.id).filter(Issue.severity == "warning"))
+        .filter(Issue.job_id.in_(ids))
+        .group_by(Issue.job_id)
+    ):
+        cifras[jid].update(errores=err, avisos=avi)
+    return cifras
+
+
+def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
+    from shared.clientes import tipo_de_rastreo
+
+    cifras = _cifras_de_jobs(db, [j.id for j in jobs])
+    salida = []
+    for j in jobs:
+        comp = j.comparacion if isinstance(j.comparacion, dict) else None
+        alertas = (comp or {}).get("alertas") if comp and comp.get("comparable") else None
+        salida.append(CensoDeSerie(
+            id=j.id, name=j.name, status=j.status, tipo=tipo_de_rastreo(j.name, j.tipo),
+            created_at=j.created_at,
+            alertas=len(alertas) if alertas is not None else None,
+            alertas_criticas=(sum(1 for a in alertas if a.get("severidad") == "critical")
+                              if alertas is not None else None),
+            comparado_con=(comp or {}).get("comparado_con"),
+            **cifras[j.id],
+        ))
+    return salida
+
+
+@router.get("/panel", response_model=PanelResponse)
+def panel(db: Session = Depends(get_session)):
+    """La portada (UX-07): cada cliente con su ultimo censo completado y el
+    anterior, para ver de un vistazo si algo ha empeorado. Los canarios y las
+    pruebas no cuentan: comparar un censo con un canario de 26 URLs no dice
+    nada."""
+    from shared.clientes import tipo_de_rastreo
+
+    clientes = db.query(Client).order_by(func.lower(Client.nombre)).all()
+    cuentas = _cuentas(db, [c.id for c in clientes])
+    salida = []
+    for c in clientes:
+        recientes = (
+            db.query(Job).filter(Job.cliente_id == c.id, Job.status == "completed")
+            .order_by(Job.created_at.desc()).limit(30).all()
+        )
+        censos = [j for j in recientes if tipo_de_rastreo(j.name, j.tipo) == "censo"][:2]
+        serie = _serie(db, censos)
+        salida.append(PanelCliente(
+            id=c.id, nombre=c.nombre, slug=c.slug,
+            n_rastreos=(cuentas.get(c.id) or {}).get("n_jobs", 0),
+            ultimo=serie[0] if serie else None,
+            anterior=serie[1] if len(serie) > 1 else None,
+        ))
+    # Los que tienen censo reciente, primero; dentro, por fecha.
+    salida.sort(key=lambda p: (p.ultimo is None, -(p.ultimo.created_at.timestamp() if p.ultimo else 0)))
+    sin_cliente = db.query(func.count(Job.id)).filter(Job.cliente_id.is_(None)).scalar() or 0
+    return PanelResponse(clientes=salida, rastreos_sin_cliente=sin_cliente)
+
+
+@router.get("/{client_id}/serie", response_model=list[CensoDeSerie])
+def serie_de_censos(
+    client_id: uuid.UUID,
+    limite: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_session),
+):
+    """Los rastreos del cliente, del mas reciente al mas antiguo, con sus
+    cifras: es la evolucion del sitio de un censo a otro."""
+    _buscar(db, client_id)
+    jobs = (
+        db.query(Job).filter(Job.cliente_id == client_id)
+        .order_by(Job.created_at.desc()).limit(limite).all()
+    )
+    return _serie(db, jobs)
 
 
 # ---------------------------------------------------------------------------

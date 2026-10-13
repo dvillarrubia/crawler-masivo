@@ -17,6 +17,7 @@ from shared.models import Job, Url, Issue, Link
 from api.backup import ConflictError, import_backup_zip
 from api.dependencies import get_redis
 from api.schemas import (
+    JobUpdate,
     ImportResponse,
     JobCreate,
     JobResponse,
@@ -174,13 +175,31 @@ def _con_cliente(db: Session, jobs: list[Job]) -> list[JobResponse]:
     """JobResponse con el nombre del cliente, en UNA consulta para la pagina."""
     from api.routers.clientes import nombres_de_clientes
 
+    from shared.clientes import tipo_de_rastreo
+
     nombres = nombres_de_clientes(db, (j.cliente_id for j in jobs))
     salida = []
     for j in jobs:
         r = JobResponse.model_validate(j)
         r.cliente_nombre = nombres.get(j.cliente_id)
+        r.tipo_efectivo = tipo_de_rastreo(j.name, j.tipo)
         salida.append(r)
     return salida
+
+
+def _tipo_sql():
+    """`tipo_de_rastreo` en SQL, con las mismas pistas, para poder filtrar."""
+    from sqlalchemy import case, func, or_
+
+    from shared.clientes import PISTAS_CANARIO, PISTAS_PRUEBA
+
+    nombre = func.lower(Job.name)
+    return case(
+        (Job.tipo.isnot(None), Job.tipo),
+        (or_(*[nombre.contains(p, autoescape=True) for p in PISTAS_CANARIO]), "canario"),
+        (or_(*[nombre.contains(p, autoescape=True) for p in PISTAS_PRUEBA]), "prueba"),
+        else_="censo",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +213,23 @@ def list_jobs(
     client_id: str | None = Query(
         None, description="UUID del cliente, su slug o el texto de siempre"),
     profile_id: uuid.UUID | None = Query(None),
+    tipo: str | None = Query(None, description="censo | canario | prueba (marcado o deducido del nombre)"),
+    buscar: str | None = Query(None, max_length=200, description="En el nombre o en la primera semilla"),
+    sin_cliente: bool = Query(False, description="Solo los rastreos sin cliente asignado"),
     db: Session = Depends(get_session),
 ):
     q = db.query(Job)
+    if sin_cliente:
+        q = q.filter(Job.cliente_id.is_(None))
+    if tipo is not None:
+        q = q.filter(_tipo_sql() == tipo)
+    if buscar:
+        from sqlalchemy import String, cast, func, or_
+
+        t = buscar.strip().lower()
+        # `seeds` es JSON: se busca en su texto, que basta para «lopesan.com».
+        q = q.filter(or_(func.lower(Job.name).contains(t, autoescape=True),
+                         func.lower(cast(Job.seeds, String)).contains(t, autoescape=True)))
 
     if status is not None:
         q = q.filter(Job.status == status)
@@ -259,6 +292,50 @@ def get_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    return _con_cliente(db, [job])[0]
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/jobs/{job_id}  --  nombre, tipo y cliente (UX-07/08)
+# ---------------------------------------------------------------------------
+@router.patch("/{job_id}", response_model=JobResponse)
+def update_job(
+    job_id: uuid.UUID,
+    cuerpo: JobUpdate,
+    db: Session = Depends(get_session),
+):
+    """Ordenar lo que ya hay: renombrar, marcar como censo/canario/prueba y
+    asignar el cliente a los rastreos que se quedaron sin el (los de antes de
+    la decision 83, como los de Druni o los Lopesan de julio).
+
+    No toca nada de lo rastreado ni de lo analizado, ni `config`: cambiar el
+    cliente no cambia la configuracion con la que se hizo el censo.
+    """
+    from shared.models import Client
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cambios = cuerpo.model_dump(exclude_unset=True)
+    if "name" in cambios and cambios["name"] is not None:
+        job.name = cambios["name"].strip()
+    if "tipo" in cambios:
+        job.tipo = cambios["tipo"]
+    if "cliente_id" in cambios:
+        nuevo = cambios["cliente_id"]
+        if nuevo is None:
+            job.cliente_id = None
+        else:
+            cliente = db.query(Client).filter(Client.id == nuevo).one_or_none()
+            if cliente is None:
+                raise HTTPException(status_code=422, detail="Ese cliente no existe")
+            job.cliente_id = cliente.id
+            # El texto viejo se conserva como pista (decision 83); si no habia
+            # ninguno, se pone el slug para que los filtros por texto lo vean.
+            if not job.client_id:
+                job.client_id = cliente.slug
+    db.commit()
+    db.refresh(job)
     return _con_cliente(db, [job])[0]
 
 

@@ -190,6 +190,10 @@ class Job(Base):
     # compararlo con el anterior de SU serie en vez de con lo ultimo que
     # pasara por ese host (decision 78).
     programacion_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    # censo | canario | prueba. NULL = no se ha dicho: se deduce del nombre
+    # (`shared.clientes.tipo_de_rastreo`). Separa en la interfaz los censos
+    # que se entregan de las pruebas de 26 URLs (UX-07).
+    tipo = Column(String(16), nullable=True)
 
     # pending | running | analyzing | completed | failed | cancelled
     status = Column(String(20), nullable=False, default="pending", index=True)
