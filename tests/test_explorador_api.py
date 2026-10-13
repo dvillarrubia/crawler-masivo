@@ -127,3 +127,58 @@ def test_el_csv_de_la_vista_es_lo_que_se_ve(entorno):
 def test_el_csv_rechaza_columnas_inventadas(entorno):
     api, jid, _ = entorno
     assert api.get(f"/api/jobs/{jid}/urls/export?columnas=password").status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Medir el uso (api/uso.py)
+# ---------------------------------------------------------------------------
+class _RedisFalso:
+    def __init__(self):
+        self.h: dict[str, dict[str, int]] = {}
+
+    def pipeline(self):
+        return self
+
+    def hincrby(self, clave, campo, n):
+        self.h.setdefault(clave, {})[campo] = self.h.setdefault(clave, {}).get(campo, 0) + n
+
+    def expire(self, *a):
+        pass
+
+    def execute(self):
+        pass
+
+    def hgetall(self, clave):
+        return self.h.get(clave, {})
+
+
+def test_el_uso_cuenta_nombres_nunca_valores():
+    from starlette.datastructures import QueryParams
+
+    from api import uso
+
+    r = _RedisFalso()
+    uso.anotar(r, QueryParams("vista=explorador&pestana=4xx&status_group=4xx&inlinks_count_gte=1"
+                              "&search=cliente-secreto&issue_type=a,b&vacio=title&sort_by=inlinks_count&page=3"))
+    uso.anotar(r, QueryParams("vista=explorador&columnas=url,title_pixel_width"), csv=True)
+    uso.anotar(r, QueryParams("status_group=4xx"))            # no viene del Explorador: no cuenta
+    campos = set().union(*[set(v) for v in r.h.values()])
+    assert {"consultas", "csv", "pestana:4xx", "filtro:inlinks_count", "busqueda", "problema:a",
+            "problema:b", "filtro:title:vacio", "orden:inlinks_count", "paginado",
+            "columna:title_pixel_width"} <= campos
+    assert not any("cliente-secreto" in c for c in campos)    # el texto buscado no se guarda
+    assert "filtro:status_group" not in campos                 # lo pone la pestaña
+    d = uso.leer(r, dias=1)
+    assert d["consultas"] == 1 and d["csv"] == 1
+
+
+def test_el_uso_no_rompe_si_redis_falla():
+    from starlette.datastructures import QueryParams
+
+    from api import uso
+
+    class Roto:
+        def pipeline(self):
+            raise ConnectionError("redis caido")
+
+    uso.anotar(Roto(), QueryParams("vista=explorador"))       # no lanza

@@ -186,6 +186,20 @@ _VACIO_FILTERS: dict[str, tuple[Any, bool]] = {
 }
 
 
+def _anotar_uso(qp, *, csv: bool = False) -> None:
+    """Cuenta la consulta si viene del Explorador (`?vista=explorador`).
+    Nunca falla: ver api/uso.py."""
+    if qp.get("vista") != "explorador":
+        return
+    try:
+        from api import uso
+        from api.dependencies import get_redis
+
+        uso.anotar(get_redis(), qp, csv=csv)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
     """Las URLs de un job con los filtros del Explorador aplicados.
 
@@ -298,6 +312,7 @@ def list_urls(
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params)
 
     q = _urls_filtradas(db, job_id, request.query_params, unir_meta=sort_by in _SORT_META)
 
@@ -427,6 +442,7 @@ def export_vista(
     sacan primero los ids en el orden de la vista y luego se leen por tramos.
     """
     _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params, csv=True)
     claves = [c for c in (x.strip() for x in columnas.split(",")) if c in COLUMNAS_VISTA]
     if not claves:
         raise HTTPException(status_code=422, detail="Ninguna columna exportable: " + columnas)

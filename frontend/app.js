@@ -2512,6 +2512,9 @@ function app() {
       // Sin el texto de cada pagina: era el 89% de 1,6 MB por pagina de la
       // tabla y no lo pinta nadie (el panel lo pide aparte).
       if (ligero) params.set('ligero', 'true');
+      // Para medir el uso (api/uso.py): que pestaña se mira. Solo nombres.
+      params.set('vista', 'explorador');
+      params.set('pestana', this.expTab);
       if (this.expProblema) params.set('issue_type', this.expProblema);
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
