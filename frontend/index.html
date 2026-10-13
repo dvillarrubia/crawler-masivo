@@ -3380,10 +3380,21 @@
 
             <!-- El CSV de esta vista: filtros, orden y columnas visibles. El censo
                  entero sigue en Exportar, en la ficha del rastreo. -->
-            <button class="btn btn-sm" @click="exportarVista()" style="display:flex;align-items:center;gap:.25rem"
-                    :data-tip="'Descarga las ' + fmt.num(expTotal) + ' URLs de esta vista con las columnas visibles'">
-              <i data-lucide="download" style="width:12px;height:12px"></i> CSV de esta vista
-            </button>
+            <div class="menu-wrap" @click.outside="menuAbierto === 'csv-exp' && (menuAbierto = '')">
+              <button class="btn btn-sm" @click="menuAbierto = menuAbierto === 'csv-exp' ? '' : 'csv-exp'"
+                      aria-haspopup="menu" :aria-expanded="menuAbierto === 'csv-exp'" style="display:flex;align-items:center;gap:.25rem">
+                <i data-lucide="download" style="width:12px;height:12px"></i> CSV
+                <i data-lucide="chevron-down" style="width:11px;height:11px"></i>
+              </button>
+              <div class="menu" x-show="menuAbierto === 'csv-exp'" x-transition.opacity role="menu" style="min-width:20rem">
+                <button role="menuitem" @click="menuAbierto = ''; exportarVista()">
+                  <i data-lucide="table" style="width:14px;height:14px"></i>
+                  <span>Esta vista<span class="menu-sub" x-text="fmt.num(expTotal) + ' URLs con las columnas visibles, en el mismo orden'"></span></span></button>
+                <button role="menuitem" @click="menuAbierto = ''; exportarEnlacesEntrantes()">
+                  <i data-lucide="link" style="width:14px;height:14px"></i>
+                  <span>Enlaces que apuntan a estas URLs<span class="menu-sub">Origen, ancla, posición y follow: dónde hay que corregir</span></span></button>
+              </div>
+            </div>
           </div>
 
           <!-- Helper hint about how filters work -->

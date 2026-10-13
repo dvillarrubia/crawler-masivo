@@ -186,6 +186,32 @@ _VACIO_FILTERS: dict[str, tuple[Any, bool]] = {
 }
 
 
+_TIPOS_NO_ENLACE = ("redirect", "canonical")
+
+
+def _origenes(db: Session, job_id: uuid.UUID, hashes: list[str]) -> dict[str, tuple[str, int]]:
+    """Para cada destino (url_hash): la pagina que mas veces lo enlaza y
+    cuantas paginas distintas lo enlazan. Usa `ix_links_to_hash (job_id,
+    to_url_hash)`: nunca recorre la tabla de enlaces entera (decision 37)."""
+    if not hashes:
+        return {}
+    filas = (
+        db.query(Link.to_url_hash, Url.url, func.count(Link.id))
+        .join(Url, Url.id == Link.from_url_id)
+        .filter(Link.job_id == job_id, Link.to_url_hash.in_(hashes),
+                or_(Link.link_type.is_(None), Link.link_type.notin_(_TIPOS_NO_ENLACE)))
+        .group_by(Link.to_url_hash, Url.url)
+        .all()
+    )
+    mejor: dict[str, tuple[str, int]] = {}
+    distintos: dict[str, int] = {}
+    for h, origen, n in filas:
+        distintos[h] = distintos.get(h, 0) + 1
+        if h not in mejor or n > mejor[h][1] or (n == mejor[h][1] and origen < mejor[h][0]):
+            mejor[h] = (origen, n)
+    return {h: (mejor[h][0], distintos[h]) for h in mejor}
+
+
 def _anotar_uso(qp, *, csv: bool = False) -> None:
     """Cuenta la consulta si viene del Explorador (`?vista=explorador`).
     Nunca falla: ver api/uso.py."""
@@ -319,6 +345,7 @@ def list_urls(
     severity: str | None = Query(None),
     in_sitemap: bool | None = Query(None),
     ligero: bool = Query(False, description="Sin page_content: es el 89% del peso y la tabla no lo usa"),
+    origenes: bool = Query(False, description="Anade enlazada_desde y origenes a cada fila"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -356,6 +383,10 @@ def list_urls(
                  for r in rows]
     else:
         items = [UrlResponse.model_validate(r) for r in rows]
+    if origenes:
+        o = _origenes(db, job_id, [r.url_hash for r in rows])
+        for it, r in zip(items, rows):
+            it.enlazada_desde, it.origenes = o.get(r.url_hash, (None, 0))
 
     return _paginate(
         items=items,
@@ -526,6 +557,9 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "http_version": ("HTTP", lambda u: u.http_version),
     "last_modified": ("Last-Modified", lambda u: u.last_modified),
     "last_crawled_at": ("Último rastreo", lambda u: u.last_crawled_at.isoformat() if u.last_crawled_at else None),
+    # Calculadas por tramo con `_origenes` (no son columnas de `urls`).
+    "enlazada_desde": ("Enlazada desde", lambda u: getattr(u, "_origen", (None, 0))[0]),
+    "origenes": ("Páginas que la enlazan", lambda u: getattr(u, "_origen", (None, 0))[1]),
 }
 
 
@@ -578,6 +612,10 @@ def export_vista(
             with Sesion() as s:
                 por_id = {u.id: u for u in s.query(Url).options(joinedload(Url.html_meta))
                           .filter(Url.id.in_(tramo)).all()}
+                if {"enlazada_desde", "origenes"} & set(claves):
+                    o = _origenes(s, job_id, [u.url_hash for u in por_id.values()])
+                    for u in por_id.values():
+                        u._origen = o.get(u.url_hash, (None, 0))
                 buf = io.StringIO()
                 w = csv.writer(buf)
                 for uid in tramo:
@@ -587,6 +625,61 @@ def export_vista(
                 yield buf.getvalue()
 
     nombre = f"explorador-{str(job_id)[:8]}-{len(ids)}-urls.csv"
+    return StreamingResponse(filas(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/enlaces-entrantes  -- de donde se enlaza la vista
+# ---------------------------------------------------------------------------
+@router.get("/urls/enlaces-entrantes")
+def export_enlaces_entrantes(
+    job_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Todos los enlaces que apuntan a las URLs de la vista, como CSV: destino,
+    su codigo, origen, ancla, posicion y follow. Es la lista que se le pasa a
+    quien tiene que corregir los enlaces a 404 o a redirecciones (#131).
+
+    Se recorre por tramos de 500 destinos con el indice (job_id, to_url_hash).
+    """
+    _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params, csv=True)
+    destinos = _urls_filtradas(db, job_id, request.query_params).with_entities(
+        Url.url_hash, Url.url, Url.status_code).order_by(Url.id).all()
+    from sqlalchemy.orm import aliased, sessionmaker
+
+    Sesion = sessionmaker(bind=db.get_bind())
+    Origen = aliased(Url)
+
+    def filas():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        buf.write("\ufeff")
+        w.writerow(["Destino", "Estado destino", "Origen", "Estado origen", "Ancla", "Posición", "Follow", "Tipo"])
+        yield buf.getvalue()
+        for i in range(0, len(destinos), 500):
+            tramo = {h: (u, c) for h, u, c in destinos[i:i + 500]}
+            with Sesion() as s:
+                enlaces = (
+                    s.query(Link.to_url_hash, Origen.url, Origen.status_code, Link.anchor_text,
+                            Link.link_position, Link.follow, Link.link_type)
+                    .join(Origen, Origen.id == Link.from_url_id)
+                    .filter(Link.job_id == job_id, Link.to_url_hash.in_(list(tramo)),
+                            or_(Link.link_type.is_(None), Link.link_type.notin_(_TIPOS_NO_ENLACE)))
+                    .order_by(Link.to_url_hash, Origen.url)
+                    .all()
+                )
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            for h, origen, cod_origen, ancla, pos, follow, tipo in enlaces:
+                destino, cod = tramo[h]
+                w.writerow([destino, cod, origen, cod_origen, ancla or "", pos or "",
+                            "si" if follow else "no", tipo or ""])
+            yield buf.getvalue()
+
+    nombre = f"enlaces-entrantes-{str(job_id)[:8]}-{len(destinos)}-destinos.csv"
     return StreamingResponse(filas(), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 

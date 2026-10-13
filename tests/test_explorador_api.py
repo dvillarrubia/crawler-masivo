@@ -26,7 +26,7 @@ from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared.database import get_session  # noqa: E402
-from shared.models import Base, HtmlMeta, Issue, Job, PageContent, Url  # noqa: E402
+from shared.models import Base, HtmlMeta, Issue, Job, Link, PageContent, Url  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -208,6 +208,11 @@ def con_plantillas(tmp_path):
         s.flush()
         if codigo == 404:
             s.add(Issue(job_id=job.id, url_id=u.id, issue_type="4xx_error", severity="error"))
+    # /es/null (hash "0") enlazada dos veces desde /es/hoteles/a y una desde /b.
+    a, b = (s.query(Url).filter(Url.path == r).one() for r in ("/es/hoteles/a", "/es/hoteles/b"))
+    for origen, ancla in ((a, "uno"), (a, "dos"), (b, "tres")):
+        s.add(Link(job_id=job.id, from_url_id=origen.id, to_url="https://x.com/es/null", to_url_hash="0",
+                   anchor_text=ancla, link_position="content", follow=True, link_type="hyperlink"))
     s.commit()
     s.close()
     app = FastAPI()
@@ -245,3 +250,21 @@ def test_por_plantilla_respeta_los_filtros_y_se_puede_entrar(con_plantillas):
     assert [p["plantilla"] for p in d["plantillas"]] == ["/:idioma/hoteles/:slug (3n)"]
     r = api.get(f"/api/jobs/{jid}/urls", params={"plantilla": "/:idioma/:slug (2n)"}).json()
     assert sorted(i["url"] for i in r["items"]) == [f"https://x.com/{l}/null" for l in ("de", "en", "es")]
+
+
+def test_enlazada_desde_y_enlaces_entrantes(con_plantillas):
+    """Para un 404, de donde se enlaza: el origen mas frecuente y cuantas
+    paginas distintas lo enlazan, y el CSV con todos los enlaces."""
+    api, jid = con_plantillas
+    items = api.get(f"/api/jobs/{jid}/urls?url_contains=/es/null&origenes=true").json()["items"]
+    fila = next(i for i in items if i["url"].endswith("/es/null"))
+    assert fila["enlazada_desde"] == "https://x.com/es/hoteles/a" and fila["origenes"] == 2
+    sin = api.get(f"/api/jobs/{jid}/urls?url_contains=/es/null").json()["items"][0]
+    assert sin["enlazada_desde"] is None                     # sin ?origenes no se calcula
+    r = api.get(f"/api/jobs/{jid}/urls/enlaces-entrantes?status_group=4xx")
+    filas = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+    assert filas[0][:3] == ["Destino", "Estado destino", "Origen"]
+    assert sorted(f[4] for f in filas[1:]) == ["dos", "tres", "uno"]
+    exp = list(csv.reader(io.StringIO(api.get(
+        f"/api/jobs/{jid}/urls/export?url_contains=/es/null&columnas=url,enlazada_desde,origenes").content.decode("utf-8-sig"))))
+    assert ["https://x.com/es/null", "https://x.com/es/hoteles/a", "2"] in exp
