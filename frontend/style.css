@@ -1132,3 +1132,51 @@ th[data-tip]{overflow:visible}
 .seeds-list{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);
   padding:.35rem .5rem;font-family:'IBM Plex Mono',monospace;font-size:.75rem;background:var(--bg-input)}
 .exp-search-wrap input.exp-search{padding-left:1.9rem}
+
+/* Barra superior fija (UX-06) */
+.topbar-brand{display:flex;align-items:center;gap:.5rem;font-size:1rem;font-weight:800;color:#5BAE23;white-space:nowrap}
+.topbar-brand:hover{color:#5BAE23;opacity:.85}
+.topnav{display:flex;gap:.15rem;margin-left:1rem}
+.topnav a{display:flex;align-items:center;gap:.35rem;padding:.35rem .65rem;border-radius:var(--radius);
+  color:var(--text-dim);font-size:.85rem;font-weight:500}
+.topnav a:hover{background:var(--bg-hover);color:var(--text)}
+.topnav a.active{background:var(--bg-card);color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
+.btn-icon-only{padding:.3rem .45rem;display:flex;align-items:center}
+
+/* Menus desplegables (topbar, Exportar, Mas) */
+.menu-wrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 4px);min-width:15rem;z-index:60;background:var(--bg-card);
+  border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:.25rem}
+.menu button,.menu a{display:flex;align-items:center;gap:.5rem;width:100%;text-align:left;padding:.45rem .6rem;
+  background:none;border:0;border-radius:var(--radius);font:inherit;font-size:.85rem;color:var(--text);cursor:pointer}
+.menu button:hover,.menu a:hover,.menu button:focus-visible{background:var(--bg-hover);outline:none}
+.menu button[disabled]{opacity:.45;cursor:not-allowed}
+.menu .menu-sub{display:block;font-size:.75rem;color:var(--text-dim);font-weight:400}
+.menu hr{border:0;border-top:1px solid var(--border);margin:.25rem 0}
+.menu .danger{color:var(--red)}
+
+/* Miga de pan */
+.breadcrumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;padding:.45rem 1rem;font-size:.8rem;
+  color:var(--text-dim);border-bottom:1px solid var(--border);background:var(--bg)}
+.breadcrumbs .crumb{display:flex;align-items:center;gap:.25rem;max-width:32rem;min-width:0}
+.breadcrumbs .crumb + .crumb::before{content:'›';color:var(--text-dim)}
+.breadcrumbs .crumb > *{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.breadcrumbs .crumb [aria-current]{color:var(--text)}
+
+@media (max-width: 720px){
+  .topbar{flex-wrap:wrap}
+  .topnav{order:3;margin-left:0;width:100%;overflow-x:auto}
+  .topbar-brand span{display:none}
+}
+
+/* Pestanas como <button> (teclado, UX-21): sin el aspecto de boton */
+button.tab{font:inherit;font-size:.8rem;border:0;border-bottom:2px solid transparent;background:none;
+  display:flex;align-items:center;gap:.35rem}
+button.tab.active{background:var(--bg-card);border-bottom-color:var(--accent)}
+button.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* La fila de la ficha tiene un desplegable: no puede recortar lo que sobresale */
+.tabs.tabs-main{overflow:visible;flex-wrap:wrap}
+.stat-card.stat-link{font:inherit;text-align:left;cursor:pointer;width:100%;color:inherit}
+.stat-card.stat-link:hover{border-color:var(--accent)}
+.stat-card.stat-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.stat-sub{font-size:.75rem;color:var(--text-dim);margin-top:.15rem}

@@ -22,7 +22,7 @@ JOB = sys.argv[2]
 CLIENTE = sys.argv[3] if len(sys.argv) > 3 else None
 OUT = "/out"
 
-PESTANAS = ["urls", "issues", "links", "insights", "semantic", "diff", "enriquecido", "cleaning"]
+PESTANAS = ["issues", "links", "insights", "semantic", "diff", "enriquecido", "cleaning"]
 
 
 async def main() -> None:
@@ -51,7 +51,7 @@ async def main() -> None:
         for t in PESTANAS:
             await vista(f"await a.switchTab('{t}')", f"03-pestana-{t}", 3500)
         await vista(
-            "await a.switchTab('urls'); await new Promise(r=>setTimeout(r,2000)); await a.openUrlDetail(a.urls[0].id)",
+            f"const r = await fetch('/api/jobs/{JOB}/urls?page_size=1').then(r => r.json()); await a.openUrlDetail(r.items[0].id)",
             "04-ficha-url", 3000)
         await vista(
             f"await a.openJob('{JOB}'); await new Promise(r=>setTimeout(r,1500)); a.openExplorer()",
@@ -63,6 +63,16 @@ async def main() -> None:
         await vista("await a.backToJobs(); await a.openCreate()", "09-nuevo-rastreo", 2000, False)
         await pg.set_viewport_size({"width": 390, "height": 844})
         await vista("await a.backToJobs()", "10-movil-portada", 1500)
+
+        # Rutas (#/...): una recarga en cada una tiene que llevar a la misma vista.
+        await pg.set_viewport_size({"width": 1440, "height": 900})
+        for nombre, ruta in [("11-ruta-problemas", f"#/rastreos/{JOB}/problemas?gravedad=error"),
+                             ("12-ruta-explorador", f"#/rastreos/{JOB}/explorador")]:
+            await pg.goto(BASE + "/" + ruta)
+            await pg.reload()
+            await vista("", nombre, 3500, False)
+            with open(f"{OUT}/{nombre}.txt", "a") as f:
+                f.write("\n# url final: " + pg.url)
 
         with open(f"{OUT}/errores.txt", "w") as f:
             f.write("\n".join(errores))

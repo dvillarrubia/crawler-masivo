@@ -623,6 +623,11 @@ class JobStats(BaseModel):
     urls_by_resource_type: list[ResourceTypeCount] = []
     internal_count: int = 0
     external_count: int = 0
+    # Lo que dicen las tarjetas de la ficha (UX-13): sobre paginas HTML
+    # internas que responden 2xx, que es donde la indexabilidad significa algo.
+    paginas_html: int = 0
+    indexables: int = 0
+    no_indexables: int = 0
 
 
 # ---------------------------------------------------------------------------
