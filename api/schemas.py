@@ -323,6 +323,53 @@ def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list
     return cleaned
 
 
+class CensoDeSerie(BaseModel):
+    """Un rastreo en la serie de su cliente, con las cifras que se comparan
+    de un censo a otro (UX-07/08)."""
+
+    id: uuid.UUID
+    name: str
+    status: str
+    tipo: str
+    created_at: datetime
+    urls: int = 0
+    paginas_html: int = 0
+    indexables: int = 0
+    errores: int = 0
+    avisos: int = 0
+    alertas: int | None = None          # de la comparacion automatica; None = no se comparo
+    alertas_criticas: int | None = None
+    comparado_con: uuid.UUID | None = None
+
+
+class PanelCliente(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    slug: str
+    n_rastreos: int = 0
+    ultimo: CensoDeSerie | None = None
+    anterior: CensoDeSerie | None = None
+
+
+class PanelResponse(BaseModel):
+    clientes: list[PanelCliente]
+    rastreos_sin_cliente: int = 0
+
+
+class JobUpdate(BaseModel):
+    """Lo que se puede cambiar de un rastreo ya hecho (UX-07/08): el nombre,
+    el tipo y el cliente. Lo rastreado y lo analizado no se tocan.
+
+    `cliente_id` explicito a null deja el rastreo sin cliente; omitirlo no lo
+    cambia (se lee con `exclude_unset`). `tipo` a null vuelve a deducirlo del
+    nombre.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=512)
+    tipo: Literal["censo", "canario", "prueba"] | None = None
+    cliente_id: uuid.UUID | None = None
+
+
 class JobCreate(BaseModel):
     """Payload to create a new crawl job.
 
@@ -389,6 +436,10 @@ class JobResponse(BaseModel):
     decisiones_resumen: dict[str, Any] | None = None
     seeds: list[str]
     config: dict[str, Any]
+    # El marcado a mano (NULL si no) y el que vale: el marcado o el que dice
+    # el nombre (UX-07).
+    tipo: str | None = None
+    tipo_efectivo: str | None = None
     total_urls_discovered: int
     total_urls_crawled: int
     total_urls_failed: int
