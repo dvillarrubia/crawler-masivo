@@ -779,7 +779,7 @@ th[data-tip]{overflow:visible}
   flex:1;
   max-width:380px;
 }
-.exp-search-wrap i{
+.exp-search-wrap i,.exp-search-wrap svg{
   position:absolute;
   left:.5rem;
   top:50%;
@@ -1124,3 +1124,11 @@ th[data-tip]{overflow:visible}
   background:rgba(91,174,35,.2);
   color:var(--text);
 }
+
+/* ===== M6 · Interfaz (docs/AUDITORIA_UX.md) ===== */
+.seeds-more{display:inline-block;margin-left:.35rem}
+.seeds-more summary{cursor:pointer;color:var(--accent);font-size:.8rem;display:inline}
+.seeds-more[open] summary{margin-bottom:.35rem}
+.seeds-list{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);
+  padding:.35rem .5rem;font-family:'IBM Plex Mono',monospace;font-size:.75rem;background:var(--bg-input)}
+.exp-search-wrap input.exp-search{padding-left:1.9rem}

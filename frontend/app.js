@@ -96,17 +96,64 @@ const POSITION_LABEL = {
 
 // Helpers
 const fmt = {
-  num: n => n == null ? '—' : Number(n).toLocaleString('es-ES'),
+  // `useGrouping: 'always'`: en es-ES Intl no agrupa los numeros de cuatro
+  // cifras, asi que la misma columna mezclaba `4319` con `15.026` (UX-14).
+  num: n => n == null ? '—' : Number(n).toLocaleString('es-ES', { useGrouping: 'always' }),
   pct: n => n == null ? '—' : n.toFixed(1) + '%',
-  ms:  n => n == null ? '—' : n < 1000 ? Math.round(n) + 'ms' : (n/1000).toFixed(1) + 's',
-  date: d => d ? new Date(d).toLocaleString('es-ES') : '—',
+  // Tiempos de respuesta (milisegundos de una peticion).
+  ms:  n => n == null ? '—' : n < 1000 ? Math.round(n) + ' ms' : (n/1000).toFixed(1).replace('.', ',') + ' s',
+  // Lo que dura un rastreo. Antes salia por `ms` y un censo se leia
+  // `14787.1s`: hay que hacer la division de cabeza para saber que son 4 h.
+  lapso: ms => {
+    if (ms == null || isNaN(ms) || ms < 0) return '—';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + ' min' + (s % 60 ? ' ' + String(s % 60).padStart(2, '0') + ' s' : '');
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + ' h' + (m % 60 ? ' ' + String(m % 60).padStart(2, '0') + ' min' : '');
+    return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+  },
+  date: d => d ? new Date(d).toLocaleString('es-ES', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—',
+  dia: d => d ? new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
   ago: d => {
     if (!d) return '—';
     const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
-    if (s < 60)    return 'hace ' + s + 's';
-    if (s < 3600)  return 'hace ' + Math.floor(s/60) + 'min';
-    if (s < 86400) return 'hace ' + Math.floor(s/3600) + 'h';
-    return 'hace ' + Math.floor(s/86400) + 'd';
+    if (s < 0)     return 'ahora';
+    if (s < 60)    return 'hace ' + s + ' s';
+    if (s < 3600)  return 'hace ' + Math.floor(s/60) + ' min';
+    if (s < 86400) return 'hace ' + Math.floor(s/3600) + ' h';
+    const dias = Math.floor(s/86400);
+    if (dias === 1) return 'ayer';
+    if (dias < 30) return 'hace ' + dias + ' días';
+    return fmt.dia(d);
+  },
+  // Una expresion cron en castellano. Solo los patrones que se usan de
+  // verdad (diario, semanal, quincenal, mensual, cada N horas); lo demas se
+  // devuelve tal cual, que es mejor que una traduccion inventada.
+  cron: expr => {
+    if (!expr) return '—';
+    const p = expr.trim().split(/\s+/);
+    if (p.length !== 5) return expr;
+    const [mi, h, dm, mes, ds] = p;
+    const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+    const num = x => /^\d+$/.test(x);
+    if (!num(mi)) return expr;
+    if (/^\*\/\d+$/.test(h) && dm === '*' && mes === '*' && ds === '*')
+      return 'cada ' + h.slice(2) + ' h, en el minuto ' + mi;
+    if (!num(h)) return expr;
+    const hora = h.padStart(2, '0') + ':' + mi.padStart(2, '0');
+    if (mes !== '*') return expr;
+    if (dm === '*' && ds === '*') return 'cada día a las ' + hora;
+    if (dm === '*' && /^[0-7](,[0-7])*$/.test(ds)) {
+      const ds_ = ds.split(',').map(d => DIAS[+d]);
+      return (ds_.length === 1 ? 'cada ' : '') + ds_.join(', ') + ' a las ' + hora;
+    }
+    if (dm === '*' && ds === '1-5') return 'de lunes a viernes a las ' + hora;
+    if (ds === '*' && /^\d+(,\d+)*$/.test(dm))
+      return 'el día ' + dm.split(',').join(' y ') + ' de cada mes a las ' + hora;
+    return expr;
   },
   bytes: b => {
     if (b == null) return '—';
@@ -355,6 +402,30 @@ function app() {
       });
 
       this.$nextTick(() => lucide.createIcons());
+      this._vigilarIconos();
+    },
+
+    // Lucide convierte los <i data-lucide> que hay en el DOM CUANDO se le
+    // llama. Todo lo que Alpine monta despues (un x-if, un x-for, una vista
+    // nueva) se quedaba con el hueco del icono salvo que ese metodo concreto
+    // se acordase de llamarle: asi salian vacios los botones de la ficha de
+    // cliente (UX-15). Un observador lo hace para todos, una vez por frame.
+    _vigilarIconos() {
+      if (!window.MutationObserver || !window.lucide) return;
+      let pendiente = false;
+      const pintar = () => { pendiente = false; lucide.createIcons(); };
+      new MutationObserver(muts => {
+        if (pendiente) return;
+        for (const m of muts) {
+          for (const n of m.addedNodes) {
+            if (n.nodeType === 1 && (n.matches('i[data-lucide]') || n.querySelector('i[data-lucide]'))) {
+              pendiente = true;
+              requestAnimationFrame(pintar);
+              return;
+            }
+          }
+        }
+      }).observe(document.body, { childList: true, subtree: true });
     },
 
     // ------- Tema (terminal / claro) -------

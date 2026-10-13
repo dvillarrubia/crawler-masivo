@@ -371,9 +371,18 @@ def list_issues(
 
     total = q.count()
 
+    # Por gravedad y luego por tipo: ordenado por `id` salian los `info`
+    # (noindex) por delante de los avisos y los errores quedaban repartidos
+    # en el orden en que los escribio el analisis (UX-04).
+    gravedad = case(
+        (Issue.severity == "error", 0),
+        (Issue.severity == "warning", 1),
+        (Issue.severity == "info", 2),
+        else_=3,
+    )
     rows = (
         q.options(joinedload(Issue.url_rel))
-        .order_by(Issue.id)
+        .order_by(gravedad, Issue.issue_type, Issue.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -441,9 +450,16 @@ def list_links(
 
     total = q.count()
 
+    # Ordenado por destino y no por `id`: con `ORDER BY id` Postgres recorre
+    # la clave primaria de la tabla ENTERA (todos los rastreos, 187 M filas en
+    # local) filtrando por job, y la primera pagina de Lopesan tardaba 2 min
+    # 02 s — la pestana se quedaba en «0 enlaces · Cargando...». Con
+    # `(to_url_hash, id)` sirve el indice `ix_links_to_hash (job_id,
+    # to_url_hash)`: 0,3 ms. De paso, los enlaces a un mismo destino salen
+    # juntos, que es como se leen.
     rows = (
         q.options(joinedload(Link.from_url_rel))
-        .order_by(Link.id)
+        .order_by(Link.to_url_hash, Link.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
