@@ -15,7 +15,7 @@ from shared.database import init_db
 
 from api import dependencies
 from api.routers import (
-    cleaning, clientes, enriquecido, jobs, programaciones, results, semantic,
+    cleaning, clientes, enriquecido, jobs, programaciones, results, semantic, uso,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -66,6 +66,7 @@ app.include_router(cleaning.router)
 app.include_router(programaciones.router)
 app.include_router(clientes.router)
 app.include_router(enriquecido.router)
+app.include_router(uso.router)
 
 
 @app.get("/health", tags=["system"])
