@@ -1460,6 +1460,44 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    `SoftwareApplication.aggregateRating`, que es «valoración O reseña» igual
    que en Product. Las cuatro pasan a recomendadas (o a `uno_de`).
 
+81. **El `Crawl-delay` se respeta en `respect`, con tope, y no lo deshace
+   AUTOTHROTTLE** (R6 de #25) — Googlebot lo ignora, así que no es una señal
+   de SEO; pero este crawler dice respetar robots.txt, y un `Crawl-delay`
+   suele ser lo que escribió el administrador después de que un rastreador le
+   tumbara el servidor: saltárselo es la forma más rápida de acabar bloqueado
+   por el WAF a mitad de censo. `RobotsCrawlDelayMiddleware` lo lee del mismo
+   parser que decide los `Disallow` (Protego, `crawl_delay(ua)`, con el mismo
+   UA) y lo pone como retraso del **slot de descarga del host**: vale igual con
+   render y sin él y no toca la concurrencia ni el auto-cap de render
+   (decisión 8). Tres cosas lo habrían deshecho en silencio y están cubiertas:
+   AUTOTHROTTLE reescribe `slot.delay` tras cada respuesta y lo bajaba a
+   `DOWNLOAD_DELAY` (0) —se vuelve a subir al piso en `response_downloaded`,
+   que este middleware conecta después que AutoThrottle; AUTOTHROTTLE puede
+   seguir SUBIÉNDOLO si el servidor va lento—; el jitter de ±50% de Scrapy daba
+   intervalos de la mitad —en esos slots se apaga—; y el recolector de slots
+   inactivos los borra a los 60 s —el retraso queda en `per_slot_settings`—.
+   Tope `ROBOTS_CRAWL_DELAY_MAX` = 10 s: un `Crawl-delay: 30` en un sitio de
+   20.000 páginas son 7 días de rastreo, y eso no es cortesía sino no poder
+   auditar; con 10 s es largo pero terminable. Un valor que no es un número
+   positivo y finito no se aplica, y el `request_delay` del job no se baja. Se
+   registra en INFO (y cuándo se recorta). En `ignore` y `audit` no se aplica:
+   rastrean a propósito lo que robots.txt pide no tocar. Test con el spider
+   real y AUTOTHROTTLE encendido midiendo el hueco entre peticiones en el
+   servidor (`test_crawl_delay_espacia_las_peticiones_de_cada_host`).
+
+82. **Las herramientas de control descargan como el rastreo** (#30) —
+   `check_js_templates.py` bajaba el crudo con `urllib`, sin huella TLS: un WAF
+   que deja pasar al rastreo (curl_cffi, decisión 11) le servía un desafío, el
+   render sí llegaba a la página y TODOS sus enlaces salían «solo con
+   JavaScript» — `grafo_fiable=false` por un bloqueo, no por el sitio. La
+   descarga y el criterio de la decisión 62 (código distinto de 200 o título de
+   muro → `NoEsLaPagina`) se mudan a `shared/descarga_cruda.py`, que usan los
+   dos scripts. Lo descartado se cuenta (`sin_comprobar`, `motivos`) y una
+   plantilla sin ninguna muestra válida sale con `muestras: 0` en vez de
+   desaparecer; el worker (`_resumen_js_check`) no la cuenta como concluyente,
+   así que si el comprobador se come el muro en todas, el veredicto es `None`
+   («no se pudo comprobar»), nunca «fiable».
+
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
@@ -1709,6 +1747,9 @@ SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
 MAX_SITEMAP_FILES=500            # cuantos ficheros de sitemap se siguen
 MAX_URLS_PER_SITEMAP=50000       # URLs por fichero
 MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
+
+# robots.txt
+ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision 81)
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
@@ -1758,6 +1799,7 @@ Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `URL_MAX
 | `UserAgentMiddleware` | 400 | UA rotation (replaces Scrapy default) |
 | `ProxyMiddleware` | 410 | Optional proxy rotation from `PROXY_LIST` |
 | `HttpConfigMiddleware` | 420 | Per-job HTTP overrides |
+| `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
 
 ## Reference Documents
 

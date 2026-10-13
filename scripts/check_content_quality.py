@@ -74,44 +74,14 @@ def firma(path: str) -> str:
     return firma_de_ruta(path)
 
 
-# Titulos con los que un WAF responde 200 a una peticion que ha bloqueado.
-# La respuesta trae 5-6 kB de HTML sin una palabra de la pagina, asi que el
-# comparador la leia como "aqui se ha perdido todo el contenido".
-_TITULOS_DE_BLOQUEO = (
-    "just a moment",
-    "access denied",
-    "pardon our interruption",
-    "attention required",
-    "request unsuccessful",
-    "are you a robot",
-    "checking your browser",
-    "security check",
-    "403 forbidden",
+# La descarga del crudo y el criterio de "esto no es la pagina" (decision 62)
+# viven en `shared/descarga_cruda.py`: `check_js_templates.py` los necesita
+# igual, y dos copias acaban descargando por caminos distintos.
+from shared.descarga_cruda import (  # noqa: E402
+    TITULOS_DE_BLOQUEO as _TITULOS_DE_BLOQUEO,  # noqa: F401
+    NoEsLaPagina,
+    descargar_crudo,
 )
-
-
-class NoEsLaPagina(RuntimeError):
-    """La respuesta no es la pagina: un codigo de error o un muro de un WAF.
-
-    Se distingue a proposito de un fallo de red. Este script existe para avisar
-    de que se ha perdido contenido, asi que confundir "el sitio no me deja
-    verla" con "el rastreo no la guardo" es su peor fallo posible: da la alarma
-    sobre un extractor que funciona.
-    """
-
-
-def descargar_crudo(url: str, timeout: int = 40) -> str:
-    """Mismo camino que el rastreo: curl_cffi con fingerprint de Chrome."""
-    from curl_cffi import requests as cr
-    from parsel import Selector
-
-    r = cr.get(url, impersonate=os.getenv("IMPERSONATE", "chrome124"), timeout=timeout)
-    if r.status_code != 200:
-        raise NoEsLaPagina(f"HTTP {r.status_code}")
-    titulo = (Selector(text=r.text).css("title::text").get() or "").strip().lower()
-    if any(t in titulo for t in _TITULOS_DE_BLOQUEO):
-        raise NoEsLaPagina(f"muro del WAF (titulo: {titulo[:40]!r})")
-    return r.text
 
 
 def cargar_paginas(job_id: str):

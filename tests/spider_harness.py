@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -120,13 +121,22 @@ def construir_sitio(port: int, con_privado: bool = False,
     }
 
 
+# (instante, host, ruta) de cada peticion que llega al sitio: para medir el
+# ritmo al que el spider pide a cada host (Crawl-delay).
+PETICIONES: list[tuple[float, str, str]] = []
+
+
 def servir(robots_prohibe_todo: bool = False,
            robots_bloquea_privado: bool = False,
-           con_recursos: bool = False) -> tuple[ThreadingHTTPServer, int]:
+           con_recursos: bool = False,
+           robots_crawl_delay: float | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
+            PETICIONES.append((time.monotonic(),
+                               (self.headers.get("Host") or "").split(":")[0],
+                               self.path))
             status, headers, body = rutas.get(self.path.split("?")[0], (404, {}, b"no"))
             self.send_response(status)
             headers = {"Content-Type": "text/html; charset=utf-8", **headers}
@@ -149,6 +159,12 @@ def servir(robots_prohibe_todo: bool = False,
         rutas["/robots.txt"] = (
             200, {"Content-Type": "text/plain"},
             b"User-agent: *\nDisallow: /privado/\n",
+        )
+    if robots_crawl_delay is not None:
+        # Crawl-delay en el robots.txt de los dos hosts del sitio (decision 81).
+        rutas["/robots.txt"] = (
+            200, {"Content-Type": "text/plain"},
+            f"User-agent: *\nCrawl-delay: {robots_crawl_delay}\n".encode(),
         )
     if robots_prohibe_todo:
         # Un robots.txt que lo prohibe todo: el caso que acababa como un job
@@ -208,7 +224,8 @@ def main() -> None:
     entrada = json.loads(sys.argv[1])
     srv, port = servir(entrada.get("robots_prohibe_todo", False),
                        entrada.get("robots_bloquea_privado", False),
-                       entrada.get("con_recursos", False))
+                       entrada.get("con_recursos", False),
+                       entrada.get("robots_crawl_delay"))
 
     import shared.database
     from scrapy.crawler import CrawlerProcess
@@ -236,18 +253,32 @@ def main() -> None:
 
         SeoSpider._page_request = _page_request
 
+    middlewares = {"seo_crawler.middlewares.RobotsAuditMiddleware": 100}
+    import seo_crawler.middlewares as mw
+    if hasattr(mw, "RobotsCrawlDelayMiddleware"):
+        # Condicional para que el test del Crawl-delay falle contra el codigo
+        # anterior por lo que mide (el ritmo), no por un ImportError.
+        middlewares["seo_crawler.middlewares.RobotsCrawlDelayMiddleware"] = 110
+    con_crawl_delay = entrada.get("robots_crawl_delay") is not None
+
     proceso = CrawlerProcess({
-        "LOG_LEVEL": "WARNING",
+        "LOG_LEVEL": entrada.get("log_level", "WARNING"),
         "TELNETCONSOLE_ENABLED": False,
         # Por defecto apagado para que el sitio de pruebas se rastree entero;
         # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
         "ROBOTSTXT_OBEY": bool(
             entrada.get("robots_prohibe_todo") or entrada.get("robots_bloquea_privado")
-        ) and entrada.get("robots_mode") != "audit",
+            or con_crawl_delay
+        ) and entrada.get("robots_mode") not in ("audit", "ignore"),
         "ROBOTS_MODE": entrada.get("robots_mode", "respect"),
-        "DOWNLOADER_MIDDLEWARES": {
-            "seo_crawler.middlewares.RobotsAuditMiddleware": 100,
-        },
+        "DOWNLOADER_MIDDLEWARES": middlewares,
+        # Como en produccion (settings.py): AUTOTHROTTLE encendido, que es lo
+        # que bajaba el retraso del slot tras cada respuesta.
+        "AUTOTHROTTLE_ENABLED": con_crawl_delay,
+        "AUTOTHROTTLE_START_DELAY": 0,
+        "AUTOTHROTTLE_MAX_DELAY": 10,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,
+        "DOWNLOAD_DELAY": 0,
         "HTTPERROR_ALLOW_ALL": True,
         "DEPTH_PRIORITY": 1,
         "REQUEST_FINGERPRINTER_IMPLEMENTATION": "2.7",
@@ -274,6 +305,7 @@ def main() -> None:
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
+    print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 
 

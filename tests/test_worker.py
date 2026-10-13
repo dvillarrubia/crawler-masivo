@@ -423,3 +423,24 @@ def test_sin_alertas_criticas_no_se_avisa_fuera(monkeypatch, tmp_path):
 
     worker._comparar_con_el_censo_anterior(ids[1])
     assert avisos == [], "sin nada grave no se molesta a nadie"
+
+
+def test_una_plantilla_sin_muestras_validas_no_hace_fiable_el_grafo():
+    """Si el comprobador se come un 403 o un muro de WAF en todas las muestras,
+    no ha mirado nada: el veredicto es "no se sabe", no "fiable" (#30)."""
+    from worker import _resumen_js_check
+
+    resumen = _resumen_js_check([
+        {"plantilla": "fichas  (n=40)", "muestras": 0, "sin_comprobar": 1},
+        {"plantilla": "blog  (n=9)", "muestras": 0, "sin_comprobar": 1},
+    ])
+    assert resumen["grafo_fiable"] is None
+    assert resumen["sin_comprobar"] == 2
+
+    # Con una plantilla comprobada de verdad, esa si decide
+    resumen = _resumen_js_check([
+        {"plantilla": "fichas  (n=40)", "muestras": 0, "sin_comprobar": 1},
+        {"plantilla": "blog  (n=9)", "muestras": 1, "enlaces_solo_js": 0,
+         "enlaces_crudo": 50, "render_sospechoso": False},
+    ])
+    assert resumen["grafo_fiable"] is True

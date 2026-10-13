@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from typing import Any, Generator
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 import redis
 import scrapy
@@ -86,10 +86,12 @@ logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 # Extensions that never need JS rendering — skip Playwright for these URLs.
 _NON_HTML_EXTENSIONS = frozenset({
-    # Images
+    # Images (HEIC/HEIF: las fotos de iPhone que se suben tal cual al CMS)
     ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp", ".tiff", ".avif",
-    # Documents
+    ".heic", ".heif",
+    # Documents (OpenDocument: lo que publican las administraciones publicas)
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".odt", ".ods", ".odp", ".epub",
     # Styles / scripts / fonts
     ".css", ".js", ".mjs", ".woff", ".woff2", ".ttf", ".eot", ".otf",
     # Media
@@ -104,21 +106,45 @@ _NON_HTML_EXTENSIONS = frozenset({
     ".txt", ".csv", ".rtf",
 })
 
+# Descargas que se piden por query string y no por extension: el gestor de
+# descargas de WordPress (`?download=123`), los exportadores (`?format=pdf`,
+# `?export=csv`). La ruta es la de una pagina (`/informe/`, `/download.php`),
+# asi que por la extension se renderizaban: una pestana de Chromium para un PDF.
+_PARAMS_DESCARGA = frozenset({"download", "dl"})
+_PARAMS_FORMATO = frozenset({"format", "export", "output", "filetype"})
+_FALSOS = frozenset({"0", "false", "no", "off"})
+
 
 def _url_likely_html(url: str) -> bool:
     """Return True if the URL probably points to an HTML page.
 
     Checks the last segment of the path for a file extension.
     No extension or an extension not in _NON_HTML_EXTENSIONS → probably HTML.
+
+    Solo decide si se RENDERIZA, y los dos errores no cuestan lo mismo: dar por
+    HTML un PDF gasta una pestana de Chromium; dar por no-HTML una pagina la
+    guarda sin lo que monta el JavaScript, en silencio. Por eso es una lista de
+    lo que seguro NO es HTML y no al reves: `producto-2.5-kg` tiene un punto en
+    el ultimo tramo y es una ficha (decision 59). Por la misma razon, en la
+    query solo cuentan los parametros que piden una descarga sin ambiguedad:
+    `download`/`dl` con un valor que no sea falso, o `format`/`export`/... con
+    el nombre de un formato de la lista (`?format=pdf` si, `?format=amp` no).
     """
-    path = urlparse(url).path
+    parsed = urlparse(url)
+    path = parsed.path
     # Get last segment, ignore trailing slash
     segment = path.rstrip("/").rsplit("/", 1)[-1] if path else ""
     dot_pos = segment.rfind(".")
-    if dot_pos == -1:
-        return True  # no extension → likely HTML
-    ext = segment[dot_pos:].lower()
-    return ext not in _NON_HTML_EXTENSIONS
+    if dot_pos != -1 and segment[dot_pos:].lower() in _NON_HTML_EXTENSIONS:
+        return False
+    if parsed.query:
+        for clave, valor in parse_qsl(parsed.query, keep_blank_values=True):
+            clave, valor = clave.strip().lower(), valor.strip().lower()
+            if clave in _PARAMS_DESCARGA and valor not in _FALSOS:
+                return False
+            if clave in _PARAMS_FORMATO and f".{valor}" in _NON_HTML_EXTENSIONS:
+                return False
+    return True
 
 
 def _hash_key(url_hash: str) -> int:

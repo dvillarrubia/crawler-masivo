@@ -4,12 +4,14 @@ Custom Scrapy downloader middlewares for the SEO crawler.
 * **UserAgentMiddleware** -- rotates User-Agent strings.
 * **ProxyMiddleware**     -- optional proxy rotation.
 * **JobConfigMiddleware** -- attaches job config to every request's meta.
+* **RobotsCrawlDelayMiddleware** -- respeta el `Crawl-delay` de robots.txt.
 """
 
 from __future__ import annotations
 
 import itertools
 import logging
+import math
 from typing import TYPE_CHECKING
 
 from scrapy import Request, signals
@@ -186,6 +188,139 @@ class RobotsAuditMiddleware(RobotsTxtMiddleware):
             useragent = request.headers.get(b"User-Agent", self._default_useragent)
         request.meta["blocked_by_robots"] = not rp.allowed(request.url, useragent)
         # Never raise IgnoreRequest -- audit mode always lets the request through.
+
+
+# Tope del Crawl-delay que se respeta. Un `Crawl-delay: 30` en un sitio de
+# 20.000 paginas son 7 dias de rastreo con una peticion cada vez: eso no es
+# cortesia, es no poder auditar el sitio. Con 10 s el mismo censo sigue siendo
+# largo (unos 2 dias y medio) pero terminable, y el tope se avisa en el log.
+CRAWL_DELAY_MAX_SEGUNDOS = 10.0
+
+
+def crawl_delay_aplicable(rp, useragent, tope: float = CRAWL_DELAY_MAX_SEGUNDOS) -> float | None:
+    """Segundos de `Crawl-delay` que robots.txt pide a `useragent`, acotados.
+
+    None si no lo declara, si el valor no es un numero positivo y finito, o si
+    el parser no sabe leerlo (`RobotParser.crawl_delay` existe desde Scrapy
+    2.18; uno anterior o de terceros puede no tenerlo). Un valor ilegible no se
+    convierte en retraso: equivocarse aqui frena un rastreo entero.
+    """
+    lector = getattr(rp, "crawl_delay", None)
+    if not callable(lector):
+        return None
+    try:
+        valor = lector(useragent)
+    except Exception:
+        return None
+    if valor is None:
+        return None
+    try:
+        valor = float(valor)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(valor) or valor <= 0:
+        return None
+    return min(valor, tope)
+
+
+class RobotsCrawlDelayMiddleware:
+    """Respeta el `Crawl-delay` de robots.txt en `robots_mode=respect`.
+
+    Googlebot lo ignora (Google regula su ritmo por la respuesta del servidor),
+    asi que no es una senal de SEO. Pero este crawler dice respetar robots.txt,
+    y un `Crawl-delay` suele ser lo que el administrador del sitio escribio
+    despues de que un rastreador le tumbara el servidor: saltarselo es la forma
+    mas rapida de acabar bloqueado por el WAF a mitad de un censo. En `ignore`
+    y en `audit` no se aplica: los dos rastrean a proposito lo que robots.txt
+    pide no tocar, y medio respetarlo no tendria sentido.
+
+    Como se aplica: el retraso es el del SLOT de descarga del host, que es como
+    Scrapy reparte el ritmo por dominio, asi que vale igual con render que sin
+    el y no toca el auto-cap de concurrencia de render (decision 8). Dos cosas
+    lo deshacian si solo se fijaba una vez:
+
+    - AUTOTHROTTLE reescribe `slot.delay` tras cada respuesta y lo puede bajar
+      hasta `DOWNLOAD_DELAY` (0). Por eso tras cada `response_downloaded` se
+      vuelve a subir al piso. Esta senal la conecta este middleware, que se
+      construye con el motor, DESPUES que la extension AutoThrottle, asi que
+      corre detras de ella y antes de que el slot saque la siguiente peticion.
+      AUTOTHROTTLE sigue pudiendo SUBIR el retraso si el servidor va lento.
+    - El jitter por defecto de Scrapy (+-50%) dejaria intervalos de la mitad
+      del pedido. En esos slots se apaga.
+
+    Y el recolector de slots inactivos los borra a los 60 s: el retraso se deja
+    tambien en `per_slot_settings`, que es de donde lee el slot que se cree
+    despues.
+    """
+
+    def __init__(self, crawler: Crawler):
+        if not crawler.settings.getbool("ROBOTSTXT_OBEY"):
+            raise NotConfigured
+        self.crawler = crawler
+        self._tope = crawler.settings.getfloat(
+            "ROBOTS_CRAWL_DELAY_MAX", CRAWL_DELAY_MAX_SEGUNDOS
+        )
+        # Mismo UA con el que RobotsTxtMiddleware decide que se puede pedir: si
+        # no, el Disallow y el Crawl-delay saldrian de grupos distintos.
+        self._useragent = (
+            crawler.settings.get("ROBOTSTXT_USER_AGENT")
+            or crawler.settings.get("USER_AGENT", "Scrapy")
+        )
+        # Lo que el job ya pide (`request_delay` -> DOWNLOAD_DELAY) no se baja.
+        self._retraso_job = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+        self._retrasos: dict[str, float] = {}
+        crawler.signals.connect(self._robots_parsed, signal=signals.robots_parsed)
+        crawler.signals.connect(
+            self._response_downloaded, signal=signals.response_downloaded
+        )
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler)
+
+    def _robots_parsed(self, robotparser, request) -> None:
+        pedido = crawl_delay_aplicable(robotparser, self._useragent, math.inf)
+        if pedido is None:
+            return
+        retraso = min(pedido, self._tope)
+        downloader = self.crawler.engine.downloader
+        clave = downloader.get_slot_key(request)
+        retraso = max(retraso, self._retraso_job)
+        self._retrasos[clave] = retraso
+        ajustes = downloader.per_slot_settings.setdefault(clave, {})
+        ajustes["delay"] = retraso
+        ajustes["jitter"] = 0.0
+        self._aplicar(clave)
+        if pedido > retraso:
+            logger.info(
+                "robots.txt de %s pide Crawl-delay %.1f s; se aplica el tope de %.1f s",
+                clave, pedido, retraso,
+            )
+        else:
+            logger.info("robots.txt de %s: Crawl-delay %.1f s aplicado", clave, retraso)
+
+    def _aplicar(self, clave: str) -> None:
+        retraso = self._retrasos.get(clave)
+        if retraso is None:
+            return
+        slot = self.crawler.engine.downloader.slots.get(clave)
+        if slot is None:
+            return
+        if slot.delay < retraso:
+            slot.delay = retraso
+        slot.jitter = 0.0
+
+    def _response_downloaded(self, response, request, spider=None) -> None:
+        clave = request.meta.get("download_slot")
+        if clave is not None and clave in self._retrasos:
+            self._aplicar(clave)
+
+    def process_request(self, request: Request, spider=None):
+        # Red de seguridad: si algo bajo el retraso entre respuestas (otra
+        # extension, un slot recreado), la siguiente peticion lo restablece.
+        if self._retrasos:
+            self._aplicar(self.crawler.engine.downloader.get_slot_key(request))
+        return None
 
 
 class HttpConfigMiddleware:

@@ -212,3 +212,60 @@ def test_sitemap_atom_usa_el_link_alternate():
     )
     paginas, _ = parse_sitemap(cuerpo, "https://x.com/feed.atom")
     assert paginas == ["https://x.com/e1", "https://x.com/e2"]
+
+
+# ---------------------------------------------------------------------------
+# lastmod y hreflang del sitemap (R21 de #25)
+# ---------------------------------------------------------------------------
+SITEMAP_HREFLANG = b"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://x.com/es/</loc>
+    <lastmod>2026-09-30T10:00:00+02:00</lastmod>
+    <xhtml:link rel="alternate" hreflang="es" href="https://x.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="/en/"/>
+    <xhtml:link rel="Alternate" hreflang="X-Default" href="https://x.com/"/>
+    <image:image><image:loc>https://x.com/foto.jpg</image:loc></image:image>
+  </url>
+  <url>
+    <loc>https://x.com/es/sin-nada</loc>
+    <xhtml:link rel="canonical" href="https://x.com/otra"/>
+    <xhtml:link rel="alternate" href="https://x.com/sin-idioma"/>
+  </url>
+</urlset>"""
+
+
+def test_el_sitemap_trae_lastmod_y_hreflang_de_cada_url():
+    from seo_crawler.sitemaps import parse_sitemap_entradas
+
+    entradas, hijos = parse_sitemap_entradas(SITEMAP_HREFLANG, "https://x.com/sitemap.xml")
+    assert hijos == []
+    assert [e.url for e in entradas] == ["https://x.com/es/", "https://x.com/es/sin-nada"]
+    portada = entradas[0]
+    assert portada.lastmod == "2026-09-30T10:00:00+02:00"
+    # El idioma tal cual: X-Default o en-UK los juzga el analizador de hreflang
+    assert portada.hreflang == [
+        ("es", "https://x.com/es/"),
+        ("en", "https://x.com/en/"),
+        ("X-Default", "https://x.com/"),
+    ]
+    # Un link que no es alternate, o sin idioma, no es una anotacion hreflang
+    assert entradas[1].lastmod is None
+    assert entradas[1].hreflang == []
+
+
+def test_parse_sitemap_sigue_devolviendo_solo_urls():
+    """Sus consumidores (el spider) no cambian."""
+    paginas, _ = parse_sitemap(SITEMAP_HREFLANG)
+    assert paginas == ["https://x.com/es/", "https://x.com/es/sin-nada"]
+
+
+def test_los_formatos_sin_lastmod_salen_sin_el():
+    from seo_crawler.sitemaps import parse_sitemap_entradas
+
+    entradas, _ = parse_sitemap_entradas(b"https://x.com/a\nhttps://x.com/b\n")
+    assert [(e.url, e.lastmod, e.hreflang) for e in entradas] == [
+        ("https://x.com/a", None, []), ("https://x.com/b", None, []),
+    ]

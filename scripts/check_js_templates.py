@@ -25,12 +25,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import gzip
 import os
 import random
 import re
 import sys
-import urllib.request
 from collections import defaultdict
 
 def _preparar_rutas() -> None:
@@ -54,11 +52,6 @@ def _preparar_rutas() -> None:
 
 
 _preparar_rutas()
-
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 
 # Codigos de idioma de verdad: con `^/[a-z]{2}/?$` a secas, `/tv/` salia como
 # "home" y se comparaba la portada del sitio con una seccion de video. La lista
@@ -148,14 +141,14 @@ def clasificar(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
     return firma_de_ruta(path)
 
 
-def descargar_crudo(url: str, timeout: int = 40) -> str:
-    req = urllib.request.Request(
-        url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"}
-    )
-    datos = urllib.request.urlopen(req, timeout=timeout).read()
-    if datos[:2] == b"\x1f\x8b":
-        datos = gzip.decompress(datos)
-    return datos.decode("utf-8", "ignore")
+# El crudo se baja por el MISMO camino que el rastreo (curl_cffi con la huella
+# de Chrome) y con el mismo criterio de "esto no es la pagina" que
+# `check_content_quality.py` (decision 62). Antes iba con `urllib`, sin huella
+# TLS de navegador: un WAF que deja pasar al rastreo le servia un desafio, el
+# render si llegaba a la pagina, y TODOS sus enlaces salian "solo con
+# JavaScript". El grafo quedaba marcado como no fiable por un bloqueo, no por
+# el sitio.
+from shared.descarga_cruda import NoEsLaPagina, descargar_crudo  # noqa: E402,F401
 
 
 def cargar_urls(job_id: str) -> list[tuple[str, str]]:
@@ -195,10 +188,22 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
         )
         for plantilla, urls in urls_por_plantilla:
             enl_solo_js = enl_crudo = pal_crudo = pal_render = muestras_ok = 0
+            # Lo que se descarta se CUENTA: una plantilla cuyas muestras caen
+            # todas no puede desaparecer del resultado, porque una lista corta
+            # se lee como "aqui no se esconde nada".
+            sin_comprobar = 0
+            motivos: list[str] = []
             for url in urls:
                 try:
                     html_crudo = descargar_crudo(url)
+                except NoEsLaPagina as exc:
+                    sin_comprobar += 1
+                    motivos.append(str(exc))
+                    print(f"    aviso: {url[:70]} no es la pagina ({exc}); muestra descartada")
+                    continue
                 except Exception as exc:
+                    sin_comprobar += 1
+                    motivos.append(f"descarga: {type(exc).__name__}")
                     print(f"    aviso: no se pudo descargar {url[:70]} ({exc})")
                     continue
                 pagina = await (await navegador.new_context()).new_page()
@@ -217,6 +222,8 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                         pass
                     html_render = await pagina.content()
                 except Exception as exc:
+                    sin_comprobar += 1
+                    motivos.append(f"render: {type(exc).__name__}")
                     print(f"    aviso: no se pudo renderizar {url[:70]} ({exc})")
                     await pagina.close()
                     continue
@@ -257,6 +264,18 @@ async def analizar(urls_por_plantilla, espera_ms: int, hosts: set[str]):
                         "palabras_crudo": pc,
                         "palabras_render": pr,
                         "render_sospechoso": render_sospechoso,
+                        "sin_comprobar": sin_comprobar,
+                    }
+                )
+            else:
+                print(f"    SIN COMPROBAR: {plantilla} -- ninguna de sus "
+                      f"{sin_comprobar} muestra(s) se pudo descargar o renderizar")
+                resultados.append(
+                    {
+                        "plantilla": plantilla,
+                        "muestras": 0,
+                        "sin_comprobar": sin_comprobar,
+                        "motivos": sorted(set(motivos)),
                     }
                 )
         await navegador.close()
@@ -356,6 +375,10 @@ def main() -> None:
     print(f"\n{'plantilla':<34}{'muestras':>9}{'enl.soloJS':>12}{'pal.crudo':>11}{'pal.render':>12}{'oculto':>9}")
     print("-" * 87)
     for r in resultados:
+        if not r.get("muestras"):
+            print(f"{r['plantilla']:<34}{0:>9}   SIN COMPROBAR: "
+                  f"{', '.join(r.get('motivos') or []) or 'sin motivo'}")
+            continue
         crudo, render = r["palabras_crudo"], r["palabras_render"]
         pct = f"+{round(100 * (render - crudo) / crudo)}%" if crudo else "n/d"
         print(

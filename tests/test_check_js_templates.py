@@ -86,3 +86,112 @@ def test_el_limpiador_de_banners_es_el_mismo_que_usa_el_rastreo():
     cualquier sitio con OneTrust o Cookiebot salia con el grafo no fiable."""
     assert "INTOCABLES" in cjt._LIMPIADOR_DE_BANNERS
     assert "cookie-banner" in cjt._LIMPIADOR_DE_BANNERS
+
+
+# ---------------------------------------------------------------------------
+# El crudo por el mismo camino que el rastreo (#30)
+# ---------------------------------------------------------------------------
+class _Respuesta:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+@pytest.fixture
+def finge(monkeypatch):
+    """Sustituye la descarga por una respuesta dada y anota con que se pidio."""
+    from curl_cffi import requests as cr
+
+    llamadas: list[dict] = []
+
+    def poner(status_code: int, text: str):
+        def get(url, **kw):
+            llamadas.append({"url": url, **kw})
+            return _Respuesta(status_code, text)
+
+        monkeypatch.setattr(cr, "get", get)
+        return llamadas
+
+    return poner
+
+
+def test_el_crudo_se_baja_con_huella_de_navegador(finge):
+    """Con `urllib` un WAF que deja pasar al rastreo servia un desafio: el
+    render si llegaba a la pagina y TODOS sus enlaces salian solo-JS."""
+    llamadas = finge(200, "<html><head><title>Ficha</title></head><body>x</body></html>")
+    assert "Ficha" in cjt.descargar_crudo("https://x.test/a")
+    assert llamadas and llamadas[0].get("impersonate")
+
+
+def test_un_403_o_un_muro_no_son_la_pagina(finge):
+    finge(403, "<html><head><title>403 Forbidden</title></head></html>")
+    with pytest.raises(cjt.NoEsLaPagina):
+        cjt.descargar_crudo("https://x.test/a")
+    finge(200, "<html><head><title>Just a moment...</title></head></html>")
+    with pytest.raises(cjt.NoEsLaPagina):
+        cjt.descargar_crudo("https://x.test/a")
+
+
+def _playwright_falso(monkeypatch, html_render: str):
+    """Chromium de mentira: cada pagina renderiza `html_render`."""
+    import types as _types
+
+    class Pagina:
+        async def goto(self, *a, **k):
+            pass
+
+        async def wait_for_timeout(self, *a):
+            pass
+
+        async def evaluate(self, *a):
+            pass
+
+        async def content(self):
+            return html_render
+
+        async def close(self):
+            pass
+
+    class Contexto:
+        async def new_page(self):
+            return Pagina()
+
+    class Navegador:
+        async def new_context(self, **k):
+            return Contexto()
+
+        async def close(self):
+            pass
+
+    class Chromium:
+        async def launch(self, **k):
+            return Navegador()
+
+    class _Gestor:
+        async def __aenter__(self):
+            return _types.SimpleNamespace(chromium=Chromium())
+
+        async def __aexit__(self, *a):
+            return False
+
+    modulo = _types.ModuleType("playwright.async_api")
+    modulo.async_playwright = lambda: _Gestor()
+    monkeypatch.setitem(sys.modules, "playwright.async_api", modulo)
+
+
+def test_la_muestra_bloqueada_se_cuenta_y_la_plantilla_no_desaparece(finge, monkeypatch):
+    """Antes una plantilla cuyas muestras fallaban todas desaparecia del
+    resultado; y con el WAF dejando pasar solo al navegador, se comparaba el
+    muro (0 enlaces) contra la pagina renderizada (todos)."""
+    import asyncio
+
+    finge(200, "<html><head><title>Just a moment...</title></head><body></body></html>")
+    _playwright_falso(monkeypatch, '<html><body><a href="/b">b</a><a href="/c">c</a></body></html>')
+    resultados = asyncio.run(cjt.analizar(
+        [("fichas  (n=40)", ["https://x.test/a1", "https://x.test/a2"])], 0, {"x.test"},
+    ))
+    (r,) = resultados
+    assert r["muestras"] == 0
+    assert r["sin_comprobar"] == 2
+    assert r.get("enlaces_solo_js", 0) == 0  # no se afirma nada sobre el grafo
+    assert any("WAF" in m for m in r["motivos"])

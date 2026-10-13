@@ -188,3 +188,75 @@ def test_el_modo_auditoria_rastrea_y_marca(rastreo_robots_auditoria):
     assert bloqueada["blocked_by_robots"] is True
     assert bloqueada["status_code"] == 200
     assert paginas["http://OTRO/home"]["blocked_by_robots"] is False
+
+
+# ---------------------------------------------------------------------------
+# Crawl-delay (R6 de #25, decision 81)
+# ---------------------------------------------------------------------------
+CRAWL_DELAY = 1.0
+
+
+def _rastrear_con_peticiones(**extra):
+    """Como `_rastrear`, y ademas las peticiones que recibio el servidor."""
+    entrada = {
+        "seeds": ["http://localhost:{port}/"],
+        "config": {"max_depth": 2, "exclude_patterns": ["*/tag/*"]},
+        **extra,
+    }
+    proc = subprocess.run(
+        [sys.executable, HARNESS, json.dumps(entrada)],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert "@@PETICIONES@@" in proc.stdout, proc.stdout + proc.stderr
+    linea = proc.stdout.split("@@PETICIONES@@", 1)[1].split("\n", 1)[0]
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
+    paginas = {i["url"]: i for i in items if i["_tipo"] == "PageItem"}
+    return json.loads(linea), paginas, proc.stderr
+
+
+def _huecos_por_host(peticiones):
+    """Segundos entre peticiones consecutivas a cada host."""
+    por_host: dict[str, list[float]] = {}
+    for instante, host, ruta in peticiones:
+        if ruta == "/robots.txt":
+            continue  # la pide el middleware de robots, antes de saber el retraso
+        por_host.setdefault(host, []).append(instante)
+    huecos = {}
+    for host, instantes in por_host.items():
+        instantes.sort()
+        huecos[host] = [b - a for a, b in zip(instantes, instantes[1:])]
+    return huecos
+
+
+@pytest.fixture(scope="module")
+def rastreo_crawl_delay():
+    return _rastrear_con_peticiones(robots_crawl_delay=CRAWL_DELAY, log_level="INFO")
+
+
+def test_crawl_delay_espacia_las_peticiones_de_cada_host(rastreo_crawl_delay):
+    """Con AUTOTHROTTLE encendido, como en produccion: es lo que bajaba el
+    retraso del slot a 0 tras cada respuesta. Antes no habia nada que leyera el
+    Crawl-delay y las peticiones salian casi a la vez."""
+    peticiones, paginas, _ = rastreo_crawl_delay
+    otro = _huecos_por_host(peticiones)["127.0.0.1"]
+    assert len(otro) >= 5, otro  # hay ritmo de verdad que medir
+    # Sin jitter ningun hueco baja del retraso; el 0,9 es margen de reloj.
+    assert min(otro) >= CRAWL_DELAY * 0.9, otro
+    assert "http://OTRO/a" in paginas
+
+
+def test_crawl_delay_se_avisa_en_el_log(rastreo_crawl_delay):
+    _, _, stderr = rastreo_crawl_delay
+    assert "Crawl-delay 1.0 s aplicado" in stderr
+
+
+@pytest.mark.parametrize("modo", ["ignore", "audit"])
+def test_crawl_delay_no_frena_si_robots_no_se_respeta(modo):
+    """`ignore` y `audit` rastrean a proposito lo que robots.txt pide no tocar:
+    respetar solo su ritmo seria medio respetarlo."""
+    peticiones, _, stderr = _rastrear_con_peticiones(
+        robots_crawl_delay=CRAWL_DELAY, robots_mode=modo, log_level="INFO",
+    )
+    assert "Crawl-delay" not in stderr
+    otro = _huecos_por_host(peticiones)["127.0.0.1"]
+    assert min(otro) < CRAWL_DELAY * 0.5, otro
