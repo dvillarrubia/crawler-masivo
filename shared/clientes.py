@@ -51,6 +51,25 @@ def slugificar(texto: str | None) -> str:
     return texto[:SLUG_MAX].strip("-")
 
 
+# Sufijos con los que se han lanzado pruebas de un cliente: `lopesan-canary`,
+# `lopesan-canario`, `lopesan-prueba`. Son rastreos DE ese cliente —una
+# muestra antes del censo completo—, no clientes distintos. Medido sobre la BD
+# de produccion el 2026-10-13: sin plegarlos, 10 clientes donde hay 5, y el
+# canario de Lopesan fuera de la ficha de Lopesan, que es donde se compara.
+_SUFIJO_PRUEBA = re.compile(r"-(?:canary|canario|prueba|test)$")
+
+
+def slug_de_cliente(texto: str | None) -> str:
+    """El slug del CLIENTE al que pertenece un `client_id` de texto.
+
+    `'Lopesan-Canary'` -> `'lopesan'`. Solo se pliega el sufijo si queda algo
+    delante: un cliente que se llame literalmente «test» sigue siendo «test».
+    """
+    slug = slugificar(texto)
+    base = _SUFIJO_PRUEBA.sub("", slug)
+    return base or slug
+
+
 def slug_valido(slug: str) -> bool:
     return bool(slug) and len(slug) <= SLUG_MAX and bool(_PATRON_SLUG.match(slug))
 
@@ -105,7 +124,7 @@ def cliente_por_texto(db, texto: str | None, *, crear: bool = True):
     from shared.models import Client
 
     texto = (texto or "").strip()
-    slug = slugificar(texto)
+    slug = slug_de_cliente(texto)
     if not slug:
         return None
     cliente = db.query(Client).filter(Client.slug == slug).one_or_none()
@@ -149,7 +168,7 @@ def migrar_client_id_texto(db) -> dict[str, Any]:
 
     por_slug: dict[str, set[str]] = {}
     for texto in textos:
-        slug = slugificar(texto)
+        slug = slug_de_cliente(texto)
         if slug:
             por_slug.setdefault(slug, set()).add(texto)
 
@@ -165,7 +184,9 @@ def migrar_client_id_texto(db) -> dict[str, Any]:
             # El nombre: la variante mas frecuente no se sabe sin otra
             # consulta; la mas larga suele ser la que lleva acentos y
             # mayusculas, que es como se escribe el nombre de verdad.
-            nombre = max((v.strip() for v in variantes), key=lambda v: (len(v), v))
+            # Las de prueba (`-canary`) no dan nombre al cliente.
+            propias = [v for v in variantes if slugificar(v) == slug] or [slug]
+            nombre = max((v.strip() for v in propias), key=lambda v: (len(v), v))
             cliente = Client(nombre=nombre[:256], slug=slug, dominios=[],
                              config_defecto={}, integraciones=[])
             db.add(cliente)
@@ -185,5 +206,11 @@ def migrar_client_id_texto(db) -> dict[str, Any]:
                         synchronize_session=False)
             )
 
-    colisiones = {s: sorted(v) for s, v in por_slug.items() if len(v) > 1}
+    # Una colision es una ERRATA (`Acme`, `acme `, `Ácme`), no un canario: los
+    # textos con sufijo de prueba se pliegan a proposito y no se avisan.
+    colisiones = {}
+    for s, v in por_slug.items():
+        propias = sorted(t for t in v if slugificar(t) == s)
+        if len(propias) > 1:
+            colisiones[s] = propias
     return {"creados": creados, **contados, "colisiones": colisiones}

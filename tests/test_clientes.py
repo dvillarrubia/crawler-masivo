@@ -34,7 +34,8 @@ from sqlalchemy import BigInteger, create_engine  # noqa: E402
 from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from shared.clientes import fusionar_config, migrar_client_id_texto, slugificar  # noqa: E402
+from shared.clientes import (  # noqa: E402
+    fusionar_config, migrar_client_id_texto, slug_de_cliente, slugificar)
 from shared.credenciales import (  # noqa: E402
     CredencialNoDisponible, credencial, error_en_variable, esta_configurada,
 )
@@ -382,6 +383,34 @@ def test_la_migracion_reutiliza_un_cliente_ya_dado_de_alta(tmp_path):
     s.commit()
     assert s.query(Job).one().cliente_id == s.query(Client).one().id
     s.close()
+
+
+def test_los_canarios_son_del_cliente_y_no_otro_cliente(tmp_path):
+    """Lo que habia en produccion el 2026-10-13: `lopesan`, `lopesan-canary`,
+    `lopesan-canario` y `lopesan-prueba` son UN cliente, no cuatro."""
+    Sesion = _motor(tmp_path)
+    s = Sesion()
+    for texto in ("lopesan", "lopesan-canary", "lopesan-canario", "lopesan-prueba",
+                  "saunierduval-canary"):
+        s.add(Job(name="j", client_id=texto, status="completed",
+                  seeds=["https://x.com/"], config={}))
+    s.commit()
+    r = migrar_client_id_texto(s)
+    s.commit()
+    assert sorted(c.slug for c in s.query(Client)) == ["lopesan", "saunierduval"]
+    assert r["colisiones"] == {}, "plegar un canario no es una errata"
+    # Sin ningun job «normal», el nombre sale del slug, no de «-canary».
+    assert s.query(Client).filter(Client.slug == "saunierduval").one().nombre == "saunierduval"
+    assert s.query(Job).filter(Job.cliente_id.is_(None)).count() == 0
+    s.close()
+
+
+def test_slug_de_cliente():
+    assert slug_de_cliente("Lopesan-Canary") == "lopesan"
+    assert slug_de_cliente("progym-canario") == "progym"
+    # Solo se pliega si queda algo delante.
+    assert slug_de_cliente("test") == "test"
+    assert slug_de_cliente("testing-labs") == "testing-labs"
 
 
 def test_slugificar():

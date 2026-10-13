@@ -234,14 +234,14 @@ def _filtro_cliente(db: Session, valor: str):
     """
     from sqlalchemy import or_
 
-    from shared.clientes import slugificar
+    from shared.clientes import slug_de_cliente
     from shared.models import Client
 
     try:
         return Job.cliente_id == uuid.UUID(valor)
     except ValueError:
         pass
-    cliente = db.query(Client).filter(Client.slug == slugificar(valor)).one_or_none()
+    cliente = db.query(Client).filter(Client.slug == slug_de_cliente(valor)).one_or_none()
     if cliente is None:
         return Job.client_id == valor
     return or_(Job.cliente_id == cliente.id,
