@@ -268,3 +268,22 @@ def test_enlazada_desde_y_enlaces_entrantes(con_plantillas):
     exp = list(csv.reader(io.StringIO(api.get(
         f"/api/jobs/{jid}/urls/export?url_contains=/es/null&columnas=url,enlazada_desde,origenes").content.decode("utf-8-sig"))))
     assert ["https://x.com/es/null", "https://x.com/es/hoteles/a", "2"] in exp
+
+
+def test_columna_h1_cuenta_solo_los_que_se_pintan(con_plantillas, tmp_path):
+    """Las vistas por ambito necesitan el H1 como columna; los ocultos (clones
+    movil/escritorio) no cuentan, decision 46."""
+    from shared.models import Heading
+
+    api, jid = con_plantillas
+    s = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/p.db"))()
+    a = s.query(Url).filter(Url.path == "/es/hoteles/a").one()
+    s.add_all([Heading(url_id=a.id, tag="h1", position=1, text="Hotel A"),
+               Heading(url_id=a.id, tag="h1", position=2, text="Hotel A", oculto=True),
+               Heading(url_id=a.id, tag="h2", position=3, text="Habitaciones")])
+    s.commit()
+    s.close()
+    fila = api.get(f"/api/jobs/{jid}/urls?url_contains=/es/hoteles/a&h1=true").json()["items"][0]
+    assert fila["h1"] == "Hotel A" and fila["h1_count"] == 1
+    exp = api.get(f"/api/jobs/{jid}/urls/export?url_contains=/es/hoteles/a&columnas=url,h1,h1_count").content.decode("utf-8-sig")
+    assert "Hotel A,1" in exp

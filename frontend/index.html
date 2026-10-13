@@ -3277,11 +3277,20 @@
                 <template x-if="tab.divider">
                   <div class="exp-divider"></div>
                 </template>
-                <template x-if="!tab.divider">
+                <template x-if="tab.header">
+                  <div class="exp-sidebar-titulo" x-text="tab.header"></div>
+                </template>
+                <template x-if="!tab.divider && !tab.header">
                   <button type="button" class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
-                    <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
+                    <template x-if="!tab.ambito">
+                      <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
+                    </template>
+                    <template x-if="tab.ambito">
+                      <span class="exp-tab-punto" :class="'p-' + gravedadDelAmbito(tab)"
+                            :title="({error:'Hay errores', warning:'Hay avisos', info:'Solo info', ok:'Sin problemas'})[gravedadDelAmbito(tab)] || ''"></span>
+                    </template>
                   </button>
                 </template>
               </div>
@@ -3396,6 +3405,26 @@
               </div>
             </div>
           </div>
+
+          <!-- Chips de la vista por ambito: un tipo de incidencia por chip -->
+          <template x-if="(EXP_TABS.find(t => t.key === expTab) || {}).ambito">
+            <div class="exp-ambito">
+              <button class="chip-ambito" :class="!expProblema && 'on'" @click="elegirTipoDelAmbito('')">Todas las páginas</button>
+              <template x-if="tiposDelAmbito().length > 1">
+                <button class="chip-ambito" :class="expProblema === (EXP_TABS.find(t => t.key === expTab).ambito.join(',')) && 'on'"
+                        @click="elegirTipoDelAmbito('*')">Con cualquier problema de este ámbito</button>
+              </template>
+              <template x-for="r in tiposDelAmbito()" :key="r.issue_type">
+                <button class="chip-ambito" :class="[expProblema === r.issue_type && 'on', 'sev-' + r.severity]"
+                        @click="elegirTipoDelAmbito(r.issue_type)" :title="(ISSUE_INFO[r.issue_type] || {}).que || ''">
+                  <span x-text="fmt.issue(r.issue_type)"></span> <strong x-text="fmt.num(r.paginas)"></strong>
+                </button>
+              </template>
+              <template x-if="issuesResumen && !tiposDelAmbito().length">
+                <span class="text-dim text-sm">Ningún problema de este ámbito en este rastreo.</span>
+              </template>
+            </div>
+          </template>
 
           <!-- Helper hint about how filters work -->
           <div class="exp-filter-hint">

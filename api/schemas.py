@@ -603,6 +603,10 @@ class UrlResponse(BaseModel):
     # cuantas paginas distintas la enlazan. Lo que convierte un 404 en tarea.
     enlazada_desde: str | None = None
     origenes: int | None = None
+    # Solo con `?h1=true`: el primer H1 que se pinta y cuantos hay (los
+    # ocultos no cuentan, decision 46).
+    h1: str | None = None
+    h1_count: int | None = None
 
 
 class UrlDetailResponse(UrlResponse):
