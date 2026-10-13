@@ -103,7 +103,15 @@ SORT_COLUMNS = {
     "title_len": HtmlMeta.title_len,
     "meta_description": HtmlMeta.meta_description,
     "meta_description_len": HtmlMeta.meta_description_len,
+    # Se ofrecian en la interfaz como ordenables y el servidor los ignoraba
+    # (docs/INVESTIGACION_EXPLORADOR.md): el clic no hacia nada.
+    "closest_similarity": Url.closest_similarity,
+    "title_pixel_width": HtmlMeta.title_pixel_width,
+    "meta_description_pixel_width": HtmlMeta.meta_description_pixel_width,
 }
+# Ordenar por una de estas exige unir con html_meta.
+_SORT_META = {"title", "title_len", "meta_description", "meta_description_len",
+              "title_pixel_width", "meta_description_pixel_width"}
 
 # Numeric range filters mapped to (model_column, requires_html_meta_join)
 _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
@@ -130,6 +138,9 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "redirect_type": (Url.redirect_type, False),
     "title_len": (HtmlMeta.title_len, True),
     "meta_description_len": (HtmlMeta.meta_description_len, True),
+    # Google corta por pixeles, no por caracteres (decision 54).
+    "title_pixel_width": (HtmlMeta.title_pixel_width, True),
+    "meta_description_pixel_width": (HtmlMeta.meta_description_pixel_width, True),
 }
 
 # String "contains" filters mapped to (model_column, requires_html_meta_join).
@@ -151,7 +162,119 @@ _STRING_CONTAINS_FILTERS: dict[str, tuple[Any, bool]] = {
     "og_type_contains":              (HtmlMeta.og_type,              True),
     "og_url_contains":               (HtmlMeta.og_url,               True),
     "twitter_card_contains":         (HtmlMeta.twitter_card,         True),
+    # La URL tiene su propio filtro: compartia `search` con el buscador de
+    # arriba y uno pisaba al otro sin avisar.
+    "url_contains":                  (Url.url,                       False),
+    "x_robots_tag_contains":         (HtmlMeta.x_robots_tag,         True),
+    "canonical_header_contains":     (HtmlMeta.canonical_header,     True),
+    "meta_refresh_contains":         (HtmlMeta.meta_refresh,         True),
 }
+
+# Campos que se pueden pedir vacios o con valor: `?vacio=title,canonical_href`
+# o `?con_valor=...`. «Sin title» o «sin canonical» no se podian pedir con un
+# «contiene».
+_VACIO_FILTERS: dict[str, tuple[Any, bool]] = {
+    "title":            (HtmlMeta.title,            True),
+    "meta_description": (HtmlMeta.meta_description, True),
+    "canonical_href":   (HtmlMeta.canonical_href,   True),
+    "meta_robots":      (HtmlMeta.meta_robots,      True),
+    "x_robots_tag":     (HtmlMeta.x_robots_tag,     True),
+    "og_title":         (HtmlMeta.og_title,         True),
+    "og_image":         (HtmlMeta.og_image,         True),
+    "redirect_url":     (Url.redirect_url,          False),
+    "last_modified":    (Url.last_modified,         False),
+}
+
+
+def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
+    """Las URLs de un job con los filtros del Explorador aplicados.
+
+    `unir_meta`: une con html_meta aunque ningun filtro lo pida (para ordenar
+    por titulo o leer sus columnas en el CSV).
+
+    La usan el listado (`/urls`) y el CSV de la vista (`/urls/export`): dos
+    filtrados escritos por separado acabarian exportando otra lista que la que
+    se ve en pantalla.
+    """
+    def _bool(v):
+        return None if v in (None, "") else str(v).lower() in ("1", "true", "si", "sí")
+
+    q = db.query(Url).filter(Url.job_id == job_id)
+    clauses: list = []
+    necesita_meta = False
+
+    # 1) Rangos numericos: <col>_gte / <col>_lte
+    for col_name, (col_expr, needs_meta) in _RANGE_FILTERS.items():
+        gte_raw = qp.get(f"{col_name}_gte")
+        lte_raw = qp.get(f"{col_name}_lte")
+        if (gte_raw in (None, "")) and (lte_raw in (None, "")):
+            continue
+        try:
+            if gte_raw not in (None, ""):
+                clauses.append(col_expr >= float(gte_raw))
+            if lte_raw not in (None, ""):
+                clauses.append(col_expr <= float(lte_raw))
+        except ValueError:
+            continue  # numero mal escrito: se ignora
+        necesita_meta |= needs_meta
+
+    # 2) «Contiene»
+    for param_name, (col_expr, needs_meta) in _STRING_CONTAINS_FILTERS.items():
+        val = qp.get(param_name)
+        if val in (None, ""):
+            continue
+        clauses.append(col_expr.ilike(f"%{val}%"))
+        necesita_meta |= needs_meta
+
+    # 3) Vacio / con valor
+    for param, vacio in (("vacio", True), ("con_valor", False)):
+        for campo in (qp.get(param) or "").split(","):
+            campo = campo.strip()
+            if campo not in _VACIO_FILTERS:
+                continue
+            col_expr, needs_meta = _VACIO_FILTERS[campo]
+            clauses.append(or_(col_expr.is_(None), func.trim(col_expr) == "") if vacio
+                           else (col_expr.isnot(None) & (func.trim(col_expr) != "")))
+            necesita_meta |= needs_meta
+
+    search = qp.get("search")
+    if search or necesita_meta or unir_meta:
+        q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id)
+
+    for campo, col in (("status_group", Url.status_group), ("resource_type", Url.resource_type)):
+        if qp.get(campo) not in (None, ""):
+            q = q.filter(col == qp.get(campo))
+    for campo, col in (("is_internal", Url.is_internal), ("indexable", Url.indexable),
+                       ("in_sitemap", Url.in_sitemap)):
+        v = _bool(qp.get(campo))
+        if v is not None:
+            q = q.filter(col == v)
+    if qp.get("status_code") not in (None, ""):
+        try:
+            q = q.filter(Url.status_code == int(qp.get("status_code")))
+        except ValueError:
+            pass
+
+    for clause in clauses:
+        q = q.filter(clause)
+
+    # Buscador de arriba: URL o titulo
+    if search:
+        pattern = f"%{search}%"
+        q = q.filter(or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern)))
+
+    # URLs con alguna incidencia de esos tipos (lista separada por comas: las
+    # vistas por ambito piden varios a la vez) y/o de esa gravedad.
+    tipos = [t.strip() for t in (qp.get("issue_type") or "").split(",") if t.strip()]
+    severidad = qp.get("severity")
+    if tipos or severidad:
+        sub = db.query(Issue.url_id).filter(Issue.job_id == job_id)
+        if tipos:
+            sub = sub.filter(Issue.issue_type.in_(tipos))
+        if severidad:
+            sub = sub.filter(Issue.severity == severidad)
+        q = q.filter(Url.id.in_(sub))
+    return q
 
 
 @router.get("/urls", response_model=PaginatedResponse[UrlResponse])
@@ -168,81 +291,15 @@ def list_urls(
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     indexable: bool | None = Query(None),
     status_code: int | None = Query(None),
-    issue_type: str | None = Query(None),
+    issue_type: str | None = Query(None, description="Uno o varios tipos separados por comas"),
     severity: str | None = Query(None),
+    in_sitemap: bool | None = Query(None),
+    ligero: bool = Query(False, description="Sin page_content: es el 89% del peso y la tabla no lo usa"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
 
-    q = db.query(Url).filter(Url.job_id == job_id)
-
-    qp = request.query_params
-
-    # ---------- Build dynamic filters from query params ----------
-    # 1) Numeric range filters: <col>_gte / <col>_lte from _RANGE_FILTERS
-    range_clauses: list = []
-    range_needs_meta = False
-    for col_name, (col_expr, needs_meta) in _RANGE_FILTERS.items():
-        gte_raw = qp.get(f"{col_name}_gte")
-        lte_raw = qp.get(f"{col_name}_lte")
-        if (gte_raw in (None, "")) and (lte_raw in (None, "")):
-            continue
-        try:
-            if gte_raw not in (None, ""):
-                range_clauses.append(col_expr >= float(gte_raw))
-            if lte_raw not in (None, ""):
-                range_clauses.append(col_expr <= float(lte_raw))
-        except ValueError:
-            continue  # ignore malformed numeric input
-        if needs_meta:
-            range_needs_meta = True
-
-    # 2) String "contains" filters from _STRING_CONTAINS_FILTERS
-    contains_clauses: list = []
-    contains_needs_meta = False
-    for param_name, (col_expr, needs_meta) in _STRING_CONTAINS_FILTERS.items():
-        val = qp.get(param_name)
-        if val in (None, ""):
-            continue
-        contains_clauses.append(col_expr.ilike(f"%{val}%"))
-        if needs_meta:
-            contains_needs_meta = True
-
-    sort_needs_meta = sort_by in {"title", "title_len", "meta_description", "meta_description_len"}
-    needs_meta_join = bool(search or sort_needs_meta or range_needs_meta or contains_needs_meta)
-
-    if needs_meta_join:
-        q = q.outerjoin(HtmlMeta, Url.id == HtmlMeta.url_id)
-
-    if status_group is not None:
-        q = q.filter(Url.status_group == status_group)
-    if is_internal is not None:
-        q = q.filter(Url.is_internal == is_internal)
-    if resource_type is not None:
-        q = q.filter(Url.resource_type == resource_type)
-    if indexable is not None:
-        q = q.filter(Url.indexable == indexable)
-    if status_code is not None:
-        q = q.filter(Url.status_code == status_code)
-
-    for clause in range_clauses:
-        q = q.filter(clause)
-    for clause in contains_clauses:
-        q = q.filter(clause)
-
-    # Search across url and title
-    if search:
-        pattern = f"%{search}%"
-        q = q.filter(or_(Url.url.ilike(pattern), HtmlMeta.title.ilike(pattern)))
-
-    # Filter by URLs that have at least one matching issue
-    if issue_type or severity:
-        issue_subq = db.query(Issue.url_id).filter(Issue.job_id == job_id)
-        if issue_type:
-            issue_subq = issue_subq.filter(Issue.issue_type == issue_type)
-        if severity:
-            issue_subq = issue_subq.filter(Issue.severity == severity)
-        q = q.filter(Url.id.in_(issue_subq))
+    q = _urls_filtradas(db, job_id, request.query_params, unir_meta=sort_by in _SORT_META)
 
     total = q.count()
 
@@ -256,19 +313,158 @@ def list_urls(
     else:
         q = q.order_by(Url.id)
 
+    # `ligero`: el Explorador no pinta el texto de cada pagina y el panel lo
+    # pide aparte; con el, una pagina de 100 filas eran 1,6 MB (89% texto).
+    # Ni se carga ni se toca la relacion (tocarla la cargaria fila a fila).
+    opciones = [joinedload(Url.html_meta)]
+    if not ligero:
+        opciones.append(joinedload(Url.page_content))
     rows = (
-        q.options(joinedload(Url.html_meta), joinedload(Url.page_content))
+        q.options(*opciones)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
     )
+    if ligero:
+        campos = [f for f in UrlResponse.model_fields if f != "page_content"]
+        items = [UrlResponse.model_validate({f: getattr(r, f, None) for f in campos}, from_attributes=True)
+                 for r in rows]
+    else:
+        items = [UrlResponse.model_validate(r) for r in rows]
 
     return _paginate(
-        items=[UrlResponse.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/export  -- CSV de LA VISTA del Explorador
+# ---------------------------------------------------------------------------
+def _m(campo):
+    return lambda u: getattr(u.html_meta, campo, None) if u.html_meta else None
+
+
+def _si_no(v):
+    return "" if v is None else ("si" if v else "no")
+
+
+# Las columnas del Explorador (mismas claves que EXP_COLUMN_DEFS en app.js):
+# (cabecera, valor). Lo que no esta aqui no se exporta en vez de inventarse.
+COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
+    "url": ("URL", lambda u: u.url),
+    "status_code": ("Estado", lambda u: u.status_code),
+    "status_text": ("Texto estado", lambda u: u.status_text),
+    "content_type": ("Tipo", lambda u: (u.content_type or "").split(";")[0] or None),
+    "content_length": ("Tamaño (bytes)", lambda u: u.content_length),
+    "transfer_size": ("Transferido (bytes)", lambda u: u.transfer_size),
+    "response_time_ms": ("Tiempo (ms)", lambda u: u.response_time_ms),
+    "click_depth": ("Clics desde home", lambda u: u.click_depth),
+    "crawl_depth": ("Prof. rastreo", lambda u: u.crawl_depth),
+    "folder_depth": ("Niveles", lambda u: u.folder_depth),
+    "word_count": ("Palabras", lambda u: u.word_count),
+    "content_word_count": ("Palabras contenido", lambda u: u.content_word_count),
+    "text_ratio": ("% texto", lambda u: u.text_ratio),
+    "url_length": ("Long. URL", lambda u: u.url_length),
+    "inlinks_count": ("Inlinks", lambda u: u.inlinks_count),
+    "unique_inlinks_count": ("Inlinks únicos", lambda u: u.unique_inlinks_count),
+    "outlinks_count": ("Outlinks", lambda u: u.outlinks_count),
+    "external_outlinks_count": ("Outlinks ext.", lambda u: u.external_outlinks_count),
+    "pagerank_score": ("PageRank (0-100)", lambda u: u.pagerank_score),
+    "pagerank_raw": ("PageRank (x media)", lambda u: u.pagerank_raw),
+    "pagerank": ("PageRank (0-10, antiguo)", lambda u: u.pagerank),
+    "near_duplicate_count": ("Casi duplicadas", lambda u: u.near_duplicate_count),
+    "closest_similarity": ("Similitud máx.", lambda u: u.closest_similarity),
+    "redirect_url": ("Redirige a", lambda u: u.redirect_url),
+    "redirect_type": ("Cód. redir.", lambda u: u.redirect_type),
+    "indexable": ("Indexable", lambda u: _si_no(u.indexable)),
+    "indexability_status": ("Indexabilidad", lambda u: u.indexability_status),
+    "is_internal": ("Interna", lambda u: _si_no(u.is_internal)),
+    "in_sitemap": ("En el sitemap", lambda u: _si_no(u.in_sitemap)),
+    "host": ("Host", lambda u: u.host),
+    "title": ("Título", _m("title")),
+    "title_len": ("Long. título", _m("title_len")),
+    "title_pixel_width": ("Título (px)", _m("title_pixel_width")),
+    "meta_description": ("Descripción", _m("meta_description")),
+    "meta_description_len": ("Long. desc.", _m("meta_description_len")),
+    "meta_description_pixel_width": ("Descripción (px)", _m("meta_description_pixel_width")),
+    "canonical_href": ("Canonical", _m("canonical_href")),
+    "canonical_header": ("Canonical (cabecera)", _m("canonical_header")),
+    "meta_robots": ("Meta robots", _m("meta_robots")),
+    "x_robots_tag": ("X-Robots-Tag", _m("x_robots_tag")),
+    "meta_refresh": ("Meta refresh", _m("meta_refresh")),
+    "og_title": ("OG title", _m("og_title")),
+    "og_image": ("OG image", _m("og_image")),
+    "og_type": ("OG type", _m("og_type")),
+    "og_url": ("OG url", _m("og_url")),
+    "twitter_card": ("Twitter card", _m("twitter_card")),
+    "http_version": ("HTTP", lambda u: u.http_version),
+    "last_modified": ("Last-Modified", lambda u: u.last_modified),
+    "last_crawled_at": ("Último rastreo", lambda u: u.last_crawled_at.isoformat() if u.last_crawled_at else None),
+}
+
+
+@router.get("/urls/export")
+def export_vista(
+    job_id: uuid.UUID,
+    request: Request,
+    columnas: str = Query("url,status_code,title,indexable",
+                          description="Claves de columna del Explorador, separadas por comas"),
+    sort_by: str | None = Query(None),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
+    db: Session = Depends(get_session),
+):
+    """Lo que se ve en el Explorador, como CSV: mismos filtros (los de
+    `/urls`), mismo orden y solo las columnas visibles.
+
+    El boton CSV del Explorador llamaba a `/export`, el censo entero con 83
+    columnas: quien filtraba «4xx con enlaces entrantes» para mandarselo a
+    desarrollo recibia todas las URLs (docs/INVESTIGACION_EXPLORADOR.md).
+
+    Como `/export`, sesion nueva por ventana de 1.000 filas (decision 5): se
+    sacan primero los ids en el orden de la vista y luego se leen por tramos.
+    """
+    _get_job_or_404(job_id, db)
+    claves = [c for c in (x.strip() for x in columnas.split(",")) if c in COLUMNAS_VISTA]
+    if not claves:
+        raise HTTPException(status_code=422, detail="Ninguna columna exportable: " + columnas)
+
+    q = _urls_filtradas(db, job_id, request.query_params, unir_meta=sort_by in _SORT_META)
+    if sort_by in SORT_COLUMNS:
+        col = SORT_COLUMNS[sort_by]
+        q = q.order_by(col.desc().nullslast() if sort_dir == "desc" else col.asc().nullsfirst(), Url.id)
+    else:
+        q = q.order_by(Url.id)
+    ids = [i for (i,) in q.with_entities(Url.id).all()]
+    # Sesiones por tramo sobre el MISMO motor que la peticion (en los tests,
+    # SQLite): SessionLocal iria siempre a la BD configurada.
+    from sqlalchemy.orm import sessionmaker
+    Sesion = sessionmaker(bind=db.get_bind())
+
+    def filas():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        buf.write("\ufeff")  # BOM: Excel abre el UTF-8 con las tildes bien
+        w.writerow([COLUMNAS_VISTA[c][0] for c in claves])
+        yield buf.getvalue()
+        for i in range(0, len(ids), 1000):
+            tramo = ids[i:i + 1000]
+            with Sesion() as s:
+                por_id = {u.id: u for u in s.query(Url).options(joinedload(Url.html_meta))
+                          .filter(Url.id.in_(tramo)).all()}
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                for uid in tramo:
+                    u = por_id.get(uid)
+                    if u is not None:
+                        w.writerow(["" if (v := COLUMNAS_VISTA[c][1](u)) is None else v for c in claves])
+                yield buf.getvalue()
+
+    nombre = f"explorador-{str(job_id)[:8]}-{len(ids)}-urls.csv"
+    return StreamingResponse(filas(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
 # ---------------------------------------------------------------------------

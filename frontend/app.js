@@ -464,9 +464,13 @@ function app() {
       window.addEventListener('popstate', () => this._irARuta(location.hash));
       // Cualquier cambio de vista, rastreo, pestana o filtro se refleja en la
       // URL. Un solo vigilante en vez de acordarse en cada metodo.
+      // Si solo cambia lo que va despues del «?» (un filtro, el orden, la
+      // pagina) se sustituye la entrada: cada tecla en un filtro no puede ser
+      // un paso del boton atras.
       this.$watch('_ruta()', h => {
         if (!h || location.hash === h) return;
-        if (this._aplicandoRuta) history.replaceState(null, '', h);
+        const mismaVista = location.hash.split('?')[0] === h.split('?')[0];
+        if (this._aplicandoRuta || mismaVista) history.replaceState(null, '', h);
         else history.pushState(null, '', h);
       });
 
@@ -528,7 +532,10 @@ function app() {
       if (v === 'programados') return '#/programados';
       if (!this.job) return '';
       const base = '#/rastreos/' + this.job.id;
-      if (v === 'explorer') return base + '/explorador';
+      if (v === 'explorer') {
+        const q = this._estadoExplorador();
+        return base + '/explorador' + (q ? '?' + q : '');
+      }
       if (v === 'url-detail') return this.urlDetailId ? base + '/url/' + this.urlDetailId : base;
       if (v !== 'detail') return '';
       const t = this.detailTab;
@@ -580,7 +587,10 @@ function app() {
           if (!this.job) return;
           const sub = p[2];
           if (sub === 'explorador') {
-            if (this.view !== 'explorer') this.openExplorer();
+            const pre = this._preajusteExplorador(q);
+            if (this.view !== 'explorer' || this._estadoExplorador() !== new URLSearchParams(qs || '').toString()) {
+              this.openExplorer(pre);
+            }
           } else if (sub === 'url' && p[3]) {
             if (this.view !== 'url-detail' || String(this.urlDetailId) !== p[3]) await this.openUrlDetail(+p[3]);
           } else {
@@ -615,6 +625,33 @@ function app() {
         await this.$nextTick();
         this._aplicandoRuta = false;
       }
+    },
+
+    // La vista del Explorador en la URL (pestaña, busqueda, problema, orden,
+    // pagina y filtros): «mira esto» con un enlace.
+    _estadoExplorador() {
+      const q = new URLSearchParams();
+      if (this.expTab && this.expTab !== 'all') q.set('pestana', this.expTab);
+      if (this.expSearch) q.set('buscar', this.expSearch);
+      if (this.expProblema) q.set('problema', this.expProblema);
+      if (this.expGravedad) q.set('gravedad', this.expGravedad);
+      if (this.expSort) { q.set('orden', this.expSort); q.set('dir', this.expSortDir); }
+      if (this.expPage > 1) q.set('pagina', this.expPage);
+      const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
+        v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
+      if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
+      return q.toString();
+    },
+
+    _preajusteExplorador(q) {
+      let filtros = {};
+      try { filtros = JSON.parse(q.get('filtros') || '{}') || {}; } catch (_) { filtros = {}; }
+      return {
+        tab: q.get('pestana') || 'all', buscar: q.get('buscar') || '',
+        problema: q.get('problema') || '', gravedad: q.get('gravedad') || '',
+        orden: q.get('orden') || null, dir: q.get('dir') === 'desc' ? 'desc' : 'asc',
+        pagina: +(q.get('pagina') || 1), filtros,
+      };
     },
 
     // Seccion de la barra superior que se marca como activa.
@@ -2331,30 +2368,40 @@ function app() {
     expSelectedUrl: null,
     expSelectedIndex: -1,
     expUrlDetail: null,
-    expDetailTab: 'content',
+    expDetailTab: 'resumen',
     expDetailOpen: false,
     expBadgeCounts: {},
     expColumnsByTab: {},        // { tabKey: [colKey, ...] } — persisted column selection per tab
     expColumnPickerOpen: false,
-    expColumnFilters: {},       // { columnKey: { op: '>=', value: '0.5' } | { value: 'foo' } }
+    expColumnFilters: {},       // { columnKey: { op: '>=', value: '0.5' } | { value: 'foo' } | { op: 'vacio' } }
+    expProblema: '',            // issue_type (o varios separados por comas) del filtro «Con el problema…»
+    expGravedad: '',            // severity del mismo filtro
+    expBuscarColumna: '',       // buscador del selector de columnas
+    EXP_GRUPOS_COLUMNAS,
     _expSearchTimer: null,
     _expFilterTimer: null,
     _expKeyHandler: null,
 
-    openExplorer() {
+    // `preajuste`: { tab, problema, gravedad, buscar, filtros, orden, dir, pagina }
+    // Lo usan la ruta (#/rastreos/<id>/explorador?...) y «Ver en el Explorador»
+    // de Problemas.
+    openExplorer(preajuste = {}) {
       this.view = 'explorer';
-      this.expTab = 'all';
-      this.expSearch = '';
-      this.expSort = null;
-      this.expSortDir = 'asc';
-      this.expPage = 1;
+      this.expTab = preajuste.tab || 'all';
+      this.expSearch = preajuste.buscar || '';
+      this.expSort = preajuste.orden || null;
+      this.expSortDir = preajuste.dir || 'asc';
+      this.expPage = preajuste.pagina || 1;
+      this.expProblema = preajuste.problema || '';
+      this.expGravedad = preajuste.gravedad || '';
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
       this.expSelectedIndex = -1;
       this.expUrlDetail = null;
-      this.expColumnFilters = {};
+      this.expColumnFilters = preajuste.filtros || {};
       this.expColumnPickerOpen = false;
       this.expColumnsByTab = this._loadExpColumnPrefs();
+      if (this.expProblema && !this.issuesResumen) this.loadIssuesResumen();
       this._bindExplorerKeyNav();
       this.loadExplorerBadges();
       this.loadExplorerUrls();
@@ -2385,16 +2432,53 @@ function app() {
       this.expBadgeCounts = b;
     },
 
+    // Cambiar de pestaña ya no borra la busqueda ni los filtros: pasar de
+    // «4xx» a «3xx» con el mismo «Inlinks ≥ 1» obligaba a reescribirlo. Los
+    // filtros de columnas que la pestaña nueva no muestra siguen aplicandose
+    // y se ven en el contador «N filtros», que los quita de golpe.
     setExplorerTab(tab) {
       this.expTab = tab;
       this.expPage = 1;
-      this.expSearch = '';
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
       this.expSelectedIndex = -1;
-      this.expColumnFilters = {};
       this.expColumnPickerOpen = false;
       this.loadExplorerUrls();
+    },
+
+    // «Con el problema…»: '' | tipo | 'sev:error'
+    setExpProblema(valor) {
+      if (valor.startsWith('sev:')) { this.expGravedad = valor.slice(4); this.expProblema = ''; }
+      else { this.expProblema = valor; this.expGravedad = ''; }
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    expValorProblema() {
+      return this.expGravedad ? 'sev:' + this.expGravedad : this.expProblema;
+    },
+
+    // Desde un tipo de Problemas: esas URLs, con las columnas que lo explican.
+    verProblemaEnExplorador(tipo) {
+      this.openExplorer({ problema: tipo });
+    },
+
+    // El CSV de LO QUE SE VE: mismos filtros, mismo orden, columnas visibles
+    // (antes exportaba el censo entero con 83 columnas).
+    exportarVista() {
+      if (!this.job) return;
+      const q = new URLSearchParams(this._buildExplorerParams(false));
+      q.delete('page'); q.delete('page_size'); q.delete('ligero');
+      q.set('columnas', this.getExpColumns().join(','));
+      window.open(`${API}/jobs/${this.job.id}/urls/export?${q}`, '_blank');
+    },
+
+    // Columnas del selector, por grupos y filtradas por el buscador.
+    expGruposVisibles() {
+      const t = this.expBuscarColumna.trim().toLowerCase();
+      return EXP_GRUPOS_COLUMNAS
+        .map(([nombre, claves]) => [nombre, claves.filter(k => !t || (EXP_COLUMN_DEFS[k]?.label || k).toLowerCase().includes(t))])
+        .filter(([, claves]) => claves.length);
     },
 
     explorerSort(col) {
@@ -2420,11 +2504,17 @@ function app() {
      * Build the query string parameters for the /urls endpoint based on tab,
      * sort, search and the inline per-column filters.
      */
-    _buildExplorerParams() {
+    _buildExplorerParams(ligero = true) {
       const tabCfg = EXP_TABS.find(t => t.key === this.expTab) || EXP_TABS[0];
       const params = new URLSearchParams();
       params.set('page', String(this.expPage));
       params.set('page_size', String(this.expPageSize));
+      // Sin el texto de cada pagina: era el 89% de 1,6 MB por pagina de la
+      // tabla y no lo pinta nadie (el panel lo pide aparte).
+      if (ligero) params.set('ligero', 'true');
+      if (this.expProblema) params.set('issue_type', this.expProblema);
+      if (this.expGravedad) params.set('severity', this.expGravedad);
+      const vacio = [], conValor = [];
       if (tabCfg.filter) {
         for (const [k, v] of Object.entries(tabCfg.filter)) params.set(k, String(v));
       }
@@ -2436,6 +2526,8 @@ function app() {
         if (!f) continue;
         const def = EXP_COLUMN_DEFS[colKey];
         if (!def || !def.filterKey) continue;
+        if (def.vacio && f.op === 'vacio') { vacio.push(def.vacio); continue; }
+        if (def.vacio && f.op === 'con_valor') { conValor.push(def.vacio); continue; }
         const raw = (f.value ?? '').toString().trim();
         if (raw === '') continue;
         if (def.type === 'numeric') {
@@ -2453,14 +2545,11 @@ function app() {
         } else if (def.type === 'boolean') {
           params.set(def.filterKey, raw);
         } else {
-          // string contains — for url use the 'search' param
-          if (def.filterKey === 'search') {
-            params.set('search', raw);
-          } else {
-            params.set(def.filterKey, raw);
-          }
+          params.set(def.filterKey, raw);
         }
       }
+      if (vacio.length) params.set('vacio', vacio.join(','));
+      if (conValor.length) params.set('con_valor', conValor.join(','));
       return params.toString();
     },
 
@@ -2587,14 +2676,15 @@ function app() {
 
     expClearAllColumnFilters() {
       this.expColumnFilters = {};
+      this.expProblema = ''; this.expGravedad = '';
       this.expPage = 1;
       this.loadExplorerUrls();
     },
 
     expActiveFilterCount() {
       return Object.values(this.expColumnFilters).filter(f =>
-        f && f.value != null && f.value.toString().trim() !== ''
-      ).length;
+        f && (f.op === 'vacio' || f.op === 'con_valor' || (f.value != null && f.value.toString().trim() !== ''))
+      ).length + (this.expProblema || this.expGravedad ? 1 : 0);
     },
 
     /**
@@ -2602,7 +2692,9 @@ function app() {
      * status_code is "exact" so it defaults to '='.
      */
     expDefaultOp(col) {
-      return EXP_COLUMN_DEFS[col]?.exact ? '=' : '>=';
+      const def = EXP_COLUMN_DEFS[col];
+      if (def?.type === 'string') return 'contiene';
+      return def?.exact ? '=' : '>=';
     },
 
     expCurrentOp(col) {
@@ -2623,7 +2715,10 @@ function app() {
           '<':  'menor que…',
         })[op] || 'núm';
       }
-      if (def.type === 'string') return 'contiene…';
+      if (def.type === 'string') {
+        const op = this.expCurrentOp(col);
+        return op === 'vacio' ? '(vacío)' : op === 'con_valor' ? '(con valor)' : 'contiene…';
+      }
       return '';
     },
 
@@ -2720,7 +2815,7 @@ function app() {
  *   width:       suggested min width in px for the column.
  */
 const EXP_COLUMN_DEFS = {
-  url:                  { label: 'URL',              type: 'string',  sortable: true,  filterKey: 'search',                width: 320, fmt: r => { try { return new URL(r.url).pathname || '/'; } catch { return r.url; } } },
+  url:                  { label: 'URL',              type: 'string',  sortable: true,  filterKey: 'url_contains',          width: 320, fmt: r => { try { return new URL(r.url).pathname || '/'; } catch { return r.url; } } },
   status_code:          { label: 'Estado',           type: 'numeric', sortable: true,  filterKey: 'status_code', exact: true, width: 130, fmt: r => r.status_code ?? '' },
   status_text:          { label: 'Texto estado',     type: 'string',  sortable: false, filterKey: 'status_text_contains',    width: 150, fmt: r => r.status_text ?? '' },
   content_type:         { label: 'Tipo',             type: 'string',  sortable: false, filterKey: 'content_type_contains',   width: 160, fmt: r => r.content_type ? r.content_type.split(';')[0] : '' },
@@ -2732,7 +2827,7 @@ const EXP_COLUMN_DEFS = {
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
   word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
   content_word_count:   { label: 'Palabras contenido', type: 'numeric', sortable: true, filterKey: 'content_word_count',   width: 170, fmt: r => r.content_word_count != null ? r.content_word_count.toLocaleString('es-ES') : '' },
-  text_ratio:           { label: '% texto',          type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
+  text_ratio:           { label: '% texto', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
   url_length:           { label: 'Long. URL',        type: 'numeric', sortable: true,  filterKey: 'url_length',              width: 140, fmt: r => r.url_length ?? '' },
   inlinks_count:        { label: 'Inlinks',          type: 'numeric', sortable: true,  filterKey: 'inlinks_count',           width: 130, fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },
   unique_inlinks_count: { label: 'Inlinks únicos',   type: 'numeric', sortable: true,  filterKey: 'unique_inlinks_count',    width: 140, fmt: r => r.unique_inlinks_count != null ? r.unique_inlinks_count.toLocaleString('es-ES') : '' },
@@ -2743,25 +2838,33 @@ const EXP_COLUMN_DEFS = {
   // queda en 0,00xx y no se distingue la 250 de la 25.000. La 0-10 se queda por
   // compatibilidad con informes ya entregados.
   pagerank_score:       { label: 'PageRank (0-100)',  type: 'numeric', sortable: true,  filterKey: 'pagerank_score',          width: 160, fmt: r => r.pagerank_score != null ? String(r.pagerank_score) : '' },
-  pagerank_raw:         { label: 'PageRank (x media)', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? (r.pagerank_raw * 1e4).toFixed(2) : '' },
-  pagerank:             { label: 'PageRank',         type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
+  pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? (r.pagerank_raw * 1e4).toFixed(2) : '' },
+  pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
   near_duplicate_count: { label: 'Casi duplicadas', type: 'numeric', sortable: true,  filterKey: 'near_duplicate_count',    width: 150, fmt: r => r.near_duplicate_count ?? '' },
   closest_similarity:   { label: 'Similitud máx.', type: 'numeric', sortable: true,  filterKey: 'closest_similarity',      width: 150, fmt: r => r.closest_similarity != null ? (r.closest_similarity * 100).toFixed(1) + '%' : '' },
-  redirect_url:         { label: 'Redirige a',      type: 'string',  sortable: false, filterKey: 'redirect_url_contains',   width: 260, fmt: r => r.redirect_url ?? '' },
+  redirect_url:         { label: 'Redirige a',      type: 'string',  sortable: false, filterKey: 'redirect_url_contains', vacio: 'redirect_url',   width: 260, fmt: r => r.redirect_url ?? '' },
   redirect_type:        { label: 'Cód. redir.',     type: 'numeric', sortable: false, filterKey: 'redirect_type',            width: 130, fmt: r => r.redirect_type ?? '' },
   indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },
   indexability_status:  { label: 'Razón noindex',   type: 'string',  sortable: false, filterKey: 'indexability_status_contains', width: 200, fmt: r => r.indexability_status ?? '' },
   is_internal:          { label: 'Interna',          type: 'boolean', sortable: false, filterKey: 'is_internal',             width: 130, fmt: r => r.is_internal === true ? 'Sí' : r.is_internal === false ? 'No' : '' },
   host:                 { label: 'Host',             type: 'string',  sortable: true,  filterKey: 'host_contains',           width: 200, fmt: r => r.host ?? '' },
   // html_meta fields
-  title:                { label: 'Título',          type: 'string',  sortable: true,  filterKey: 'title_contains',          width: 260, fmt: r => r.html_meta?.title ?? '' },
+  title:                { label: 'Título',          type: 'string',  sortable: true,  filterKey: 'title_contains', vacio: 'title',          width: 260, fmt: r => r.html_meta?.title ?? '' },
   title_len:            { label: 'Long. título',    type: 'numeric', sortable: true,  filterKey: 'title_len',               width: 140, fmt: r => r.html_meta?.title_len ?? '' },
-  meta_description:     { label: 'Descripción',     type: 'string',  sortable: false, filterKey: 'description_contains',    width: 300, fmt: r => r.html_meta?.meta_description ?? '' },
+  // Google corta por pixeles (~580 el titulo, ~985 la descripcion), no por
+  // caracteres: decision 54. El dato llegaba en cada fila y no era columna.
+  title_pixel_width:    { label: 'Título (px)',     type: 'numeric', sortable: true,  filterKey: 'title_pixel_width',       width: 130, fmt: r => r.html_meta?.title_pixel_width ?? '' },
+  meta_description:     { label: 'Descripción',     type: 'string',  sortable: false, filterKey: 'description_contains', vacio: 'meta_description',    width: 300, fmt: r => r.html_meta?.meta_description ?? '' },
   meta_description_len: { label: 'Long. desc.',     type: 'numeric', sortable: true,  filterKey: 'meta_description_len',    width: 140, fmt: r => r.html_meta?.meta_description_len ?? '' },
-  canonical_href:       { label: 'Canonical',       type: 'string',  sortable: false, filterKey: 'canonical_contains',      width: 260, fmt: r => r.html_meta?.canonical_href ?? '' },
-  meta_robots:          { label: 'Meta robots',     type: 'string',  sortable: false, filterKey: 'meta_robots_contains',    width: 180, fmt: r => r.html_meta?.meta_robots ?? '' },
-  og_title:             { label: 'OG title',        type: 'string',  sortable: false, filterKey: 'og_title_contains',       width: 220, fmt: r => r.html_meta?.og_title ?? '' },
-  og_image:             { label: 'OG image',        type: 'string',  sortable: false, filterKey: 'og_image_contains',       width: 240, fmt: r => r.html_meta?.og_image ?? '' },
+  meta_description_pixel_width: { label: 'Descripción (px)', type: 'numeric', sortable: true, filterKey: 'meta_description_pixel_width', width: 150, fmt: r => r.html_meta?.meta_description_pixel_width ?? '' },
+  canonical_href:       { label: 'Canonical',       type: 'string',  sortable: false, filterKey: 'canonical_contains', vacio: 'canonical_href',      width: 260, fmt: r => r.html_meta?.canonical_href ?? '' },
+  meta_robots:          { label: 'Meta robots',     type: 'string',  sortable: false, filterKey: 'meta_robots_contains', vacio: 'meta_robots',    width: 180, fmt: r => r.html_meta?.meta_robots ?? '' },
+  x_robots_tag:         { label: 'X-Robots-Tag',    type: 'string',  sortable: false, filterKey: 'x_robots_tag_contains', vacio: 'x_robots_tag',   width: 180, fmt: r => (r.html_meta?.x_robots_tag ?? '').replace(/\n/g, ' | ') },
+  canonical_header:     { label: 'Canonical (cabecera)', type: 'string', sortable: false, filterKey: 'canonical_header_contains', width: 240, fmt: r => r.html_meta?.canonical_header ?? '' },
+  meta_refresh:         { label: 'Meta refresh',    type: 'string',  sortable: false, filterKey: 'meta_refresh_contains',   width: 200, fmt: r => r.html_meta?.meta_refresh ?? '' },
+  in_sitemap:           { label: 'En el sitemap',   type: 'boolean', sortable: false, filterKey: 'in_sitemap',              width: 140, fmt: r => r.in_sitemap === true ? 'Sí' : r.in_sitemap === false ? 'No' : '' },
+  og_title:             { label: 'OG title',        type: 'string',  sortable: false, filterKey: 'og_title_contains', vacio: 'og_title',       width: 220, fmt: r => r.html_meta?.og_title ?? '' },
+  og_image:             { label: 'OG image',        type: 'string',  sortable: false, filterKey: 'og_image_contains', vacio: 'og_image',       width: 240, fmt: r => r.html_meta?.og_image ?? '' },
   og_type:              { label: 'OG type',         type: 'string',  sortable: false, filterKey: 'og_type_contains',        width: 140, fmt: r => r.html_meta?.og_type ?? '' },
   og_url:               { label: 'OG url',          type: 'string',  sortable: false, filterKey: 'og_url_contains',         width: 240, fmt: r => r.html_meta?.og_url ?? '' },
   twitter_card:         { label: 'Twitter card',    type: 'string',  sortable: false, filterKey: 'twitter_card_contains',   width: 150, fmt: r => r.html_meta?.twitter_card ?? '' },
@@ -2769,6 +2872,19 @@ const EXP_COLUMN_DEFS = {
   last_modified:        { label: 'Last-Modified',   type: 'string',  sortable: false, filterKey: 'last_modified_contains',  width: 180, fmt: r => r.last_modified ?? '' },
   last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
 };
+
+// El selector de columnas, agrupado: 50 casillas seguidas no se leen. «Otros»
+// lleva lo que no conviene usar para decidir: la escala 0-10 del PageRank
+// (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
+const EXP_GRUPOS_COLUMNAS = [
+  ['Respuesta',   ['url','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
+  ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap']],
+  ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width']],
+  ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
+  ['Enlazado',    ['inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
+  ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
+  ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
+];
 
 const EXP_DEFAULT_COLUMNS = [
   'url','status_code','title','title_len','meta_description','meta_description_len',
