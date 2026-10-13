@@ -23,7 +23,10 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/app.js"></script>
 </head>
-<body x-data="app()" x-init="init()" x-effect="$nextTick(() => lucide.createIcons())">
+<!-- Sin x-init: Alpine 3 ya llama solo al init() del componente, y con los
+     dos arrancaba todo dos veces (dos peticiones de la lista, dos atajos de
+     teclado y, con las rutas, dos navegaciones pisandose). -->
+<body x-data="app()" x-effect="$nextTick(() => lucide.createIcons())">
 
 <div class="app">
 
