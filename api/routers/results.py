@@ -531,6 +531,11 @@ def get_diff(
             # resuelta: no se sabe.
             urls_del_nuevo={_norm(_aplicar(p["url"]))
                             for p in paginas_de_censo(db, nuevo_id)},
+            # Dos censos analizados con codigo distinto no se comparan por
+            # incidencias: un hallazgo puede salir "resuelto" solo porque la
+            # regla que lo emitia ha cambiado.
+            analisis_a=antes.get("analisis_version"),
+            analisis_b=ahora.get("analisis_version"),
         )
 
     # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban
