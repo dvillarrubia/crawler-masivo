@@ -2064,6 +2064,10 @@ class SEOAnalyzer:
         # canonica, casi siempre la misma plantilla) y pasa todo a la canonica.
         # Solo si la canonica se rastreo y responde 200: si no, consolidar
         # seria mandar el PageRank a un sitio que no existe.
+        # El canonical es el mismo que decide la indexabilidad: manda el del
+        # HTML y, si no hay, el de la cabecera `Link`. Sin la cabecera, una
+        # pagina "Canonicalised" solo por ella —un PDF, o un HTML que la usa en
+        # vez del <link>— retenia su PageRank y lo repartia por su cuenta (#26).
         self.session.execute(text("DROP TABLE IF EXISTS pr_canon_tmp"))
         self.session.execute(text(
             """
@@ -2071,7 +2075,8 @@ class SEOAnalyzer:
             SELECT u.id AS src, d.id AS dst
             FROM urls u
             JOIN html_meta m ON m.url_id = u.id
-            JOIN urls d ON d.job_id = u.job_id AND d.url = m.canonical_href
+            JOIN urls d ON d.job_id = u.job_id
+             AND d.url = COALESCE(NULLIF(btrim(m.canonical_href), ''), m.canonical_header)
             WHERE u.job_id = :jid AND u.is_internal AND d.is_internal
               AND u.indexability_status = 'Canonicalised'
               AND d.status_code = 200 AND d.id <> u.id
