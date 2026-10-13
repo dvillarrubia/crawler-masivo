@@ -106,8 +106,8 @@
           </div>
           <div class="modal-body">
             <p class="text-dim text-sm" style="margin-bottom:.8rem">
-              Se repetira con las mismas semillas y la misma configuracion que
-              <strong x-text="job.name"></strong>, y cada vez se comparara con el
+              Se repetirá con las mismas semillas y la misma configuración que
+              <strong x-text="job.name"></strong>, y cada vez se comparará con el
               censo anterior del mismo sitio.
             </p>
 
@@ -204,7 +204,7 @@
 
         <template x-if="!programaciones.length">
           <div class="empty" style="padding:2.5rem 1.5rem">
-            <h3 style="margin-bottom:.5rem;font-size:1.05rem">No hay ningun rastreo programado</h3>
+            <h3 style="margin-bottom:.5rem;font-size:1.05rem">No hay ningún rastreo programado</h3>
             <p class="text-dim" style="max-width:420px;line-height:1.5">
               Mientras no los haya, de un cambio en un sitio te enteras cuando se te ocurre mirar.
             </p>
@@ -217,8 +217,8 @@
               <thead><tr>
                 <th style="text-align:left">nombre</th>
                 <th style="text-align:left">cuando</th>
-                <th style="text-align:left">proximo</th>
-                <th style="text-align:left">ultimo</th>
+                <th style="text-align:left">próximo</th>
+                <th style="text-align:left">último</th>
                 <th style="width:7rem"></th>
               </tr></thead>
               <tbody>
@@ -281,7 +281,7 @@
 
         <template x-if="!clientes.length">
           <div class="empty" style="padding:2.5rem 1.5rem">
-            <h3 style="margin-bottom:.5rem;font-size:1.05rem">Todavia no hay clientes</h3>
+            <h3 style="margin-bottom:.5rem;font-size:1.05rem">Todavía no hay clientes</h3>
             <p class="text-dim" style="max-width:440px;line-height:1.5">
               Los rastreos antiguos que tenian un ID de cliente escrito a mano se convierten en
               clientes solos al desplegar. Para dar de alta uno nuevo, «Nuevo cliente».
@@ -375,14 +375,14 @@
         </div>
 
         <div class="tabs" x-show="cliente">
-          <div class="tab" :class="clienteTab === 'rastreos' && 'active'" @click="clienteTab = 'rastreos'"
+          <button type="button" class="tab" :class="clienteTab === 'rastreos' && 'active'" @click="clienteTab = 'rastreos'"
                style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="radar" style="width:14px;height:14px"></i> Rastreos
-          </div>
-          <div class="tab" :class="clienteTab === 'config' && 'active'" @click="clienteTab = 'config'"
+          </button>
+          <button type="button" class="tab" :class="clienteTab === 'config' && 'active'" @click="clienteTab = 'config'"
                style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="settings" style="width:14px;height:14px"></i> Configuracion
-          </div>
+            <i data-lucide="settings" style="width:14px;height:14px"></i> Configuración
+          </button>
         </div>
 
         <template x-if="clienteError">
@@ -400,17 +400,17 @@
               </div>
               <p class="text-dim text-sm mb-1">
                 Que se rastrea y como: el sitio principal, el blog, otro idioma o un competidor. Un
-                rastreo lanzado desde un perfil hereda la configuracion del cliente y la del perfil.
+                rastreo lanzado desde un perfil hereda la configuración del cliente y la del perfil.
               </p>
               <template x-if="!clientePerfiles.length">
-                <div class="text-dim text-sm">Sin perfiles todavia.</div>
+                <div class="text-dim text-sm">Sin perfiles todavía.</div>
               </template>
               <template x-if="clientePerfiles.length">
                 <table style="width:100%;font-size:.85rem">
                   <thead><tr>
                     <th style="text-align:left">perfil</th>
                     <th style="text-align:left">semillas</th>
-                    <th style="text-align:left">ultimo rastreo</th>
+                    <th style="text-align:left">último rastreo</th>
                     <th style="width:13rem"></th>
                   </tr></thead>
                   <tbody>
@@ -554,7 +554,7 @@
               </div>
               <p class="text-dim text-sm mb-1">
                 APIs externas del cliente (Search Console, DataForSEO, Ahrefs, Semrush...). <strong>Las claves no se
-                guardan aqui</strong>: la API no tiene autenticacion y cualquiera que llegue a ella podria leerlas.
+                guardan aquí</strong>: la API no tiene autenticación y cualquiera que llegue a ella podría leerlas.
                 Se escribe el <em>nombre</em> de la variable de entorno y el secreto se pone en el
                 <code>.env</code> del servidor, por ejemplo <code>DATAFORSEO_LIN3S=login:password</code>.
               </p>
@@ -715,7 +715,7 @@
               <i data-lucide="search" style="width:48px;height:48px;color:var(--accent)"></i>
             </div>
             <h3 style="margin-bottom:.5rem;font-size:1.1rem">No hay trabajos de rastreo</h3>
-            <p class="text-dim" style="margin-bottom:1.25rem;max-width:340px;line-height:1.5">Crea tu primer rastreo para empezar a auditar un sitio web y detectar problemas SEO automaticamente.</p>
+            <p class="text-dim" style="margin-bottom:1.25rem;max-width:340px;line-height:1.5">Crea tu primer rastreo para empezar a auditar un sitio web y detectar problemas SEO automáticamente.</p>
             <button class="btn btn-primary mt-2" @click="openCreate()" style="display:flex;align-items:center;gap:.4rem;padding:.6rem 1.2rem">
               <i data-lucide="plus-circle" style="width:16px;height:16px"></i> Nuevo rastreo
             </button>
@@ -732,11 +732,11 @@
                     <th data-tip="Nombre identificativo del trabajo de rastreo">Nombre</th>
                     <th data-tip="Cliente al que pertenece el rastreo">Cliente</th>
                     <th data-tip="Estado actual: pendiente, en curso, completado, fallido o cancelado">Estado</th>
-                    <th data-tip="Numero de URLs semilla desde las que empieza el rastreo">Semillas</th>
-                    <th data-tip="URLs rastreadas con exito hasta ahora">Rastreadas</th>
-                    <th data-tip="URLs que dieron error (timeout, DNS, conexion rechazada, etc.)">Fallidas</th>
+                    <th data-tip="Número de URLs semilla desde las que empieza el rastreo">Semillas</th>
+                    <th data-tip="URLs rastreadas con éxito hasta ahora">Rastreadas</th>
+                    <th data-tip="URLs que dieron error (timeout, DNS, conexión rechazada, etc.)">Fallidas</th>
                     <th data-tip="Cuando se creo el trabajo">Creado</th>
-                    <th data-tip="Tiempo total desde el inicio hasta la finalizacion del rastreo">Duracion</th>
+                    <th data-tip="Tiempo total desde el inicio hasta la finalización del rastreo">Duración</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -744,7 +744,7 @@
                     <tr @click="openJob(j.id)" style="cursor:pointer">
                       <td>
                         <div style="font-weight:500">
-                          <span x-text="j.name"></span>
+                          <a :href="'#/rastreos/' + j.id" @click.stop class="enlace-fila" x-text="j.name"></a>
                           <span class="tipo-chip" x-show="j.tipo_efectivo && j.tipo_efectivo !== 'censo'" x-text="j.tipo_efectivo"></span>
                         </div>
                         <div class="text-dim text-sm truncate" style="max-width:250px" x-text="j.seeds?.[0] || ''"></div>
@@ -790,7 +790,7 @@
 
             <!-- Paginacion -->
             <div class="pagination">
-              <span>Pagina <strong x-text="jobsPage"></strong> de <strong x-text="jobsPages"></strong></span>
+              <span>Página <strong x-text="jobsPage"></strong> de <strong x-text="jobsPages"></strong></span>
               <div class="pagination-buttons">
                 <button class="btn btn-sm" :disabled="jobsPage <= 1" @click="setJobsPage(jobsPage - 1)">&laquo; Anterior</button>
                 <button class="btn btn-sm" :disabled="jobsPage >= jobsPages" @click="setJobsPage(jobsPage + 1)">Siguiente &raquo;</button>
@@ -808,7 +808,7 @@
     <template x-if="view === 'detail' && job">
       <div>
         <!-- Hero gradient header -->
-        <div style="margin:-1rem -1rem 1rem -1rem;padding:1rem 1rem .75rem;background:var(--bg);border-bottom:1px solid var(--border)">
+        <div class="ficha-cabecera">
           <!-- Cabecera -->
           <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
             <div>
@@ -915,7 +915,7 @@
           <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)">
             <div class="text-sm">
               <strong>Rastreo incompleto.</strong>
-              Se alcanzo el tope de URLs configurado, asi que quedaron paginas sin
+              Se alcanzó el tope de URLs configurado, así que quedaron páginas sin
               rastrear. El grafo de enlaces y el PageRank estan calculados sobre
               una parte del sitio. Reanuda el rastreo con un tope mayor —o sin
               tope— antes de usar estos datos para un informe.
@@ -964,7 +964,7 @@
             <div class="text-sm">
               <strong>El PageRank no es fiable: faltan enlaces.</strong>
               Este rastreo se hizo sin render de JavaScript y hay plantillas que
-              montan sus enlaces con JS, asi que el grafo esta incompleto y el
+              montan sus enlaces con JS, así que el grafo esta incompleto y el
               PageRank sale de el.
               <template x-if="(job.js_check.plantillas || []).some(p => p.enlaces_solo_js > 0)">
                 <span>
@@ -1373,7 +1373,7 @@
                     <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
                          x-show="diff.incidencias.sin_pagina_en_el_nuevo">
                       <span x-text="fmt.num(diff.incidencias.sin_pagina_en_el_nuevo)"></span>
-                      incidencias mas estaban en paginas que este rastreo no ha
+                      incidencias mas estaban en páginas que este rastreo no ha
                       visitado: no se sabe si se arreglaron.
                     </div>
                     <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
@@ -1387,7 +1387,7 @@
 
                 <div class="card">
                   <table style="width:100%;font-size:.85rem">
-                    <thead><tr><th style="text-align:left">que cambio</th><th style="text-align:right;width:7rem">paginas</th></tr></thead>
+                    <thead><tr><th style="text-align:left">que cambio</th><th style="text-align:right;width:7rem">páginas</th></tr></thead>
                     <tbody>
                       <template x-for="[campo, v] in Object.entries(diff.cambios)" :key="campo">
                         <tr :style="v.total ? '' : 'opacity:.45'">
@@ -1416,9 +1416,9 @@
         <template x-if="detailTab === 'overview' && stats">
           <div class="overview-grid">
             <div class="card">
-              <div class="card-header"><h2>Codigos de estado</h2></div>
+              <div class="card-header"><h2>Códigos de estado</h2></div>
               <template x-if="stats.urls_by_status_group.length === 0">
-                <div class="text-dim text-sm">Sin datos todavia</div>
+                <div class="text-dim text-sm">Sin datos todavía</div>
               </template>
               <div class="bar-chart">
                 <template x-for="s in stats.urls_by_status_group" :key="s.status_group">
@@ -1457,7 +1457,7 @@
             <div class="card" style="grid-column:1/-1">
               <div class="card-header"><h2>Hosts mas frecuentes</h2></div>
               <template x-if="stats.top_hosts.length === 0">
-                <div class="text-dim text-sm">Sin datos todavia</div>
+                <div class="text-dim text-sm">Sin datos todavía</div>
               </template>
               <div class="bar-chart">
                 <template x-for="h in stats.top_hosts.slice(0, 10)" :key="h.host">
@@ -1473,7 +1473,7 @@
             </div>
 
             <div class="card" style="grid-column:1/-1">
-              <div class="card-header"><h2>Configuracion</h2></div>
+              <div class="card-header"><h2>Configuración</h2></div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;font-size:.85rem">
                 <!-- Las semillas pueden ser miles (un censo sembrado desde el
                      sitemap): pintadas enteras, la ficha de Lopesan medía
@@ -1491,7 +1491,7 @@
                     </details>
                   </template>
                 </div>
-                <div><span class="text-dim">Prof. maxima:</span> <span x-text="job.config?.max_depth"></span></div>
+                <div><span class="text-dim">Prof. máxima:</span> <span x-text="job.config?.max_depth"></span></div>
                 <div><span class="text-dim">Max URLs:</span> <span x-text="fmt.num(job.config?.max_urls)"></span></div>
                 <div><span class="text-dim">Concurrencia:</span> <span x-text="job.config?.concurrent_requests"></span></div>
                 <div><span class="text-dim">Por dominio:</span> <span x-text="job.config?.concurrent_requests_per_domain"></span></div>
@@ -1644,7 +1644,7 @@
                   </table>
                 </div>
                 <div class="pagination">
-                  <span>Pagina <strong x-text="issuesPage"></strong> de <strong x-text="issuesPages"></strong></span>
+                  <span>Página <strong x-text="issuesPage"></strong> de <strong x-text="issuesPages"></strong></span>
                   <div class="pagination-buttons">
                     <button class="btn btn-sm" :disabled="issuesPage <= 1" @click="setIssuesPage(issuesPage - 1)">&laquo;</button>
                     <button class="btn btn-sm" :disabled="issuesPage >= issuesPages" @click="setIssuesPage(issuesPage + 1)">&raquo;</button>
@@ -1706,7 +1706,7 @@
                   </table>
                 </div>
                 <div class="pagination">
-                  <span>Pagina <strong x-text="linksPage"></strong> de <strong x-text="linksPages"></strong></span>
+                  <span>Página <strong x-text="linksPage"></strong> de <strong x-text="linksPages"></strong></span>
                   <div class="pagination-buttons">
                     <button class="btn btn-sm" :disabled="linksPage <= 1" @click="setLinksPage(linksPage - 1)">&laquo;</button>
                     <button class="btn btn-sm" :disabled="linksPage >= linksPages" @click="setLinksPage(linksPage + 1)">&raquo;</button>
@@ -1724,11 +1724,11 @@
             <template x-if="semanticResults && semanticResults.site_metrics">
               <div style="display:flex;align-items:center;gap:1.5rem;padding:.75rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap">
                 <span class="text-sm" data-tip="Coherencia tematica del sitio (0-100). Cuanto mas alto, mas enfocado esta el contenido en un mismo tema. Sitios nicho suelen tener >70, sitios genericos <40."><strong>Focus:</strong> <span x-text="(semanticResults.site_metrics.focus_score * 100).toFixed(1)"></span>%</span>
-                <span class="text-sm" data-tip="Distancia maxima de cualquier pagina al centro semantico. Indica cuanto se dispersa el contenido. Valores altos = contenido muy variado."><strong>Radius:</strong> <span x-text="semanticResults.site_metrics.semantic_radius"></span></span>
-                <span class="text-sm" data-tip="Impacto de las paginas con mas autoridad que estan lejos del centro. Si una pagina importante (alto PageRank/clicks) esta lejos del tema principal, arrastra el centro semantico del sitio."><strong>Drift:</strong> <span x-text="semanticResults.site_metrics.drift_score"></span></span>
-                <span class="text-sm" data-tip="Total de paginas indexables con contenido suficiente (min 150 palabras) incluidas en el analisis."><strong>Paginas:</strong> <span x-text="semanticResults.site_metrics.total_pages"></span></span>
-                <span class="text-sm" data-tip="Grupos tematicos detectados automaticamente (HDBSCAN). Cada cluster agrupa paginas con contenido semanticamente similar."><strong>Clusters:</strong> <span x-text="semanticResults.site_metrics.n_clusters"></span></span>
-                <span class="text-sm" data-tip="Pares de paginas con contenido tan similar que compiten entre si en buscadores. Cuantos mas pares, mas canibalizacion tiene el sitio."><strong>Canibalizacion:</strong> <span x-text="semanticResults.site_metrics.n_cannibal_pairs"></span> pares</span>
+                <span class="text-sm" data-tip="Distancia máxima de cualquier página al centro semántico. Indica cuanto se dispersa el contenido. Valores altos = contenido muy variado."><strong>Radius:</strong> <span x-text="semanticResults.site_metrics.semantic_radius"></span></span>
+                <span class="text-sm" data-tip="Impacto de las páginas con mas autoridad que estan lejos del centro. Si una página importante (alto PageRank/clicks) esta lejos del tema principal, arrastra el centro semántico del sitio."><strong>Drift:</strong> <span x-text="semanticResults.site_metrics.drift_score"></span></span>
+                <span class="text-sm" data-tip="Total de páginas indexables con contenido suficiente (min 150 palabras) incluidas en el análisis."><strong>Páginas:</strong> <span x-text="semanticResults.site_metrics.total_pages"></span></span>
+                <span class="text-sm" data-tip="Grupos temáticos detectados automáticamente (HDBSCAN). Cada cluster agrupa páginas con contenido semanticamente similar."><strong>Clusters:</strong> <span x-text="semanticResults.site_metrics.n_clusters"></span></span>
+                <span class="text-sm" data-tip="Pares de páginas con contenido tan similar que compiten entre si en buscadores. Cuantos mas pares, mas canibalización tiene el sitio."><strong>Canibalización:</strong> <span x-text="semanticResults.site_metrics.n_cannibal_pairs"></span> pares</span>
                 <button class="btn btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:.3rem" @click="exportSemanticCsv()">
                   <i data-lucide="download" style="width:13px;height:13px"></i> Export CSV
                 </button>
@@ -1741,11 +1741,11 @@
                 <span class="text-sm" style="font-weight:600;color:#4285f4;display:flex;align-items:center;gap:.3rem">
                   <i data-lucide="bar-chart-3" style="width:14px;height:14px"></i> GSC
                 </span>
-                <span class="text-sm" data-tip="Total de clicks organicos de Google Search Console para las URLs del analisis."><strong>Clicks:</strong> <span x-text="semanticResults.gsc_summary.total_clicks.toLocaleString('es-ES')"></span></span>
-                <span class="text-sm" data-tip="Total de impresiones en resultados de Google para las URLs del analisis."><strong>Impressions:</strong> <span x-text="semanticResults.gsc_summary.total_impressions.toLocaleString('es-ES')"></span></span>
+                <span class="text-sm" data-tip="Total de clicks organicos de Google Search Console para las URLs del análisis."><strong>Clicks:</strong> <span x-text="semanticResults.gsc_summary.total_clicks.toLocaleString('es-ES')"></span></span>
+                <span class="text-sm" data-tip="Total de impresiones en resultados de Google para las URLs del análisis."><strong>Impressions:</strong> <span x-text="semanticResults.gsc_summary.total_impressions.toLocaleString('es-ES')"></span></span>
                 <span class="text-sm" data-tip="CTR medio (Click-Through Rate). Porcentaje de impresiones que generan click."><strong>CTR medio:</strong> <span x-text="(semanticResults.gsc_summary.avg_ctr * 100).toFixed(2) + '%'"></span></span>
                 <span class="text-sm" data-tip="Posicion media en los resultados de Google. Menor = mejor posicionamiento."><strong>Pos. media:</strong> <span x-text="semanticResults.gsc_summary.avg_position"></span></span>
-                <span class="text-sm text-dim" data-tip="Numero de URLs del analisis que tienen datos en GSC."><span x-text="semanticResults.gsc_summary.urls_with_data"></span> URLs con datos</span>
+                <span class="text-sm text-dim" data-tip="Número de URLs del análisis que tienen datos en GSC."><span x-text="semanticResults.gsc_summary.urls_with_data"></span> URLs con datos</span>
               </div>
             </template>
 
@@ -1769,12 +1769,23 @@
             <template x-if="!semanticResults">
               <div class="card" style="padding:1.5rem">
                 <h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:.4rem">
-                  <i data-lucide="brain" style="width:18px;height:18px"></i> Analisis Semantico
+                  <i data-lucide="brain" style="width:18px;height:18px"></i> Análisis semántico
                 </h3>
+                <!-- Que da, antes de pedir nada (UX-18): antes se abria con una
+                     cuenta de GSC, una clave y tres deslizadores. -->
+                <div class="semantico-intro">
+                  <p>Convierte el contenido de cada página indexable en un vector (embeddings de Gemini) y contesta:</p>
+                  <ul>
+                    <li><strong>De qué va el sitio</strong>: cuánto se concentra en su tema y qué páginas se alejan de él.</li>
+                    <li><strong>Canibalización</strong>: parejas de páginas tan parecidas que compiten entre sí.</li>
+                    <li><strong>Huecos</strong>: qué página tuya cubre mejor un tema concreto, o si no hay ninguna.</li>
+                  </ul>
+                  <p class="text-dim text-sm">Necesita una API key de Gemini (los embeddings cuestan céntimos por miles de páginas). Search Console es opcional: si se añade, las páginas con más clics pesan más.</p>
+                </div>
 
                 <!-- GSC Section -->
                 <div style="margin-bottom:1.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--border)">
-                  <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Conecta GSC para incluir clicks reales de Google en el calculo de autoridad. Sin GSC, solo se usa PageRank interno. Con GSC, las paginas con mas trafico organico influyen mas en el centro semantico.">
+                  <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Conecta GSC para incluir clicks reales de Google en el calculo de autoridad. Sin GSC, solo se usa PageRank interno. Con GSC, las páginas con mas trafico organico influyen mas en el centro semántico.">
                     <i data-lucide="bar-chart-3" style="width:14px;height:14px"></i> Google Search Console (opcional)
                   </h4>
                   <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
@@ -1833,7 +1844,7 @@
                 </div>
 
                 <!-- Gemini API key (cada cliente paga su consumo de embeddings) -->
-                <div style="margin-bottom:1.25rem" data-tip="El analisis genera embeddings via la API de Gemini. Cada cliente usa su propia API key para que el coste se facture en su cuenta de Google AI. La key se guarda solo aqui y nunca se devuelve completa al frontend.">
+                <div style="margin-bottom:1.25rem" data-tip="El análisis genera embeddings via la API de Gemini. Cada cliente usa su propia API key para que el coste se facture en su cuenta de Google AI. La key se guarda solo aquí y nunca se devuelve completa al frontend.">
                   <h4 style="margin-bottom:.5rem;font-size:.9rem">API key de Gemini</h4>
                   <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
                     <select x-model="semanticGeminiAccountId" style="flex:1;min-width:200px">
@@ -1848,7 +1859,7 @@
                     </template>
                   </div>
                   <template x-if="geminiAccounts.length === 0">
-                    <p class="text-sm text-dim" style="margin-top:.5rem">No hay API keys guardadas. Anade una para poder lanzar analisis.</p>
+                    <p class="text-sm text-dim" style="margin-top:.5rem">No hay API keys guardadas. Anade una para poder lanzar análisis.</p>
                   </template>
                 </div>
 
@@ -1877,24 +1888,25 @@
                   </div>
                 </template>
 
-                <!-- Parametros -->
-                <div style="margin-bottom:1.25rem">
-                  <h4 style="margin-bottom:.5rem;font-size:.9rem">Parametros</h4>
+                <!-- Parametros: plegados, los valores por defecto sirven casi siempre -->
+                <details class="config-avanzada" style="margin-bottom:1.25rem">
+                  <summary><span>Parámetros</span>
+                    <span class="text-dim text-sm" x-text="'PageRank ' + semanticAlpha + ' · clics ' + semanticBeta + ' · canibalización desde ' + semanticThreshold"></span></summary>
                   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem">
                     <div data-tip="Peso del PageRank interno en el calculo de autoridad. Con alpha=1.0 solo usa PageRank. Si tienes datos GSC, baja alpha para dar peso a clicks reales.">
                       <label class="text-dim text-sm">Alpha (PageRank): <span x-text="semanticAlpha"></span></label>
                       <input type="range" min="0" max="1" step="0.05" x-model.number="semanticAlpha" style="width:100%">
                     </div>
-                    <div data-tip="Peso de los clicks de Google Search Console. Solo aplica si has importado datos GSC. Con beta=0.4 las paginas con mas trafico organico tendran mas influencia en el centro semantico.">
+                    <div data-tip="Peso de los clicks de Google Search Console. Solo aplica si has importado datos GSC. Con beta=0.4 las páginas con mas trafico organico tendran mas influencia en el centro semántico.">
                       <label class="text-dim text-sm">Beta (Clicks GSC): <span x-text="semanticBeta"></span></label>
                       <input type="range" min="0" max="1" step="0.05" x-model.number="semanticBeta" style="width:100%">
                     </div>
-                    <div data-tip="Similitud coseno minima para considerar dos paginas como canibalizacion. 0.92 = conservador (solo pares muy similares). Baja a 0.85 para detectar mas pares, sube a 0.95 para solo los mas criticos.">
-                      <label class="text-dim text-sm">Umbral canibalizacion: <span x-text="semanticThreshold"></span></label>
+                    <div data-tip="Similitud coseno minima para considerar dos páginas como canibalización. 0.92 = conservador (solo pares muy similares). Baja a 0.85 para detectar mas pares, sube a 0.95 para solo los mas criticos.">
+                      <label class="text-dim text-sm">Umbral canibalización: <span x-text="semanticThreshold"></span></label>
                       <input type="range" min="0.8" max="0.99" step="0.01" x-model.number="semanticThreshold" style="width:100%">
                     </div>
                   </div>
-                </div>
+                </details>
 
                 <!-- Boton Analizar -->
                 <button class="btn btn-primary" @click="runSemanticAnalysis()" :disabled="semanticLoading"
@@ -1932,22 +1944,22 @@
             <template x-if="semanticResults">
               <div>
                 <div class="tabs" style="margin-bottom:1rem">
-                  <div class="tab" :class="semanticSubTab === 'rings' && 'active'" @click="semanticSubTab='rings'; renderSemanticChart('rings')" data-tip="Visualizacion en anillos concentricos. Las paginas se colocan segun su distancia al centro semantico del sitio. Core = tema principal, Peripheral = contenido lejano.">Ring Map</div>
-                  <div class="tab" :class="semanticSubTab === 'scatter' && 'active'" @click="semanticSubTab='scatter'; renderSemanticChart('scatter')" data-tip="Mapa 2D donde cada punto es una pagina. Las paginas cercanas tratan temas similares. Los colores agrupan clusters tematicos detectados automaticamente.">Scatter UMAP</div>
-                  <div class="tab" :class="semanticSubTab === 'cannibal' && 'active'" @click="semanticSubTab='cannibal'; loadCannibalization()" data-tip="Pares de paginas con contenido casi identico que compiten entre si en Google. La URL dominante es la de mayor autoridad (PageRank/clicks). La debil es candidata a consolidar, redirigir o diferenciar.">Canibalizacion</div>
-                  <div class="tab" :class="semanticSubTab === 'drift' && 'active'" @click="semanticSubTab='drift'; loadDrift()" data-tip="Paginas con alta autoridad que estan lejos del tema central. Al tener mucho peso, arrastran el centro semantico del sitio. Candidatas a reenfocar o desacoplar.">Drift</div>
-                  <div class="tab" :class="semanticSubTab === 'gap' && 'active'" @click="semanticSubTab='gap'" data-tip="Busca que paginas de tu sitio son mas relevantes para un tema concreto. Compara embeddings directamente para encontrar contenido existente que cubra o se acerque al topico buscado.">Gap Analysis</div>
+                  <button type="button" class="tab" :class="semanticSubTab === 'rings' && 'active'" @click="semanticSubTab='rings'; renderSemanticChart('rings')" data-tip="Visualizacion en anillos concentricos. Las páginas se colocan según su distancia al centro semántico del sitio. Core = tema principal, Peripheral = contenido lejano.">Anillos</button>
+                  <button type="button" class="tab" :class="semanticSubTab === 'scatter' && 'active'" @click="semanticSubTab='scatter'; renderSemanticChart('scatter')" data-tip="Mapa 2D donde cada punto es una página. Las páginas cercanas tratan temas similares. Los colores agrupan clusters temáticos detectados automáticamente.">Mapa de temas</button>
+                  <button type="button" class="tab" :class="semanticSubTab === 'cannibal' && 'active'" @click="semanticSubTab='cannibal'; loadCannibalization()" data-tip="Pares de páginas con contenido casi identico que compiten entre si en Google. La URL dominante es la de mayor autoridad (PageRank/clicks). La debil es candidata a consolidar, redirigir o diferenciar.">Canibalización</button>
+                  <button type="button" class="tab" :class="semanticSubTab === 'drift' && 'active'" @click="semanticSubTab='drift'; loadDrift()" data-tip="Páginas con alta autoridad que estan lejos del tema central. Al tener mucho peso, arrastran el centro semántico del sitio. Candidatas a reenfocar o desacoplar.">Desvío del tema</button>
+                  <button type="button" class="tab" :class="semanticSubTab === 'gap' && 'active'" @click="semanticSubTab='gap'" data-tip="Busca que páginas de tu sitio son mas relevantes para un tema concreto. Compara embeddings directamente para encontrar contenido existente que cubra o se acerque al topico buscado.">Huecos</button>
                 </div>
 
                 <!-- Ring Map -->
                 <template x-if="semanticSubTab === 'rings'">
                   <div>
-                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Cada punto es una pagina posicionada segun su distancia al <strong>centro semantico actual</strong> del sitio. El centro se calcula como la media ponderada de todos los embeddings (peso = PageRank + clicks GSC). <strong>PageRank</strong> mide la importancia de cada pagina segun cuantos enlaces internos recibe y de que paginas: una URL enlazada desde muchas paginas (o desde paginas importantes) tiene mas PageRank. Es la misma logica que usa Google internamente. Las paginas del anillo <strong style="color:#34a853">Core</strong> definen el tema principal, las del <strong style="color:#ea4335">Peripheral</strong> estan fuera de foco. El tamano del punto refleja su autoridad.</p>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Cada punto es una página posicionada según su distancia al <strong>centro semántico actual</strong> del sitio. El centro se calcula como la media ponderada de todos los embeddings (peso = PageRank + clicks GSC). <strong>PageRank</strong> mide la importancia de cada pagina segun cuantos enlaces internos recibe y de que paginas: una URL enlazada desde muchas paginas (o desde paginas importantes) tiene mas PageRank. Es la misma logica que usa Google internamente. Las paginas del anillo <strong style="color:#34a853">Core</strong> definen el tema principal, las del <strong style="color:#ea4335">Peripheral</strong> estan fuera de foco. El tamaño del punto refleja su autoridad.</p>
                     <div id="semantic-ring-chart" style="width:100%;height:600px;border-radius:8px;overflow:hidden"></div>
 
                     <!-- Target Theme -->
                     <div class="card" style="padding:1rem;margin-top:1rem">
-                      <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Define el tema ideal de tu sitio. El sistema re-centra los anillos alrededor de ese tema y te dice que paginas reforzar (estan cerca del objetivo pero con poca autoridad) y cuales reenfocar (tienen mucha autoridad pero estan lejos del objetivo).">
+                      <h4 style="margin-bottom:.5rem;font-size:.9rem;display:flex;align-items:center;gap:.3rem" data-tip="Define el tema ideal de tu sitio. El sistema re-centra los anillos alrededor de ese tema y te dice que páginas reforzar (estan cerca del objetivo pero con poca autoridad) y cuales reenfocar (tienen mucha autoridad pero estan lejos del objetivo).">
                         <i data-lucide="target" style="width:14px;height:14px"></i> Tema objetivo
                       </h4>
                       <p class="text-dim text-sm" style="margin-bottom:.5rem">Describe el tema central ideal de tu sitio (5-15 palabras para mejor precision). El sistema re-centrara los anillos alrededor de ese tema y mostrara como mover el centro semantico hacia el.</p>
@@ -1968,7 +1980,7 @@
                         <div style="margin-top:1rem">
                           <!-- Alignment Score -->
                           <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap">
-                            <span class="text-sm" data-tip="Similitud coseno entre el centro semantico actual del sitio y el tema objetivo. 100% = perfectamente alineado.">
+                            <span class="text-sm" data-tip="Similitud coseno entre el centro semántico actual del sitio y el tema objetivo. 100% = perfectamente alineado.">
                               <strong>Alineamiento:</strong>
                               <span :style="'font-weight:700;color:' + (targetResults.alignment >= 0.9 ? 'var(--green)' : targetResults.alignment >= 0.8 ? 'var(--orange)' : 'var(--red)')"
                                     x-text="(targetResults.alignment * 100).toFixed(1) + '%'"></span>
@@ -1988,7 +2000,7 @@
                           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                             <!-- Reinforce -->
                             <div>
-                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#34a853;display:flex;align-items:center;gap:.3rem" data-tip="Paginas cercanas al tema objetivo pero con poca autoridad. Refuerza el enlazado interno hacia ellas para mover el centro semantico hacia tu objetivo.">
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#34a853;display:flex;align-items:center;gap:.3rem" data-tip="Páginas cercanas al tema objetivo pero con poca autoridad. Refuerza el enlazado interno hacia ellas para mover el centro semántico hacia tu objetivo.">
                                 <i data-lucide="arrow-up-circle" style="width:14px;height:14px"></i> Reforzar (enlazar mas)
                               </h5>
                               <template x-if="targetResults.reinforce.length === 0">
@@ -2014,7 +2026,7 @@
 
                             <!-- Refocus -->
                             <div>
-                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#ea4335;display:flex;align-items:center;gap:.3rem" data-tip="Paginas con alta autoridad pero alejadas del tema objetivo. Estan arrastrando el centro semantico en otra direccion. Opciones: reenfocar su contenido hacia el objetivo, o reducir su enlazado interno.">
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#ea4335;display:flex;align-items:center;gap:.3rem" data-tip="Páginas con alta autoridad pero alejadas del tema objetivo. Estan arrastrando el centro semántico en otra direccion. Opciones: reenfocar su contenido hacia el objetivo, o reducir su enlazado interno.">
                                 <i data-lucide="arrow-down-circle" style="width:14px;height:14px"></i> Reenfocar (alejadas del objetivo)
                               </h5>
                               <template x-if="targetResults.refocus.length === 0">
@@ -2055,12 +2067,12 @@
                 <!-- Canibalizacion -->
                 <template x-if="semanticSubTab === 'cannibal'">
                   <div>
-                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Pares de paginas con contenido similar que compiten por las mismas keywords en Google. Si hay datos GSC con queries, se valida que ambas paginas ranqueen para las mismas keywords no-marca. Sin datos GSC, se muestra solo la similitud semantica.</p>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Pares de páginas con contenido similar que compiten por las mismas keywords en Google. Si hay datos GSC con queries, se valida que ambas páginas ranqueen para las mismas keywords no-marca. Sin datos GSC, se muestra solo la similitud semántica.</p>
 
                     <!-- Brand filter + reload -->
                     <div style="display:flex;gap:.5rem;align-items:end;margin-bottom:.75rem;flex-wrap:wrap">
                       <div style="flex:1;min-width:200px">
-                        <label class="text-dim text-sm" data-tip="Keywords de marca a excluir. Separadas por coma. Ej: ilerna, ilerna fp. Dos paginas que solo comparten queries de marca NO son canibalizacion real.">Keywords de marca (excluir)</label>
+                        <label class="text-dim text-sm" data-tip="Keywords de marca a excluir. Separadas por coma. Ej: ilerna, ilerna fp. Dos páginas que solo comparten queries de marca NO son canibalización real.">Keywords de marca (excluir)</label>
                         <input type="text" x-model="cannibalBrand" placeholder="Ej: ilerna, ilerna fp"
                                style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem;margin-top:.2rem">
                       </div>
@@ -2078,12 +2090,12 @@
                     </div>
 
                     <template x-if="cannibalLoading">
-                      <div class="loading-overlay"><div class="spinner"></div> Cargando canibalizacion...</div>
+                      <div class="loading-overlay"><div class="spinner"></div> Cargando canibalización...</div>
                     </template>
                     <template x-if="!cannibalLoading && cannibalPairs.length === 0">
                       <div class="empty" style="padding:2rem">
                         <i data-lucide="check-circle" style="width:32px;height:32px;color:var(--green);margin-bottom:.5rem"></i>
-                        <p>No se detectaron pares de canibalizacion con el umbral actual.</p>
+                        <p>No se detectaron pares de canibalización con el umbral actual.</p>
                       </div>
                     </template>
                     <template x-if="!cannibalLoading && cannibalPairs.length > 0">
@@ -2096,7 +2108,7 @@
                               <th>URL Debil</th>
                               <th data-tip="Clicks organicos de la URL debil (GSC).">Clicks</th>
                               <th>Similitud</th>
-                              <th data-tip="Keywords no-marca compartidas entre ambas URLs en GSC. Si hay queries compartidas = canibalizacion confirmada.">KWs compartidas</th>
+                              <th data-tip="Keywords no-marca compartidas entre ambas URLs en GSC. Si hay queries compartidas = canibalización confirmada.">KWs compartidas</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2136,7 +2148,7 @@
                 <!-- Drift -->
                 <template x-if="semanticSubTab === 'drift'">
                   <div>
-                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Paginas que mas desplazan el centro semantico del sitio. Son URLs con <strong>alta autoridad</strong> (peso) pero <strong>alejadas del tema principal</strong> (distancia). El Drift Score = peso x distancia. Si una pagina importante habla de algo muy diferente al resto del sitio, arrastra el centroide. Accion: reenfocar su contenido o reducir su autoridad interna.</p>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Páginas que mas desplazan el centro semántico del sitio. Son URLs con <strong>alta autoridad</strong> (peso) pero <strong>alejadas del tema principal</strong> (distancia). El Drift Score = peso x distancia. Si una pagina importante habla de algo muy diferente al resto del sitio, arrastra el centroide. Accion: reenfocar su contenido o reducir su autoridad interna.</p>
                     <template x-if="driftLoading">
                       <div class="loading-overlay"><div class="spinner"></div> Cargando drift...</div>
                     </template>
@@ -2148,8 +2160,8 @@
                               <th>#</th><th>URL</th>
                               <th data-tip="Distancia euclidea al centroide. Mayor = mas alejada del tema central.">Distancia</th>
                               <th data-tip="Autoridad normalizada (PageRank + clicks GSC). Mayor = mas influyente.">Peso</th>
-                              <th data-tip="Impacto en el desplazamiento del centro semantico. Drift = peso x distancia.">Drift Score</th>
-                              <th data-tip="Clicks organicos de Google (GSC). Contexto: por que esta pagina importa.">Clicks</th>
+                              <th data-tip="Impacto en el desplazamiento del centro semántico. Drift = peso x distancia.">Drift Score</th>
+                              <th data-tip="Clicks organicos de Google (GSC). Contexto: por que esta página importa.">Clicks</th>
                               <th data-tip="Posicion media en Google (GSC). Menor = mejor posicionamiento.">Pos.</th>
                             </tr>
                           </thead>
@@ -2194,14 +2206,14 @@
                     </div>
                     <template x-if="gapResults && gapResults.candidates">
                       <div>
-                        <p class="text-sm text-dim" style="margin-bottom:.5rem">Paginas mas relevantes para "<span x-text="gapResults.topic"></span>":</p>
+                        <p class="text-sm text-dim" style="margin-bottom:.5rem">Páginas mas relevantes para "<span x-text="gapResults.topic"></span>":</p>
                         <table class="tbl">
                           <thead>
                             <tr>
                               <th>#</th>
                               <th>URL</th>
-                              <th data-tip="Similitud coseno entre el embedding de la pagina y el del tema buscado. Mayor = mas relevante.">Similitud al tema</th>
-                              <th data-tip="Similitud coseno al centroide del sitio. Alto = pagina central. Bajo = pagina periferica.">Centralidad</th>
+                              <th data-tip="Similitud coseno entre el embedding de la página y el del tema buscado. Mayor = mas relevante.">Similitud al tema</th>
+                              <th data-tip="Similitud coseno al centroide del sitio. Alto = página central. Bajo = página periferica.">Centralidad</th>
                               <th data-tip="Clicks organicos de Google (GSC).">Clicks</th>
                               <th data-tip="Posicion media en Google (GSC).">Pos.</th>
                             </tr>
@@ -2267,9 +2279,9 @@
                   <table>
                     <thead>
                       <tr>
-                        <th data-tip="Patron de forma de URL que agrupa paginas con estructura similar">Forma de URL</th>
-                        <th data-tip="Numero de paginas del grupo">Páginas</th>
-                        <th data-tip="Paginas del grupo con limpieza aplicada">Limpiadas</th>
+                        <th data-tip="Patron de forma de URL que agrupa páginas con estructura similar">Forma de URL</th>
+                        <th data-tip="Número de páginas del grupo">Páginas</th>
+                        <th data-tip="Páginas del grupo con limpieza aplicada">Limpiadas</th>
                         <th data-tip="Longitud media del contenido en caracteres">Long. media</th>
                         <th data-tip="URL de ejemplo del grupo">Ejemplo</th>
                       </tr>
@@ -2467,7 +2479,7 @@
                   <template x-for="cat in insights.categories" :key="cat.key">
                     <div class="insight-card" :style="'border-left-color:' + scoreColor(cat.score)">
                       <!-- Cabecera de categoria -->
-                      <div class="insight-card-header" @click="toggleCategory(cat.key)">
+                      <div class="insight-card-header" role="button" tabindex="0" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()" @click="toggleCategory(cat.key)">
                         <div class="flex items-center gap-1">
                           <span class="insight-icon" x-text="cat.icon"></span>
                           <span class="insight-name" x-text="cat.name"></span>
@@ -2750,7 +2762,7 @@
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" x-text="fmt.bytes(urlDetail.transfer_size || urlDetail.content_length)"></div>
-                <div class="stat-label">Tamano</div>
+                <div class="stat-label">Tamaño</div>
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" x-text="fmt.num(urlDetail.word_count)"></div>
@@ -2766,7 +2778,7 @@
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem;color:var(--accent)" x-text="urlDetail.pagerank_score != null ? urlDetail.pagerank_score : (urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—')"></div>
-                <div class="stat-label" data-tip="Importancia de esta pagina segun los enlaces internos que recibe, en escala 0-100 logaritmica anclada al maximo del sitio: cada 25 puntos son diez veces menos autoridad que la pagina mas fuerte.">PageRank (0-100)</div>
+                <div class="stat-label" data-tip="Importancia de esta página según los enlaces internos que recibe, en escala 0-100 logaritmica anclada al máximo del sitio: cada 25 puntos son diez veces menos autoridad que la página mas fuerte.">PageRank (0-100)</div>
               </div>
               <div class="stat-card">
                 <div class="stat-value" style="font-size:1.3rem" :class="urlDetail.issues?.length > 0 ? 'orange' : 'green'"
@@ -2777,27 +2789,27 @@
 
             <!-- Pestanas del detalle de URL -->
             <div class="tabs">
-              <div class="tab" :class="urlDetailTab === 'seo' && 'active'" @click="urlDetailTab = 'seo'">SEO</div>
-              <div class="tab" :class="urlDetailTab === 'content' && 'active'" @click="urlDetailTab = 'content'">
+              <button type="button" class="tab" :class="urlDetailTab === 'seo' && 'active'" @click="urlDetailTab = 'seo'">SEO</button>
+              <button type="button" class="tab" :class="urlDetailTab === 'content' && 'active'" @click="urlDetailTab = 'content'">
                 Contenido <span class="count" x-text="urlDetail.page_content ? fmt.num(urlDetail.page_content.content_length) : '—'"></span>
-              </div>
-              <div class="tab" :class="urlDetailTab === 'headings' && 'active'" @click="urlDetailTab = 'headings'">
+              </button>
+              <button type="button" class="tab" :class="urlDetailTab === 'headings' && 'active'" @click="urlDetailTab = 'headings'">
                 Encabezados <span class="count" x-text="urlDetail.headings?.length || 0"></span>
-              </div>
-              <div class="tab" :class="urlDetailTab === 'links' && 'active'" @click="urlDetailTab = 'links'">
+              </button>
+              <button type="button" class="tab" :class="urlDetailTab === 'links' && 'active'" @click="urlDetailTab = 'links'">
                 Enlaces <span class="count" x-text="(urlDetail.inlinks?.length || 0) + (urlDetail.outlinks?.length || 0)"></span>
-              </div>
-              <div class="tab" :class="urlDetailTab === 'resources' && 'active'" @click="urlDetailTab = 'resources'">
+              </button>
+              <button type="button" class="tab" :class="urlDetailTab === 'resources' && 'active'" @click="urlDetailTab = 'resources'">
                 Recursos <span class="count" x-text="urlDetail.resources?.length || 0"></span>
-              </div>
-              <div class="tab" :class="urlDetailTab === 'issues' && 'active'" @click="urlDetailTab = 'issues'">
+              </button>
+              <button type="button" class="tab" :class="urlDetailTab === 'issues' && 'active'" @click="urlDetailTab = 'issues'">
                 Problemas <span class="count" x-text="urlDetail.issues?.length || 0"></span>
-              </div>
-              <div class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">Todos los campos</div>
-              <div class="tab" :class="urlDetailTab === 'security' && 'active'" @click="urlDetailTab = 'security'">Seguridad</div>
-              <div class="tab" :class="urlDetailTab === 'structured' && 'active'" @click="urlDetailTab = 'structured'">
+              </button>
+              <button type="button" class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">Todos los campos</button>
+              <button type="button" class="tab" :class="urlDetailTab === 'security' && 'active'" @click="urlDetailTab = 'security'">Seguridad</button>
+              <button type="button" class="tab" :class="urlDetailTab === 'structured' && 'active'" @click="urlDetailTab = 'structured'">
                 Datos estr. <span class="count" x-text="urlDetail.structured_data?.length || 0"></span>
-              </div>
+              </button>
             </div>
 
             <!-- ===== TAB: GENERAL ===== -->
@@ -2811,11 +2823,11 @@
                   <div class="detail-row"><span class="detail-label">Interna</span><span class="detail-value" x-text="urlDetail.is_internal ? 'Si' : 'No'"></span></div>
                   <div class="detail-row"><span class="detail-label">Clics desde la home</span><span class="detail-value" x-text="urlDetail.click_depth ?? 'sin camino desde la home'"></span></div>
                   <div class="detail-row"><span class="detail-label">Prof. de rastreo</span><span class="detail-value text-dim" x-text="urlDetail.crawl_depth ?? '—'" title="Saltos del rastreador desde la semilla mas cercana (cada semilla es 0, lo del sitemap 1). Es la que limita max_depth, no la que mide Google"></span></div>
-                  <div class="detail-row"><span class="detail-label">Codigo estado</span><span class="detail-value" x-text="(urlDetail.status_code || '—') + ' ' + (urlDetail.status_text || '')"></span></div>
+                  <div class="detail-row"><span class="detail-label">Código estado</span><span class="detail-value" x-text="(urlDetail.status_code || '—') + ' ' + (urlDetail.status_text || '')"></span></div>
                   <div class="detail-row"><span class="detail-label">Grupo estado</span><span class="detail-value" x-text="urlDetail.status_group || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Content-Type</span><span class="detail-value" x-text="urlDetail.content_type || '—'"></span></div>
-                  <div class="detail-row"><span class="detail-label">Tamano contenido</span><span class="detail-value" x-text="fmt.bytes(urlDetail.content_length)"></span></div>
-                  <div class="detail-row"><span class="detail-label">Tamano transferencia</span><span class="detail-value" x-text="fmt.bytes(urlDetail.transfer_size)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tamaño contenido</span><span class="detail-value" x-text="fmt.bytes(urlDetail.content_length)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tamaño transferencia</span><span class="detail-value" x-text="fmt.bytes(urlDetail.transfer_size)"></span></div>
                   <div class="detail-row"><span class="detail-label">Tiempo respuesta</span><span class="detail-value" x-text="fmt.ms(urlDetail.response_time_ms)"></span></div>
                   <div class="detail-row"><span class="detail-label">Version HTTP</span><span class="detail-value" x-text="urlDetail.http_version || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Es HTML</span><span class="detail-value" x-text="urlDetail.is_html ? 'Si' : 'No'"></span></div>
@@ -2826,17 +2838,17 @@
                   <div class="detail-row"><span class="detail-label">Prof. carpetas</span><span class="detail-value" x-text="urlDetail.folder_depth ?? '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Palabras</span><span class="detail-value" x-text="fmt.num(urlDetail.word_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Ratio texto</span><span class="detail-value" x-text="urlDetail.text_ratio != null ? urlDetail.text_ratio.toFixed(1) + '%' : '—'"></span></div>
-                  <div class="detail-row"><span class="detail-label">Redireccion a</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.redirect_url || '—'"></span></div>
-                  <div class="detail-row"><span class="detail-label">Tipo redireccion</span><span class="detail-value" x-text="urlDetail.redirect_type || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Redirección a</span><span class="detail-value" style="word-break:break-all" x-text="urlDetail.redirect_url || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Tipo redirección</span><span class="detail-value" x-text="urlDetail.redirect_type || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Last-Modified</span><span class="detail-value" x-text="urlDetail.last_modified || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Inlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.inlinks_count)"></span></div>
-                  <div class="detail-row"><span class="detail-label">Inlinks unicos</span><span class="detail-value" x-text="fmt.num(urlDetail.unique_inlinks_count)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Inlinks únicos</span><span class="detail-value" x-text="fmt.num(urlDetail.unique_inlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks externos</span><span class="detail-value" x-text="fmt.num(urlDetail.external_outlinks_count)"></span></div>
-                  <div class="detail-row"><span class="detail-label" data-tip="Escala 0-100 logaritmica anclada al maximo del sitio. Es la que hay que leer y ordenar.">PageRank (0-100)</span><span class="detail-value" x-text="urlDetail.pagerank_score != null ? urlDetail.pagerank_score : '—'"></span></div>
-                  <div class="detail-row"><span class="detail-label" data-tip="La escala 0-10 de siempre, aqui solo por compatibilidad con los informes ya entregados.">PageRank (0-10, antiguo)</span><span class="detail-value text-dim" x-text="urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label" data-tip="Escala 0-100 logaritmica anclada al máximo del sitio. Es la que hay que leer y ordenar.">PageRank (0-100)</span><span class="detail-value" x-text="urlDetail.pagerank_score != null ? urlDetail.pagerank_score : '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label" data-tip="La escala 0-10 de siempre, aquí solo por compatibilidad con los informes ya entregados.">PageRank (0-10, antiguo)</span><span class="detail-value text-dim" x-text="urlDetail.pagerank != null ? urlDetail.pagerank.toFixed(2) : '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Primera vez</span><span class="detail-value" x-text="fmt.date(urlDetail.first_seen_at)"></span></div>
-                  <div class="detail-row"><span class="detail-label">Ultimo rastreo</span><span class="detail-value" x-text="fmt.date(urlDetail.last_crawled_at)"></span></div>
+                  <div class="detail-row"><span class="detail-label">Último rastreo</span><span class="detail-value" x-text="fmt.date(urlDetail.last_crawled_at)"></span></div>
                 </div>
               </div>
             </template>
@@ -2953,7 +2965,7 @@
                 <template x-if="!urlDetail.page_content">
                   <div class="empty">
                     <h3>Sin contenido</h3>
-                    <p class="text-dim">No se pudo extraer el contenido principal de esta pagina</p>
+                    <p class="text-dim">No se pudo extraer el contenido principal de esta página</p>
                   </div>
                 </template>
               </div>
@@ -2965,7 +2977,7 @@
                 <template x-if="urlDetail.headings && urlDetail.headings.length > 0">
                   <div>
                     <div class="flex items-center justify-between mb-2">
-                      <h3 class="seo-section-title" style="margin:0">Jerarquia de encabezados</h3>
+                      <h3 class="seo-section-title" style="margin:0">Jerarquía de encabezados</h3>
                       <span class="text-dim text-sm" x-text="urlDetail.headings.length + ' encabezados'"></span>
                     </div>
                     <div class="heading-tree">
@@ -3069,7 +3081,7 @@
                 <template x-if="urlDetail.resources && urlDetail.resources.length > 0">
                   <div>
                     <div class="flex items-center justify-between mb-2">
-                      <h3 class="seo-section-title" style="margin:0">Recursos de la pagina</h3>
+                      <h3 class="seo-section-title" style="margin:0">Recursos de la página</h3>
                       <span class="text-dim text-sm" x-text="urlDetail.resources.length + ' recursos'"></span>
                     </div>
                     <div class="table-wrap">
@@ -3099,7 +3111,7 @@
                   </div>
                 </template>
                 <template x-if="!urlDetail.resources || urlDetail.resources.length === 0">
-                  <div class="empty"><h3>Sin recursos</h3><p class="text-dim">No se encontraron imagenes, CSS, JS u otros recursos en esta pagina</p></div>
+                  <div class="empty"><h3>Sin recursos</h3><p class="text-dim">No se encontraron imagenes, CSS, JS u otros recursos en esta página</p></div>
                 </template>
               </div>
             </template>
@@ -3137,7 +3149,7 @@
                   <div class="empty">
                     <div style="font-size:2rem;margin-bottom:.5rem">&#10003;</div>
                     <h3 style="color:var(--green)">Sin problemas</h3>
-                    <p class="text-dim">No se detectaron problemas SEO en esta pagina</p>
+                    <p class="text-dim">No se detectaron problemas SEO en esta página</p>
                   </div>
                 </template>
               </div>
@@ -3228,7 +3240,7 @@
                   </div>
                 </template>
                 <template x-if="!urlDetail.structured_data || urlDetail.structured_data.length === 0">
-                  <div class="empty"><h3>Sin datos estructurados</h3><p class="text-dim">No se encontraron JSON-LD, Microdata ni RDFa en esta pagina</p></div>
+                  <div class="empty"><h3>Sin datos estructurados</h3><p class="text-dim">No se encontraron JSON-LD, Microdata ni RDFa en esta página</p></div>
                 </template>
               </div>
             </template>
@@ -3258,11 +3270,11 @@
                   <div class="exp-divider"></div>
                 </template>
                 <template x-if="!tab.divider">
-                  <div class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
+                  <button type="button" class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
                     <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
-                  </div>
+                  </button>
                 </template>
               </div>
             </template>
@@ -3442,30 +3454,30 @@
                 <button class="exp-detail-close" @click="closeExplorerDetail()">&times;</button>
               </div>
               <div class="exp-detail-tabs">
-                <div class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'content' && 'active'" @click="expDetailTab = 'content'">
                   Contenido
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'headings' && 'active'" @click="expDetailTab = 'headings'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'headings' && 'active'" @click="expDetailTab = 'headings'">
                   Encabezados <span class="count" x-text="expUrlDetail?.headings?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'inlinks' && 'active'" @click="expDetailTab = 'inlinks'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'inlinks' && 'active'" @click="expDetailTab = 'inlinks'">
                   Inlinks <span class="count" x-text="expUrlDetail?.inlinks?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'outlinks' && 'active'" @click="expDetailTab = 'outlinks'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'outlinks' && 'active'" @click="expDetailTab = 'outlinks'">
                   Outlinks <span class="count" x-text="expUrlDetail?.outlinks?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">
                   Problemas <span class="count" x-text="expUrlDetail?.issues?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'resources' && 'active'" @click="expDetailTab = 'resources'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'resources' && 'active'" @click="expDetailTab = 'resources'">
                   Recursos <span class="count" x-text="expUrlDetail?.resources?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'structured' && 'active'" @click="expDetailTab = 'structured'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'structured' && 'active'" @click="expDetailTab = 'structured'">
                   Datos estr. <span class="count" x-text="expUrlDetail?.structured_data?.length || 0"></span>
-                </div>
-                <div class="exp-detail-tab" :class="expDetailTab === 'hreflang' && 'active'" @click="expDetailTab = 'hreflang'">
+                </button>
+                <button type="button" class="exp-detail-tab" :class="expDetailTab === 'hreflang' && 'active'" @click="expDetailTab = 'hreflang'">
                   Hreflang <span class="count" x-text="expUrlDetail?.hreflangs?.length || 0"></span>
-                </div>
+                </button>
               </div>
               <div class="exp-detail-body">
                 <!-- Loading -->
@@ -3785,38 +3797,38 @@
           </summary>
         <!-- Barra de pestanas -->
         <div class="config-tabs">
-          <div class="tab" :class="createForm.configTab === 'general' && 'active'" @click="createForm.configTab = 'general'" style="display:flex;align-items:center;gap:.3rem">
+          <button type="button" class="tab" :class="createForm.configTab === 'general' && 'active'" @click="createForm.configTab = 'general'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="settings" style="width:13px;height:13px"></i> General
-          </div>
-          <div class="tab" :class="createForm.configTab === 'spider' && 'active'" @click="createForm.configTab = 'spider'" style="display:flex;align-items:center;gap:.3rem">
+          </button>
+          <button type="button" class="tab" :class="createForm.configTab === 'spider' && 'active'" @click="createForm.configTab = 'spider'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="bug" style="width:13px;height:13px"></i> Spider
-          </div>
-          <div class="tab" :class="createForm.configTab === 'content' && 'active'" @click="createForm.configTab = 'content'" style="display:flex;align-items:center;gap:.3rem">
+          </button>
+          <button type="button" class="tab" :class="createForm.configTab === 'content' && 'active'" @click="createForm.configTab = 'content'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido
-          </div>
-          <div class="tab" :class="createForm.configTab === 'speed' && 'active'" @click="createForm.configTab = 'speed'" style="display:flex;align-items:center;gap:.3rem">
+          </button>
+          <button type="button" class="tab" :class="createForm.configTab === 'speed' && 'active'" @click="createForm.configTab = 'speed'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="gauge" style="width:13px;height:13px"></i> Velocidad
-          </div>
-          <div class="tab" :class="createForm.configTab === 'http' && 'active'" @click="createForm.configTab = 'http'" style="display:flex;align-items:center;gap:.3rem">
+          </button>
+          <button type="button" class="tab" :class="createForm.configTab === 'http' && 'active'" @click="createForm.configTab = 'http'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="globe" style="width:13px;height:13px"></i> HTTP
-          </div>
-          <div class="tab" :class="createForm.configTab === 'analysis' && 'active'" @click="createForm.configTab = 'analysis'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="bar-chart-2" style="width:13px;height:13px"></i> Analisis
-          </div>
+          </button>
+          <button type="button" class="tab" :class="createForm.configTab === 'analysis' && 'active'" @click="createForm.configTab = 'analysis'" style="display:flex;align-items:center;gap:.3rem">
+            <i data-lucide="bar-chart-2" style="width:13px;height:13px"></i> Análisis
+          </button>
         </div>
 
         <!-- ===== TAB: General ===== -->
         <div x-show="createForm.configTab === 'general'" style="margin-top:1rem">
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="sliders-horizontal" style="width:14px;height:14px;opacity:.6"></i> Limites de rastreo
+            <i data-lucide="sliders-horizontal" style="width:14px;height:14px;opacity:.6"></i> Límites de rastreo
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Profundidad maxima</label>
+              <label>Profundidad máxima</label>
               <input type="number" x-model="createForm.max_depth" min="1" max="50">
             </div>
             <div class="form-group">
-              <label>Maximo de URLs</label>
+              <label>Máximo de URLs</label>
               <input type="number" x-model="createForm.max_urls" min="1" max="5000000">
             </div>
           </div>
@@ -3866,7 +3878,7 @@
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
-            <label class="checkbox-label" data-tip="Lee robots.txt y sitemap.xml, rastrea las URLs listadas y detecta huerfanas (en sitemap sin enlaces) y paginas indexables ausentes del sitemap"><input type="checkbox" x-model="createForm.use_sitemap"> Usar sitemap.xml</label>
+            <label class="checkbox-label" data-tip="Lee robots.txt y sitemap.xml, rastrea las URLs listadas y detecta huérfanas (en sitemap sin enlaces) y páginas indexables ausentes del sitemap"><input type="checkbox" x-model="createForm.use_sitemap"> Usar sitemap.xml</label>
           </div>
           <div class="form-group" style="margin-top:.75rem">
             <label>Robots.txt</label>
@@ -3965,7 +3977,7 @@
           <div class="form-group">
             <label>Tiempo maximo del crawl (horas)</label>
             <input type="number" x-model="createForm.max_runtime_hours" min="1" max="72">
-            <div class="form-hint">Si el crawl no termina en este tiempo, se marca como fallido. Por defecto 6h, maximo 72h.</div>
+            <div class="form-hint">Si el crawl no termina en este tiempo, se marca como fallido. Por defecto 6h, máximo 72h.</div>
           </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
@@ -3977,7 +3989,7 @@
           <div class="form-group" style="margin-top:.75rem" x-show="createForm.autothrottle_enabled">
             <label>Concurrencia objetivo</label>
             <input type="number" x-model="createForm.autothrottle_target_concurrency" min="1" max="100" step="0.5">
-            <div class="form-hint">Numero de peticiones simultaneas que el autothrottle intentara mantener</div>
+            <div class="form-hint">Número de peticiones simultaneas que el autothrottle intentara mantener</div>
           </div>
         </div>
 
@@ -4022,7 +4034,7 @@
         <!-- ===== TAB: Analisis ===== -->
         <div x-show="createForm.configTab === 'analysis'" style="margin-top:1rem">
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="type" style="width:14px;height:14px;opacity:.6"></i> Titulo
+            <i data-lucide="type" style="width:14px;height:14px;opacity:.6"></i> Título
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -4030,13 +4042,13 @@
               <input type="number" x-model="createForm.title_min_length" min="0" max="200">
             </div>
             <div class="form-group">
-              <label>Longitud maxima</label>
+              <label>Longitud máxima</label>
               <input type="number" x-model="createForm.title_max_length" min="1" max="500">
             </div>
           </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="align-left" style="width:14px;height:14px;opacity:.6"></i> Meta descripcion
+            <i data-lucide="align-left" style="width:14px;height:14px;opacity:.6"></i> Meta descripción
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -4044,7 +4056,7 @@
               <input type="number" x-model="createForm.description_min_length" min="0" max="500">
             </div>
             <div class="form-group">
-              <label>Longitud maxima</label>
+              <label>Longitud máxima</label>
               <input type="number" x-model="createForm.description_max_length" min="1" max="1000">
             </div>
           </div>
@@ -4164,7 +4176,7 @@
       </div>
       <div class="modal-body" style="padding:1.25rem">
         <p class="text-dim text-sm" style="margin-bottom:1rem">
-          Las URLs ya rastreadas se preservan. El crawler continuara desde la frontera descubierta. Puedes ajustar los parametros mas relevantes antes de relanzar.
+          Las URLs ya rastreadas se preservan. El crawler continuara desde la frontera descubierta. Puedes ajustar los parámetros mas relevantes antes de relanzar.
         </p>
 
         <div class="form-group">
@@ -4345,6 +4357,50 @@
     </div>
   </div>
 </template>
+
+<!-- ===== DIALOGO PROPIO (UX-21) =====
+     Sustituye a confirm()/alert()/prompt(). Los borrados que se llevan mucho
+     por delante piden escribir una palabra para habilitar el boton. -->
+<template x-if="dialogo">
+  <div class="modal-backdrop" @click.self="cerrarDialogo(false)" @keydown.escape.window="cerrarDialogo(false)">
+    <div class="modal dialogo" style="max-width:30rem" role="alertdialog" aria-modal="true"
+         aria-labelledby="dialogo-titulo" aria-describedby="dialogo-mensaje">
+      <div class="modal-header">
+        <h2 id="dialogo-titulo" style="display:flex;align-items:center;gap:.45rem">
+          <template x-if="dialogo.peligro"><i data-lucide="alert-triangle" style="width:18px;height:18px;color:var(--red)"></i></template>
+          <span x-text="dialogo.titulo"></span>
+        </h2>
+      </div>
+      <div class="modal-body">
+        <p id="dialogo-mensaje" class="text-sm" style="line-height:1.55;white-space:pre-line" x-text="dialogo.mensaje"></p>
+        <template x-if="dialogo.escribir">
+          <div style="margin-top:.8rem">
+            <label class="text-sm" for="dialogo-entrada">Escribe <strong x-text="dialogo.escribir"></strong> para confirmar</label>
+            <input id="dialogo-entrada" type="text" x-model="dialogo.entrada" data-foco autocomplete="off"
+                   @keydown.enter="cerrarDialogo(true)" style="width:100%;margin-top:.3rem">
+          </div>
+        </template>
+      </div>
+      <div class="modal-footer">
+        <template x-if="!dialogo.solo_aviso">
+          <button class="btn" @click="cerrarDialogo(false)" :data-foco="dialogo.peligro && !dialogo.escribir ? '' : null">Volver</button>
+        </template>
+        <button class="btn" :class="dialogo.peligro ? 'btn-danger' : 'btn-primary'" @click="cerrarDialogo(true)"
+                :disabled="dialogo.escribir && dialogo.entrada.trim() !== dialogo.escribir"
+                :data-foco="!dialogo.peligro && !dialogo.escribir ? '' : null" x-text="dialogo.aceptar"></button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== AVISOS BREVES =====
+     showToast() los anadia a una lista que nadie pintaba: «Rastreo iniciado»,
+     «Cliente guardado» o «Trabajo eliminado» no se habian visto nunca. -->
+<div class="toasts" role="status" aria-live="polite">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="'toast-' + t.type" x-text="t.msg"></div>
+  </template>
+</div>
 
 </body>
 </html>

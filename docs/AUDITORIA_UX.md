@@ -86,52 +86,52 @@ pequeño y una regresión se aísla sola.
 
 Lo que hoy rompe o miente, sin tocar la estructura.
 
-- [ ] UX-01 Semillas plegadas en el Resumen («3.040 semillas · ver»). Criterio: la ficha de Lopesan mide menos de 3.000 px.
-- [ ] UX-02 Enlaces responde en segundos: total estimado o `count` filtrando por `links.job_id` con índice; y el estado «cargando» no puede decir «0 enlaces». Medir antes y después con el mismo job.
-- [ ] UX-14 Un único `fmt` para números (`useGrouping: 'always'`), duraciones («4 h 06 min»), fechas (relativa + absoluta en `title`) y cron legible («miércoles 4:00»).
-- [ ] UX-15 Fijar versión de lucide y arreglar los iconos que faltan.
-- [ ] UX-16 Lupa y miga de pan del Explorador.
-- [ ] UX-04 (parcial) Problemas ordenado por gravedad real: error → aviso → info.
+- [x] UX-01 Semillas plegadas en el Resumen («3.040 semillas · ver»). Criterio: la ficha de Lopesan mide menos de 3.000 px. (#125)
+- [x] UX-02 Enlaces responde en segundos: total estimado o `count` filtrando por `links.job_id` con índice; y el estado «cargando» no puede decir «0 enlaces». Medir antes y después con el mismo job. (#125)
+- [x] UX-14 Un único `fmt` para números (`useGrouping: 'always'`), duraciones («4 h 06 min»), fechas (relativa + absoluta en `title`) y cron legible («miércoles 4:00»). (#125)
+- [x] UX-15 Fijar versión de lucide y arreglar los iconos que faltan. (#125)
+- [x] UX-16 Lupa y miga de pan del Explorador. (#125)
+- [x] UX-04 (parcial) Problemas ordenado por gravedad real: error → aviso → info. (#125)
 
 ### Fase 1 · Navegación — #120
 
-- [ ] UX-03 Rutas en el hash (`#/rastreos/:id/problemas?tipo=...`, `#/clientes/:slug`, `#/rastreos/:id/url/:url_id`) con atrás, recarga y enlaces que se pueden pegar.
-- [ ] UX-06 Navegación fija e igual en todas las vistas: Rastreos · Clientes · Programados. Importar backup y el tema, a un menú.
-- [ ] UX-09 «Exportar ▾» con los cuatro exports; Backup y Eliminar en «⋯».
-- [ ] UX-10 Fusionar la pestaña URLs con el Explorador (el Explorador se queda).
-- [ ] UX-09/11 Cinco pestañas: Resumen, Explorador, Problemas, Enlaces, Comparar. Semántico, Enriquecido y Limpieza bajo «Avanzado».
-- [ ] UX-13 Tarjetas que digan algo: indexables, no indexables, errores, cambio frente al censo anterior.
+- [x] UX-03 Rutas en el hash (`#/rastreos/:id/problemas?tipo=...`, `#/clientes/:slug`, `#/rastreos/:id/url/:url_id`) con atrás, recarga y enlaces que se pueden pegar. (#126)
+- [x] UX-06 Navegación fija e igual en todas las vistas: Rastreos · Clientes · Programados. Importar backup y el tema, a un menú. (#126)
+- [x] UX-09 «Exportar ▾» con los cuatro exports; Backup y Eliminar en «⋯». (#126)
+- [x] UX-10 Fusionar la pestaña URLs con el Explorador (el Explorador se queda). (#126)
+- [x] UX-09/11 Cinco pestañas: Resumen, Explorador, Problemas, Enlaces, Comparar. Semántico, Enriquecido y Limpieza bajo «Avanzado». (#126)
+- [x] UX-13 Tarjetas que digan algo: indexables, no indexables, errores, cambio frente al censo anterior. (#126)
 
 ### Fase 2 · Problemas como centro — #121
 
 La pantalla que se enseña en una reunión.
 
-- [ ] UX-04 Problemas agrupado por tipo: páginas afectadas, gravedad, qué es, qué decide Google, cómo se arregla, ejemplos; clic → Explorador filtrado. La lista plana queda como detalle.
-- [ ] UX-05 La nota del Informe SEO no puede decir «Bueno» con errores graves abiertos (tope por error grave, o quitar la nota). Criterio: Lopesan no sale «Bueno».
-- [ ] UX-11 Resumen, Problemas e Informe sacan las cifras de la misma consulta (decisiones 23 y 39: dos cifras que dicen medir lo mismo acaban sin coincidir).
-- [ ] UX-12 Comparar abre con la comparación automática contra el censo anterior (`jobs.comparacion`): qué se arregló, qué es nuevo, qué sigue; el desplegable, para elegir otro, sin canarios ni pruebas por defecto.
-- [ ] UX-17 Ficha de URL con lo importante arriba: indexabilidad y por qué, problemas, enlazado (in/out, PageRank 0-100), y «todos los campos» plegado.
+- [x] UX-04 Problemas agrupado por tipo: páginas afectadas, gravedad, qué es, qué decide Google, cómo se arregla, ejemplos; clic → Explorador filtrado. La lista plana queda como detalle. (#127)
+- [x] UX-05 La nota del Informe SEO no puede decir «Bueno» con errores graves abiertos (tope por error grave, o quitar la nota). Criterio: Lopesan no sale «Bueno». (#127)
+- [x] UX-11 Resumen, Problemas e Informe sacan las cifras de la misma consulta (decisiones 23 y 39: dos cifras que dicen medir lo mismo acaban sin coincidir). (#127)
+- [x] UX-12 Comparar abre con la comparación automática contra el censo anterior (`jobs.comparacion`): qué se arregló, qué es nuevo, qué sigue; el desplegable, para elegir otro, sin canarios ni pruebas por defecto. (#127)
+- [x] UX-17 Ficha de URL con lo importante arriba: indexabilidad y por qué, problemas, enlazado (in/out, PageRank 0-100), y «todos los campos» plegado. (#127)
 
 ### Fase 3 · El cliente como eje — #122
 
 Depende de #36 (clientes) y comparte terreno con él.
 
-- [ ] UX-07 Portada = panel de clientes: último censo, tendencia de errores, alertas críticas. La lista de rastreos pasa a ser una vista con buscador y filtro por cliente y estado.
-- [ ] UX-07 Marcar cada rastreo como censo, canario o prueba (y filtrar por ello).
-- [ ] UX-08 Asignar a un cliente los rastreos que no tienen (Druni, los Lopesan de julio).
-- [ ] UX-08 Ficha de cliente con la serie de censos y sus comparaciones encadenadas.
-- [ ] UX-19 Nuevo rastreo empieza por cliente/perfil y hereda; nombre + semillas visibles, «Avanzado» plegado, botón «lanzar canario».
+- [x] UX-07 Portada = panel de clientes: último censo, tendencia de errores, alertas críticas. La lista de rastreos pasa a ser una vista con buscador y filtro por cliente y estado. (#128)
+- [x] UX-07 Marcar cada rastreo como censo, canario o prueba (y filtrar por ello). (#128)
+- [x] UX-08 Asignar a un cliente los rastreos que no tienen (Druni, los Lopesan de julio). (#128)
+- [x] UX-08 Ficha de cliente con la serie de censos y sus comparaciones encadenadas. (#128)
+- [x] UX-19 Nuevo rastreo empieza por cliente/perfil y hereda; nombre + semillas visibles, «Avanzado» plegado, botón «lanzar canario». (#128)
 
 ### Fase 4 · Pulido — #123
 
 Sin fecha; se va haciendo cuando se toca cada zona.
 
-- [ ] UX-21 Pestañas y botones como `button` con `role="tab"`; ayudas también con foco/clic.
-- [ ] UX-21 Diálogos propios en lugar de `confirm`/`alert`/`prompt`.
+- [x] UX-21 Pestañas y botones como `button` con `role="tab"`; ayudas también con foco/clic. (#129)
+- [x] UX-21 Diálogos propios en lugar de `confirm`/`alert`/`prompt`. (#129)
 - [ ] UX-21 Estilos en línea a clases (al tocar cada bloque, no en un PR gigante).
-- [ ] UX-20 Tildes y términos en castellano en toda la interfaz.
-- [ ] UX-18 Semántico: explicar qué da antes de pedir clave; parámetros en «Avanzado».
-- [ ] UX-22 Mínimo usable en móvil: barra superior sin desbordar.
+- [x] UX-20 Tildes y términos en castellano en toda la interfaz. (#129)
+- [x] UX-18 Semántico: explicar qué da antes de pedir clave; parámetros en «Avanzado». (#129)
+- [x] UX-22 Mínimo usable en móvil: barra superior sin desbordar. (#129)
 
 ---
 
@@ -139,10 +139,38 @@ Sin fecha; se va haciendo cuando se toca cada zona.
 
 | fase | issue | estado |
 |---|---|---|
-| 0 · Arreglos rápidos | #119 | pendiente |
-| 1 · Navegación | #120 | pendiente |
-| 2 · Problemas como centro | #121 | pendiente |
-| 3 · Cliente como eje | #122 | pendiente |
-| 4 · Pulido | #123 | pendiente |
+| 0 · Arreglos rápidos | #119 | hecha (#125) |
+| 1 · Navegación | #120 | hecha (#126) |
+| 2 · Problemas como centro | #121 | hecha (#127) |
+| 3 · Cliente como eje | #122 | hecha (#128) |
+| 4 · Pulido | #123 | casi: queda pasar los estilos en línea a clases (#129) |
+
+### Lo que salió por el camino (2026-10-14)
+
+Cosas que no estaban en la auditoría y aparecieron al hacerla:
+
+- **`init()` se ejecutaba dos veces** desde siempre: `x-init="init()"` y el
+  `init()` automático de Alpine 3. La lista de rastreos se pedía dos veces al
+  cargar y, con las rutas, dos navegaciones iniciales se pisaban (#126).
+- **Los avisos breves no existían**: `showToast()` llenaba una lista que nadie
+  pintaba. «Rastreo iniciado», «Cliente guardado»… no se habían visto nunca (#129).
+- **Seis tipos de incidencia sin nombre** en la interfaz (`canonical_multiple`,
+  `canonical_in_body`, `canonical_a_http`, `title_multiple`,
+  `description_multiple`, `hreflang_in_body`) (#127).
+- **`click_depth` NULL no siempre es «sin camino desde la home»**: en un censo
+  analizado antes de la decisión 90 es «sin calcular» (#127).
+- **El orden de `/links` por `id`** recorría la tabla entera de todos los
+  rastreos: 2 min la primera página en local, 3,1 s en producción tras el
+  arreglo (#125).
+
+### Cómo se probó
+
+Cada fase, con una API local montada sobre el worktree (`docker run … -v
+$PWD:/app crawler-masivo-api uvicorn … --reload`, puerto 8001) contra la BD de
+desarrollo, y con Playwright dentro de la imagen del crawler: capturas de cada
+vista (`docs/ux/capturas.py`), excepciones de página (`pageerror`, no solo la
+consola: el fallo del `x-for` con claves repetidas solo salía ahí), historial
+del navegador (atrás cuatro veces), teclado en las pestañas y desbordamiento a
+390 px.
 
 Al cerrar una casilla: marcarla aquí y en la issue, con el PR al lado.

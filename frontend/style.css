@@ -216,8 +216,8 @@ td{
 tbody tr:nth-child(even) td{background:#f7f8fa}
 tr:hover td{background:#eef5e6}
 tbody tr{cursor:default;transition:background .1s}
-tr[data-tip]{position:static}
-tr[data-tip]:hover::before,tr[data-tip]:hover::after{display:none}
+tr[data-tip]{position:static}tr[data-tip]:hover::before,
+tr[data-tip]:hover::after{display:none}
 
 /* ===== Status Badges ===== */
 .badge{
@@ -408,7 +408,8 @@ input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-
 
 /* ===== Tooltips ===== */
 [data-tip]{position:relative}
-[data-tip]:hover::after{
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after{
   content:attr(data-tip);
   position:absolute;
   bottom:calc(100% + 6px);
@@ -430,8 +431,8 @@ input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-
   text-transform:none;
   letter-spacing:normal;
   animation:fadeIn .1s;
-}
-[data-tip]:hover::before{
+}[data-tip]:hover::before,
+[data-tip]:focus-visible::before{
   content:'';
   position:absolute;
   bottom:calc(100% + 2px);
@@ -441,19 +442,29 @@ input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-
   border-top-color:#333;
   z-index:200;
   pointer-events:none;
-}
-/* Tooltip abajo para stat-cards, th, .tab, .topbar */
+}/* Tooltip abajo para stat-cards,
+th,
+.tab,
+.topbar */
 .stat-card[data-tip]:hover::after,
 th[data-tip]:hover::after,
 .tab[data-tip]:hover::after,
-.topbar [data-tip]:hover::after{
+.topbar [data-tip]:hover::after,
+.topbar */
+.stat-card[data-tip]:focus-visible::after,
+th[data-tip]:focus-visible::after,
+.tab[data-tip]:focus-visible::after,
+.topbar [data-tip]:focus-visible::after{
   bottom:auto;
   top:calc(100% + 6px);
-}
-.stat-card[data-tip]:hover::before,
+}.stat-card[data-tip]:hover::before,
 th[data-tip]:hover::before,
 .tab[data-tip]:hover::before,
-.topbar [data-tip]:hover::before{
+.topbar [data-tip]:hover::before,
+.stat-card[data-tip]:focus-visible::before,
+th[data-tip]:focus-visible::before,
+.tab[data-tip]:focus-visible::before,
+.topbar [data-tip]:focus-visible::before{
   bottom:auto;
   top:calc(100% + 2px);
   border-top-color:transparent;
@@ -1170,7 +1181,7 @@ th[data-tip]{overflow:visible}
 }
 
 /* Pestanas como <button> (teclado, UX-21): sin el aspecto de boton */
-button.tab{font:inherit;font-size:.8rem;border:0;border-bottom:2px solid transparent;background:none;
+button.tab{font:inherit;font-size:.8rem;font-weight:500;color:var(--text-dim);border:0;border-bottom:2px solid transparent;background:none;
   display:flex;align-items:center;gap:.35rem}
 button.tab.active{background:var(--bg-card);border-bottom-color:var(--accent)}
 button.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -1254,3 +1265,23 @@ button.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .config-avanzada > summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline;
   font-weight:600;font-size:.85rem;padding:.35rem 0;list-style:revert}
 .config-avanzada[open] > summary{margin-bottom:.5rem}
+
+/* Avisos breves (no tenian marcado) */
+.toasts{position:fixed;bottom:1rem;right:1rem;display:flex;flex-direction:column;gap:.4rem;z-index:200;pointer-events:none}
+.toast{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);padding:.55rem .8rem;font-size:.85rem;max-width:22rem;animation:fadeInUp .2s ease}
+.toast-info{border-left-color:var(--blue)}
+.toast-error{border-left-color:var(--red)}
+/* Solo lo que trae un <button> de serie: el borde y el color los pone cada clase */
+button.exp-tab{font-family:inherit;background:none;border-top:0;border-right:0;border-bottom:0;width:100%;text-align:left}
+button.exp-detail-tab{font-family:inherit;background:none;border-top:0;border-left:0}
+button.exp-tab:focus-visible,button.exp-detail-tab:focus-visible,.insight-card-header:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.enlace-fila{color:var(--text)}
+.enlace-fila:hover{color:var(--accent);text-decoration:underline}
+.semantico-intro{margin-bottom:1.25rem;font-size:.88rem;line-height:1.55}
+.semantico-intro ul{margin:.4rem 0 .5rem 1.2rem}
+
+/* Cabecera de la ficha: los margenes negativos siguen al relleno de .main,
+   que en movil es menor (con -1rem fijo desbordaba 4 px) */
+.ficha-cabecera{margin:-1rem -1rem 1rem;padding:1rem 1rem .75rem;background:var(--bg);border-bottom:1px solid var(--border)}
+@media(max-width:768px){.ficha-cabecera{margin:-.75rem -.75rem 1rem;padding:.75rem}}
