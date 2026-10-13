@@ -507,6 +507,8 @@ def import_backup_zip(
             status=job_data.get("status", "completed"),
             seeds=job_data.get("seeds", []),
             config=job_data.get("config", {}),
+            # censo | canario | prueba (UX-07); sin el, se deduce del nombre.
+            tipo=job_data.get("tipo"),
             total_urls_discovered=job_data.get("total_urls_discovered", 0),
             total_urls_crawled=job_data.get("total_urls_crawled", 0),
             total_urls_failed=job_data.get("total_urls_failed", 0),
