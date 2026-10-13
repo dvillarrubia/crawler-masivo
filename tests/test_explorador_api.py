@@ -182,3 +182,66 @@ def test_el_uso_no_rompe_si_redis_falla():
             raise ConnectionError("redis caido")
 
     uso.anotar(Roto(), QueryParams("vista=explorador"))       # no lanza
+
+
+# ---------------------------------------------------------------------------
+# Agrupar por plantilla
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def con_plantillas(tmp_path):
+    from api.routers import results
+
+    engine = create_engine(f"sqlite:///{tmp_path}/p.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    s = Sesion()
+    job = Job(id=uuid.uuid4(), name="censo", status="completed", seeds=["https://x.com/"], config={})
+    s.add(job)
+    s.flush()
+    rutas = [("/es/null", 404), ("/en/null", 404), ("/de/null", 404), ("/es/corporativa/null", 404),
+             ("/es/hoteles/a", 200), ("/es/hoteles/b", 200), ("/es/hoteles/c", 200)]
+    for i, (ruta, codigo) in enumerate(rutas):
+        u = Url(job_id=job.id, url=f"https://x.com{ruta}", path=ruta, url_hash=str(i), is_internal=True,
+                is_html=True, status_code=codigo, status_group=f"{codigo // 100}xx",
+                indexable=codigo == 200, inlinks_count=2, pagerank_score=10 * i)
+        s.add(u)
+        s.flush()
+        if codigo == 404:
+            s.add(Issue(job_id=job.id, url_id=u.id, issue_type="4xx_error", severity="error"))
+    s.commit()
+    s.close()
+    app = FastAPI()
+    app.include_router(results.router)
+
+    def _sesion():
+        ses = Sesion()
+        try:
+            yield ses
+        finally:
+            ses.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    return TestClient(app), job.id
+
+
+def test_por_plantilla_agrupa_y_delata_el_tramo_repetido(con_plantillas):
+    """`/de/null`, `/en/null`... son un solo fallo de plantilla, no cuatro 404."""
+    api, jid = con_plantillas
+    d = api.get(f"/api/jobs/{jid}/urls/plantillas").json()
+    assert d["urls"] == 7
+    por_forma = {p["plantilla"]: p for p in d["plantillas"]}
+    idioma = por_forma["/:idioma/:slug (2n)"]
+    assert idioma["urls"] == 3 and idioma["con_errores"] == 3 and idioma["indexables"] == 0
+    assert idioma["tramos_repetidos"] == [{"tramo": "null", "veces": 3}]
+    hoteles = por_forma["/:idioma/hoteles/:slug (3n)"]
+    assert hoteles["urls"] == 3 and hoteles["por_estado"] == {"2xx": 3} and hoteles["tramos_repetidos"] == []
+    # En toda la vista, `null` cruza de plantilla (tambien /es/corporativa/null).
+    assert {"tramo": "null", "veces": 4} in d["tramos_repetidos"]
+
+
+def test_por_plantilla_respeta_los_filtros_y_se_puede_entrar(con_plantillas):
+    api, jid = con_plantillas
+    d = api.get(f"/api/jobs/{jid}/urls/plantillas?status_group=2xx").json()
+    assert [p["plantilla"] for p in d["plantillas"]] == ["/:idioma/hoteles/:slug (3n)"]
+    r = api.get(f"/api/jobs/{jid}/urls", params={"plantilla": "/:idioma/:slug (2n)"}).json()
+    assert sorted(i["url"] for i in r["items"]) == [f"https://x.com/{l}/null" for l in ("de", "en", "es")]

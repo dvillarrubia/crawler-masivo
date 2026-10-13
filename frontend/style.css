@@ -1301,3 +1301,9 @@ body:has(.breadcrumbs){--alto-migas:29px}
 .exp-resumen dt{color:var(--text-dim)}
 .exp-resumen dd{min-width:0}
 .exp-resumen .green{color:var(--green)}.exp-resumen .orange{color:var(--orange)}
+/* Por plantilla (#131) */
+.exp-repetidos{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;padding:.45rem .6rem;font-size:.78rem;
+  background:var(--orange-bg);border-bottom:1px solid var(--border)}
+.chip-tramo{font:inherit;font-size:.75rem;border:1px solid var(--orange);background:#fff;border-radius:3px;padding:.05rem .4rem;cursor:pointer}
+.chip-tramo:hover{background:var(--orange-bg)}
+code.tramo{font-size:.7rem;background:var(--orange-bg);padding:0 .25rem;border-radius:3px;margin-right:.25rem;white-space:nowrap}

@@ -288,6 +288,16 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         if severidad:
             sub = sub.filter(Issue.severity == severidad)
         q = q.filter(Url.id.in_(sub))
+
+    # Una plantilla (forma de ruta, `shared.plantillas.firma_de_ruta`). La
+    # forma se calcula en Python —no hay forma de escribirla en SQL sin atarse a
+    # Postgres—, sobre lo que ya ha filtrado lo demas.
+    plantilla = qp.get("plantilla")
+    if plantilla:
+        from shared.plantillas import firma_de_ruta
+
+        ids = [i for i, ruta in q.with_entities(Url.id, Url.path).all() if firma_de_ruta(ruta or "/") == plantilla]
+        q = q.filter(Url.id.in_(ids or [-1]))
     return q
 
 
@@ -352,6 +362,104 @@ def list_urls(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/plantillas  -- la vista agrupada por plantilla
+# ---------------------------------------------------------------------------
+class _Plantilla(BaseModel):
+    plantilla: str
+    urls: int
+    indexables: int = 0
+    por_estado: dict[str, int] = {}
+    con_errores: int = 0
+    palabras_mediana: float | None = None
+    pagerank_mediana: float | None = None
+    clics_mediana: float | None = None
+    inlinks: int = 0
+    tramos_repetidos: list[dict] = []   # [{tramo, veces}], los que se repiten
+    ejemplos: list[str] = []
+
+
+class _VistaPorPlantilla(BaseModel):
+    plantillas: list[_Plantilla]
+    # Ultimos tramos que se repiten en TODA la vista, crucen o no de plantilla:
+    # `null` aparecia en /es/null, /en/corporate/null y /es/corporativa/null.
+    tramos_repetidos: list[dict] = []
+    urls: int = 0
+
+
+def _mediana(valores: list) -> float | None:
+    v = sorted(x for x in valores if x is not None)
+    if not v:
+        return None
+    m = len(v) // 2
+    return float(v[m]) if len(v) % 2 else (v[m - 1] + v[m]) / 2
+
+
+@router.get("/urls/plantillas", response_model=_VistaPorPlantilla)
+def urls_por_plantilla(
+    job_id: uuid.UUID,
+    request: Request,
+    limite: int = Query(300, ge=1, le=2000),
+    db: Session = Depends(get_session),
+):
+    """Las URLs de la vista agrupadas por la forma de su ruta.
+
+    En SEO tecnico casi nada se arregla URL a URL: se arregla una plantilla. En
+    Lopesan, `/de/null`, `/en/null`, `/es/null`… salian como doce 404 sueltos
+    y son un solo fallo (docs/INVESTIGACION_EXPLORADOR.md). La forma normaliza
+    el ultimo tramo, asi que cada grupo dice ademas que ultimo tramo se repite
+    (`null` × 9): es lo que delata el fallo.
+    """
+    from collections import Counter, defaultdict
+
+    from shared.plantillas import firma_de_ruta
+
+    _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params)
+    q = _urls_filtradas(db, job_id, request.query_params)
+    filas = q.with_entities(
+        Url.id, Url.url, Url.path, Url.status_group, Url.indexable, Url.content_word_count,
+        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count,
+    ).all()
+    con_error = {
+        uid for (uid,) in db.query(Issue.url_id)
+        .filter(Issue.job_id == job_id, Issue.severity == "error").distinct()
+    } if filas else set()
+
+    def ultimo(f):
+        return (f.path or "/").rstrip("/").rsplit("/", 1)[-1] or "/"
+
+    def repetidos(cuenta: Counter, n: int, minimo: int = 2) -> list[dict]:
+        # Solo dicen algo si se repiten: en una plantilla sana cada pagina
+        # tiene su slug.
+        return [{"tramo": t, "veces": v} for t, v in cuenta.most_common(n) if v >= minimo]
+
+    grupos: dict[str, list] = defaultdict(list)
+    for f in filas:
+        grupos[firma_de_ruta(f.path or "/")].append(f)
+
+    salida = []
+    for forma, fs in grupos.items():
+        salida.append(_Plantilla(
+            plantilla=forma, urls=len(fs),
+            indexables=sum(1 for f in fs if f.indexable),
+            por_estado=dict(Counter(f.status_group or "?" for f in fs)),
+            con_errores=sum(1 for f in fs if f.id in con_error),
+            palabras_mediana=_mediana([f.content_word_count if f.content_word_count is not None else f.word_count for f in fs]),
+            pagerank_mediana=_mediana([f.pagerank_score for f in fs]),
+            clics_mediana=_mediana([f.click_depth for f in fs]),
+            inlinks=sum(f.inlinks_count or 0 for f in fs),
+            tramos_repetidos=repetidos(Counter(ultimo(f) for f in fs), 3),
+            ejemplos=[f.url for f in fs[:3]],
+        ))
+    salida.sort(key=lambda p: (-p.urls, p.plantilla))
+    return _VistaPorPlantilla(
+        plantillas=salida[:limite],
+        tramos_repetidos=repetidos(Counter(ultimo(f) for f in filas), 8, minimo=3),
+        urls=len(filas),
     )
 
 

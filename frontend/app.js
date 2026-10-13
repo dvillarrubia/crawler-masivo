@@ -637,6 +637,8 @@ function app() {
       if (this.expGravedad) q.set('gravedad', this.expGravedad);
       if (this.expSort) { q.set('orden', this.expSort); q.set('dir', this.expSortDir); }
       if (this.expPage > 1) q.set('pagina', this.expPage);
+      if (this.expAgrupar) q.set('agrupar', 'plantilla');
+      if (this.expPlantilla) q.set('plantilla', this.expPlantilla);
       const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
         v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
       if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
@@ -651,6 +653,7 @@ function app() {
         problema: q.get('problema') || '', gravedad: q.get('gravedad') || '',
         orden: q.get('orden') || null, dir: q.get('dir') === 'desc' ? 'desc' : 'asc',
         pagina: +(q.get('pagina') || 1), filtros,
+        agrupar: q.get('agrupar') === 'plantilla', plantilla: q.get('plantilla') || '',
       };
     },
 
@@ -2377,6 +2380,9 @@ function app() {
     expProblema: '',            // issue_type (o varios separados por comas) del filtro «Con el problema…»
     expGravedad: '',            // severity del mismo filtro
     expBuscarColumna: '',       // buscador del selector de columnas
+    expAgrupar: false,          // vista agrupada por plantilla (forma de ruta)
+    expPlantillas: null,        // respuesta de /urls/plantillas
+    expPlantilla: '',           // plantilla elegida: filtra la tabla
     EXP_GRUPOS_COLUMNAS,
     _expSearchTimer: null,
     _expFilterTimer: null,
@@ -2394,6 +2400,9 @@ function app() {
       this.expPage = preajuste.pagina || 1;
       this.expProblema = preajuste.problema || '';
       this.expGravedad = preajuste.gravedad || '';
+      this.expAgrupar = !!preajuste.agrupar;
+      this.expPlantilla = preajuste.plantilla || '';
+      this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
       this.expSelectedIndex = -1;
@@ -2443,6 +2452,48 @@ function app() {
       this.expSelectedUrl = null;
       this.expSelectedIndex = -1;
       this.expColumnPickerOpen = false;
+      this.loadExplorerUrls();
+    },
+
+    // ---- Agrupar por plantilla (#131) ----
+    // En SEO tecnico se arregla una plantilla, no una URL: los 32 errores 4xx
+    // de Lopesan son, en buena parte, dos fallos repetidos por idioma.
+    async cargarPlantillas() {
+      this.expLoading = true;
+      try {
+        const q = new URLSearchParams(this._buildExplorerParams());
+        q.delete('page'); q.delete('page_size'); q.delete('ligero'); q.delete('plantilla');
+        this.expPlantillas = await api(`/jobs/${this.job.id}/urls/plantillas?${q}`);
+        this.expTotal = this.expPlantillas.urls;
+      } catch (e) { this.error = e.message; }
+      this.expLoading = false;
+    },
+
+    alternarAgrupar() {
+      this.expAgrupar = !this.expAgrupar;
+      this.expDetailOpen = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    entrarEnPlantilla(forma) {
+      this.expPlantilla = forma;
+      this.expAgrupar = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    quitarPlantilla() {
+      this.expPlantilla = '';
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    // Un tramo repetido (`null`) como filtro de URL.
+    filtrarPorTramo(tramo) {
+      this.expColumnFilters = { ...this.expColumnFilters, url: { value: '/' + tramo } };
+      this.expAgrupar = false;
+      this.expPage = 1;
       this.loadExplorerUrls();
     },
 
@@ -2516,6 +2567,7 @@ function app() {
       params.set('vista', 'explorador');
       params.set('pestana', this.expTab);
       if (this.expProblema) params.set('issue_type', this.expProblema);
+      if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
       if (tabCfg.filter) {
@@ -2558,6 +2610,7 @@ function app() {
 
     async loadExplorerUrls() {
       if (!this.job) return;
+      if (this.expAgrupar) return this.cargarPlantillas();
       this.expLoading = true;
       try {
         const params = this._buildExplorerParams();
@@ -2679,7 +2732,7 @@ function app() {
 
     expClearAllColumnFilters() {
       this.expColumnFilters = {};
-      this.expProblema = ''; this.expGravedad = '';
+      this.expProblema = ''; this.expGravedad = ''; this.expPlantilla = '';
       this.expPage = 1;
       this.loadExplorerUrls();
     },
@@ -2687,7 +2740,7 @@ function app() {
     expActiveFilterCount() {
       return Object.values(this.expColumnFilters).filter(f =>
         f && (f.op === 'vacio' || f.op === 'con_valor' || (f.value != null && f.value.toString().trim() !== ''))
-      ).length + (this.expProblema || this.expGravedad ? 1 : 0);
+      ).length + (this.expProblema || this.expGravedad ? 1 : 0) + (this.expPlantilla ? 1 : 0);
     },
 
     /**
