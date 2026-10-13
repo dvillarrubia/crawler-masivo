@@ -644,30 +644,49 @@ def censo_anterior(db, job):
         )
         if de_la_serie is not None:
             return de_la_serie
-        # Primera ejecución de la serie: se cae a la regla del host, que es
-        # mejor que no comparar con nada — el guardia de alcance ya dirá si los
-        # alcances no casan.
+        # Primera ejecución de la serie: se cae a la regla del host, que ahora
+        # elige por ALCANCE y no solo por fecha. Ver abajo.
 
     host = _host(job.seeds[0])
     if not host:
         return None
-    # Se recorre de más reciente a más antiguo y se para en el primero del
-    # mismo host. En lotes y no con un `limit`: con un tope fijo, en una
-    # instalación con varios clientes los rastreos de los demás se comen la
-    # ventana y el censo anterior de ESTE sitio queda fuera — y la ausencia de
-    # alerta se lee igual que «no ha cambiado nada». El host no se puede filtrar
-    # en SQL sin atarse a Postgres: `seeds` es JSON y la primera semilla no es
-    # una columna.
+    # Se recorre de más reciente a más antiguo. En lotes y no con un `limit`:
+    # con un tope fijo, en una instalación con varios clientes los rastreos de
+    # los demás se comen la ventana y el censo anterior de ESTE sitio queda
+    # fuera — y la ausencia de alerta se lee igual que «no ha cambiado nada».
+    # El host no se puede filtrar en SQL sin atarse a Postgres: `seeds` es JSON
+    # y la primera semilla no es una columna.
+    #
+    # Y entre los del mismo host se prefiere el que ABARQUE lo mismo, no el más
+    # reciente. Medido en producción el 2026-10-13: el primer censo semanal de
+    # Lopesan (3.040 semillas) eligió como referencia un **rastreo de prueba de
+    # 40 URLs** de cuatro días antes, porque era el más reciente de ese host.
+    # Resultado: 40 URLs en común de 3.884. Los guardias hicieron su trabajo
+    # —no concluyente, sin alertas, nada falso afirmado— pero con 40 páginas en
+    # común no se habría visto nada **aunque el sitio se hubiera roto**, y eso
+    # se lee igual que «no ha cambiado nada», que es contra lo que existen las
+    # decisiones 67 a 78.
+    #
+    # «Abarcar lo mismo» es la contención de la decisión 70: que las semillas
+    # del candidato cubran las de este censo. Si ninguno la cumple se devuelve
+    # el más reciente, que es lo de antes: comparar con algo del mismo sitio
+    # sigue siendo mejor que no comparar con nada.
     consulta = (
         db.query(Job)
         .filter(Job.id != job.id, Job.status == "completed",
                 Job.started_at.isnot(None), Job.started_at < job.started_at)
         .order_by(Job.started_at.desc())
     )
+    mias = {_norm(u) for u in (job.seeds or [])}
+    mas_reciente = None
     for c in consulta.yield_per(200):
-        if c.seeds and _host(c.seeds[0]) == host:
+        if not c.seeds or _host(c.seeds[0]) != host:
+            continue
+        if mas_reciente is None:
+            mas_reciente = c
+        if mias and mias <= {_norm(u) for u in c.seeds}:
             return c
-    return None
+    return mas_reciente
 
 
 def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:

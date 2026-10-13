@@ -1429,10 +1429,24 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    un silencio se lee igual que «no ha cambiado nada» — que es contra lo que
    existen las decisiones 67 a 77.
    `jobs.programacion_id` liga cada rastreo con la programación que lo lanzó.
-   La primera ejecución de una serie cae a la regla del host (comparar con algo
-   del mismo sitio es mejor que no comparar con nada, y el guardia de alcance
-   ya dirá si no casan), y un rastreo lanzado a mano se queda con esa regla
-   porque es lo único que se sabe de él.
+   La primera ejecución de una serie cae a la regla del host, y un rastreo
+   lanzado a mano se queda con esa regla porque es lo único que se sabe de él.
+
+79. **El respaldo elige por ALCANCE, no por fecha** — la otra cara de la
+   decisión 78, y me la encontré el mismo día en producción: el primer censo
+   semanal de Lopesan (3.040 semillas) eligió como referencia un **rastreo de
+   prueba de 40 URLs** de cuatro días antes, porque era el más reciente de ese
+   host. **40 URLs en común de 3.884.** Los guardias hicieron su trabajo —no
+   concluyente, sin alertas, nada falso afirmado— pero con 40 páginas en común
+   no se habría visto nada **aunque el sitio se hubiera roto**, y un silencio
+   se lee igual que «no ha cambiado nada».
+   Entre los candidatos del mismo host se prefiere el que **abarque** lo
+   mismo: que sus semillas cubran las de este censo, que es la contención de
+   la decisión 70. Si ninguno la cumple se devuelve el más reciente, que es lo
+   de antes — comparar con algo del mismo sitio sigue siendo mejor que no
+   comparar con nada. Un candidato que abarca MÁS también vale: si cubre todas
+   mis semillas y alguna más, las páginas comunes siguen siendo todas las
+   mías.
 
 79. **Un `<dialog>` cerrado es contenido salvo que se le note la plantilla**
    (#27) — `dialog` estaba entre los selectores que se quitan siempre, así que
