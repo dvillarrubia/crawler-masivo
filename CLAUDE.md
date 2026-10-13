@@ -482,6 +482,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    cualquier idioma con acentos en la URL). Cambio real al unificar: 0,2% de
    las filas en blogs.uoc.edu y 0,7% en www.uoc.edu.
 
+   **Una sola funcion no basta si no recibe los mismos datos** (#26): el
+   analyzer reescribe `indexable` en todas las URLs y le llegaba menos que al
+   spider. El `<meta name="googlebot">` no se guardaba y el canonical de la
+   cabecera `Link` se guardaba sin que nadie lo leyera, asi que una pagina
+   noindex solo para Google, o canonicalizada por cabecera, salia bien del
+   rastreo y volvia a "Indexable" al analizar. Ahora existe
+   `html_meta.meta_robots_googlebot` y el analyzer pasa las dos cosas. Y las
+   `X-Robots-Tag` se guardan **una por linea**, no unidas por coma: con la coma,
+   `bingbot: noindex` + `googlebot: noindex` se leia como una sola cabecera
+   dirigida a bingbot y la pagina salia indexable. El nofollow de pagina usa
+   las mismas reglas (`es_nofollow`). **Los censos anteriores no se arreglan
+   re-analizando**: el googlebot no se guardo y las cabeceras estan unidas por
+   coma; hace falta re-rastrear.
+
 40. **Un candado no puede tragarse los errores de lo que protege** — la primera
    version de `candado_de_job` tenia el `yield` dentro de un `try/except`
    amplio: cuando el analisis de dentro reventaba, la excepcion entraba por el

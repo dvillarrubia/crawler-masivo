@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.indexabilidad import es_noindex, estado_indexabilidad, misma_url
+from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, es_noindex, estado_indexabilidad, misma_url
 
 URL = "https://x.com/pagina"
 
@@ -130,3 +130,25 @@ def test_la_barra_no_se_interpreta_como_separador():
     """
     assert estado_indexabilidad(200, meta_robots="noindex/nofollow", page_url=URL) == (
         True, "Indexable")
+
+
+# -- Lo guardado en BD (#26) --------------------------------------------------
+# El analyzer no recibe la lista de cabeceras sino la columna `x_robots_tag`,
+# con una cabecera por linea. Unidas por coma se perdia a que bot iba cada una.
+
+def test_las_cabeceras_guardadas_conservan_su_bot():
+    guardado = SEPARADOR_CABECERAS.join(["bingbot: noindex", "googlebot: noindex"])
+    assert estado_indexabilidad(200, x_robots=guardado, page_url=URL) == (False, "Noindex")
+
+
+def test_una_cabecera_a_otro_bot_no_contagia_a_la_siguiente():
+    guardado = SEPARADOR_CABECERAS.join(["bingbot: noindex", "noarchive"])
+    assert estado_indexabilidad(200, x_robots=guardado, page_url=URL) == (True, "Indexable")
+
+
+def test_es_nofollow_con_las_reglas_del_noindex():
+    """El nofollow de pagina se decide igual: cuenta el googlebot, no otro bot."""
+    assert es_nofollow(meta_robots={"robots": "index", "googlebot": "nofollow"}) is True
+    assert es_nofollow(x_robots=["bingbot: nofollow"]) is False
+    assert es_nofollow(x_robots="none") is True
+    assert es_nofollow(meta_robots="index, follow") is False

@@ -57,6 +57,7 @@ class HtmlMetaItem(scrapy.Item):
     meta_description_len = scrapy.Field()
     meta_keywords = scrapy.Field()
     meta_robots = scrapy.Field()
+    meta_robots_googlebot = scrapy.Field()
     x_robots_tag = scrapy.Field()
 
     canonical_href = scrapy.Field()

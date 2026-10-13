@@ -59,14 +59,13 @@ from seo_crawler.extractors import (
     dominio_registrable,
     normalize_host,
     normalize_url,
-    robots_tokens,
 )
 from seo_crawler.sitemaps import (
     MAX_SITEMAP_FILES,
     parse_robots_sitemaps,
     parse_sitemap,
 )
-from shared.indexabilidad import estado_indexabilidad
+from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
 from seo_crawler.items import (
     ContentItem,
     HeadingItem,
@@ -1430,7 +1429,9 @@ class SeoSpider(scrapy.Spider):
                 for valor in response.headers.getlist(b"X-Robots-Tag")
                 if valor
             ]
-            x_robots = ", ".join(cabeceras_robots) or None
+            # Se guardan una por linea, no unidas por coma: cada cabecera
+            # puede ir a un bot distinto y con la coma se perdia a cual.
+            x_robots = SEPARADOR_CABECERAS.join(cabeceras_robots) or None
 
             # Canonical de la cabecera Link (RFC 8288). Antes se cogia el
             # primer enlace de la cabecera fuera el que fuera, asi que un
@@ -1556,6 +1557,7 @@ class SeoSpider(scrapy.Spider):
             meta_description_len=meta["meta_description_len"],
             meta_keywords=meta["meta_keywords"],
             meta_robots=meta["meta_robots"],
+            meta_robots_googlebot=meta.get("meta_robots_googlebot"),
             x_robots_tag=x_robots,
             canonical_href=meta["canonical_href"],
             canonical_count=meta.get("canonical_count"),
@@ -1597,8 +1599,15 @@ class SeoSpider(scrapy.Spider):
 
         # Page-level nofollow: meta robots / X-Robots-Tag "nofollow" (or
         # "none") makes EVERY link on the page nofollow, as Google applies it.
-        combined_tokens = robots_tokens(meta.get("meta_robots")) | robots_tokens(x_robots)
-        page_nofollow = "nofollow" in combined_tokens or "none" in combined_tokens
+        # Con las mismas reglas que el noindex: cuenta el `googlebot` y no
+        # cuenta una cabecera dirigida a otro bot.
+        page_nofollow = es_nofollow(
+            meta_robots={
+                "robots": meta.get("meta_robots"),
+                "googlebot": meta.get("meta_robots_googlebot"),
+            },
+            x_robots=x_robots,
+        )
 
         # Links (extract_links already returns enhanced SF fields)
         links = extract_links(selector, base_url, self.allowed_hosts, page_nofollow=page_nofollow)

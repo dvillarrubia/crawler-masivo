@@ -235,6 +235,11 @@ class HtmlMeta(Base):
     meta_description_len = Column(Integer, nullable=True)
     meta_keywords = Column(Text, nullable=True)
     meta_robots = Column(String(256), nullable=True)
+    # `<meta name="googlebot">`. Sin guardarlo, el analyzer recalculaba la
+    # indexabilidad sin el y una pagina noindex solo para Google volvia a
+    # "Indexable" al analizar (#26).
+    meta_robots_googlebot = Column(String(256), nullable=True)
+    # Una cabecera por linea (SEPARADOR_CABECERAS en shared/indexabilidad.py).
     x_robots_tag = Column(String(256), nullable=True)
 
     canonical_href = Column(Text, nullable=True)
