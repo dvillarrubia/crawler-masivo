@@ -1432,21 +1432,6 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    La primera ejecución de una serie cae a la regla del host, y un rastreo
    lanzado a mano se queda con esa regla porque es lo único que se sabe de él.
 
-79. **El respaldo elige por ALCANCE, no por fecha** — la otra cara de la
-   decisión 78, y me la encontré el mismo día en producción: el primer censo
-   semanal de Lopesan (3.040 semillas) eligió como referencia un **rastreo de
-   prueba de 40 URLs** de cuatro días antes, porque era el más reciente de ese
-   host. **40 URLs en común de 3.884.** Los guardias hicieron su trabajo —no
-   concluyente, sin alertas, nada falso afirmado— pero con 40 páginas en común
-   no se habría visto nada **aunque el sitio se hubiera roto**, y un silencio
-   se lee igual que «no ha cambiado nada».
-   Entre los candidatos del mismo host se prefiere el que **abarque** lo
-   mismo: que sus semillas cubran las de este censo, que es la contención de
-   la decisión 70. Si ninguno la cumple se devuelve el más reciente, que es lo
-   de antes — comparar con algo del mismo sitio sigue siendo mejor que no
-   comparar con nada. Un candidato que abarca MÁS también vale: si cubre todas
-   mis semillas y alguna más, las páginas comunes siguen siendo todas las
-   mías.
 
 79. **Un `<dialog>` cerrado es contenido salvo que se le note la plantilla**
    (#27) — `dialog` estaba entre los selectores que se quitan siempre, así que
@@ -1764,6 +1749,22 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
      issues y del CSV, y sustituir las issues de un módulo al relanzarlo (no
      hay módulos que emitan issues todavía). Al apagar el worker una ejecución
      en curso no se interrumpe: se queda sin latido y el vigilante la reencola.
+
+86. **El respaldo elige por ALCANCE, no por fecha** — la otra cara de la
+   decisión 78, y me la encontré el mismo día en producción: el primer censo
+   semanal de Lopesan (3.040 semillas) eligió como referencia un **rastreo de
+   prueba de 40 URLs** de cuatro días antes, porque era el más reciente de ese
+   host. **40 URLs en común de 3.884.** Los guardias hicieron su trabajo —no
+   concluyente, sin alertas, nada falso afirmado— pero con 40 páginas en común
+   no se habría visto nada **aunque el sitio se hubiera roto**, y un silencio
+   se lee igual que «no ha cambiado nada».
+   Entre los candidatos del mismo host se prefiere el que **abarque** lo
+   mismo: que sus semillas cubran las de este censo, que es la contención de
+   la decisión 70. Si ninguno la cumple se devuelve el más reciente, que es lo
+   de antes — comparar con algo del mismo sitio sigue siendo mejor que no
+   comparar con nada. Un candidato que abarca MÁS también vale: si cubre todas
+   mis semillas y alguna más, las páginas comunes siguen siendo todas las
+   mías.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
