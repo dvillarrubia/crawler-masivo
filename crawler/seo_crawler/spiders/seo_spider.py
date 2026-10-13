@@ -1703,6 +1703,7 @@ class SeoSpider(scrapy.Spider):
                     raw=sd["raw"],
                     format=sd["format"],
                     schema_type=sd["schema_type"],
+                    json_invalido=sd.get("json_invalido"),
                 )
 
         # Resources (extract_resources already returns width, height,

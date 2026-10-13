@@ -365,6 +365,11 @@ class StructuredData(Base):
     schema_type = Column(String(128), nullable=True)
     validation_status = Column(String(10), nullable=True)  # ok, warning, error
     validation_issues = Column(JSON, nullable=True)
+    # Por que el bloque JSON-LD no es JSON estricto (coma final, comentario):
+    # Google lo descarta entero, aunque un lector permisivo lo lea y `raw`
+    # parezca bueno. NULL = JSON valido, o bloque que no es JSON-LD, o rastreo
+    # anterior a la columna (#28, decision 80).
+    json_invalido = Column(String(200), nullable=True)
 
     url_rel = relationship("Url", back_populates="structured_data")
 

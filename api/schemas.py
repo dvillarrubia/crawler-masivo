@@ -425,6 +425,7 @@ class StructuredDataResponse(BaseModel):
     validation_status: str | None = None
     validation_issues: dict[str, Any] | list | None = None
     raw: dict[str, Any] | list | None = None
+    json_invalido: str | None = None
 
 
 class SecurityHeadersResponse(BaseModel):

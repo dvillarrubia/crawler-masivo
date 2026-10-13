@@ -79,13 +79,30 @@ def test_dos_problemas_distintos_siguen_siendo_dos_avisos():
     for n in range(10):
         _pagina_con_bloque(s, j, n, dict(ORG_SIN_NADA))
     for n in range(10, 20):
-        # Sin `name`: propiedad obligatoria, asi que es un error, no un aviso.
-        _pagina_con_bloque(s, j, n, {"@type": "Organization", "url": "https://x.com/"})
+        # Sin precio, resena ni valoracion: obligatorio, asi que es un error.
+        _pagina_con_bloque(s, j, n, {"@type": "Product", "name": "Zapatilla"})
     SEOAnalyzer(s, j.id).analyze_structured_data()
     s.flush()
 
     tipos = sorted(i.issue_type for i in s.query(Issue).filter(Issue.job_id == j.id))
     assert tipos == ["structured_data_error", "structured_data_warning"]
+
+
+def test_un_json_ld_con_coma_final_es_un_error_aunque_este_completo():
+    """El extractor marca el bloque (`json_invalido`) y el analisis lo convierte
+    en error: Google descarta el bloque entero, este como este de completo."""
+    s, j = _montar()
+    u = _pagina_con_bloque(s, j, 1, dict(ORG_SIN_NADA))
+    s.query(StructuredData).filter(StructuredData.url_id == u.id).update(
+        {"json_invalido": "coma final antes de '}' (linea 1, columna 40)"})
+    SEOAnalyzer(s, j.id).analyze_structured_data()
+    s.flush()
+
+    bloque = s.query(StructuredData).filter(StructuredData.url_id == u.id).one()
+    assert bloque.validation_status == "error"
+    assert "coma final" in bloque.validation_issues[0]
+    tipos = [i.issue_type for i in s.query(Issue).filter(Issue.job_id == j.id)]
+    assert tipos == ["structured_data_error"]
 
 
 def test_la_validacion_se_guarda_en_TODOS_los_bloques():

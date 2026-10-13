@@ -149,8 +149,22 @@ def test_una_miga_de_pan_sin_eslabones_no_esta_bien():
 
 
 def test_un_name_en_blanco_es_un_name_que_falta():
-    estado, _ = validate_structured_data({"@type": "Organization", "name": "   "})
+    estado, _ = validate_structured_data(
+        {"@type": "LocalBusiness", "name": "   ", "address": "Calle 1"})
     assert estado == "error"
+
+
+def test_organization_sin_name_es_un_aviso_no_un_error():
+    """Google: «There are no required properties» para Organization. El `name`
+    es recomendado, como todo lo de Article (decision 51)."""
+    estado, problemas = validate_structured_data(
+        {"@type": "Organization", "url": "https://acme.com", "logo": "l",
+         "sameAs": ["s"], "contactPoint": {"telephone": "1"}})
+    assert estado == "warning"
+    assert problemas == [
+        "Organization: falta la propiedad recomendada 'name'; sale como "
+        "resultado enriquecido, pero mas pobre"
+    ]
 
 
 def test_un_nodo_de_referencia_no_es_un_bloque_roto():
@@ -210,10 +224,10 @@ def test_una_entidad_anidada_no_avisa_de_lo_recomendado():
     }
     assert validate_structured_data(ficha) == ("ok", [])
     # Pero una obligatoria que falta en la anidada sigue siendo error.
-    ficha["brand"] = {"@type": "Organization", "url": "https://acme.com"}
+    ficha["review"] = {"@type": "Review", "reviewRating": {"ratingValue": 5}}
     estado, problemas = validate_structured_data(ficha)
     assert estado == "error"
-    assert any("name" in p for p in problemas)
+    assert any("author" in p for p in problemas)
 
 
 # ---------------------------------------------------------------------------
@@ -262,3 +276,148 @@ def test_mezclar_schema_con_un_vocabulario_ajeno_sigue_siendo_error():
         "name": "y",
     }
     assert any(sev == "error" and "@type" in msg for sev, msg in validate_sd_item(item))
+
+
+# ---------------------------------------------------------------------------
+# JSON-LD que no es JSON (#28)
+# ---------------------------------------------------------------------------
+def test_un_json_ld_con_coma_final_es_error_aunque_este_completo():
+    """Google descarta el bloque entero: da igual que las propiedades esten."""
+    completo = {"@type": "BreadcrumbList",
+                "itemListElement": [{"@type": "ListItem", "name": "a"}]}
+    assert validate_structured_data(completo) == ("ok", [])
+    estado, problemas = validate_structured_data(
+        completo, json_invalido="coma final antes de '}' (linea 1, columna 9)")
+    assert estado == "error"
+    assert problemas[0].startswith("JSON-LD no valido: coma final")
+
+
+def test_un_json_ld_ilegible_es_error():
+    estado, problemas = validate_structured_data(
+        None, json_invalido="Expecting ',' delimiter (linea 1, columna 25)")
+    assert estado == "error" and len(problemas) == 1
+
+
+def test_tras_el_json_invalido_se_sigue_validando_el_resto():
+    """Para que al arreglar la coma no aparezca una segunda tanda de errores."""
+    _, problemas = validate_structured_data(
+        {"@type": "Product", "name": "X"}, json_invalido="comentario dentro del JSON")
+    assert problemas[0].startswith("JSON-LD no valido")
+    assert any("offers" in p for p in problemas[1:])
+
+
+# ---------------------------------------------------------------------------
+# La tabla de requisitos entera, contra la documentacion de Google (#28)
+# ---------------------------------------------------------------------------
+# Escrita a mano a partir de las paginas de resultados enriquecidos de Google
+# (developers.google.com/search/docs/appearance/structured-data/<pagina>),
+# consultadas el 2026-10-13. Si cambia REQUISITOS sin cambiar esto, el test
+# falla: un cambio en lo que se exige es un cambio de criterio y tiene que ser
+# a proposito. Las OBLIGATORIAS son exactamente las de Google; las
+# recomendadas son un subconjunto (las que mas pesan en el resultado), no la
+# lista completa.
+REQUISITOS_ESPERADOS = {
+    # product-snippet: name + al menos uno de review/aggregateRating/offers.
+    # Las recomendadas salen de merchant-listing (image, brand, description).
+    "product": {
+        "obligatorias": ["name"],
+        "uno_de": [["offers", "review", "aggregaterating"]],
+        "recomendadas": ["image", "brand", "description"],
+    },
+    # article: «There are no required properties».
+    "article": {
+        "obligatorias": [],
+        "recomendadas": ["headline", "image", "datepublished", "author",
+                         "datemodified"],
+    },
+    # recipe: obligatorias image y name.
+    "recipe": {
+        "obligatorias": ["name", "image"],
+        "recomendadas": ["recipeingredient", "recipeinstructions",
+                         "aggregaterating", "author", "datepublished"],
+    },
+    # faqpage / qapage: mainEntity.
+    "faqpage": {"obligatorias": ["mainentity"]},
+    "qapage": {"obligatorias": ["mainentity"]},
+    # how-to (retirado de la busqueda en 2023; se conserva lo que pedia).
+    "howto": {
+        "obligatorias": ["name", "step"],
+        "recomendadas": ["image", "totaltime", "tool", "supply"],
+    },
+    # breadcrumb: itemListElement.
+    "breadcrumblist": {"obligatorias": ["itemlistelement"]},
+    # organization: «There are no required properties»; name es recomendada.
+    "organization": {
+        "obligatorias": [],
+        "recomendadas": ["name", "url", "logo", "sameas", "contactpoint"],
+    },
+    # local-business: obligatorias address y name. `openinghours` e `image`
+    # no estan en la lista de Google (que dice openingHoursSpecification y no
+    # pide imagen); se dejan como estaban porque son avisos, no errores.
+    "localbusiness": {
+        "obligatorias": ["name", "address"],
+        "recomendadas": ["telephone", "openinghours", "geo", "pricerange", "image"],
+    },
+    # event: obligatorias location, name, startDate.
+    "event": {
+        "obligatorias": ["name", "startdate", "location"],
+        "recomendadas": ["enddate", "offers", "image", "description", "performer"],
+    },
+    # job-posting: datePosted, description, hiringOrganization, jobLocation,
+    # title. validThrough solo si la oferta caduca: recomendada.
+    "jobposting": {
+        "obligatorias": ["title", "description", "dateposted",
+                         "hiringorganization", "joblocation"],
+        "recomendadas": ["basesalary", "employmenttype", "validthrough"],
+    },
+    # review-snippet: author, itemReviewed (salvo anidada), reviewRating.
+    "review": {
+        "obligatorias": ["itemreviewed", "reviewrating", "author"],
+        "recomendadas": ["datepublished", "reviewbody"],
+    },
+    # video: obligatorias name, thumbnailUrl, uploadDate; description es
+    # recomendada.
+    "videoobject": {
+        "obligatorias": ["name", "thumbnailurl", "uploaddate"],
+        "recomendadas": ["description", "duration", "contenturl", "embedurl"],
+    },
+    # course: obligatorias name y description; provider es recomendada.
+    "course": {
+        "obligatorias": ["name", "description"],
+        "recomendadas": ["provider", "offers", "hascourseinstance"],
+    },
+    # software-app: name, offers(.price) y uno de aggregateRating o review.
+    "softwareapplication": {
+        "obligatorias": ["name", "offers"],
+        "uno_de": [["aggregaterating", "review"]],
+        "recomendadas": ["operatingsystem", "applicationcategory"],
+    },
+    # profile-page: la Person de mainEntity exige name.
+    "person": {"obligatorias": ["name"]},
+}
+
+
+def test_la_tabla_de_requisitos_coincide_con_la_documentacion_de_google():
+    from analysis.sd_validation import REQUISITOS
+
+    assert set(REQUISITOS) == set(REQUISITOS_ESPERADOS)
+    for tipo, esperado in REQUISITOS_ESPERADOS.items():
+        real = REQUISITOS[tipo]
+        for campo in ("obligatorias", "uno_de", "recomendadas"):
+            assert real.get(campo, []) == esperado.get(campo, []), (tipo, campo)
+
+
+def test_un_video_sin_description_sale_enriquecido():
+    estado, problemas = validate_structured_data(
+        {"@type": "VideoObject", "name": "v", "thumbnailUrl": "t",
+         "uploadDate": "2026-01-01"})
+    assert estado == "warning"
+    assert any("description" in p for p in problemas)
+
+
+def test_una_app_con_resenas_y_sin_valoracion_media_sale_enriquecida():
+    estado, _ = validate_structured_data(
+        {"@type": "SoftwareApplication", "name": "a", "offers": {"price": 0},
+         "review": {"@type": "Review", "author": "x", "reviewRating": {"ratingValue": 4}},
+         "operatingSystem": "iOS", "applicationCategory": "Game"})
+    assert estado == "ok"

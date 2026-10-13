@@ -804,6 +804,68 @@ def test_el_tipo_se_guarda_con_el_mismo_nombre_en_los_tres_formatos():
     assert tipos == {"Product"}
 
 
+def _ld(*bloques: str) -> str:
+    scripts = "".join(f'<script type="application/ld+json">{b}</script>' for b in bloques)
+    return f"<html><head>{scripts}</head><body>x</body></html>"
+
+
+def test_el_json_ld_con_coma_final_se_marca_como_invalido():
+    """Google lee el JSON-LD como JSON estricto: con una coma final descarta el
+    bloque ENTERO. extruct lo reintentaba con un lector permisivo y el bloque
+    se guardaba y validaba como bueno — «ok» justo donde Google no ve nada."""
+    items = ex.extract_structured_data(_ld(
+        '{"@context":"https://schema.org","@type":"Product","name":"X",}'
+    ), "https://x.com/")
+    assert len(items) == 1
+    # El bloque se sigue leyendo: el tipo y el resto valen para auditar.
+    assert items[0]["schema_type"] == "Product"
+    assert items[0]["raw"]["name"] == "X"
+    assert "coma final" in (items[0].get("json_invalido") or "")
+
+    items = ex.extract_structured_data(_ld(
+        '{"@type":"Organization","sameAs":["a","b",]}'), "https://x.com/")
+    assert "coma final" in (items[0].get("json_invalido") or "")
+
+
+def test_el_json_ld_con_comentarios_se_marca_como_invalido():
+    for bloque in (
+        '{"@context":"https://schema.org", // la marca\n"@type":"Product","name":"X"}',
+        '/* Yoast */ {"@context":"https://schema.org","@type":"Product","name":"X"}',
+    ):
+        items = ex.extract_structured_data(_ld(bloque), "https://x.com/")
+        assert [i["schema_type"] for i in items] == ["Product"], bloque
+        assert "comentario" in (items[0].get("json_invalido") or ""), bloque
+
+
+def test_el_json_ld_valido_no_se_marca():
+    """Ni una URL con `//` dentro de una cadena, ni el CDATA (decision 51)."""
+    items = ex.extract_structured_data(_ld(
+        '{"@type":"Product","name":"X","url":"https://x.com/a//b"}',
+        '//<![CDATA[\n{"@type":"Organization","name":"A"}\n//]]>',
+    ), "https://x.com/")
+    assert [i["json_invalido"] for i in items] == [None, None]
+
+
+def test_un_json_ld_ilegible_no_se_lleva_el_resto_de_la_pagina():
+    """extruct lanzaba una excepcion con un bloque que ni el lector permisivo
+    entiende y la pagina se quedaba sin NINGUN dato estructurado, microdatos
+    incluidos. Ahora el roto sale como bloque sin leer —Google tampoco lo
+    lee— y los demas siguen."""
+    html = ('<html><head><script type="application/ld+json">'
+            '{"@type":"Product" "name":"X"}</script>'
+            '<script type="application/ld+json">{"@type":"Organization","name":"A"}'
+            '</script></head><body><div itemscope itemtype="https://schema.org/Event">'
+            '<span itemprop="name">E</span></div></body></html>')
+    items = ex.extract_structured_data(html, "https://x.com/")
+    roto = [i for i in items if i["raw"] is None]
+    assert len(roto) == 1 and roto[0]["json_invalido"]
+    assert {i["schema_type"] for i in items if i["raw"]} == {"Organization", "Event"}
+
+
+def test_un_script_json_ld_vacio_no_es_un_bloque_roto():
+    assert ex.extract_structured_data(_ld("  "), "https://x.com/") == []
+
+
 # ---------------------------------------------------------------------------
 # Imagenes y recursos (#28)
 # ---------------------------------------------------------------------------
