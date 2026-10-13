@@ -53,6 +53,18 @@
         <i data-lucide="contrast" style="width:14px;height:14px"></i>
         <span x-text="theme === 'terminal' ? 'Claro' : 'Terminal'"></span>
       </button>
+      <template x-if="view === 'client'">
+        <button class="btn btn-sm" @click="verClientes()" data-tip="Volver a la lista de clientes" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Clientes
+        </button>
+      </template>
+      <template x-if="['jobs', 'programados', 'clients'].includes(view)">
+        <button class="btn btn-sm" @click="view === 'clients' ? (view = 'jobs') : verClientes()"
+                data-tip="Clientes: sus dominios, sus perfiles de rastreo y sus integraciones" style="display:flex;align-items:center;gap:.35rem">
+          <i data-lucide="building-2" style="width:14px;height:14px"></i>
+          <span x-text="view === 'clients' ? 'Rastreos' : 'Clientes'"></span>
+        </button>
+      </template>
       <template x-if="view === 'jobs' || view === 'programados'">
         <button class="btn btn-sm" @click="view === 'programados' ? (view = 'jobs') : verProgramados()"
                 data-tip="Rastreos que se repiten solos" style="display:flex;align-items:center;gap:.35rem">
@@ -203,6 +215,352 @@
       </div>
     </template>
 
+    <!-- ============================================================ -->
+    <!--                  VISTA: CLIENTES (#36)                       -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'clients'">
+      <div>
+        <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
+          <span class="text-dim text-sm">Cada cliente con sus dominios, sus perfiles de rastreo y sus
+            integraciones. Un rastreo lanzado desde un cliente hereda su configuracion.</span>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:.35rem"
+                  @click="nuevoCliente()">
+            <i data-lucide="plus" style="width:14px;height:14px"></i> Nuevo cliente
+          </button>
+        </div>
+
+        <template x-if="!clientes.length">
+          <div class="empty" style="padding:2.5rem 1.5rem">
+            <h3 style="margin-bottom:.5rem;font-size:1.05rem">Todavia no hay clientes</h3>
+            <p class="text-dim" style="max-width:440px;line-height:1.5">
+              Los rastreos antiguos que tenian un ID de cliente escrito a mano se convierten en
+              clientes solos al desplegar. Para dar de alta uno nuevo, «Nuevo cliente».
+            </p>
+          </div>
+        </template>
+
+        <template x-if="clientes.length">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Cliente</th>
+                <th>Dominios</th>
+                <th data-tip="Perfiles de rastreo: el sitio principal, el blog, un competidor...">Perfiles</th>
+                <th>Rastreos</th>
+                <th>Ultimo rastreo</th>
+                <th data-tip="Integraciones con APIs externas y si su credencial esta puesta en el servidor">Integraciones</th>
+              </tr></thead>
+              <tbody>
+                <template x-for="c in clientes" :key="c.id">
+                  <tr @click="abrirCliente(c.id)" style="cursor:pointer">
+                    <td>
+                      <div style="font-weight:500" x-text="c.nombre"></div>
+                      <div class="text-dim text-sm" x-text="c.slug"></div>
+                    </td>
+                    <td class="text-sm" x-text="(c.dominios || []).join(', ') || '—'"></td>
+                    <td x-text="c.n_perfiles"></td>
+                    <td x-text="fmt.num(c.n_jobs)"></td>
+                    <td x-text="c.ultimo_job_at ? fmt.ago(c.ultimo_job_at) : '—'"></td>
+                    <td>
+                      <template x-for="i in c.integraciones" :key="i.tipo + (i.credencial_env || '')">
+                        <span class="badge" :class="i.configurada ? 'badge-completed' : 'badge-pending'"
+                              style="margin-right:.25rem"
+                              :data-tip="i.configurada ? 'Credencial puesta en el servidor' : 'Falta la variable ' + (i.credencial_env || '') + ' en el .env del servidor'"
+                              x-text="i.tipo"></span>
+                      </template>
+                      <span class="text-dim" x-show="!(c.integraciones || []).length">—</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- ===== FICHA DE UN CLIENTE ===== -->
+    <template x-if="view === 'client'">
+      <div>
+        <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:.5rem">
+          <div>
+            <h2 style="font-size:1.2rem;font-weight:700" x-text="cliente ? cliente.nombre : 'Nuevo cliente'"></h2>
+            <div class="text-dim text-sm" x-show="cliente"
+                 x-text="cliente ? (cliente.slug + ' · ' + ((cliente.dominios || []).join(', ') || 'sin dominios')) : ''"></div>
+          </div>
+          <template x-if="cliente">
+            <button class="btn btn-primary btn-sm" @click="openCreate({ cliente_id: cliente.id })"
+                    style="display:flex;align-items:center;gap:.35rem">
+              <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
+            </button>
+          </template>
+        </div>
+
+        <div class="tabs" x-show="cliente">
+          <div class="tab" :class="clienteTab === 'rastreos' && 'active'" @click="clienteTab = 'rastreos'"
+               style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="radar" style="width:14px;height:14px"></i> Rastreos
+          </div>
+          <div class="tab" :class="clienteTab === 'config' && 'active'" @click="clienteTab = 'config'"
+               style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="settings" style="width:14px;height:14px"></i> Configuracion
+          </div>
+        </div>
+
+        <template x-if="clienteError">
+          <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem"
+               x-text="clienteError"></div>
+        </template>
+
+        <!-- --- Pestana: perfiles y rastreos --- -->
+        <template x-if="cliente && clienteTab === 'rastreos'">
+          <div>
+            <div class="card mb-2">
+              <div class="flex items-center justify-between mb-1">
+                <h3 style="font-size:1rem">Perfiles de rastreo</h3>
+                <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
+              </div>
+              <p class="text-dim text-sm mb-1">
+                Que se rastrea y como: el sitio principal, el blog, otro idioma o un competidor. Un
+                rastreo lanzado desde un perfil hereda la configuracion del cliente y la del perfil.
+              </p>
+              <template x-if="!clientePerfiles.length">
+                <div class="text-dim text-sm">Sin perfiles todavia.</div>
+              </template>
+              <template x-if="clientePerfiles.length">
+                <table style="width:100%;font-size:.85rem">
+                  <thead><tr>
+                    <th style="text-align:left">perfil</th>
+                    <th style="text-align:left">semillas</th>
+                    <th style="text-align:left">ultimo rastreo</th>
+                    <th style="width:13rem"></th>
+                  </tr></thead>
+                  <tbody>
+                    <template x-for="p in clientePerfiles" :key="p.id">
+                      <tr :style="p.activo ? '' : 'opacity:.5'">
+                        <td>
+                          <div x-text="p.nombre"></div>
+                          <span class="badge" :class="p.rol === 'competidor' ? 'badge-pending' : 'badge-completed'"
+                                x-text="p.rol"></span>
+                        </td>
+                        <td class="text-dim" x-text="(p.seeds || []).join(', ').slice(0, 80)"></td>
+                        <td>
+                          <template x-if="p.last_job_id">
+                            <a href="#" @click.prevent="openJob(p.last_job_id)">abrir</a>
+                          </template>
+                          <span class="text-dim" x-show="!p.last_job_id">nunca</span>
+                        </td>
+                        <td style="text-align:right;white-space:nowrap">
+                          <button class="btn btn-sm btn-primary"
+                                  @click="openCreate({ cliente_id: cliente.id, profile_id: p.id })">Lanzar</button>
+                          <button class="btn btn-sm" @click="editarPerfil(p)">Editar</button>
+                          <button class="btn btn-sm" @click="borrarPerfil(p)"
+                                  data-tip="Borra el perfil. Sus rastreos NO se borran">&times;</button>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </template>
+            </div>
+
+            <div class="card">
+              <h3 style="font-size:1rem" class="mb-1">Rastreos del cliente</h3>
+              <template x-if="!clienteJobs.length">
+                <div class="text-dim text-sm">Ningun rastreo todavia.</div>
+              </template>
+              <template x-if="clienteJobs.length">
+                <table style="width:100%;font-size:.85rem">
+                  <thead><tr>
+                    <th style="text-align:left">nombre</th>
+                    <th style="text-align:left">perfil</th>
+                    <th style="text-align:left">estado</th>
+                    <th style="text-align:left">rastreadas</th>
+                    <th style="text-align:left">creado</th>
+                  </tr></thead>
+                  <tbody>
+                    <template x-for="j in clienteJobs" :key="j.id">
+                      <tr @click="openJob(j.id)" style="cursor:pointer">
+                        <td x-text="j.name"></td>
+                        <td class="text-dim" x-text="nombreDePerfil(j.profile_id) || 'puntual'"></td>
+                        <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
+                        <td x-text="fmt.num(j.total_urls_crawled)"></td>
+                        <td x-text="fmt.ago(j.created_at)"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- --- Pestana: configuracion del cliente --- -->
+        <template x-if="clienteTab === 'config' || !cliente">
+          <div class="card">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Nombre *</label>
+                <input type="text" x-model="clienteForm.nombre" placeholder="Ej: Lopesan Hotels">
+              </div>
+              <div class="form-group">
+                <label>Slug</label>
+                <input type="text" x-model="clienteForm.slug" placeholder="sale del nombre si se deja vacio">
+                <div class="form-hint">Identificador estable: con el se casa el cliente al importar un backup.</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Dominios (uno por linea)</label>
+                <textarea x-model="clienteForm.dominios" rows="3" placeholder="www.cliente.com&#10;blog.cliente.com"></textarea>
+              </div>
+              <div class="form-group">
+                <label>Zona horaria</label>
+                <input type="text" x-model="clienteForm.zona_horaria" placeholder="Europe/Madrid">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Notas</label>
+              <textarea x-model="clienteForm.notas" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Configuracion de rastreo por defecto (JSON)</label>
+              <textarea x-model="clienteForm.config_defecto" rows="6" style="font-family:monospace;font-size:.8rem"
+                        placeholder='{"render_js": true, "exclude_patterns": ["/carrito/"]}'></textarea>
+              <div class="form-hint">
+                Solo lo que este cliente fija; lo demas queda con los valores de siempre. Mismas claves que
+                <code>projects/&lt;cliente&gt;/config.json</code>. Una clave que no existe se rechaza al guardar.
+              </div>
+            </div>
+
+            <!-- Integraciones: NUNCA el secreto. Se guarda el nombre de la
+                 variable de entorno; la API solo dice si esta puesta. -->
+            <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+              <div class="flex items-center justify-between mb-1">
+                <h3 style="font-size:1rem">Integraciones</h3>
+                <button class="btn btn-sm" @click="agregarIntegracion()">Anadir integracion</button>
+              </div>
+              <p class="text-dim text-sm mb-1">
+                APIs externas del cliente (Search Console, DataForSEO, Ahrefs, Semrush...). <strong>Las claves no se
+                guardan aqui</strong>: la API no tiene autenticacion y cualquiera que llegue a ella podria leerlas.
+                Se escribe el <em>nombre</em> de la variable de entorno y el secreto se pone en el
+                <code>.env</code> del servidor, por ejemplo <code>DATAFORSEO_LIN3S=login:password</code>.
+              </p>
+              <template x-for="(i, idx) in clienteForm.integraciones" :key="idx">
+                <div class="card mb-1" style="padding:.6rem .75rem">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Tipo</label>
+                      <select x-model="i.tipo">
+                        <option value="gsc">Search Console</option>
+                        <option value="dataforseo">DataForSEO</option>
+                        <option value="ahrefs">Ahrefs</option>
+                        <option value="semrush">Semrush</option>
+                        <option value="majestic">Majestic</option>
+                        <option value="pagespeed">PageSpeed</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Etiqueta</label>
+                      <input type="text" x-model="i.etiqueta" placeholder="opcional">
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Variable de entorno con la credencial</label>
+                      <input type="text" x-model="i.credencial_env" style="font-family:monospace"
+                             :placeholder="prefijoIntegracion(i.tipo) + 'NOMBRECLIENTE'">
+                      <div class="form-hint">
+                        Tiene que empezar por <code x-text="prefijoIntegracion(i.tipo)"></code>.
+                        <template x-if="i.configurada === true">
+                          <span style="color:var(--green,#2e7d32)">&#10003; configurada en el servidor</span>
+                        </template>
+                        <template x-if="i.configurada === false">
+                          <span style="color:var(--orange,#e67e22)">no esta puesta en el servidor</span>
+                        </template>
+                        <template x-if="i.configurada === null">
+                          <span class="text-dim">se comprueba al guardar</span>
+                        </template>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label>Parametros (clave=valor, uno por linea)</label>
+                      <textarea x-model="i.parametros" rows="2" style="font-family:monospace;font-size:.8rem"
+                                :placeholder="i.tipo === 'gsc' ? 'propiedad=sc-domain:cliente.com' : 'location_code=2724\nlanguage_code=es'"></textarea>
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <label class="checkbox-label"><input type="checkbox" x-model="i.activa"> Activa</label>
+                    <button class="btn btn-sm" @click="quitarIntegracion(idx)">Quitar</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="flex items-center gap-1" style="margin-top:1rem">
+              <button class="btn btn-primary" @click="guardarCliente()"
+                      x-text="cliente ? 'Guardar cambios' : 'Crear cliente'"></button>
+              <button class="btn" @click="cliente ? (clienteForm = _formCliente(cliente)) : verClientes()">Cancelar</button>
+              <template x-if="cliente">
+                <button class="btn btn-danger" style="margin-left:auto" @click="borrarCliente()"
+                        data-tip="Borra el cliente y sus perfiles. Sus rastreos NO se borran">Borrar cliente</button>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- ===== MODAL: PERFIL DE RASTREO ===== -->
+    <template x-if="perfilForm && cliente">
+      <div class="modal-backdrop" @click.self="perfilForm = null">
+        <div class="modal" style="max-width:38rem">
+          <div class="modal-header">
+            <h3 x-text="perfilForm.id ? 'Editar perfil' : 'Nuevo perfil'"></h3>
+            <button class="btn-icon" @click="perfilForm = null" style="font-size:1.25rem">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Nombre *</label>
+                <input type="text" x-model="perfilForm.nombre" placeholder="Sitio principal, Blog, Competidor X...">
+              </div>
+              <div class="form-group">
+                <label>Rol</label>
+                <select x-model="perfilForm.rol">
+                  <option value="propio">Propio</option>
+                  <option value="competidor">Competidor</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>URLs semilla * (una por linea)</label>
+              <textarea x-model="perfilForm.seeds" rows="3" placeholder="https://www.cliente.com/"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Configuracion del perfil (JSON)</label>
+              <textarea x-model="perfilForm.config" rows="5" style="font-family:monospace;font-size:.8rem"></textarea>
+              <div class="form-hint">Se aplica encima de la del cliente. <code>null</code> quita lo heredado
+                (por ejemplo <code>{"max_urls": null}</code> deja sin tope a un cliente que lo fija).</div>
+            </div>
+            <div class="form-group">
+              <label>Notas</label>
+              <textarea x-model="perfilForm.notas" rows="2"></textarea>
+            </div>
+            <label class="checkbox-label"><input type="checkbox" x-model="perfilForm.activo"> Activo</label>
+            <div x-show="perfilError" class="card" style="border-left:3px solid var(--red,#d32f2f);margin-top:.8rem">
+              <div class="text-sm" x-text="perfilError"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" @click="perfilForm = null">Cancelar</button>
+            <button class="btn btn-primary" @click="guardarPerfil()">Guardar</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <template x-if="view === 'jobs'">
       <div>
         <!-- Filtros -->
@@ -255,6 +613,7 @@
                 <thead>
                   <tr>
                     <th data-tip="Nombre identificativo del trabajo de rastreo">Nombre</th>
+                    <th data-tip="Cliente al que pertenece el rastreo">Cliente</th>
                     <th data-tip="Estado actual: pendiente, en curso, completado, fallido o cancelado">Estado</th>
                     <th data-tip="Numero de URLs semilla desde las que empieza el rastreo">Semillas</th>
                     <th data-tip="URLs rastreadas con exito hasta ahora">Rastreadas</th>
@@ -269,6 +628,16 @@
                       <td>
                         <div style="font-weight:500" x-text="j.name"></div>
                         <div class="text-dim text-sm truncate" style="max-width:250px" x-text="j.seeds?.[0] || ''"></div>
+                      </td>
+                      <td>
+                        <template x-if="j.cliente_id">
+                          <a href="#" @click.prevent.stop="abrirCliente(j.cliente_id)" x-text="j.cliente_nombre || j.client_id"></a>
+                        </template>
+                        <!-- Sin FK pero con texto: un job anterior a la migracion.
+                             Se ensena el texto, atenuado, para no esconder la pista. -->
+                        <template x-if="!j.cliente_id">
+                          <span class="text-dim" x-text="j.client_id || '—'"></span>
+                        </template>
                       </td>
                       <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
                       <td x-text="j.seeds?.length || 0"></td>
@@ -328,6 +697,10 @@
                 <span class="badge" :class="statusColor(job.status)" x-text="fmt.status(job.status)"></span>
                 <span>&middot;</span>
                 <span x-text="'Creado ' + fmt.ago(job.created_at)"></span>
+                <template x-if="job.cliente_id">
+                  <span>&middot; <a href="#" @click.prevent="abrirCliente(job.cliente_id)"
+                     x-text="job.cliente_nombre || job.client_id"></a></span>
+                </template>
               </div>
             </div>
             <div class="flex gap-1">
@@ -2918,9 +3291,35 @@
           <label>URLs semilla * (una por linea)</label>
           <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
         </div>
-        <div class="form-group">
-          <label>ID de cliente</label>
-          <input type="text" x-model="createForm.client_id" placeholder="Identificador opcional">
+        <!-- El cliente se elige, no se escribe: con texto libre una errata
+             creaba otro cliente (#36). Al elegirlo, el formulario se precarga
+             con su configuracion y la del perfil. -->
+        <div class="form-row">
+          <div class="form-group">
+            <label>Cliente</label>
+            <select x-model="createForm.cliente_id" @change="cambiarClienteModal()">
+              <option value="">Sin cliente</option>
+              <template x-for="c in clientes" :key="c.id">
+                <option :value="c.id" x-text="c.nombre" :selected="c.id === createForm.cliente_id"></option>
+              </template>
+              <option value="__nuevo__">Nuevo cliente…</option>
+            </select>
+          </div>
+          <div class="form-group" x-show="createForm.cliente_id">
+            <label>Perfil de rastreo</label>
+            <select x-model="createForm.profile_id" @change="aplicarHerencia()">
+              <option value="">Rastreo puntual (sin perfil)</option>
+              <template x-for="p in createPerfiles" :key="p.id">
+                <option :value="p.id" :selected="p.id === createForm.profile_id"
+                        x-text="p.nombre + (p.rol === 'competidor' ? ' (competidor)' : '')"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+        <div class="form-hint" x-show="createForm.cliente_id" style="margin:-.4rem 0 .8rem">
+          La configuracion viene precargada con la del cliente y la del perfil. Lo que cambies aqui
+          solo vale para este rastreo; lo que el formulario no muestra (plantillas, umbrales extra)
+          se hereda igual.
         </div>
 
         <!-- Barra de pestanas -->

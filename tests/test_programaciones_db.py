@@ -278,3 +278,32 @@ def test_el_job_que_lanza_la_programacion_queda_ligado_a_ella(entorno):
     job = s2.query(Job).one()
     assert job.programacion_id == pid
     s2.close()
+
+
+def test_el_job_programado_sale_colgado_de_su_cliente_y_perfil(entorno):
+    """#36: la programacion sabe de quien es, y el job que dispara tambien.
+    Sin esto, los rastreos semanales de un cliente no aparecerian en su
+    ficha. Y el perfil apunta al ultimo rastreo lanzado."""
+    from shared.models import Client, CrawlProfile
+
+    s = entorno()
+    cliente = Client(id=uuid.uuid4(), nombre="Progym", slug="progym", dominios=[],
+                     config_defecto={}, integraciones=[])
+    perfil = CrawlProfile(id=uuid.uuid4(), cliente_id=cliente.id, nombre="web",
+                          seeds=["https://www.progym.es/"], config={})
+    s.add_all([cliente, perfil])
+    s.commit()
+    pid = _programacion(s, proxima=datetime.now(timezone.utc) - timedelta(minutes=1))
+    prog = s.get(Programacion, pid)
+    prog.cliente_id, prog.profile_id = cliente.id, perfil.id
+    s.commit()
+    cid, perf_id = cliente.id, perfil.id
+    s.close()
+
+    _lanzar(ColaFalsa())
+
+    s2 = entorno()
+    job = s2.query(Job).one()
+    assert job.cliente_id == cid and job.profile_id == perf_id
+    assert s2.get(CrawlProfile, perf_id).last_job_id == job.id
+    s2.close()

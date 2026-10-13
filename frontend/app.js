@@ -215,8 +215,20 @@ function app() {
     jobsTotal: 0,
     jobsFilter: '',
 
+    // Clientes (#36)
+    clientes: [],
+    cliente: null,
+    clienteTab: 'rastreos',
+    clienteForm: _formCliente(null),
+    clienteError: '',
+    clientePerfiles: [],
+    clienteJobs: [],
+    perfilForm: null,
+    perfilError: '',
+
     // Modal de creacion
     showCreate: false,
+    createPerfiles: [],
     createForm: _freshForm(),
     creating: false,
     createError: null,
@@ -382,11 +394,65 @@ function app() {
     },
 
     // ------- Crear trabajo -------
-    openCreate() {
+    // `preset` = { cliente_id, profile_id } cuando se lanza desde la ficha de
+    // un cliente: el modal se abre ya con lo heredado.
+    async openCreate(preset = null) {
       this.createForm = _freshForm();
       this.createError = null;
+      this.createPerfiles = [];
       this.showCreate = true;
       this.$nextTick(() => lucide.createIcons());
+      try {
+        if (!this.clientes.length) this.clientes = await api('/clients');
+      } catch (_) { /* sin clientes: el desplegable queda con «Sin cliente» */ }
+      if (preset && preset.cliente_id) {
+        this.createForm.cliente_id = preset.cliente_id;
+        await this.cambiarClienteModal(preset.profile_id || '');
+      }
+    },
+
+    // Al elegir cliente (o perfil) en el modal, se precarga lo que heredaria
+    // el rastreo. Lo que se ve es lo que se lanza: el modal manda lo que
+    // muestra, y lo que el modal no tiene (plantillas, umbrales extra...) se
+    // hereda en el servidor al crear el job.
+    async cambiarClienteModal(profileId = '') {
+      const f = this.createForm;
+      if (f.cliente_id === '__nuevo__') {
+        this.showCreate = false;
+        this.nuevoCliente();
+        return;
+      }
+      f.profile_id = profileId;
+      this.createPerfiles = [];
+      if (!f.cliente_id) return;
+      try {
+        this.createPerfiles = await api(`/clients/${f.cliente_id}/profiles`);
+      } catch (e) { this.createError = e.message; return; }
+      await this.aplicarHerencia();
+    },
+
+    async aplicarHerencia() {
+      const f = this.createForm;
+      if (!f.cliente_id) return;
+      try {
+        const q = f.profile_id ? `?profile_id=${f.profile_id}` : '';
+        const r = await api(`/clients/${f.cliente_id}/config-resuelta${q}`);
+        const nuevo = _freshForm();
+        _formDesdeConfig(nuevo, r.config_heredada || {});
+        // Se conserva lo que no es configuracion: nombre, cliente y perfil.
+        nuevo.name = f.name;
+        nuevo.cliente_id = f.cliente_id;
+        nuevo.profile_id = f.profile_id;
+        nuevo.configTab = f.configTab;
+        nuevo.seeds = (r.seeds && r.seeds.length) ? r.seeds.join('\n') : f.seeds;
+        if (!nuevo.name) {
+          const perfil = this.createPerfiles.find(p => p.id === f.profile_id);
+          const cliente = this.clientes.find(c => c.id === f.cliente_id);
+          const base = perfil ? `${cliente ? cliente.nombre + ' · ' : ''}${perfil.nombre}` : (cliente ? cliente.nombre : '');
+          nuevo.name = base ? `${base} · ${new Date().toISOString().slice(0, 10)}` : '';
+        }
+        this.createForm = nuevo;
+      } catch (e) { this.createError = e.message; }
     },
 
     async submitCreate() {
@@ -396,80 +462,180 @@ function app() {
         const f = this.createForm;
         const seeds = f.seeds.split('\n').map(s => s.trim()).filter(Boolean);
 
-        const payload = {
-          name: f.name,
-          seeds,
-          config: {
-            max_depth:     parseInt(f.max_depth)     || 3,
-            max_urls:      parseInt(f.max_urls)      || 50000,
-            concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
-            concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
-            follow_external: f.follow_external,
-            robots_mode:     f.robots_mode,
-            render_js:       f.render_js,
-            use_sitemap:     f.use_sitemap,
-            user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
-            impersonate:     f.impersonate || 'chrome124',
-            exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
-            include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
-            resource_types: {
-              crawl_images: f.crawl_images,
-              crawl_css: f.crawl_css,
-              crawl_js: f.crawl_js,
-              crawl_pdfs: f.crawl_pdfs,
-              crawl_fonts: f.crawl_fonts,
-              crawl_svg: f.crawl_svg,
-              crawl_other: f.crawl_other,
-              check_external_resources: f.check_external_resources,
-            },
-            crawl_behavior: {
-              download_timeout: parseInt(f.download_timeout) || 30,
-              retry_count: parseInt(f.retry_count) || 2,
-              request_delay: parseFloat(f.request_delay) || 0,
-              autothrottle_enabled: f.autothrottle_enabled,
-              autothrottle_target_concurrency: parseFloat(f.autothrottle_target_concurrency) || 8,
-              follow_nofollow: f.follow_nofollow,
-              crawl_subdomains: f.crawl_subdomains,
-              max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
-            },
-            url_filters: {
-              max_url_length: parseInt(f.max_url_length) || 0,
-              max_folder_depth: parseInt(f.max_folder_depth) || 0,
-            },
-            extraction: {
-              extract_structured_data: f.extract_structured_data,
-              extract_hreflang: f.extract_hreflang,
-              extract_security_headers: f.extract_security_headers,
-              extract_page_content: f.extract_page_content,
-              store_raw_html: f.store_raw_html,
-            },
-            http: {
-              custom_headers: _parseKV(f.custom_headers, ':'),
-              accept_language: f.accept_language,
-              cookies: _parseKV(f.cookies, '='),
-              basic_auth_user: f.basic_auth_user,
-              basic_auth_password: f.basic_auth_password,
-            },
-            analysis_thresholds: {
-              title_min_length: parseInt(f.title_min_length) || 10,
-              title_max_length: parseInt(f.title_max_length) || 60,
-              description_min_length: parseInt(f.description_min_length) || 50,
-              description_max_length: parseInt(f.description_max_length) || 160,
-              min_word_count: parseInt(f.min_word_count) || 200,
-              max_redirect_chain_length: parseInt(f.max_redirect_chain_length) || 2,
-              max_outlinks: parseInt(f.max_outlinks) || 100,
-            },
-          }
-        };
-        if (f.client_id) payload.client_id = f.client_id;
+        const payload = { name: f.name, seeds, config: _configDesdeForm(f) };
+        if (f.cliente_id) payload.cliente_id = f.cliente_id;
+        if (f.profile_id) payload.profile_id = f.profile_id;
 
         await api('/jobs', { method: 'POST', body: JSON.stringify(payload) });
         this.showCreate = false;
         this.jobsPage = 1;
         await this.loadJobs();
+        if (this.view === 'client' && this.cliente) await this.abrirCliente(this.cliente.id, this.clienteTab);
         this.showToast('Rastreo iniciado correctamente');
       } catch (e) { this.createError = e.message; }
       this.creating = false;
+    },
+
+    // ------- Clientes (#36) -------
+    async verClientes() {
+      this.view = 'clients';
+      await this.cargarClientes();
+    },
+
+    async cargarClientes() {
+      try {
+        this.clientes = await api('/clients');
+      } catch (e) {
+        this.clientes = [];
+        this.error = 'No se pudieron cargar los clientes: ' + e.message;
+      }
+    },
+
+    async abrirCliente(id, tab = 'rastreos') {
+      this.view = 'client';
+      this.clienteTab = tab;
+      this.clienteError = '';
+      try {
+        const [c, perfiles, jobs] = await Promise.all([
+          api(`/clients/${id}`),
+          api(`/clients/${id}/profiles`),
+          api(`/jobs?client_id=${id}&page_size=100`),
+        ]);
+        this.cliente = c;
+        this.clientePerfiles = perfiles;
+        this.clienteJobs = jobs.items || [];
+        this.clienteForm = _formCliente(c);
+      } catch (e) { this.error = e.message; }
+    },
+
+    nuevoCliente() {
+      this.view = 'client';
+      this.cliente = null;
+      this.clientePerfiles = [];
+      this.clienteJobs = [];
+      this.clienteForm = _formCliente(null);
+      this.clienteTab = 'config';
+      this.clienteError = '';
+    },
+
+    agregarIntegracion() {
+      this.clienteForm.integraciones.push({
+        tipo: 'gsc', etiqueta: '', parametros: '', credencial_env: '', activa: true, configurada: null,
+      });
+    },
+
+    quitarIntegracion(i) {
+      this.clienteForm.integraciones.splice(i, 1);
+    },
+
+    // El prefijo que exige el servidor para la variable de cada tipo: se
+    // muestra como pista, la validacion de verdad es la de la API.
+    prefijoIntegracion(tipo) {
+      return ({ gsc: 'GSC_', dataforseo: 'DATAFORSEO_', ahrefs: 'AHREFS_', semrush: 'SEMRUSH_',
+                majestic: 'MAJESTIC_', pagespeed: 'PAGESPEED_' })[tipo] || '';
+    },
+
+    async guardarCliente() {
+      this.clienteError = '';
+      const f = this.clienteForm;
+      let config = {};
+      try {
+        config = f.config_defecto.trim() ? JSON.parse(f.config_defecto) : {};
+      } catch (e) {
+        this.clienteError = 'La configuracion por defecto no es JSON valido: ' + e.message;
+        return;
+      }
+      const cuerpo = {
+        nombre: f.nombre,
+        dominios: f.dominios.split('\n').map(s => s.trim()).filter(Boolean),
+        zona_horaria: f.zona_horaria || null,
+        notas: f.notas || null,
+        config_defecto: config,
+        integraciones: f.integraciones.map(i => ({
+          tipo: i.tipo,
+          etiqueta: i.etiqueta || null,
+          parametros: _parseKV(i.parametros, '='),
+          credencial_env: (i.credencial_env || '').trim() || null,
+          activa: !!i.activa,
+        })),
+      };
+      if (f.slug) cuerpo.slug = f.slug;
+      try {
+        const c = this.cliente
+          ? await api(`/clients/${this.cliente.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) })
+          : await api('/clients', { method: 'POST', body: JSON.stringify(cuerpo) });
+        this.clientes = await api('/clients');
+        await this.abrirCliente(c.id, 'config');
+        this.showToast('Cliente guardado');
+      } catch (e) { this.clienteError = e.message; }
+    },
+
+    async borrarCliente() {
+      if (!this.cliente) return;
+      // Se pide el slug escrito: un borrado que se lleva perfiles e
+      // integraciones no puede salir de un clic suelto. Los rastreos NO se
+      // borran desde aqui: son censos entregados y quedan sin cliente.
+      const slug = prompt(
+        `Borrar el cliente "${this.cliente.nombre}" y sus perfiles.\n\n`
+        + `Sus ${this.cliente.n_jobs} rastreos NO se borran: quedan sin cliente.\n\n`
+        + `Escribe su slug (${this.cliente.slug}) para confirmar:`);
+      if (slug === null) return;
+      try {
+        await api(`/clients/${this.cliente.id}?confirmar=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+        this.cliente = null;
+        await this.verClientes();
+        this.showToast('Cliente borrado');
+      } catch (e) { this.clienteError = e.message; }
+    },
+
+    nuevoPerfil() {
+      this.perfilError = '';
+      this.perfilForm = { id: null, nombre: '', rol: 'propio', seeds: '', config: '{}', notas: '', activo: true };
+    },
+
+    editarPerfil(p) {
+      this.perfilError = '';
+      this.perfilForm = {
+        id: p.id, nombre: p.nombre, rol: p.rol, seeds: (p.seeds || []).join('\n'),
+        config: JSON.stringify(p.config || {}, null, 2), notas: p.notas || '', activo: p.activo,
+      };
+    },
+
+    async guardarPerfil() {
+      this.perfilError = '';
+      const f = this.perfilForm;
+      let config = {};
+      try {
+        config = f.config.trim() ? JSON.parse(f.config) : {};
+      } catch (e) {
+        this.perfilError = 'La configuracion no es JSON valido: ' + e.message;
+        return;
+      }
+      const cuerpo = {
+        nombre: f.nombre, rol: f.rol,
+        seeds: f.seeds.split('\n').map(s => s.trim()).filter(Boolean),
+        config, notas: f.notas || null, activo: !!f.activo,
+      };
+      const base = `/clients/${this.cliente.id}/profiles`;
+      try {
+        if (f.id) await api(`${base}/${f.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+        else await api(base, { method: 'POST', body: JSON.stringify(cuerpo) });
+        this.perfilForm = null;
+        await this.abrirCliente(this.cliente.id, 'rastreos');
+      } catch (e) { this.perfilError = e.message; }
+    },
+
+    async borrarPerfil(p) {
+      if (!confirm(`Borrar el perfil "${p.nombre}"?\n\nSus rastreos NO se borran: quedan colgados del cliente.`)) return;
+      try {
+        await api(`/clients/${this.cliente.id}/profiles/${p.id}`, { method: 'DELETE' });
+        await this.abrirCliente(this.cliente.id, 'rastreos');
+      } catch (e) { this.clienteError = e.message; }
+    },
+
+    nombreDePerfil(id) {
+      const p = this.clientePerfiles.find(x => x.id === id);
+      return p ? p.nombre : '';
     },
 
     // ------- Detalle del trabajo -------
@@ -622,6 +788,8 @@ function app() {
           body: JSON.stringify({
             nombre: this.programarNombre,
             client_id: this.job.client_id,
+            cliente_id: this.job.cliente_id || null,
+            profile_id: this.job.profile_id || null,
             seeds: this.job.seeds,
             config: this.job.config || {},
             cron: this.programarCron,
@@ -1963,7 +2131,8 @@ function _freshForm() {
   return {
     name: '',
     seeds: '',
-    client_id: '',
+    cliente_id: '',
+    profile_id: '',
     configTab: 'general',
     // General
     max_depth: 3,
@@ -2018,7 +2187,9 @@ function _freshForm() {
     description_min_length: 50,
     description_max_length: 160,
     min_word_count: 200,
-    max_redirect_chain_length: 2,
+    // 1, no 2: dos saltos ya son una cadena (decision 43). El formulario
+    // mandaba 2 y pisaba el default del servidor en cada rastreo lanzado aqui.
+    max_redirect_chain_length: 1,
     max_outlinks: 100,
   };
 }
@@ -2036,4 +2207,130 @@ function _parseKV(text, separator) {
     if (key) obj[key] = val;
   });
   return obj;
+}
+
+// La configuracion de un job a partir del formulario del modal. Es lo que se
+// enviaba siempre; con cliente, el formulario llega precargado con lo heredado
+// (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
+function _configDesdeForm(f) {
+  return {
+    max_depth:     parseInt(f.max_depth)     || 3,
+    max_urls:      parseInt(f.max_urls)      || 50000,
+    concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
+    concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
+    follow_external: f.follow_external,
+    robots_mode:     f.robots_mode,
+    render_js:       f.render_js,
+    use_sitemap:     f.use_sitemap,
+    user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
+    impersonate:     f.impersonate || 'chrome124',
+    exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+    include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+    resource_types: {
+      crawl_images: f.crawl_images,
+      crawl_css: f.crawl_css,
+      crawl_js: f.crawl_js,
+      crawl_pdfs: f.crawl_pdfs,
+      crawl_fonts: f.crawl_fonts,
+      crawl_svg: f.crawl_svg,
+      crawl_other: f.crawl_other,
+      check_external_resources: f.check_external_resources,
+    },
+    crawl_behavior: {
+      download_timeout: parseInt(f.download_timeout) || 30,
+      retry_count: parseInt(f.retry_count) || 2,
+      request_delay: parseFloat(f.request_delay) || 0,
+      autothrottle_enabled: f.autothrottle_enabled,
+      autothrottle_target_concurrency: parseFloat(f.autothrottle_target_concurrency) || 8,
+      follow_nofollow: f.follow_nofollow,
+      crawl_subdomains: f.crawl_subdomains,
+      max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
+    },
+    url_filters: {
+      max_url_length: parseInt(f.max_url_length) || 0,
+      max_folder_depth: parseInt(f.max_folder_depth) || 0,
+    },
+    extraction: {
+      extract_structured_data: f.extract_structured_data,
+      extract_hreflang: f.extract_hreflang,
+      extract_security_headers: f.extract_security_headers,
+      extract_page_content: f.extract_page_content,
+      store_raw_html: f.store_raw_html,
+    },
+    http: {
+      custom_headers: _parseKV(f.custom_headers, ':'),
+      accept_language: f.accept_language,
+      cookies: _parseKV(f.cookies, '='),
+      basic_auth_user: f.basic_auth_user,
+      basic_auth_password: f.basic_auth_password,
+    },
+    analysis_thresholds: {
+      title_min_length: parseInt(f.title_min_length) || 10,
+      title_max_length: parseInt(f.title_max_length) || 60,
+      description_min_length: parseInt(f.description_min_length) || 50,
+      description_max_length: parseInt(f.description_max_length) || 160,
+      min_word_count: parseInt(f.min_word_count) || 200,
+      max_redirect_chain_length: parseInt(f.max_redirect_chain_length) || 1,
+      max_outlinks: parseInt(f.max_outlinks) || 100,
+    },
+  };
+}
+
+// Lo contrario: vuelca en el formulario una configuracion PARCIAL (la que
+// fijan cliente y perfil). Solo toca los campos que la configuracion trae; el
+// resto se queda con los valores de siempre del modal.
+function _formDesdeConfig(f, cfg) {
+  const poner = (campo, valor) => { if (valor !== undefined && valor !== null) f[campo] = valor; };
+  ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
+   'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
+    .forEach(k => poner(k, cfg[k]));
+  if (cfg.user_agent) {
+    const preset = Object.keys(UA_PRESETS).find(k => UA_PRESETS[k] === cfg.user_agent);
+    f.user_agent_preset = preset || 'custom';
+    if (!preset) f.user_agent_custom = cfg.user_agent;
+  }
+  if (Array.isArray(cfg.exclude_patterns)) f.exclude_patterns = cfg.exclude_patterns.join('\n');
+  if (Array.isArray(cfg.include_patterns)) f.include_patterns = cfg.include_patterns.join('\n');
+  const sub = (obj, campos) => campos.forEach(k => poner(k, (obj || {})[k]));
+  sub(cfg.resource_types, ['crawl_images', 'crawl_css', 'crawl_js', 'crawl_pdfs', 'crawl_fonts',
+    'crawl_svg', 'crawl_other', 'check_external_resources']);
+  sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
+    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours']);
+  sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
+  sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
+    'extract_page_content', 'store_raw_html']);
+  const http = cfg.http || {};
+  if (http.custom_headers) f.custom_headers = _kvTexto(http.custom_headers, ': ');
+  if (http.cookies) f.cookies = _kvTexto(http.cookies, '=');
+  poner('accept_language', http.accept_language);
+  poner('basic_auth_user', http.basic_auth_user);
+  sub(cfg.analysis_thresholds, ['title_min_length', 'title_max_length', 'description_min_length',
+    'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);
+  return f;
+}
+
+function _kvTexto(obj, sep) {
+  return Object.entries(obj || {}).map(([k, v]) => `${k}${sep}${v}`).join('\n');
+}
+
+// El formulario de la ficha de un cliente. `c` = la respuesta de la API, o
+// null para uno nuevo. Las integraciones traen `configurada` del servidor:
+// si la variable existe en su entorno, nunca su valor.
+function _formCliente(c) {
+  return {
+    nombre: c ? c.nombre : '',
+    slug: c ? c.slug : '',
+    dominios: c ? (c.dominios || []).join('\n') : '',
+    zona_horaria: c ? (c.zona_horaria || '') : 'Europe/Madrid',
+    notas: c ? (c.notas || '') : '',
+    config_defecto: c ? JSON.stringify(c.config_defecto || {}, null, 2) : '{}',
+    integraciones: c ? (c.integraciones || []).map(i => ({
+      tipo: i.tipo,
+      etiqueta: i.etiqueta || '',
+      parametros: _kvTexto(i.parametros, '='),
+      credencial_env: i.credencial_env || '',
+      activa: i.activa !== false,
+      configurada: i.configurada,
+    })) : [],
+  };
 }

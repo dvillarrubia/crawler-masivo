@@ -82,7 +82,7 @@ def main() -> int:
     ap.add_argument("--seed", action="append", default=[], help="URL semilla (repetible)")
     ap.add_argument("--seeds-file", help="fichero con una URL por linea")
     ap.add_argument("--name", help="nombre del job (def. '<cliente> (full)' o 'CANARY - <cliente>')")
-    ap.add_argument("--client-id", help="def. <cliente> (o <cliente>-canary)")
+    ap.add_argument("--client-id", help="def. <cliente>")
     ap.add_argument("--canary", action="store_true", help="300 URLs, profundidad 3, 1 h")
     ap.add_argument("--set", action="append", default=[], metavar="CLAVE=VALOR",
                     help="sobreescribir una clave del config (anidada con puntos): render_js=true, crawl_behavior.request_delay=1")
@@ -119,7 +119,9 @@ def main() -> int:
         _poner(cfg, clave, _parsear_valor(valor))
 
     nombre = args.name or (f"CANARY - {args.cliente}" if args.canary else f"{args.cliente} (full)")
-    client_id = args.client_id or (f"{args.cliente}-canary" if args.canary else args.cliente)
+    # El canario es un rastreo DEL cliente (lo dice su nombre), no otro
+    # cliente: con `<cliente>-canary` cada prueba abria una ficha aparte.
+    client_id = args.client_id or args.cliente
     job = {"name": nombre, "client_id": client_id, "seeds": seeds, "config": cfg}
     cuerpo = json.dumps(job, ensure_ascii=False).encode("utf-8")
     if args.dry_run:

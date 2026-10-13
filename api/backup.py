@@ -36,7 +36,10 @@ from shared.models import (
 
 logger = logging.getLogger(__name__)
 
-FORMAT_VERSION = "1"
+# "2" lleva ademas `client.json` y `profile.json` (#36). Se siguen aceptando
+# los de formato "1": son los backups ya entregados.
+FORMAT_VERSION = "2"
+FORMATOS_ACEPTADOS = {"1", "2"}
 
 
 class ConflictError(Exception):
@@ -275,6 +278,7 @@ def stream_backup_zip(
         job_dict = _row_to_dict(job)
         job_name = job.name
         job_status = job.status
+        cliente_dict, perfil_dict = _cliente_y_perfil_de(session, job)
     finally:
         session.close()
 
@@ -296,6 +300,12 @@ def stream_backup_zip(
             "job.json",
             json.dumps(job_dict, default=_json_default, ensure_ascii=False, indent=2),
         )
+        if cliente_dict is not None:
+            zf.writestr("client.json", json.dumps(
+                cliente_dict, default=_json_default, ensure_ascii=False, indent=2))
+        if perfil_dict is not None:
+            zf.writestr("profile.json", json.dumps(
+                perfil_dict, default=_json_default, ensure_ascii=False, indent=2))
 
         for fname, filas in _tablas():
             count = 0
@@ -325,6 +335,92 @@ def stream_backup_zip(
     resto = salida.recoger()
     if resto:
         yield resto
+
+
+# ---------------------------------------------------------------------------
+# Cliente y perfil (#36)
+# ---------------------------------------------------------------------------
+# Lo que viaja de un cliente. Lista cerrada a proposito: si manana `clients`
+# gana una columna con algo sensible (los canales de alerta de F2 llevan
+# tokens), no se cuela en los backups por defecto.
+_CAMPOS_CLIENTE = ("id", "nombre", "slug", "dominios", "zona_horaria",
+                   "config_defecto", "integraciones", "notas")
+_CAMPOS_PERFIL = ("id", "nombre", "rol", "seeds", "config", "notas")
+
+
+def _cliente_y_perfil_de(session, job) -> tuple[dict | None, dict | None]:
+    from shared.models import Client, CrawlProfile
+
+    cliente = session.get(Client, job.cliente_id) if job.cliente_id else None
+    perfil = session.get(CrawlProfile, job.profile_id) if job.profile_id else None
+    return (
+        {c: getattr(cliente, c) for c in _CAMPOS_CLIENTE} if cliente else None,
+        {c: getattr(perfil, c) for c in _CAMPOS_PERFIL} if perfil else None,
+    )
+
+
+def _casar_cliente_y_perfil(zf, job_data: dict, db: Session, warnings: list[str]):
+    """El cliente del job importado: se casa por `slug`, nunca por id.
+
+    El id de un cliente es de SU instalacion: en otra puede no existir o,
+    peor, ser de otro cliente. El slug es lo que significa lo mismo en las
+    dos. Si no hay cliente con ese slug se crea con lo que trae el backup.
+
+    El perfil se casa por (cliente, nombre) y **no se crea**: un perfil es una
+    forma de rastrear en ESTA instalacion (en F2, con su calendario), e
+    importar un censo no deberia dejar programado nada. Si no existe, el job
+    queda colgado solo del cliente y se avisa.
+
+    Un backup de formato 1 solo trae el `client_id` de texto: se resuelve por
+    slug igual que en la migracion, para que ningun job importado que tuviera
+    cliente quede sin el.
+    """
+    from shared.clientes import cliente_por_texto, slugificar
+    from shared.models import Client, CrawlProfile
+
+    nombres = zf.namelist()
+    datos_cliente = json.loads(zf.read("client.json")) if "client.json" in nombres else None
+    datos_perfil = json.loads(zf.read("profile.json")) if "profile.json" in nombres else None
+
+    cliente = None
+    if datos_cliente and datos_cliente.get("slug"):
+        slug = slugificar(datos_cliente["slug"])
+        cliente = db.query(Client).filter(Client.slug == slug).one_or_none()
+        if cliente is None:
+            cliente = Client(
+                nombre=(datos_cliente.get("nombre") or slug)[:256],
+                slug=slug,
+                dominios=list(datos_cliente.get("dominios") or []),
+                zona_horaria=datos_cliente.get("zona_horaria"),
+                config_defecto=dict(datos_cliente.get("config_defecto") or {}),
+                # Las integraciones no llevan secretos (decision 83): solo el
+                # nombre de la variable, que en esta instalacion dira si esta
+                # puesta o no.
+                integraciones=[
+                    i for i in (datos_cliente.get("integraciones") or [])
+                    if isinstance(i, dict)
+                ],
+                notas=datos_cliente.get("notas"),
+            )
+            db.add(cliente)
+            db.flush()
+            warnings.append(f"Cliente '{slug}' creado a partir del backup")
+    elif job_data.get("client_id"):
+        cliente = cliente_por_texto(db, job_data["client_id"], crear=True)
+
+    perfil = None
+    if cliente is not None and datos_perfil and datos_perfil.get("nombre"):
+        perfil = (
+            db.query(CrawlProfile)
+            .filter(CrawlProfile.cliente_id == cliente.id,
+                    CrawlProfile.nombre == datos_perfil["nombre"])
+            .one_or_none()
+        )
+        if perfil is None:
+            warnings.append(
+                f"El perfil '{datos_perfil['nombre']}' no existe en el cliente "
+                f"'{cliente.slug}': el rastreo queda colgado solo del cliente")
+    return cliente, perfil
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +469,7 @@ def import_backup_zip(
             raise ValueError("Falta manifest.json en el ZIP")
         manifest = json.loads(zf.read("manifest.json"))
 
-        if manifest.get("format_version") != FORMAT_VERSION:
+        if manifest.get("format_version") not in FORMATOS_ACEPTADOS:
             raise ValueError(
                 f"Version de formato no soportada: {manifest.get('format_version')}"
             )
@@ -394,11 +490,15 @@ def import_backup_zip(
         else:
             new_job_id = uuid.uuid4()
 
+        cliente, perfil = _casar_cliente_y_perfil(zf, job_data, db, warnings)
+
         # Insert job
         job = Job(
             id=new_job_id,
             name=job_data.get("name", "Imported job"),
-            client_id=job_data.get("client_id"),
+            client_id=(cliente.slug if cliente else job_data.get("client_id")),
+            cliente_id=cliente.id if cliente else None,
+            profile_id=perfil.id if perfil else None,
             owner_id=job_data.get("owner_id"),
             status=job_data.get("status", "completed"),
             seeds=job_data.get("seeds", []),

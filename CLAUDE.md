@@ -126,6 +126,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `dependencies.py` | Shared Redis client + DB session dependency |
 | `routers/jobs.py` | Job CRUD endpoints (POST, GET, PATCH cancel, DELETE) |
 | `routers/results.py` | Results endpoints (urls, issues, links, stats, export CSV) |
+| `routers/clientes.py` | Clientes, perfiles e integraciones (#36, decision 83). Resuelve la herencia de configuracion al crear un job (`resolver_config`) |
 
 ### Crawler (`crawler/`)
 | File | Description |
@@ -151,6 +152,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `models.py` | SQLAlchemy models: Job, Url (40+ fields), HtmlMeta, Heading, Link, Hreflang, StructuredData, Resource, PageContent, SecurityHeaders, Issue |
 | `database.py` | Engine + SessionLocal factory |
 | `config.py` | Env vars + SEO thresholds (title/description min/max lengths) |
+| `clientes.py` | Slug, fusion profunda de configuracion (`fusionar_config`), cliente a partir del `client_id` de texto y la migracion de esos textos (decision 83) |
+| `credenciales.py` | `credencial(integracion)`: el secreto de una integracion, leido del ENTORNO (nunca de la BD) y solo dentro del prefijo de su tipo (decision 83) |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -159,7 +162,12 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 |--------|------|-------------|
 | GET | `/health` | Health check |
 | POST | `/api/jobs` | Create crawl job |
-| GET | `/api/jobs` | List jobs (`?status=`, `?client_id=`, `?page=`) |
+| GET | `/api/jobs` | List jobs (`?status=`, `?client_id=` —UUID, slug o el texto viejo—, `?profile_id=`, `?page=`) |
+| GET/POST | `/api/clients` | Listar / crear clientes |
+| GET/PATCH/DELETE | `/api/clients/{id}` | Ficha, edicion y borrado (`?confirmar=<slug>`, `?con_jobs=`) |
+| GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente |
+| GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
+| GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`), para precargar el modal |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
 | DELETE | `/api/jobs/{id}` | Delete job + cascade |
@@ -173,7 +181,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 
 ## Database (PostgreSQL)
 
-11 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
+13 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
@@ -188,6 +196,10 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `resources` | 1:N from urls | resource_url, resource_type, alt_text |
 | `security_headers` | 1:1 with urls | is_https, has_hsts, has_csp, has_mixed_content |
 | `issues` | 1:N from urls | issue_type, severity, details (JSON) |
+| `clients` | root | nombre, slug (unico), dominios, config_defecto (parcial), integraciones (sin secretos) |
+| `crawl_profiles` | 1:N from clients | nombre, rol, seeds, config (parcial), last_job_id |
+
+`jobs.cliente_id` / `jobs.profile_id` son las FK al cliente y al perfil; `jobs.client_id` sigue siendo el texto libre de siempre (decision 83).
 
 URL dedup: SHA-256 hash per `(job_id, url_hash)` unique constraint.
 
@@ -1497,6 +1509,50 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    desaparecer; el worker (`_resumen_js_check`) no la cuenta como concluyente,
    así que si el comprobador se come el muro en todas, el veredicto es `None`
    («no se pudo comprobar»), nunca «fiable».
+
+83. **El cliente es una entidad, y sus credenciales viven en el entorno, no
+   en la base de datos** (#36, F1). Tres criterios:
+   - **Secretos.** La API no tiene autenticación y el CORS está abierto: todo lo
+     que se guarda en `clients` lo lee y lo cambia cualquiera que llegue al
+     puerto, y viaja en cada backup. Una integración (GSC, DataForSEO, Ahrefs,
+     Semrush, Majestic, PageSpeed) guarda solo el tipo, parámetros públicos
+     (propiedad de GSC, ubicación e idioma de DataForSEO) y el **nombre** de la
+     variable de entorno con la clave (`DATAFORSEO_LIN3S`, en el `.env` del
+     servidor). La API devuelve `configurada: true/false`, jamás el valor; quien
+     llame al proveedor pide el secreto con `shared/credenciales.credencial()`.
+     El nombre tiene que ser un identificador de entorno **y empezar por el
+     prefijo de su tipo** (`DATAFORSEO_*`, `GSC_*`...): como cualquiera puede
+     escribir en `clients`, sin el prefijo bastaría con declarar una
+     integración cuya variable fuera `POSTGRES_PASSWORD` para que el código que
+     llama a DataForSEO mandara la contraseña de la base de datos como
+     credencial. Se valida al guardar y otra vez al leer (la BD se puede editar
+     a mano). También se rechazan parámetros con nombre de secreto (`api_key`,
+     `password`, `token`...) y `http.basic_auth_password` en la configuración
+     de un cliente o un perfil; en un job puntual sigue pudiendo ir.
+   - **Herencia.** `clients.config_defecto` y `crawl_profiles.config` son dicts
+     PARCIALES de `JobConfig` (solo lo que fijan; un `JobConfig` entero pisaría
+     con sus defaults todo lo que viniera detrás), y una clave desconocida es un
+     422 que la nombra en vez de perderse (decisión 33). Al crear el job se
+     fusiona en profundidad defaults ← cliente ← perfil ← lo que mande el job
+     (`shared/clientes.fusionar_config`: listas y escalares, gana la última
+     capa; `None` explícito quita lo heredado), se valida DESPUÉS de fusionar y
+     el resultado se copia en `jobs.config`. El crawler y el analizador no saben
+     que existe el cliente, y editar un cliente no cambia ningún job ya creado.
+   - **Migración sin romper lo viejo.** `jobs.client_id` (texto) NO se convierte
+     en FK: se añade `jobs.cliente_id` al lado (y `profile_id`; lo mismo en
+     `programaciones`). Los jobs viejos se abren igual, `lanzar_job.py` sigue
+     mandando texto (la API lo resuelve por slug y crea el cliente si falta) y
+     si la conversión saliera mal el dato original sigue ahí. `init_db.py`
+     crea un cliente por slug distinto (sin acentos ni caja) y **imprime los
+     textos que colapsan en el mismo slug**: fusionar erratas en silencio sería
+     cambiar el histórico de un cliente sin que nadie lo sepa. `acme` y
+     `acme-canary` son clientes distintos porque eso no se puede decidir mirando
+     el texto. Borrar un job deja `last_job_id` del perfil a NULL; borrar un
+     cliente borra sus perfiles y deja sus jobs sin cliente (con su texto como
+     pista), salvo `con_jobs=true`, y exige `confirmar=<slug>`. El backup lleva
+     `client.json`/`profile.json` (formato 2, acepta el 1) y al importar el
+     cliente se casa por slug, nunca por id; el perfil se casa por nombre y no
+     se crea, para que importar un censo no deje nada programado.
 
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
