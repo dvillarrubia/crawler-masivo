@@ -99,7 +99,8 @@ jobs:
         run: >
           python -m pytest -q -rs tests/test_export_csv.py tests/test_insights.py
           tests/test_raw_html.py tests/test_comparacion.py
-          tests/test_programaciones.py tests/test_clientes.py
+          tests/test_programaciones.py
+          tests/test_cache_estaticos.py tests/test_clientes.py
           tests/test_decisiones_api.py tests/test_decisiones.py tests/test_llm.py
           tests/test_enriquecido.py tests/test_enriquecido_api.py
 
