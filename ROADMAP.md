@@ -154,6 +154,18 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Profundidad en clics desde la home (13 de octubre)
+
+La columna de profundidad contaba los saltos desde donde empezó el rastreo, y
+cada URL de la lista de partida contaba como cero: en el censo semanal de
+Lopesan, sembrado con 3.040 URLs, casi todo el sitio salía a profundidad 0.
+Ahora la profundidad son los **clics desde la home**, como la cuenta Google:
+desde la portada y desde las portadas de cada idioma, siguiendo los enlaces
+internos que Google sigue y sin contar una redirección como un clic. Las
+páginas a las que no se llega desde la home tienen su propio aviso. En
+Lopesan son 45 indexables enlazadas solo desde otras páginas sin camino,
+sobre todo posts del blog. Para los rastreos ya hechos basta re-analizarlos.
+
 ### Análisis enriquecido: la base y el botón (13 de octubre)
 
 [#7](https://github.com/dvillarrubia/crawler-masivo/issues/7) y

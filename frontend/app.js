@@ -83,6 +83,7 @@ const ISSUE_LABEL = {
   'high_outlink_count': 'Demasiados enlaces salientes',
   'sitemap_orphan': 'Huerfana (solo en sitemap)',
   'solo_enlazada_por_redireccion': 'Solo se llega por una redireccion',
+  'not_reachable_from_home': 'Sin camino de enlaces desde la home',
   'not_in_sitemap': 'No incluida en el sitemap',
 };
 
@@ -2265,7 +2266,8 @@ const EXP_COLUMN_DEFS = {
   content_length:       { label: 'Tamaño',           type: 'numeric', sortable: true,  filterKey: 'content_length',          width: 140, fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
   transfer_size:        { label: 'Transferido',      type: 'numeric', sortable: true,  filterKey: 'transfer_size',           width: 140, fmt: r => r.transfer_size != null ? fmt.bytes(r.transfer_size) : '' },
   response_time_ms:     { label: 'Tiempo (ms)',      type: 'numeric', sortable: true,  filterKey: 'response_time_ms',        width: 140, fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
-  crawl_depth:          { label: 'Prof.',            type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 130, fmt: r => r.crawl_depth ?? '' },
+  click_depth:          { label: 'Clics desde home', type: 'numeric', sortable: true,  filterKey: 'click_depth',             width: 160, fmt: r => r.click_depth ?? '' },
+  crawl_depth:          { label: 'Prof. rastreo',    type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 140, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
   word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
   content_word_count:   { label: 'Palabras contenido', type: 'numeric', sortable: true, filterKey: 'content_word_count',   width: 170, fmt: r => r.content_word_count != null ? r.content_word_count.toLocaleString('es-ES') : '' },
@@ -2309,7 +2311,7 @@ const EXP_COLUMN_DEFS = {
 
 const EXP_DEFAULT_COLUMNS = [
   'url','status_code','title','title_len','meta_description','meta_description_len',
-  'content_type','content_length','response_time_ms','crawl_depth',
+  'content_type','content_length','response_time_ms','click_depth',
   'word_count','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'
 ];
 
@@ -2321,19 +2323,19 @@ const EXP_TABS = [
   { key: 'image',      label: 'Imágenes',    icon: 'image',       filter: { resource_type: 'image' },             columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
   { key: 'pdf',        label: 'PDFs',        icon: 'file',        filter: { resource_type: 'pdf' },               columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
   { key: '_div1', divider: true },
-  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                  columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','crawl_depth','indexable','canonical_href'] },
+  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                  columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','indexable','canonical_href'] },
   { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },               columns: ['url','status_code','host','content_type','content_length','response_time_ms'] },
   { key: '_div2', divider: true },
   { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },               columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'] },
-  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','response_time_ms','inlinks_count','crawl_depth'] },
-  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','status_text','inlinks_count','crawl_depth','content_type'] },
-  { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','crawl_depth','inlinks_count'] },
+  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','response_time_ms','inlinks_count','click_depth'] },
+  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','status_text','inlinks_count','click_depth','content_type'] },
+  { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','click_depth','inlinks_count'] },
   { key: '_div3', divider: true },
   { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true }, columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','pagerank_score','canonical_href'] },
   { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
   // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
   // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
-  { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','crawl_depth'] },
+  { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','click_depth'] },
 ];
 
 function _freshForm() {
