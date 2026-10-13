@@ -409,6 +409,21 @@ es cada plantilla— y va con
   **WordPress**: cruzar el rastreo con lo que el propio WordPress dice que tiene
   publicado.
 
+### 3b. Que la interfaz se entienda (milestone M6)
+
+La app tiene casi todo, pero ordenado alrededor del rastreo y no de lo que se
+hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
+
+- [#119](https://github.com/dvillarrubia/crawler-masivo/issues/119) **Arreglos rápidos**: la ficha que mide 114.000 px, la
+  pestaña de enlaces que tarda dos minutos, formatos de cifras y fechas.
+- [#120](https://github.com/dvillarrubia/crawler-masivo/issues/120) **Navegación**: enlaces que se pueden pegar, el botón atrás,
+  la misma barra en todas partes y menos pestañas.
+- [#121](https://github.com/dvillarrubia/crawler-masivo/issues/121) **Problemas como centro**: agrupados por tipo, con qué es y
+  cómo se arregla, y una nota que no diga «Bueno» con errores graves abiertos.
+- [#122](https://github.com/dvillarrubia/crawler-masivo/issues/122) **El cliente como entrada**: portada por cliente, con su
+  último censo y sus alertas.
+- [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
+
 ### 4. Análisis enriquecido con Jev
 
 Índice: [#6](https://github.com/dvillarrubia/crawler-masivo/issues/6).
