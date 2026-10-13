@@ -307,3 +307,87 @@ def test_el_job_programado_sale_colgado_de_su_cliente_y_perfil(entorno):
     assert job.cliente_id == cid and job.profile_id == perf_id
     assert s2.get(CrawlProfile, perf_id).last_job_id == job.id
     s2.close()
+
+
+def test_el_respaldo_prefiere_el_censo_que_ABARCA_lo_mismo(entorno):
+    """El caso real del 2026-10-13, que es el que lo motiva.
+
+    El primer censo semanal de Lopesan (3.040 semillas) eligio como referencia
+    un **rastreo de prueba de 40 URLs** de cuatro dias antes, porque era el mas
+    reciente de ese host. 40 URLs en comun de 3.884. Los guardias hicieron su
+    trabajo —no concluyente, sin alertas— pero con 40 paginas en comun no se
+    habria visto nada AUNQUE EL SITIO SE HUBIERA ROTO, y eso se lee igual que
+    "no ha cambiado nada".
+    """
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+    muchas = [f"https://www.progym.es/s{i}" for i in range(50)]
+
+    def job(nombre, dia, semillas):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=semillas, config={},
+                started_at=datetime(2026, 6, dia, tzinfo=timezone.utc))
+        s.add(j)
+        s.flush()
+        return j
+
+    job("censo completo", 1, muchas)
+    job("PRUEBA del planificador", 9, ["https://www.progym.es/"])  # el mas reciente
+    actual = job("semanal, primera vez", 15, muchas)
+    s.commit()
+
+    elegido = censo_anterior(s, actual)
+    assert elegido.name == "censo completo", (
+        "se prefiere el que abarca lo mismo, no el mas reciente")
+    s.close()
+
+
+def test_si_ninguno_abarca_lo_mismo_se_coge_el_mas_reciente(entorno):
+    """Comparar con algo del mismo sitio sigue siendo mejor que nada, y el
+    guardia de alcance (decision 70) ya dira que no es concluyente."""
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+
+    def job(nombre, dia, semillas):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=semillas, config={},
+                started_at=datetime(2026, 7, dia, tzinfo=timezone.utc))
+        s.add(j)
+        s.flush()
+        return j
+
+    job("canario viejo", 1, ["https://www.progym.es/"])
+    job("canario nuevo", 9, ["https://www.progym.es/otra"])
+    actual = job("semanal", 15, [f"https://www.progym.es/s{i}" for i in range(50)])
+    s.commit()
+
+    assert censo_anterior(s, actual).name == "canario nuevo"
+    s.close()
+
+
+def test_el_candidato_puede_abarcar_MAS_que_el_censo_nuevo(entorno):
+    """Lo normal al reducir el alcance: si el candidato cubre todas mis
+    semillas y alguna mas, las paginas comunes siguen siendo todas las mias."""
+    from shared.comparacion import censo_anterior
+
+    s = entorno()
+    amplio = [f"https://www.progym.es/s{i}" for i in range(80)]
+    mias = [f"https://www.progym.es/s{i}" for i in range(50)]
+
+    def job(nombre, dia, semillas):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=semillas, config={},
+                started_at=datetime(2026, 8, dia, tzinfo=timezone.utc))
+        s.add(j)
+        s.flush()
+        return j
+
+    job("censo amplio", 1, amplio)
+    job("canario", 9, ["https://www.progym.es/"])
+    actual = job("semanal mas estrecho", 15, mias)
+    s.commit()
+
+    assert censo_anterior(s, actual).name == "censo amplio"
+    s.close()
