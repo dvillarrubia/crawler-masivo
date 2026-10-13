@@ -119,6 +119,10 @@ a:hover{color:var(--accent-h)}
   cursor:not-allowed;
   filter:grayscale(20%);
 }
+/* Cualquier boton deshabilitado (p. ej. «Analisis enriquecido» con el job sin
+   completar) tiene que verse inactivo, no solo el primario. */
+.btn:disabled,.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn:not(.btn-primary):disabled:hover,.btn:not(.btn-primary)[disabled]:hover{background:var(--bg-card);border-color:var(--border)}
 .btn-danger{background:transparent;border-color:var(--red);color:var(--red)}
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-sm{padding:.3rem .6rem;font-size:.78rem}
@@ -240,7 +244,7 @@ tr[data-tip]:hover::before,tr[data-tip]:hover::after{display:none}
 /* ===== Forms ===== */
 .form-group{margin-bottom:.85rem}
 .form-group label{display:block;font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.3rem;letter-spacing:.01em}
-input[type="text"],input[type="number"],input[type="url"],textarea,select{
+input[type="text"],input[type="number"],input[type="url"],input[type="password"],textarea,select{
   width:100%;
   padding:.45rem .65rem;
   background:#fff;

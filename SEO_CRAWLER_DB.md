@@ -246,7 +246,7 @@ Registro de lo decidido y cache DURADERA: un recrawl busca aqui por `(clave, pre
 | id | bigint (PK) | |
 | job_id | UUID (FK → jobs, CASCADE), nullable | NULL en el juego de evaluacion (#8) |
 | url_id | bigint (FK → urls, CASCADE), nullable | |
-| run_id | UUID, nullable | Ejecucion de enriquecimiento de #40 (sin FK hasta que exista su tabla) |
+| run_id | UUID (FK → enrichment_runs, SET NULL), nullable | Ejecucion de enriquecimiento de #40 que la produjo |
 | ambito | varchar(10) | url, bloque, enlace, par, job |
 | clave | varchar(64) | SHA-256 del estado normalizado. Estable entre jobs: no depende de `url_id` |
 | pregunta / version_pregunta | varchar(64) / int | Del catalogo `shared/preguntas/` |
@@ -263,6 +263,32 @@ Registro de lo decidido y cache DURADERA: un recrawl busca aqui por `(clave, pre
 | created_at | timestamptz | |
 
 Indices: `(job_id, pregunta)`, `url_id`, `(clave, pregunta, version_pregunta, modelo)`, `run_id`.
+
+### `enrichment_runs` — Ejecuciones del analisis enriquecido (#40, decision 85 de CLAUDE.md)
+Una pulsacion del boton «Analisis enriquecido». La crea la API (con token) y la ejecuta el worker desde la cola `enrichment:pending`.
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | UUID (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | |
+| modulos | JSON | Lista YA resuelta, con las dependencias anadidas, en orden de ejecucion |
+| alcance | JSON | `{"carpeta", "max_urls", "muestra"}`; vacio = HTML internas, 200 e indexables |
+| estimacion | JSON | Lo que enseño el dialogo al confirmar (llamadas, tokens, coste, cache, topes) |
+| presupuesto_usd / gastado_usd | float | Tope de la ejecucion y suma de `usage.cost` de lo pagado |
+| estado | varchar(16) | pendiente, en_curso, cancelando, completada, parcial (corte por presupuesto), cancelada, fallida |
+| motivo | varchar(32) | Por que se paro: presupuesto_ejecucion, presupuesto_cliente, presupuesto_global, sin_credito, desactivado, cancelada... |
+| progreso | JSON | `{modulo, procesadas, total, por_modulo: {...}}` |
+| errores | JSON | Avisos de la capa (hasta 50) |
+| created_at / started_at / finished_at / latido_at | timestamptz | `latido_at` lo actualiza el worker en cada lote; sin latido en `ENRICHMENT_STALE_MINUTES` se reencola |
+
+Indices: `job_id`, `estado`.
+
+```sql
+-- Lo decidido en una ejecucion, por respuesta
+SELECT pregunta, respuesta, estado, count(*), sum(coste_usd)
+FROM decisions WHERE run_id = 'UUID-AQUI'
+GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC;
+```
 
 **Issue types:** missing_title, title_too_short, title_too_long, duplicate_title, missing_description, description_too_short, description_too_long, duplicate_description, missing_h1, multiple_h1, status_4xx, status_5xx, redirect_chain, image_missing_alt, http_url, mixed_content, missing_hsts, missing_csp, low_word_count, url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count
 

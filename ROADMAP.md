@@ -393,8 +393,17 @@ se lanza solo.
 - **Hecho, la base ([#7](https://github.com/dvillarrubia/crawler-masivo/issues/7))**:
   el cliente de OpenRouter para Jev con caché (un recrawl no vuelve a pagar lo
   mismo), presupuesto por ejecución, mensual por cliente y global, y la
-  observabilidad del gasto en cada trabajo. Todavía no pregunta nada por su
-  cuenta: falta el botón de #40 y las preguntas de verdad (#8 y #9).
+  observabilidad del gasto en cada trabajo.
+- **Hecho, el botón ([#40](https://github.com/dvillarrubia/crawler-masivo/issues/40))**:
+  «Análisis enriquecido» en el detalle de un rastreo completado, con el coste
+  estimado (lo que ya está en caché no cuenta) y el gasto del mes del cliente
+  a la vista antes de confirmar, un presupuesto máximo que corta en seco, y una
+  pestaña «Enriquecido» con el progreso, lo gastado, Cancelar y los resultados.
+  Lanzar exige un token configurado en el servidor. De momento solo hay un
+  módulo, el de la pregunta de ejemplo: los de verdad llegan con #8 y #9.
+  Pendiente: comprobar con una clave real que la estimación cae dentro del
+  ±30% del coste, la opción por perfil de repetirlo en cada rastreo programado,
+  y los resultados como columnas del explorador y del CSV.
 
 ---
 
