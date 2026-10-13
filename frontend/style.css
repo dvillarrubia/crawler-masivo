@@ -1318,3 +1318,11 @@ code.tramo{font-size:.7rem;background:var(--orange-bg);padding:0 .25rem;border-r
 .chip-ambito:hover{border-color:var(--accent)}
 .chip-ambito.on{border-color:var(--accent);background:var(--accent-subtle);font-weight:600}
 .chip-ambito.sev-error strong{color:var(--red)}.chip-ambito.sev-warning strong{color:var(--orange)}.chip-ambito.sev-info strong{color:var(--blue)}
+.exp-aviso-cambios{padding:.35rem .6rem;font-size:.76rem;border-bottom:1px solid var(--border);background:var(--blue-bg)}.exp-aviso-cambios .orange{color:var(--orange)}
+/* Vistas guardadas (#131) */
+.exp-vistas{border-bottom:1px solid var(--border);padding-bottom:.3rem;margin-bottom:.3rem}
+.exp-vista{display:flex;align-items:center}
+.exp-vista .exp-tab{flex:1;min-width:0}
+.exp-vista-borrar{border:0;background:none;color:var(--text-dim);cursor:pointer;padding:0 .5rem;font-size:1rem;opacity:0}
+.exp-vista:hover .exp-vista-borrar,.exp-vista-borrar:focus-visible{opacity:1}
+.exp-vista-nueva{color:var(--accent)}

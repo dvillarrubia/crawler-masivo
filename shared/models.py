@@ -58,6 +58,11 @@ class Client(Base):
     # OpenRouter va en el entorno (decision 84).
     decisiones = Column(JSON, nullable=True)
     notas = Column(Text, nullable=True)
+    # Vistas guardadas del Explorador (#131): `[{id, nombre, consulta, creada}]`.
+    # `consulta` es la parte de despues del «?» de `#/rastreos/<id>/explorador`,
+    # asi que una vista vale para cualquier censo del cliente: es como se repite
+    # el mismo analisis cada mes.
+    vistas_explorador = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

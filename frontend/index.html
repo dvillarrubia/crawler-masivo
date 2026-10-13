@@ -3271,6 +3271,23 @@
             <i data-lucide="table-2" style="width:14px;height:14px;color:var(--accent)"></i>
             Explorador
           </div>
+          <!-- Vistas guardadas del cliente (#131) -->
+          <template x-if="job.cliente_id">
+            <div class="exp-vistas">
+              <div class="exp-sidebar-titulo" style="border-top:0;margin-top:0">Vistas de <span x-text="job.cliente_nombre || 'este cliente'"></span></div>
+              <template x-for="v in expVistas" :key="v.id">
+                <div class="exp-vista">
+                  <button type="button" class="exp-tab" @click="abrirVista(v)" :title="v.nombre">
+                    <i data-lucide="bookmark" class="exp-tab-icon"></i><span class="truncate" x-text="v.nombre"></span>
+                  </button>
+                  <button type="button" class="exp-vista-borrar" @click="borrarVista(v)" :aria-label="'Borrar la vista ' + v.nombre" title="Borrar">&times;</button>
+                </div>
+              </template>
+              <button type="button" class="exp-tab exp-vista-nueva" @click="guardarVista()">
+                <i data-lucide="bookmark-plus" class="exp-tab-icon"></i><span>Guardar esta vista</span>
+              </button>
+            </div>
+          </template>
           <div class="exp-sidebar-group">
             <template x-for="tab in EXP_TABS" :key="tab.key">
               <div>
@@ -3426,6 +3443,24 @@
             </div>
           </template>
 
+          <!-- Con la columna de cambios visible: contra que censo se compara y,
+               si los dos se hicieron con codigo distinto, que parte del cambio
+               puede ser nuestra (decisiones 66, 67 y 72). -->
+          <template x-if="getExpColumns().includes('cambio')">
+            <div class="exp-aviso-cambios">
+              <template x-if="job.comparacion && job.comparacion.comparado_con">
+                <span>
+                  Cambios frente a <strong x-text="job.comparacion.nombre_anterior"></strong>
+                  (<span x-text="fmt.dia(job.comparacion.fecha_anterior)"></span>).
+                  <template x-for="a in (job.comparacion.avisos || [])" :key="a"><span class="orange" x-text="' ' + a"></span></template>
+                </span>
+              </template>
+              <template x-if="!(job.comparacion && job.comparacion.comparado_con)">
+                <span>Este rastreo no tiene censo anterior con el que compararse: la columna sale vacía.</span>
+              </template>
+            </div>
+          </template>
+
           <!-- Helper hint about how filters work -->
           <div class="exp-filter-hint">
             <i data-lucide="info" style="width:12px;height:12px;flex-shrink:0"></i>
@@ -3433,7 +3468,7 @@
               Filtra cada columna debajo de su nombre. En las numéricas, elige el operador
               (<strong>≥</strong> al menos, <strong>&gt;</strong> mayor que, <strong>=</strong> igual,
               <strong>≤</strong> máximo, <strong>&lt;</strong> menor que) y escribe el valor. En las de texto,
-              <strong>∅</strong> busca las vacías y <strong>≠∅</strong> las que tienen valor.
+              <strong>a|b</strong> contiene a o b, <strong>!a</strong> no contiene a, <strong>∅</strong> vacías y <strong>≠∅</strong> con valor.
               Usa ↑↓ para moverte por las filas.
             </span>
           </div>
@@ -4578,6 +4613,13 @@
       </div>
       <div class="modal-body">
         <p id="dialogo-mensaje" class="text-sm" style="line-height:1.55;white-space:pre-line" x-text="dialogo.mensaje"></p>
+        <template x-if="dialogo.pedir">
+          <div style="margin-top:.8rem">
+            <label class="text-sm" for="dialogo-libre" x-text="dialogo.pedir"></label>
+            <input id="dialogo-libre" type="text" x-model="dialogo.entrada" data-foco autocomplete="off" maxlength="80"
+                   @keydown.enter="cerrarDialogo(true)" style="width:100%;margin-top:.3rem">
+          </div>
+        </template>
         <template x-if="dialogo.escribir">
           <div style="margin-top:.8rem">
             <label class="text-sm" for="dialogo-entrada">Escribe <strong x-text="dialogo.escribir"></strong> para confirmar</label>
@@ -4591,8 +4633,8 @@
           <button class="btn" @click="cerrarDialogo(false)" :data-foco="dialogo.peligro && !dialogo.escribir ? '' : null">Volver</button>
         </template>
         <button class="btn" :class="dialogo.peligro ? 'btn-danger' : 'btn-primary'" @click="cerrarDialogo(true)"
-                :disabled="dialogo.escribir && dialogo.entrada.trim() !== dialogo.escribir"
-                :data-foco="!dialogo.peligro && !dialogo.escribir ? '' : null" x-text="dialogo.aceptar"></button>
+                :disabled="(dialogo.escribir && dialogo.entrada.trim() !== dialogo.escribir) || (dialogo.pedir && !dialogo.entrada.trim())"
+                :data-foco="!dialogo.peligro && !dialogo.escribir && !dialogo.pedir ? '' : null" x-text="dialogo.aceptar"></button>
       </div>
     </div>
   </div>

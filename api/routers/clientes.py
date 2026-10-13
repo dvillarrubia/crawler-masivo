@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -303,6 +303,51 @@ def serie_de_censos(
         .order_by(Job.created_at.desc()).limit(limite).all()
     )
     return _serie(db, jobs)
+
+
+# ---------------------------------------------------------------------------
+# Vistas guardadas del Explorador (#131)
+# ---------------------------------------------------------------------------
+class _VistaNueva(BaseModel):
+    nombre: str = Field(..., min_length=1, max_length=80)
+    consulta: str = Field(..., max_length=4000)
+
+    @field_validator("consulta")
+    @classmethod
+    def _solo_consulta(cls, v: str) -> str:
+        # Solo la parte de despues del «?»: ni rutas ni otro sitio al que
+        # llevar a quien la abra.
+        v = v.lstrip("?")
+        if "#" in v or v.lower().startswith(("http", "/", "javascript")):
+            raise ValueError("La consulta es solo la parte de despues del «?»")
+        return v
+
+
+@router.get("/{client_id}/vistas")
+def listar_vistas(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    return _buscar(db, client_id).vistas_explorador or []
+
+
+@router.post("/{client_id}/vistas", status_code=201)
+def guardar_vista(client_id: uuid.UUID, cuerpo: _VistaNueva, db: Session = Depends(get_session)):
+    """Guarda (o sustituye, si ya hay una con ese nombre) una vista."""
+    cliente = _buscar(db, client_id)
+    vistas = [v for v in (cliente.vistas_explorador or []) if v.get("nombre") != cuerpo.nombre.strip()]
+    nueva = {"id": uuid.uuid4().hex[:12], "nombre": cuerpo.nombre.strip(), "consulta": cuerpo.consulta,
+             "creada": datetime.now(timezone.utc).isoformat()}
+    cliente.vistas_explorador = vistas + [nueva]   # lista nueva: SQLAlchemy no ve mutaciones de JSON
+    _commit(db)
+    return nueva
+
+
+@router.delete("/{client_id}/vistas/{vista_id}", status_code=204)
+def borrar_vista(client_id: uuid.UUID, vista_id: str, db: Session = Depends(get_session)):
+    cliente = _buscar(db, client_id)
+    antes = cliente.vistas_explorador or []
+    cliente.vistas_explorador = [v for v in antes if v.get("id") != vista_id]
+    if len(cliente.vistas_explorador) == len(antes):
+        raise HTTPException(status_code=404, detail="Vista no encontrada")
+    _commit(db)
 
 
 # ---------------------------------------------------------------------------

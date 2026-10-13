@@ -287,3 +287,103 @@ def test_columna_h1_cuenta_solo_los_que_se_pintan(con_plantillas, tmp_path):
     assert fila["h1"] == "Hotel A" and fila["h1_count"] == 1
     exp = api.get(f"/api/jobs/{jid}/urls/export?url_contains=/es/hoteles/a&columnas=url,h1,h1_count").content.decode("utf-8-sig")
     assert "Hotel A,1" in exp
+
+
+def test_contiene_admite_o_y_negacion_y_varios_codigos(con_plantillas):
+    api, jid = con_plantillas
+    assert sorted(_urls(api, jid, "url_contains=hoteles/a|hoteles/b")) == ["/es/hoteles/a", "/es/hoteles/b"]
+    sin_null = _urls(api, jid, "url_contains=!null")
+    assert sin_null and not any("null" in u for u in sin_null)
+    assert len(_urls(api, jid, "status_code=200,404")) == 7
+    assert len(_urls(api, jid, "status_code=404")) == 4
+
+
+def test_cambio_frente_al_censo_anterior(tmp_path):
+    """Misma URL (mismo url_hash) en el censo de referencia: codigo, indice,
+    titulo, canonical y palabras con el umbral del 20% sobre el mayor."""
+    from api.routers import results
+
+    engine = create_engine(f"sqlite:///{tmp_path}/c.db")
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine, expire_on_commit=False)()
+    viejo = Job(id=uuid.uuid4(), name="julio", status="completed", seeds=["https://x.com/"], config={})
+    nuevo = Job(id=uuid.uuid4(), name="octubre", status="completed", seeds=["https://x.com/"], config={},
+                comparacion={"comparado_con": str(viejo.id), "comparable": True})
+    s.add_all([viejo, nuevo])
+    s.flush()
+
+    def pag(job, ruta, codigo, titulo, palabras, indexable=True):
+        u = Url(job_id=job.id, url=f"https://x.com{ruta}", path=ruta, url_hash=ruta, is_internal=True,
+                is_html=True, status_code=codigo, status_group=f"{codigo // 100}xx", indexable=indexable,
+                word_count=palabras)
+        s.add(u)
+        s.flush()
+        s.add(HtmlMeta(url_id=u.id, title=titulo))
+
+    pag(viejo, "/igual", 200, "T", 1000)
+    pag(nuevo, "/igual", 200, "T", 900)              # -10%: ruido, no cuenta
+    pag(viejo, "/rota", 200, "T", 1000)
+    pag(nuevo, "/rota", 404, "T", 1000, indexable=False)
+    pag(viejo, "/texto", 200, "Viejo", 1000)
+    pag(nuevo, "/texto", 200, "Nuevo", 500)
+    pag(nuevo, "/nueva", 200, "N", 100)
+    s.commit()
+    s.close()
+    app = FastAPI()
+    app.include_router(results.router)
+    Sesion = sessionmaker(bind=engine)
+
+    def _sesion():
+        ses = Sesion()
+        try:
+            yield ses
+        finally:
+            ses.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    api = TestClient(app)
+    filas = {i["url"].replace("https://x.com", ""): i["cambio"]
+             for i in api.get(f"/api/jobs/{nuevo.id}/urls?cambios=true").json()["items"]}
+    assert filas["/igual"] is None
+    assert filas["/rota"] == "200→404; sale del índice"
+    assert filas["/texto"] == "título; palabras 1000→500"
+    assert filas["/nueva"] == "nueva"
+
+
+def test_vistas_guardadas_por_cliente(tmp_path):
+    from api.routers import clientes
+    from shared.models import Client
+
+    engine = create_engine(f"sqlite:///{tmp_path}/v.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    s = Sesion()
+    c = Client(nombre="Acme", slug="acme", dominios=[])
+    s.add(c)
+    s.commit()
+    cid = c.id
+    s.close()
+    app = FastAPI()
+    app.include_router(clientes.router)
+
+    def _sesion():
+        ses = Sesion()
+        try:
+            yield ses
+        finally:
+            ses.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    api = TestClient(app)
+    base = f"/api/clients/{cid}/vistas"
+    v = api.post(base, json={"nombre": "4xx enlazados", "consulta": "?pestana=4xx&issue_type=4xx_error"}).json()
+    assert v["consulta"] == "pestana=4xx&issue_type=4xx_error"          # sin el «?»
+    api.post(base, json={"nombre": "4xx enlazados", "consulta": "pestana=4xx"})   # mismo nombre: sustituye
+    assert [x["consulta"] for x in api.get(base).json()] == ["pestana=4xx"]
+    # Solo una consulta: ni otra direccion ni otra ruta a la que llevar a nadie.
+    for mala in ("https://malo.com", "/rastreos/x", "javascript:alert(1)", "a=1#/otra"):
+        assert api.post(base, json={"nombre": "x", "consulta": mala}).status_code == 422, mala
+    vid = api.get(base).json()[0]["id"]
+    assert api.delete(f"{base}/{vid}").status_code == 204
+    assert api.get(base).json() == []
+    assert api.delete(f"{base}/{vid}").status_code == 404
