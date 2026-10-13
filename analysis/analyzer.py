@@ -37,7 +37,7 @@ from shared.config import (
 from analysis.sd_validation import validate_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
-from shared.indexabilidad import es_noindex, estado_indexabilidad
+from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
 from shared.dominios import dominio_registrable
@@ -57,22 +57,24 @@ from shared.models import (
 logger = logging.getLogger(__name__)
 
 
-def _norm_url(url: str | None) -> str | None:
-    """Canonicalise a URL for equality comparison (dedup semantics).
+def _clave(url: str | None):
+    """Clave para buscar una URL entre las rastreadas, o None si no se puede.
 
-    Uses the same w3lib canonicalisation the crawler applies when hashing
-    URLs, so a self-referencing canonical that differs from the page URL
-    only by trailing slash, query-arg order, or fragment is treated as
-    equal.  Falls back to a trimmed string if w3lib is unavailable.
+    Es la de :func:`shared.indexabilidad.misma_url`, y no otra. Aqui habia un
+    segundo normalizador (w3lib a secas) cuyo docstring prometia igualar la
+    barra final —no lo hacia, y no debe: `/a` y `/a/` son dos URLs— y que no
+    quitaba el puerto por defecto. Con dos criterios, un canonical a
+    `https://x.com:443/b` era la misma URL que `/b` para la indexabilidad y otra
+    para `canonical_broken`, que no encontraba el 404 (#26, decision 39).
+    Tolerante a URLs que no se pueden partir (un puerto no numerico): esas no
+    casan con nada, igual que antes.
     """
-    if not url:
-        return url
+    if not url or not url.strip():
+        return None
     try:
-        from w3lib.url import canonicalize_url
-
-        return canonicalize_url(url, keep_fragments=False)
-    except Exception:
-        return url.strip().rstrip("/")
+        return clave_url(url)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +97,23 @@ HIGH_OUTLINK_THRESHOLD = 100
 _LANG_TAG_RE = re.compile(
     r"^(?:x-default|[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8})*)$", re.I
 )
+
+# Idiomas ISO 639-1, que es lo que Google acepta en hreflang ("the language, in
+# ISO 639-1 format"). La regex de arriba solo mira la FORMA, asi que `eng`, `xx`
+# o `sp` pasaban por validos y Google ignora esas anotaciones enteras: ese
+# idioma se queda sin hreflang y el informe decia que estaba bien (#26). Con
+# los codigos retirados que Google sigue usando (`iw`, `in`, `ji`, `jw`, `mo`)
+# para no marcar como error lo que funciona.
+_ISO_639_1 = frozenset("""
+aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co
+cr cs cu cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl
+gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg
+ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk
+ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps
+pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw ta
+te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za
+zh zu iw in ji jw mo
+""".split())
 
 # Regiones que la gente escribe y no existen en ISO 3166-1. `en-UK` es el error
 # clasico —el codigo de Reino Unido es GB— y Google ignora el hreflang entero,
@@ -399,7 +418,7 @@ class SEOAnalyzer:
         stmt = (
             select(Url.id, HtmlMeta.title, HtmlMeta.title_len,
                    HtmlMeta.title_pixel_width, Url.status_code,
-                   Url.is_internal, Url.indexable)
+                   Url.is_internal, Url.indexable, HtmlMeta.title_count)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -409,7 +428,17 @@ class SEOAnalyzer:
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
         for (url_id, title, title_len, title_px, status_code, is_internal,
-             indexable) in rows:
+             indexable, title_count) in rows:
+            # Con dos `<title>` no se sabe cual usa Google, y el caso tipico es
+            # uno VACIO delante del bueno (dos plugins escribiendo la cabecera):
+            # se cogia el vacio y salia `title_missing` sin decir que habia otro.
+            # El aviso dice si el primero esta vacio, que es la pista de por que.
+            if (title_count or 0) > 1:
+                self._add_issue(
+                    url_id, "title_multiple", "warning",
+                    {"cuantos": title_count,
+                     "primero_vacio": not (title or "").strip()},
+                )
             if not title or not title.strip():
                 self._add_issue(url_id, "title_missing", "warning")
                 continue
@@ -485,7 +514,8 @@ class SEOAnalyzer:
         stmt = (
             select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len,
                    HtmlMeta.meta_description_pixel_width,
-                   Url.status_code, Url.is_internal, Url.indexable)
+                   Url.status_code, Url.is_internal, Url.indexable,
+                   HtmlMeta.meta_description_count)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -494,7 +524,14 @@ class SEOAnalyzer:
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
 
         for (url_id, description, desc_len, desc_px, status_code, is_internal,
-             indexable) in rows:
+             indexable, desc_count) in rows:
+            # Igual que el titulo: con dos descriptions no se sabe cual usa
+            # Google. La vacia se salta al coger el valor, pero sigue ahi.
+            if (desc_count or 0) > 1:
+                self._add_issue(
+                    url_id, "description_multiple", "warning",
+                    {"cuantos": desc_count},
+                )
             if not description or not description.strip():
                 self._add_issue(url_id, "description_missing", "warning")
                 continue
@@ -646,9 +683,10 @@ class SEOAnalyzer:
         for row_url, sc, host in self.session.execute(url_lookup_stmt).all():
             url_status[row_url] = sc
             url_host[row_url] = host
-            # Also index by normalised URL so a canonical that differs only
-            # by trailing slash / arg order still resolves to its target.
-            norm = _norm_url(row_url)
+            # Tambien por la clave de `misma_url`, para que un canonical que
+            # solo difiere en el orden de los parametros, el escapado o el
+            # puerto por defecto encuentre su destino.
+            norm = _clave(row_url)
             if norm and norm not in url_status:
                 url_status[norm] = sc
 
@@ -682,10 +720,12 @@ class SEOAnalyzer:
 
             canonical = canonical_href.strip()
 
-            # Self-referencing canonical is fine -- skip. Compare after
-            # normalisation so trailing-slash / www / scheme differences on
-            # an otherwise self-referencing canonical are not flagged.
-            if _norm_url(canonical) == _norm_url(page_url):
+            # Autocanonico: nada que avisar. Con la MISMA regla que la
+            # indexabilidad (`misma_url`): el puerto por defecto, la caja del
+            # host, el escapado y el orden de los parametros no cuentan; la
+            # barra final, el `www` y el esquema SI, porque ahi hay una
+            # canonicalizacion de verdad (decision 39).
+            if misma_url(canonical, page_url):
                 continue
 
             # Cross-domain canonical.
@@ -750,7 +790,7 @@ class SEOAnalyzer:
             # Canonical pointing to a non-200 URL (only if we crawled it).
             target_status = url_status.get(canonical)
             if target_status is None:
-                target_status = url_status.get(_norm_url(canonical))
+                target_status = url_status.get(_clave(canonical))
             if target_status is not None and target_status != 200:
                 self._add_issue(
                     url_id,
@@ -783,14 +823,15 @@ class SEOAnalyzer:
             select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
         ).all():
             url_status[row_url] = sc
-            norm = _norm_url(row_url)
+            norm = _clave(row_url)
             if norm:
                 url_status.setdefault(norm, sc)
                 url_id_by_norm[norm] = uid
                 norm_by_id[uid] = norm
 
         stmt = (
-            select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href)
+            select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href,
+                   Hreflang.en_body)
             .join(Url, Url.id == Hreflang.url_id)
             .where(Url.job_id == self.job_id)
         )
@@ -798,26 +839,48 @@ class SEOAnalyzer:
 
         # Map each crawled page to the set of hreflang targets it declares,
         # so we can check whether a target links back (reciprocal return tag).
+        # Los del `<body>` no: Google los ignora, asi que no son el retorno de
+        # nadie.
         targets_by_page: dict[int, set[str]] = defaultdict(set)
-        for _hid, page_id, _lang, href in rows:
-            nh = _norm_url(href)
-            if nh:
+        for _hid, page_id, _lang, href, en_body in rows:
+            nh = _clave(href)
+            if nh and not en_body:
                 targets_by_page[page_id].add(nh)
 
         # Anotaciones agrupadas por veredicto, para escribirlas por lotes.
         por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
+        # Pagina -> idiomas anotados en el `<body>`.
+        en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
 
-        for hreflang_id, url_id, lang, href in rows:
-            norm_href = _norm_url(href)
+        for hreflang_id, url_id, lang, href, en_body in rows:
+            norm_href = _clave(href)
 
             # Language code validity (x-default is always valid).
             lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
             region_mala = None
+            idioma_malo = None
+            if lang_is_valid and lang.lower() != "x-default":
+                idioma = lang.split("-")[0].lower()
+                if idioma not in _ISO_639_1:
+                    idioma_malo = idioma
+                    lang_is_valid = False
             if lang_is_valid and "-" in (lang or ""):
                 region = lang.split("-")[-1].lower()
                 if region in _REGIONES_INVENTADAS and len(region) == 2:
                     region_mala = region
                     lang_is_valid = False
+
+            # Un hreflang en el `<body>` Google lo ignora: esa anotacion no
+            # existe para el, asi que no tiene sentido decir que le falta el
+            # retorno o que su destino esta roto. Un aviso por hallazgo
+            # (decision 36): `hreflang_in_body`, una vez por pagina, y lo que
+            # hay que hacer es moverlo al `<head>`. Se guarda igualmente si el
+            # idioma es valido, que sigue siendo verdad.
+            if en_body:
+                en_body_por_pagina[url_id].append(lang)
+                por_veredicto.setdefault((lang_is_valid, None), []).append(
+                    hreflang_id)
+                continue
 
             # Reciprocal return tag. Only decidable when the target page was
             # crawled; x-default entries need no reciprocal.
@@ -861,7 +924,12 @@ class SEOAnalyzer:
 
             if not lang_is_valid:
                 detalle = {"lang": lang}
-                if region_mala:
+                if idioma_malo:
+                    detalle["motivo"] = (
+                        f"'{idioma_malo}' no es un codigo de idioma ISO 639-1"
+                        " (Google solo acepta los de dos letras)"
+                    )
+                elif region_mala:
                     sugerida = _REGIONES_INVENTADAS.get(region_mala) or None
                     detalle["motivo"] = (
                         f"'{region_mala.upper()}' no es un codigo de pais ISO 3166-1"
@@ -877,6 +945,12 @@ class SEOAnalyzer:
                     "error",
                     {"href": href, "target_status": estado_destino},
                 )
+
+        for url_id, langs in en_body_por_pagina.items():
+            self._add_issue(
+                url_id, "hreflang_in_body", "warning",
+                {"cuantos": len(langs), "langs": sorted(set(langs))[:20]},
+            )
 
         for (lang_valid, return_ok), ids in por_veredicto.items():
             for i in range(0, len(ids), 5000):

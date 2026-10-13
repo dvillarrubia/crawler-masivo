@@ -1157,6 +1157,38 @@ class SeoSpider(scrapy.Spider):
     # ------------------------------------------------------------------
     # Main parse
     # ------------------------------------------------------------------
+    @staticmethod
+    def _directivas_de_cabecera(
+        response: Response, base_url: str,
+    ) -> tuple[list[str], str | None, str | None]:
+        """``(cabeceras X-Robots-Tag, como se guardan, canonical de Link)``.
+
+        Lo mismo para HTML y para cualquier otro documento: en un PDF es lo
+        unico que hay.
+        """
+        # X-Robots-Tag: TODAS las cabeceras, no solo la ultima. Un servidor
+        # puede mandar dos (`noindex` y `noarchive`) y con `headers.get` la
+        # pagina salia indexable.
+        cabeceras_robots = [
+            valor.decode("utf-8", errors="ignore")
+            for valor in response.headers.getlist(b"X-Robots-Tag")
+            if valor
+        ]
+        # Se guardan una por linea, no unidas por coma: cada cabecera puede ir a
+        # un bot distinto y con la coma se perdia a cual.
+        x_robots = SEPARADOR_CABECERAS.join(cabeceras_robots) or None
+
+        # Canonical de la cabecera Link (RFC 8288). Antes se cogia el primer
+        # enlace de la cabecera fuera el que fuera, asi que un `rel=preload`
+        # delante se guardaba como canonical de la pagina. Todas las cabeceras
+        # `Link`, por la misma razon que las de robots.
+        link_header = ", ".join(
+            v.decode("utf-8", errors="ignore")
+            for v in response.headers.getlist(b"Link") if v
+        )
+        canonical_header = canonical_de_cabecera(link_header, base_url)
+        return cabeceras_robots, x_robots, canonical_header
+
     def parse(self, response: Response) -> Generator:
         # Check cancel signal
         if self._should_cancel():
@@ -1421,23 +1453,9 @@ class SeoSpider(scrapy.Spider):
             # self-referencing canonicals are not misread as canonicalised.
             meta = extract_meta(selector, base_url=base_url)
 
-            # X-Robots-Tag: TODAS las cabeceras, no solo la ultima. Un
-            # servidor puede mandar dos (`noindex` y `noarchive`) y con
-            # `headers.get` la pagina salia indexable.
-            cabeceras_robots = [
-                valor.decode("utf-8", errors="ignore")
-                for valor in response.headers.getlist(b"X-Robots-Tag")
-                if valor
-            ]
-            # Se guardan una por linea, no unidas por coma: cada cabecera
-            # puede ir a un bot distinto y con la coma se perdia a cual.
-            x_robots = SEPARADOR_CABECERAS.join(cabeceras_robots) or None
-
-            # Canonical de la cabecera Link (RFC 8288). Antes se cogia el
-            # primer enlace de la cabecera fuera el que fuera, asi que un
-            # `rel=preload` delante se guardaba como canonical de la pagina.
-            link_header = response.headers.get(b"Link", b"").decode("utf-8", errors="ignore")
-            canonical_header = canonical_de_cabecera(link_header, base_url)
+            cabeceras_robots, x_robots, canonical_header = (
+                self._directivas_de_cabecera(response, base_url)
+            )
 
             # Word count and text ratio
             word_count_val = extract_word_count(selector)
@@ -1489,8 +1507,24 @@ class SeoSpider(scrapy.Spider):
         else:
             # No es HTML, o no es 2xx: la misma funcion decide, sin duplicar
             # aqui la escala de codigos.
+            #
+            # Un PDF (o cualquier documento no HTML) solo puede llevar sus
+            # directivas en la CABECERA: `X-Robots-Tag: noindex` para sacarlo
+            # del indice y `Link: <...>; rel="canonical"` para consolidarlo en
+            # la pagina HTML equivalente, que es la UNICA forma de canonicalizar
+            # un PDF. Antes las cabeceras solo se leian en HTML, asi que un PDF
+            # en noindex o canonicalizado salia "Indexable" en el informe y el
+            # cliente acababa revisando el PDF que ya habia sacado a proposito
+            # (#26). En un 3xx/4xx/5xx no se leen: manda el codigo.
+            cabeceras_robots = None
+            if is_success:
+                cabeceras_robots, x_robots, canonical_header = (
+                    self._directivas_de_cabecera(response, final_url)
+                )
             _, indexability_status_val = estado_indexabilidad(
                 status_code,
+                x_robots=cabeceras_robots,
+                canonical_header=canonical_header,
                 page_url=url_for_record,
                 bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
             )
@@ -1541,6 +1575,20 @@ class SeoSpider(scrapy.Spider):
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         if not is_html or not is_success:
+            # Las directivas de cabecera de un no HTML se GUARDAN, no solo se
+            # usan aqui: `analyze_indexability` recalcula la indexabilidad de
+            # todas las URLs del job con lo que haya en `html_meta`, y sin fila
+            # devolvia el PDF a "Indexable" al analizar. Solo cuando hay algo
+            # que guardar: una fila por cada imagen del sitio no aporta nada.
+            # Los checks de titulo, description, canonical, h1... filtran por
+            # `is_html`, asi que esta fila no los hace avisar de los PDFs.
+            if is_success and (x_robots or canonical_header):
+                yield HtmlMetaItem(
+                    url_hash=final_hash,
+                    job_id=self.job_id,
+                    x_robots_tag=x_robots,
+                    canonical_header=canonical_header,
+                )
             return
 
         selector = response.selector
@@ -1553,8 +1601,10 @@ class SeoSpider(scrapy.Spider):
             job_id=self.job_id,
             title=meta["title"],
             title_len=meta["title_len"],
+            title_count=meta.get("title_count"),
             meta_description=meta["meta_description"],
             meta_description_len=meta["meta_description_len"],
+            meta_description_count=meta.get("meta_description_count"),
             meta_keywords=meta["meta_keywords"],
             meta_robots=meta["meta_robots"],
             meta_robots_googlebot=meta.get("meta_robots_googlebot"),
@@ -1636,6 +1686,7 @@ class SeoSpider(scrapy.Spider):
                     job_id=self.job_id,
                     lang=hreflang["lang"],
                     href=hreflang["href"],
+                    en_body=hreflang.get("en_body"),
                 )
 
         # Structured data

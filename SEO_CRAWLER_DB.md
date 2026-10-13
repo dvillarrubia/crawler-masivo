@@ -86,15 +86,23 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 **Unique constraint:** `(job_id, url_hash)`
 
 ### `html_meta` — Metadatos SEO (1:1 con urls)
+
+Tambien hay fila para un documento **no HTML** 2xx (PDF, sobre todo) cuando trae
+`X-Robots-Tag` o canonical en la cabecera `Link`: solo con esas dos columnas
+rellenas. Es la unica forma de sacar del indice o canonicalizar un PDF, y sin la
+fila el analisis lo devolvia a «Indexable». Para leer metadatos de paginas,
+filtrar por `urls.is_html`.
 | Columna | Tipo | Descripcion |
 |---|---|---|
 | url_id | bigint (PK, FK → urls) | |
 | title | text | Tag `<title>` |
 | title_len | int | Longitud del title |
 | title_pixel_width | int | Ancho en px estimado en SERP (Arial 20px) |
+| title_count | int | Cuantos `<title>` hay, vacios incluidos (>1 → `title_multiple`) |
 | meta_description | text | Meta description |
 | meta_description_len | int | Longitud |
 | meta_description_pixel_width | int | Ancho en px en SERP (Arial 14px) |
+| meta_description_count | int | Cuantas meta description hay, vacias incluidas (>1 → `description_multiple`) |
 | meta_keywords | text | Meta keywords |
 | meta_robots | varchar(256) | Contenido de meta robots |
 | meta_robots_googlebot | varchar(256) | `<meta name="googlebot">` (manda sobre el `robots` generico para Google) |
@@ -160,6 +168,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | url_id | bigint (FK → urls) | |
 | lang | varchar(20) | Codigo de idioma (es, en-US, x-default) |
 | href | text | URL alternativa |
+| return_tag_ok | bool | La pagina destino devuelve el enlace (NULL = no se sabe: sin rastrear, autorreferencia, x-default, destino roto o en el body) |
+| lang_valid | bool | Idioma ISO 639-1 y region existente |
+| en_body | bool | Anotacion fuera del `<head>`: Google la ignora (`hreflang_in_body`). NULL = rastreo anterior a la columna |
 
 ### `resources` — Recursos referenciados (img, css, js)
 | Columna | Tipo | Descripcion |

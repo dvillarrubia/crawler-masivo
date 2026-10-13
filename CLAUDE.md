@@ -496,6 +496,20 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    re-analizando**: el googlebot no se guardo y las cabeceras estan unidas por
    coma; hace falta re-rastrear.
 
+   Lo mismo con los **PDF y demas no HTML**, que solo pueden llevar sus
+   directivas en la cabecera (`X-Robots-Tag`, y `Link: rel=canonical`, la unica
+   forma de canonicalizar un PDF): el spider no las leia fuera del HTML y salian
+   "Indexable". Ahora se leen en todo 2xx y se guardan en una fila de
+   `html_meta` con solo esas dos columnas —y solo si hay alguna—, porque sin
+   fila el analisis las volvia a deshacer. Los checks de pagina (titulo,
+   description, canonical, robots) filtran por `is_html`, asi que esa fila no
+   los hace avisar de los PDFs.
+   Y **un solo normalizador tambien en el analyzer**: `analyze_canonicals` y
+   `analyze_hreflang` buscaban el destino con w3lib a secas (`_norm_url`, cuyo
+   docstring prometia igualar la barra final y no lo hacia). Ahora usan
+   `clave_url`, la clave de `misma_url`: un canonical a `https://x.com:443/b`
+   ya encuentra el 404 de `/b`. Ningun test existente cambio de resultado.
+
 40. **Un candado no puede tragarse los errores de lo que protege** — la primera
    version de `candado_de_job` tenia el `yield` dentro de un `try/except`
    amplio: cuando el analisis de dentro reventaba, la excepcion entraba por el
@@ -920,6 +934,15 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    También: `name=" robots"` con un espacio delante no se detectaba, y un
    `<meta property="description">` —que es RDFa, no una meta description—
    contaba como la description de la página.
+   Y tres cosas que quedaban (#26): un **hreflang en el `<body>`** se guarda
+   marcado (`hreflang.en_body`) y da `hreflang_in_body` una vez por página, sin
+   contar como retorno de nadie ni generar más avisos —Google no lo lee—; el
+   **idioma** se valida contra ISO 639-1 y no solo por la forma (`eng`, `xx` y
+   `sp` pasaban; se aceptan los retirados que Google usa, como `iw`); y **dos
+   `<title>` o dos meta description** —vacíos incluidos, que es como llegaba
+   el caso típico de dos plugins escribiendo la cabecera— dan `title_multiple` /
+   `description_multiple` (`html_meta.title_count`, `meta_description_count`).
+   El valor guardado no cambia. Las tres necesitan **re-rastrear**.
 
 57. **Un enlace desde una página rota no enlaza nada** — un 404 o un 500 sale
    del índice y se lleva sus enlaces con él, así que lo que solo cuelga de ahí no

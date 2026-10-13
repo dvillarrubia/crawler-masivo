@@ -1006,3 +1006,32 @@ def test_la_psl_no_tiene_respaldo_silencioso():
 
     fuente = inspect.getsource(dom.dominio_registrable)
     assert "_PSL = False" not in fuente, "el respaldo silencioso ha vuelto"
+
+
+def test_hreflang_en_el_body_se_marca():
+    """Google solo lee el hreflang del `<head>`: el del body se guarda marcado
+    para poder avisar (#26), igual que el canonical (decision 56)."""
+    s = sel(
+        '<html><head><link rel="alternate" hreflang="es" href="/es"></head>'
+        '<body><p>x</p><link rel="alternate" hreflang="en" href="/en"></body></html>'
+    )
+    marcas = {r["lang"]: r["en_body"] for r in ex.extract_hreflang(s, base_url="https://e.com/x")}
+    assert marcas == {"es": False, "en": True}
+
+
+def test_titulos_y_descriptions_se_cuentan_vacios_incluidos():
+    """Un `<title>` vacio delante del bueno se saltaba sin decir que habia otro;
+    Screaming Frog lo reporta como «multiple» (#26)."""
+    s = sel(
+        '<html><head><title></title><title>Bueno</title>'
+        '<meta name="description" content="">'
+        '<meta name="Description" content="La buena">'
+        '<meta property="description" content="RDFa, no cuenta">'
+        '</head><body><svg><title>icono</title></svg></body></html>'
+    )
+    m = ex.extract_meta(s, base_url="https://e.com/")
+    assert m["title_count"] == 2
+    assert m["meta_description_count"] == 2
+    # El valor no cambia: el primer title (vacio) y la primera description con texto.
+    assert m["title"] is None
+    assert m["meta_description"] == "La buena"

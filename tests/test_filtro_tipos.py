@@ -114,3 +114,58 @@ def test_tipo_por_extension_dice_no_se_cuando_no_se_sabe():
     assert tipo_por_extension("https://x.com/producto-2.5-kg") is None
     assert tipo_por_extension("https://x.com/pagina") is None
     assert tipo_por_extension("https://x.com/") is None
+
+
+def test_un_pdf_lee_sus_directivas_de_cabecera(spider):
+    """Un PDF solo puede sacarse del indice o canonicalizarse por cabecera
+    (`X-Robots-Tag`, `Link: rel=canonical`), y en los no HTML no se leian: el
+    PDF salia "Indexable" (#26). Y se guardan en `html_meta`, porque el analisis
+    recalcula la indexabilidad con lo que haya ahi."""
+    from seo_crawler.items import HtmlMetaItem, PageItem
+
+    spider._allowed_resource_types = {"html", "redirect", "pdf"}
+    peticion = Request("https://x.com/ficha.pdf", meta={"depth": 1})
+    respuesta = Response(
+        "https://x.com/ficha.pdf", status=200,
+        headers={
+            b"Content-Type": b"application/pdf",
+            # Dirigida a otro bot: no cuenta. La de googlebot si.
+            b"X-Robots-Tag": [b"bingbot: noarchive", b"googlebot: noindex"],
+            b"Link": b'</ficha.css>; rel=preload, </ficha>; rel="canonical"',
+        },
+        body=b"%PDF-1.4", request=peticion,
+    )
+    items = list(spider.parse(respuesta))
+    pagina = next(i for i in items if isinstance(i, PageItem))
+    assert pagina["indexability_status"] == "Noindex"
+    meta = next(i for i in items if isinstance(i, HtmlMetaItem))
+    assert meta["x_robots_tag"] == "bingbot: noarchive\ngooglebot: noindex"
+    assert meta["canonical_header"] == "https://x.com/ficha"
+
+
+def test_un_pdf_canonicalizado_por_link_sale_canonicalizado(spider):
+    from seo_crawler.items import PageItem
+
+    spider._allowed_resource_types = {"html", "redirect", "pdf"}
+    respuesta = Response(
+        "https://x.com/ficha.pdf", status=200,
+        headers={b"Content-Type": b"application/pdf",
+                 b"Link": b"<https://x.com/ficha>; rel=canonical"},
+        body=b"%PDF-1.4", request=Request("https://x.com/ficha.pdf", meta={"depth": 1}),
+    )
+    pagina = next(i for i in spider.parse(respuesta) if isinstance(i, PageItem))
+    assert pagina["indexability_status"] == "Canonicalised"
+
+
+def test_un_pdf_sin_directivas_no_deja_fila_de_metadatos(spider):
+    """Una fila por cada imagen o PDF del sitio no aporta nada."""
+    from seo_crawler.items import HtmlMetaItem
+
+    spider._allowed_resource_types = {"html", "redirect", "pdf"}
+    respuesta = Response(
+        "https://x.com/a.pdf", status=200,
+        headers={b"Content-Type": b"application/pdf"},
+        body=b"%PDF-1.4", request=Request("https://x.com/a.pdf", meta={"depth": 1}),
+    )
+    items = list(spider.parse(respuesta))
+    assert not any(isinstance(i, HtmlMetaItem) for i in items)

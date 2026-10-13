@@ -56,10 +56,17 @@ def misma_url(a: str | None, b: str | None) -> bool:
     """
     if not a or not b:
         return False
-    return _clave_url(a) == _clave_url(b)
+    return clave_url(a) == clave_url(b)
 
 
-def _clave_url(url: str) -> tuple[str, str, str, str]:
+def clave_url(url: str) -> tuple[str, str, str, str]:
+    """Clave de igualdad de :func:`misma_url`, para usarla en un diccionario.
+
+    El analyzer busca el destino de un canonical o de un hreflang entre las URLs
+    rastreadas; si lo indexara con otro normalizador, la misma pareja de URLs
+    seria "la misma" para la indexabilidad y "otra" para el canonical roto o el
+    retorno del hreflang (decision 39).
+    """
     # w3lib primero, para la codificacion y el orden de los parametros: la
     # misma URL se escribe `intel%C2%B7ligencia` en el enlace y `intel·ligencia`
     # en el canonical, y sin normalizar eso salian 83 paginas de un censo como
@@ -185,6 +192,7 @@ def es_nofollow(meta_robots=None, x_robots=None, bot: str = BOT_POR_DEFECTO) -> 
 
 
 __all__ = [
-    "estado_indexabilidad", "es_noindex", "es_nofollow", "misma_url", "hay_noindex",
+    "estado_indexabilidad", "es_noindex", "es_nofollow", "misma_url", "clave_url",
+    "hay_noindex",
     "SEPARADOR_CABECERAS",
 ]

@@ -41,6 +41,11 @@ if __name__ == "__main__":
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_in_body BOOLEAN"))
         # Robots dirigido a Google: lo necesita el analyzer al recalcular (#26).
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_robots_googlebot VARCHAR(256)"))
+        # Varios <title> / meta description (vacios incluidos) y hreflang en el
+        # body: Google ignora el del body y con dos titulos no se sabe cual usa (#26).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS title_count INTEGER"))
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_description_count INTEGER"))
+        conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
