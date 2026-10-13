@@ -9,3 +9,6 @@ lxml>=5.0
 # Contraste del dia de la semana en las expresiones cron: implementa el
 # estandar, que APScheduler NO (ver `shared/programaciones._dia_de_semana`).
 croniter>=2.0
+# Transporte simulado (`httpx.MockTransport`) del FakeLLM: ningun test llama
+# a OpenRouter (#7). Los SDK oficiales van aparte, en requirements-contrato.txt.
+httpx>=0.28

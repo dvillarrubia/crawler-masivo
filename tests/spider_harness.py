@@ -220,12 +220,41 @@ class Recolector:
         return item
 
 
+def _armar_trampa_llm() -> dict:
+    """Lo peor que puede encontrarse el rastreo: la capa activada y con
+    clave. Si algo construye un cliente de OpenRouter o intenta salir hacia
+    el, queda anotado (#7: nada se dispara solo; el disparo es #40)."""
+    os.environ["DECISIONS_ENABLED"] = "1"
+    os.environ["OPENROUTER_API_KEY"] = "sk-trampa"
+    trampa = {"clientes": 0, "red": []}
+    import shared.llm
+
+    original = shared.llm.ClienteOpenRouter.__init__
+
+    def _init(self, *a, **k):
+        trampa["clientes"] += 1
+        original(self, *a, **k)
+
+    shared.llm.ClienteOpenRouter.__init__ = _init
+    try:
+        from fake_llm import vigilar_httpx
+
+        trampa["red"] = vigilar_httpx(setattr)
+    except ImportError:  # sin httpx no hay por donde salir
+        pass
+    return trampa
+
+
 def main() -> None:
     entrada = json.loads(sys.argv[1])
     srv, port = servir(entrada.get("robots_prohibe_todo", False),
                        entrada.get("robots_bloquea_privado", False),
                        entrada.get("con_recursos", False),
                        entrada.get("robots_crawl_delay"))
+
+    trampa = None
+    if entrada.get("trampa_llm"):
+        trampa = _armar_trampa_llm()
 
     import shared.database
     from scrapy.crawler import CrawlerProcess
@@ -305,6 +334,8 @@ def main() -> None:
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
+    if trampa is not None:
+        print("@@LLM@@" + json.dumps(trampa))
     print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 

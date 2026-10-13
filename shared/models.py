@@ -52,6 +52,11 @@ class Client(Base):
     zona_horaria = Column(String(64), nullable=True, default="Europe/Madrid")
     config_defecto = Column(JSON, nullable=False, default=dict)
     integraciones = Column(JSON, nullable=False, default=list)
+    # Capa de decisiones (#7): `{"presupuesto_mensual_usd": 5.0}`. NULL o sin
+    # la clave = sin tope propio del cliente (sigue mandando el global,
+    # `ENRICHMENT_MAX_USD_MES`). Es un presupuesto, no un secreto: la clave de
+    # OpenRouter va en el entorno (decision 84).
+    decisiones = Column(JSON, nullable=True)
     notas = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -216,6 +221,11 @@ class Job(Base):
     # cada tipo de URL (indexable, redireccion, error...) y cuanta se
     # desperdicia en errores. NULL = analisis anterior a este modelo.
     pagerank_resumen = Column(JSON, nullable=True)
+    # Observabilidad de la capa de decisiones (#7): llamadas, tokens, coste
+    # real, aciertos de cache, 429, latencia y distribucion de respuestas.
+    # NULL = nunca se le pregunto nada a un modelo sobre este job, que con
+    # este PR es lo normal: nada se dispara solo (decision 84).
+    decisiones_resumen = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -598,4 +608,74 @@ class Issue(Base):
         # URLs) pasaba de mas de 14 minutos sin terminar a 15 segundos.
         # Tambien lo usa el join de GET /issues/urls.
         Index("ix_issues_url_id", "url_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Decisiones de un modelo (#7, decision 84)
+# ---------------------------------------------------------------------------
+class Decision(Base):
+    """Una respuesta de Jev a una pregunta sobre un estado.
+
+    Es a la vez el registro de lo decidido y la cache DURADERA: un recrawl
+    busca aqui por `(clave, pregunta, version_pregunta, modelo)` antes de
+    pagar otra vez (la de Redis es la que comparten las replicas durante una
+    ejecucion y caduca).
+
+    `clave` es el hash del estado NORMALIZADO y no depende de `url_id`, que
+    cambia de un job a otro: es lo que permite al rastreo incremental (#36 F4)
+    arrastrar decisiones de un job al siguiente sin llamar a nadie.
+
+    `run_id` es la ejecucion de enriquecimiento de #40, que aun no existe: sin
+    FK hasta que exista la tabla, y NULL para lo que no venga de una.
+    """
+
+    __tablename__ = "decisions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # Nullable: el juego de evaluacion de #8 pregunta sin job.
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    nullable=True)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=True)
+    run_id = Column(UUID(as_uuid=True), nullable=True)
+    # url | bloque | enlace | par | job
+    ambito = Column(String(10), nullable=False, default="url")
+    clave = Column(String(64), nullable=False)
+    pregunta = Column(String(64), nullable=False)
+    version_pregunta = Column(Integer, nullable=False)
+    # decidido | incierto | sin_decidir
+    estado = Column(String(12), nullable=False)
+    # modelo | cache | arrastre | regla | humano
+    origen = Column(String(10), nullable=False)
+    # Para `noul` la probabilidad de si en texto ("0.98"): una sola columna
+    # para los tres tipos, y los numeros siguen en `probabilidades`.
+    respuesta = Column(Text, nullable=True)
+    probabilidades = Column(JSON, nullable=True)
+    confianza = Column(Float, nullable=True)
+    # El modelo PEDIDO (fijado en el catalogo), que es el que forma la clave
+    # de cache, y el que respondio (`typesafe/jev-1.13-20260917`), que puede
+    # no coincidir y es el que hay que mirar al comparar resultados.
+    modelo = Column(String(64), nullable=False)
+    modelo_respuesta = Column(String(96), nullable=True)
+    proveedor = Column(String(64), nullable=True)
+    tokens_entrada = Column(Integer, nullable=True)
+    # La parte de la llamada que corresponde a esta pregunta (el coste de una
+    # llamada con varias preguntas se reparte a partes iguales). 0 en lo
+    # servido de cache: es lo que no se ha vuelto a pagar.
+    coste_usd = Column(Float, nullable=True)
+    coste_estimado = Column(Boolean, nullable=True)
+    # Por que quedo sin decidir: presupuesto_agotado, sin_credito, red...
+    motivo = Column(String(32), nullable=True)
+    # Lo que VIO el modelo: la revision de #8 tiene que ensenar eso y no lo
+    # que hay hoy en la pagina. Es contenido que ya esta en nuestra BD.
+    estado_enviado = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_decisions_job_pregunta", "job_id", "pregunta"),
+        # FK con ON DELETE CASCADE: sin indice, borrar un rastreo recorre la
+        # tabla entera por cada fila de `urls` (la leccion de `ix_issues_url_id`).
+        Index("ix_decisions_url_id", "url_id"),
+        Index("ix_decisions_cache", "clave", "pregunta", "version_pregunta", "modelo"),
+        Index("ix_decisions_run_id", "run_id"),
     )

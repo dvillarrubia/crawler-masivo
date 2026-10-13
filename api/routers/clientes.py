@@ -148,6 +148,7 @@ def _respuesta(cliente: Client, cuentas: dict | None = None) -> ClientResponse:
         zona_horaria=cliente.zona_horaria,
         config_defecto=dict(cliente.config_defecto or {}),
         integraciones=_integraciones(cliente),
+        decisiones=cliente.decisiones,
         notas=cliente.notas,
         created_at=cliente.created_at,
         updated_at=cliente.updated_at,
@@ -226,6 +227,7 @@ def crear_cliente(cuerpo: ClientCreate, db: Session = Depends(get_session)):
         zona_horaria=cuerpo.zona_horaria,
         config_defecto=cuerpo.config_defecto,
         integraciones=[i.model_dump() for i in cuerpo.integraciones],
+        decisiones=cuerpo.decisiones.model_dump() if cuerpo.decisiones else None,
         notas=cuerpo.notas,
     )
     db.add(cliente)

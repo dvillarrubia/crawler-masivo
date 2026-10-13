@@ -9,3 +9,7 @@ numpy>=1.26
 # que la decision 49 descarto porque metia a la competencia en el
 # informe del cliente.
 tldextract>=5.1
+# Cliente de OpenRouter (`shared/llm.py`, #7): asincrono, para poder llamar
+# desde el spider sin bloquear el reactor. Ninguna llamada sale sola: hace
+# falta DECISIONS_ENABLED=1, OPENROUTER_API_KEY y que alguien la dispare (#40).
+httpx>=0.28

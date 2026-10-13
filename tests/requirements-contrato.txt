@@ -1,0 +1,10 @@
+# Solo para tests/test_llm_contrato.py (#7): fija el formato de /systemone
+# contra los modelos Pydantic de los SDK oficiales. NO son dependencias de
+# produccion (ver shared/llm.py): el de OpenRouter fija pydantic<2.13 y el de
+# TypeSafe arrastra httpx2 y descarta usage.cost. Por eso van en su propio
+# trabajo de CI y no en tests/requirements.txt.
+pytest>=8.0
+httpx>=0.28
+sqlalchemy>=2.0,<3.0
+typesafe-sdk==0.7.2
+openrouter==1.3.22

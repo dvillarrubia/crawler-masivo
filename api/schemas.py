@@ -370,6 +370,10 @@ class JobResponse(BaseModel):
     analisis_version: str | None = None
     # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
     pagerank_resumen: dict[str, Any] | None = None
+    # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
+    # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
+    # pregunto nada a un modelo sobre este job.
+    decisiones_resumen: dict[str, Any] | None = None
     seeds: list[str]
     config: dict[str, Any]
     total_urls_discovered: int
@@ -794,6 +798,19 @@ def _validar_dominios(v: list[str] | None) -> list[str]:
     return vistos
 
 
+class DecisionesCliente(BaseModel):
+    """Lo del cliente en la capa de decisiones (#7). Un presupuesto, no un
+    secreto: la clave de OpenRouter va en el entorno (decision 84)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Tope de gasto en llamadas a modelos por mes natural (UTC), sumando todas
+    # las ejecuciones del cliente. None = sin tope propio (manda el global,
+    # `ENRICHMENT_MAX_USD_MES`). Con rastreos semanales, un tope por ejecucion
+    # se multiplica sin control; este no.
+    presupuesto_mensual_usd: float | None = Field(default=None, ge=0, le=100_000)
+
+
 class _ClienteCampos(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -834,6 +851,7 @@ class ClientCreate(_ClienteCampos):
     zona_horaria: str | None = Field(default="Europe/Madrid", max_length=64)
     config_defecto: dict[str, Any] = Field(default_factory=dict)
     integraciones: list[Integracion] = Field(default_factory=list)
+    decisiones: DecisionesCliente | None = None
     notas: str | None = None
 
 
@@ -845,6 +863,7 @@ class ClientUpdate(_ClienteCampos):
     config_defecto: dict[str, Any] | None = None
     # Se sustituye la lista entera: es como la edita la interfaz.
     integraciones: list[Integracion] | None = None
+    decisiones: DecisionesCliente | None = None
     notas: str | None = None
 
 
@@ -856,6 +875,7 @@ class ClientResponse(BaseModel):
     zona_horaria: str | None = None
     config_defecto: dict[str, Any] = Field(default_factory=dict)
     integraciones: list[IntegracionResponse] = Field(default_factory=list)
+    decisiones: dict[str, Any] | None = None
     notas: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

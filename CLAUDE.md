@@ -154,6 +154,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `config.py` | Env vars + SEO thresholds (title/description min/max lengths) |
 | `clientes.py` | Slug, fusion profunda de configuracion (`fusionar_config`), cliente a partir del `client_id` de texto y la migracion de esos textos (decision 83) |
 | `credenciales.py` | `credencial(integracion)`: el secreto de una integracion, leido del ENTORNO (nunca de la BD) y solo dentro del prefijo de su tipo (decision 83) |
+| `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
+| `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Nadie la dispara todavia |
+| `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -1555,6 +1558,108 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
      se crea, para que importar un censo no deje nada programado.
 
 
+84. **Jev por OpenRouter: una capa que no se dispara sola, no tumba un censo y
+   no vuelve a pagar lo mismo** (#7). Base de la capa de decisiones (#6);
+   el disparo es el boton de #40.
+   - **Un transporte, un formato verificado.** `shared/llm.py` es el UNICO
+     sitio que habla con un modelo, siempre a traves de OpenRouter
+     (`POST https://openrouter.ai/api/v1/systemone`, la ruta estable y
+     compatible con TypeSafe; no la alfa `/api/alpha/decisions`). Cliente
+     propio sobre `httpx` y no los SDK: el de OpenRouter fija `pydantic<2.13`
+     y no reintenta los 429; el de TypeSafe descarta `usage.cost`, que es lo
+     que necesita el presupuesto. El formato lo fija `test_llm_contrato.py`
+     contra los modelos Pydantic de `openrouter==1.3.22` y
+     `typesafe-sdk==0.7.2` en su propio trabajo de CI. Verificado el
+     2026-10-13 en el codigo de los dos SDK, en la guia
+     `openrouter.ai/docs/guides/community/typesafe-sdk`, en
+     `docs.typesafe.ai/{api,models}` y en `GET /api/v1/models/typesafe/
+     jev-1.13/endpoints`: un solo endpoint (proveedor TypeSafe,
+     `typesafe/jev-1.13-20260917`), **0,042 $/M tokens de entrada, salida
+     gratis**, 32k de prompt y 64k de contexto, y aparece en
+     `GET /api/v1/endpoints/zdr` (o sea que `provider.zdr=true` deberia
+     encontrarlo; sin probar con una llamada). `instructions` es obligatorio
+     en los tres tipos (el esquema de TypeSafe lo deja opcional, el de
+     OpenRouter y la referencia publica no), y un `noul` lleva sus dos
+     criterios o ninguno. No esta publicado el limite de tasa de Jev A TRAVES
+     de OpenRouter (TypeSafe directo: 80 peticiones/s y 100.000 tokens/s), de
+     ahi `LLM_RPM=600` y AIMD: tras un 429 el ritmo baja a la mitad 60 s.
+   - **Resiliencia.** Reintento con backoff y jitter (o `retry-after-ms` /
+     `retry-after`) ante 408, 429, 5xx, 524, 529, timeouts y errores de red:
+     3 reintentos y 30 s por llamada como mucho. Sin reintento ante 400, 413
+     y 422 (esa peticion esta mal; las demas siguen). 402 (sin credito), 401,
+     403 y 404 **cortan la capa** para el resto de la ejecucion, tambien las
+     llamadas que esperaban turno; cinco fallos seguidos abren el circuito.
+     Lo que no se decide queda `sin_decidir` con su `motivo` y **nada lanza**:
+     una caida de Jev no puede tumbar un censo.
+   - **Cache por el estado normalizado, no por bytes ni por URL.** Clave =
+     SHA-256 de (estado sin caja, sin espacios repetidos, sin nonces/CSRF de
+     24+ caracteres, sin marcas de tiempo con hora y sin `?v=`) | pregunta |
+     version | **modelo pedido**. Los numeros de negocio NO se tocan: un precio
+     o la fecha de una oferta cambian la respuesta. Tres niveles: memoria de
+     la ejecucion, Redis `llm:dec:{clave}` (30 dias, lo que comparten las
+     replicas) y la tabla `decisions` (duradera: un recrawl no vuelve a
+     pagar). Dos estados identicos —bloques de plantilla— son UNA llamada, y
+     las preguntas que faltan de un estado van todas en la misma. Lo
+     `sin_decidir` no se cachea. La tabla tolera no existir aun (primer minuto
+     de un despliegue): es una cache que falla, no una decision.
+   - **El modelo va fijado y la version es parte de la pregunta.** El
+     catalogo (`shared/preguntas/`) rechaza `*-latest`: el alias se mueve
+     cuando sale una version y la cache y los umbrales de #8 dejarian de
+     significar lo que significaban. Cambiar el texto de una pregunta es subir
+     su `version`; un test guarda la huella de cada (nombre, version) y falla
+     si cambia el texto sin la version. Sin umbral calibrado por #8 **nada
+     sale `decidido`**: todo lo respondido es `incierto`.
+   - **Presupuesto en dolares, con reserva.** Antes de cada llamada se
+     reserva su coste estimado contra tres topes —el de la ejecucion (#40),
+     el mensual del cliente (`clients.decisiones.presupuesto_mensual_usd`) y
+     el global (`ENRICHMENT_MAX_USD_MES`)— y despues se ajusta con
+     `usage.cost` (si falta, tokens x precio, y se marca `coste_estimado`).
+     Los mensuales van en Redis con `INCRBYFLOAT` (atomico entre replicas) y
+     se siembran desde `decisions` si Redis se vacio. La reserva aprende del
+     coste real (nunca baja de la estimacion por precio) y se hace dentro del
+     cupo de llamadas en vuelo: con `gather` sin cupo todas reservaban a la
+     vez con la estimacion inicial y el tope se pasaba por tantas llamadas
+     como estados. El exceso maximo es el error de estimacion de
+     `LLM_MAX_CONCURRENCIA` llamadas. `estimar()` da llamadas, tokens y coste
+     tras la cache sin llamar (lo que enseña el dialogo de #40).
+   - **Que sale de la instalacion.** Hacia OpenRouter, y de ahi a TypeSafe:
+     el `state` que construya cada familia de preguntas (#9 en adelante) —
+     estados MINIMOS: titulo, h1, el principio del contenido principal,
+     codigo, cabeceras relevantes, metricas; **nunca el HTML entero**—, las
+     instrucciones y opciones de las preguntas, el modelo, `session_id` = id
+     del job (segun el SDK de OpenRouter, «never sent to the provider») y
+     `user` = **slug** del cliente (nunca su nombre). `provider` lleva
+     `data_collection: deny` siempre y `zdr: true` con `LLM_ZDR=1`; la
+     retencion cero depende del proveedor que hay detras, no la garantiza
+     OpenRouter. Nada mas: ni URLs completas si el estado no las incluye, ni
+     cookies, ni credenciales. La clave va en el entorno, nunca en la BD; un
+     cliente que no autorice el envio no debe tener ejecuciones de #40.
+   - **Nada se dispara solo.** Ni el spider, ni el analizador, ni el worker,
+     ni la API importan la capa, y `test_decisiones_no_se_disparan.py` lo
+     comprueba **ejecutando** un analisis completo y un rastreo real con
+     `DECISIONS_ENABLED=1` y una clave puesta, con una trampa que anota
+     cualquier cliente construido o intento de red. En toda la suite, un
+     transporte real de httpx hacia `openrouter.ai`/`typesafe.ai` falla
+     (`conftest.py`) y la clave se borra del entorno; los tests usan el
+     `FakeLLM` de `tests/fake_llm.py` (probabilidades fijas, 429, 503, 402...).
+   - **Observabilidad por job** en `jobs.decisiones_resumen`, expuesta en
+     `GET /api/jobs/{id}`: llamadas, tokens, coste real, aciertos de cache
+     (y cuantos de la BD), 429, reintentos, errores, latencia (histograma por
+     cubos, que se fusiona EXACTO entre ejecuciones; p50 y p95 son el limite
+     del cubo), distribucion de respuestas por pregunta, avisos y `estado`
+     (ok, degradado, presupuesto_agotado, desactivado, clave_invalida,
+     sin_credito; al fusionar gana el peor). Se acumula con bloqueo de fila.
+   - **`decisions`**: clave estable (no depende de `url_id`, para que el
+     rastreo incremental de #36 F4 arrastre decisiones sin pagar), `run_id`
+     nullable y sin FK hasta que exista la tabla de ejecuciones de #40, el
+     modelo pedido y el que respondio, y `estado_enviado` (lo que VIO el
+     modelo, para la revision de #8). El coste de una llamada con varias
+     preguntas se reparte a partes iguales entre sus filas.
+   - Fuera de este PR: la migracion del modulo semantico a OpenRouter (paso 9
+     de la guia de #7, aparcado en el ROADMAP), `job.config.decisions` para los
+     modulos de rastreo (#10/#14/#20 lo declararan en `JobConfig` cuando
+     existan) y la prueba real con 1.000 URLs, que necesita una clave.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -1819,6 +1924,21 @@ MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 
 # robots.txt
 ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision 81)
+
+# Capa de decisiones: Jev por OpenRouter (decision 84). Sin clave o con
+# DECISIONS_ENABLED=0 no se llama a nadie; con las dos, tampoco solo (#40).
+DECISIONS_ENABLED=0
+OPENROUTER_API_KEY=              # en el entorno, NUNCA en la BD
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_APP_URL=              # HTTP-Referer
+OPENROUTER_APP_TITLE=SEO Crawler # X-OpenRouter-Title
+LLM_RPM=600                      # el limite de Jev via OpenRouter no esta publicado
+LLM_MAX_CONCURRENCIA=16
+LLM_TIMEOUT_S=15
+LLM_CACHE_TTL_D=30               # Redis; la cache de BD no caduca
+LLM_ZDR=0                        # 1 = exigir retencion cero
+JEV_PRECIO_USD_MTOK=0.042        # solo reserva y respaldo si falta usage.cost
+ENRICHMENT_MAX_USD_MES=          # tope global mensual; vacio = sin tope
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
@@ -1921,6 +2041,13 @@ tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
 en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
 las de la derecha), y `test_render_espera.py` (contrato de la espera de render:
 no resolver con peticiones en vuelo).
+Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
+429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
+confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
+`test_llm_contrato.py` (contra los SDK oficiales; necesita
+`tests/requirements-contrato.txt` y corre en su propio trabajo de CI). Todos
+con el `FakeLLM` de `tests/fake_llm.py`: **ningun test llama a la red**, y
+`conftest.py` hace fallar cualquier transporte real hacia OpenRouter.
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
@@ -2034,3 +2161,4 @@ Lo que dispara despliegue es el filtro de `paths` de `deploy.yml`:
 - JavaScript comparison tab (raw HTML vs rendered)
 - Pagination (rel next/prev) analysis
 - Structured data rich-result validation (only basic @type/required-prop checks)
+- Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40

@@ -46,6 +46,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | seeds | JSON | Lista de seed URLs |
 | config | JSON | Configuracion completa del crawl. Con cliente, ya resuelta (defaults ← cliente ← perfil ← job) en el momento de crearlo |
 | total_urls_crawled | int | URLs crawleadas |
+| decisiones_resumen | JSON | Capa de decisiones (#7): `llamadas`, `tokens_entrada`, `coste_usd` (real, de `usage.cost`), `aciertos_cache`, `n_429`, `latencia_p50_ms`/`p95`, `por_pregunta` con la distribucion de respuestas, `avisos` y `estado` (ok, degradado, desactivado, sin_credito, presupuesto_agotado). NULL = nunca se pregunto nada a un modelo |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 
@@ -59,6 +60,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | zona_horaria | varchar(64) | Def. `Europe/Madrid` |
 | config_defecto | JSON | Configuracion PARCIAL de `JobConfig`: solo lo que el cliente fija. `null` en una clave = quitar lo heredado |
 | integraciones | JSON | Lista de `{tipo, etiqueta, parametros, credencial_env, activa}`. **Sin secretos**: `credencial_env` es el NOMBRE de la variable de entorno con la clave (decision 83 de CLAUDE.md) |
+| decisiones | JSON | `{"presupuesto_mensual_usd": 5.0}`: tope de gasto en llamadas a modelos por mes natural (UTC), sumando todas sus ejecuciones. NULL = sin tope propio (manda `ENRICHMENT_MAX_USD_MES`) |
 | notas | text | |
 | created_at / updated_at | timestamptz | |
 
@@ -235,6 +237,32 @@ filtrar por `urls.is_html`.
 | severity | varchar(10) | error, warning, info |
 | details | JSON | Detalles adicionales |
 | detected_at | timestamptz | |
+
+### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)
+Registro de lo decidido y cache DURADERA: un recrawl busca aqui por `(clave, pregunta, version_pregunta, modelo)` antes de pagar otra vez.
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE), nullable | NULL en el juego de evaluacion (#8) |
+| url_id | bigint (FK → urls, CASCADE), nullable | |
+| run_id | UUID, nullable | Ejecucion de enriquecimiento de #40 (sin FK hasta que exista su tabla) |
+| ambito | varchar(10) | url, bloque, enlace, par, job |
+| clave | varchar(64) | SHA-256 del estado normalizado. Estable entre jobs: no depende de `url_id` |
+| pregunta / version_pregunta | varchar(64) / int | Del catalogo `shared/preguntas/` |
+| estado | varchar(12) | decidido, incierto, sin_decidir |
+| origen | varchar(10) | modelo, cache, arrastre, regla, humano |
+| respuesta | text | La opcion de un choice, `true`/`false` de un noul, el valor esperado de un score |
+| probabilidades | JSON | Por opcion / nivel |
+| confianza | float | Normalizada: `max(p, 1-p)` en noul, `confidence` o la probabilidad maxima en choice/score |
+| modelo / modelo_respuesta | varchar | El pedido (`typesafe/jev-1.13`, forma la clave) y el que respondio (`typesafe/jev-1.13-20260917`) |
+| proveedor | varchar(64) | `TypeSafe` |
+| tokens_entrada / coste_usd / coste_estimado | int / float / bool | Parte de la llamada que le toca a esta pregunta. 0 en lo servido de cache. `coste_estimado` = la respuesta no traia `usage.cost` |
+| motivo | varchar(32) | Por que quedo sin decidir (presupuesto_ejecucion, presupuesto_cliente, sin_credito, servidor, desactivado...) |
+| estado_enviado | JSON | Lo que VIO el modelo (estado normalizado) |
+| created_at | timestamptz | |
+
+Indices: `(job_id, pregunta)`, `url_id`, `(clave, pregunta, version_pregunta, modelo)`, `run_id`.
 
 **Issue types:** missing_title, title_too_short, title_too_long, duplicate_title, missing_description, description_too_short, description_too_long, duplicate_description, missing_h1, multiple_h1, status_4xx, status_5xx, redirect_chain, image_missing_alt, http_url, mixed_content, missing_hsts, missing_csp, low_word_count, url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count
 
