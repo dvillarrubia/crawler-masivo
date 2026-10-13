@@ -212,6 +212,21 @@ def _origenes(db: Session, job_id: uuid.UUID, hashes: list[str]) -> dict[str, tu
     return {h: (mejor[h][0], distintos[h]) for h in mejor}
 
 
+def _h1s(db: Session, ids: list[int]) -> dict[int, tuple[str | None, int]]:
+    """Primer H1 visible y cuantos H1 visibles tiene cada URL."""
+    if not ids:
+        return {}
+    salida: dict[int, tuple[str | None, int]] = {}
+    for uid, texto in (
+        db.query(Heading.url_id, Heading.text)
+        .filter(Heading.url_id.in_(ids), Heading.tag == "h1", Heading.oculto.isnot(True))
+        .order_by(Heading.url_id, Heading.position)
+    ):
+        primero, n = salida.get(uid, (None, 0))
+        salida[uid] = (primero if primero is not None else texto, n + 1)
+    return salida
+
+
 def _anotar_uso(qp, *, csv: bool = False) -> None:
     """Cuenta la consulta si viene del Explorador (`?vista=explorador`).
     Nunca falla: ver api/uso.py."""
@@ -346,6 +361,7 @@ def list_urls(
     in_sitemap: bool | None = Query(None),
     ligero: bool = Query(False, description="Sin page_content: es el 89% del peso y la tabla no lo usa"),
     origenes: bool = Query(False, description="Anade enlazada_desde y origenes a cada fila"),
+    h1: bool = Query(False, description="Anade el primer H1 visible y cuantos hay"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -387,6 +403,10 @@ def list_urls(
         o = _origenes(db, job_id, [r.url_hash for r in rows])
         for it, r in zip(items, rows):
             it.enlazada_desde, it.origenes = o.get(r.url_hash, (None, 0))
+    if h1:
+        hs = _h1s(db, [r.id for r in rows])
+        for it, r in zip(items, rows):
+            it.h1, it.h1_count = hs.get(r.id, (None, 0))
 
     return _paginate(
         items=items,
@@ -560,6 +580,8 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     # Calculadas por tramo con `_origenes` (no son columnas de `urls`).
     "enlazada_desde": ("Enlazada desde", lambda u: getattr(u, "_origen", (None, 0))[0]),
     "origenes": ("Páginas que la enlazan", lambda u: getattr(u, "_origen", (None, 0))[1]),
+    "h1": ("H1", lambda u: getattr(u, "_h1", (None, 0))[0]),
+    "h1_count": ("Nº de H1", lambda u: getattr(u, "_h1", (None, 0))[1]),
 }
 
 
@@ -616,6 +638,10 @@ def export_vista(
                     o = _origenes(s, job_id, [u.url_hash for u in por_id.values()])
                     for u in por_id.values():
                         u._origen = o.get(u.url_hash, (None, 0))
+                if {"h1", "h1_count"} & set(claves):
+                    hs = _h1s(s, list(por_id))
+                    for u in por_id.values():
+                        u._h1 = hs.get(u.id, (None, 0))
                 buf = io.StringIO()
                 w = csv.writer(buf)
                 for uid in tramo:

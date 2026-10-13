@@ -2410,7 +2410,7 @@ function app() {
       this.expColumnFilters = preajuste.filtros || {};
       this.expColumnPickerOpen = false;
       this.expColumnsByTab = this._loadExpColumnPrefs();
-      if (this.expProblema && !this.issuesResumen) this.loadIssuesResumen();
+      if ((this.expProblema || EXP_TABS.find(t => t.key === this.expTab)?.ambito) && !this.issuesResumen) this.loadIssuesResumen();
       this._bindExplorerKeyNav();
       this.loadExplorerBadges();
       this.loadExplorerUrls();
@@ -2446,7 +2446,13 @@ function app() {
     // filtros de columnas que la pestaña nueva no muestra siguen aplicandose
     // y se ven en el contador «N filtros», que los quita de golpe.
     setExplorerTab(tab) {
+      const antes = EXP_TABS.find(t => t.key === this.expTab);
       this.expTab = tab;
+      // Entre vistas de ambito, el problema elegido es de la anterior: fuera.
+      if (antes && antes.ambito && this.expProblema && this.expProblema.split(',').every(t => antes.ambito.includes(t))) {
+        this.expProblema = '';
+      }
+      if (EXP_TABS.find(t => t.key === tab)?.ambito && !this.issuesResumen) this.loadIssuesResumen();
       this.expPage = 1;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
@@ -2493,6 +2499,30 @@ function app() {
     filtrarPorTramo(tramo) {
       this.expColumnFilters = { ...this.expColumnFilters, url: { value: '/' + tramo } };
       this.expAgrupar = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    // Los tipos de incidencia del ambito de la pestaña, con sus paginas.
+    tiposDelAmbito() {
+      const tab = EXP_TABS.find(t => t.key === this.expTab);
+      if (!tab || !tab.ambito) return [];
+      const por = Object.fromEntries((this.issuesResumen || []).map(r => [r.issue_type, r]));
+      return tab.ambito.filter(t => por[t]).map(t => por[t]);
+    },
+
+    // Gravedad mas alta del ambito: el punto de color de la barra lateral.
+    gravedadDelAmbito(tab) {
+      if (!tab.ambito || !this.issuesResumen) return '';
+      const sev = this.issuesResumen.filter(r => tab.ambito.includes(r.issue_type)).map(r => r.severity);
+      return sev.includes('error') ? 'error' : sev.includes('warning') ? 'warning' : sev.includes('info') ? 'info' : 'ok';
+    },
+
+    elegirTipoDelAmbito(tipo) {
+      const tab = EXP_TABS.find(t => t.key === this.expTab);
+      // '' = todas las paginas; '*' = cualquier problema del ambito
+      this.expProblema = tipo === '*' ? tab.ambito.join(',') : tipo;
+      this.expGravedad = '';
       this.expPage = 1;
       this.loadExplorerUrls();
     },
@@ -2578,6 +2608,7 @@ function app() {
       if (this.expProblema) params.set('issue_type', this.expProblema);
       if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
+      if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'h1')) params.set('h1', 'true');
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
       if (tabCfg.filter) {
@@ -2939,6 +2970,8 @@ const EXP_COLUMN_DEFS = {
   // Calculadas en el servidor solo si estan visibles (?origenes=true): el
   // origen mas frecuente y cuantas paginas la enlazan. Para un 404 o una
   // redireccion es lo que dice DONDE hay que corregir.
+  h1:                   { label: 'H1',               type: 'string',  sortable: false, calculada: 'h1', width: 260, fmt: r => r.h1 ?? '' },
+  h1_count:             { label: 'Nº de H1',         type: 'numeric', sortable: false, calculada: 'h1', width: 110, fmt: r => r.h1_count ?? '' },
   enlazada_desde:       { label: 'Enlazada desde',  type: 'string',  sortable: false, calculada: 'origenes', width: 280, fmt: r => r.enlazada_desde ? (() => { try { return new URL(r.enlazada_desde).pathname; } catch { return r.enlazada_desde; } })() : '' },
   origenes:             { label: 'Páginas que la enlazan', type: 'numeric', sortable: false, calculada: 'origenes', width: 170, fmt: r => r.origenes ?? '' },
   last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
@@ -2950,7 +2983,7 @@ const EXP_COLUMN_DEFS = {
 const EXP_GRUPOS_COLUMNAS = [
   ['Respuesta',   ['url','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
   ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap']],
-  ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width']],
+  ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
@@ -2962,6 +2995,8 @@ const EXP_DEFAULT_COLUMNS = [
   'content_type','content_length','response_time_ms','click_depth',
   'word_count','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'
 ];
+
+const HTML_INTERNO = { resource_type: 'html', is_internal: true };
 
 const EXP_TABS = [
   { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                   columns: EXP_DEFAULT_COLUMNS },
@@ -2984,6 +3019,31 @@ const EXP_TABS = [
   // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
   // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
   { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','click_depth'] },
+  // Vistas por ambito SEO (#131), como las pestañas de Screaming Frog pero
+  // construidas con lo que ya calcula el analizador: cada una son las paginas
+  // HTML internas, sus columnas y, encima de la tabla, un chip por tipo de
+  // incidencia de su ambito con cuantas paginas lo tienen.
+  { key: '_h1', header: 'Por ámbito SEO' },
+  { key: 'a_titulos',  label: 'Títulos',       icon: 'heading',      filter: HTML_INTERNO, ambito: ['title_missing','title_too_short','title_too_long','title_duplicate','title_multiple'],
+    columns: ['url','status_code','title','title_len','title_pixel_width','indexable','inlinks_count'] },
+  { key: 'a_desc',     label: 'Descripciones', icon: 'align-left',   filter: HTML_INTERNO, ambito: ['description_missing','description_too_short','description_too_long','description_duplicate','description_multiple'],
+    columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
+  { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_multiple','h1_duplicate'],
+    columns: ['url','status_code','h1','h1_count','title','indexable'] },
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
+    columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
+  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','robots_invalid_syntax'],
+    columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
+  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body'],
+    columns: ['url','status_code','title','indexable','inlinks_count'] },
+  { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning'],
+    columns: ['url','status_code','title','indexable','pagerank_score'] },
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap'],
+    columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
+  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content'],
+    columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
+  { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
+    columns: ['url','status_code','url_length','indexable','inlinks_count'] },
 ];
 
 function _freshForm() {

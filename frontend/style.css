@@ -1308,3 +1308,13 @@ body:has(.breadcrumbs){--alto-migas:29px}
 .chip-tramo{font:inherit;font-size:.75rem;border:1px solid var(--orange);background:#fff;border-radius:3px;padding:.05rem .4rem;cursor:pointer}
 .chip-tramo:hover{background:var(--orange-bg)}
 code.tramo{font-size:.7rem;background:var(--orange-bg);padding:0 .25rem;border-radius:3px;margin-right:.25rem;white-space:nowrap}
+/* Vistas por ambito (#131) */
+.exp-sidebar-titulo{font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:.7rem .6rem .25rem;border-top:1px solid var(--border);margin-top:.35rem}
+.exp-tab-punto{margin-left:auto;width:.5rem;height:.5rem;border-radius:50%;flex-shrink:0;background:transparent}
+.exp-tab-punto.p-error{background:var(--red)}.exp-tab-punto.p-warning{background:var(--orange)}
+.exp-tab-punto.p-info{background:var(--blue)}.exp-tab-punto.p-ok{background:var(--green);opacity:.5}
+.exp-ambito{display:flex;flex-wrap:wrap;gap:.3rem;padding:.4rem .6rem;border-bottom:1px solid var(--border);background:var(--bg-card)}
+.chip-ambito{font:inherit;font-size:.74rem;border:1px solid var(--border);background:#fff;border-radius:999px;padding:.12rem .55rem;cursor:pointer;color:var(--text)}
+.chip-ambito:hover{border-color:var(--accent)}
+.chip-ambito.on{border-color:var(--accent);background:var(--accent-subtle);font-weight:600}
+.chip-ambito.sev-error strong{color:var(--red)}.chip-ambito.sev-warning strong{color:var(--orange)}.chip-ambito.sev-info strong{color:var(--blue)}
