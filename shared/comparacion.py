@@ -608,16 +608,46 @@ def resumen_de_job(job) -> dict[str, Any]:
 
 
 def censo_anterior(db, job):
-    """El rastreo completado más reciente del mismo sitio ANTES que este.
+    """Con qué censo hay que comparar este, si hay alguno.
 
-    Mismo host de semilla y completado: con otra cosa la comparación o se
-    rechaza (otro origen) o no puede afirmar ausencias (truncado). Devuelve
-    None si no hay ninguno, que es el caso normal del primer censo de un sitio.
+    **Si el rastreo lo lanzó una programación, se compara con el anterior de
+    ESA programación**, no con lo último que pasara por ese host. La regla del
+    host sola elige mal en cuanto alguien lanza algo a mano: comprobado el
+    2026-10-09 en producción, el segundo canario de Lopesan se comparó con el
+    primero —117 URLs en común de 250— en vez de con el censo completo. Llevado
+    a un rastreo semanal de 5.000 páginas, se compararía contra un canario de
+    250 que alguien lanzó el martes.
+
+    Y no es cosmético: **las alertas se miden sobre las páginas que están en
+    los dos censos**. Si la referencia cubre 250 páginas y el fallo afecta a
+    2.319 que no están entre ellas, la alerta NO salta. El guardia de alcance
+    (decisión 70) evita afirmar ausencias falsas, pero no evita ese silencio, y
+    un silencio se lee igual que «no ha cambiado nada».
+
+    Para un rastreo lanzado a mano se mantiene la regla del host: es lo único
+    que se sabe de él.
     """
     from shared.models import Job
 
     if not job.seeds or not job.started_at:
         return None
+
+    programacion = getattr(job, "programacion_id", None)
+    if programacion:
+        de_la_serie = (
+            db.query(Job)
+            .filter(Job.id != job.id, Job.programacion_id == programacion,
+                    Job.status == "completed", Job.started_at.isnot(None),
+                    Job.started_at < job.started_at)
+            .order_by(Job.started_at.desc())
+            .first()
+        )
+        if de_la_serie is not None:
+            return de_la_serie
+        # Primera ejecución de la serie: se cae a la regla del host, que es
+        # mejor que no comparar con nada — el guardia de alcance ya dirá si los
+        # alcances no casan.
+
     host = _host(job.seeds[0])
     if not host:
         return None

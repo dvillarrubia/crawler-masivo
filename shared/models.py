@@ -68,6 +68,10 @@ class Job(Base):
     name = Column(String(512), nullable=False)
     client_id = Column(String(128), nullable=True, index=True)
     owner_id = Column(String(128), nullable=True)
+    # Que programacion lo lanzo, si lo lanzo alguna. Es lo que permite
+    # compararlo con el anterior de SU serie en vez de con lo ultimo que
+    # pasara por ese host (decision 78).
+    programacion_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 
     # pending | running | analyzing | completed | failed | cancelled
     status = Column(String(20), nullable=False, default="pending", index=True)

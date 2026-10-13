@@ -1367,6 +1367,25 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    corre al cerrar un rastreo, y que un webhook caído dejara un censo en
    `failed` sería cambiar un problema por otro peor.
 
+78. **Un rastreo programado se compara con el anterior de SU serie** — la
+   regla «el censo completado más reciente del mismo host» elige mal en cuanto
+   alguien lanza algo a mano. Comprobado en producción el 2026-10-09: el
+   segundo canario de Lopesan se comparó con el primero —**117 URLs en común
+   de 250**— en vez de con el censo completo. Llevado a un rastreo semanal de
+   5.000 páginas, se compararía contra un canario de 250 que alguien lanzó el
+   martes.
+   Y no es cosmético: **las alertas se miden sobre las páginas que están en
+   los dos censos**. Si la referencia cubre 250 páginas y el fallo afecta a
+   2.319 que no están entre ellas, la alerta NO salta. El guardia de alcance
+   (decisión 70) evita afirmar ausencias falsas, pero no evita ese silencio, y
+   un silencio se lee igual que «no ha cambiado nada» — que es contra lo que
+   existen las decisiones 67 a 77.
+   `jobs.programacion_id` liga cada rastreo con la programación que lo lanzó.
+   La primera ejecución de una serie cae a la regla del host (comparar con algo
+   del mismo sitio es mejor que no comparar con nada, y el guardia de alcance
+   ya dirá si no casan), y un rastreo lanzado a mano se queda con esa regla
+   porque es lo único que se sabe de él.
+
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
