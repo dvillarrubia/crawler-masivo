@@ -783,6 +783,52 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
             session.close()
 
 
+# Un enlace escondido no invalida un grafo: lo que lo invalida es que
+# una plantilla monte con JavaScript una parte que PESA. Con el umbral
+# en "mayor que cero", el enlace que inyecta cualquier widget —un
+# gestor de consentimiento, un chat, un "volver arriba"— marcaba el
+# grafo como no fiable y ponia el PageRank bajo sospecha en sitios donde
+# estaba bien. Se pide una fraccion del grafo de la plantilla (10%) o el
+# caso que de verdad importa: una plantilla con CERO enlaces en crudo que
+# al renderizar aparecen (el listado montado por XHR de la decision 18).
+def _esconde_enlaces(r: dict) -> bool:
+    solo_js = r.get("enlaces_solo_js") or 0
+    if not solo_js:
+        return False
+    crudo = r.get("enlaces_crudo")
+    if crudo is None:
+        return solo_js > 0  # resultados de antes de medir el crudo
+    if crudo == 0:
+        return True
+    return solo_js >= max(3, crudo * 0.1)
+
+
+def _resumen_js_check(resultados: list[dict]) -> dict:
+    """Veredicto de `jobs.js_check` a partir de las plantillas comprobadas."""
+    con_enlaces_ocultos = [r for r in resultados if _esconde_enlaces(r)]
+    # Plantillas cuyo render no fue tal (WAF, desafio, error): su "0 enlaces
+    # solo-JS" no cuenta. Si TODAS estan asi, el veredicto queda en None
+    # ("no se pudo comprobar"), nunca en "fiable".
+    sospechosas = [r for r in resultados if r.get("render_sospechoso")]
+    # Y las que se quedaron sin una sola muestra valida (un 403, el muro de un
+    # WAF, un fallo de descarga): su "0 enlaces solo-JS" es que no se miro.
+    # Sin esto, un sitio que bloquea al comprobador en todas las plantillas
+    # salia con el grafo "fiable" (decision 62).
+    sin_muestra = [r for r in resultados if not r.get("muestras", 1)]
+    concluyentes = [
+        r for r in resultados if not r.get("render_sospechoso") and r.get("muestras", 1)
+    ]
+    resumen = {
+        "plantillas": resultados,
+        "enlaces_ocultos": bool(con_enlaces_ocultos),
+        "grafo_fiable": (not con_enlaces_ocultos) if concluyentes else None,
+        "render_bloqueado": len(sospechosas),
+        "sin_comprobar": len(sin_muestra),
+        "concluyentes": len(concluyentes),
+    }
+    return resumen
+
+
 def _comprobar_render_js(job_id: str) -> None:
     """Comprueba, plantilla a plantilla, que se pierde por no renderizar JS.
 
@@ -816,37 +862,11 @@ def _comprobar_render_js(job_id: str) -> None:
         if not resultados:
             return
 
-        # Un enlace escondido no invalida un grafo: lo que lo invalida es que
-        # una plantilla monte con JavaScript una parte que PESA. Con el umbral
-        # en "mayor que cero", el enlace que inyecta cualquier widget —un
-        # gestor de consentimiento, un chat, un "volver arriba"— marcaba el
-        # grafo como no fiable y ponia el PageRank bajo sospecha en sitios donde
-        # estaba bien. Se pide una fraccion del grafo de la plantilla (10%) o el
-        # caso que de verdad importa: una plantilla con CERO enlaces en crudo que
-        # al renderizar aparecen (el listado montado por XHR de la decision 18).
-        def _esconde_enlaces(r: dict) -> bool:
-            solo_js = r.get("enlaces_solo_js") or 0
-            if not solo_js:
-                return False
-            crudo = r.get("enlaces_crudo")
-            if crudo is None:
-                return solo_js > 0  # resultados de antes de medir el crudo
-            if crudo == 0:
-                return True
-            return solo_js >= max(3, crudo * 0.1)
-
+        resumen = _resumen_js_check(resultados)
         con_enlaces_ocultos = [r for r in resultados if _esconde_enlaces(r)]
-        # Plantillas cuyo render no fue tal (WAF, desafio, error): su "0 enlaces
-        # solo-JS" no cuenta. Si TODAS estan asi, el veredicto queda en None
-        # ("no se pudo comprobar"), nunca en "fiable".
         sospechosas = [r for r in resultados if r.get("render_sospechoso")]
-        concluyentes = [r for r in resultados if not r.get("render_sospechoso")]
-        resumen = {
-            "plantillas": resultados,
-            "enlaces_ocultos": bool(con_enlaces_ocultos),
-            "grafo_fiable": (not con_enlaces_ocultos) if concluyentes else None,
-            "render_bloqueado": len(sospechosas),
-        }
+        sin_muestra = [r for r in resultados if not r.get("muestras", 1)]
+        concluyentes = resumen["concluyentes"] > 0
 
         session = SessionLocal()
         try:
@@ -857,6 +877,14 @@ def _comprobar_render_js(job_id: str) -> None:
         finally:
             session.close()
 
+        if sin_muestra:
+            logger.warning(
+                "Job %s: %d de %d plantilla(s) sin ninguna muestra valida (codigo "
+                "distinto de 200, muro de WAF o fallo de descarga/render): no "
+                "cuentan para el veredicto del grafo (%s).",
+                job_id, len(sin_muestra), len(resultados),
+                ", ".join(r["plantilla"].split("  (")[0] for r in sin_muestra),
+            )
         if sospechosas:
             logger.warning(
                 "Job %s: en %d de %d plantilla(s) Chromium recibio una pagina sin "

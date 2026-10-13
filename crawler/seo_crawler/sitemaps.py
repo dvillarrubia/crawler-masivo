@@ -13,6 +13,7 @@ import gzip
 import logging
 import os
 import zlib
+from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
 _GZIP_MAGIC = b"\x1f\x8b"
@@ -111,6 +112,26 @@ def _localname(tag) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
 
+@dataclass
+class EntradaSitemap:
+    """Una URL de un sitemap con lo que el sitemap dice de ella.
+
+    - ``lastmod``: el valor tal cual (fecha W3C, a veces con hora). Sin
+      interpretar a proposito: Google lo usa solo si es "consistente y
+      verificable", y un lastmod que miente (la fecha de hoy en todas las URLs,
+      el formato roto) es en si un hallazgo; normalizarlo aqui lo taparia.
+    - ``hreflang``: las anotaciones ``<xhtml:link rel="alternate"
+      hreflang="..." href="...">`` de esa URL, como ``(idioma, href)``. Es la
+      tercera forma de declarar hreflang que acepta Google, junto al ``<link>``
+      del HTML y la cabecera HTTP, y la unica que usan muchos sitios grandes:
+      sin leerla, su hreflang no existe para el informe.
+    """
+
+    url: str
+    lastmod: str | None = None
+    hreflang: list[tuple[str, str]] = field(default_factory=list)
+
+
 def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], list[str]]:
     """Parse a sitemap file into ``(page_urls, child_sitemap_urls)``.
 
@@ -125,6 +146,21 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
     membresia `in_sitemap` queda en falso para TODAS las URLs del sitio, y de
     ahi salen los huerfanos inflados y la lista de "URLs del sitemap sin
     rastrear" vacia.
+
+    Solo las URLs; ``lastmod`` y hreflang de cada una salen de
+    :func:`parse_sitemap_entradas`.
+    """
+    entradas, hijos = parse_sitemap_entradas(body, base_url)
+    return ([e.url for e in entradas], hijos)
+
+
+def parse_sitemap_entradas(
+    body: bytes | str, base_url: str = ""
+) -> tuple[list[EntradaSitemap], list[str]]:
+    """Como :func:`parse_sitemap`, pero cada URL con su ``lastmod`` y su hreflang.
+
+    Los formatos de texto, RSS y Atom no los llevan: sus entradas salen con
+    ``lastmod=None`` y sin hreflang.
     """
     if isinstance(body, str):
         raw = body.encode("utf-8", errors="ignore")
@@ -132,25 +168,28 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
         raw = body
     raw = _maybe_gunzip(raw)
 
+    def _solo_urls(urls: list[str]) -> list[EntradaSitemap]:
+        return [EntradaSitemap(url=u) for u in urls]
+
     try:
         from lxml import etree
 
         # recover=True tolerates the malformed XML that real sites serve.
         root = etree.fromstring(raw, parser=etree.XMLParser(recover=True, huge_tree=True))
     except Exception:
-        return (_parse_sitemap_texto(raw, base_url), [])
+        return (_solo_urls(_parse_sitemap_texto(raw, base_url)), [])
     if root is None:
-        return (_parse_sitemap_texto(raw, base_url), [])
+        return (_solo_urls(_parse_sitemap_texto(raw, base_url)), [])
 
     root_kind = _localname(root.tag)
     if root_kind in ("rss", "feed"):
-        return (_parse_feed(root, base_url), [])
+        return (_solo_urls(_parse_feed(root, base_url)), [])
     if root_kind not in ("urlset", "sitemapindex"):
         # Ni sitemap ni feed: puede ser el de texto plano (y tambien un HTML de
         # error, que no dara ninguna linea con pinta de URL).
-        return (_parse_sitemap_texto(raw, base_url), [])
+        return (_solo_urls(_parse_sitemap_texto(raw, base_url)), [])
 
-    page_urls: list[str] = []
+    paginas: list[EntradaSitemap] = []
     child_sitemaps: list[str] = []
     seen: set[str] = set()
 
@@ -162,10 +201,18 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
         if entry_kind not in ("url", "sitemap"):
             continue
         loc_text = None
+        lastmod = None
+        hreflang: list[tuple[str, str]] = []
         for child in entry:
-            if _localname(child.tag) == "loc":
+            nombre = _localname(child.tag)
+            if nombre == "loc" and loc_text is None:
                 loc_text = (child.text or "").strip()
-                break
+            elif nombre == "lastmod" and lastmod is None:
+                lastmod = (child.text or "").strip() or None
+            elif nombre == "link":
+                anotacion = _hreflang_de(child, base_url)
+                if anotacion:
+                    hreflang.append(anotacion)
         if not loc_text:
             continue
         url = urljoin(base_url, loc_text) if base_url else loc_text
@@ -175,11 +222,29 @@ def parse_sitemap(body: bytes | str, base_url: str = "") -> tuple[list[str], lis
         if entry_kind == "sitemap" or root_kind == "sitemapindex":
             child_sitemaps.append(url)
         else:
-            page_urls.append(url)
-        if len(page_urls) >= MAX_URLS_PER_SITEMAP:
+            paginas.append(EntradaSitemap(url=url, lastmod=lastmod, hreflang=hreflang))
+        if len(paginas) >= MAX_URLS_PER_SITEMAP:
             break
 
-    return (page_urls, child_sitemaps)
+    return (paginas, child_sitemaps)
+
+
+def _hreflang_de(elemento, base_url: str = "") -> tuple[str, str] | None:
+    """``(idioma, href)`` de un ``<xhtml:link>`` de sitemap, o None.
+
+    ``rel`` se compara por token, como en el HTML (decision 56): ``Alternate``
+    vale. El idioma se devuelve tal cual, sin validar ni pasar a minusculas:
+    `X-Default` o `en-UK` son hallazgos que decide el analizador de hreflang,
+    no el parser.
+    """
+    rel = (elemento.get("rel") or "").lower().split()
+    if "alternate" not in rel:
+        return None
+    idioma = (elemento.get("hreflang") or "").strip()
+    href = (elemento.get("href") or "").strip()
+    if not idioma or not href:
+        return None
+    return (idioma, urljoin(base_url, href) if base_url else href)
 
 
 def _parse_sitemap_texto(raw: bytes, base_url: str = "") -> list[str]:
