@@ -17,8 +17,8 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/theme-terminal.css">
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/app.js"></script>
@@ -123,7 +123,7 @@
             <input type="text" x-model="programarCron" style="width:100%;font-family:monospace"
                    placeholder="minuto hora dia-del-mes mes dia-de-semana">
             <div class="text-dim" style="font-size:.76rem;margin:.3rem 0 .8rem">
-              Cinco campos, como un crontab. <code>0 3 * * 1</code> son los lunes a las 3:00.
+              Cinco campos, como un crontab. Se lee: <strong x-text="fmt.cron(programarCron)"></strong>.
             </div>
 
             <label class="text-sm">Zona horaria</label>
@@ -182,8 +182,10 @@
                            x-text="(p.seeds || []).join(', ').slice(0, 70)"></div>
                     </td>
                     <td>
-                      <code x-text="p.cron"></code>
-                      <div class="text-dim" style="font-size:.75rem" x-text="p.zona_horaria || 'Europe/Madrid'"></div>
+                      <div x-text="fmt.cron(p.cron)"></div>
+                      <div class="text-dim" style="font-size:.75rem">
+                        <code x-text="p.cron"></code> · <span x-text="p.zona_horaria || 'Europe/Madrid'"></span>
+                      </div>
                     </td>
                     <td>
                       <span x-text="p.activa ? fmt.date(p.proxima_ejecucion) : 'en pausa'"></span>
@@ -385,7 +387,7 @@
                         <td class="text-dim" x-text="nombreDePerfil(j.profile_id) || 'puntual'"></td>
                         <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
                         <td x-text="fmt.num(j.total_urls_crawled)"></td>
-                        <td x-text="fmt.ago(j.created_at)"></td>
+                        <td x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
                       </tr>
                     </template>
                   </tbody>
@@ -643,10 +645,10 @@
                       <td x-text="j.seeds?.length || 0"></td>
                       <td x-text="fmt.num(j.total_urls_crawled)"></td>
                       <td x-text="fmt.num(j.total_urls_failed)"></td>
-                      <td x-text="fmt.ago(j.created_at)"></td>
+                      <td x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
                       <td>
                         <template x-if="j.started_at && j.completed_at">
-                          <span x-text="fmt.ms(new Date(j.completed_at) - new Date(j.started_at))"></span>
+                          <span x-text="fmt.lapso(new Date(j.completed_at) - new Date(j.started_at))"></span>
                         </template>
                         <template x-if="j.started_at && !j.completed_at && ['running','analyzing','pending'].includes(j.status)">
                           <span class="text-dim">en curso...</span>
@@ -897,13 +899,13 @@
             <i data-lucide="layout-dashboard" style="width:14px;height:14px"></i> Resumen
           </div>
           <div class="tab" :class="detailTab === 'urls' && 'active'" @click="switchTab('urls')" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="link" style="width:14px;height:14px"></i> URLs <span class="count" x-text="urlsTotal || (stats?.total_urls || '')"></span>
+            <i data-lucide="link" style="width:14px;height:14px"></i> URLs <span class="count" x-text="(urlsTotal || stats?.total_urls) ? fmt.num(urlsTotal || stats.total_urls) : ''"></span>
           </div>
           <div class="tab" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : '') || ''"></span>
+            <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(issuesTotal || (stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0))"></span>
           </div>
           <div class="tab" :class="detailTab === 'links' && 'active'" @click="switchTab('links')" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal || ''"></span>
+            <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal ? fmt.num(linksTotal) : ''"></span>
           </div>
           <div class="tab" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
@@ -1297,7 +1299,22 @@
             <div class="card" style="grid-column:1/-1">
               <div class="card-header"><h2>Configuracion</h2></div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;font-size:.85rem">
-                <div><span class="text-dim">Semillas:</span> <span x-text="job.seeds?.join(', ')"></span></div>
+                <!-- Las semillas pueden ser miles (un censo sembrado desde el
+                     sitemap): pintadas enteras, la ficha de Lopesan medía
+                     114.000 px. Se ven tres y el resto bajo demanda. -->
+                <div style="grid-column:1/-1">
+                  <span class="text-dim">Semillas</span>
+                  <span class="text-dim" x-text="'(' + fmt.num((job.seeds || []).length) + '):'"></span>
+                  <span x-text="(job.seeds || []).slice(0, 3).join(', ')" style="word-break:break-all"></span>
+                  <template x-if="(job.seeds || []).length > 3">
+                    <details class="seeds-more">
+                      <summary x-text="'y ' + fmt.num(job.seeds.length - 3) + ' más · ver todas'"></summary>
+                      <div class="seeds-list">
+                        <template x-for="s in job.seeds" :key="s"><div x-text="s"></div></template>
+                      </div>
+                    </details>
+                  </template>
+                </div>
                 <div><span class="text-dim">Prof. maxima:</span> <span x-text="job.config?.max_depth"></span></div>
                 <div><span class="text-dim">Max URLs:</span> <span x-text="fmt.num(job.config?.max_urls)"></span></div>
                 <div><span class="text-dim">Concurrencia:</span> <span x-text="job.config?.concurrent_requests"></span></div>
@@ -1463,7 +1480,7 @@
                             <div class="truncate text-sm" :title="JSON.stringify(i.details)"
                               x-text="i.details ? Object.entries(i.details).map(([k,v]) => k + ': ' + v).join(' | ') : '—'"></div>
                           </td>
-                          <td class="text-dim" style="white-space:nowrap" x-text="fmt.ago(i.detected_at)"></td>
+                          <td class="text-dim" style="white-space:nowrap" x-text="fmt.ago(i.detected_at)" :title="fmt.date(i.detected_at)"></td>
                         </tr>
                       </template>
                     </tbody>
@@ -1485,7 +1502,8 @@
         <template x-if="detailTab === 'links'">
           <div>
             <div class="flex justify-between items-center mb-2">
-              <span class="text-dim text-sm" x-text="fmt.num(linksTotal) + ' enlaces'"></span>
+              <!-- Mientras carga no hay cifra: «0 enlaces» se lee como que no hay ninguno. -->
+              <span class="text-dim text-sm" x-text="loading ? 'Contando enlaces…' : fmt.num(linksTotal) + ' enlaces · agrupados por destino'"></span>
             </div>
 
             <template x-if="loading">
@@ -3033,7 +3051,7 @@
           <div class="exp-toolbar">
             <button class="exp-back" @click="backFromExplorer()">
               <i data-lucide="arrow-left" style="width:13px;height:13px"></i>
-              <span x-text="job.name" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <span x-text="job.name" :title="job.name" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
             </button>
             <div class="exp-search-wrap">
               <i data-lucide="search"></i>
