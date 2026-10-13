@@ -718,7 +718,7 @@ th[data-tip]{overflow:visible}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ===== Explorer View ===== */
-.explorer{display:flex;height:calc(100vh - 48px);overflow:hidden;margin:-1rem;border-radius:0}
+.explorer{display:flex;height:calc(100vh - 48px - var(--alto-migas, 0px));overflow:hidden;margin:-1rem;border-radius:0}
 
 /* Sidebar */
 .exp-sidebar{
@@ -1285,3 +1285,5 @@ button.exp-tab:focus-visible,button.exp-detail-tab:focus-visible,.insight-card-h
    que en movil es menor (con -1rem fijo desbordaba 4 px) */
 .ficha-cabecera{margin:-1rem -1rem 1rem;padding:1rem 1rem .75rem;background:var(--bg);border-bottom:1px solid var(--border)}
 @media(max-width:768px){.ficha-cabecera{margin:-.75rem -.75rem 1rem;padding:.75rem}}
+/* El explorador ocupa el alto que queda: con miga de pan, 29 px menos */
+body:has(.breadcrumbs){--alto-migas:29px}
