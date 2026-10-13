@@ -133,3 +133,58 @@ def test_i18n_sin_retorno_real_si_se_avisa(db, job):
     assert ins.metrics["return_missing"] == 1
     alta = [r for r in ins.recommendations if r.priority == "alta"]
     assert alta and alta[0].affected_count == 1
+
+
+@pytest.fixture()
+def db_completa():
+    """El informe entero lee todas las tablas (enlaces, seguridad...)."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine)()
+    yield s
+    s.close()
+
+
+@pytest.fixture()
+def job_c(db_completa):
+    j = Job(id=uuid.uuid4(), name="t", status="completed", seeds=["https://x.com/"], config={})
+    db_completa.add(j)
+    db_completa.flush()
+    return j
+
+
+def _error(db, job, url, tipo="canonical_cross_domain"):
+    db.add(Issue(job_id=job.id, url_id=url.id, issue_type=tipo, severity="error"))
+    db.flush()
+
+
+def test_sin_errores_la_nota_no_lleva_tope(db_completa, job_c):
+    db, job = db_completa, job_c
+    for i in range(10):
+        _url(db, job, f"/p{i}")
+    r = results.get_insights(job.id, db)
+    assert r.tope is None
+    assert r.overall_score == r.overall_score_sin_tope
+
+
+def test_con_algun_error_la_nota_no_pasa_de_mejorable(db_completa, job_c):
+    db, job = db_completa, job_c
+    """UX-05 / decision 92: una media que dice «Bueno» con errores abiertos
+    es lo que hizo que Lopesan saliera con 88."""
+    urls = [_url(db, job, f"/p{i}") for i in range(20)]
+    _error(db, job, urls[0])                      # 1 de 20: 5 %
+    r = results.get_insights(job.id, db)
+    assert r.overall_score <= results.TOPE_CON_ERRORES
+    if r.overall_score_sin_tope > results.TOPE_CON_ERRORES:
+        assert r.tope is not None and r.tope.paginas_con_error == 1 and r.tope.de == 20
+
+
+def test_errores_extendidos_la_dejan_en_critico(db_completa, job_c):
+    db, job = db_completa, job_c
+    urls = [_url(db, job, f"/p{i}") for i in range(20)]
+    for u in urls[:3]:                            # 3 de 20: 15 %
+        _error(db, job, u)
+    _error(db, job, urls[0], "4xx_error")         # misma pagina: cuenta una vez
+    r = results.get_insights(job.id, db)
+    assert r.overall_score <= results.TOPE_CON_ERRORES_EXTENDIDOS
+    assert r.tope is not None and r.tope.paginas_con_error == 3 and r.tope.pct == 15.0

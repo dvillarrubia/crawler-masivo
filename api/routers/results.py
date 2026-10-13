@@ -24,6 +24,7 @@ from shared.models import (
 )
 
 from api.schemas import (
+    TopeDeNota,
     CategoryInsight,
     HeadingResponse,
     HreflangResponse,
@@ -404,6 +405,85 @@ def list_issues(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/issues/resumen — una fila por tipo de incidencia
+# ---------------------------------------------------------------------------
+class _EjemploIssue(BaseModel):
+    url_id: int
+    url: str | None = None
+
+
+class _ResumenIssue(BaseModel):
+    issue_type: str
+    severity: str
+    incidencias: int
+    paginas: int
+    ejemplos: list[_EjemploIssue] = []
+
+
+@router.get("/issues/resumen", response_model=list[_ResumenIssue])
+def resumen_issues(
+    job_id: uuid.UUID,
+    ejemplos: int = Query(3, ge=0, le=10),
+    db: Session = Depends(get_session),
+):
+    """Lo que enseña la vista agrupada de Problemas (UX-04): cuántas
+    incidencias y cuántas PÁGINAS distintas de cada tipo, de más grave a menos.
+
+    Las páginas van aparte de las incidencias porque no son lo mismo: un
+    hreflang sin retorno emite una incidencia por idioma, y una imagen sin alt
+    se cuenta una vez aunque esté en mil páginas (decisión 64).
+    """
+    _get_job_or_404(job_id, db)
+
+    gravedad = case(
+        (Issue.severity == "error", 0),
+        (Issue.severity == "warning", 1),
+        (Issue.severity == "info", 2),
+        else_=3,
+    )
+    filas = (
+        db.query(
+            Issue.issue_type, Issue.severity,
+            func.count(Issue.id), func.count(func.distinct(Issue.url_id)),
+        )
+        .filter(Issue.job_id == job_id)
+        .group_by(Issue.issue_type, Issue.severity)
+        .order_by(gravedad, func.count(func.distinct(Issue.url_id)).desc(), Issue.issue_type)
+        .all()
+    )
+
+    resultado = []
+    for tipo, sev, n, paginas in filas:
+        muestra = []
+        if ejemplos:
+            # Una consulta corta por tipo, por el indice (job_id, issue_type):
+            # son unas decenas de tipos, y un ROW_NUMBER sobre todo el censo
+            # (841.901 incidencias en el mayor) ordenaria filas que no se piden.
+            # Paginas DISTINTAS: un hreflang sin retorno emite una incidencia
+            # por idioma, y tres ejemplos de la misma URL no ensenan nada (y
+            # repetian la clave del x-for de la interfaz).
+            vistos: set[int] = set()
+            for uid, u in (
+                db.query(Issue.url_id, Url.url)
+                .join(Url, Url.id == Issue.url_id)
+                .filter(Issue.job_id == job_id, Issue.issue_type == tipo, Issue.severity == sev)
+                .order_by(Issue.id)
+                .limit(ejemplos * 5)
+                .all()
+            ):
+                if uid in vistos:
+                    continue
+                vistos.add(uid)
+                muestra.append(_EjemploIssue(url_id=uid, url=u))
+                if len(muestra) == ejemplos:
+                    break
+        resultado.append(_ResumenIssue(
+            issue_type=tipo, severity=sev, incidencias=n, paginas=paginas, ejemplos=muestra,
+        ))
+    return resultado
+
+
+# ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/issues/urls — URLs affected by specific issue types
 # ---------------------------------------------------------------------------
 class _AffectedUrl(BaseModel):
@@ -636,6 +716,10 @@ def get_stats(
         Url.status_group == "2xx",
     ).one()
 
+    click_depth_calculada = db.query(
+        exists().where(Url.job_id == job_id, Url.click_depth.isnot(None))
+    ).scalar()
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -658,6 +742,7 @@ def get_stats(
         paginas_html=paginas_html or 0,
         indexables=indexables or 0,
         no_indexables=no_indexables or 0,
+        click_depth_calculada=bool(click_depth_calculada),
     )
 
 
@@ -1848,11 +1933,46 @@ def get_insights(
 
     # Weighted average: crawlability 25%, content 25%, links 20%, security 15%, SD 10%, i18n 5%
     weights = [0.25, 0.25, 0.20, 0.15, 0.10, 0.05]
-    overall = sum(c.score * w for c, w in zip(categories, weights))
+    media = _clamp_score(sum(c.score * w for c, w in zip(categories, weights)))
+    tope = _tope_por_errores(job_id, db)
+    nota = min(media, tope.tope) if tope else media
 
     return InsightsResponse(
         job_id=job_id,
-        overall_score=_clamp_score(overall),
+        overall_score=nota,
+        overall_score_sin_tope=media,
+        tope=tope if tope and tope.tope < media else None,
         categories=categories,
         generated_at=datetime.now(timezone.utc),
+    )
+
+
+# Topes de la nota global (UX-05, decision 92). Una media ponderada no puede
+# decir «Bueno» de un censo con errores abiertos: el de Lopesan sacaba 88 con
+# 2.367 paginas canonicalizadas a otro dominio, la mitad del sitio fuera del
+# indice. Con cualquier error, como mucho «Mejorable»; si afecta al 10% de las
+# URLs internas o mas, como mucho «Critico».
+TOPE_CON_ERRORES = 79
+TOPE_CON_ERRORES_EXTENDIDOS = 49
+UMBRAL_ERRORES_EXTENDIDOS = 10.0
+
+
+def _tope_por_errores(job_id: uuid.UUID, db: Session) -> TopeDeNota | None:
+    paginas = db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.severity == "error",
+    ).scalar() or 0
+    if not paginas:
+        return None
+    internas = db.query(func.count(Url.id)).filter(
+        Url.job_id == job_id, Url.is_internal == True,
+    ).scalar() or 0
+    pct = _safe_pct(paginas, internas)
+    if pct >= UMBRAL_ERRORES_EXTENDIDOS:
+        return TopeDeNota(
+            tope=TOPE_CON_ERRORES_EXTENDIDOS, paginas_con_error=paginas, de=internas, pct=pct,
+            motivo=f"El {pct}% de las URLs internas tiene algun error: la nota no puede pasar de {TOPE_CON_ERRORES_EXTENDIDOS}.",
+        )
+    return TopeDeNota(
+        tope=TOPE_CON_ERRORES, paginas_con_error=paginas, de=internas, pct=pct,
+        motivo=f"Hay {paginas} URLs con algun error: la nota no puede pasar de {TOPE_CON_ERRORES} mientras sigan abiertos.",
     )

@@ -1180,3 +1180,46 @@ button.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .stat-card.stat-link:hover{border-color:var(--accent)}
 .stat-card.stat-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .stat-sub{font-size:.75rem;color:var(--text-dim);margin-top:.15rem}
+
+/* Problemas agrupados por tipo (UX-04) */
+.chip{display:flex;align-items:center;gap:.35rem}
+.chip.chip-on{border-color:var(--accent);background:var(--accent-subtle);color:var(--text)}
+.issue-groups{display:flex;flex-direction:column;gap:.4rem}
+.issue-group{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--text-dim);border-radius:var(--radius)}
+.issue-group.sev-error{border-left-color:var(--red)}
+.issue-group.sev-warning{border-left-color:var(--orange)}
+.issue-group.sev-info{border-left-color:var(--blue)}
+.issue-group-head{display:flex;align-items:center;gap:.75rem;width:100%;padding:.6rem .8rem;background:none;border:0;
+  font:inherit;color:inherit;text-align:left;cursor:pointer}
+.issue-group-head:hover{background:var(--bg-hover)}
+.issue-group-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.issue-group-name{flex:1;min-width:0;display:flex;flex-direction:column;gap:.1rem;font-size:.85rem}
+.issue-group-name .text-dim{font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.issue-group-count{white-space:nowrap;font-size:.85rem}
+.issue-group-caret{color:var(--text-dim);transition:transform .15s}
+.issue-group-head[aria-expanded="true"] .issue-group-caret{transform:rotate(180deg)}
+.issue-group-body{padding:.25rem .8rem .8rem 4.6rem;font-size:.85rem}
+.sev-chip{font-size:.68rem;font-weight:600;text-transform:uppercase;padding:.1rem .4rem;border-radius:3px;min-width:3.6rem;text-align:center}
+.sev-chip.sev-error{background:var(--red-bg);color:var(--red)}
+.sev-chip.sev-warning{background:var(--orange-bg);color:var(--orange)}
+.sev-chip.sev-info{background:var(--blue-bg);color:var(--blue)}
+.issue-explica{display:grid;grid-template-columns:max-content 1fr;gap:.25rem .75rem}
+.issue-explica dt{color:var(--text-dim)}
+.issue-ejemplos{list-style:none;display:flex;flex-direction:column;gap:.15rem}
+.issue-ejemplos a{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem}
+.issue-explica-card{display:flex;flex-direction:column;gap:.25rem;border-left:3px solid var(--accent)}
+@media (max-width:720px){.issue-group-body{padding-left:.8rem}.issue-group-head{flex-wrap:wrap}}
+.bar-row-link{cursor:pointer;border-radius:var(--radius)}.bar-row-link:hover,.bar-row-link:focus-visible{background:var(--bg-hover);outline:none}
+.nota-tope{display:flex;gap:.5rem;align-items:flex-start;margin:.35rem 0 .5rem;padding:.5rem .65rem;font-size:.85rem;
+  background:var(--red-bg);border-left:3px solid var(--red);border-radius:var(--radius)}
+.nota-tope svg{color:var(--red);flex-shrink:0;margin-top:.15rem}
+
+/* Ficha de URL: veredicto arriba (UX-17) */
+.url-veredicto{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.75rem}
+.url-veredicto .card{display:flex;flex-direction:column;gap:.25rem;min-width:0}
+.veredicto-titulo{display:flex;align-items:center;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim)}
+.veredicto-valor{font-size:1.05rem;font-weight:600}
+.veredicto-valor.green{color:var(--green)}
+.veredicto-valor.orange{color:var(--orange)}
+.veredicto-lista{list-style:none;display:flex;flex-direction:column;gap:.25rem;font-size:.85rem}
+.veredicto-lista li{display:flex;gap:.5rem;align-items:center}

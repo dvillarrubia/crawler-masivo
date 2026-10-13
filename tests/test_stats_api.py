@@ -107,3 +107,32 @@ def test_enlaces_salen_agrupados_por_destino(entorno):
     d = api.get(f"/api/jobs/{jid}/links").json()
     assert d["total"] == 3
     assert [l["to_url"] for l in d["items"]] == ["https://x.com/a", "https://x.com/b", "https://x.com/b"]
+
+
+def test_click_depth_sin_calcular_no_es_sin_camino(entorno):
+    """Un censo analizado antes de la decision 90 tiene click_depth NULL en
+    todas sus URLs: la ficha no puede decir «sin camino desde la home»."""
+    api, jid = entorno
+    assert api.get(f"/api/jobs/{jid}/stats").json()["click_depth_calculada"] is False
+
+
+def test_resumen_por_tipo_cuenta_paginas_y_no_repite_ejemplos(entorno, tmp_path):
+    """La vista agrupada de Problemas (UX-04): paginas distintas aparte de
+    incidencias, ejemplos sin repetir URL y de mas grave a menos."""
+    api, jid = entorno
+    from shared.models import Issue as I
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    s = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/s.db"))()
+    u1 = s.query(Url).filter(Url.url == "https://x.com/1").one()
+    # Un hreflang sin retorno por idioma: tres incidencias, una pagina.
+    for lang in ("en", "de", "fr"):
+        s.add(I(job_id=u1.job_id, url_id=u1.id, issue_type="hreflang_missing_return",
+                severity="warning", details={"lang": lang}))
+    s.commit()
+    s.close()
+    r = api.get(f"/api/jobs/{jid}/issues/resumen").json()
+    assert [x["severity"] for x in r] == sorted([x["severity"] for x in r], key=["error", "warning", "info"].index)
+    h = next(x for x in r if x["issue_type"] == "hreflang_missing_return")
+    assert h["incidencias"] == 3 and h["paginas"] == 1
+    assert len(h["ejemplos"]) == 1

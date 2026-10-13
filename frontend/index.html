@@ -21,6 +21,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="/static/incidencias.js"></script>
   <script src="/static/app.js"></script>
 </head>
 <!-- Sin x-init: Alpine 3 ya llama solo al init() del componente, y con los
@@ -900,7 +901,7 @@
               <template x-if="job.comparacion && job.comparacion.comparable">
                 <div>
                   <div class="stat-value" :class="(job.comparacion.alertas || []).length ? 'orange' : 'green'"
-                       x-text="(job.comparacion.alertas || []).length ? (job.comparacion.alertas || []).length + ' alertas' : 'Sin alertas'"></div>
+                       x-text="(n => n ? n + (n === 1 ? ' alerta' : ' alertas') : 'Sin alertas')((job.comparacion.alertas || []).length)"></div>
                   <div class="stat-label">Frente al censo anterior</div>
                   <div class="stat-sub" x-text="fmt.dia(job.comparacion.fecha_anterior)"></div>
                 </div>
@@ -1088,14 +1089,28 @@
             <div class="card" style="margin-bottom:1rem">
               <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
                 <span style="font-size:.85rem">Comparar con:</span>
+                <!-- Censos comparables primero; las pruebas pequenas aparte
+                     (UX-12): comparar un censo de 5.000 URLs con un canario de
+                     26 no dice nada de lo que ha cambiado. -->
                 <select @change="diffOtro = $el.value; cargarDiff()" style="padding:.35rem .5rem;font-size:.85rem;max-width:34rem">
                   <option value="">— elige otro rastreo del mismo sitio —</option>
-                  <template x-for="j in diffCandidatos" :key="j.id">
-                    <option :value="j.id" :selected="j.id === diffOtro"
-                            x-text="j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.date(j.created_at)"></option>
-                  </template>
+                  <optgroup label="Censos de tamaño parecido">
+                    <template x-for="j in candidatosDiff(true)" :key="j.id">
+                      <option :value="j.id" :selected="j.id === diffOtro"
+                              x-text="(j.id === (job.comparacion || {}).comparado_con ? '★ ' : '') + j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.dia(j.created_at)"></option>
+                    </template>
+                  </optgroup>
+                  <optgroup label="Rastreos de prueba o parciales">
+                    <template x-for="j in candidatosDiff(false)" :key="j.id">
+                      <option :value="j.id" :selected="j.id === diffOtro"
+                              x-text="j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.dia(j.created_at)"></option>
+                    </template>
+                  </optgroup>
                 </select>
                 <span x-show="diffCargando" class="text-dim" style="font-size:.8rem">comparando…</span>
+              </div>
+              <div x-show="job.comparacion && job.comparacion.comparado_con === diffOtro" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
+                ★ Es el censo con el que se comparó automáticamente al terminar el rastreo.
               </div>
               <div x-show="!diffCandidatos.length" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
                 No hay otro rastreo completado del mismo sitio con el que comparar.
@@ -1299,13 +1314,16 @@
             </div>
 
             <div class="card">
-              <div class="card-header"><h2>Principales problemas</h2></div>
+              <div class="card-header"><h2>Principales problemas</h2>
+                <a :href="'#/rastreos/' + job.id + '/problemas'" class="text-sm">Ver todos por tipo</a></div>
               <template x-if="stats.issues_by_type.length === 0">
                 <div class="text-dim text-sm">No se encontraron problemas</div>
               </template>
               <div class="bar-chart">
                 <template x-for="i in issuesSorted.slice(0, 10)" :key="i.issue_type + i.severity">
-                  <div class="bar-row">
+                  <div class="bar-row bar-row-link" role="link" tabindex="0" :title="'Ver ' + fmt.issue(i.issue_type)"
+                       @click="verTipoDeIncidencia(i.issue_type, i.severity); switchTab('issues')"
+                       @keydown.enter="verTipoDeIncidencia(i.issue_type, i.severity); switchTab('issues')">
                     <div class="bar-label" :title="fmt.issue(i.issue_type)" x-text="fmt.issue(i.issue_type)"></div>
                     <div class="bar-track">
                       <div class="bar-fill" :style="'width:' + (i.count / maxIssueCount() * 100) + '%;background:' + issueBarColor(i.severity)"></div>
@@ -1369,10 +1387,77 @@
           </div>
         </template>
 
-        <!-- ===== PESTANA: PROBLEMAS ===== -->
-        <template x-if="detailTab === 'issues'">
+        <!-- ===== PESTANA: PROBLEMAS =====
+             Por defecto, una fila por TIPO (UX-04): 38.922 filas sueltas en
+             779 paginas no se leen. Cada tipo dice que es, que decide Google y
+             como se arregla (incidencias.js). La lista plana sigue ahi: al
+             elegir un tipo, o con «Ver como lista». -->
+        <template x-if="detailTab === 'issues' && !issueFilters.issue_type && issuesVista === 'tipos'">
           <div>
-            <div class="flex gap-1 mb-2" style="flex-wrap:wrap">
+            <div class="flex gap-1 mb-2 items-center" style="flex-wrap:wrap">
+              <template x-for="g in [['', 'Todas'], ['error', 'Errores'], ['warning', 'Avisos'], ['info', 'Info']]" :key="g[0]">
+                <button class="btn btn-sm chip" :class="issueFilters.severity === g[0] && 'chip-on'"
+                        @click="issueFilters.severity = g[0]">
+                  <span x-text="g[1]"></span>
+                  <!-- Tipos, no paginas: una pagina con tres problemas sumaria tres
+                       veces y el total pasaria del numero de paginas del sitio. -->
+                  <span class="text-dim" x-show="issuesResumen"
+                        x-text="(n => n + (n === 1 ? ' tipo' : ' tipos'))(resumenIssues(g[0]).length)"></span>
+                </button>
+              </template>
+              <button class="btn btn-sm" style="margin-left:auto" @click="issuesVista = 'lista'; issues = []; loadIssues()">
+                <i data-lucide="list" style="width:13px;height:13px"></i> Ver todas como lista</button>
+            </div>
+            <template x-if="!issuesResumen">
+              <div class="loading-overlay"><div class="spinner"></div> Agrupando incidencias…</div>
+            </template>
+            <template x-if="issuesResumen && !resumenIssues(issueFilters.severity).length">
+              <div class="empty"><h3>No hay incidencias de esta gravedad</h3></div>
+            </template>
+            <div class="issue-groups">
+              <template x-for="r in resumenIssues(issueFilters.severity)" :key="r.issue_type + r.severity">
+                <div class="issue-group" :class="'sev-' + r.severity">
+                  <button class="issue-group-head" @click="grupoAbierto[r.issue_type] = !grupoAbierto[r.issue_type]"
+                          :aria-expanded="!!grupoAbierto[r.issue_type]">
+                    <span class="sev-chip" :class="'sev-' + r.severity" x-text="fmt.severity(r.severity)"></span>
+                    <span class="issue-group-name">
+                      <strong x-text="fmt.issue(r.issue_type)"></strong>
+                      <span class="text-dim" x-text="(ISSUE_INFO[r.issue_type] || {}).que || ''"></span>
+                    </span>
+                    <span class="issue-group-count">
+                      <strong x-text="fmt.num(r.paginas)"></strong> <span x-text="r.paginas === 1 ? 'página' : 'páginas'"></span>
+                      <span class="text-dim" x-show="r.incidencias !== r.paginas" x-text="'· ' + fmt.num(r.incidencias) + ' incidencias'"></span>
+                    </span>
+                    <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
+                  </button>
+                  <div class="issue-group-body" x-show="grupoAbierto[r.issue_type]">
+                    <template x-if="ISSUE_INFO[r.issue_type]">
+                      <dl class="issue-explica">
+                        <dt>Qué decide Google</dt><dd x-text="ISSUE_INFO[r.issue_type].google"></dd>
+                        <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[r.issue_type].arreglo"></dd>
+                      </dl>
+                    </template>
+                    <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Ejemplos</div>
+                    <ul class="issue-ejemplos">
+                      <template x-for="(e, n) in r.ejemplos" :key="n + '-' + e.url_id">
+                        <li><a :href="'#/rastreos/' + job.id + '/url/' + e.url_id" x-text="e.url" :title="e.url"></a></li>
+                      </template>
+                    </ul>
+                    <button class="btn btn-sm mt-1" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
+                      Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="detailTab === 'issues' && (issueFilters.issue_type || issuesVista === 'lista')">
+          <div>
+            <div class="flex gap-1 mb-2 items-center" style="flex-wrap:wrap">
+              <button class="btn btn-sm" @click="volverAGrupos()">
+                <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Todos los tipos</button>
               <select x-model="issueFilters.severity" @change="applyIssueFilters()" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
                 <option value="">Todas las gravedades</option>
                 <option value="error">Error</option>
@@ -1385,8 +1470,16 @@
                   <option :value="t" :selected="t === issueFilters.issue_type" x-text="fmt.issue(t)"></option>
                 </template>
               </select>
-              <span class="text-dim text-sm" style="margin-left:auto;align-self:center" x-text="fmt.num(issuesTotal) + ' problemas'"></span>
+              <span class="text-dim text-sm" style="margin-left:auto" x-text="loading ? 'Cargando…' : fmt.num(issuesTotal) + ' incidencias'"></span>
             </div>
+            <template x-if="issueFilters.issue_type && ISSUE_INFO[issueFilters.issue_type]">
+              <div class="card mb-2 issue-explica-card">
+                <div><strong x-text="fmt.issue(issueFilters.issue_type)"></strong> ·
+                  <span x-text="ISSUE_INFO[issueFilters.issue_type].que"></span></div>
+                <div class="text-sm"><span class="text-dim">Qué decide Google:</span> <span x-text="ISSUE_INFO[issueFilters.issue_type].google"></span></div>
+                <div class="text-sm"><span class="text-dim">Cómo se arregla:</span> <span x-text="ISSUE_INFO[issueFilters.issue_type].arreglo"></span></div>
+              </div>
+            </template>
 
             <template x-if="loading">
               <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
@@ -1418,11 +1511,11 @@
                           </td>
                           <td style="white-space:nowrap" x-text="fmt.issue(i.issue_type)"></td>
                           <td style="max-width:350px" :title="i.url || ''">
-                            <div class="truncate" x-text="i.url || '—'"></div>
+                            <a class="truncate" style="display:block" :href="'#/rastreos/' + job.id + '/url/' + i.url_id" x-text="i.url || '—'"></a>
                           </td>
-                          <td style="max-width:350px">
-                            <div class="truncate text-sm" :title="JSON.stringify(i.details)"
-                              x-text="i.details ? Object.entries(i.details).map(([k,v]) => k + ': ' + v).join(' | ') : '—'"></div>
+                          <td style="max-width:420px">
+                            <div class="truncate text-sm" :title="fmt.detalles(i.details) || ''"
+                              x-text="fmt.detalles(i.details) || '—'"></div>
                           </td>
                           <td class="text-dim" style="white-space:nowrap" x-text="fmt.ago(i.detected_at)" :title="fmt.date(i.detected_at)"></td>
                         </tr>
@@ -2231,8 +2324,21 @@
                     </svg>
                   </div>
                   <div class="insights-header-text">
-                    <h2>Puntuacion SEO Global</h2>
-                    <p class="text-dim text-sm">Basado en el analisis de 6 categorias SEO del rastreo completado. Puntuacion ponderada: Rastreabilidad 25%, Contenido 25%, Enlaces 20%, Seguridad 15%, Datos Estructurados 10%, i18n 5%.</p>
+                    <h2>Puntuación SEO global</h2>
+                    <!-- El tope va ANTES que la explicacion de la media: si la
+                         nota esta recortada, es lo primero que hay que saber. -->
+                    <template x-if="insights.tope">
+                      <div class="nota-tope">
+                        <i data-lucide="alert-octagon" style="width:15px;height:15px"></i>
+                        <div>
+                          <strong x-text="'Limitada a ' + insights.tope.tope + ' por errores'"></strong>
+                          (sin el tope saldría <span x-text="insights.overall_score_sin_tope"></span>).
+                          <span x-text="fmt.num(insights.tope.paginas_con_error) + ' de ' + fmt.num(insights.tope.de) + ' URLs internas (' + String(insights.tope.pct).replace('.', ',') + ' %) tienen algún error.'"></span>
+                          <a :href="'#/rastreos/' + job.id + '/problemas?gravedad=error'">Ver los errores</a>
+                        </div>
+                      </div>
+                    </template>
+                    <p class="text-dim text-sm">Media ponderada de 6 categorías: rastreabilidad 25 %, contenido 25 %, enlaces 20 %, seguridad 15 %, datos estructurados 10 %, internacionalización 5 %. Con errores abiertos no pasa de 79, y si afectan al 10 % de las URLs o más, de 49.</p>
                   </div>
                 </div>
 
@@ -2461,6 +2567,61 @@
               </div>
             </div>
 
+            <!-- Veredicto (UX-17): las tres preguntas que se hacen al abrir una
+                 URL —¿se indexa?, ¿que le pasa?, ¿le llegan enlaces?— arriba,
+                 antes de los 30 campos. -->
+            <div class="url-veredicto mb-2">
+              <div class="card">
+                <div class="veredicto-titulo">Indexabilidad</div>
+                <div class="veredicto-valor" :class="urlDetail.indexable ? 'green' : (urlDetail.indexable === false ? 'orange' : '')"
+                     x-text="urlDetail.indexability_status || (urlDetail.indexable ? 'Indexable' : urlDetail.indexable === false ? 'No indexable' : 'Sin analizar')"></div>
+                <template x-if="urlDetail.html_meta && urlDetail.html_meta.canonical_href && !urlDetail.indexable">
+                  <div class="text-sm text-dim truncate" :title="urlDetail.html_meta.canonical_href"
+                       x-text="'Canonical: ' + urlDetail.html_meta.canonical_href"></div>
+                </template>
+                <template x-if="urlDetail.html_meta && urlDetail.html_meta.meta_robots">
+                  <div class="text-sm text-dim" x-text="'Meta robots: ' + urlDetail.html_meta.meta_robots"></div>
+                </template>
+                <template x-if="urlDetail.redirect_url">
+                  <div class="text-sm text-dim truncate" :title="urlDetail.redirect_url" x-text="'Redirige a ' + urlDetail.redirect_url"></div>
+                </template>
+                <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
+              </div>
+              <div class="card">
+                <div class="veredicto-titulo">
+                  Problemas
+                  <a href="#" class="text-sm" style="margin-left:auto" x-show="(urlDetail.issues || []).length"
+                     @click.prevent="urlDetailTab = 'issues'">ver detalle</a>
+                </div>
+                <template x-if="!(urlDetail.issues || []).length">
+                  <div class="veredicto-valor green">Ninguno</div>
+                </template>
+                <ul class="veredicto-lista">
+                  <template x-for="(i, n) in [...(urlDetail.issues || [])].sort((a, b) => ({error:0,warning:1,info:2}[a.severity] ?? 3) - ({error:0,warning:1,info:2}[b.severity] ?? 3)).slice(0, 5)" :key="n">
+                    <li>
+                      <span class="sev-chip" :class="'sev-' + i.severity" x-text="fmt.severity(i.severity)"></span>
+                      <span x-text="fmt.issue(i.issue_type)" :title="fmt.detalles(i.details)"></span>
+                    </li>
+                  </template>
+                </ul>
+                <div class="text-sm text-dim" x-show="(urlDetail.issues || []).length > 5"
+                     x-text="'y ' + ((urlDetail.issues || []).length - 5) + ' más'"></div>
+              </div>
+              <div class="card">
+                <div class="veredicto-titulo">Enlazado interno</div>
+                <!-- NULL no siempre es «sin camino»: en un censo analizado antes
+                     de la decision 90 la columna no se calculo. -->
+                <div class="veredicto-valor" x-text="urlDetail.click_depth != null ? (urlDetail.click_depth === 0 ? 'Es una portada' : 'A ' + urlDetail.click_depth + (urlDetail.click_depth === 1 ? ' clic' : ' clics') + ' de la home') : (stats && stats.click_depth_calculada ? 'Sin camino desde la home' : 'Profundidad sin calcular')"
+                     :class="urlDetail.click_depth == null && urlDetail.indexable && stats && stats.click_depth_calculada ? 'orange' : ''"></div>
+                <div class="text-sm text-dim" x-show="urlDetail.click_depth == null && !(stats && stats.click_depth_calculada)">
+                  Este censo se analizó antes de medir los clics desde la home: hay que volver a analizarlo.</div>
+                <div class="text-sm text-dim"
+                     x-text="fmt.num(urlDetail.unique_inlinks_count ?? urlDetail.inlinks_count) + ' páginas la enlazan · ' + fmt.num(urlDetail.inlinks_count) + ' enlaces entrantes'"></div>
+                <div class="text-sm text-dim" x-show="urlDetail.pagerank_score != null"
+                     x-text="'PageRank ' + urlDetail.pagerank_score + ' de 100'"></div>
+              </div>
+            </div>
+
             <!-- Mini stats de la URL -->
             <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
               <div class="stat-card">
@@ -2496,7 +2657,6 @@
 
             <!-- Pestanas del detalle de URL -->
             <div class="tabs">
-              <div class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">General</div>
               <div class="tab" :class="urlDetailTab === 'seo' && 'active'" @click="urlDetailTab = 'seo'">SEO</div>
               <div class="tab" :class="urlDetailTab === 'content' && 'active'" @click="urlDetailTab = 'content'">
                 Contenido <span class="count" x-text="urlDetail.page_content ? fmt.num(urlDetail.page_content.content_length) : '—'"></span>
@@ -2513,6 +2673,7 @@
               <div class="tab" :class="urlDetailTab === 'issues' && 'active'" @click="urlDetailTab = 'issues'">
                 Problemas <span class="count" x-text="urlDetail.issues?.length || 0"></span>
               </div>
+              <div class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">Todos los campos</div>
               <div class="tab" :class="urlDetailTab === 'security' && 'active'" @click="urlDetailTab = 'security'">Seguridad</div>
               <div class="tab" :class="urlDetailTab === 'structured' && 'active'" @click="urlDetailTab = 'structured'">
                 Datos estr. <span class="count" x-text="urlDetail.structured_data?.length || 0"></span>
