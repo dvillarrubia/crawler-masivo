@@ -137,6 +137,25 @@ def test_pagerank_con_repeticion_canonical_y_sumideros(sesion, job):
     assert articulo(9) == pytest.approx(articulo(6), rel=0.01)
 
 
+def test_el_canonical_de_la_cabecera_link_tambien_consolida(sesion, job):
+    """Si el canonical solo viene en la cabecera `Link`, la variante tambien se
+    consolida en la canonica: es el mismo canonical que decide que la pagina sea
+    "Canonicalised" (shared/indexabilidad.py)."""
+    from analysis.analyzer import SEOAnalyzer
+
+    j, filas = job
+    meta = sesion.execute(select(HtmlMeta).where(
+        HtmlMeta.url_id == filas["/blog/a1?orden=precio"].id)).scalar_one()
+    meta.canonical_href = None
+    meta.canonical_header = BASE + "/blog/a1"
+    sesion.commit()
+
+    SEOAnalyzer(sesion, str(j.id)).compute_pagerank()
+    sesion.commit()
+
+    assert sesion.get(Job, j.id).pagerank_resumen["aristas_canonical"] == 1
+
+
 def test_una_pagina_noindex_recibe_pero_no_reparte(sesion, job):
     """C3 de #24: Google acaba tratando los enlaces de una noindex como
     nofollow, asi que lo que llega desde ella no es autoridad real. Es el mismo
