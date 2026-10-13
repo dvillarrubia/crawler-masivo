@@ -59,6 +59,13 @@ def main() -> None:
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS programacion_id UUID"))
         conn.execute(text(
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS analisis_version VARCHAR(64)"))
+        # Capa de decisiones (#7, decision 84). La tabla `decisions` la crea
+        # create_all (con sus indices, por ser nueva); aqui va lo que
+        # create_all no anade a tablas que ya existen.
+        conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS decisiones_resumen JSON"))
+        conn.execute(text(
+            "ALTER TABLE clients ADD COLUMN IF NOT EXISTS decisiones JSON"))
 
         # Indices de claves foraneas que faltaban. create_all() solo crea
         # indices al crear la tabla, asi que en instalaciones ya existentes hay

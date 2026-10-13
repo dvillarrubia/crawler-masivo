@@ -390,6 +390,11 @@ se lanza solo.
   técnica está en [#7](https://github.com/dvillarrubia/crawler-masivo/issues/7),
   [#8](https://github.com/dvillarrubia/crawler-masivo/issues/8) y
   [#9](https://github.com/dvillarrubia/crawler-masivo/issues/9).
+- **Hecho, la base ([#7](https://github.com/dvillarrubia/crawler-masivo/issues/7))**:
+  el cliente de OpenRouter para Jev con caché (un recrawl no vuelve a pagar lo
+  mismo), presupuesto por ejecución, mensual por cliente y global, y la
+  observabilidad del gasto en cada trabajo. Todavía no pregunta nada por su
+  cuenta: falta el botón de #40 y las preguntas de verdad (#8 y #9).
 
 ---
 

@@ -344,7 +344,7 @@ def stream_backup_zip(
 # gana una columna con algo sensible (los canales de alerta de F2 llevan
 # tokens), no se cuela en los backups por defecto.
 _CAMPOS_CLIENTE = ("id", "nombre", "slug", "dominios", "zona_horaria",
-                   "config_defecto", "integraciones", "notas")
+                   "config_defecto", "integraciones", "decisiones", "notas")
 _CAMPOS_PERFIL = ("id", "nombre", "rol", "seeds", "config", "notas")
 
 
@@ -400,6 +400,10 @@ def _casar_cliente_y_perfil(zf, job_data: dict, db: Session, warnings: list[str]
                     i for i in (datos_cliente.get("integraciones") or [])
                     if isinstance(i, dict)
                 ],
+                # El presupuesto de decisiones (#7) viaja: es configuracion
+                # del cliente, no un secreto.
+                decisiones=(datos_cliente.get("decisiones")
+                            if isinstance(datos_cliente.get("decisiones"), dict) else None),
                 notas=datos_cliente.get("notas"),
             )
             db.add(cliente)
