@@ -38,7 +38,9 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 # Despues de arreglar sys.path, no antes.
-from shared.cola import COLA_JOBS, encolar, siguiente  # noqa: E402
+from shared.cola import (  # noqa: E402
+    COLA_JOBS, encolar, encolar_enriquecido, siguiente, siguiente_enriquecido,
+)
 from shared.version import VERSION as _VERSION
 
 # Nivel configurable por entorno. La salida de Scrapy se registra en DEBUG, y
@@ -79,6 +81,12 @@ PROGRAMACION_INTERVAL_SECONDS = int(
     os.getenv("PROGRAMACION_INTERVAL_SECONDS", "60"))
 # Cada cuanto se vuelve a mirar si hay jobs huerfanos. Ver `_quizas_recuperar`.
 RECOVERY_INTERVAL_SECONDS = int(os.getenv("RECOVERY_INTERVAL_SECONDS", "300"))
+# Analisis enriquecido (#40, decision 85): cuantas ejecuciones a la vez. Van
+# en su PROPIO pool y no en el de rastreos: una ejecucion larga (60.000 URLs
+# a 600 por minuto es hora y media) no puede quitarle el hueco a un rastreo,
+# y un rastreo de nueve horas no puede tener esperando a quien pulso el boton.
+# Casi todo su tiempo es esperar a la red, asi que un hilo apenas pesa.
+MAX_CONCURRENT_ENRIQUECIDOS = int(os.getenv("MAX_CONCURRENT_ENRIQUECIDOS", "1"))
 # El nombre y el orden de la cola viven en shared/cola.py: estaban
 # escritos a mano en cinco sitios y el orden salia al reves.
 JOBS_QUEUE = COLA_JOBS
@@ -1167,7 +1175,72 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
     if ahora - ultima_vez < RECOVERY_INTERVAL_SECONDS:
         return ultima_vez
     _recover_stale_jobs(rconn)
+    _recuperar_enriquecidos(rconn)
     return ahora
+
+
+# ---------------------------------------------------------------------------
+# Analisis enriquecido (#40, decision 85)
+# ---------------------------------------------------------------------------
+def _ejecutar_enriquecido(run_id: str) -> None:
+    """Unico sitio del worker que llega a la capa de decisiones, y solo con
+    un id sacado de `enrichment:pending`, que solo llena
+    `POST /api/jobs/{id}/enrichment` (con token). Ni `_run_job` ni el analisis
+    ni las programaciones pasan por aqui. El import va DENTRO a proposito: el
+    worker no carga la capa hasta que alguien ha pulsado el boton."""
+    try:
+        from shared.database import SessionLocal
+        from shared.enriquecido import ejecutar
+
+        rconn = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+        final = ejecutar(run_id, sesion_factory=SessionLocal, redis=rconn)
+        if final is None:
+            logger.info("Enriquecido %s: no estaba pendiente; se omite", run_id)
+        else:
+            logger.info("Enriquecido %s: %s", run_id, final)
+    except Exception:
+        # Best-effort con el try cubriendo la funcion ENTERA (decision 74):
+        # un fallo aqui no puede tumbar el bucle de rastreos.
+        logger.exception("Enriquecido %s: fallo al ejecutar", run_id)
+
+
+def _quizas_enriquecer(rconn, executor, activos: dict) -> None:
+    """Saca una ejecucion de su cola si hay hueco. Sin bloquear: el bucle ya
+    bloquea en la de rastreos."""
+    for rid in [r for r, f in activos.items() if f.done()]:
+        activos.pop(rid)
+    if len(activos) >= MAX_CONCURRENT_ENRIQUECIDOS:
+        return
+    try:
+        run_id = siguiente_enriquecido(rconn)
+    except Exception as exc:
+        logger.warning("Redis: no se pudo leer la cola de enriquecido (%s)", exc)
+        return
+    run_id = (run_id or "").strip()
+    if not run_id or run_id in activos:
+        return
+    logger.info("Dequeued enriquecido %s", run_id)
+    activos[run_id] = executor.submit(_ejecutar_enriquecido, run_id)
+
+
+def _recuperar_enriquecidos(rconn) -> None:
+    """Las ejecuciones que un despliegue dejo en `en_curso` sin nadie detras
+    vuelven a la cola. Reanudar es idempotente y no repaga: se saltan las URLs
+    con fila de esta ejecucion y lo demas sale de la cache."""
+    try:
+        from shared.database import SessionLocal
+        from shared.enriquecido import minutos_de_latido, recuperar
+
+        s = SessionLocal()
+        try:
+            ids = recuperar(s, minutos_de_latido())
+        finally:
+            s.close()
+        for rid in ids:
+            logger.warning("Recuperando enriquecido %s huerfano: se reencola", rid)
+            encolar_enriquecido(rconn, rid)
+    except Exception:
+        logger.exception("No se pudieron recuperar las ejecuciones de enriquecido")
 
 
 def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
@@ -1263,6 +1336,7 @@ def main() -> None:
         sys.exit(1)
 
     _recover_stale_jobs(rconn)
+    _recuperar_enriquecidos(rconn)
     ultima_recuperacion = time.time()
     # A cero para que la primera vuelta ya mire las programaciones: si el
     # worker arranca justo despues de un despliegue, el disparo perdido de ese
@@ -1271,6 +1345,8 @@ def main() -> None:
 
     executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
     active_futures: dict[str, Future] = {}
+    executor_enr = ThreadPoolExecutor(max_workers=max(1, MAX_CONCURRENT_ENRIQUECIDOS))
+    enriquecidos: dict[str, Future] = {}
 
     try:
         while not _shutdown_event.is_set():
@@ -1280,6 +1356,11 @@ def main() -> None:
             ultima_programacion = _quizas_programar(
                 rconn, ultima_programacion, time.time()
             )
+
+            # Antes de mirar el cupo de rastreos: con los huecos de rastreo
+            # llenos el bucle hace `continue` y la cola de enriquecido no se
+            # leeria nunca.
+            _quizas_enriquecer(rconn, executor_enr, enriquecidos)
 
             # Clean up finished futures
             done_ids = [
@@ -1341,6 +1422,7 @@ def main() -> None:
     finally:
         logger.info("Waiting for %d active job(s) to finish ...", len(active_futures))
         executor.shutdown(wait=True)
+        executor_enr.shutdown(wait=True)
         logger.info("Worker stopped")
 
 

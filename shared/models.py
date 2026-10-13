@@ -626,8 +626,9 @@ class Decision(Base):
     cambia de un job a otro: es lo que permite al rastreo incremental (#36 F4)
     arrastrar decisiones de un job al siguiente sin llamar a nadie.
 
-    `run_id` es la ejecucion de enriquecimiento de #40, que aun no existe: sin
-    FK hasta que exista la tabla, y NULL para lo que no venga de una.
+    `run_id` es la ejecucion de enriquecimiento de #40 (`enrichment_runs`), y
+    NULL para lo que no venga de una (el juego de evaluacion de #8). SET NULL
+    al borrar la ejecucion: la decision sigue valiendo como cache.
     """
 
     __tablename__ = "decisions"
@@ -637,7 +638,8 @@ class Decision(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
                     nullable=True)
     url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=True)
-    run_id = Column(UUID(as_uuid=True), nullable=True)
+    run_id = Column(UUID(as_uuid=True),
+                    ForeignKey("enrichment_runs.id", ondelete="SET NULL"), nullable=True)
     # url | bloque | enlace | par | job
     ambito = Column(String(10), nullable=False, default="url")
     clave = Column(String(64), nullable=False)
@@ -679,3 +681,56 @@ class Decision(Base):
         Index("ix_decisions_cache", "clave", "pregunta", "version_pregunta", "modelo"),
         Index("ix_decisions_run_id", "run_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Ejecuciones del analisis enriquecido (#40, decision 85)
+# ---------------------------------------------------------------------------
+class EnrichmentRun(Base):
+    """Una pulsacion del boton «Analisis enriquecido»: que se pidio, sobre que
+    URLs, con cuanto dinero y en que quedo.
+
+    Es lo UNICO que dispara la capa de decisiones despues de un rastreo: la
+    crea la API (con token, decision 85) y la ejecuta el worker desde su
+    propia cola. Nunca se crea sola —ni al terminar un rastreo ni desde una
+    programacion—.
+
+    `modulos` guarda la lista YA RESUELTA, con las dependencias anadidas, para
+    que reanudar tras un reinicio haga exactamente lo que se confirmo aunque
+    el registro de modulos cambie entre medias. `estimacion` es lo que se
+    enseño en el dialogo al confirmar: comparar con `gastado_usd` es la
+    validacion del ±30% de #40.
+
+    Estados: pendiente -> en_curso -> completada | parcial | cancelada |
+    fallida. `cancelando` es la peticion de cancelar mientras corre: el worker
+    la ve entre lotes y cierra como `cancelada` conservando lo pagado.
+    `parcial` = se corto por presupuesto (de la ejecucion o mensual).
+    """
+
+    __tablename__ = "enrichment_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    modulos = Column(JSON, nullable=False, default=list)
+    # {"carpeta": "/blog/", "max_urls": 500, "muestra": true}; vacio = todas
+    # las HTML internas, 200 e indexables.
+    alcance = Column(JSON, nullable=False, default=dict)
+    estimacion = Column(JSON, nullable=True)
+    presupuesto_usd = Column(Float, nullable=True)
+    # Suma de `usage.cost` de lo que se ha pagado en esta ejecucion (o de la
+    # estimacion por tokens si la respuesta no lo trae, marcado en
+    # `decisions.coste_estimado`).
+    gastado_usd = Column(Float, nullable=False, default=0.0)
+    estado = Column(String(16), nullable=False, default="pendiente", index=True)
+    # {"modulo": ..., "procesadas": n, "total": N, "por_modulo": {...}}
+    progreso = Column(JSON, nullable=True)
+    errores = Column(JSON, nullable=True)
+    # Por que se paro (presupuesto_ejecucion, presupuesto_cliente, sin_credito...)
+    motivo = Column(String(32), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    # Latido del worker: lo que distingue una ejecucion viva de una que se
+    # quedo en `en_curso` porque un despliegue recreo el contenedor.
+    latido_at = Column(DateTime(timezone=True), nullable=True)

@@ -374,7 +374,7 @@ def delete_job(
 def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
     """Borra un job y todo lo suyo. Lo usa tambien el borrado de un cliente
     con `con_jobs=true`; `confirmar=False` deja el commit a quien llama."""
-    from shared.models import CrawlProfile
+    from shared.models import CrawlProfile, Decision, EnrichmentRun
 
     job_id = job.id
     # If the job is still active, signal the crawler to stop first so it does
@@ -389,6 +389,12 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
     # A mano y no solo por el ON DELETE SET NULL: igual en cualquier motor.
     db.query(CrawlProfile).filter(CrawlProfile.last_job_id == job_id).update(
         {CrawlProfile.last_job_id: None}, synchronize_session=False)
+    # Analisis enriquecido (#40): a mano, como links e issues (en SQLite no
+    # hay ON DELETE CASCADE). Una ejecucion en curso se para sola: en el
+    # siguiente lote su fila ya no existe y el worker deja de llamar.
+    db.query(Decision).filter(Decision.job_id == job_id).delete(synchronize_session=False)
+    db.query(EnrichmentRun).filter(EnrichmentRun.job_id == job_id).delete(
+        synchronize_session=False)
     # Delete associated records in bulk (faster than cascade for large sets).
     db.query(Link).filter(Link.job_id == job_id).delete(synchronize_session=False)
     db.query(Issue).filter(Issue.job_id == job_id).delete(synchronize_session=False)

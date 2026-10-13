@@ -1043,3 +1043,55 @@ class CleaningRulesetResponse(BaseModel):
     pages_skipped: int
     chars_removed: int
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Analisis enriquecido (#40, decision 85)
+# ---------------------------------------------------------------------------
+class AlcanceEnriquecido(BaseModel):
+    """Sobre que URLs. Vacio = todas las HTML internas, 200 e indexables.
+
+    `extra="forbid"`: una clave mal escrita (`max_url`) seria un alcance que
+    se ignora en silencio, y aqui eso es pagar por todo el sitio en vez de
+    por la muestra que se pidio (decision 33)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    carpeta: str | None = Field(default=None, max_length=512)
+    max_urls: int | None = Field(default=None, ge=1, le=1_000_000)
+    muestra: bool = False
+
+
+class EnriquecidoEstimar(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    modulos: list[str] = Field(..., min_length=1, max_length=50)
+    alcance: AlcanceEnriquecido = Field(default_factory=AlcanceEnriquecido)
+
+
+class EnriquecidoCrear(EnriquecidoEstimar):
+    # Obligatorio: lanzar sin tope de ejecucion seria dejar todo en manos del
+    # mensual, y el dialogo siempre propone uno.
+    presupuesto_usd: float = Field(..., ge=0, le=10_000)
+
+
+class EnrichmentRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    modulos: list[str]
+    alcance: dict[str, Any]
+    estimacion: dict[str, Any] | None = None
+    presupuesto_usd: float | None = None
+    gastado_usd: float = 0.0
+    estado: str
+    motivo: str | None = None
+    progreso: dict[str, Any] | None = None
+    errores: list[str] | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    latido_at: datetime | None = None
+    # Distribucion de respuestas por pregunta, para la pestaña.
+    resultados: dict[str, Any] | None = None
