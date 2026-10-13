@@ -995,38 +995,131 @@ def _es_solo_referencia(item: dict) -> bool:
     return bool(claves) and claves <= {"@id", "id"}
 
 
+# Lo que el lector permisivo de extruct quita antes de reintentar: comentarios
+# de linea de HTML o JS al principio. Es SU regla, copiada para leer el bloque
+# igual que lo leia extruct cuando el JSON estricto falla.
+_RE_COMENTARIO_INICIAL = re.compile(r"^\s*(//.*|<!--.*-->)", re.M)
+
+
+def _motivo_json_invalido(texto: str, exc: json.JSONDecodeError) -> str:
+    """Por que no es JSON, en las palabras con que se arregla."""
+    resto = texto[exc.pos:exc.pos + 2]
+    donde = f"linea {exc.lineno}, columna {exc.colno}"
+    if resto.startswith(("//", "/*")) or texto.lstrip().startswith(("//", "/*", "<!--")):
+        return f"comentario dentro del JSON ({donde})"
+    if resto[:1] in ("}", "]"):
+        return f"coma final antes de '{resto[:1]}' ({donde})"
+    return f"{exc.msg} ({donde})"
+
+
+def _leer_json_ld(texto: str) -> tuple[Any, str | None]:
+    """Lee un bloque JSON-LD y dice si Google lo podra leer.
+
+    Devuelve ``(datos, motivo)``: ``motivo`` es None si el bloque es JSON de
+    verdad y, si no lo es, por que. Google parsea el JSON-LD como JSON
+    estricto: una coma final o un comentario hacen que descarte el bloque
+    ENTERO, y la pagina se queda sin resultado enriquecido con el marcado
+    aparentemente en su sitio. extruct en cambio reintenta con `jstyleson`,
+    que perdona las dos cosas, asi que esos bloques se guardaban y validaban
+    como buenos: el informe decia «ok» justo donde Google no ve nada (#28).
+
+    Se sigue leyendo con el lector permisivo —como hacia extruct— porque el
+    contenido sirve para auditar el resto del bloque y para saber de que tipo
+    era; lo que cambia es que el motivo viaja con el y la validacion lo
+    convierte en un error. Si ni el permisivo puede, ``datos`` es None.
+
+    ``strict=False`` (caracteres de control dentro de una cadena) se mantiene
+    como en extruct: no esta comprobado que Google los rechace y esta tabla no
+    se inventa hallazgos.
+    """
+    try:
+        return json.loads(texto, strict=False), None
+    except json.JSONDecodeError as exc:
+        motivo = _motivo_json_invalido(texto, exc)
+    try:
+        import jstyleson
+
+        return jstyleson.loads(_RE_COMENTARIO_INICIAL.sub("", texto), strict=False), motivo
+    except Exception:
+        return None, motivo
+
+
+def _bloques_json_ld(html_body: str) -> list[tuple[Any, str | None]]:
+    """``(datos, motivo)`` por cada `<script type="application/ld+json">`.
+
+    Se leen aqui y no con extruct por dos razones: extruct no dice que bloque
+    necesito el lector permisivo, y cuando un bloque no se puede leer ni asi
+    lanza una excepcion que se llevaba por delante TODOS los datos
+    estructurados de la pagina, microdatos y RDFa incluidos. El selector es el
+    mismo que usa extruct, para que cuenten los mismos bloques.
+    """
+    from extruct.utils import parse_html
+
+    try:
+        arbol = parse_html(html_body, encoding="UTF-8")
+    except Exception:
+        return []
+    bloques: list[tuple[Any, str | None]] = []
+    for nodo in arbol.xpath('descendant-or-self::script[@type="application/ld+json"]'):
+        texto = nodo.xpath("string()")
+        # Un <script> vacio no declara nada: no es un bloque roto.
+        if not texto or not texto.strip():
+            continue
+        bloques.append(_leer_json_ld(texto))
+    return bloques
+
+
 def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any]]:
     """
     Extract JSON-LD, Microdata, and RDFa using *extruct*.
 
-    Returns a list of dicts with: raw, format, schema_type.
+    Returns a list of dicts with: raw, format, schema_type, json_invalido.
 
     Un `@graph` se abre en una entidad por nodo. Antes el bloque entero daba una
     sola fila con `schema_type` NULL, y el `@graph` es exactamente lo que emite
     Yoast: en casi todo WordPress no habia forma de filtrar ni de informar por
     tipo, ni de validar cada entidad por separado.
+
+    ``json_invalido`` es el motivo por el que un bloque JSON-LD no es JSON
+    estricto (coma final, comentario), que es lo que Google descarta; None si
+    es valido o si el bloque no es JSON-LD. Un bloque que no se puede leer de
+    ninguna manera sale igual, con ``raw`` None: Google tampoco lo lee, y que
+    desapareciera del informe era callarse justo ese hallazgo.
     """
     results: list[dict[str, Any]] = []
+    html_body = _limpiar_cdata(html_body)
+
+    data: dict[str, Any] = {"json-ld": []}
+    for datos, motivo in _bloques_json_ld(html_body):
+        if datos is None:
+            results.append({"raw": None, "format": "jsonld", "schema_type": None,
+                            "json_invalido": motivo})
+            continue
+        for item in (datos if isinstance(datos, list) else [datos]):
+            if item:
+                data["json-ld"].append((item, motivo))
 
     try:
         import extruct
 
-        data = extruct.extract(
-            _limpiar_cdata(html_body),
+        otros = extruct.extract(
+            html_body,
             base_url=url,
-            syntaxes=["json-ld", "microdata", "rdfa"],
+            syntaxes=["microdata", "rdfa"],
             uniform=True,
         )
     except Exception:
-        return results
+        otros = {}
+    for fmt, items in otros.items():
+        if isinstance(items, list):
+            data[fmt] = [(item, None) for item in items]
 
     for fmt, items in data.items():
-        if not isinstance(items, list):
-            continue
         formato = fmt.replace("-", "")  # jsonld, microdata, rdfa
-        for item in items:
+        for item, motivo in items:
             if not isinstance(item, dict):
-                results.append({"raw": item, "format": formato, "schema_type": None})
+                results.append({"raw": item, "format": formato, "schema_type": None,
+                                "json_invalido": motivo})
                 continue
             grafo = item.get("@graph")
             nodos = (
@@ -1046,6 +1139,7 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
                     "raw": nodo,
                     "format": formato,
                     "schema_type": schema_type,
+                    "json_invalido": motivo,
                 })
 
     return results
@@ -1911,8 +2005,24 @@ _BOILERPLATE_CSS_SELECTORS: list[str] = [
     "#drift-widget-container", "#drift-frame-chat",
     "#tawk-bubble-container",
     # ---- ARIA modals / HTML5 dialogs ----
+    # Solo el ABIERTO: un `<dialog open>` en el HTML servido se pinta encima de
+    # la pagina nada mas cargar, que es la forma de un interstitial (cookies,
+    # newsletter, selector de pais). El cerrado no va aqui: ver
+    # ``_dialog_es_plantilla`` (#27, decision 79).
     "[aria-modal='true']",
-    "dialog[open]", "dialog",
+    "dialog[open]",
+]
+
+# Nombres que delatan un `<dialog>` de INTERFAZ y no de contenido: cuenta,
+# carrito, buscador, menu. Solo se aplican a `<dialog>`, no a cualquier
+# elemento como las listas de arriba: `account` o `search` sobre un `<div>`
+# cualquiera casaria con bloques de contenido (`search-results`, la ficha de
+# `account-types` de un banco), pero un MODAL con ese nombre es el de iniciar
+# sesion o el del buscador.
+_DIALOG_UI_PATTERNS: list[str] = [
+    "login", "log-in", "signin", "sign-in", "account", "cuenta",
+    "cart", "carrito", "basket", "cesta", "search", "buscador", "busqueda",
+    "menu", "share", "compartir",
 ]
 
 # Substrings matched against element id and class attributes (case-insensitive).
@@ -2144,6 +2254,38 @@ def _looks_like_hero(header_el) -> bool:
     return False
 
 
+def _dialog_es_plantilla(el, patrones: list[str]) -> bool:
+    """True si un `<dialog>` cerrado es interfaz (consentimiento, login, promo).
+
+    El `<dialog>` dejo de ser plantilla por etiqueta (#27): un FAQ en modal o
+    una guia de tallas estan en el HTML y Google los indexa. Lo que sigue
+    fuera se reconoce por lo mismo que el resto de la plantilla (decision 45):
+
+    - el nombre casa con las listas de plantilla y promo, o con las de
+      interfaz propias de un modal (``_DIALOG_UI_PATTERNS``);
+    - el texto lleva una frase de reclamo o de consentimiento
+      (``_PROMO_TEXT_PHRASES``). En un `<p>` suelto exigimos que el bloque SEA
+      la frase (``_PROMO_TEXT_MAX_FACTOR``), porque un parrafo puede
+      mencionar las cookies; un MODAL que dice «aceptar cookies» es el de
+      cookies aunque el texto legal que lo acompane sea largo, y es justo el
+      caso que el filtro por parrafo no caza;
+    - lleva campos de formulario: un modal con `<input>` es el login, la
+      newsletter o el buscador. Un modal de contenido se lee, no se rellena.
+    """
+    nombre = ((el.get("id") or "") + " " + (el.get("class") or "")).lower()
+    if any(p in nombre for p in patrones) or any(
+        p in nombre for p in _DIALOG_UI_PATTERNS
+    ):
+        return True
+    texto = el.text_content().lower()
+    if any(frase in texto for frase in _PROMO_TEXT_PHRASES):
+        return True
+    for campo in el.iter("input", "select", "textarea"):
+        if (campo.get("type") or "").strip().lower() != "hidden":
+            return True
+    return False
+
+
 def _strip_boilerplate_html(
     html: str,
     *,
@@ -2232,6 +2374,18 @@ def _strip_boilerplate_html(
             if es_la_pagina(el):
                 continue
             _remove_keep_tail(el)
+
+        # 2b) `<dialog>` cerrado: contenido salvo que se le note la plantilla.
+        #     Lo cerrado esta en el DOM y Google lo indexa —el FAQ en modal, la
+        #     tabla de tallas, las condiciones de envio—, igual que
+        #     `hidden="until-found"` (decision 44). Se desenvuelve a <div>
+        #     para que trafilatura no lo trate como una caja aparte.
+        for el in list(doc.iter("dialog")):
+            if _dialog_es_plantilla(el, patterns) and not es_la_pagina(el):
+                _remove_keep_tail(el)
+            else:
+                el.tag = "div"
+                el.attrib.pop("role", None)
 
         # 3) Remove non-content tags and template regions (landmark-aware).
         doomed = []

@@ -160,6 +160,7 @@ filtrar por `urls.is_html`.
 | raw | JSON | Dato estructurado completo |
 | format | varchar(20) | jsonld, microdata, rdfa |
 | schema_type | varchar(128) | @type del schema (Article, FAQPage...) |
+| json_invalido | varchar(200) | Por que el JSON-LD no es JSON estricto (coma final, comentario): Google lo descarta. NULL = valido o no aplica |
 
 ### `hreflang` — Anotaciones hreflang
 | Columna | Tipo | Descripcion |

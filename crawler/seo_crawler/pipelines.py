@@ -469,6 +469,7 @@ class PostgresPipeline:
             raw=data.get("raw"),
             format=data.get("format"),
             schema_type=data.get("schema_type"),
+            json_invalido=(data.get("json_invalido") or "")[:200] or None,
         )
 
     def _make_resource(self, data: dict):

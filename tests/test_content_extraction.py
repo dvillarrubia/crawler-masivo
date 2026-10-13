@@ -506,3 +506,64 @@ def test_el_reclamo_puro_sigue_fuera():
                     "Aceptar cookies"):
         html = _pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p><div><p>{reclamo}</p></div>")
         assert reclamo not in (ex.extract_main_content(sel(html)) or "")
+
+
+# ---------------------------------------------------------------------------
+# <dialog> cerrado: contenido salvo que se le note la plantilla (#27)
+# ---------------------------------------------------------------------------
+_FAQ = ("<dialog id='faq-envios'><h2>Preguntas frecuentes</h2>"
+        "<p>Los envios tardan entre dos y cuatro dias laborables en peninsula "
+        "y hasta siete en islas.</p></dialog>")
+
+_AVISO_LEGAL_LARGO = (
+    "Utilizamos cookies propias y de terceros para mejorar nuestros servicios "
+    "y mostrarle publicidad relacionada con sus preferencias mediante el "
+    "analisis de sus habitos de navegacion. Puede obtener mas informacion y "
+    "configurar sus preferencias en cualquier momento.")
+
+
+def test_un_faq_en_un_dialog_cerrado_es_contenido():
+    """Lo cerrado esta en el DOM y Google lo indexa, como `hidden="until-found"`
+    (decision 44). `dialog` estaba entre los selectores que se quitan siempre y
+    el FAQ en modal desaparecia del contenido guardado."""
+    out = ex.extract_main_content(sel(_pagina(f"<h1>Envios</h1><p>{_CUERPO}</p>{_FAQ}"))) or ""
+    assert "Texto real" in out
+    assert "entre dos y cuatro dias laborables" in out
+
+
+def test_el_dialog_de_cookies_sigue_fuera_aunque_su_texto_sea_largo():
+    """El filtro por parrafo exige que el bloque SEA la frase; en un modal basta
+    con que la diga: un MODAL que pide «aceptar cookies» es el de cookies."""
+    for dialogo in (
+        f"<dialog><p>{_AVISO_LEGAL_LARGO}</p><button>Aceptar cookies</button></dialog>",
+        f"<dialog id='dlg-1'><p>{_AVISO_LEGAL_LARGO}</p><button>Accept cookies</button></dialog>",
+        "<dialog class='cookie-consent'><p>Configura tu privacidad antes de seguir.</p></dialog>",
+    ):
+        out = ex.extract_main_content(sel(_pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p>{dialogo}"))) or ""
+        assert "Texto real" in out
+        assert "cookies" not in out.lower() and "privacidad" not in out.lower(), dialogo
+
+
+def test_el_dialog_de_login_newsletter_o_buscador_sigue_fuera():
+    for dialogo in (
+        # Sin nombre que lo delate: lo delatan los campos.
+        "<dialog id='m2'><h2>Bienvenido de nuevo</h2><p>Introduce tus datos para "
+        "continuar comprando con nosotros.</p><input type='email'>"
+        "<input type='password'></dialog>",
+        "<dialog class='newsletter-modal'><p>Recibe las novedades de la tienda "
+        "cada semana en tu correo.</p></dialog>",
+        "<dialog id='modal-carrito'><p>Tu cesta tiene tres articulos pendientes "
+        "de pagar.</p></dialog>",
+    ):
+        out = ex.extract_main_content(sel(_pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p>{dialogo}"))) or ""
+        assert "Texto real" in out
+        for palabra in ("Bienvenido", "novedades", "cesta"):
+            assert palabra not in out, dialogo
+
+
+def test_un_dialog_abierto_en_el_html_sigue_fuera():
+    """`<dialog open>` servido abierto se pinta encima de la pagina al cargar:
+    es la forma de un interstitial, no de contenido."""
+    html = _pagina(f"<h1>Ficha</h1><p>{_CUERPO}</p>"
+                   "<dialog open><p>Elige tu pais y tu idioma para continuar</p></dialog>")
+    assert "Elige tu pais" not in (ex.extract_main_content(sel(html)) or "")

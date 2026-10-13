@@ -135,6 +135,7 @@ class StructuredDataItem(scrapy.Item):
     raw = scrapy.Field()
     format = scrapy.Field()
     schema_type = scrapy.Field()
+    json_invalido = scrapy.Field()
 
 
 class ResourceItem(scrapy.Item):

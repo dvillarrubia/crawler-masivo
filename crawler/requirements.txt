@@ -11,6 +11,10 @@ w3lib>=2.1
 # informe del cliente.
 tldextract>=5.1
 extruct>=0.17
+# Lector permisivo de JSON con el que se lee un JSON-LD que no es JSON estricto
+# (coma final, comentarios) para poder auditarlo. Viene con extruct, pero se
+# usa directamente en `_leer_json_ld`, asi que se declara aqui (decision 69).
+jstyleson>=0.0.2
 lxml>=5.0
 scrapy-playwright>=0.0.40
 scrapy-impersonate

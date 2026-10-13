@@ -1409,6 +1409,57 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    ya dirá si no casan), y un rastreo lanzado a mano se queda con esa regla
    porque es lo único que se sabe de él.
 
+79. **Un `<dialog>` cerrado es contenido salvo que se le note la plantilla**
+   (#27) — `dialog` estaba entre los selectores que se quitan siempre, así que
+   un FAQ en modal, una guía de tallas o las condiciones de envío desaparecían
+   de `page_content`. Lo cerrado está en el DOM y Google lo indexa, igual que
+   `hidden="until-found"` (decisión 44). Ahora solo se quita sin preguntar el
+   `<dialog open>` —servido abierto se pinta encima de la página al cargar, que
+   es la forma de un interstitial— y el cerrado se juzga como el resto de la
+   plantilla (decisión 45), en `_dialog_es_plantilla`: fuera si su nombre casa
+   con las listas de plantilla y promo o con las de interfaz propias de un
+   modal (`login`, `cart`, `search`, `menu`…, que solo se aplican a `<dialog>`
+   porque sobre un `<div>` cualquiera `search-results` o `account-types` son
+   contenido), si su texto lleva una frase de consentimiento o reclamo
+   —en un modal basta con que la DIGA: el que pide «aceptar cookies» es el de
+   cookies aunque el texto legal que lo acompaña sea largo, que es justo lo que
+   el filtro por párrafo no caza—, o si lleva campos de formulario (login,
+   newsletter, buscador: un modal de contenido se lee, no se rellena). Lo que
+   queda se desenvuelve a `<div>`. Sin medir sobre páginas de control: no hay
+   un corpus guardado en el repo; lo cubren los tests de contenido, con cookies
+   de texto largo, sin nombre y con nombre. Lo que no cambia: un `<dialog>`
+   fuera de `<main>` sigue sin entrar, porque trafilatura se queda dentro del
+   contenedor elegido; y `role="dialog"` sobre un `<div>` sigue siendo
+   plantilla, porque ahí no hay forma de saber si está abierto.
+
+80. **Un JSON-LD que no es JSON no es un bloque válido, aunque se pueda leer**
+   (#28) — Google parsea el JSON-LD como JSON estricto: una coma final o un
+   comentario hacen que descarte el bloque ENTERO. extruct reintenta con
+   `jstyleson`, que perdona las dos cosas, así que esos bloques se guardaban y
+   validaban como buenos: «ok» justo donde Google no ve nada. Ahora el JSON-LD
+   se lee en el extractor (`_leer_json_ld`), con el mismo selector y el mismo
+   lector permisivo que extruct para no perder el bloque —el tipo y el resto
+   del marcado siguen sirviendo para auditar—, y el motivo viaja en
+   `structured_data.json_invalido` («coma final antes de '}' (línea 3,
+   columna 1)», «comentario dentro del JSON…»). La validación lo pone el
+   PRIMERO de la lista como error y sigue validando el resto, para que al
+   arreglar la coma no aparezca una segunda tanda por sorpresa. De paso: un
+   bloque que ni el permisivo entiende hacía saltar una excepción en extruct
+   que se llevaba **todos** los datos estructurados de la página, microdatos y
+   RDFa incluidos; ahora sale como bloque con `raw` NULL y error, y el resto
+   sigue. El CDATA (decisión 51) no cuenta como inválido, y `strict=False`
+   —caracteres de control dentro de una cadena— se mantiene: no está
+   comprobado que Google los rechace. Los rastreos anteriores llevan la
+   columna a NULL: hay que **re-rastrear**, no basta re-analizar (decisión 66).
+   Y la tabla de requisitos tiene ya un test que la compara ENTERA con una
+   tabla escrita a partir de la documentación de Google
+   (`REQUISITOS_ESPERADOS` en `tests/test_sd_validation.py`, con la página de
+   origen de cada tipo). Al escribirlo salieron cuatro obligatorias que Google
+   no pide: `Organization.name` (no documenta ninguna, como Article en la
+   decisión 51), `VideoObject.description`, `Course.provider`, y
+   `SoftwareApplication.aggregateRating`, que es «valoración O reseña» igual
+   que en Product. Las cuatro pasan a recomendadas (o a `uno_de`).
+
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

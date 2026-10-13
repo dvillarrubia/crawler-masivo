@@ -982,6 +982,7 @@ class SEOAnalyzer:
                 StructuredData.url_id,
                 StructuredData.schema_type,
                 StructuredData.raw,
+                StructuredData.json_invalido,
             )
             .join(Url, Url.id == StructuredData.url_id)
             .where(Url.job_id == self.job_id)
@@ -1007,8 +1008,8 @@ class SEOAnalyzer:
         # valores distintos.
         por_veredicto: dict[tuple, list[int]] = {}
 
-        for sd_id, url_id, schema_type, raw in rows:
-            status, issues = validate_structured_data(raw)
+        for sd_id, url_id, schema_type, raw, json_invalido in rows:
+            status, issues = validate_structured_data(raw, json_invalido=json_invalido)
             clave = (status, json.dumps(issues or None, sort_keys=True))
             por_veredicto.setdefault(clave, []).append(sd_id)
             if status in ("error", "warning"):

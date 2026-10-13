@@ -55,9 +55,14 @@ REQUISITOS: dict[str, dict[str, list]] = {
         "recomendadas": ["image", "totaltime", "tool", "supply"],
     },
     "breadcrumblist": {"obligatorias": ["itemlistelement"]},
+    # Tampoco para Organization: «There are no required properties». El
+    # `name` es recomendado como el resto, igual que se hizo con Article
+    # (decision 51). Importa por volumen: es el bloque de plantilla que va en
+    # todas las paginas, y como «error» un Organization sin nombre tenia el
+    # mismo peso en el informe que un Product sin precio.
     "organization": {
-        "obligatorias": ["name"],
-        "recomendadas": ["url", "logo", "sameas", "contactpoint"],
+        "obligatorias": [],
+        "recomendadas": ["name", "url", "logo", "sameas", "contactpoint"],
     },
     "localbusiness": {
         "obligatorias": ["name", "address"],
@@ -76,16 +81,22 @@ REQUISITOS: dict[str, dict[str, list]] = {
         "obligatorias": ["itemreviewed", "reviewrating", "author"],
         "recomendadas": ["datepublished", "reviewbody"],
     },
+    # `description` es recomendada en la documentacion de video, no
+    # obligatoria: pedirla daba error a videos que si salen enriquecidos.
     "videoobject": {
-        "obligatorias": ["name", "description", "thumbnailurl", "uploaddate"],
-        "recomendadas": ["duration", "contenturl", "embedurl"],
+        "obligatorias": ["name", "thumbnailurl", "uploaddate"],
+        "recomendadas": ["description", "duration", "contenturl", "embedurl"],
     },
+    # `provider` es recomendada (Course list), no obligatoria.
     "course": {
-        "obligatorias": ["name", "description", "provider"],
-        "recomendadas": ["offers", "hascourseinstance"],
+        "obligatorias": ["name", "description"],
+        "recomendadas": ["provider", "offers", "hascourseinstance"],
     },
+    # Valoracion O resena, como en Product: exigir `aggregateRating` daba
+    # error a una app con resenas sueltas, que Google acepta.
     "softwareapplication": {
-        "obligatorias": ["name", "offers", "aggregaterating"],
+        "obligatorias": ["name", "offers"],
+        "uno_de": [["aggregaterating", "review"]],
         "recomendadas": ["operatingsystem", "applicationcategory"],
     },
     "person": {"obligatorias": ["name"]},
@@ -288,14 +299,35 @@ def validate_sd_item(
     return problemas
 
 
-def validate_structured_data(raw) -> tuple[str, list[str]]:
+def validate_structured_data(
+    raw, json_invalido: str | None = None
+) -> tuple[str, list[str]]:
     """Validate a structured-data block.
 
     Returns ``(status, issues)`` where *status* is ``"ok"``, ``"warning"``
     (present but missing a required property), or ``"error"`` (missing
     ``@type`` entirely). Handles JSON-LD ``@graph`` containers and bare
     lists. Any unexpected shape is treated as ``"ok"`` (no false positives).
+
+    *json_invalido* es el motivo con que el extractor marco un JSON-LD que no
+    es JSON estricto (coma final, comentario). Es un error por si solo: Google
+    descarta el bloque ENTERO, asi que da igual que las propiedades esten. Va
+    el primero de la lista porque es lo primero que hay que arreglar —hasta
+    entonces el resto de avisos son sobre un marcado que Google no ve—, y el
+    resto se sigue validando para que al arreglar la coma no aparezca una
+    segunda tanda de errores por sorpresa.
     """
+    previos: list[tuple[str, str]] = []
+    if json_invalido:
+        previos.append((
+            "error",
+            f"JSON-LD no valido: {json_invalido}. Google descarta el bloque "
+            f"entero y la pagina no tiene resultado enriquecido por el",
+        ))
+        if raw is None:
+            # Ni un lector permisivo lo pudo leer: no hay nada mas que validar.
+            return ("error", [m for _, m in previos])
+
     items: list[dict] = []
     if isinstance(raw, dict):
         graph = raw.get("@graph")
@@ -306,9 +338,9 @@ def validate_structured_data(raw) -> tuple[str, list[str]]:
     elif isinstance(raw, list):
         items = [g for g in raw if isinstance(g, dict)]
     else:
-        return ("ok", [])
+        items = []
 
-    problemas: list[tuple[str, str]] = []
+    problemas: list[tuple[str, str]] = list(previos)
     for it in items:
         problemas += validate_sd_item(it)
     if not problemas:
