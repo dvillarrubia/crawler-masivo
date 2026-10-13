@@ -1721,8 +1721,21 @@ canario que se para en seco a las 199 URLs parece un WAF y era esto. Antes de
 reconstruir, mirar si hay algo rastreando:
 
 ```bash
-curl -s "$API/api/jobs?status=running" | python -c "import json,sys;print([j['name'] for j in json.load(sys.stdin)['items']])"
+for s in pending queued running analyzing; do
+  curl -s "$API/api/jobs?status=$s" | python -c "import json,sys;print('$s', [j['name'] for j in json.load(sys.stdin)['items']])"
+done
 ```
+
+**`analyzing` cuenta como en marcha.** El 2026-10-13 un merge se hizo con
+«0 running» y el rastreo semanal de Lopesan en pleno analisis: el analisis
+tiene `jobs` con `FOR UPDATE` toda la pasada, el `ALTER TABLE jobs` de la
+migracion se quedo esperando su candado y, mientras esperaba, **la API dejo de
+responder a `/api/jobs`** (Postgres pone en cola detras del `ALTER` todas las
+lecturas de la tabla). Desde entonces las migraciones del despliegue llevan
+`lock_timeout` de 15 s (`limitar_espera_de_bloqueos`) y fallan en vez de
+bloquear, y el despliegue solo reintenta cuando falla la conexion SSH: antes
+repetia el script entero, y un despliegue cancelado siguio vivo dos intentos
+mas camino del `up -d`.
 
 Y lo mismo vale para cualquier cosa larga contra la API: **mergear una PR
 dispara un despliegue, y el despliegue recrea el contenedor de la API**, asi

@@ -164,12 +164,23 @@ jobs:
           REMOTE
           )
 
+          # Solo se reintenta si falla la CONEXION (ssh sale con 255). Si lo
+          # que falla es el script —una migracion que no consigue su candado,
+          # un build roto— repetirlo entero vuelve a construir, a migrar y,
+          # si esta vez pasa, a recrear contenedores con un rastreo en marcha:
+          # el 2026-10-13 un despliegue cancelado siguio vivo dos intentos mas.
           for attempt in 1 2 3; do
-            if ssh "${ssh_opts[@]}" "${VPS_USER}@${VPS_HOST}" bash -se <<< "$remote_script"; then
+            rc=0
+            ssh "${ssh_opts[@]}" "${VPS_USER}@${VPS_HOST}" bash -se <<< "$remote_script" || rc=$?
+            if [ "$rc" -eq 0 ]; then
               echo "Deploy succeeded on attempt $attempt"
               break
             fi
-            echo "Deploy attempt $attempt failed"
+            if [ "$rc" -ne 255 ]; then
+              echo "::error::El script de despliegue fallo (codigo $rc); no se reintenta"
+              exit 1
+            fi
+            echo "Deploy attempt $attempt failed (conexion)"
             [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
             [ "$attempt" -eq 3 ] && { echo "::error::Deploy failed after 3 attempts"; exit 1; }
           done

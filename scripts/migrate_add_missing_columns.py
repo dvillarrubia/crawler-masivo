@@ -20,12 +20,13 @@ if _PROJECT_ROOT not in sys.path:
 from sqlalchemy import inspect, text
 from sqlalchemy.schema import CreateColumn
 
-from shared.database import engine
+from shared.database import engine, limitar_espera_de_bloqueos
 from shared import models  # noqa: F401  -- ensure all models register on Base.metadata
 from shared.models import Base
 
 
 def main() -> None:
+    limitar_espera_de_bloqueos()
     insp = inspect(engine)
     existing_tables = set(insp.get_table_names())
 
