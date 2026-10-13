@@ -1340,7 +1340,7 @@
                         <th data-tip="Numero de palabras visibles en la pagina">Palabras</th>
                         <th data-tip="Tiempo de respuesta del servidor">Tiempo</th>
                         <th data-tip="Tamano de la respuesta HTTP">Tamano</th>
-                        <th data-tip="Nivel de profundidad desde la URL semilla">Prof.</th>
+                        <th data-tip="Clics desde la home (o desde la portada de cada idioma), siguiendo enlaces internos follow. Vacio: no hay ningun camino de enlaces desde la home, o el censo es anterior a esta columna y no se ha re-analizado">Clics</th>
                         <th data-tip="Inlinks: enlaces internos que apuntan a esta URL">In</th>
                         <th data-tip="Outlinks: enlaces que salen de esta URL">Out</th>
                         <th data-tip="PageRank interno en escala 0-100: mide la importancia de la pagina segun cuantos enlaces internos recibe y de que paginas. Es logaritmica y esta anclada al maximo del sitio, asi que cada 25 puntos son diez veces menos autoridad que la pagina mas fuerte. La escala 0-10 de siempre apelotonaba el 85% del sitio por debajo de 0,1; esta los separa.">PR</th>
@@ -1363,7 +1363,7 @@
                           <td x-text="fmt.num(u.word_count)"></td>
                           <td x-text="fmt.ms(u.response_time_ms)"></td>
                           <td x-text="fmt.bytes(u.content_length)"></td>
-                          <td x-text="u.crawl_depth ?? '—'"></td>
+                          <td x-text="u.click_depth ?? '—'"></td>
                           <td x-text="fmt.num(u.inlinks_count)"></td>
                           <td x-text="fmt.num(u.outlinks_count)"></td>
                           <td>
@@ -2553,7 +2553,8 @@
                   <div class="detail-row"><span class="detail-label">Path</span><span class="detail-value" x-text="urlDetail.path || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Scheme</span><span class="detail-value" x-text="urlDetail.scheme || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Interna</span><span class="detail-value" x-text="urlDetail.is_internal ? 'Si' : 'No'"></span></div>
-                  <div class="detail-row"><span class="detail-label">Profundidad</span><span class="detail-value" x-text="urlDetail.crawl_depth ?? '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Clics desde la home</span><span class="detail-value" x-text="urlDetail.click_depth ?? 'sin camino desde la home'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Prof. de rastreo</span><span class="detail-value text-dim" x-text="urlDetail.crawl_depth ?? '—'" title="Saltos del rastreador desde la semilla mas cercana (cada semilla es 0, lo del sitemap 1). Es la que limita max_depth, no la que mide Google"></span></div>
                   <div class="detail-row"><span class="detail-label">Codigo estado</span><span class="detail-value" x-text="(urlDetail.status_code || '—') + ' ' + (urlDetail.status_text || '')"></span></div>
                   <div class="detail-row"><span class="detail-label">Grupo estado</span><span class="detail-value" x-text="urlDetail.status_group || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Content-Type</span><span class="detail-value" x-text="urlDetail.content_type || '—'"></span></div>

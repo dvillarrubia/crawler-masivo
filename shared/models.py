@@ -257,6 +257,10 @@ class Url(Base):
 
     is_internal = Column(Boolean, default=True)
     crawl_depth = Column(Integer, nullable=True)
+    # Clics desde la home (raiz del host y portadas de idioma), calculada por
+    # el analisis. NULL = sin camino desde la home. crawl_depth es otra cosa:
+    # saltos del rastreador desde las semillas, la que aplica max_depth.
+    click_depth = Column(Integer, nullable=True)
 
     content_type = Column(String(256))
     content_length = Column(BigInteger, nullable=True)

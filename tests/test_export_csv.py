@@ -19,7 +19,7 @@ from api.routers.results import CSV_COLUMNS, _csv_row, _val  # noqa: E402
 def _url_falsa(**extra):
     base = dict(
         url="https://e.com/a", host="e.com", path="/a", scheme="https",
-        is_internal=True, crawl_depth=1, status_code=200, status_group="2xx",
+        is_internal=True, crawl_depth=1, click_depth=2, status_code=200, status_group="2xx",
         status_text="OK", content_type="text/html", content_length=100,
         transfer_size=100, response_time_ms=12.5, is_html=True,
         resource_type="html", redirect_url=None, redirect_type=None,

@@ -188,7 +188,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
-| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **82 columnas**: URL + metadatos + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
+| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **83 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
 
 ## Database (PostgreSQL)
 
@@ -258,7 +258,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
-| `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
+| `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan, not_in_sitemap |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
@@ -1815,6 +1815,39 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    darle ninguna cifra. Y el diff de incidencias va dentro de su propio `try`:
    las alertas críticas de página —media sección fuera del índice— son lo que
    hay que entregar aunque el recuento falle.
+
+90. **La profundidad se cuenta en clics desde la home, no desde las semillas**
+   — `crawl_depth` son los saltos del rastreador desde donde empezo: cada
+   semilla es 0 y lo del sitemap 1. Con un censo sembrado desde la home se
+   parece a la profundidad de verdad; con una lista de semillas no significa
+   nada, y era la que se pintaba como «Prof.». Medido en el censo semanal de
+   Lopesan, sembrado con 3.040 URLs: **2.867 de 3.237 indexables a
+   profundidad 0**. `urls.click_depth` la calcula el analisis en
+   `compute_click_depth`, sobre las mismas aristas que los enlaces entrantes
+   (sin otra lectura de `links`, decision 41) y por niveles en el servidor, no
+   cargando el grafo en Python. Criterio:
+   - se parte de la **raiz de cada host de las semillas y de las portadas de
+     idioma que la home declara en su hreflang**. Contando solo desde `/es/`,
+     todo lo de `/en/` y `/de/` salia varios clics mas lejos —llegaba cruzando
+     de idioma a media navegacion—: con las portadas, el mismo censo pasa de
+     1.710 indexables a 4-6 clics a 386, y de 707 a 7 o mas a 9. El hreflang de
+     cualquier otra pagina no hace portada a su destino;
+   - **una redireccion no es un clic** (como en el spider, decision 27): la
+     raiz de Lopesan es un 302 a `/es/`, y `/es/` es la 0;
+   - se avanza solo por enlaces internos **follow** desde paginas **200 no
+     noindex** (decisiones 38 y 57). Al reves que en los entrantes, el
+     `nofollow` no es un camino: el enlace existe, pero no se sigue;
+   - **sin camino = NULL**, y si la pagina es indexable y alguien la enlaza
+     emite `not_reachable_from_home` (warning): una isla que solo se alcanza
+     desde semillas o desde el sitemap. Si nadie la enlaza ya es `orphan_page`
+     o `sitemap_orphan` (decision 36). En Lopesan: **461 indexables sin
+     camino**, 45 enlazadas desde otras islas —sobre todo posts del blog— y 416
+     huerfanas. Si no se rastreo la raiz de ningun host, la columna queda vacia
+     y no se avisa de nada: sin home no hay de donde contar.
+   `crawl_depth` se queda: es la que aplica `max_depth`. La tabla, la ficha, el
+   explorador y el CSV muestran la de clics, y la ficha tambien la de rastreo,
+   en gris. No hace falta re-rastrear: basta **re-analizar** (3,8 s el
+   agregado de enlaces con la profundidad incluida, en ese censo).
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino

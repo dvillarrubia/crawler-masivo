@@ -33,6 +33,8 @@ def main() -> None:
         # Palabras del contenido principal: con las del body entero el
         # megamenu tapaba las paginas escasas (997 vs 10.433 en un censo).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_word_count INTEGER"))
+        # Clics desde la home, no saltos desde las semillas (decision 90).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS click_depth INTEGER"))
         # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.
         conn.execute(text("ALTER TABLE headings ADD COLUMN IF NOT EXISTS oculto BOOLEAN"))
         # Hash del contenido normalizado: el de los bytes no detecta duplicados

@@ -616,6 +616,7 @@ def _insert_url_batch(
             scheme=d.get("scheme"),
             is_internal=d.get("is_internal"),
             crawl_depth=d.get("crawl_depth"),
+            click_depth=d.get("click_depth"),
             content_type=d.get("content_type"),
             content_length=d.get("content_length"),
             status_code=d.get("status_code"),

@@ -1980,6 +1980,9 @@ class SEOAnalyzer:
             Column("origen_id", BigInteger),
             Column("es_interno", Boolean),
             Column("origen_cuenta", Boolean),
+            # Solo para la profundidad de clic: el `nofollow` SI cuenta como
+            # enlace entrante (abajo), pero no es un camino que se recorra.
+            Column("seguible", Boolean),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -1988,10 +1991,11 @@ class SEOAnalyzer:
         destino = aliased(Url)
         self.session.execute(
             insert(aristas).from_select(
-                ["destino_id", "origen_id", "es_interno", "origen_cuenta"],
+                ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible"],
                 select(
                     destino.id, Link.from_url_id, Link.is_internal,
                     and_(origen.noindex.isnot(True), origen.status_code == 200),
+                    Link.follow.isnot(False),
                 )
                 .join(origen, origen.id == Link.from_url_id)
                 .outerjoin(destino, and_(
@@ -2051,8 +2055,190 @@ class SEOAnalyzer:
             )
         )
 
+        # Sobre las mismas aristas: una segunda lectura de `links` costaria lo
+        # mismo que todo lo anterior (decision 41).
+        self.compute_click_depth(aristas)
+
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         self.session.flush()
+
+    # -- Profundidad de clic -------------------------------------------------
+
+    def _portadas(self) -> list[int]:
+        """Las URLs desde las que se cuenta la profundidad: la raiz de cada
+        host de las semillas (`https://host/`), si se rastreo.
+
+        No las semillas: un censo sembrado con 3.040 URLs (Lopesan, 13-oct)
+        tenia 2.867 de sus 3.237 indexables a profundidad 0, y medido desde la
+        home esas mismas paginas estaban entre 1 y 12 clics.
+        """
+        from shared.models import Job
+
+        semillas = self.session.execute(
+            select(Job.seeds).where(Job.id == self.job_id)
+        ).scalar() or []
+        candidatas: list[str] = []
+        for semilla in semillas:
+            host = urlparse(str(semilla)).hostname
+            if not host:
+                continue
+            for esquema in ("https", "http"):
+                candidatas += [f"{esquema}://{host}/", f"{esquema}://{host}"]
+        if not candidatas:
+            return []
+        return list(self.session.execute(
+            select(Url.id).where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.url.in_(set(candidatas)),
+            )
+        ).scalars())
+
+    def compute_click_depth(self, aristas) -> None:
+        """`urls.click_depth`: clics desde la home, como cuenta Google.
+
+        `crawl_depth` es otra cosa —saltos del rastreador desde donde empezo,
+        con cada semilla a 0 y lo del sitemap a 1— y sigue haciendo falta,
+        porque es la que corta el rastreo (`max_depth`).
+
+        Criterio, el mismo grafo que los enlaces entrantes:
+        - se parte de la raiz de cada host de las semillas y de las portadas
+          de idioma que esa raiz declara en su hreflang: `/es/`, `/en/` y
+          `/de/` son portadas para Google, y contando solo desde una todo lo
+          que no esta en ese idioma sale varios clics mas lejos;
+        - una redireccion NO es un clic: el destino hereda la profundidad del
+          salto (lo mismo que hace el spider, decision 27). La raiz de Lopesan
+          es un 302 a `/es/`, y `/es/` es la profundidad 0;
+        - solo se avanza por enlaces internos, follow, desde paginas 200 que
+          no son noindex (decisiones 38 y 57): de una 404 o una noindex no
+          sale ningun camino;
+        - lo que no tiene camino queda en NULL, y si es indexable y alguien la
+          enlaza emite `not_reachable_from_home` (si nadie la enlaza ya es
+          `orphan_page` o `sitemap_orphan`, decision 36).
+
+        Por niveles y en el servidor, no cargando el grafo en Python: en
+        penguin son 10 millones de aristas.
+        """
+        from sqlalchemy import BigInteger, Column, Integer, MetaData, Table, exists, insert, literal
+
+        from shared.models import Hreflang
+
+        self.session.execute(
+            update(Url).where(Url.job_id == self.job_id).values(click_depth=None)
+        )
+        portadas = self._portadas()
+        if not portadas:
+            logger.warning(
+                "Profundidad de clic: no se rastreo la raiz de ningun host de "
+                "las semillas; click_depth queda vacia en el job %s", self.job_id)
+            return
+
+        self.session.execute(text("DROP TABLE IF EXISTS prof_tmp"))
+        prof = Table(
+            "prof_tmp", MetaData(),
+            Column("id", BigInteger, primary_key=True),
+            Column("d", Integer),
+            prefixes=["TEMPORARY"],
+        )
+        prof.create(self.session.connection())
+        # Alias para el NOT EXISTS: con la misma tabla dentro y fuera,
+        # SQLAlchemy autocorrela la subconsulta y la deja sin FROM.
+        visto = prof.alias("visto")
+        self.session.execute(insert(prof), [{"id": i, "d": 0} for i in set(portadas)])
+
+        def insertar(consulta) -> int:
+            return self.session.execute(
+                insert(prof).from_select(["id", "d"], consulta)
+            ).rowcount or 0
+
+        def cerrar_redirecciones(d: int) -> None:
+            salto = aliased(Url)
+            destino = aliased(Url)
+            while insertar(
+                select(destino.id, literal(d, Integer)).distinct()
+                .select_from(salto)
+                .join(prof, and_(prof.c.id == salto.id, prof.c.d == d))
+                .join(destino, and_(
+                    destino.job_id == salto.job_id,
+                    destino.url == salto.redirect_url,
+                ))
+                .where(
+                    salto.job_id == self.job_id,
+                    destino.is_internal.is_(True),
+                    ~exists().where(visto.c.id == destino.id),
+                )
+            ):
+                pass
+
+        cerrar_redirecciones(0)
+        # Portadas de idioma: el hreflang de la home (ya resuelta la
+        # redireccion de la raiz), no el de cualquier pagina.
+        portada = aliased(Url)
+        alterna = aliased(Url)
+        insertar(
+            select(alterna.id, literal(0, Integer)).distinct()
+            .select_from(Hreflang)
+            .join(portada, portada.id == Hreflang.url_id)
+            .join(prof, and_(prof.c.id == portada.id, prof.c.d == 0))
+            .join(alterna, and_(
+                alterna.job_id == portada.job_id,
+                alterna.url == Hreflang.href,
+            ))
+            .where(
+                portada.job_id == self.job_id,
+                portada.status_code == 200,
+                Hreflang.en_body.isnot(True),
+                alterna.is_internal.is_(True),
+                ~exists().where(visto.c.id == alterna.id),
+            )
+        )
+        cerrar_redirecciones(0)
+
+        d = 0
+        while d < 1000:
+            nuevos = insertar(
+                select(aristas.c.destino_id, literal(d + 1, Integer)).distinct()
+                .select_from(aristas)
+                .join(prof, and_(prof.c.id == aristas.c.origen_id, prof.c.d == d))
+                .where(
+                    aristas.c.es_interno.is_(True),
+                    aristas.c.origen_cuenta.is_(True),
+                    aristas.c.seguible.is_(True),
+                    aristas.c.destino_id.isnot(None),
+                    ~exists().where(visto.c.id == aristas.c.destino_id),
+                )
+            )
+            if not nuevos:
+                break
+            d += 1
+            cerrar_redirecciones(d)
+
+        self.session.execute(
+            update(Url)
+            .where(Url.id == prof.c.id, Url.job_id == self.job_id)
+            .values(click_depth=prof.c.d)
+        )
+        self.session.execute(text("DROP TABLE IF EXISTS prof_tmp"))
+
+        sin_camino = self.session.execute(
+            select(Url.id, Url.inlinks_count, Url.in_sitemap).where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.is_html.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+                Url.click_depth.is_(None),
+                Url.inlinks_count > 0,
+            )
+        ).all()
+        for url_id, entrantes, en_sitemap in sin_camino:
+            self._add_issue(
+                url_id, "not_reachable_from_home", "warning",
+                {"inlinks": entrantes, "in_sitemap": en_sitemap},
+            )
+        logger.info(
+            "Profundidad de clic: %d portadas, %d niveles, %d indexables "
+            "enlazadas sin camino desde la home", len(portadas), d, len(sin_camino))
 
     # -- PageRank -----------------------------------------------------------
 

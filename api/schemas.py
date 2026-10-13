@@ -494,6 +494,7 @@ class UrlResponse(BaseModel):
     scheme: str | None = None
     is_internal: bool | None = None
     crawl_depth: int | None = None
+    click_depth: int | None = None
     content_type: str | None = None
     content_length: int | None = None
     status_code: int | None = None
