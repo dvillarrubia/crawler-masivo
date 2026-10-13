@@ -41,9 +41,22 @@ class CategoryInsight(BaseModel):
     recommendations: list[Recommendation]
 
 
+class TopeDeNota(BaseModel):
+    """Por que la nota global no pasa de cierto valor (UX-05)."""
+    tope: int
+    paginas_con_error: int
+    de: int
+    pct: float
+    motivo: str
+
+
 class InsightsResponse(BaseModel):
     job_id: uuid.UUID
     overall_score: int
+    # La media ponderada antes del tope. Se devuelve para que se vea cuanto
+    # recorta: un 88 que baja a 49 no es lo mismo que un 52 que baja a 49.
+    overall_score_sin_tope: int | None = None
+    tope: TopeDeNota | None = None
     categories: list[CategoryInsight]
     generated_at: datetime
 
@@ -628,6 +641,9 @@ class JobStats(BaseModel):
     paginas_html: int = 0
     indexables: int = 0
     no_indexables: int = 0
+    # False en los censos analizados antes de la decision 90: ahi un
+    # click_depth NULL es «sin calcular», no «sin camino desde la home».
+    click_depth_calculada: bool = False
 
 
 # ---------------------------------------------------------------------------

@@ -169,7 +169,45 @@ const fmt = {
     return (b/1048576).toFixed(1) + ' MB';
   },
   status: s => STATUS_LABEL[s] || s,
-  issue: t => ISSUE_LABEL[t] || t.replaceAll('_', ' '),
+  issue: t => ISSUE_LABEL[t] || ISSUE_LABEL_EXTRA[t] || t.replaceAll('_', ' '),
+  // `issues.details` en castellano, para la tabla de Problemas. Antes se
+  // pintaba el JSON tal cual («status_code: 404», «duplicate_urls: 276074»).
+  detalles: d => {
+    if (!d || typeof d !== 'object') return '';
+    const partes = [];
+    const corta = u => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
+    for (const [k, v] of Object.entries(d)) {
+      if (v == null || v === '' || k === 'otro_dominio_registrable' || k === 'paginas_del_host') continue;
+      if (k === 'validation_issues' && Array.isArray(v)) {
+        partes.push(v[0] + (v.length > 1 ? ` (y ${v.length - 1} más)` : ''));
+      } else if (k === 'duplicate_urls' && Array.isArray(v)) {
+        if (d.duplicate_count == null) partes.push(`${fmt.num(v.length + 1)} páginas en el grupo`);
+      } else if (k === 'matches' && Array.isArray(v)) {
+        if (v.length) partes.push('se parece a ' + corta(v[0].url || v[0]) + (v.length > 1 ? ` y ${v.length - 1} más` : ''));
+      } else if (k === 'chain' && Array.isArray(v)) {
+        partes.push(`${v.length - 1} saltos`);
+      } else if (k === 'closest_similarity' || k === 'similarity') {
+        partes.push(`similitud ${Math.round(v * 100)} %`);
+      } else if (k === 'threshold') {
+        continue;
+      } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url'].includes(k)) {
+        partes.push((DETALLE_LABEL[k] || k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
+      } else if (k === 'canonical_host') {
+        if (!d.canonical) partes.push('a ' + v);
+      } else if (k === 'target_status') {
+        partes.push(`el destino responde ${v}`);
+      } else if (Array.isArray(v)) {
+        partes.push(`${DETALLE_LABEL[k] || k}: ${v.length}`);
+      } else if (typeof v === 'object') {
+        continue;
+      } else if (typeof v === 'boolean') {
+        if (v) partes.push(DETALLE_LABEL[k] || k);
+      } else {
+        partes.push(`${DETALLE_LABEL[k] || k} ${typeof v === 'number' ? fmt.num(v) : v}`);
+      }
+    }
+    return partes.join(' · ');
+  },
   // Analisis enriquecido (#40)
   usd: n => n == null ? '—' : (n === 0 ? '0 $' : (n < 0.01 ? Number(n).toFixed(5) : Number(n).toFixed(2)) + ' $'),
   duracion: s => s == null ? '—' : s < 60 ? s + ' s' : s < 3600 ? Math.ceil(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h',
@@ -333,6 +371,10 @@ function app() {
 
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
+    issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    issuesVista: 'tipos',     // 'tipos' | 'lista'
+    grupoAbierto: {},
+    ISSUE_INFO,
     issueFilters: { severity: '', issue_type: '' },
 
     // Pestana Enlaces
@@ -477,7 +519,11 @@ function app() {
         const q = new URLSearchParams();
         if (this.issueFilters.issue_type) q.set('tipo', this.issueFilters.issue_type);
         if (this.issueFilters.severity) q.set('gravedad', this.issueFilters.severity);
+        if (this.issuesVista === 'lista' && !this.issueFilters.issue_type) q.set('vista', 'lista');
         if (q.toString()) h += '?' + q.toString();
+      }
+      if (t === 'diff' && this.diffOtro && this.diffOtro !== (this.job.comparacion || {}).comparado_con) {
+        h += '?con=' + this.diffOtro;
       }
       return h;
     },
@@ -517,12 +563,18 @@ function app() {
             const tab = SLUG_TAB[sub] || 'overview';
             if (tab === 'issues') {
               const tipo = q.get('tipo') || '', grav = q.get('gravedad') || '';
-              if (tipo !== this.issueFilters.issue_type || grav !== this.issueFilters.severity) {
+              const vista = tipo || q.get('vista') === 'lista' ? 'lista' : 'tipos';
+              if (tipo !== this.issueFilters.issue_type || grav !== this.issueFilters.severity || vista !== this.issuesVista) {
                 this.issueFilters.issue_type = tipo;
                 this.issueFilters.severity = grav;
+                this.issuesVista = vista;
                 this.issues = [];
                 this.issuesPage = 1;
               }
+            }
+            if (tab === 'diff' && q.get('con') && q.get('con') !== this.diffOtro) {
+              this.diffOtro = q.get('con');
+              this.cargarDiff();
             }
             await this.switchTab(tab);
           }
@@ -911,6 +963,7 @@ function app() {
       this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null;
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
+      this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
       this.linksPage = 1; this.issuesPage = 1;
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
@@ -1128,6 +1181,12 @@ function app() {
       });
     },
 
+    // Tamano parecido = al menos la mitad de URLs que este censo.
+    candidatosDiff(parecidos) {
+      const mio = (this.stats && this.stats.total_urls) || this.job?.total_urls_crawled || 0;
+      return this.diffCandidatos.filter(j => ((j.total_urls_crawled || 0) >= mio * 0.5) === parecidos);
+    },
+
     async cargarDiff() {
       if (!this.job || !this.diffOtro) { this.diff = null; return; }
       this.diffCargando = true;
@@ -1144,12 +1203,21 @@ function app() {
     async switchTab(tab) {
       this.detailTab = tab;
       if (tab === 'urls' && this.urls.length === 0) this.loadUrls();
-      if (tab === 'issues' && this.issues.length === 0) this.loadIssues();
+      if (tab === 'issues') {
+        if (!this.issuesResumen) this.loadIssuesResumen();
+        if ((this.issueFilters.issue_type || this.issuesVista === 'lista') && this.issues.length === 0) this.loadIssues();
+      }
       if (tab === 'links' && this.links.length === 0) this.loadLinks();
       if (tab === 'insights' && !this.insights) this.loadInsights();
       if (tab === 'semantic') this.loadSemantic();
       if (tab === 'cleaning') this.loadCleaning();
-      if (tab === 'diff' && !this.diffCandidatos.length) this.cargarCandidatosDiff();
+      if (tab === 'diff') {
+        if (!this.diffCandidatos.length) this.cargarCandidatosDiff();
+        // Se abre con la comparacion que el worker hizo al cerrar el rastreo
+        // (UX-12): un desplegable vacio obligaba a saber con cual comparar.
+        const auto = this.job && this.job.comparacion && this.job.comparacion.comparado_con;
+        if (auto && !this.diffOtro) { this.diffOtro = auto; this.cargarDiff(); }
+      }
       if (tab === 'enriquecido') this.cargarEjecuciones();
       this.$nextTick(() => lucide.createIcons());
     },
@@ -1537,7 +1605,7 @@ function app() {
     // ------- Detalle de URL individual -------
     async openUrlDetail(urlId) {
       this.urlDetailLoading = true;
-      this.urlDetailTab = 'general';
+      this.urlDetailTab = 'seo';
       this.urlDetail = null;
       if (this.view === 'explorer') { this.urlDetailDesde = 'explorer'; this._unbindExplorerKeyNav(); }
       else if (this.view === 'detail') this.urlDetailDesde = 'detail';
@@ -1576,6 +1644,32 @@ function app() {
         this.issuesTotal = data.total;
       } catch (e) { this.error = e.message; }
       this.loading = false;
+    },
+
+    async loadIssuesResumen() {
+      if (!this.job) return;
+      try {
+        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen`);
+      } catch (e) { this.error = e.message; this.issuesResumen = []; }
+    },
+
+    resumenIssues(severidad) {
+      const r = this.issuesResumen || [];
+      return severidad ? r.filter(x => x.severity === severidad) : r;
+    },
+
+    verTipoDeIncidencia(tipo, severidad) {
+      this.issueFilters.issue_type = tipo;
+      this.issueFilters.severity = severidad || '';
+      this.issuesVista = 'lista';
+      this.applyIssueFilters();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+
+    volverAGrupos() {
+      this.issueFilters.issue_type = '';
+      this.issuesVista = 'tipos';
+      this.issues = [];
     },
 
     applyIssueFilters() { this.issuesPage = 1; this.loadIssues(); },

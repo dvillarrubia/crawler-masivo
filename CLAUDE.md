@@ -27,7 +27,7 @@ A distributed SEO crawler (similar to Screaming Frog) built with **FastAPI + Scr
 | **Crawler** | `crawler/` | Scrapy + Playwright | SEO spider + Redis queue worker. Each crawl runs as **subprocess** |
 | **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis (17 check types). Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
-| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI. Light theme (`style.css`) is the default; `theme-terminal.css` (green-phosphor console) is opt-in; toggle in the top bar, stored in `localStorage['seo-crawler-theme']` |
+| **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS). Served by FastAPI. Rutas en el hash (`#/rastreos/<id>/problemas?gravedad=error`, `#/clientes/<id>`…; `_ruta()` / `_irARuta()` en `app.js`). `incidencias.js` es el catálogo de cada tipo de incidencia (qué es, qué decide Google, cómo se arregla): un tipo nuevo del analizador lleva su entrada ahí. Plan y estado de la interfaz en `docs/AUDITORIA_UX.md`. Light theme (`style.css`) is the default; `theme-terminal.css` (green-phosphor console) is opt-in; toggle in the top bar, stored in `localStorage['seo-crawler-theme']` |
 | **Scripts** | `scripts/` | Python | DB init (`init_db.py`), verificación (`check_content_quality.py`, `check_js_templates.py`) y reparaciones sobre censos ya hechos (`fix_h1_en_contenido.py`, `near_duplicates.py`) |
 
 ### Docker Services (docker-compose.yml)
@@ -184,7 +184,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | DELETE | `/api/jobs/{id}` | Delete job + cascade |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
 | GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`) |
-| GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`) |
+| GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`), por gravedad y tipo |
+| GET | `/api/jobs/{id}/issues/resumen` | Una fila por tipo: incidencias, páginas distintas y ejemplos (vista agrupada de Problemas) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
@@ -1867,6 +1868,21 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    explorador y el CSV muestran la de clics, y la ficha tambien la de rastreo,
    en gris. No hace falta re-rastrear: basta **re-analizar** (3,8 s el
    agregado de enlaces con la profundidad incluida, en ese censo).
+
+92. **La nota global del Informe SEO no puede decir «Bueno» con errores
+   abiertos** (UX-05 de `docs/AUDITORIA_UX.md`). Era una media ponderada de
+   seis categorías, y una media esconde justo lo que importa: el censo de
+   Lopesan sacaba **88 «Bueno»** con 2.367 páginas canonicalizadas a
+   `*.lfr.cloud` —la mitad del sitio fuera del índice, decisión 64—. Ahora la
+   media se recorta: con cualquier URL con una incidencia de gravedad `error`,
+   como mucho **79** («Mejorable»); si las URLs con error son el **10 %** de las
+   internas o más, como mucho **49** («Crítico»). Lopesan: 2.449 de 5.751 URLs
+   (42,6 %) → **49**. La respuesta lleva `overall_score_sin_tope` y `tope` (con
+   las cifras y el motivo), y la interfaz lo dice encima de la nota: un 88 que
+   baja a 49 no es lo mismo que un 52 que baja a 49. Las notas por categoría no
+   cambian. Los umbrales (`TOPE_CON_ERRORES*` en `api/routers/results.py`) son
+   un juicio, no una medida: lo que sí está medido es que sin tope la nota
+   contradecía a Problemas y al Resumen del mismo censo.
 
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
