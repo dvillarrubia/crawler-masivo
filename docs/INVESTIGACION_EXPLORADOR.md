@@ -201,3 +201,27 @@ Por orden de impacto entre coste. Cada una dice qué decisión SEO desbloquea.
 - Columnas sin uso: diferencia entre las claves de una fila de `/urls` y `EXP_COLUMN_DEFS`.
 - Orden por similitud: `closest_similarity` está en `_RANGE_FILTERS` y no en `SORT_COLUMNS`.
 - Logs: `docker compose logs api` en el VPS justo después del despliegue → 0 líneas de `/urls`.
+
+## Estado (2026-10-14)
+
+Todo lo recomendado está hecho y desplegado (#132-#136), en una noche:
+
+| Recomendación | PR | Medido |
+|---|---|---|
+| CSV de la vista | #132 | Lopesan, «HTML sin título»: 32 filas, las mismas que en pantalla |
+| Listado ligero | #132 | 1,6 MB → 250 kB por página de 100 filas |
+| Filtro por problema y «Ver en el Explorador» | #132 | Canonical externo → 2.367 URLs |
+| Columnas que ya llegaban (píxeles, sitemap, X-Robots-Tag…) | #132 | — |
+| Vista en la URL, filtros que sobreviven al cambio de pestaña | #132 | Recarga y atrás comprobados |
+| Ordenar por similitud, URL ≠ buscador, vacío/con valor, panel en resumen SEO | #132 | — |
+| Medir el uso | #133 | `GET /api/uso/explorador` |
+| Agrupar por plantilla | #134 | 32 errores 4xx de Lopesan: 12 son dos fallos (`{"es_ES":""}` × 6, `null` × 6) |
+| Enlazada desde + CSV de enlaces entrantes | #134 | `/de/unternehmen/null` ← `/de/unternehmen/lopesan-geschichte` × 3 |
+| Vistas por ámbito SEO | #135 | 10 vistas con chips por tipo de incidencia |
+| Vistas guardadas por cliente | #136 | — |
+| Cambio frente al censo anterior | #136 | Con los avisos de versión encima de la tabla |
+| Filtros `a|b`, `!a`, varios códigos | #136 | «4xx sin null»: 26 de 32 |
+
+Lo siguiente con fundamento es **leer `/api/uso/explorador` dentro de un par
+de semanas** y quitar lo que no se use: diez vistas por ámbito y 52 columnas
+son muchas, y ahora se puede saber cuáles sobran.
