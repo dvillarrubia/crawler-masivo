@@ -115,6 +115,27 @@ const fmt = {
   },
   status: s => STATUS_LABEL[s] || s,
   issue: t => ISSUE_LABEL[t] || t.replaceAll('_', ' '),
+  // Analisis enriquecido (#40)
+  usd: n => n == null ? '—' : (n === 0 ? '0 $' : (n < 0.01 ? Number(n).toFixed(5) : Number(n).toFixed(2)) + ' $'),
+  duracion: s => s == null ? '—' : s < 60 ? s + ' s' : s < 3600 ? Math.ceil(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h',
+  estadoEnriq: e => ({ pendiente: 'En cola', en_curso: 'En curso', cancelando: 'Cancelando…',
+    completada: 'Completada', parcial: 'Parcial (presupuesto)', cancelada: 'Cancelada', fallida: 'Fallida' })[e] || e,
+  colorEnriq: e => ({ completada: 'var(--green)', parcial: 'var(--orange)', fallida: 'var(--red)',
+    cancelada: 'var(--text-dim)', cancelando: 'var(--orange)' })[e] || 'var(--accent)',
+  motivoEnriq: m => ({ presupuesto_ejecucion: 'se agotó el presupuesto de la ejecución',
+    presupuesto_cliente: 'se agotó el tope mensual del cliente', presupuesto_global: 'se agotó el tope mensual de la instancia',
+    presupuesto_sin_contador: 'sin contador de gasto no se puede garantizar el tope', max_llamadas: 'tope de llamadas',
+    sin_credito: 'sin crédito en OpenRouter', clave_invalida: 'clave de OpenRouter inválida',
+    desactivado: 'capa desactivada en el worker', cancelada: 'cancelada a mano' })[m] || m,
+  alcanceEnriq: a => {
+    if (!a) return 'todas las indexables';
+    const partes = [];
+    if (a.carpeta) partes.push('carpeta ' + a.carpeta);
+    if (a.muestra) partes.push('muestra de ' + a.max_urls);
+    else if (a.max_urls) partes.push('máx. ' + a.max_urls + ' URLs');
+    return partes.join(', ') || 'todas las indexables';
+  },
+  respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : r,
   campoDiff: c => ({
     status_code: 'Codigo de respuesta',
     indexability_status: 'Indexabilidad',
@@ -665,6 +686,8 @@ function app() {
       this.cleaningRulesets = [];
       this.cleaningError = null;
       this.cleaningMessage = null;
+      this._pararEnriq();
+      this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null;
       this.urls = []; this.issues = []; this.links = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
@@ -672,6 +695,7 @@ function app() {
         this.job = await api(`/jobs/${id}`);
         await this.loadStats();
         this._startProgress();
+        this.cargarEjecuciones();
       } catch (e) { this.error = e.message; }
       this.loading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -681,6 +705,7 @@ function app() {
     backToJobs() {
       this._stopProgress();
       this._stopSemanticPoll();
+      this._pararEnriq();
       this.view = 'jobs';
       this.job = null;
       this.loadJobs();
@@ -882,6 +907,7 @@ function app() {
       if (tab === 'semantic') this.loadSemantic();
       if (tab === 'cleaning') this.loadCleaning();
       if (tab === 'diff' && !this.diffCandidatos.length) this.cargarCandidatosDiff();
+      if (tab === 'enriquecido') this.cargarEjecuciones();
       this.$nextTick(() => lucide.createIcons());
     },
 
@@ -1506,6 +1532,167 @@ function app() {
         alert(e.message);
       }
       this.resuming = false;
+    },
+
+    // ------- Analisis enriquecido (#40, decision 85) -------
+    // Lo unico de la interfaz que gasta dinero. El dialogo estima SIEMPRE
+    // antes de dejar lanzar, y el token va en la cabecera de la peticion de
+    // lanzar y en ningun otro sitio: sessionStorage (muere con la pestaña),
+    // nunca localStorage ni la URL.
+    enriqAbierto: false,
+    enriqCatalogo: [],
+    enriqLanzable: false,
+    enriqForm: { modulos: [], tipo: 'todas', carpeta: '', max_urls: 500, presupuesto: 0.01 },
+    enriqEstimacion: null,
+    enriqEstimando: false,
+    enriqLanzando: false,
+    enriqError: null,
+    enriqToken: '',
+    enriqRuns: [],
+    enriqRun: null,
+    enriqDecisiones: null,
+    enriqFiltro: { pregunta: null, respuesta: null, page: 1 },
+    enriqTimer: null,
+
+    _alcanceEnriq() {
+      const f = this.enriqForm;
+      if (f.tipo === 'carpeta') return { carpeta: (f.carpeta || '').trim() || null };
+      if (f.tipo === 'max') return { max_urls: parseInt(f.max_urls) || null };
+      if (f.tipo === 'muestra') return { muestra: true, max_urls: parseInt(f.max_urls) || 500 };
+      return {};
+    },
+
+    async abrirEnriquecido() {
+      if (!this.job || this.job.status !== 'completed') return;
+      this.enriqError = null;
+      this.enriqEstimacion = null;
+      try { this.enriqToken = sessionStorage.getItem('enrichment-token') || ''; } catch { this.enriqToken = ''; }
+      try {
+        const cat = await api('/enrichment/modulos');
+        this.enriqCatalogo = cat.modulos;
+        this.enriqLanzable = cat.lanzamiento_activado;
+      } catch (e) { this.enriqError = e.message; return; }
+      // Sin nada marcado: que el coste aparezca solo cuando alguien elige.
+      // Con un unico modulo se marca para que la estimacion salga de entrada.
+      if (!this.enriqForm.modulos.length && this.enriqCatalogo.length === 1) {
+        this.enriqForm.modulos = [this.enriqCatalogo[0].nombre];
+      }
+      this.enriqAbierto = true;
+      this.$nextTick(() => lucide.createIcons());
+      this.estimarEnriquecido();
+    },
+
+    alternarModuloEnriq(nombre, marcado) {
+      const m = this.enriqForm.modulos.filter(n => n !== nombre);
+      if (marcado) m.push(nombre);
+      this.enriqForm.modulos = m;
+      this.estimarEnriquecido();
+    },
+
+    async estimarEnriquecido() {
+      if (!this.job) return;
+      this.enriqError = null;
+      if (!this.enriqForm.modulos.length) { this.enriqEstimacion = null; return; }
+      this.enriqEstimando = true;
+      try {
+        const e = await api(`/jobs/${this.job.id}/enrichment/estimate`, {
+          method: 'POST',
+          body: JSON.stringify({ modulos: this.enriqForm.modulos, alcance: this._alcanceEnriq() }),
+        });
+        this.enriqEstimacion = e;
+        this.enriqForm.presupuesto = e.presupuesto_sugerido_usd;
+      } catch (e) {
+        this.enriqEstimacion = null;
+        this.enriqError = e.message;
+      }
+      this.enriqEstimando = false;
+    },
+
+    async lanzarEnriquecido() {
+      if (!this.job || this.enriqLanzando || !this.enriqEstimacion) return;
+      this.enriqLanzando = true;
+      this.enriqError = null;
+      const token = (this.enriqToken || '').trim();
+      try {
+        const run = await api(`/jobs/${this.job.id}/enrichment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Enrichment-Token': token },
+          body: JSON.stringify({
+            modulos: this.enriqForm.modulos,
+            alcance: this._alcanceEnriq(),
+            presupuesto_usd: parseFloat(this.enriqForm.presupuesto) || 0,
+          }),
+        });
+        try { sessionStorage.setItem('enrichment-token', token); } catch {}
+        this.enriqAbierto = false;
+        this.showToast('Análisis enriquecido en cola', 'info');
+        this.detailTab = 'enriquecido';
+        await this.cargarEjecuciones(run.id);
+      } catch (e) {
+        // Un token rechazado no se guarda: que la proxima vez se pida otra vez.
+        if (/token/i.test(e.message)) { try { sessionStorage.removeItem('enrichment-token'); } catch {} }
+        this.enriqError = e.message;
+      }
+      this.enriqLanzando = false;
+    },
+
+    async cargarEjecuciones(elegir = null) {
+      if (!this.job) return;
+      try {
+        this.enriqRuns = await api(`/jobs/${this.job.id}/enrichment`);
+      } catch { this.enriqRuns = []; return; }
+      const id = elegir || (this.enriqRun && this.enriqRun.id) || (this.enriqRuns[0] && this.enriqRuns[0].id);
+      if (id && this.detailTab === 'enriquecido') await this.verEjecucion(id);
+    },
+
+    async verEjecucion(id) {
+      if (!this.job || !id) return;
+      if (!this.enriqRun || this.enriqRun.id !== id) {
+        this.enriqDecisiones = null;
+        this.enriqFiltro = { pregunta: null, respuesta: null, page: 1 };
+      }
+      try {
+        this.enriqRun = await api(`/jobs/${this.job.id}/enrichment/${id}`);
+      } catch (e) { this.error = e.message; return; }
+      this._pararEnriq();
+      if (['pendiente', 'en_curso', 'cancelando'].includes(this.enriqRun.estado)) {
+        this.enriqTimer = setInterval(async () => {
+          if (!this.job || !this.enriqRun) return this._pararEnriq();
+          try {
+            const r = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}`);
+            this.enriqRun = r;
+            const i = this.enriqRuns.findIndex(x => x.id === r.id);
+            if (i >= 0) this.enriqRuns[i] = { ...this.enriqRuns[i], estado: r.estado, gastado_usd: r.gastado_usd };
+            if (!['pendiente', 'en_curso', 'cancelando'].includes(r.estado)) this._pararEnriq();
+          } catch {}
+        }, 3000);
+      }
+      this.$nextTick(() => lucide.createIcons());
+    },
+
+    _pararEnriq() {
+      if (this.enriqTimer) { clearInterval(this.enriqTimer); this.enriqTimer = null; }
+    },
+
+    async cancelarEnriquecido() {
+      if (!this.job || !this.enriqRun) return;
+      try {
+        this.enriqRun = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}/cancel`, { method: 'PATCH' });
+        this.showToast('Cancelación pedida: lo ya pagado se conserva', 'info');
+        await this.cargarEjecuciones(this.enriqRun.id);
+      } catch (e) { this.showToast(e.message, 'error'); }
+    },
+
+    async cargarDecisionesEnriq(pregunta = undefined, respuesta = undefined) {
+      if (!this.job || !this.enriqRun) return;
+      if (pregunta !== undefined) this.enriqFiltro = { pregunta, respuesta, page: 1 };
+      const f = this.enriqFiltro;
+      const q = new URLSearchParams({ page: f.page, page_size: 50 });
+      if (f.pregunta) q.set('pregunta', f.pregunta);
+      if (f.respuesta) q.set('respuesta', f.respuesta);
+      try {
+        this.enriqDecisiones = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}/decisions?${q}`);
+      } catch (e) { this.error = e.message; }
     },
 
     // ------- Importar backup -------

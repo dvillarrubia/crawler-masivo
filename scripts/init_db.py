@@ -95,6 +95,7 @@ def main() -> None:
     print("Migrations applied.")
 
     migrar_clientes()
+    migrar_enriquecido()
 
     print("Done.")
 
@@ -165,6 +166,35 @@ def migrar_clientes() -> None:
     # Se imprimen para revisarlos a mano: no se fusionan erratas en silencio.
     for slug, textos in sorted(resultado["colisiones"].items()):
         print(f"  ATENCION: textos distintos colapsan en el cliente '{slug}': {textos}")
+
+
+def migrar_enriquecido() -> None:
+    """Analisis enriquecido (#40, decision 85). Idempotente.
+
+    `enrichment_runs` la crea create_all (con sus indices, por ser nueva). Lo
+    que create_all no hace en una instalacion existente es la FK de
+    `decisions.run_id`, que #7 dejo sin ella porque la tabla aun no existia.
+    SET NULL: borrar una ejecucion no tiene por que llevarse lo decidido, que
+    sigue sirviendo de cache.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_enrichment_runs_job_id ON enrichment_runs (job_id)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_enrichment_runs_estado ON enrichment_runs (estado)"))
+        existe = conn.execute(
+            text("SELECT 1 FROM pg_constraint WHERE conname = :n"),
+            {"n": "decisions_run_id_fkey"}).first()
+        if not existe:
+            # Una fila con un run_id que no existe (no deberia haberla: hasta
+            # ahora nadie creaba ejecuciones) haria fallar la FK entera.
+            conn.execute(text(
+                "UPDATE decisions SET run_id = NULL WHERE run_id IS NOT NULL AND run_id "
+                "NOT IN (SELECT id FROM enrichment_runs)"))
+            conn.execute(text(
+                "ALTER TABLE decisions ADD CONSTRAINT decisions_run_id_fkey FOREIGN KEY "
+                "(run_id) REFERENCES enrichment_runs(id) ON DELETE SET NULL"))
+    print("Enriquecido: tabla enrichment_runs y FK de decisions.run_id al dia.")
 
 
 if __name__ == "__main__":

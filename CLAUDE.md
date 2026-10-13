@@ -127,6 +127,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `routers/jobs.py` | Job CRUD endpoints (POST, GET, PATCH cancel, DELETE) |
 | `routers/results.py` | Results endpoints (urls, issues, links, stats, export CSV) |
 | `routers/clientes.py` | Clientes, perfiles e integraciones (#36, decision 83). Resuelve la herencia de configuracion al crear un job (`resolver_config`) |
+| `routers/enriquecido.py` | Analisis enriquecido (#40, decision 85): estimar, crear (con `X-Enrichment-Token`), leer y cancelar ejecuciones. No llama a ningun modelo: encola en `enrichment:pending` |
 
 ### Crawler (`crawler/`)
 | File | Description |
@@ -155,7 +156,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `clientes.py` | Slug, fusion profunda de configuracion (`fusionar_config`), cliente a partir del `client_id` de texto y la migracion de esos textos (decision 83) |
 | `credenciales.py` | `credencial(integracion)`: el secreto de una integracion, leido del ENTORNO (nunca de la BD) y solo dentro del prefijo de su tipo (decision 83) |
 | `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
-| `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Nadie la dispara todavia |
+| `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
+| `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
 | `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
@@ -171,6 +173,12 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
 | GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`), para precargar el modal |
+| GET | `/api/enrichment/modulos` | Modulos del analisis enriquecido y si lanzar esta activado (decision 85) |
+| POST | `/api/jobs/{id}/enrichment/estimate` | Llamadas tras la cache, tokens, coste, tiempo y gasto del mes del cliente. No gasta nada |
+| POST | `/api/jobs/{id}/enrichment` | Crea y encola una ejecucion. **Exige `X-Enrichment-Token`**; sin `ENRICHMENT_TOKEN` en el entorno, 403 |
+| GET | `/api/jobs/{id}/enrichment[/{run_id}]` | Ejecuciones del job / una con su progreso, coste y resultados por pregunta |
+| GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`) |
+| PATCH | `/api/jobs/{id}/enrichment/{run_id}/cancel` | Cancela (pendiente: en el acto; en curso: entre lotes, conservando lo pagado) |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
 | DELETE | `/api/jobs/{id}` | Delete job + cascade |
@@ -184,7 +192,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 
 ## Database (PostgreSQL)
 
-13 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
+15 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
@@ -201,6 +209,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | `issues` | 1:N from urls | issue_type, severity, details (JSON) |
 | `clients` | root | nombre, slug (unico), dominios, config_defecto (parcial), integraciones (sin secretos) |
 | `crawl_profiles` | 1:N from clients | nombre, rol, seeds, config (parcial), last_job_id |
+| `decisions` | 1:N from jobs | clave, pregunta, version_pregunta, estado, respuesta, coste_usd, run_id (decision 84) |
+| `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
 
 `jobs.cliente_id` / `jobs.profile_id` son las FK al cliente y al perfil; `jobs.client_id` sigue siendo el texto libre de siempre (decision 83).
 
@@ -1660,6 +1670,87 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
      modulos de rastreo (#10/#14/#20 lo declararan en `JobConfig` cuando
      existan) y la prueba real con 1.000 URLs, que necesita una clave.
 
+85. **El análisis enriquecido se lanza a mano, con token, y lo ejecuta el
+   worker desde su propia cola** (#40). Es el disparo de la capa de la
+   decisión 84 y lo único de la instalación que gasta dinero después de un
+   rastreo.
+   - **Seguridad, porque la API no tiene autenticación.** Con el CORS abierto,
+     cualquiera que llegue al puerto podía lanzar análisis de pago. Crear una
+     ejecución (`POST /api/jobs/{id}/enrichment`) exige la cabecera
+     `X-Enrichment-Token` igual a `ENRICHMENT_TOKEN`, comparada con
+     `hmac.compare_digest` (un `==` corta en el primer carácter distinto y el
+     tiempo de respuesta va diciendo cuántos se han acertado). **Sin la
+     variable, o con menos de 16 caracteres, el lanzamiento está DESACTIVADO**
+     (403 que dice qué falta), nunca abierto: el fallo seguro de un despliegue
+     que se olvida de configurarla es que no se pueda gastar. Ninguna respuesta
+     ni ninguna fila repite el token. Estimar, leer y **cancelar** no lo piden:
+     no gastan, y cancelar es justo lo que tiene que poder hacerse deprisa
+     cuando algo se va de las manos. El frontend lo pide en el diálogo, lo manda
+     solo en esa petición y lo guarda en `sessionStorage` (muere con la
+     pestaña), nunca en `localStorage` ni en la URL; uno rechazado se borra.
+   - **Cola aparte, no un tipo de mensaje.** `enrichment:pending`
+     (`shared/cola.py`) y no ids mezclados en `jobs:pending`: todo lo que lee la
+     de rastreos (el bucle, el vigilante, las reanudaciones) da por hecho que
+     cada elemento es un job, y un id de ejecución colado ahí acabaría lanzado
+     como rastreo. El worker la atiende con `lpop` sin bloquear ANTES de mirar
+     el cupo de rastreos (si no, con los huecos llenos no se leería nunca) y en
+     su PROPIO pool (`MAX_CONCURRENT_ENRIQUECIDOS=1`): 60.000 URLs a 600 por
+     minuto es hora y media que no puede quitarle el hueco a un rastreo, ni un
+     rastreo de nueve horas tener esperando a quien pulsó el botón. Nunca dentro
+     del request, que es el error de `fetch-gsc`.
+   - **Estados**: `pendiente → en_curso → completada | parcial | cancelada |
+     fallida`, más `cancelando` mientras corre. El worker **reclama** con un
+     UPDATE condicional sobre `pendiente`, así que un id duplicado en la cola
+     (un reencolado tras un reinicio) lo ejecuta uno solo. Entre lote y lote
+     (`ENRICHMENT_LOTE=200` URLs) relee el estado, anota progreso, gasto y
+     latido. `parcial` = cortó un presupuesto (el de la ejecución, el mensual
+     del cliente o el global): lo procesado queda guardado. `fallida` = sin
+     crédito, clave mala, capa desactivada en el worker o una excepción.
+     `cancelada` conserva todo lo pagado. Sin latido en
+     `ENRICHMENT_STALE_MINUTES` (15) el vigilante devuelve a `pendiente` y
+     reencola.
+   - **Idempotente sin repagar.** Lo que no se decidió NI se pagó (cortes,
+     red) no se escribe en `decisions`, para que reanudar lo vuelva a intentar;
+     lo pagado se escribe siempre, aunque la respuesta viniera incompleta, o
+     ese dinero desaparecería de la cuenta. Reanudar salta las URLs que ya
+     tienen fila con ese `run_id`, y relanzar desde cero sale de la caché de la
+     decisión 84: medido en la prueba de la interfaz contra Postgres, 40 URLs
+     → 40 llamadas la primera vez y **0 llamadas y 0 $** la segunda.
+   - **Coste real**: `gastado_usd` es la suma de `usage.cost` (respaldo por
+     tokens marcado en `decisions.coste_estimado`). `estimacion` guarda lo que
+     enseñó el diálogo al confirmar, para la comparación ±30% de #40, que queda
+     **pendiente**: sin una clave no hay coste real con el que comparar.
+   - **Módulos**: `shared/enriquecido.REGISTRO`, cada uno con sus preguntas del
+     catálogo, cómo construir el estado y de qué otros depende
+     (`resolver_modulos` los añade solos y los pone antes; un ciclo es un
+     error, no un cuelgue). Hoy solo `pagina_legal`, la pregunta de ejemplo de
+     #7, marcado como ejemplo: los de verdad son #9 con su evaluación de #8, y
+     un test falla si aparece otro. Su estado es título, primer h1 que se pinta
+     y 600 caracteres de `page_content` (sin plantilla). Alcance por defecto:
+     internas, HTML, 200 e indexables; la carpeta va con `startswith` escapado
+     (un `%` es literal); el modo muestra ordena por `url_hash` (un SHA-256:
+     reparto estable y la misma muestra si se repite, que entonces sale de
+     caché). Un `job` solo admite una ejecución activa a la vez y solo si está
+     `completed` (un análisis que falla deja `failed`, decisión 28).
+   - **Antes de encolar** se rehace la estimación y, si el cliente o la
+     instancia ya agotaron su mes, es un 409 que da las cifras: mejor que una
+     ejecución que se queda `parcial` sin haber hecho nada.
+   - **Qué cambia de la decisión 84**: el worker y la API YA llegan a la capa,
+     pero solo a través de `shared.enriquecido` y solo desde dos sitios, que
+     `test_decisiones_no_se_disparan.py` comprueba por AST con la función que
+     importa: el router de enriquecido y, en el worker, `_ejecutar_enriquecido`
+     y `_recuperar_enriquecidos`. Otro test **ejecuta** `import worker` y
+     comprueba que no carga la capa, y otro dispara una programación y
+     comprueba que solo se encola el rastreo. `decisions.run_id` tiene ya su FK
+     (`SET NULL`, `scripts/init_db.py`).
+   - **Pendiente**: la opción por perfil «repetir el análisis enriquecido en
+     cada ejecución» (desactivada por defecto cuando exista; hoy un perfil o
+     una programación **no lanzan nada de pago**), las fuentes externas
+     (DataForSEO, Ahrefs), los resultados como columnas del explorador, de
+     issues y del CSV, y sustituir las issues de un módulo al relanzarlo (no
+     hay módulos que emitan issues todavía). Al apagar el worker una ejecución
+     en curso no se interrumpe: se queda sin latido y el vigilante la reencola.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras
@@ -1939,6 +2030,12 @@ LLM_CACHE_TTL_D=30               # Redis; la cache de BD no caduca
 LLM_ZDR=0                        # 1 = exigir retencion cero
 JEV_PRECIO_USD_MTOK=0.042        # solo reserva y respaldo si falta usage.cost
 ENRICHMENT_MAX_USD_MES=          # tope global mensual; vacio = sin tope
+
+# Analisis enriquecido (decision 85)
+ENRICHMENT_TOKEN=                # API: sin el (o <16 caracteres) lanzar esta DESACTIVADO
+MAX_CONCURRENT_ENRIQUECIDOS=1    # worker: pool propio, no quita huecos a los rastreos
+ENRICHMENT_LOTE=200              # URLs por lote (entre lotes: cancelar, progreso, latido)
+ENRICHMENT_STALE_MINUTES=15      # sin latido -> se reencola
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)
@@ -2048,6 +2145,11 @@ confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
 `tests/requirements-contrato.txt` y corre en su propio trabajo de CI). Todos
 con el `FakeLLM` de `tests/fake_llm.py`: **ningun test llama a la red**, y
 `conftest.py` hace fallar cualquier transporte real hacia OpenRouter.
+Analisis enriquecido (decision 85): `test_enriquecido.py` (modulos y
+dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
+mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
+`test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
+respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

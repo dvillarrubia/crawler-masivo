@@ -130,6 +130,8 @@ html[data-theme="terminal"] .btn:hover{
   box-shadow:0 0 8px var(--accent-glow);
 }
 html[data-theme="terminal"] .btn:active{background:var(--accent);color:var(--accent-ink)}
+html[data-theme="terminal"] .btn:disabled,html[data-theme="terminal"] .btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none}
+html[data-theme="terminal"] .btn:not(.btn-primary):disabled:hover,html[data-theme="terminal"] .btn:not(.btn-primary)[disabled]:hover{background:var(--bg-card);border-color:var(--border-hi);color:var(--text)}
 html[data-theme="terminal"] .btn-primary{
   background:var(--accent);
   border-color:var(--accent);

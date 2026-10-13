@@ -738,6 +738,14 @@
                   <i data-lucide="archive" style="width:13px;height:13px"></i> Backup
                 </button>
               </template>
+              <!-- Analisis enriquecido (#40): lo UNICO que gasta dinero, siempre a
+                   mano y con el coste a la vista antes de confirmar. Solo sobre
+                   un rastreo completado (el analisis determinista ya termino). -->
+              <button class="btn btn-sm" @click="abrirEnriquecido()" :disabled="job.status !== 'completed'"
+                      style="display:flex;align-items:center;gap:.3rem"
+                      :data-tip="job.status === 'completed' ? 'Preguntas a un modelo sobre las URLs, con el coste estimado antes de lanzar' : 'Solo con el rastreo completado y analizado'">
+                <i data-lucide="sparkles" style="width:13px;height:13px"></i> Análisis enriquecido
+              </button>
               <button class="btn btn-sm btn-danger" @click="deleteJob()" style="display:flex;align-items:center;gap:.3rem">
                 <i data-lucide="trash-2" style="width:13px;height:13px"></i> Eliminar
               </button>
@@ -906,10 +914,133 @@
           <div class="tab" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado entre este rastreo y otro del mismo sitio" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
           </div>
+          <div class="tab" :class="detailTab === 'enriquecido' && 'active'" @click="switchTab('enriquecido')" data-tip="Ejecuciones del analisis enriquecido: progreso, coste y resultados" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="sparkles" style="width:14px;height:14px"></i> Enriquecido <span class="count" x-text="enriqRuns.length || ''"></span>
+          </div>
           <div class="tab" :class="detailTab === 'cleaning' && 'active'" @click="switchTab('cleaning')" data-tip="Limpieza opcional del contenido extraido por grupos de URL" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="eraser" style="width:14px;height:14px"></i> Limpieza
           </div>
         </div>
+
+        <!-- ===== PESTANA: ENRIQUECIDO (#40) ===== -->
+        <template x-if="detailTab === 'enriquecido'">
+          <div>
+            <div class="card" style="margin-bottom:1rem" x-show="!enriqRuns.length">
+              <div class="text-dim" style="font-size:.85rem">
+                Este rastreo no tiene ejecuciones de análisis enriquecido. Nada de esto se lanza solo:
+                pulsa <strong>Análisis enriquecido</strong> en la barra de arriba para ver el coste estimado antes de decidir.
+              </div>
+            </div>
+            <template x-if="enriqRuns.length">
+              <div class="card" style="margin-bottom:1rem">
+                <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+                  <span style="font-size:.85rem">Ejecución:</span>
+                  <select @change="verEjecucion($el.value)" style="padding:.35rem .5rem;font-size:.85rem;max-width:34rem">
+                    <template x-for="r in enriqRuns" :key="r.id">
+                      <option :value="r.id" :selected="enriqRun && r.id === enriqRun.id"
+                              x-text="fmt.date(r.created_at) + '  ·  ' + fmt.estadoEnriq(r.estado) + '  ·  ' + fmt.usd(r.gastado_usd)"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="enriqRun">
+              <div>
+                <div class="card" style="margin-bottom:1rem"
+                     :style="'margin-bottom:1rem;border-left:3px solid ' + fmt.colorEnriq(enriqRun.estado)">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap">
+                    <div>
+                      <strong x-text="fmt.estadoEnriq(enriqRun.estado)"></strong>
+                      <span class="text-dim" style="font-size:.8rem" x-show="enriqRun.motivo" x-text="' · ' + fmt.motivoEnriq(enriqRun.motivo)"></span>
+                      <div class="text-dim" style="font-size:.78rem;margin-top:.2rem">
+                        Módulos: <span x-text="enriqRun.modulos.join(', ')"></span>
+                        · Alcance: <span x-text="fmt.alcanceEnriq(enriqRun.alcance)"></span>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+                      <span style="font-variant-numeric:tabular-nums">
+                        <strong x-text="fmt.usd(enriqRun.gastado_usd)"></strong>
+                        <span class="text-dim" x-text="' de ' + fmt.usd(enriqRun.presupuesto_usd) + ' (estimado ' + fmt.usd(enriqRun.estimacion && enriqRun.estimacion.coste_estimado_usd) + ')'"></span>
+                      </span>
+                      <template x-if="['pendiente','en_curso'].includes(enriqRun.estado)">
+                        <button class="btn btn-sm btn-danger" @click="cancelarEnriquecido()" style="display:flex;align-items:center;gap:.3rem">
+                          <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                  <template x-if="enriqRun.progreso">
+                    <div style="margin-top:.6rem">
+                      <div class="text-sm" style="display:flex;justify-content:space-between">
+                        <span x-text="'Módulo: ' + (enriqRun.progreso.modulo || '—')"></span>
+                        <span x-text="fmt.num(enriqRun.progreso.procesadas) + ' de ' + fmt.num(enriqRun.progreso.total) + ' URLs'"></span>
+                      </div>
+                      <div class="progress-bar">
+                        <div class="progress-fill" :style="'width:' + (enriqRun.progreso.total ? Math.min(100, 100 * enriqRun.progreso.procesadas / enriqRun.progreso.total) : 0) + '%'"></div>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="enriqRun.estado === 'cancelando'">
+                    <div class="text-dim" style="font-size:.8rem;margin-top:.4rem">Se para al terminar el lote en curso. Lo ya pagado se conserva.</div>
+                  </template>
+                  <template x-for="e in (enriqRun.errores || []).slice(0, 5)" :key="e">
+                    <div class="text-dim" style="font-size:.75rem;margin-top:.25rem" x-text="'· ' + e"></div>
+                  </template>
+                </div>
+
+                <template x-for="[preg, r] in Object.entries(enriqRun.resultados || {})" :key="preg">
+                  <div class="card" style="margin-bottom:1rem">
+                    <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
+                      <strong><code x-text="preg"></code></strong>
+                      <span class="text-dim" style="font-size:.8rem" x-text="fmt.num(r.total) + ' URLs · ' + fmt.usd(r.coste_usd)"></span>
+                    </div>
+                    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.5rem;font-size:.82rem">
+                      <template x-for="[resp, n] in Object.entries(r.por_respuesta)" :key="resp">
+                        <a href="#" @click.prevent="cargarDecisionesEnriq(preg, resp)">
+                          <strong x-text="fmt.respuestaEnriq(resp)"></strong> <span x-text="fmt.num(n)"></span>
+                        </a>
+                      </template>
+                      <template x-for="[est, n] in Object.entries(r.por_estado)" :key="est">
+                        <span class="text-dim" x-text="est + ': ' + fmt.num(n)"></span>
+                      </template>
+                    </div>
+                    <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="!(r.por_estado || {}).decidido">
+                      Sin umbral calibrado (#8) ninguna respuesta sale «decidido»: son orientativas.
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="enriqDecisiones">
+                  <div class="card">
+                    <div class="text-dim" style="font-size:.8rem;margin-bottom:.4rem"
+                         x-text="fmt.num(enriqDecisiones.total) + ' respuestas' + (enriqFiltro.respuesta ? ' «' + fmt.respuestaEnriq(enriqFiltro.respuesta) + '»' : '')"></div>
+                    <div style="overflow-x:auto">
+                      <table>
+                        <thead><tr><th style="text-align:left">URL</th><th>respuesta</th><th>confianza</th><th>origen</th><th style="text-align:right">coste</th></tr></thead>
+                        <tbody>
+                          <template x-for="d in enriqDecisiones.items" :key="d.id">
+                            <tr>
+                              <td style="max-width:32rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="d.url"></td>
+                              <td x-text="d.respuesta === null ? (d.motivo || '—') : fmt.respuestaEnriq(d.respuesta)"></td>
+                              <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
+                              <td x-text="d.origen"></td>
+                              <td style="text-align:right" x-text="fmt.usd(d.coste_usd)"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem" x-show="enriqDecisiones.total > enriqDecisiones.page_size">
+                      <button class="btn btn-sm" :disabled="enriqFiltro.page <= 1" @click="enriqFiltro.page--; cargarDecisionesEnriq()">Anterior</button>
+                      <button class="btn btn-sm" :disabled="enriqFiltro.page * enriqDecisiones.page_size >= enriqDecisiones.total" @click="enriqFiltro.page++; cargarDecisionesEnriq()">Siguiente</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
 
         <!-- ===== PESTANA: COMPARAR ===== -->
         <template x-if="detailTab === 'diff'">
@@ -3730,6 +3861,115 @@
           <template x-if="resuming"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="play-circle" style="width:14px;height:14px" x-show="!resuming"></i>
           Reanudar
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== MODAL: ANALISIS ENRIQUECIDO (#40) ===== -->
+<template x-if="enriqAbierto">
+  <div class="modal-backdrop" @click.self="enriqAbierto = false" @keydown.escape.window="enriqAbierto = false">
+    <div class="modal" style="max-width:40rem">
+      <div class="modal-header">
+        <h3 style="display:flex;align-items:center;gap:.4rem">
+          <i data-lucide="sparkles" style="width:18px;height:18px;color:var(--accent)"></i>
+          Análisis enriquecido
+        </h3>
+        <button class="btn-icon" @click="enriqAbierto = false" style="font-size:1.25rem">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1.25rem">
+        <p class="text-dim text-sm" style="margin-bottom:1rem">
+          Pregunta a un modelo de pago sobre las URLs de este rastreo. Antes de lanzar ves cuánto costaría;
+          lo que ya se preguntó en otra ejecución sale de la caché y no se vuelve a pagar.
+        </p>
+
+        <div class="form-group">
+          <label>Módulos</label>
+          <template x-for="m in enriqCatalogo" :key="m.nombre">
+            <div style="margin:.3rem 0">
+              <label class="checkbox-label">
+                <input type="checkbox" :checked="enriqForm.modulos.includes(m.nombre)"
+                       @change="alternarModuloEnriq(m.nombre, $el.checked)">
+                <span x-text="m.titulo"></span>
+              </label>
+              <div class="form-hint" x-text="m.descripcion"></div>
+              <div class="form-hint" x-show="m.depende_de.length" x-text="'Necesita: ' + m.depende_de.join(', ') + ' (se añade solo)'"></div>
+            </div>
+          </template>
+          <div class="form-hint" x-show="enriqEstimacion && enriqEstimacion.anadidos.length"
+               x-text="'Añadidos por dependencia: ' + (enriqEstimacion ? enriqEstimacion.anadidos.join(', ') : '')"></div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Alcance</label>
+          <select x-model="enriqForm.tipo" @change="estimarEnriquecido()">
+            <option value="todas">Todas las HTML internas, 200 e indexables</option>
+            <option value="carpeta">Solo una carpeta</option>
+            <option value="max">Un máximo de URLs (por orden de rastreo)</option>
+            <option value="muestra">Modo muestra (repartida por todo el sitio)</option>
+          </select>
+          <template x-if="enriqForm.tipo === 'carpeta'">
+            <input type="text" x-model="enriqForm.carpeta" placeholder="/blog/" @change="estimarEnriquecido()" style="margin-top:.4rem">
+          </template>
+          <template x-if="['max','muestra'].includes(enriqForm.tipo)">
+            <input type="number" min="1" x-model="enriqForm.max_urls" @change="estimarEnriquecido()" style="margin-top:.4rem">
+          </template>
+        </div>
+
+        <div class="card" style="margin-top:.75rem;padding:.75rem 1rem">
+          <template x-if="enriqEstimando"><div class="text-dim text-sm">Estimando…</div></template>
+          <template x-if="enriqEstimacion && !enriqEstimando">
+            <div class="text-sm" style="display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;font-variant-numeric:tabular-nums">
+              <span>URLs en el alcance</span><strong x-text="fmt.num(enriqEstimacion.urls)"></strong>
+              <span>Llamadas (después de la caché)</span><strong x-text="fmt.num(enriqEstimacion.llamadas)"></strong>
+              <span>Ya en caché, no se repagan</span><strong x-text="fmt.num(enriqEstimacion.aciertos_cache) + ' de ' + fmt.num(enriqEstimacion.decisiones)"></strong>
+              <span>Tokens estimados</span><strong x-text="fmt.num(enriqEstimacion.tokens_estimados)"></strong>
+              <span>Coste estimado</span><strong x-text="fmt.usd(enriqEstimacion.coste_estimado_usd)"></strong>
+              <span>Tiempo estimado</span><strong x-text="fmt.duracion(enriqEstimacion.segundos_estimados)"></strong>
+              <template x-if="enriqEstimacion.cliente">
+                <span x-text="'Gasto del mes de ' + (enriqEstimacion.cliente.nombre || 'el cliente')"></span>
+              </template>
+              <template x-if="enriqEstimacion.cliente">
+                <strong x-text="fmt.usd(enriqEstimacion.cliente.gastado_mes_usd) + ' de ' + (enriqEstimacion.cliente.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.cliente.tope_mensual_usd))"></strong>
+              </template>
+              <span>Gasto del mes de la instancia</span>
+              <strong x-text="fmt.usd(enriqEstimacion.global.gastado_mes_usd) + ' de ' + (enriqEstimacion.global.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.global.tope_mensual_usd))"></strong>
+            </div>
+          </template>
+          <div class="form-hint" style="margin-top:.4rem">
+            Estimación por caracteres; el coste real sale de lo que cobra OpenRouter y la ejecución se para en seco al llegar al presupuesto.
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Presupuesto máximo de esta ejecución ($)</label>
+          <input type="number" min="0" step="0.01" x-model="enriqForm.presupuesto">
+          <div class="form-hint">Al llegar aquí se para y queda «parcial» con lo hecho guardado. Por defecto, la estimación más un 50%.</div>
+        </div>
+
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Token de lanzamiento</label>
+          <input type="password" x-model="enriqToken" autocomplete="off" placeholder="ENRICHMENT_TOKEN del servidor">
+          <div class="form-hint">Se guarda solo en esta pestaña del navegador (sessionStorage) y se borra al cerrarla.</div>
+        </div>
+        <template x-if="!enriqLanzable">
+          <div class="card" style="border-left:3px solid var(--orange);padding:.6rem .8rem;font-size:.82rem">
+            El lanzamiento está desactivado en este servidor: falta <code>ENRICHMENT_TOKEN</code>. Puedes estimar, pero no lanzar.
+          </div>
+        </template>
+        <template x-if="enriqError">
+          <div class="card" style="border-left:3px solid var(--red);padding:.6rem .8rem;font-size:.82rem;margin-top:.5rem" x-text="enriqError"></div>
+        </template>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="enriqAbierto = false">Cancelar</button>
+        <button class="btn btn-primary" @click="lanzarEnriquecido()"
+                :disabled="enriqLanzando || enriqEstimando || !enriqEstimacion || !enriqLanzable || !enriqToken || !enriqForm.modulos.length"
+                style="display:flex;align-items:center;gap:.4rem">
+          <template x-if="enriqLanzando"><span class="spinner" style="width:14px;height:14px"></span></template>
+          <i data-lucide="sparkles" style="width:14px;height:14px" x-show="!enriqLanzando"></i>
+          Confirmar y lanzar
         </button>
       </div>
     </div>

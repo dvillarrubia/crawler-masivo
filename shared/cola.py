@@ -44,3 +44,27 @@ def pendientes(conexion) -> int:
         return int(conexion.llen(COLA_JOBS))
     except Exception:
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Analisis enriquecido (#40, decision 85)
+# ---------------------------------------------------------------------------
+# Una lista APARTE y no un tipo de mensaje dentro de `jobs:pending`: en la de
+# rastreos todo el codigo (el bucle del worker, el vigilante, las
+# reanudaciones, `pendientes()`) da por hecho que cada elemento es el id de un
+# job. Meter ahi otra cosa obligaba a tocar todos esos sitios y, si alguno se
+# olvidaba, un id de ejecucion acabaria lanzado como rastreo. Con dos listas
+# el FIFO de cada una es el mismo de arriba y no se mezclan.
+COLA_ENRIQUECIDO = "enrichment:pending"
+
+
+def encolar_enriquecido(conexion, run_id) -> None:
+    conexion.rpush(COLA_ENRIQUECIDO, str(run_id))
+
+
+def siguiente_enriquecido(conexion):
+    """Sin bloquear: el worker ya bloquea en la cola de rastreos, y si
+    bloqueara tambien aqui un hueco libre de enriquecido retrasaria cada
+    vuelta del bucle (y con ella los rastreos y el vigilante)."""
+    valor = conexion.lpop(COLA_ENRIQUECIDO)
+    return valor or None
