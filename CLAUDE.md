@@ -1766,6 +1766,40 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
    mis semillas y alguna más, las páginas comunes siguen siendo todas las
    mías.
 
+88. **Comparar páginas no contesta «qué arregló el cliente»** (#32) — la
+   comparación entre censos miraba `status_code`, canonical, título, h1 y
+   palabras, que dice qué cambió en el SITIO. Lo que se mira en un seguimiento
+   mensual es otra cosa: qué incidencias se arreglaron, cuáles son nuevas y
+   cuáles siguen ahí. Eso exige identificar «el mismo hallazgo» entre dos
+   censos, y es `(issue_type, url, group_key)`: con tipo y URL no basta porque
+   un hreflang mal escrito emite una incidencia **por código de idioma** y un
+   título duplicado pertenece a un grupo.
+   `issues.group_key` lo rellenan las **once reglas** que emiten más de una
+   incidencia por URL o que agrupan URLs (duplicados de título, description,
+   h1 y contenido; los tres de hreflang; datos estructurados; imágenes;
+   cabeceras por host; canonical a otro dominio). Es un SHA-256 truncado a 16
+   del valor normalizado —caja y espacios, como el `content_hash` de la
+   decisión 47— porque una description duplicada puede tener 1.000 caracteres
+   y la clave se repite en cada fila del grupo. Las reglas que emiten como
+   mucho una incidencia por URL van a NULL a propósito: ahí el par (tipo, URL)
+   ya identifica el hallazgo, y una clave inventada puede cambiar entre
+   versiones del código y fingir que el problema se resolvió. Los casi
+   duplicados tampoco llevan clave: no pertenecen a un grupo estable sino a un
+   conjunto de parecidos que cambia cada censo.
+
+89. **Una incidencia cuya página ya no está en el censo NO está resuelta** —
+   el guardia del censo truncado (decisión 67) no basta, y esto fue lo que más
+   cerca estuvo de acabar en un informe de cliente. Medido con dos censos
+   reales de progym que terminaron los dos enteros, pero en los que
+   desaparecieron 1.205 URLs: el diff decía **4.794 resueltas**, y las tres
+   primeras clases —1.152 `noindex_page`, 1.146 `canonical_missing`, 938
+   `hreflang_missing_return`— eran páginas que sencillamente no se volvieron a
+   visitar. Con el arreglo: **125 resueltas** y 4.669 en «no se sabe».
+   Decirle a un cliente que arregló cuatro mil cosas que no tocó es peor que no
+   darle ninguna cifra. Y el diff de incidencias va dentro de su propio `try`:
+   las alertas críticas de página —media sección fuera del índice— son lo que
+   hay que entregar aunque el recuento falle.
+
 17. **Página de error de Chromium = repetir sin render** — cuando Playwright
    acaba en `chrome-error://`, la respuesta llegaba como un 307 con destino
    `chrome-error://chromewebdata/` y la URL real quedaba sin estado. Pasa tras

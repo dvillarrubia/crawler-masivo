@@ -471,9 +471,10 @@ def test_la_comparacion_automatica_de_extremo_a_extremo():
     def _bigint(tipo, compilador, **kw):
         return "INTEGER"
 
+    # `issues` tambien: la comparacion automatica cuenta que se arreglo y que
+    # aparecio desde el censo anterior (#32), no solo que paginas cambiaron.
     engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine, tables=[
-        Job.__table__, Url.__table__, HtmlMeta.__table__, Heading.__table__])
+    Base.metadata.create_all(engine)
     s = sessionmaker(bind=engine)()
 
     def censo(nombre, dia, canonical_a_staging):
@@ -521,9 +522,10 @@ def test_el_primer_censo_de_un_sitio_no_inventa_una_comparacion():
     def _bigint2(tipo, compilador, **kw):
         return "INTEGER"
 
+    # `issues` tambien: la comparacion automatica cuenta que se arreglo y que
+    # aparecio desde el censo anterior (#32), no solo que paginas cambiaron.
     engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine, tables=[
-        Job.__table__, Url.__table__, HtmlMeta.__table__, Heading.__table__])
+    Base.metadata.create_all(engine)
     s = sessionmaker(bind=engine)()
     j = Job(id=uuid.uuid4(), name="el unico", status="completed",
             seeds=["https://x.com/"], config={}, started_at=datetime(2026, 1, 1))

@@ -1,0 +1,150 @@
+"""Qué se arregló, qué apareció y qué sigue entre dos censos (#32).
+
+Comparar páginas no contesta «qué arregló el cliente desde la auditoría
+anterior», que es justo para lo que se mira un seguimiento mensual.
+
+«El mismo hallazgo» es `(issue_type, url, group_key)`. Con tipo y URL no basta:
+un hreflang mal escrito emite una incidencia por código de idioma, y un título
+duplicado pertenece a un grupo.
+"""
+
+from __future__ import annotations
+
+from shared.comparacion import comparar_incidencias
+
+
+def _inc(tipo, url, *, sev="warning", grupo=None):
+    return {"issue_type": tipo, "url": url, "severity": sev, "group_key": grupo}
+
+
+def test_resuelta_nueva_y_que_sigue():
+    antes = [
+        _inc("title_too_long", "https://x.com/a"),
+        _inc("missing_h1", "https://x.com/b"),
+    ]
+    ahora = [
+        _inc("missing_h1", "https://x.com/b"),          # sigue
+        _inc("status_4xx", "https://x.com/c", sev="error"),  # nueva
+    ]
+    r = comparar_incidencias(antes, ahora)
+    assert r["resueltas"]["total"] == 1
+    assert r["resueltas"]["por_tipo"][0]["tipo"] == "title_too_long"
+    assert r["nuevas"]["total"] == 1
+    assert r["nuevas"]["por_tipo"][0]["tipo"] == "status_4xx"
+    assert r["siguen"]["total"] == 1
+
+
+def test_dos_hallazgos_del_mismo_tipo_en_la_misma_URL_no_se_confunden():
+    """Es la razon de ser de `group_key`: un hreflang mal escrito emite una
+    incidencia POR CODIGO DE IDIOMA. Sin la clave, arreglar uno de los dos
+    pareceria arreglar los dos."""
+    antes = [
+        _inc("hreflang_invalid_lang", "https://x.com/a", grupo="en-UK"),
+        _inc("hreflang_invalid_lang", "https://x.com/a", grupo="es-SP"),
+    ]
+    ahora = [_inc("hreflang_invalid_lang", "https://x.com/a", grupo="es-SP")]
+
+    r = comparar_incidencias(antes, ahora)
+    assert r["resueltas"]["total"] == 1, "se arreglo en-UK, no los dos"
+    assert r["siguen"]["total"] == 1
+    assert r["nuevas"]["total"] == 0
+
+
+def test_un_duplicado_que_cambia_de_grupo_es_otro_hallazgo():
+    """Si el titulo cambia, el duplicado anterior SE RESOLVIO y hay uno nuevo.
+    Es el comportamiento correcto: ya no compite con las mismas paginas."""
+    antes = [_inc("title_duplicate", "https://x.com/a", grupo="hash-viejo")]
+    ahora = [_inc("title_duplicate", "https://x.com/a", grupo="hash-nuevo")]
+
+    r = comparar_incidencias(antes, ahora)
+    assert r["resueltas"]["total"] == 1
+    assert r["nuevas"]["total"] == 1
+    assert r["siguen"]["total"] == 0
+
+
+def test_con_el_censo_anterior_truncado_no_se_afirma_ninguna_resuelta():
+    """Que un hallazgo no aparezca ahora puede ser que no se llegara a su
+    pagina. Y no se enumeran: una lista de "quizas resueltas" se lee como una
+    lista de resueltas en cuanto alguien la copia a un informe.
+    """
+    antes = [_inc("missing_h1", f"https://x.com/p{i}") for i in range(40)]
+    ahora = [_inc("missing_h1", "https://x.com/p0")]
+
+    r = comparar_incidencias(antes, ahora, puede_afirmar_resueltas=False)
+    assert r["resueltas"] is None
+    assert r["resueltas_no_afirmables"] == 39
+    assert r["siguen"]["total"] == 1
+
+
+def test_las_URLs_se_emparejan_por_su_texto_normalizado():
+    """El orden de los parametros no hace dos URLs; la barra final si."""
+    antes = [_inc("missing_h1", "https://x.com/a?b=2&a=1")]
+    ahora = [_inc("missing_h1", "https://x.com/a?a=1&b=2")]
+    assert comparar_incidencias(antes, ahora)["siguen"]["total"] == 1
+
+    r = comparar_incidencias([_inc("missing_h1", "https://x.com/a/")],
+                             [_inc("missing_h1", "https://x.com/a")])
+    assert r["siguen"]["total"] == 0
+
+
+def test_con_mapeo_de_host_las_de_preproduccion_casan():
+    antes = [_inc("missing_h1", "https://pre.x.com/a")]
+    ahora = [_inc("missing_h1", "https://x.com/a")]
+    r = comparar_incidencias(antes, ahora, mapa_hosts={"pre.x.com": "x.com"})
+    assert r["siguen"]["total"] == 1
+
+
+def test_el_recuento_va_por_tipo_y_los_errores_primero():
+    """Un informe se lee de arriba abajo: lo que saca paginas del indice va
+    antes que un aviso de estilo."""
+    ahora = ([_inc("status_5xx", f"https://x.com/e{i}", sev="error") for i in range(2)]
+             + [_inc("title_too_long", f"https://x.com/t{i}") for i in range(9)]
+             + [_inc("url_underscores", "https://x.com/u", sev="info")])
+    r = comparar_incidencias([], ahora)
+    assert [f["tipo"] for f in r["nuevas"]["por_tipo"]] == [
+        "status_5xx", "title_too_long", "url_underscores"]
+    assert r["nuevas"]["total"] == 12
+
+
+def test_una_incidencia_cuya_pagina_ya_no_esta_NO_esta_resuelta():
+    """Es lo que mas cerca estuvo de acabar en un informe de cliente.
+
+    Medido con dos censos reales de progym en los que desaparecieron 1.205
+    URLs: sin esto el diff decia **4.794 resueltas**, y las tres primeras
+    clases —1.152 `noindex_page`, 1.146 `canonical_missing`, 938
+    `hreflang_missing_return`— eran paginas que sencillamente no se volvieron a
+    visitar. Con el arreglo: **125 resueltas** y 4.669 "no se sabe".
+
+    Decirle a un cliente que arreglo cuatro mil cosas que no toco es peor que
+    no darle ninguna cifra.
+    """
+    antes = [
+        _inc("missing_h1", "https://x.com/sigue"),
+        _inc("missing_h1", "https://x.com/ya-no-se-rastrea"),
+    ]
+    ahora = []     # la primera se arreglo, la segunda no se visito
+    urls = {"https://x.com/sigue"}
+
+    r = comparar_incidencias(antes, ahora, urls_del_nuevo=urls)
+    assert r["resueltas"]["total"] == 1
+    assert r["resueltas"]["ejemplos"] == ["https://x.com/sigue"]
+    assert r["sin_pagina_en_el_nuevo"] == 1
+
+
+def test_sin_saber_que_URLs_hay_no_se_descarta_ninguna():
+    """Quien llama puede no tener la lista; entonces se comporta como antes."""
+    antes = [_inc("missing_h1", "https://x.com/a")]
+    r = comparar_incidencias(antes, [])
+    assert r["resueltas"]["total"] == 1
+    assert r["sin_pagina_en_el_nuevo"] == 0
+
+
+def test_con_el_anterior_truncado_las_dos_clases_van_juntas():
+    """Ni resueltas ni "sin pagina": todo es "no se sabe", y una sola cifra."""
+    antes = [_inc("missing_h1", "https://x.com/a"),
+             _inc("missing_h1", "https://x.com/b")]
+    r = comparar_incidencias(antes, [], puede_afirmar_resueltas=False,
+                             urls_del_nuevo={"https://x.com/a"})
+    assert r["resueltas"] is None
+    assert r["resueltas_no_afirmables"] == 2
+    assert r["sin_pagina_en_el_nuevo"] == 0

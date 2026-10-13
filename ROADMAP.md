@@ -197,6 +197,26 @@ tiene usuarios ni contraseña, así que cualquier cosa guardada ahí la podría 
 quien llegue a ella. Se apunta el *nombre* de la variable del servidor que tiene
 la clave y la ficha dice si está puesta o no, nunca su valor.
 
+### Qué arregló el cliente desde la vez pasada (13 de octubre)
+
+Cierra [#32](https://github.com/dvillarrubia/crawler-masivo/issues/32). La
+comparación entre dos rastreos ya decía qué cambió en el sitio; ahora dice
+también **qué incidencias se arreglaron, cuáles son nuevas y cuáles siguen
+ahí**, con el desglose por tipo y los errores arriba. Es lo que se mira en un
+seguimiento mensual.
+
+Lo difícil no era contarlas, era saber **cuándo dos avisos de censos distintos
+son el mismo**: un hreflang mal escrito genera un aviso por cada idioma, y un
+título duplicado pertenece a un grupo que puede cambiar de miembros sin dejar
+de existir.
+
+Y una cosa que estuvo a punto de acabar en un informe: probándolo con dos
+censos reales, decía **4.794 incidencias resueltas**. Eran falsas. Entre los
+dos rastreos desaparecieron 1.205 páginas, y los avisos de una página que ya
+no se visita no están resueltos — **no se sabe**. Las resueltas de verdad eran
+**125**. Decirle a un cliente que arregló cuatro mil cosas que no tocó es peor
+que no darle ninguna cifra.
+
 ### El aviso sale del panel (9 de octubre)
 
 Cuando un rastreo encuentra algo grave —media plantilla fuera del índice, una
