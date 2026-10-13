@@ -26,7 +26,7 @@ from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared.database import get_session  # noqa: E402
-from shared.models import Base, HtmlMeta, Issue, Job, PageContent, Url  # noqa: E402
+from shared.models import Base, HtmlMeta, Issue, Job, Link, PageContent, Url  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -182,3 +182,89 @@ def test_el_uso_no_rompe_si_redis_falla():
             raise ConnectionError("redis caido")
 
     uso.anotar(Roto(), QueryParams("vista=explorador"))       # no lanza
+
+
+# ---------------------------------------------------------------------------
+# Agrupar por plantilla
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def con_plantillas(tmp_path):
+    from api.routers import results
+
+    engine = create_engine(f"sqlite:///{tmp_path}/p.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    s = Sesion()
+    job = Job(id=uuid.uuid4(), name="censo", status="completed", seeds=["https://x.com/"], config={})
+    s.add(job)
+    s.flush()
+    rutas = [("/es/null", 404), ("/en/null", 404), ("/de/null", 404), ("/es/corporativa/null", 404),
+             ("/es/hoteles/a", 200), ("/es/hoteles/b", 200), ("/es/hoteles/c", 200)]
+    for i, (ruta, codigo) in enumerate(rutas):
+        u = Url(job_id=job.id, url=f"https://x.com{ruta}", path=ruta, url_hash=str(i), is_internal=True,
+                is_html=True, status_code=codigo, status_group=f"{codigo // 100}xx",
+                indexable=codigo == 200, inlinks_count=2, pagerank_score=10 * i)
+        s.add(u)
+        s.flush()
+        if codigo == 404:
+            s.add(Issue(job_id=job.id, url_id=u.id, issue_type="4xx_error", severity="error"))
+    # /es/null (hash "0") enlazada dos veces desde /es/hoteles/a y una desde /b.
+    a, b = (s.query(Url).filter(Url.path == r).one() for r in ("/es/hoteles/a", "/es/hoteles/b"))
+    for origen, ancla in ((a, "uno"), (a, "dos"), (b, "tres")):
+        s.add(Link(job_id=job.id, from_url_id=origen.id, to_url="https://x.com/es/null", to_url_hash="0",
+                   anchor_text=ancla, link_position="content", follow=True, link_type="hyperlink"))
+    s.commit()
+    s.close()
+    app = FastAPI()
+    app.include_router(results.router)
+
+    def _sesion():
+        ses = Sesion()
+        try:
+            yield ses
+        finally:
+            ses.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    return TestClient(app), job.id
+
+
+def test_por_plantilla_agrupa_y_delata_el_tramo_repetido(con_plantillas):
+    """`/de/null`, `/en/null`... son un solo fallo de plantilla, no cuatro 404."""
+    api, jid = con_plantillas
+    d = api.get(f"/api/jobs/{jid}/urls/plantillas").json()
+    assert d["urls"] == 7
+    por_forma = {p["plantilla"]: p for p in d["plantillas"]}
+    idioma = por_forma["/:idioma/:slug (2n)"]
+    assert idioma["urls"] == 3 and idioma["con_errores"] == 3 and idioma["indexables"] == 0
+    assert idioma["tramos_repetidos"] == [{"tramo": "null", "veces": 3}]
+    hoteles = por_forma["/:idioma/hoteles/:slug (3n)"]
+    assert hoteles["urls"] == 3 and hoteles["por_estado"] == {"2xx": 3} and hoteles["tramos_repetidos"] == []
+    # En toda la vista, `null` cruza de plantilla (tambien /es/corporativa/null).
+    assert {"tramo": "null", "veces": 4} in d["tramos_repetidos"]
+
+
+def test_por_plantilla_respeta_los_filtros_y_se_puede_entrar(con_plantillas):
+    api, jid = con_plantillas
+    d = api.get(f"/api/jobs/{jid}/urls/plantillas?status_group=2xx").json()
+    assert [p["plantilla"] for p in d["plantillas"]] == ["/:idioma/hoteles/:slug (3n)"]
+    r = api.get(f"/api/jobs/{jid}/urls", params={"plantilla": "/:idioma/:slug (2n)"}).json()
+    assert sorted(i["url"] for i in r["items"]) == [f"https://x.com/{l}/null" for l in ("de", "en", "es")]
+
+
+def test_enlazada_desde_y_enlaces_entrantes(con_plantillas):
+    """Para un 404, de donde se enlaza: el origen mas frecuente y cuantas
+    paginas distintas lo enlazan, y el CSV con todos los enlaces."""
+    api, jid = con_plantillas
+    items = api.get(f"/api/jobs/{jid}/urls?url_contains=/es/null&origenes=true").json()["items"]
+    fila = next(i for i in items if i["url"].endswith("/es/null"))
+    assert fila["enlazada_desde"] == "https://x.com/es/hoteles/a" and fila["origenes"] == 2
+    sin = api.get(f"/api/jobs/{jid}/urls?url_contains=/es/null").json()["items"][0]
+    assert sin["enlazada_desde"] is None                     # sin ?origenes no se calcula
+    r = api.get(f"/api/jobs/{jid}/urls/enlaces-entrantes?status_group=4xx")
+    filas = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+    assert filas[0][:3] == ["Destino", "Estado destino", "Origen"]
+    assert sorted(f[4] for f in filas[1:]) == ["dos", "tres", "uno"]
+    exp = list(csv.reader(io.StringIO(api.get(
+        f"/api/jobs/{jid}/urls/export?url_contains=/es/null&columnas=url,enlazada_desde,origenes").content.decode("utf-8-sig"))))
+    assert ["https://x.com/es/null", "https://x.com/es/hoteles/a", "2"] in exp

@@ -637,6 +637,8 @@ function app() {
       if (this.expGravedad) q.set('gravedad', this.expGravedad);
       if (this.expSort) { q.set('orden', this.expSort); q.set('dir', this.expSortDir); }
       if (this.expPage > 1) q.set('pagina', this.expPage);
+      if (this.expAgrupar) q.set('agrupar', 'plantilla');
+      if (this.expPlantilla) q.set('plantilla', this.expPlantilla);
       const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
         v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
       if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
@@ -651,6 +653,7 @@ function app() {
         problema: q.get('problema') || '', gravedad: q.get('gravedad') || '',
         orden: q.get('orden') || null, dir: q.get('dir') === 'desc' ? 'desc' : 'asc',
         pagina: +(q.get('pagina') || 1), filtros,
+        agrupar: q.get('agrupar') === 'plantilla', plantilla: q.get('plantilla') || '',
       };
     },
 
@@ -2377,6 +2380,9 @@ function app() {
     expProblema: '',            // issue_type (o varios separados por comas) del filtro «Con el problema…»
     expGravedad: '',            // severity del mismo filtro
     expBuscarColumna: '',       // buscador del selector de columnas
+    expAgrupar: false,          // vista agrupada por plantilla (forma de ruta)
+    expPlantillas: null,        // respuesta de /urls/plantillas
+    expPlantilla: '',           // plantilla elegida: filtra la tabla
     EXP_GRUPOS_COLUMNAS,
     _expSearchTimer: null,
     _expFilterTimer: null,
@@ -2394,6 +2400,9 @@ function app() {
       this.expPage = preajuste.pagina || 1;
       this.expProblema = preajuste.problema || '';
       this.expGravedad = preajuste.gravedad || '';
+      this.expAgrupar = !!preajuste.agrupar;
+      this.expPlantilla = preajuste.plantilla || '';
+      this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
       this.expSelectedIndex = -1;
@@ -2446,6 +2455,48 @@ function app() {
       this.loadExplorerUrls();
     },
 
+    // ---- Agrupar por plantilla (#131) ----
+    // En SEO tecnico se arregla una plantilla, no una URL: los 32 errores 4xx
+    // de Lopesan son, en buena parte, dos fallos repetidos por idioma.
+    async cargarPlantillas() {
+      this.expLoading = true;
+      try {
+        const q = new URLSearchParams(this._buildExplorerParams());
+        q.delete('page'); q.delete('page_size'); q.delete('ligero'); q.delete('plantilla');
+        this.expPlantillas = await api(`/jobs/${this.job.id}/urls/plantillas?${q}`);
+        this.expTotal = this.expPlantillas.urls;
+      } catch (e) { this.error = e.message; }
+      this.expLoading = false;
+    },
+
+    alternarAgrupar() {
+      this.expAgrupar = !this.expAgrupar;
+      this.expDetailOpen = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    entrarEnPlantilla(forma) {
+      this.expPlantilla = forma;
+      this.expAgrupar = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    quitarPlantilla() {
+      this.expPlantilla = '';
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    // Un tramo repetido (`null`) como filtro de URL.
+    filtrarPorTramo(tramo) {
+      this.expColumnFilters = { ...this.expColumnFilters, url: { value: '/' + tramo } };
+      this.expAgrupar = false;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
     // «Con el problema…»: '' | tipo | 'sev:error'
     setExpProblema(valor) {
       if (valor.startsWith('sev:')) { this.expGravedad = valor.slice(4); this.expProblema = ''; }
@@ -2471,6 +2522,15 @@ function app() {
       q.delete('page'); q.delete('page_size'); q.delete('ligero');
       q.set('columnas', this.getExpColumns().join(','));
       window.open(`${API}/jobs/${this.job.id}/urls/export?${q}`, '_blank');
+    },
+
+    // Todos los enlaces que apuntan a las URLs de esta vista (origen, ancla,
+    // posicion, follow): la lista para corregir enlaces a 404 o redirecciones.
+    exportarEnlacesEntrantes() {
+      if (!this.job) return;
+      const q = new URLSearchParams(this._buildExplorerParams(false));
+      ['page', 'page_size', 'ligero', 'origenes', 'sort_by', 'sort_dir'].forEach(k => q.delete(k));
+      window.open(`${API}/jobs/${this.job.id}/urls/enlaces-entrantes?${q}`, '_blank');
     },
 
     // Columnas del selector, por grupos y filtradas por el buscador.
@@ -2516,6 +2576,8 @@ function app() {
       params.set('vista', 'explorador');
       params.set('pestana', this.expTab);
       if (this.expProblema) params.set('issue_type', this.expProblema);
+      if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
+      if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
       if (tabCfg.filter) {
@@ -2558,6 +2620,7 @@ function app() {
 
     async loadExplorerUrls() {
       if (!this.job) return;
+      if (this.expAgrupar) return this.cargarPlantillas();
       this.expLoading = true;
       try {
         const params = this._buildExplorerParams();
@@ -2679,7 +2742,7 @@ function app() {
 
     expClearAllColumnFilters() {
       this.expColumnFilters = {};
-      this.expProblema = ''; this.expGravedad = '';
+      this.expProblema = ''; this.expGravedad = ''; this.expPlantilla = '';
       this.expPage = 1;
       this.loadExplorerUrls();
     },
@@ -2687,7 +2750,7 @@ function app() {
     expActiveFilterCount() {
       return Object.values(this.expColumnFilters).filter(f =>
         f && (f.op === 'vacio' || f.op === 'con_valor' || (f.value != null && f.value.toString().trim() !== ''))
-      ).length + (this.expProblema || this.expGravedad ? 1 : 0);
+      ).length + (this.expProblema || this.expGravedad ? 1 : 0) + (this.expPlantilla ? 1 : 0);
     },
 
     /**
@@ -2873,6 +2936,11 @@ const EXP_COLUMN_DEFS = {
   twitter_card:         { label: 'Twitter card',    type: 'string',  sortable: false, filterKey: 'twitter_card_contains',   width: 150, fmt: r => r.html_meta?.twitter_card ?? '' },
   http_version:         { label: 'HTTP',            type: 'string',  sortable: false, filterKey: 'http_version_contains',   width: 130, fmt: r => r.html_meta?.http_version ?? r.http_version ?? '' },
   last_modified:        { label: 'Last-Modified',   type: 'string',  sortable: false, filterKey: 'last_modified_contains',  width: 180, fmt: r => r.last_modified ?? '' },
+  // Calculadas en el servidor solo si estan visibles (?origenes=true): el
+  // origen mas frecuente y cuantas paginas la enlazan. Para un 404 o una
+  // redireccion es lo que dice DONDE hay que corregir.
+  enlazada_desde:       { label: 'Enlazada desde',  type: 'string',  sortable: false, calculada: 'origenes', width: 280, fmt: r => r.enlazada_desde ? (() => { try { return new URL(r.enlazada_desde).pathname; } catch { return r.enlazada_desde; } })() : '' },
+  origenes:             { label: 'Páginas que la enlazan', type: 'numeric', sortable: false, calculada: 'origenes', width: 170, fmt: r => r.origenes ?? '' },
   last_crawled_at:      { label: 'Último rastreo',  type: 'string',  sortable: true,                                        width: 170, fmt: r => fmt.date(r.last_crawled_at) },
 };
 
@@ -2884,7 +2952,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
-  ['Enlazado',    ['inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
+  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
@@ -2907,8 +2975,8 @@ const EXP_TABS = [
   { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },               columns: ['url','status_code','host','content_type','content_length','response_time_ms'] },
   { key: '_div2', divider: true },
   { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },               columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'] },
-  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','response_time_ms','inlinks_count','click_depth'] },
-  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','status_text','inlinks_count','click_depth','content_type'] },
+  { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','enlazada_desde','click_depth'] },
+  { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','inlinks_count','origenes','enlazada_desde','click_depth','content_type'] },
   { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','click_depth','inlinks_count'] },
   { key: '_div3', divider: true },
   { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true }, columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','pagerank_score','canonical_href'] },

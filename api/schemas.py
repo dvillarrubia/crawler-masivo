@@ -599,6 +599,10 @@ class UrlResponse(BaseModel):
     closest_similarity: float | None = None
     html_meta: HtmlMetaResponse | None = None
     page_content: PageContentResponse | None = None
+    # Solo con `?origenes=true` (#131): la pagina que mas veces la enlaza y
+    # cuantas paginas distintas la enlazan. Lo que convierte un 404 en tarea.
+    enlazada_desde: str | None = None
+    origenes: int | None = None
 
 
 class UrlDetailResponse(UrlResponse):

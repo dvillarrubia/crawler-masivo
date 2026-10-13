@@ -3325,6 +3325,18 @@
               </template>
             </select>
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
+            <!-- Agrupar por plantilla (#131): la unidad de trabajo del SEO tecnico. -->
+            <button class="exp-toolbar-btn" :class="expAgrupar && 'active'" @click="alternarAgrupar()"
+                    :aria-pressed="expAgrupar" data-tip="Agrupa las URLs de esta vista por la forma de su ruta">
+              <i data-lucide="layers" style="width:13px;height:13px"></i>
+              <span>Por plantilla</span>
+            </button>
+            <template x-if="expPlantilla">
+              <button class="exp-toolbar-btn active" @click="quitarPlantilla()" :title="'Quitar el filtro de plantilla ' + expPlantilla">
+                <i data-lucide="x" style="width:12px;height:12px"></i>
+                <span class="truncate" style="max-width:16rem" x-text="expPlantilla"></span>
+              </button>
+            </template>
 
             <!-- Active filter chip -->
             <template x-if="expActiveFilterCount() > 0">
@@ -3368,10 +3380,21 @@
 
             <!-- El CSV de esta vista: filtros, orden y columnas visibles. El censo
                  entero sigue en Exportar, en la ficha del rastreo. -->
-            <button class="btn btn-sm" @click="exportarVista()" style="display:flex;align-items:center;gap:.25rem"
-                    :data-tip="'Descarga las ' + fmt.num(expTotal) + ' URLs de esta vista con las columnas visibles'">
-              <i data-lucide="download" style="width:12px;height:12px"></i> CSV de esta vista
-            </button>
+            <div class="menu-wrap" @click.outside="menuAbierto === 'csv-exp' && (menuAbierto = '')">
+              <button class="btn btn-sm" @click="menuAbierto = menuAbierto === 'csv-exp' ? '' : 'csv-exp'"
+                      aria-haspopup="menu" :aria-expanded="menuAbierto === 'csv-exp'" style="display:flex;align-items:center;gap:.25rem">
+                <i data-lucide="download" style="width:12px;height:12px"></i> CSV
+                <i data-lucide="chevron-down" style="width:11px;height:11px"></i>
+              </button>
+              <div class="menu" x-show="menuAbierto === 'csv-exp'" x-transition.opacity role="menu" style="min-width:20rem">
+                <button role="menuitem" @click="menuAbierto = ''; exportarVista()">
+                  <i data-lucide="table" style="width:14px;height:14px"></i>
+                  <span>Esta vista<span class="menu-sub" x-text="fmt.num(expTotal) + ' URLs con las columnas visibles, en el mismo orden'"></span></span></button>
+                <button role="menuitem" @click="menuAbierto = ''; exportarEnlacesEntrantes()">
+                  <i data-lucide="link" style="width:14px;height:14px"></i>
+                  <span>Enlaces que apuntan a estas URLs<span class="menu-sub">Origen, ancla, posición y follow: dónde hay que corregir</span></span></button>
+              </div>
+            </div>
           </div>
 
           <!-- Helper hint about how filters work -->
@@ -3386,8 +3409,63 @@
             </span>
           </div>
 
+          <!-- Vista agrupada por plantilla -->
+          <template x-if="expAgrupar">
+            <div class="exp-table-wrap">
+              <template x-if="expLoading && !expPlantillas">
+                <div class="loading-overlay"><div class="spinner"></div> Agrupando…</div>
+              </template>
+              <template x-if="expPlantillas">
+                <div>
+                  <template x-if="expPlantillas.tramos_repetidos.length">
+                    <div class="exp-repetidos">
+                      <i data-lucide="repeat" style="width:13px;height:13px"></i>
+                      <span>Se repiten como último tramo en esta vista (suele ser un fallo de plantilla):</span>
+                      <template x-for="t in expPlantillas.tramos_repetidos" :key="t.tramo">
+                        <button class="chip-tramo" @click="filtrarPorTramo(t.tramo)" :title="'Ver las URLs que acaban en /' + t.tramo">
+                          <code x-text="decodeURIComponent(t.tramo).slice(0, 40)"></code> × <span x-text="t.veces"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <table class="exp-table">
+                    <thead><tr>
+                      <th style="min-width:280px">Plantilla</th><th>URLs</th><th>Indexables</th><th>Estados</th>
+                      <th>Con errores</th><th data-tip="Mediana de palabras del contenido propio">Palabras</th>
+                      <th data-tip="Mediana del PageRank (0-100)">PageRank</th><th data-tip="Mediana de clics desde la home">Clics</th>
+                      <th>Inlinks</th><th>Tramos repetidos</th><th style="min-width:240px">Ejemplo</th>
+                    </tr></thead>
+                    <tbody>
+                      <template x-for="p in expPlantillas.plantillas" :key="p.plantilla">
+                        <tr @click="entrarEnPlantilla(p.plantilla)" style="cursor:pointer" :title="'Ver las ' + p.urls + ' URLs de ' + p.plantilla">
+                          <td><code x-text="p.plantilla"></code></td>
+                          <td x-text="fmt.num(p.urls)"></td>
+                          <td x-text="p.urls ? Math.round(p.indexables / p.urls * 100) + ' %' : '—'"></td>
+                          <td>
+                            <template x-for="[g, n] in Object.entries(p.por_estado)" :key="g">
+                              <span class="exp-status" :class="'exp-status-' + g" style="margin-right:.2rem" x-text="g + ' ' + n"></span>
+                            </template>
+                          </td>
+                          <td :class="p.con_errores && 'text-red'" x-text="fmt.num(p.con_errores)"></td>
+                          <td x-text="p.palabras_mediana != null ? fmt.num(Math.round(p.palabras_mediana)) : '—'"></td>
+                          <td x-text="p.pagerank_mediana != null ? Math.round(p.pagerank_mediana) : '—'"></td>
+                          <td x-text="p.clics_mediana != null ? p.clics_mediana : '—'"></td>
+                          <td x-text="fmt.num(p.inlinks)"></td>
+                          <td><template x-for="t in p.tramos_repetidos" :key="t.tramo">
+                            <code class="tramo" x-text="decodeURIComponent(t.tramo).slice(0, 24) + ' ×' + t.veces"></code>
+                          </template></td>
+                          <td class="truncate" style="max-width:280px" x-text="(p.ejemplos[0] || '').replace(/^https?:\/\/[^/]+/, '')"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
+          </template>
+
           <!-- Table -->
-          <div class="exp-table-wrap">
+          <div class="exp-table-wrap" x-show="!expAgrupar">
             <template x-if="expLoading && expUrls.length === 0">
               <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
             </template>

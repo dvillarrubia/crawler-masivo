@@ -184,6 +184,9 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | DELETE | `/api/jobs/{id}` | Delete job + cascade |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
 | GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`). El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista |
+| GET | `/api/jobs/{id}/urls/plantillas` | La vista del Explorador agrupada por forma de ruta (`shared.plantillas.firma_de_ruta`): URLs, indexables, estados, con errores, medianas y los últimos tramos que se repiten (`null` × 6 = un fallo de plantilla). `/urls?plantilla=` entra en una |
+| GET | `/api/jobs/{id}/urls/enlaces-entrantes` | CSV con todos los enlaces que apuntan a las URLs de la vista (destino, origen, ancla, posición, follow). `/urls?origenes=true` añade a cada fila `enlazada_desde` y `origenes` |
+| GET | `/api/uso/explorador` | Qué pestañas, filtros, órdenes, problemas y columnas se piden en el Explorador (`?dias=`). Solo nombres, nunca valores (`api/uso.py`) |
 | GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA`) |
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`), por gravedad y tipo |
 | GET | `/api/jobs/{id}/issues/resumen` | Una fila por tipo: incidencias, páginas distintas y ejemplos (vista agrupada de Problemas) |

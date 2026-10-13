@@ -186,6 +186,32 @@ _VACIO_FILTERS: dict[str, tuple[Any, bool]] = {
 }
 
 
+_TIPOS_NO_ENLACE = ("redirect", "canonical")
+
+
+def _origenes(db: Session, job_id: uuid.UUID, hashes: list[str]) -> dict[str, tuple[str, int]]:
+    """Para cada destino (url_hash): la pagina que mas veces lo enlaza y
+    cuantas paginas distintas lo enlazan. Usa `ix_links_to_hash (job_id,
+    to_url_hash)`: nunca recorre la tabla de enlaces entera (decision 37)."""
+    if not hashes:
+        return {}
+    filas = (
+        db.query(Link.to_url_hash, Url.url, func.count(Link.id))
+        .join(Url, Url.id == Link.from_url_id)
+        .filter(Link.job_id == job_id, Link.to_url_hash.in_(hashes),
+                or_(Link.link_type.is_(None), Link.link_type.notin_(_TIPOS_NO_ENLACE)))
+        .group_by(Link.to_url_hash, Url.url)
+        .all()
+    )
+    mejor: dict[str, tuple[str, int]] = {}
+    distintos: dict[str, int] = {}
+    for h, origen, n in filas:
+        distintos[h] = distintos.get(h, 0) + 1
+        if h not in mejor or n > mejor[h][1] or (n == mejor[h][1] and origen < mejor[h][0]):
+            mejor[h] = (origen, n)
+    return {h: (mejor[h][0], distintos[h]) for h in mejor}
+
+
 def _anotar_uso(qp, *, csv: bool = False) -> None:
     """Cuenta la consulta si viene del Explorador (`?vista=explorador`).
     Nunca falla: ver api/uso.py."""
@@ -288,6 +314,16 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         if severidad:
             sub = sub.filter(Issue.severity == severidad)
         q = q.filter(Url.id.in_(sub))
+
+    # Una plantilla (forma de ruta, `shared.plantillas.firma_de_ruta`). La
+    # forma se calcula en Python —no hay forma de escribirla en SQL sin atarse a
+    # Postgres—, sobre lo que ya ha filtrado lo demas.
+    plantilla = qp.get("plantilla")
+    if plantilla:
+        from shared.plantillas import firma_de_ruta
+
+        ids = [i for i, ruta in q.with_entities(Url.id, Url.path).all() if firma_de_ruta(ruta or "/") == plantilla]
+        q = q.filter(Url.id.in_(ids or [-1]))
     return q
 
 
@@ -309,6 +345,7 @@ def list_urls(
     severity: str | None = Query(None),
     in_sitemap: bool | None = Query(None),
     ligero: bool = Query(False, description="Sin page_content: es el 89% del peso y la tabla no lo usa"),
+    origenes: bool = Query(False, description="Anade enlazada_desde y origenes a cada fila"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -346,12 +383,114 @@ def list_urls(
                  for r in rows]
     else:
         items = [UrlResponse.model_validate(r) for r in rows]
+    if origenes:
+        o = _origenes(db, job_id, [r.url_hash for r in rows])
+        for it, r in zip(items, rows):
+            it.enlazada_desde, it.origenes = o.get(r.url_hash, (None, 0))
 
     return _paginate(
         items=items,
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/plantillas  -- la vista agrupada por plantilla
+# ---------------------------------------------------------------------------
+class _Plantilla(BaseModel):
+    plantilla: str
+    urls: int
+    indexables: int = 0
+    por_estado: dict[str, int] = {}
+    con_errores: int = 0
+    palabras_mediana: float | None = None
+    pagerank_mediana: float | None = None
+    clics_mediana: float | None = None
+    inlinks: int = 0
+    tramos_repetidos: list[dict] = []   # [{tramo, veces}], los que se repiten
+    ejemplos: list[str] = []
+
+
+class _VistaPorPlantilla(BaseModel):
+    plantillas: list[_Plantilla]
+    # Ultimos tramos que se repiten en TODA la vista, crucen o no de plantilla:
+    # `null` aparecia en /es/null, /en/corporate/null y /es/corporativa/null.
+    tramos_repetidos: list[dict] = []
+    urls: int = 0
+
+
+def _mediana(valores: list) -> float | None:
+    v = sorted(x for x in valores if x is not None)
+    if not v:
+        return None
+    m = len(v) // 2
+    return float(v[m]) if len(v) % 2 else (v[m - 1] + v[m]) / 2
+
+
+@router.get("/urls/plantillas", response_model=_VistaPorPlantilla)
+def urls_por_plantilla(
+    job_id: uuid.UUID,
+    request: Request,
+    limite: int = Query(300, ge=1, le=2000),
+    db: Session = Depends(get_session),
+):
+    """Las URLs de la vista agrupadas por la forma de su ruta.
+
+    En SEO tecnico casi nada se arregla URL a URL: se arregla una plantilla. En
+    Lopesan, `/de/null`, `/en/null`, `/es/null`… salian como doce 404 sueltos
+    y son un solo fallo (docs/INVESTIGACION_EXPLORADOR.md). La forma normaliza
+    el ultimo tramo, asi que cada grupo dice ademas que ultimo tramo se repite
+    (`null` × 9): es lo que delata el fallo.
+    """
+    from collections import Counter, defaultdict
+
+    from shared.plantillas import firma_de_ruta
+
+    _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params)
+    q = _urls_filtradas(db, job_id, request.query_params)
+    filas = q.with_entities(
+        Url.id, Url.url, Url.path, Url.status_group, Url.indexable, Url.content_word_count,
+        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count,
+    ).all()
+    con_error = {
+        uid for (uid,) in db.query(Issue.url_id)
+        .filter(Issue.job_id == job_id, Issue.severity == "error").distinct()
+    } if filas else set()
+
+    def ultimo(f):
+        return (f.path or "/").rstrip("/").rsplit("/", 1)[-1] or "/"
+
+    def repetidos(cuenta: Counter, n: int, minimo: int = 2) -> list[dict]:
+        # Solo dicen algo si se repiten: en una plantilla sana cada pagina
+        # tiene su slug.
+        return [{"tramo": t, "veces": v} for t, v in cuenta.most_common(n) if v >= minimo]
+
+    grupos: dict[str, list] = defaultdict(list)
+    for f in filas:
+        grupos[firma_de_ruta(f.path or "/")].append(f)
+
+    salida = []
+    for forma, fs in grupos.items():
+        salida.append(_Plantilla(
+            plantilla=forma, urls=len(fs),
+            indexables=sum(1 for f in fs if f.indexable),
+            por_estado=dict(Counter(f.status_group or "?" for f in fs)),
+            con_errores=sum(1 for f in fs if f.id in con_error),
+            palabras_mediana=_mediana([f.content_word_count if f.content_word_count is not None else f.word_count for f in fs]),
+            pagerank_mediana=_mediana([f.pagerank_score for f in fs]),
+            clics_mediana=_mediana([f.click_depth for f in fs]),
+            inlinks=sum(f.inlinks_count or 0 for f in fs),
+            tramos_repetidos=repetidos(Counter(ultimo(f) for f in fs), 3),
+            ejemplos=[f.url for f in fs[:3]],
+        ))
+    salida.sort(key=lambda p: (-p.urls, p.plantilla))
+    return _VistaPorPlantilla(
+        plantillas=salida[:limite],
+        tramos_repetidos=repetidos(Counter(ultimo(f) for f in filas), 8, minimo=3),
+        urls=len(filas),
     )
 
 
@@ -418,6 +557,9 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "http_version": ("HTTP", lambda u: u.http_version),
     "last_modified": ("Last-Modified", lambda u: u.last_modified),
     "last_crawled_at": ("Último rastreo", lambda u: u.last_crawled_at.isoformat() if u.last_crawled_at else None),
+    # Calculadas por tramo con `_origenes` (no son columnas de `urls`).
+    "enlazada_desde": ("Enlazada desde", lambda u: getattr(u, "_origen", (None, 0))[0]),
+    "origenes": ("Páginas que la enlazan", lambda u: getattr(u, "_origen", (None, 0))[1]),
 }
 
 
@@ -470,6 +612,10 @@ def export_vista(
             with Sesion() as s:
                 por_id = {u.id: u for u in s.query(Url).options(joinedload(Url.html_meta))
                           .filter(Url.id.in_(tramo)).all()}
+                if {"enlazada_desde", "origenes"} & set(claves):
+                    o = _origenes(s, job_id, [u.url_hash for u in por_id.values()])
+                    for u in por_id.values():
+                        u._origen = o.get(u.url_hash, (None, 0))
                 buf = io.StringIO()
                 w = csv.writer(buf)
                 for uid in tramo:
@@ -479,6 +625,61 @@ def export_vista(
                 yield buf.getvalue()
 
     nombre = f"explorador-{str(job_id)[:8]}-{len(ids)}-urls.csv"
+    return StreamingResponse(filas(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/urls/enlaces-entrantes  -- de donde se enlaza la vista
+# ---------------------------------------------------------------------------
+@router.get("/urls/enlaces-entrantes")
+def export_enlaces_entrantes(
+    job_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Todos los enlaces que apuntan a las URLs de la vista, como CSV: destino,
+    su codigo, origen, ancla, posicion y follow. Es la lista que se le pasa a
+    quien tiene que corregir los enlaces a 404 o a redirecciones (#131).
+
+    Se recorre por tramos de 500 destinos con el indice (job_id, to_url_hash).
+    """
+    _get_job_or_404(job_id, db)
+    _anotar_uso(request.query_params, csv=True)
+    destinos = _urls_filtradas(db, job_id, request.query_params).with_entities(
+        Url.url_hash, Url.url, Url.status_code).order_by(Url.id).all()
+    from sqlalchemy.orm import aliased, sessionmaker
+
+    Sesion = sessionmaker(bind=db.get_bind())
+    Origen = aliased(Url)
+
+    def filas():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        buf.write("\ufeff")
+        w.writerow(["Destino", "Estado destino", "Origen", "Estado origen", "Ancla", "Posición", "Follow", "Tipo"])
+        yield buf.getvalue()
+        for i in range(0, len(destinos), 500):
+            tramo = {h: (u, c) for h, u, c in destinos[i:i + 500]}
+            with Sesion() as s:
+                enlaces = (
+                    s.query(Link.to_url_hash, Origen.url, Origen.status_code, Link.anchor_text,
+                            Link.link_position, Link.follow, Link.link_type)
+                    .join(Origen, Origen.id == Link.from_url_id)
+                    .filter(Link.job_id == job_id, Link.to_url_hash.in_(list(tramo)),
+                            or_(Link.link_type.is_(None), Link.link_type.notin_(_TIPOS_NO_ENLACE)))
+                    .order_by(Link.to_url_hash, Origen.url)
+                    .all()
+                )
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            for h, origen, cod_origen, ancla, pos, follow, tipo in enlaces:
+                destino, cod = tramo[h]
+                w.writerow([destino, cod, origen, cod_origen, ancla or "", pos or "",
+                            "si" if follow else "no", tipo or ""])
+            yield buf.getvalue()
+
+    nombre = f"enlaces-entrantes-{str(job_id)[:8]}-{len(destinos)}-destinos.csv"
     return StreamingResponse(filas(), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
