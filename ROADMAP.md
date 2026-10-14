@@ -154,6 +154,29 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Borrar rastreos viejos en masa (15 de octubre)
+
+La base de datos crecía sin que nada lo dijera —57 GB para 50 rastreos en la
+instalación local antes de agrupar los enlaces, y el 86% era la tabla de
+enlaces— y limpiar significaba
+entrar en la ficha de cada rastreo, teclear «eliminar» y volver, así que no se
+limpiaba nunca. Ahora, en la lista de rastreos, hay una casilla por fila y un
+botón de **eliminar los seleccionados**. Antes de borrar se ve la lista con lo
+que ocupa cada uno y lo que se libera en total, y un botón arriba dice cuánto
+ocupa la base entera y en qué tablas.
+
+Dos cosas no se borran salvo que se insista: un rastreo **en marcha**, y el
+**censo con el que se compara la próxima ejecución de una programación** —sin
+él, ese rastreo semanal dejaría de avisar de lo que cambie y el silencio se lee
+igual que «no ha cambiado nada»—. Cada caso dice su motivo con todas las
+letras.
+
+Y lo que se libera se cuenta como es: el espacio queda disponible **dentro** de
+la base de datos y se reutiliza en los siguientes rastreos, pero el fichero del
+disco no se encoge. Lo que se gana es que deje de crecer. La excepción son los
+enlaces de los rastreos ya archivados: viven en un fichero aparte, se cuentan
+aparte y ese espacio sí vuelve al disco al borrar.
+
 ### Profundidad en clics desde la home (13 de octubre)
 
 La columna de profundidad contaba los saltos desde donde empezó el rastreo, y

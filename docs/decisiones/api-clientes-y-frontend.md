@@ -114,3 +114,94 @@
    ya se mandaba, la pregunta se contesta con un **304** de unos cientos de
    bytes frente a los 100 kB del fichero. Se paga una petición condicional por
    carga y se gana no servir nunca una mezcla de dos versiones.
+
+<a id="d96"></a>
+96. **Borrar censos viejos: en masa, con ids, y sin llevarse por delante la
+   referencia de una serie** — un censo de produccion ocupa gigas y la
+   instalacion acumula pruebas de 40 URLs, canarios y censos de hace meses.
+   Borrarlos de uno en uno —entrar en la ficha, teclear «eliminar», volver— es
+   lo que hace que no se borren nunca y que el aviso lo acabe dando el disco.
+   Medido en la base local el 2026-10-15, **antes de agrupar los enlaces
+   (decision 94)**: **57 GB para 50 rastreos**, de los cuales `links` eran
+   **49 GB y 187,5 millones de filas, el 86%**.
+   `POST /api/jobs/eliminar`, con cinco criterios:
+   - **Ids, nunca un filtro.** Un filtro se puede desplazar entre lo que se vio
+     en la lista y lo que llega al servidor —otro rastreo termina y entra en la
+     pagina— y esto no se recupera.
+   - **Dos guardias, y solo dos.** Un rastreo en marcha (`pending`, `running`,
+     `analyzing`) y **el censo de referencia de una programacion activa**: sin
+     el, el siguiente rastreo de esa serie se queda sin con que compararse, y
+     un silencio se lee igual que «no ha cambiado nada» (decisiones 78 y 86).
+     Lo demas es aviso y no guardia: que un host se quede sin ningun censo
+     completado solo muerde si ese sitio se vuelve a rastrear, lo que puede no
+     pasar nunca; la serie programada SI va a volver a correr. Con `forzar` se
+     saltan los dos, y marcarlo en la interfaz **rehace la vista previa**: la
+     lista que se lee y lo que se borra tienen que ser lo mismo.
+     El archivado de la decision 95 no anade ningun guardia: solo archiva
+     censos que ya NO son referencia de nada, y la comparacion no lee `links`
+     (`paginas_de_censo` va por `urls`), asi que un censo archivado que vuelva
+     a ser referencia porque se borre el mas nuevo sigue sirviendo para
+     comparar paginas y alertas.
+   - **La vista previa la calcula el MISMO endpoint, con `simular`.** Dos
+     caminos distintos para «que se va a borrar» y «que se borra» son dos
+     criterios que acaban discrepando (decisiones 23 y 39).
+   - **Presupuesto de tiempo, no limite de trabajo.** Cada censo se borra en su
+     propia transaccion y por lotes de 200.000 filas; lo que no cabe en los
+     60 s vuelve como `pendientes` y la interfaz repite. Las hijas se borran
+     antes que la fila de `jobs`, asi que lo que queda a medias es «un censo
+     con menos enlaces» —consistente, y la siguiente pasada lo termina— y no
+     filas huerfanas. Hace falta porque un `DELETE` de decenas de millones de
+     enlaces son minutos con la tabla tomada, y porque **mergear una PR recrea
+     el contenedor de la API y se lleva la peticion en vuelo**
+     ([`operacion.md`](../referencia/operacion.md)).
+   - **Lo que se libera se dice bien.** Postgres marca el espacio como
+     reutilizable y lo reusa en el siguiente rastreo, pero el fichero **no se
+     encoge** sin un `VACUUM FULL`, que toma un candado exclusivo sobre una
+     tabla de decenas de GB y por eso no se dispara desde aqui. Lo que se gana
+     es que el disco deje de crecer, y esa frase viaja en la respuesta.
+
+   **El Parquet de un censo archivado se borra con el, y por la misma
+   funcion.** `borrar_job` —la del `DELETE /api/jobs/{id}`, la del borrado de
+   un cliente con `con_jobs` y la de este endpoint— llama a
+   `archivo_enlaces.borrar` despues del commit; si el presupuesto corta a
+   medias, la fila de `jobs` sigue y su fichero tambien, porque quitarlo antes
+   dejaria un censo «archivado» sin archivo. La API ya monta el volumen
+   `archivo` (lo lee para servir los enlaces archivados), asi que no hace falta
+   un barrido del worker.
+
+   El tamano por censo (`shared/almacenamiento.py`, tambien `GET
+   /api/almacenamiento` con el desglose por tabla) es una **estimacion**:
+   filas por `job_id` x bytes por fila medidos con `pg_total_relation_size` y
+   `reltuples`, y las tablas que cuelgan de `url_id` repartidas por URL,
+   porque contarlas exigiria unir con `urls` y eso es lo que prohibe la
+   decision 37. Tres cosas que costaron una medicion o un criterio:
+   - **Los enlaces se cuentan con una consulta POR CENSO, no con un `IN`.** El
+     recorrido del indice de `links` iba a unos **1,6 us por fila** (691.939
+     enlaces de un censo de progym en 1,1 s, el 2026-10-15 y antes de
+     agrupar), asi que un `IN` con cinco censos de progym se pasaba del tope de
+     20 s y, al reventar la consulta agrupada, se perdian los tamanos de los
+     CINCO —medido: ocho con «?»—. Una por censo degrada de uno en uno: los que
+     caben en el presupuesto traen su cifra y los demas salen **sin medir**,
+     que es «no se sabe» y no una cifra corta.
+   - **Sin los enlaces no hay cifra.** Siendo la tabla mas grande con
+     diferencia, una estimacion sin ellos no se queda corta: miente. Y un 0 se
+     leeria como «este censo no ocupa nada», que es justo lo contrario de lo
+     que se quiere saber antes de borrarlo. Lo que se cuentan son **filas**,
+     no enlaces: desde la decision 94 una fila agrupa sus `repeticiones`, y lo
+     que ocupa disco es la fila.
+   - **Un censo archivado (decision 95) se mide por su Parquet.** No tiene
+     filas en `links`, y se sabe: van a 0 sin consultar, asi que nunca sale
+     «sin medir» por falta de presupuesto ni con el tamano que tenia antes de
+     archivarse. Lo que ocupa es su fichero, medido con `stat` (o lo anotado
+     en `jobs.enlaces_archivados` si la API no lo ve), y va **aparte**
+     (`archivo_bytes`), no sumado al de la base: ese espacio SI vuelve al disco
+     al borrar, y mezclarlo con la estimacion de Postgres haria mentir a la
+     nota. El panel de espacio suma tambien los Parquet del directorio, que
+     estan fuera de `pg_database_size`.
+   Las tablas del semantico y de Search Console se pesan igual —`semantic_pages`
+   guarda un vector de 1.024 dimensiones por pagina— y se borran por el
+   `ON DELETE CASCADE`: importar `shared.semantic_models` en el borrado
+   registraria sus tablas de pgvector en el `MetaData` compartido y tumbaria el
+   `create_all` de `test_pagerank_db.py` contra el `postgres:16-alpine` de CI.
+   Por eso el test que comprueba que ninguna tabla del censo se queda fuera
+   pregunta a los modelos **en otro proceso**.

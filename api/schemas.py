@@ -712,6 +712,89 @@ class JobStats(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Borrado en masa (decision 96)
+# ---------------------------------------------------------------------------
+class BorradoEnMasa(BaseModel):
+    """Que rastreos borrar. Ids explicitos, nunca un filtro: ver el endpoint."""
+
+    ids: list[uuid.UUID] = Field(min_length=1)
+    # La vista previa del dialogo: mismos guardias, mismas cifras, sin borrar.
+    simular: bool = False
+    # Pasar por encima de los guardias (rastreo en marcha, censo de referencia
+    # de una programacion activa). Lo pide la interfaz aparte, no va por
+    # defecto.
+    forzar: bool = False
+    # Presupuesto de tiempo de ESTA peticion. Lo que no se termine vuelve en
+    # `pendientes` para repetirlo.
+    segundos: int = Field(default=60, ge=5, le=600)
+
+
+class JobBorrado(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    status: str
+    created_at: datetime | None = None
+    # Filas por tabla (`urls`, `links`, `issues`). None = no se pudieron contar.
+    filas: dict[str, int] | None = None
+    # Bytes estimados en la base, no medidos fila a fila (ver
+    # shared/almacenamiento.py). Un censo archivado no cuenta aqui sus enlaces:
+    # no estan en la base.
+    bytes: int | None = None
+    # Enlaces archivados en Parquet (decision 95) y lo que ocupa ese fichero,
+    # medido. None = archivado pero no se sabe cuanto ocupa.
+    archivado: bool = False
+    archivo_bytes: int | None = 0
+    # Solo en la simulacion: lo que conviene saber antes de darle, sin que
+    # impida nada.
+    aviso: str | None = None
+
+
+class JobOmitido(BaseModel):
+    id: uuid.UUID
+    nombre: str | None = None
+    motivo: str
+
+
+class BorradoEnMasaResultado(BaseModel):
+    simulado: bool
+    eliminados: list[JobBorrado]
+    omitidos: list[JobOmitido]
+    # Los que no se llegaron a terminar dentro del presupuesto de tiempo.
+    # Repetir la peticion con estos ids los acaba.
+    pendientes: list[uuid.UUID]
+    bytes_aprox: int | None = None
+    # True = de alguno no se pudo medir el tamano, asi que `bytes_aprox` se
+    # queda corto. Decirlo es mejor que dar una cifra que parece completa.
+    bytes_incompletos: bool = False
+    # Parquet de enlaces archivados que se van con estos censos. Aparte de
+    # `bytes_aprox` porque ESTE espacio si vuelve al disco (ver `nota`).
+    archivo_bytes: int = 0
+    filas: dict[str, int] = {}
+    nota: str
+
+
+# ---------------------------------------------------------------------------
+# Espacio en disco (decision 96)
+# ---------------------------------------------------------------------------
+class TablaEnDisco(BaseModel):
+    tabla: str
+    bytes: int
+    filas_aprox: int | None = None
+
+
+class Almacenamiento(BaseModel):
+    # None fuera de Postgres: no es que no ocupe nada, es que no se sabe.
+    total_bytes: int | None = None
+    censo_bytes: int | None = None
+    tablas: list[TablaEnDisco] = []
+    # Los Parquet de enlaces archivados (decision 95), fuera de Postgres y por
+    # tanto fuera de `total_bytes`. None = el directorio no se pudo leer.
+    archivo_bytes: int | None = None
+    archivo_ficheros: int | None = None
+    nota: str
+
+
+# ---------------------------------------------------------------------------
 # Paginated wrapper
 # ---------------------------------------------------------------------------
 class PaginatedResponse(BaseModel, Generic[T]):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from typing import Any
@@ -17,6 +18,8 @@ from shared.models import Job, Url, Issue, Link
 from api.backup import ConflictError, import_backup_zip
 from api.dependencies import get_redis
 from api.schemas import (
+    BorradoEnMasa,
+    BorradoEnMasaResultado,
     JobUpdate,
     ImportResponse,
     JobCreate,
@@ -25,6 +28,17 @@ from api.schemas import (
 )
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+
+def _reloj() -> float:
+    """El reloj del presupuesto del borrado en masa, en una funcion propia.
+
+    No es ceremonia: un test que necesite agotar el presupuesto tiene que
+    poder cambiar el reloj de ESTE modulo. Parchear `time.monotonic` lo cambia
+    para todo el proceso —httpx, SQLite, el propio pytest— y la suite se
+    cuelga en vez de fallar; me paso al escribir el test del presupuesto.
+    """
+    return time.monotonic()
 
 
 # ---------------------------------------------------------------------------
@@ -448,12 +462,32 @@ def delete_job(
     return None
 
 
-def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
-    """Borra un job y todo lo suyo. Lo usa tambien el borrado de un cliente
-    con `con_jobs=true`; `confirmar=False` deja el commit a quien llama."""
-    from shared.models import CrawlProfile, Decision, EnrichmentRun
+def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
+               trozo: int | None = None, hasta: float | None = None) -> dict[str, Any]:
+    """Borra un job y todo lo suyo. Devuelve que se borro y si termino.
+
+    Lo usa tambien el borrado de un cliente con `con_jobs=true`;
+    `confirmar=False` deja el commit a quien llama.
+
+    `trozo` parte el borrado de las tablas grandes en lotes de ese tamano, con
+    un commit por lote, y `hasta` es el instante (`time.monotonic`) en el que
+    hay que dejarlo. Las dos las usa el borrado en masa:
+
+    - **Un censo grande no cabe en una transaccion comoda.** Borrar los 37,5
+      millones de enlaces de un censo de Druni en un solo DELETE son minutos
+      con la tabla tomada y un WAL enorme. Por lotes, cada uno se confirma y se
+      suelta.
+    - **Lo borrado a medias es consistente y se puede retomar.** Primero las
+      hijas y la fila de `jobs` al final, asi que si se agota el tiempo queda un
+      job con menos filas —no un huerfano sin job— y la siguiente pasada sigue
+      donde iba. Por eso el presupuesto se puede cortar sin miedo.
+
+    Sin `trozo` hace exactamente lo de siempre: un DELETE por tabla y un commit.
+    """
+    from shared.models import CleaningRuleset, CrawlProfile, Decision, EnrichmentRun
 
     job_id = job.id
+    filas: dict[str, int] = {}
     # If the job is still active, signal the crawler to stop first so it does
     # not keep writing rows (with a now-dangling job_id FK) while we delete.
     if job.status in ("pending", "running"):
@@ -466,17 +500,47 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
     # A mano y no solo por el ON DELETE SET NULL: igual en cualquier motor.
     db.query(CrawlProfile).filter(CrawlProfile.last_job_id == job_id).update(
         {CrawlProfile.last_job_id: None}, synchronize_session=False)
-    # Analisis enriquecido (#40): a mano, como links e issues (en SQLite no
-    # hay ON DELETE CASCADE). Una ejecucion en curso se para sola: en el
-    # siguiente lote su fila ya no existe y el worker deja de llamar.
-    db.query(Decision).filter(Decision.job_id == job_id).delete(synchronize_session=False)
-    db.query(EnrichmentRun).filter(EnrichmentRun.job_id == job_id).delete(
-        synchronize_session=False)
-    # Delete associated records in bulk (faster than cascade for large sets).
-    db.query(Link).filter(Link.job_id == job_id).delete(synchronize_session=False)
-    db.query(Issue).filter(Issue.job_id == job_id).delete(synchronize_session=False)
-    # Urls cascade handles html_meta, headings, etc. via DB-level ON DELETE CASCADE.
-    db.query(Url).filter(Url.job_id == job_id).delete(synchronize_session=False)
+    # Analisis enriquecido (#40) y reglas de limpieza: a mano, como links e
+    # issues (en SQLite no hay ON DELETE CASCADE). Una ejecucion de
+    # enriquecido en curso se para sola: en el siguiente lote su fila ya no
+    # existe y el worker deja de llamar.
+    #
+    # Lo del analisis semantico y Search Console NO se borra a mano, y es a
+    # proposito: `semantic_analyses` cuelga del job y el resto de las URLs,
+    # los cuatro con ON DELETE CASCADE. Importar aqui `shared.semantic_models`
+    # registraria sus tablas de pgvector en el `MetaData` compartido, y
+    # entonces el `create_all` de los tests contra un Postgres SIN la
+    # extension (el `postgres:16-alpine` de CI) revienta — se llevaria por
+    # delante `test_pagerank_db.py`, que no tiene nada que ver con esto.
+    for nombre, modelo in (("decisions", Decision), ("enrichment_runs", EnrichmentRun),
+                           ("cleaning_rulesets", CleaningRuleset)):
+        filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
+            synchronize_session=False)
+
+    # Las tres grandes. `urls` arrastra html_meta, headings, page_content y
+    # demas por el ON DELETE CASCADE de la BD.
+    for nombre, modelo in (("links", Link), ("issues", Issue), ("urls", Url)):
+        borradas = 0
+        while True:
+            if trozo:
+                sub = (db.query(modelo.id).filter(modelo.job_id == job_id)
+                       .limit(trozo).scalar_subquery())
+                n = db.query(modelo).filter(modelo.id.in_(sub)).delete(
+                    synchronize_session=False)
+            else:
+                n = db.query(modelo).filter(modelo.job_id == job_id).delete(
+                    synchronize_session=False)
+            borradas += n
+            if not trozo:
+                break
+            db.commit()
+            if n < trozo:
+                break
+            if hasta is not None and _reloj() >= hasta:
+                filas[nombre] = borradas
+                return {"completo": False, "filas": filas}
+        filas[nombre] = borradas
+
     db.delete(job)
     if confirmar:
         db.commit()
@@ -487,6 +551,195 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
         archivo_enlaces.borrar(job_id)
     else:
         db.flush()
+    return {"completo": True, "filas": filas}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/eliminar  --  borrado en masa (decision 96)
+# ---------------------------------------------------------------------------
+# Un censo de produccion ocupa gigas y la instalacion acumula pruebas de 40
+# URLs, canarios y censos de hace meses que ya no se van a mirar. Borrarlos de
+# uno en uno, entrando en cada ficha y teclando «eliminar», es lo que hace que
+# no se borren nunca y que el aviso lo acabe dando el disco del VPS.
+#
+# Tres cosas que este endpoint se NIEGA a hacer sin que se le insista:
+#   - borrar un rastreo en marcha (`pending`, `running`, `analyzing`),
+#   - borrar el censo de referencia de una programacion activa, porque el
+#     siguiente rastreo de esa serie se quedaria sin con que compararse y un
+#     silencio se lee igual que «no ha cambiado nada» (decisiones 78 y 86),
+#   - y borrar a partir de un FILTRO: solo acepta ids, uno a uno. Un filtro se
+#     puede desplazar entre lo que se vio en la lista y lo que llega aqui
+#     —otro rastreo termina y entra en la pagina—, y esto no se recupera.
+MAX_IDS_POR_PETICION = 500
+TROZO_DE_BORRADO = 200_000
+
+
+def _motivo_para_no_borrar(db: Session, job: Job) -> str | None:
+    """Por que NO se borra este rastreo, si hay motivo. `None` = adelante."""
+    from shared.models import Programacion
+
+    if job.status in ("pending", "running", "analyzing"):
+        return (f"está en marcha ({job.status}): cancélalo y espera a que pare "
+                "antes de borrarlo")
+
+    if job.programacion_id and job.status == "completed" and job.started_at:
+        programacion = (db.query(Programacion)
+                        .filter(Programacion.id == job.programacion_id).one_or_none())
+        if programacion is not None and programacion.activa:
+            mas_nuevo = (
+                db.query(Job.id)
+                .filter(Job.id != job.id, Job.programacion_id == job.programacion_id,
+                        Job.status == "completed", Job.started_at.isnot(None),
+                        Job.started_at > job.started_at)
+                .first()
+            )
+            if mas_nuevo is None:
+                return (f"es el censo de referencia de la programación "
+                        f"«{programacion.nombre}»: el próximo rastreo de esa serie "
+                        "se quedaría sin con qué compararse")
+    return None
+
+
+def _avisos_por_host(db: Session, a_borrar: list[Job]) -> dict[uuid.UUID, str]:
+    """«Con esto se va el último censo completado de X», por job.
+
+    No impide nada: la referencia de un rastreo lanzado a mano se elige por
+    host (decision 86), y quedarse sin censo de un sitio solo muerde si ese
+    sitio se vuelve a rastrear, lo que puede no pasar nunca. La serie
+    programada si vuelve a correr seguro, y por eso esa SI es un guardia.
+
+    Un solo recorrido de `jobs` para todos: el host no es una columna (`seeds`
+    es JSON) y preguntarlo job a job serian tantos recorridos como ids.
+    """
+    from shared.comparacion import _host
+
+    completados_por_host: dict[str, int] = {}
+    for j in db.query(Job.id, Job.seeds).filter(Job.status == "completed").yield_per(500):
+        host = _host((j.seeds or [None])[0])
+        if host:
+            completados_por_host[host] = completados_por_host.get(host, 0) + 1
+
+    se_van: dict[str, int] = {}
+    for job in a_borrar:
+        host = _host((job.seeds or [None])[0])
+        if host and job.status == "completed":
+            se_van[host] = se_van.get(host, 0) + 1
+
+    avisos = {}
+    for job in a_borrar:
+        host = _host((job.seeds or [None])[0])
+        if not host or job.status != "completed":
+            continue
+        if completados_por_host.get(host, 0) - se_van.get(host, 0) <= 0:
+            avisos[job.id] = (f"con esto {host} se queda sin ningún censo completado: "
+                              "el próximo rastreo del sitio no tendrá con qué compararse")
+    return avisos
+
+
+@router.post("/eliminar", response_model=BorradoEnMasaResultado)
+def eliminar_jobs(
+    cuerpo: BorradoEnMasa,
+    db: Session = Depends(get_session),
+):
+    """Borra varios rastreos, cada uno en su propia transaccion.
+
+    `simular=true` no borra nada y devuelve lo mismo: el mismo recorrido y los
+    mismos guardias, para que la vista previa del dialogo no pueda decir una
+    cosa y el borrado hacer otra.
+
+    `segundos` es un presupuesto de tiempo, no un limite de trabajo: cuando se
+    agota, lo que no se ha terminado vuelve en `pendientes` y basta con
+    repetir la peticion con esos ids. Asi un lote de censos grandes no depende
+    de que la peticion HTTP sobreviva veinte minutos —ni de que no haya un
+    despliegue en vuelo, que recrea el contenedor de la API y se lleva la
+    peticion por delante— y la interfaz puede pintar el avance.
+    """
+    from shared.almacenamiento import NOTA_DE_ESPACIO, tamano_de_jobs
+
+    # Ids repetidos: se cuentan una vez. Pedir dos veces el mismo borrado no
+    # es un error del que haya que avisar.
+    ids: list[uuid.UUID] = list(dict.fromkeys(cuerpo.ids))
+    if len(ids) > MAX_IDS_POR_PETICION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Como mucho {MAX_IDS_POR_PETICION} rastreos por petición; "
+                   f"se han pedido {len(ids)}")
+
+    jobs = {j.id: j for j in db.query(Job).filter(Job.id.in_(ids)).all()}
+
+    # El tamano se mide ANTES de borrar y de una vez para todos: despues ya no
+    # hay filas que contar. Si no se puede medir viene a None (ver
+    # shared/almacenamiento.py) y el borrado sigue igual.
+    tamanos = tamano_de_jobs(db, [i for i in ids if i in jobs])
+
+    omitidos: list[dict[str, Any]] = []
+    eliminados: list[dict[str, Any]] = []
+    pendientes: list[uuid.UUID] = []
+    filas_totales: dict[str, int] = {}
+    bytes_conocidos, sin_medir = 0, False
+    archivo_bytes = 0
+    hasta = _reloj() + cuerpo.segundos
+
+    candidatos = []
+    for i in ids:
+        job = jobs.get(i)
+        if job is None:
+            omitidos.append({"id": i, "nombre": None, "motivo": "ya no existe"})
+            continue
+        motivo = None if cuerpo.forzar else _motivo_para_no_borrar(db, job)
+        if motivo:
+            omitidos.append({"id": i, "nombre": job.name, "motivo": motivo})
+            continue
+        candidatos.append(job)
+
+    # Los avisos solo en la vista previa: son para decidir, y una vez borrado
+    # no hay nada que decidir.
+    avisos = _avisos_por_host(db, candidatos) if cuerpo.simular else {}
+
+    for job in candidatos:
+        medida = tamanos.get(job.id, {})
+        fila = {"id": job.id, "nombre": job.name, "status": job.status,
+                "created_at": job.created_at,
+                "filas": medida.get("filas"), "bytes": medida.get("bytes"),
+                # El Parquet de sus enlaces (decision 95): `borrar_job` lo
+                # quita con el job, y ese espacio SI vuelve al disco.
+                "archivado": bool(medida.get("archivado")),
+                "archivo_bytes": medida.get("archivo_bytes"),
+                "aviso": avisos.get(job.id)}
+
+        if not cuerpo.simular:
+            if _reloj() >= hasta:
+                pendientes.append(job.id)
+                continue
+            resultado = borrar_job(db, job, trozo=TROZO_DE_BORRADO, hasta=hasta)
+            for tabla, n in resultado["filas"].items():
+                filas_totales[tabla] = filas_totales.get(tabla, 0) + n
+            if not resultado["completo"]:
+                # Se quedo a medias: faltan filas y la de `jobs` sigue ahi,
+                # asi que repetir la peticion con este id lo termina.
+                pendientes.append(job.id)
+                continue
+
+        eliminados.append(fila)
+        archivo_bytes += medida.get("archivo_bytes") or 0
+        if medida.get("bytes") is None:
+            sin_medir = True
+        else:
+            bytes_conocidos += medida["bytes"]
+
+    return BorradoEnMasaResultado(
+        simulado=cuerpo.simular,
+        eliminados=eliminados,
+        omitidos=omitidos,
+        pendientes=pendientes,
+        # None = no se pudo medir ni uno. Un 0 se leeria como «no ocupaban
+        # nada», que es justo lo contrario de lo que se quiere saber aqui.
+        bytes_aprox=None if (sin_medir and not bytes_conocidos) else bytes_conocidos,
+        bytes_incompletos=sin_medir,
+        archivo_bytes=archivo_bytes,
+        filas=filas_totales,
+        nota=NOTA_DE_ESPACIO,
+    )
 
 
 # ---------------------------------------------------------------------------

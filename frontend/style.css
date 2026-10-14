@@ -1329,3 +1329,9 @@ code.tramo{font-size:.7rem;background:var(--orange-bg);padding:0 .25rem;border-r
 .exp-vista-borrar{border:0;background:none;color:var(--text-dim);cursor:pointer;padding:0 .5rem;font-size:1rem;opacity:0}
 .exp-vista:hover .exp-vista-borrar,.exp-vista-borrar:focus-visible{opacity:1}
 .exp-vista-nueva{color:var(--accent)}
+/* Borrado en masa (decision 96). Todo con los tokens del tema, para que el
+   tema terminal no necesite su propia copia. */
+.barra-seleccion{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.45rem .7rem;
+  border:1px solid var(--accent);border-radius:var(--radius);background:var(--accent-subtle);font-size:.82rem}
+.barra-seleccion .text-dim{margin-right:auto}
+tr.fila-marcada td{background:var(--accent-subtle)}
