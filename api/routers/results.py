@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from api.backup import stream_backup_zip
 
+from shared import archivo_enlaces
 from shared.database import get_session
 from shared.models import (
     Job, Url, Issue, Link, HtmlMeta, PageContent,
@@ -189,13 +190,58 @@ _VACIO_FILTERS: dict[str, tuple[Any, bool]] = {
 _TIPOS_NO_ENLACE = ("redirect", "canonical")
 
 
+def _job_archivado(db: Session, job_id: uuid.UUID) -> bool:
+    """Si los enlaces del job viven en Parquet y no en `links` (decision 95)."""
+    job = db.get(Job, job_id)
+    return job is not None and archivo_enlaces.esta_archivado(job)
+
+
+def _urls_de(db: Session, ids) -> dict[int, tuple[str, int | None]]:
+    """(url, codigo) de cada id, por tramos."""
+    ids = list({i for i in ids if i is not None})
+    salida: dict[int, tuple[str, int | None]] = {}
+    for i in range(0, len(ids), 1000):
+        for uid, url, cod in (db.query(Url.id, Url.url, Url.status_code)
+                              .filter(Url.id.in_(ids[i:i + 1000])).all()):
+            salida[uid] = (url, cod)
+    return salida
+
+
+def _como_links(db: Session, job_id: uuid.UUID, filas: list[dict]) -> list[Any]:
+    """Filas del Parquet con la forma de un `Link` del ORM, `from_url_rel`
+    incluido, para que el resto del endpoint no distinga de donde vienen."""
+    from types import SimpleNamespace
+
+    urls = _urls_de(db, (f["from_url_id"] for f in filas))
+    return [
+        SimpleNamespace(**f, job_id=job_id, from_url_rel=SimpleNamespace(
+            url=urls.get(f["from_url_id"], (None, None))[0]))
+        for f in filas
+    ]
+
+
+def _es_enlace(tipo: str | None) -> bool:
+    return tipo is None or tipo not in _TIPOS_NO_ENLACE
+
+
 def _origenes(db: Session, job_id: uuid.UUID, hashes: list[str]) -> dict[str, tuple[str, int]]:
     """Para cada destino (url_hash): la pagina que mas veces lo enlaza y
     cuantas paginas distintas lo enlazan. Usa `ix_links_to_hash (job_id,
     to_url_hash)`: nunca recorre la tabla de enlaces entera (decision 37)."""
     if not hashes:
         return {}
-    filas = (
+    if _job_archivado(db, job_id):
+        cuenta: dict[tuple[str, int], int] = {}
+        for f in archivo_enlaces.leer(job_id, a_hashes=hashes,
+                                      columnas=["to_url_hash", "from_url_id", "link_type"]):
+            if _es_enlace(f["link_type"]):
+                k = (f["to_url_hash"], f["from_url_id"])
+                cuenta[k] = cuenta.get(k, 0) + 1
+        urls = _urls_de(db, (o for _, o in cuenta))
+        filas = [(h, urls[o][0], n) for (h, o), n in cuenta.items() if o in urls]
+    else:
+        filas = None
+    filas = filas if filas is not None else (
         db.query(Link.to_url_hash, Url.url, func.count(Link.id))
         .join(Url, Url.id == Link.from_url_id)
         .filter(Link.job_id == job_id, Link.to_url_hash.in_(hashes),
@@ -764,6 +810,7 @@ def export_enlaces_entrantes(
 
     Sesion = sessionmaker(bind=db.get_bind())
     Origen = aliased(Url)
+    archivado = _job_archivado(db, job_id)
 
     def filas():
         buf = io.StringIO()
@@ -774,7 +821,18 @@ def export_enlaces_entrantes(
         for i in range(0, len(destinos), 500):
             tramo = {h: (u, c) for h, u, c in destinos[i:i + 500]}
             with Sesion() as s:
-                enlaces = (
+                if archivado:
+                    crudas = [f for f in archivo_enlaces.leer(job_id, a_hashes=list(tramo))
+                              if _es_enlace(f["link_type"])]
+                    urls = _urls_de(s, (f["from_url_id"] for f in crudas))
+                    enlaces = sorted(
+                        ((f["to_url_hash"], *urls.get(f["from_url_id"], ("", None)),
+                          f["anchor_text"], f["link_position"], f["follow"], f["link_type"])
+                         for f in crudas),
+                        key=lambda e: (e[0], e[1] or ""))
+                else:
+                    enlaces = None
+                enlaces = enlaces if enlaces is not None else (
                     s.query(Link.to_url_hash, Origen.url, Origen.status_code, Link.anchor_text,
                             Link.link_position, Link.follow, Link.link_type)
                     .join(Origen, Origen.id == Link.from_url_id)
@@ -829,7 +887,18 @@ def get_url_detail(
     from sqlalchemy.orm import aliased
     UrlAlias = aliased(Url)
 
-    outlink_rows = (
+    if _job_archivado(db, job_id):
+        def _fila(lk):
+            return lk, lk.from_url_rel.url
+        salientes = sorted(archivo_enlaces.leer(job_id, de_url_id=url_id), key=lambda f: f["id"])
+        entrantes = sorted(archivo_enlaces.leer(job_id, a_hashes=[url_obj.url_hash]),
+                           key=lambda f: f["id"])
+        outlink_rows = [_fila(lk) for lk in _como_links(db, job_id, salientes[:200])]
+        inlink_rows = [_fila(lk) for lk in _como_links(db, job_id, entrantes[:200])]
+    else:
+        outlink_rows = inlink_rows = None
+
+    outlink_rows = outlink_rows if outlink_rows is not None else (
         db.query(Link, UrlAlias.url.label("src_url"))
         .outerjoin(UrlAlias, Link.from_url_id == UrlAlias.id)
         .filter(Link.from_url_id == url_id)
@@ -839,7 +908,7 @@ def get_url_detail(
     )
 
     # Build inlinks using to_url_hash match
-    inlink_rows = (
+    inlink_rows = inlink_rows if inlink_rows is not None else (
         db.query(Link, UrlAlias.url.label("src_url"))
         .outerjoin(UrlAlias, Link.from_url_id == UrlAlias.id)
         .filter(Link.job_id == job_id, Link.to_url_hash == url_obj.url_hash)
@@ -1049,7 +1118,17 @@ def list_links(
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
+
+    if archivo_enlaces.esta_archivado(job):
+        items = []
+        for r in _como_links(db, job_id, archivo_enlaces.pagina(
+                job_id, (page - 1) * page_size, page_size)):
+            resp = LinkResponse.model_validate(r)
+            resp.from_url = r.from_url_rel.url
+            items.append(resp)
+        return _paginate(items=items, total=archivo_enlaces.contar(job_id),
+                         page=page, page_size=page_size)
 
     q = db.query(Link).filter(Link.job_id == job_id)
 
@@ -1706,8 +1785,13 @@ def _links_csv_row(link_obj: Link) -> list[str]:
     ]
 
 
-def _stream_links_csv(job_id: uuid.UUID):
-    """Generator that yields the link graph as CSV in windowed chunks."""
+def _stream_links_csv(job_id: uuid.UUID, archivado_en=None):
+    """Generator that yields the link graph as CSV in windowed chunks.
+
+    Con `archivado_en` (un motor) los enlaces salen del Parquet del job
+    (decision 95) y las URLs de origen se resuelven contra ese motor. Salen
+    las mismas filas, pero agrupadas por destino —el orden del fichero— y no
+    por id: ordenarlas por id obligaria a cargar el censo entero."""
     from shared.database import SessionLocal
 
     batch_size = 1000
@@ -1716,7 +1800,30 @@ def _stream_links_csv(job_id: uuid.UUID):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(LINKS_CSV_COLUMNS)
-    yield "﻿" + buf.getvalue()
+    yield "\ufeff" + buf.getvalue()
+
+    if archivado_en is not None:
+        from sqlalchemy.orm import sessionmaker
+
+        Sesion = sessionmaker(bind=archivado_en)
+        lote: list[dict] = []
+
+        def _volcar(lote):
+            with Sesion() as s:
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                for lk in _como_links(s, job_id, lote):
+                    writer.writerow(_links_csv_row(lk))
+                return buf.getvalue()
+
+        for fila in archivo_enlaces.recorrer(job_id):
+            lote.append(fila)
+            if len(lote) >= batch_size:
+                yield _volcar(lote)
+                lote = []
+        if lote:
+            yield _volcar(lote)
+        return
 
     while True:
         session = SessionLocal()
@@ -1749,10 +1856,11 @@ def export_links_csv(
     job_id: uuid.UUID,
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
+    archivado_en = db.get_bind() if archivo_enlaces.esta_archivado(job) else None
 
     return StreamingResponse(
-        _stream_links_csv(job_id),
+        _stream_links_csv(job_id, archivado_en),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename=job_{job_id}_links.csv",
@@ -2136,12 +2244,18 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
 
     # Nofollow internal links
     # Por aparicion, como siempre: una fila agrupa sus repeticiones (decision 94)
-    total_internal_links = db.query(func.sum(Link.repeticiones)).filter(
-        Link.job_id == job_id, Link.is_internal == True,
-    ).scalar() or 0
-    nofollow_links = db.query(func.sum(Link.repeticiones)).filter(
-        Link.job_id == job_id, Link.is_internal == True, Link.follow == False,
-    ).scalar() or 0
+    job = db.get(Job, job_id)
+    if job is not None and archivo_enlaces.esta_archivado(job):
+        # Guardadas al archivar: las mismas sumas, sin leer el fichero
+        total_internal_links = job.enlaces_archivados.get("internos", 0)
+        nofollow_links = job.enlaces_archivados.get("nofollow_internos", 0)
+    else:
+        total_internal_links = db.query(func.sum(Link.repeticiones)).filter(
+            Link.job_id == job_id, Link.is_internal == True,
+        ).scalar() or 0
+        nofollow_links = db.query(func.sum(Link.repeticiones)).filter(
+            Link.job_id == job_id, Link.is_internal == True, Link.follow == False,
+        ).scalar() or 0
 
     # Broken links (4xx/5xx issue counts)
     broken_link_issues = db.query(func.count(Issue.id)).filter(

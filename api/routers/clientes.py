@@ -436,6 +436,7 @@ def borrar_cliente(
             status_code=409,
             detail=f"Para borrar el cliente escribe su slug ('{cliente.slug}')")
 
+    borrados: list = []
     if con_jobs:
         from api.routers.jobs import borrar_job
 
@@ -443,6 +444,7 @@ def borrar_cliente(
             job = db.get(Job, jid)
             if job is not None:
                 borrar_job(db, job, confirmar=False)
+                borrados.append(jid)
     else:
         db.query(Job).filter(Job.cliente_id == cliente.id).update(
             {Job.cliente_id: None, Job.profile_id: None}, synchronize_session=False)
@@ -453,6 +455,10 @@ def borrar_cliente(
         synchronize_session=False)
     db.delete(cliente)
     db.commit()
+    # Los Parquet de enlaces de sus jobs, despues del commit (decision 95)
+    from shared import archivo_enlaces
+    for jid in borrados:
+        archivo_enlaces.borrar(jid)
 
 
 @router.get("/{client_id}/config-resuelta", response_model=ConfigResueltaResponse)

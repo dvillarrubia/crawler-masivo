@@ -97,6 +97,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
   los agregados de enlaces leen `links` una vez (41).
 - **Un conteo de enlaces por aparicion es `SUM(links.repeticiones)`, no `COUNT(*)`**:
   las apariciones identicas de una pagina van en una fila. Decision 94.
+- **Un censo con `jobs.enlaces_archivados` no tiene filas en `links`**: se lee del
+  Parquet y no se re-analiza sin `archivar_enlaces.py --restaurar`. Decision 95.
 - **Reglas que comparten spider y analizador viven en `shared/`** (robots,
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en

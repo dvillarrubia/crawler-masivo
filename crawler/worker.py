@@ -723,6 +723,43 @@ def _run_job(job_id: str) -> None:
     # luego.
     if final_status == "completed":
         _comparar_con_el_censo_anterior(job_id)
+        # Despues de comparar: la referencia de esta comparacion no es
+        # candidata (la abarca un censo mas nuevo solo a partir de ahora, y aun
+        # asi espera ARCHIVAR_DIAS_MINIMOS), pero el orden lo deja claro.
+        _archivar_enlaces_superados(job_id)
+
+
+def _archivar_enlaces_superados(job_id: str) -> None:
+    """Pasa a Parquet los enlaces de los censos que ya han quedado superados.
+
+    Es lo que mantiene `links` acotada a los censos vivos en vez de crecer con
+    cada rastreo semanal (decision 95). Best-effort, con el `try` cubriendo la
+    funcion ENTERA (decision 74): un fallo deja los enlaces donde estaban, que
+    es un estado valido, y no puede tocar el job que acaba de terminar.
+    `ARCHIVAR_ENLACES=0` lo apaga.
+    """
+    if os.getenv("ARCHIVAR_ENLACES", "1") not in ("1", "true", "True"):
+        return
+    session = None
+    try:
+        from shared import archivo_enlaces
+        from shared.database import SessionLocal
+
+        session = SessionLocal()
+        for job in archivo_enlaces.candidatos(session):
+            try:
+                r = archivo_enlaces.archivar(session, job.id)
+                logger.info("Job %s: enlaces del censo superado %s archivados "
+                            "(%d filas, %d bytes)", job_id, job.id, r["filas"], r["bytes"])
+            except Exception:
+                session.rollback()
+                logger.exception("Job %s: no se pudieron archivar los enlaces de %s",
+                                 job_id, job.id)
+    except Exception:
+        logger.exception("Job %s: fallo al buscar enlaces que archivar", job_id)
+    finally:
+        if session is not None:
+            session.close()
 
 
 def _comparar_con_el_censo_anterior(job_id: str) -> None:

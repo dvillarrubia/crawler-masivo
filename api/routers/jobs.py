@@ -480,6 +480,11 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True) -> None:
     db.delete(job)
     if confirmar:
         db.commit()
+        # El Parquet de sus enlaces, si estaban archivados (decision 95). Despues
+        # del commit: si el borrado de la BD fallase, el job seguiria pidiendo
+        # su fichero.
+        from shared import archivo_enlaces
+        archivo_enlaces.borrar(job_id)
     else:
         db.flush()
 

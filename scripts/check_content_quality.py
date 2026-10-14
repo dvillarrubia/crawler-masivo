@@ -93,6 +93,18 @@ def cargar_paginas(job_id: str):
 
     sesion = SessionLocal()
     try:
+        from shared.models import Job
+
+        import uuid as _uuid
+
+        job = sesion.get(Job, _uuid.UUID(str(job_id)))
+        if job is not None and getattr(job, "enlaces_archivados", None):
+            # Sin sus filas en `links`, cada pagina saldria con 0 enlaces
+            # guardados y la alarma de enlaces perdidos saltaria en todas
+            # (decision 95).
+            raise SystemExit(
+                f"Los enlaces del job {job_id} estan archivados: restauralos con "
+                f"scripts/archivar_enlaces.py --restaurar {job_id}")
         filas = (
             sesion.query(Url.id, Url.url, Url.path, Url.word_count)
             .filter(
