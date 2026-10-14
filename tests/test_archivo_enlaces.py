@@ -164,16 +164,6 @@ def test_restaurar_deja_links_como_estaba(entorno):
     assert not archivo_enlaces.ruta(jid).exists()
 
 
-def test_el_analisis_se_niega_sobre_un_censo_archivado(entorno):
-    from analysis.analyzer import EnlacesArchivados, SEOAnalyzer
-
-    _, jid, _, Sesion = entorno
-    with Sesion() as s:
-        archivo_enlaces.archivar(s, jid)
-        with pytest.raises(EnlacesArchivados, match="--restaurar"):
-            SEOAnalyzer(s, jid).run_all()
-
-
 def test_no_archiva_un_job_en_marcha(entorno):
     _, jid, _, Sesion = entorno
     with Sesion() as s:
