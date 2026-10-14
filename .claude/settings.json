@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sesiones.py\" hook-inicio", "timeout": 20 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sesiones.py\" hook-latido", "timeout": 10 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sesiones.py\" hook-bash", "timeout": 90 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sesiones.py\" hook-fin", "timeout": 10 } ] }
+    ]
+  }
+}

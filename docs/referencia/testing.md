@@ -1,0 +1,65 @@
+# Tests
+
+> Movido tal cual desde `CLAUDE.md` (2026-10-14).
+
+## Testing
+
+Unit test suite at `tests/` (**480 casos**: 466 en la imagen del crawler y 14
+mas —`test_insights.py`, `test_export_csv.py` y `test_raw_html.py`— que
+necesitan FastAPI y se corren en la de la API). Los 466 incluyen 32 que SOLO
+corren con servicios de verdad: `test_pagerank_db.py` (27, Postgres) y el de la
+cola contra Redis. Para destaparlos en local:
+
+```bash
+docker compose exec -T postgres createdb -U crawler crawler_test
+docker run --rm --network crawler-masivo_default -v "$PWD":/repo -w /repo \
+  -e PYTHONPATH=/repo:/repo/crawler:/repo/tests \
+  -e PAGERANK_TEST_DATABASE_URL=postgresql+psycopg2://crawler:crawler@postgres:5432/crawler_test \
+  -e REDIS_TEST_URL=redis://redis:6379/9 \
+  crawler-masivo-crawler bash -lc "pip install -q pytest; python -m pytest /repo/tests -q"
+```
+
+Sin la red de compose y los nombres de servicio no valen: apuntar
+`REDIS_TEST_URL` a `127.0.0.1` desde otro contenedor hace fallar el test de la
+cola, y parece un fallo del codigo. Lo que cubren: pure extractors
+(`test_extractors.py`), main-content extraction / boilerplate stripping
+(`test_content_extraction.py`), structured-data validation
+(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
+casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
+estimada contra la Jaccard exacta) y un test de integracion del spider
+(`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
+local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
+refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
+redireccion la sigue el navegador) y `test_analyzer_near_duplicates_db.py`, que
+pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
+(que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
+(modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
+de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el
+fichero; nunca apuntarlo a `crawler_db`). Del contrafactual por columna salen
+tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
+en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
+las de la derecha), y `test_render_espera.py` (contrato de la espera de render:
+no resolver con peticiones en vuelo).
+Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
+429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
+confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
+`test_llm_contrato.py` (contra los SDK oficiales; necesita
+`tests/requirements-contrato.txt` y corre en su propio trabajo de CI). Todos
+con el `FakeLLM` de `tests/fake_llm.py`: **ningun test llama a la red**, y
+`conftest.py` hace fallar cualquier transporte real hacia OpenRouter.
+Analisis enriquecido (decision 85): `test_enriquecido.py` (modulos y
+dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
+mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
+`test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
+respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
+Run with
+`pip install -r tests/requirements.txt && pytest`.
+`scripts/prueba_espera_render.py` mide si la espera de render pierde el
+contenido que llega por XHR (laboratorio con retardo, o URLs reales).
+`scripts/check_content_quality.py <job_id>` compares, per URL template,
+what the crawl stored against what the extractor, `extract_main_content` and a
+Chromium render see right now — it is how content loss is caught after a crawl.
+De la capa de analisis contra BD ya hay tres tests
+(`test_analyzer_headings_db.py`, `test_analyzer_near_duplicates_db.py` y
+`test_pagerank_db.py`); el resto se sigue verificando con las consultas SQL de
+`docs/AUDITORIA_Y_VERIFICACION.md`.
