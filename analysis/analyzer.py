@@ -1971,7 +1971,7 @@ class SEOAnalyzer:
         # es un UUID y comparado como cadena no liga igual en todos los
         # motores, asi que la primera version de esto no actualizaba ni una
         # fila en los tests contra SQLite.
-        from sqlalchemy import BigInteger, Boolean, Column, MetaData, Table, insert
+        from sqlalchemy import BigInteger, Boolean, Column, Integer, MetaData, Table, insert
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         aristas = Table(
@@ -1983,6 +1983,9 @@ class SEOAnalyzer:
             # Solo para la profundidad de clic: el `nofollow` SI cuenta como
             # enlace entrante (abajo), pero no es un camino que se recorra.
             Column("seguible", Boolean),
+            # Apariciones identicas en la pagina (decision 94). Los conteos por
+            # INSTANCIA suman esto; los de origenes distintos no lo miran.
+            Column("veces", Integer),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -1991,11 +1994,13 @@ class SEOAnalyzer:
         destino = aliased(Url)
         self.session.execute(
             insert(aristas).from_select(
-                ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible"],
+                ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
+                 "veces"],
                 select(
                     destino.id, Link.from_url_id, Link.is_internal,
                     and_(origen.noindex.isnot(True), origen.status_code == 200),
                     Link.follow.isnot(False),
+                    Link.repeticiones,
                 )
                 .join(origen, origen.id == Link.from_url_id)
                 .outerjoin(destino, and_(
@@ -2016,8 +2021,10 @@ class SEOAnalyzer:
         salientes = (
             select(
                 aristas.c.origen_id.label("url_id"),
-                func.count().filter(aristas.c.es_interno).label("internos"),
-                func.count().filter(~aristas.c.es_interno).label("externos"),
+                func.coalesce(func.sum(aristas.c.veces).filter(aristas.c.es_interno), 0)
+                .label("internos"),
+                func.coalesce(func.sum(aristas.c.veces).filter(~aristas.c.es_interno), 0)
+                .label("externos"),
             )
             .group_by(aristas.c.origen_id)
             .subquery()
@@ -2035,7 +2042,7 @@ class SEOAnalyzer:
         entrantes = (
             select(
                 aristas.c.destino_id.label("url_id"),
-                func.count().label("entrantes"),
+                func.sum(aristas.c.veces).label("entrantes"),
                 func.count(func.distinct(aristas.c.origen_id)).label("origenes"),
             )
             .where(
@@ -2307,7 +2314,7 @@ class SEOAnalyzer:
         desconocidas = self.session.execute(
             text(
                 """
-                SELECT l.link_position, COUNT(*) AS n
+                SELECT l.link_position, SUM(l.repeticiones) AS n
                 FROM links l
                 WHERE l.job_id = :jid AND l.is_internal AND l.follow
                   AND l.link_position IS NOT NULL

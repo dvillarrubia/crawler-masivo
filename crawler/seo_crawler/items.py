@@ -115,6 +115,8 @@ class LinkItem(scrapy.Item):
     target = scrapy.Field()
     alt_text = scrapy.Field()
     link_type = scrapy.Field()
+    # Apariciones identicas en la pagina, agrupadas en una fila (decision 94)
+    repeticiones = scrapy.Field()
 
 
 class HreflangItem(scrapy.Item):

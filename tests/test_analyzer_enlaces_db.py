@@ -257,3 +257,42 @@ def test_un_enlace_desde_una_pagina_rota_no_cuenta():
     analizador.compute_link_counts()
     s.flush()
     assert s.get(Url, destino.id).inlinks_count == 1
+
+
+def _conteos_de(agrupado: bool):
+    """El mismo sitio guardado de las dos formas: una fila por aparicion (los
+    rastreos anteriores a la decision 94) o agrupadas con `repeticiones`."""
+    s, j = _montar()
+    home = _url(s, j, "/inicio")
+    ficha = _url(s, j, "/ficha")
+    # El menu de escritorio y el de movil enlazan la ficha: tres apariciones
+    # identicas. Y una mas en el cuerpo, que es OTRO enlace (otra posicion).
+    if agrupado:
+        s.add(Link(job_id=j.id, from_url_id=home.id, to_url="https://x.com/ficha",
+                   to_url_hash="/ficha", is_internal=True, link_position="nav",
+                   follow=True, repeticiones=3))
+    else:
+        for _ in range(3):
+            _enlace(s, j, home, "/ficha", posicion="nav")
+    _enlace(s, j, home, "/ficha", posicion="content")
+    s.add(Link(job_id=j.id, from_url_id=home.id, to_url="https://y.com/",
+               to_url_hash="ext", is_internal=False, link_position="footer",
+               follow=True, repeticiones=2 if agrupado else 1))
+    if not agrupado:
+        s.add(Link(job_id=j.id, from_url_id=home.id, to_url="https://y.com/",
+                   to_url_hash="ext", is_internal=False, link_position="footer",
+                   follow=True))
+    s.commit()
+    SEOAnalyzer(s, j.id).compute_link_counts()
+    s.commit()
+    s.refresh(home)
+    s.refresh(ficha)
+    return (ficha.inlinks_count, ficha.unique_inlinks_count,
+            home.outlinks_count, home.external_outlinks_count)
+
+
+def test_agrupar_las_repeticiones_no_cambia_ningun_conteo():
+    """Decision 94: guardar agrupado es una optimizacion, no un cambio de
+    criterio. Los conteos por aparicion suman `repeticiones`; los de origenes
+    distintos no lo miran."""
+    assert _conteos_de(agrupado=True) == _conteos_de(agrupado=False) == (4, 1, 4, 2)

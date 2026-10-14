@@ -176,6 +176,7 @@ filtrar por `urls.is_html`.
 | target | varchar(20) | _blank, _self... |
 | alt_text | text | Alt de imagen si es image link |
 | link_type | varchar(20) | hyperlink, image, image_text |
+| repeticiones | int, def. 1 | Apariciones IDENTICAS del enlace en la pagina, agrupadas en esta fila (decision 94). Un conteo por aparicion es `SUM(repeticiones)`, no `COUNT(*)` |
 
 ### `page_content` — Contenido extraido (1:1 con urls)
 | Columna | Tipo | Descripcion |

@@ -44,6 +44,7 @@ from seo_crawler.extractors import (
     extract_headings,
     extract_hreflang,
     extract_links,
+    agrupar_enlaces,
     extract_main_content,
     extract_main_content_markdown,
     extract_meta,
@@ -1687,8 +1688,11 @@ class SeoSpider(scrapy.Spider):
 
         # Links (extract_links already returns enhanced SF fields)
         links = extract_links(selector, base_url, self.allowed_hosts, page_nofollow=page_nofollow)
-        for link in links:
+        # Se guardan agrupados (repeticiones), pero se SIGUEN todos: el
+        # seguimiento de mas abajo usa `links`, no lo agrupado.
+        for link in agrupar_enlaces(links):
             yield LinkItem(
+                repeticiones=link["repeticiones"],
                 from_url_hash=final_hash,
                 to_url=link["url"],
                 to_url_hash=compute_url_hash(link["url"]),

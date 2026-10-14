@@ -313,3 +313,34 @@
    explorador y el CSV muestran la de clics, y la ficha tambien la de rastreo,
    en gris. No hace falta re-rastrear: basta **re-analizar** (3,8 s el
    agregado de enlaces con la profundidad incluida, en ese censo).
+
+<a id="d94"></a>
+94. **Un enlace repetido en la misma pagina es UNA fila, no tres** — `links`
+   guardaba una fila por aparicion, y el megamenu sale dos o tres veces por
+   pagina (escritorio, movil, desplegable). Medido en la BD local, censo de
+   Druni (60.399 URLs): **139 M filas, el 97,3% de menu**, unas 2.400 por
+   pagina y ~30 GB solo ese censo, de los 48 GB de toda la tabla. Agrupando las
+   apariciones IDENTICAS de cada pagina (mismo destino, ancla, posicion, rel,
+   follow, target, alt y tipo) quedan **42 M filas y 9,0 GB**, medido creando la
+   tabla agrupada. `agrupar_enlaces()` lo hace en el spider antes de emitir los
+   `LinkItem` —el seguimiento de enlaces sigue usando la lista entera— y
+   `links.repeticiones` guarda cuantas eran.
+   **No cambia ninguna cifra**: los conteos por aparicion (inlinks, outlinks,
+   externos, las estadisticas de /insights) pasan de `COUNT(*)` a
+   `SUM(repeticiones)`; los inlinks unicos cuentan origenes distintos y el
+   PageRank ya deduplicaba antes de sus dos pasos caros (`pr_lk_tmp` es
+   `DISTINCT`), asi que ninguno de los dos mira las repeticiones. Un enlace de
+   menu y el mismo en el cuerpo siguen siendo DOS filas, porque la posicion
+   difiere: la paridad con Screaming Frog (dos inlinks, un inlink unico) se
+   mantiene. Lo cubre un test que analiza el mismo sitio guardado de las dos
+   formas y exige los mismos conteos.
+   Los censos viejos se compactan con `scripts/compactar_enlaces.py` (sin
+   `--aplicar` solo cuenta), sin re-analizar. Postgres no devuelve el espacio
+   al disco: queda libre dentro de la tabla para los rastreos siguientes, y
+   para encoger el fichero hace falta `VACUUM FULL links`, que bloquea la tabla
+   entera — ventana de mantenimiento, sin rastreos.
+   Lo que queda por ganar, por orden: cada fila sigue llevando la URL de
+   destino entera (53 bytes de media) **y** su SHA-256 en hexadecimal (65), mas
+   el `job_id` (16) que ya se deduce del origen. Y lo que queda tras agrupar
+   sigue siendo sobre todo el menu, repetido entre paginas: guardarlo una vez
+   por plantilla es el siguiente salto, pero toca el modelo de datos entero.

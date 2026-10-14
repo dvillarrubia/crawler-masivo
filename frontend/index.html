@@ -1691,6 +1691,7 @@
                         <th>Posicion</th>
                         <th>Interno</th>
                         <th>Follow</th>
+                        <th data-tip="Cuantas veces aparece este mismo enlace (mismo destino, ancla y posicion) en la pagina de origen: el menu de escritorio y el de movil son dos apariciones">Veces</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1708,6 +1709,7 @@
                           <td x-text="fmt.position(l.link_position)"></td>
                           <td x-text="l.is_internal ? 'Si' : 'No'"></td>
                           <td x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                          <td x-text="l.repeticiones || 1"></td>
                         </tr>
                       </template>
                     </tbody>
