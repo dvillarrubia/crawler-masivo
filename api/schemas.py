@@ -662,6 +662,8 @@ class LinkResponse(BaseModel):
     target: str | None = None
     alt_text: str | None = None
     link_type: str | None = None
+    # Apariciones identicas en la pagina de origen (decision 94)
+    repeticiones: int = 1
 
 
 # ---------------------------------------------------------------------------

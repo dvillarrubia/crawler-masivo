@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91 |
@@ -118,6 +118,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 90 | La profundidad se cuenta en clics desde la home, no desde las semillas | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d90) |
 | 91 | Dos censos analizados con código distinto no se comparan por incidencias | [`comparacion-y-alertas`](comparacion-y-alertas.md#d91) |
 | 92 | La nota global del Informe SEO no puede decir «Bueno» con errores abiertos | [`incidencias`](incidencias.md#d92) |
+| 94 | Un enlace repetido en la misma pagina es UNA fila, no tres | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d94) |
 
 ## Anadir una decision
 

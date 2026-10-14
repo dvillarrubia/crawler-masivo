@@ -1684,6 +1684,7 @@ LINKS_CSV_COLUMNS = [
     "target",
     "is_internal",
     "alt_text",
+    "repeticiones",
 ]
 
 
@@ -1701,6 +1702,7 @@ def _links_csv_row(link_obj: Link) -> list[str]:
         _val(link_obj.target),
         _val(link_obj.is_internal),
         _val(link_obj.alt_text),
+        _val(link_obj.repeticiones),
     ]
 
 
@@ -2133,10 +2135,11 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     ).scalar() or 0)
 
     # Nofollow internal links
-    total_internal_links = db.query(func.count(Link.id)).filter(
+    # Por aparicion, como siempre: una fila agrupa sus repeticiones (decision 94)
+    total_internal_links = db.query(func.sum(Link.repeticiones)).filter(
         Link.job_id == job_id, Link.is_internal == True,
     ).scalar() or 0
-    nofollow_links = db.query(func.count(Link.id)).filter(
+    nofollow_links = db.query(func.sum(Link.repeticiones)).filter(
         Link.job_id == job_id, Link.is_internal == True, Link.follow == False,
     ).scalar() or 0
 

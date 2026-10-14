@@ -735,6 +735,38 @@ def extract_links(
     return results
 
 
+# Lo que hace que dos apariciones sean EL MISMO enlace a efectos de cualquier
+# analisis: todo lo que se guarda de el. Si difiere la posicion (menu y cuerpo)
+# o el ancla, son dos enlaces y siguen siendo dos filas.
+_CLAVE_ENLACE = (
+    "url", "anchor_text", "rel", "is_internal", "link_position",
+    "target", "alt_text", "follow", "link_type",
+)
+
+
+def agrupar_enlaces(links: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Las apariciones IDENTICAS de un enlace en una pagina, en una fila con
+    ``repeticiones``.
+
+    Un megamenu sale dos o tres veces por pagina (escritorio, movil, el
+    desplegable), y guardar cada aparicion era la mayor parte de la base de
+    datos: en Druni, 139 M filas en `links` para 60.399 URLs, el 97% de menu.
+    Agrupadas quedan 42 M, y la tabla del censo pasa de ~30 GB a 9 GB.
+
+    No se pierde nada: ``repeticiones`` conserva cuantas veces aparecia, asi
+    que los conteos de Screaming Frog (inlinks por instancia, inlinks unicos)
+    salen iguales sumandolo. El orden es el de la primera aparicion.
+    """
+    grupos: dict[tuple, dict[str, Any]] = {}
+    for link in links:
+        clave = tuple(link.get(k) for k in _CLAVE_ENLACE)
+        if clave in grupos:
+            grupos[clave]["repeticiones"] += 1
+        else:
+            grupos[clave] = {**link, "repeticiones": 1}
+    return list(grupos.values())
+
+
 # Class/id tokens that reveal a template region. Matched as WHOLE tokens
 # (split on non-alphanumerics), never as substrings: "canvas" must not read
 # as nav, "elementor-widget" must not read as sidebar.

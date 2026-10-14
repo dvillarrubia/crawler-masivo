@@ -429,6 +429,7 @@ class PostgresPipeline:
             target=data.get("target"),
             alt_text=data.get("alt_text"),
             link_type=data.get("link_type", "hyperlink"),
+            repeticiones=data.get("repeticiones") or 1,
         )
 
     def _make_heading(self, data: dict):

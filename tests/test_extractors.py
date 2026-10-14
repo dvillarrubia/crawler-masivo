@@ -1097,3 +1097,32 @@ def test_titulos_y_descriptions_se_cuentan_vacios_incluidos():
     # El valor no cambia: el primer title (vacio) y la primera description con texto.
     assert m["title"] is None
     assert m["meta_description"] == "La buena"
+
+
+# ---------------------------------------------------------------------------
+# agrupar_enlaces  (decision 94: una fila por enlace distinto, con repeticiones)
+# ---------------------------------------------------------------------------
+def test_agrupar_enlaces_junta_solo_los_identicos():
+    s = sel(
+        '<nav><a href="/x">Zapatillas</a></nav>'
+        '<nav><a href="/x">Zapatillas</a></nav>'      # menu movil: mismo enlace
+        '<nav><a href="/x">Zapas</a></nav>'           # otra ancla: otro enlace
+        '<main><a href="/x">Zapatillas</a></main>'    # otra posicion: otro enlace
+        '<nav><a href="/y">Bolsos</a></nav>'
+    )
+    links = ex.extract_links(s, "https://e.com/", {"e.com"})
+    agrupados = ex.agrupar_enlaces(links)
+    assert sum(l["repeticiones"] for l in agrupados) == len(links) == 5
+    assert [(l["url"], l["anchor_text"], l["link_position"], l["repeticiones"])
+            for l in agrupados] == [
+        ("https://e.com/x", "Zapatillas", "nav", 2),
+        ("https://e.com/x", "Zapas", "nav", 1),
+        ("https://e.com/x", "Zapatillas", "content", 1),
+        ("https://e.com/y", "Bolsos", "nav", 1),
+    ]
+
+
+def test_agrupar_enlaces_no_junta_un_follow_con_un_nofollow():
+    s = sel('<a href="/x">a</a><a href="/x" rel="nofollow">a</a>')
+    agrupados = ex.agrupar_enlaces(ex.extract_links(s, "https://e.com/", {"e.com"}))
+    assert sorted(l["follow"] for l in agrupados) == [False, True]

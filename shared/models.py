@@ -459,6 +459,12 @@ class Link(Base):
     target = Column(String(20), nullable=True)            # _blank, _self, etc.
     alt_text = Column(Text, nullable=True)                # for image links
     link_type = Column(String(20), default="hyperlink")   # hyperlink, image, redirect, canonical
+    # Cuantas apariciones IDENTICAS de este enlace hay en la pagina (decision
+    # 92): el megamenu repetido para escritorio y movil es una fila, no tres.
+    # Un conteo "por instancia" (inlinks, outlinks) es SUM(repeticiones), no
+    # COUNT(*). Los rastreos anteriores tienen 1 en todas: una fila por
+    # aparicion, que suma lo mismo.
+    repeticiones = Column(Integer, nullable=False, default=1, server_default="1")
 
     from_url_rel = relationship("Url", foreign_keys=[from_url_id])
 
