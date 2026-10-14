@@ -1,0 +1,68 @@
+# Trabajo pendiente y lo que no existe
+
+> Movido tal cual desde `CLAUDE.md` (2026-10-14).
+
+## PENDING WORK — read before adding features
+
+**`docs/AUDITORIA_Y_VERIFICACION.md` is the canonical TODO.** It contains, in
+order of priority:
+
+1. **Verification checklist (sections 0–8c)**: ~30 fixes from the 2026-07
+   audit branch (`claude/crawler-export-issues-oi77bm`, PR #5). **Ya está
+   pasado**: el 2026-09-11 contra dos censos reales de produccion (Saunier
+   Duval con `render_js` y Lopesan sin JS) en vez de crawls de prueba, y el
+   ultimo punto que quedaba —8b.6, la propagacion del `nofollow` de pagina a
+   sus enlaces— se cerro el 2026-10-07 con el censo de progym: 1.157 paginas
+   con `noindex,nofollow` en sintaxis valida y sus 267.063 enlaces en
+   `follow=false`, sin tocar los del resto del sitio. Lo unico abierto de esa
+   seccion es `http_version`, que solo se rellena con `render_js` y esta en las
+   limitaciones conocidas. No hay que volver a pasarlo.
+2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: tambien
+   **ejecutado** (2026-09-11, sobre todos los jobs de mas de 50 URLs), con el
+   resultado ya escrito ahi. Lo que hay que saber sin abrir el documento: los
+   canonicals relativos —el bug que parecia el peor— **no contaminaron ningun
+   censo** (0 en todos), asi que las indexabilidades viejas se pueden mirar sin
+   sospecha. El que si mordio es el dedup de inlinks: **todo lo anterior al
+   2026-09-08** (CST, Salle, penguin y los tres Lopesan de julio) tiene
+   `inlinks_count == unique_inlinks_count` en todas sus paginas, con los
+   enlaces infravalorados y **el PageRank calculado sobre un grafo
+   incompleto**. De esos censos, titulos, metas, contenido y codigos de estado
+   valen tal cual; cualquier metrica de enlazado interno o PageRank exige
+   re-rastrear. Las consultas D1-D7 estan ahi para medir un job concreto.
+3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
+   custom extraction (XPath/regex per job) ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
+   PageSpeed/CWV API ⭐⭐, minor ones after.
+4. **Known limitations (section 11)**: also, with `render_js` an `http://` URL of an
+   https site is recorded as **307** (Chromium's internal upgrade redirect), not the
+   server's real 301. Treat http→https 307s in JS crawls as 301.: backup is not truly streaming (OOM risk
+   on huge jobs), word_count includes hidden text, SD validation is basic.
+   Dos columnas mas con relleno parcial, a proposito: `urls.http_version` solo
+   se rellena con `render_js` (Navigation Timing; por el camino de curl_cffi
+   habria que reimplementar el handler de scrapy-impersonate, que la
+   descarta), y `resources.size_bytes` no se recoge — el rastreo no descarga
+   el cuerpo de los recursos; el dato saldria de unir `resource_url` con
+   `urls.content_length` de los recursos que si se rastrearon.
+
+## What Does NOT Exist Yet
+
+- Authentication/authorization
+- Monitoring/metrics (Prometheus, Grafana)
+- PageSpeed/CrUX integration
+- Custom extraction / custom search (XPath/CSS/regex per job)
+- JavaScript comparison tab (raw HTML vs rendered)
+- Pagination (rel next/prev) analysis
+- Structured data rich-result validation (only basic @type/required-prop checks)
+- Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40
+
+## Reference Documents
+
+These markdown files are available in the project root for consultation:
+
+| File | Description |
+|------|-------------|
+| **`ROADMAP.md`** | Funcionalidades hechas y en cola, en lenguaje no técnico, con enlace a la issue de cada punto. Actualizarlo al cerrar o abrir una funcionalidad. |
+| **`SEO_CRAWLER_DB.md`** | Complete database schema, connection strings, example SQL queries, relationship diagram. Use this for DB access from external tools. |
+| **`modelo-de-datos.md`** | Original data model design — tables, calculations, Screaming Frog tab mapping. Design spec that guided implementation. |
+| **`stack-de-ingenieria.md`** | Engineering stack design doc — architecture decisions, component breakdown, scaling strategy, monitoring plan. |
+| **`millones-de-URL.md`** | Guide for scaling to millions of URLs — distributed crawling patterns (scrapy-redis, Scrapy Cluster), memory management, BFS tuning. |
+| **`screaming_frog_complete_fields_reference.md`** | Complete Screaming Frog fields reference (900+ lines) — all tabs, columns, filters, bulk exports. Feature parity checklist. |

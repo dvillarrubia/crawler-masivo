@@ -21,8 +21,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code: se versionan los hooks de coordinacion entre sesiones; lo demas es local
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 POC_centro_semantico/big-bison-734-3dde0ec362c4 (3).json
 
 # Local-only experiments and notes
