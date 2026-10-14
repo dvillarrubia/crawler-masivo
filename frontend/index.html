@@ -1315,6 +1315,19 @@
                      por incidencias: un hallazgo puede salir "resuelto" solo
                      porque la regla que lo emitia ha cambiado. Se dice, con
                      el motivo y como arreglarlo. -->
+                <!-- Si el censo anterior se volvio a analizar para poder
+                     comparar, se dice: sus cifras guardadas han cambiado y
+                     quien viera un informe suyo tiene derecho a saberlo. -->
+                <template x-if="diff.anterior_reanalizado">
+                  <div class="card mb-2" style="border-left:3px solid var(--blue,#2979b5)">
+                    <div class="text-sm">
+                      El rastreo anterior se ha <strong>vuelto a analizar</strong> con
+                      el codigo de hoy para poder comparar las incidencias. Sus
+                      cifras han cambiado respecto a lo que se viera antes.
+                    </div>
+                  </div>
+                </template>
+
                 <template x-if="diff.incidencias && diff.incidencias.comparable === false">
                   <div class="card mb-2" style="border-left:3px solid var(--muted,#6b7280)">
                     <div class="text-sm">

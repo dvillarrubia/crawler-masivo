@@ -48,6 +48,8 @@ from collections import defaultdict
 from typing import Any
 
 import logging
+import os
+import time
 
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
@@ -824,6 +826,57 @@ def censo_anterior(db, job):
     return mas_reciente
 
 
+REANALIZAR_LA_REFERENCIA = os.getenv("REANALIZAR_LA_REFERENCIA", "1") != "0"
+
+
+def _poner_al_dia_el_anterior(db, anterior, job) -> bool:
+    """Re-analiza el censo de referencia si se analizó con otro código.
+
+    Sin esto, la decisión 91 deja la comparación de incidencias **inservible en
+    la práctica**: se despliega a diario, así que entre dos rastreos de una
+    serie semanal casi siempre habrá cambiado el analizador, y entonces no se
+    dan cifras. Visto en el primer rastreo automático de Lopesan, el
+    2026-10-14: los dos censos salieron con `6ae6004` y `c5d863e` y el diff se
+    calló. Callarse es mejor que mentir, pero no es una función que sirva.
+
+    Volver a analizar el anterior es barato —246 s en ese censo— y lo deja
+    comparable. Lo que NO es gratis es que **cambia sus cifras guardadas**: si
+    alguien exportó un CSV de ese censo, ya no cuadrará. Por eso se registra en
+    el log y viaja en el resultado como `anterior_reanalizado`, y por eso se
+    puede apagar con `REANALIZAR_LA_REFERENCIA=0`.
+
+    Devuelve si se volvió a analizar.
+    """
+    if not REANALIZAR_LA_REFERENCIA:
+        return False
+    actual = getattr(job, "analisis_version", None)
+    previa = getattr(anterior, "analisis_version", None)
+    if not actual or previa == actual:
+        return False
+    try:
+        from analysis.analyzer import run_analysis
+    except ImportError:
+        # La imagen de la API no lleva `analysis/`: ahi no se re-analiza nada,
+        # solo se compara lo que haya.
+        return False
+    inicio = time.time()
+    logger.info(
+        "El censo de referencia %s se analizo con %s y este con %s: se vuelve "
+        "a analizar para poder comparar las incidencias",
+        anterior.id, previa or "(desconocida)", actual)
+    try:
+        run_analysis(str(anterior.id))
+    except Exception:
+        logger.exception(
+            "No se pudo re-analizar %s; la comparacion de incidencias se "
+            "quedara sin hacer, pero las alertas de pagina siguen", anterior.id)
+        return False
+    db.expire(anterior)
+    logger.info("Censo de referencia %s re-analizado en %.0f s",
+                anterior.id, time.time() - inicio)
+    return True
+
+
 def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
     """Compara un rastreo recién terminado con el anterior del mismo sitio.
 
@@ -835,6 +888,7 @@ def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
     anterior = censo_anterior(db, job)
     if anterior is None:
         return None
+    reanalizado = _poner_al_dia_el_anterior(db, anterior, job)
     resumen_anterior = resumen_de_job(anterior)
     r = comparar_censos(
         paginas_de_censo(db, anterior.id),
@@ -873,6 +927,10 @@ def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
     # plantillas ya van dentro de cada alerta.
     return {
         "incidencias": incidencias,
+        # Si el censo anterior se volvio a analizar para poder comparar, se
+        # dice: sus cifras han cambiado respecto a lo que se viera antes, y
+        # quien mire un informe viejo de ese censo tiene derecho a saberlo.
+        "anterior_reanalizado": reanalizado,
         "comparado_con": str(anterior.id),
         "nombre_anterior": anterior.name,
         "fecha_anterior": resumen_de_job(anterior)["fecha"],

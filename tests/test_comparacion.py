@@ -626,3 +626,107 @@ def test_el_analizador_sella_la_version_al_terminar(monkeypatch):
     finally:
         monkeypatch.delenv("CRAWLER_VERSION", raising=False)
         importlib.reload(shared.version)
+
+
+def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(monkeypatch, tmp_path):
+    """Sin esto, la decision 91 deja el diff de incidencias inservible.
+
+    Se despliega a diario, asi que entre dos rastreos de una serie semanal casi
+    siempre habra cambiado el analizador. Visto en el primer rastreo automatico
+    de Lopesan (2026-10-14): los dos censos salieron con `6ae6004` y `c5d863e`
+    y el diff se callo. Callarse es mejor que mentir, pero no es una funcion
+    que sirva.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import shared.comparacion as comp
+    from shared.models import Base, HtmlMeta, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_rean(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/rean.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine)
+    s = Sesion()
+
+    def censo(nombre, dia, version):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 11, dia, tzinfo=timezone.utc),
+                crawler_version="abc", analisis_version=version)
+        s.add(j)
+        s.flush()
+        for i in range(5):
+            u = Url(job_id=j.id, url=f"https://x.com/p{i}", url_hash=f"{nombre}{i}",
+                    is_internal=True, is_html=True, status_code=200,
+                    indexability_status="Indexable", word_count=300)
+            s.add(u)
+            s.flush()
+            s.add(HtmlMeta(url_id=u.id, title="T", canonical_href=f"https://x.com/p{i}"))
+        s.commit()
+        return j
+
+    viejo = censo("el de la semana pasada", 1, "version-vieja")
+    nuevo = censo("el de hoy", 8, "version-nueva")
+
+    analizados = []
+    monkeypatch.setattr(
+        "analysis.analyzer.run_analysis",
+        lambda jid: analizados.append(str(jid)))
+
+    r = comp.comparar_con_el_anterior(s, nuevo)
+
+    assert analizados == [str(viejo.id)], (
+        "se re-analiza el ANTERIOR, no el nuevo ni los dos")
+    assert r["anterior_reanalizado"] is True, (
+        "viaja en el resultado: sus cifras guardadas han cambiado y quien mire "
+        "un informe viejo de ese censo tiene derecho a saberlo")
+    s.close()
+
+
+def test_si_ya_estan_al_dia_no_se_reanaliza_nada(monkeypatch, tmp_path):
+    """El caso normal de dos rastreos seguidos sin despliegue en medio."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import shared.comparacion as comp
+    from shared.models import Base, Job, Url
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_igual(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/igual.db")
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine)()
+    for nombre, dia in (("anterior", 1), ("nuevo", 8)):
+        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
+                finish_reason="finished", seeds=["https://x.com/"], config={},
+                started_at=datetime(2026, 12, dia, tzinfo=timezone.utc),
+                analisis_version="la-misma")
+        s.add(j)
+        s.flush()
+        s.add(Url(job_id=j.id, url="https://x.com/a", url_hash=f"{nombre}a",
+                  is_internal=True, is_html=True, status_code=200))
+    s.commit()
+
+    analizados = []
+    monkeypatch.setattr("analysis.analyzer.run_analysis",
+                        lambda jid: analizados.append(jid))
+    ultimo = s.query(Job).filter(Job.name == "nuevo").one()
+    r = comp.comparar_con_el_anterior(s, ultimo)
+
+    assert analizados == [], "no se re-analiza por gusto: cuesta minutos"
+    assert r["anterior_reanalizado"] is False
+    s.close()
