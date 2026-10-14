@@ -40,6 +40,11 @@ services:
     env_file: .env
     environment:
       - PYTHONPATH=/app
+      - ARCHIVO_DIR=/data/archivo
+    # Enlaces archivados en Parquet (decision 95): lo escribe el worker y lo
+    # lee la API, asi que es el mismo volumen en los dos.
+    volumes:
+      - archivo:/data/archivo
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +61,11 @@ services:
     env_file: .env
     environment:
       - PYTHONPATH=/app
+      - ARCHIVO_DIR=/data/archivo
+    # Enlaces archivados en Parquet (decision 95): lo escribe el worker y lo
+    # lee la API, asi que es el mismo volumen en los dos.
+    volumes:
+      - archivo:/data/archivo
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,3 +96,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  archivo:

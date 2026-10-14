@@ -344,3 +344,41 @@
    el `job_id` (16) que ya se deduce del origen. Y lo que queda tras agrupar
    sigue siendo sobre todo el menu, repetido entre paginas: guardarlo una vez
    por plantilla es el siguiente salto, pero toca el modelo de datos entero.
+
+<a id="d95"></a>
+95. **Los enlaces de un censo superado se archivan en Parquet** — la decision
+   94 hace cada censo unas tres veces mas pequeno, pero `links` seguia
+   creciendo con CADA rastreo: con una programacion semanal, un sitio como
+   Druni (9 GB por censo agrupado) llena el VPS en unas semanas. Los enlaces
+   de un censo se escriben una vez y no se tocan, y en Parquet con zstd ocupan
+   una fraccion: medido, **Druni 139 M filas → 68 MB** y **www.uoc.edu 4,8 M
+   filas → 40 MB** (archivar 105 s, restaurar 253 s, cifras identicas a la
+   vuelta).
+   Se archiva un censo **superado**: hay otro completado, mas nuevo y del mismo
+   host cuyas semillas cubren las suyas —la contencion con la que
+   `comparacion.censo_anterior` elige la referencia (decisiones 70 y 86)—, no
+   es el ultimo de su programacion (78) y termino hace mas de
+   `ARCHIVAR_DIAS_MINIMOS` (14). Asi nunca se archiva un censo que pueda ser la
+   referencia de una comparacion. Uno fallido, cancelado o estancado basta con
+   que tenga un completado mas nuevo del mismo host. El worker lo hace solo al
+   cerrar cada rastreo completado (`ARCHIVAR_ENLACES=0` lo apaga);
+   `scripts/archivar_enlaces.py` lo lista en seco o lo aplica a mano.
+   El orden lo hace seguro: el fichero se escribe a un temporal, se relee y
+   solo si cuadran filas Y suma de repeticiones con la BD se renombra; la marca
+   `jobs.enlaces_archivados` y el borrado van en la misma transaccion.
+   **Lo archivado se sigue leyendo**: ficha de URL, `GET /links`, los dos CSV,
+   los origenes del explorador, `/insights` (con las sumas guardadas al
+   archivar) y el backup salen del fichero, y un test exige que la API devuelva
+   lo MISMO antes y despues. Una diferencia, asumida: el CSV de enlaces sale
+   agrupado por destino (el orden del fichero, el que necesita la paginacion) y
+   no por id. **Lo que no se puede es re-analizarlo**: el analisis calcula
+   entrantes, PageRank y profundidad con SQL sobre `links`, y sin filas los
+   pondria a cero con todo el censo huerfano. `run_all` lanza
+   `EnlacesArchivados`; se restaura con `--restaurar <job_id>`. El backup de un
+   censo archivado lleva sus enlaces y el job importado vuelve a tenerlos en
+   `links`.
+   Lo que NO hace: encoger un censo vivo (eso es la fase 2, que los enlaces no
+   entren nunca en Postgres y el analisis los lea del Parquet) ni devolver el
+   espacio al disco: Postgres lo reutiliza para los rastreos siguientes, y para
+   que el fichero encoja hace falta `VACUUM FULL links` en una ventana sin
+   rastreos. El volumen `archivo` (`/data/archivo`) lo comparten worker y API.

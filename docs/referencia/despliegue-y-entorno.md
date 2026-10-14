@@ -129,6 +129,11 @@ ENRICHMENT_TOKEN=                # API: sin el (o <16 caracteres) lanzar esta DE
 MAX_CONCURRENT_ENRIQUECIDOS=1    # worker: pool propio, no quita huecos a los rastreos
 ENRICHMENT_LOTE=200              # URLs por lote (entre lotes: cancelar, progreso, latido)
 ENRICHMENT_STALE_MINUTES=15      # sin latido -> se reencola
+
+# Enlaces archivados en Parquet (decision 95)
+ARCHIVO_DIR=/data/archivo        # volumen `archivo`, compartido por worker y API
+ARCHIVAR_ENLACES=1               # 0 = el worker no archiva tras cada rastreo
+ARCHIVAR_DIAS_MINIMOS=14         # no se archiva nada que termino hace menos
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)

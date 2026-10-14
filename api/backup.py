@@ -102,6 +102,14 @@ def _fila_cruda_a_dict(fila, columnas) -> dict[str, Any]:
     return {c: m[c] for c in columnas}
 
 
+def _iter_enlaces_archivados(job_id: uuid.UUID) -> Generator[dict[str, Any], None, None]:
+    """Las filas de `links` de un job archivado, leidas del Parquet."""
+    from shared import archivo_enlaces
+
+    for fila in archivo_enlaces.recorrer(job_id):
+        yield {"job_id": job_id, **fila}
+
+
 def _ndjson_line(d: dict[str, Any]) -> str:
     return json.dumps(d, default=_json_default, ensure_ascii=False) + "\n"
 
@@ -276,6 +284,11 @@ def stream_backup_zip(
         if job is None:
             return
         job_dict = _row_to_dict(job)
+        # Los enlaces archivados (decision 95) viajan en `links.jsonl` como
+        # cualquier otros: el backup es autosuficiente, y al importarlo los
+        # enlaces vuelven a `links`, asi que el job importado no esta archivado.
+        archivado = bool(job_dict.get("enlaces_archivados"))
+        job_dict["enlaces_archivados"] = None
         job_name = job.name
         job_status = job.status
         cliente_dict, perfil_dict = _cliente_y_perfil_de(session, job)
@@ -293,6 +306,9 @@ def stream_backup_zip(
         for fname, model, _has_job in _CHILD_TABLES_1TON:
             yield fname, _iter_child_by_url(job_id, model)
         for fname, model, _url_fk in _CHILD_TABLES_JOB:
+            if fname == "links" and archivado:
+                yield fname, _iter_enlaces_archivados(job_id)
+                continue
             yield fname, _iter_table(job_id, model, "job_id")
 
     with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as zf:

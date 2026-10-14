@@ -47,6 +47,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | config | JSON | Configuracion completa del crawl. Con cliente, ya resuelta (defaults ← cliente ← perfil ← job) en el momento de crearlo |
 | total_urls_crawled | int | URLs crawleadas |
 | decisiones_resumen | JSON | Capa de decisiones (#7): `llamadas`, `tokens_entrada`, `coste_usd` (real, de `usage.cost`), `aciertos_cache`, `n_429`, `latencia_p50_ms`/`p95`, `por_pregunta` con la distribucion de respuestas, `avisos` y `estado` (ok, degradado, desactivado, sin_credito, presupuesto_agotado). NULL = nunca se pregunto nada a un modelo |
+| enlaces_archivados | JSON | Enlaces archivados en Parquet (decision 95): `filas`, `apariciones`, `internos`, `nofollow_internos`, `fichero`, `bytes`, `fecha`. Con valor, `links` NO tiene filas de este job: se leen de `$ARCHIVO_DIR/enlaces/<job_id>.parquet`. NULL = en `links` |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 

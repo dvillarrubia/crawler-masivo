@@ -66,6 +66,9 @@ def main() -> None:
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS programacion_id UUID"))
         conn.execute(text(
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS analisis_version VARCHAR(64)"))
+        # Enlaces de los censos superados, archivados en Parquet (decision 95)
+        conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS enlaces_archivados JSON"))
         # Capa de decisiones (#7, decision 84). La tabla `decisions` la crea
         # create_all (con sus indices, por ser nueva); aqui va lo que
         # create_all no anade a tablas que ya existen.

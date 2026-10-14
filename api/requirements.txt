@@ -34,3 +34,6 @@ tenacity>=8.2.0
 # desde el spider sin bloquear el reactor. Ninguna llamada sale sola: hace
 # falta DECISIONS_ENABLED=1, OPENROUTER_API_KEY y que alguien la dispare (#40).
 httpx>=0.28
+# Enlaces de los censos superados en Parquet (`shared/archivo_enlaces.py`,
+# decision 95): 68 MB donde Postgres necesita 9-30 GB.
+pyarrow>=15.0

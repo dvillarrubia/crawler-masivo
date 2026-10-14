@@ -26,3 +26,6 @@ trafilatura>=2.0
 # dispara cosas ahi es una carrera esperando. Lo que no quiero escribir a
 # mano es el dia 31 en meses de 30 y el domingo del cambio de hora.
 apscheduler>=3.10
+# Enlaces de los censos superados en Parquet (`shared/archivo_enlaces.py`,
+# decision 95): 68 MB donde Postgres necesita 9-30 GB.
+pyarrow>=15.0

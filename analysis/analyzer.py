@@ -212,6 +212,7 @@ class SEOAnalyzer:
 
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         t = (job.config or {}).get("analysis_thresholds", {}) if job else {}
+        self._enlaces_archivados = getattr(job, "enlaces_archivados", None)
         self.title_min_len = t.get("title_min_length", TITLE_MIN_LEN)
         self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
         self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
@@ -234,6 +235,16 @@ class SEOAnalyzer:
     def run_all(self) -> None:
         """Run every analysis check and persist results to the issues table."""
         logger.info("Starting SEO analysis for job %s", self.job_id)
+
+        # Sin sus enlaces, el analisis pondria a cero los entrantes, el
+        # PageRank y la profundidad, y llenaria el censo de huerfanas falsas
+        # (decision 95). Se restaura y despues se analiza.
+        if self._enlaces_archivados:
+            raise EnlacesArchivados(
+                f"los enlaces del job {self.job_id} estan archivados en Parquet; "
+                f"restauralos antes de analizar: python scripts/archivar_enlaces.py "
+                f"--restaurar {self.job_id}"
+            )
 
         self.actualizar_estadisticas()
         self.clear_existing_issues()
@@ -2966,6 +2977,10 @@ def candado_de_job(job_id: str):
             conexion.close()
         if motor is not None:
             motor.dispose()
+
+
+class EnlacesArchivados(RuntimeError):
+    """El job tiene sus enlaces en Parquet: no se puede analizar sin restaurar."""
 
 
 def run_analysis(job_id: str) -> None:

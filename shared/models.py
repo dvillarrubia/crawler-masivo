@@ -235,6 +235,10 @@ class Job(Base):
     # NULL = nunca se le pregunto nada a un modelo sobre este job, que con
     # este PR es lo normal: nada se dispara solo (decision 84).
     decisiones_resumen = Column(JSON, nullable=True)
+    # Enlaces archivados en Parquet (decision 95): filas, apariciones,
+    # internos, nofollow internos, fichero, bytes y fecha. NULL = los enlaces
+    # estan en `links`. Con valor, `links` no tiene filas de este job.
+    enlaces_archivados = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -460,7 +464,7 @@ class Link(Base):
     alt_text = Column(Text, nullable=True)                # for image links
     link_type = Column(String(20), default="hyperlink")   # hyperlink, image, redirect, canonical
     # Cuantas apariciones IDENTICAS de este enlace hay en la pagina (decision
-    # 92): el megamenu repetido para escritorio y movil es una fila, no tres.
+    # 94): el megamenu repetido para escritorio y movil es una fila, no tres.
     # Un conteo "por instancia" (inlinks, outlinks) es SUM(repeticiones), no
     # COUNT(*). Los rastreos anteriores tienen 1 en todas: una fila por
     # aparicion, que suma lo mismo.

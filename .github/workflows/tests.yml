@@ -81,7 +81,7 @@ jobs:
         run: |
           python -m pip install -q --upgrade pip
           pip install -q fastapi 'sqlalchemy>=2.0,<3.0' 'pydantic>=2.9' psycopg2-binary \
-            'w3lib>=2.1.2' tldextract 'apscheduler>=3.10' redis httpx python-multipart pgvector
+            'w3lib>=2.1.2' tldextract 'apscheduler>=3.10' redis httpx python-multipart pgvector 'pyarrow>=15.0'
           pip install -q -r tests/requirements.txt
       - name: pytest
         # `test_comparacion.py` corre tambien AQUI, y no solo en el trabajo del
@@ -104,7 +104,7 @@ jobs:
           tests/test_decisiones_api.py tests/test_decisiones.py tests/test_llm.py
           tests/test_enriquecido.py tests/test_enriquecido_api.py
           tests/test_stats_api.py tests/test_rastreos_y_panel_api.py
-          tests/test_explorador_api.py
+          tests/test_explorador_api.py tests/test_archivo_enlaces.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales
