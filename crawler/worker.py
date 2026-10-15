@@ -723,9 +723,13 @@ def _run_job(job_id: str) -> None:
     # luego.
     if final_status == "completed":
         _comparar_con_el_censo_anterior(job_id)
-        # Despues de comparar: la referencia de esta comparacion no es
-        # candidata (la abarca un censo mas nuevo solo a partir de ahora, y aun
-        # asi espera ARCHIVAR_DIAS_MINIMOS), pero el orden lo deja claro.
+        # Despues de comparar, y el orden importa: la comparacion puede
+        # RE-ANALIZAR la referencia (decision 93), y la referencia es justo un
+        # censo que este rastreo acaba de dejar superado. Archivandola antes,
+        # el re-analisis no tendria enlaces. Contra el cierre de OTRO rastreo
+        # del mismo sitio a la vez protegen el candado del job, que comparten
+        # el analisis y el archivado, y que la comparacion no re-analiza un
+        # censo ya archivado.
         _archivar_enlaces_superados(job_id)
 
 
@@ -751,6 +755,13 @@ def _archivar_enlaces_superados(job_id: str) -> None:
                 r = archivo_enlaces.archivar(session, job.id)
                 logger.info("Job %s: enlaces del censo superado %s archivados "
                             "(%d filas, %d bytes)", job_id, job.id, r["filas"], r["bytes"])
+            except archivo_enlaces.SeEstaAnalizando:
+                # Lo esta analizando otro proceso (p. ej. el re-analisis de la
+                # referencia de otro rastreo, decision 93): sigue en `links` y
+                # el cierre del siguiente rastreo lo volvera a intentar.
+                session.rollback()
+                logger.info("Job %s: %s se esta analizando; se archivara en otra "
+                            "pasada", job_id, job.id)
             except Exception:
                 session.rollback()
                 logger.exception("Job %s: no se pudieron archivar los enlaces de %s",
@@ -793,7 +804,17 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         if job is None:
             return
-        resultado = comparar_con_el_anterior(session, job)
+        # El analizador se pasa desde aqui y no lo importa `shared/`: la API
+        # carga ese modulo y su imagen no lleva `analysis/` (decision 93). Si
+        # faltara, se compara igual, sin poner al dia la referencia.
+        try:
+            from analysis.analyzer import run_analysis
+        except ImportError:
+            logger.exception("Job %s: sin el analizador no se re-analiza la "
+                             "referencia", job_id)
+            run_analysis = None
+
+        resultado = comparar_con_el_anterior(session, job, reanalizar=run_analysis)
         if resultado is None:
             logger.info("Job %s: no hay censo anterior del mismo sitio", job_id)
             return

@@ -89,6 +89,7 @@ PLAYWRIGHT_BLOCK_TRACKERS=1      # 0 = cargar analitica y publicidad
 ALERTA_WEBHOOK_URL=              # vacio = no se avisa
 ALERTA_TIMEOUT_SEGUNDOS=10
 API_PUBLIC_URL=                  # para el enlace del aviso
+REANALIZAR_LA_REFERENCIA=1       # re-analizar el censo anterior si lo analizo otro codigo (decision 93)
 
 # Programaciones
 PROGRAMACION_INTERVAL_SECONDS=60 # cada cuanto mira el worker si toca lanzar

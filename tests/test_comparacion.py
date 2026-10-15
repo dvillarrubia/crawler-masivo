@@ -628,15 +628,18 @@ def test_el_analizador_sella_la_version_al_terminar(monkeypatch):
         importlib.reload(shared.version)
 
 
-def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(monkeypatch, tmp_path):
-    """Sin esto, la decision 91 deja el diff de incidencias inservible.
+# --- Decision 93: el censo de referencia se pone al dia solo ----------------
+#
+# Todos EJECUTAN `comparar_con_el_anterior` contra SQLite (decision 74). El
+# re-analisis se inyecta como `reanalizar`, que es como lo pasa el worker:
+# `shared/comparacion.py` no importa `analysis/`, porque la API carga ese
+# modulo y ni su imagen ni el trabajo de la API en CI llevan el analizador
+# (numpy, trafilatura...). Un `monkeypatch` de `analysis.analyzer.run_analysis`
+# lo importaria, y eso es justo lo que rompia la CI de la API.
 
-    Se despliega a diario, asi que entre dos rastreos de una serie semanal casi
-    siempre habra cambiado el analizador. Visto en el primer rastreo automatico
-    de Lopesan (2026-10-14): los dos censos salieron con `6ae6004` y `c5d863e`
-    y el diff se callo. Callarse es mejor que mentir, pero no es una funcion
-    que sirva.
-    """
+
+def _dos_censos(tmp_path, nombre_bd, version_vieja, version_nueva, *,
+                archivado=False):
     import uuid
     from datetime import datetime, timezone
 
@@ -644,23 +647,21 @@ def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(monkeypat
     from sqlalchemy.ext.compiler import compiles
     from sqlalchemy.orm import sessionmaker
 
-    import shared.comparacion as comp
-    from shared.models import Base, HtmlMeta, Job, Url
+    from shared.models import Base, HtmlMeta, Issue, Job, Url
 
     @compiles(BigInteger, "sqlite")
     def _bigint_rean(tipo, compilador, **kw):
         return "INTEGER"
 
-    engine = create_engine(f"sqlite:///{tmp_path}/rean.db")
+    engine = create_engine(f"sqlite:///{tmp_path}/{nombre_bd}.db")
     Base.metadata.create_all(engine)
-    Sesion = sessionmaker(bind=engine)
-    s = Sesion()
+    s = sessionmaker(bind=engine)()
 
-    def censo(nombre, dia, version):
+    def censo(nombre, dia, version, **extra):
         j = Job(id=uuid.uuid4(), name=nombre, status="completed",
                 finish_reason="finished", seeds=["https://x.com/"], config={},
                 started_at=datetime(2026, 11, dia, tzinfo=timezone.utc),
-                crawler_version="abc", analisis_version=version)
+                crawler_version="abc", analisis_version=version, **extra)
         s.add(j)
         s.flush()
         for i in range(5):
@@ -670,63 +671,163 @@ def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(monkeypat
             s.add(u)
             s.flush()
             s.add(HtmlMeta(url_id=u.id, title="T", canonical_href=f"https://x.com/p{i}"))
+            s.add(Issue(job_id=j.id, url_id=u.id, issue_type="missing_h1",
+                        severity="warning", details={}))
         s.commit()
         return j
 
-    viejo = censo("el de la semana pasada", 1, "version-vieja")
-    nuevo = censo("el de hoy", 8, "version-nueva")
+    viejo = censo("el de la semana pasada", 1, version_vieja,
+                  **({"enlaces_archivados": {"filas": 10, "fichero": "x.parquet"}}
+                     if archivado else {}))
+    nuevo = censo("el de hoy", 8, version_nueva)
+    return s, viejo, nuevo
 
-    analizados = []
-    monkeypatch.setattr(
-        "analysis.analyzer.run_analysis",
-        lambda jid: analizados.append(str(jid)))
 
-    r = comp.comparar_con_el_anterior(s, nuevo)
+def _reanalizador(s, version):
+    """Un `run_analysis` de mentira: deja el sello que deja el de verdad."""
+    from shared.models import Job
+
+    llamados = []
+
+    def reanalizar(job_id):
+        llamados.append(str(job_id))
+        import uuid
+
+        # Como el de verdad, recibe el id en texto.
+        j = s.query(Job).filter(Job.id == uuid.UUID(job_id)).one()
+        j.analisis_version = version
+        s.commit()
+
+    return reanalizar, llamados
+
+
+def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(tmp_path):
+    """Sin esto, la decision 91 deja el diff de incidencias inservible.
+
+    Se despliega a diario, asi que entre dos rastreos de una serie semanal casi
+    siempre habra cambiado el analizador. Visto en el primer rastreo automatico
+    de Lopesan (2026-10-14): los dos censos salieron con `6ae6004` y `c5d863e`
+    y el diff se callo. Callarse es mejor que mentir, pero no es una funcion
+    que sirva.
+    """
+    import shared.comparacion as comp
+
+    s, viejo, nuevo = _dos_censos(tmp_path, "rean", "version-vieja", "version-nueva")
+    reanalizar, analizados = _reanalizador(s, "version-nueva")
+
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=reanalizar)
 
     assert analizados == [str(viejo.id)], (
         "se re-analiza el ANTERIOR, no el nuevo ni los dos")
     assert r["anterior_reanalizado"] is True, (
         "viaja en el resultado: sus cifras guardadas han cambiado y quien mire "
         "un informe viejo de ese censo tiene derecho a saberlo")
+    assert r["anterior_sin_reanalizar"] is None
+    assert r["incidencias"]["comparable"] is not False, (
+        "puesto al dia, el diff de incidencias da cifras")
     s.close()
 
 
-def test_si_ya_estan_al_dia_no_se_reanaliza_nada(monkeypatch, tmp_path):
+def test_si_ya_estan_al_dia_no_se_reanaliza_nada(tmp_path):
     """El caso normal de dos rastreos seguidos sin despliegue en medio."""
-    import uuid
-    from datetime import datetime, timezone
-
-    from sqlalchemy import BigInteger, create_engine
-    from sqlalchemy.ext.compiler import compiles
-    from sqlalchemy.orm import sessionmaker
-
     import shared.comparacion as comp
-    from shared.models import Base, Job, Url
 
-    @compiles(BigInteger, "sqlite")
-    def _bigint_igual(tipo, compilador, **kw):
-        return "INTEGER"
-
-    engine = create_engine(f"sqlite:///{tmp_path}/igual.db")
-    Base.metadata.create_all(engine)
-    s = sessionmaker(bind=engine)()
-    for nombre, dia in (("anterior", 1), ("nuevo", 8)):
-        j = Job(id=uuid.uuid4(), name=nombre, status="completed",
-                finish_reason="finished", seeds=["https://x.com/"], config={},
-                started_at=datetime(2026, 12, dia, tzinfo=timezone.utc),
-                analisis_version="la-misma")
-        s.add(j)
-        s.flush()
-        s.add(Url(job_id=j.id, url="https://x.com/a", url_hash=f"{nombre}a",
-                  is_internal=True, is_html=True, status_code=200))
-    s.commit()
-
-    analizados = []
-    monkeypatch.setattr("analysis.analyzer.run_analysis",
-                        lambda jid: analizados.append(jid))
-    ultimo = s.query(Job).filter(Job.name == "nuevo").one()
-    r = comp.comparar_con_el_anterior(s, ultimo)
+    s, _, nuevo = _dos_censos(tmp_path, "igual", "la-misma", "la-misma")
+    reanalizar, analizados = _reanalizador(s, "la-misma")
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=reanalizar)
 
     assert analizados == [], "no se re-analiza por gusto: cuesta minutos"
     assert r["anterior_reanalizado"] is False
+    assert r["anterior_sin_reanalizar"] is None
     s.close()
+
+
+def test_una_referencia_archivada_no_se_reanaliza_y_se_dice_por_que(tmp_path):
+    """Decision 95: un censo con los enlaces en Parquet no tiene filas en `links`.
+
+    Re-analizarlo asi pondria a cero los entrantes, el PageRank y la
+    profundidad del censo de referencia, y lo dejaria entero de huerfanas: el
+    diff de incidencias saldria lleno de `orphan_page` "nuevas" en el censo
+    viejo. No se le pide al analizador, no se restaura (devolveria a `links`
+    lo que el archivo saco, para una cifra de un informe) y se vuelve a la 91
+    con el motivo concreto y como arreglarlo.
+    """
+    import shared.comparacion as comp
+
+    s, viejo, nuevo = _dos_censos(tmp_path, "arch", "version-vieja", "version-nueva",
+                                  archivado=True)
+    reanalizar, analizados = _reanalizador(s, "version-nueva")
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=reanalizar)
+
+    assert analizados == [], "NUNCA se re-analiza un censo archivado"
+    assert r["anterior_reanalizado"] is False
+    assert "archivados" in r["anterior_sin_reanalizar"]
+    assert f"--restaurar {viejo.id}" in r["anterior_sin_reanalizar"]
+    assert r["incidencias"]["comparable"] is False, "comportamiento de la 91"
+    assert "--restaurar" in r["incidencias"]["motivo"], (
+        "el motivo que se pinta dice como arreglarlo de verdad, no el generico "
+        "«vuelve a analizar el mas antiguo», que fallaria tal cual")
+    assert r["comparable"] is True, "las alertas de pagina siguen"
+    s.close()
+
+
+def test_si_el_analizador_no_entra_no_se_dice_que_se_reanalizo(tmp_path):
+    """`run_analysis` vuelve sin hacer nada si otro tiene el candado del job.
+
+    Pasa con otro analisis del mismo censo y con el archivado de la decision 95
+    en curso, que toma el mismo candado. Que la llamada vuelva no es haber
+    analizado: manda el sello que deja `run_all`.
+    """
+    import shared.comparacion as comp
+
+    s, _, nuevo = _dos_censos(tmp_path, "candado", "version-vieja", "version-nueva")
+    llamados = []
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=llamados.append)
+
+    assert len(llamados) == 1
+    assert r["anterior_reanalizado"] is False
+    assert r["anterior_sin_reanalizar"]
+    assert r["incidencias"]["comparable"] is False
+    s.close()
+
+
+def test_si_el_reanalisis_revienta_las_alertas_siguen(tmp_path):
+    import shared.comparacion as comp
+
+    s, _, nuevo = _dos_censos(tmp_path, "falla", "version-vieja", "version-nueva")
+
+    def revienta(job_id):
+        raise RuntimeError("el analisis se cae a medias")
+
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=revienta)
+    assert r["anterior_reanalizado"] is False
+    assert "fallado" in r["anterior_sin_reanalizar"]
+    assert r["comparable"] is True
+    assert r["incidencias"]["comparable"] is False
+    s.close()
+
+
+def test_sin_analizador_como_en_la_api_no_se_reanaliza_ni_se_importa(tmp_path):
+    """La API carga `shared/comparacion.py` y su imagen no lleva `analysis/`."""
+    import subprocess
+    import sys
+    import textwrap
+
+    # En otro proceso: en este, otros tests ya pueden haber importado el
+    # analizador y la comprobacion no diria nada.
+    codigo = textwrap.dedent(f"""
+        import sys
+        sys.path[:0] = [{str(__import__("pathlib").Path(__file__).resolve().parent)!r}] + {sys.path!r}
+        from test_comparacion import _dos_censos
+        from pathlib import Path
+        import shared.comparacion as comp
+        s, _, nuevo = _dos_censos(Path({str(tmp_path)!r}), "api", "vieja", "nueva")
+        r = comp.comparar_con_el_anterior(s, nuevo)
+        assert r["anterior_reanalizado"] is False, r
+        assert r["incidencias"]["comparable"] is False
+        assert "analysis" not in sys.modules, "shared/ importo el analizador"
+        assert not any(m.startswith("analysis.") for m in sys.modules)
+    """)
+    p = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True,
+                       cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+    assert p.returncode == 0, p.stderr[-2000:]
