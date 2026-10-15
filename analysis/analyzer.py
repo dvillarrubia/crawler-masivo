@@ -80,6 +80,12 @@ def _clave_de_grupo(valor: str | None) -> str | None:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
 
 
+def _url_de_clave(clave: tuple[str, str, str, str]) -> str:
+    """La URL que representa una clave de :func:`_clave`, para escribirla."""
+    esquema, host, ruta, query = clave
+    return f"{esquema}://{host}{ruta}" + (f"?{query}" if query else "")
+
+
 def _clave(url: str | None):
     """Clave para buscar una URL entre las rastreadas, o None si no se puede.
 
@@ -152,6 +158,28 @@ _REGIONES_INVENTADAS: dict[str, str] = {
     "sp": "ES",
     "po": "PT",
 }
+
+def _lang_hreflang_valido(lang: str | None) -> tuple[bool, str | None, str | None]:
+    """(valido, idioma que no es ISO 639-1, region inventada) de un codigo.
+
+    Una sola regla para el aviso de idioma invalido y para los checks de
+    cluster de la decision 99, que no deben contar una anotacion que Google
+    ignora.
+    """
+    valido = bool(lang) and bool(_LANG_TAG_RE.match(lang))
+    idioma_malo = region_mala = None
+    if valido and lang.lower() != "x-default":
+        idioma = lang.split("-")[0].lower()
+        if idioma not in _ISO_639_1:
+            idioma_malo = idioma
+            valido = False
+    if valido and "-" in lang:
+        region = lang.split("-")[-1].lower()
+        if region in _REGIONES_INVENTADAS and len(region) == 2:
+            region_mala = region
+            valido = False
+    return valido, idioma_malo, region_mala
+
 
 # Regex to detect non-ASCII characters in a URL.
 _NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
@@ -1010,22 +1038,70 @@ class SEOAnalyzer:
         that do not return 200. Reciprocity is confirmed only when the target
         page was crawled and carries its own hreflang cluster; otherwise the
         return tag is left unknown to avoid false positives.
+
+        Y los cinco de la decision 99, que solo miran paginas INDEXABLES
+        (Google no usa el hreflang de una pagina canonicalizada o noindex: una
+        variante `?utm` que repite el cluster de su canonica no tiene nada que
+        arreglar): `hreflang_sin_autorreferencia` (por pagina),
+        `hreflang_sin_x_default` (por host), `hreflang_idioma_repetido`
+        (por cluster e idioma), `hreflang_destino_no_indexable` (por destino) y
+        `hreflang_retorno_incoherente` (por anotacion). Todo sale de diccionarios
+        montados con UNA consulta de URLs y una de anotaciones: nada por
+        anotacion y nada por pareja de paginas.
         """
         logger.debug("Analyzing hreflang ...")
 
-        # Preload URL id/status/normalised-url for target resolution.
+        # Precarga, una sola consulta para todo el censo: estado, indexable,
+        # motivo (`Noindex`, `Canonicalised`, robots...), redireccion y
+        # canonical de cada URL (decision 99). El canonical solo va
+        # al detalle —«este destino esta canonicalizado a X»—; quien decide si
+        # la pagina es indexable es `analyze_indexability`, que corre antes.
         url_status: dict[str, int | None] = {}
         url_id_by_norm: dict[str, int] = {}
         norm_by_id: dict[int, str] = {}
-        for uid, row_url, sc in self.session.execute(
-            select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
-        ).all():
+        url_by_id: dict[int, str] = {}
+        info_url: dict[int, tuple] = {}
+        consulta = (
+            select(Url.id, Url.url, Url.status_code, Url.indexable,
+                   Url.indexability_status, Url.redirect_url,
+                   HtmlMeta.canonical_href)
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == self.job_id)
+        )
+        # URL -> a donde la manda su redireccion o su canonical: una pagina
+        # que se anota a si misma por una variante que salta a ella no carece
+        # de autorreferencia; lo que tiene es un destino roto o no indexable,
+        # y ese es el aviso (uno por hallazgo).
+        alias_de: dict[str, str] = {}
+        for uid, row_url, sc, indexable, estado_idx, redirige, canonical in self.session.execute(
+            consulta.execution_options(yield_per=BATCH_SIZE)
+        ):
             url_status[row_url] = sc
+            url_by_id[uid] = row_url
+            info_url[uid] = (sc, indexable, estado_idx, canonical)
             norm = _clave(row_url)
             if norm:
                 url_status.setdefault(norm, sc)
                 url_id_by_norm[norm] = uid
                 norm_by_id[uid] = norm
+                otra = redirige if redirige else (
+                    canonical if estado_idx == "Canonicalised" else None)
+                otra = _clave(otra)
+                if otra and otra != norm:
+                    alias_de[norm] = otra
+
+        def indexable(uid: int | None) -> bool:
+            """Si la pagina cuenta como FUENTE de hreflang.
+
+            Google no usa el hreflang de una pagina que no es indexable: la
+            variante `/es` canonicalizada a `/es/` repite el cluster de su
+            canonica y nadie le devuelve el enlace, porque el retorno apunta,
+            bien, a `/es/`. Medido: de las 296 `hreflang_missing_return` de
+            Lopesan, las 296 venian de paginas canonicalizadas (decision 99).
+            NULL —un censo sin indexabilidad calculada— cuenta: no se descarta
+            por desconocimiento.
+            """
+            return uid is not None and info_url.get(uid, (None, None))[1] is not False
 
         stmt = (
             select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href,
@@ -1040,33 +1116,39 @@ class SEOAnalyzer:
         # Los del `<body>` no: Google los ignora, asi que no son el retorno de
         # nadie.
         targets_by_page: dict[int, set[str]] = defaultdict(set)
-        for _hid, page_id, _lang, href, en_body in rows:
+        # Pagina -> destino -> codigos VALIDOS con que lo anota (casefold).
+        # Un codigo invalido ya tiene su aviso y Google ignora esa anotacion:
+        # contarlo aqui seria avisar dos veces de lo mismo.
+        codigos: dict[int, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        # Pagina -> destinos a los que apunta con cualquier codigo, valido o no:
+        # para la autorreferencia basta con que exista (si su codigo esta mal,
+        # el aviso es `hreflang_invalid_lang`, no este).
+        for _hid, page_id, lang, href, en_body in rows:
             nh = _clave(href)
             if nh and not en_body:
                 targets_by_page[page_id].add(nh)
+                if _lang_hreflang_valido(lang)[0]:
+                    codigos[page_id][nh].add(lang.casefold())
 
         # Anotaciones agrupadas por veredicto, para escribirlas por lotes.
         por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
         # Pagina -> idiomas anotados en el `<body>`.
         en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
+        # Destino no indexable -> paginas indexables que lo anotan, e idiomas.
+        no_indexable: dict[int, tuple[set[int], set[str]]] = {}
 
         for hreflang_id, url_id, lang, href, en_body in rows:
             norm_href = _clave(href)
 
-            # Language code validity (x-default is always valid).
-            lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
-            region_mala = None
-            idioma_malo = None
-            if lang_is_valid and lang.lower() != "x-default":
-                idioma = lang.split("-")[0].lower()
-                if idioma not in _ISO_639_1:
-                    idioma_malo = idioma
-                    lang_is_valid = False
-            if lang_is_valid and "-" in (lang or ""):
-                region = lang.split("-")[-1].lower()
-                if region in _REGIONES_INVENTADAS and len(region) == 2:
-                    region_mala = region
-                    lang_is_valid = False
+            lang_is_valid, idioma_malo, region_mala = _lang_hreflang_valido(lang)
+
+            # Una pagina no indexable no es fuente: se guarda si su codigo es
+            # valido, que sigue siendo verdad, y nada mas. Lo que tenga mal lo
+            # tendra tambien su canonica, y ahi es donde se avisa.
+            if not indexable(url_id):
+                por_veredicto.setdefault((lang_is_valid, None), []).append(
+                    hreflang_id)
+                continue
 
             # Un hreflang en el `<body>` Google lo ignora: esa anotacion no
             # existe para el, asi que no tiene sentido decir que le falta el
@@ -1102,6 +1184,31 @@ class SEOAnalyzer:
             destino_roto = estado_destino is not None and estado_destino != 200
             if destino_roto:
                 return_ok = None
+
+            # Lo mismo con un destino que responde pero no es indexable
+            # (canonicalizado, noindex, bloqueado por robots): Google no lo usa
+            # como alternativa, asi que su retorno tampoco cuenta. Un aviso, por
+            # DESTINO, con las paginas que lo anotan (decision 99).
+            # Sin respuesta (timeout, DNS) es otra cosa: no se sabe que veria
+            # Google, asi que ni se avisa del destino ni se afirma que falte su
+            # retorno —un destino sin respuesta no tiene hreflang guardado y
+            # salia como `hreflang_missing_return`—.
+            sin_respuesta = (
+                target_uid is not None and estado_destino is None
+                and not (info_url[target_uid][2] or "").startswith("Blocked by robots")
+            )
+            destino_no_indexable = (
+                not destino_roto and not sin_respuesta
+                and target_uid is not None and target_uid != url_id
+                and info_url[target_uid][1] is False
+            )
+            if sin_respuesta and target_uid != url_id:
+                return_ok = None
+            if destino_no_indexable:
+                return_ok = None
+                fuentes, langs = no_indexable.setdefault(target_uid, (set(), set()))
+                fuentes.add(url_id)
+                langs.add(lang)
 
             # El veredicto se apunta y se escribe al final, por lotes. Se
             # escribia con un UPDATE POR ANOTACION —y con DOS cuando el destino
@@ -1161,8 +1268,171 @@ class SEOAnalyzer:
                     .values(lang_valid=lang_valid, return_tag_ok=return_ok)
                 )
 
+        self._hreflang_completo(
+            targets_by_page, codigos, no_indexable, info_url, norm_by_id,
+            url_id_by_norm, url_by_id, indexable, alias_de,
+        )
+
         self.session.flush()
         self._flush_issues()
+
+    # Cuantas URLs de ejemplo lleva una incidencia agrupada (decision 73).
+    _EJEMPLOS_HREFLANG = 5
+
+    def _hreflang_completo(self, targets_by_page, codigos, no_indexable,
+                           info_url, norm_by_id, url_id_by_norm, url_by_id,
+                           indexable, alias_de) -> None:
+        """Los cinco tipos de la decision 99, sobre lo ya precargado.
+
+        El CLUSTER de una pagina es el conjunto de URLs que anota mas ella
+        misma. En un cluster bien hecho todas sus paginas declaran el mismo
+        conjunto, asi que les sale la misma clave sin unir nada con nada: no
+        hay componentes conexas que un enlace de «idioma no disponible -> la
+        home» convierta en un cluster de medio sitio.
+        """
+        n_ej = self._EJEMPLOS_HREFLANG
+        clusters: dict[str, list[int]] = defaultdict(list)
+        cluster_de: dict[int, str] = {}
+        sin_auto: list[int] = []
+
+        for page_id, destinos in targets_by_page.items():
+            if not indexable(page_id):
+                continue
+            yo = norm_by_id.get(page_id)
+            if not yo:
+                continue
+            otros = destinos - {yo}
+            if not otros:
+                continue  # solo se anota a si misma: no hay cluster
+            miembros = sorted(_url_de_clave(m) for m in destinos | {yo})
+            clave = _clave_de_grupo("\n".join(miembros))
+            clusters[clave].append(page_id)
+            cluster_de[page_id] = clave
+
+            # Autorreferencia: con cualquier codigo que no sea x-default. Si el
+            # unico que apunta a ella es x-default, la pagina no dice en que
+            # idioma esta.
+            propios = codigos.get(page_id, {}).get(yo)
+            autoref = yo in destinos and (
+                propios is None or bool(propios - {"x-default"})
+                # `propios is None`: se anota con un codigo invalido, que ya
+                # tiene su aviso.
+            )
+            if not autoref and any(alias_de.get(d) == yo for d in otros):
+                autoref = True  # por una variante: el aviso es el del destino
+            if not autoref:
+                sin_auto.append(page_id)
+
+        for page_id in sin_auto:
+            yo = norm_by_id[page_id]
+            otros = targets_by_page[page_id] - {yo}
+            detalle = {"cluster": cluster_de[page_id], "alternativas": len(otros)}
+            # Lo mas comun en los censos medidos: la pagina SI se anota, pero
+            # con otra URL —la misma ruta con un parametro de tienda o de
+            # pagina—, que para Google es otra URL. Se dice cual, porque el
+            # arreglo es ese.
+            variante = sorted(_url_de_clave(d) for d in otros if d[:3] == yo[:3])
+            if variante:
+                detalle["variante_propia"] = variante[0]
+            self._add_issue(page_id, "hreflang_sin_autorreferencia", "warning",
+                            detalle)
+
+        def ejemplos(ids) -> list[str]:
+            return sorted(url_by_id[i] for i in ids)[:n_ej]
+
+        def ancla(ids) -> int:
+            return min(ids, key=lambda i: url_by_id[i])
+
+        # x-default: se decide por cluster —basta con que una de sus paginas
+        # lo declare para no afirmar que falta— y se AVISA por host. Es una
+        # decision de plantilla y casi siempre de todo el sitio: medido en el
+        # censo de penguin del 30-jul, una fila por cluster eran 20.557 avisos
+        # `info` diciendo una sola cosa (decision 64).
+        sin_xd_por_host: dict[str, list[list[int]]] = defaultdict(list)
+        clusters_por_host: dict[str, int] = defaultdict(int)
+        for clave, paginas in clusters.items():
+            host = norm_by_id[paginas[0]][1]
+            clusters_por_host[host] += 1
+            if not any("x-default" in cods
+                       for p in paginas
+                       for cods in codigos.get(p, {}).values()):
+                sin_xd_por_host[host].append(paginas)
+        for host, grupos in sorted(sin_xd_por_host.items()):
+            todas = [p for g in grupos for p in g]
+            self._add_issue(
+                ancla(todas), "hreflang_sin_x_default", "info",
+                {"host": host,
+                 "clusters_afectados": len(grupos),
+                 "clusters_del_host": clusters_por_host[host],
+                 "paginas_afectadas": len(todas),
+                 "ejemplos": sorted(url_by_id[ancla(g)] for g in grupos)[:n_ej]},
+                group_key=_clave_de_grupo(host),
+            )
+
+        for clave, paginas in clusters.items():
+            # Mismo codigo -> varias URLs dentro del cluster.
+            repetidos: dict[str, tuple[set[str], list[int]]] = {}
+            for p in paginas:
+                por_codigo: dict[str, set[str]] = defaultdict(set)
+                for destino, cods in codigos.get(p, {}).items():
+                    for c in cods:
+                        por_codigo[c].add(destino)
+                for c, urls_c in por_codigo.items():
+                    if len(urls_c) > 1:
+                        urls_r, pags = repetidos.setdefault(c, (set(), []))
+                        urls_r |= urls_c
+                        pags.append(p)
+            for c, (urls_r, pags) in sorted(repetidos.items()):
+                self._add_issue(
+                    ancla(pags), "hreflang_idioma_repetido", "warning",
+                    {"lang": c, "urls": sorted(_url_de_clave(u) for u in urls_r)[:10],
+                     "cuantas_urls": len(urls_r),
+                     "paginas_afectadas": len(pags), "ejemplos": ejemplos(pags)},
+                    group_key=_clave_de_grupo(f"{clave}|{c}"),
+                )
+
+        for destino_id, (fuentes, langs) in no_indexable.items():
+            _sc, _idx, estado_idx, canonical = info_url[destino_id]
+            detalle = {
+                "motivo": estado_idx,
+                "langs": sorted(langs)[:20],
+                "paginas_afectadas": len(fuentes),
+                "ejemplos": ejemplos(fuentes),
+            }
+            if canonical and estado_idx == "Canonicalised":
+                detalle["canonical"] = canonical
+            # `error`, como el destino roto: la consecuencia es la misma —Google
+            # descarta esa alternativa y ese mercado se queda sin su version—.
+            self._add_issue(destino_id, "hreflang_destino_no_indexable", "error",
+                            detalle)
+
+        # Retorno incoherente: S anota D con un codigo, D devuelve el enlace a
+        # S, pero D se declara a si misma con OTRO. Una vez por anotacion de S;
+        # el caso simetrico (lo que D dice de S frente a lo que S dice de si
+        # misma) sale cuando D es la fuente.
+        for page_id in cluster_de:
+            yo = norm_by_id[page_id]
+            for destino, cods_s in codigos.get(page_id, {}).items():
+                if destino == yo:
+                    continue
+                cods_s = cods_s - {"x-default"}
+                if not cods_s:
+                    continue
+                d_id = url_id_by_norm.get(destino)
+                if d_id is None or not indexable(d_id):
+                    continue
+                if yo not in targets_by_page.get(d_id, ()):
+                    continue  # sin retorno: eso es `hreflang_missing_return`
+                cods_d = codigos.get(d_id, {}).get(destino, set()) - {"x-default"}
+                if not cods_d or cods_s & cods_d:
+                    continue
+                lang = ", ".join(sorted(cods_s))
+                self._add_issue(
+                    page_id, "hreflang_retorno_incoherente", "warning",
+                    {"href": url_by_id[d_id], "lang": lang,
+                     "lang_del_destino": sorted(cods_d)},
+                    group_key=_clave_de_grupo(lang),
+                )
 
     # -- Structured Data ----------------------------------------------------
 

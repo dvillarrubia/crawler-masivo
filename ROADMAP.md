@@ -29,6 +29,9 @@ milestone.
 
 - Códigos de respuesta, titles, descriptions, encabezados, canonicals,
   hreflang, datos estructurados e indexabilidad.
+- Hreflang completo: retorno, autorreferencia, x-default, idioma repetido,
+  versiones que apuntan a una página no indexable y códigos que no casan entre
+  versiones; solo sobre páginas indexables, que son las que Google lee.
 - Indexabilidad calculada sobre la URL final tras redirecciones; las páginas
   bloqueadas por robots.txt no cuentan como indexables.
 - Duplicados exactos y casi duplicados (páginas que comparten el 90 % del texto

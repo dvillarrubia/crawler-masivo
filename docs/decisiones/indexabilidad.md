@@ -158,6 +158,105 @@
    `description_multiple` (`html_meta.title_count`, `meta_description_count`).
    El valor guardado no cambia. Las tres necesitan **re-rastrear**.
 
+<a id="d99"></a>
+99. **Hreflang completo, y solo con lo que Google lee: el de una página no
+   indexable no cuenta** (PR 1.2 del plan, `docs/plan/MEJOR_CRAWLER.md`).
+   `analyze_hreflang` emite cinco tipos más, todos sobre fuentes indexables
+   y todos desde diccionarios montados con UNA consulta de URLs (estado,
+   `indexable`, `indexability_status`, `redirect_url` y `canonical_href`) y
+   una de anotaciones: nada por anotación y nada por pareja de páginas.
+   - **El clúster** de una página es el conjunto de URLs que anota más ella
+     misma, con la clave de `misma_url`. En un clúster bien hecho todas sus
+     páginas declaran el mismo conjunto, así que les sale la misma clave sin
+     unir nada: con componentes conexas, un «este idioma no existe, mando a la
+     portada» une medio sitio en un clúster (pasa en www.uoc.edu, cuyo
+     `walkin/` anota las portadas `ca` y `en`).
+   - `hreflang_sin_autorreferencia` (warning, por página): anota otras
+     versiones y a sí misma no, o solo con `x-default`. No cuenta como falta
+     si la autorreferencia lleva un código inválido (ese es
+     `hreflang_invalid_lang`) ni si va a una variante que redirige o se
+     canonicaliza a ella (ese es el aviso del destino). Si se anota con la
+     misma ruta y otros parámetros, `variante_propia` lo dice: es el caso de
+     progym, `/compex` anotada como `/compex?___store=progym_es_sp`.
+   - `hreflang_sin_x_default` (info): se decide por clúster —basta con que
+     una de sus páginas lo declare— y se avisa **por host**, con
+     `clusters_afectados` de `clusters_del_host`. Una fila por clúster eran
+     20.557 avisos `info` en penguin diciendo una sola cosa (decisión 64).
+   - `hreflang_idioma_repetido` (warning, por clúster y código, `group_key`
+     = clúster|código): el mismo código hacia dos URLs. Un error de plantilla
+     en un clúster de 30 páginas es UNA fila con `paginas_afectadas=30`.
+   - `hreflang_destino_no_indexable` (**error**, como el destino roto: la
+     consecuencia es la misma, ese mercado se queda sin su versión): una fila
+     por DESTINO —canonicalizado, noindex o bloqueado por robots—, anclada en
+     él, con las páginas que lo anotan. Un destino roto sigue siendo solo
+     `hreflang_broken_target` (decisión 56).
+   - `hreflang_retorno_incoherente` (warning, por anotación): A llama a B
+     `en-US`, B devuelve el enlace a A pero se llama a sí misma `en-GB`. Basta
+     con que un código coincida: `/es/` para `es-ES` y `es-MX` es legítimo.
+     Sin retorno es `hreflang_missing_return`, no este.
+   - `group_key`: el clúster en lo que se avisa por clúster, el host en el
+     x-default, el código en lo que es por anotación (como sus hermanos) y
+     NULL en la autorreferencia, que es una por URL: una clave de clúster ahí
+     cambiaría al añadir un idioma y fingiría que el problema se resolvió
+     (decisión 88). El clúster va en `details.cluster`.
+
+   **Lo que cambia de lo que ya había**, y es lo que más se mueve: una página
+   no indexable ya **no es fuente**. Google no usa el hreflang de una página
+   canonicalizada o noindex, y la variante `/es` canonicalizada a `/es/`
+   repite el clúster de su canónica sin que nadie le devuelva el enlace —el
+   retorno apunta, bien, a `/es/`—. Medido: **las 296 `hreflang_missing_return`
+   de Lopesan venían de páginas canonicalizadas**. Se sigue guardando
+   `lang_valid`, con `return_tag_ok` a NULL. Tampoco se afirma la falta de
+   retorno cuando el destino no es indexable (el aviso es el del destino) ni
+   cuando no respondió (`Sin respuesta`: un timeout nuestro no dice qué vería
+   Google, y como no tiene hreflang guardado salía «sin retorno»). Nada de
+   «hreflang no enlazado».
+
+   Medido sobre los censos de la BD local, re-ejecutando
+   `analyze_indexability` y `analyze_hreflang` dentro de una transacción que
+   acaba en ROLLBACK (el check no lee `links`, así que el archivo en Parquet
+   de www.uoc.edu no le afecta):
+
+   | censo (anotaciones) | sin autorref. | sin x-default | idioma rep. | destino no indexable | retorno incoh. | missing_return | broken_target |
+   |---|---|---|---|---|---|---|---|
+   | Lopesan es/en/de (17.268) | 0 | 1: 1 de 620 clústeres | 0 | **27** | 0 | 296 → **0** | 12 → 4 |
+   | www.uoc.edu ca/es/en (81.960) | 34 | 2: 21 de 6.038 (+1 de 1 en guia-audiovisual) | 0 | 19 | 0 | 3.281 → **71** | 72 → 72 |
+   | penguin 30-jul (194.824) | 587 | 1: 20.557 de 20.557 | 0 | 196 | 0 | 5.957 → 121 | 61 → 10 |
+   | penguin 29-jul (315.076) | 1.013 | 1: 21.262 de 21.262 | 0 | 1 | 0 | 6.197 → 5.919 | 13 → 13 |
+   | Druni (139.981) | 304 | 1: 16 de 37.059 | 0 | 0 | 0 | 8.197 → 288 | 0 |
+   | progym (21.195) | 277 | 0 | 0 | 0 | 0 | 144 → 140 | 0 |
+   | CST (23.901) | 42 | 0 | 0 | 0 | 0 | 166 → 32 | 0 |
+
+   `idioma_repetido` y `retorno_incoherente` salen a **0 en todos**, y no por
+   el extractor (no deduplica): contado aparte con SQL sobre todos los censos
+   de la BD local, no hay ni una página con un código hacia dos URLs ni una
+   pareja con retorno y códigos que no casan. Es corrección de criterio,
+   cubierta por los tests.
+
+   Revisados a mano:
+   - Lopesan: los 27 destinos no indexables son 14 páginas `/en/` y 13 `/de/`
+     **canonicalizadas a su equivalente `/es/`** —`/en/` a `/es/`, `/en/hotels`
+     a `/es/hoteles`— y anotadas como `en-US`/`de-DE` desde la versión
+     española. Cierto, y grave: la versión inglesa y la alemana de esas
+     páginas están fuera del índice. Antes salía como 36 «sin retorno».
+   - Lopesan, las 296 «sin retorno» que desaparecen: `/es` sin barra,
+     canonicalizada a `/es/`, con el clúster de la canónica. Eran falsas.
+   - progym `/compex`: se anota como `/compex?___store=progym_es_sp`, que para
+     Google es otra URL. Cierto (las 277 son esa plantilla de Magento).
+   - www.uoc.edu `walkin/es/subscripcio.html`: anota `ca` → `https://www.uoc.edu/`
+     y `en` → `/en`, y a sí misma no. Cierto: la plantilla vieja de walkin
+     apunta a las portadas.
+   - Lopesan blog `meeting-rooms-in-madrid` (`en` y `de`, sin versión `es`):
+     el único de los 620 clústeres sin x-default. Cierto.
+
+   **Tiempo**: en penguin 29-jul (315.076 anotaciones), tres pasadas
+   alternas, 10,6 / 11,7 / 9,9 s antes y 12,6 / 13,7 / 10,7 s ahora: ×1,2.
+   Proyectado a las 438.957 de producción, unos 24 s frente al tope de 40,6
+   (2 × 20,3). Es re-analizar, no re-rastrear.
+   Tests: `tests/test_hreflang_completo_db.py` (ejecuta el check contra
+   SQLite) y `tests/test_catalogo_incidencias.py` (ningún tipo emitido sin
+   ficha en `incidencias.js`).
+
 <a id="d101"></a>
 101. **Lo que importa de un canonical es lo que Google encuentra al llegar al
    destino, y de una redireccion, donde acaba** (PR 1.1 de

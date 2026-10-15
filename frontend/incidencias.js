@@ -225,6 +225,31 @@ const ISSUE_INFO = {
     google: 'Solo las lee en el <head>, la cabecera HTTP o el sitemap.',
     arreglo: 'Mover las etiquetas al <head>.',
   },
+  'hreflang_sin_autorreferencia': {
+    que: 'La página anota sus otras versiones pero no se anota a sí misma con su idioma (a veces se anota con otra URL: la misma ruta con un parámetro).',
+    google: 'Su documentación pide que cada versión se liste a sí misma; sin ella la página no declara en qué idioma está y el clúster queda cojo.',
+    arreglo: 'Añadir a la plantilla la etiqueta de la propia página, con su URL canónica exacta.',
+  },
+  'hreflang_sin_x_default': {
+    que: 'Ningún clúster hreflang de este host declara x-default (el aviso es uno por host, con cuántos clústeres afecta).',
+    google: 'Sin x-default, a quien no casa con ningún idioma le enseña la versión que él elija. No es un error: es la opción de no decidirlo.',
+    arreglo: 'Si hay una versión para «el resto del mundo» (o un selector de idioma), anotarla como x-default en todas las páginas del clúster.',
+  },
+  'hreflang_idioma_repetido': {
+    que: 'Dentro del mismo clúster, un código de idioma-región apunta a dos o más URLs distintas.',
+    google: 'No sabe cuál de las dos es la de ese idioma y puede ignorar las dos.',
+    arreglo: 'Dejar una sola URL por código; si son dos mercados, darles códigos distintos (es-ES, es-MX).',
+  },
+  'hreflang_destino_no_indexable': {
+    que: 'Una URL que otras páginas anotan como versión de un idioma está canonicalizada a otra, en noindex o bloqueada por robots.txt.',
+    google: 'Descarta esa alternativa: ese mercado se queda sin su versión en los resultados, igual que con un destino roto.',
+    arreglo: 'Si la canonicalización es un error, quitarla; si no, apuntar el hreflang a la URL canónica de ese idioma.',
+  },
+  'hreflang_retorno_incoherente': {
+    que: 'A anota B con un código (en-US), B devuelve el enlace a A pero se declara a sí misma con otro (en-GB).',
+    google: 'Ve dos códigos para la misma URL y no garantiza cuál usa: la versión puede salir en el país equivocado.',
+    arreglo: 'Usar el mismo código para cada URL en todas las páginas del clúster.',
+  },
 
   // ----- Datos estructurados -----
   'structured_data_error': {
@@ -376,6 +401,11 @@ const ISSUE_LABEL_EXTRA = {
   title_multiple: 'Varios títulos',
   description_multiple: 'Varias meta descriptions',
   hreflang_in_body: 'Hreflang fuera del head',
+  hreflang_sin_autorreferencia: 'Hreflang sin autorreferencia',
+  hreflang_sin_x_default: 'Hreflang sin x-default',
+  hreflang_idioma_repetido: 'Hreflang idioma repetido',
+  hreflang_destino_no_indexable: 'Hreflang a URL no indexable',
+  hreflang_retorno_incoherente: 'Hreflang retorno incoherente',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -403,6 +433,15 @@ const DETALLE_LABEL = {
   lang: 'idioma',
   href: 'destino',
   paginas_afectadas: 'páginas',
+  cluster: 'clúster',
+  alternativas: 'alternativas',
+  variante_propia: 'se anota como',
+  clusters_afectados: 'clústeres sin x-default',
+  clusters_del_host: 'clústeres del host',
+  cuantas_urls: 'URLs con ese código',
+  lang_del_destino: 'código del destino',
+  motivo: 'motivo',
+  ejemplos: 'ejemplos',
   similarity: 'similitud',
   outlinks: 'enlaces',
   schema_type: 'tipo',

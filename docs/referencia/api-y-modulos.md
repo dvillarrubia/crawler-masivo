@@ -124,7 +124,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description |
 | `analyze_headings()` | missing_h1, multiple_h1 |
 | `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101) |
-| `analyze_hreflang()` | hreflang return tags, invalid langs |
+| `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas indexables |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_indexability()` | indexability status |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |

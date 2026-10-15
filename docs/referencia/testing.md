@@ -45,6 +45,11 @@ tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
 en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
 las de la derecha), y `test_render_espera.py` (contrato de la espera de render:
 no resolver con peticiones en vuelo).
+Hreflang (decision 99): `test_hreflang_completo_db.py` ejecuta
+`analyze_hreflang` contra SQLite (autorreferencia, x-default por host, idioma
+repetido sin N², destino no indexable, retorno incoherente y que una fuente no
+indexable no da avisos), y `test_catalogo_incidencias.py` falla si el
+analizador emite un tipo sin ficha en `frontend/incidencias.js`.
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
