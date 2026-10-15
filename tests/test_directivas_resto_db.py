@@ -120,7 +120,8 @@ def test_canonical_roto_con_el_puerto_por_defecto_se_ve():
     _url(s, j, "https://x.com/b", status=404, sin_meta=True)
     SEOAnalyzer(s, j.id).analyze_canonicals()
     s.flush()
-    assert "canonical_broken" in _tipos(s, j, a.id)
+    # `canonical_broken` se separo en error y redireccion (decision 101).
+    assert "canonical_a_error" in _tipos(s, j, a.id)
 
 
 def test_la_barra_final_si_son_dos_urls():
@@ -132,7 +133,7 @@ def test_la_barra_final_si_son_dos_urls():
     _url(s, j, "https://x.com/a/", status=301, sin_meta=True)
     SEOAnalyzer(s, j.id).analyze_canonicals()
     s.flush()
-    assert "canonical_broken" in _tipos(s, j, a.id)
+    assert "canonical_a_redireccion" in _tipos(s, j, a.id)
 
 
 def test_el_retorno_del_hreflang_casa_con_el_puerto_por_defecto():

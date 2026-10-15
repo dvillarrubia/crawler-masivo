@@ -123,19 +123,19 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title |
 | `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description |
 | `analyze_headings()` | missing_h1, multiple_h1 |
-| `analyze_canonicals()` | canonical issues |
+| `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101) |
 | `analyze_hreflang()` | hreflang return tags, invalid langs |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_indexability()` | indexability status |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
 | `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
-| `analyze_redirect_chains()` | redirect_chain |
+| `analyze_redirect_chains()` | redirect_chain, redirect_loop, **redireccion_a_error** (decision 101) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
-| `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
+| `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan, not_in_sitemap |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.

@@ -3466,8 +3466,11 @@ const EXP_TABS = [
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
   { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_multiple','h1_duplicate'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
-  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
+  // Las redirecciones no son HTML: el ambito va sobre las internas.
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redirect_chain','redirect_loop'],
+    columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','robots_invalid_syntax'],
     columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
   { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body'],
