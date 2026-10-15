@@ -104,6 +104,6 @@ De la capa de analisis contra BD ya hay tres tests
 `test_pagerank_db.py`); el resto se sigue verificando con las consultas SQL de
 `docs/AUDITORIA_Y_VERIFICACION.md`.
 Sitemap (decision 100): `test_analyzer_sitemap_db.py` ejecuta `analyze_sitemap`
-contra SQLite: cada motivo de `sitemap_no_indexable` con su detalle, que un 429
+contra SQLite: cada motivo de `sitemap_no_indexable` con su detalle, que un 429 o un 503
 o una URL sin respuesta no se afirman, que una no indexable del sitemap no sale
 ademas como `sitemap_orphan`, y que vale con los enlaces archivados.

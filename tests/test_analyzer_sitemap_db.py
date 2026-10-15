@@ -111,16 +111,24 @@ def test_cada_motivo_sale_con_su_detalle():
 
 
 def test_lo_que_no_se_sabe_no_se_afirma():
-    """Un 429 es el sitio frenando al rastreador; sin respuesta no hay estado."""
+    """Un 429 o un 503 es el sitio frenando al rastreador —Google documenta
+    los dos como la misma senal temporal—; sin respuesta no hay estado. Un
+    500 si se afirma: es la pagina rota, no un «vuelve luego»."""
     s, j = _montar()
     _url(s, j, "/frenada", status_code=429, status_group="4xx",
          indexable=False, indexability_status="Client Error (429)")
+    _url(s, j, "/saturada", status_code=503, status_group="5xx",
+         indexable=False, indexability_status="Server Error (503)")
     _url(s, j, "/timeout", status_code=None, status_group="timeout", is_html=False,
          indexable=False, indexability_status="Sin respuesta")
     _url(s, j, "/sin-estado", indexable=None, indexability_status=None)
+    rota = _url(s, j, "/rota", status_code=500, status_group="5xx",
+                indexable=False, indexability_status="Server Error (500)")
     s.commit()
     _analizar(s, j)
-    assert _issues(s, j, "sitemap_no_indexable") == []
+    avisos = _issues(s, j, "sitemap_no_indexable")
+    assert [a[0] for a in avisos] == [rota.id]
+    assert avisos[0][2]["motivo"] == "5xx"
 
 
 def test_una_no_indexable_del_sitemap_no_es_ademas_huerfana():
@@ -182,7 +190,9 @@ def test_con_los_enlaces_archivados_sigue_valiendo():
     (None, "Redirect (JS)", "redireccion"),
     (410, "Client Error (410)", "4xx"),
     (429, "Client Error (429)", None),
-    (503, "Server Error (503)", "5xx"),
+    (503, "Server Error (503)", None),
+    (500, "Server Error (500)", "5xx"),
+    (502, "Server Error (502)", "5xx"),
     (200, "Noindex", "noindex"),
     (200, "Canonicalised", "canonicalizada"),
     (None, "Blocked by robots.txt", "bloqueada_robots"),

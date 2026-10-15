@@ -174,9 +174,10 @@
 <a id="d100"></a>
 100. **Una URL del sitemap que no es indexable es una contradicción, y se dice
    por qué** (PR 1.3A de `docs/plan/MEJOR_CRAWLER.md`). El sitemap es la lista
-   de URLs canónicas que el sitio pide indexar; Google documenta que solo vayan
-   ahí esas, y que un sitemap con la URL A y un `rel=canonical` a B son dos
-   señales de canónica que no coinciden. Había `sitemap_orphan` (en el sitemap
+   de URLs canónicas que el sitio pide indexar: Google pide incluir las URLs
+   que se quieren ver en los resultados, y lista el sitemap como una de las
+   señales de canónica, así que un sitemap con la URL A y un `rel=canonical` a
+   B son dos señales que no coinciden. Había `sitemap_orphan` (en el sitemap
    y sin enlaces) y `not_in_sitemap` (indexable y fuera), pero nada miraba lo
    que el sitemap declara y la página desmiente. `sitemap_no_indexable`: una
    incidencia por URL interna con `in_sitemap = true` e `indexable` no
@@ -193,17 +194,24 @@
      tipo.
    - **`warning` en todos los motivos.** Ninguno saca del índice una página
      indexable —eso es lo que reserva `error` (decisiones 64 y 92)— y ninguno
-     es solo informativo: cada entrada le hace a Google rastrear de más y
-     fiarse menos del sitemap, que es la señal de sitemap sucio que documenta.
+     es solo informativo: cada entrada es una URL que el sitio pide indexar y
+     la propia página desmiente. (Que un sitemap sucio le haga a Google
+     fiarse menos de él NO está en su guía de sitemaps —solo lo dice del
+     `lastmod`—; es observación nuestra, y por eso no va en la ficha.)
      El 404 o el 500 ya llevan su `4xx_error` / `5xx_error` (`error`) por la
      página; esta dice otra cosa y se arregla en otro sitio (el generador del
      sitemap), igual que Search Console los separa como «URL enviada…».
    - **Sustituye a `sitemap_orphan` en las no indexables** (decisión 36).
      `sitemap_orphan` le decía a un noindex del sitemap «enlázala desde su
      sección», que es el consejo contrario. Ahora exige `indexable` no falso.
-   - **Lo que no se sabe no se afirma.** Un **429** es el sitio frenando al
-     rastreador, no lo que verá Google, y «Sin respuesta» no dice nada de la
-     página: no se emiten, se cuentan en el log como «sin comprobar». Un 403
+   - **Lo que no se sabe no se afirma.** Un **429** o un **503** es el sitio
+     frenando al rastreador, no lo que verá Google —Google documenta los dos
+     como la misma señal temporal de «frena», y Scrapy los reintenta igual
+     (`RETRY_HTTP_CODES`)—. Un 500 sí se emite: es la página rota, no un
+     «vuelve luego». En los censos medidos no hay ni un 503 en el sitemap
+     (los 509 5xx son todos 500), así que las cifras no cambian. «Sin
+     respuesta» tampoco dice nada de la página. Ninguno de los tres se emite:
+     se cuentan en el log como «sin comprobar». Un 403
      sí se emite: es lo que respondió el sitio, y no hay forma de distinguir
      un WAF de un permiso. Las URLs externas del sitemap tampoco: son otro
      problema (un sitemap solo puede listar su host).

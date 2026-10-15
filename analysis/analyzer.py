@@ -3514,9 +3514,9 @@ class SEOAnalyzer:
         URL —es la URL la que hay que quitar del sitemap, o la directiva la que
         esta mal— con el motivo, el codigo y el destino en ``details``.
 
-        Lo que no se sabe no se afirma: un 429 es el sitio frenando al
-        rastreador y una URL sin respuesta no dice como la ve Google, asi que
-        no se emiten (se cuentan en el log).
+        Lo que no se sabe no se afirma: un 429 o un 503 es el sitio frenando
+        al rastreador y una URL sin respuesta no dice como la ve Google, asi
+        que no se emiten (se cuentan en el log).
         """
         rows = self.session.execute(
             select(
@@ -3555,7 +3555,7 @@ class SEOAnalyzer:
         if por_motivo or sin_comprobar:
             logger.info(
                 "Sitemap: %d URLs declaradas no indexables (%s); %d sin "
-                "comprobar (429 o sin respuesta)",
+                "comprobar (429, 503 o sin respuesta)",
                 sum(por_motivo.values()),
                 ", ".join(f"{m}={n}" for m, n in sorted(por_motivo.items())),
                 sin_comprobar,
@@ -3742,13 +3742,19 @@ _MOTIVOS_SITEMAP = (
 )
 
 
+# Respuestas que dicen «vuelve luego», no como es la pagina (decision 100).
+_CODIGOS_TEMPORALES = frozenset({429, 503})
+
+
 def motivo_sitemap_no_indexable(status_code, indexability_status) -> str | None:
     """Por que una URL del sitemap no es indexable, o None si no se sabe.
 
-    El 429 se descarta: es el sitio frenando al rastreador, no lo que vera
-    Google (decision 100).
+    El 429 y el 503 se descartan: Google documenta los dos como la senal
+    temporal de «frena», y Scrapy los reintenta igual (RETRY_HTTP_CODES). Son
+    el sitio frenando al rastreador, no lo que vera Google (decision 100). Un
+    500 si se afirma: es un error de la pagina, no una peticion de esperar.
     """
-    if status_code == 429 or not indexability_status:
+    if status_code in _CODIGOS_TEMPORALES or not indexability_status:
         return None
     for prefijo, motivo in _MOTIVOS_SITEMAP:
         if indexability_status.startswith(prefijo):
