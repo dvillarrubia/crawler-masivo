@@ -1704,10 +1704,14 @@ class SeoSpider(scrapy.Spider):
         # microdatos, validos en el body: se guarda por compatibilidad, pero
         # no es una incidencia (decision 102).
         has_meta_outside_head = bool(selector.css("body meta"))
-        # Donde corta el navegador el head y que metadatos quedan fuera. Con
-        # render el texto es el DOM serializado: el corte ya no se ve, pero
-        # los metadatos que el navegador movio al body si.
-        head = leer_head(response.text)
+        # Donde corta el navegador el head y que metadatos quedan fuera. Solo
+        # sobre el HTML servido: con render el texto es el DOM serializado, en
+        # el que el corte ya no se ve pero lo que el navegador movio al body
+        # si, asi que un head cortado por un pixel saldria como «metadatos en
+        # el body sin corte», con la causa y el arreglo equivocados. Y lo que
+        # un framework sube al head con JavaScript (Next.js con streaming
+        # metadata) ya esta en el head del DOM. Con render: NULL, no medido.
+        head = None if response.meta.get("playwright") else leer_head(response.text)
 
         yield HtmlMetaItem(
             url_hash=final_hash,

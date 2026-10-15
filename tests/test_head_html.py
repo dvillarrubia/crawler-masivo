@@ -4,7 +4,8 @@ Decision 102. Cada caso lleva lo que hace Chromium (scripting activado),
 comprobado el 2026-10-16 con el Chromium de la imagen del crawler cargando el
 HTML y preguntando ``e.closest('head')`` por el title, el meta robots, la meta
 description y el canonical. ``test_coincide_con_chromium`` lo repite si hay
-navegador (en CI no se baja, y se salta).
+navegador: en CI corre, porque el trabajo del crawler instala Chromium
+(``playwright install --with-deps chromium``); sin navegador se salta.
 
 Los casos que separan a este lector de lxml y de html5lib, que es por lo que
 existe:
@@ -96,6 +97,16 @@ CASOS = {
         D + "<head><meta charset=utf-8>&nbsp;<title>T</title></head>"
         "<body><p>x</p></body></html>",
         "#texto", ["title"]),
+    # Dentro de <foreignObject> se vuelve a leer HTML, pero al cerrarlo se
+    # sigue en el SVG: el <title> de despues es el del icono.
+    "foreignobject_y_title_svg": (
+        D + "<head><title>T</title></head><body><svg><foreignObject><div>x</div>"
+        "</foreignObject><title>icono</title></svg><p>x</p></body></html>",
+        None, []),
+    "title_html_en_foreignobject": (
+        D + "<head><title>T</title></head><body><svg><foreignObject><div>"
+        "<title>dentro</title></div></foreignObject></svg></body></html>",
+        None, ["title"]),
 }
 
 
@@ -161,6 +172,19 @@ def test_lo_que_pasa_del_limite_no_se_mira():
     assert leer_head(html)["fuera_del_head"] == []
 
 
+def test_un_nombre_de_etiqueta_que_no_lo_es_no_se_guarda_tal_cual():
+    """`html_meta.head_cortado_por` es VARCHAR(64): una errata sin espacios es
+    UNA etiqueta para HTMLParser, y guardada entera tumbaria el INSERT en
+    Postgres. Va a `#otro`, que tampoco parte el grupo en una fila por errata."""
+    errata = ('<metaproperty="og:title"content="Zapatillas-de-running-para-'
+              'mujer-con-amortiguacion-maxima">')
+    for corte in (errata, "<" + "a" * 80 + ">"):
+        html = D + "<head>" + corte + "<title>T</title></head><body></body></html>"
+        assert leer_head(html) == {"cortado_por": "#otro", "fuera_del_head": ["title"]}
+    html = D + "<head><mi-widget></mi-widget><title>T</title></head><body></body></html>"
+    assert leer_head(html)["cortado_por"] == "mi-widget"
+
+
 def test_vacio_o_ilegible():
     assert leer_head("") == {"cortado_por": None, "fuera_del_head": []}
     assert leer_head(None) == {"cortado_por": None, "fuera_del_head": []}
@@ -173,7 +197,9 @@ _JS = """() => {
   for (const [k, sel] of [['title','title'], ['robots','meta[name=robots]'],
         ['description','meta[name=description]'], ['canonical','link[rel=canonical]']]) {
     for (const e of document.querySelectorAll(sel)) {
-      if (e.closest('svg')) continue;
+      // Solo elementos HTML: el <title> de un SVG no es el de la pagina, pero
+      // uno dentro de un <foreignObject> si es HTML.
+      if (e.namespaceURI !== 'http://www.w3.org/1999/xhtml') continue;
       if (!e.closest('head')) r.push(k);
     }
   }

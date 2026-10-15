@@ -287,25 +287,42 @@
      `PageMethod` lee `decodedBodySize` de Navigation Timing (comprobado con un
      HTML gzip de 3,4 MB, con la interceptación de scrapy-playwright, con y sin
      `Content-Length`).
-   - **`head_cortado`** (warning, agrupado por elemento que corta + metadatos
-     perdidos, con `paginas_afectadas` y `group_key`). Google: «once Google
+   - **`head_cortado`** (agrupado por elemento que corta + metadatos
+     perdidos, con `paginas_afectadas` y `group_key`). **Severidad por lo que
+     se pierde** (64): `error` si detrás queda el `robots`, el `googlebot` o el
+     canonical —deciden si la página entra en el índice y con qué URL—, y
+     `warning` si solo título, description o hreflang. Google: «once Google
      detects an invalid element in the <head>, it assumes the end of the
      <head> element and stops reading» (valid-page-metadata, 2025-12-10). Solo
      se emite si detrás del corte queda algo que importa: `title`, `robots`,
      `googlebot`, `description`, `canonical` o `hreflang`. Si lo que queda en
      el body es el canonical o el hreflang, `canonical_in_body` y
      `hreflang_in_body` **no** se emiten además en esa página: el hallazgo es
-     el corte (36).
-   - **`meta_fuera_del_head`** (warning, agrupado): título, description o
+     el corte (36). **La indexabilidad no cambia**: sigue leyendo ese robots
+     como aplicado, porque no está comprobado qué hace Google con un robots en
+     el body, y cambiarla sin medir metería o sacaría páginas del índice y del
+     PageRank (38). Lo que se afirma es que la directiva está donde Google
+     deja de leer, y la incidencia lo marca (`directiva_en_duda`) y la ficha
+     lo dice: el mismo informe que la da por noindex avisa de que eso está en
+     duda, en vez de contradecirlo en silencio.
+   - **`meta_fuera_del_head`** (**info**, agrupado): título, description o
      robots en el body **sin** corte. Google dice que van en el head y no
-     promete leerlos fuera; no se afirma que los ignore. Canonical y hreflang
+     dice qué hace con ellos fuera; no se afirma que los ignore. Y hay quien
+     los pone ahí a propósito: **Next.js 15.2+ con streaming metadata** sirve
+     el `<title>`, la description, el robots y el canonical al final del
+     `<body>` de toda página con `generateMetadata` dinámico, los sube al head
+     con JavaScript y documenta que Googlebot los interpreta bien
+     (nextjs.org/docs/app/api-reference/functions/generate-metadata#streaming-metadata).
+     Con `warning` y «la directiva puede no aplicarse», cada plantilla de un
+     sitio así habría salido con un fallo que su framework documenta como
+     correcto. Es un dato que mirar (con la inspección de URL), no un fallo. Canonical y hreflang
      no entran (tienen su tipo), ni un segundo `<title>` o `description` con el
      bueno en el head, que ya es `title_multiple` / `description_multiple`.
 
    **El head se lee con un tokenizador propio** (`seo_crawler/head_html.py`)
    que sigue a Chromium con scripting activado, y no con un árbol. Contrastado
    en 17 casos con el Chromium de la imagen (`tests/test_head_html.py`, que lo
-   repite en CI): **lxml** falla en 3 (deja en el head un meta detrás de un
+   repite en CI, y ahora 19 con los dos de `<foreignObject>`): **lxml** falla en 3 (deja en el head un meta detrás de un
    `<svg>` o de un elemento personalizado, y saca de los dos uno detrás de
    `</head>`), y **html5lib en 3** distintos: corta el head con
    `<noscript><img>` y `<noscript><iframe>` —el píxel de Facebook y el GTM mal
@@ -322,9 +339,19 @@
    de 3.581 en progym. Se queda la columna y se añaden dos que sí dicen algo:
    `html_meta.head_cortado_por` (`img`, `div`, `#texto`…; NULL si el head acabó
    donde debía) y `html_meta.fuera_del_head` (lista; `''` = medido y nada,
-   NULL = censo anterior). Con render el DOM serializado ya no conserva el
-   corte, pero sí lo que el navegador movió al body, que va a
-   `meta_fuera_del_head`. **Head o body múltiples** no son un tipo aparte: un
+   NULL = no medido). **Con render no se miden** (el spider las deja a
+   NULL y el analizador no emite ninguno de los dos): el DOM serializado ya no
+   conserva el corte pero sí lo que el navegador movió al body, así que un
+   head cortado por un píxel saldría como `meta_fuera_del_head` —«sin corte»,
+   «súbelos al head»—, con la causa y el arreglo equivocados y sin suprimir
+   `canonical_in_body`; y lo que Next.js sube con JavaScript ya está en el
+   head del DOM. El motivo que se guarda es un nombre de etiqueta válido de
+   hasta 40 caracteres o `#otro`: HTMLParser toma por una sola etiqueta una
+   errata como `<metaproperty="og:title"content="...">`, y guardada entera en
+   el `VARCHAR(64)` tumbaba el INSERT de `html_meta` en Postgres y lo
+   pendiente del lote con él. Dentro de un `<foreignObject>` se vuelve a leer
+   HTML y al cerrarlo se sigue en el SVG (el `<title>` del icono que viene
+   después no es el de la página). **Head o body múltiples** no son un tipo aparte: un
    segundo `<body>` el navegador lo funde sin consecuencia, y un segundo
    `<head>` dentro del body deja sus metadatos en el body, que es lo que ya
    cuenta `fuera_del_head`.
@@ -343,7 +370,9 @@
 
    Para el head, sin columnas guardadas, una muestra viva (2026-10-16, curl_cffi
    como el rastreo): 70 páginas indexables de Lopesan, 70 de UOC, 70 de
-   penguin, 79 de Druni, 40 de blogs.uoc.edu y 39 de Saunier, **0 con un head
+   penguin, unas 80 de Druni (el resumen de la medición dice 78 y la primera
+   versión de esta nota 79; no queda el registro para desempatar, y el
+   resultado, 0, no depende de ello), 40 de blogs.uoc.edu y 39 de Saunier, **0 con un head
    cortado que pierda algo**. progym (403) y CST (404 en 11 de 20) no se
    pudieron mirar. Ejemplos revisados a mano:
    - penguin `/es/217497-ficcion` (indexable, 5,9 MB hoy): 20 de las 24 fichas

@@ -118,13 +118,13 @@ const ISSUE_INFO = {
   },
   'head_cortado': {
     que: 'Un elemento que no va en el <head> (una imagen, un div, un texto suelto) lo cierra antes de tiempo, y metadatos que venían detrás quedan en el <body>. Una fila por cada combinación de elemento y metadatos, con las páginas afectadas.',
-    google: 'Al encontrar un elemento no válido da el <head> por terminado y deja de leerlo: lo de detrás (robots, canonical, título…) no cuenta.',
-    arreglo: 'Mover ese elemento al <body> o subir los metadatos por encima de él en la plantilla. Suele ser un pixel, un iframe o un bloque de un plugin.',
+    google: 'Documenta que, al encontrar un elemento no válido, da el <head> por terminado y deja de leer lo que venga en él: lo de detrás (robots, canonical, título…) puede no aplicarse. Es error si lo que queda detrás es el robots, el googlebot o el canonical, porque decide si la página entra en el índice. Ojo: la indexabilidad de este informe sigue contando ese robots como aplicado, porque no está comprobado qué hace Google con él en el body; la página puede estar en el índice aunque aquí salga como noindex, o al revés.',
+    arreglo: 'Mover ese elemento al <body> o subir los metadatos por encima de él en la plantilla. Suele ser un pixel, un iframe o un bloque de un plugin. Solo se mide en rastreos sin render: en el DOM montado el corte ya no se ve.',
   },
   'meta_fuera_del_head': {
     que: 'El título, la meta description o la meta robots están en el <body>, sin que nada haya cortado el <head>. Una fila por combinación, con las páginas afectadas.',
-    google: 'Documenta que van en el <head> y no garantiza leerlos fuera: la directiva o el título pueden no aplicarse.',
-    arreglo: 'Moverlos al <head> de la plantilla.',
+    google: 'Documenta que van en el <head> y no dice qué hace con ellos fuera. Hay frameworks que los sirven en el body a propósito: Next.js 15.2 o posterior (streaming metadata) los sube al <head> con JavaScript y documenta que Googlebot los lee. Por eso es informativo, no un fallo.',
+    arreglo: 'Si el sitio no es de un framework que los suba con JavaScript, moverlos al <head> de la plantilla. Si lo es, comprobar con la inspección de URL de Search Console que Google ve el título y el robots que tocan. Solo se mide en rastreos sin render.',
   },
 
   // ----- Títulos, descripciones y encabezados -----
@@ -478,4 +478,5 @@ const DETALLE_LABEL = {
   pct_sin_leer: '% sin leer',
   cortado_por: 'lo corta',
   fuera_del_head: 'quedan fuera',
+  directiva_en_duda: 'robots o canonical detrás del corte',
 };

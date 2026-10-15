@@ -84,6 +84,23 @@ _CANDIDATO = re.compile(
 
 _TROZO = 64 * 1024
 
+# Lo que se guarda como motivo del corte (`html_meta.head_cortado_por`,
+# VARCHAR(64)). HTMLParser acepta como nombre de etiqueta cualquier cosa sin
+# espacios —`<metaproperty="og:title"content="...">` es UNA etiqueta—, y una
+# cadena de mas de 64 caracteres tumbaria el INSERT de html_meta en Postgres
+# (y con el, lo pendiente del lote). Un nombre que no lo parece va a `#otro`,
+# que ademas no parte los grupos de `head_cortado` en una fila por errata.
+_NOMBRE_VALIDO = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+_MAX_NOMBRE = 40
+
+
+def _nombre_de_corte(motivo: str) -> str:
+    if motivo.startswith("#"):
+        return motivo
+    if len(motivo) <= _MAX_NOMBRE and _NOMBRE_VALIDO.fullmatch(motivo):
+        return motivo
+    return "#otro"
+
 
 def _rel(valor: str | None) -> set[str]:
     if not valor:
@@ -99,14 +116,26 @@ class _LectorHead(HTMLParser):
         self.cortado_por: str | None = None
         self.fuera: set[str] = set()
         self._plantilla = 0
-        self._extranjero = 0
+        # Pila de contextos SVG/MathML abiertos en el body: "f" = extranjero
+        # (svg, math), "h" = punto de integracion (``foreignObject``), dentro
+        # del cual se vuelve a leer HTML.
+        self._pila: list[str] = []
+
+    @property
+    def _en_extranjero(self) -> bool:
+        return bool(self._pila) and self._pila[-1] == "f"
+
+    def _salir_de_extranjero(self) -> None:
+        """Un elemento HTML dentro de un svg lo cierra hasta el ultimo HTML."""
+        while self._en_extranjero:
+            self._pila.pop()
 
     # -- utilidades -------------------------------------------------------
 
     def _cortar(self, motivo: str) -> None:
         """Lo que no cabe en el head lo cierra y abre el body."""
         if self.modo in ("antes", "head"):
-            self.cortado_por = motivo
+            self.cortado_por = _nombre_de_corte(motivo)
         self.modo = "body"
 
     def _anotar(self, tag: str, attrs: dict[str, str | None]) -> None:
@@ -161,15 +190,17 @@ class _LectorHead(HTMLParser):
             # Y se procesa como elemento del body (sigue abajo).
 
         # -- body --
-        if self._extranjero:
+        if self._en_extranjero:
             if tag in _SALEN_DE_EXTRANJERO:
-                self._extranjero = 0
+                self._salir_de_extranjero()
             else:
                 if tag in _EXTRANJEROS:
-                    self._extranjero += 1
+                    self._pila.append("f")
+                elif tag == "foreignobject":
+                    self._pila.append("h")
                 return
         if tag in _EXTRANJEROS:
-            self._extranjero = 1
+            self._pila.append("f")
             return
         if tag == "template":
             self._plantilla = 1
@@ -182,7 +213,7 @@ class _LectorHead(HTMLParser):
             if self.modo in ("antes", "head", "tras_head") and not self._plantilla:
                 self._cortar(tag)
             return
-        if self._extranjero and tag not in _SALEN_DE_EXTRANJERO:
+        if self._en_extranjero and tag not in _SALEN_DE_EXTRANJERO:
             return
         self.handle_starttag(tag, attrs)
 
@@ -194,8 +225,11 @@ class _LectorHead(HTMLParser):
         if self.modo == "head" and tag in ("head", "body", "html"):
             self.modo = "tras_head"
             return
-        if self._extranjero and tag in _EXTRANJEROS:
-            self._extranjero -= 1
+        if self._pila:
+            if tag in _EXTRANJEROS and self._pila[-1] == "f":
+                self._pila.pop()
+            elif tag == "foreignobject" and self._pila[-1] == "h":
+                self._pila.pop()
 
     def handle_data(self, data):
         # El texto de un <title>, <script>, <noscript>… es su contenido, no un

@@ -126,6 +126,35 @@ def test_head_cortado_agrupa_por_corte_y_perdidos():
     assert _issues(s, j, "meta_fuera_del_head") == []
 
 
+def test_la_severidad_del_corte_sigue_a_lo_que_se_pierde():
+    """Decision 64: robots, googlebot o canonical detras del corte deciden el
+    indice (error); titulo, description o hreflang, no (warning)."""
+    s, j = _censo()
+    robots = _url(s, j, "/r", meta={"head_cortado_por": "img", "fuera_del_head": "robots,title"})
+    gbot = _url(s, j, "/g", meta={"head_cortado_por": "div", "fuera_del_head": "googlebot"})
+    titulo = _url(s, j, "/t", meta={"head_cortado_por": "img", "fuera_del_head": "description,title"})
+    SEOAnalyzer(s, j.id).analyze_html_ignorado()
+
+    filas = {f.url_id: f for f in _issues(s, j, "head_cortado")}
+    assert filas[robots.id].severity == "error"
+    assert filas[robots.id].details["directiva_en_duda"] is True
+    assert filas[gbot.id].severity == "error"
+    assert filas[titulo.id].severity == "warning"
+    assert filas[titulo.id].details["directiva_en_duda"] is False
+
+
+def test_con_render_no_se_afirma_nada_del_head():
+    """Con render el DOM ya no conserva el corte y lo movido al body saldria
+    como `meta_fuera_del_head` con la causa equivocada: no se emite ninguno de
+    los dos, aunque un censo viejo trajera las columnas."""
+    s, j = _censo(render_js=True)
+    _url(s, j, "/a", meta={"head_cortado_por": None, "fuera_del_head": "robots,title"})
+    _url(s, j, "/b", meta={"head_cortado_por": "img", "fuera_del_head": "robots"})
+    SEOAnalyzer(s, j.id).analyze_html_ignorado()
+    assert _issues(s, j, "meta_fuera_del_head") == []
+    assert _issues(s, j, "head_cortado") == []
+
+
 def test_meta_fuera_del_head_sin_corte_y_sin_repetir_otros_avisos():
     s, j = _censo()
     robots = _url(s, j, "/robots", meta={"fuera_del_head": "robots", "title_count": 1})
@@ -140,6 +169,8 @@ def test_meta_fuera_del_head_sin_corte_y_sin_repetir_otros_avisos():
     assert set(filas) == {robots.id, solo.id}
     assert filas[robots.id].details["fuera_del_head"] == ["robots"]
     assert filas[solo.id].details["fuera_del_head"] == ["title"]
+    # Informativo: Next.js 15.2+ los sirve ahi a proposito (streaming metadata).
+    assert {f.severity for f in filas.values()} == {"info"}
 
 
 def test_el_corte_se_lleva_canonical_in_body_y_hreflang_in_body():
@@ -224,8 +255,11 @@ def test_spider_con_render_toma_el_tamano_del_navegador(spider):
         metodo.result = valor
         return {"playwright": True, "playwright_page_methods": [metodo]}
 
-    pagina, _meta = _parse(spider, ROTO, con_resultado(3_400_070))
+    pagina, meta = _parse(spider, ROTO, con_resultado(3_400_070))
     assert pagina["html_bytes_servidos"] == 3_400_070
+    # Con render el head no se mide: el DOM serializado no conserva el corte.
+    assert meta["head_cortado_por"] is None
+    assert meta["fuera_del_head"] is None
     # Si el navegador no lo dio, no se sabe: nunca el tamano del DOM.
     pagina, _meta = _parse(spider, ROTO, con_resultado(None))
     assert pagina["html_bytes_servidos"] is None

@@ -1620,6 +1620,10 @@ class SEOAnalyzer:
     # Los que tienen su propio aviso cuando estan en el body sin que se haya
     # cortado el head (`canonical_in_body`, `hreflang_in_body`).
     _CON_AVISO_PROPIO = frozenset({"canonical", "hreflang"})
+    # Lo que, quedando detras del corte, decide si la pagina entra en el
+    # indice o cual de sus variantes (decision 64: la severidad es la
+    # consecuencia).
+    _PERDIDA_GRAVE = frozenset({"robots", "googlebot", "canonical"})
 
     def analyze_html_ignorado(self) -> None:
         """HTML que Googlebot no llega a leer: mas de 2 MB o un head cortado.
@@ -1637,12 +1641,21 @@ class SEOAnalyzer:
         - ``head_cortado`` (agrupado): un elemento que no va en el head lo
           cerro antes de tiempo y algun metadato quedo detras, en el body.
           Google: "it assumes the end of the <head> element and stops reading".
-        - ``meta_fuera_del_head`` (agrupado): titulo, description o robots en
-          el body sin que nada cortara el head. Google documenta que van en el
-          head y no promete leerlos fuera.
+          Severidad por lo que se pierde (decision 64): ``error`` si queda
+          detras el robots, el googlebot o el canonical —la pagina puede
+          acabar dentro o fuera del indice al reves de lo que pide—, y
+          ``warning`` si solo titulo, description o hreflang.
+        - ``meta_fuera_del_head`` (agrupado, ``info``): titulo, description o
+          robots en el body sin que nada cortara el head. Google documenta que
+          van en el head y no dice que hace con ellos fuera, y hay frameworks
+          que los sirven ahi a proposito (Next.js 15.2+ con streaming metadata
+          los sube al head con JavaScript, y documenta que Googlebot los lee):
+          un dato que mirar, no un fallo afirmado.
 
         Los dos ultimos necesitan las columnas de la decision 102, que solo
-        rellena un rastreo: en un censo anterior no se emiten.
+        rellena un rastreo SIN render (con render el DOM serializado ya no
+        conserva el corte; el spider las deja a NULL). En un censo anterior, o
+        con render, no se emiten.
         """
         logger.debug("Analyzing HTML que Google trunca o ignora ...")
         base = (
@@ -1686,6 +1699,11 @@ class SEOAnalyzer:
                 "afirma nada de ellas. Hay que re-rastrear.", sin_medir)
 
         # -- Head cortado y metadatos en el body ----------------------------
+        if self._render_js:
+            # El DOM montado no dice si el head se corto: lo que el navegador
+            # movio al body pareceria «fuera del head sin corte» (102).
+            self._flush_issues()
+            return
         filas = self.session.execute(
             select(Url.id, HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head,
                    HtmlMeta.title_count, HtmlMeta.meta_description_count)
@@ -1715,17 +1733,24 @@ class SEOAnalyzer:
                 en_body.setdefault(propios, []).append(url_id)
 
         for (cortado_por, perdidos), paginas in cortados.items():
+            grave = bool(self._PERDIDA_GRAVE.intersection(perdidos))
             self._add_issue(
-                paginas[0], "head_cortado", "warning",
+                paginas[0], "head_cortado", "error" if grave else "warning",
                 {"cortado_por": cortado_por,
                  "fuera_del_head": list(perdidos),
+                 # El estado de indexabilidad del crawler sigue leyendo el
+                 # robots que quedo en el body como si contara: no esta
+                 # comprobado que Google lo ignore ahi, y cambiarlo sin medir
+                 # sacaria o meteria paginas del indice. Lo que se afirma es
+                 # que la directiva esta donde Google deja de leer.
+                 "directiva_en_duda": grave,
                  "paginas_afectadas": len(paginas),
                  "paginas_ejemplo": self._urls_de(paginas[:5])},
                 group_key=_clave_de_grupo(f"{cortado_por}|" + ",".join(perdidos)),
             )
         for perdidos, paginas in en_body.items():
             self._add_issue(
-                paginas[0], "meta_fuera_del_head", "warning",
+                paginas[0], "meta_fuera_del_head", "info",
                 {"fuera_del_head": list(perdidos),
                  "paginas_afectadas": len(paginas),
                  "paginas_ejemplo": self._urls_de(paginas[:5])},
