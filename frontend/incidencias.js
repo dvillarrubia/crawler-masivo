@@ -284,6 +284,11 @@ const ISSUE_INFO = {
     google: 'Puede descubrirla por enlaces, pero el sitemap le ayuda a priorizar.',
     arreglo: 'Incluir en el sitemap todas las páginas indexables.',
   },
+  'sitemap_no_indexable': {
+    que: 'Está en el sitemap, pero no es indexable: redirige, da error, lleva noindex, se canonicaliza a otra URL o robots.txt la bloquea. El motivo va en el detalle.',
+    google: 'El sitemap debe listar solo las URLs canónicas que quieres en el buscador. Una entrada que se contradice con la página le hace rastrear de más y fiarse menos del sitemap; con un canonical a otra URL, son dos señales de canónica que no coinciden.',
+    arreglo: 'Decidir cuál de las dos está mal: si la página no debe indexarse, quitarla del sitemap (suele ser una regla del generador, no URL a URL); si debe, quitar el noindex o el canonical. Un salto se cambia por la URL final.',
+  },
   'solo_enlazada_por_redireccion': {
     que: 'Solo se llega a la página a través de una redirección: los enlaces internos apuntan a la URL vieja.',
     google: 'Acaba dejando de rastrear la URL vieja, y con ella el camino a esta.',

@@ -170,3 +170,91 @@
    cambian. Los umbrales (`TOPE_CON_ERRORES*` en `api/routers/results.py`) son
    un juicio, no una medida: lo que sí está medido es que sin tope la nota
    contradecía a Problemas y al Resumen del mismo censo.
+
+<a id="d100"></a>
+100. **Una URL del sitemap que no es indexable es una contradicción, y se dice
+   por qué** (PR 1.3A de `docs/plan/MEJOR_CRAWLER.md`). El sitemap es la lista
+   de URLs canónicas que el sitio pide indexar; Google documenta que solo vayan
+   ahí esas, y que un sitemap con la URL A y un `rel=canonical` a B son dos
+   señales de canónica que no coinciden. Había `sitemap_orphan` (en el sitemap
+   y sin enlaces) y `not_in_sitemap` (indexable y fuera), pero nada miraba lo
+   que el sitemap declara y la página desmiente. `sitemap_no_indexable`: una
+   incidencia por URL interna con `in_sitemap = true` e `indexable` no
+   verdadero, con `details.motivo` = `redireccion` · `4xx` · `5xx` ·
+   `noindex` · `canonicalizada` · `bloqueada_robots` · `sin_contenido`, el
+   código, el `indexability_status` y, en saltos y canonicalizadas, el
+   `destino`. El motivo sale del prefijo de `indexability_status`, que es la
+   única función de indexabilidad (decisión 39): no hay un segundo criterio.
+   Criterios:
+   - **Una por URL, `group_key` NULL.** La entrada que hay que quitar (o la
+     directiva que hay que corregir) es la de esa URL; el par (tipo, URL) ya
+     identifica el hallazgo entre censos (decisión 88). Lo agregado es el
+     desglose por motivo, que va en el log del análisis y sale del resumen por
+     tipo.
+   - **`warning` en todos los motivos.** Ninguno saca del índice una página
+     indexable —eso es lo que reserva `error` (decisiones 64 y 92)— y ninguno
+     es solo informativo: cada entrada le hace a Google rastrear de más y
+     fiarse menos del sitemap, que es la señal de sitemap sucio que documenta.
+     El 404 o el 500 ya llevan su `4xx_error` / `5xx_error` (`error`) por la
+     página; esta dice otra cosa y se arregla en otro sitio (el generador del
+     sitemap), igual que Search Console los separa como «URL enviada…».
+   - **Sustituye a `sitemap_orphan` en las no indexables** (decisión 36).
+     `sitemap_orphan` le decía a un noindex del sitemap «enlázala desde su
+     sección», que es el consejo contrario. Ahora exige `indexable` no falso.
+   - **Lo que no se sabe no se afirma.** Un **429** es el sitio frenando al
+     rastreador, no lo que verá Google, y «Sin respuesta» no dice nada de la
+     página: no se emiten, se cuentan en el log como «sin comprobar». Un 403
+     sí se emite: es lo que respondió el sitio, y no hay forma de distinguir
+     un WAF de un permiso. Las URLs externas del sitemap tampoco: son otro
+     problema (un sitemap solo puede listar su host).
+   - **Sitemap leído a medias** (decisión 50): las que no se leyeron están a
+     NULL y no se juzgan; las que sí se leyeron están declaradas igual, así que
+     se avisan. Sin ningún `in_sitemap = true` no corre nada.
+   - **No lee `links`**, solo `urls` y `html_meta`: vale igual en un censo con
+     los enlaces archivados (decisión 95).
+
+   Medido el 2026-10-16 ejecutando `analyze_sitemap` sobre los censos de la BD
+   local dentro de una transacción que acaba en `ROLLBACK`:
+
+   | censo | URLs en sitemap | `sitemap_no_indexable` | motivos | `sitemap_orphan` antes → después |
+   |---|---|---|---|---|
+   | penguin | 25.785 | **5.906** | 5.828 noindex, 56 canonicalizada, 13 4xx, 8 5xx, 1 salto | 19.036 → 13.187 |
+   | www.uoc.edu | 15.644 | **1.404** | 782 salto, 501 5xx, 87 4xx, 34 noindex | 6.835 → 6.815 |
+   | Druni | 45.005 | **135** | 119 salto, 16 canonicalizada | 9.266 → 9.265 |
+   | Lopesan | 68 | **59** | 44 salto, 15 canonicalizada | 0 → 0 |
+   | progym, CST | — | 0 | sin datos de sitemap (`in_sitemap` NULL): no corre | — |
+
+   Fuera quedan 122 URLs de penguin con 429 y 78 de Druni y 24 de www.uoc.edu
+   sin respuesta. En Lopesan, **59 de sus 68 entradas** no son indexables:
+   el sitemap entero está sucio. En penguin, las 5.849 que dejan de ser
+   `sitemap_orphan` son las noindex y canonicalizadas que pasan a
+   `sitemap_no_indexable` (5.825 + 24): ningún hallazgo se pierde, cambia el
+   consejo.
+
+   Revisados a mano (estado del censo y, el 16-oct, `curl` al sitio):
+   - Druni `/marcas/brow-tint` → 301 a `/marcas/syoss`: **cierto**, sigue
+     igual. Son fichas de producto o marca retiradas que el sitemap sigue
+     declarando.
+   - www.uoc.edu `/portal/en/25-anys/index.html` → 404: **cierto**, sigue
+     igual, y la enlazan 9 páginas.
+   - penguin `/es/991398-david-sanglas` (ficha de autor) → `noindex, nofollow`
+     en el sitemap: **cierto**, sigue igual. Son las 5.828: el generador
+     incluye fichas de autor que la plantilla pone en noindex.
+   - Lopesan `/en/hotels` canonical a `/es/hoteles` en el censo del 6-oct:
+     **cierto en el censo, ya no en el sitio**: hoy sirve canonical a sí
+     misma. Era el canonical lo que estaba mal, no el sitemap, que es por lo
+     que la ficha dice «decidir cuál de las dos está mal».
+   - Lopesan `/es/politica-empresa` → 301 a `/es/corporativa/politica-esg`, y
+     sus versiones `/en/` y `/de/` canonicalizadas a ella: **cierto** en el
+     censo; cadena de contradicciones dentro del propio sitemap.
+
+   Fuera de esta decisión (parte B de 1.3): la tabla `sitemap_entries`
+   (`url_hash`, fichero, `lastmod`), conectar `parse_sitemap_entradas`, y con
+   ella `en_varios_sitemaps`, `sitemap_supera_limite` y `lastmod_futuro`, más
+   el fichero de origen en la ficha de cada URL. Exige re-rastrear y entra en
+   `shared/almacenamiento.py` y en el borrado en masa. Hoy no se sabe **de qué
+   fichero** viene cada entrada, así que el aviso no puede decir «arregla el
+   sitemap de autores». Y una pista sin comprobar: Lopesan tiene 68 URLs en el
+   sitemap de un sitemapindex de Liferay con decenas de hijos, y 1.813
+   `not_in_sitemap`; conviene mirar si la pertenencia casa bien (por ejemplo,
+   `robots.txt` lo declara como `https://lopesan.com:443/sitemap.xml`).

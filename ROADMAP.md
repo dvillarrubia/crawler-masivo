@@ -37,7 +37,9 @@ milestone.
 - Duplicados exactos y casi duplicados (páginas que comparten el 90 % del texto
   o más).
 - Cadenas de redirección, imágenes sin alt, seguridad, contenido escaso, URLs
-  problemáticas, páginas huérfanas y cobertura del sitemap.
+  problemáticas, páginas huérfanas y cobertura del sitemap, incluidas las URLs
+  que el sitemap declara y no se pueden indexar (saltos, errores, noindex,
+  canonicalizadas), con el motivo de cada una.
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;

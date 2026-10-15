@@ -3446,6 +3446,15 @@ class SEOAnalyzer:
           plain ``orphan_page``.
         - ``not_in_sitemap``: indexable internal 200 HTML page missing from
           the sitemap — should probably be listed.
+        - ``sitemap_no_indexable`` (decision 100): URL declarada en el sitemap
+          que no es indexable — salto, 4xx, 5xx, noindex, canonicalizada a
+          otra, bloqueada por robots.txt o sin contenido —, una por URL y con el
+          motivo en ``details``. Sustituye a ``sitemap_orphan`` en esas
+          paginas: lo que hay que arreglar es la contradiccion, no el enlazado
+          (decision 36).
+
+        No lee ``links``: solo ``urls`` y ``html_meta``, asi que vale igual en
+        un censo con los enlaces archivados (decision 95).
         """
         logger.debug("Analyzing sitemap coverage ...")
 
@@ -3466,6 +3475,10 @@ class SEOAnalyzer:
                 Url.status_code == 200,
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+                # Una no indexable del sitemap ya lleva sitemap_no_indexable,
+                # y «enlazala» seria el consejo equivocado: lo que sobra es la
+                # entrada del sitemap o la directiva (decision 100).
+                Url.indexable.isnot(False),
                 ~_es_destino_de_redireccion(),
             )
         ).all()
@@ -3473,6 +3486,8 @@ class SEOAnalyzer:
         for (url_id,) in rows:
             if url_id not in sin_enlazar:
                 self._add_issue(url_id, "sitemap_orphan", "warning")
+
+        self._sitemap_no_indexable()
 
         # Indexable page the sitemap forgot.
         rows = self.session.execute(
@@ -3489,6 +3504,62 @@ class SEOAnalyzer:
             self._add_issue(url_id, "not_in_sitemap", "info")
 
         self._flush_issues()
+
+    def _sitemap_no_indexable(self) -> None:
+        """URLs que el sitemap declara y que Google no va a indexar (decision 100).
+
+        El sitemap es la lista de URLs canonicas que el sitio pide indexar;
+        cada entrada que salta, falla, lleva noindex o se canonicaliza a otra
+        es una instruccion que la propia pagina contradice. Una incidencia por
+        URL —es la URL la que hay que quitar del sitemap, o la directiva la que
+        esta mal— con el motivo, el codigo y el destino en ``details``.
+
+        Lo que no se sabe no se afirma: un 429 es el sitio frenando al
+        rastreador y una URL sin respuesta no dice como la ve Google, asi que
+        no se emiten (se cuentan en el log).
+        """
+        rows = self.session.execute(
+            select(
+                Url.id, Url.status_code, Url.indexability_status,
+                Url.redirect_url, HtmlMeta.canonical_href,
+                HtmlMeta.canonical_header,
+            )
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(True),
+                Url.is_internal.is_(True),
+                Url.indexable.isnot(True),
+            )
+        ).all()
+
+        por_motivo: dict[str, int] = defaultdict(int)
+        sin_comprobar = 0
+        for url_id, codigo, estado, salto, canonical, canonical_cab in rows:
+            motivo = motivo_sitemap_no_indexable(codigo, estado)
+            if motivo is None:
+                sin_comprobar += 1
+                continue
+            por_motivo[motivo] += 1
+            details: dict[str, Any] = {
+                "motivo": motivo,
+                "status_code": codigo,
+                "indexability_status": estado,
+            }
+            if motivo == "redireccion" and salto:
+                details["destino"] = salto
+            elif motivo == "canonicalizada" and (canonical or canonical_cab):
+                details["destino"] = canonical or canonical_cab
+            self._add_issue(url_id, "sitemap_no_indexable", "warning", details)
+
+        if por_motivo or sin_comprobar:
+            logger.info(
+                "Sitemap: %d URLs declaradas no indexables (%s); %d sin "
+                "comprobar (429 o sin respuesta)",
+                sum(por_motivo.values()),
+                ", ".join(f"{m}={n}" for m, n in sorted(por_motivo.items())),
+                sin_comprobar,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -3655,6 +3726,34 @@ class _Fichas:
                 return cadena, actual, False
             actual = sig
         return cadena, None, False
+
+
+# Prefijo de `indexability_status` (shared/indexabilidad.py) -> motivo de
+# `sitemap_no_indexable`. Lo que no esta aqui ("Sin respuesta", "Indexable",
+# NULL) no se afirma.
+_MOTIVOS_SITEMAP = (
+    ("Redirect", "redireccion"),
+    ("Client Error", "4xx"),
+    ("Server Error", "5xx"),
+    ("Noindex", "noindex"),
+    ("Canonicalised", "canonicalizada"),
+    ("Blocked by robots.txt", "bloqueada_robots"),
+    ("Sin contenido", "sin_contenido"),
+)
+
+
+def motivo_sitemap_no_indexable(status_code, indexability_status) -> str | None:
+    """Por que una URL del sitemap no es indexable, o None si no se sabe.
+
+    El 429 se descarta: es el sitio frenando al rastreador, no lo que vera
+    Google (decision 100).
+    """
+    if status_code == 429 or not indexability_status:
+        return None
+    for prefijo, motivo in _MOTIVOS_SITEMAP:
+        if indexability_status.startswith(prefijo):
+            return motivo
+    return None
 
 
 def _es_destino_de_redireccion():
