@@ -237,6 +237,8 @@ tr[data-tip]:hover::after{display:none}
 .badge-completed{color:var(--green);background:var(--green-bg);border:1px solid rgba(46,139,87,.2)}.badge-completed::before{background:var(--green)}
 .badge-failed{color:var(--red);background:var(--red-bg);border:1px solid rgba(211,47,47,.2)}.badge-failed::before{background:var(--red)}
 .badge-cancelled{color:var(--orange);background:var(--orange-bg);border:1px solid rgba(230,126,34,.2)}.badge-cancelled::before{background:var(--orange)}
+/* Datos estructurados `info` (decision 97): nada que arreglar, en el azul de la gravedad info y sin la animacion de badge-running. */
+.badge-info{color:var(--blue);background:var(--blue-bg);border:1px solid rgba(41,121,181,.2)}.badge-info::before{background:var(--blue)}
 .severity-error{color:var(--red)}.severity-warning{color:var(--orange)}.severity-info{color:var(--blue)}
 
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.8)}}
@@ -266,6 +268,7 @@ input:hover:not(:focus),textarea:hover:not(:focus),select:hover:not(:focus){
 textarea{resize:vertical;min-height:80px}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:.65rem}
 .form-hint{font-size:.68rem;color:var(--text-dim);margin-top:.2rem}
+.aviso-ua-bot{color:var(--text);border-left:3px solid var(--orange);padding:.35rem .6rem}
 .checkbox-label{display:flex;align-items:center;gap:.45rem;font-size:.82rem;cursor:pointer;transition:color .15s}
 .checkbox-label:hover{color:var(--text)}
 input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-radius:2px}

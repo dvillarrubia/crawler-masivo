@@ -122,3 +122,52 @@ def test_la_validacion_se_guarda_en_TODOS_los_bloques():
     assert len(bloques) == 30
     assert all(b.validation_status == "warning" for b in bloques)
     assert all(b.validation_issues for b in bloques)
+
+
+def test_el_faq_de_plantilla_es_UN_aviso_informativo():
+    """Un FAQ de plantilla en 30 paginas: una fila `info`, no 30 errores."""
+    s, j = _montar()
+    for n in range(30):
+        _pagina_con_bloque(s, j, n, {"@type": "FAQPage", "mainEntity": []})
+    SEOAnalyzer(s, j.id).analyze_structured_data()
+    s.flush()
+
+    filas = s.query(Issue).filter(Issue.job_id == j.id).all()
+    assert [(f.issue_type, f.severity) for f in filas] == [
+        ("structured_data_info", "info")]
+    assert filas[0].details["paginas_afectadas"] == 30
+    bloques = s.query(StructuredData).all()
+    assert all(b.validation_status == "info" for b in bloques)
+
+
+def test_un_faq_dentro_de_un_bloque_con_warning_sigue_dando_su_aviso_info():
+    """El bloque se queda con el peor nivel; el aviso de retirado va aparte.
+
+    Antes, un WebPage con una recomendada que falta y un FAQPage anidado daba
+    UNA `structured_data_warning` con el aviso de «retirado» dentro, ninguna
+    `structured_data_info`, y el warning del WebPage salia en un grupo distinto
+    del de las paginas sin FAQ (decision 73).
+    """
+    s, j = _montar()
+    org_sin_same_as = {"@type": "Organization", "name": "Tienda",
+                       "logo": "https://x.com/l.png", "url": "https://x.com/"}
+    for n in range(10):
+        _pagina_con_bloque(s, j, n, {
+            **org_sin_same_as,
+            "subjectOf": {"@type": "FAQPage", "mainEntity": []},
+        })
+    for n in range(10, 20):
+        _pagina_con_bloque(s, j, n, dict(org_sin_same_as))
+    SEOAnalyzer(s, j.id).analyze_structured_data()
+    s.flush()
+
+    filas = s.query(Issue).filter(Issue.job_id == j.id).all()
+    por_tipo = {f.issue_type: f for f in filas}
+    assert sorted(por_tipo) == ["structured_data_info", "structured_data_warning"]
+    assert len(filas) == 2, "el warning de Organization es UN grupo, lleve FAQ o no"
+    assert por_tipo["structured_data_warning"].details["paginas_afectadas"] == 20
+    assert por_tipo["structured_data_info"].details["paginas_afectadas"] == 10
+    assert all("FAQPage" in m for m in
+               por_tipo["structured_data_info"].details["validation_issues"])
+    con_faq = s.query(StructuredData).join(Url).filter(Url.url == "https://x.com/p0").one()
+    assert con_faq.validation_status == "warning", "el bloque guarda el peor nivel"

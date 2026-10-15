@@ -9,12 +9,12 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92 |
-| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80 |
+| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
@@ -121,6 +121,8 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 93 | Callarse no basta: el censo de referencia se pone al día solo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d93) |
 | 94 | Un enlace repetido en la misma pagina es UNA fila, no tres | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d94) |
 | 95 | Los enlaces de un censo superado se archivan en Parquet | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d95) |
+| 97 | Un resultado enriquecido que Google ya no muestra no tiene propiedades obligatorias | [`datos-estructurados`](datos-estructurados.md#d97) |
+| 98 | Un preset de bot cambia también qué reglas de robots.txt se obedecen, y no engaña a un WAF | [`render-y-descarga`](render-y-descarga.md#d98) |
 
 ## Anadir una decision
 

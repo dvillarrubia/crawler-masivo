@@ -164,3 +164,20 @@ def test_sin_js_check_un_rastreo_con_render_es_fiable():
 def test_sin_nada_que_mirar_se_queda_sin_respuesta():
     """Vacio es "no se sabe", y es distinto de "no es fiable"."""
     assert _fiable(resumen=None, js_check=None, config={"render_js": False}) is None
+
+
+@pytest.mark.parametrize("estados, esperado", [
+    ("ok|info", "info"),
+    ("info|ok", "info"),
+    ("info|warning|ok", "warning"),
+    ("info|error", "error"),
+    ("ok", "ok"),
+    ("raro|ok", "ok"),
+    (None, None),
+    ("", None),
+])
+def test_el_estado_de_datos_estructurados_de_una_pagina_es_el_peor(estados, esperado):
+    """`info` (FAQPage/HowTo retirados, decision 97) entre warning y ok."""
+    from api.routers.results import _peor_validacion
+
+    assert _peor_validacion(estados) == esperado

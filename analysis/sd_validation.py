@@ -48,12 +48,9 @@ REQUISITOS: dict[str, dict[str, list]] = {
         "recomendadas": ["recipeingredient", "recipeinstructions",
                          "aggregaterating", "author", "datepublished"],
     },
-    "faqpage": {"obligatorias": ["mainentity"]},
+    # FAQPage y HowTo NO estan aqui: Google retiro los dos resultados
+    # (`RESULTADOS_RETIRADOS`). QAPage es otro resultado y sigue vivo.
     "qapage": {"obligatorias": ["mainentity"]},
-    "howto": {
-        "obligatorias": ["name", "step"],
-        "recomendadas": ["image", "totaltime", "tool", "supply"],
-    },
     "breadcrumblist": {"obligatorias": ["itemlistelement"]},
     # Tampoco para Organization: «There are no required properties». El
     # `name` es recomendado como el resto, igual que se hizo con Article
@@ -101,6 +98,48 @@ REQUISITOS: dict[str, dict[str, list]] = {
     },
     "person": {"obligatorias": ["name"]},
 }
+
+# Tipos cuyo resultado enriquecido Google ya NO muestra (decision 97). Pedirles
+# propiedades «obligatorias» era mandar al cliente a completar un marcado que
+# no da nada en la busqueda: un FAQPage sin `mainEntity` salia como error, con
+# el mismo peso que un Product sin precio. Ahora se dice una vez, como aviso
+# informativo y con la fuente, y no se exige nada mas. El marcado no es
+# incorrecto —sigue siendo schema.org valido y otros buscadores pueden leerlo—,
+# asi que no es un error ni pide quitarlo.
+#
+# Comprobado el 2026-10-16 en el registro de cambios de Search Central:
+# - FAQ: limitado a sitios de gobierno y salud con autoridad el 2023-09-14;
+#   retirado del todo el 2026-05-07 y su documentacion borrada el 2026-06-15.
+# - HowTo: retirado y documentacion borrada el 2023-09-14.
+FUENTE_RETIRADAS = "https://developers.google.com/search/updates"
+RESULTADOS_RETIRADOS: dict[str, dict[str, str]] = {
+    "faqpage": {
+        "desde": "2026-05-07",
+        "historia": ("limitado a sitios de gobierno y salud con autoridad "
+                     "desde el 2023-09-14 y retirado del todo el 2026-05-07"),
+        "fuente": FUENTE_RETIRADAS,
+    },
+    "howto": {
+        "desde": "2023-09-14",
+        "historia": "retirado el 2023-09-14",
+        "fuente": FUENTE_RETIRADAS,
+    },
+}
+
+
+def resultado_retirado(tipo: str) -> dict[str, str] | None:
+    """Si Google ya no muestra el resultado enriquecido de este tipo."""
+    clave = (tipo or "").rsplit("/", 1)[-1].lstrip("@").lower()
+    return RESULTADOS_RETIRADOS.get(clave)
+
+
+def mensaje_retirado(tipo: str, retirado: dict[str, str]) -> str:
+    return (
+        f"{tipo}: Google ya no muestra este resultado enriquecido "
+        f"({retirado['historia']}; fuente: {retirado['fuente']}). El marcado "
+        f"no es incorrecto, pero completarlo no da nada en la busqueda"
+    )
+
 
 # Subtipos que comparten requisitos con un tipo base.
 ALIAS_TIPOS: dict[str, str] = {
@@ -210,7 +249,8 @@ def _entidades_anidadas(item: dict, profundidad: int = 0):
         for candidato in candidatos:
             if not isinstance(candidato, dict) or _es_referencia(candidato):
                 continue
-            if sd_item_types(candidato) and requisitos_de(sd_item_types(candidato)[0]):
+            tipos = sd_item_types(candidato)
+            if tipos and (requisitos_de(tipos[0]) or resultado_retirado(tipos[0])):
                 yield candidato
             yield from _entidades_anidadas(candidato, profundidad + 1)
 
@@ -220,8 +260,9 @@ def validate_sd_item(
 ) -> list[tuple[str, str]]:
     """Problemas de una entidad, como ``(nivel, mensaje)``.
 
-    *nivel* es ``"error"`` (sin esto no hay resultado enriquecido) o
-    ``"warning"`` (sale, pero peor).
+    *nivel* es ``"error"`` (sin esto no hay resultado enriquecido),
+    ``"warning"`` (sale, pero peor) o ``"info"`` (es de un tipo cuyo resultado
+    Google ya no muestra: `RESULTADOS_RETIRADOS`).
 
     `anidada` cambia dos cosas, y las dos salen de medir en un censo real:
     no se exige lo que el anidamiento ya resuelve (`IMPLICITAS_AL_ANIDAR`) y no
@@ -257,6 +298,10 @@ def validate_sd_item(
 
     problemas: list[tuple[str, str]] = []
     for tipo in sd_item_types(item):
+        retirado = resultado_retirado(tipo)
+        if retirado:
+            problemas.append(("info", mensaje_retirado(tipo, retirado)))
+            continue
         reqs = requisitos_de(tipo)
         if not reqs:
             continue
@@ -302,12 +347,31 @@ def validate_sd_item(
 def validate_structured_data(
     raw, json_invalido: str | None = None
 ) -> tuple[str, list[str]]:
-    """Validate a structured-data block.
+    """El veredicto de un bloque: ``(peor nivel, mensajes)``.
 
-    Returns ``(status, issues)`` where *status* is ``"ok"``, ``"warning"``
-    (present but missing a required property), or ``"error"`` (missing
-    ``@type`` entirely). Handles JSON-LD ``@graph`` containers and bare
-    lists. Any unexpected shape is treated as ``"ok"`` (no false positives).
+    Envoltorio de `problemas_structured_data`, que es lo que hay que usar
+    cuando importa el nivel de CADA mensaje (las incidencias: decision 97).
+    """
+    problemas = problemas_structured_data(raw, json_invalido=json_invalido)
+    if not problemas:
+        return ("ok", [])
+    # Manda el peor: un bloque con una obligatoria que falta es un error
+    # aunque tambien le falten recomendadas.
+    niveles = {n for n, _ in problemas}
+    estado = next(n for n in ("error", "warning", "info") if n in niveles)
+    return (estado, [m for _, m in problemas])
+
+
+def problemas_structured_data(
+    raw, json_invalido: str | None = None
+) -> list[tuple[str, str]]:
+    """Los problemas de un bloque, como ``(nivel, mensaje)``.
+
+    *nivel* es ``"error"`` (falta ``@type`` o una obligatoria), ``"warning"``
+    (falta una recomendada) o ``"info"`` (un tipo cuyo resultado Google
+    retiro). Lista vacia = bloque bien. Abre los ``@graph`` de JSON-LD y las
+    listas sueltas; una forma inesperada no da problemas (sin falsos
+    positivos).
 
     *json_invalido* es el motivo con que el extractor marco un JSON-LD que no
     es JSON estricto (coma final, comentario). Es un error por si solo: Google
@@ -326,7 +390,7 @@ def validate_structured_data(
         ))
         if raw is None:
             # Ni un lector permisivo lo pudo leer: no hay nada mas que validar.
-            return ("error", [m for _, m in previos])
+            return previos
 
     items: list[dict] = []
     if isinstance(raw, dict):
@@ -343,9 +407,4 @@ def validate_structured_data(
     problemas: list[tuple[str, str]] = list(previos)
     for it in items:
         problemas += validate_sd_item(it)
-    if not problemas:
-        return ("ok", [])
-    # Manda el peor: un bloque con una obligatoria que falta es un error
-    # aunque tambien le falten recomendadas.
-    estado = "error" if any(n == "error" for n, _ in problemas) else "warning"
-    return (estado, [m for _, m in problemas])
+    return problemas

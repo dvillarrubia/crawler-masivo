@@ -36,7 +36,7 @@ from shared.config import (
     TITLE_MAX_PIXELS,
     TITLE_MIN_LEN,
 )
-from analysis.sd_validation import validate_structured_data
+from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
@@ -1113,13 +1113,30 @@ class SEOAnalyzer:
         por_veredicto: dict[tuple, list[int]] = {}
 
         for sd_id, url_id, schema_type, raw, json_invalido in rows:
-            status, issues = validate_structured_data(raw, json_invalido=json_invalido)
+            problemas = problemas_structured_data(raw, json_invalido=json_invalido)
+            niveles = {n for n, _ in problemas}
+            status = next(
+                (n for n in ("error", "warning", "info") if n in niveles), "ok"
+            )
+            issues = [m for _, m in problemas]
             clave = (status, json.dumps(issues or None, sort_keys=True))
             por_veredicto.setdefault(clave, []).append(sd_id)
-            if status in ("error", "warning"):
-                por_hallazgo.setdefault(
-                    (status, schema_type, tuple(issues or ())), []
-                ).append(url_id)
+            # El bloque se queda con el PEOR nivel, pero el aviso de «resultado
+            # retirado» (decision 97) es su propio hallazgo. Si no, un FAQPage
+            # anidado en un bloque al que le falta una recomendada se emitia
+            # como `structured_data_warning` con el aviso dentro, sin ninguna
+            # `structured_data_info` para esa pagina; y el «falta tal
+            # recomendada» se partia en dos grupos segun la pagina llevara FAQ
+            # o no (decision 73: un aviso por hallazgo). Errores y warnings del
+            # mismo bloque siguen juntos, como siempre: son el mismo marcado
+            # que arreglar.
+            resto = tuple(m for n, m in problemas if n != "info")
+            retirados = tuple(m for n, m in problemas if n == "info")
+            if resto:
+                nivel = "error" if "error" in niveles else "warning"
+                por_hallazgo.setdefault((nivel, schema_type, resto), []).append(url_id)
+            if retirados:
+                por_hallazgo.setdefault(("info", schema_type, retirados), []).append(url_id)
 
         for (status, issues_json), ids in por_veredicto.items():
             valores = {"validation_status": status,

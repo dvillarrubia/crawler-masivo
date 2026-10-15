@@ -509,7 +509,7 @@ class StructuredData(Base):
     raw = Column(JSON, nullable=True)
     format = Column(String(20), nullable=False)  # jsonld, microdata, rdfa
     schema_type = Column(String(128), nullable=True)
-    validation_status = Column(String(10), nullable=True)  # ok, warning, error
+    validation_status = Column(String(10), nullable=True)  # ok, info, warning, error
     validation_issues = Column(JSON, nullable=True)
     # Por que el bloque JSON-LD no es JSON estricto (coma final, comentario):
     # Google lo descarta entero, aunque un lector permisivo lo lea y `raw`
