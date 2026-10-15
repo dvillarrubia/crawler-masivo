@@ -186,7 +186,12 @@
    `Chrome/W.X.Y.Z` y lo sustituyen por la versión actual: va
    `CHROME_EVERGREEN` (la estable de Chrome de esa fecha, 155.0.8059.84) en un
    solo sitio. El preset `googlebot` de antes (cadena de escritorio sin Chrome)
-   se conserva para que los configs guardados con él sigan casando.
+   se conserva para que los configs guardados con él sigan casando. Por lo
+   mismo, subir `CHROME_EVERGREEN` no deja huérfanos los perfiles guardados:
+   `presetDeUserAgent` casa los presets que la llevan
+   (`UA_PRESETS_EVERGREEN`) ignorando la versión de Chrome, así que un perfil
+   con la 155 se sigue abriendo como «Googlebot smartphone» y se relanza con la
+   versión del día, que es lo que hace el bot de verdad.
    Dos consecuencias que el formulario dice con un aviso cuando el UA —de
    preset o escrito a mano— lleva un token de bot:
    - **robots.txt se evalúa con ese UA.** El `RobotsTxtMiddleware` de Scrapy

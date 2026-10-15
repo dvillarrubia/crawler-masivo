@@ -114,3 +114,20 @@
    Los tests fijan las dos fechas (`RETIRADOS_ESPERADOS`) y que ningún tipo
    retirado vuelva a la tabla de requisitos. No hace falta re-rastrear: basta
    **re-analizar**.
+   Un bloque guarda el PEOR nivel en `validation_status`, pero el aviso de
+   retirado es su propio hallazgo: un FAQPage anidado en un WebPage al que le
+   falta una recomendada da su `structured_data_info` **y** el
+   `structured_data_warning` del WebPage, este en el mismo grupo que el de las
+   páginas sin FAQ (`problemas_structured_data` devuelve el nivel de cada
+   mensaje). Errores y warnings del mismo bloque siguen siendo una sola
+   incidencia, como antes.
+   **Ojo al re-analizar un censo ya entregado: sus cifras de `/insights`
+   cambian.** Un FAQPage sin `mainEntity` o un HowTo sin `name`/`step` estaban
+   en `validation_status='error'`; pasan a `info`. Bajan `sd_errors` y
+   `pct_errors` (`_calc_structured_data`), sube la nota de Datos
+   Estructurados y puede desaparecer la recomendación «Corregir errores de
+   validacion». Y si esa `structured_data_error` era el único error del
+   censo, deja de aplicarse el tope de 79 de la decisión 92, así que también
+   puede subir la nota global. No es un fallo: esos «errores» eran de un
+   resultado que Google ya no muestra. Si las cifras no cuadran con el informe
+   entregado, la explicación es esta (como en la decisión 38).

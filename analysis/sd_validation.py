@@ -347,12 +347,31 @@ def validate_sd_item(
 def validate_structured_data(
     raw, json_invalido: str | None = None
 ) -> tuple[str, list[str]]:
-    """Validate a structured-data block.
+    """El veredicto de un bloque: ``(peor nivel, mensajes)``.
 
-    Returns ``(status, issues)`` where *status* is ``"ok"``, ``"info"`` (a type
-    whose rich result Google retired), ``"warning"`` (missing a recommended
-    property) or ``"error"`` (missing ``@type`` or a required property). Handles JSON-LD ``@graph`` containers and bare
-    lists. Any unexpected shape is treated as ``"ok"`` (no false positives).
+    Envoltorio de `problemas_structured_data`, que es lo que hay que usar
+    cuando importa el nivel de CADA mensaje (las incidencias: decision 97).
+    """
+    problemas = problemas_structured_data(raw, json_invalido=json_invalido)
+    if not problemas:
+        return ("ok", [])
+    # Manda el peor: un bloque con una obligatoria que falta es un error
+    # aunque tambien le falten recomendadas.
+    niveles = {n for n, _ in problemas}
+    estado = next(n for n in ("error", "warning", "info") if n in niveles)
+    return (estado, [m for _, m in problemas])
+
+
+def problemas_structured_data(
+    raw, json_invalido: str | None = None
+) -> list[tuple[str, str]]:
+    """Los problemas de un bloque, como ``(nivel, mensaje)``.
+
+    *nivel* es ``"error"`` (falta ``@type`` o una obligatoria), ``"warning"``
+    (falta una recomendada) o ``"info"`` (un tipo cuyo resultado Google
+    retiro). Lista vacia = bloque bien. Abre los ``@graph`` de JSON-LD y las
+    listas sueltas; una forma inesperada no da problemas (sin falsos
+    positivos).
 
     *json_invalido* es el motivo con que el extractor marco un JSON-LD que no
     es JSON estricto (coma final, comentario). Es un error por si solo: Google
@@ -371,7 +390,7 @@ def validate_structured_data(
         ))
         if raw is None:
             # Ni un lector permisivo lo pudo leer: no hay nada mas que validar.
-            return ("error", [m for _, m in previos])
+            return previos
 
     items: list[dict] = []
     if isinstance(raw, dict):
@@ -388,10 +407,4 @@ def validate_structured_data(
     problemas: list[tuple[str, str]] = list(previos)
     for it in items:
         problemas += validate_sd_item(it)
-    if not problemas:
-        return ("ok", [])
-    # Manda el peor: un bloque con una obligatoria que falta es un error
-    # aunque tambien le falten recomendadas.
-    niveles = {n for n, _ in problemas}
-    estado = next(n for n in ("error", "warning", "info") if n in niveles)
-    return (estado, [m for _, m in problemas])
+    return problemas

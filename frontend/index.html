@@ -3248,7 +3248,7 @@
                         <div class="structured-item card mb-1" style="padding:.75rem">
                           <div class="flex items-center gap-1 mb-1">
                             <span class="badge badge-pending" x-text="s.format"></span>
-                            <span class="badge" :class="s.validation_status === 'ok' ? 'badge-completed' : s.validation_status === 'error' ? 'badge-failed' : 'badge-cancelled'"
+                            <span class="badge" :class="({ok: 'badge-completed', error: 'badge-failed', warning: 'badge-cancelled', info: 'badge-info'})[s.validation_status] || 'badge-pending'"
                               x-text="s.validation_status || '—'"></span>
                             <template x-if="s.schema_type">
                               <span style="font-weight:500" x-text="s.schema_type"></span>

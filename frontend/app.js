@@ -31,6 +31,20 @@ const UA_PRESETS = {
   // docs.perplexity.ai/guides/bots
   perplexitybot: 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)',
 };
+// Los presets que llevan `CHROME_EVERGREEN` dentro. Al subir la constante, un
+// cliente o un perfil guardado con la version anterior tiene que seguir
+// reconociendose como ese preset —y relanzarse con la version de hoy, que es
+// lo que hace el bot de verdad—, no caer a «Personalizado» con una cadena
+// congelada. Es el mismo motivo por el que se conserva el `googlebot` antiguo.
+const UA_PRESETS_EVERGREEN = ['googlebot_mobile', 'bingbot'];
+const RE_VERSION_CHROME = /Chrome\/[0-9.]+/;
+function presetDeUserAgent(ua) {
+  if (!ua) return null;
+  const exacto = Object.keys(UA_PRESETS).find(k => UA_PRESETS[k] === ua);
+  if (exacto) return exacto;
+  const sinVersion = s => s.replace(RE_VERSION_CHROME, 'Chrome/*');
+  return UA_PRESETS_EVERGREEN.find(k => sinVersion(UA_PRESETS[k]) === sinVersion(ua)) || null;
+}
 const UA_LABELS = {
   chrome_win:  'Chrome - Windows',
   chrome_mac:  'Chrome - macOS',
@@ -3309,7 +3323,7 @@ function _formDesdeConfig(f, cfg) {
    'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
     .forEach(k => poner(k, cfg[k]));
   if (cfg.user_agent) {
-    const preset = Object.keys(UA_PRESETS).find(k => UA_PRESETS[k] === cfg.user_agent);
+    const preset = presetDeUserAgent(cfg.user_agent);
     f.user_agent_preset = preset || 'custom';
     if (!preset) f.user_agent_custom = cfg.user_agent;
   }

@@ -134,3 +134,36 @@ def test_el_orden_de_middlewares_es_el_que_supone_el_test():
     robots = DOWNLOADER_MIDDLEWARES_BASE[
         "scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware"]
     assert robots < s.DOWNLOADER_MIDDLEWARES["seo_crawler.middlewares.UserAgentMiddleware"]
+
+
+def test_un_preset_evergreen_guardado_con_otra_version_sigue_siendo_ese_preset():
+    """Subir `CHROME_EVERGREEN` no puede dejar huerfanos los perfiles guardados.
+
+    `presetDeUserAgent` en `app.js` casa los presets que llevan la version de
+    Chrome dentro ignorando esa version. Aqui se comprueba con los mismos datos
+    que lee la funcion: que la lista de evergreen son EXACTAMENTE los que usan
+    la constante (si se anade otro y se olvida la lista, falla) y que, quitada
+    la version, ninguno se confunde con otro preset.
+    """
+    m = re.search(r"const RE_VERSION_CHROME = /(.+)/;", APP_JS)
+    assert m, "no se encuentra RE_VERSION_CHROME en app.js"
+    patron = re.compile(m.group(1).replace("\\/", "/"))
+    lista = re.search(r"const UA_PRESETS_EVERGREEN = \[([^\]]*)\]", APP_JS).group(1)
+    evergreen = set(re.findall(r"'([a-z_]+)'", lista))
+    inicio = APP_JS.index("const UA_PRESETS = {")
+    cuerpo = APP_JS[inicio:APP_JS.index("\n};", inicio)]
+    con_constante = set(re.findall(r"^\s*([a-z_]+):.*\$\{CHROME_EVERGREEN\}", cuerpo, re.M))
+    assert evergreen == con_constante
+
+    def sin_version(s):
+        return patron.sub("Chrome/*", s, count=1)
+
+    for k in evergreen:
+        vieja = patron.sub("Chrome/150.0.1.2", PRESETS[k], count=1)
+        assert vieja != PRESETS[k]
+        candidatos = [p for p in evergreen if sin_version(PRESETS[p]) == sin_version(vieja)]
+        assert candidatos == [k]
+    # Un preset fijo con otra version de Chrome NO casa: solo se relajan los
+    # evergreen, asi que chrome_win y edge_win siguen distinguiendose.
+    assert sin_version(PRESETS["chrome_win"]) != sin_version(PRESETS["edge_win"])
+    assert "presetDeUserAgent(cfg.user_agent)" in APP_JS

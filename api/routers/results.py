@@ -1579,6 +1579,19 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
 _ORDEN_VALIDACION = {"error": 0, "warning": 1, "info": 2, "ok": 3}
 
 
+def _peor_validacion(estados: str | None) -> str | None:
+    """El peor `validation_status` de los bloques de una pagina («a|b|c»).
+
+    `info` (un FAQPage o HowTo retirados, decision 97) va entre `warning` y
+    `ok`: una pagina con un Organization bien y un FAQ retirado es `info`, no
+    `ok`, y una con un warning sigue siendo `warning`. Un estado desconocido va
+    al final, para que nunca tape a uno conocido.
+    """
+    if not estados:
+        return None
+    return sorted(estados.split("|"), key=lambda e: _ORDEN_VALIDACION.get(e, 9))[0]
+
+
 def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str, Any]]:
     """Agrega encabezados, hreflang, datos estructurados e imagenes del lote.
 
@@ -1631,10 +1644,8 @@ def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str
         .group_by(StructuredData.url_id)
         .all()
     ):
-        peor = None
-        if estados:
-            peor = sorted(estados.split("|"), key=lambda e: _ORDEN_VALIDACION.get(e, 9))[0]
-        extras[url_id].update(sd_count=n_sd, sd_types=tipos, sd_status=peor)
+        extras[url_id].update(sd_count=n_sd, sd_types=tipos,
+                              sd_status=_peor_validacion(estados))
 
     for url_id, n_img, sin_alt in (
         session.query(

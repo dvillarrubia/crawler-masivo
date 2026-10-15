@@ -201,6 +201,7 @@ html[data-theme="terminal"] .badge-running{border-color:rgba(63,224,255,.4)}
 html[data-theme="terminal"] .badge-completed{border-color:rgba(61,255,106,.4)}
 html[data-theme="terminal"] .badge-failed{border-color:rgba(255,79,79,.45)}
 html[data-theme="terminal"] .badge-cancelled{border-color:rgba(255,194,51,.45)}
+html[data-theme="terminal"] .badge-info{border-color:rgba(63,224,255,.4)}
 html[data-theme="terminal"] .priority-alta{border-color:rgba(255,79,79,.45)}
 html[data-theme="terminal"] .priority-media{border-color:rgba(255,194,51,.45)}
 html[data-theme="terminal"] .priority-baja{border-color:rgba(63,224,255,.4)}
