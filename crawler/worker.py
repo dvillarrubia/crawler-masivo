@@ -19,6 +19,7 @@ BRPOP_TIMEOUT          Seconds to block on Redis pop (default: 5)
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -368,6 +369,9 @@ def _run_job(job_id: str) -> None:
     sin_guardar = False
     # Motivo de un rastreo con CERO URLs ("sin_urls" / "robots_bloquea_todo").
     razon_cero = ""
+    # Salud del rastreo y, si estaba detras de un muro, la causa (decision 103).
+    salud: dict | None = None
+    bloqueo: str | None = None
     analisis_ok = True
     max_runtime_hours = max(1, min(int(job_config.get("crawl_behavior", {}).get("max_runtime_hours", 72)), 720))
     # 0 = sin vigilancia. Por defecto 30 min: el latido se estampa cada 50
@@ -605,7 +609,12 @@ def _run_job(job_id: str) -> None:
         # dejo en la BD, asi que lo barato es volver a encolar el job y seguir.
         # Se reintenta STALL_AUTO_RESUME veces (def. 3); solo despues se cierra
         # como "stalled" y se analiza lo obtenido, sin fingir que termino bien.
-        if _reencolar_tras_estancamiento(job_id, str(exc)):
+        #
+        # SALVO que este bloqueado: reanudar un rastreo detras de un muro es
+        # pedir otras tres veces lo mismo y que el WAF lo apunte (decision 103).
+        salud = _salud_del_job(job_id, job_config)
+        bloqueo = (salud or {}).get("causa")
+        if not bloqueo and _reencolar_tras_estancamiento(job_id, str(exc)):
             return
         logger.warning(
             "Job %s detenido por estancamiento (%s): se analiza lo obtenido",
@@ -641,6 +650,20 @@ def _run_job(job_id: str) -> None:
     # job while analysis runs with the spider — and its heartbeat — stopped.
     if _reencolar_si_pedido(job_id):
         return
+
+    # Un rastreo detras de un muro no es un sitio limpio (decisiones 28 y 32):
+    # si las respuestas no validas llegan al umbral, `failed` con la causa y
+    # sin analizar —el analisis sacaria incidencias de un censo que no se ha
+    # visto— ni comparar con el anterior.
+    if salud is None:
+        salud = _salud_del_job(job_id, job_config)
+    if not bloqueo:
+        bloqueo = (salud or {}).get("causa")
+    if bloqueo and not razon_cero and not sin_guardar:
+        logger.error(
+            "Job %s BLOQUEADO (%s): %s. Se marca fallido; lo rastreado se "
+            "conserva", job_id, bloqueo, (salud or {}).get("por_clase"))
+        final_status = "failed"
 
     cancelled = False
     session = SessionLocal()
@@ -693,6 +716,7 @@ def _run_job(job_id: str) -> None:
             # agotado la frontera teniendo 1.051 URLs pendientes.
             motivo = (razon_cero if razon_cero
                       else "persistence_failed" if sin_guardar
+                      else bloqueo if bloqueo
                       else "stalled" if stalled
                       else "max_runtime_reached" if timed_out
                       else "finished")
@@ -700,12 +724,15 @@ def _run_job(job_id: str) -> None:
                 rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
                 # Si no se guardo nada, eso manda sobre como acabo el rastreo
                 if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
-                        and not sin_guardar):
+                        and not sin_guardar and not bloqueo):
                     motivo = "max_urls_reached"
                 rc.delete(f"job:{job_id}:finish_reason")
+                rc.delete(f"job:{job_id}:bloqueo")
             except Exception:
                 pass
             job.finish_reason = motivo
+            if salud is not None:
+                job.health = salud
             session.commit()
             try:
                 redis_lib.Redis.from_url(REDIS_URL, decode_responses=True).delete(
@@ -1046,6 +1073,59 @@ def _config_invalida(job_id: str) -> str | None:
             rc.delete(clave)
         return motivo or None
     except Exception:
+        return None
+
+
+def _salud_del_job(job_id: str, job_config: dict | None) -> dict | None:
+    """Respuestas del job por clase y, si el rastreo esta bloqueado, la causa.
+
+    Dos fuentes, por este orden: la marca que deja el spider cuando para por
+    la ventana (`job:<id>:bloqueo`) y, si no la hay, el TOTAL del job en la
+    base de datos. El total es lo que cubre el rastreo corto que acaba entero
+    detras de un muro sin llenar la ventana: el de una URL de la decision 11,
+    o el de progym, cuya home responde 200 desde la cache de Cloudflare y todo
+    lo demas 403 con el desafio (decision 103). Y como la BD sobrevive a las
+    reanudaciones, tambien es lo que decide si un job estancado se reencola.
+
+    Best-effort entero (decision 74): si algo falla devuelve None y el job se
+    juzga como antes.
+    """
+    try:
+        from sqlalchemy import func
+
+        from shared.database import SessionLocal
+        from shared.models import Url
+        from shared.respuestas import (
+            UMBRAL_POR_DEFECTO, causa_de_bloqueo, resumen_de_salud,
+        )
+
+        cb = (job_config or {}).get("crawl_behavior") or {}
+        umbral = float(cb.get("salud_umbral") or UMBRAL_POR_DEFECTO)
+        session = SessionLocal()
+        try:
+            recuentos = dict(
+                session.query(Url.response_class, func.count(Url.id))
+                .filter(Url.job_id == job_id, Url.response_class.isnot(None))
+                .group_by(Url.response_class)
+                .all()
+            )
+        finally:
+            session.close()
+        marca = None
+        try:
+            rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+            crudo = rc.get(f"job:{job_id}:bloqueo")
+            marca = json.loads(crudo) if crudo else None
+        except Exception:
+            marca = None
+        causa = (marca or {}).get("causa") or causa_de_bloqueo(recuentos, umbral)
+        salud = resumen_de_salud(recuentos, umbral, causa)
+        if marca:
+            # Lo que vio el spider al parar: la ventana, no el total.
+            salud["ventana"] = marca
+        return salud
+    except Exception:
+        logger.exception("Job %s: no se pudo calcular la salud del rastreo", job_id)
         return None
 
 

@@ -1454,6 +1454,7 @@ def get_diff(
         viejo_id = job_id if antes.get("fecha") == _resumen_fecha(a) else otro_id
         nuevo_id = otro_id if viejo_id == job_id else job_id
         from shared.comparacion import _norm
+        from shared.respuestas import NO_VALIDAS
 
         resultado["incidencias"] = comparar_incidencias(
             incidencias_de_censo(db, viejo_id),
@@ -1463,8 +1464,10 @@ def get_diff(
                 antes.get("status"), antes.get("finish_reason")),
             # Una incidencia cuya pagina ya no esta en el censo no esta
             # resuelta: no se sabe.
+            # Ni si ahora es un muro: no se ha visto (decision 103).
             urls_del_nuevo={_norm(_aplicar(p["url"]))
-                            for p in paginas_de_censo(db, nuevo_id)},
+                            for p in paginas_de_censo(db, nuevo_id)
+                            if p.get("response_class") not in NO_VALIDAS},
             # Dos censos analizados con codigo distinto no se comparan por
             # incidencias: un hallazgo puede salir "resuelto" solo porque la
             # regla que lo emitia ha cambiado.
@@ -1679,6 +1682,8 @@ CSV_COLUMNS = [
     "has_mixed_content",
     # Otros
     "blocked_by_robots",
+    # La respuesta era la pagina o un muro delante (decision 103)
+    "response_class",
     "body_hash",
     "content_hash",
     "last_crawled_at",
@@ -1801,6 +1806,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(sec.has_mixed_content) if sec else "",
         # Otros
         _val(url_obj.blocked_by_robots),
+        _val(getattr(url_obj, "response_class", None)),
         _val(url_obj.body_hash),
         _val(url_obj.content_hash),
         _val(url_obj.last_crawled_at.isoformat() if url_obj.last_crawled_at else None),

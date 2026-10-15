@@ -41,6 +41,7 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
+from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
 from shared.dominios import dominio_registrable
@@ -101,6 +102,18 @@ def _fuera_del_head(valor: str | None) -> list[str]:
 def _lo_saca_el_corte(cortado_por: str | None, fuera: str | None, nombre: str) -> bool:
     """Si *nombre* esta fuera del head porque algo corto el head antes."""
     return bool(cortado_por) and nombre in _fuera_del_head(fuera)
+
+
+def _respuesta_valida():
+    """La fila es la respuesta del sitio, no un muro delante (decision 103).
+
+    NULL vale: rastreos anteriores a la columna, saltos y filas sin respuesta.
+    Una pagina de muro no lleva incidencias de pagina —saldrian un `h1_missing`
+    y un `4xx_error` de una pagina que no se ha llegado a ver—; lleva
+    `respuesta_no_valida`, agrupada por host y clase.
+    """
+    return or_(Url.response_class.is_(None),
+               Url.response_class.notin_(sorted(NO_VALIDAS)))
 
 
 def _clave(url: str | None):
@@ -505,11 +518,14 @@ class SEOAnalyzer:
         """Flag 4xx, 5xx, and connection-level errors."""
         logger.debug("Analyzing status codes ...")
 
+        self._respuestas_no_validas()
+
         # 4xx errors
         rows = self.session.execute(
             select(Url.id, Url.status_code).where(
                 Url.job_id == self.job_id,
                 Url.status_group == "4xx",
+                _respuesta_valida(),
             )
         ).all()
         for url_id, status_code in rows:
@@ -525,6 +541,7 @@ class SEOAnalyzer:
             select(Url.id, Url.status_code).where(
                 Url.job_id == self.job_id,
                 Url.status_group == "5xx",
+                _respuesta_valida(),
             )
         ).all()
         for url_id, status_code in rows:
@@ -551,6 +568,42 @@ class SEOAnalyzer:
             )
 
         self._flush_issues()
+
+    # Cuantas URLs de ejemplo lleva una incidencia agrupada.
+    _MUESTRA_EJEMPLOS = 5
+
+    def _respuestas_no_validas(self) -> None:
+        """Una incidencia por host y clase de respuesta no valida.
+
+        Un desafio de un WAF, un captcha, un 429 o un cuerpo binario no son la
+        pagina: no se puede decir nada de su titulo ni de su h1, y emitir un
+        `4xx_error` por cada desafio de Cloudflare era contar como roto lo que
+        no se llego a ver (medido en penguin: 270 paginas con 429 y un
+        `4xx_error` cada una). Es un hallazgo del RASTREO por host, como las
+        cabeceras de seguridad (decision 53): una fila por (host, clase) con
+        las paginas afectadas y unos ejemplos.
+        """
+        filas = self.session.execute(
+            select(Url.id, Url.host, Url.url, Url.response_class, Url.status_code)
+            .where(Url.job_id == self.job_id,
+                   Url.response_class.in_(sorted(NO_VALIDAS)))
+            .order_by(Url.id)
+        ).all()
+        grupos: dict[tuple[str, str], dict[str, Any]] = {}
+        for url_id, host, url, clase, status in filas:
+            g = grupos.setdefault((host or "", clase), {
+                "url_id": url_id, "paginas": 0, "ejemplos": [], "codigos": defaultdict(int)})
+            g["paginas"] += 1
+            g["codigos"][str(status)] += 1
+            if len(g["ejemplos"]) < self._MUESTRA_EJEMPLOS:
+                g["ejemplos"].append(url)
+        for (host, clase), g in grupos.items():
+            self._add_issue(
+                g["url_id"], "respuesta_no_valida", "warning",
+                {"host": host, "clase": clase, "paginas_afectadas": g["paginas"],
+                 "codigos": dict(g["codigos"]), "ejemplos": g["ejemplos"]},
+                group_key=_clave_de_grupo(f"{host}|{clase}"),
+            )
 
     # -- Titles -------------------------------------------------------------
 
@@ -766,6 +819,7 @@ class SEOAnalyzer:
         html_url_ids_stmt = select(Url.id).where(
             Url.job_id == self.job_id, Url.is_html.is_(True),
             Url.status_code >= 200, Url.status_code < 300,
+            _respuesta_valida(),
         )
         all_html_url_ids = {
             row[0] for row in self.session.execute(html_url_ids_stmt).all()
@@ -1103,7 +1157,8 @@ class SEOAnalyzer:
         consulta = (
             select(Url.id, Url.url, Url.status_code, Url.indexable,
                    Url.indexability_status, Url.redirect_url,
-                   HtmlMeta.canonical_href, Url.is_internal, Url.resource_type)
+                   HtmlMeta.canonical_href, Url.is_internal, Url.resource_type,
+                   Url.response_class)
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id)
         )
@@ -1113,9 +1168,13 @@ class SEOAnalyzer:
         # y ese es el aviso (uno por hallazgo).
         alias_de: dict[str, str] = {}
         for (uid, row_url, sc, indexable, estado_idx, redirige, canonical,
-             interna, tipo_recurso) in self.session.execute(
+             interna, tipo_recurso, clase) in self.session.execute(
             consulta.execution_options(yield_per=BATCH_SIZE)
         ):
+            # Un destino que es un muro no se ha visto: ni roto ni sin retorno
+            # (decision 103). Como si no se hubiera rastreado.
+            if clase in NO_VALIDAS:
+                continue
             url_status[row_url] = sc
             url_by_id[uid] = row_url
             info_url[uid] = (sc, indexable, estado_idx, canonical)
@@ -1733,6 +1792,8 @@ class SEOAnalyzer:
             Url.is_internal.is_(True),
             Url.status_code >= 200,
             Url.status_code < 300,
+            # El HTML de un muro no es el de la pagina (decision 103).
+            _respuesta_valida(),
         )
 
         # -- Mas de 2 MB --------------------------------------------------
@@ -1863,6 +1924,7 @@ class SEOAnalyzer:
                 Url.status_code,
                 Url.indexability_status,
                 Url.blocked_by_robots,
+                Url.response_class,
                 HtmlMeta.meta_robots,
                 HtmlMeta.meta_robots_googlebot,
                 HtmlMeta.x_robots_tag,
@@ -1895,6 +1957,7 @@ class SEOAnalyzer:
             status_code,
             estado_actual,
             bloqueada_robots,
+            clase_respuesta,
             meta_robots_generico,
             meta_robots_googlebot,
             x_robots,
@@ -1925,6 +1988,7 @@ class SEOAnalyzer:
                 page_url=page_url,
                 bloqueada_por_robots=bool(bloqueada_robots)
                 or (estado_actual or "").startswith("Blocked"),
+                response_class=clase_respuesta,
             )
             has_noindex = es_noindex(meta_robots=meta_robots, x_robots=x_robots)
             canonical_ok = motivo_calc != "Canonicalised"
@@ -3728,6 +3792,7 @@ class SEOAnalyzer:
                 Url.in_sitemap.is_(True),
                 Url.is_html.is_(True),
                 Url.status_code == 200,
+                _respuesta_valida(),
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
                 # Una no indexable del sitemap ya lleva sitemap_no_indexable,
@@ -3785,6 +3850,9 @@ class SEOAnalyzer:
                 Url.in_sitemap.is_(True),
                 Url.is_internal.is_(True),
                 Url.indexable.isnot(True),
+                # Un muro no es la respuesta del sitio: «4xx» seria afirmar lo
+                # que no se ha visto (decision 103).
+                _respuesta_valida(),
             )
         ).all()
 
@@ -3867,9 +3935,15 @@ def _a_https(url: str) -> str:
 def _estado_por_url(session: Session, job_id) -> dict[Any, int | None]:
     """Codigo de cada URL del job, por la URL tal cual y por su clave."""
     estado: dict[Any, int | None] = {}
-    for url, sc in session.execute(
-        select(Url.url, Url.status_code).where(Url.job_id == job_id)
+    for url, sc, clase in session.execute(
+        select(Url.url, Url.status_code, Url.response_class)
+        .where(Url.job_id == job_id)
     ).all():
+        # Un muro no dice que responde la URL: NULL, como sin rastrear
+        # (decision 103). Si no, una redireccion hacia un desafio de 403 seria
+        # `redireccion_a_error`.
+        if clase in NO_VALIDAS:
+            sc = None
         estado[url] = sc
         k = _clave(url)
         if k is not None:
@@ -3907,11 +3981,16 @@ class _Fichas:
             select(
                 Url.id, Url.url, Url.status_code, Url.redirect_url, Url.noindex,
                 HtmlMeta.canonical_href, HtmlMeta.canonical_header,
+                Url.response_class,
             )
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == job_id)
         ).all()
-        for uid, url, sc, red, noindex, c_href, c_cab in filas:
+        for uid, url, sc, red, noindex, c_href, c_cab, clase in filas:
+            # Un muro delante del destino no dice que responde: como si no se
+            # hubiera rastreado (decision 103).
+            if clase in NO_VALIDAS:
+                continue
             canonical = (c_href or "").strip() or (c_cab or "").strip()
             f = _Ficha(uid, url, sc, red, noindex, canonical)
             self._por_url[url] = f

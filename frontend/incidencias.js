@@ -27,6 +27,11 @@ const ISSUE_INFO = {
     google: 'Para Google es como un 5xx: menos rastreo y, si dura, fuera del índice.',
     arreglo: 'Comprobar si es un bloqueo al rastreador (WAF) o una caída real del servidor.',
   },
+  'respuesta_no_valida': {
+    que: 'Lo que respondió el servidor no era la página: un desafío de un WAF (Cloudflare, Akamai, Imperva, F5, AWS), un captcha, un límite de peticiones (429) o un cuerpo que no se puede leer. Va una fila por host y tipo, con cuántas páginas.',
+    google: 'No se sabe: no hemos visto la página. Si el muro también se le pone a Googlebot, Google no puede rastrearla y acaba sacándola del índice; si solo nos lo pone a nosotros, esas páginas se quedan sin auditar.',
+    arreglo: 'Comprobar con Search Console (inspección de URL) que Google sí ve la página. Para auditarla: lista blanca de la IP del rastreador en el WAF, menos concurrencia o render de JavaScript, y reanudar el rastreo (las páginas de muro se repiten al reanudar).',
+  },
   'redirect_chain': {
     que: 'Para llegar a la URL final hay dos saltos o más (A → B → C).',
     google: 'Sigue la cadena, pero cada salto gasta rastreo y Google pide evitarlas.',

@@ -145,3 +145,19 @@ def test_el_panel_compara_censo_con_censo(entorno):
     assert p["ultimo"]["id"] == str(ids["nuevo"])
     # El anterior es el censo de julio, no el canario de en medio.
     assert p["anterior"]["id"] == str(ids["viejo"])
+
+
+def test_la_ficha_del_job_lleva_su_salud(entorno):
+    """La causa de un rastreo bloqueado viaja en la respuesta del job: es lo
+    que pinta la ficha (decision 103)."""
+    api, Sesion, _, ids = entorno
+    s = Sesion()
+    j = s.get(Job, ids["huerfano"])
+    j.status, j.finish_reason = "failed", "bloqueado_por_waf"
+    j.health = {"por_clase": {"contenido": 1, "challenge_waf": 49},
+                "causa": "bloqueado_por_waf"}
+    s.commit()
+    s.close()
+    d = api.get(f"/api/jobs/{ids['huerfano']}").json()
+    assert d["finish_reason"] == "bloqueado_por_waf"
+    assert d["health"]["por_clase"]["challenge_waf"] == 49

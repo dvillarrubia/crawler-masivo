@@ -121,6 +121,39 @@ def construir_sitio(port: int, con_privado: bool = False,
     }
 
 
+_DESAFIO = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "fixtures", "respuestas", "cloudflare_desafio_progym.html")
+
+
+def construir_sitio_con_muro(n_muros: int = 30, codigo: int = 403) -> dict:
+    """Un sitio detras de Cloudflare (decision 103): la home se sirve, el resto
+    responde con el desafio REAL descargado de progym.es el 2026-10-16."""
+    with open(_DESAFIO, "rb") as f:
+        desafio = f.read()
+    cabeceras = {"cf-mitigated": "challenge", "Server": "cloudflare"}
+    if codigo == 429:
+        cabeceras, desafio = {"Retry-After": "30"}, _html("<p>Too many requests</p>")
+    rutas = {
+        "/muro-home": (200, {}, _html(
+            "".join(f'<a href="/muro/{i}">m{i}</a>' for i in range(n_muros))
+            + '<a href="/muro-200">200</a><a href="/binaria">bin</a>'
+              '<a href="/articulo-captcha">art</a>')),
+        # El desafio servido con 200 y sin la cabecera: lo decide el cuerpo.
+        "/muro-200": (200, {}, desafio if codigo != 429 else _html("<p>x</p>")),
+        # El caso de la decision 11: HTML declarado y bytes binarios.
+        "/binaria": (200, {}, bytes(range(256)) * 16),
+        # Un articulo que HABLA de captchas no es un captcha.
+        "/articulo-captcha": (200, {}, _html(
+            "<h1>Cómo funciona un captcha</h1>"
+            + "<p>Un captcha es una prueba para distinguir personas de bots. "
+              "Google reCAPTCHA y hCaptcha son los mas usados. </p>" * 20
+            + '<div class="g-recaptcha" data-sitekey="x"></div>')),
+    }
+    for i in range(n_muros):
+        rutas[f"/muro/{i}"] = (codigo, cabeceras, desafio)
+    return rutas
+
+
 # (instante, host, ruta) de cada peticion que llega al sitio: para medir el
 # ritmo al que el spider pide a cada host (Crawl-delay).
 PETICIONES: list[tuple[float, str, str]] = []
@@ -131,7 +164,8 @@ def servir(robots_prohibe_todo: bool = False,
            con_recursos: bool = False,
            robots_crawl_delay: float | None = None,
            rutas_extra: dict | None = None,
-           puerto: int = 0) -> tuple[ThreadingHTTPServer, int]:
+           puerto: int = 0,
+           muro: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -161,6 +195,8 @@ def servir(robots_prohibe_todo: bool = False,
     # admite {port}.
     for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
         rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
+    if muro is not None:
+        rutas.update(construir_sitio_con_muro(**muro))
     if robots_bloquea_privado:
         # Un robots.txt que prohibe una carpeta concreta: el caso del informe
         # "Blocked by robots.txt" (R6 de #25). La URL la enlaza /home.
@@ -260,7 +296,8 @@ def main() -> None:
                        entrada.get("con_recursos", False),
                        entrada.get("robots_crawl_delay"),
                        entrada.get("rutas"),
-                       entrada.get("puerto", 0))
+                       entrada.get("puerto", 0),
+                       entrada.get("muro"))
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -373,6 +410,14 @@ def main() -> None:
         },
         "ITEM_PIPELINES": pipelines,
     })
+    cierre: dict = {}
+    original_closed = SeoSpider.spider_closed
+
+    def _spider_closed(self, spider, reason):
+        cierre["reason"] = reason
+        return original_closed(self, spider, reason)
+
+    SeoSpider.spider_closed = _spider_closed
     proceso.crawl(SeoSpider, job_id=job_id)
     proceso.start()
     srv.shutdown()
@@ -384,12 +429,14 @@ def main() -> None:
         fila = {k: v for k, v in it.items() if k in (
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
-            "blocked_by_robots", "status_group", "url_hash", "filas",
+            "blocked_by_robots", "status_group", "response_class", "url_hash",
+            "from_url_hash", "filas",
         )}
         for k in ("url", "redirect_url", "to_url"):
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
+    print("@@CIERRE@@" + json.dumps(cierre))
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))
     if redis_falso is not None:

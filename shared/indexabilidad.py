@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit, urlunsplit
 
+from shared.respuestas import ESTADO_INDEXABILIDAD, NO_VALIDAS
 from shared.robots import hay_noindex, robots_tokens
 
 # Bot cuyas directivas especificas manda. Configurable por si algun dia se
@@ -136,15 +137,24 @@ def estado_indexabilidad(
     canonical_header: str | None = None,
     bloqueada_por_robots: bool = False,
     bot: str = BOT_POR_DEFECTO,
+    response_class: str | None = None,
 ) -> tuple[bool, str]:
     """``(es_indexable, motivo)``. El motivo describe por que NO lo es.
 
     El orden importa: se devuelve la razon que un SEO miraria primero. Una
     pagina bloqueada por robots.txt no se mira el canonical, porque el buscador
     no va a llegar a leerlo.
+
+    `response_class` es la de `shared/respuestas.py`. Una respuesta que no es
+    la pagina —un desafio de un WAF servido con 200, un captcha, un 429, un
+    cuerpo binario— no es indexable ni deja de serlo por lo que diga: no se ha
+    visto la pagina. Va antes que el codigo porque un 403 de Cloudflare no es
+    un «Client Error (403)» del sitio (decision 103).
     """
     if bloqueada_por_robots:
         return (False, "Blocked by robots.txt")
+    if response_class in NO_VALIDAS:
+        return (False, ESTADO_INDEXABILIDAD[response_class])
 
     if status_code is None:
         return (False, "Sin respuesta")

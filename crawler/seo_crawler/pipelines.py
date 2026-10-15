@@ -180,6 +180,7 @@ class PostgresPipeline:
                     "text_ratio", "redirect_type", "status_text",
                     "last_modified", "http_version", "transfer_size",
                     "indexability_status", "blocked_by_robots",
+                    "response_class",
                 ):
                     setattr(existing, field, data.get(field))
                 # crawl_depth NO se sobrescribe sin mas: se conserva el MINIMO.
@@ -238,6 +239,7 @@ class PostgresPipeline:
                     transfer_size=data.get("transfer_size"),
                     indexability_status=data.get("indexability_status"),
                     blocked_by_robots=data.get("blocked_by_robots"),
+                    response_class=data.get("response_class"),
                 )
                 self.session.add(url_obj)
                 self.session.flush()

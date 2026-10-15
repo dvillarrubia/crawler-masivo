@@ -56,6 +56,10 @@ def main() -> None:
         conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
+        # La respuesta era la pagina o un muro delante, y la salud del job
+        # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS crawler_version VARCHAR(64)"))
