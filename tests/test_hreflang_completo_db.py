@@ -330,3 +330,115 @@ def test_sin_retorno_no_es_incoherente():
     assert "hreflang_missing_return" in tipos
     assert "hreflang_retorno_incoherente" not in tipos
 
+
+
+def test_autorreferencia_por_una_variante_canonicalizada_a_ella_no_es_un_error():
+    """penguin 30-jul: `?recomendados=1` canonicalizada a la propia pagina.
+
+    Ningun mercado pierde su version —la pagina es indexable—: lo que tiene es
+    una autorreferencia escrita con una URL no canonica. Un aviso, el de la
+    autorreferencia, y no el `error` del destino.
+    """
+    s, j = _montar()
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    var = _url(s, j, ES + "?rec=1", indexable=False, estado="Canonicalised",
+               canonical=ES)
+    _anotar(s, es, ("es", ES + "?rec=1"), ("es-ES", ES + "?rec=1"), ("en", EN),
+            ("x-default", EN))
+    _anotar(s, en, ("es", ES), ("en", EN), ("x-default", EN))
+    issues = _analizar(s, j)
+    assert not _de(issues, "hreflang_destino_no_indexable")
+    sin = _de(issues, "hreflang_sin_autorreferencia")
+    assert [i.url_id for i in sin] == [es.id]
+    assert sin[0].details["variante_propia"] == ES + "?rec=1"
+    assert var.id not in {i.url_id for i in issues}
+
+
+def test_variante_canonicalizada_a_la_fuente_que_ya_se_autorreferencia_es_error():
+    """www.uoc.edu, recerca: `?lang=ca` canonicalizada a `?lang=en`.
+
+    La fuente ya se anota a si misma, asi que la variante es OTRA version —la
+    catalana— y esta fuera del indice: ese mercado se queda sin su version.
+    """
+    s, j = _montar()
+    en_url, ca_url = ES + "?lang=en", ES + "?lang=ca"
+    en = _url(s, j, en_url)
+    ca = _url(s, j, ca_url, indexable=False, estado="Canonicalised",
+              canonical=en_url)
+    _anotar(s, en, ("en", en_url), ("ca", ca_url), ("x-default", en_url))
+    issues = _analizar(s, j)
+    ni = _de(issues, "hreflang_destino_no_indexable")
+    assert [i.url_id for i in ni] == [ca.id]
+    assert not _de(issues, "hreflang_sin_autorreferencia")
+
+
+def test_la_variante_propia_de_una_fuente_no_quita_el_aviso_de_las_demas():
+    """Si OTRA pagina anota la misma variante canonicalizada, para esa si es
+    un destino no indexable: solo se descuenta la fuente cuya variante es."""
+    s, j = _montar()
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    var = _url(s, j, ES + "?rec=1", indexable=False, estado="Canonicalised",
+               canonical=ES)
+    _anotar(s, es, ("es", ES + "?rec=1"), ("en", EN), ("x-default", EN))
+    _anotar(s, en, ("es", ES + "?rec=1"), ("en", EN), ("x-default", EN))
+    ni = _de(_analizar(s, j), "hreflang_destino_no_indexable")
+    assert [i.url_id for i in ni] == [var.id]
+    assert ni[0].details["paginas_afectadas"] == 1
+    assert ni[0].details["ejemplos"] == [EN]
+
+
+def _sin_xd_entre_hosts(orden):
+    s, j = _montar()
+    a, b = "https://a.x.com/es/p", "https://b.x.com/en/p"
+    raiz = _url(s, j, "https://a.x.com/")
+    paginas = {u: _url(s, j, u) for u in orden((a, b))}
+    for p in paginas.values():
+        _anotar(s, p, ("es", a), ("en", b))
+    return _de(_analizar(s, j), "hreflang_sin_x_default"), raiz
+
+
+def test_sin_x_default_el_host_no_depende_del_orden_de_las_filas():
+    """Un cluster que cruza hosts se atribuye siempre al mismo, y la fila se
+    ancla en su raiz: con la primera fila o la URL minima, el diff entre censos
+    lo daba por resuelto y nuevo a la vez sin que el sitio cambiase."""
+    xd1, raiz1 = _sin_xd_entre_hosts(lambda t: t)
+    xd2, raiz2 = _sin_xd_entre_hosts(lambda t: tuple(reversed(t)))
+    assert len(xd1) == len(xd2) == 1
+    assert xd1[0].details["host"] == xd2[0].details["host"] == "a.x.com"
+    assert xd1[0].group_key == xd2[0].group_key == _clave_de_grupo("a.x.com")
+    assert xd1[0].url_id == raiz1.id and xd2[0].url_id == raiz2.id
+
+
+def test_sin_x_default_sin_raiz_rastreada_cae_a_la_url_minima():
+    s, j = _montar()
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    for p in (es, en):
+        _anotar(s, p, ("es", ES), ("en", EN))
+    xd = _de(_analizar(s, j), "hreflang_sin_x_default")
+    assert [i.url_id for i in xd] == [en.id]  # /en/a < /es/a
+
+
+def _indexable_null(s, j, *urls):
+    for u in urls:
+        s.query(Url).filter(Url.job_id == j.id, Url.url == u).update(
+            {"indexable": None, "indexability_status": None})
+    s.flush()
+
+
+def test_indexable_null_cuenta_como_fuente():
+    """Un censo sin indexabilidad calculada: NULL no descarta la pagina."""
+    s, j = _montar()
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    _anotar(s, es, ("en", EN), ("x-default", EN))
+    _anotar(s, en, ("en", EN), ("x-default", EN))
+    _indexable_null(s, j, ES, EN)
+    tipos = sorted(i.issue_type for i in _analizar(s, j))
+    # /es/a no se autorreferencia y /en/a no le devuelve el enlace.
+    assert tipos == ["hreflang_missing_return", "hreflang_sin_autorreferencia"]
+
+
+def test_indexable_null_en_el_destino_no_es_destino_no_indexable():
+    s, j = _montar()
+    _cluster_bien(s, j)
+    _indexable_null(s, j, EN)
+    assert _analizar(s, j) == []

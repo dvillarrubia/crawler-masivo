@@ -174,14 +174,28 @@
    - `hreflang_sin_autorreferencia` (warning, por página): anota otras
      versiones y a sí misma no, o solo con `x-default`. No cuenta como falta
      si la autorreferencia lleva un código inválido (ese es
-     `hreflang_invalid_lang`) ni si va a una variante que redirige o se
-     canonicaliza a ella (ese es el aviso del destino). Si se anota con la
-     misma ruta y otros parámetros, `variante_propia` lo dice: es el caso de
-     progym, `/compex` anotada como `/compex?___store=progym_es_sp`.
+     `hreflang_invalid_lang`). Si se anota con la misma ruta y otros
+     parámetros, `variante_propia` lo dice: es el caso de progym, `/compex`
+     anotada como `/compex?___store=progym_es_sp`. **Y también cuando esa
+     variante se canonicaliza a la propia página** (penguin, `?recomendados=1`):
+     ahí es este aviso y no el `error` del destino, porque ningún mercado pierde
+     su versión —la página es indexable—; lo que falla es que la
+     autorreferencia va a una URL no canónica. Solo si la página no se anota
+     además directamente a sí misma: si ya lo hace, la variante canonicalizada
+     a ella es OTRA versión fuera del índice (www.uoc.edu, `?lang=ca`
+     canonicalizada a `?lang=en`) y sigue siendo el error del destino. Una
+     variante de otra ruta que salta o se canonicaliza a ella (`/de/` a `/es/`)
+     tampoco cuenta como autorreferencia: el aviso es el del destino.
    - `hreflang_sin_x_default` (info): se decide por clúster —basta con que
      una de sus páginas lo declare— y se avisa **por host**, con
      `clusters_afectados` de `clusters_del_host`. Una fila por clúster eran
-     20.557 avisos `info` en penguin diciendo una sola cosa (decisión 64).
+     20.557 avisos `info` en penguin diciendo una sola cosa (decisión 64). El
+     host de un clúster que cruza hosts es el **menor** de los de sus páginas,
+     no el de la primera fila (la consulta no tiene orden y el propio UPDATE
+     por lotes reescribe las tuplas), y la fila se ancla en la **raíz** del
+     host si se rastreó, no en la URL mínima de las afectadas: con cualquiera
+     de las dos cosas el hallazgo cambiaba de URL o de clave entre análisis y
+     la comparación (decisión 88) lo daba por resuelto y nuevo a la vez.
    - `hreflang_idioma_repetido` (warning, por clúster y código, `group_key`
      = clúster|código): el mismo código hacia dos URLs. Un error de plantilla
      en un clúster de 30 páginas es UNA fila con `paginas_afectadas=30`.
@@ -221,8 +235,8 @@
    |---|---|---|---|---|---|---|---|
    | Lopesan es/en/de (17.268) | 0 | 1: 1 de 620 clústeres | 0 | **27** | 0 | 296 → **0** | 12 → 4 |
    | www.uoc.edu ca/es/en (81.960) | 34 | 2: 21 de 6.038 (+1 de 1 en guia-audiovisual) | 0 | 19 | 0 | 3.281 → **71** | 72 → 72 |
-   | penguin 30-jul (194.824) | 587 | 1: 20.557 de 20.557 | 0 | 196 | 0 | 5.957 → 121 | 61 → 10 |
-   | penguin 29-jul (315.076) | 1.013 | 1: 21.262 de 21.262 | 0 | 1 | 0 | 6.197 → 5.919 | 13 → 13 |
+   | penguin 30-jul (194.824) | **783** | 1: 20.557 de 20.557 | 0 | **0** | 0 | 5.957 → 121 | 61 → 10 |
+   | penguin 29-jul (315.076) | **1.014** | 1: 21.262 de 21.262 | 0 | **0** | 0 | 6.197 → 5.919 | 13 → 13 |
    | Druni (139.981) | 304 | 1: 16 de 37.059 | 0 | 0 | 0 | 8.197 → 288 | 0 |
    | progym (21.195) | 277 | 0 | 0 | 0 | 0 | 144 → 140 | 0 |
    | CST (23.901) | 42 | 0 | 0 | 0 | 0 | 166 → 32 | 0 |
@@ -238,7 +252,21 @@
      **canonicalizadas a su equivalente `/es/`** —`/en/` a `/es/`, `/en/hotels`
      a `/es/hoteles`— y anotadas como `en-US`/`de-DE` desde la versión
      española. Cierto, y grave: la versión inglesa y la alemana de esas
-     páginas están fuera del índice. Antes salía como 36 «sin retorno».
+     páginas están fuera del índice. **Antes no daba ningún aviso** desde las
+     indexables: esas 27 anotaciones tenían `return_tag_ok = true`. Las 36
+     «sin retorno» hacia destinos canonicalizados que había venían de fuentes
+     NO indexables (7 destinos) y son parte de las 296 falsas.
+   - penguin 30-jul: con la primera versión salían 196 «destinos no
+     indexables» y eran **todas** autorreferencias por variante —
+     `/es/recomendaciones/tendencias/dieta-keto-que-es-y-para-que-sirve` se
+     anota `es` y `es-ES` como la misma ruta con `?recomendados=1`,
+     canonicalizada a ella—. Ahora son 196 `hreflang_sin_autorreferencia` más
+     (587 → 783) con esa URL en `variante_propia`, y 0 errores. En penguin
+     29-jul pasa lo mismo con el único que había (1.013 → 1.014). Los 19 de
+     www.uoc.edu no cambian: los 7 de `recerca` que tienen esa forma
+     (`detalle?lang=ca` canonicalizada a `detalle?lang=en`) vienen de páginas
+     que ya se anotan a sí mismas, así que es la versión catalana fuera del
+     índice. Cierto.
    - Lopesan, las 296 «sin retorno» que desaparecen: `/es` sin barra,
      canonicalizada a `/es/`, con el clúster de la canónica. Eran falsas.
    - progym `/compex`: se anota como `/compex?___store=progym_es_sp`, que para

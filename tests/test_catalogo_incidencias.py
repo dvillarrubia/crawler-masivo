@@ -5,30 +5,67 @@ la vista agrupada de Problemas enseña la ficha —que es, que decide Google,
 como se arregla— y un tipo sin ella sale con su nombre tecnico en la reunion
 con el cliente. Lee el fuente a proposito: lo que se comprueba es que dos
 ficheros digan lo mismo, no un comportamiento (decision 74).
+
+Los tipos se sacan con `ast` y no con una regex: la primera version, con
+regex, no veia `hreflang_idioma_repetido` ni `hreflang_sin_x_default` porque
+su primer argumento lleva parentesis (`ancla(pags)`), y el test seguia verde.
+Las llamadas cuyo tipo no es un literal estan enumeradas abajo: una nueva hace
+fallar el test hasta que alguien diga que tipos produce.
 """
 
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 
+# Expresion del tipo (tal cual la escribe `ast.unparse`) -> tipos que produce.
+_NO_LITERALES = {
+    "f'structured_data_{status}'": {"structured_data_error",
+                                    "structured_data_warning"},
+    "tipo": {"missing_hsts", "missing_csp", "missing_x_content_type_options",
+             "missing_x_frame_options"},
+}
+
+
+def _llamadas() -> list[ast.expr]:
+    arbol = ast.parse((RAIZ / "analysis" / "analyzer.py").read_text(encoding="utf-8"))
+    tipos = []
+    for nodo in ast.walk(arbol):
+        if (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+                and nodo.func.attr == "_add_issue"):
+            if len(nodo.args) > 1:
+                tipos.append(nodo.args[1])
+            else:
+                tipos.append(next(k.value for k in nodo.keywords
+                                  if k.arg == "issue_type"))
+    return tipos
+
 
 def _tipos_emitidos() -> set[str]:
-    fuente = (RAIZ / "analysis" / "analyzer.py").read_text(encoding="utf-8")
-    tipos = set(re.findall(r'_add_issue\(\s*[^,()]+,\s*"([a-z0-9_]+)"', fuente))
-    # La forma partida en lineas: `self._add_issue(\n url_id,\n "tipo",\n "sev"`.
-    tipos |= set(re.findall(
-        r'^\s*"([a-z0-9_]+)",\s*\n\s*"(?:error|warning|info)"', fuente, re.M))
+    tipos: set[str] = set()
+    for expr in _llamadas():
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            tipos.add(expr.value)
+        else:
+            texto = ast.unparse(expr)
+            assert texto in _NO_LITERALES, (
+                f"_add_issue con un tipo no literal ({texto}): anadelo a "
+                "_NO_LITERALES con los tipos que produce")
+            tipos |= _NO_LITERALES[texto]
     return tipos
 
 
 def test_el_patron_encuentra_los_tipos():
     tipos = _tipos_emitidos()
-    # Si el patron se rompe, el test de abajo pasaria sin mirar nada.
+    # Si la extraccion se rompe, el test de abajo pasaria sin mirar nada.
+    # Van los cinco de la decision 99, incluidos los dos que la regex perdia.
     assert {"4xx_error", "hreflang_missing_return",
-            "hreflang_destino_no_indexable"} <= tipos
+            "hreflang_destino_no_indexable", "hreflang_idioma_repetido",
+            "hreflang_sin_x_default", "hreflang_sin_autorreferencia",
+            "hreflang_retorno_incoherente", "structured_data_error",
+            "missing_csp"} <= tipos
     assert len(tipos) > 40
 
 

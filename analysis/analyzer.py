@@ -80,6 +80,12 @@ def _clave_de_grupo(valor: str | None) -> str | None:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
 
 
+def _misma_ruta(a: tuple[str, str, str, str], b: tuple[str, str, str, str]) -> bool:
+    """Si dos claves de :func:`_clave` son la misma ruta salvo parametros o la
+    barra final: la forma de una variante de la misma pagina."""
+    return a[:2] == b[:2] and (a[2].rstrip("/") or "/") == (b[2].rstrip("/") or "/")
+
+
 def _url_de_clave(clave: tuple[str, str, str, str]) -> str:
     """La URL que representa una clave de :func:`_clave`, para escribirla."""
     esquema, host, ruta, query = clave
@@ -1134,8 +1140,8 @@ class SEOAnalyzer:
         por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
         # Pagina -> idiomas anotados en el `<body>`.
         en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
-        # Destino no indexable -> paginas indexables que lo anotan, e idiomas.
-        no_indexable: dict[int, tuple[set[int], set[str]]] = {}
+        # Destino no indexable -> pagina indexable que lo anota -> idiomas.
+        no_indexable: dict[int, dict[int, set[str]]] = {}
 
         for hreflang_id, url_id, lang, href, en_body in rows:
             norm_href = _clave(href)
@@ -1206,9 +1212,8 @@ class SEOAnalyzer:
                 return_ok = None
             if destino_no_indexable:
                 return_ok = None
-                fuentes, langs = no_indexable.setdefault(target_uid, (set(), set()))
-                fuentes.add(url_id)
-                langs.add(lang)
+                no_indexable.setdefault(target_uid, {}).setdefault(
+                    url_id, set()).add(lang)
 
             # El veredicto se apunta y se escribe al final, por lotes. Se
             # escribia con un UPDATE POR ANOTACION —y con DOS cuando el destino
@@ -1293,7 +1298,7 @@ class SEOAnalyzer:
         n_ej = self._EJEMPLOS_HREFLANG
         clusters: dict[str, list[int]] = defaultdict(list)
         cluster_de: dict[int, str] = {}
-        sin_auto: list[int] = []
+        sin_auto: list[tuple[int, str | None]] = []
 
         for page_id, destinos in targets_by_page.items():
             if not indexable(page_id):
@@ -1318,12 +1323,39 @@ class SEOAnalyzer:
                 # `propios is None`: se anota con un codigo invalido, que ya
                 # tiene su aviso.
             )
-            if not autoref and any(alias_de.get(d) == yo for d in otros):
-                autoref = True  # por una variante: el aviso es el del destino
-            if not autoref:
-                sin_auto.append(page_id)
+            if autoref:
+                continue
+            # Se anota con una VARIANTE de si misma —la misma ruta con un
+            # parametro, o con/sin barra final— que se canonicaliza a ella:
+            # es su autorreferencia escrita con una URL no canonica, y ningun
+            # mercado pierde su version (la pagina es indexable). El aviso es
+            # este, no `hreflang_destino_no_indexable`, que diria con un
+            # `error` que esa version desaparece (decision 99; medido: las 196
+            # de penguin 30-jul eran esto). Una variante con OTRA ruta —`/de/`
+            # canonicalizada a `/es/`— si es un mercado sin version, y sigue
+            # siendo el error del destino.
+            propias = sorted(
+                d for d in otros
+                if alias_de.get(d) == yo and _misma_ruta(d, yo)
+                and (info_url[url_id_by_norm[d]][2] if d in url_id_by_norm
+                     else None) == "Canonicalised"
+                and (codigos.get(page_id, {}).get(d) is None
+                     or bool(codigos[page_id][d] - {"x-default"}))
+            )
+            if propias:
+                for d in propias:
+                    fuentes = no_indexable.get(url_id_by_norm[d])
+                    if fuentes is not None:
+                        fuentes.pop(page_id, None)
+                        if not fuentes:
+                            del no_indexable[url_id_by_norm[d]]
+                sin_auto.append((page_id, _url_de_clave(propias[0])))
+            elif any(alias_de.get(d) == yo for d in otros):
+                continue  # por otra URL que es ella: el aviso es el del destino
+            else:
+                sin_auto.append((page_id, None))
 
-        for page_id in sin_auto:
+        for page_id, propia in sin_auto:
             yo = norm_by_id[page_id]
             otros = targets_by_page[page_id] - {yo}
             detalle = {"cluster": cluster_de[page_id], "alternativas": len(otros)}
@@ -1331,7 +1363,8 @@ class SEOAnalyzer:
             # con otra URL —la misma ruta con un parametro de tienda o de
             # pagina—, que para Google es otra URL. Se dice cual, porque el
             # arreglo es ese.
-            variante = sorted(_url_de_clave(d) for d in otros if d[:3] == yo[:3])
+            variante = [propia] if propia else sorted(
+                _url_de_clave(d) for d in otros if d[:3] == yo[:3])
             if variante:
                 detalle["variante_propia"] = variante[0]
             self._add_issue(page_id, "hreflang_sin_autorreferencia", "warning",
@@ -1350,8 +1383,15 @@ class SEOAnalyzer:
         # `info` diciendo una sola cosa (decision 64).
         sin_xd_por_host: dict[str, list[list[int]]] = defaultdict(list)
         clusters_por_host: dict[str, int] = defaultdict(int)
+        esquema_de_host: dict[str, str] = {}
         for clave, paginas in clusters.items():
-            host = norm_by_id[paginas[0]][1]
+            # El host del cluster, elegido sin depender del orden de las filas
+            # (la consulta no lleva ORDER BY y el UPDATE por lotes reescribe las
+            # tuplas): con `paginas[0]`, un cluster que cruza hosts caia en uno
+            # u otro segun el analisis, y la comparacion entre censos lo daba
+            # por resuelto en uno y nuevo en el otro (decision 88).
+            host, esquema = min((norm_by_id[p][1], norm_by_id[p][0]) for p in paginas)
+            esquema_de_host.setdefault(host, esquema)
             clusters_por_host[host] += 1
             if not any("x-default" in cods
                        for p in paginas
@@ -1359,8 +1399,15 @@ class SEOAnalyzer:
                 sin_xd_por_host[host].append(paginas)
         for host, grupos in sorted(sin_xd_por_host.items()):
             todas = [p for g in grupos for p in g]
+            # Anclado en la raiz del host si se rastreo: con la URL minima de
+            # las afectadas, el hallazgo cambiaba de URL en cuanto se arreglaba
+            # ese cluster o aparecia otro con una URL menor, y el diff lo
+            # contaba como uno resuelto y uno nuevo estando abierto.
+            raiz = url_id_by_norm.get(
+                _clave(f"{esquema_de_host[host]}://{host}/"))
             self._add_issue(
-                ancla(todas), "hreflang_sin_x_default", "info",
+                raiz if raiz is not None else ancla(todas),
+                "hreflang_sin_x_default", "info",
                 {"host": host,
                  "clusters_afectados": len(grupos),
                  "clusters_del_host": clusters_por_host[host],
@@ -1391,7 +1438,9 @@ class SEOAnalyzer:
                     group_key=_clave_de_grupo(f"{clave}|{c}"),
                 )
 
-        for destino_id, (fuentes, langs) in no_indexable.items():
+        for destino_id, por_fuente in no_indexable.items():
+            fuentes = set(por_fuente)
+            langs = {l for ls in por_fuente.values() for l in ls}
             _sc, _idx, estado_idx, canonical = info_url[destino_id]
             detalle = {
                 "motivo": estado_idx,

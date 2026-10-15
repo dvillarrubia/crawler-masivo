@@ -226,7 +226,7 @@ const ISSUE_INFO = {
     arreglo: 'Mover las etiquetas al <head>.',
   },
   'hreflang_sin_autorreferencia': {
-    que: 'La página anota sus otras versiones pero no se anota a sí misma con su idioma (a veces se anota con otra URL: la misma ruta con un parámetro).',
+    que: 'La página anota sus otras versiones pero no se anota a sí misma con su idioma (a veces se anota con otra URL: la misma ruta con un parámetro, aunque esa variante se canonicalice a ella).',
     google: 'Su documentación pide que cada versión se liste a sí misma; sin ella la página no declara en qué idioma está y el clúster queda cojo.',
     arreglo: 'Añadir a la plantilla la etiqueta de la propia página, con su URL canónica exacta.',
   },

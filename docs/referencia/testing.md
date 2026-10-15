@@ -48,8 +48,11 @@ no resolver con peticiones en vuelo).
 Hreflang (decision 99): `test_hreflang_completo_db.py` ejecuta
 `analyze_hreflang` contra SQLite (autorreferencia, x-default por host, idioma
 repetido sin N², destino no indexable, retorno incoherente y que una fuente no
-indexable no da avisos), y `test_catalogo_incidencias.py` falla si el
-analizador emite un tipo sin ficha en `frontend/incidencias.js`.
+indexable no da avisos; la autorreferencia por una variante canonicalizada a
+la propia pagina, el host y el ancla del x-default sin depender del orden de
+las filas, e `indexable` a NULL), y `test_catalogo_incidencias.py` falla si el
+analizador emite un tipo sin ficha en `frontend/incidencias.js` (los tipos
+salen con `ast`; una llamada con tipo no literal tiene que declararse).
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
