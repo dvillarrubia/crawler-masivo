@@ -146,6 +146,38 @@ def candidatos(db, ahora: datetime | None = None) -> list:
 # ---------------------------------------------------------------------------
 # Archivar y restaurar
 # ---------------------------------------------------------------------------
+class SeEstaAnalizando(RuntimeError):
+    """Otro proceso tiene el candado del job: se archivara en otra pasada."""
+
+
+def _tomar_candado_del_job(db, job_id) -> None:
+    """El candado del ANALISIS de ese job, hasta el commit del archivado.
+
+    Archivar borra las filas de `links` del job. Si a la vez alguien lo esta
+    analizando —el re-analisis de la referencia de la decision 93 lo hace con
+    un censo superado, que es justo lo que se archiva, y lo lanza el cierre
+    de OTRO rastreo—, el analisis veria los enlaces desaparecer a mitad y
+    dejaria entrantes, PageRank y profundidad a cero sin ningun error. Con el
+    candado compartido, uno de los dos espera: si analiza, aqui no se archiva
+    (la siguiente pasada lo hara); si se archiva, `run_analysis` no entra, y
+    si entra despues ve la marca y se niega (decision 95).
+
+    Es de TRANSACCION: se suelta solo con el commit (o el rollback) que marca
+    el job y borra sus enlaces. En SQLite no hay advisory locks.
+    """
+    from sqlalchemy import text
+
+    from shared.candados import clave_de_job
+
+    if not db.get_bind().dialect.name.startswith("postgres"):
+        return
+    tomado = db.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                        {"k": clave_de_job(job_id)}).scalar()
+    if not tomado:
+        raise SeEstaAnalizando(
+            f"el job {job_id} se esta analizando: no se archiva ahora")
+
+
 def archivar(db, job_id) -> dict:
     """Escribe los enlaces del job en Parquet, lo comprueba y los borra de BD.
 
@@ -169,6 +201,7 @@ def archivar(db, job_id) -> dict:
         return job.enlaces_archivados
     if job.status not in _TERMINADOS:
         raise RuntimeError(f"el job {job_id} esta en '{job.status}': no se archiva")
+    _tomar_candado_del_job(db, job.id)
 
     destino = ruta(job.id)
     destino.parent.mkdir(parents=True, exist_ok=True)

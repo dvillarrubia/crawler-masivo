@@ -224,3 +224,54 @@
    se puede» sin salida convierte la función en un adorno. La comparación de
    PÁGINAS sigue, y con ella las alertas críticas: esas salen del rastreo, no
    del análisis.
+
+<a id="d93"></a>
+93. **Callarse no basta: el censo de referencia se pone al día solo** — la
+   decisión 91 evita la mentira y deja la función **inservible en la
+   práctica**. Se despliega a diario, así que entre dos rastreos de una serie
+   semanal casi siempre habrá cambiado el analizador. Visto en el **primer
+   rastreo automático** de Lopesan, el 2026-10-14: los dos censos salieron con
+   `6ae6004` y `c5d863e` y el diff de incidencias no dio ni una cifra. Todo lo
+   demás funcionó —se disparó solo a las 03:00, 5.281 URLs, eligió el censo de
+   su propia serie, sin alertas— y la parte que más trabajo costó fue la única
+   que no sirvió.
+   Ahora, si el censo de referencia se analizó con otro código, el worker lo
+   **vuelve a analizar** antes de comparar. Cuesta 246 s en ese censo, contra
+   las 3 h del rastreo que acaba de terminar.
+   Lo que NO es gratis: **cambia las cifras guardadas del censo anterior**. Si
+   alguien exportó un CSV, ya no cuadrará. Por eso viaja en el resultado como
+   `anterior_reanalizado`, se dice en la ficha del rastreo y se puede apagar
+   con `REANALIZAR_LA_REFERENCIA=0`. Si no se re-analiza cuando hacía falta, se
+   vuelve al comportamiento de la 91 —sin cifras de incidencias, con las
+   alertas de página intactas— y el porqué va en `anterior_sin_reanalizar` y
+   en el motivo del diff de incidencias, que es lo que se pinta.
+   - **El analizador lo pasa el worker** (`comparar_con_el_anterior(db, job,
+     reanalizar=run_analysis)`); `shared/comparacion.py` no importa
+     `analysis/`, porque lo carga también la API y su imagen no lo lleva
+     (decisiones 69 y 71). La primera versión lo importaba con un
+     `except ImportError`, y su test, al parchear
+     `analysis.analyzer.run_analysis`, importaba el analizador entero y
+     tumbaba el trabajo de la API en CI (sin numpy).
+   - **Que `run_analysis` vuelva no es haber analizado**: si otro proceso
+     tiene el candado del job se retira sin hacer nada. Manda el sello
+     `analisis_version` que deja `run_all` al terminar, releído de la BD.
+   - **Un censo con los enlaces archivados (decisión 95) no se re-analiza
+     nunca desde aquí.** La referencia es por definición un censo superado,
+     que es justo lo que se archiva, y sin filas en `links` el análisis
+     pondría a cero entrantes, PageRank y profundidad y llenaría el censo de
+     huérfanas. Tampoco se restaura: devolver a `links` lo que el archivo
+     sacó (restaurar www.uoc.edu son 253 s; Druni, 139 M de filas) para una
+     cifra de un informe deshace la 95. Se vuelve a la 91 con el motivo y los
+     dos comandos que lo arreglan (`archivar_enlaces.py --restaurar` y
+     `python -m analysis.analyzer`). En el flujo normal no llega a pasar: el
+     worker compara **antes** de archivar, y `candidatos` no archiva nada de
+     menos de `ARCHIVAR_DIAS_MINIMOS` ni el último censo de una programación.
+     Lo que sí podía pasar es la carrera: el cierre de OTRO rastreo del mismo
+     sitio archivando la referencia **mientras** se re-analiza. Por eso
+     `archivo_enlaces.archivar` toma el mismo candado que el análisis
+     (`shared/candados.py`, advisory lock de transacción hasta el commit que
+     borra los enlaces): si se está analizando, no archiva (`SeEstaAnalizando`,
+     la siguiente pasada lo hará); si se está archivando, el análisis no entra
+     y luego ve la marca y se niega. Probado contra Postgres en
+     `test_no_se_archiva_un_censo_que_se_esta_analizando`, que falla quitando
+     el candado.

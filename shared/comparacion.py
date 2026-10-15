@@ -48,6 +48,8 @@ from collections import defaultdict
 from typing import Any
 
 import logging
+import os
+import time
 
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
@@ -824,17 +826,110 @@ def censo_anterior(db, job):
     return mas_reciente
 
 
-def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
+REANALIZAR_LA_REFERENCIA = os.getenv("REANALIZAR_LA_REFERENCIA", "1") != "0"
+
+
+def _poner_al_dia_el_anterior(db, anterior, job, reanalizar) -> tuple[bool, str | None]:
+    """Re-analiza el censo de referencia si se analizó con otro código.
+
+    Sin esto, la decisión 91 deja la comparación de incidencias **inservible en
+    la práctica**: se despliega a diario, así que entre dos rastreos de una
+    serie semanal casi siempre habrá cambiado el analizador, y entonces no se
+    dan cifras. Visto en el primer rastreo automático de Lopesan, el
+    2026-10-14: los dos censos salieron con `6ae6004` y `c5d863e` y el diff se
+    calló. Callarse es mejor que mentir, pero no es una función que sirva.
+
+    Volver a analizar el anterior es barato —246 s en ese censo— y lo deja
+    comparable. Lo que NO es gratis es que **cambia sus cifras guardadas**: si
+    alguien exportó un CSV de ese censo, ya no cuadrará. Por eso se registra en
+    el log y viaja en el resultado como `anterior_reanalizado`, y por eso se
+    puede apagar con `REANALIZAR_LA_REFERENCIA=0`.
+
+    `reanalizar` es la función que analiza un job (`run_analysis`) y la pasa
+    QUIEN LLAMA. Este módulo no importa `analysis/`: lo carga también la API,
+    cuya imagen no lo lleva (decisiones 69 y 71). Sin ella no se re-analiza.
+
+    Un censo con los enlaces **archivados** (decisión 95) no se re-analiza
+    nunca desde aquí: sin filas en `links` el análisis pondría a cero los
+    entrantes, el PageRank y la profundidad. El analizador ya se niega, pero no
+    se le llega a pedir: restaurar para comparar devolvería a `links` lo que el
+    archivo sacó de ahí (horas y gigas en un censo como Druni) solo para una
+    cifra del informe. Se vuelve a la 91 con el motivo dicho.
+
+    Devuelve `(se re-analizó, por qué no)`. El motivo solo va cuando hacía
+    falta re-analizar y no se hizo: es lo que el diff de incidencias dirá en
+    lugar del genérico «vuelve a analizar el más antiguo».
+    """
+    actual = getattr(job, "analisis_version", None)
+    previa = getattr(anterior, "analisis_version", None)
+    if not actual or previa == actual:
+        return False, None
+    if not REANALIZAR_LA_REFERENCIA:
+        return False, ("el re-analisis automatico del censo anterior esta "
+                       "apagado (REANALIZAR_LA_REFERENCIA=0).")
+    if reanalizar is None:
+        return False, None
+    # Lo que diga la fila AHORA, no lo que se cargo al elegir la referencia:
+    # el archivado lo hace otro proceso (el cierre de otro rastreo).
+    db.refresh(anterior)
+    from shared.archivo_enlaces import esta_archivado
+
+    if esta_archivado(anterior):
+        logger.warning(
+            "El censo de referencia %s tiene los enlaces archivados: no se "
+            "re-analiza y las incidencias no se comparan", anterior.id)
+        return False, (
+            f"El censo anterior tiene sus enlaces archivados en Parquet "
+            f"(decision 95) y re-analizarlo sin ellos pondria a cero los "
+            f"enlaces entrantes y el PageRank, asi que no se ha re-analizado. "
+            f"Para compararlo: python scripts/archivar_enlaces.py --restaurar "
+            f"{anterior.id} y despues python -m analysis.analyzer {anterior.id}."
+        )
+    inicio = time.time()
+    logger.info(
+        "El censo de referencia %s se analizo con %s y este con %s: se vuelve "
+        "a analizar para poder comparar las incidencias",
+        anterior.id, previa or "(desconocida)", actual)
+    try:
+        reanalizar(str(anterior.id))
+    except Exception:
+        logger.exception(
+            "No se pudo re-analizar %s; la comparacion de incidencias se "
+            "quedara sin hacer, pero las alertas de pagina siguen", anterior.id)
+        db.rollback()
+        return False, "el re-analisis del censo anterior ha fallado (ver el log del worker)."
+    # Que la llamada vuelva no quiere decir que haya analizado: si otro proceso
+    # tiene el candado del job (otro analisis, o el archivado de la decision 95
+    # en curso) `run_analysis` se retira sin hacer nada. Lo que manda es el
+    # sello que deja `run_all` al terminar.
+    db.expire(anterior)
+    db.refresh(anterior)
+    if anterior.analisis_version != actual:
+        logger.warning("El censo de referencia %s no se ha re-analizado (sigue "
+                       "con %s)", anterior.id, anterior.analisis_version)
+        return False, ("el censo anterior no se ha podido re-analizar: otro "
+                       "proceso lo estaba analizando o archivando.")
+    logger.info("Censo de referencia %s re-analizado en %.0f s",
+                anterior.id, time.time() - inicio)
+    return True, None
+
+
+def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     """Compara un rastreo recién terminado con el anterior del mismo sitio.
 
     Es lo que convierte la comparación en una alerta: nadie va a entrar a
     elegir dos censos en un desplegable para enterarse de que media sección se
     ha ido del índice. En Lopesan eso pasó y se entregó como un aviso `info`
     entre 315.119 incidencias.
+
+    `reanalizar` (el `run_analysis` del analizador) lo pasa el worker para
+    poner al dia el censo de referencia (decision 93); sin ella no se toca.
     """
     anterior = censo_anterior(db, job)
     if anterior is None:
         return None
+    reanalizado, sin_reanalizar = _poner_al_dia_el_anterior(
+        db, anterior, job, reanalizar)
     resumen_anterior = resumen_de_job(anterior)
     r = comparar_censos(
         paginas_de_censo(db, anterior.id),
@@ -869,10 +964,21 @@ def comparar_con_el_anterior(db, job) -> dict[str, Any] | None:
             logger.exception(
                 "No se pudo comparar las incidencias de %s con %s; las alertas "
                 "de pagina siguen", job.id, anterior.id)
+        # Si hacia falta poner al dia la referencia y no se pudo, el motivo
+        # concreto sustituye al consejo generico de la 91: con los enlaces
+        # archivados, «vuelve a analizar el mas antiguo» fallaria tal cual.
+        if (sin_reanalizar and incidencias is not None
+                and incidencias.get("comparable") is False):
+            incidencias["motivo"] = f"{incidencias['motivo']} {sin_reanalizar}"
     # Lo que se guarda es el veredicto, no el censo entero: los ejemplos y las
     # plantillas ya van dentro de cada alerta.
     return {
         "incidencias": incidencias,
+        # Si el censo anterior se volvio a analizar para poder comparar, se
+        # dice: sus cifras han cambiado respecto a lo que se viera antes, y
+        # quien mire un informe viejo de ese censo tiene derecho a saberlo.
+        "anterior_reanalizado": reanalizado,
+        "anterior_sin_reanalizar": sin_reanalizar,
         "comparado_con": str(anterior.id),
         "nombre_anterior": anterior.name,
         "fecha_anterior": resumen_de_job(anterior)["fecha"],

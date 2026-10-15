@@ -2900,10 +2900,14 @@ def _es_destino_de_redireccion():
 # ---------------------------------------------------------------------------
 
 def _clave_candado(job_id: str) -> int:
-    """Clave estable de 63 bits para el advisory lock, a partir del UUID."""
-    import hashlib
+    """Clave estable de 63 bits para el advisory lock, a partir del UUID.
 
-    return int.from_bytes(hashlib.sha1(str(job_id).encode()).digest()[:8], "big") & 0x7FFFFFFFFFFFFFFF
+    La misma que toma el archivado de enlaces (`shared/candados.py`): asi no
+    se archiva un censo a mitad de analizarlo (decisiones 93 y 95).
+    """
+    from shared.candados import clave_de_job
+
+    return clave_de_job(job_id)
 
 
 @contextmanager

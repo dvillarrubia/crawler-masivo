@@ -99,6 +99,9 @@ Una linea por regla; el porque y la medida, en la decision citada.
   las apariciones identicas de una pagina van en una fila. Decision 94.
 - **Un censo con `jobs.enlaces_archivados` no tiene filas en `links`**: se lee del
   Parquet y no se re-analiza sin `archivar_enlaces.py --restaurar`. Decision 95.
+- **Lo que analiza o archiva un censo entero toma el candado del job**
+  (`shared/candados.py`): el re-analisis de la referencia (93) cae justo sobre
+  censos superados, que es lo que se archiva (95).
 - **Reglas que comparten spider y analizador viven en `shared/`** (robots,
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en
