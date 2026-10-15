@@ -134,9 +134,14 @@
      un silencio se lee igual que «no ha cambiado nada» (decisiones 78 y 86).
      Lo demas es aviso y no guardia: que un host se quede sin ningun censo
      completado solo muerde si ese sitio se vuelve a rastrear, lo que puede no
-     pasar nunca; la serie programada SI va a volver a correr. Con `forzar` se
-     saltan los dos, y marcarlo en la interfaz **rehace la vista previa**: la
-     lista que se lee y lo que se borra tienen que ser lo mismo.
+     pasar nunca; la serie programada SI va a volver a correr. `forzar` salta
+     **solo el de la serie**, y marcarlo en la interfaz **rehace la vista
+     previa**: la lista que se lee y lo que se borra tienen que ser lo mismo.
+     Un rastreo en marcha no se borra ni forzando: con `running` el pipeline
+     sigue metiendo enlaces mientras se borran, y con `analyzing` el `DELETE`
+     de la fila de `jobs` espera al `FOR UPDATE` que el analisis mantiene toda
+     la pasada —43 min en Druni—, con la peticion colgada mucho mas alla de su
+     presupuesto. Se cancela, se espera a que pare y se borra.
      El archivado de la decision 95 no anade ningun guardia: solo archiva
      censos que ya NO son referencia de nada, y la comparacion no lee `links`
      (`paginas_de_censo` va por `urls`), asi que un censo archivado que vuelva
@@ -154,11 +159,35 @@
      enlaces son minutos con la tabla tomada, y porque **mergear una PR recrea
      el contenedor de la API y se lleva la peticion en vuelo**
      ([`operacion.md`](../referencia/operacion.md)).
+     Lo primero que se confirma es **`status='deleting'`**, porque a medias
+     tambien puede quedarse para siempre (la pestana se cierra, la API se
+     recrea) y lo que queda —sin enlaces ni incidencias, con media tabla de
+     URLs— no puede seguir pareciendo un `completed`: la comparacion lo
+     elegiria como referencia y sus alertas callarian sobre las pocas paginas
+     comunes (decisiones 78 y 86), y el archivado lo guardaria en un Parquet
+     vacio (decision 95). Ninguno de los dos mira un job sin terminar, y la
+     lista lo ensena como «Borrandose» para terminarlo repitiendo el borrado.
+     La interfaz da una pasada por atascada solo si no termina ningun censo
+     **ni borra ninguna fila**: un censo grande pasa muchas vueltas sin
+     terminar, borrando en cada una. El presupuesto empieza antes de medir
+     (medir tambien es tiempo de la peticion) y el primer censo de cada pasada
+     entra siempre, asi que toda pasada avanza al menos un lote.
    - **Lo que se libera se dice bien.** Postgres marca el espacio como
      reutilizable y lo reusa en el siguiente rastreo, pero el fichero **no se
      encoge** sin un `VACUUM FULL`, que toma un candado exclusivo sobre una
      tabla de decenas de GB y por eso no se dispara desde aqui. Lo que se gana
      es que el disco deje de crecer, y esa frase viaja en la respuesta.
+     Lo liberado se suma con lo que midio la **vista previa**: un censo que
+     necesita varias pasadas llega a la ultima casi vacio, y medirlo entonces
+     daria el resto como si fuera lo que ocupaba. Al borrar, cada censo se
+     mide **una sola vez, justo antes de empezarlo** (contar sus enlaces son
+     segundos, y repetirlo en cada pasada era gastar el presupuesto en contar
+     filas que se iban a borrar a continuacion): uno que no se llega a empezar
+     en una pasada no se mide en ella, y uno que ya estaba en `deleting` no se
+     vuelve a medir (sale «sin medir», nunca un resto con cara de total). Un
+     Parquet que no se puede medir marca `archivo_incompleto` en vez de sumar
+     un cero. `deleting` no necesita migracion: `jobs.status` es un
+     `String(20)` sin restriccion de valores.
 
    **El Parquet de un censo archivado se borra con el, y por la misma
    funcion.** `borrar_job` —la del `DELETE /api/jobs/{id}`, la del borrado de

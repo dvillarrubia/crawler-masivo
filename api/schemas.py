@@ -720,9 +720,9 @@ class BorradoEnMasa(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1)
     # La vista previa del dialogo: mismos guardias, mismas cifras, sin borrar.
     simular: bool = False
-    # Pasar por encima de los guardias (rastreo en marcha, censo de referencia
-    # de una programacion activa). Lo pide la interfaz aparte, no va por
-    # defecto.
+    # Pasar por encima del guardia del censo de referencia de una programacion
+    # activa. Lo pide la interfaz aparte, no va por defecto. Un rastreo en
+    # marcha no se borra ni con esto (ver `_motivo_para_no_borrar`).
     forzar: bool = False
     # Presupuesto de tiempo de ESTA peticion. Lo que no se termine vuelve en
     # `pendientes` para repetirlo.
@@ -753,6 +753,8 @@ class JobOmitido(BaseModel):
     id: uuid.UUID
     nombre: str | None = None
     motivo: str
+    # Si `forzar` lo saltaria. Un rastreo en marcha no, ni uno que no existe.
+    forzable: bool = False
 
 
 class BorradoEnMasaResultado(BaseModel):
@@ -769,6 +771,8 @@ class BorradoEnMasaResultado(BaseModel):
     # Parquet de enlaces archivados que se van con estos censos. Aparte de
     # `bytes_aprox` porque ESTE espacio si vuelve al disco (ver `nota`).
     archivo_bytes: int = 0
+    # True = algun Parquet no se pudo medir y `archivo_bytes` se queda corto.
+    archivo_incompleto: bool = False
     filas: dict[str, int] = {}
     nota: str
 

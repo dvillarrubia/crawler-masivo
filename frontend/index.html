@@ -4753,9 +4753,12 @@
                     </li>
                   </template>
                 </ul>
-                <label class="checkbox-label text-sm" style="margin-top:.5rem">
+                <!-- Solo lo protegido por una programación se puede forzar: un
+                     rastreo en marcha hay que cancelarlo antes, siempre. -->
+                <label class="checkbox-label text-sm" style="margin-top:.5rem"
+                       x-show="borrado.forzar || borrado.previa.omitidos.some(o => o.forzable)">
                   <input type="checkbox" x-model="borrado.forzar" @change="recargarPrevia()">
-                  Borrarlos igualmente
+                  Borrar igualmente los que son referencia de una programación
                 </label>
               </div>
             </template>
@@ -4805,7 +4808,8 @@
               Liberan <strong x-text="fmt.bytes(borrado.previa.bytes_aprox)"></strong> aproximadamente<span
                 x-show="borrado.previa.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
                 x-show="borrado.previa.archivo_bytes > 0">, más
-                <strong x-text="fmt.bytes(borrado.previa.archivo_bytes)"></strong> de enlaces archivados</span>.
+                <strong x-text="fmt.bytes(borrado.previa.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.previa.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
             </p>
             <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5"
                x-show="borrado.previa.eliminados.length" x-text="borrado.previa.nota"></p>
@@ -4844,8 +4848,14 @@
             </p>
             <p class="text-sm" style="margin-top:.4rem">
               Liberados <strong x-text="fmt.bytes(borrado.resultado.bytes_aprox)"></strong> aproximadamente<span
+                x-show="borrado.resultado.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
                 x-show="borrado.resultado.archivo_bytes > 0">, más
-                <strong x-text="fmt.bytes(borrado.resultado.archivo_bytes)"></strong> de enlaces archivados</span>.
+                <strong x-text="fmt.bytes(borrado.resultado.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.resultado.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
+            </p>
+            <p class="text-sm" style="margin-top:.4rem;color:var(--orange)" x-show="borrado.resultado.sin_terminar > 0">
+              <strong x-text="fmt.num(borrado.resultado.sin_terminar)"></strong> quedaron a medias: salen en la
+              lista como «Borrándose» y se terminan seleccionándolos y repitiendo el borrado.
             </p>
             <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5" x-text="borrado.resultado.nota"></p>
             <template x-if="borrado.resultado.omitidos.length > 0">

@@ -483,6 +483,15 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
       donde iba. Por eso el presupuesto se puede cortar sin miedo.
 
     Sin `trozo` hace exactamente lo de siempre: un DELETE por tabla y un commit.
+
+    Con `trozo`, lo primero que se confirma es `status='deleting'`. Un borrado
+    por trozos se puede quedar a medias y no volver nadie a terminarlo (la
+    pestana se cierra, un despliegue recrea la API), y un censo sin enlaces ni
+    incidencias y con la mitad de las URLs no puede seguir pareciendo un
+    `completed`: lo elegiria la comparacion como referencia (decisiones 78 y
+    86, y sus alertas callarian sobre las pocas paginas comunes) y el archivado
+    lo guardaria en un Parquet vacio (decision 95). Ninguno de los dos mira un
+    job que no este terminado, y `deleting` no lo esta.
     """
     from shared.models import CleaningRuleset, CrawlProfile, Decision, EnrichmentRun
 
@@ -495,6 +504,9 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
             get_redis().set(f"job:{job_id}:cancel", "1")
         except Exception:
             pass
+    if trozo and job.status != "deleting":
+        job.status = "deleting"
+        db.commit()
 
     # El perfil que lo tenia como ultimo rastreo se queda sin el, no roto.
     # A mano y no solo por el ON DELETE SET NULL: igual en cualquier motor.
@@ -562,9 +574,10 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
 # uno en uno, entrando en cada ficha y teclando «eliminar», es lo que hace que
 # no se borren nunca y que el aviso lo acabe dando el disco del VPS.
 #
-# Tres cosas que este endpoint se NIEGA a hacer sin que se le insista:
-#   - borrar un rastreo en marcha (`pending`, `running`, `analyzing`),
-#   - borrar el censo de referencia de una programacion activa, porque el
+# Tres cosas que este endpoint se NIEGA a hacer:
+#   - borrar un rastreo en marcha (`pending`, `running`, `analyzing`), ni
+#     siquiera con `forzar`: hay que cancelarlo y esperar a que pare,
+#   - borrar sin `forzar` el censo de referencia de una programacion activa, porque el
 #     siguiente rastreo de esa serie se quedaria sin con que compararse y un
 #     silencio se lee igual que «no ha cambiado nada» (decisiones 78 y 86),
 #   - y borrar a partir de un FILTRO: solo acepta ids, uno a uno. Un filtro se
@@ -574,13 +587,23 @@ MAX_IDS_POR_PETICION = 500
 TROZO_DE_BORRADO = 200_000
 
 
-def _motivo_para_no_borrar(db: Session, job: Job) -> str | None:
-    """Por que NO se borra este rastreo, si hay motivo. `None` = adelante."""
+def _motivo_para_no_borrar(db: Session, job: Job, *, forzar: bool = False
+                           ) -> tuple[str, bool] | None:
+    """Por que NO se borra este rastreo y si `forzar` lo salta. `None` = adelante.
+
+    Un rastreo en marcha no se borra NI con `forzar`: el pipeline sigue
+    insertando enlaces mientras se borran, y con `analyzing` el `DELETE` de la
+    fila de `jobs` espera al `FOR UPDATE` que el analisis tiene toda la pasada
+    —43 minutos en un censo como Druni—, con la peticion colgada mucho mas
+    alla de su presupuesto. Se cancela, se espera a que pare y se borra.
+    """
     from shared.models import Programacion
 
     if job.status in ("pending", "running", "analyzing"):
         return (f"está en marcha ({job.status}): cancélalo y espera a que pare "
-                "antes de borrarlo")
+                "antes de borrarlo", False)
+    if forzar:
+        return None
 
     if job.programacion_id and job.status == "completed" and job.started_at:
         programacion = (db.query(Programacion)
@@ -596,7 +619,7 @@ def _motivo_para_no_borrar(db: Session, job: Job) -> str | None:
             if mas_nuevo is None:
                 return (f"es el censo de referencia de la programación "
                         f"«{programacion.nombre}»: el próximo rastreo de esa serie "
-                        "se quedaría sin con qué compararse")
+                        "se quedaría sin con qué compararse", True)
     return None
 
 
@@ -665,39 +688,68 @@ def eliminar_jobs(
             detail=f"Como mucho {MAX_IDS_POR_PETICION} rastreos por petición; "
                    f"se han pedido {len(ids)}")
 
-    jobs = {j.id: j for j in db.query(Job).filter(Job.id.in_(ids)).all()}
+    # El presupuesto empieza YA: medir tambien es tiempo de la peticion, y si
+    # no contara, cada pasada duraria sus `segundos` mas los 20 s de medir.
+    hasta = _reloj() + cuerpo.segundos
 
-    # El tamano se mide ANTES de borrar y de una vez para todos: despues ya no
-    # hay filas que contar. Si no se puede medir viene a None (ver
-    # shared/almacenamiento.py) y el borrado sigue igual.
-    tamanos = tamano_de_jobs(db, [i for i in ids if i in jobs])
+    jobs = {j.id: j for j in db.query(Job).filter(Job.id.in_(ids)).all()}
 
     omitidos: list[dict[str, Any]] = []
     eliminados: list[dict[str, Any]] = []
     pendientes: list[uuid.UUID] = []
     filas_totales: dict[str, int] = {}
     bytes_conocidos, sin_medir = 0, False
-    archivo_bytes = 0
-    hasta = _reloj() + cuerpo.segundos
+    archivo_bytes, archivo_sin_medir = 0, False
 
     candidatos = []
     for i in ids:
         job = jobs.get(i)
         if job is None:
-            omitidos.append({"id": i, "nombre": None, "motivo": "ya no existe"})
+            omitidos.append({"id": i, "nombre": None, "motivo": "ya no existe",
+                             "forzable": False})
             continue
-        motivo = None if cuerpo.forzar else _motivo_para_no_borrar(db, job)
+        motivo = _motivo_para_no_borrar(db, job, forzar=cuerpo.forzar)
         if motivo:
-            omitidos.append({"id": i, "nombre": job.name, "motivo": motivo})
+            omitidos.append({"id": i, "nombre": job.name, "motivo": motivo[0],
+                             "forzable": motivo[1]})
             continue
         candidatos.append(job)
+
+    # En la vista previa el tamano se mide de una vez para todos. Al borrar,
+    # cada censo se mide justo ANTES de empezarlo (despues ya no hay filas que
+    # contar) y una sola vez en toda la operacion: un censo que no se llega a
+    # empezar en esta pasada no se mide —lo hara la pasada que lo empiece— y
+    # uno que ya estaba a medias (`deleting`) no se vuelve a medir, porque lo
+    # que queda no es lo que ocupaba y sumarlo como «liberado» daria una cifra
+    # corta con cara de completa. Va a None —«no se sabe»— y la interfaz suma
+    # lo liberado con lo que midio la vista previa, que es de antes de empezar.
+    # Si no se puede medir viene a None (ver shared/almacenamiento.py) y el
+    # borrado sigue igual.
+    tamanos = tamano_de_jobs(db, [j.id for j in candidatos]) if (
+        cuerpo.simular and candidatos) else {}
 
     # Los avisos solo en la vista previa: son para decidir, y una vez borrado
     # no hay nada que decidir.
     avisos = _avisos_por_host(db, candidatos) if cuerpo.simular else {}
 
+    intentado = False
     for job in candidatos:
-        medida = tamanos.get(job.id, {})
+        if not cuerpo.simular:
+            # El primero entra siempre, aunque medir se haya comido el
+            # presupuesto: `borrar_job` hace al menos un trozo antes de mirar
+            # el reloj, y asi cada pasada avanza algo. Una pasada sin avance
+            # la interfaz la lee como atasco y para.
+            if intentado and _reloj() >= hasta:
+                pendientes.append(job.id)
+                continue
+            intentado = True
+            if job.status != "deleting":
+                tamanos.update(tamano_de_jobs(db, [job.id]))
+        medida = tamanos.get(job.id)
+        if medida is None:
+            # Sin medir (ya estaba a medias): ni la base ni su Parquet se saben.
+            archivado = bool(job.enlaces_archivados)
+            medida = {"archivado": archivado, "archivo_bytes": None if archivado else 0}
         fila = {"id": job.id, "nombre": job.name, "status": job.status,
                 "created_at": job.created_at,
                 "filas": medida.get("filas"), "bytes": medida.get("bytes"),
@@ -708,9 +760,6 @@ def eliminar_jobs(
                 "aviso": avisos.get(job.id)}
 
         if not cuerpo.simular:
-            if _reloj() >= hasta:
-                pendientes.append(job.id)
-                continue
             resultado = borrar_job(db, job, trozo=TROZO_DE_BORRADO, hasta=hasta)
             for tabla, n in resultado["filas"].items():
                 filas_totales[tabla] = filas_totales.get(tabla, 0) + n
@@ -721,7 +770,10 @@ def eliminar_jobs(
                 continue
 
         eliminados.append(fila)
-        archivo_bytes += medida.get("archivo_bytes") or 0
+        if medida.get("archivado") and medida.get("archivo_bytes") is None:
+            archivo_sin_medir = True
+        else:
+            archivo_bytes += medida.get("archivo_bytes") or 0
         if medida.get("bytes") is None:
             sin_medir = True
         else:
@@ -737,6 +789,7 @@ def eliminar_jobs(
         bytes_aprox=None if (sin_medir and not bytes_conocidos) else bytes_conocidos,
         bytes_incompletos=sin_medir,
         archivo_bytes=archivo_bytes,
+        archivo_incompleto=archivo_sin_medir,
         filas=filas_totales,
         nota=NOTA_DE_ESPACIO,
     )

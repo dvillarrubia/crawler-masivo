@@ -70,7 +70,7 @@
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
 | DELETE | `/api/jobs/{id}` | Delete job + cascade, y el Parquet de sus enlaces si estaban archivados (decision 95) |
-| POST | `/api/jobs/eliminar` | Borrado en masa (decision 96). `{ids, simular, forzar, segundos}`: `simular` es la vista previa con tamanos, guardias y `archivo_bytes`; sin el, borra (Parquet incluido) y devuelve `pendientes` con lo que no cupo en su presupuesto de tiempo |
+| POST | `/api/jobs/eliminar` | Borrado en masa (decision 96). `{ids, simular, forzar, segundos}` (`forzar` salta solo el guardia de la serie programada, nunca el de un rastreo en marcha): `simular` es la vista previa con tamanos, guardias y `archivo_bytes`; sin el, borra (Parquet incluido) y devuelve `pendientes` con lo que no cupo en su presupuesto de tiempo; lo que queda a medias pasa a `status='deleting'` |
 | GET | `/api/almacenamiento` | Lo que ocupa la base y cada tabla, mas los Parquet archivados (`archivo_bytes`, `archivo_ficheros`), para decidir que censos borrar |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
 | GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`; columnas calculadas con `?origenes=`, `?h1=` y `?cambios=` —frente al censo de la comparación automática o `?con=`—). Los «contiene» admiten `a|b` y `!a`; `status_code` admite `301,302`. El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista |

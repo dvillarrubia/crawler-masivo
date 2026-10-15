@@ -89,6 +89,7 @@ const STATUS_LABEL = {
   completed: 'Completado',
   failed:    'Fallido',
   cancelled: 'Cancelado',
+  deleting:  'Borrándose',
 };
 
 const ISSUE_LABEL = {
@@ -899,8 +900,14 @@ function app() {
       if (!b || b.escribir.trim() !== 'eliminar') return;
       const total = b.previa.eliminados.length;
       let pendientes = b.previa.eliminados.map(e => e.id);
+      // Lo liberado se suma con lo que midió la VISTA PREVIA, de antes de
+      // empezar: un censo que necesita varias pasadas llega a la última con
+      // casi todo borrado, y lo que el servidor mide entonces es el resto, no
+      // lo que ocupaba.
+      const medidaPrevia = Object.fromEntries(b.previa.eliminados.map(e => [e.id, e]));
       const acumulado = { eliminados: [], omitidos: [], filas: {}, bytes_aprox: 0,
-                          bytes_incompletos: false, archivo_bytes: 0, nota: b.previa.nota };
+                          bytes_incompletos: false, archivo_bytes: 0, archivo_incompleto: false,
+                          sin_terminar: 0, nota: b.previa.nota };
       b.paso = 'borrando';
       b.hechos = 0;
       b.total = total;
@@ -923,18 +930,32 @@ function app() {
         }
         acumulado.eliminados.push(...r.eliminados);
         acumulado.omitidos.push(...r.omitidos);
-        for (const [tabla, n] of Object.entries(r.filas || {}))
+        let filasBorradas = 0;
+        for (const [tabla, n] of Object.entries(r.filas || {})) {
           acumulado.filas[tabla] = (acumulado.filas[tabla] || 0) + n;
-        if (r.bytes_aprox != null) acumulado.bytes_aprox += r.bytes_aprox;
-        if (r.bytes_incompletos) acumulado.bytes_incompletos = true;
-        acumulado.archivo_bytes += r.archivo_bytes || 0;
+          filasBorradas += n;
+        }
+        for (const e of r.eliminados) {
+          const m = medidaPrevia[e.id] || e;
+          if (m.bytes != null) acumulado.bytes_aprox += m.bytes;
+          else acumulado.bytes_incompletos = true;
+          if (m.archivado && m.archivo_bytes == null) acumulado.archivo_incompleto = true;
+          else acumulado.archivo_bytes += m.archivo_bytes || 0;
+        }
         b.hechos = acumulado.eliminados.length;
-        const antes = pendientes.length;
         pendientes = r.pendientes;
-        if (pendientes.length >= antes && !r.eliminados.length && vuelta > 0) {
+        // Avanzar es terminar algún censo O borrar filas: un censo de decenas
+        // de millones de enlaces pasa muchas vueltas sin terminar, borrando
+        // en cada una. Atascado es una vuelta que no hace ninguna de las dos.
+        if (pendientes.length && !r.eliminados.length && !filasBorradas) {
           this.showToast('El borrado no avanza; quedan ' + pendientes.length, 'error');
           break;
         }
+      }
+      if (pendientes.length) {
+        // Se acabaron las vueltas o se atascó: lo que queda se ve en la lista
+        // como «Borrándose» y se termina repitiendo la operación.
+        acumulado.sin_terminar = pendientes.length;
       }
 
       this.borrado.resultado = acumulado;
@@ -2470,7 +2491,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled', deleting:'badge-cancelled' }[s] || 'badge-pending';
     },
 
     barColor(group) {

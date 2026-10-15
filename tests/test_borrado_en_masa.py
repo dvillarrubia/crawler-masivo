@@ -3,8 +3,11 @@
 Lo que se sujeta, que es lo que no se puede deshacer si falla:
 
 - que se borra TODO lo del censo y nada de los demas;
-- que un rastreo en marcha y el censo de referencia de una programacion activa
-  NO se borran sin insistir (decisiones 78 y 86), y que insistiendo si;
+- que el censo de referencia de una programacion activa NO se borra sin
+  insistir (decisiones 78 y 86), que insistiendo si, y que un rastreo en
+  marcha no se borra ni insistiendo;
+- que un borrado cortado a medias deja el job en `deleting`, fuera de las
+  referencias de la comparacion y del archivado;
 - que la simulacion recorre lo mismo que el borrado y no toca nada;
 - que el presupuesto de tiempo devuelve `pendientes` y que repetir termina —el
   caso que de verdad importa: un lote de censos grandes partido en varias
@@ -154,16 +157,22 @@ def test_borra_varios_y_no_deja_nada_detras(entorno):
     assert d["filas"]["urls"] == 6 and d["filas"]["links"] == 12 and d["filas"]["issues"] == 6
 
 
-def test_un_rastreo_en_marcha_no_se_borra_sin_insistir(entorno):
+@pytest.mark.parametrize("estado", ["pending", "running", "analyzing"])
+def test_un_rastreo_en_marcha_no_se_borra_ni_forzando(entorno, estado):
+    """Con `analyzing`, el DELETE de la fila de `jobs` esperaria al FOR UPDATE
+    del analisis toda la pasada; con `running`, el pipeline seguiria metiendo
+    enlaces mientras se borran. `forzar` solo salta el guardia de la serie."""
     api, Sesion, ids = entorno
-    d = _borrar(api, [ids["en_marcha"]])
-    assert d["eliminados"] == []
-    assert len(d["omitidos"]) == 1 and "en marcha" in d["omitidos"][0]["motivo"]
-    assert _filas(Sesion, ids["en_marcha"])["jobs"] == 1
-    # Con `forzar` se va, y se le manda la senal de cancelar al crawler.
-    d = _borrar(api, [ids["en_marcha"]], forzar=True)
-    assert len(d["eliminados"]) == 1
-    assert _filas(Sesion, ids["en_marcha"]) == {"jobs": 0, "urls": 0, "links": 0, "issues": 0}
+    s = Sesion()
+    s.query(Job).filter(Job.id == ids["en_marcha"]).update({Job.status: estado})
+    s.commit()
+    s.close()
+    for forzar in (False, True):
+        d = _borrar(api, [ids["en_marcha"]], forzar=forzar)
+        assert d["eliminados"] == []
+        assert len(d["omitidos"]) == 1 and "en marcha" in d["omitidos"][0]["motivo"]
+        assert d["omitidos"][0]["forzable"] is False
+        assert _filas(Sesion, ids["en_marcha"])["jobs"] == 1
 
 
 def test_el_censo_de_referencia_de_una_serie_viva_se_protege(entorno):
@@ -173,6 +182,7 @@ def test_el_censo_de_referencia_de_una_serie_viva_se_protege(entorno):
     d = _borrar(api, [ids["serie_nueva"]])
     assert d["eliminados"] == []
     assert "referencia" in d["omitidos"][0]["motivo"]
+    assert d["omitidos"][0]["forzable"] is True
     assert "Semanal de x.com" in d["omitidos"][0]["motivo"]
     # El anterior de la misma serie NO lo esta: ya no es con lo que se compara.
     d = _borrar(api, [ids["serie_vieja"]])
@@ -266,20 +276,49 @@ def test_el_presupuesto_de_tiempo_devuelve_pendientes_y_repetir_termina(entorno,
         return 0.0 if vueltas["n"] <= 2 else 1e9
 
     monkeypatch.setattr(router_jobs, "_reloj", _reloj_falso)
+    # Cada censo se mide UNA vez en toda la operacion: medir cuenta los enlaces
+    # (segundos en un censo grande) y repetirlo en cada pasada es gastar el
+    # presupuesto en contar filas que se van a borrar justo despues.
+    from shared import almacenamiento
+
+    medidos: list = []
+    medir = almacenamiento.tamano_de_jobs
+
+    def _medir(db, job_ids, **kw):
+        medidos.extend(job_ids)
+        return medir(db, job_ids, **kw)
+
+    monkeypatch.setattr(almacenamiento, "tamano_de_jobs", _medir)
 
     lote = [ids["prueba"], ids["canario"]]
     d = _borrar(api, lote, segundos=5)
     assert d["eliminados"] == []
+    # El que no se llego a empezar no se midio.
+    assert medidos == [ids["prueba"]]
     assert set(d["pendientes"]) == {str(i) for i in lote}
+    # Una pasada sin terminar nada SI avanza: trae filas borradas, que es lo
+    # que la interfaz mira para no darla por atascada.
+    assert sum(d["filas"].values()) > 0
     # Lo que se llego a borrar esta borrado; la fila de `jobs` sigue, asi que
     # el censo es «uno con menos enlaces», no un huerfano.
     assert _filas(Sesion, ids["prueba"])["jobs"] == 1
     assert _filas(Sesion, ids["prueba"])["links"] < 6
+    s = Sesion()
+    assert s.get(Job, ids["prueba"]).status == "deleting"
+    # El segundo no se llego a empezar: sigue como estaba.
+    assert s.get(Job, ids["canario"]).status == "completed"
+    s.close()
 
-    # Repitiendo con los pendientes y sin reloj trucado, se acaba.
+    # Repitiendo con los pendientes y sin reloj trucado, se acaba. El que ya
+    # estaba a medias no se vuelve a medir: lo que queda no es lo que ocupaba.
     monkeypatch.setattr(router_jobs, "_reloj", time.monotonic)
     d = _borrar(api, lote)
     assert d["pendientes"] == [] and len(d["eliminados"]) == 2
+    por_id = {e["id"]: e for e in d["eliminados"]}
+    assert por_id[str(ids["prueba"])]["filas"] is None
+    assert por_id[str(ids["prueba"])]["status"] == "deleting"
+    assert por_id[str(ids["canario"])]["filas"] == {"urls": 3, "links": 6, "issues": 3}
+    assert medidos == [ids["prueba"], ids["canario"]]
     for clave in ("prueba", "canario"):
         assert _filas(Sesion, ids[clave]) == {"jobs": 0, "urls": 0, "links": 0, "issues": 0}
 
@@ -394,3 +433,54 @@ def test_a_medias_el_parquet_se_queda_con_su_job(entorno, monkeypatch):
     monkeypatch.setattr(router_jobs, "_reloj", time.monotonic)
     d = _borrar(api, [ids["prueba"]])
     assert d["pendientes"] == [] and not fichero.exists()
+
+
+def test_un_censo_a_medio_borrar_no_es_referencia_ni_se_archiva(entorno, monkeypatch):
+    """Si nadie vuelve a terminar el borrado, lo que queda no puede pasar por
+    un censo `completed`: la comparacion lo elegiria como referencia y sus
+    alertas callarian (decisiones 78 y 86), y el archivado lo guardaria en un
+    Parquet vacio (decision 95)."""
+    from api.routers import jobs as router_jobs
+    from shared import archivo_enlaces
+    from shared.comparacion import censo_anterior
+
+    api, Sesion, ids = entorno
+    monkeypatch.setattr(router_jobs, "TROZO_DE_BORRADO", 1)
+    vueltas = {"n": 0}
+
+    def _reloj_falso():
+        vueltas["n"] += 1
+        return 0.0 if vueltas["n"] <= 2 else 1e9
+
+    monkeypatch.setattr(router_jobs, "_reloj", _reloj_falso)
+    # `canario` es el completado mas reciente de x.com sin serie.
+    d = _borrar(api, [ids["canario"]], segundos=5)
+    assert d["pendientes"] == [str(ids["canario"])]
+
+    s = Sesion()
+    nuevo = _job(s, "manual", 10)
+    s.commit()
+    ref = censo_anterior(s, nuevo)
+    assert ref is None or ref.id != ids["canario"]
+    # Con un completado mas nuevo que abarca sus semillas y mucho tiempo
+    # despues, un `completed` seria archivable; a medio borrar, no.
+    lejos = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    archivables = {c.id for c in archivo_enlaces.candidatos(s, ahora=lejos)}
+    assert ids["prueba"] in archivables, "el control: el mismo caso con un completado si"
+    assert ids["canario"] not in archivables
+    s.close()
+
+
+def test_un_parquet_sin_medir_no_suma_como_cero(entorno):
+    """Archivado, sin fichero visible y sin `bytes` anotados: el total lo dice."""
+    api, Sesion, ids = entorno
+    fichero = _archivar(Sesion, ids["prueba"])
+    fichero.unlink()
+    s = Sesion()
+    j = s.get(Job, ids["prueba"])
+    j.enlaces_archivados = {k: v for k, v in j.enlaces_archivados.items() if k != "bytes"}
+    s.commit()
+    s.close()
+    d = _borrar(api, [ids["prueba"]], simular=True)
+    assert d["eliminados"][0]["archivo_bytes"] is None
+    assert d["archivo_bytes"] == 0 and d["archivo_incompleto"] is True
