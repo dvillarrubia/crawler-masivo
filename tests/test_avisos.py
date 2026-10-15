@@ -61,7 +61,7 @@ def test_el_aviso_dice_QUE_pasa_no_cuantas_alertas_hay(capturado):
     assert "lopesan.com (semanal)" in texto
     assert "2319" in texto and "4193" in texto and "55.3" in texto
     assert "OTRO host" in texto, "que decide Google viaja en el aviso"
-    assert capturado["cuerpo"]["url"] == "https://crawler.ejemplo/#/jobs/abc-123"
+    assert capturado["cuerpo"]["url"] == "https://crawler.ejemplo/#/rastreos/abc-123"
     assert capturado["cuerpo"]["alertas"][0]["regla"] == "canonical_a_otro_host"
 
 
@@ -116,3 +116,62 @@ def test_el_worker_solo_avisa_de_las_CRITICAS():
     pos_aviso = fuente.index("avisar_de_alertas(")
     assert pos_filtro < pos_aviso
     assert "avisar_de_alertas(job_id, job.name, criticas)" in fuente
+
+
+# ---------------------------------------------------------------------------
+# El enlace del aviso tiene que llevar a la ficha del rastreo
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+import re
+
+APP_JS = Path(__file__).resolve().parent.parent / "frontend" / "app.js"
+
+
+def _cuerpo_de_irARuta() -> str:
+    fuente = APP_JS.read_text(encoding="utf-8")
+    inicio = fuente.index("async _irARuta(hash)")
+    fin = fuente.index("\n    },\n", inicio)
+    return fuente[inicio:fin]
+
+
+def _resolver_como_irARuta(hash_: str) -> tuple[str, list[str]]:
+    """Lo que hace `_irARuta` con el hash: a qué rama va y con qué trozos.
+
+    Reproduce el troceado del frontend (quitar `#`, cortar la query, partir por
+    `/` sin vacíos) y las ramas que reconoce, sacadas del fuente de
+    `_irARuta`: si alguien renombra la ruta, el test lo nota.
+    """
+    cuerpo = _cuerpo_de_irARuta()
+    prefijos = set(re.findall(r"p\[0\] === '([a-z-]+)'", cuerpo))
+    assert "rastreos" in prefijos, "no se reconocen las ramas de _irARuta"
+    ruta = hash_.lstrip("#").split("?")[0]
+    p = [x for x in ruta.split("/") if x]
+    if not p or p[0] not in prefijos:
+        return "desconocida", p   # el frontend la manda a la lista de rastreos
+    if p[0] == "rastreos" and len(p) == 1:
+        return "lista", p
+    return p[0], p
+
+
+def test_el_enlace_del_aviso_abre_la_ficha_del_rastreo(monkeypatch):
+    """`#/jobs/<id>` no lo conoce el frontend y acababa en la lista: el aviso
+    llevaba a todas partes menos al rastreo del que avisaba."""
+    monkeypatch.setattr(avisos, "BASE_PUBLICA", "https://crawler.ejemplo")
+    enlace = avisos.enlace_al_rastreo("abc-123")
+    assert enlace.startswith("https://crawler.ejemplo/#/")
+    rama, p = _resolver_como_irARuta(enlace.split("/", 3)[3])
+    assert rama == "rastreos", f"{enlace} no abre una ficha de rastreo ({rama})"
+    assert p[1] == "abc-123"
+    assert len(p) == 2, "sin pestaña: abre el resumen, donde va la alerta"
+
+
+def test_la_ruta_vieja_no_la_resuelve_el_frontend():
+    """Control del comprobador: si la ruta vieja tambien «resolviera», el test
+    de arriba no estaria comprobando nada."""
+    assert _resolver_como_irARuta("#/jobs/abc-123")[0] == "desconocida"
+
+
+def test_sin_url_publica_no_hay_enlace(monkeypatch):
+    monkeypatch.setattr(avisos, "BASE_PUBLICA", "")
+    assert avisos.enlace_al_rastreo("abc") is None

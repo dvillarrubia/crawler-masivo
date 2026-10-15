@@ -31,6 +31,17 @@ WEBHOOK_URL = os.getenv("ALERTA_WEBHOOK_URL", "").strip()
 TIMEOUT = float(os.getenv("ALERTA_TIMEOUT_SEGUNDOS", "10"))
 # Para que el enlace del aviso lleve a alguna parte.
 BASE_PUBLICA = os.getenv("API_PUBLIC_URL", "").rstrip("/")
+# La ficha de un rastreo en el frontend (`_irARuta` en `frontend/app.js`).
+# Era `#/jobs/{id}`, una ruta que el frontend no conoce y manda a la lista de
+# rastreos: el aviso llevaba a todas partes menos al rastreo que avisaba.
+RUTA_FICHA_RASTREO = "#/rastreos/{job_id}"
+
+
+def enlace_al_rastreo(job_id) -> str | None:
+    """El enlace del aviso a la ficha del rastreo, o None sin URL publica."""
+    if not BASE_PUBLICA:
+        return None
+    return f"{BASE_PUBLICA}/" + RUTA_FICHA_RASTREO.format(job_id=job_id)
 
 
 def _texto_de_alertas(nombre_job: str, alertas: list[dict]) -> str:
@@ -65,7 +76,7 @@ def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
             "text": _texto_de_alertas(nombre_job, alertas),
             "job_id": str(job_id),
             "job": nombre_job,
-            "url": f"{BASE_PUBLICA}/#/jobs/{job_id}" if BASE_PUBLICA else None,
+            "url": enlace_al_rastreo(job_id),
             "alertas": [
                 {k: a.get(k) for k in
                  ("regla", "severidad", "paginas", "de", "pct",
