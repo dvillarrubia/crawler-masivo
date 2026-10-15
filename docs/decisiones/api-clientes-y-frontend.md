@@ -128,7 +128,7 @@
    - **Ids, nunca un filtro.** Un filtro se puede desplazar entre lo que se vio
      en la lista y lo que llega al servidor —otro rastreo termina y entra en la
      pagina— y esto no se recupera.
-   - **Dos guardias, y solo dos.** Un rastreo en marcha (`pending`, `running`,
+   - **Dos guardias, más el candado del censo.** Un rastreo en marcha (`pending`, `running`,
      `analyzing`) y **el censo de referencia de una programacion activa**: sin
      el, el siguiente rastreo de esa serie se queda sin con que compararse, y
      un silencio se lee igual que «no ha cambiado nada» (decisiones 78 y 86).
@@ -142,6 +142,11 @@
      de la fila de `jobs` espera al `FOR UPDATE` que el analisis mantiene toda
      la pasada —43 min en Druni—, con la peticion colgada mucho mas alla de su
      presupuesto. Se cancela, se espera a que pare y se borra.
+     Lo mismo, y tampoco con `forzar`, si alguien tiene **el candado del
+     censo** (`shared/candados.py`): el re-analisis de la referencia (decision
+     93) y el archivado (95) lo toman sobre censos `completed`, justo los que
+     se borran, sin que el `status` lo diga. Se prueba y se suelta en el acto;
+     en cuanto el borrado marca `deleting`, ninguno de los dos lo elige.
      El archivado de la decision 95 no anade ningun guardia: solo archiva
      censos que ya NO son referencia de nada, y la comparacion no lee `links`
      (`paginas_de_censo` va por `urls`), asi que un censo archivado que vuelva

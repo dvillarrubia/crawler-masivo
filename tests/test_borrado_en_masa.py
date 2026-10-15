@@ -484,3 +484,55 @@ def test_un_parquet_sin_medir_no_suma_como_cero(entorno):
     d = _borrar(api, [ids["prueba"]], simular=True)
     assert d["eliminados"][0]["archivo_bytes"] is None
     assert d["archivo_bytes"] == 0 and d["archivo_incompleto"] is True
+
+
+def test_un_censo_con_el_candado_tomado_no_se_borra_ni_forzando(entorno, monkeypatch):
+    """El re-analisis de la referencia (decision 93) y el archivado (95) toman
+    el candado del censo, y un `completed` puede estar re-analizandose sin que
+    su `status` lo diga. Borrarlo a la vez dejaria un analisis escribiendo
+    sobre filas que desaparecen."""
+    import api.routers.jobs as jobs_router
+
+    api, Sesion, ids = entorno
+    monkeypatch.setattr(jobs_router, "_candado_ocupado", lambda db, job_id: job_id == ids["prueba"])
+    for forzar in (False, True):
+        d = _borrar(api, [ids["prueba"], ids["canario"]], forzar=forzar, simular=True)
+        omitidos = {o["id"]: o for o in d["omitidos"]}
+        assert set(omitidos) == {str(ids["prueba"])}
+        assert "analizando o archivando" in omitidos[str(ids["prueba"])]["motivo"]
+        assert omitidos[str(ids["prueba"])]["forzable"] is False
+    d = _borrar(api, [ids["prueba"], ids["canario"]])
+    assert [e["id"] for e in d["eliminados"]] == [str(ids["canario"])]
+    assert _filas(Sesion, ids["prueba"])["jobs"] == 1
+
+
+def test_candado_ocupado_contra_postgres():
+    """La comprobacion de verdad: otra conexion tiene el candado del censo."""
+    import os
+
+    from sqlalchemy import text
+
+    from api.routers.jobs import _candado_ocupado
+    from shared.candados import clave_de_job
+
+    url = os.environ.get("ALMACENAMIENTO_TEST_DATABASE_URL") or os.environ.get(
+        "PAGERANK_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("sin ALMACENAMIENTO_TEST_DATABASE_URL ni PAGERANK_TEST_DATABASE_URL")
+    motor = create_engine(url)
+    job_id = uuid.uuid4()
+    Sesion = sessionmaker(bind=motor)
+    s = Sesion()
+    try:
+        assert _candado_ocupado(s, job_id) is False
+        # Probarlo no lo deja tomado: una segunda prueba sigue viendolo libre.
+        assert _candado_ocupado(s, job_id) is False
+        with motor.connect() as otra:
+            assert otra.execute(text("SELECT pg_try_advisory_lock(:k)"),
+                                {"k": clave_de_job(job_id)}).scalar()
+            assert _candado_ocupado(s, job_id) is True
+            otra.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave_de_job(job_id)})
+        assert _candado_ocupado(s, job_id) is False
+    finally:
+        s.close()
+        motor.dispose()

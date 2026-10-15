@@ -587,6 +587,28 @@ MAX_IDS_POR_PETICION = 500
 TROZO_DE_BORRADO = 200_000
 
 
+def _candado_ocupado(db: Session, job_id) -> bool:
+    """¿Tiene alguien el candado del censo (analisis, archivado)? Decisiones 93 y 95.
+
+    El re-analisis de la referencia (93) cae justo sobre censos superados, que
+    son los que se borran: un `completed` puede estar re-analizandose sin que su
+    `status` lo diga. Se prueba y se suelta en el acto, sin retenerlo: en cuanto
+    `borrar_job` marca `deleting`, ni la comparacion ni el archivado lo eligen.
+    En SQLite no hay advisory locks.
+    """
+    from sqlalchemy import text
+
+    from shared.candados import clave_de_job
+
+    if not db.get_bind().dialect.name.startswith("postgres"):
+        return False
+    clave = clave_de_job(job_id)
+    if not db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": clave}).scalar():
+        return True
+    db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": clave})
+    return False
+
+
 def _motivo_para_no_borrar(db: Session, job: Job, *, forzar: bool = False
                            ) -> tuple[str, bool] | None:
     """Por que NO se borra este rastreo y si `forzar` lo salta. `None` = adelante.
@@ -602,6 +624,10 @@ def _motivo_para_no_borrar(db: Session, job: Job, *, forzar: bool = False
     if job.status in ("pending", "running", "analyzing"):
         return (f"está en marcha ({job.status}): cancélalo y espera a que pare "
                 "antes de borrarlo", False)
+    if _candado_ocupado(db, job.id):
+        return ("lo está analizando o archivando otro proceso (por ejemplo, el "
+                "re-análisis de la referencia tras un rastreo): prueba en unos minutos",
+                False)
     if forzar:
         return None
 
