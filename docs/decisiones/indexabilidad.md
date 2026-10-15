@@ -160,7 +160,7 @@
 
 <a id="d99"></a>
 99. **Hreflang completo, y solo con lo que Google lee: el de una página no
-   indexable no cuenta** (PR 1.2 del plan, `docs/plan/MEJOR_CRAWLER.md`).
+   indexable no cuenta** (PR 1.2 del plan, `docs/PLAN_MEJOR_CRAWLER.md`).
    `analyze_hreflang` emite cinco tipos más, todos sobre fuentes indexables
    y todos desde diccionarios montados con UNA consulta de URLs (estado,
    `indexable`, `indexability_status`, `redirect_url` y `canonical_href`) y

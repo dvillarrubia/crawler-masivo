@@ -173,7 +173,7 @@
 
 <a id="d100"></a>
 100. **Una URL del sitemap que no es indexable es una contradicción, y se dice
-   por qué** (PR 1.3A de `docs/plan/MEJOR_CRAWLER.md`). El sitemap es la lista
+   por qué** (PR 1.3A de `docs/PLAN_MEJOR_CRAWLER.md`). El sitemap es la lista
    de URLs canónicas que el sitio pide indexar: Google pide incluir las URLs
    que se quieren ver en los resultados, y lista el sitemap como una de las
    señales de canónica, así que un sitemap con la URL A y un `rel=canonical` a
