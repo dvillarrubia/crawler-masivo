@@ -266,3 +266,101 @@
    sitemap de un sitemapindex de Liferay con decenas de hijos, y 1.813
    `not_in_sitemap`; conviene mirar si la pertenencia casa bien (por ejemplo,
    `robots.txt` lo declara como `https://lopesan.com:443/sitemap.xml`).
+
+<a id="d102"></a>
+102. **HTML que Google trunca o ignora: más de 2 MB y un `<head>` que se
+   corta antes de tiempo** (PR 1.5 del plan). Tres tipos nuevos, de
+   `analyze_html_ignorado`, sobre HTML interno 2xx:
+   - **`html_supera_2mb`** (warning, por página, solo indexables). Google:
+     «Googlebot crawls the first 2MB of a supported file type [...] The file
+     size limit is applied on the uncompressed data» y, pasado el corte, solo
+     indexa lo descargado (página de Googlebot, actualizada el 2026-02-03). No
+     dice si son 2.000.000 o 2.097.152 bytes: se usa el **mayor**, para no
+     afirmar un corte que quizá no hay. El tamaño es `urls.html_bytes_servidos`
+     (nueva); en un censo anterior **sin render** sale re-analizando del
+     **mayor** de `content_length` y `transfer_size`, porque la decisión 50 los
+     cambió de sitio el 2026-10-07 y el descomprimido es el mayor en las dos
+     épocas. **Con render no**: ahí `content_length` es el DOM montado, y no
+     se afirma nada (WARNING en el log con cuántas quedan sin medir). Medido en
+     Druni, las 5 primeras con 2,2-3,9 MB de DOM sirven HOY 1,5-2,2 MB de HTML:
+     cuatro de cinco serían falsos. Para los rastreos nuevos con render, un
+     `PageMethod` lee `decodedBodySize` de Navigation Timing (comprobado con un
+     HTML gzip de 3,4 MB, con la interceptación de scrapy-playwright, con y sin
+     `Content-Length`).
+   - **`head_cortado`** (warning, agrupado por elemento que corta + metadatos
+     perdidos, con `paginas_afectadas` y `group_key`). Google: «once Google
+     detects an invalid element in the <head>, it assumes the end of the
+     <head> element and stops reading» (valid-page-metadata, 2025-12-10). Solo
+     se emite si detrás del corte queda algo que importa: `title`, `robots`,
+     `googlebot`, `description`, `canonical` o `hreflang`. Si lo que queda en
+     el body es el canonical o el hreflang, `canonical_in_body` y
+     `hreflang_in_body` **no** se emiten además en esa página: el hallazgo es
+     el corte (36).
+   - **`meta_fuera_del_head`** (warning, agrupado): título, description o
+     robots en el body **sin** corte. Google dice que van en el head y no
+     promete leerlos fuera; no se afirma que los ignore. Canonical y hreflang
+     no entran (tienen su tipo), ni un segundo `<title>` o `description` con el
+     bueno en el head, que ya es `title_multiple` / `description_multiple`.
+
+   **El head se lee con un tokenizador propio** (`seo_crawler/head_html.py`)
+   que sigue a Chromium con scripting activado, y no con un árbol. Contrastado
+   en 17 casos con el Chromium de la imagen (`tests/test_head_html.py`, que lo
+   repite en CI): **lxml** falla en 3 (deja en el head un meta detrás de un
+   `<svg>` o de un elemento personalizado, y saca de los dos uno detrás de
+   `</head>`), y **html5lib en 3** distintos: corta el head con
+   `<noscript><img>` y `<noscript><iframe>` —el píxel de Facebook y el GTM mal
+   pegado, en media web— porque parsea con scripting desactivado, y no conoce
+   `<template>` en el head. Además cuesta 0,44-0,54 s por 2 MB frente a 54 ms
+   del tokenizador (10 ms en una página de 369 kB; 3,5 ms en una de 13 MB,
+   porque deja de leer cuando ya no quedan candidatos). Por eso se descarta.
+   Solo mira los primeros 2 MB: lo de detrás Google ni lo descarga.
+
+   **Lo que dice `has_meta_outside_head` no es una incidencia**: cuenta
+   cualquier `<meta>` del body, incluidos los `itemprop` de microdatos, que son
+   válidos ahí. Salta en **28.335 de 28.454** páginas HTML 2xx de penguin, 35.871
+   de 56.544 en Druni, 15.506 de 22.020 en UOC, 2.427 de 4.318 en Lopesan y 675
+   de 3.581 en progym. Se queda la columna y se añaden dos que sí dicen algo:
+   `html_meta.head_cortado_por` (`img`, `div`, `#texto`…; NULL si el head acabó
+   donde debía) y `html_meta.fuera_del_head` (lista; `''` = medido y nada,
+   NULL = censo anterior). Con render el DOM serializado ya no conserva el
+   corte, pero sí lo que el navegador movió al body, que va a
+   `meta_fuera_del_head`. **Head o body múltiples** no son un tipo aparte: un
+   segundo `<body>` el navegador lo funde sin consecuencia, y un segundo
+   `<head>` dentro del body deja sus metadatos en el body, que es lo que ya
+   cuenta `fuera_del_head`.
+
+   **Qué sale re-analizando y qué exige re-rastrear.** `html_supera_2mb` sale
+   re-analizando en los censos sin render; `head_cortado` y
+   `meta_fuera_del_head` necesitan las columnas nuevas, que solo rellena un
+   rastreo. Medido (consulta de solo lectura que replica el check):
+
+   | censo | render | `html_supera_2mb` | HTML > 2 MiB sin filtrar |
+   |---|---|---|---|
+   | penguin | no | **17** | 24 (7 son `noindex`) |
+   | Lopesan | no | **0** | 12, todas canonicalizadas a `*.lfr.cloud` |
+   | progym | no | **0** | 0 |
+   | UOC, Druni, CST | sí | sin medir | 2 / 2.434 / 5 de DOM |
+
+   Para el head, sin columnas guardadas, una muestra viva (2026-10-16, curl_cffi
+   como el rastreo): 70 páginas indexables de Lopesan, 70 de UOC, 70 de
+   penguin, 79 de Druni, 40 de blogs.uoc.edu y 39 de Saunier, **0 con un head
+   cortado que pierda algo**. progym (403) y CST (404 en 11 de 20) no se
+   pudieron mirar. Ejemplos revisados a mano:
+   - penguin `/es/217497-ficcion` (indexable, 5,9 MB hoy): 20 de las 24 fichas
+     de producto y 216 de 555 enlaces están detrás de los 2 MB — **cierto**.
+   - penguin `/es/976987-ebooks` (13,6 MB): 546 de 552 enlaces y todas las
+     fichas detrás del corte, por 8.966 casillas de filtro; es `noindex` y no se
+     avisa — **correcto no avisar**.
+   - penguin `/es/64-libros-autoayuda` (2,26 MB): lo de detrás son 35 enlaces
+     del pie y scripts, ninguna ficha — **cierto, de poca consecuencia**.
+   - penguin, listados: el head lo corta un `<div>` de los filtros, pero el
+     title, el canonical y el robots van antes — **sin aviso, correcto**.
+   - penguin `/…/fragmento` (552 páginas): llevan un capítulo EPUB entero, con
+     su `<head><title>cap-2</title>`, dentro del body. Es un segundo título, no
+     uno fuera de sitio: lo dirá `title_multiple` al re-rastrear, no este check.
+     Los `<title>` de los iconos SVG (cuatro por página) no cuentan.
+
+   Fuera: dónde cae un metadato concreto respecto de los 2 MB (un head de más
+   de 2 MB deja fuera el canonical aunque esté en el head); y la indexabilidad
+   sigue leyendo el `meta robots` esté donde esté, porque no está comprobado
+   que Google lo ignore en el body.

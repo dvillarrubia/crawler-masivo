@@ -46,6 +46,11 @@ milestone.
   - mide cuánto PageRank se desperdicia en errores y redirecciones.
 - Aviso automático cuando el JavaScript esconde enlaces y el PageRank puede no
   ser fiable.
+- HTML que Google no llega a leer: páginas de más de 2 MB (Googlebot corta
+  ahí) y cabeceras `<head>` que se cortan antes de tiempo y dejan el robots,
+  el canonical o el título donde Google no los lee (decisión 102). Lo del
+  tamaño sale en los censos ya hechos sin JavaScript; lo de la cabecera, al
+  volver a rastrear.
 
 ### Contenido y entregables
 

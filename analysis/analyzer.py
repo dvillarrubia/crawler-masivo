@@ -32,6 +32,7 @@ from shared.config import (
     DESCRIPTION_MAX_LEN,
     DESCRIPTION_MAX_PIXELS,
     DESCRIPTION_MIN_LEN,
+    GOOGLEBOT_HTML_MAX_BYTES,
     TITLE_MAX_LEN,
     TITLE_MAX_PIXELS,
     TITLE_MIN_LEN,
@@ -90,6 +91,16 @@ def _url_de_clave(clave: tuple[str, str, str, str]) -> str:
     """La URL que representa una clave de :func:`_clave`, para escribirla."""
     esquema, host, ruta, query = clave
     return f"{esquema}://{host}{ruta}" + (f"?{query}" if query else "")
+
+
+def _fuera_del_head(valor: str | None) -> list[str]:
+    """La lista guardada en `html_meta.fuera_del_head`."""
+    return [t for t in (valor or "").split(",") if t]
+
+
+def _lo_saca_el_corte(cortado_por: str | None, fuera: str | None, nombre: str) -> bool:
+    """Si *nombre* esta fuera del head porque algo corto el head antes."""
+    return bool(cortado_por) and nombre in _fuera_del_head(fuera)
 
 
 def _clave(url: str | None):
@@ -247,6 +258,7 @@ class SEOAnalyzer:
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         t = (job.config or {}).get("analysis_thresholds", {}) if job else {}
         self._enlaces_archivados = getattr(job, "enlaces_archivados", None)
+        self._render_js = bool((job.config or {}).get("render_js")) if job else False
         self.title_min_len = t.get("title_min_length", TITLE_MIN_LEN)
         self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
         self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
@@ -295,6 +307,7 @@ class SEOAnalyzer:
         self.analyze_canonicals()
         self.analyze_hreflang()
         self.analyze_structured_data()
+        self.analyze_html_ignorado()
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()
@@ -817,14 +830,16 @@ class SEOAnalyzer:
         # Iterate HTML pages with their canonical information.
         stmt = (
             select(Url.id, Url.url, Url.host, Url.status_code, HtmlMeta.canonical_href,
-                   HtmlMeta.canonical_count, HtmlMeta.canonical_in_body)
+                   HtmlMeta.canonical_count, HtmlMeta.canonical_in_body,
+                   HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
         rows = self.session.execute(stmt).all()
 
         for (url_id, page_url, page_host, page_status, canonical_href,
-             canonical_count, canonical_in_body) in rows:
+             canonical_count, canonical_in_body, head_cortado_por,
+             fuera_del_head) in rows:
             # Con VARIOS canonicals Google los ignora todos y elige el por su
             # cuenta: la pagina esta sin canonicalizar, aunque el informe
             # mostrara el primero como si valiera.
@@ -835,7 +850,12 @@ class SEOAnalyzer:
                 )
             # Un canonical en el `<body>` Google lo ignora SIEMPRE: solo cuenta
             # en el `<head>`.
-            if canonical_in_body:
+            # Si esta en el body porque algo corto el head, el hallazgo es el
+            # corte y lo dice `head_cortado` (decision 102): un aviso por
+            # hallazgo (36).
+            if canonical_in_body and not _lo_saca_el_corte(
+                head_cortado_por, fuera_del_head, "canonical"
+            ):
                 self._add_issue(url_id, "canonical_in_body", "warning")
 
             if not canonical_href or not canonical_href.strip():
@@ -1259,7 +1279,21 @@ class SEOAnalyzer:
                     group_key=_clave_de_grupo(lang),
                 )
 
+        # Las que estan en el body porque algo corto el head van en
+        # `head_cortado` (decision 102), no aqui tambien.
+        cortadas = {
+            uid for uid, cortado, fuera in self.session.execute(
+                select(HtmlMeta.url_id, HtmlMeta.head_cortado_por,
+                       HtmlMeta.fuera_del_head)
+                .join(Url, Url.id == HtmlMeta.url_id)
+                .where(Url.job_id == self.job_id,
+                       HtmlMeta.head_cortado_por.isnot(None))
+            ).all()
+            if _lo_saca_el_corte(cortado, fuera, "hreflang")
+        } if en_body_por_pagina else set()
         for url_id, langs in en_body_por_pagina.items():
+            if url_id in cortadas:
+                continue
             self._add_issue(
                 url_id, "hreflang_in_body", "warning",
                 {"cuantos": len(langs), "langs": sorted(set(langs))[:20]},
@@ -1579,6 +1613,124 @@ class SEOAnalyzer:
             )
 
         self.session.flush()
+        self._flush_issues()
+
+    # -- HTML que Google trunca o ignora (decision 102) ---------------------
+
+    # Los que tienen su propio aviso cuando estan en el body sin que se haya
+    # cortado el head (`canonical_in_body`, `hreflang_in_body`).
+    _CON_AVISO_PROPIO = frozenset({"canonical", "hreflang"})
+
+    def analyze_html_ignorado(self) -> None:
+        """HTML que Googlebot no llega a leer: mas de 2 MB o un head cortado.
+
+        Tres tipos, todos sobre paginas HTML internas que responden 2xx:
+
+        - ``html_supera_2mb`` (por pagina, solo indexables): Googlebot corta la
+          descarga en los 2 MB del HTML descomprimido e indexa lo que tenga.
+          El tamano sale de ``html_bytes_servidos``; en un censo anterior a la
+          columna y SIN render, del mayor de ``content_length`` y
+          ``transfer_size`` (la decision 50 los cambio de sitio el 2026-10-07 y
+          el mayor es el descomprimido en las dos epocas). Con render y sin la
+          columna no se sabe —``content_length`` es el DOM montado— y no se
+          afirma nada.
+        - ``head_cortado`` (agrupado): un elemento que no va en el head lo
+          cerro antes de tiempo y algun metadato quedo detras, en el body.
+          Google: "it assumes the end of the <head> element and stops reading".
+        - ``meta_fuera_del_head`` (agrupado): titulo, description o robots en
+          el body sin que nada cortara el head. Google documenta que van en el
+          head y no promete leerlos fuera.
+
+        Los dos ultimos necesitan las columnas de la decision 102, que solo
+        rellena un rastreo: en un censo anterior no se emiten.
+        """
+        logger.debug("Analyzing HTML que Google trunca o ignora ...")
+        base = (
+            Url.job_id == self.job_id,
+            Url.is_html.is_(True),
+            Url.is_internal.is_(True),
+            Url.status_code >= 200,
+            Url.status_code < 300,
+        )
+
+        # -- Mas de 2 MB --------------------------------------------------
+        limite = GOOGLEBOT_HTML_MAX_BYTES
+        sin_medir = 0
+        for url_id, servidos, content_length, transfer_size in self.session.execute(
+            select(Url.id, Url.html_bytes_servidos, Url.content_length,
+                   Url.transfer_size)
+            .where(*base, Url.indexable.is_(True))
+        ):
+            if servidos is not None:
+                tamano, fuente = servidos, "html_bytes_servidos"
+            elif not self._render_js:
+                tamano = max(content_length or 0, transfer_size or 0) or None
+                fuente = "cuerpo_descargado"
+            else:
+                tamano = None
+            if tamano is None:
+                sin_medir += 1
+                continue
+            if tamano > limite:
+                self._add_issue(
+                    url_id, "html_supera_2mb", "warning",
+                    {"bytes": tamano, "limite_bytes": limite,
+                     "bytes_sin_leer": tamano - limite,
+                     "pct_sin_leer": round(100 * (tamano - limite) / tamano, 1),
+                     "fuente": fuente},
+                )
+        if sin_medir:
+            logger.warning(
+                "html_supera_2mb: %d paginas indexables sin el tamano del HTML "
+                "servido (rastreo con render anterior a la decision 102); no se "
+                "afirma nada de ellas. Hay que re-rastrear.", sin_medir)
+
+        # -- Head cortado y metadatos en el body ----------------------------
+        filas = self.session.execute(
+            select(Url.id, HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head,
+                   HtmlMeta.title_count, HtmlMeta.meta_description_count)
+            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(*base, HtmlMeta.fuera_del_head.isnot(None),
+                   HtmlMeta.fuera_del_head != "")
+        ).all()
+        cortados: dict[tuple, list[int]] = {}
+        en_body: dict[tuple, list[int]] = {}
+        for url_id, cortado_por, fuera, n_titulos, n_descripciones in filas:
+            perdidos = tuple(_fuera_del_head(fuera))
+            if cortado_por:
+                cortados.setdefault((cortado_por, perdidos), []).append(url_id)
+                continue
+            # Un segundo <title> o una segunda description en el body, con el
+            # bueno en el head, ya es `title_multiple` / `description_multiple`:
+            # un aviso por hallazgo (36). Medido en penguin: las 552 paginas
+            # `/fragmento` incrustan un capitulo EPUB entero, con su propio
+            # `<head><title>cap-2</title>`, dentro del body.
+            ya_dicho = set(self._CON_AVISO_PROPIO)
+            if (n_titulos or 0) > 1:
+                ya_dicho.add("title")
+            if (n_descripciones or 0) > 1:
+                ya_dicho.add("description")
+            propios = tuple(p for p in perdidos if p not in ya_dicho)
+            if propios:
+                en_body.setdefault(propios, []).append(url_id)
+
+        for (cortado_por, perdidos), paginas in cortados.items():
+            self._add_issue(
+                paginas[0], "head_cortado", "warning",
+                {"cortado_por": cortado_por,
+                 "fuera_del_head": list(perdidos),
+                 "paginas_afectadas": len(paginas),
+                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                group_key=_clave_de_grupo(f"{cortado_por}|" + ",".join(perdidos)),
+            )
+        for perdidos, paginas in en_body.items():
+            self._add_issue(
+                paginas[0], "meta_fuera_del_head", "warning",
+                {"fuera_del_head": list(perdidos),
+                 "paginas_afectadas": len(paginas),
+                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                group_key=_clave_de_grupo(",".join(perdidos)),
+            )
         self._flush_issues()
 
     def _urls_de(self, url_ids: list[int]) -> list[str]:

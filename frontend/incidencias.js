@@ -110,6 +110,23 @@ const ISSUE_INFO = {
     arreglo: 'Cambiar el canonical a https.',
   },
 
+  // ----- HTML que Google trunca o ignora (decisión 102) -----
+  'html_supera_2mb': {
+    que: 'El HTML de la página pasa de 2 MB descomprimido. Solo se cuenta en páginas indexables.',
+    google: 'Googlebot deja de descargar a los 2 MB e indexa lo que lleve: el contenido y los enlaces de detrás no existen para él.',
+    arreglo: 'Sacar del HTML lo que no es contenido (SVG en línea, JSON o CSS incrustados, filtros con miles de opciones) o paginar el listado.',
+  },
+  'head_cortado': {
+    que: 'Un elemento que no va en el <head> (una imagen, un div, un texto suelto) lo cierra antes de tiempo, y metadatos que venían detrás quedan en el <body>. Una fila por cada combinación de elemento y metadatos, con las páginas afectadas.',
+    google: 'Al encontrar un elemento no válido da el <head> por terminado y deja de leerlo: lo de detrás (robots, canonical, título…) no cuenta.',
+    arreglo: 'Mover ese elemento al <body> o subir los metadatos por encima de él en la plantilla. Suele ser un pixel, un iframe o un bloque de un plugin.',
+  },
+  'meta_fuera_del_head': {
+    que: 'El título, la meta description o la meta robots están en el <body>, sin que nada haya cortado el <head>. Una fila por combinación, con las páginas afectadas.',
+    google: 'Documenta que van en el <head> y no garantiza leerlos fuera: la directiva o el título pueden no aplicarse.',
+    arreglo: 'Moverlos al <head> de la plantilla.',
+  },
+
   // ----- Títulos, descripciones y encabezados -----
   'title_missing': {
     que: 'La página no tiene <title>.',
@@ -411,6 +428,9 @@ const ISSUE_LABEL_EXTRA = {
   hreflang_idioma_repetido: 'Hreflang idioma repetido',
   hreflang_destino_no_indexable: 'Hreflang a URL no indexable',
   hreflang_retorno_incoherente: 'Hreflang retorno incoherente',
+  html_supera_2mb: 'HTML de más de 2 MB',
+  head_cortado: 'Head cortado antes de tiempo',
+  meta_fuera_del_head: 'Metadatos fuera del head',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -452,4 +472,10 @@ const DETALLE_LABEL = {
   schema_type: 'tipo',
   errors: 'errores',
   warnings: 'avisos',
+  bytes: 'bytes',
+  limite_bytes: 'límite',
+  bytes_sin_leer: 'bytes sin leer',
+  pct_sin_leer: '% sin leer',
+  cortado_por: 'lo corta',
+  fuera_del_head: 'quedan fuera',
 };

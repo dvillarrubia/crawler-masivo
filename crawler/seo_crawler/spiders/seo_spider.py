@@ -62,6 +62,7 @@ from seo_crawler.extractors import (
     normalize_host,
     normalize_url,
 )
+from seo_crawler.head_html import leer_head
 from seo_crawler.sitemaps import (
     MAX_SITEMAP_FILES,
     parse_robots_sitemaps,
@@ -294,6 +295,18 @@ _JS_ESPERAR_DOM_QUIETO = """
 _JS_PROTOCOLO = (
     "() => { try { const n = performance.getEntriesByType('navigation')[0];"
     " return n ? n.nextHopProtocol : null; } catch (e) { return null; } }"
+)
+
+# Bytes del HTML que sirvio el servidor, DESCOMPRIMIDO y antes de que el
+# JavaScript lo toque: lo que cuenta para el limite de 2 MB de Googlebot
+# (decision 102). Con render, `response.body` es el DOM ya montado, que puede
+# ser mucho mayor o menor. Navigation Timing lo da tambien con la
+# interceptacion de peticiones de scrapy-playwright (comprobado con un HTML
+# gzip de 3,4 MB, con y sin Content-Length). 0 = el navegador no lo sabe.
+_JS_BYTES_DOCUMENTO = (
+    "() => { try { const n = performance.getEntriesByType('navigation')[0];"
+    " return n && n.decodedBodySize > 0 ? n.decodedBodySize : null; }"
+    " catch (e) { return null; } }"
 )
 
 _PROTOCOLO_LEGIBLE = {
@@ -737,8 +750,9 @@ class SeoSpider(scrapy.Spider):
                 # antes de que el banner exista.
                 PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
                 PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
-                # Ultimo: su resultado se lee luego desde response.meta.
+                # Los dos ultimos: su resultado se lee luego desde response.meta.
                 PageMethod(_evaluar_tolerante, _JS_PROTOCOLO),
+                PageMethod(_evaluar_tolerante, _JS_BYTES_DOCUMENTO),
             ],
         }
 
@@ -1501,6 +1515,21 @@ class SeoSpider(scrapy.Spider):
                     http_version_val = _normaliza_protocolo(metodo.result)
                     break
 
+        # Lo que pesa el HTML para Googlebot (decision 102). Sin render es el
+        # cuerpo tal cual; con render, lo que dijo el navegador del documento
+        # servido, nunca el DOM montado: si no lo dijo, no se sabe.
+        html_bytes_servidos_val = None
+        if is_html:
+            if response.meta.get("playwright"):
+                for metodo in response.meta.get("playwright_page_methods") or []:
+                    if getattr(metodo, "args", None) and _JS_BYTES_DOCUMENTO in metodo.args:
+                        valor = metodo.result
+                        if isinstance(valor, (int, float)) and valor > 0:
+                            html_bytes_servidos_val = int(valor)
+                        break
+            else:
+                html_bytes_servidos_val = len(response.body)
+
         # HTML-specific fields computed before PageItem yield so that all
         # Screaming Frog parity fields can be included in the single yield.
         word_count_val = None
@@ -1636,6 +1665,7 @@ class SeoSpider(scrapy.Spider):
             word_count=word_count_val,
             content_word_count=content_word_count_val,
             content_hash=content_hash_val,
+            html_bytes_servidos=html_bytes_servidos_val,
             text_ratio=text_ratio_val,
             redirect_type=None,
             status_text=status_text_val,
@@ -1670,8 +1700,14 @@ class SeoSpider(scrapy.Spider):
 
         selector = response.selector
 
-        # Detect <meta> tags outside <head>
+        # Detect <meta> tags outside <head>. Cuenta tambien los `itemprop` de
+        # microdatos, validos en el body: se guarda por compatibilidad, pero
+        # no es una incidencia (decision 102).
         has_meta_outside_head = bool(selector.css("body meta"))
+        # Donde corta el navegador el head y que metadatos quedan fuera. Con
+        # render el texto es el DOM serializado: el corte ya no se ve, pero
+        # los metadatos que el navegador movio al body si.
+        head = leer_head(response.text)
 
         yield HtmlMetaItem(
             url_hash=final_hash,
@@ -1711,6 +1747,8 @@ class SeoSpider(scrapy.Spider):
             ),
             meta_refresh=extract_meta_refresh(selector),
             has_meta_outside_head=has_meta_outside_head,
+            head_cortado_por=head["cortado_por"] if head else None,
+            fuera_del_head=",".join(head["fuera_del_head"]) if head else None,
         )
 
         # Headings

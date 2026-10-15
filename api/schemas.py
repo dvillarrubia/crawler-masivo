@@ -550,6 +550,9 @@ class HtmlMetaResponse(BaseModel):
     meta_description_pixel_width: int | None = None
     meta_refresh: str | None = None
     has_meta_outside_head: bool | None = None
+    # Decision 102: donde corta el navegador el head y que queda fuera.
+    head_cortado_por: str | None = None
+    fuera_del_head: str | None = None
 
 
 class PageContentResponse(BaseModel):
@@ -647,6 +650,7 @@ class UrlResponse(BaseModel):
     word_count: int | None = None
     content_word_count: int | None = None
     content_hash: str | None = None
+    html_bytes_servidos: int | None = None
     text_ratio: float | None = None
     redirect_type: int | None = None
     status_text: str | None = None

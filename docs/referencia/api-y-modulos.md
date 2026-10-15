@@ -110,6 +110,7 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 | `extract_main_content(selector)` | str or None — boilerplate-free text |
 | `extract_main_content_markdown(selector)` | str or None — content as Markdown |
 | `extract_meta_refresh(selector)` | str or None |
+| `head_html.leer_head(html)` | dict — `cortado_por` (etiqueta que cierra el head antes de tiempo) y `fuera_del_head` (metadatos en el body), como Chromium con scripting (decision 102) |
 | `extract_security_headers(headers)` | dict — HTTPS, HSTS, CSP, X-Frame, etc. |
 | `extract_custom(selector, html, comp, **kw)` | list[dict] — filas de las reglas a medida (envuelve `shared.extraccion_a_medida.aplicar`, decision 104) |
 
@@ -126,6 +127,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101) |
 | `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas indexables |
 | `analyze_structured_data()` | structured data validation |
+| `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
 | `analyze_indexability()` | indexability status |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |

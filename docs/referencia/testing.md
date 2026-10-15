@@ -92,6 +92,11 @@ reasignados; trabajo de la API) y `test_a_medida_db.py` (600.000 filas en
 Postgres con `_urls_filtradas` y `_ordenar` REALES: cada lectura de la tabla va
 acotada por `job_id` o `url_id`; corre en el trabajo de la API con
 `A_MEDIDA_TEST_DATABASE_URL`).
+
+HTML que Google trunca o ignora (decision 102): `test_head_html.py` (17 casos
+del head roto con lo que hace Chromium, y el contraste contra el navegador si
+esta instalado; en CI lo esta) y `test_html_ignorado_db.py` (el check contra
+SQLite, el spider guardando las columnas y `decodedBodySize` contra Chromium).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

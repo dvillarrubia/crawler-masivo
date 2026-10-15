@@ -29,3 +29,12 @@ DESCRIPTION_MAX_LEN = 160
 # descripcion (dos lineas), que es lo que usa Screaming Frog.
 TITLE_MAX_PIXELS = 580
 DESCRIPTION_MAX_PIXELS = 985
+
+# Googlebot indexa los primeros 2 MB del HTML DESCOMPRIMIDO; lo que viene
+# detras no se descarga ni se indexa ("Googlebot crawls the first 2MB of a
+# supported file type [...] The file size limit is applied on the uncompressed
+# data", developers.google.com/search/docs/crawling-indexing/googlebot,
+# actualizada el 2026-02-03). Google no dice si son 2.000.000 o 2.097.152
+# bytes: se usa el MAYOR, para no afirmar un corte que quiza no hay
+# (decision 102).
+GOOGLEBOT_HTML_MAX_BYTES = 2 * 1024 * 1024

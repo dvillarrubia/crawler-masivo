@@ -3474,6 +3474,8 @@ const EXP_TABS = [
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','robots_invalid_syntax'],
     columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
+  { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
+    columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
   { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente'],
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],

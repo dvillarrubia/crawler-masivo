@@ -35,6 +35,7 @@ class PageItem(scrapy.Item):
     word_count = scrapy.Field()
     content_word_count = scrapy.Field()
     content_hash = scrapy.Field()
+    html_bytes_servidos = scrapy.Field()
     text_ratio = scrapy.Field()
     redirect_type = scrapy.Field()
     status_text = scrapy.Field()
@@ -85,6 +86,8 @@ class HtmlMetaItem(scrapy.Item):
     meta_description_pixel_width = scrapy.Field()
     meta_refresh = scrapy.Field()
     has_meta_outside_head = scrapy.Field()
+    head_cortado_por = scrapy.Field()
+    fuera_del_head = scrapy.Field()
 
 
 class HeadingItem(scrapy.Item):

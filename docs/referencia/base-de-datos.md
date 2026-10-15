@@ -9,8 +9,8 @@
 | Table | Relation | Key Fields |
 |-------|----------|------------|
 | `jobs` | root | id (UUID), name, status, seeds (JSON), config (JSON) |
-| `urls` | 1:N from jobs | url, status_code, is_html, pagerank, word_count, indexability_status |
-| `html_meta` | 1:1 with urls | title, meta_description, canonical_href, og_*, twitter_* |
+| `urls` | 1:N from jobs | url, status_code, is_html, pagerank, word_count, indexability_status, html_bytes_servidos (HTML servido descomprimido, antes del render; decision 102) |
+| `html_meta` | 1:1 with urls | title, meta_description, canonical_href, og_*, twitter_*, head_cortado_por y fuera_del_head (decision 102; NULL en censos anteriores) |
 | `headings` | 1:N from urls | tag (h1-h6), position, text |
 | `links` | N:N graph | from_url_id, to_url, anchor_text, rel, link_position, follow |
 | `page_content` | 1:1 with urls | content_text, content_markdown |
