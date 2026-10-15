@@ -102,6 +102,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
 - **Lo que analiza o archiva un censo entero toma el candado del job**
   (`shared/candados.py`): el re-analisis de la referencia (93) cae justo sobre
   censos superados, que es lo que se archiva (95).
+- **Un censo se borra con `borrar_job`** (ficha, cliente y borrado en masa): es la que
+  quita tambien el Parquet de sus enlaces archivados. Decision 96.
 - **Reglas que comparten spider y analizador viven en `shared/`** (robots,
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en
@@ -125,7 +127,7 @@ Una linea por regla; el porque y la medida, en la decision citada.
 
 | Si vas a... | Lee |
 |---|---|
-| Cambiar cualquier comportamiento | [`docs/decisiones/README.md`](docs/decisiones/README.md): las 94 decisiones por tema y por numero. Lee las del area antes de tocarla |
+| Cambiar cualquier comportamiento | [`docs/decisiones/README.md`](docs/decisiones/README.md): las decisiones por tema y por numero. Lee las del area antes de tocarla |
 | Tocar API, extractores, checks del analizador, middlewares | [`docs/referencia/api-y-modulos.md`](docs/referencia/api-y-modulos.md) |
 | Consultar o migrar la BD | [`docs/referencia/base-de-datos.md`](docs/referencia/base-de-datos.md) y `SEO_CRAWLER_DB.md` (esquema completo) |
 | Desplegar, variables de entorno, CI, umbrales | [`docs/referencia/despliegue-y-entorno.md`](docs/referencia/despliegue-y-entorno.md) |

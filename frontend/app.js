@@ -89,6 +89,7 @@ const STATUS_LABEL = {
   completed: 'Completado',
   failed:    'Fallido',
   cancelled: 'Cancelado',
+  deleting:  'Borrándose',
 };
 
 const ISSUE_LABEL = {
@@ -223,11 +224,16 @@ const fmt = {
       return 'el día ' + dm.split(',').join(' y ') + ' de cada mes a las ' + hora;
     return expr;
   },
+  // Se corta en MB para el tamano de una pagina, pero un censo son cientos
+  // de MB y la base entera 57 GB: con el tope en MB se leia «57344.0 MB», y
+  // esa division la tenia que hacer de cabeza quien mira el panel.
   bytes: b => {
     if (b == null) return '—';
     if (b < 1024) return b + ' B';
     if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    return (b/1048576).toFixed(1) + ' MB';
+    if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+    if (b < 1099511627776) return (b/1073741824).toFixed(1).replace('.', ',') + ' GB';
+    return (b/1099511627776).toFixed(1).replace('.', ',') + ' TB';
   },
   status: s => STATUS_LABEL[s] || s,
   issue: t => ISSUE_LABEL[t] || ISSUE_LABEL_EXTRA[t] || t.replaceAll('_', ' '),
@@ -399,6 +405,16 @@ function app() {
     jobsBuscar: '',
     jobsCliente: '',          // id de cliente | 'ninguno' | ''
     jobsTipo: '',
+
+    // Borrado en masa (decision 96). La seleccion se guarda por id y NO se
+    // limpia al cambiar de pagina o de filtro: la limpieza tipica es «todas
+    // las pruebas viejas», que no caben en una pagina de 20. Lo que evita
+    // borrar a ciegas no es olvidar la seleccion, es que el dialogo liste
+    // nombre a nombre lo que se va.
+    jobsSel: {},
+    borrado: null,            // {paso, previa, resultado, escribir, forzar, vueltas}
+    almacenamiento: null,
+    verAlmacenamiento: false,
 
     // Clientes (#36)
     clientes: [],
@@ -811,8 +827,151 @@ function app() {
         this.jobs = data.items;
         this.jobsPages = data.pages;
         this.jobsTotal = data.total;
+        if (!this.almacenamiento) this.cargarAlmacenamiento();
       } catch (e) { this.error = e.message; }
       this.loading = false;
+    },
+
+    // ------- Borrado en masa (decision 96) -------
+    // Lo que libera espacio son los censos viejos, y de uno en uno —entrar en
+    // la ficha, teclear «eliminar», volver— no se borran nunca.
+    get seleccionados() {
+      return Object.keys(this.jobsSel).filter(id => this.jobsSel[id]);
+    },
+
+    alternarSeleccion(id) {
+      this.jobsSel = { ...this.jobsSel, [id]: !this.jobsSel[id] };
+    },
+
+    get paginaSeleccionada() {
+      return this.jobs.length > 0 && this.jobs.every(j => this.jobsSel[j.id]);
+    },
+
+    alternarPagina() {
+      const todos = this.paginaSeleccionada;
+      const sel = { ...this.jobsSel };
+      this.jobs.forEach(j => { sel[j.id] = !todos; });
+      this.jobsSel = sel;
+    },
+
+    limpiarSeleccion() {
+      this.jobsSel = {};
+    },
+
+    // Paso 1: la vista previa. La pide al MISMO endpoint con `simular`, así
+    // que los guardias que se ven aquí son exactamente los que se aplicarán.
+    async abrirBorrado() {
+      const ids = this.seleccionados;
+      if (!ids.length) return;
+      this.borrado = { paso: 'cargando', ids, previa: null, resultado: null,
+                       escribir: '', forzar: false };
+      await this.recargarPrevia();
+    },
+
+    // Marcar «borrarlos igualmente» REHACE la vista previa. Si no, la tabla
+    // seguiria enseñando los que sí se iban y el borrado se llevaria además
+    // los protegidos: la lista que se lee y lo que pasa tienen que ser lo
+    // mismo.
+    async recargarPrevia() {
+      const b = this.borrado;
+      if (!b) return;
+      b.paso = 'cargando';
+      try {
+        b.previa = await api('/jobs/eliminar', {
+          method: 'POST', body: JSON.stringify({ ids: b.ids, simular: true, forzar: b.forzar }) });
+        b.paso = 'previa';
+      } catch (e) {
+        this.borrado = null;
+        this.avisar('No se pudo preparar el borrado', e.message);
+      }
+    },
+
+    get borradoBytes() {
+      const p = this.borrado && (this.borrado.resultado || this.borrado.previa);
+      return p ? p.bytes_aprox : null;
+    },
+
+    // Paso 2: borrar de verdad, en tantas peticiones como haga falta. El
+    // servidor devuelve `pendientes` cuando se le agota su presupuesto de
+    // tiempo (un censo de millones de enlaces no cabe en una petición), así
+    // que esto es un bucle con barra de avance y no una espera a ciegas.
+    async confirmarBorrado() {
+      const b = this.borrado;
+      if (!b || b.escribir.trim() !== 'eliminar') return;
+      const total = b.previa.eliminados.length;
+      let pendientes = b.previa.eliminados.map(e => e.id);
+      // Lo liberado se suma con lo que midió la VISTA PREVIA, de antes de
+      // empezar: un censo que necesita varias pasadas llega a la última con
+      // casi todo borrado, y lo que el servidor mide entonces es el resto, no
+      // lo que ocupaba.
+      const medidaPrevia = Object.fromEntries(b.previa.eliminados.map(e => [e.id, e]));
+      const acumulado = { eliminados: [], omitidos: [], filas: {}, bytes_aprox: 0,
+                          bytes_incompletos: false, archivo_bytes: 0, archivo_incompleto: false,
+                          sin_terminar: 0, nota: b.previa.nota };
+      b.paso = 'borrando';
+      b.hechos = 0;
+      b.total = total;
+
+      // Tope de vueltas: si el servidor devolviera siempre los mismos
+      // pendientes sin borrar nada, esto sería un bucle infinito contra la
+      // API. Mejor pararse y decirlo.
+      for (let vuelta = 0; pendientes.length && vuelta < 200; vuelta++) {
+        let r;
+        try {
+          r = await api('/jobs/eliminar', {
+            method: 'POST', body: JSON.stringify({ ids: pendientes, forzar: b.forzar }) });
+        } catch (e) {
+          b.paso = 'previa';
+          this.avisar('El borrado se ha interrumpido',
+            `${acumulado.eliminados.length} de ${total} rastreos se habían borrado ya. ` +
+            `Lo que quedó a medias se puede terminar repitiendo la operación.\n\n${e.message}`);
+          await this.loadJobs();
+          return;
+        }
+        acumulado.eliminados.push(...r.eliminados);
+        acumulado.omitidos.push(...r.omitidos);
+        let filasBorradas = 0;
+        for (const [tabla, n] of Object.entries(r.filas || {})) {
+          acumulado.filas[tabla] = (acumulado.filas[tabla] || 0) + n;
+          filasBorradas += n;
+        }
+        for (const e of r.eliminados) {
+          const m = medidaPrevia[e.id] || e;
+          if (m.bytes != null) acumulado.bytes_aprox += m.bytes;
+          else acumulado.bytes_incompletos = true;
+          if (m.archivado && m.archivo_bytes == null) acumulado.archivo_incompleto = true;
+          else acumulado.archivo_bytes += m.archivo_bytes || 0;
+        }
+        b.hechos = acumulado.eliminados.length;
+        pendientes = r.pendientes;
+        // Avanzar es terminar algún censo O borrar filas: un censo de decenas
+        // de millones de enlaces pasa muchas vueltas sin terminar, borrando
+        // en cada una. Atascado es una vuelta que no hace ninguna de las dos.
+        if (pendientes.length && !r.eliminados.length && !filasBorradas) {
+          this.showToast('El borrado no avanza; quedan ' + pendientes.length, 'error');
+          break;
+        }
+      }
+      if (pendientes.length) {
+        // Se acabaron las vueltas o se atascó: lo que queda se ve en la lista
+        // como «Borrándose» y se termina repitiendo la operación.
+        acumulado.sin_terminar = pendientes.length;
+      }
+
+      this.borrado.resultado = acumulado;
+      this.borrado.paso = 'hecho';
+      this.jobsSel = {};
+      await this.loadJobs();
+      if (this.verAlmacenamiento || this.almacenamiento) this.cargarAlmacenamiento();
+    },
+
+    cerrarBorrado() {
+      this.borrado = null;
+    },
+
+    // ------- Espacio en disco -------
+    async cargarAlmacenamiento() {
+      try { this.almacenamiento = await api('/almacenamiento'); } catch (_) { this.almacenamiento = null; }
     },
 
     setJobsPage(p) {
@@ -2332,7 +2491,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled', deleting:'badge-cancelled' }[s] || 'badge-pending';
     },
 
     barColor(group) {

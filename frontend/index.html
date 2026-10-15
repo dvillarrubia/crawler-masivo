@@ -701,7 +701,30 @@
             </template>
           </select>
           <span class="text-dim text-sm" style="margin-left:auto" x-text="fmt.num(jobsTotal) + (jobsTotal === 1 ? ' rastreo' : ' rastreos')"></span>
+          <!-- Lo que ocupa la base, donde se decide que borrar: sin esto, la
+               unica forma de enterarse de que el disco se llena es que se
+               llene (decision 96). -->
+          <template x-if="almacenamiento && almacenamiento.total_bytes">
+            <button class="btn btn-sm" @click="verAlmacenamiento = true"
+                    :title="'Base de datos: ' + fmt.bytes(almacenamiento.total_bytes) + ' — ver el desglose'">
+              <i data-lucide="hard-drive" style="width:14px;height:14px"></i>
+              <span x-text="fmt.bytes(almacenamiento.total_bytes)"></span>
+            </button>
+          </template>
         </div>
+
+        <!-- Seleccion para borrar en masa. Aparece solo cuando hay algo
+             seleccionado: en la lista normal no estorba. -->
+        <template x-if="seleccionados.length > 0">
+          <div class="barra-seleccion mb-2">
+            <strong x-text="fmt.num(seleccionados.length) + (seleccionados.length === 1 ? ' rastreo seleccionado' : ' rastreos seleccionados')"></strong>
+            <span class="text-dim text-sm">La selección se mantiene al cambiar de página o de filtro</span>
+            <button class="btn btn-sm" @click="limpiarSeleccion()">Limpiar</button>
+            <button class="btn btn-sm btn-danger" @click="abrirBorrado()">
+              <i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar seleccionados
+            </button>
+          </div>
+        </template>
 
         <!-- Cargando -->
         <template x-if="loading && jobs.length === 0">
@@ -729,6 +752,11 @@
               <table>
                 <thead>
                   <tr>
+                    <th style="width:2.2rem">
+                      <input type="checkbox" :checked="paginaSeleccionada" @change="alternarPagina()"
+                             aria-label="Seleccionar los rastreos de esta página"
+                             title="Seleccionar los rastreos de esta página">
+                    </th>
                     <th data-tip="Nombre identificativo del trabajo de rastreo">Nombre</th>
                     <th data-tip="Cliente al que pertenece el rastreo">Cliente</th>
                     <th data-tip="Estado actual: pendiente, en curso, completado, fallido o cancelado">Estado</th>
@@ -741,7 +769,12 @@
                 </thead>
                 <tbody>
                   <template x-for="j in jobs" :key="j.id">
-                    <tr @click="openJob(j.id)" style="cursor:pointer">
+                    <tr @click="openJob(j.id)" style="cursor:pointer"
+                        :class="jobsSel[j.id] && 'fila-marcada'">
+                      <td @click.stop>
+                        <input type="checkbox" :checked="!!jobsSel[j.id]" @change="alternarSeleccion(j.id)"
+                               :aria-label="'Seleccionar ' + j.name">
+                      </td>
                       <td>
                         <div style="font-weight:500">
                           <a :href="'#/rastreos/' + j.id" @click.stop class="enlace-fila" x-text="j.name"></a>
@@ -4667,6 +4700,228 @@
         <button class="btn" :class="dialogo.peligro ? 'btn-danger' : 'btn-primary'" @click="cerrarDialogo(true)"
                 :disabled="(dialogo.escribir && dialogo.entrada.trim() !== dialogo.escribir) || (dialogo.pedir && !dialogo.entrada.trim())"
                 :data-foco="!dialogo.peligro && !dialogo.escribir && !dialogo.pedir ? '' : null" x-text="dialogo.aceptar"></button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== BORRADO EN MASA (decision 96) =====
+     Tres pasos en el mismo modal: lo que se va a borrar (con su tamaño y lo
+     que el servidor se niega a tocar), el borrado con su avance, y lo que
+     quedó. La vista previa la calcula el MISMO endpoint que borra, con
+     `simular`, así que no puede decir una cosa y hacer otra. -->
+<template x-if="borrado">
+  <div class="modal-backdrop" @click.self="borrado.paso !== 'borrando' && cerrarBorrado()"
+       @keydown.escape.window="borrado.paso !== 'borrando' && cerrarBorrado()">
+    <div class="modal" style="max-width:46rem" role="alertdialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 style="display:flex;align-items:center;gap:.45rem">
+          <i data-lucide="trash-2" style="width:18px;height:18px;color:var(--red)"></i>
+          <span x-text="borrado.paso === 'hecho' ? 'Rastreos eliminados' : 'Eliminar rastreos'"></span>
+        </h2>
+      </div>
+
+      <div class="modal-body">
+        <template x-if="borrado.paso === 'cargando'">
+          <div class="loading-overlay"><div class="spinner"></div> Midiendo lo que ocupan…</div>
+        </template>
+
+        <!-- ---------- Vista previa ---------- -->
+        <template x-if="borrado.paso === 'previa'">
+          <div>
+            <p class="text-sm" style="line-height:1.55" x-show="borrado.previa.eliminados.length">
+              Se borran
+              <strong x-text="fmt.num(borrado.previa.eliminados.length)"></strong>
+              rastreos con todos sus datos: URLs, enlaces, incidencias, contenido y comparaciones.
+              <strong>No se puede deshacer.</strong>
+              Si alguno es un censo entregado, descarga antes su backup.
+            </p>
+            <p class="text-sm" style="line-height:1.55" x-show="!borrado.previa.eliminados.length">
+              Ninguno de los rastreos seleccionados se puede borrar tal cual. Abajo está el
+              motivo de cada uno.
+            </p>
+
+            <!-- Lo que el servidor NO va a tocar, y por qué. Va arriba: es lo
+                 que hay que leer antes de teclear la palabra. -->
+            <template x-if="borrado.previa.omitidos.length > 0">
+              <div class="card" style="margin-top:.8rem;border-left:3px solid var(--orange)">
+                <strong x-text="fmt.num(borrado.previa.omitidos.length) + (borrado.previa.omitidos.length === 1 ? ' no se borra' : ' no se borran')"></strong>
+                <ul style="margin:.4rem 0 0 1rem;line-height:1.5">
+                  <template x-for="o in borrado.previa.omitidos" :key="o.id">
+                    <li class="text-sm">
+                      <strong x-text="o.nombre || o.id"></strong>: <span x-text="o.motivo"></span>
+                    </li>
+                  </template>
+                </ul>
+                <!-- Solo lo protegido por una programación se puede forzar: un
+                     rastreo en marcha hay que cancelarlo antes, siempre. -->
+                <label class="checkbox-label text-sm" style="margin-top:.5rem"
+                       x-show="borrado.forzar || borrado.previa.omitidos.some(o => o.forzable)">
+                  <input type="checkbox" x-model="borrado.forzar" @change="recargarPrevia()">
+                  Borrar igualmente los que son referencia de una programación
+                </label>
+              </div>
+            </template>
+
+            <template x-if="borrado.previa.eliminados.some(e => e.aviso)">
+              <div class="card" style="margin-top:.8rem;border-left:3px solid var(--blue)">
+                <ul style="margin:0 0 0 1rem;line-height:1.5">
+                  <template x-for="e in borrado.previa.eliminados.filter(x => x.aviso)" :key="e.id">
+                    <li class="text-sm"><strong x-text="e.nombre"></strong>: <span x-text="e.aviso"></span></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+
+            <div class="table-wrap" x-show="borrado.previa.eliminados.length"
+                 style="margin-top:.8rem;max-height:17rem;overflow:auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rastreo</th><th>Estado</th><th>Creado</th>
+                    <th style="text-align:right">URLs</th>
+                    <th style="text-align:right" title="Filas de la tabla de enlaces: cada una agrupa las apariciones idénticas de un enlace en su página (decisión 94)">Filas de enlaces</th>
+                    <th style="text-align:right">Ocupa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="e in borrado.previa.eliminados" :key="e.id">
+                    <tr>
+                      <td x-text="e.nombre"></td>
+                      <td><span class="badge" :class="statusColor(e.status)" x-text="fmt.status(e.status)"></span></td>
+                      <td class="text-dim text-sm" x-text="fmt.dia(e.created_at)"></td>
+                      <td style="text-align:right" x-text="e.filas ? fmt.num(e.filas.urls) : '—'"></td>
+                      <!-- Archivado (decision 95): sin filas en la base; lo que
+                           ocupa es su Parquet, medido, y se suma en «Ocupa». -->
+                      <td style="text-align:right" x-show="!e.archivado" x-text="e.filas ? fmt.num(e.filas.links) : '—'"></td>
+                      <td style="text-align:right" class="text-dim" x-show="e.archivado"
+                          :title="'Enlaces archivados en Parquet: ' + fmt.bytes(e.archivo_bytes) + ' en disco'">archivados</td>
+                      <td style="text-align:right" x-text="fmt.bytes(e.bytes)"
+                          :title="e.bytes == null ? 'No se pudo medir dentro del tiempo disponible' : 'Estimado a partir de sus filas'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <p class="text-sm" style="margin-top:.6rem" x-show="borrado.previa.eliminados.length">
+              Liberan <strong x-text="fmt.bytes(borrado.previa.bytes_aprox)"></strong> aproximadamente<span
+                x-show="borrado.previa.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
+                x-show="borrado.previa.archivo_bytes > 0">, más
+                <strong x-text="fmt.bytes(borrado.previa.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.previa.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
+            </p>
+            <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5"
+               x-show="borrado.previa.eliminados.length" x-text="borrado.previa.nota"></p>
+
+            <div style="margin-top:.8rem" x-show="borrado.previa.eliminados.length">
+              <label class="text-sm" for="borrado-palabra">Escribe <strong>eliminar</strong> para confirmar</label>
+              <input id="borrado-palabra" type="text" x-model="borrado.escribir" data-foco autocomplete="off"
+                     @keydown.enter="confirmarBorrado()" style="width:100%;margin-top:.3rem">
+            </div>
+          </div>
+        </template>
+
+        <!-- ---------- Borrando ---------- -->
+        <template x-if="borrado.paso === 'borrando'">
+          <div>
+            <p class="text-sm">Borrando <strong x-text="fmt.num(borrado.hechos)"></strong> de
+              <strong x-text="fmt.num(borrado.total)"></strong>…</p>
+            <!-- Un censo de millones de enlaces no cabe en una peticion: el
+                 servidor devuelve lo que le queda y esto sigue pidiendolo. -->
+            <div class="progress-bar">
+              <div class="progress-fill" :style="'width:' + Math.round(100 * borrado.hechos / Math.max(1, borrado.total)) + '%'"></div>
+            </div>
+            <p class="text-dim text-sm" style="margin-top:.6rem">No cierres la pestaña. Un censo
+              grande puede tardar varios minutos: se borra por lotes y lo que quede a medias se
+              retoma solo.</p>
+          </div>
+        </template>
+
+        <!-- ---------- Hecho ---------- -->
+        <template x-if="borrado.paso === 'hecho'">
+          <div>
+            <p class="text-sm" style="line-height:1.55">
+              Eliminados <strong x-text="fmt.num(borrado.resultado.eliminados.length)"></strong> rastreos
+              y <strong x-text="fmt.num(Object.values(borrado.resultado.filas).reduce((a, b) => a + b, 0))"></strong> filas
+              (<span x-text="Object.entries(borrado.resultado.filas).filter(e => e[1]).map(e => fmt.num(e[1]) + ' en ' + e[0]).join(', ')"></span>).
+            </p>
+            <p class="text-sm" style="margin-top:.4rem">
+              Liberados <strong x-text="fmt.bytes(borrado.resultado.bytes_aprox)"></strong> aproximadamente<span
+                x-show="borrado.resultado.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
+                x-show="borrado.resultado.archivo_bytes > 0">, más
+                <strong x-text="fmt.bytes(borrado.resultado.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.resultado.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
+            </p>
+            <p class="text-sm" style="margin-top:.4rem;color:var(--orange)" x-show="borrado.resultado.sin_terminar > 0">
+              <strong x-text="fmt.num(borrado.resultado.sin_terminar)"></strong> quedaron a medias: salen en la
+              lista como «Borrándose» y se terminan seleccionándolos y repitiendo el borrado.
+            </p>
+            <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5" x-text="borrado.resultado.nota"></p>
+            <template x-if="borrado.resultado.omitidos.length > 0">
+              <div class="card" style="margin-top:.8rem;border-left:3px solid var(--orange)">
+                <ul style="margin:0 0 0 1rem;line-height:1.5">
+                  <template x-for="o in borrado.resultado.omitidos" :key="o.id">
+                    <li class="text-sm"><strong x-text="o.nombre || o.id"></strong>: <span x-text="o.motivo"></span></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <div class="modal-footer">
+        <template x-if="borrado.paso === 'previa'">
+          <button class="btn" @click="cerrarBorrado()">Volver</button>
+        </template>
+        <template x-if="borrado.paso === 'previa'">
+          <button class="btn btn-danger" @click="confirmarBorrado()"
+                  :disabled="borrado.escribir.trim() !== 'eliminar' || !borrado.previa.eliminados.length">
+            Eliminar para siempre
+          </button>
+        </template>
+        <template x-if="borrado.paso === 'hecho'">
+          <button class="btn btn-primary" @click="cerrarBorrado()" data-foco>Entendido</button>
+        </template>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ===== ESPACIO EN DISCO (decision 96) ===== -->
+<template x-if="verAlmacenamiento && almacenamiento">
+  <div class="modal-backdrop" @click.self="verAlmacenamiento = false" @keydown.escape.window="verAlmacenamiento = false">
+    <div class="modal" style="max-width:34rem" role="dialog" aria-modal="true">
+      <div class="modal-header"><h2>Espacio en disco</h2></div>
+      <div class="modal-body">
+        <p class="text-sm">La base de datos ocupa
+          <strong x-text="fmt.bytes(almacenamiento.total_bytes)"></strong>, de los cuales
+          <strong x-text="fmt.bytes(almacenamiento.censo_bytes)"></strong> son datos de rastreos.<span
+            x-show="almacenamiento.archivo_ficheros"> Fuera de ella, los enlaces archivados de
+            <strong x-text="fmt.num(almacenamiento.archivo_ficheros)"></strong> censos ocupan
+            <strong x-text="fmt.bytes(almacenamiento.archivo_bytes)"></strong>.</span></p>
+        <div class="table-wrap" style="margin-top:.8rem;max-height:18rem;overflow:auto">
+          <table>
+            <thead><tr><th>Tabla</th><th style="text-align:right">Ocupa</th><th style="text-align:right">Filas</th></tr></thead>
+            <tbody>
+              <template x-for="t in almacenamiento.tablas" :key="t.tabla">
+                <tr>
+                  <td x-text="t.tabla"></td>
+                  <td style="text-align:right" x-text="fmt.bytes(t.bytes)"></td>
+                  <td style="text-align:right" class="text-dim" x-text="fmt.num(t.filas_aprox)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-dim text-sm" style="margin-top:.6rem;line-height:1.5">
+          Las filas son la estimación del planificador, no una cuenta exacta.
+        </p>
+        <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5" x-text="almacenamiento.nota"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" @click="verAlmacenamiento = false" data-foco>Cerrar</button>
       </div>
     </div>
   </div>

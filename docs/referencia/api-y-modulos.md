@@ -13,6 +13,7 @@
 | `routers/jobs.py` | Job CRUD endpoints (POST, GET, PATCH cancel, DELETE) |
 | `routers/results.py` | Results endpoints (urls, issues, links, stats, export CSV) |
 | `routers/clientes.py` | Clientes, perfiles e integraciones (#36, decision 83). Resuelve la herencia de configuracion al crear un job (`resolver_config`) |
+| `routers/almacenamiento.py` | Lo que ocupa la base, cada tabla y los Parquet de enlaces archivados (decision 96). Router propio: en el de jobs la ruta caeria debajo de `GET /{job_id}` |
 | `routers/enriquecido.py` | Analisis enriquecido (#40, decision 85): estimar, crear (con `X-Enrichment-Token`), leer y cancelar ejecuciones. No llama a ningun modelo: encola en `enrichment:pending` |
 
 ### Crawler (`crawler/`)
@@ -45,6 +46,7 @@
 | `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
 | `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
 | `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
+| `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -67,7 +69,9 @@
 | PATCH | `/api/jobs/{id}/enrichment/{run_id}/cancel` | Cancela (pendiente: en el acto; en curso: entre lotes, conservando lo pagado) |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
-| DELETE | `/api/jobs/{id}` | Delete job + cascade |
+| DELETE | `/api/jobs/{id}` | Delete job + cascade, y el Parquet de sus enlaces si estaban archivados (decision 95) |
+| POST | `/api/jobs/eliminar` | Borrado en masa (decision 96). `{ids, simular, forzar, segundos}` (`forzar` salta solo el guardia de la serie programada, nunca el de un rastreo en marcha): `simular` es la vista previa con tamanos, guardias y `archivo_bytes`; sin el, borra (Parquet incluido) y devuelve `pendientes` con lo que no cupo en su presupuesto de tiempo; lo que queda a medias pasa a `status='deleting'` |
+| GET | `/api/almacenamiento` | Lo que ocupa la base y cada tabla, mas los Parquet archivados (`archivo_bytes`, `archivo_ficheros`), para decidir que censos borrar |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
 | GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`; columnas calculadas con `?origenes=`, `?h1=` y `?cambios=` —frente al censo de la comparación automática o `?con=`—). Los «contiene» admiten `a|b` y `!a`; `status_code` admite `301,302`. El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista |
 | GET | `/api/jobs/{id}/urls/plantillas` | La vista del Explorador agrupada por forma de ruta (`shared.plantillas.firma_de_ruta`): URLs, indexables, estados, con errores, medianas y los últimos tramos que se repiten (`null` × 6 = un fallo de plantilla). `/urls?plantilla=` entra en una |

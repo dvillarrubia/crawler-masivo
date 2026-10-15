@@ -200,7 +200,8 @@ class Job(Base):
     # que se entregan de las pruebas de 26 URLs (UX-07).
     tipo = Column(String(16), nullable=True)
 
-    # pending | running | analyzing | completed | failed | cancelled
+    # pending | running | analyzing | completed | failed | cancelled | stalled
+    # | deleting (un borrado por trozos en curso o a medias, decision 96)
     status = Column(String(20), nullable=False, default="pending", index=True)
 
     # Por que termino el rastreo: "finished" (frontera agotada, dato completo)

@@ -297,6 +297,39 @@ def restaurar(db, job_id) -> int:
     return n
 
 
+def bytes_en_disco(job_id, resumen: dict | None = None) -> int | None:
+    """Lo que ocupa el Parquet de un job, que es lo que se libera al borrarlo.
+
+    Del fichero si se puede leer; si no (la API sin el volumen montado, un
+    fichero que falta), lo que se anoto al archivar. `None` si no hay ni lo
+    uno ni lo otro: «no se sabe», nunca un cero.
+    """
+    try:
+        return ruta(job_id).stat().st_size
+    except OSError:
+        pass
+    valor = (resumen or {}).get("bytes")
+    return int(valor) if isinstance(valor, (int, float)) else None
+
+
+def resumen_del_directorio() -> dict[str, Any]:
+    """Cuanto ocupan TODOS los Parquet de enlaces, para el panel de espacio.
+
+    Cuenta el directorio y no los jobs: un fichero que se quedo sin job (un
+    borrado que no pudo quitarlo) tambien ocupa. `None` si el directorio no se
+    puede leer, que no es lo mismo que vacio.
+    """
+    try:
+        d = directorio()
+        if not d.exists():
+            return {"archivo_bytes": 0, "archivo_ficheros": 0}
+        ficheros = [f for f in d.iterdir() if f.suffix == ".parquet"]
+        return {"archivo_bytes": sum(f.stat().st_size for f in ficheros),
+                "archivo_ficheros": len(ficheros)}
+    except OSError:
+        return {"archivo_bytes": None, "archivo_ficheros": None}
+
+
 def borrar(job_id) -> None:
     """El fichero de un job que se borra."""
     try:

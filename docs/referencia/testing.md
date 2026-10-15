@@ -55,6 +55,16 @@ dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
 mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
 `test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
 respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
+Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se
+borra TODO lo del censo y nada de lo demas, los dos guardias, que `forzar`
+salta el de la serie y nunca el de en marcha, que `simular` no toca nada, el
+presupuesto de tiempo y que repetir termina, que un censo a medio borrar queda
+en `deleting` y no es referencia ni se archiva, y que el Parquet de un censo archivado se mide, se borra con el y se
+queda con su job si el borrado queda a medias) y `test_almacenamiento.py` (la
+cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
+cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
+medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
+corren tambien en el trabajo de la API.
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
