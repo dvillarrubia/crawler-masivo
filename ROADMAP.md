@@ -375,6 +375,11 @@ terminado.
 
 ## En cola
 
+**Desde el 2026-10-16 el orden lo marca [`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md)**:
+la comparación con Screaming Frog, Sitebulb, Lumar, Botify, JetOctopus y
+Oncrawl, los huecos verificados contra el código y las olas de trabajo, cada
+una con su criterio de hecho. Los bloques de abajo siguen valiendo como detalle.
+
 El orden de los bloques es el orden recomendado: primero lo que corrige datos,
 después lo nuevo.
 
