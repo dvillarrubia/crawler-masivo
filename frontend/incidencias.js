@@ -207,6 +207,11 @@ const ISSUE_INFO = {
     google: 'Lo acepta, pero el resultado enriquecido puede ser más pobre.',
     arreglo: 'Completar la propiedad en la plantilla si el dato existe.',
   },
+  'structured_data_info': {
+    que: 'El bloque es de un tipo cuyo resultado enriquecido Google ha retirado (FAQPage desde mayo de 2026, HowTo desde septiembre de 2023).',
+    google: 'Lo lee, pero ya no lo muestra como resultado enriquecido: no da preguntas desplegables ni pasos en la búsqueda.',
+    arreglo: 'Nada urgente: el marcado no es incorrecto. No merece la pena completarlo ni crearlo por la búsqueda de Google; quitarlo solo si estorba.',
+  },
 
   // ----- Enlazado y sitemap -----
   'orphan_page': {

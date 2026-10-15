@@ -82,3 +82,35 @@
    decisión 51), `VideoObject.description`, `Course.provider`, y
    `SoftwareApplication.aggregateRating`, que es «valoración O reseña» igual
    que en Product. Las cuatro pasan a recomendadas (o a `uno_de`).
+
+<a id="d97"></a>
+97. **Un resultado enriquecido que Google ya no muestra no tiene propiedades
+   obligatorias** — `FAQPage` exigía `mainEntity` y `HowTo` exigía `name` y
+   `step`, así que un FAQ sin preguntas salía como **error**, con el mismo peso
+   en el informe que un Product sin precio, y uno completo salía «ok», que se
+   lee como «este marcado te da algo en Google». Ninguna de las dos cosas es
+   verdad. Comprobado el 2026-10-16 en el registro de cambios de Search Central
+   (<https://developers.google.com/search/updates>):
+   - **HowTo**: retirado el 2023-09-14 («Removed the How-to structured data
+     documentation, as this rich result is no longer shown in search
+     results»).
+   - **FAQ**: limitado el 2023-09-14 a «well-known, authoritative government
+     and health websites»; anunciada la retirada el 2026-05-08 («will no longer
+     appear in Google Search starting May 7, 2026») y documentación borrada el
+     2026-06-15. Es decir, ya no está «restringido», está **retirado** para
+     todo el mundo.
+   Salen de `REQUISITOS` y pasan a `RESULTADOS_RETIRADOS`
+   (`analysis/sd_validation.py`), con la fecha y la fuente. Un bloque de esos
+   tipos —también anidado, p. ej. `WebPage.mainEntity`— lleva un único aviso
+   de nivel **`info`** que dice qué pasó, cuándo y dónde está escrito, y no se
+   le exige nada más. Es `info` y no `warning` porque no hay nada que arreglar:
+   el marcado es schema.org válido, otros buscadores y asistentes pueden
+   leerlo, y pedir que se quite sería inventar trabajo. `validation_status`
+   gana el valor `info` (orden: error > warning > info > ok) y el análisis
+   emite `structured_data_info` con la agrupación de la decisión 73: una fila
+   por hallazgo con `paginas_afectadas`, no una por página — un FAQ de
+   plantilla en 30 páginas es una incidencia. `QAPage` es otro resultado y
+   sigue documentado y vivo (página actualizada el 2026-09-08): no cambia.
+   Los tests fijan las dos fechas (`RETIRADOS_ESPERADOS`) y que ningún tipo
+   retirado vuelva a la tabla de requisitos. No hace falta re-rastrear: basta
+   **re-analizar**.

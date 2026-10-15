@@ -122,3 +122,19 @@ def test_la_validacion_se_guarda_en_TODOS_los_bloques():
     assert len(bloques) == 30
     assert all(b.validation_status == "warning" for b in bloques)
     assert all(b.validation_issues for b in bloques)
+
+
+def test_el_faq_de_plantilla_es_UN_aviso_informativo():
+    """Un FAQ de plantilla en 30 paginas: una fila `info`, no 30 errores."""
+    s, j = _montar()
+    for n in range(30):
+        _pagina_con_bloque(s, j, n, {"@type": "FAQPage", "mainEntity": []})
+    SEOAnalyzer(s, j.id).analyze_structured_data()
+    s.flush()
+
+    filas = s.query(Issue).filter(Issue.job_id == j.id).all()
+    assert [(f.issue_type, f.severity) for f in filas] == [
+        ("structured_data_info", "info")]
+    assert filas[0].details["paginas_afectadas"] == 30
+    bloques = s.query(StructuredData).all()
+    assert all(b.validation_status == "info" for b in bloques)

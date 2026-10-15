@@ -1116,7 +1116,7 @@ class SEOAnalyzer:
             status, issues = validate_structured_data(raw, json_invalido=json_invalido)
             clave = (status, json.dumps(issues or None, sort_keys=True))
             por_veredicto.setdefault(clave, []).append(sd_id)
-            if status in ("error", "warning"):
+            if status in ("error", "warning", "info"):
                 por_hallazgo.setdefault(
                     (status, schema_type, tuple(issues or ())), []
                 ).append(url_id)

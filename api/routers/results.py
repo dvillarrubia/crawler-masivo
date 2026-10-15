@@ -1576,7 +1576,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
     ]
 
 
-_ORDEN_VALIDACION = {"error": 0, "warning": 1, "ok": 2}
+_ORDEN_VALIDACION = {"error": 0, "warning": 1, "info": 2, "ok": 3}
 
 
 def _extras_por_lote(session: Session, url_ids: list[int]) -> dict[int, dict[str, Any]]:

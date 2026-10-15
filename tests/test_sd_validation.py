@@ -336,14 +336,10 @@ REQUISITOS_ESPERADOS = {
         "recomendadas": ["recipeingredient", "recipeinstructions",
                          "aggregaterating", "author", "datepublished"],
     },
-    # faqpage / qapage: mainEntity.
-    "faqpage": {"obligatorias": ["mainentity"]},
+    # qapage: mainEntity (la Question). Sigue vivo: documentado y sin aviso de
+    # retirada a 2026-10-16 (developers.google.com/.../structured-data/qapage).
+    # FAQPage y HowTo ya no estan: ver RETIRADOS_ESPERADOS.
     "qapage": {"obligatorias": ["mainentity"]},
-    # how-to (retirado de la busqueda en 2023; se conserva lo que pedia).
-    "howto": {
-        "obligatorias": ["name", "step"],
-        "recomendadas": ["image", "totaltime", "tool", "supply"],
-    },
     # breadcrumb: itemListElement.
     "breadcrumblist": {"obligatorias": ["itemlistelement"]},
     # organization: «There are no required properties»; name es recomendada.
@@ -421,3 +417,62 @@ def test_una_app_con_resenas_y_sin_valoracion_media_sale_enriquecida():
          "review": {"@type": "Review", "author": "x", "reviewRating": {"ratingValue": 4}},
          "operatingSystem": "iOS", "applicationCategory": "Game"})
     assert estado == "ok"
+
+
+# Resultados que Google ya no muestra (decision 97), comprobado el 2026-10-16
+# en https://developers.google.com/search/updates:
+# - 2023-09-14 «Removed the How-to structured data documentation, as this rich
+#   result is no longer shown in search results» y FAQ limitado a «well-known,
+#   authoritative government and health websites».
+# - 2026-05-08 «Deprecating the FAQ rich result feature» («will no longer
+#   appear in Google Search starting May 7, 2026») y 2026-06-15 «Removed
+#   documentation for the FAQ rich result feature».
+RETIRADOS_ESPERADOS = {"faqpage": "2026-05-07", "howto": "2023-09-14"}
+
+
+def test_la_tabla_de_retirados_coincide_con_la_documentacion_de_google():
+    from analysis.sd_validation import REQUISITOS, RESULTADOS_RETIRADOS
+
+    assert {t: r["desde"] for t, r in RESULTADOS_RETIRADOS.items()} == RETIRADOS_ESPERADOS
+    assert not set(RESULTADOS_RETIRADOS) & set(REQUISITOS), (
+        "un tipo retirado no puede exigir propiedades")
+    for r in RESULTADOS_RETIRADOS.values():
+        assert r["fuente"].startswith("https://developers.google.com/search/")
+
+
+def test_un_faq_sin_mainentity_ya_no_es_un_error():
+    """Antes era «falta la propiedad obligatoria»: el mismo peso que un Product
+    sin precio, por un resultado que Google ya no ensena."""
+    estado, problemas = validate_structured_data({"@type": "FAQPage"})
+    assert estado == "info"
+    assert len(problemas) == 1
+    assert "ya no muestra" in problemas[0]
+    assert "developers.google.com/search/updates" in problemas[0], "con la fuente"
+
+
+def test_un_howto_completo_tambien_avisa_de_que_no_da_nada():
+    estado, problemas = validate_structured_data(
+        {"@type": "HowTo", "name": "x", "step": [{"@type": "HowToStep", "text": "a"}]})
+    assert estado == "info"
+    assert "2023-09-14" in problemas[0]
+
+
+def test_lo_retirado_no_tapa_un_error_de_otra_entidad():
+    estado, problemas = validate_structured_data({"@graph": [
+        {"@type": "FAQPage", "mainEntity": []},
+        {"@type": "Product", "name": "p"},
+    ]})
+    assert estado == "error", "manda el peor"
+    assert any("ya no muestra" in p for p in problemas)
+
+
+def test_un_faq_anidado_avisa_igual():
+    estado, problemas = validate_structured_data(
+        {"@type": "WebPage", "mainEntity": {"@type": "FAQPage"}})
+    assert estado == "info"
+    assert problemas and "FAQPage" in problemas[0]
+
+
+def test_qapage_sigue_exigiendo_su_pregunta():
+    estado, _ = validate_structured_data({"@type": "QAPage"})
+    assert estado == "error"
