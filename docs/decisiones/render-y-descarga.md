@@ -208,3 +208,97 @@
      que ve el bot de verdad.
    `user_agent` ya era una clave de `JobConfig`: los presets son solo del
    formulario y no añaden claves (`test_jobconfig_claves` sigue igual).
+
+<a id="d103"></a>
+103. **Una respuesta que no es la página no se guarda como la página, y un
+   rastreo detrás de un muro no es un censo** (PR 2.1 del plan, versión
+   determinista de #10). Con `HTTPERROR_ALLOW_ALL` todo llega al spider: un
+   desafío de Cloudflare servido con 200, un captcha o el cuerpo binario de un
+   F5 (decisión 11) se guardaban como páginas normales, indexables y con sus
+   incidencias, y el job acababa `completed`. Ahora cada respuesta final lleva
+   `urls.response_class`, de una función pura en `shared/respuestas.py` que
+   usan el spider y `shared/descarga_cruda.py` (un solo «esto es un muro»,
+   decisiones 62 y 82): `contenido`, `challenge_waf`, `captcha`,
+   `rate_limited`, `respuesta_binaria`, `login_requerido` y `desconocido`.
+   - **Conservadora, porque un falso positivo esconde una página real.** Una
+     clase de muro sale con una señal inequívoca (`cf-mitigated: challenge`,
+     un 429, un 503 con `Retry-After`, bytes de control en un cuerpo declarado
+     HTML) o con DOS que se confirman: un título o un marcador de desafío
+     **y** una página sin contenido (menos de 150 palabras o un código de
+     error). Los marcadores son los de la página de desafío, no los que el
+     proveedor inyecta en las normales: Cloudflare mete
+     `/cdn-cgi/challenge-platform/scripts/jsd/` en páginas buenas, así que
+     cuenta `_cf_chl_opt`. Tres títulos —`Access denied`, `403 Forbidden`,
+     `Security check`— son también los de un error **honesto** del servidor,
+     y con un código de error se quedan en `contenido`: los 12 403 del censo
+     de www.uoc.edu son directorios de Apache, y un enlace interno a algo
+     prohibido es un hallazgo. Solo cuentan servidos con 2xx y sin contenido.
+     Un artículo que habla de captchas o lleva un reCAPTCHA es contenido. El
+     título se casa al principio y por palabra entera: «Security checklist»
+     ya no casa con «security check», que con la subcadena de la 62 sí.
+     `login_requerido` (401, o redirección a un login de OTRO host) y
+     `desconocido` (2xx HTML con el cuerpo vacío) son la respuesta del sitio:
+     no cuentan como muro.
+   - **Un muro no es indexable ni lleva incidencias de página.**
+     `estado_indexabilidad(response_class=…)` lo saca antes que el código
+     («Bloqueada (WAF)», «Bloqueada (captcha)», «Limitada (rate limit)»,
+     «Respuesta no valida (binaria)»): un 403 de Cloudflare no es un «Client
+     Error (403)» del sitio. El spider no extrae nada de un muro (ni
+     metadatos, ni titulares, ni enlaces que seguir). El analizador no le emite
+     `4xx_error`, `5xx_error`, `h1_missing` ni `sitemap_orphan`, y un canonical
+     o un hreflang que apunta a un muro no está «roto»: el destino no se ha
+     visto. En su lugar, **una** `respuesta_no_valida` (warning) por host y
+     clase, con las páginas afectadas, los códigos y cinco ejemplos (decisión
+     53). Al reanudar, los muros se repiten como los 5xx.
+   - **La salud del job, por ventana.** El spider mira las últimas
+     `salud_ventana` respuestas (50) y, si la fracción `salud_umbral` (0,8)
+     no son la página, deja la marca `job:<id>:bloqueo` y para con
+     `bloqueado_por_waf` o `rate_limited` (el que más pese). Solo juzga con la
+     ventana llena: tres muros al arrancar no paran nada. El rastreo corto que
+     acaba entero detrás del muro sin llenar la ventana —el de 1 URL de la
+     decisión 11— lo juzga el worker al cerrar sobre el TOTAL de la base de
+     datos. Las dos cosas acaban en `failed` con esa causa, sin análisis ni
+     comparación (decisiones 28 y 32), y en `jobs.health` (recuentos por
+     clase, proporción, causa y la ventana que vio el spider). Las claves van
+     en `CrawlBehaviorConfig` (decisión 33), con `parar_si_bloqueado` para
+     seguir rastreando y juzgar solo al cerrar.
+   - **Sobrevive a las reanudaciones sin bloquearse para siempre.** Un
+     estancamiento (decisión 15) de un job bloqueado no se reencola: el worker
+     lo decide con la base de datos, que sí sobrevive. La ventana del spider
+     NO se siembra con la ejecución anterior: llena de muros, la primera página
+     buena tras reanudar la volvería a parar aunque el sitio se hubiera
+     recuperado.
+   - **La comparación no alerta con un censo bloqueado** (#36 F2): se marca
+     «NO CONCLUYENTE: censo bloqueado» con la causa y no salen alertas. Y en un
+     censo entero, una página que fue muro en cualquiera de los dos queda fuera
+     (ni cambia, ni sale del índice, ni desaparece: `sin_comparar_por_muro`), y
+     sus incidencias de antes son «no se sabe», no «resueltas».
+
+   Medido el 2026-10-16 desde la IP local, con `curl_cffi` y `chrome124`:
+   - **progym.es**: la home sale de la caché de Cloudflare con 200 →
+     `contenido`; `/blog/`, `/contacto/` y `/maquinas-de-cardio/` responden
+     403 con `cf-mitigated: challenge` y «Just a moment...» → `challenge_waf`
+     las tres (el desafío sin la cabecera también: por `_cf_chl_opt`). Es el
+     fixture `tests/fixtures/respuestas/cloudflare_desafio_progym.html`.
+   - **Contenido de verdad, sin un falso positivo**: www.uoc.edu/es,
+     www.uoc.edu/es/estudios, www.lopesan.com/es/ y /es/hoteles/,
+     blogs.uoc.edu/. Y tres errores honestos que se parecen a un muro y se
+     quedan en `contenido`: una ficha de penguinlibros.com que responde 403
+     con la página entera (349 kB, nginx), un 403 de Apache de www.uoc.edu y
+     el wp-login de blogs.uoc.edu (403 «403 Forbidden», openresty).
+   - **En la base local** (solo lectura): sin cuerpos guardados
+     (`raw_html` vacío) no se puede reclasificar, así que se cuenta por
+     título y código. **1 página de muro indexable**: el wp-login de
+     blogs.uoc.edu, guardado con 200, «403 Forbidden» y 3 palabras. **270
+     respuestas 429** en el censo `penguin-estructura-es-2026-07-30` (19.607
+     URLs), con 270 `4xx_error` y 152 incidencias más sobre páginas que no se
+     vieron; en su peor ventana de 50 hubo 38 (76%), así que con el umbral por
+     defecto el rastreo **no** se habría parado —lo que cambia es que esas
+     270 dejan de ser «rotas» y se repiten al reanudar—. Los 65 403 de los
+     demás censos son respuestas del sitio (45 fichas enteras de penguin, 12
+     Apache de la UOC, 8 de blogs) y siguen siendo `contenido`; los 5 401 de
+     Saunier, `login_requerido`.
+   Fuera, para la fase con modelo de #10: el soft-block que sirve la página
+   con otro contenido (precios a cero, «producto no disponible» en todas), la
+   caída de tamaño por plantilla y la pausa con reanudación automática más
+   tarde. Los censos anteriores no tienen la columna: hay que **re-rastrear**.

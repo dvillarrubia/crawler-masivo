@@ -115,6 +115,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
   (una fila con `paginas_afectadas`, no una por pagina). 36, 53, 64, 73.
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un
   sitio limpio. 28, 32.
+- **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
+  indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Lo que no se puede afirmar no se afirma**: ausencias en censos truncados o
   de otro alcance, incidencias entre censos analizados con codigo distinto. 67, 70, 89, 91.
 - **Un `noindex` o una pagina que no da 200 no reparten enlazado.** 38, 57.

@@ -25,6 +25,12 @@
 | `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
 | `custom_extraction` | 1:N from urls (con `job_id`) | nombre, clase (extractor/busqueda), estado, n, valor, valor_clave, valor_num, valores, render (decision 104). Una fila por (URL, regla) EVALUADA: sin fila = no evaluada, no «vacio». Migracion: `migrar_custom_extraction()` en `init_db.py` |
 
+`urls.response_class` dice si la respuesta era la pagina o un muro delante
+(`contenido`, `challenge_waf`, `captcha`, `rate_limited`, `respuesta_binaria`,
+`login_requerido`, `desconocido`; NULL en saltos, sin respuesta y censos
+anteriores) y `jobs.health` los recuentos por clase y la causa si el rastreo se
+dio por bloqueado (decision 103).
+
 `jobs.cliente_id` / `jobs.profile_id` son las FK al cliente y al perfil; `jobs.client_id` sigue siendo el texto libre de siempre (decision 83).
 
 URL dedup: SHA-256 hash per `(job_id, url_hash)` unique constraint.

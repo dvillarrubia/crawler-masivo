@@ -32,6 +32,10 @@ decision 98), el enlace del aviso contra las rutas de `_irARuta`
 (`test_avisos.py`), sitemap parsing (`test_sitemaps.py`) and
 casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
 estimada contra la Jaccard exacta) y un test de integracion del spider
+(`test_spider_muro.py`: el mismo arnes con el desafio real de Cloudflare de
+progym, el cuerpo binario y un 429 masivo, decision 103; las clases en
+`test_respuestas.py`, el analizador en `test_analyzer_muros_db.py` y el worker
+en `test_worker_bloqueo.py`)
 (`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
 local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
 refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la

@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95 |
@@ -129,6 +129,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 100 | Una URL del sitemap que no es indexable es una contradicción, y se dice por qué | [`incidencias`](incidencias.md#d100) |
 | 101 | Lo que importa de un canonical es lo que Google encuentra al llegar al destino, y de una redireccion, donde acaba | [`indexabilidad`](indexabilidad.md#d101) |
 | 102 | HTML que Google trunca o ignora: más de 2 MB y un `<head>` que se corta antes de tiempo | [`incidencias`](incidencias.md#d102) |
+| 103 | Una respuesta que no es la página no se guarda como la página, y un rastreo detrás de un muro no es un censo | [`render-y-descarga`](render-y-descarga.md#d103) |
 | 104 | Extracción y búsqueda a medida: una fila por (URL, regla) evaluada, y sin fila no es «vacío» | [`extraccion-a-medida`](extraccion-a-medida.md#d104) |
 
 ## Anadir una decision
