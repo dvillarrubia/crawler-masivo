@@ -947,7 +947,11 @@ class SEOAnalyzer:
                 # `destino_final` va vacio.
                 bueno = final is not None and final.status_code == 200
                 vuelve = bueno and misma_url(final.url, page_url)
-                if vuelve and a_http:
+                # Con `canonical_a_http` ya avisado, una redireccion que solo
+                # sube a https (a la propia pagina o a la version https del
+                # canonical) es el mismo hallazgo con el mismo arreglo.
+                if a_http and bueno and (
+                        vuelve or misma_url(final.url, _a_https(canonical))):
                     return
                 self._add_issue(url_id, "canonical_a_redireccion", "warning", {
                     **base, "destino_final": final.url if bueno else None,
@@ -968,6 +972,12 @@ class SEOAnalyzer:
             return
 
         if destino.noindex:
+            # Si la propia pagina tambien es noindex no hay senales que se
+            # contradigan: no entra en el indice pase lo que pase, y lo que
+            # quede por revisar es el noindex del destino, que avisa en su URL.
+            origen = fichas.buscar(page_url)
+            if origen is not None and origen.noindex:
+                return
             self._add_issue(url_id, "canonical_a_no_indexable", "warning", {
                 **base, "motivo": "noindex",
             })
@@ -975,6 +985,10 @@ class SEOAnalyzer:
 
         if destino.canonical and not misma_url(destino.canonical, destino.url):
             cadena, final, bucle = fichas.seguir_canonicals(page_url, destino)
+            if final is destino:
+                # El canonical del destino vuelve a el por una redireccion: el
+                # de A es correcto, de un salto.
+                return
             final_malo = final is not None and _es_error(final.status_code)
             detalle = {**base, "cadena": cadena, "bucle": bucle}
             if final is not None:
@@ -1746,7 +1760,13 @@ class SEOAnalyzer:
             final_status = estado_final.get(current)
             if final_status is None:
                 final_status = estado_final.get(_clave(current))
-            if origin_url in internas and _es_error(final_status):
+            # Si el salto solo normaliza (http → https, www, barra final) la
+            # redireccion esta bien hecha: el error es el destino, que ya
+            # tiene su `4xx_error` / `5xx_error`. Medido en www.uoc.edu: 383 de
+            # las 473 redirecciones de un salto que acababan en error eran
+            # esto, casi todas el 307 de Chromium hacia https.
+            if (origin_url in internas and _es_error(final_status)
+                    and not _solo_normaliza(origin_url, current)):
                 self._add_issue(
                     origin_id,
                     "redireccion_a_error",
@@ -2893,7 +2913,8 @@ class SEOAnalyzer:
           `orphan_page`) ni destino de una redireccion (eso es
           `solo_enlazada_por_redireccion`, decision 63);
         - al menos una variante —200 y canonicalizada a ella— que SI recibe
-          enlaces. Si tampoco las variantes estan enlazadas, la pagina es
+          enlaces desde FUERA del grupo (ni de la canonica ni de otra variante
+          suya). Si tampoco las variantes estan enlazadas, la pagina es
           huerfana de verdad y lo dice `orphan_page` / `sitemap_orphan`.
 
         `inlinks_count` NULL es «no se sabe» y no entra. Con los enlaces
@@ -2933,7 +2954,7 @@ class SEOAnalyzer:
                 por_clave.setdefault(k, (uid, bool(en_sitemap)))
 
         variantes = self.session.execute(
-            select(Url.url, Url.inlinks_count,
+            select(Url.id, Url.url, Url.url_hash, Url.inlinks_count,
                    HtmlMeta.canonical_href, HtmlMeta.canonical_header)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(
@@ -2943,7 +2964,10 @@ class SEOAnalyzer:
                 Url.indexability_status == "Canonicalised",
             )
         ).all()
-        for url, inlinks, c_href, c_cab in variantes:
+        # canonica -> [(id, url, hash, inlinks)] de sus variantes
+        grupos: dict[int, list[tuple[int, str, str, int]]] = defaultdict(list)
+        en_sitemap_de: dict[int, bool] = {}
+        for vid, url, h, inlinks, c_href, c_cab in variantes:
             canonical = (c_href or "").strip() or (c_cab or "").strip()
             if not canonical or misma_url(canonical, url):
                 continue
@@ -2953,19 +2977,61 @@ class SEOAnalyzer:
             if hallada is None:
                 continue
             uid, en_sitemap = hallada
-            d = resultado.setdefault(uid, {
-                "variantes": 0, "variantes_enlazadas": 0,
+            grupos[uid].append((vid, url, h, int(inlinks or 0)))
+            en_sitemap_de[uid] = en_sitemap
+
+        # Un enlace a la variante desde la propia canonica o desde otra
+        # variante suya no dice que el SITIO enlace ese contenido: es el
+        # selector de color o de talla de la ficha. Con solo esos, el grupo
+        # entero es huerfano y lo sigue diciendo `orphan_page` /
+        # `sitemap_orphan`. Se cuentan los de fuera con el mismo criterio que
+        # `inlinks_count` (origen 200 y no noindex, SUM(repeticiones),
+        # decision 94), filtrando el job en `links` (decision 37).
+        hash_a_grupo: dict[str, tuple[int, int]] = {}
+        for uid, vs in grupos.items():
+            for vid, _url, h, inlinks in vs:
+                if inlinks > 0 and h:
+                    hash_a_grupo[h] = (uid, vid)
+        de_fuera: dict[int, int] = defaultdict(int)
+        if hash_a_grupo:
+            miembros = {uid: {uid} | {v[0] for v in vs} for uid, vs in grupos.items()}
+            origen = aliased(Url)
+            hashes = list(hash_a_grupo)
+            for n in range(0, len(hashes), 500):
+                lote = hashes[n:n + 500]
+                filas = self.session.execute(
+                    select(Link.to_url_hash, Link.from_url_id,
+                           func.sum(Link.repeticiones))
+                    .join(origen, origen.id == Link.from_url_id)
+                    .where(
+                        Link.job_id == self.job_id,
+                        Link.to_url_hash.in_(lote),
+                        origen.status_code == 200,
+                        origen.noindex.isnot(True),
+                    )
+                    .group_by(Link.to_url_hash, Link.from_url_id)
+                ).all()
+                for h, desde, veces in filas:
+                    uid, vid = hash_a_grupo[h]
+                    if desde in miembros[uid]:
+                        continue
+                    de_fuera[vid] += int(veces or 0)
+
+        for uid, vs in grupos.items():
+            d = {
+                "variantes": len(vs), "variantes_enlazadas": 0,
                 "enlaces_a_variantes": 0, "ejemplos_variante": [],
-                "en_sitemap": en_sitemap,
-            })
-            d["variantes"] += 1
-            if (inlinks or 0) > 0:
-                d["variantes_enlazadas"] += 1
-                d["enlaces_a_variantes"] += int(inlinks)
-                if len(d["ejemplos_variante"]) < 5:
-                    d["ejemplos_variante"].append(url)
-        for uid in [u for u, d in resultado.items() if not d["variantes_enlazadas"]]:
-            del resultado[uid]
+                "en_sitemap": en_sitemap_de[uid],
+            }
+            for vid, url, _h, _inlinks in vs:
+                fuera = de_fuera.get(vid, 0)
+                if fuera > 0:
+                    d["variantes_enlazadas"] += 1
+                    d["enlaces_a_variantes"] += fuera
+                    if len(d["ejemplos_variante"]) < 5:
+                        d["ejemplos_variante"].append(url)
+            if d["variantes_enlazadas"]:
+                resultado[uid] = d
         return resultado
 
     def _avisar_canonical_sin_enlazar(self) -> dict[int, dict[str, Any]]:
@@ -3126,6 +3192,33 @@ def _es_error(status: int | None) -> bool:
     return status is not None and 400 <= status < 600 and status != 429
 
 
+def _solo_normaliza(a: str | None, b: str | None) -> bool:
+    """¿*a* y *b* son la misma ruta salvo el esquema, el `www` o la barra
+    final? Es la forma de una redireccion de normalizacion (http → https,
+    sin-www → www, `/a` → `/a/`), que esta bien hecha aunque el destino falle:
+    lo que hay que arreglar entonces es el destino, y ya avisa en su URL.
+    """
+    if not a or not b:
+        return False
+    try:
+        _, ha, ra, qa = clave_url(a)
+        _, hb, rb, qb = clave_url(b)
+    except Exception:
+        return False
+
+    def _host(h: str) -> str:
+        return h[4:] if h.startswith("www.") else h
+
+    def _ruta(r: str) -> str:
+        return r.rstrip("/") or "/"
+
+    return _host(ha) == _host(hb) and _ruta(ra) == _ruta(rb) and qa == qb
+
+
+def _a_https(url: str) -> str:
+    return "https://" + url.split("://", 1)[1] if "://" in url else url
+
+
 def _estado_por_url(session: Session, job_id) -> dict[Any, int | None]:
     """Codigo de cada URL del job, por la URL tal cual y por su clave."""
     estado: dict[Any, int | None] = {}
@@ -3236,6 +3329,11 @@ class _Fichas:
                 sig, _, _ = self.seguir_redirecciones(sig)
                 if sig is None:
                     return cadena, None, False
+            if sig.id == actual.id:
+                # El canonical de `actual` es una variante suya que redirige
+                # de vuelta a ella (barra final, http): es autocanonica de
+                # hecho, no un bucle. Lo que tenga de malo lo avisa en su URL.
+                return cadena, actual, False
             actual = sig
         return cadena, None, False
 

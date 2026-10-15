@@ -161,7 +161,7 @@
 <a id="d101"></a>
 101. **Lo que importa de un canonical es lo que Google encuentra al llegar al
    destino, y de una redireccion, donde acaba** (PR 1.1 de
-   `docs/plan/MEJOR_CRAWLER.md`). `canonical_broken` metia en el mismo saco un
+   `docs/PLAN_MEJOR_CRAWLER.md`). `canonical_broken` metia en el mismo saco un
    301 y un 404 —dos hallazgos con arreglos distintos—, y un destino que
    responde 200 pero esta en `noindex` o canonicalizado a su vez a otro no
    avisaba de nada. Una redireccion que acababa en 404 solo avisaba en el 404,
@@ -174,10 +174,10 @@
    |---|---|---|
    | `canonical_a_error` | el destino da 4xx/5xx, directamente o al final de sus redirecciones, o las redirecciones hacen bucle | error: el contenido se queda sin URL que indexar |
    | `canonical_a_redireccion` | el destino redirige (y no acaba en error) | warning: Google suele quedarse con la final, pero las dos senales no coinciden |
-   | `canonical_a_no_indexable` | el destino da 200 y esta en `noindex` | warning (ver abajo) |
+   | `canonical_a_no_indexable` | una pagina que NO es noindex declara canonical a un destino 200 en `noindex` | warning (ver abajo) |
    | `canonical_encadenado` | A → B → C: el destino da 200 y declara otro canonical; incluye el bucle A → B → A | error si la cadena acaba en 4xx/5xx; warning si no |
-   | `redireccion_a_error` | una redireccion interna, o su cadena, acaba en 4xx/5xx | error |
-   | `canonical_sin_enlazar` | canonica indexable con 0 entrantes y al menos una variante enlazada | warning |
+   | `redireccion_a_error` | una redireccion interna, o su cadena, lleva a OTRA ruta que da 4xx/5xx (no una normalizacion: esquema, `www`, barra final) | error |
+   | `canonical_sin_enlazar` | canonica indexable con 0 entrantes y al menos una variante enlazada desde fuera del grupo | warning |
 
    `canonical_broken` deja de emitirse; su ficha se queda en `incidencias.js`
    para los censos analizados antes, y la comparacion entre censos no casa los
@@ -194,16 +194,35 @@
    - **Un aviso por hallazgo.** Una cadena que acaba en error da
      `redireccion_a_error` y no tambien `redirect_chain`: redirigir directo a
      una pagina buena arregla las dos. Un canonical a `http` que redirige a la
-     propia pagina ya es `canonical_a_http` y no se repite como redireccion. La
+     propia pagina, o a la version https del mismo canonical, ya es
+     `canonical_a_http` y no se repite como redireccion. Una redireccion que
+     solo **normaliza** (http → https, `www`, barra final) y cuyo destino da
+     404 no es `redireccion_a_error`: esta bien hecha, el error es el destino
+     y ya tiene su `4xx_error` — en www.uoc.edu eran **383 de 594**, casi
+     todas el 307 interno de Chromium hacia https. Y si el canonical del
+     destino B es una variante suya que redirige de vuelta a B (`/b/` → `/b`),
+     B es autocanonica de hecho: A → B no es cadena ni bucle, y lo de B avisa
+     en B como `canonical_a_redireccion`. La
      canonica sin enlazar sale de `orphan_page` y `sitemap_orphan` —es la
      misma cura que la decision 63 con los destinos de redireccion—; si
      TAMPOCO las variantes estan enlazadas, es huerfana de verdad y lo sigue
-     diciendo `orphan_page`.
-   - **`canonical_a_no_indexable` es warning y no error**, aunque ninguna de
-     las dos URLs quede indexada: lo que saca el contenido del indice es el
+     diciendo `orphan_page`. Una variante enlazada solo desde la propia
+     canonica o desde otra variante suya (el selector de color o de talla)
+     **no cuenta como enlazada**: se cuentan sus entrantes de fuera del grupo
+     sobre `links` (filtrando por `links.job_id`, decision 37; con
+     SUM(repeticiones), decision 94; origen 200 y no noindex, como
+     `inlinks_count`). En www.uoc.edu era una de las 16: una noticia cuyo unico
+     enlace a su variante `?idTag=` salia de ella misma.
+   - **`canonical_a_no_indexable` solo desde una pagina que no es noindex, y
+     es warning y no error**: lo que saca el contenido del indice es el
      `noindex` del destino, que avisa en su propia URL y muchas veces es
-     deliberado. Medido: en Druni las 52 son variantes con `gclid` o
-     `gad_campaignid` de paginaciones `?p=N` que estan en noindex a proposito.
+     deliberado. Si el origen TAMBIEN es noindex no hay senales que se
+     contradigan —no entra en el indice pase lo que pase— y no se emite. La
+     primera version no lo miraba y el 100% de lo que encontraba era eso: las
+     52 de Druni (variantes con `gclid` de paginaciones `?p=N` en noindex a
+     proposito, las dos URLs en noindex), las 3 de UOC y las 2 de penguin. Con
+     el criterio, **0 en los seis censos**: el tipo queda para el caso que si
+     es un conflicto, y hoy no aparece en ninguno.
    - **El enlazado sigue las decisiones 38 y 57**: `inlinks_count` ya descuenta
      los enlaces desde `noindex` y desde paginas que no dan 200, asi que una
      canonica que solo enlaza una noindex sigue «sin enlazar» (hay test). Lee
@@ -222,17 +241,23 @@
    | censo | a_error | a_redireccion | a_no_indexable | encadenado | sin_enlazar | redireccion_a_error |
    |---|---|---|---|---|---|---|
    | Lopesan (5.751) | 0 | 4 | 0 | 2 | 0 | 9 |
-   | www.uoc.edu | 0 | 0 | 3 | 8 | 16 | 594 |
-   | penguin | 0 | 0 | 2 | 0 | 0 | 97 |
-   | Druni | 0 | 0 | 52 | 0 | 41 | 40 |
+   | www.uoc.edu | 0 | 0 | 0 | 8 | 15 | 203 |
+   | penguin | 0 | 0 | 0 | 0 | 0 | 97 |
+   | Druni | 0 | 0 | 0 | 0 | 41 | 40 |
    | progym | 0 | 0 | 0 | 0 | 0 | 1 |
    | CST | 0 | 0 | 0 | 0 | 1 | 0 |
 
+   (Tras la revision: `canonical_a_no_indexable` 3/2/52 → 0 por el origen
+   noindex, `redireccion_a_error` en UOC 594 → 203 por las normalizaciones
+   —3 de ellas, cadenas de dos saltos, pasan a `redirect_chain`, 280 → 283— y
+   `canonical_sin_enlazar` en UOC 16 → 15. Medido con los tres checks en una
+   transaccion `READ ONLY` sobre lo guardado; ninguno de los seis censos tiene
+   los enlaces archivados.)
+
    Los 4 `canonical_broken` de Lopesan son ahora sus 4 `canonical_a_redireccion`.
-   En UOC, `redirect_chain` pasa de 401 a 280: las **121** cadenas que acaban en
-   404 son ahora `redireccion_a_error` (las otras 473 son de un solo salto y no
-   avisaban en ninguna parte). Los 16 `canonical_sin_enlazar` de UOC salen de
-   `orphan_page` (370 → 365) y `sitemap_orphan` (6.835 → 6.824), exactamente;
+   En UOC, `redirect_chain` pasa de 401 a 283: las cadenas que acaban en un
+   404 de otra ruta son ahora `redireccion_a_error`. Los `canonical_sin_enlazar`
+   de UOC salen de `orphan_page` y `sitemap_orphan`, exactamente;
    los 41 de Druni, de `sitemap_orphan`. Fuera de esas columnas, las demas
    diferencias del total contra lo guardado (Lopesan 38.922 → 27.332, penguin
    293.847 → 114.851, UOC 78.494 → 73.269) son de las decisiones posteriores
@@ -240,7 +265,7 @@
    Lopesan, 464 s en penguin y 691 s en UOC; los tres checks juntos, 2,0 s en
    UOC y 3,1 s en Druni (61.236 URLs).
 
-   **Revisados a mano**, los cinco ciertos:
+   **Revisados a mano**, los cuatro que siguen saliendo, ciertos:
    - Lopesan, `canonical_a_redireccion`: `/de/unternehmen/lopesan-for-good/nachhaltigkeitspolitik`
      declara canonical `/es/corporativa/lopesan-for-good/politica-sostenibilidad`,
      que da 301 a `/es/corporativa/politica-esg`. (Ademas apunta a otro idioma,
@@ -250,11 +275,12 @@
      se canonicaliza a la home.
    - UOC, `canonical_sin_enlazar`: `/es/estudios/grados/menciones` (en el
      sitemap, 0 entrantes) recibe su senal por la variante
-     `?area=sis%3Aareas%2F18`, con **1.816 enlaces**. Hasta ahora era un
+     `?area=sis%3Aareas%2F18`, con **1.815 enlaces** de fuera del grupo. Hasta ahora era un
      `sitemap_orphan` que mandaba a buscar enlaces que si existen.
-   - UOC, `canonical_a_no_indexable`: `/es/estudios/precios/precio-descuentos.html`
-     → `/es/estudios/precios/precio-descuentos`, que lleva `noindex`, esta en
-     el sitemap y tiene 2.978 entrantes: probablemente el noindex sobra.
+   - (Descartado en la revision: el ejemplo de `canonical_a_no_indexable` de
+     UOC, `precio-descuentos.html` → `precio-descuentos`, tiene el ORIGEN
+     tambien en noindex; con el criterio final no sale, y no queda ningun
+     caso de ese tipo en los seis censos.)
    - Lopesan, `redireccion_a_error`: `/hoteles/tailandia` → 301 →
      `/de/hoteles/tailandia`, que da 404 (el prefijo de idioma por defecto
      mal resuelto; 9 asi).

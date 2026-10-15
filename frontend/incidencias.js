@@ -33,7 +33,7 @@ const ISSUE_INFO = {
     arreglo: 'Que la primera URL redirija directamente a la final, y actualizar los enlaces internos.',
   },
   'redireccion_a_error': {
-    que: 'La redirección, o la cadena de redirecciones, acaba en un error (4xx o 5xx).',
+    que: 'La redirección, o la cadena de redirecciones, lleva a otra ruta que da un error (4xx o 5xx). Las que solo cambian http/https, www o la barra final no salen aquí: ahí el error es la página, que ya avisa en su URL.',
     google: 'Llega a un error: la URL vieja pierde lo que tenía y la nueva no existe.',
     arreglo: 'Redirigir directamente a una página que responda 200, o quitar los enlaces que llevan a la URL vieja.',
   },
@@ -75,7 +75,7 @@ const ISSUE_INFO = {
     arreglo: 'Poner en el canonical la URL final de la redirección.',
   },
   'canonical_a_no_indexable': {
-    que: 'El canonical apunta a una página que está en noindex.',
+    que: 'Una página indexable declara canonical a una página que está en noindex.',
     google: 'Recibe dos señales que se contradicen: «la buena es aquella» y aquella pide no estar en el índice. Ninguna de las dos URLs queda indexada.',
     arreglo: 'Si la canónica debe posicionar, quitarle el noindex; si el noindex es deliberado, nada urgente, pero mejor que la variante apunte a una página indexable o sea autocanónica.',
   },
@@ -87,7 +87,7 @@ const ISSUE_INFO = {
   'canonical_sin_enlazar': {
     que: 'Una página canónica a la que no llega ningún enlace interno: los enlaces van a sus variantes.',
     google: 'Usa los enlaces internos como señal de cuál es la canónica: con todos apuntando a la variante, puede quedarse con ella.',
-    arreglo: 'Cambiar los enlaces internos para que apunten a la canónica.',
+    arreglo: 'Cambiar los enlaces internos para que apunten a la canónica. Solo cuentan los enlaces de fuera del grupo: los de la canónica a sus variantes (el selector de color o talla) no.',
   },
   'canonical_broken': {
     que: 'El canonical apunta a una URL que no responde 200.',

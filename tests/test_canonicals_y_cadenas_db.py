@@ -140,6 +140,40 @@ def test_canonical_a_una_noindex():
     assert (fila.issue_type, fila.severity) == ("canonical_a_no_indexable", "warning")
 
 
+def test_canonical_a_noindex_desde_una_noindex_no_avisa():
+    """Si la propia pagina tambien es noindex no hay senales que se
+    contradigan: lo que haya que revisar es el noindex del destino, que avisa
+    en su URL. Medido: era el 100% de los casos en Druni, UOC y penguin."""
+    s, j = _montar()
+    a = _url(s, j, "/b?p=2&gclid=1", canonical="https://x.com/b?p=2", noindex=True)
+    _url(s, j, "/b?p=2", canonical="https://x.com/b?p=2", noindex=True)
+    _canonicals(s, j)
+    assert _tipos(s, j, a.id) == []
+
+
+def test_canonical_a_http_que_redirige_a_su_version_https_es_un_solo_aviso():
+    """El canonical escrito en http tras migrar a https: el arreglo es el
+    mismo (escribir la URL https), asi que es un aviso, no dos."""
+    s, j = _montar()
+    a = _url(s, j, "/a", canonical="http://x.com/b")
+    _salto(s, j, "http://x.com/b", "https://x.com/b")
+    _url(s, j, "/b", canonical="https://x.com/b")
+    _canonicals(s, j)
+    assert _tipos(s, j, a.id) == ["canonical_a_http"]
+
+
+def test_canonical_del_destino_que_redirige_a_el_no_es_un_bucle():
+    """B declara canonical `/b/`, que da 301 a B: B es autocanonica de hecho y
+    el canonical de A es correcto, de un salto. Lo de B avisa en B."""
+    s, j = _montar()
+    a = _url(s, j, "/b?gclid=1", canonical="https://x.com/b")
+    b = _url(s, j, "/b", canonical="https://x.com/b/")
+    _salto(s, j, "/b/", "/b")
+    _canonicals(s, j)
+    assert _tipos(s, j, a.id) == []
+    assert _tipos(s, j, b.id) == ["canonical_a_redireccion"]
+
+
 def test_canonical_encadenado_a_b_c():
     s, j = _montar()
     a = _url(s, j, "/a", canonical="https://x.com/b")
@@ -263,6 +297,24 @@ def test_una_cadena_que_acaba_bien_sigue_siendo_redirect_chain():
     assert _tipos(s, j, a.id) == ["redirect_chain"]
 
 
+def test_una_redireccion_de_normalizacion_a_un_404_no_avisa():
+    """http → https, www o barra final: la redireccion esta bien hecha y el
+    error es el destino, que ya tiene su 4xx. En www.uoc.edu eran 383 de las
+    473 de un salto, casi todas el 307 de Chromium hacia https."""
+    s, j = _montar()
+    https = _salto(s, j, "http://x.com/a", "https://x.com/a", status=307)
+    _url(s, j, "/a", status=404, sin_meta=True)
+    www = _salto(s, j, "https://www.x.com/c", "https://x.com/c")
+    barra = _salto(s, j, "/c/", "/c")
+    _url(s, j, "/c", status=404, sin_meta=True)
+    otra = _salto(s, j, "/vieja", "/c")
+    _cadenas(s, j)
+    assert _tipos(s, j, https.id) == []
+    assert _tipos(s, j, www.id) == []
+    assert _tipos(s, j, barra.id) == []
+    assert _tipos(s, j, otra.id) == ["redireccion_a_error"]
+
+
 def test_redireccion_a_429_o_sin_rastrear_no_avisa():
     s, j = _montar()
     a = _salto(s, j, "/a", "/frenada")
@@ -326,6 +378,22 @@ def test_si_las_variantes_tampoco_estan_enlazadas_es_huerfana():
     canonica = _url(s, j, "/p", canonical="https://x.com/p")
     _enlazado(s, j)
     assert _tipos(s, j, canonica.id) == ["orphan_page"]
+
+
+def test_la_variante_enlazada_solo_desde_su_canonica_no_cuenta():
+    """El selector de color de la ficha enlaza la variante desde la propia
+    canonica: nadie de fuera enlaza ese contenido, asi que es huerfana y lo
+    sigue diciendo `sitemap_orphan`. Medido en www.uoc.edu: una noticia cuyo
+    unico enlace a su variante `?idTag=` era ella misma."""
+    s, j = _montar()
+    _url(s, j, "/", canonical="https://x.com/", crawl_depth=0)
+    canonica = _url(s, j, "/p", canonical="https://x.com/p", in_sitemap=True)
+    rojo = _url(s, j, "/p?color=rojo", canonical="https://x.com/p")
+    azul = _url(s, j, "/p?color=azul", canonical="https://x.com/p")
+    _enlace(s, j, canonica, rojo)
+    _enlace(s, j, rojo, azul)
+    _enlazado(s, j)
+    assert _tipos(s, j, canonica.id) == ["sitemap_orphan"]
 
 
 def test_un_enlace_desde_una_noindex_no_enlaza_la_canonica():
