@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter, deque
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 CONTENIDO = "contenido"
@@ -99,8 +99,54 @@ TITULOS_DE_CAPTCHA = (
 TITULOS_GENERICOS = ("access denied", "403 forbidden", "security check")
 
 
+# Frases tan propias de un muro que basta con que EMPIECEN el titulo: «Checking
+# your browser before accessing x.com», «Request unsuccessful. Incapsula
+# incident ID: ...». Las demas («captcha», «security check», «just a moment»,
+# «access denied», «are you a robot»...) son tambien el principio de titulos
+# normales —«Captcha Solver Pro - Comprar», «Security check-in en el aeropuerto»,
+# «Access Denied (2024) - Ficha»— y tienen que ser el titulo ENTERO: la frase,
+# puntuacion, y como mucho un separador con la marca del WAF o el nombre del
+# propio host («Attention Required! | Cloudflare», «Access Denied | x.com»).
+TITULOS_QUE_EMPIEZAN = (
+    "attention required",
+    "pardon our interruption",
+    "request unsuccessful",
+    "checking your browser",
+    "verify you are human",
+)
+_MARCAS_WAF = frozenset({
+    "cloudflare", "incapsula", "imperva", "akamai", "datadome", "perimeterx",
+    "human", "sucuri", "aws", "waf", "f5",
+})
+_RE_RESTO_PUNTUACION = re.compile(r"^[\s.!?¡¿…,:;]*$")
+_RE_RESTO_MARCA = re.compile(r"^[\s.!?…]*[|\-–—·:]\s*(.+?)[\s.!?…]*$")
+
+
 def _re_titulos(titulos) -> re.Pattern:
-    return re.compile(r"^\s*(?:" + "|".join(re.escape(t) for t in titulos) + r")\b")
+    return re.compile(r"^\s*(" + "|".join(re.escape(t) for t in titulos) + r")\b(.*)$", re.S)
+
+
+def _tokens_de_host(url: str) -> set[str]:
+    try:
+        host = (urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        return set()
+    return {t for t in re.split(r"[.\-]", host) if t and t != "www"} | ({host} if host else set())
+
+
+def _casa_titulo(patron: re.Pattern, titulo: str, url: str = "") -> bool:
+    m = patron.match(titulo or "")
+    if not m:
+        return False
+    frase, resto = m.group(1), m.group(2)
+    if frase in TITULOS_QUE_EMPIEZAN or _RE_RESTO_PUNTUACION.match(resto):
+        return True
+    mm = _RE_RESTO_MARCA.match(resto)
+    if not mm:
+        return False
+    tokens = set(re.split(r"[\s.\-|·]+", mm.group(1).strip().lower())) - {""}
+    permitidos = _MARCAS_WAF | _tokens_de_host(url)
+    return bool(tokens) and tokens <= permitidos
 
 
 _RE_TITULO_MURO = _re_titulos(TITULOS_DE_BLOQUEO)
@@ -118,7 +164,12 @@ _MARCADORES_WAF = (
     "_cf_chl_opt",                          # Cloudflare, desafio JS / gestionado
     "/cdn-cgi/challenge-platform/h/",       # Cloudflare, orquestador del desafio
     "cf-browser-verification",              # Cloudflare, desafio antiguo
-    "_incapsula_resource",                  # Imperva / Incapsula
+    # Imperva / Incapsula: SOLO el texto del incidente. `/_Incapsula_Resource`
+    # a secas NO vale: Imperva inyecta su script de deteccion
+    # (`/_Incapsula_Resource?SWJIYLWA=...`) en TODAS las paginas que sirve, y
+    # con un codigo de error como segunda senal cada 404 de verdad de un sitio
+    # detras de Imperva salia `challenge_waf` (medido el 2026-10-16: un 404 de
+    # imperva.com con 982 palabras, y el script en imperva.com y endesa.com/es).
     "incapsula incident id",
     "the requested url was rejected. please consult with your administrator",  # F5 ASM
     "awswafintegration",                    # AWS WAF, desafio
@@ -150,6 +201,13 @@ _RE_SCRIPTS = re.compile(r"<(script|style|noscript|template)\b.*?</\1\s*>", re.I
 _RE_TAGS = re.compile(r"<[^>]+>")
 _RE_ENTIDADES = re.compile(r"&#?\w+;")
 _RE_PALABRA = re.compile(r"\w+", re.U)
+# Escrituras sin espacios entre palabras (CJK, kana, hangul, tailandes...): cada
+# caracter cuenta como una palabra, como en `contar_palabras` (decision 44). Con
+# `\w+` treinta parrafos de japones eran 91 «palabras» y cualquier articulo
+# salia «sin contenido».
+_RE_SIN_ESPACIOS = re.compile(
+    "[\u0e00-\u0e7f\u0e80-\u0eff\u1000-\u109f\u1780-\u17ff\u3040-\u30ff"
+    "\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]")
 
 # Una redireccion a otro host es «login requerido» solo si el destino lo dice
 # sin dudas: en el host (`login.`, `sso.`, `auth.`, `accounts.`) o en la ruta.
@@ -172,10 +230,11 @@ def _cabecera(cabeceras: Mapping[str, Any] | None, nombre: str) -> str:
     return ""
 
 
-def es_titulo_de_muro(titulo: str | None) -> bool:
-    """¿Es el `<title>` de un muro conocido? Al principio y por palabra entera."""
-    t = (titulo or "").strip().lower()
-    return bool(t) and bool(_RE_TITULO_MURO.match(t) or _RE_TITULO_CAPTCHA.match(t))
+def es_titulo_de_muro(titulo: str | None, url: str = "") -> bool:
+    """¿Es el `<title>` de un muro conocido? Ver `_casa_titulo`."""
+    t = re.sub(r"\s+", " ", (titulo or "").strip().lower())
+    return bool(t) and (_casa_titulo(_RE_TITULO_MURO, t, url)
+                        or _casa_titulo(_RE_TITULO_CAPTCHA, t, url))
 
 
 def _titulo(cuerpo: bytes) -> str:
@@ -191,15 +250,37 @@ def palabras_visibles(texto: str) -> int:
     falta para separar «12 palabras» de «900»."""
     sin_scripts = _RE_SCRIPTS.sub(" ", texto)
     sin_tags = _RE_ENTIDADES.sub(" ", _RE_TAGS.sub(" ", sin_scripts))
-    return len(_RE_PALABRA.findall(sin_tags))
+    sueltos = len(_RE_SIN_ESPACIOS.findall(sin_tags))
+    return len(_RE_PALABRA.findall(_RE_SIN_ESPACIOS.sub(" ", sin_tags))) + sueltos
 
 
-def _es_binario(cuerpo: bytes) -> bool:
+# Codificaciones de HTML valido que SI llevan bytes de control: UTF-16 y UTF-32
+# (la mitad o tres cuartos de los bytes son 0x00) e ISO-2022 (ESC en cada tramo
+# de japones, coreano o chino). Un IIS antiguo sirve UTF-16 y Scrapy lo decodifica
+# bien: tratarlo como binario dejaba el sitio entero «Respuesta no valida».
+_BOMS_ANCHOS = (b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")
+_RE_CHARSET_ANCHO = re.compile(r"charset\s*=\s*[\"']?\s*(utf-?(16|32)|ucs-?[24]|iso-?2022)", re.I)
+
+
+def _codificacion_con_control(cuerpo: bytes, content_type: str) -> bool:
+    if cuerpo.startswith(_BOMS_ANCHOS):
+        return True
+    if _RE_CHARSET_ANCHO.search(content_type or ""):
+        return True
+    # Declarado en el propio documento (ISO-2022 es ASCII hasta el primer ESC,
+    # asi que su <meta charset> se lee tal cual).
+    cabeza = cuerpo[:2048].replace(b"\x00", b"").decode("latin-1", "replace")
+    return bool(_RE_CHARSET_ANCHO.search(cabeza))
+
+
+def _es_binario(cuerpo: bytes, content_type: str = "") -> bool:
     muestra = cuerpo[:4096]
     if not muestra:
         return False
     if any(muestra.startswith(m) for m in _MAGIAS_BINARIAS):
         return True
+    if _codificacion_con_control(cuerpo, content_type):
+        return False
     control = sum(1 for b in muestra if b in _CONTROL)
     return control / len(muestra) > _UMBRAL_CONTROL
 
@@ -225,12 +306,19 @@ def clasificar_respuesta(
     content_type: str | None = None,
     url: str = "",
     destino: str | None = None,
+    renderizada: bool = False,
 ) -> tuple[str, str | None]:
     """``(clase, motivo)`` de una respuesta. El motivo dice que senal decidio.
 
     - `status`, `cabeceras` (nombre -> valor; listas o bytes valen) y `cuerpo`
       tal como llegaron (ya descomprimido).
     - `destino`: el `Location` de una redireccion, ya absoluto.
+    - `renderizada`: la respuesta viene de Chromium. scrapy-playwright toma el
+      codigo y las cabeceras de la PRIMERA respuesta de `page.goto` y el cuerpo
+      del DOM al terminar la espera: si el navegador resolvio el desafio, la
+      cabecera `cf-mitigated` y el 403 son del desafio y el cuerpo es la pagina.
+      Ahi manda el cuerpo: ni la cabecera ni el codigo de error cuentan como
+      senal. Un desafio que Chromium NO resolvio se sigue viendo en el cuerpo.
     """
     cuerpo = cuerpo or b""
     if content_type is None:
@@ -238,13 +326,15 @@ def clasificar_respuesta(
     ct = (content_type or "").lower()
 
     # Inequivocas: el propio WAF lo dice en la cabecera.
+    # Un 503, con o sin `Retry-After`, NO esta aqui: es lo que Google pide servir
+    # durante un mantenimiento y lo que manda un origen saturado, o sea la
+    # respuesta del sitio y un `5xx_error` que hay que ver. Solo es un muro si
+    # el cuerpo lo dice (marcador o titulo, mas abajo).
     mitigado = _cabecera(cabeceras, "cf-mitigated").lower()
-    if "challenge" in mitigado:
+    if "challenge" in mitigado and not renderizada:
         return CHALLENGE_WAF, "cabecera cf-mitigated: challenge"
     if status == 429:
         return RATE_LIMITED, "HTTP 429"
-    if status == 503 and _cabecera(cabeceras, "retry-after"):
-        return RATE_LIMITED, "HTTP 503 con Retry-After"
     if status == 401:
         return LOGIN_REQUERIDO, "HTTP 401"
     if status is not None and 300 <= status < 400:
@@ -263,16 +353,16 @@ def clasificar_respuesta(
     # Lo que llega declarado como HTML y no se puede leer: el caso de la
     # decision 11, un F5 que contesta con basura binaria a una huella TLS que
     # no le gusta. Se guardaba con 1 URL y el job terminaba como si nada.
-    if _es_binario(cuerpo):
+    if _es_binario(cuerpo, ct):
         return RESPUESTA_BINARIA, "cuerpo declarado HTML con bytes binarios"
 
     texto_bajo = cuerpo[:_BYTES_A_MIRAR].decode("utf-8", "replace").lower()
     titulo = _titulo(cuerpo)
     marcador_waf = next((m for m in _MARCADORES_WAF if m in texto_bajo), None)
     marcador_captcha = next((m for m in _MARCADORES_CAPTCHA if m in texto_bajo), None)
-    titulo_captcha = bool(_RE_TITULO_CAPTCHA.match(titulo))
-    titulo_propio = bool(_RE_TITULO_PROPIO.match(titulo))
-    titulo_generico = not titulo_propio and bool(_RE_TITULO_MURO.match(titulo))
+    titulo_captcha = _casa_titulo(_RE_TITULO_CAPTCHA, titulo, url)
+    titulo_propio = _casa_titulo(_RE_TITULO_PROPIO, titulo, url)
+    titulo_generico = not titulo_propio and _casa_titulo(_RE_TITULO_MURO, titulo, url)
     if not (marcador_waf or marcador_captcha or titulo_captcha or titulo_propio
             or titulo_generico):
         return CONTENIDO, None
@@ -280,7 +370,7 @@ def clasificar_respuesta(
     # Segunda senal: la pagina no tiene contenido. Un codigo de error confirma
     # un marcador o un titulo PROPIO de un WAF; un titulo generico solo cuenta
     # con 2xx (ver TITULOS_GENERICOS).
-    error = status is not None and status >= 400
+    error = status is not None and status >= 400 and not renderizada
     pocas = palabras_visibles(texto_bajo) < PALABRAS_DE_UN_MURO
     if marcador_captcha or titulo_captcha:
         if error or pocas:
@@ -331,21 +421,20 @@ class VentanaDeSalud:
     con la ventana LLENA, para que tres muros al arrancar no paren un rastreo;
     el rastreo corto que acaba entero detras de un muro (el de una URL de la
     decision 11) lo juzga el worker al cerrar, sobre el total.
+
+    Empieza VACIA en cada ejecucion, tambien al reanudar: sembrada con los
+    muros de la anterior, la primera pagina buena tras arreglar el bloqueo
+    volveria a parar el rastreo aunque el sitio se hubiera recuperado
+    (decision 103). Que un job bloqueado no se reencole sin fin lo decide el
+    worker con el total de la base de datos.
     """
 
     def __init__(self, ventana: int = VENTANA_POR_DEFECTO,
-                 umbral: float = UMBRAL_POR_DEFECTO,
-                 previas: Iterable[str] = ()):
+                 umbral: float = UMBRAL_POR_DEFECTO):
         self.ventana = max(1, int(ventana))
         self.umbral = float(umbral)
         self._ultimas: deque[str] = deque(maxlen=self.ventana)
         self.totales: Counter[str] = Counter()
-        # Las de una ejecucion anterior del mismo job (reanudacion): asi un job
-        # bloqueado que se reanuda no necesita otras 50 respuestas para volver
-        # a saberlo. Solo llenan la ventana; los totales son de esta ejecucion.
-        for clase in previas:
-            if clase:
-                self._ultimas.append(clase)
 
     def anotar(self, clase: str | None) -> None:
         if not clase:

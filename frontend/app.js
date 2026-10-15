@@ -264,6 +264,12 @@ const fmt = {
         if (!d.canonical) partes.push('a ' + v);
       } else if (k === 'target_status') {
         partes.push(`el destino responde ${v}`);
+      } else if (k === 'clase') {
+        partes.push(fmt.claseRespuesta(v));
+      } else if (k === 'codigos' && typeof v === 'object' && !Array.isArray(v)) {
+        // respuesta_no_valida: lo que distingue un 429 de un 403 (decision 103)
+        const cods = Object.entries(v).map(([c, n]) => `${c === 'null' ? 'sin código' : c} × ${fmt.num(n)}`);
+        if (cods.length) partes.push('códigos ' + cods.join(', '));
       } else if (Array.isArray(v)) {
         partes.push(`${DETALLE_LABEL[k] || k}: ${v.length}`);
       } else if (typeof v === 'object') {

@@ -436,6 +436,8 @@ const ISSUE_LABEL_EXTRA = {
   html_supera_2mb: 'HTML de más de 2 MB',
   head_cortado: 'Head cortado antes de tiempo',
   meta_fuera_del_head: 'Metadatos fuera del head',
+
+  respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -471,6 +473,7 @@ const DETALLE_LABEL = {
   cuantas_urls: 'URLs con ese código',
   lang_del_destino: 'código del destino',
   motivo: 'motivo',
+
   ejemplos: 'ejemplos',
   similarity: 'similitud',
   outlinks: 'enlaces',

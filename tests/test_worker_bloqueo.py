@@ -185,3 +185,47 @@ def test_un_rastreo_sano_sigue_completed_con_su_salud(entorno, monkeypatch):
     assert (status, motivo) == ("completed", "finished")
     assert salud["no_validas"] == 5 and salud["causa"] is None
     assert llamadas["analisis"] == 1 and llamadas["comparar"] == 1
+
+
+def test_la_marca_de_una_ejecucion_anterior_no_tumba_la_siguiente(entorno, monkeypatch):
+    """La ejecucion anterior paro por muro y se reencolo antes de la
+    finalizacion (reanudacion pedida, despliegue, estancamiento): su marca
+    seguia en Redis y esta, que sale limpia, acababa `failed`."""
+    worker, Sesion, datos, llamadas, jid = entorno
+    datos[f"job:{jid}:bloqueo"] = json.dumps(
+        {"causa": "bloqueado_por_waf", "ventana": 50, "recuentos": {"challenge_waf": 50}})
+    monkeypatch.setattr(worker, "_ejecutar_con_vigilancia", _scrapy_que_guarda(
+        worker, Sesion, jid, ["contenido"] * 100, datos))
+    worker._run_job(jid)
+
+    status, motivo, salud = _job(Sesion, jid)
+    assert (status, motivo) == ("completed", "finished")
+    assert "ventana" not in salud
+    assert llamadas["analisis"] == 1
+
+
+def test_los_muros_de_hosts_externos_no_bloquean_el_job(entorno, monkeypatch):
+    """Con follow_external, los desafios de redes sociales y medios enlazados
+    no dicen nada del sitio que se audita."""
+    from shared.models import Url
+
+    worker, Sesion, datos, llamadas, jid = entorno
+
+    def falso(cmd, **kw):
+        s = Sesion()
+        for i in range(10):
+            s.add(Url(job_id=jid, url=f"https://x.com/p{i}", url_hash=f"i{i}",
+                      is_internal=True, is_html=True, status_code=200,
+                      response_class="contenido"))
+        for i in range(90):
+            s.add(Url(job_id=jid, url=f"https://twitter.com/p{i}", url_hash=f"e{i}",
+                      is_internal=False, is_html=True, status_code=403,
+                      response_class="challenge_waf"))
+        s.commit()
+        s.close()
+        datos[f"job:{jid}:crawled_count"] = "100"
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(worker, "_ejecutar_con_vigilancia", falso)
+    worker._run_job(jid)
+    assert _job(Sesion, jid)[:2] == ("completed", "finished")

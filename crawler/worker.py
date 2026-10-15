@@ -362,6 +362,17 @@ def _run_job(job_id: str) -> None:
     finally:
         session.close()
 
+    # La marca de bloqueo es de UNA ejecucion (decision 103). Si la anterior
+    # paro por muro y no llego a la finalizacion —reanudacion pedida, un
+    # despliegue que recreo el contenedor, un estancamiento con la salud sin
+    # calcular—, la marca seguiria viva y esta ejecucion acabaria `failed` con
+    # `bloqueado_por_waf` aunque el sitio respondiera bien de principio a fin.
+    try:
+        redis_lib.Redis.from_url(REDIS_URL, decode_responses=True,
+                                 socket_timeout=15).delete(f"job:{job_id}:bloqueo")
+    except Exception:
+        logger.warning("Job %s: no se pudo borrar la marca de bloqueo anterior", job_id)
+
     # -- Run Scrapy as subprocess (avoids Twisted reactor restart issues) --
     final_status = "completed"
     timed_out = False
@@ -1105,7 +1116,10 @@ def _salud_del_job(job_id: str, job_config: dict | None) -> dict | None:
         try:
             recuentos = dict(
                 session.query(Url.response_class, func.count(Url.id))
-                .filter(Url.job_id == job_id, Url.response_class.isnot(None))
+                # Solo las internas, como la ventana del spider: un muro de un
+                # host externo (follow_external) no dice nada del sitio.
+                .filter(Url.job_id == job_id, Url.response_class.isnot(None),
+                        Url.is_internal.is_(True))
                 .group_by(Url.response_class)
                 .all()
             )

@@ -1454,8 +1454,12 @@ class SeoSpider(scrapy.Spider):
         # HTTPERROR_ALLOW_ALL todo llega aqui: un desafio de Cloudflare servido
         # con 200 o el cuerpo binario de un F5 se guardaban como paginas
         # indexables, con sus incidencias, y el job acababa `completed`.
+        # Con render, el codigo y las cabeceras son de la primera respuesta de
+        # page.goto y el cuerpo es el DOM final: si Chromium paso el desafio,
+        # manda el cuerpo (ver `renderizada` en clasificar_respuesta).
         clase, motivo_clase = clasificar_respuesta(
-            status_code, cabeceras, response.body, content_type=content_type, url=url)
+            status_code, cabeceras, response.body, content_type=content_type, url=url,
+            renderizada=bool(response.meta.get("playwright")))
         muro = clase in NO_VALIDAS
         if muro:
             logger.info("Respuesta no valida (%s, %s): %s", clase, motivo_clase, url)
@@ -1738,7 +1742,11 @@ class SeoSpider(scrapy.Spider):
             blocked_by_robots=response.meta.get("blocked_by_robots"),
             response_class=clase,
         )
-        self._anotar_salud(clase, url)
+        # Solo las internas: con follow_external, una tanda de enlaces a redes
+        # sociales o medios detras de Cloudflare paraba el rastreo de un sitio
+        # que respondia bien. La salud es la del sitio que se audita.
+        if internal:
+            self._anotar_salud(clase, url)
 
         if refresh_target:
             yield from self._follow_redirect(url_for_record, refresh_target, depth)

@@ -222,20 +222,36 @@
    `rate_limited`, `respuesta_binaria`, `login_requerido` y `desconocido`.
    - **Conservadora, porque un falso positivo esconde una página real.** Una
      clase de muro sale con una señal inequívoca (`cf-mitigated: challenge`,
-     un 429, un 503 con `Retry-After`, bytes de control en un cuerpo declarado
-     HTML) o con DOS que se confirman: un título o un marcador de desafío
-     **y** una página sin contenido (menos de 150 palabras o un código de
-     error). Los marcadores son los de la página de desafío, no los que el
-     proveedor inyecta en las normales: Cloudflare mete
-     `/cdn-cgi/challenge-platform/scripts/jsd/` en páginas buenas, así que
-     cuenta `_cf_chl_opt`. Tres títulos —`Access denied`, `403 Forbidden`,
+     un 429, bytes de control en un cuerpo declarado HTML) o con DOS que se
+     confirman: un título o un marcador de desafío **y** una página sin
+     contenido (menos de 150 palabras o un código de error). Un **503 no es
+     inequívoco**, ni con `Retry-After`: es lo que Google pide servir en un
+     mantenimiento y lo que manda un origen saturado, o sea un `5xx_error` del
+     sitio; solo es muro si el cuerpo lo dice. Las palabras cuentan cada
+     carácter CJK, kana, hangul o tailandés como una (decisión 44): con `\w+`
+     treinta párrafos de japonés eran 91 y cualquier artículo salía «sin
+     contenido». Y un cuerpo con BOM o charset UTF-16/UTF-32 o ISO-2022 lleva
+     bytes nulos o ESC de forma legítima: no es binario. Los marcadores son
+     los de la página de desafío, no los que el proveedor inyecta en las
+     normales: Cloudflare mete `/cdn-cgi/challenge-platform/scripts/jsd/` en
+     páginas buenas, así que cuenta `_cf_chl_opt`; e Imperva inyecta
+     `/_Incapsula_Resource?SWJIYLWA=` en TODAS, así que cuenta solo «Incapsula
+     incident ID» (con el script, un 404 de verdad de imperva.com, 982
+     palabras, salía muro: el código de error hacía de segunda señal). Tres títulos —`Access denied`, `403 Forbidden`,
      `Security check`— son también los de un error **honesto** del servidor,
      y con un código de error se quedan en `contenido`: los 12 403 del censo
      de www.uoc.edu son directorios de Apache, y un enlace interno a algo
      prohibido es un hallazgo. Solo cuentan servidos con 2xx y sin contenido.
      Un artículo que habla de captchas o lleva un reCAPTCHA es contenido. El
      título se casa al principio y por palabra entera: «Security checklist»
-     ya no casa con «security check», que con la subcadena de la 62 sí.
+     ya no casa con «security check», que con la subcadena de la 62 sí. Y
+     salvo cinco frases que solo usa un muro («Checking your browser…»,
+     «Request unsuccessful…», «Attention required», «Pardon our
+     interruption», «Verify you are human»), tiene que ser el título ENTERO:
+     la frase, puntuación y como mucho un separador con la marca del WAF o el
+     nombre del propio host («Attention Required! | Cloudflare», «Access
+     Denied | x.com»). «Captcha Solver Pro - Comprar», «Security check-in en
+     el aeropuerto» o «Access Denied (2024) - Ficha» son páginas.
      `login_requerido` (401, o redirección a un login de OTRO host) y
      `desconocido` (2xx HTML con el cuerpo vacío) son la respuesta del sitio:
      no cuentan como muro.
@@ -250,11 +266,21 @@
      visto. En su lugar, **una** `respuesta_no_valida` (warning) por host y
      clase, con las páginas afectadas, los códigos y cinco ejemplos (decisión
      53). Al reanudar, los muros se repiten como los 5xx.
+   - **Con render manda el cuerpo.** scrapy-playwright toma el código y las
+     cabeceras de la primera respuesta de `page.goto` y el cuerpo del DOM al
+     acabar la espera: si Chromium pasa el desafío gestionado, el 403 y el
+     `cf-mitigated` son del desafío y el cuerpo es la página. Con
+     `renderizada` ni esa cabecera ni el código de error cuentan; un desafío
+     que no se resolvió se sigue viendo en el cuerpo. Sin esto, el remedio que
+     propone la ficha («prueba con render») no podía funcionar nunca.
    - **La salud del job, por ventana.** El spider mira las últimas
      `salud_ventana` respuestas (50) y, si la fracción `salud_umbral` (0,8)
      no son la página, deja la marca `job:<id>:bloqueo` y para con
      `bloqueado_por_waf` o `rate_limited` (el que más pese). Solo juzga con la
-     ventana llena: tres muros al arrancar no paran nada. El rastreo corto que
+     ventana llena: tres muros al arrancar no paran nada. Solo cuentan las
+     URLs **internas**, en la ventana y en el total del worker: con
+     `follow_external`, una tanda de enlaces a redes sociales detrás de
+     Cloudflare paraba el rastreo de un sitio sano. El rastreo corto que
      acaba entero detrás del muro sin llenar la ventana —el de 1 URL de la
      decisión 11— lo juzga el worker al cerrar sobre el TOTAL de la base de
      datos. Las dos cosas acaban en `failed` con esa causa, sin análisis ni
@@ -267,7 +293,11 @@
      lo decide con la base de datos, que sí sobrevive. La ventana del spider
      NO se siembra con la ejecución anterior: llena de muros, la primera página
      buena tras reanudar la volvería a parar aunque el sitio se hubiera
-     recuperado.
+     recuperado. Por lo mismo, la marca `job:<id>:bloqueo` es de UNA
+     ejecución y el worker la borra al marcar el job `running`: si la
+     anterior no llegó a la finalización (reanudación pedida, un despliegue,
+     un estancamiento sin salud calculada), la marca vieja dejaba `failed` un
+     rastreo que había salido limpio.
    - **La comparación no alerta con un censo bloqueado** (#36 F2): se marca
      «NO CONCLUYENTE: censo bloqueado» con la causa y no salen alertas. Y en un
      censo entero, una página que fue muro en cualquiera de los dos queda fuera
