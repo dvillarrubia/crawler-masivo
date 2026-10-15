@@ -266,6 +266,7 @@ input:hover:not(:focus),textarea:hover:not(:focus),select:hover:not(:focus){
 textarea{resize:vertical;min-height:80px}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:.65rem}
 .form-hint{font-size:.68rem;color:var(--text-dim);margin-top:.2rem}
+.aviso-ua-bot{color:var(--text);border-left:3px solid var(--orange);padding:.35rem .6rem}
 .checkbox-label{display:flex;align-items:center;gap:.45rem;font-size:.82rem;cursor:pointer;transition:color .15s}
 .checkbox-label:hover{color:var(--text)}
 input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-radius:2px}

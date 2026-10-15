@@ -24,7 +24,10 @@ Sin la red de compose y los nombres de servicio no valen: apuntar
 cola, y parece un fallo del codigo. Lo que cubren: pure extractors
 (`test_extractors.py`), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
-(`test_sd_validation.py`), sitemap parsing (`test_sitemaps.py`) and
+(`test_sd_validation.py`, con los resultados retirados de la decision 97),
+presets de User-Agent contra el middleware de robots real (`test_ua_presets.py`,
+decision 98), el enlace del aviso contra las rutas de `_irARuta`
+(`test_avisos.py`), sitemap parsing (`test_sitemaps.py`) and
 casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
 estimada contra la Jaccard exacta) y un test de integracion del spider
 (`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en

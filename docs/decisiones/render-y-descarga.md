@@ -173,3 +173,33 @@
    rastrean a propósito lo que robots.txt pide no tocar. Test con el spider
    real y AUTOTHROTTLE encendido midiendo el hueco entre peticiones en el
    servidor (`test_crawl_delay_espacia_las_peticiones_de_cada_host`).
+
+<a id="d98"></a>
+98. **Un preset de bot cambia también qué reglas de robots.txt se obedecen, y
+   no engaña a un WAF** — el formulario ofrece ahora Googlebot smartphone,
+   Bingbot, GPTBot, OAI-SearchBot, ClaudeBot y PerplexityBot (`UA_PRESETS` en
+   `frontend/app.js`) con las cadenas que publica cada proveedor, comprobadas
+   el 2026-10-16: Google (`google-common-crawlers`), Bing (anuncio de abril de
+   2022), OpenAI (`developers.openai.com/api/docs/bots`) y Perplexity
+   (`docs.perplexity.ai/guides/bots`); Anthropic publica solo el token
+   `ClaudeBot`, y la cadena es la que se ve en los logs. Google y Bing escriben
+   `Chrome/W.X.Y.Z` y lo sustituyen por la versión actual: va
+   `CHROME_EVERGREEN` (la estable de Chrome de esa fecha, 155.0.8059.84) en un
+   solo sitio. El preset `googlebot` de antes (cadena de escritorio sin Chrome)
+   se conserva para que los configs guardados con él sigan casando.
+   Dos consecuencias que el formulario dice con un aviso cuando el UA —de
+   preset o escrito a mano— lleva un token de bot:
+   - **robots.txt se evalúa con ese UA.** El `RobotsTxtMiddleware` de Scrapy
+     (prioridad 100) corre antes que nuestro `UserAgentMiddleware` (400), así
+     que lee el `USER_AGENT` que el worker pasa con `-s`, y Protego busca el
+     token del grupo dentro de la cadena entera: con GPTBot se aplica
+     `User-agent: GPTBot` y no `*`. El `Crawl-delay` (decisión 81) sale del
+     mismo grupo. `tests/test_ua_presets.py` lo comprueba con el middleware y
+     el parser reales y las cadenas leídas del `app.js`, para cada bot.
+   - **Un WAF puede verlo como bot falso.** La petición sale con la huella TLS
+     de un navegador (decisión 11) y desde nuestra IP, no la del proveedor:
+     un WAF que verifica bots (DNS inverso, rangos publicados) lo detecta y
+     puede bloquearlo o servirle otra cosa. Lo que se mida así puede no ser lo
+     que ve el bot de verdad.
+   `user_agent` ya era una clave de `JobConfig`: los presets son solo del
+   formulario y no añaden claves (`test_jobconfig_claves` sigue igual).

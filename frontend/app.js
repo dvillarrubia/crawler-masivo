@@ -3,13 +3,33 @@
 const API = '/api';
 
 /* ===== User-Agent presets ===== */
+// Las cadenas de los bots son las que publica cada proveedor (comprobadas el
+// 2026-10-16; decision 98). Google y Bing escriben `Chrome/W.X.Y.Z` y lo
+// sustituyen por la version de Chromium/Edge que usan en cada momento: aqui va
+// la estable de Chrome de esa fecha. Para robots.txt solo cuenta el TOKEN
+// (`UA_TOKEN_ROBOTS`), que no cambia con la version.
+const CHROME_EVERGREEN = '155.0.8059.84';
 const UA_PRESETS = {
   chrome_win:  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   chrome_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   safari_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
   firefox_win: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
   edge_win:    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
+  // developers.google.com/search/docs/crawling-indexing/google-common-crawlers
+  googlebot_mobile: `Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_EVERGREEN} Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)`,
+  // La cadena antigua de escritorio, sin Chrome: se conserva para que los
+  // configs guardados con ella sigan casando con un preset.
   googlebot:   'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  // blogs.bing.com/webmaster/april-2022/Announcing-user-agent-change-for-Bing-crawler-bingbot
+  bingbot:     `Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/${CHROME_EVERGREEN} Safari/537.36`,
+  // developers.openai.com/api/docs/bots
+  gptbot:      'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.4; +https://openai.com/gptbot',
+  oai_searchbot: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36; compatible; OAI-SearchBot/1.4; +https://openai.com/searchbot',
+  // Anthropic publica el token (support.claude.com, articulo 8896518), no la
+  // cadena entera: esta es la que se ve en los logs.
+  claudebot:   'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)',
+  // docs.perplexity.ai/guides/bots
+  perplexitybot: 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)',
 };
 const UA_LABELS = {
   chrome_win:  'Chrome - Windows',
@@ -17,9 +37,35 @@ const UA_LABELS = {
   safari_mac:  'Safari - macOS',
   firefox_win: 'Firefox - Windows',
   edge_win:    'Edge - Windows',
-  googlebot:   'Googlebot',
+  googlebot_mobile: 'Googlebot smartphone',
+  googlebot:   'Googlebot escritorio (cadena antigua)',
+  bingbot:     'Bingbot',
+  gptbot:      'GPTBot (OpenAI, entrenamiento)',
+  oai_searchbot: 'OAI-SearchBot (búsqueda de ChatGPT)',
+  claudebot:   'ClaudeBot (Anthropic)',
+  perplexitybot: 'PerplexityBot',
   custom:      'Personalizado',
 };
+// El token de producto con que robots.txt agrupa las reglas de cada bot. Es lo
+// que casa el parser (Protego) dentro de la cadena entera; se usa para avisar
+// en el formulario y en `test_ua_presets.py`, que lo comprueba con el
+// middleware de robots de verdad.
+const UA_TOKEN_ROBOTS = {
+  googlebot_mobile: 'Googlebot',
+  googlebot:   'Googlebot',
+  bingbot:     'bingbot',
+  gptbot:      'GPTBot',
+  oai_searchbot: 'OAI-SearchBot',
+  claudebot:   'ClaudeBot',
+  perplexitybot: 'PerplexityBot',
+};
+
+// El token de bot que lleva un User-Agent (de preset o escrito a mano), o ''.
+function tokenDeBot(ua) {
+  const texto = (ua || '').toLowerCase();
+  const tokens = [...new Set(Object.values(UA_TOKEN_ROBOTS))];
+  return tokens.find(t => texto.includes(t.toLowerCase())) || '';
+}
 
 /* ===== Traducciones ===== */
 const STATUS_LABEL = {
@@ -719,6 +765,13 @@ function app() {
         xaxis: axis(layout && layout.xaxis),
         yaxis: axis(layout && layout.yaxis),
       };
+    },
+
+    // El bot que declara el User-Agent del formulario, para el aviso de WAF y
+    // de robots.txt (decision 98).
+    botDelFormulario() {
+      const f = this.createForm || {};
+      return tokenDeBot(f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset]);
     },
 
     // ------- Toast notifications -------

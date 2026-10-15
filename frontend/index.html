@@ -4112,7 +4112,17 @@
                 <option value="safari_mac">Safari - macOS</option>
                 <option value="firefox_win">Firefox - Windows</option>
                 <option value="edge_win">Edge - Windows</option>
-                <option value="googlebot">Googlebot</option>
+                <optgroup label="Buscadores">
+                  <option value="googlebot_mobile">Googlebot smartphone</option>
+                  <option value="googlebot">Googlebot escritorio (cadena antigua)</option>
+                  <option value="bingbot">Bingbot</option>
+                </optgroup>
+                <optgroup label="Asistentes de IA">
+                  <option value="gptbot">GPTBot (OpenAI, entrenamiento)</option>
+                  <option value="oai_searchbot">OAI-SearchBot (búsqueda de ChatGPT)</option>
+                  <option value="claudebot">ClaudeBot (Anthropic)</option>
+                  <option value="perplexitybot">PerplexityBot</option>
+                </optgroup>
                 <option value="custom">Personalizado</option>
               </select>
             </div>
@@ -4128,6 +4138,13 @@
           <div class="form-group" x-show="createForm.user_agent_preset === 'custom'">
             <label>User Agent personalizado</label>
             <input type="text" x-model="createForm.user_agent_custom" placeholder="Mozilla/5.0 ...">
+          </div>
+          <div class="form-hint aviso-ua-bot" x-show="botDelFormulario()" style="margin-bottom:.5rem">
+            <strong>Te haces pasar por <span x-text="botDelFormulario()"></span>.</strong>
+            robots.txt se evalúa con este User Agent: se aplican las reglas del grupo
+            <code x-text="'User-agent: ' + botDelFormulario()"></code> (o las de <code>*</code> si no hay), no las de un navegador.
+            Y la petición sale con huella TLS de navegador (y desde nuestra IP, no la del proveedor): un WAF que verifica bots
+            ve un bot falso y puede bloquearlo o servirle otra cosa. Si las cifras salen raras, compáralo con un rastreo con UA de Chrome.
           </div>
           <div class="form-hint" style="margin-bottom:.75rem">El User Agent y la huella TLS se envian juntos. Para maxima eficacia, usa el mismo navegador en ambos (ej: Chrome + Chrome)</div>
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center">
