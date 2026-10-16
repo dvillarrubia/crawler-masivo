@@ -33,6 +33,7 @@ from shared.models import (
     PageContent,
     Issue,
     CustomExtraction,
+    EnlaceNoRastreable,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     # Extraccion a medida (decision 104). Un backup anterior no la trae y la
     # importacion se la salta: no hace falta subir el formato.
     ("custom_extraction", CustomExtraction, "url_id"),
+    # Enlaces no rastreables (decision 106). Lo mismo: un backup anterior no
+    # la trae y se salta.
+    ("enlaces_no_rastreables", EnlaceNoRastreable, "from_url_id"),
 ]
 
 

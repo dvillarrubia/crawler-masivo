@@ -113,7 +113,8 @@ jobs:
         # dependencias de SU imagen. Y el analisis enriquecido (#40), cuyo
         # endpoint con token vive aqui. La extraccion a medida (decision 104)
         # tambien: la API valida y prueba las reglas con parsel y regex, que se
-        # instalan arriba igual que en su imagen.
+        # instalan arriba igual que en su imagen. Y el backup de los enlaces no
+        # rastreables (decision 106), que viaja por el mismo camino.
         run: >
           python -m pytest -q -rs tests/test_export_csv.py tests/test_insights.py
           tests/test_raw_html.py tests/test_comparacion.py
@@ -127,6 +128,7 @@ jobs:
           tests/test_extraccion_a_medida.py tests/test_a_medida_api.py
           tests/test_a_medida_db.py tests/test_backup_a_medida.py
           tests/test_respuestas.py
+          tests/test_backup_no_rastreables.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales

@@ -115,6 +115,20 @@ HTML que Google trunca o ignora (decision 102): `test_head_html.py` (17 casos
 del head roto con lo que hace Chromium, y el contraste contra el navegador si
 esta instalado; en CI lo esta) y `test_html_ignorado_db.py` (el check contra
 SQLite, el spider guardando las columnas y `decodedBodySize` contra Chromium).
+
+Enlaces que Google no puede seguir (decision 106): `test_enlaces_no_rastreables.py`
+(los ejemplos de Google uno por uno, lo que NO se guarda, y que nada de ello
+entra en `extract_links`), `test_avisos_de_enlaces_db.py` (agregacion por
+origen y de plantilla, 4xx de plantilla sin aviso nuevo, `utm` por destino y
+sustituyendo a `url_has_parameters`, censo truncado, tabla ausente; SQLite),
+`test_spider_no_rastreables.py` (el `SeoSpider` real: el destino no se rastrea
+ni es arista y, con Postgres, re-rastrear no duplica),
+`test_pipeline_no_rastreables_db.py` (la tuberia real contra Postgres: sin la
+tabla, o con un fallo al guardarlas, no se pierde ninguna pagina; una pagina que
+ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
+ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
+ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
+`test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

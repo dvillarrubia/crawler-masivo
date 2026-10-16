@@ -145,6 +145,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
+| `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
 
@@ -161,6 +162,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `ResourceItem` | `resources` | N per url |
 | `ContentItem` | `page_content` | 1:1 with urls |
 | `SecurityItem` | `security_headers` | 1:1 with urls |
+| `EnlacesNoRastreablesItem` | `enlaces_no_rastreables` | uno por pagina con todas sus filas; la reemplaza entera (decision 106) |
 
 ## Middleware Stack
 

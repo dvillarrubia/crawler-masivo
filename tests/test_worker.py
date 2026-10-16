@@ -444,3 +444,75 @@ def test_una_plantilla_sin_muestras_validas_no_hace_fiable_el_grafo():
          "enlaces_crudo": 50, "render_sospechoso": False},
     ])
     assert resumen["grafo_fiable"] is True
+
+
+def test_el_analisis_automatico_ya_sabe_que_el_censo_esta_truncado(monkeypatch, tmp_path):
+    """`finish_reason` se escribia DESPUES del analisis, asi que en el analisis
+    automatico de cada rastreo valia NULL: un censo cortado por `max_urls`
+    contaba como entero y el aviso de enlaces no rastreables afirmaba cuantos
+    destinos «no estan en el censo» (revision de la decision 106; 67). Se
+    ejecuta `_run_job` de verdad, con el rastreo y el analisis sustituidos, y
+    se mira que ve el analisis en la base de datos."""
+    import subprocess
+    import uuid
+
+    from sqlalchemy import BigInteger, create_engine
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    import worker
+    from shared.models import Base, Job
+
+    @compiles(BigInteger, "sqlite")
+    def _bigint_worker_fin(tipo, compilador, **kw):
+        return "INTEGER"
+
+    engine = create_engine(f"sqlite:///{tmp_path}/fin.db")
+    Base.metadata.create_all(engine, tables=[Job.__table__])
+    Sesion = sessionmaker(bind=engine)
+    monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
+    jid = uuid.uuid4()
+    s = Sesion()
+    s.add(Job(id=jid, name="truncado", status="pending", seeds=["https://x.com/"],
+              config={"max_urls": 400, "render_js": True}))
+    s.commit()
+    s.close()
+
+    marcas = {f"job:{jid}:finish_reason": "max_urls_reached"}
+
+    class _Redis:
+        def get(self, k):
+            return marcas.get(k)
+
+        def delete(self, *ks):
+            for k in ks:
+                marcas.pop(k, None)
+
+        def __getattr__(self, nombre):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(worker.redis_lib.Redis, "from_url",
+                        classmethod(lambda cls, *a, **k: _Redis()))
+    monkeypatch.setattr(worker, "_ejecutar_con_vigilancia",
+                        lambda *a, **k: subprocess.CompletedProcess([], 0, "", "x"))
+    monkeypatch.setattr(worker, "_rastreadas_y_guardadas", lambda j: (400, 400, 400))
+    monkeypatch.setattr(worker, "_config_invalida", lambda j: None)
+    monkeypatch.setattr(worker, "_reencolar_si_pedido", lambda j: False)
+    monkeypatch.setattr(worker, "_comparar_con_el_censo_anterior", lambda j: None)
+    monkeypatch.setattr(worker, "_archivar_enlaces_superados", lambda j: None)
+    visto = {}
+
+    def _analisis(job_id):
+        with Sesion() as s2:
+            j = s2.query(Job).filter(Job.id == jid).one()
+            visto["estado"], visto["motivo"] = j.status, j.finish_reason
+        return True
+
+    monkeypatch.setattr(worker, "_trigger_analysis", _analisis)
+    worker._run_job(jid)
+
+    assert visto == {"estado": "analyzing", "motivo": "max_urls_reached"}
+    with Sesion() as s3:
+        j = s3.query(Job).filter(Job.id == jid).one()
+        assert (j.status, j.finish_reason) == ("completed", "max_urls_reached")
+    assert not marcas, "la marca de Redis se consume al cerrar, no antes"

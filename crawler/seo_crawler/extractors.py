@@ -777,6 +777,144 @@ def agrupar_enlaces(links: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(grupos.values())
 
 
+# Elementos que llevan `href` y NO son enlaces de una pagina HTML: el `<link>`
+# del head, `<base>` y lo de SVG/MathML (`<use href>`, `<image href>`, que son
+# referencias a recursos). Lo que queda —`<span href>`, `<div href>`, `<button
+# href>`— es el ejemplo de Google de un enlace que no se puede seguir.
+_XPATH_HREF_FUERA_DE_A = (
+    "descendant-or-self::*[@href][not(self::a) and not(self::area) and not(self::link)"
+    " and not(self::base) and not(self::svg) and not(ancestor::svg) and not(self::math)"
+    " and not(ancestor::math)]" + "[not(ancestor::template) and not(ancestor::noscript)]"
+    # Un componente web (`<ion-item href>`, `<sl-button href>`) suele pintar un
+    # `<a href>` de verdad en su shadow DOM, que Google aplana al renderizar:
+    # sin render no se sabe, y no se afirma. Su nombre lleva guion por norma.
+    "[not(contains(name(), '-'))]"
+)
+
+
+def extract_enlaces_no_rastreables(
+    selector,
+    base_url: str,
+    allowed_hosts: set[str],
+) -> list[dict[str, Any]]:
+    """Los enlaces que una persona puede pulsar y Google no puede seguir.
+
+    Disjunto de :func:`extract_links` por construccion: alli solo entra el
+    ``<a>``/``<area>`` con un ``href`` que resuelve a una URL; aqui lo que esa
+    funcion descarta y Google documenta como no rastreable (ver
+    ``shared/enlaces_no_rastreables.py`` para la taxonomia y lo que NO cuenta).
+    Por eso nada de esto entra en el grafo, en los entrantes, en el PageRank ni
+    en la frontera del rastreo: ni siquiera pasa por la lista que los alimenta.
+
+    Cada dict lleva ``crawlability``, ``etiqueta``, ``href`` (el atributo tal
+    cual, o el ``onclick``, recortado), ``destino`` (URL absoluta si se ve a
+    donde iria, si no None), ``destino_interno`` (None sin destino),
+    ``anchor_text``, ``link_position`` y ``repeticiones`` (agrupados como en la
+    decision 94: el megamenu repetido es una fila).
+    """
+    from shared import enlaces_no_rastreables as enr
+
+    filas: list[dict[str, Any]] = []
+
+    def _ancla(nodo) -> str | None:
+        texto = _clean(" ".join(_lineas_visibles(nodo.root, forzar_raiz=True)))
+        if not texto:
+            texto = _clean(nodo.attrib.get("aria-label") or nodo.attrib.get("title"))
+        return texto[: enr.MAX_ANCLA] if texto else None
+
+    def _anadir(nodo, tipo: str, crudo: str, destino_crudo: str | None) -> None:
+        destino = absolutize_url(base_url, destino_crudo) if destino_crudo else None
+        if destino and urlparse(destino).scheme not in ("http", "https"):
+            destino = None
+        filas.append({
+            "crawlability": tipo,
+            "etiqueta": (nodo.xpath("name()").get() or "").lower()[:20] or None,
+            "href": (crudo or "")[: enr.MAX_HREF] or None,
+            "destino": destino,
+            "destino_interno": is_internal_url(destino, allowed_hosts) if destino else None,
+            # Para saber despues si el destino esta en el censo, sin unir con
+            # `links`: el mismo hash que `urls.url_hash`.
+            "destino_hash": compute_url_hash(destino) if destino else None,
+            "anchor_text": _ancla(nodo),
+            "link_position": _detect_link_position(nodo),
+        })
+
+    # 1. `<a>` sin un href rastreable.
+    for a in selector.xpath(f"descendant-or-self::a{_XPATH_FUERA_DEL_DOM}"):
+        attrs = {k.lower(): v for k, v in a.attrib.items()}
+        href = attrs.get("href")
+        href_limpio = (href or "").strip()
+        onclick = (attrs.get("onclick") or "").strip()
+        if href is not None and href_limpio.lower().startswith("javascript:"):
+            codigo = href_limpio[len("javascript:"):]
+            _anadir(a, enr.JAVASCRIPT_HREF, href_limpio,
+                    enr.destino_en_script(codigo) or enr.destino_en_script(onclick))
+        elif href is not None and enr.es_fragmento_como_ruta(href_limpio):
+            _anadir(a, enr.FRAGMENTO_COMO_RUTA, href_limpio, None)
+        elif href is None or href_limpio in ("", "#", "#!"):
+            ruta = next((attrs[k].strip() for k in enr.ATRIBUTOS_DE_RUTA
+                         if (attrs.get(k) or "").strip()), None)
+            if ruta:
+                _anadir(a, enr.A_SIN_HREF, ruta, ruta)
+            elif onclick and enr.menciona_ruta(onclick):
+                # Un `<a>` tiene forma de enlace: si su onclick lleva una ruta
+                # se guarda, pero el destino solo si se ve la navegacion
+                # entera. `getDetalleNoticia('/press/noticias/', 'slug')` va a
+                # una noticia que no se puede saber sin ejecutarlo.
+                _anadir(a, enr.ONCLICK_SIN_HREF, onclick, enr.destino_en_script(onclick))
+            # `href="#"`/`""`/`"#!"` sin manejador, un `onclick` sin ruta
+            # («Leer mas», un `scrollTo`) o un `<a name>`: un boton o un ancla.
+        if len(filas) >= enr.MAX_POR_PAGINA:
+            return agrupar_enlaces_no_rastreables(filas)
+
+    # 2. Otra etiqueta con `href`: el `<span href>` del ejemplo de Google.
+    for nodo in selector.xpath(_XPATH_HREF_FUERA_DE_A):
+        crudo = (nodo.attrib.get("href") or "").strip()
+        if not crudo or crudo.startswith("#") or crudo.lower().startswith(
+                ("mailto:", "tel:", "data:", "javascript:")):
+            continue
+        _anadir(nodo, enr.HREF_FUERA_DE_A, crudo, crudo)
+        if len(filas) >= enr.MAX_POR_PAGINA:
+            return agrupar_enlaces_no_rastreables(filas)
+
+    # 3. Otra etiqueta con un `onclick` que NAVEGA a una URL reconocible: la
+    # tarjeta entera clicable. Sin navegacion es un boton y no se guarda, lleve
+    # o no una ruta: `addToCart('/cart/add')`, `this.src='/b.png'` (d106).
+    for nodo in selector.xpath(
+            f"descendant-or-self::*[@onclick][not(self::a)]{_XPATH_FUERA_DEL_DOM}"):
+        onclick = (nodo.attrib.get("onclick") or "").strip()
+        destino = enr.destino_en_script(onclick)
+        if not destino:
+            continue
+        # Si la tarjeta ya contiene un `<a href>` al mismo destino, Google
+        # tiene el enlace: el onclick es comodidad para la persona.
+        dentro = {absolutize_url(base_url, h) for h in nodo.xpath(".//a/@href").getall()}
+        if absolutize_url(base_url, destino) in dentro:
+            continue
+        _anadir(nodo, enr.ONCLICK_EN_OTRA_ETIQUETA, onclick, destino)
+        if len(filas) >= enr.MAX_POR_PAGINA:
+            break
+
+    return agrupar_enlaces_no_rastreables(filas)
+
+
+_CLAVE_NO_RASTREABLE = (
+    "crawlability", "etiqueta", "href", "destino", "anchor_text", "link_position",
+)
+
+
+def agrupar_enlaces_no_rastreables(filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Como :func:`agrupar_enlaces`: lo identico en una fila con ``repeticiones``."""
+    grupos: dict[tuple, dict[str, Any]] = {}
+    for f in filas:
+        clave = tuple(f.get(k) for k in _CLAVE_NO_RASTREABLE)
+        if clave in grupos:
+            grupos[clave]["repeticiones"] += 1
+        else:
+            grupos[clave] = {**f, "repeticiones": 1}
+    return list(grupos.values())
+
+
 # Class/id tokens that reveal a template region. Matched as WHOLE tokens
 # (split on non-alphanumerics), never as substrings: "canvas" must not read
 # as nav, "elementor-widget" must not read as sidebar.

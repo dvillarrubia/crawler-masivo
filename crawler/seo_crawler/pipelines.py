@@ -18,6 +18,7 @@ from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
+    EnlacesNoRastreablesItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -63,6 +64,13 @@ class PostgresPipeline:
         # item por pagina lleva todas sus reglas. Si llegan dos de la misma
         # URL en el lote, gana el ultimo.
         self._custom_buffer: dict[int, tuple[str, list[dict]]] = {}
+        # Enlaces no rastreables (decision 106): igual, la pagina entera.
+        self._enr_buffer: dict[int, tuple[str, list[dict]]] = {}
+        # Si su tabla existe. None = sin mirar; False se vuelve a mirar cada
+        # minuto (la crea el `create_all` de la API, que en un despliegue
+        # arranca DESPUES de que el worker pueda estar rastreando).
+        self._enr_tabla: bool | None = None
+        self._enr_mirada: float = 0.0
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -145,6 +153,8 @@ class PostgresPipeline:
             self._handle_security(item, spider)
         elif isinstance(item, CustomExtractionItem):
             self._handle_custom(item, spider)
+        elif isinstance(item, EnlacesNoRastreablesItem):
+            self._handle_no_rastreables(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -205,6 +215,11 @@ class PostgresPipeline:
                 if getattr(spider, "_reglas_a_medida", None) and not (
                         data.get("is_html") and 200 <= status < 300):
                     self._borrar_custom(url_id)
+                # Lo mismo con los enlaces no rastreables (decision 106): el
+                # item solo llega con HTML 2xx, y una pagina que ahora falla no
+                # puede conservar los de cuando respondia.
+                if not (data.get("is_html") and 200 <= status < 300):
+                    self._borrar_no_rastreables(url_id)
             else:
                 url_obj = Url(
                     job_id=job_id,
@@ -360,6 +375,99 @@ class PostgresPipeline:
             logger.exception("Fallo al guardar la extraccion a medida de %d paginas", len(lote))
 
     # ------------------------------------------------------------------
+    # EnlacesNoRastreablesItem (decision 106)
+    # ------------------------------------------------------------------
+    def _tabla_no_rastreables(self) -> bool:
+        """Si existe `enlaces_no_rastreables`. Sin ella, el DELETE fallaba, el
+        rollback se llevaba todas las paginas escritas y sin confirmar del lote
+        (hasta `commit_every`) y la cache de ids, y se repetia en cada lote:
+        medido con la tuberia real, 1 de 100 paginas guardadas y 60 de 6.000
+        enlaces. Y como algo se guardaba, el job no salia `persistence_failed`
+        (decision 28)."""
+        ahora = time.monotonic()
+        if self._enr_tabla is None or (not self._enr_tabla and ahora - self._enr_mirada > 60):
+            self._enr_mirada = ahora
+            antes = self._enr_tabla
+            try:
+                from sqlalchemy import inspect
+
+                from shared.models import EnlaceNoRastreable
+
+                self._enr_tabla = inspect(self.session.get_bind()).has_table(
+                    EnlaceNoRastreable.__tablename__)
+            except Exception:
+                self._enr_tabla = False
+            if not self._enr_tabla and antes is None:
+                logger.warning(
+                    "Sin tabla enlaces_no_rastreables: no se guardan los enlaces no "
+                    "rastreables hasta que exista (la crea la API al arrancar; "
+                    "decision 106). El resto del rastreo sigue igual.")
+        return bool(self._enr_tabla)
+
+    def _borrar_no_rastreables(self, url_id: int) -> None:
+        self._enr_buffer.pop(url_id, None)
+        if not self._tabla_no_rastreables():
+            return
+        from shared.models import EnlaceNoRastreable
+
+        try:
+            with self.session.begin_nested():
+                self.session.query(EnlaceNoRastreable).filter(
+                    EnlaceNoRastreable.from_url_id == url_id).delete(
+                        synchronize_session=False)
+        except Exception:
+            logger.exception("No se pudieron borrar los enlaces no rastreables de url_id=%s",
+                             url_id)
+
+    def _handle_no_rastreables(self, item: EnlacesNoRastreablesItem):
+        if not self._tabla_no_rastreables():
+            return
+        url_id = self._resolve_url_id(item.get("url_hash"), item.get("job_id"))
+        if url_id is None:
+            return
+        self._enr_buffer[url_id] = (item.get("job_id"), list(item.get("filas") or []))
+        if len(self._enr_buffer) >= self.batch_size:
+            self._flush_no_rastreables()
+
+    def _flush_no_rastreables(self) -> None:
+        if not self._enr_buffer:
+            return
+        from shared.models import EnlaceNoRastreable
+
+        lote = self._enr_buffer
+        self._enr_buffer = {}
+        columnas = ("crawlability", "etiqueta", "href", "destino", "destino_interno",
+                    "destino_hash", "anchor_text", "link_position")
+        filas = [
+            {"job_id": job_id, "from_url_id": url_id,
+             "repeticiones": f.get("repeticiones") or 1,
+             **{c: (f.get(c).replace("\x00", "") if isinstance(f.get(c), str) else f.get(c))
+                for c in columnas}}
+            for url_id, (job_id, de_la_pagina) in lote.items()
+            for f in de_la_pagina
+        ]
+        # En un SAVEPOINT: si falla, se pierden ESTAS filas y no las paginas
+        # escritas y sin confirmar que comparten la transaccion.
+        try:
+            with self.session.begin_nested():
+                self.session.query(EnlaceNoRastreable).filter(
+                    EnlaceNoRastreable.from_url_id.in_(list(lote))).delete(
+                        synchronize_session=False)
+                if filas:
+                    self.session.bulk_insert_mappings(EnlaceNoRastreable, filas)
+        except Exception:
+            logger.exception("Fallo al guardar los enlaces no rastreables de %d paginas",
+                             len(lote))
+            return
+        try:
+            self.session.commit()
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al confirmar los enlaces no rastreables de %d paginas",
+                             len(lote))
+
+    # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)
     # ------------------------------------------------------------------
     def _handle_security(self, item: SecurityItem, spider: Spider):
@@ -396,6 +504,7 @@ class PostgresPipeline:
     # ------------------------------------------------------------------
     def _flush(self, spider: Spider):
         self._flush_custom()
+        self._flush_no_rastreables()
         if not self._buffer:
             return
 

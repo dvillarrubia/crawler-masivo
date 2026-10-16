@@ -336,6 +336,26 @@ const ISSUE_INFO = {
     google: 'Reparte la autoridad entre muchos destinos.',
     arreglo: 'Revisar si todos esos enlaces aportan.',
   },
+  'enlace_no_rastreable': {
+    que: 'Enlaces que una persona puede pulsar y Google no puede seguir: href="javascript:…", <a onclick> sin href, <a routerLink>, <span href>, una tarjeta con onclick o una ruta en el fragmento (#/…). Si el mismo componente está en 10 páginas o más se cuenta una vez («plantilla»); si no, por página.',
+    google: 'Solo sigue un <a> con un href que sea una URL. Por estos enlaces no descubre el destino ni le pasa autoridad. Si es «aviso», detrás hay una URL interna; si es «info», el código no dice a dónde va (un desplegable con javascript:void(0)).',
+    arreglo: 'Convertirlos en <a href="/destino"> (el onclick puede quedarse). En una SPA, rutas con la History API en vez de #/. El de plantilla se arregla una vez, en el componente.',
+  },
+  'enlace_interno_a_error': {
+    que: 'La página enlaza a URLs internas que responden 4xx o 5xx. Los enlaces rotos que salen en 10 páginas o más no se repiten aquí: los avisa la propia URL rota.',
+    google: 'Rastrea un error por cada enlace, y la autoridad que pasaba por ahí se pierde.',
+    arreglo: 'Cambiar o quitar los enlaces de esta página; si el destino debería existir, arreglarlo o redirigirlo.',
+  },
+  'enlace_interno_a_redireccion': {
+    que: 'Enlaces internos a una URL que redirige. «Plantilla»: la URL que redirige está enlazada desde 10 páginas o más (el aviso va en ella); «página»: los de esta página.',
+    google: 'Sigue la redirección y pasa la señal, pero gasta un rastreo más por enlace y prefiere que se enlace la URL final.',
+    arreglo: 'Apuntar los enlaces a la URL final. Los de plantilla se cambian una vez, en el menú o el pie.',
+  },
+  'utm_en_enlace_interno': {
+    que: 'Enlaces internos con parámetros utm_*. Se avisa una vez por URL con utm, con cuántas páginas la enlazan.',
+    google: 'Es otra URL que rastrear; si se puede indexar (aviso) compite con la limpia. Además, en Analytics reinicia la sesión y atribuye la visita a una campaña falsa.',
+    arreglo: 'Quitar los utm de los enlaces internos. Para medir clics internos, usar eventos, no parámetros de campaña.',
+  },
 
   // ----- Imágenes -----
   'image_missing_alt': {
@@ -448,6 +468,20 @@ const ISSUE_LABEL_EXTRA = {
   meta_fuera_del_head: 'Metadatos fuera del head',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
+  enlace_no_rastreable: 'Enlace que Google no puede seguir',
+  enlace_interno_a_error: 'Enlace interno a un error',
+  enlace_interno_a_redireccion: 'Enlace interno a una redirección',
+  utm_en_enlace_interno: 'Enlace interno con utm',
+};
+
+// Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
+const TIPO_NO_RASTREABLE = {
+  javascript_href: 'href="javascript:"',
+  onclick_sin_href: '<a onclick> sin href',
+  a_sin_href: '<a> sin href (routerLink…)',
+  href_fuera_de_a: 'href fuera de un <a>',
+  onclick_en_otra_etiqueta: 'onclick en otra etiqueta',
+  fragmento_como_ruta: 'ruta en el fragmento (#/)',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -497,4 +531,18 @@ const DETALLE_LABEL = {
   cortado_por: 'lo corta',
   fuera_del_head: 'quedan fuera',
   directiva_en_duda: 'robots o canonical detrás del corte',
+  // Avisos de enlaces (decision 106)
+  paginas_que_enlazan: 'páginas que la enlazan',
+  enlaces: 'enlaces',
+  destinos: 'destinos',
+  con_destino_interno: 'con destino interno',
+  destinos_fuera_del_censo: 'destinos fuera del censo',
+  destinos_internos_distintos: 'destinos internos distintos',
+  apariciones: 'apariciones',
+  destino: 'destino',
+  href_ejemplo: 'código',
+  destino_ejemplo: 'destino',
+  etiqueta: 'etiqueta',
+  posicion: 'posición',
+  ancla: 'ancla',
 };

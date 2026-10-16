@@ -382,3 +382,182 @@
    espacio al disco: Postgres lo reutiliza para los rastreos siguientes, y para
    que el fichero encoja hace falta `VACUUM FULL links` en una ventana sin
    rastreos. El volumen `archivo` (`/data/archivo`) lo comparten worker y API.
+
+<a id="d106"></a>
+106. **Lo que Google no puede seguir se guarda aparte, y lo de la plantilla se
+   avisa una vez** (ola 2.3 del plan). Cuatro avisos sobre enlaces internos
+   (`enlace_no_rastreable`, `enlace_interno_a_error`,
+   `enlace_interno_a_redireccion` y `utm_en_enlace_interno`) y una tabla nueva. Google solo sigue un `<a>` con un `href` que resuelve a una URL
+   («Make your links crawlable»), y `extract_links` tiraba en silencio todo lo
+   demas: un selector de idioma hecho con `onclick` no aparecia en ningun
+   informe.
+   - **Tabla propia, no una columna en `links`.** El plan decia «`crawlability`
+     en `links`». `links` es el grafo: la leen mas de veinte consultas
+     —entrantes, PageRank, profundidad, el explorador, los CSV, la comparacion,
+     el archivo en Parquet (95)—, y una fila que no es arista obligaria a
+     filtrarla en todas; la que se olvide cambia el PageRank sin avisar, que es
+     como acaban dos criterios discrepando (23, 39). `enlaces_no_rastreables`
+     (con `job_id`, decision 37) lleva la columna `crawlability` y sale de una
+     funcion nueva, `extract_enlaces_no_rastreables`, disjunta de
+     `extract_links` por construccion: nada de esto entra en el grafo, en los
+     entrantes ni en la frontera. Comprobado en 71 paginas de control: la salida
+     de `extract_links` es **identica a la de master en las 71**. Coste:
+     2,2 ms por pagina frente a los 48 de `extract_links`.
+   - **La taxonomia es la de Google**, con sus ejemplos como tests:
+     `javascript_href`, `onclick_sin_href`, `a_sin_href` (`routerLink`,
+     `data-href`, `ng-href`), `href_fuera_de_a` (`<span href>`),
+     `onclick_en_otra_etiqueta` (la tarjeta clicable sin `<a>` dentro) y
+     `fragmento_como_ruta` (`#/x`, `#!x`). **No se guarda**, y es lo que mas
+     pesaba: `href="#"`/`""` sin manejador (98 en las 71 paginas), `#ancla`
+     (215) y un `onclick` que no navega (55 «Leer mas», `scrollTo`, modales,
+     que la primera version contaba como enlaces). Todo eso es la forma de un
+     boton y no se sabe si va a algun sitio; avisarlo seria afirmar lo que no se
+     sabe (67, 89). Tampoco el `href="#!"` a secas (el conmutador de menu de
+     Materialize) ni un elemento con guion en el nombre (`<ion-item href>`,
+     `<sl-button href>`): un componente web suele pintar un `<a href>` en su
+     shadow DOM, que Google aplana al renderizar, y sin render no se sabe. El
+     `href="javascript:..."` si se guarda aunque no diga a donde va: es un
+     `href` que Google intenta resolver y lo documenta expresamente; sale como
+     `info`. El destino se saca del codigo **solo si NAVEGA** con la URL entera
+     (`location=`, `location.assign/replace`, `window.open(...)`, y
+     `goTo`/`navigate`/`redirect` con la URL como unico argumento; nada con un
+     `+` o un `${}` detras): el `goTo('products')` del ejemplo de Google no dice
+     a donde va, y una cadena con forma de ruta tampoco (ver la revision, abajo).
+     **Antes y despues en las 71 paginas** (8 sitios; progym solo dejo bajar la
+     home, el resto 403): 0 → 220 enlaces no rastreables en 32 paginas —110
+     `javascript_href`, 57 `onclick_sin_href`, 52 `onclick_en_otra_etiqueta`, 1
+     `a_sin_href`—, 95 con destino interno (111 antes de la revision).
+     `href_fuera_de_a` y `fragmento_como_ruta`: 0, no hay ningun sitio asi en el
+     corpus.
+   - **Por pagina de origen, salvo lo que es de plantilla.** La unidad de
+     trabajo es la pagina donde se edita el enlace: una incidencia por pagina
+     con la cuenta y ejemplos, nunca una por enlace. Pero un enlace del menu
+     se arregla una vez, y por origen salia en TODAS las paginas — lo que la
+     decision 64 dice que deja de ser un aviso. Un enlace presente en
+     `enlaces_plantilla_min_paginas` paginas o mas (10, el umbral de seccion
+     de la 29; en `AnalysisThresholdsConfig`) se avisa una vez. Medido sobre
+     los censos locales, con `compute_link_counts` en una transaccion deshecha:
+
+     | censo (HTML 200) | a redireccion: por origen → con plantilla | a 4xx/5xx |
+     |---|---|---|
+     | Lopesan (4.318) | **4.317** → 1.205 + 367 | 37 → 35 |
+     | www.uoc.edu (21.826) | 13.652 → 1.661 + 333 | 7.478 → 1.983 |
+     | penguin (28.454) | **28.454** → 727 + 50 | 785 → 352 |
+
+     (Cifras tras la revision: la UOC baja de 2.505 + 714 y penguin de 752 + 51
+     porque ya no se repite lo que dice `solo_enlazada_por_redireccion`, ver
+     abajo; Lopesan no tiene ninguna.)
+
+     Por origen a secas, el aviso de redirecciones salia en el 99,98% y el 100%
+     de las paginas de dos sitios. Que va en cada caso: a un 3xx de plantilla,
+     un aviso en la URL que redirige (`alcance: plantilla`, con cuantas paginas
+     la enlazan); a un 4xx/5xx de plantilla, **ninguno nuevo**: la URL rota ya
+     tiene su `4xx_error`/`5xx_error` y sus entrantes dicen desde donde se
+     enlaza (36) — son los 143 destinos rotos de plantilla de la UOC. Origen
+     solo HTML con 200 (un 500 con su menu ya tiene su aviso, 57); el `noindex`
+     si entra, porque el enlace roto lo pulsa una persona igual. Severidad:
+     error → `warning`, redireccion → `info` (Google la sigue y pasa la senal).
+   - **En los no rastreables, la plantilla se reconoce por el componente, no
+     por el destino.** El selector de idioma de Lopesan es
+     `onclick="location.href='/en/<esta pagina>'"`: el destino cambia en cada
+     pagina y por destino salian 201 avisos por un solo componente. La firma es
+     (tipo, posicion, ancla —o el atributo si no hay—). En un canario real de
+     400 URLs sin render: **Lopesan, 216 paginas con alguno → 15 avisos** (13 de
+     plantilla: los cuatro del selector de idioma, `warning`, 201 paginas y 201
+     destinos distintos cada uno, y nueve `javascript:void(0)` del menu —
+     «Hoteles», «Marcas», «Descubre»—, `info`); **cst.gov.sa, 248 → 10** (las
+     ocho entradas del menu, en arabe e ingles, son `javascript:`). Severidad:
+     `warning` si detras hay una URL interna, `info` si el codigo no dice a
+     donde va. Los detalles cuentan los destinos que **no estan en el censo**
+     (ni el rastreo ni Google llegaron a ellos por otro camino), y la cifra va a
+     `None` en un censo truncado: ahi no estar no dice nada (67).
+   - **`utm_en_enlace_interno` va por DESTINO**: la URL con `utm` es el hallazgo
+     y el mismo banner es la misma correccion en tres paginas o en tres mil. Si
+     se rastreo, el aviso va en ella y **sustituye a su `url_has_parameters`**,
+     que dice lo mismo con menos (36): 78 de 1.201 en la UOC. `warning` si esa
+     URL es indexable (un duplicado que el propio sitio reparte), `info` si se
+     canonicaliza o no se rastreo. Lopesan 21, UOC 84, penguin 28, todos
+     `info`; en Lopesan son `?utm_source=chatgpt.com` pegados en enlaces del
+     blog.
+   - **Ninguna lectura nueva de `links`.** Los avisos de respuesta salen de la
+     temporal de aristas de `compute_link_counts` (decision 41), que ganan una
+     columna `utm_hash` NULL salvo en los enlaces con `utm`; se unen con `urls`
+     por clave primaria, despues de filtrar por job. Coste de los avisos: 1,8 s
+     en Lopesan, 3,3 s en la UOC y 5,9 s en penguin, dentro de un
+     `compute_link_counts` de 42-120 s (no medido aparte el `CASE` de la
+     columna en el `INSERT`).
+   - **Que pide cada uno**: los no rastreables, **re-rastrear** (el censo viejo
+     no los guardo); los de respuesta y `utm`, basta **re-analizar**. La tabla
+     nueva la crea `create_all` (ningun `ALTER` sobre `links` ni `urls`) y pesa
+     poco: en el canario de Lopesan (repetido con las mismas 15 incidencias),
+     2.051 filas y 616 kB frente a 54.109 filas y 15,3 MB de `links`, un 4%. Entra
+     en el backup, el borrado en masa y el panel de espacio. Queda fuera:
+     ensenarlos en la ficha de la URL, en el explorador y en el CSV.
+   - **Revision (16-oct).** Lo que cambio, con su caso:
+     - **Una ruta en un `onclick` no es un destino.** La primera version tomaba
+       la primera cadena con forma de ruta: `addToCart('/cart/add')`,
+       `ga('send','event','/promo')`, `this.src='/b.png'` o
+       `$('#m').load('/ajax/modal')` salian como enlace interno que Google se
+       pierde, con `warning`. En otra etiqueta, sin navegacion es un boton y no
+       se guarda; en un `<a>` sin `href` (que tiene forma de enlace) se guarda
+       **sin destino**, `info`. Es tambien el caso del helper con varios
+       argumentos: en el canario de Lopesan, 16
+       `getDetalleNoticia('/press/.../detalle-noticia/', '<slug>')` salian con
+       el PREFIJO como destino —una URL que no existe— y «1 destino fuera del
+       censo»; son 16 noticias distintas que no se saben sin ejecutar el
+       codigo, y el aviso de esa pagina pasa de `warning` a `info`. En las 71
+       paginas de control las filas no cambian (220) y pierden el destino 11:
+       10 `iqitSocialPopup('//…/authenticate?provider=google')` de penguin (el
+       popup del login social) y un `obre(450,200,'http://…')` de la UOC (una
+       ventana emergente). El canario de Lopesan, reconstruido a partir del
+       codigo guardado en la tabla (no re-rastreado): 15 incidencias antes y
+       despues, y los cuatro avisos del selector de idioma siguen igual
+       (navegan con `location.href=`). Lo que no se ha medido: cuantas tarjetas
+       de otra etiqueta con una ruta y sin navegacion habia en un censo real —en
+       el corpus, ninguna; las 52 `onclick_en_otra_etiqueta` navegan todas—.
+     - **Un censo truncado se sabe al analizar.** `jobs.finish_reason` se
+       escribia DESPUES del analisis, asi que en el automatico de cada rastreo
+       valia NULL y «destinos fuera del censo» salia con cifra en un censo
+       cortado por `max_urls` (en el canario de 400 URLs, 201 en los cuatro
+       avisos del selector de idioma; con el motivo puesto, `None`). El worker
+       escribe ya el motivo al pasar a `analyzing` (`_motivo_de_fin`, el mismo
+       calculo que al cerrar, que es quien consume la marca de Redis).
+     - **Origen 200 y HTML tambien en los no rastreables**, como en los avisos de
+       respuesta (57): un 500 con su menu ya tiene su aviso, y una pagina
+       re-rastreada que ahora falla no conserva los de cuando respondia (la
+       tuberia ademas los borra, como `_borrar_custom` en la decision 104).
+     - **Sin la tabla no se pierde el rastreo.** Si `enlaces_no_rastreables`
+       aun no existe —la crea el `create_all` de la API, que en un despliegue
+       arranca despues del worker, y con `up -d --build crawler` no llega a
+       crearse—, el `DELETE` fallaba y el rollback se llevaba las paginas sin
+       confirmar del lote: **1 de 100 paginas y 60 de 6.000 enlaces**
+       guardados con la tuberia real contra Postgres, y como algo se guardaba
+       el job no salia `persistence_failed` (28). Ahora la tuberia mira si la
+       tabla existe (y vuelve a mirar cada minuto) y guarda estas filas en un
+       SAVEPOINT: un fallo se lleva esas filas, no las paginas (100/100 y
+       6.000/6.000 en las dos pruebas).
+     - **Un aviso por hallazgo (36), en dos cruces.** Un enlace con `utm` a una
+       URL que redirige o falla ya lo cuentan los avisos de respuesta, y la
+       correccion es la misma: en la UOC, 20 de las 104 URLs con `utm` (10 3xx,
+       10 4xx) dejan de llevar `utm_en_enlace_interno` (y 78 en vez de 88
+       sustituyen a su `url_has_parameters`). Y la URL que redirige a una pagina
+       con `solo_enlazada_por_redireccion` (63) no lleva el de redireccion: los
+       dos piden apuntar los enlaces a la URL final, y el de la 63 es el mas
+       fuerte. El criterio de esa pagina final vive en una funcion
+       (`criterio_solo_por_redireccion`) que leen los dos (23). En la UOC, las
+       **381** redirecciones de plantilla que repetian el hallazgo (714 → 333) y
+       844 avisos por pagina (2.505 → 1.661); en penguin, 752 + 51 → 727 + 50;
+       Lopesan no cambia (no tiene ninguna `solo_enlazada`). `redirect_chain`
+       NO se excluye, a proposito: pide otra cosa —que la primera URL salte
+       directa a la final, una regla del servidor— y el enlace a la URL vieja
+       es un arreglo aparte, en otra pieza.
+     - **El anclaje no depende del orden de rastreo.** Lo que no tiene pagina
+       propia (el no rastreable de plantilla, el `utm` sin rastrear) se ancla en
+       la pagina de URL menor y no en la de id menor: la comparacion identifica
+       el hallazgo por (tipo, URL, clave), y otro orden de rastreo lo daba por
+       resuelto y por nuevo a la vez (88). Las imagenes y los datos
+       estructurados tienen el mismo problema y no se tocan aqui.
+     - **En la interfaz**: nombre en castellano para los cuatro tipos
+       (`ISSUE_LABEL_EXTRA`), entran en el ambito «Enlazado» del explorador y
+       sus detalles se leen («de plantilla», «páginas que la enlazan», el
+       reparto por tipo, un ejemplo).

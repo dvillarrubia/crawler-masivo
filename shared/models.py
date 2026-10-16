@@ -724,6 +724,50 @@ class CustomExtraction(Base):
 
 
 # ---------------------------------------------------------------------------
+# Enlaces que Google no puede seguir (decision 106)
+# ---------------------------------------------------------------------------
+class EnlaceNoRastreable(Base):
+    """Un enlace que una persona puede pulsar y Google no puede seguir.
+
+    `href="javascript:..."`, `<a onclick>` sin href, `<a routerLink>`,
+    `<span href>`, la tarjeta con `onclick="location=..."` y la ruta en el
+    fragmento (`#/x`). Tabla APARTE de `links` a proposito: `links` es el grafo
+    —entrantes, PageRank, profundidad, la comparacion y el archivo en Parquet
+    la leen en mas de veinte consultas— y una fila que no es una arista
+    obligaria a filtrarla en todas; la que se olvide cambia el PageRank sin
+    avisar (decisiones 23 y 39: dos criterios acaban discrepando).
+
+    `job_id` en la fila para filtrar, borrar y pesar por censo sin unir con
+    `urls` (decision 37). Una fila por enlace distinto de la pagina, con
+    `repeticiones` (decision 94).
+    """
+
+    __tablename__ = "enlaces_no_rastreables"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    from_url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    # javascript_href, onclick_sin_href, a_sin_href, href_fuera_de_a,
+    # onclick_en_otra_etiqueta, fragmento_como_ruta (shared/enlaces_no_rastreables.py)
+    crawlability = Column(String(32), nullable=False)
+    etiqueta = Column(String(20), nullable=True)       # a, span, div, button...
+    href = Column(Text, nullable=True)                 # el atributo (o el onclick), recortado
+    # A donde iria, si el codigo lo dice; NULL = no se sabe, que no es «a ningun sitio».
+    destino = Column(Text, nullable=True)
+    destino_interno = Column(Boolean, nullable=True)
+    # El de `urls.url_hash`: para saber si el destino esta en el censo.
+    destino_hash = Column(String(64), nullable=True)
+    anchor_text = Column(Text, nullable=True)
+    link_position = Column(String(20), nullable=True)
+    repeticiones = Column(Integer, nullable=False, default=1, server_default="1")
+
+    __table_args__ = (
+        Index("ix_enr_job", "job_id"),
+        Index("ix_enr_from", "from_url_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Decisiones de un modelo (#7, decision 84)
 # ---------------------------------------------------------------------------
 class Decision(Base):

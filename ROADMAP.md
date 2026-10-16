@@ -175,6 +175,31 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Enlaces que Google no puede seguir, enlaces a errores y utm internos (16 de octubre)
+
+Ola 2.3 del plan (decisión 106). Cuatro avisos nuevos sobre el enlazado interno:
+
+- **Enlaces que Google no puede seguir**: los que una persona pulsa y el
+  buscador no ve —`href="javascript:…"`, un `<a>` con `onclick` y sin `href`, un
+  `<span href>`, una tarjeta con `onclick`, una ruta `#/…`—, que antes se tiraban
+  sin dejar rastro. En Lopesan sale, por ejemplo, que el **selector de idioma**
+  del menú es un `onclick` en 201 de 216 páginas: Google no llega por ahí a la
+  versión en inglés ni en alemán.
+- **Enlaces internos a errores y a redirecciones** (dos avisos), por página
+  donde hay que cambiarlos. Lo que ya dice otro aviso no se repite: la
+  redirección a una página que solo se alcanza por ella, o el `utm` de un enlace
+  que ya va a un error.
+- **Parámetros `utm_` en enlaces internos**, que en Analytics reinician la
+  sesión y abren URLs duplicadas.
+
+Lo que está en el menú o en el pie se avisa **una vez** y no en cada página: en
+penguin, los enlaces a redirecciones salían en las 28.454 páginas del sitio y
+ahora son 50 avisos de plantilla más 727 de página. Ninguno de estos enlaces
+entra en el PageRank ni en los entrantes: no ha cambiado ni una cifra del
+grafo. Los no rastreables piden volver a rastrear; los otros dos salen al
+volver a analizar. Queda para después enseñarlos en la ficha de la URL y en el
+CSV.
+
 ### Extracción a medida: precio, SKU, disponibilidad y «¿tiene el tag de GTM?» (16 de octubre)
 
 [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34). Cada rastreo
