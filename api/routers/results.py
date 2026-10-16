@@ -1936,7 +1936,7 @@ def _pagerank_fiable(session: Session, job_id: uuid.UUID):
 
 def columnas_a_medida_export(config) -> list[tuple[str, str, str, dict]]:
     """Las columnas `x_<nombre>` del CSV completo: AL FINAL y solo si el job
-    tiene reglas (decision 104). Las 83 fijas no se mueven, asi que un informe
+    tiene reglas (decision 104). Las fijas no se mueven, asi que un informe
     montado sobre sus posiciones sigue valiendo."""
     return [(f"x_{nombre}", nombre, clase, regla)
             for nombre, (clase, regla) in reglas_del_job(config).items()]

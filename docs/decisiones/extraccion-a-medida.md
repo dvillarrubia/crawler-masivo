@@ -117,7 +117,7 @@
      de texto que vienen de la página; los números no se tocan. Con `todos`, una
      columna por posición («Talla 1», «Talla 2»…), tantas como el máximo de
      coincidencias del censo con el tope de la regla. En `/export` las columnas
-     `x_<nombre>` van AL FINAL y solo si hay reglas: las 83 fijas no se mueven.
+     `x_<nombre>` van AL FINAL y solo si hay reglas: las fijas no se mueven.
    - **Números: un caso ambiguo no se adivina.** `1.299,00 €` y `1,234.56` se
      leen bien (el último separador es el decimal); `1.234` o `1,299` sin
      separador declarado salen `conversion_fallida`: inventar uno de los dos
