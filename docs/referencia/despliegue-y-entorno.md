@@ -131,6 +131,12 @@ MAX_CONCURRENT_ENRIQUECIDOS=1    # worker: pool propio, no quita huecos a los ra
 ENRICHMENT_LOTE=200              # URLs por lote (entre lotes: cancelar, progreso, latido)
 ENRICHMENT_STALE_MINUTES=15      # sin latido -> se reencola
 
+# Extraccion a medida (decision 104)
+CUSTOM_EXTRACTION_MAX_BYTES_PAGINA=65536  # tope de max_valores x max_caracteres por pagina (422)
+CUSTOM_EXTRACTION_TIMEOUT_MS=50           # timeout de cada regex
+CUSTOM_EXTRACTION_PRESUPUESTO_MS=250      # todas las reglas de una pagina
+CUSTOM_EXTRACTION_AGOTADOS=3              # timeouts tras los que una regla se desactiva el resto del job
+
 # Enlaces archivados en Parquet (decision 95)
 ARCHIVO_DIR=/data/archivo        # volumen `archivo`, compartido por worker y API
 ARCHIVAR_ENLACES=1               # 0 = el worker no archiva tras cada rastreo

@@ -65,6 +65,16 @@ cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
 cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
 medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
 corren tambien en el trabajo de la API.
+Extraccion y busqueda a medida (decision 104): `test_extraccion_a_medida.py`
+(la funcion pura: CSS, XPath, regex, `a_numero`, muro, tiempo y
+cortacircuitos, validacion, firma; y el esquema y la herencia, que necesitan
+Pydantic y corren en el trabajo de la API), `test_a_medida_api.py` (filtros y
+CSV con las mismas filas, «no evaluada» frente a «sin coincidencia», 422 por
+regla inexistente, orden, una columna por posicion y formulas, `/export`,
+prueba de reglas, uso y fusion al guardar un perfil; trabajo de la API),
+`test_spider_a_medida.py` (el `SeoSpider` real con el arnes: lo emitido y,
+con Postgres, lo guardado tras reanudar, 404, 301 y repetir) y
+`test_a_medida_db.py` (600.000 filas en Postgres: el plan usa `ix_cext_*`).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

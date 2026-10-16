@@ -14,6 +14,7 @@
 | `routers/results.py` | Results endpoints (urls, issues, links, stats, export CSV) |
 | `routers/clientes.py` | Clientes, perfiles e integraciones (#36, decision 83). Resuelve la herencia de configuracion al crear un job (`resolver_config`) |
 | `routers/almacenamiento.py` | Lo que ocupa la base, cada tabla y los Parquet de enlaces archivados (decision 96). Router propio: en el de jobs la ruta caeria debajo de `GET /{job_id}` |
+| `routers/extraccion.py` | Extraccion y busqueda a medida (#34, decision 104): probar reglas sin red (`POST /api/extraccion/probar`), resumen y distribucion de valores de un censo |
 | `routers/enriquecido.py` | Analisis enriquecido (#40, decision 85): estimar, crear (con `X-Enrichment-Token`), leer y cancelar ejecuciones. No llama a ningun modelo: encola en `enrichment:pending` |
 
 ### Crawler (`crawler/`)
@@ -47,6 +48,8 @@
 | `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
 | `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
 | `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
+| `extraccion_a_medida.py` | Extraccion y busqueda a medida (decision 104): `validar`, `compilar`, `aplicar`, `firma`, `a_numero` y el `Presupuesto` con cortacircuitos. La usan el spider y la API |
+| `texto_visible.py` | Texto que el navegador pinta, linea a linea (`_lineas_visibles`, `_nodo_oculto`...). Mudado desde `extractors.py`, que lo reexporta, para que la API lo comparta (decision 104) |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -73,18 +76,21 @@
 | POST | `/api/jobs/eliminar` | Borrado en masa (decision 96). `{ids, simular, forzar, segundos}` (`forzar` salta solo el guardia de la serie programada, nunca el de un rastreo en marcha): `simular` es la vista previa con tamanos, guardias y `archivo_bytes`; sin el, borra (Parquet incluido) y devuelve `pendientes` con lo que no cupo en su presupuesto de tiempo; lo que queda a medias pasa a `status='deleting'` |
 | GET | `/api/almacenamiento` | Lo que ocupa la base y cada tabla, mas los Parquet archivados (`archivo_bytes`, `archivo_ficheros`), para decidir que censos borrar |
 | GET | `/api/jobs/{id}/progress` | Real-time progress from Redis |
-| GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`; columnas calculadas con `?origenes=`, `?h1=` y `?cambios=` —frente al censo de la comparación automática o `?con=`—). Los «contiene» admiten `a|b` y `!a`; `status_code` admite `301,302`. El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista |
+| GET | `/api/jobs/{id}/urls` | Crawled URLs (`?status_group=`, `?is_internal=`, `?resource_type=`, `?issue_type=` —uno o varios, por comas—, `?severity=`, `?in_sitemap=`, `?vacio=`/`?con_valor=` campos, `<col>_gte/_lte`, `<campo>_contains`, `?ligero=true` sin `page_content`; columnas calculadas con `?origenes=`, `?h1=` y `?cambios=` —frente al censo de la comparación automática o `?con=`—). Los «contiene» admiten `a|b` y `!a`; `status_code` admite `301,302`. El filtrado vive en `_urls_filtradas`, compartido con el CSV de la vista. Reglas a medida (decision 104): `x.<n>_gte/_lte`, `x.<n>_contains` (`!a` solo sobre lo evaluado), `x.<n>=si\|no`, `x.<n>_estado=`, `vacio=x.<n>`, `sort_by=x.<n>` y `?a_medida=n1,n2\|todas` para añadir los valores; una regla que el censo no tiene es 422 |
 | GET | `/api/jobs/{id}/urls/plantillas` | La vista del Explorador agrupada por forma de ruta (`shared.plantillas.firma_de_ruta`): URLs, indexables, estados, con errores, medianas y los últimos tramos que se repiten (`null` × 6 = un fallo de plantilla). `/urls?plantilla=` entra en una |
 | GET | `/api/jobs/{id}/urls/enlaces-entrantes` | CSV con todos los enlaces que apuntan a las URLs de la vista (destino, origen, ancla, posición, follow). `/urls?origenes=true` añade a cada fila `enlazada_desde` y `origenes` |
 | GET/POST/DELETE | `/api/clients/{id}/vistas[/{vista_id}]` | Vistas guardadas del Explorador (`clients.vistas_explorador`): la consulta de la URL con nombre, válida en cualquier censo del cliente |
 | GET | `/api/uso/explorador` | Qué pestañas, filtros, órdenes, problemas y columnas se piden en el Explorador (`?dias=`). Solo nombres, nunca valores (`api/uso.py`) |
-| GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA`) |
+| GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA` y `x.<nombre>`: una columna por posicion con `cuantos=todos`, formulas escapadas) |
+| POST | `/api/extraccion/probar` | Prueba reglas a medida (decision 104) contra `html` pegado (5 MB como mucho, 413) o el `raw_html` de `job_id` + `url_id` (409 si no se guardo). Hereda con `cliente_id`/`profile_id`. Sin red. Devuelve por regla estado, n, valor(es), valor_num, ms y avisos de coste |
+| GET | `/api/jobs/{id}/extraccion` | Por regla: definicion, firma, evaluadas, por estado, renderizadas y los 5 valores mas frecuentes; avisa si un extractor no encontro nada |
+| GET | `/api/jobs/{id}/extraccion/{nombre}/valores` | Distribucion paginada de `valor_clave` |
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`), por gravedad y tipo |
 | GET | `/api/jobs/{id}/issues/resumen` | Una fila por tipo: incidencias, páginas distintas y ejemplos (vista agrupada de Problemas) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
-| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **83 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export` |
+| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **83 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
 
 ## Extraction Functions (`extractors.py`)
 
@@ -105,6 +111,7 @@ All pure functions — no Scrapy imports. First candidates for unit tests.
 | `extract_main_content_markdown(selector)` | str or None — content as Markdown |
 | `extract_meta_refresh(selector)` | str or None |
 | `extract_security_headers(headers)` | dict — HTTPS, HSTS, CSP, X-Frame, etc. |
+| `extract_custom(selector, html, comp, **kw)` | list[dict] — filas de las reglas a medida (envuelve `shared.extraccion_a_medida.aplicar`, decision 104) |
 
 ## SEO Analysis Checks (`analyzer.py`)
 

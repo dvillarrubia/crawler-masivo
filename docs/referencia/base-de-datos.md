@@ -4,7 +4,7 @@
 
 ## Database (PostgreSQL)
 
-15 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
+16 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
@@ -23,6 +23,7 @@
 | `crawl_profiles` | 1:N from clients | nombre, rol, seeds, config (parcial), last_job_id |
 | `decisions` | 1:N from jobs | clave, pregunta, version_pregunta, estado, respuesta, coste_usd, run_id (decision 84) |
 | `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
+| `custom_extraction` | 1:N from urls (con `job_id`) | nombre, clase (extractor/busqueda), estado, n, valor, valor_clave, valor_num, valores, render (decision 104). Una fila por (URL, regla) EVALUADA: sin fila = no evaluada, no «vacio». Migracion: `migrar_custom_extraction()` en `init_db.py` |
 
 `jobs.cliente_id` / `jobs.profile_id` son las FK al cliente y al perfil; `jobs.client_id` sigue siendo el texto libre de siempre (decision 83).
 

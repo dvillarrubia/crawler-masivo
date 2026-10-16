@@ -108,6 +108,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en
   silencio. Decision 33.
+- **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no
+  contiene» es `estado='sin_coincidencia'` y nunca incluye bloqueadas ni errores. 104.
 - **Nada de un cliente en codigo**: va en `projects/<cliente>/config.json`.
 - **Un aviso por hallazgo**, y lo que es de plantilla o de servidor se agrupa
   (una fila con `paginas_afectadas`, no una por pagina). 36, 53, 64, 73.

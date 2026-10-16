@@ -48,7 +48,18 @@ order of priority:
 - Authentication/authorization
 - Monitoring/metrics (Prometheus, Grafana)
 - PageSpeed/CrUX integration
-- Custom extraction / custom search (XPath/CSS/regex per job)
+- Custom extraction / custom search: hecho lo basico (decision 104, #34). Falta:
+  - **PR 2**: pestaña «Extraccion» en el formulario (tablas de reglas, marca de
+    heredada, `null` al quitar una heredada) y prueba con URL en vivo desde el
+    worker (cola `extraccion:pruebas`, subproceso, `shared/red.py` contra SSRF con
+    `CURLOPT_RESOLVE` y comprobacion en cada salto, `comparar_render`), mudando
+    `_BOILERPLATE_REMOVAL_JS` y `_JS_ESPERAR_DOM_QUIETO` a `render.py`;
+  - **PR 3**: `fuente=html_crudo` en jobs con render (`page.on("response")`) e
+    incidencia agrupada opcional `busqueda_a_medida` (una fila por regla con
+    `paginas_afectadas`, `group_key = sha16(firma)`, ficha en `incidencias.js`);
+  - **PR 4 (3.4)**: comparar valores extraidos entre censos en
+    `shared/comparacion.py` (misma firma, sin mezclar `render`, umbral de la 68);
+  - `scripts/reextraer_a_medida.py` sobre `raw_html`, con el candado del job.
 - JavaScript comparison tab (raw HTML vs rendered)
 - Pagination (rel next/prev) analysis
 - Structured data rich-result validation (only basic @type/required-prop checks)
