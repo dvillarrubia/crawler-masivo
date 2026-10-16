@@ -333,6 +333,25 @@ def test_un_salto_externo_que_acaba_en_error_no_es_del_sitio():
     assert _tipos(s, j, ext.id) == []
 
 
+def test_una_cadena_o_un_bucle_que_empiezan_fuera_no_son_del_sitio():
+    """www.uoc.edu: 5 de las 283 `redirect_chain` empezaban en
+    `http://research.uoc.edu/...`, externa; la pestana Redirecciones las
+    contaba en el chip y no las ensenaba. Desde una interna siguen saliendo."""
+    s, j = _montar()
+    ext = _salto(s, j, "http://otro.com/a", "https://otro.com/a", interna=False)
+    _salto(s, j, "https://otro.com/a", "https://otro.com/b", interna=False)
+    _url(s, j, "https://otro.com/b", interna=False)
+    bucle = _salto(s, j, "https://otro.com/p", "https://otro.com/q", interna=False)
+    _salto(s, j, "https://otro.com/q", "https://otro.com/p", interna=False)
+    a = _salto(s, j, "/a", "/b")
+    _salto(s, j, "/b", "/c")
+    _url(s, j, "/c")
+    _cadenas(s, j)
+    assert _tipos(s, j, ext.id) == []
+    assert _tipos(s, j, bucle.id) == []
+    assert _tipos(s, j, a.id) == ["redirect_chain"]
+
+
 # -- La canonica que nadie enlaza ---------------------------------------------
 
 def _enlace(s, j, origen, destino):

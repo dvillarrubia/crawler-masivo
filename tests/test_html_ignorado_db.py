@@ -177,8 +177,9 @@ def test_el_corte_se_lleva_canonical_in_body_y_hreflang_in_body():
     """Un aviso por hallazgo (36): si el canonical esta en el body porque un
     <img> corto el head, el hallazgo es el corte."""
     s, j = _censo()
+    # Como lo guarda el extractor: el canonical del body no es `canonical_href`.
     cortada = _url(s, j, "/cortada", meta={
-        "canonical_href": "https://x.com/cortada", "canonical_in_body": True,
+        "canonical_href": None, "canonical_in_body": True, "canonical_count": 1,
         "head_cortado_por": "img", "fuera_del_head": "canonical,hreflang"})
     puesta = _url(s, j, "/puesta", meta={
         "canonical_href": "https://x.com/puesta", "canonical_in_body": True,
@@ -192,6 +193,8 @@ def test_el_corte_se_lleva_canonical_in_body_y_hreflang_in_body():
     an.analyze_html_ignorado()
 
     assert [f.url_id for f in _issues(s, j, "canonical_in_body")] == [puesta.id]
+    # Ni que le falta: lo declara, solo que detras del corte.
+    assert _issues(s, j, "canonical_missing") == []
     assert [f.url_id for f in _issues(s, j, "hreflang_in_body")] == [puesta.id]
     assert [f.url_id for f in _issues(s, j, "head_cortado")] == [cortada.id]
 
@@ -317,3 +320,27 @@ def test_navigation_timing_da_el_html_servido_descomprimido():
         assert asyncio.run(correr()) == [len(cuerpo), len(cuerpo)]
     finally:
         srv.shutdown()
+
+
+@pytest.mark.parametrize("corta", [b"<img src=/p.gif>", b"<div>x</div>"])
+def test_canonical_tras_el_corte_con_el_spider_real_es_solo_head_cortado(spider, corta):
+    """Con lo que guarda el spider de verdad (decision 74): el canonical detras
+    de un <img> o un <div> llega con `canonical_href` vacio, y antes salia
+    ademas `canonical_missing` en cada pagina cortada."""
+    cuerpo = (b"<!doctype html><html><head><title>T</title>" + corta
+              + b"<link rel=canonical href=https://x.com/p>"
+              b"<meta name=robots content=noindex></head><body><p>x</p></body></html>")
+    _pagina, item = _parse(spider, cuerpo)
+    assert item["canonical_href"] is None and item["canonical_in_body"] is True
+
+    s, j = _censo()
+    columnas = set(HtmlMeta.__table__.columns.keys()) - {"id", "url_id"}
+    u = _url(s, j, "/p", meta={k: v for k, v in dict(item).items() if k in columnas})
+    an = SEOAnalyzer(s, j.id)
+    an.analyze_canonicals()
+    an.analyze_html_ignorado()
+    tipos = sorted(f.issue_type for f in s.execute(
+        select(Issue).where(Issue.job_id == j.id)).scalars())
+    assert tipos == ["head_cortado"]
+    [corte] = _issues(s, j, "head_cortado")
+    assert corte.severity == "error" and corte.url_id == u.id

@@ -2776,8 +2776,28 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     return_unknown = total_hreflang - return_ok - missing_return
     lang_unknown = total_hreflang - lang_valid - invalid_lang
 
+    # Anotaciones hacia un destino que Google descarta: roto (4xx/5xx) o no
+    # indexable (canonicalizado, noindex, robots). Las dos son `error` y una
+    # incidencia por anotacion (decisiones 56 y 99), y su `return_tag_ok` va a
+    # NULL —el retorno de un destino descartado no se puede afirmar—, asi que
+    # sin contarlas aqui salian del denominador: Lopesan, con 31 errores de
+    # hreflang abiertos en Problemas, pasaba de 96 a 100 sin una sola
+    # recomendacion.
+    def _incidencias(*tipos):
+        return db.query(func.count(Issue.id)).filter(
+            Issue.job_id == job_id, Issue.issue_type.in_(tipos),
+        ).scalar() or 0
+
+    destino_malo = _incidencias("hreflang_broken_target",
+                                "hreflang_destino_no_indexable")
+    sin_autorref = _incidencias("hreflang_sin_autorreferencia")
+
     pct_return_ok = _safe_pct(return_ok, return_ok + missing_return)
     pct_lang_valid = _safe_pct(lang_valid, lang_valid + invalid_lang)
+    # De las anotaciones verificadas hacia otra pagina, las que llegan a una
+    # alternativa que Google puede usar.
+    verificadas = return_ok + missing_return + destino_malo
+    pct_destino_ok = _safe_pct(return_ok + missing_return, verificadas)
 
     # La nota solo con lo verificado. Sin nada verificado no hay nota que dar:
     # se deja en 100 (nada que corregir que sepamos) y se avisa abajo.
@@ -2786,9 +2806,24 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         partes.append(pct_return_ok)
     if lang_valid + invalid_lang:
         partes.append(pct_lang_valid)
+    if destino_malo:
+        partes.append(pct_destino_ok)
     score = sum(partes) / len(partes) if partes else 100
+    # Y con un error abierto la categoria no puede decir «bueno», por pocas
+    # anotaciones que sean (el criterio de la nota global, decision 92): en
+    # Lopesan los 31 son el 0,9% de las verificadas y la media sola seguia
+    # redondeando a 100.
+    if destino_malo:
+        score = min(score, TOPE_CON_ERRORES)
 
     recs: list[Recommendation] = []
+    if destino_malo > 0:
+        recs.append(Recommendation(
+            priority="alta", title="Corregir hreflang hacia URLs que Google descarta",
+            description=f"Hay {destino_malo} etiquetas hreflang que apuntan a una URL rota, canonicalizada a otra, en noindex o bloqueada por robots.txt. Google descarta esa alternativa y ese idioma se queda sin su version.",
+            affected_count=destino_malo,
+            issue_types=["hreflang_broken_target", "hreflang_destino_no_indexable"],
+        ))
     if missing_return > 0:
         recs.append(Recommendation(
             priority="alta", title="Corregir etiquetas hreflang sin retorno",
@@ -2802,6 +2837,13 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             description=f"Hay {invalid_lang} etiquetas hreflang con codigos de idioma no validos. Usa codigos ISO 639-1 (ej: es, en, fr).",
             affected_count=invalid_lang,
             issue_types=["hreflang_invalid_lang"],
+        ))
+    if sin_autorref > 0:
+        recs.append(Recommendation(
+            priority="media", title="Anadir la autorreferencia hreflang",
+            description=f"Hay {sin_autorref} paginas que anotan sus otras versiones pero no a si mismas (o se anotan con otra URL, como la misma ruta con un parametro).",
+            affected_count=sin_autorref,
+            issue_types=["hreflang_sin_autorreferencia"],
         ))
     if not partes:
         recs.append(Recommendation(
@@ -2817,6 +2859,8 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             "total_hreflang": total_hreflang, "languages": languages,
             "pct_return_ok": pct_return_ok, "pct_lang_valid": pct_lang_valid,
             "return_missing": missing_return, "return_unknown": return_unknown,
+            "destino_malo": destino_malo, "pct_destino_ok": pct_destino_ok,
+            "sin_autorreferencia": sin_autorref,
             "invalid_lang": invalid_lang, "lang_unknown": lang_unknown,
         },
         recommendations=recs,

@@ -51,10 +51,10 @@ def _montar():
 
 
 def _url(s, j, url, *, status=200, indexable=True, estado="Indexable",
-         canonical=None, redirect=None):
-    u = Url(job_id=j.id, url=url, url_hash=url[-40:], is_internal=True,
+         canonical=None, redirect=None, interna=True, tipo="html"):
+    u = Url(job_id=j.id, url=url, url_hash=url[-40:], is_internal=interna,
             is_html=True, status_code=status, host=url.split("/")[2],
-            resource_type="html", indexable=indexable,
+            resource_type=tipo, indexable=indexable,
             indexability_status=estado, redirect_url=redirect)
     s.add(u)
     s.flush()
@@ -222,8 +222,11 @@ def test_el_mismo_codigo_dos_veces_hacia_la_misma_url_no_es_repetido():
     assert not _de(_analizar(s, j), "hreflang_idioma_repetido")
 
 
-def test_destino_canonicalizado_un_aviso_por_destino_y_sin_retorno_falso():
-    """Lopesan: `/en/` canonicalizada a `/es/`, anotada desde `/es/` y `/de/`."""
+def test_destino_canonicalizado_un_aviso_por_anotacion_y_sin_retorno_falso():
+    """Lopesan: `/en/` canonicalizada a `/es/`, anotada desde `/es/` y `/de/`.
+
+    El aviso va en la pagina que ANOTA, como el destino roto: el destino puede
+    ser externo y la pestana Hreflang solo ensena HTML interno."""
     s, j = _montar()
     es, de = _url(s, j, ES), _url(s, j, DE)
     en = _url(s, j, EN, indexable=False, estado="Canonicalised", canonical=ES)
@@ -232,13 +235,27 @@ def test_destino_canonicalizado_un_aviso_por_destino_y_sin_retorno_falso():
     # La canonicalizada no devuelve nada: su hreflang no cuenta.
     issues = _analizar(s, j)
     ni = _de(issues, "hreflang_destino_no_indexable")
-    assert [i.url_id for i in ni] == [en.id]
-    assert ni[0].severity == "error"
-    assert ni[0].details["motivo"] == "Canonicalised"
-    assert ni[0].details["canonical"] == ES
-    assert ni[0].details["paginas_afectadas"] == 2
-    assert ni[0].details["ejemplos"] == sorted([ES, DE])
+    assert sorted(i.url_id for i in ni) == sorted([es.id, de.id])
+    assert en.id not in {i.url_id for i in issues}
+    for i in ni:
+        assert i.severity == "error"
+        assert i.details == {"href": EN, "lang": "en", "motivo": "Canonicalised",
+                             "canonical": ES}
+        assert i.group_key == _clave_de_grupo("en")
     assert not _de(issues, "hreflang_missing_return")
+
+
+def test_destino_no_indexable_externo_se_avisa_en_la_pagina_del_sitio():
+    """www.uoc.edu: 9 de 19 destinos eran externos (`blogs.uoc.edu`)."""
+    s, j = _montar()
+    es = _url(s, j, ES)
+    ext = "https://blog.otro.com/en/a"
+    _url(s, j, ext, indexable=False, estado="Canonicalised",
+         canonical="https://blog.otro.com/", interna=False)
+    _anotar(s, es, ("es", ES), ("en", ext), ("x-default", ES))
+    ni = _de(_analizar(s, j), "hreflang_destino_no_indexable")
+    assert [i.url_id for i in ni] == [es.id]
+    assert ni[0].details["href"] == ext
 
 
 def test_destino_noindex():
@@ -248,8 +265,8 @@ def test_destino_noindex():
     for p in (es, de):
         _anotar(s, p, *CLUSTER)
     ni = _de(_analizar(s, j), "hreflang_destino_no_indexable")
-    assert len(ni) == 1 and ni[0].details["motivo"] == "Noindex"
-    assert "canonical" not in ni[0].details
+    assert len(ni) == 2 and {i.details["motivo"] for i in ni} == {"Noindex"}
+    assert not any("canonical" in i.details for i in ni)
 
 
 def test_destino_roto_es_solo_destino_roto():
@@ -280,7 +297,8 @@ def test_destino_bloqueado_por_robots_es_no_indexable():
     for p in (es, de):
         _anotar(s, p, *CLUSTER)
     ni = _de(_analizar(s, j), "hreflang_destino_no_indexable")
-    assert len(ni) == 1 and ni[0].details["motivo"] == "Blocked by robots.txt"
+    assert len(ni) == 2
+    assert {i.details["motivo"] for i in ni} == {"Blocked by robots.txt"}
 
 
 def test_una_fuente_no_indexable_no_da_avisos_y_su_retorno_no_se_sabe():
@@ -368,7 +386,9 @@ def test_variante_canonicalizada_a_la_fuente_que_ya_se_autorreferencia_es_error(
     _anotar(s, en, ("en", en_url), ("ca", ca_url), ("x-default", en_url))
     issues = _analizar(s, j)
     ni = _de(issues, "hreflang_destino_no_indexable")
-    assert [i.url_id for i in ni] == [ca.id]
+    assert [i.url_id for i in ni] == [en.id]
+    assert ni[0].details["href"] == ca_url
+    assert ca.id not in {i.url_id for i in issues}
     assert not _de(issues, "hreflang_sin_autorreferencia")
 
 
@@ -382,9 +402,8 @@ def test_la_variante_propia_de_una_fuente_no_quita_el_aviso_de_las_demas():
     _anotar(s, es, ("es", ES + "?rec=1"), ("en", EN), ("x-default", EN))
     _anotar(s, en, ("es", ES + "?rec=1"), ("en", EN), ("x-default", EN))
     ni = _de(_analizar(s, j), "hreflang_destino_no_indexable")
-    assert [i.url_id for i in ni] == [var.id]
-    assert ni[0].details["paginas_afectadas"] == 1
-    assert ni[0].details["ejemplos"] == [EN]
+    assert [i.url_id for i in ni] == [en.id]
+    assert ni[0].details["href"] == var.url
 
 
 def _sin_xd_entre_hosts(orden):
@@ -441,4 +460,77 @@ def test_indexable_null_en_el_destino_no_es_destino_no_indexable():
     s, j = _montar()
     _cluster_bien(s, j)
     _indexable_null(s, j, EN)
+    assert _analizar(s, j) == []
+
+
+def test_la_variante_propia_sin_retorno_es_solo_sin_autorreferencia():
+    """progym: `?p=2` se anota `es-es` con la URL de la pagina 1, que no le
+    devuelve el enlace. Un hallazgo —que `?p=2` se nombre a si misma—, no dos:
+    139 de las 140 `hreflang_missing_return` de progym eran esto."""
+    s, j = _montar()
+    p1, p2 = _url(s, j, ES), _url(s, j, ES + "?p=2")
+    en = _url(s, j, EN)
+    _anotar(s, p1, ("es", ES), ("en", EN), ("x-default", ES))
+    _anotar(s, p2, ("es", ES), ("en", EN), ("x-default", ES))
+    _anotar(s, en, ("es", ES), ("en", EN), ("x-default", ES))
+    issues = _analizar(s, j)
+    sin = _de(issues, "hreflang_sin_autorreferencia")
+    assert [i.url_id for i in sin] == [p2.id]
+    assert sin[0].details["variante_propia"] == ES
+    # La de `en` hacia EN sigue sin retorno de verdad: EN no anota `?p=2`.
+    sr = _de(issues, "hreflang_missing_return")
+    assert [(i.url_id, i.details["href"]) for i in sr] == [(p2.id, EN)]
+    filas = {h.href: h.return_tag_ok for h in
+             s.query(Hreflang).filter(Hreflang.url_id == p2.id)}
+    assert filas[ES] is None and filas[EN] is False
+
+
+def test_una_variante_de_otra_ruta_sin_retorno_sigue_siendo_sin_retorno():
+    """penguin: las paginas con los dos avisos anotan OTRA ruta; ahi el retorno
+    que falta es un hallazgo aparte y se sigue diciendo."""
+    s, j = _montar()
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    _anotar(s, es, ("en", EN), ("x-default", EN))
+    _anotar(s, en, ("en", EN), ("x-default", EN))
+    tipos = sorted(i.issue_type for i in _analizar(s, j))
+    assert tipos == ["hreflang_missing_return", "hreflang_sin_autorreferencia"]
+
+
+def test_sin_x_default_con_la_raiz_que_redirige_se_ancla_donde_lleva():
+    """Lopesan: la raiz es un 302 a `/es/`; penguin, un 301. Anclado en el
+    salto, el chip de la pestana decia «1 pagina» y la lista salia vacia."""
+    s, j = _montar()
+    _url(s, j, "https://x.com/", status=302, indexable=False,
+         estado="Redirect (302)", redirect="https://x.com/es/", tipo="redirect")
+    portada = _url(s, j, "https://x.com/es/")
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    for p in (es, en):
+        _anotar(s, p, ("es", ES), ("en", EN))
+    xd = _de(_analizar(s, j), "hreflang_sin_x_default")
+    assert [i.url_id for i in xd] == [portada.id]
+
+
+def test_sin_x_default_si_la_raiz_acaba_fuera_cae_a_una_pagina_afectada():
+    s, j = _montar()
+    _url(s, j, "https://x.com/", status=301, indexable=False,
+         estado="Redirect (301)", redirect="https://x.com/vieja", tipo="redirect")
+    _url(s, j, "https://x.com/vieja", status=404, indexable=False,
+         estado="Client Error (404)")
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    for p in (es, en):
+        _anotar(s, p, ("es", ES), ("en", EN))
+    xd = _de(_analizar(s, j), "hreflang_sin_x_default")
+    assert [i.url_id for i in xd] == [en.id]
+
+
+def test_una_pagina_externa_no_es_fuente():
+    """www.uoc.edu: `guia-audiovisual.uoc.edu`, fuera del alcance, se leyo y
+    daba su propio x-default. No es del sitio auditado ni sale en la pestana."""
+    s, j = _montar()
+    a, b = "https://otro.com/es/", "https://otro.com/en/"
+    pa = _url(s, j, a, interna=False)
+    pb = _url(s, j, b, interna=False)
+    _anotar(s, pa, ("en", b))
+    _anotar(s, pb, ("es", a), ("en", "https://otro.com/404"))
+    _url(s, j, "https://otro.com/404", status=404, indexable=False, interna=False)
     assert _analizar(s, j) == []

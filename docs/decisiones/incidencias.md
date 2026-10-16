@@ -220,6 +220,17 @@
      se avisan. Sin ningún `in_sitemap = true` no corre nada.
    - **No lee `links`**, solo `urls` y `html_meta`: vale igual en un censo con
      los enlaces archivados (decisión 95).
+   - **Convive con `noindex_page` y con el hreflang hacia esa URL**, a
+     propósito. Una `/en/hotels` canonicalizada a `/es/hoteles` y declarada en
+     el sitemap da este aviso en ella y `hreflang_destino_no_indexable` en la
+     página que la anota (decisión 99, que tras la revisión se ancla en la
+     fuente y no en el destino); en UOC, 8 noindex del sitemap dan además
+     `noindex_page`. Lo que hay que corregir puede ser el mismo canonical o el
+     mismo noindex, pero también puede ser lo contrario —que esa URL no deba
+     estar en el sitemap, o que el hreflang deba apuntar a la canónica—, y cada
+     aviso dice dónde está la contradicción: es el patrón de un destino de
+     hreflang roto, con su `4xx_error` en su URL y `hreflang_broken_target`
+     en quien lo anota (decisión 56).
 
    Medido el 2026-10-16 ejecutando `analyze_sitemap` sobre los censos de la BD
    local dentro de una transacción que acaba en `ROLLBACK`:
@@ -298,10 +309,21 @@
      `googlebot`, `description`, `canonical` o `hreflang`. Si lo que queda en
      el body es el canonical o el hreflang, `canonical_in_body` y
      `hreflang_in_body` **no** se emiten además en esa página: el hallazgo es
-     el corte (36). **La indexabilidad no cambia**: sigue leyendo ese robots
+     el corte (36). **Ni `canonical_missing`**: el extractor solo toma el
+     canonical del head tal como lo parsea lxml, y lxml también cierra el head
+     en un `<img>` o un `<div>`, así que esa página llega con `canonical_href`
+     vacío y salía «no declara canonical» (`info`) encima del `error` del
+     corte. Lo cazó un test con el spider de verdad; el que había ponía a la
+     vez `canonical_href` y `canonical_in_body`, una combinación que el
+     extractor no produce. **La indexabilidad no cambia**: sigue leyendo ese robots
      como aplicado, porque no está comprobado qué hace Google con un robots en
      el body, y cambiarla sin medir metería o sacaría páginas del índice y del
-     PageRank (38). Lo que se afirma es que la directiva está donde Google
+     PageRank (38). (El canonical detrás del corte, en cambio, NO se aplica,
+     igual que cualquier canonical del body: eso sí lo documenta Google —un
+     `rel=canonical` fuera del head se ignora— y es lo que ya hacía la
+     indexabilidad antes de esta decisión. La asimetría es la de lo que está
+     comprobado, y la incidencia marca los dos como `directiva_en_duda`.)
+     Lo que se afirma es que la directiva está donde Google
      deja de leer, y la incidencia lo marca (`directiva_en_duda`) y la ficha
      lo dice: el mismo informe que la da por noindex avisa de que eso está en
      duda, en vez de contradecirlo en silencio.

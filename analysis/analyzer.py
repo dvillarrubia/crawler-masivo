@@ -853,13 +853,18 @@ class SEOAnalyzer:
             # Si esta en el body porque algo corto el head, el hallazgo es el
             # corte y lo dice `head_cortado` (decision 102): un aviso por
             # hallazgo (36).
-            if canonical_in_body and not _lo_saca_el_corte(
-                head_cortado_por, fuera_del_head, "canonical"
-            ):
+            cortado = _lo_saca_el_corte(head_cortado_por, fuera_del_head, "canonical")
+            if canonical_in_body and not cortado:
                 self._add_issue(url_id, "canonical_in_body", "warning")
 
             if not canonical_href or not canonical_href.strip():
-                self._add_issue(url_id, "canonical_missing", "info")
+                # El extractor solo toma el canonical del head tal como lo
+                # parsea lxml, asi que con el head cortado antes del canonical
+                # `canonical_href` llega vacio: la pagina SI lo declara, y el
+                # hallazgo es el corte (`head_cortado`, error). Decir ademas
+                # que falta era el mismo hallazgo dos veces (decision 36).
+                if not cortado:
+                    self._add_issue(url_id, "canonical_missing", "info")
                 continue
 
             canonical = canonical_href.strip()
@@ -1070,7 +1075,7 @@ class SEOAnalyzer:
         variante `?utm` que repite el cluster de su canonica no tiene nada que
         arreglar): `hreflang_sin_autorreferencia` (por pagina),
         `hreflang_sin_x_default` (por host), `hreflang_idioma_repetido`
-        (por cluster e idioma), `hreflang_destino_no_indexable` (por destino) y
+        (por cluster e idioma), `hreflang_destino_no_indexable` (por anotacion) y
         `hreflang_retorno_incoherente` (por anotacion). Todo sale de diccionarios
         montados con UNA consulta de URLs y una de anotaciones: nada por
         anotacion y nada por pareja de paginas.
@@ -1087,10 +1092,18 @@ class SEOAnalyzer:
         norm_by_id: dict[int, str] = {}
         url_by_id: dict[int, str] = {}
         info_url: dict[int, tuple] = {}
+        # Interna y tipo de recurso, para dos cosas: una pagina EXTERNA no es
+        # fuente (no es del sitio auditado y la pestana Hreflang del Explorador
+        # no la ensena), y el x-default se ancla en una pagina HTML interna.
+        internas: set[int] = set()
+        html_200: set[int] = set()
+        # URL -> a donde salta, SOLO por redireccion (para anclar el x-default
+        # en la pagina a la que lleva la raiz, no en el 301).
+        salta_a: dict[tuple, tuple] = {}
         consulta = (
             select(Url.id, Url.url, Url.status_code, Url.indexable,
                    Url.indexability_status, Url.redirect_url,
-                   HtmlMeta.canonical_href)
+                   HtmlMeta.canonical_href, Url.is_internal, Url.resource_type)
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id)
         )
@@ -1099,14 +1112,21 @@ class SEOAnalyzer:
         # de autorreferencia; lo que tiene es un destino roto o no indexable,
         # y ese es el aviso (uno por hallazgo).
         alias_de: dict[str, str] = {}
-        for uid, row_url, sc, indexable, estado_idx, redirige, canonical in self.session.execute(
+        for (uid, row_url, sc, indexable, estado_idx, redirige, canonical,
+             interna, tipo_recurso) in self.session.execute(
             consulta.execution_options(yield_per=BATCH_SIZE)
         ):
             url_status[row_url] = sc
             url_by_id[uid] = row_url
             info_url[uid] = (sc, indexable, estado_idx, canonical)
+            if interna:
+                internas.add(uid)
+                if sc == 200 and tipo_recurso == "html":
+                    html_200.add(uid)
             norm = _clave(row_url)
             if norm:
+                if redirige and _clave(redirige):
+                    salta_a[norm] = _clave(redirige)
                 url_status.setdefault(norm, sc)
                 url_id_by_norm[norm] = uid
                 norm_by_id[uid] = norm
@@ -1128,6 +1148,13 @@ class SEOAnalyzer:
             por desconocimiento.
             """
             return uid is not None and info_url.get(uid, (None, None))[1] is not False
+
+        def fuente(uid: int | None) -> bool:
+            """Indexable y del sitio: una pagina externa que el rastreo leyo
+            (otro subdominio fuera del alcance) no es lo que se audita, y sus
+            avisos no se verian en la pestana Hreflang, que filtra por HTML
+            interno."""
+            return indexable(uid) and uid in internas
 
         stmt = (
             select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href,
@@ -1162,6 +1189,8 @@ class SEOAnalyzer:
         en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
         # Destino no indexable -> pagina indexable que lo anota -> idiomas.
         no_indexable: dict[int, dict[int, set[str]]] = {}
+        # Anotaciones sin retorno, pendientes de saber si son la autorreferencia.
+        sin_retorno: list[tuple] = []
 
         for hreflang_id, url_id, lang, href, en_body in rows:
             norm_href = _clave(href)
@@ -1171,7 +1200,7 @@ class SEOAnalyzer:
             # Una pagina no indexable no es fuente: se guarda si su codigo es
             # valido, que sigue siendo verdad, y nada mas. Lo que tenga mal lo
             # tendra tambien su canonica, y ahi es donde se avisa.
-            if not indexable(url_id):
+            if not fuente(url_id):
                 por_veredicto.setdefault((lang_is_valid, None), []).append(
                     hreflang_id)
                 continue
@@ -1241,17 +1270,19 @@ class SEOAnalyzer:
             # salen SEIS combinaciones distintas: valido o no, por devuelve el
             # enlace / no lo devuelve / no se sabe. En el censo de penguin eso
             # son 438.957 sentencias para escribir seis valores.
-            por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
-                hreflang_id)
-
+            # La falta de retorno se decide DESPUES de la autorreferencia: si el
+            # destino es la variante con la que la pagina se anota a si misma
+            # (`?p=2` que se llama `es-es` con la URL de la pagina 1), el
+            # hallazgo es `hreflang_sin_autorreferencia` y su arreglo cierra
+            # los dos; avisar tambien de que la pagina 1 no devuelve el enlace
+            # era el mismo hallazgo dos veces (decision 36). Medido en progym:
+            # 139 de las 140 `hreflang_missing_return` eran esto.
             if return_ok is False:
-                self._add_issue(
-                    url_id,
-                    "hreflang_missing_return",
-                    "warning",
-                    {"lang": lang, "href": href},
-                    group_key=_clave_de_grupo(lang),
-                )
+                sin_retorno.append((hreflang_id, lang_is_valid, url_id, lang,
+                                    href, norm_href))
+            else:
+                por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
+                    hreflang_id)
 
             if not lang_is_valid:
                 detalle = {"lang": lang}
@@ -1299,6 +1330,26 @@ class SEOAnalyzer:
                 {"cuantos": len(langs), "langs": sorted(set(langs))[:20]},
             )
 
+        variante_de = self._hreflang_completo(
+            targets_by_page, codigos, no_indexable, info_url, norm_by_id,
+            url_id_by_norm, url_by_id, fuente, alias_de, salta_a, html_200,
+        )
+
+        for hreflang_id, lang_valid, url_id, lang, href, norm_href in sin_retorno:
+            if norm_href is not None and variante_de.get(url_id) == norm_href:
+                # La autorreferencia escrita con otra URL: no se afirma que
+                # falte el retorno (ni en la nota de /insights).
+                por_veredicto.setdefault((lang_valid, None), []).append(hreflang_id)
+                continue
+            por_veredicto.setdefault((lang_valid, False), []).append(hreflang_id)
+            self._add_issue(
+                url_id,
+                "hreflang_missing_return",
+                "warning",
+                {"lang": lang, "href": href},
+                group_key=_clave_de_grupo(lang),
+            )
+
         for (lang_valid, return_ok), ids in por_veredicto.items():
             for i in range(0, len(ids), 5000):
                 self.session.execute(
@@ -1306,11 +1357,6 @@ class SEOAnalyzer:
                     .where(Hreflang.id.in_(ids[i:i + 5000]))
                     .values(lang_valid=lang_valid, return_tag_ok=return_ok)
                 )
-
-        self._hreflang_completo(
-            targets_by_page, codigos, no_indexable, info_url, norm_by_id,
-            url_id_by_norm, url_by_id, indexable, alias_de,
-        )
 
         self.session.flush()
         self._flush_issues()
@@ -1320,7 +1366,7 @@ class SEOAnalyzer:
 
     def _hreflang_completo(self, targets_by_page, codigos, no_indexable,
                            info_url, norm_by_id, url_id_by_norm, url_by_id,
-                           indexable, alias_de) -> None:
+                           indexable, alias_de, salta_a, html_200) -> dict:
         """Los cinco tipos de la decision 99, sobre lo ya precargado.
 
         El CLUSTER de una pagina es el conjunto de URLs que anota mas ella
@@ -1328,11 +1374,17 @@ class SEOAnalyzer:
         conjunto, asi que les sale la misma clave sin unir nada con nada: no
         hay componentes conexas que un enlace de «idioma no disponible -> la
         home» convierta en un cluster de medio sitio.
+
+        *indexable* es el criterio de FUENTE (indexable e interna). Devuelve,
+        por pagina sin autorreferencia, la clave de la variante con la que se
+        anota a si misma, para no afirmar ademas que esa variante no le
+        devuelve el enlace.
         """
         n_ej = self._EJEMPLOS_HREFLANG
         clusters: dict[str, list[int]] = defaultdict(list)
         cluster_de: dict[int, str] = {}
-        sin_auto: list[tuple[int, str | None]] = []
+        sin_auto: list[tuple[int, tuple | None]] = []
+        variante_de: dict[int, tuple] = {}
 
         for page_id, destinos in targets_by_page.items():
             if not indexable(page_id):
@@ -1383,7 +1435,7 @@ class SEOAnalyzer:
                         fuentes.pop(page_id, None)
                         if not fuentes:
                             del no_indexable[url_id_by_norm[d]]
-                sin_auto.append((page_id, _url_de_clave(propias[0])))
+                sin_auto.append((page_id, propias[0]))
             elif any(alias_de.get(d) == yo for d in otros):
                 continue  # por otra URL que es ella: el aviso es el del destino
             else:
@@ -1398,9 +1450,10 @@ class SEOAnalyzer:
             # pagina—, que para Google es otra URL. Se dice cual, porque el
             # arreglo es ese.
             variante = [propia] if propia else sorted(
-                _url_de_clave(d) for d in otros if d[:3] == yo[:3])
+                (d for d in otros if d[:3] == yo[:3]), key=_url_de_clave)
             if variante:
-                detalle["variante_propia"] = variante[0]
+                detalle["variante_propia"] = _url_de_clave(variante[0])
+                variante_de[page_id] = variante[0]
             self._add_issue(page_id, "hreflang_sin_autorreferencia", "warning",
                             detalle)
 
@@ -1437,8 +1490,18 @@ class SEOAnalyzer:
             # las afectadas, el hallazgo cambiaba de URL en cuanto se arreglaba
             # ese cluster o aparecia otro con una URL menor, y el diff lo
             # contaba como uno resuelto y uno nuevo estando abierto.
-            raiz = url_id_by_norm.get(
-                _clave(f"{esquema_de_host[host]}://{host}/"))
+            # Si la raiz redirige (Lopesan: 302 a `/es/`; penguin: 301 a la
+            # https), se ancla en la pagina a la que lleva: el 302 no es una
+            # pagina HTML y la pestana Hreflang no lo ensenaba («1 pagina» en
+            # el chip y la lista vacia).
+            clave_raiz = _clave(f"{esquema_de_host[host]}://{host}/")
+            vistas = {clave_raiz}
+            while clave_raiz in salta_a and salta_a[clave_raiz] not in vistas:
+                clave_raiz = salta_a[clave_raiz]
+                vistas.add(clave_raiz)
+            raiz = url_id_by_norm.get(clave_raiz)
+            if raiz not in html_200:
+                raiz = None
             self._add_issue(
                 raiz if raiz is not None else ancla(todas),
                 "hreflang_sin_x_default", "info",
@@ -1472,22 +1535,26 @@ class SEOAnalyzer:
                     group_key=_clave_de_grupo(f"{clave}|{c}"),
                 )
 
+        # Por ANOTACION y en la pagina que la escribe, como el destino roto
+        # (`hreflang_broken_target`): `error` por lo mismo —Google descarta esa
+        # alternativa y ese mercado se queda sin su version—, y la fila tiene
+        # que estar en una pagina del sitio. Anclada en el destino, en
+        # www.uoc.edu 9 de las 19 caian en URLs externas (`blogs.uoc.edu`,
+        # `recerca.uoc.edu`) que la pestana Hreflang no ensena, y el arreglo
+        # —apuntar el hreflang a la canonica, o quitar la canonicalizacion—
+        # se decide mirando la pagina que anota.
         for destino_id, por_fuente in no_indexable.items():
-            fuentes = set(por_fuente)
-            langs = {l for ls in por_fuente.values() for l in ls}
             _sc, _idx, estado_idx, canonical = info_url[destino_id]
-            detalle = {
-                "motivo": estado_idx,
-                "langs": sorted(langs)[:20],
-                "paginas_afectadas": len(fuentes),
-                "ejemplos": ejemplos(fuentes),
-            }
-            if canonical and estado_idx == "Canonicalised":
-                detalle["canonical"] = canonical
-            # `error`, como el destino roto: la consecuencia es la misma —Google
-            # descarta esa alternativa y ese mercado se queda sin su version—.
-            self._add_issue(destino_id, "hreflang_destino_no_indexable", "error",
-                            detalle)
+            for fuente_id, langs in por_fuente.items():
+                for lang in sorted(langs):
+                    detalle = {"href": url_by_id[destino_id], "lang": lang,
+                               "motivo": estado_idx}
+                    if canonical and estado_idx == "Canonicalised":
+                        detalle["canonical"] = canonical
+                    self._add_issue(
+                        fuente_id, "hreflang_destino_no_indexable", "error",
+                        detalle, group_key=_clave_de_grupo(lang),
+                    )
 
         # Retorno incoherente: S anota D con un codigo, D devuelve el enlace a
         # S, pero D se declara a si misma con OTRO. Una vez por anotacion de S;
@@ -1516,6 +1583,8 @@ class SEOAnalyzer:
                      "lang_del_destino": sorted(cods_d)},
                     group_key=_clave_de_grupo(lang),
                 )
+
+        return variante_de
 
     # -- Structured Data ----------------------------------------------------
 
@@ -2237,6 +2306,15 @@ class SEOAnalyzer:
             origin_id = url_to_id[origin_url]
             hops = len(visited) - 1  # number of redirects
 
+            # Solo desde una URL interna: una cadena que empieza en otro sitio
+            # (`http://research.uoc.edu/...` enlazada desde el censo) no es del
+            # sitio auditado, y la pestana Redirecciones —que filtra por
+            # interna— la contaba en el chip sin ensenarla en la lista. Lo que
+            # el sitio puede hacer ahi es cambiar el enlace, y eso no es una
+            # cadena suya. Mismo criterio que `redireccion_a_error`.
+            if origin_url not in internas:
+                continue
+
             if is_loop:
                 self._add_issue(
                     origin_id,
@@ -2261,7 +2339,7 @@ class SEOAnalyzer:
             # tiene su `4xx_error` / `5xx_error`. Medido en www.uoc.edu: 383 de
             # las 473 redirecciones de un salto que acababan en error eran
             # esto, casi todas el 307 de Chromium hacia https.
-            if (origin_url in internas and _es_error(final_status)
+            if (_es_error(final_status)
                     and not _solo_normaliza(origin_url, current)):
                 self._add_issue(
                     origin_id,

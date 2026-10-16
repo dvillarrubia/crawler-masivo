@@ -196,13 +196,26 @@
      host si se rastreó, no en la URL mínima de las afectadas: con cualquiera
      de las dos cosas el hallazgo cambiaba de URL o de clave entre análisis y
      la comparación (decisión 88) lo daba por resuelto y nuevo a la vez.
+     Si la raíz **redirige** se ancla en la página HTML 200 interna a la que
+     lleva (Lopesan: 302 a `/es/`; penguin: 301): anclada en el salto, el chip
+     de la pestaña decía «1 página» y la lista salía vacía. Si la cadena no
+     acaba en una así, cae a la URL mínima de las afectadas.
    - `hreflang_idioma_repetido` (warning, por clúster y código, `group_key`
      = clúster|código): el mismo código hacia dos URLs. Un error de plantilla
      en un clúster de 30 páginas es UNA fila con `paginas_afectadas=30`.
    - `hreflang_destino_no_indexable` (**error**, como el destino roto: la
      consecuencia es la misma, ese mercado se queda sin su versión): una fila
-     por DESTINO —canonicalizado, noindex o bloqueado por robots—, anclada en
-     él, con las páginas que lo anotan. Un destino roto sigue siendo solo
+     por ANOTACIÓN hacia un destino canonicalizado, noindex o bloqueado por
+     robots, **en la página que la escribe** —como `hreflang_broken_target`,
+     con `group_key` = código y el destino en `details.href`—. La primera
+     versión daba una fila por destino anclada en él, y el destino puede ser
+     externo: en www.uoc.edu **9 de las 19** caían en `blogs.uoc.edu` o
+     `recerca.uoc.edu`, que la pestaña Hreflang (HTML interno) no enseña, así
+     que el chip decía 19 y la lista 10. Esas 9 solo las anotaban páginas
+     externas, que ya no son fuente (abajo), así que salen; las 10 internas
+     quedan como **17 anotaciones en 10 páginas**, todas visibles en la
+     pestaña. En Lopesan, los 27 destinos son 27 anotaciones en **14** páginas
+     `/es/`. Un destino roto sigue siendo solo
      `hreflang_broken_target` (decisión 56).
    - `hreflang_retorno_incoherente` (warning, por anotación): A llama a B
      `en-US`, B devuelve el enlace a A pero se llama a sí misma `en-GB`. Basta
@@ -213,6 +226,45 @@
      NULL en la autorreferencia, que es una por URL: una clave de clúster ahí
      cambiaría al añadir un idioma y fingiría que el problema se resolvió
      (decisión 88). El clúster va en `details.cluster`.
+
+   **Una página externa tampoco es fuente.** El rastreo lee el HTML de
+   algunos subdominios fuera del alcance (en www.uoc.edu, 139 páginas con
+   hreflang, como `guia-audiovisual.uoc.edu`, que daba su propio x-default);
+   no son el sitio auditado y nada de lo que se diga de ellas sale en la
+   pestaña Hreflang. Sus anotaciones se guardan con `return_tag_ok` NULL.
+   Medido en www.uoc.edu: el x-default pasa de 2 a **1** y los destinos no
+   indexables de 19 a 10 (los 9 de `blogs.uoc.edu` y `recerca.uoc.edu`, que
+   solo anotaban páginas de esos mismos subdominios); el resto de tipos no se
+   mueve.
+
+   **La variante propia sin retorno es solo `hreflang_sin_autorreferencia`.**
+   Si una página se anota con otra URL de su misma ruta (`?p=2` que se llama
+   `es-es` con la URL de la página 1), esa variante no le devuelve el enlace,
+   y salía también `hreflang_missing_return` sobre la misma anotación: un
+   arreglo y dos avisos (decisión 36). La falta de retorno se decide ahora
+   después de la autorreferencia, y la anotación hacia `variante_propia` queda
+   con `return_tag_ok` NULL. Solo esa: en penguin las 107 páginas con los dos
+   avisos anotan OTRA ruta, y ahí el retorno que falta es otro hallazgo.
+   Medido con `run_all` en ROLLBACK: progym **140 → 1** `missing_return` (la
+   que queda anota otra ruta); penguin 121, UOC 71 y Lopesan 0, sin cambio.
+
+   **La nota de Internacionalización de `/insights` cuenta los destinos
+   descartados.** Puntuaba solo con `return_tag_ok` y `lang_valid`, y las
+   anotaciones hacia un destino roto o no indexable tienen el retorno a NULL,
+   así que salían del denominador: Lopesan pasaba de 96 a 100 con 31 errores
+   de hreflang abiertos en Problemas, y UOC de 95 a 100 con 91. Ahora hay una
+   tercera parte, `pct_destino_ok` (de las anotaciones verificadas hacia otra
+   página, las que no van a un destino descartado), una recomendación `alta`
+   con `hreflang_broken_target` + `hreflang_destino_no_indexable` y otra
+   `media` con `hreflang_sin_autorreferencia`. Y con uno de esos dos errores
+   abiertos la categoría no pasa de `TOPE_CON_ERRORES` (79), el criterio de la
+   nota global (decisión 92): en Lopesan son 31 de 3.635 anotaciones y la
+   media sola redondeaba a 100. Medido con `run_all` + `/insights` en
+   ROLLBACK: **Lopesan 96 (master) → 79, UOC 95 → 79**; penguin 64 y progym
+   50, que sin destinos descartados casi no tienen retorno verificado (194.703
+   y 21.194 anotaciones con `return_tag_ok` NULL: se anotan a sí mismas o a
+   su variante). La nota global no cambia (Lopesan 49 por el tope); las URLs
+   con algún `error` en Lopesan quedan en 2.424 (2.405 en master).
 
    **Lo que cambia de lo que ya había**, y es lo que más se mueve: una página
    no indexable ya **no es fuente**. Google no usa el hreflang de una página
@@ -233,12 +285,12 @@
 
    | censo (anotaciones) | sin autorref. | sin x-default | idioma rep. | destino no indexable | retorno incoh. | missing_return | broken_target |
    |---|---|---|---|---|---|---|---|
-   | Lopesan es/en/de (17.268) | 0 | 1: 1 de 620 clústeres | 0 | **27** | 0 | 296 → **0** | 12 → 4 |
-   | www.uoc.edu ca/es/en (81.960) | 34 | 2: 21 de 6.038 (+1 de 1 en guia-audiovisual) | 0 | 19 | 0 | 3.281 → **71** | 72 → 72 |
+   | Lopesan es/en/de (17.268) | 0 | 1: 1 de 620 clústeres | 0 | **27** (en 14 páginas) | 0 | 296 → **0** | 12 → 4 |
+   | www.uoc.edu ca/es/en (81.960) | 34 | 1: 21 de 6.038 | 0 | 10 destinos, 17 anotaciones | 0 | 3.281 → **71** | 72 → 72 |
    | penguin 30-jul (194.824) | **783** | 1: 20.557 de 20.557 | 0 | **0** | 0 | 5.957 → 121 | 61 → 10 |
    | penguin 29-jul (315.076) | **1.014** | 1: 21.262 de 21.262 | 0 | **0** | 0 | 6.197 → 5.919 | 13 → 13 |
    | Druni (139.981) | 304 | 1: 16 de 37.059 | 0 | 0 | 0 | 8.197 → 288 | 0 |
-   | progym (21.195) | 277 | 0 | 0 | 0 | 0 | 144 → 140 | 0 |
+   | progym (21.195) | 277 | 0 | 0 | 0 | 0 | 144 → **1** | 0 |
    | CST (23.901) | 42 | 0 | 0 | 0 | 0 | 166 → 32 | 0 |
 
    `idioma_repetido` y `retorno_incoherente` salen a **0 en todos**, y no por
@@ -266,7 +318,10 @@
      www.uoc.edu no cambian: los 7 de `recerca` que tienen esa forma
      (`detalle?lang=ca` canonicalizada a `detalle?lang=en`) vienen de páginas
      que ya se anotan a sí mismas, así que es la versión catalana fuera del
-     índice. Cierto.
+     índice. Cierto, pero de `recerca.uoc.edu`, fuera del alcance del censo, y
+     anotada desde ese mismo subdominio: con la regla de que una página
+     externa no es fuente (más arriba) esas 7 y las 2 de `blogs.uoc.edu`
+     dejan de avisarse, y quedan las 10 de www.uoc.edu.
    - Lopesan, las 296 «sin retorno» que desaparecen: `/es` sin barra,
      canonicalizada a `/es/`, con el clúster de la canónica. Eran falsas.
    - progym `/compex`: se anota como `/compex?___store=progym_es_sp`, que para
@@ -383,7 +438,13 @@
 
    Los 4 `canonical_broken` de Lopesan son ahora sus 4 `canonical_a_redireccion`.
    En UOC, `redirect_chain` pasa de 401 a 283: las cadenas que acaban en un
-   404 de otra ruta son ahora `redireccion_a_error`. Los `canonical_sin_enlazar`
+   404 de otra ruta son ahora `redireccion_a_error`. Y de 283 a **278** tras
+   la revisión de la Ola 1: una cadena o un bucle solo se avisan si **empiezan
+   en una URL interna**, el criterio que ya tenía `redireccion_a_error`. Las 5
+   que se van empezaban en otro sitio (`http://research.uoc.edu/portal/es/ri/index.html`,
+   `http://estudios.uoc.edu/...`, todas 301) y la pestaña Redirecciones, que
+   filtra por interna, las contaba en el chip sin enseñarlas en la lista. En
+   Lopesan (29), penguin (0) y progym (1) no cambia nada. Los `canonical_sin_enlazar`
    de UOC salen de `orphan_page` y `sitemap_orphan`, exactamente;
    los 41 de Druni, de `sitemap_orphan`. Fuera de esas columnas, las demas
    diferencias del total contra lo guardado (Lopesan 38.922 → 27.332, penguin

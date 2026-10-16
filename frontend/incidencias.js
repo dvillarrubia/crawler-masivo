@@ -258,7 +258,7 @@ const ISSUE_INFO = {
     arreglo: 'Dejar una sola URL por código; si son dos mercados, darles códigos distintos (es-ES, es-MX).',
   },
   'hreflang_destino_no_indexable': {
-    que: 'Una URL que otras páginas anotan como versión de un idioma está canonicalizada a otra, en noindex o bloqueada por robots.txt.',
+    que: 'Esta página anota como versión de un idioma una URL que está canonicalizada a otra, en noindex o bloqueada por robots.txt (una incidencia por anotación; la URL anotada va en el detalle).',
     google: 'Descarta esa alternativa: ese mercado se queda sin su versión en los resultados, igual que con un destino roto.',
     arreglo: 'Si la canonicalización es un error, quitarla; si no, apuntar el hreflang a la URL canónica de ese idioma.',
   },
