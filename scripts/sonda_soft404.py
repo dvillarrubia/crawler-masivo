@@ -29,7 +29,7 @@ import os
 import sys
 from collections import Counter
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse, urlsplit
 
 _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # El repo primero: en la imagen, /app trae la copia de `shared/` con la que se
@@ -55,6 +55,22 @@ def planificar(job_id: str, semillas: list[str], urls: list[str], maximo: int) -
         if host and clave not in vistos:
             vistos.add(clave)
             plan.append((clave, mangle_path(f"{p.scheme}://{p.netloc}/", token_sonda(job_id, clave)), None))
+    # La raiz de cada host con paginas en el censo, no solo la de las
+    # semillas: si la semilla redirige a otro host (sin www -> www), las
+    # paginas viven en un host que de otro modo se quedaba sin sonda.
+    hosts: Counter = Counter()
+    origen_host: dict[str, str] = {}
+    for u in urls:
+        p = urlparse(u)
+        h = (p.hostname or "").lower()
+        if h:
+            hosts[h] += 1
+            origen_host.setdefault(h, f"{p.scheme}://{p.netloc}/")
+    for h, _ in hosts.most_common():
+        clave = f"{h}|raiz"
+        if clave not in vistos and len(plan) < maximo:
+            vistos.add(clave)
+            plan.append((clave, mangle_path(origen_host[h], token_sonda(job_id, clave)), None))
     cuenta: Counter = Counter()
     modelo: dict[tuple[str, str], str] = {}
     for u in urls:
@@ -75,7 +91,8 @@ def planificar(job_id: str, semillas: list[str], urls: list[str], maximo: int) -
     return plan[:maximo]
 
 
-def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, extraction: dict) -> dict:
+def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, extraction: dict,
+            _repetida: bool = False) -> dict:
     from curl_cffi import requests as cr
     from parsel import Selector
 
@@ -91,6 +108,16 @@ def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, ex
         return fila
     fila["status"] = r.status_code
     fila["redirige_a"] = r.headers.get("location") if 300 <= r.status_code < 400 else None
+    destino = urljoin(url, fila["redirige_a"]) if fila["redirige_a"] else None
+    if destino and not _repetida and urlsplit(destino).path == urlsplit(url).path \
+            and urlsplit(destino)[:2] != urlsplit(url)[:2]:
+        # Solo cambia el esquema o el host (http -> https, sin www -> www): la
+        # pagina de error esta al otro lado. Como en el rastreo, una vez.
+        nuevo_host = (urlsplit(destino).hostname or "").lower()
+        nueva = sondear(urlsplit(destino)._replace(query="", fragment="").geturl(),
+                        f"{nuevo_host}|{plantilla or 'raiz'}", plantilla,
+                        impersonate=impersonate, extraction=extraction, _repetida=True)
+        return nueva
     if fila["redirige_a"] is None and "html" in (r.headers.get("content-type") or "html"):
         fila.update(huella_de_respuesta(Selector(text=r.text), url, extraction=extraction))
     return fila

@@ -431,6 +431,12 @@
      determinista por job, conservando tramos padre, extensión y barra final) por
      host de las semillas, y otra por cada plantilla de ruta nueva
      (`firma_de_ruta`), hasta `crawl_behavior.soft404_sondas` (12; 0 las apaga).
+     Y la de la raíz de **cada host interno** la primera vez que sale una página
+     suya, no solo la de las semillas: si la semilla redirige a otro host (sin
+     www → www), el censo vive en un host sin sonda. Una sonda que **solo cambia
+     de esquema o de host** (`http://x.com/zz…` → `https://x.com/zz…`) es la
+     canonicalización del sitio, no su respuesta: se repite una vez en el
+     destino.
      Lo que responde el sitio es SU página de error. Va con su propio callback
      (`crawler/seo_crawler/sonda_soft404.py`): no pasa por `parse`, así que **no
      gasta `max_urls`**; no emite ningún item, así que **no es una URL del
@@ -445,7 +451,12 @@
      decisión 62): con su huella, cada página bloqueada saldría soft 404, y eso
      es un bloqueo.
    - **La huella** es el contenido principal sin el eco de la URL pedida
-     («La página /es/zz… no existe»; `quitar_eco`). Casa por igualdad exacta
+     («La página /es/zz… no existe»; `quitar_eco`). La sonda guarda los
+     primeros 4.000 caracteres (`MAX_TEXTO_SONDA`), pero el hash y el recuento
+     van sobre el texto ENTERO (`huella_hash`, `huella_palabras`), y el parecido
+     se mide contra el mismo principio de la página: con el texto recortado,
+     una página de error de más de 4.000 caracteres —las de e-commerce con
+     carrusel de productos— no casaba nunca. Casa por igualdad exacta
      —con menos de 5 palabras, solo si además coincide el título— o por MinHash
      ≥ 0,9 (`soft404_similitud`), que solo se calcula con 30 palabras o más en los
      dos lados (`firma()` devuelve None por debajo): con 14 palabras no se
@@ -456,7 +467,13 @@
      con una **portada** (`/`, `/es`), el sitio sirve la home para lo que no
      existe. En los dos casos va UN `soft_404_candidato` agrupado
      (`paginas_afectadas`, muestra de 20 y `group_key` por sonda), nunca uno por
-     página.
+     página. **Las sondas que casan con las mismas páginas (o tienen la misma
+     huella) se juzgan juntas**, y la proporción se mide contra el host Y contra
+     cada forma de ruta en la que caen: si una ve la plantilla, ninguna afirma.
+     Antes cada sonda se medía solo contra su alcance, y la de la raíz, contra el
+     host entero: un esqueleto de SPA que era el 100% de su sección y el 40% del
+     host salía afirmado en las cuatro páginas, que llevaban además el candidato
+     agrupado de la sonda de la plantilla.
    - **El titular dice que es un error** (`senal_titulo`, frases en
      es/en/ca/eu/fr/de/pt/it). Seguro si el h1 entero, o un segmento del título
      separado por la marca (`|`, ` - `, `–`), es la frase con dos palabras de
@@ -464,12 +481,30 @@
      encontrado», «not found») solo si no hay nada más que relleno de error
      («Paraíso no encontrado» es un libro). **Y solo con menos de
      `min_word_count` palabras propias**: una página de error no tiene contenido.
+     Entre 30 y `min_word_count` (200) el titular solo no basta —cabe una
+     entrada de glosario «Error 404 - Glosario SEO» de 150 palabras, que con
+     el h1 «Error 404» y en el sitemap salía `error`—: hace falta que el título
+     sea el de la página de error que dio la sonda (`titulo_de_la_sonda`); si
+     no, candidato. Por debajo de 30 palabras no hay contenido que diga otra
+     cosa. No había ningún caso en los censos locales (0 páginas 200 con 30-199
+     palabras y un título de error): es un riesgo de la regla, no una cifra, y
+     las 23 de CST tienen 16-21 palabras y el mismo título que su sonda.
      Las dos reglas salieron de revisar a mano: con los dos puntos como
      separador y sin el recuento, «Inauguración JJOO 2012: ERROR 404», un post de
      blogs.uoc.edu sobre la ceremonia, salía **`error`** (estaba en el sitemap).
      Ahora es candidato.
    - **Búsqueda interna sin resultados** (`es_busqueda` + frase): seguro, es el
-     ejemplo que pone la documentación de Google. La misma frase fuera de una
+     ejemplo que pone la documentación de Google. Con dos guardias: la frase
+     tiene que estar en el título o el h1, o la página tener menos de
+     `min_word_count` palabras (una búsqueda vacía no tiene más que la frase;
+     con contenido, «sin resultados concluyentes» es prosa y «Marca X (0
+     resultados)» la faceta de una búsqueda que sí los tiene); y el tramo de
+     búsqueda tiene que ser el PRIMERO de la ruta (tras el idioma), con
+     `resultados`, `cerca` y `busca` solo si además hay consulta, y `term`, `k`
+     o `keyword` solo con una ruta de búsqueda: `/es/resultados/informe-2025`
+     (blogs.uoc.edu tiene una así, de publicaciones), `/hotel/cerca/playa` y
+     `/glosario?term=seo` pasaban por búsquedas. Las 12 de blogs.uoc.edu
+     tienen 13-14 palabras y siguen saliendo. La misma frase fuera de una
      búsqueda (un listado que dice «no hay productos») y con poco texto, solo
      candidato.
    - **Agotado no es soft 404.** Google pide mantener la página de un producto
@@ -484,22 +519,43 @@
      Excluirlas escondía todo lo de www.uoc.edu: sus 19 páginas de error con 200
      estaban canonicalizadas. Los candidatos, solo en indexables. Un aviso por
      hallazgo: varias señales van en una incidencia, y una `soft_404` no lleva
-     además `low_word_count` (CST: 44 → 21).
+     además lo que describe su contenido (`TAPADAS`: contenido escaso, título,
+     description y h1 que faltan, sobran o se repiten, duplicados exactos y
+     casi duplicados). Es el mismo hallazgo visto peor y manda a arreglar otra
+     cosa: `title_duplicate` pedía hacer distinto el título de 23 páginas de
+     error de CST que tienen que responder 404. Un grupo de duplicados que se
+     queda con una sola página al quitarlas también sobra. Lo que dice algo de
+     la URL y no de lo que sirve (forma de la URL, enlazado, sitemap,
+     directivas) se queda. En `/insights` la soft 404 cuenta como fallo en cada
+     criterio de la nota de contenido y lleva su propia recomendación (alta si
+     hay indexables): sin eso, al perder su `low_word_count` la nota **subía**
+     por un hallazgo peor. El tope de la decisión 92 no cambia: lo dispara la
+     de severidad `error` (en el sitemap), que es la consecuencia.
    - **Medido** en 8 censos locales, con sondas tomadas en vivo el 2026-10-16
      con `scripts/sonda_soft404.py` (renderizadas en los censos con
      `render_js`) y `analyze_soft_404()` sobre una copia del censo. Antes: 0 en
      todos, el tipo no existía.
 
-     | censo | páginas 200 | sondas: respuesta | `soft_404` | candidatos | s |
-     |---|---|---|---|---|---|
-     | Lopesan | 4.318 | 11×404, 1×302 | 0 | 0 | 6,5 |
-     | penguin | 28.454 | 8×3xx, 4×404 vacío | 0 | 0 | 7,6 |
-     | progym | 3.581 | 12×403 (Cloudflare) | 0 | 0 | 1,7 |
-     | Druni | 56.544 | 11×404, 1 redirección | 0 | 0 | 37,9 |
-     | www.uoc.edu | 21.826 | 12×404 | **19** (info; huella **y** título en las 19) | 0 | 27,7 |
-     | CST | 8.049 | 8×404, 4×200 que redirigen por JS | **23** (warning; título) | 0 | 4,1 |
-     | blogs.uoc.edu | 29.808 | 12×404 | **12** (info; búsquedas vacías) | 4 | 21,3 |
-     | Saunier Duval | 1.285 | 11×404, 1×200 | **1** (error; huella y título) | 0 | 1,0 |
+     | censo | páginas 200 | sondas: respuesta | `soft_404` | candidatos | tapadas | s |
+     |---|---|---|---|---|---|---|
+     | Lopesan | 4.318 | 11×404, 1×302 | 0 | 0 | 0 | 3,0 |
+     | penguin | 28.454 | 8×3xx, 4×404 vacío | 0 | 0 | 0 | 7,1 |
+     | progym | 3.581 | 12×403 (Cloudflare) | 0 | 0 | 0 | 1,1 |
+     | Druni | 56.544 | 11×404, 1 redirección | 0 | 0 | 0 | 28,9 |
+     | www.uoc.edu | 21.826 | 12×404 | **19** (info; huella **y** título en las 19) | 0 | 76 | 25,7 |
+     | CST | 8.049 | 8×404, 4×200 que redirigen por JS | **23** (warning; título) | 0 | 92 | 3,0 |
+     | blogs.uoc.edu | 29.808 | 12×404 | **12** (info; búsquedas vacías) | 4 | 24 | 20,2 |
+     | Saunier Duval | 1.285 | 11×404, 1×200 | **1** (error; huella y título) | 0 | 1 | 0,7 |
+
+     «Tapadas» son las incidencias que la `soft_404` sustituye: en CST 23
+     `low_word_count`, 23 `title_duplicate`, 23 `description_missing` y 23
+     `h1_missing` (antes de la revisión solo se quitaban las 23 primeras); en
+     www.uoc.edu 19 de cada una de `description_missing`, `h1_missing`,
+     `near_duplicate_content` y `title_too_long`. Las cifras de `soft_404` y
+     candidatos son **las mismas** antes y después de la revisión de abajo: sus
+     arreglos cierran casos que estos ocho censos no tienen (un esqueleto de
+     SPA, páginas de error largas, una semilla que cambia de host, glosarios),
+     y no se llevaron ninguno de los 21 aciertos revisados a mano.
 
      La huella funcionó donde podía: en www.uoc.edu y en Saunier la página del
      censo es **idéntica** a la que el sitio da hoy con 404 (eco quitado). En
@@ -529,6 +585,24 @@
      a la incidencia (decisión 13: el sitio puede haber cambiado su página de
      error). Una `soft_404` en el sitemap es `error`, así que también pesa en el
      tope de la nota (decisión 92).
+   - **Revisión (2026-10-16)**, cada arreglo con un test que falla sin él:
+     las sondas se juzgan juntas y por forma de ruta (arriba); la huella va
+     sobre el texto entero; la búsqueda y el titular con sus guardias; la sonda
+     del host al que redirige la semilla y la que solo cambia de esquema; lo
+     tapado y `/insights`. Y dos de coste, medidos contra la base local (1,6 M
+     bloques de datos estructurados de todos los censos): los productos
+     descatalogados se buscaban con `url_id IN (subconsulta)` y Postgres
+     recorría `structured_data` **entera** convirtiendo cada JSON a texto —9,4 a
+     12,4 s en Druni, 8,9 a 11,2 s en penguin, y creciendo con lo que guarda la
+     instalación—; ahora va por lotes de 1.000 ids por el índice de `url_id`
+     (con 5.000, el planificador estima 144.000 bloques y vuelve a recorrer la
+     tabla), con una barrera `OFFSET 0` y un `lower()` con tres LIKE en vez de
+     tres ILIKE: **3,1 s en Druni y 3,4-3,5 s en penguin**, con las mismas
+     filas. Y la primera pasada cargaba con `.all()` todas las páginas con
+     1.500 caracteres de texto: ahora va por lotes y no guarda el texto. Pico
+     de memoria de `analyze_soft_404` medido en el mismo proceso: **Druni
+     +351 MB → +75 MB, penguin +124 MB → +37 MB**. El test de `run_all` ya no
+     mira el fuente: lo ejecuta (decisión 74).
    - **Fuera**: los soft 404 por redirección (URLs que mandan a la home; la sonda
      lo anota, ningún check lo usa todavía), la ficha del job no enseña las
      sondas (`JobResponse` no lleva `soft404`: cada sonda guarda hasta 4.000

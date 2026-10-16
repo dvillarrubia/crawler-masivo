@@ -27,7 +27,7 @@
 | `seo_crawler/items.py` | Scrapy Item definitions (PageItem, HtmlMetaItem, LinkItem, etc.) |
 | `seo_crawler/middlewares.py` | UA rotation, proxy, job config, HTTP config middlewares |
 | `seo_crawler/settings.py` | Scrapy settings (BFS, autothrottle, Playwright, pipeline) |
-| `seo_crawler/sonda_soft404.py` | Sondas de soft 404 (decision 105): una URL inexistente por host de las semillas y por plantilla nueva, con su propio callback; no cuentan en `max_urls` ni se guardan en `urls`, van a `jobs.soft404["sondas"]` |
+| `seo_crawler/sonda_soft404.py` | Sondas de soft 404 (decision 105): una URL inexistente por host de las semillas, por host interno nuevo y por plantilla nueva (y repetida en el destino si solo cambia de esquema o host), con su propio callback; no cuentan en `max_urls` ni se guardan en `urls`, van a `jobs.soft404["sondas"]` |
 
 ### Analysis (`analysis/`)
 | File | Description |
@@ -141,7 +141,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
-| `analyze_soft_404()` | **soft_404** y **soft_404_candidato** (decision 105, logica en `analysis/soft404.py`): huella de la sonda, titular de error, busqueda sin resultados; descatalogados y huellas de plantilla como candidatos. Tapa el `low_word_count` de la misma pagina |
+| `analyze_soft_404()` | **soft_404** y **soft_404_candidato** (decision 105, logica en `analysis/soft404.py`): huella de la sonda, titular de error, busqueda sin resultados; descatalogados y huellas de plantilla como candidatos. Tapa en la misma pagina lo que describe su contenido (`TAPADAS`: contenido escaso, titulo, description, h1, duplicados) |
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |

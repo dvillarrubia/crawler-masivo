@@ -224,3 +224,33 @@ def test_errores_extendidos_la_dejan_en_critico(db_completa, job_c):
     r = results.get_insights(job.id, db)
     assert r.overall_score <= results.TOPE_CON_ERRORES_EXTENDIDOS
     assert r.tope is not None and r.tope.paginas_con_error == 3 and r.tope.pct == 15.0
+
+
+def test_una_soft_404_no_mejora_la_nota_de_contenido(db, job):
+    """Decision 105: el analisis le quita a la soft 404 su `low_word_count`,
+    su `title_duplicate`... (un aviso por hallazgo). Sin contarla aqui, la
+    pagina dejaba de restar y la nota SUBIA por un hallazgo peor."""
+    escasa = [_url(db, job, f"/e{i}") for i in range(2)]
+    for p in escasa:
+        _issue(db, job, p, "low_word_count")
+        _issue(db, job, p, "title_duplicate")
+    sanas = [_url(db, job, f"/s{i}") for i in range(2)]
+    db.commit()
+    antes = results._calc_content(job.id, db)
+
+    # Las mismas dos paginas, ahora reconocidas como soft 404
+    db.query(Issue).filter(Issue.job_id == job.id).delete()
+    for p in escasa:
+        _issue(db, job, p, "soft_404")
+    _issue(db, job, sanas[0], "soft_404_candidato")
+    db.commit()
+    ahora = results._calc_content(job.id, db)
+
+    assert ahora.score <= antes.score
+    assert ahora.metrics["soft404_count"] == 2 and ahora.metrics["soft404_indexables"] == 2
+    recs = {r.title: r for r in ahora.recommendations}
+    soft = recs["Corregir paginas de error que responden 200 (soft 404)"]
+    assert soft.priority == "alta" and soft.affected_count == 2
+    assert recs["Revisar posibles soft 404"].affected_count == 1
+    # Y no se recomienda arreglar el titulo de una pagina de error
+    assert "Optimizar titulos" not in recs

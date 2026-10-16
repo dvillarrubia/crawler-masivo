@@ -6,6 +6,7 @@ incidencia (`soft_404`, `soft_404_candidato`) que nadie emitia.
 
 from __future__ import annotations
 
+import os
 import uuid
 
 import pytest
@@ -296,13 +297,200 @@ def test_titulos_busquedas_y_descatalogados_sin_sonda(sesion):
     assert sesion.get(Job, job_id).soft404["resumen"]["productos_agotados_no_emitidos"] == 1
 
 
-def test_soft404_corre_en_run_all():
-    import inspect
+URL_PG = os.environ.get("PAGERANK_TEST_DATABASE_URL")
 
+
+@pytest.mark.parametrize("motor", [
+    "sqlite",
+    pytest.param("postgres", marks=pytest.mark.skipif(
+        not URL_PG, reason="sin PAGERANK_TEST_DATABASE_URL")),
+])
+def test_run_all_quita_de_la_soft_404_lo_que_dice_de_su_contenido(tmp_path, monkeypatch, motor):
+    """Se EJECUTA `run_all` (decision 74) y se lee lo que queda escrito.
+
+    El caso de CST: paginas indexables con el titulo «404: NotFound», sin h1 ni
+    description y con poco texto. Antes de esto llevaban, ademas de
+    `soft_404`, `title_duplicate` (un grupo hecho solo de ellas, que mandaba a
+    hacer distinto cada titulo de error), `description_missing`, `h1_missing` y
+    `low_word_count`: cinco avisos para un hallazgo que se arregla respondiendo
+    404. Y si `analyze_soft_404` dejara de correr, o algo volviera a emitir
+    `low_word_count` despues, este test lo veria; mirar el fuente no.
+
+    En SQLite, los tres pasos del grafo de enlaces (SQL de Postgres, como en
+    `test_comparacion`) no hacen nada; en Postgres corre `run_all` entero.
+    """
     from analysis.analyzer import SEOAnalyzer
+    from analysis.soft404 import TAPADAS
 
-    fuente = inspect.getsource(SEOAnalyzer.run_all)
-    assert fuente.index("analyze_content()") < fuente.index("analyze_soft_404()")
+    if motor == "postgres":
+        engine = create_engine(URL_PG)
+    else:
+        engine = create_engine(f"sqlite:///{tmp_path}/a.db")
+        for paso in ("compute_link_counts", "compute_pagerank", "analyze_links"):
+            monkeypatch.setattr(SEOAnalyzer, paso, lambda self: None)
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine)()
+    job_id = uuid.uuid4()
+    b = 7_000_000_000 + uuid.uuid4().int % 1_000_000 * 100  # ids libres en la base compartida
+    s.add(Job(id=job_id, name="t", status="analyzing", seeds=["https://x.com/"], config={}))
+    s.flush()
+    try:
+        error = "404 We're sorry, the page you're looking for doesn't exist. Go Back to Home page"
+        for uid in range(1, 4):
+            _pagina(s, job_id, b + uid, f"/premios/SpaceUp0{uid}", error, titulo="404: NotFound")
+        # Una pagina real que comparte titulo con las de error: al quitar las
+        # de error, su grupo de duplicados se queda solo y tambien sobra.
+        _pagina(s, job_id, b + 4, "/premios/real", NORMAL, titulo="404: NotFound", h1="Premios")
+        for uid in range(5, 9):
+            _pagina(s, job_id, b + uid, f"/info/p{uid}", NORMAL + f" p{uid}",
+                    titulo=f"Pagina {uid} | X", h1=f"Pagina {uid}")
+        s.flush()
+        for m in s.query(HtmlMeta).filter(HtmlMeta.url_id >= b + 4, HtmlMeta.url_id <= b + 8):
+            m.meta_description = "Una descripcion suficientemente larga para no avisar de nada " * 2
+        s.commit()
+
+        SEOAnalyzer(s, job_id).run_all()
+        s.expire_all()
+        issues = [(i.url_id - b, i.issue_type) for i in s.query(Issue).filter(Issue.job_id == job_id)]
+        for uid in (1, 2, 3):
+            assert (uid, "soft_404") in issues
+            assert not [t for u, t in issues if u == uid and t in TAPADAS], issues
+        assert (4, "title_duplicate") not in issues
+        resumen = s.get(Job, job_id).soft404["resumen"]
+        assert resumen["incidencias_tapadas"]["low_word_count"] == 3
+        assert resumen["incidencias_tapadas"]["title_duplicate_sin_grupo"] == 1
+    finally:
+        s.rollback()
+        if motor == "postgres":
+            ids = [u for (u,) in s.query(Url.id).filter(Url.job_id == job_id)]
+            for tabla in (Issue, Heading, HtmlMeta, PageContent):
+                col = tabla.job_id if tabla is Issue else tabla.url_id
+                s.query(tabla).filter(col == job_id if tabla is Issue else col.in_(ids or [0])).delete(
+                    synchronize_session=False)
+            s.query(Url).filter(Url.job_id == job_id).delete()
+            s.query(Job).filter(Job.id == job_id).delete()
+            s.commit()
+        s.close()
+        engine.dispose()
+
+
+SHELL = " ".join(f"cargando aplicacion modulo{i} espera" for i in range(12))
+
+
+def _shell_spa(sesion, job_id, sondas):
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={}, soft404={"sondas": sondas}))
+    for uid in range(1, 5):
+        _pagina(sesion, job_id, uid, f"/app/ficha-{uid}", SHELL, titulo="App")
+    for uid in range(5, 11):
+        _pagina(sesion, job_id, uid, f"/info/p{uid}", NORMAL + f" p{uid}")
+    sesion.commit()
+
+
+def test_la_raiz_no_afirma_lo_que_su_plantilla_ve_como_esqueleto(sesion):
+    """El esqueleto de una SPA que es el 100% de su seccion y el 40% del host.
+
+    La sonda de la plantilla ya lo marcaba como ambiguo, pero la de la raiz se
+    media contra el host entero (4/10) y afirmaba las cuatro: cada pagina
+    acababa con `soft_404` Y `soft_404_candidato`.
+    """
+    job_id = uuid.uuid4()
+    _shell_spa(sesion, job_id, [
+        _sonda(path="/zz00", texto=SHELL, titulo="App"),
+        _sonda(path="/app/zz01", texto=SHELL, titulo="App", plantilla="/app/:slug (2n)"),
+    ])
+    issues = _analizar(sesion, job_id)
+    assert not [k for k in issues if k[1] == "soft_404"]
+    cand = [i for k, i in issues.items() if k[1] == "soft_404_candidato"]
+    assert len(cand) == 1 and cand[0].details["paginas_afectadas"] == 4
+    assert len(cand[0].details["motivos"][0]["sondas"]) == 2
+
+
+def test_la_raiz_sola_tambien_mira_cada_plantilla(sesion):
+    job_id = uuid.uuid4()
+    _shell_spa(sesion, job_id, [_sonda(path="/zz00", texto=SHELL, titulo="App")])
+    issues = _analizar(sesion, job_id)
+    assert not [k for k in issues if k[1] == "soft_404"]
+    cand = [i for k, i in issues.items() if k[1] == "soft_404_candidato"]
+    assert cand[0].details["motivos"][0]["plantillas_cubiertas"][0]["proporcion"] == 1.0
+
+
+LARGA = ("Lo sentimos, esta pagina no existe. Te recomendamos estos productos: "
+         + " ".join(f"Producto recomendado numero {i} con envio gratis y devolucion" for i in range(150)))
+
+
+def test_una_pagina_de_error_larga_casa_aunque_la_sonda_se_guarde_recortada(sesion):
+    assert len(LARGA) > s4.MAX_TEXTO_SONDA
+    job_id = uuid.uuid4()
+    url_sonda = "https://x.com/zz00"
+    sonda = _sonda(path="/zz00", titulo="Oops | X", texto=None)
+    sonda.update(s4.campos_de_huella(LARGA, url_sonda, "Oops | X"))
+    vieja = _sonda(path="/zz00", titulo="Oops | X", texto=LARGA[:s4.MAX_TEXTO_SONDA],
+                   palabras=len(LARGA.split()))  # sonda guardada antes de la huella
+    vieja["host"] = "y.com"
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={},
+                   soft404={"sondas": [sonda, vieja]}))
+    _pagina(sesion, job_id, 1, "/p/viejo", LARGA)
+    sesion.add(Url(id=2, job_id=job_id, url="https://y.com/p/viejo", url_hash="h2", host="y.com",
+                   path="/p/viejo", is_html=True, is_internal=True, status_code=200,
+                   indexable=True, content_word_count=len(LARGA.split())))
+    sesion.add(PageContent(url_id=2, content_text=LARGA))
+    sesion.add(HtmlMeta(url_id=2, title="Ficha | X"))
+    for uid in range(3, 8):
+        _pagina(sesion, job_id, uid, f"/p/n{uid}", NORMAL + f" n{uid}")
+    sesion.commit()
+    issues = _analizar(sesion, job_id)
+    assert issues[(1, "soft_404")].details["senales"][0]["metodo"] == "contenido_identico"
+    assert issues[(2, "soft_404")].details["senales"][0]["metodo"] == "minhash"
+
+
+@pytest.mark.parametrize("url", [
+    "https://x.com/es/resultados/informe-2025", "https://x.com/hotel/cerca/playa",
+    "https://x.com/glosario?term=seo",
+])
+def test_no_es_busqueda(url):
+    assert not s4.es_busqueda(url)
+
+
+@pytest.mark.parametrize("url", [
+    "https://x.com/ca/cerca?q=a", "https://x.com/es/resultados/?q=1",
+    "https://x.com/tienda/buscar/?keyword=x", "https://x.com/search/zapatillas",
+])
+def test_si_es_busqueda(url):
+    assert s4.es_busqueda(url)
+
+
+def test_una_busqueda_con_contenido_no_es_una_busqueda_vacia(sesion):
+    """La frase en el texto de una pagina con contenido es otra cosa: las
+    facetas («Marca X (0 resultados)») de una busqueda que si tiene."""
+    job_id = uuid.uuid4()
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={}))
+    _pagina(sesion, job_id, 1, "/buscar?q=hotel", "Marca X (0 resultados) " + NORMAL,
+            titulo="Buscar hotel | X")
+    _pagina(sesion, job_id, 2, "/buscar?q=zzz", NORMAL + " sin resultados",
+            titulo="Sin resultados | X")
+    sesion.commit()
+    issues = _analizar(sesion, job_id)
+    assert (1, "soft_404") not in issues
+    assert (2, "soft_404") in issues  # la frase en el titular
+
+
+def test_titular_de_error_con_algo_de_texto_solo_afirma_con_la_sonda(sesion):
+    """Una entrada de glosario «Error 404» de 150 palabras es candidato; con
+    el titulo de la pagina de error que da la sonda, es la pagina de error."""
+    job_id = uuid.uuid4()
+    medio = " ".join(f"palabra{i}" for i in range(150))
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={}, soft404={"sondas": [
+        _sonda(path="/zz00", status=404, texto="No existe", titulo="404 | Tienda")]}))
+    _pagina(sesion, job_id, 1, "/glosario/error-404", medio, titulo="Error 404 - Glosario SEO | Seobide",
+            h1="Error 404")
+    _pagina(sesion, job_id, 2, "/p/viejo", medio + " x", titulo="404 | Tienda")
+    _pagina(sesion, job_id, 3, "/p/corta", "Vuelve al inicio", titulo="Not Found | Discos")
+    sesion.commit()
+    issues = _analizar(sesion, job_id)
+    assert (1, "soft_404") not in issues
+    assert issues[(1, "soft_404_candidato")].details["motivos"][0]["content_word_count"] == 150
+    assert issues[(2, "soft_404")].details["senales"][0]["titulo_de_la_sonda"] is True
+    assert (3, "soft_404") in issues  # sin contenido que diga otra cosa
 
 
 def test_umbrales_declarados_en_el_schema():

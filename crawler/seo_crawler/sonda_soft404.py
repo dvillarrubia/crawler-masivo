@@ -1,8 +1,9 @@
 """Sonda de soft 404 durante el rastreo (decision 105).
 
 Al empezar, el spider pide por cada host de las semillas una URL que no puede
-existir (`shared.soft404.mangle_path`), y despues una por cada plantilla de
-ruta nueva que encuentra (`shared.plantillas.firma_de_ruta`), hasta
+existir (`shared.soft404.mangle_path`), y despues una por cada host interno y
+cada plantilla de ruta nueva que encuentra (`shared.plantillas.firma_de_ruta`),
+hasta
 `crawl_behavior.soft404_sondas`. Lo que responde el sitio a esa URL es su
 pagina de error: si es un 200, el sitio tiene soft 404 de serie; si es un 404
 con cuerpo, ese cuerpo sigue siendo la huella con la que reconocer las paginas
@@ -25,19 +26,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, Generator
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import scrapy
 from scrapy.http import HtmlResponse, Response
 
 from shared.plantillas import firma_de_ruta
-from shared.soft404 import mangle_path, token_sonda
+from shared.soft404 import MAX_TEXTO_SONDA, campos_de_huella, mangle_path, token_sonda  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-# Lo que se guarda del contenido de la sonda: suficiente para MinHash y para
-# leerla a mano, sin convertir `jobs` en un almacen de paginas.
-MAX_TEXTO_SONDA = 4000
 SONDAS_POR_DEFECTO = 12
 
 
@@ -65,12 +63,14 @@ def huella_de_respuesta(selector, url: str, *, extraction: dict | None = None) -
             strip_promo=extraction.get("strip_promo_blocks", True),
             extra_selectors=extraction.get("custom_boilerplate_selectors") or None,
         )
+    titulo = meta.get("title") or None
     return {
-        "titulo": (meta.get("title") or None),
+        "titulo": titulo,
         "h1": h1,
-        "texto": (texto or "")[:MAX_TEXTO_SONDA] or None,
         "palabras": contar_palabras(texto),
         "content_hash": hash_de_contenido(texto),
+        # El texto se guarda recortado, pero la huella va sobre el ENTERO
+        **campos_de_huella(texto, url, titulo),
     }
 
 
@@ -85,12 +85,13 @@ class SondaSoft404Mixin:
         self._sondas: list[dict] = list(previo.get("sondas") or []) if isinstance(previo, dict) else []
         self._sondas_claves: set[str] = {s.get("clave") for s in self._sondas if s.get("clave")}
 
-    def _sonda_request(self, url_modelo: str, clave: str) -> scrapy.Request | None:
+    def _sonda_request(self, url_modelo: str, clave: str, *,
+                       url_exacta: str | None = None) -> scrapy.Request | None:
         if getattr(self, "_sondas_max", 0) <= 0:
             return None
         if clave in self._sondas_claves or len(self._sondas_claves) >= self._sondas_max:
             return None
-        url = mangle_path(url_modelo, token_sonda(self.job_id, clave))
+        url = url_exacta or mangle_path(url_modelo, token_sonda(self.job_id, clave))
         if not self._should_follow(url):
             return None
         self._sondas_claves.add(clave)
@@ -118,17 +119,55 @@ class SondaSoft404Mixin:
                 yield req
 
     def _sonda_de_plantilla(self, url: str) -> Generator[scrapy.Request, None, None]:
-        """Una por plantilla de ruta nueva, mientras quede cupo."""
+        """La de la raiz del host de `url` si falta, y una por plantilla nueva.
+
+        La de la raiz no basta con pedirla para los hosts de las SEMILLAS: si
+        la semilla redirige a otro host (sin www -> www), las paginas del censo
+        viven en un host sin sonda y no se comparaban con ninguna huella. Por
+        eso cada host interno con paginas pide la suya la primera vez que se ve.
+        """
         if getattr(self, "_sondas_max", 0) <= 0 or len(self._sondas_claves) >= self._sondas_max:
             return
         partes = urlparse(url)
+        host = (partes.hostname or "").lower()
+        if host:
+            req = self._sonda_request(f"{partes.scheme or 'https'}://{partes.netloc}/",
+                                      f"{host}|raiz")
+            if req is not None:
+                yield req
         tramos = [t for t in (partes.path or "").split("/") if t]
         if len(tramos) < 2:
             return  # la de un tramo es la de la raiz
-        host = (partes.hostname or "").lower()
         req = self._sonda_request(url, f"{host}|{firma_de_ruta(partes.path)}")
         if req is not None:
             yield req
+
+    def _repetir_sonda_en_destino(self, request, destino: str) -> scrapy.Request | None:
+        """Si la sonda solo ha cambiado de esquema o de host, pedirla alli.
+
+        `http://x.com/zz…` -> `https://x.com/zz…` (o a `www.`) es la
+        canonicalizacion del sitio, no la respuesta a una URL que no existe: la
+        pagina de error esta al otro lado. Se repite UNA vez, con la clave del
+        host de destino (y con la misma si el host es el mismo: la que redirigio
+        queda anotada como tal y no deja huella).
+        """
+        if request.meta.get("sonda_repetida"):
+            return None
+        origen, dest = urlsplit(request.url), urlsplit(destino)
+        if dest.scheme not in ("http", "https") or (dest.path or "/") != (origen.path or "/"):
+            return None
+        if (dest.scheme, dest.netloc) == (origen.scheme, origen.netloc):
+            return None
+        clave = request.meta.get("sonda_soft404") or ""
+        _, _, plantilla = clave.partition("|")
+        nueva = f"{(dest.hostname or '').lower()}|{plantilla or 'raiz'}"
+        if nueva == clave:
+            self._sondas_claves.discard(clave)  # la misma clave, ya gastada
+        req = self._sonda_request(destino, nueva,
+                                  url_exacta=dest._replace(query="", fragment="").geturl())
+        if req is not None:
+            req.meta["sonda_repetida"] = True
+        return req
 
     def _anotar_sonda(self, fila: dict) -> None:
         self._sondas.append(fila)
@@ -177,8 +216,10 @@ class SondaSoft404Mixin:
         logger.info("Sonda soft 404 %s -> %s%s", fila["url"], response.status,
                     f" -> {destino}" if destino else "")
         self._anotar_sonda(fila)
-        return
-        yield  # generador: Scrapy espera un iterable
+        if destino:
+            req = self._repetir_sonda_en_destino(response.request, destino)
+            if req is not None:
+                yield req
 
     def sonda_error(self, failure) -> None:
         fila = self._fila_sonda(failure.request)

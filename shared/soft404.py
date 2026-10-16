@@ -158,6 +158,26 @@ def huella(texto: str | None, url: str | None, titulo: str | None = None) -> Hue
     )
 
 
+# Lo que se guarda del texto de una sonda en `jobs.soft404`: suficiente para
+# MinHash y para leerla a mano, sin convertir `jobs` en un almacen de paginas.
+# El hash y el recuento van calculados sobre el texto ENTERO
+# (`campos_de_huella`): con el texto recortado, una pagina de error de mas de
+# 4.000 caracteres no casaba nunca con su copia del censo.
+MAX_TEXTO_SONDA = 4000
+
+
+def campos_de_huella(texto: str | None, url: str | None, titulo: str | None = None) -> dict:
+    """Lo que la sonda guarda de su contenido: el principio y la huella entera."""
+    h = huella(texto, url, titulo)
+    recortado = bool(texto) and len(texto) > MAX_TEXTO_SONDA
+    return {
+        "texto": (texto or "")[:MAX_TEXTO_SONDA] or None,
+        "texto_recortado": recortado,
+        "huella_hash": h.hash,
+        "huella_palabras": h.palabras,
+    }
+
+
 def misma_huella(sonda: Huella, pagina: Huella, min_palabras: int) -> str | None:
     """Igualdad exacta de contenido; devuelve el metodo o None.
 
@@ -290,16 +310,24 @@ def senal_titulo(titulo: str | None, h1: str | None) -> tuple[str, str, str] | N
 # Busqueda interna sin resultados
 # ---------------------------------------------------------------------------
 
+# Parametros que solo usa un buscador. Los ambiguos (`term` de un glosario,
+# `k`, `keyword` de un filtro, `cerca` = «near» en castellano) solo cuentan si
+# la RUTA tambien es de busqueda.
 PARAMETROS_BUSQUEDA = frozenset({
     "s", "q", "query", "search", "search_query", "searchterm", "buscar", "busqueda",
-    "keyword", "keywords", "k", "term", "termino", "cerca", "recherche", "suche",
-    "pesquisa", "ricerca", "bilatu",
+    "recherche", "suche", "pesquisa", "ricerca", "bilatu",
 })
+PARAMETROS_BUSQUEDA_AMBIGUOS = frozenset({"keyword", "keywords", "k", "term", "termino", "cerca"})
+# Tramos de ruta del buscador. Solo valen como PRIMER tramo (tras el idioma,
+# `/es/buscar/...`): en medio de una ruta, `/es/resultados/informe-2025` es una
+# pagina de resultados de investigacion y `/hotel/cerca/playa` una ubicacion.
 TRAMOS_BUSQUEDA = frozenset({
-    "search", "buscar", "busqueda", "buscador", "busca", "cerca", "cercar", "recherche",
-    "suche", "pesquisa", "ricerca", "bilatu", "bilaketa", "catalogsearch", "resultados",
-    "search-results",
+    "search", "buscar", "busqueda", "buscador", "cercar", "recherche",
+    "suche", "pesquisa", "ricerca", "bilatu", "bilaketa", "catalogsearch", "search-results",
 })
+# Y estos, ademas, solo con una consulta en la URL: «resultados», «cerca»
+# (catalan/italiano «buscar») y «busca» tambien son palabras corrientes.
+TRAMOS_BUSQUEDA_AMBIGUOS = frozenset({"resultados", "cerca", "busca"})
 
 FRASES_SIN_RESULTADOS: tuple[str, ...] = tuple(sorted({
     # es
@@ -329,12 +357,24 @@ FRASES_SIN_RESULTADOS: tuple[str, ...] = tuple(sorted({
 
 def es_busqueda(url: str) -> bool:
     """True si la URL es una pagina de resultados del buscador interno."""
+    from shared.plantillas import es_idioma
+
     partes = urlsplit(url)
-    for clave, valor in parse_qsl(partes.query, keep_blank_values=True):
-        if clave.lower() in PARAMETROS_BUSQUEDA:
-            return True
+    claves = {c.lower() for c, _ in parse_qsl(partes.query, keep_blank_values=True)}
+    if claves & PARAMETROS_BUSQUEDA:
+        return True
     tramos = [t.lower() for t in (partes.path or "").split("/") if t]
-    return any(t in TRAMOS_BUSQUEDA for t in tramos)
+    while tramos and es_idioma(tramos[0]):
+        tramos = tramos[1:]
+    if claves & PARAMETROS_BUSQUEDA_AMBIGUOS and any(
+            t in TRAMOS_BUSQUEDA or t in TRAMOS_BUSQUEDA_AMBIGUOS for t in tramos):
+        return True  # `/tienda/buscar/?keyword=x`
+    if not tramos:
+        return False
+    primero = tramos[0]
+    if primero in TRAMOS_BUSQUEDA:
+        return True
+    return primero in TRAMOS_BUSQUEDA_AMBIGUOS and bool(partes.query)
 
 
 # Una sola alternancia, de la frase mas larga a la mas corta: con un
