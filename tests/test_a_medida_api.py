@@ -10,7 +10,7 @@ Lo que se sujeta:
 - que una regla que el censo no tiene es un 422, no el censo entero;
 - el orden numerico, una columna por posicion con `todos` y el escape de
   formulas en el CSV;
-- `/export`: las columnas `x_*` al final y las 83 fijas en su sitio;
+- `/export`: las columnas `x_*` al final y las fijas en su sitio;
 - la prueba de reglas (HTML pegado y `raw_html`, 409 sin el, 413 si pesa);
 - que el uso cuenta `x.*` y nunca el nombre de una regla;
 - que guardar un perfil valida la fusion con su cliente.
@@ -224,7 +224,7 @@ def test_export_completo_lleva_las_reglas_al_final(entorno, monkeypatch):
     api, jid, _ = entorno
     texto = "".join(_stream_csv(jid))
     filas = list(csv.reader(io.StringIO(texto.lstrip("﻿"))))
-    assert filas[0][:len(CSV_COLUMNS)] == CSV_COLUMNS            # las 83 en su sitio
+    assert filas[0][:len(CSV_COLUMNS)] == CSV_COLUMNS            # las fijas en su sitio
     assert filas[0][len(CSV_COLUMNS):] == ["x_precio", "x_sku", "x_tallas", "x_gtm"]
     p1 = next(f for f in filas[1:] if f[0] == "https://x.com/p/1")
     assert p1[len(CSV_COLUMNS):] == ["19.95", "'=HYPERLINK(\"x\")", "38 | 39", "si"]
@@ -236,7 +236,9 @@ def test_export_completo_sin_reglas_no_cambia(entorno, tmp_path):
 
     assert columnas_a_medida_export({}) == []
     assert columnas_a_medida_export(None) == []
-    assert len(CSV_COLUMNS) == 83
+    # Sin reglas no se anade ninguna columna a las fijas, que no dependen de
+    # las reglas. Su numero lo fija test_export_csv.py, no se repite a mano.
+    assert len(set(CSV_COLUMNS)) == len(CSV_COLUMNS)
 
 
 # ---------------------------------------------------------------------------

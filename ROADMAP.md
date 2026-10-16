@@ -184,6 +184,22 @@ maneras (`1.234`) se marca como dudoso en vez de adivinarlo. Antes de rastrear,
 las reglas se pueden probar contra el HTML de una página. Queda para después la
 pantalla para editarlas y la prueba contra una URL en vivo.
 
+### Rastreos detrás de un muro (16 de octubre)
+
+Cuando un WAF (Cloudflare, Akamai, Imperva, F5…) o un captcha no nos dejaba
+ver una página, su desafío se guardaba como si fuera la página: con su
+«Just a moment...» como título, indexable y llena de incidencias, y el rastreo
+acababa como «completado», que es como se lee un sitio limpio. Ahora cada
+respuesta dice si era la página o un muro, el muro no cuenta como indexable ni
+lleva incidencias de página —va **una** por sitio y tipo de muro, con cuántas
+páginas—, y si las últimas 50 respuestas son casi todas muros, el rastreo se
+para solo y la ficha lo dice con la causa (bloqueado por un WAF o por límite
+de peticiones). Un rastreo así no se analiza ni se compara con el anterior,
+para que no salten alertas de un sitio que no se ha visto. Probado con el muro
+real de progym. Es la versión sin modelo de
+[#10](https://github.com/dvillarrubia/crawler-masivo/issues/10); la que usa
+Jev para los bloqueos que no se anuncian sigue en cola. Decisión 103.
+
 ### Borrar rastreos viejos en masa (15 de octubre)
 
 La base de datos crecía sin que nada lo dijera —57 GB para 50 rastreos en la
@@ -492,7 +508,8 @@ lanzarlo y un presupuesto máximo
 ([#40](https://github.com/dvillarrubia/crawler-masivo/issues/40)). Nada de pago
 se lanza solo.
 
-- Detectar bloqueos ([#10](https://github.com/dvillarrubia/crawler-masivo/issues/10))
+- Detectar los bloqueos que no se anuncian ([#10](https://github.com/dvillarrubia/crawler-masivo/issues/10);
+  los que sí se anuncian ya se detectan sin modelo, decisión 103)
   y soft 404 ([#11](https://github.com/dvillarrubia/crawler-masivo/issues/11)).
 - Tipo de página ([#12](https://github.com/dvillarrubia/crawler-masivo/issues/12)).
 - Intención de búsqueda y embudo TOFU/MOFU/BOFU, contrastados con las keywords

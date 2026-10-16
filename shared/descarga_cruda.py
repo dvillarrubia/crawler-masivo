@@ -19,20 +19,12 @@ from __future__ import annotations
 
 import os
 
-# Titulos con los que un WAF responde 200 a una peticion que ha bloqueado.
-# La respuesta trae 5-6 kB de HTML sin una palabra de la pagina, asi que un
-# comparador la leia como "aqui se ha perdido todo el contenido" (decision 62).
-TITULOS_DE_BLOQUEO = (
-    "just a moment",
-    "access denied",
-    "pardon our interruption",
-    "attention required",
-    "request unsuccessful",
-    "are you a robot",
-    "checking your browser",
-    "security check",
-    "403 forbidden",
-)
+# Los titulos de muro y el criterio entero viven en `shared/respuestas.py`, que
+# es tambien lo que usa el spider para clasificar cada respuesta: un solo
+# «esto es un muro» para el rastreo y para las herramientas que lo controlan
+# (decisiones 62, 82 y 103). Se reexporta el nombre porque lo importan los
+# scripts.
+from shared.respuestas import NO_VALIDAS, TITULOS_DE_BLOQUEO, clasificar_respuesta  # noqa: E402,F401
 
 
 class NoEsLaPagina(RuntimeError):
@@ -48,18 +40,20 @@ class NoEsLaPagina(RuntimeError):
 def descargar_crudo(url: str, timeout: int = 40) -> str:
     """HTML crudo de `url` con curl_cffi y la huella TLS de Chrome.
 
-    Lanza `NoEsLaPagina` si el codigo no es 200 o si el `<title>` es el de un
-    muro conocido. El titulo se casa por subcadena pero solo contra muros
-    reales: "Checklist de seguridad web" es un articulo y pasa, y una pagina sin
-    `<title>` no se tira por eso.
+    Lanza `NoEsLaPagina` si el codigo no es 200 o si `clasificar_respuesta`
+    dice que la respuesta es un muro (titulo o marcador de desafio sin
+    contenido, captcha, cuerpo binario). "Checklist de seguridad web" es un
+    articulo y pasa, y una pagina sin `<title>` no se tira por eso.
     """
     from curl_cffi import requests as cr
-    from parsel import Selector
-
     r = cr.get(url, impersonate=os.getenv("IMPERSONATE", "chrome124"), timeout=timeout)
     if r.status_code != 200:
         raise NoEsLaPagina(f"HTTP {r.status_code}")
-    titulo = (Selector(text=r.text).css("title::text").get() or "").strip().lower()
-    if any(t in titulo for t in TITULOS_DE_BLOQUEO):
-        raise NoEsLaPagina(f"muro del WAF (titulo: {titulo[:40]!r})")
+    cuerpo = getattr(r, "content", None)
+    if not isinstance(cuerpo, (bytes, bytearray)):
+        cuerpo = (r.text or "").encode("utf-8")
+    clase, motivo = clasificar_respuesta(
+        r.status_code, dict(getattr(r, "headers", None) or {}), bytes(cuerpo), url=url)
+    if clase in NO_VALIDAS:
+        raise NoEsLaPagina(f"muro del WAF ({clase}: {motivo})")
     return r.text

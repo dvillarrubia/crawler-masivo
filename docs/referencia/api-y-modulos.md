@@ -50,6 +50,8 @@
 | `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
 | `extraccion_a_medida.py` | Extraccion y busqueda a medida (decision 104): `validar`, `compilar`, `aplicar`, `firma`, `a_numero` y el `Presupuesto` con cortacircuitos. La usan el spider y la API |
 | `texto_visible.py` | Texto que el navegador pinta, linea a linea (`_lineas_visibles`, `_nodo_oculto`...). Mudado desde `extractors.py`, que lo reexporta, para que la API lo comparta (decision 104) |
+
+| `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -90,7 +92,8 @@
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
-| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **83 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
+| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **84 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio), `response_class` (decision 103) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
+
 
 ## Extraction Functions (`extractors.py`)
 
@@ -120,7 +123,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 
 | Method | Issue Types Detected |
 |--------|---------------------|
-| `analyze_status_codes()` | status_4xx, status_5xx |
+| `analyze_status_codes()` | status_4xx, status_5xx (sin los muros), **respuesta_no_valida** por host y clase (decision 103) |
 | `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title |
 | `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description |
 | `analyze_headings()` | missing_h1, multiple_h1 |

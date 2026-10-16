@@ -53,6 +53,7 @@ import time
 
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
+from shared.respuestas import MOTIVOS_BLOQUEO, NO_VALIDAS
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,14 @@ def _truncado(estado: str | None, motivo: str | None) -> bool:
     return estado != "completed" or (motivo or "") in MOTIVOS_TRUNCADO
 
 
+def _bloqueo(job: dict[str, Any]) -> str | None:
+    """Causa si el censo se rastreo detras de un muro (decision 103)."""
+    motivo = job.get("finish_reason") or ""
+    if motivo in MOTIVOS_BLOQUEO:
+        return motivo
+    return (job.get("salud") or {}).get("causa")
+
+
 def _aplicar_mapa(url: str, mapa: dict[str, str]) -> str:
     """Reescribe el host de una URL según el mapa `pre.x.com -> x.com`."""
     if not mapa:
@@ -212,11 +221,28 @@ def comparar_censos(
             ),
         }
 
-    truncado_a = _truncado(job_a.get("status"), job_a.get("finish_reason"))
-    truncado_b = _truncado(job_b.get("status"), job_b.get("finish_reason"))
-    concluyente = not (truncado_a or truncado_b)
+    # Un censo bloqueado no dice nada del sitio: lo que «cambio» es que el WAF
+    # nos dejo de servir la pagina. Ni ausencias ni alertas (decision 103).
+    bloqueo_a, bloqueo_b = _bloqueo(job_a), _bloqueo(job_b)
+    truncado_a = (_truncado(job_a.get("status"), job_a.get("finish_reason"))
+                  and not bloqueo_a)
+    truncado_b = (_truncado(job_b.get("status"), job_b.get("finish_reason"))
+                  and not bloqueo_b)
+    concluyente = not (truncado_a or truncado_b or bloqueo_a or bloqueo_b)
 
     avisos: list[str] = []
+
+    if bloqueo_a or bloqueo_b:
+        cual = []
+        if bloqueo_a:
+            cual.append(f"el primero ({bloqueo_a})")
+        if bloqueo_b:
+            cual.append(f"el segundo ({bloqueo_b})")
+        avisos.append(
+            "NO CONCLUYENTE: censo bloqueado. " + " y ".join(cual).capitalize()
+            + " se rastreo detras de un muro (desafio de un WAF, captcha o "
+            "limite de peticiones): lo que cambia es lo que nos dejaron ver, no "
+            "el sitio. No se emiten alertas.")
 
     if truncado_a or truncado_b:
         # Solo cuando algo esta DE VERDAD truncado: `concluyente` tambien lo
@@ -304,6 +330,14 @@ def comparar_censos(
         }
 
     a, b = indexar(paginas_a), indexar(paginas_b)
+    # Una pagina que en cualquiera de los dos censos fue un muro no se ha visto
+    # en ese censo: ni cambia, ni desaparece, ni sale del indice. Fuera de la
+    # comparacion, y se cuenta (decision 103).
+    muros = {k for k, p in a.items() if p.get("response_class") in NO_VALIDAS}
+    muros |= {k for k, p in b.items() if p.get("response_class") in NO_VALIDAS}
+    for k in muros:
+        a.pop(k, None)
+        b.pop(k, None)
     comunes = a.keys() & b.keys()
 
     cambios: dict[str, list[dict[str, Any]]] = {
@@ -364,6 +398,7 @@ def comparar_censos(
             "nuevas": len(nuevas),
             "desaparecidas": len(desaparecidas) if concluyente else None,
             "desaparecidas_no_afirmables": len(a.keys() - b.keys()) if not concluyente else 0,
+            "sin_comparar_por_muro": len(muros),
             "ejemplos_nuevas": [b[k]["url"] for k in nuevas[:MUESTRA]],
             "ejemplos_desaparecidas": [a[k]["url"] for k in desaparecidas[:MUESTRA]],
         },
@@ -372,7 +407,10 @@ def comparar_censos(
             for campo, filas in cambios.items()
         },
     }
-    if direccion_sabida:
+    if bloqueo_a or bloqueo_b:
+        resultado["alertas"] = []
+        resultado["bloqueado"] = bloqueo_b or bloqueo_a
+    elif direccion_sabida:
         resultado["alertas"] = _alertas(afectadas, bases)
     else:
         resultado["alertas"] = []
@@ -697,6 +735,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
     filas = (
         db.query(
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
+            Url.response_class,
             HtmlMeta.canonical_href, HtmlMeta.title,
         )
         .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
@@ -721,6 +760,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "indexability_status": f.indexability_status,
             "canonical_href": f.canonical_href, "title": f.title,
             "h1": h1s.get(f.url), "word_count": f.word_count,
+            "response_class": f.response_class,
         }
         for f in filas
     ]
@@ -739,6 +779,8 @@ def resumen_de_job(job) -> dict[str, Any]:
         "finish_reason": job.finish_reason,
         "crawler_version": job.crawler_version,
         "analisis_version": getattr(job, "analisis_version", None),
+        # Para no comparar un censo bloqueado como si fuera el sitio (103).
+        "salud": getattr(job, "health", None),
         "nombre": job.name,
         "fecha": job.started_at.isoformat() if job.started_at else None,
     }
@@ -956,7 +998,10 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
                 incidencias_de_censo(db, anterior.id),
                 incidencias_de_censo(db, job.id),
                 puede_afirmar_resueltas=anterior_entero,
-                urls_del_nuevo={_norm(p["url"]) for p in paginas_nuevas},
+                # Una pagina que ahora es un muro no se ha visto: sus
+                # incidencias de antes «no se sabe», no «resueltas» (103).
+                urls_del_nuevo={_norm(p["url"]) for p in paginas_nuevas
+                                if p.get("response_class") not in NO_VALIDAS},
                 analisis_a=resumen_anterior.get("analisis_version"),
                 analisis_b=getattr(job, "analisis_version", None),
             )
@@ -985,6 +1030,7 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         "comparable": r.get("comparable", False),
         "motivo": r.get("motivo"),
         "concluyente": r.get("concluyente"),
+        "bloqueado": r.get("bloqueado"),
         "avisos": r.get("avisos", []),
         "urls": r.get("urls"),
         "alertas": r.get("alertas", []),

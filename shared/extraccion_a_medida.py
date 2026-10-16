@@ -695,7 +695,8 @@ def es_muro(titulo: str | None, html: str | None) -> bool:
 def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
             contenido: str | None = None, ruta: str | None = None,
             titulo: str | None = None, render: bool | None = None,
-            presupuesto: Presupuesto | None = None, medir: dict | None = None) -> list[dict]:
+            presupuesto: Presupuesto | None = None, medir: dict | None = None,
+            bloqueada: bool | None = None) -> list[dict]:
     """Aplica las reglas a una pagina. Una fila por regla EVALUADA (las que
     `solo_urls` deja fuera no dan fila). Nunca lanza: un fallo de una regla es
     una fila `error`, no un rastreo caido.
@@ -703,10 +704,14 @@ def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
     `raiz`: elemento lxml del documento (`selector.root`). `texto`: el texto
     visible del body. `contenido`: el contenido principal (`page_content`).
     `medir`, si se pasa, recibe los ms de cada regla (lo usa la prueba).
+    `bloqueada`: el spider ya clasifico la respuesta como muro (decision 103,
+    `shared/respuestas.clasificar_respuesta`, que ve tambien el codigo, las
+    cabeceras y el cuerpo binario); si es None se decide aqui por el titulo.
     """
     presupuesto = presupuesto or Presupuesto()
     filas: list[dict] = []
-    bloqueada = es_muro(titulo, html)
+    if bloqueada is None:
+        bloqueada = es_muro(titulo, html)
     inicio_pagina = time.perf_counter()
     for rc in comp.reglas:
         if rc.solo_urls is not None:

@@ -108,6 +108,14 @@ class CrawlBehaviorConfig(BaseModel):
     # Tope (ms) de la espera a que el DOM se calme tras domcontentloaded con
     # render_js; 0/None = el del entorno (PLAYWRIGHT_BANNER_WAIT_MS, def. 2000).
     render_wait_ms: int | None = Field(default=None, ge=0, le=60000)
+    # Salud del rastreo (decision 103): si de las ultimas `salud_ventana`
+    # respuestas, la fraccion `salud_umbral` o mas no son la pagina (desafio de
+    # un WAF, captcha, 429, cuerpo binario), el rastreo se para y el job queda
+    # `failed` con `bloqueado_por_waf` o `rate_limited`. Con
+    # `parar_si_bloqueado=false` sigue, pero el job se juzga igual al cerrar.
+    parar_si_bloqueado: bool = True
+    salud_ventana: int = Field(default=50, ge=10, le=1000)
+    salud_umbral: float = Field(default=0.8, ge=0.1, le=1.0)
 
 
 class UrlFilterConfig(BaseModel):
@@ -501,6 +509,9 @@ class JobResponse(BaseModel):
     analisis_version: str | None = None
     # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
     pagerank_resumen: dict[str, Any] | None = None
+    # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
+    # causa si el rastreo se dio por bloqueado (decision 103).
+    health: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
     # pregunto nada a un modelo sobre este job.
@@ -659,6 +670,8 @@ class UrlResponse(BaseModel):
     transfer_size: int | None = None
     indexability_status: str | None = None
     blocked_by_robots: bool | None = None
+    # La respuesta era la pagina o un muro delante (decision 103).
+    response_class: str | None = None
     inlinks_count: int | None = None
     outlinks_count: int | None = None
     external_outlinks_count: int | None = None

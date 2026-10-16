@@ -12,6 +12,7 @@ then performs a BFS crawl extracting all SEO-relevant data.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -69,6 +70,10 @@ from seo_crawler.sitemaps import (
     parse_sitemap,
 )
 from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
+from shared.respuestas import (
+    NO_VALIDAS, UMBRAL_POR_DEFECTO, VENTANA_POR_DEFECTO, VentanaDeSalud,
+    clasificar_respuesta,
+)
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -415,6 +420,20 @@ _BOILERPLATE_REMOVAL_JS = """
 """
 
 
+def _cabeceras_de(response: Response) -> dict[str, str]:
+    """Las cabeceras de una respuesta de Scrapy como nombre -> valor, en
+    minusculas y con las repetidas unidas por coma."""
+    salida: dict[str, str] = {}
+    try:
+        for nombre, valores in response.headers.items():
+            clave = nombre.decode("latin-1").lower()
+            salida[clave] = ", ".join(
+                v.decode("latin-1", "replace") for v in (valores or []))
+    except Exception:
+        pass
+    return salida
+
+
 class SeoSpider(scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
@@ -468,6 +487,11 @@ class SeoSpider(scrapy.Spider):
         self._reglas_a_medida = None
         self._presupuesto_a_medida = None
         self._config_invalida: str | None = None
+        # Salud del rastreo (decision 103): clase de las ultimas respuestas y
+        # si ya se paro por bloqueo (para no cerrarlo dos veces).
+        self._salud = VentanaDeSalud()
+        self._parar_si_bloqueado: bool = True
+        self._bloqueo: str | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -546,6 +570,16 @@ class SeoSpider(scrapy.Spider):
             cb = self.job_config.get("crawl_behavior", {})
             self._follow_nofollow = cb.get("follow_nofollow", False)
             self._crawl_subdomains = cb.get("crawl_subdomains", False)
+            # Por ventana de esta ejecucion, no sembrada con la anterior: al
+            # reanudar un job que estuvo bloqueado, con la ventana llena de
+            # muros la primera pagina buena ya lo pararia otra vez aunque el
+            # sitio hubiera vuelto. Que un job bloqueado no se reencole sin fin
+            # lo decide el worker (decision 103).
+            self._parar_si_bloqueado = bool(cb.get("parar_si_bloqueado", True))
+            self._salud = VentanaDeSalud(
+                cb.get("salud_ventana") or VENTANA_POR_DEFECTO,
+                cb.get("salud_umbral") or UMBRAL_POR_DEFECTO,
+            )
 
             # -- Advanced config: URL filters --
             uf = self.job_config.get("url_filters", {})
@@ -621,6 +655,9 @@ class SeoSpider(scrapy.Spider):
                             Url.status_code.is_(None),
                             Url.status_code >= 500,
                             Url.redirect_url.like("chrome-error://%"),
+                            # Un muro no es la pagina: no se llego a verla
+                            # (decision 103).
+                            Url.response_class.in_(sorted(NO_VALIDAS)),
                         ),
                     )
                     .yield_per(10_000)
@@ -1168,6 +1205,7 @@ class SeoSpider(scrapy.Spider):
         depth: int,
         response_time_ms: float,
         content_type: str,
+        response_class: str | None = None,
     ) -> Generator:
         """Registra un salto 3xx como su propia fila y sigue el destino."""
         url = response.url
@@ -1202,6 +1240,8 @@ class SeoSpider(scrapy.Spider):
             transfer_size=int(response.headers.get(b"Content-Length", 0) or 0) or len(response.body),
             indexability_status=f"Redirect ({status})",
             blocked_by_robots=response.meta.get("blocked_by_robots"),
+            # Solo `login_requerido` dice algo de un salto; el resto, NULL.
+            response_class=response_class if response_class != "contenido" else None,
         )
         yield from self._follow_redirect(url, location, depth)
 
@@ -1382,12 +1422,20 @@ class SeoSpider(scrapy.Spider):
         # (ver _page_request). Va antes del filtro de tipo: un 301 no es un
         # PDF ni una imagen aunque la URL acabe en .pdf.
         location = self._redirect_location(response)
+        cabeceras = _cabeceras_de(response)
         if location is not None:
             # Un salto 3xx SI cuenta: escribe su fila y gasta presupuesto.
             self._crawled_count += 1
             self._update_redis_progress()
+            # Los saltos no cuentan para la salud: diluirian la ventana, y un
+            # WAF que redirige a su desafio se ve en la respuesta final. Solo
+            # se anota si el salto es a un login de otro host.
+            clase_salto, _ = clasificar_respuesta(
+                status_code, cabeceras, b"", content_type=content_type,
+                url=url, destino=location)
             yield from self._handle_redirect(response, location, depth,
-                                             response_time_ms, content_type)
+                                             response_time_ms, content_type,
+                                             response_class=clase_salto)
             return
 
         # Resource type filter: skip types not enabled in config
@@ -1401,6 +1449,20 @@ class SeoSpider(scrapy.Spider):
 
         self._crawled_count += 1
         self._update_redis_progress()
+
+        # ¿Es la pagina, o un muro delante? (decision 103). Con
+        # HTTPERROR_ALLOW_ALL todo llega aqui: un desafio de Cloudflare servido
+        # con 200 o el cuerpo binario de un F5 se guardaban como paginas
+        # indexables, con sus incidencias, y el job acababa `completed`.
+        # Con render, el codigo y las cabeceras son de la primera respuesta de
+        # page.goto y el cuerpo es el DOM final: si Chromium paso el desafio,
+        # manda el cuerpo (ver `renderizada` en clasificar_respuesta).
+        clase, motivo_clase = clasificar_respuesta(
+            status_code, cabeceras, response.body, content_type=content_type, url=url,
+            renderizada=bool(response.meta.get("playwright")))
+        muro = clase in NO_VALIDAS
+        if muro:
+            logger.info("Respuesta no valida (%s, %s): %s", clase, motivo_clase, url)
 
         # Cadena de redirecciones seguida fuera del spider (con render JS la
         # sigue el navegador): un PageItem por salto. La pagina de este
@@ -1491,7 +1553,7 @@ class SeoSpider(scrapy.Spider):
 
         # Body hash for duplicate content detection
         body_hash = None
-        if is_html and status_code < 400 and hasattr(response, "body"):
+        if is_html and not muro and status_code < 400 and hasattr(response, "body"):
             body_hash = hashlib.sha256(response.body).hexdigest()
 
         # -- Screaming Frog extended fields --------------------------------
@@ -1548,7 +1610,7 @@ class SeoSpider(scrapy.Spider):
         is_success = 200 <= status_code < 300
         refresh_target = None
 
-        if is_html and is_success:
+        if is_html and is_success and not muro:
             selector = response.selector
 
             # Effective base URL for resolving relative URLs (honours <base href>)
@@ -1622,8 +1684,10 @@ class SeoSpider(scrapy.Spider):
             # en noindex o canonicalizado salia "Indexable" en el informe y el
             # cliente acababa revisando el PDF que ya habia sacado a proposito
             # (#26). En un 3xx/4xx/5xx no se leen: manda el codigo.
+            # Un muro no lleva directivas de la pagina: no se leen sus
+            # cabeceras (el desafio de Cloudflare manda `noindex` en el suyo).
             cabeceras_robots = None
-            if is_success:
+            if is_success and not muro:
                 cabeceras_robots, x_robots, canonical_header = (
                     self._directivas_de_cabecera(response, final_url)
                 )
@@ -1633,6 +1697,7 @@ class SeoSpider(scrapy.Spider):
                 canonical_header=canonical_header,
                 page_url=url_for_record,
                 bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
+                response_class=clase,
             )
 
         # -- PageItem for the final destination (always yielded) -----------
@@ -1675,12 +1740,35 @@ class SeoSpider(scrapy.Spider):
             transfer_size=bytes_del_cable or len(response.body),
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
+            response_class=clase,
         )
+        # Solo las internas: con follow_external, una tanda de enlaces a redes
+        # sociales o medios detras de Cloudflare paraba el rastreo de un sitio
+        # que respondia bien. La salud es la del sitio que se audita.
+        if internal:
+            self._anotar_salud(clase, url)
 
         if refresh_target:
             yield from self._follow_redirect(url_for_record, refresh_target, depth)
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
+        # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces
+        # que seguir (los de un desafio son del proveedor, no del sitio).
+        # Las reglas a medida si dejan fila, `pagina_bloqueada`: sin fila la
+        # URL se leeria como «no evaluada», y que no se pudo ver es un dato
+        # (decision 104).
+        if muro:
+            if getattr(self, "_reglas_a_medida", None):
+                yield CustomExtractionItem(
+                    url_hash=final_hash, job_id=self.job_id,
+                    filas=extract_custom(
+                        None, "", self._reglas_a_medida, ruta=parsed.path or "/",
+                        render=bool(response.meta.get("playwright"))
+                        and not response.meta.get("_sin_render"),
+                        presupuesto=self._presupuesto_a_medida, bloqueada=True,
+                    ),
+                )
+            return
         if not is_html or not is_success:
             # Las directivas de cabecera de un no HTML se GUARDAN, no solo se
             # usan aqui: `analyze_indexability` recalcula la indexabilidad de
@@ -2116,6 +2204,41 @@ class SeoSpider(scrapy.Spider):
     # ------------------------------------------------------------------
     # Redis helpers
     # ------------------------------------------------------------------
+    def _anotar_salud(self, clase: str | None, url: str) -> None:
+        """Anota la clase de una respuesta y para el rastreo si esta bloqueado.
+
+        La marca en Redis la lee el worker para dejar el job `failed` con la
+        causa (decision 103): un rastreo detras de un muro no es un sitio
+        limpio (decisiones 28 y 32).
+        """
+        # Con getattr: hay tests que montan el spider sin pasar por __init__.
+        salud = getattr(self, "_salud", None)
+        if salud is None:
+            salud = self._salud = VentanaDeSalud()
+        salud.anotar(clase)
+        if getattr(self, "_bloqueo", None) or not getattr(self, "_parar_si_bloqueado", True):
+            return
+        causa = self._salud.veredicto()
+        if not causa:
+            return
+        self._bloqueo = causa
+        recuentos = self._salud.recuentos()
+        logger.warning(
+            "Rastreo BLOQUEADO (%s): %s en las ultimas %d respuestas (umbral "
+            "%.0f%%). Ultima: %s. Se para: seguir solo guardaria muros.",
+            causa, recuentos, self._salud.ventana, self._salud.umbral * 100, url,
+        )
+        if self._redis is not None:
+            try:
+                self._redis.set(f"job:{self.job_id}:bloqueo", json.dumps({
+                    "causa": causa, "ventana": self._salud.ventana,
+                    "umbral": self._salud.umbral, "recuentos": recuentos,
+                    "ultima_url": url,
+                }))
+            except Exception:
+                logger.warning("No se pudo dejar la marca de bloqueo en Redis")
+        self.crawler.engine.close_spider(self, causa)
+
     def _update_redis_progress(self):
         """Push crawled count + liveness heartbeat to Redis periodically.
 

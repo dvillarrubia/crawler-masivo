@@ -831,3 +831,45 @@ def test_sin_analizador_como_en_la_api_no_se_reanaliza_ni_se_importa(tmp_path):
     p = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True,
                        cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     assert p.returncode == 0, p.stderr[-2000:]
+
+
+# ---------------------------------------------------------------------------
+# Censos detras de un muro (decision 103)
+# ---------------------------------------------------------------------------
+
+def test_un_censo_bloqueado_no_dispara_alertas_seo():
+    """40 de 40 paginas «rotas» porque Cloudflare nos sirvio su desafio: no es
+    el sitio. Sin esto, cada rastreo bloqueado era una alerta critica."""
+    antes = [_pag(f"/p{i}") for i in range(40)]
+    despues = [_pag(f"/p{i}", status_code=403,
+                    indexability_status="Client Error (403)") for i in range(40)]
+    bloqueado = {**JOB_LUEGO, "status": "failed", "finish_reason": "bloqueado_por_waf"}
+    r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=bloqueado)
+    assert r["alertas"] == []
+    assert r["concluyente"] is False
+    assert r["bloqueado"] == "bloqueado_por_waf"
+    assert any("censo bloqueado" in a and "bloqueado_por_waf" in a for a in r["avisos"])
+    # El mismo cambio con un censo entero SI alerta: el guardia es el bloqueo.
+    r2 = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_LUEGO)
+    assert any(a["regla"] == "rotas" for a in r2["alertas"])
+
+
+def test_la_causa_tambien_vale_desde_la_salud_del_job():
+    bloqueado = {**JOB_LUEGO, "salud": {"causa": "rate_limited"}}
+    r = comparar_censos([_pag("/a")], [_pag("/a")], job_a=JOB_OK, job_b=bloqueado)
+    assert r["alertas"] == [] and r["bloqueado"] == "rate_limited"
+
+
+def test_las_paginas_de_muro_no_se_comparan_ni_desaparecen():
+    """Un censo entero con 30 paginas que ahora son un desafio: no han salido
+    del indice ni han desaparecido. No se han visto."""
+    antes = [_pag(f"/p{i}") for i in range(60)]
+    despues = ([_pag(f"/p{i}") for i in range(30)]
+               + [_pag(f"/p{i}", status_code=403, indexability_status="Bloqueada (WAF)",
+                       response_class="challenge_waf") for i in range(30, 60)])
+    r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_LUEGO)
+    assert r["alertas"] == []
+    assert r["urls"]["en_ambos"] == 30
+    assert r["urls"]["desaparecidas"] == 0
+    assert r["urls"]["sin_comparar_por_muro"] == 30
+    assert r["cambios"]["status_code"]["total"] == 0

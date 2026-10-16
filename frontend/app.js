@@ -264,6 +264,12 @@ const fmt = {
         if (!d.canonical) partes.push('a ' + v);
       } else if (k === 'target_status') {
         partes.push(`el destino responde ${v}`);
+      } else if (k === 'clase') {
+        partes.push(fmt.claseRespuesta(v));
+      } else if (k === 'codigos' && typeof v === 'object' && !Array.isArray(v)) {
+        // respuesta_no_valida: lo que distingue un 429 de un 403 (decision 103)
+        const cods = Object.entries(v).map(([c, n]) => `${c === 'null' ? 'sin código' : c} × ${fmt.num(n)}`);
+        if (cods.length) partes.push('códigos ' + cods.join(', '));
       } else if (Array.isArray(v)) {
         partes.push(`${DETALLE_LABEL[k] || k}: ${v.length}`);
       } else if (typeof v === 'object') {
@@ -305,6 +311,16 @@ const fmt = {
     h1: 'H1',
     word_count: 'Palabras (cambio de mas del 20%)',
   }[c] || c),
+  // Si lo que llego era la pagina o un muro delante (decision 103).
+  claseRespuesta: c => ({
+    contenido: 'La página',
+    challenge_waf: 'Desafío de un WAF',
+    captcha: 'Captcha',
+    rate_limited: 'Límite de peticiones (429)',
+    respuesta_binaria: 'Cuerpo binario ilegible',
+    login_requerido: 'Pide iniciar sesión',
+    desconocido: 'Cuerpo vacío',
+  }[c] || (c ? c : '—')),
   // El titular de cada alerta, en castellano llano: quien abre esto quiere
   // saber que ha pasado, no el nombre de la regla.
   reglaDiff: r => ({

@@ -231,6 +231,10 @@ class Job(Base):
     # cada tipo de URL (indexable, redireccion, error...) y cuanta se
     # desperdicia en errores. NULL = analisis anterior a este modelo.
     pagerank_resumen = Column(JSON, nullable=True)
+    # Salud del rastreo (decision 103): respuestas por clase de
+    # `urls.response_class`, cuantas no eran la pagina y la causa si el rastreo
+    # se paro o se dio por bloqueado. NULL = rastreo anterior a la columna.
+    health = Column(JSON, nullable=True)
     # Observabilidad de la capa de decisiones (#7): llamadas, tokens, coste
     # real, aciertos de cache, 429, latencia y distribucion de respuestas.
     # NULL = nunca se le pregunto nada a un modelo sobre este job, que con
@@ -326,6 +330,11 @@ class Url(Base):
     transfer_size = Column(BigInteger, nullable=True)
     indexability_status = Column(String(64), nullable=True)  # reason: "Canonicalised", "Noindex", etc.
     blocked_by_robots = Column(Boolean, nullable=True)       # only set in robots_mode="audit"
+    # Si la respuesta es la pagina o un muro delante (`shared/respuestas.py`):
+    # contenido, challenge_waf, captcha, rate_limited, respuesta_binaria,
+    # login_requerido, desconocido. NULL = sin respuesta, salto de una
+    # redireccion o rastreo anterior a la columna (decision 103).
+    response_class = Column(String(32), nullable=True)
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
     outlinks_count = Column(Integer, default=0)              # outlinks INTERNOS (los externos, aparte)
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count

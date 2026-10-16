@@ -44,6 +44,7 @@ class PageItem(scrapy.Item):
     transfer_size = scrapy.Field()
     indexability_status = scrapy.Field()
     blocked_by_robots = scrapy.Field()
+    response_class = scrapy.Field()
 
 
 class HtmlMetaItem(scrapy.Item):

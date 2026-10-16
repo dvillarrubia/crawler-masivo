@@ -956,6 +956,28 @@
           </div>
         </template>
 
+        <!-- Rastreo detras de un muro (decision 103): el job queda failed con
+             la causa y no se analiza. Sin esto se leia como un sitio con
+             todo en 403, o peor, como un sitio limpio. -->
+        <template x-if="['bloqueado_por_waf','rate_limited'].includes(job.finish_reason)
+                        || (job.health && job.health.causa)">
+          <div class="card mb-2" style="border-left:3px solid var(--error,#dc2626)">
+            <div class="text-sm">
+              <strong x-text="(job.finish_reason === 'rate_limited' || (job.health||{}).causa === 'rate_limited')
+                ? 'Rastreo parado: el servidor limita las peticiones (429).'
+                : 'Rastreo parado: un WAF o un captcha no deja ver las páginas.'"></strong>
+              Las respuestas que no eran la página llegaron al umbral, así que el
+              rastreo se detuvo y no se ha analizado: las cifras de este censo
+              no describen el sitio. Prueba con render de JavaScript, menos
+              concurrencia o la IP del rastreador en la lista blanca del cliente.
+            </div>
+            <template x-if="job.health && job.health.por_clase">
+              <div class="text-dim" style="font-size:.78rem;margin-top:.4rem"
+                   x-text="Object.entries(job.health.por_clase).map(([c,n]) => fmt.claseRespuesta(c) + ': ' + fmt.num(n)).join(' · ')"></div>
+            </template>
+          </div>
+        </template>
+
         <!-- Que cambio respecto al censo anterior del mismo sitio, calculado
              al cerrar el rastreo. Va ARRIBA y antes que las cifras: una
              alerta a la que hay que ir no es una alerta. En Lopesan, media
@@ -2938,6 +2960,7 @@
                   <div class="detail-row"><span class="detail-label">Tipo recurso</span><span class="detail-value" x-text="urlDetail.resource_type || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Indexable</span><span class="detail-value" x-text="urlDetail.indexable ? 'Si' : 'No'"></span></div>
                   <div class="detail-row"><span class="detail-label">Estado indexabilidad</span><span class="detail-value" x-text="urlDetail.indexability_status || '—'"></span></div>
+                  <div class="detail-row"><span class="detail-label">Respuesta</span><span class="detail-value" :class="['challenge_waf','captcha','rate_limited','respuesta_binaria'].includes(urlDetail.response_class) && 'orange'" x-text="fmt.claseRespuesta(urlDetail.response_class)" title="Si lo que llegó era la página o un muro delante (desafío de un WAF, captcha, límite de peticiones, cuerpo binario). Decisión 103"></span></div>
                   <div class="detail-row"><span class="detail-label">Longitud URL</span><span class="detail-value" x-text="urlDetail.url_length || '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Prof. carpetas</span><span class="detail-value" x-text="urlDetail.folder_depth ?? '—'"></span></div>
                   <div class="detail-row"><span class="detail-label">Palabras</span><span class="detail-value" x-text="fmt.num(urlDetail.word_count)"></span></div>
@@ -3828,6 +3851,12 @@
                         <dt>Indexabilidad</dt>
                         <dd :class="expUrlDetail.indexable ? 'green' : (expUrlDetail.indexable === false ? 'orange' : '')"
                             x-text="expUrlDetail.indexability_status || (expUrlDetail.indexable ? 'Indexable' : '—')"></dd>
+                        <template x-if="expUrlDetail.response_class && expUrlDetail.response_class !== 'contenido'">
+                          <dt>Respuesta</dt>
+                        </template>
+                        <template x-if="expUrlDetail.response_class && expUrlDetail.response_class !== 'contenido'">
+                          <dd class="orange" x-text="fmt.claseRespuesta(expUrlDetail.response_class)"></dd>
+                        </template>
                         <dt>Título</dt>
                         <dd>
                           <span x-text="expUrlDetail.html_meta?.title || '(sin título)'"></span>
