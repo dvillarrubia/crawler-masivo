@@ -684,6 +684,16 @@ def _run_job(job_id: str) -> None:
             cancelled = True
         elif job and final_status == "completed":
             job.status = "analyzing"
+            # El analisis tiene que saber ya si el censo esta truncado: lo que
+            # decide sobre ausencias (que un destino no este en el censo) no
+            # puede afirmarse en un censo cortado por el tope (decision 67), y
+            # antes `finish_reason` solo se escribia DESPUES de analizar —en el
+            # analisis automatico de cada rastreo valia NULL—. Se escribe el
+            # mismo motivo que al cerrar; la marca de Redis se consume alli.
+            job.finish_reason = _motivo_de_fin(
+                job_id, razon_cero=razon_cero, sin_guardar=sin_guardar,
+                stalled=stalled, timed_out=timed_out, consumir=False,
+                bloqueo=bloqueo)
             session.commit()
     except Exception:
         session.rollback()
@@ -725,22 +735,10 @@ def _run_job(job_id: str) -> None:
             # OJO con el orden: el timeout manda. Antes se ponia "finished"
             # por defecto, asi que un rastreo cortado por tiempo afirmaba haber
             # agotado la frontera teniendo 1.051 URLs pendientes.
-            motivo = (razon_cero if razon_cero
-                      else "persistence_failed" if sin_guardar
-                      else bloqueo if bloqueo
-                      else "stalled" if stalled
-                      else "max_runtime_reached" if timed_out
-                      else "finished")
-            try:
-                rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
-                # Si no se guardo nada, eso manda sobre como acabo el rastreo
-                if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
-                        and not sin_guardar and not bloqueo):
-                    motivo = "max_urls_reached"
-                rc.delete(f"job:{job_id}:finish_reason")
-                rc.delete(f"job:{job_id}:bloqueo")
-            except Exception:
-                pass
+            motivo = _motivo_de_fin(
+                job_id, razon_cero=razon_cero, sin_guardar=sin_guardar,
+                stalled=stalled, timed_out=timed_out, consumir=True,
+                bloqueo=bloqueo)
             job.finish_reason = motivo
             if salud is not None:
                 job.health = salud
@@ -1029,6 +1027,39 @@ def _comprobar_render_js(job_id: str) -> None:
     except Exception:
         # Nunca debe tumbar el cierre del job: es un diagnostico, no el rastreo.
         logger.exception("Comprobacion de render JS fallida para el job %s", job_id)
+
+
+def _motivo_de_fin(job_id: str, *, razon_cero: str, sin_guardar: bool, stalled: bool,
+                   timed_out: bool, consumir: bool, bloqueo: str | None = None) -> str:
+    """Motivo real de finalizacion para `finish_reason`.
+
+    El spider marca en Redis cuando corta por el tope de URLs; sin esto, un
+    crawl truncado quedaba indistinguible de uno completo y el PageRank se
+    presentaba como bueno estando calculado sobre una parte del sitio.
+    OJO con el orden: el timeout manda. Antes se ponia "finished" por defecto,
+    asi que un rastreo cortado por tiempo afirmaba haber agotado la frontera
+    teniendo 1.051 URLs pendientes. `consumir` borra la marca de Redis: solo al
+    cerrar, porque antes de analizar se calcula lo mismo una primera vez.
+    """
+    motivo = (razon_cero if razon_cero
+              else "persistence_failed" if sin_guardar
+              else bloqueo if bloqueo
+              else "stalled" if stalled
+              else "max_runtime_reached" if timed_out
+              else "finished")
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+        # Si no se guardo nada, eso manda sobre como acabo el rastreo; y un
+        # bloqueo (decision 103) tambien: el tope no es lo que lo corto.
+        if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
+                and not sin_guardar and not bloqueo):
+            motivo = "max_urls_reached"
+        if consumir:
+            rc.delete(f"job:{job_id}:finish_reason")
+            rc.delete(f"job:{job_id}:bloqueo")
+    except Exception:
+        pass
+    return motivo
 
 
 def _trigger_analysis(job_id: str) -> bool:

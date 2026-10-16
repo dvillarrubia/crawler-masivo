@@ -1,6 +1,6 @@
 """Avisos sobre los enlaces internos (decision 106).
 
-Tres incidencias, con un mismo criterio de agregacion:
+Cuatro incidencias:
 
 - ``enlace_no_rastreable``: enlaces que una persona puede pulsar y Google no
   puede seguir (``javascript:``, ``<a onclick>`` sin href, ``<span href>``...).
@@ -14,21 +14,35 @@ la pagina donde hay que editar el enlace, y por eso se agrega por origen (una
 incidencia por pagina con la cuenta y ejemplos, nunca una por enlace). Pero un
 enlace que esta en el menu o en el pie de cientos de paginas se arregla UNA
 vez, en la plantilla, y emitido por origen salia en todas las paginas del
-sitio — que es justo lo que la decision 64 dice que deja de ser un aviso. Un
-enlace (mismo tipo y mismo destino) que aparece en ``enlaces_plantilla_min_
-paginas`` paginas distintas o mas (10 por defecto, el mismo umbral que la
-seccion del PageRank, decision 29) se cuenta aparte, una vez:
+sitio — que es justo lo que la decision 64 dice que deja de ser un aviso. Lo
+que cuenta como «el mismo enlace» depende del aviso, y el umbral es siempre
+``enlaces_plantilla_min_paginas`` paginas de origen distintas (10 por defecto,
+el de la seccion del PageRank, decision 29):
 
-- a un 3xx: una incidencia en la URL que redirige (``alcance: plantilla``);
-- a un 4xx/5xx: ninguna nueva — la URL rota ya tiene su ``4xx_error`` o
-  ``5xx_error`` y sus entrantes dicen desde donde se enlaza (decision 36);
-- no rastreable: una incidencia por enlace distinto, en una pagina de ejemplo.
+- a un 3xx/4xx/5xx: el mismo DESTINO. Si 10 paginas o mas enlazan la URL que
+  redirige, un aviso en ella (``alcance: plantilla``); si es una URL rota,
+  ninguno nuevo — ya tiene su ``4xx_error`` o ``5xx_error`` y sus entrantes
+  dicen desde donde se enlaza (decision 36);
+- no rastreable: el mismo COMPONENTE, (tipo, posicion, ancla o atributo) —por
+  destino no, porque el selector de idioma cambia de destino en cada pagina—;
+  una incidencia por componente, en la pagina de URL menor.
 
 ``utm_en_enlace_interno`` va por DESTINO siempre: la URL con ``utm`` es el
 hallazgo (una URL con parametros que Google puede rastrear como otra pagina),
 y el mismo banner con el mismo ``utm`` es la misma correccion aunque salga en
 tres paginas o en tres mil. Si esa URL se rastreo, la incidencia va en ella y
 sustituye a su ``url_has_parameters``, que dice lo mismo con menos (36).
+
+Lo que ya dice otro aviso no se repite (36): un enlace con ``utm`` a una URL que
+redirige o falla lo cuentan los avisos de respuesta, y una URL que redirige a
+una pagina con ``solo_enlazada_por_redireccion`` (decision 63) no lleva el de
+redireccion: los dos piden lo mismo, enlazar la URL final.
+
+Una incidencia que no tiene pagina propia (la de plantilla de un no rastreable,
+la de un ``utm`` que no se rastreo) se ancla en la pagina de URL MENOR, no en la
+de id menor: el id depende del orden de rastreo, y la comparacion entre censos
+identifica el hallazgo por (tipo, URL, clave) — otra pagina de anclaje lo daria
+por resuelto y por nuevo a la vez (decision 88).
 
 Todo se calcula sobre la temporal de aristas de ``compute_link_counts`` o sobre
 la tabla nueva filtrada por ``job_id``: ninguna lectura de ``links`` unida con
@@ -53,6 +67,15 @@ MUESTRA = 5
 MUESTRA_DESTINOS = 10
 
 UMBRAL_PLANTILLA_DEFECTO = 10
+
+# Los tipos que emite este modulo. Cada uno lleva su ficha y su nombre en el
+# frontend (`incidencias.js`) y entra en el ambito «Enlazado» del explorador.
+TIPOS = (
+    "enlace_no_rastreable",
+    "enlace_interno_a_error",
+    "enlace_interno_a_redireccion",
+    "utm_en_enlace_interno",
+)
 
 
 def _clave(*partes: Any) -> str | None:
@@ -113,6 +136,14 @@ def avisar_enlaces_a_respuestas(az, aristas) -> None:
         .group_by(aristas.c.destino_id, clase)
     ).all()
 
+    # La URL que redirige a una pagina con `solo_enlazada_por_redireccion`
+    # (decision 63): ese aviso ya pide apuntar los enlaces a la URL final, y es
+    # el mas fuerte de los dos (la pagina final no tiene ni un enlace directo).
+    # Repetirlo aqui seria el mismo hallazgo dos veces (36).
+    ya_avisadas = _redirecciones_a_solo_enlazadas(az, {
+        r.destino_id for r in por_destino if r.clase == "3xx"})
+    por_destino = [r for r in por_destino if r.destino_id not in ya_avisadas]
+
     de_plantilla = {r.destino_id for r in por_destino if r.origenes >= umbral}
     propios = {r.destino_id for r in por_destino if r.origenes < umbral}
 
@@ -169,6 +200,27 @@ def avisar_enlaces_a_respuestas(az, aristas) -> None:
     az._flush_issues()
 
 
+def _redirecciones_a_solo_enlazadas(az, ids: set[int]) -> set[int]:
+    """De esas URLs que redirigen, las que llevan a una pagina final que recibe
+    `solo_enlazada_por_redireccion` (mismo criterio, misma funcion)."""
+    if not ids:
+        return set()
+    from analysis.analyzer import criterio_solo_por_redireccion
+    from shared.models import Url
+
+    x = aliased(Url)
+    y = aliased(Url)
+    fuera: set[int] = set()
+    lista = list(ids)
+    for i in range(0, len(lista), 5000):
+        fuera.update(az.session.execute(
+            select(x.id).join(y, and_(y.job_id == x.job_id, y.url == x.redirect_url))
+            .where(x.id.in_(lista[i:i + 5000]), x.is_internal.is_(True),
+                   *criterio_solo_por_redireccion(y, az.job_id))
+        ).scalars())
+    return fuera
+
+
 def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
     from shared.models import Issue, Link, Url
 
@@ -179,7 +231,7 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
             func.max(aristas.c.destino_id).label("destino_id"),
             func.count(func.distinct(aristas.c.origen_id)).label("origenes"),
             func.sum(aristas.c.veces).label("enlaces"),
-            func.min(aristas.c.origen_id).label("ejemplo_origen"),
+            func.min(o.url).label("ejemplo_url"),
         )
         .select_from(aristas)
         .join(o, o.id == aristas.c.origen_id)
@@ -190,16 +242,32 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
         return
 
     destinos = {f.destino_id for f in filas if f.destino_id is not None}
-    info_destino: dict[int, tuple[str, bool | None]] = {}
+    info_destino: dict[int, tuple[str, bool | None, str | None]] = {}
     if destinos:
-        for i, url, indexable in az.session.execute(
-                select(d.id, d.url, d.indexable).where(d.id.in_(destinos))).all():
-            info_destino[i] = (url, indexable)
+        for i, url, indexable, grupo in az.session.execute(
+                select(d.id, d.url, d.indexable, d.status_group)
+                .where(d.id.in_(destinos))).all():
+            info_destino[i] = (url, indexable, grupo)
+
+    # La pagina de ejemplo (y de anclaje, si el destino no se rastreo) es la de
+    # URL menor, no la de id menor: el id cambia con el orden de rastreo.
+    por_url = {}
+    ejemplos = [f.ejemplo_url for f in filas if f.ejemplo_url]
+    for i in range(0, len(ejemplos), 5000):
+        por_url.update(az.session.execute(
+            select(o.url, o.id).where(o.job_id == az.job_id,
+                                      o.url.in_(ejemplos[i:i + 5000]))).all())
 
     sustituidas: list[int] = []
     for f in filas:
         if f.destino_id is not None and f.destino_id in info_destino:
-            url, indexable = info_destino[f.destino_id]
+            url, indexable, grupo = info_destino[f.destino_id]
+            if grupo in ("3xx", "4xx", "5xx"):
+                # El enlace ya lo cuentan los avisos de respuesta (o el
+                # `4xx_error` de la URL, si es de plantilla), y quitar el utm
+                # es la misma correccion: enlazar la URL limpia y final. Un
+                # aviso por hallazgo (36); el `url_has_parameters` se queda.
+                continue
             url_id = f.destino_id
             rastreado = True
             sustituidas.append(url_id)
@@ -210,7 +278,9 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
                 select(Link.to_url).where(Link.job_id == az.job_id,
                                           Link.to_url_hash == f.utm_hash).limit(1)
             ).scalar()
-            url_id, indexable, rastreado = f.ejemplo_origen, None, False
+            url_id, indexable, rastreado = por_url.get(f.ejemplo_url), None, False
+            if url_id is None:
+                continue
         # Si la URL con utm se puede indexar, es una pagina duplicada que el
         # propio sitio reparte: warning. Si se canonicaliza o no se rastreo, lo
         # que queda es la sesion de Analytics reiniciada y el rastreo gastado:
@@ -220,7 +290,7 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
             {"destino": url, "destino_rastreado": rastreado,
              "destino_indexable": indexable,
              "paginas_que_enlazan": int(f.origenes), "enlaces": int(f.enlaces or 0),
-             "ejemplos_origen": az._urls_de([f.ejemplo_origen])},
+             "ejemplos_origen": [f.ejemplo_url] if f.ejemplo_url else []},
             group_key=_clave(f.utm_hash),
         )
 
@@ -297,12 +367,22 @@ def avisar_enlaces_no_rastreables(az) -> None:
         .where(E.job_id == az.job_id, E.destino_hash.isnot(None))
     ).scalars())
 
+    # Origen: una pagina HTML que responde 200, como en los avisos de respuesta.
+    # Un 404 o un 500 con su menu entero ya tiene su aviso, y sus enlaces no se
+    # arreglan editandolo (decision 57). Y una pagina re-rastreada que ahora
+    # falla no puede conservar los de cuando respondia. Se une con `urls` por
+    # clave primaria despues de filtrar la tabla por su job_id (37).
+    origen = aliased(Url)
     filas = az.session.execute(
         select(E.from_url_id, E.crawlability, E.href, E.destino, E.destino_interno,
-               E.destino_hash, E.anchor_text, E.etiqueta, E.link_position, E.repeticiones)
-        .where(E.job_id == az.job_id)
+               E.destino_hash, E.anchor_text, E.etiqueta, E.link_position, E.repeticiones,
+               origen.url.label("origen_url"))
+        .join(origen, origen.id == E.from_url_id)
+        .where(E.job_id == az.job_id, origen.status_code == 200,
+               origen.is_html.is_(True))
         .order_by(E.from_url_id, E.id)
     ).all()
+    url_de = {f.from_url_id: f.origen_url for f in filas}
 
     paginas_por_firma: dict[tuple, set[int]] = defaultdict(set)
     for f in filas:
@@ -338,7 +418,9 @@ def avisar_enlaces_no_rastreables(az) -> None:
 
     for k, acc in plantillas.items():
         f = acc["primera"]
-        paginas = sorted(paginas_por_firma[k])
+        # Por URL, no por id: el id depende del orden de rastreo y la pagina de
+        # anclaje identifica el hallazgo entre censos (decision 88).
+        paginas = sorted(paginas_por_firma[k], key=lambda i: url_de[i])
         az._add_issue(
             paginas[0], "enlace_no_rastreable",
             "warning" if acc["con_destino_interno"] else "info",
@@ -348,7 +430,7 @@ def avisar_enlaces_no_rastreables(az) -> None:
              "destinos_internos_distintos": len(acc["destinos"]),
              "destinos_fuera_del_censo": _fuera(acc),
              "paginas_afectadas": len(paginas), "apariciones": acc["enlaces"],
-             "paginas_ejemplo": az._urls_de(paginas[:MUESTRA])},
+             "paginas_ejemplo": [url_de[i] for i in paginas[:MUESTRA]]},
             group_key=_clave(*k),
         )
 

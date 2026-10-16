@@ -26,6 +26,29 @@ Lo que NO es un enlace no rastreable, a proposito:
   enlace escondido. El ``href="javascript:..."`` SI se guarda aunque no diga a
   donde va: es un ``href`` que Google intenta resolver y Google lo documenta
   expresamente como no rastreable; sin destino sale como ``info``.
+- ``href="#!"`` a secas: el «enlace» de relleno que Materialize y muchos temas
+  ponen en los conmutadores del menu. Es el ``#`` con otra grafia, no una ruta.
+- Un elemento con ``href`` cuyo nombre lleva guion (``<ion-item href>``,
+  ``<sl-button href>``): es un componente web, y suele pintar un ``<a href>``
+  de verdad dentro de su shadow DOM, que Google aplana al renderizar. Sin
+  renderizar no se sabe, y no se afirma.
+
+**El destino solo se afirma cuando el codigo NAVEGA.** Una cadena con forma de
+ruta en un ``onclick`` no es un destino: ``addToCart('/cart/add')``,
+``ga('send','event','/promo')``, ``this.src='/b.png'`` o
+``$('#m').load('/ajax/modal')`` llevan rutas y no van a ninguna parte. Y un
+helper que monta la URL con varios argumentos
+(``getDetalleNoticia('/press/noticias/', 'slug')``) tiene como primer argumento
+un PREFIJO comun a todas las noticias: tomarlo por destino colapsaba dieciseis
+noticias distintas en una URL que no existe. Por eso hay dos preguntas:
+
+- :func:`destino_en_script`: a donde va, solo si se ve una navegacion
+  (``location=``, ``location.assign/replace``, ``window.open``, ``goTo``/
+  ``navigate``/``redirect`` con la URL como UNICO argumento) con la URL entera
+  —sin ``+`` ni ``${}`` detras—. Si no, None.
+- :func:`menciona_ruta`: si el codigo lleva una ruta. Solo se usa en un ``<a>``
+  sin ``href`` (que tiene forma de enlace), para guardarlo SIN destino
+  (``info``); en otra etiqueta, sin navegacion es un boton y no se guarda.
 """
 
 from __future__ import annotations
@@ -63,21 +86,31 @@ MAX_POR_PAGINA = 300
 MAX_HREF = 500
 MAX_ANCLA = 200
 
-# Un destino dentro de un trozo de JavaScript. Primero las formas que navegan
-# sin duda (`location = ...`, `location.href = ...`, `location.assign(...)`,
-# `window.open(...)`); si no hay ninguna, la primera cadena que tiene forma de
-# ruta o de URL. Una cadena cualquiera (`'products'`, `'menu'`) NO es un
-# destino: el ejemplo de Google `goTo('products')` no dice a donde va, y
-# adivinarlo seria afirmar lo que no se sabe.
+# Un destino dentro de un trozo de JavaScript: solo las formas que navegan sin
+# duda. `location = ...`, `location.href = ...`, `location.assign/replace(...)` y
+# `window.open(...)` admiten mas argumentos (el `'_blank'` de `window.open`); los
+# helpers con nombre de navegar (`goTo`, `navigate`, `redirect`, el
+# `router.push` de Vue) solo si la URL es su UNICO argumento, porque con mas
+# puede ser un trozo de la URL. El grupo `sig` es lo que va justo detras de la
+# cadena: un `+` dice que es un prefijo.
 _RE_NAVEGA = re.compile(
-    r"""(?:location(?:\.href)?\s*=\s*|location\.(?:assign|replace)\s*\(\s*|"""
-    r"""window\.open\s*\(\s*|navigate(?:ByUrl)?\s*\(\s*)(['"`])(?P<u>[^'"`\n]{1,400})\1""",
+    r"""(?:(?:location(?:\.href)?\s*=\s*|location\.(?:assign|replace)\s*\(\s*|"""
+    r"""window\.open\s*\(\s*)(?P<q1>['"`])(?P<u1>[^'"`\n]{1,400})(?P=q1)(?P<sig1>\s*\+)?"""
+    r"""|\b(?:go_?to|navigate(?:To|ByUrl)?|redirect(?:To)?|router\.push)\s*\(\s*"""
+    r"""(?P<q2>['"`])(?P<u2>[^'"`\n]{1,400})(?P=q2)\s*\))""",
     re.IGNORECASE,
 )
+# Una cadena con forma de ruta o de URL en cualquier sitio del codigo.
 _RE_CADENA_RUTA = re.compile(
     r"""(['"`])(?P<u>(?:https?://|/|\./|\.\./)[^'"`\s]{0,400})\1""",
     re.IGNORECASE,
 )
+
+
+def _util(u: str) -> bool:
+    # `//` suelto o `/` solo no dicen nada; `/*` es un comentario.
+    return not (u in ("/", "//") or u.startswith("/*") or u.startswith("//*"))
+
 
 # Parametros de campana de Google Analytics. Un enlace INTERNO con ellos
 # reinicia la sesion en Analytics y abre una URL con parametros que Google
@@ -86,28 +119,55 @@ RE_UTM = re.compile(r"[?&]utm_[a-z]+=", re.IGNORECASE)
 
 
 def destino_en_script(codigo: str | None) -> str | None:
-    """La URL a la que navega un trozo de JavaScript, si se ve; si no, None.
+    """La URL a la que NAVEGA un trozo de JavaScript, si se ve entera; si no, None.
 
     >>> destino_en_script("window.location.href='/productos'")
     '/productos'
     >>> destino_en_script("goTo('products')") is None
     True
+    >>> destino_en_script("addToCart('/cart/add', 12)") is None
+    True
+    >>> destino_en_script("location.href='/en/' + slug") is None
+    True
     """
     if not codigo:
         return None
-    m = _RE_NAVEGA.search(codigo) or _RE_CADENA_RUTA.search(codigo)
-    if not m:
-        return None
-    u = m.group("u").strip()
-    # `//` suelto o `/` solo no dicen nada; `/*` es un comentario.
-    if u in ("/", "//") or u.startswith("/*") or u.startswith("//*"):
-        return None
-    return u
+    for m in _RE_NAVEGA.finditer(codigo):
+        if m.group("u1") is not None:
+            if m.group("sig1"):
+                continue  # `'/en/' + slug`: un prefijo, no la URL
+            u = m.group("u1").strip()
+        else:
+            u = m.group("u2").strip()
+        if "${" in u or not _util(u):
+            continue
+        # «goTo('products')», el ejemplo de Google: una cadena cualquiera
+        # tampoco es un destino aunque vaya en una navegacion.
+        if not u.lower().startswith(("http://", "https://", "/", "./", "../")):
+            continue
+        return u
+    return None
+
+
+def menciona_ruta(codigo: str | None) -> bool:
+    """Si el codigo navega o lleva una cadena con forma de ruta.
+
+    No dice a donde va: ``getDetalleNoticia('/press/noticias/', slug)`` lleva
+    una ruta, y la URL de verdad no se puede saber sin ejecutarlo.
+    """
+    if not codigo:
+        return False
+    if _RE_NAVEGA.search(codigo):
+        return True
+    return any(_util(m.group("u").strip()) for m in _RE_CADENA_RUTA.finditer(codigo))
 
 
 def es_fragmento_como_ruta(href: str) -> bool:
-    """``#/productos`` o ``#!/productos``: una ruta de SPA en el fragmento."""
-    return href.startswith("#/") or href.startswith("#!")
+    """``#/productos`` o ``#!/productos``: una ruta de SPA en el fragmento.
+
+    ``#!`` a secas no: es el ``#`` de relleno de los conmutadores de menu.
+    """
+    return href.startswith("#/") or (href.startswith("#!") and len(href) > 2)
 
 
 def tiene_utm(url: str | None) -> bool:

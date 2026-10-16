@@ -86,7 +86,10 @@ def test_lo_que_no_es_un_enlace_perdido_no_se_guarda(cuerpo):
 def test_una_cadena_cualquiera_no_es_un_destino():
     """`goTo('products')` no dice a donde va: adivinar seria afirmar."""
     assert enr.destino_en_script("goTo('products')") is None
-    assert enr.destino_en_script("abrir('/ficha/3')") == "/ficha/3"
+    # Lleva una ruta, pero no se ve que navegue: no es un destino (revision
+    # de la decision 106), aunque en un `<a>` sin href se guarde sin destino.
+    assert enr.destino_en_script("abrir('/ficha/3')") is None
+    assert enr.menciona_ruta("abrir('/ficha/3')")
     assert enr.destino_en_script("location.assign('https://x.com/a')") == "https://x.com/a"
     assert enr.destino_en_script("/* comentario */ hacer()") is None
 
@@ -137,3 +140,53 @@ def test_utm():
     assert enr.tiene_utm("https://x.com/a?x=1&UTM_campaign=b")
     assert not enr.tiene_utm("https://x.com/utm_source/a")
     assert not enr.tiene_utm(None)
+
+
+# --- Revision de la decision 106 --------------------------------------------
+# Una ruta en un onclick no es un destino: la primera version tomaba la primera
+# cadena con forma de ruta, y cada uno de estos salia como enlace interno que
+# Google se pierde, con `warning`.
+@pytest.mark.parametrize("cuerpo", [
+    "<button onclick=\"addToCart('/cart/add', 12)\">Al carrito</button>",
+    "<div onclick=\"ga('send','event','/promo')\">Promo</div>",
+    "<img onclick=\"this.src='/b.png'\" src='/a.png'>",
+    "<span onclick=\"$('#m').load('/ajax/modal')\">Abrir</span>",
+    "<button onclick=\"this.form.action='/buscar';this.form.submit()\">Buscar</button>",
+])
+def test_una_ruta_en_un_onclick_de_otra_etiqueta_no_es_un_enlace(cuerpo):
+    assert _enr(cuerpo) == []
+
+
+def test_un_helper_con_varios_argumentos_no_da_un_destino_falso():
+    """Lopesan: 16 `getDetalleNoticia('/press/.../detalle-noticia/', '<slug>')`
+    salian con el PREFIJO como destino —una URL que no existe— y contaban
+    como un solo destino fuera del censo. Son 16 noticias distintas que no se
+    pueden saber sin ejecutar el codigo: se guardan, sin destino."""
+    cuerpo = "".join(
+        f"<a onclick=\"getDetalleNoticia('/press/noticias/detalle/', 'n-{i}')\">Seguir</a>"
+        for i in range(3))
+    assert _tipos(cuerpo) == [(enr.ONCLICK_SIN_HREF, None)] * 3
+
+
+def test_una_url_concatenada_no_es_un_destino():
+    assert _tipos("<a onclick=\"location.href='/en/' + slug\">EN</a>") == [
+        (enr.ONCLICK_SIN_HREF, None)]
+    assert _enr("<div onclick=\"location.href='/en/' + slug\">EN</div>") == []
+
+
+def test_almohadilla_exclamacion_a_secas_es_un_conmutador():
+    """Materialize pone `href="#!"` en cada desplegable: es el `#` de siempre."""
+    assert _enr('<a href="#!" class="dropdown-trigger">Menu</a>') == []
+    assert _tipos("<a href=\"#!\" onclick=\"location='/x'\">X</a>") == [
+        (enr.ONCLICK_SIN_HREF, "https://x.com/x")]
+    assert _tipos('<a href="#!productos">P</a>') == [(enr.FRAGMENTO_COMO_RUTA, None)]
+
+
+@pytest.mark.parametrize("cuerpo", [
+    '<ion-item href="/productos">Productos</ion-item>',
+    '<sl-button href="/contacto">Contacto</sl-button>',
+    '<md-text-button href="/ayuda">Ayuda</md-text-button>',
+])
+def test_un_componente_web_con_href_no_se_afirma(cuerpo):
+    """Pintan un `<a href>` en su shadow DOM, que Google aplana al renderizar."""
+    assert _enr(cuerpo) == []

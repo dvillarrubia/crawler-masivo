@@ -785,6 +785,10 @@ _XPATH_HREF_FUERA_DE_A = (
     "descendant-or-self::*[@href][not(self::a) and not(self::area) and not(self::link)"
     " and not(self::base) and not(self::svg) and not(ancestor::svg) and not(self::math)"
     " and not(ancestor::math)]" + "[not(ancestor::template) and not(ancestor::noscript)]"
+    # Un componente web (`<ion-item href>`, `<sl-button href>`) suele pintar un
+    # `<a href>` de verdad en su shadow DOM, que Google aplana al renderizar:
+    # sin render no se sabe, y no se afirma. Su nombre lleva guion por norma.
+    "[not(contains(name(), '-'))]"
 )
 
 
@@ -847,14 +851,18 @@ def extract_enlaces_no_rastreables(
                     enr.destino_en_script(codigo) or enr.destino_en_script(onclick))
         elif href is not None and enr.es_fragmento_como_ruta(href_limpio):
             _anadir(a, enr.FRAGMENTO_COMO_RUTA, href_limpio, None)
-        elif href is None or href_limpio in ("", "#"):
+        elif href is None or href_limpio in ("", "#", "#!"):
             ruta = next((attrs[k].strip() for k in enr.ATRIBUTOS_DE_RUTA
                          if (attrs.get(k) or "").strip()), None)
             if ruta:
                 _anadir(a, enr.A_SIN_HREF, ruta, ruta)
-            elif onclick and enr.destino_en_script(onclick):
+            elif onclick and enr.menciona_ruta(onclick):
+                # Un `<a>` tiene forma de enlace: si su onclick lleva una ruta
+                # se guarda, pero el destino solo si se ve la navegacion
+                # entera. `getDetalleNoticia('/press/noticias/', 'slug')` va a
+                # una noticia que no se puede saber sin ejecutarlo.
                 _anadir(a, enr.ONCLICK_SIN_HREF, onclick, enr.destino_en_script(onclick))
-            # `href="#"`/`""` sin manejador, un `onclick` que no navega
+            # `href="#"`/`""`/`"#!"` sin manejador, un `onclick` sin ruta
             # («Leer mas», un `scrollTo`) o un `<a name>`: un boton o un ancla.
         if len(filas) >= enr.MAX_POR_PAGINA:
             return agrupar_enlaces_no_rastreables(filas)
@@ -870,7 +878,8 @@ def extract_enlaces_no_rastreables(
             return agrupar_enlaces_no_rastreables(filas)
 
     # 3. Otra etiqueta con un `onclick` que NAVEGA a una URL reconocible: la
-    # tarjeta entera clicable. Sin destino es un boton y no se guarda.
+    # tarjeta entera clicable. Sin navegacion es un boton y no se guarda, lleve
+    # o no una ruta: `addToCart('/cart/add')`, `this.src='/b.png'` (d106).
     for nodo in selector.xpath(
             f"descendant-or-self::*[@onclick][not(self::a)]{_XPATH_FUERA_DEL_DOM}"):
         onclick = (nodo.attrib.get("onclick") or "").strip()

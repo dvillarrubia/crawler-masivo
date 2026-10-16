@@ -260,7 +260,23 @@ const fmt = {
         partes.push(`similitud ${Math.round(v * 100)} %`);
       } else if (k === 'threshold') {
         continue;
-      } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url'].includes(k)) {
+      } else if (k === 'alcance') {
+        partes.push(v === 'plantilla' ? 'de plantilla' : 'en esta página');
+      } else if (k === 'tipo' && TIPO_NO_RASTREABLE[v]) {
+        partes.push(TIPO_NO_RASTREABLE[v]);
+      } else if (k === 'por_tipo' && typeof v === 'object') {
+        partes.push(Object.entries(v).map(([t, n]) => `${TIPO_NO_RASTREABLE[t] || t} ${fmt.num(n)}`).join(', '));
+      } else if (k === 'destino_rastreado' || k === 'destino_indexable') {
+        if (v === false) partes.push(k === 'destino_rastreado' ? 'destino sin rastrear' : 'destino no indexable');
+        else if (v === true && k === 'destino_indexable') partes.push('destino indexable');
+      } else if (['ejemplos', 'paginas_ejemplo', 'ejemplos_origen'].includes(k) && Array.isArray(v)) {
+        const e = v[0];
+        if (e == null) continue;
+        const txt = typeof e === 'string' ? corta(e)
+          : e.url ? corta(e.url) + (e.status_code ? ` (${e.status_code})` : '')
+          : (e.destino ? corta(e.destino) : (e.href || ''));
+        if (txt) partes.push('p. ej. ' + (txt.length > 70 ? txt.slice(0, 70) + '…' : txt));
+      } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url', 'destino', 'href_ejemplo', 'destino_ejemplo'].includes(k)) {
         partes.push((DETALLE_LABEL[k] || k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
       } else if (k === 'canonical_host') {
         if (!d.canonical) partes.push('a ' + v);
@@ -3498,7 +3514,7 @@ const EXP_TABS = [
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
   // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y

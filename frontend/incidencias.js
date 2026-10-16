@@ -468,6 +468,20 @@ const ISSUE_LABEL_EXTRA = {
   meta_fuera_del_head: 'Metadatos fuera del head',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
+  enlace_no_rastreable: 'Enlace que Google no puede seguir',
+  enlace_interno_a_error: 'Enlace interno a un error',
+  enlace_interno_a_redireccion: 'Enlace interno a una redirección',
+  utm_en_enlace_interno: 'Enlace interno con utm',
+};
+
+// Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
+const TIPO_NO_RASTREABLE = {
+  javascript_href: 'href="javascript:"',
+  onclick_sin_href: '<a onclick> sin href',
+  a_sin_href: '<a> sin href (routerLink…)',
+  href_fuera_de_a: 'href fuera de un <a>',
+  onclick_en_otra_etiqueta: 'onclick en otra etiqueta',
+  fragmento_como_ruta: 'ruta en el fragmento (#/)',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -517,4 +531,18 @@ const DETALLE_LABEL = {
   cortado_por: 'lo corta',
   fuera_del_head: 'quedan fuera',
   directiva_en_duda: 'robots o canonical detrás del corte',
+  // Avisos de enlaces (decision 106)
+  paginas_que_enlazan: 'páginas que la enlazan',
+  enlaces: 'enlaces',
+  destinos: 'destinos',
+  con_destino_interno: 'con destino interno',
+  destinos_fuera_del_censo: 'destinos fuera del censo',
+  destinos_internos_distintos: 'destinos internos distintos',
+  apariciones: 'apariciones',
+  destino: 'destino',
+  href_ejemplo: 'código',
+  destino_ejemplo: 'destino',
+  etiqueta: 'etiqueta',
+  posicion: 'posición',
+  ancla: 'ancla',
 };

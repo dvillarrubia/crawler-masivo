@@ -3745,21 +3745,7 @@ class SEOAnalyzer:
                     origen.is_internal.is_(True),
                 ),
             )
-            .where(
-                Url.job_id == self.job_id,
-                Url.is_html.is_(True),
-                Url.is_internal.is_(True),
-                Url.status_code == 200,
-                Url.indexable.is_(True),
-                (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
-                # La semilla no: es la puerta de entrada del rastreo y no tiene
-                # entrantes DESCUBIERTOS por definicion. Pasa en cuanto se
-                # siembra con `http://` y el sitio salta a `https://`: el
-                # destino es la home, es destino de un salto, y decir de ella
-                # que "solo se llega por una redireccion" es falso. Misma
-                # exclusion que `orphan_page`.
-                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
-            )
+            .where(*criterio_solo_por_redireccion(Url, self.job_id))
             .group_by(Url.id, Url.in_sitemap)
         ).all()
 
@@ -4117,6 +4103,29 @@ def motivo_sitemap_no_indexable(status_code, indexability_status) -> str | None:
         if indexability_status.startswith(prefijo):
             return motivo
     return None
+
+
+def criterio_solo_por_redireccion(u, job_id) -> tuple:
+    """Condiciones sobre la PAGINA FINAL de `solo_enlazada_por_redireccion`.
+
+    En una funcion porque las leen dos: el aviso (decision 63) y los avisos de
+    enlaces a una redireccion (decision 106), que no repiten el hallazgo cuando
+    la URL final ya lo lleva. Dos copias del criterio acaban discrepando (23).
+    """
+    return (
+        u.job_id == job_id,
+        u.is_html.is_(True),
+        u.is_internal.is_(True),
+        u.status_code == 200,
+        u.indexable.is_(True),
+        (u.inlinks_count.is_(None)) | (u.inlinks_count == 0),
+        # La semilla no: es la puerta de entrada del rastreo y no tiene
+        # entrantes DESCUBIERTOS por definicion. Pasa en cuanto se siembra con
+        # `http://` y el sitio salta a `https://`: el destino es la home, es
+        # destino de un salto, y decir de ella que "solo se llega por una
+        # redireccion" es falso. Misma exclusion que `orphan_page`.
+        (u.crawl_depth.is_(None)) | (u.crawl_depth > 0),
+    )
 
 
 def _es_destino_de_redireccion():

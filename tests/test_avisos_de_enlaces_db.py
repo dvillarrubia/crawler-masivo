@@ -275,3 +275,85 @@ def test_en_un_censo_truncado_no_se_afirma_que_un_destino_no_este():
     (fila,) = _issues(s, "enlace_no_rastreable")
     assert fila.details["destinos_fuera_del_censo"] is None
     assert fila.severity == "warning"
+
+
+# --- Revision de la decision 106 --------------------------------------------
+def test_no_rastreables_desde_un_404_o_un_500_no_se_avisan():
+    """El menu de un 500 ya tiene su `5xx_error` (decision 57), y una pagina
+    re-rastreada que ahora da 404 no puede conservar los de cuando respondia."""
+    s, j = _montar()
+    caida = _url(s, j, "/caida", status=500)
+    rota = _url(s, j, "/rota", status=404)
+    viva = _url(s, j, "/viva")
+    for p in (caida, rota, viva):
+        _no_rastreable(s, j, p, tipo="onclick_sin_href", href="location='/x'",
+                       destino="https://x.com/x", interno=True)
+    s.commit()
+    from analysis import avisos_de_enlaces
+    avisos_de_enlaces.avisar_enlaces_no_rastreables(SEOAnalyzer(s, j.id))
+    s.commit()
+    assert [f.url_id for f in _issues(s, "enlace_no_rastreable")] == [viva.id]
+
+
+def test_un_utm_a_una_redireccion_o_a_un_404_es_un_aviso_no_dos():
+    """El enlace con utm a una URL que redirige o falla ya lo cuentan los
+    avisos de respuesta, y la correccion es la misma: enlazar la URL limpia."""
+    s, j = _montar()
+    p = _url(s, j, "/p")
+    salto = _url(s, j, "/a?utm_source=x", status=301)
+    rota = _url(s, j, "/b?utm_source=x", status=404)
+    _enlace(s, j, p, salto.url_hash)
+    _enlace(s, j, p, rota.url_hash)
+    s.commit()
+    _contar(s, j)
+    assert _issues(s, "utm_en_enlace_interno") == []
+    assert [f.url_id for f in _issues(s, "enlace_interno_a_redireccion")] == [p.id]
+    assert [f.url_id for f in _issues(s, "enlace_interno_a_error")] == [p.id]
+
+
+def test_la_redireccion_a_una_solo_enlazada_no_repite_el_aviso():
+    """`solo_enlazada_por_redireccion` (63) en la final ya pide apuntar los
+    enlaces a ella: medido en la UOC, 381 URLs que redirigian llevaban ademas
+    `enlace_interno_a_redireccion` de plantilla."""
+    s, j = _montar()
+    final = _url(s, j, "/nueva")
+    salto = _url(s, j, "/vieja", status=301)
+    salto.redirect_url = final.url
+    otro_final = _url(s, j, "/destino")
+    otro_salto = _url(s, j, "/antes", status=301)
+    otro_salto.redirect_url = otro_final.url
+    paginas = [_url(s, j, f"/p/{i}") for i in range(12)]
+    for p in paginas:
+        _enlace(s, j, p, salto.url_hash)
+        _enlace(s, j, p, otro_salto.url_hash)
+    _enlace(s, j, paginas[0], otro_final.url_hash)   # este SI tiene enlace directo
+    s.commit()
+    az = _contar(s, j)
+    az._avisar_solo_por_redireccion()
+    az._flush_issues()
+    s.commit()
+    assert [f.url_id for f in _issues(s, "solo_enlazada_por_redireccion")] == [final.id]
+    assert [f.url_id for f in _issues(s, "enlace_interno_a_redireccion")] == [otro_salto.id]
+
+
+def test_el_anclaje_no_depende_del_orden_de_rastreo():
+    """La comparacion identifica el hallazgo por (tipo, URL, clave): anclado en
+    el id menor, otro orden de rastreo lo daba por resuelto y por nuevo."""
+    s, j = _montar()
+    # Se rastrean en orden inverso: el id menor es la URL MAYOR.
+    paginas = [_url(s, j, f"/p/{i:02d}") for i in reversed(range(12))]
+    for p in paginas:
+        _no_rastreable(s, j, p, href="javascript:menu()")
+    _enlace(s, j, paginas[0], "/sin-rastrear?utm_source=x")
+    _enlace(s, j, paginas[-1], "/sin-rastrear?utm_source=x")
+    s.commit()
+    _contar(s, j)
+    from analysis import avisos_de_enlaces
+    avisos_de_enlaces.avisar_enlaces_no_rastreables(SEOAnalyzer(s, j.id))
+    s.commit()
+    menor = min(paginas, key=lambda u: u.url)
+    (plantilla,) = _issues(s, "enlace_no_rastreable")
+    assert plantilla.url_id == menor.id
+    assert plantilla.details["paginas_ejemplo"][0] == menor.url
+    (utm,) = _issues(s, "utm_en_enlace_interno")
+    assert utm.url_id == menor.id and utm.details["ejemplos_origen"] == [menor.url]
