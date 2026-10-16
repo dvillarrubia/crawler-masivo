@@ -108,10 +108,40 @@ def test_un_pdf_no_deja_fila_y_un_muro_sale_bloqueado(emitido):
 
 
 def test_reglas_que_no_compilan_no_rastrean_nada():
+    """Y dejan en Redis la marca que el worker convierte en
+    `finish_reason=config_invalida`, con el motivo: sin la marca el job
+    acabaria `sin_urls` (o `completed`, si es una reanudacion)."""
     malo = {**CONFIG, "custom_extraction": {"r": {"tipo": "regex", "expresion": "(a"}}}
-    items, stderr = _rastrear(config=malo, log_level="ERROR")
+    entrada = {"seeds": ["http://127.0.0.1:{port}/home"], "config": malo, "rutas": SITIO,
+               "log_level": "ERROR", "redis_falso": True, "job_id": "jx"}
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=120)
+    assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
     assert not [i for i in items if i["_tipo"] == "PageItem"]
-    assert "Reglas a medida no validas" in stderr
+    assert "Reglas a medida no validas" in proc.stderr
+    marcas = json.loads(proc.stdout.split("@@REDIS@@", 1)[1].split("\n", 1)[0])
+    from shared.extraccion_a_medida import CLAVE_CONFIG_INVALIDA
+
+    motivo = marcas.get(CLAVE_CONFIG_INVALIDA.format(job_id="jx"))
+    assert motivo and "custom_extraction.r" in motivo, marcas
+
+
+def test_reglas_validas_borran_una_marca_vieja():
+    """Una marca de una ejecucion anterior (dependencia arreglada entre medias)
+    no puede tumbar la reanudacion que si compila."""
+    from shared.extraccion_a_medida import CLAVE_CONFIG_INVALIDA
+
+    clave = CLAVE_CONFIG_INVALIDA.format(job_id="jy")
+    entrada = {"seeds": ["http://127.0.0.1:{port}/home"], "config": CONFIG, "rutas": SITIO,
+               "redis_falso": True, "redis_inicial": {clave: "vieja"}, "job_id": "jy"}
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=120)
+    assert "@@REDIS@@" in proc.stdout, proc.stdout + proc.stderr
+    marcas = json.loads(proc.stdout.split("@@REDIS@@", 1)[1].split("\n", 1)[0])
+    assert clave not in marcas
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
+    assert [i for i in items if i["_tipo"] == "PageItem"]
 
 
 # ---------------------------------------------------------------------------

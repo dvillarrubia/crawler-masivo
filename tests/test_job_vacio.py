@@ -79,3 +79,83 @@ def test_el_motivo_de_cero_urls_distingue_robots():
         assert worker._por_que_cero_urls("x") == "sin_urls"
     finally:
         worker.redis_lib.Redis.from_url = original
+
+
+@pytest.mark.parametrize("marca, esperado", [
+    ("custom_extraction.r: regex no valida", ("failed", "config_invalida")),
+    (None, ("completed", "finished")),
+])
+def test_reglas_invalidas_en_una_reanudacion_dejan_el_job_fallido(monkeypatch, marca, esperado):
+    """Ejecutando `_run_job` de verdad (con Scrapy y el analisis simulados).
+
+    El caso que importa es la REANUDACION: el job ya tiene filas con
+    respuesta, asi que el guardia de cero URLs no salta. Si las reglas dejaron
+    de compilar entre medias, el spider no pide nada y el job saldria
+    `completed` con la frontera sin explorar —y la comparacion daria por
+    desaparecido lo que no se llego a pedir (decision 67)—. El control (sin
+    marca) comprueba que el resto del flujo no se rompe."""
+    pytest.importorskip("redis")
+    # Postgres y no SQLite: el worker pasa el id del job como TEXTO (sale de la
+    # cola), que Postgres convierte a UUID y SQLite no.
+    url_bd = os.environ.get("PAGERANK_TEST_DATABASE_URL")
+    if not url_bd:
+        pytest.skip("sin PAGERANK_TEST_DATABASE_URL")
+    import uuid
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    import shared.database
+    import shared.models as modelos
+    from crawler import worker
+    from shared.extraccion_a_medida import CLAVE_CONFIG_INVALIDA
+    from shared.models import Base, Job, Url
+
+    engine = create_engine(url_bd)
+    Base.metadata.create_all(engine, tables=[
+        v.__table__ for v in vars(modelos).values()
+        if isinstance(v, type) and getattr(v, "__module__", "") == modelos.__name__
+        and hasattr(v, "__table__")])
+    Sesion = sessionmaker(bind=engine)
+    jid = uuid.uuid4()
+    with Sesion() as s:
+        s.add(Job(id=jid, name="reanudado", status="pending", seeds=["https://x.com/"],
+                  config={"render_js": True}))
+        s.add(Url(job_id=jid, url="https://x.com/", url_hash=uuid.uuid4().hex, status_code=200))
+        s.commit()
+
+    datos = {CLAVE_CONFIG_INVALIDA.format(job_id=str(jid)): marca} if marca else {}
+
+    class RedisDeMentira:
+        def get(self, clave):
+            return datos.get(clave)
+
+        def delete(self, *claves):
+            for c in claves:
+                datos.pop(c, None)
+
+        def __getattr__(self, nombre):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(shared.database, "SessionLocal", Sesion)
+    monkeypatch.setattr(worker, "SessionLocal", Sesion, raising=False)
+    monkeypatch.setattr(worker.redis_lib.Redis, "from_url",
+                        classmethod(lambda cls, *a, **k: RedisDeMentira()))
+    monkeypatch.setattr(worker, "_ejecutar_con_vigilancia",
+                        lambda cmd, **k: subprocess.CompletedProcess(cmd, 0, "", ""))
+    monkeypatch.setattr(worker, "_reencolar_si_pedido", lambda j: False)
+    monkeypatch.setattr(worker, "_trigger_analysis", lambda j: True)
+    monkeypatch.setattr(worker, "_comparar_con_el_censo_anterior", lambda j: None)
+    monkeypatch.setattr(worker, "_archivar_enlaces_superados", lambda j: None)
+
+    try:
+        worker._run_job(str(jid))
+        with Sesion() as s:
+            job = s.get(Job, jid)
+            assert (job.status, job.finish_reason) == esperado
+        assert not datos, "la marca se consume"
+    finally:
+        with engine.begin() as c:
+            c.execute(text("DELETE FROM urls WHERE job_id = :j"), {"j": str(jid)})
+            c.execute(text("DELETE FROM jobs WHERE id = :j"), {"j": str(jid)})
+        engine.dispose()

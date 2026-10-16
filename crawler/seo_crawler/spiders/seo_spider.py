@@ -821,16 +821,26 @@ class SeoSpider(scrapy.Spider):
             yield request
 
     def start_requests(self) -> Generator[Request, None, None]:
-        # Reglas a medida que no compilan: no se rastrea nada. Cero URLs hace
-        # que el worker marque el job `failed`, y esta marca le da el motivo.
+        # Reglas a medida que no compilan: no se rastrea nada, y la marca le
+        # dice al worker que el job es `failed` con finish_reason=config_invalida
+        # AUNQUE ya haya filas (una reanudacion: sin la marca saldria
+        # `completed` con la frontera sin explorar). Si compilan, se borra la
+        # marca de una ejecucion anterior para que no tumbe esta.
+        from shared.extraccion_a_medida import CLAVE_CONFIG_INVALIDA
+
+        clave_invalida = CLAVE_CONFIG_INVALIDA.format(job_id=self.job_id)
         if getattr(self, "_config_invalida", None):
             if self._redis is not None:
                 try:
-                    self._redis.set(f"job:{self.job_id}:config_invalida",
-                                    self._config_invalida, ex=86400)
+                    self._redis.set(clave_invalida, self._config_invalida, ex=86400)
                 except Exception:
                     pass
             return
+        if self._redis is not None:
+            try:
+                self._redis.delete(clave_invalida)
+            except Exception:
+                pass
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
@@ -1885,7 +1895,8 @@ class SeoSpider(scrapy.Spider):
             for nombre in self._presupuesto_a_medida.recien_desactivadas:
                 logger.warning(
                     "Regla a medida %r DESACTIVADA para el resto del rastreo: agoto su "
-                    "tiempo %d veces (regex catastrofica?)", nombre,
+                    "tiempo %d veces (regex catastrofica, o XPath/CSS que sola pasa del "
+                    "presupuesto de la pagina)", nombre,
                     self._presupuesto_a_medida.agotados_max)
             self._presupuesto_a_medida.recien_desactivadas.clear()
             yield CustomExtractionItem(url_hash=final_hash, job_id=self.job_id, filas=filas)

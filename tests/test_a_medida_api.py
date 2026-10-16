@@ -361,3 +361,58 @@ def test_guardar_un_perfil_valida_la_fusion_con_su_cliente(tmp_path, monkeypatch
     assert r.status_code == 201, r.text
     r = api.patch(f"/api/clients/{cid}/profiles/{r.json()['id']}", json=malo)
     assert r.status_code == 422
+
+
+def test_editar_el_cliente_no_puede_dejar_invalido_un_perfil(tmp_path):
+    """La otra mitad: un perfil valido sobre su cliente deja de serlo si el
+    CLIENTE apaga `extract_page_content`. El 422 al guardar el cliente, que lo
+    nombra, y no en el siguiente rastreo programado de ese perfil."""
+    from api.routers import clientes
+
+    engine = create_engine(f"sqlite:///{tmp_path}/c2.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    app = FastAPI()
+    app.include_router(clientes.router)
+
+    def _sesion():
+        s = Sesion()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    api = TestClient(app)
+    cid = api.post("/api/clients", json={"nombre": "Tienda"}).json()["id"]
+    r = api.post(f"/api/clients/{cid}/profiles", json={
+        "nombre": "fichas", "seeds": ["https://x.com/"], "config": {"custom_search": {
+            "s": {"patron": "sin stock", "fuente": "contenido"}}}})
+    assert r.status_code == 201, r.text
+    r = api.patch(f"/api/clients/{cid}", json={
+        "config_defecto": {"extraction": {"extract_page_content": False}}})
+    assert r.status_code == 422 and "fichas" in r.text and "custom_search.s" in r.text
+    # No se ha guardado
+    assert api.get(f"/api/clients/{cid}").json()["config_defecto"] == {}
+    # Un cambio que no rompe al perfil se guarda
+    r = api.patch(f"/api/clients/{cid}", json={"config_defecto": {"max_depth": 4}})
+    assert r.status_code == 200, r.text
+
+
+def test_probar_tiene_un_tope_de_pruebas_a_la_vez(entorno):
+    """Sin autenticacion y con XPath que no se pueden interrumpir: lo que se
+    puede ocupar es este endpoint (429), no el threadpool entero de la API."""
+    from api.routers import extraccion
+
+    api, _, _ = entorno
+    tomados = 0
+    while extraccion._pruebas.acquire(blocking=False):
+        tomados += 1
+    try:
+        assert tomados == extraccion.PROBAR_CONCURRENCIA
+        r = api.post("/api/extraccion/probar", json={"html": FICHA, **CONFIG})
+        assert r.status_code == 429 and "en curso" in r.text
+    finally:
+        for _ in range(tomados):
+            extraccion._pruebas.release()
+    assert api.post("/api/extraccion/probar", json={"html": FICHA, **CONFIG}).status_code == 200

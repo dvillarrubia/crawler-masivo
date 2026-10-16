@@ -3536,17 +3536,17 @@
                   <strong x-text="r.etiqueta"></strong>
                   <span class="text-dim text-sm" x-text="fmt.num(r.ok) + ' de ' + fmt.num(r.evaluadas)"></span>
                   <template x-if="r.sin_coincidencia">
-                    <button class="chip-ambito" @click="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')">
+                    <button class="chip-ambito" :class="{ on: chipAMedidaActivo(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio') }" @click="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')">
                       <span x-text="r.clase === 'busqueda' ? 'no contiene' : 'sin coincidencia'"></span> <strong x-text="fmt.num(r.sin_coincidencia)"></strong>
                     </button>
                   </template>
                   <template x-if="r.bloqueadas">
-                    <button class="chip-ambito sev-warning" @click="verAMedida(r.nombre, 'estado:pagina_bloqueada')">
+                    <button class="chip-ambito sev-warning" :class="{ on: chipAMedidaActivo(r.nombre, 'estado:pagina_bloqueada') }" @click="verAMedida(r.nombre, 'estado:pagina_bloqueada')">
                       bloqueada <strong x-text="fmt.num(r.bloqueadas)"></strong>
                     </button>
                   </template>
                   <template x-if="r.errores">
-                    <button class="chip-ambito sev-error" @click="verAMedida(r.nombre, 'estado:error,tiempo_agotado,presupuesto_pagina')">
+                    <button class="chip-ambito sev-error" :class="{ on: chipAMedidaActivo(r.nombre, 'estado:error,tiempo_agotado,presupuesto_pagina') }" @click="verAMedida(r.nombre, 'estado:error,tiempo_agotado,presupuesto_pagina')">
                       error <strong x-text="fmt.num(r.errores)"></strong>
                     </button>
                   </template>

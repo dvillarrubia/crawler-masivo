@@ -253,8 +253,11 @@ class JobConfig(BaseModel):
     # columnas salen como `x.<nombre>` en el Explorador y en los CSV. En la
     # herencia cliente -> perfil -> job una regla se SUSTITUYE entera por
     # nombre y `null` la quita (`shared/clientes._fusionar_en`).
-    custom_extraction: dict[str, ExtractorAMedida] = Field(default_factory=dict)
-    custom_search: dict[str, BusquedaAMedida] = Field(default_factory=dict)
+    # `| None` tambien en el JOB: un rastreo puntual tiene que poder apagar una
+    # regla del cliente sin crear un perfil. El `null` lo consume
+    # `fusionar_config`, asi que en `jobs.config` no llega a guardarse.
+    custom_extraction: dict[str, ExtractorAMedida | None] = Field(default_factory=dict)
+    custom_search: dict[str, BusquedaAMedida | None] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _reglas_a_medida(self):
@@ -263,8 +266,8 @@ class JobConfig(BaseModel):
         from shared.extraccion_a_medida import validar
 
         errores = validar(
-            {k: v.model_dump() for k, v in self.custom_extraction.items()},
-            {k: v.model_dump() for k, v in self.custom_search.items()},
+            {k: v.model_dump() for k, v in self.custom_extraction.items() if v is not None},
+            {k: v.model_dump() for k, v in self.custom_search.items() if v is not None},
             extract_page_content=self.extraction.extract_page_content,
             max_urls=self.max_urls,
         )

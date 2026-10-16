@@ -68,6 +68,19 @@ jobs:
   api:
     name: Suite de la API (export, insights)
     runs-on: ubuntu-latest
+    services:
+      # Solo para tests/test_a_medida_db.py, que ejecuta los filtros reales de
+      # la API (`_urls_filtradas`, `_ordenar`) contra Postgres (decision 74).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crawler
+          POSTGRES_PASSWORD: crawler
+          POSTGRES_DB: crawler_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U crawler"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -85,6 +98,8 @@ jobs:
             'parsel>=1.9' 'regex>=2024.11.6'
           pip install -q -r tests/requirements.txt
       - name: pytest
+        env:
+          A_MEDIDA_TEST_DATABASE_URL: postgresql+psycopg2://crawler:crawler@localhost:5432/crawler_test
         # `test_comparacion.py` corre tambien AQUI, y no solo en el trabajo del
         # crawler, porque el endpoint de comparacion vive en la imagen de la
         # API: con el test solo alla, w3lib estaba presente y el fallo de
@@ -110,6 +125,7 @@ jobs:
           tests/test_explorador_api.py tests/test_archivo_enlaces.py
           tests/test_borrado_en_masa.py tests/test_almacenamiento.py
           tests/test_extraccion_a_medida.py tests/test_a_medida_api.py
+          tests/test_a_medida_db.py tests/test_backup_a_medida.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales

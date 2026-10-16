@@ -298,6 +298,31 @@ def main() -> None:
 
     from seo_crawler.spiders.seo_spider import SeoSpider
 
+    redis_falso = None
+    if entrada.get("redis_falso"):
+        # Redis en memoria que anota lo que el spider ESCRIBE (`set`), para
+        # comprobar las marcas que luego lee el worker. Lo demas no hace nada.
+        import seo_crawler.spiders.seo_spider as modulo_spider
+
+        redis_falso = dict(entrada.get("redis_inicial") or {})
+
+        class _RedisFalso:
+            def set(self, clave, valor, *a, **k):
+                redis_falso[clave] = valor
+                return True
+
+            def get(self, clave):
+                return redis_falso.get(clave)
+
+            def delete(self, *claves):
+                for c in claves:
+                    redis_falso.pop(c, None)
+
+            def __getattr__(self, nombre):
+                return lambda *a, **k: None
+
+        modulo_spider.redis.Redis.from_url = classmethod(lambda cls, *a, **k: _RedisFalso())
+
     if entrada.get("simular_navegador"):
         # Como con render JS: la redireccion no la sigue el spider sino quien
         # descarga (aqui el RedirectMiddleware de Scrapy, que rellena
@@ -367,6 +392,8 @@ def main() -> None:
         salida.append(fila)
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))
+    if redis_falso is not None:
+        print("@@REDIS@@" + json.dumps(redis_falso, default=str))
     print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 

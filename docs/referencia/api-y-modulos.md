@@ -82,7 +82,7 @@
 | GET/POST/DELETE | `/api/clients/{id}/vistas[/{vista_id}]` | Vistas guardadas del Explorador (`clients.vistas_explorador`): la consulta de la URL con nombre, válida en cualquier censo del cliente |
 | GET | `/api/uso/explorador` | Qué pestañas, filtros, órdenes, problemas y columnas se piden en el Explorador (`?dias=`). Solo nombres, nunca valores (`api/uso.py`) |
 | GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA` y `x.<nombre>`: una columna por posicion con `cuantos=todos`, formulas escapadas) |
-| POST | `/api/extraccion/probar` | Prueba reglas a medida (decision 104) contra `html` pegado (5 MB como mucho, 413) o el `raw_html` de `job_id` + `url_id` (409 si no se guardo). Hereda con `cliente_id`/`profile_id`. Sin red. Devuelve por regla estado, n, valor(es), valor_num, ms y avisos de coste |
+| POST | `/api/extraccion/probar` | Prueba reglas a medida (decision 104) contra `html` pegado (5 MB como mucho, 413) o el `raw_html` de `job_id` + `url_id` (409 si no se guardo). Hereda con `cliente_id`/`profile_id`. Sin red. Dos a la vez como mucho (429; `CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ`). Devuelve por regla estado, n, valor(es), valor_num, ms y avisos de coste |
 | GET | `/api/jobs/{id}/extraccion` | Por regla: definicion, firma, evaluadas, por estado, renderizadas y los 5 valores mas frecuentes; avisa si un extractor no encontro nada |
 | GET | `/api/jobs/{id}/extraccion/{nombre}/valores` | Distribucion paginada de `valor_clave` |
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`), por gravedad y tipo |

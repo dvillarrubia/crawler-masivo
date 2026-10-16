@@ -119,6 +119,27 @@ def _validar_fusion(cliente: Client | None, config_perfil: dict | None) -> None:
     resolver_config(cliente, SimpleNamespace(config=config_perfil or {}), None)
 
 
+def _validar_perfiles_sobre(db: Session, cliente: Client, config_defecto: dict) -> None:
+    """La otra mitad de `_validar_fusion`: cambiar el cliente puede dejar
+    invalido un perfil que ya tiene (apagar `extract_page_content` con una
+    regla `fuente=contenido` en el perfil). Sin esto el 422 salia al lanzar su
+    siguiente rastreo programado, que no se lanzaba."""
+    from types import SimpleNamespace
+
+    nuevo = SimpleNamespace(config_defecto=config_defecto or {})
+    resolver_config(nuevo, None, None)
+    perfiles = (db.query(CrawlProfile).filter(CrawlProfile.cliente_id == cliente.id)
+                .order_by(CrawlProfile.nombre).all())
+    for perfil in perfiles:
+        try:
+            resolver_config(nuevo, perfil, None)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Con esta configuracion el perfil '{perfil.nombre}' dejaria de ser "
+                       f"valido: {exc.detail}") from None
+
+
 def nombres_de_clientes(db: Session, ids) -> dict[uuid.UUID, str]:
     ids = {i for i in ids if i}
     if not ids:
@@ -415,6 +436,8 @@ def editar_cliente(
     for campo in ("dominios", "config_defecto", "integraciones"):
         if campo in cambios and cambios[campo] is None:
             cambios[campo] = {} if campo == "config_defecto" else []
+    if "config_defecto" in cambios:
+        _validar_perfiles_sobre(db, cliente, cambios["config_defecto"])
     for campo, valor in cambios.items():
         setattr(cliente, campo, valor)
     cliente.updated_at = datetime.now(timezone.utc)

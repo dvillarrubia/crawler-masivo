@@ -30,7 +30,8 @@ order of priority:
    valen tal cual; cualquier metrica de enlazado interno o PageRank exige
    re-rastrear. Las consultas D1-D7 estan ahi para medir un job concreto.
 3. **Screaming Frog parity roadmap (section 10b)**: gaps left, prioritized —
-   custom extraction (XPath/regex per job) ⭐⭐⭐, JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
+   custom extraction ya hecha en lo basico (decision 104; lo que falta, abajo),
+   JavaScript raw-vs-rendered tab ⭐⭐, pagination analysis ⭐⭐,
    PageSpeed/CWV API ⭐⭐, minor ones after.
 4. **Known limitations (section 11)**: also, with `render_js` an `http://` URL of an
    https site is recorded as **307** (Chromium's internal upgrade redirect), not the

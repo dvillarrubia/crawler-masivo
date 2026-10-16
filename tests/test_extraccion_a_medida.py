@@ -205,6 +205,76 @@ def test_el_presupuesto_por_pagina_corta_las_reglas_que_faltan():
     assert {f["estado"] for f in filas} == {"presupuesto_pagina"}
 
 
+def test_una_xpath_lenta_cuenta_como_agotada_y_se_desactiva():
+    """lxml no se puede interrumpir: se MIDE. La regla que sola pasa del
+    presupuesto de la pagina cuenta como agotada; a la tercera, desactivada.
+    Medido: `div ~ div ~ div` tarda 11 s por pagina con 3.000 bloques; aqui
+    basta con un tope de cero para que cualquier regla «tarde»."""
+    comp = xm.compilar({"lenta": {"tipo": "css", "expresion": "div ~ div ~ div",
+                                  "cuantos": "recuento"}}, {})
+    html = "<html><body>" + "<div>x</div>" * 50 + "</body></html>"
+    raiz = lhtml.fromstring(html)
+    p = xm.Presupuesto()
+    p.ms_lenta = 0   # cualquier regla «tarda»
+    estados = [xm.aplicar(raiz, html, comp, presupuesto=p)[0] for _ in range(4)]
+    assert [e["estado"] for e in estados] == ["ok"] * 3 + ["desactivada"]
+    assert estados[0]["n"] == 48 and "tardo" in estados[0]["detalle"]
+    assert p.desactivadas == {"lenta"}
+
+
+def test_con_primero_el_texto_del_resto_de_nodos_no_se_calcula(monkeypatch):
+    """Con `cuantos=primero`, `_texto_de` solo corre hasta el primer valor; `n`
+    sigue contando los nodos que casan."""
+    html = "<html><body>" + "".join(f"<p>p{i}</p>" for i in range(200)) + "</body></html>"
+    llamadas = []
+    original = xm._texto_de
+    monkeypatch.setattr(xm, "_texto_de", lambda el: llamadas.append(1) or original(el))
+    f = _aplicar({"p": {"tipo": "css", "expresion": "p"}}, html=html)["p"]
+    assert (f["estado"], f["valor"], f["n"]) == ("ok", "p0", 200)
+    assert len(llamadas) == 1
+
+
+def test_un_nul_no_llega_a_la_fila():
+    """Postgres rechaza un NUL en un texto y tumbaba el lote entero. lxml no
+    los admite, asi que el arbol se monta sin ellos (como hace parsel), pero la
+    regex y la busqueda corren sobre el HTML crudo, que si los lleva."""
+    html = '<html><body><div sku="AB\x00CD">GTM-\x00X</div></body></html>'
+    raiz = lhtml.fromstring(html.replace("\x00", ""))
+    comp = xm.compilar({"sku": {"tipo": "regex", "expresion": 'sku="([^"]+)"'},
+                        "t": {"tipo": "regex", "expresion": 'sku="([^"]+)"', "cuantos": "todos"}},
+                       {"gtm": {"patron": "GTM-"}})
+    f = {x["nombre"]: x for x in xm.aplicar(raiz, html, comp)}
+    assert f["sku"]["valor"] == "ABCD" and f["sku"]["valor_clave"] == "ABCD"
+    assert f["gtm"]["estado"] == "ok" and "\x00" not in f["gtm"]["valor"]
+    assert f["t"]["valores"] == ["ABCD"]
+
+
+def test_un_articulo_con_titulo_de_muro_si_se_evalua():
+    """El titulo de un muro solo cuenta en una pagina pequena: un articulo
+    titulado «403 Forbidden: que es» lleva la plantilla del sitio."""
+    cuerpo = "<p>" + "texto del articulo " * 5000 + "</p><span class='precio'>9,95</span>"
+    html = f"<html><head><title>Error 403 Forbidden: qué es</title></head><body>{cuerpo}</body></html>"
+    f = _aplicar({"precio": {"tipo": "css", "expresion": ".precio"}}, html=html)
+    assert f["precio"]["estado"] == "ok"
+    assert xm.es_muro("Just a moment...", "<html>" + "x" * 100 + "</html>")
+    assert not xm.es_muro("Security check en el aeropuerto", "x" * (xm.MURO_MAX_CARACTERES + 1))
+    assert not xm.es_muro(None, "")
+
+
+def test_una_ruta_absoluta_en_un_predicado_se_rechaza():
+    for expr in ("//a[/html//b]", "//a[count(/x) > 1]", "//a[@x and //b]"):
+        assert _errores({"r": {"tipo": "xpath", "expresion": expr}}), expr
+    for expr in ("//a[.//b]", "//a[b/c]", "//a[*/b]", "(//a)[1]/b", "//p[@class='a/b']"):
+        assert not _errores({"r": {"tipo": "xpath", "expresion": expr}}), expr
+
+
+def test_un_nombre_no_puede_acabar_en_un_sufijo_de_filtro():
+    for nombre in ("stock_estado", "precio_gte", "precio_lte", "h1_contains"):
+        e = _errores({nombre: {"tipo": "css", "expresion": "a"}})
+        assert e and "sufijos" in e[0], nombre
+    assert not _errores({"estado_stock": {"tipo": "css", "expresion": "a"}})
+
+
 def test_un_fallo_de_una_regla_es_una_fila_error():
     # `foo()` compila y solo falla al evaluarse sobre un <h1>; el documento de
     # prueba de la validacion no tiene ninguno, asi que pasa.
@@ -237,7 +307,7 @@ def test_errores_con_su_ruta():
     }, {"vacia": {"modo": "regex", "patron": "x*"}})
     texto = "\n".join(e)
     for ruta in ("custom_extraction.css_malo: selector CSS", "custom_extraction.xp_mala: XPath",
-                 "custom_extraction.re_mala: regex", "custom_extraction.abs: XPath con //",
+                 "custom_extraction.re_mala: regex", "custom_extraction.abs: XPath con una ruta absoluta",
                  "custom_extraction.attr: atributo", "custom_extraction.grupo: grupo 3",
                  "custom_extraction.fuente:", "custom_search.vacia: la regex casa con la cadena vacia"):
         assert ruta in texto, (ruta, texto)
@@ -317,6 +387,19 @@ def test_config_parcial_acepta_quitar_una_regla_heredada():
     with pytest.raises(ValueError):
         # Una regla parcial no es una regla: no se «retoca» un campo de otra
         validar_config_parcial({"custom_extraction": {"precio": {"solo_urls": "^/p/"}}})
+
+
+def test_un_job_puntual_puede_quitar_una_regla_heredada_con_null():
+    _pydantic()
+    from api.schemas import JobConfig
+    from shared.clientes import fusionar_config
+
+    cliente = {"custom_extraction": {"precio": {"tipo": "css", "expresion": ".p"},
+                                     "sku": {"tipo": "css", "expresion": ".s"}}}
+    job = JobConfig.model_validate({"custom_extraction": {"precio": None}})
+    cfg = JobConfig.model_validate(
+        fusionar_config(cliente, job.model_dump(exclude_unset=True))).model_dump()
+    assert set(cfg["custom_extraction"]) == {"sku"}
 
 
 def test_la_herencia_suma_por_nombre_y_sustituye_cada_regla_entera():

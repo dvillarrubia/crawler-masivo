@@ -557,7 +557,20 @@ def _run_job(job_id: str) -> None:
             # codigo 0 y el job quedaba `completed` con cero filas. Medido: un
             # censo de 289 URLs rastreadas y 0 guardadas, sin un solo aviso.
             rastreadas, guardadas, recuperadas = _rastreadas_y_guardadas(job_id)
-            if rastreadas and not guardadas:
+            # Reglas a medida que no compilan (decision 104): va ANTES que
+            # `recuperadas`, porque en una reanudacion ya hay filas y el job
+            # saldria `completed` con la frontera sin explorar.
+            reglas_invalidas = _config_invalida(job_id)
+            if reglas_invalidas:
+                logger.error(
+                    "Job %s: las reglas a medida no compilan y no se ha rastreado "
+                    "nada; se marca como fallido (config_invalida): %s",
+                    job_id, reglas_invalidas,
+                )
+                final_status = "failed"
+                sin_guardar = True
+                razon_cero = "config_invalida"
+            elif rastreadas and not guardadas:
                 logger.error(
                     "Job %s: se rastrearon %d URLs y no se guardo NINGUNA. El "
                     "pipeline fallo al escribir (ver errores arriba); el job se "
@@ -1012,14 +1025,28 @@ def _por_que_cero_urls(job_id: str) -> str:
     """
     try:
         rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
-        # Reglas a medida que no compilan (decision 104): el spider no rastrea.
-        if rc.get(f"job:{job_id}:config_invalida"):
-            return "config_invalida"
         if rc.get(f"job:{job_id}:robots_bloquea_semillas"):
             return "robots_bloquea_todo"
     except Exception:
         pass
     return "sin_urls"
+
+
+def _config_invalida(job_id: str) -> str | None:
+    """El motivo si el spider dejo la marca de reglas a medida que no compilan
+    (decision 104), o None. La marca se consume: el motivo queda en el log del
+    worker y el estado en `finish_reason`."""
+    from shared.extraccion_a_medida import CLAVE_CONFIG_INVALIDA
+
+    try:
+        rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        clave = CLAVE_CONFIG_INVALIDA.format(job_id=job_id)
+        motivo = rc.get(clave)
+        if motivo:
+            rc.delete(clave)
+        return motivo or None
+    except Exception:
+        return None
 
 
 def _rastreadas_y_guardadas(job_id: str) -> tuple[int, int, int]:

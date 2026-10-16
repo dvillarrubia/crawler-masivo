@@ -2656,13 +2656,28 @@ function app() {
       if (op === 'vacio') f = { op: 'vacio' };
       else if (op === 'si' || op === 'no') f = { value: op === 'si' ? 'true' : 'false' };
       else if (op && op.startsWith('estado:')) f = { op: 'estado', value: op.slice(7) };
+      // El chip SUSTITUYE los filtros, desde la ficha y desde el Explorador:
+      // su cifra es la del censo entero, y sumado a otro filtro (AND) la
+      // tabla no la daba. Pulsar el chip activo lo quita.
+      const activo = f && this.chipAMedidaActivo(nombre, op);
       if (this.view !== 'explorer') this.openExplorer({ tab: 'a_medida', filtros: f ? { [key]: f } : {} });
       else {
         this.expTab = 'a_medida';
-        this.expColumnFilters = f ? { ...this.expColumnFilters, [key]: f } : this.expColumnFilters;
+        this.expColumnFilters = (f && !activo) ? { [key]: f } : {};
         this.expPage = 1;
         this.loadExplorerUrls();
       }
+    },
+
+    chipAMedidaActivo(nombre, op) {
+      const filtros = Object.entries(this.expColumnFilters || {}).filter(([, v]) => v);
+      if (this.view !== 'explorer' || filtros.length !== 1) return false;
+      const [k, f] = filtros[0];
+      if (k !== 'x.' + nombre) return false;
+      if (op === 'vacio') return f.op === 'vacio';
+      if (op === 'si' || op === 'no') return !f.op && f.value === (op === 'si' ? 'true' : 'false');
+      if (op && op.startsWith('estado:')) return f.op === 'estado' && f.value === op.slice(7);
+      return false;
     },
 
     // Un 422 por una regla que el censo no tiene: se quitan los filtros y el
@@ -2961,6 +2976,20 @@ function app() {
       for (const [colKey, f] of Object.entries(this.expColumnFilters)) {
         if (!f) continue;
         const def = EXP_COLUMN_DEFS[colKey];
+        if (!def && colKey.startsWith('x.')) {
+          // Una regla que este censo no tiene (vista guardada de otro censo):
+          // se manda igual para que la API dé el 422 y salga el aviso con
+          // «Quitar el filtro». Descartarla aquí enseñaba el censo ENTERO
+          // como si el filtro se hubiera aplicado (decision 104).
+          const raw = (f.value ?? '').toString().trim();
+          if (f.op === 'vacio') vacio.push(colKey);
+          else if (f.op === 'con_valor') conValor.push(colKey);
+          else if (f.op === 'estado') params.set(`${colKey}_estado`, raw);
+          else if (['>=', '>', '='].includes(f.op)) params.set(`${colKey}_gte`, raw);
+          else if (['<=', '<'].includes(f.op)) params.set(`${colKey}_lte`, raw);
+          else params.set(colKey, raw);
+          continue;
+        }
         if (!def || !def.filterKey) continue;
         if (def.aMedida && f.op === 'estado') { if (f.value) params.set(`x.${def.nombre}_estado`, f.value); continue; }
         if (def.vacio && f.op === 'vacio') { vacio.push(def.vacio); continue; }

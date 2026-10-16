@@ -70,7 +70,10 @@
    sitio entero). Ahora es `failed`, y el motivo distingue
    `robots_bloquea_todo` —un hallazgo que se cuenta en una frase— de
    `sin_urls`, que hay que mirar. El spider deja la marca en Redis cuando lo
-   prohibido es una SEMILLA.
+   prohibido es una SEMILLA. Un tercer motivo, `config_invalida`: las reglas
+   de extraccion a medida no compilan y no se rastrea nada; ese manda incluso
+   en una reanudacion con filas ya guardadas, y el motivo concreto va al log
+   del worker ([104](extraccion-a-medida.md#d104)).
 
 <a id="d40"></a>
 40. **Un candado no puede tragarse los errores de lo que protege** — la primera

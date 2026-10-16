@@ -16,6 +16,8 @@ Las definiciones viven en `jobs.config` (`custom_extraction`,
 from __future__ import annotations
 
 import math
+import os
+import threading
 import time
 import uuid
 from typing import Any
@@ -34,6 +36,15 @@ router = APIRouter(prefix="/api", tags=["extraccion"])
 
 MAX_HTML_BYTES = 5 * 1024 * 1024
 AVISO_MS = 50.0
+# Pruebas a la vez. Una XPath o un CSS no se pueden interrumpir (lxml no tiene
+# timeout) y el endpoint no pide autenticacion: sin tope, unas decenas de
+# peticiones con `div ~ div ~ div` sobre 5 MB ocupaban todo el threadpool y
+# la API dejaba de responder a /api/jobs. Con el, lo que se puede bloquear es
+# este endpoint (429), no la API. Dentro de una prueba, el presupuesto de la
+# pagina corta las reglas que vienen detras de una lenta, asi que una peticion
+# cuesta como mucho UNA regla lenta. lxml suelta el GIL al evaluar.
+PROBAR_CONCURRENCIA = max(1, int(os.getenv("CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ", "2")))
+_pruebas = threading.BoundedSemaphore(PROBAR_CONCURRENCIA)
 
 
 class ProbarExtraccion(BaseModel):
@@ -141,6 +152,19 @@ def probar(cuerpo: ProbarExtraccion, db: Session = Depends(get_session)) -> dict
                       "que llegue al puerto. No extraigas datos personales (correos, telefonos)")
 
     comp = xm.compilar(config.get("custom_extraction"), config.get("custom_search"))
+    if not _pruebas.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Hay {PROBAR_CONCURRENCIA} pruebas de extraccion en curso; vuelve a "
+                   f"intentarlo en unos segundos")
+    try:
+        return _probar(xm, comp, config, cuerpo, html, contenido, ruta, render, fuente, avisos)
+    finally:
+        _pruebas.release()
+
+
+def _probar(xm, comp, config, cuerpo, html, contenido, ruta, render, fuente,
+            avisos) -> dict[str, Any]:
     from lxml import html as lhtml
 
     try:

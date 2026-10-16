@@ -20,9 +20,11 @@ Cuatro reglas que no son obvias:
   prefijo, `re:test()` falla al validar con «prefijo no definido».
 - **Las regex van con el modulo `regex` y `timeout`.** Mantiene lookaround y
   referencias hacia atras, que los consultores usan, y se puede cortar. Una
-  regla que agota el tiempo `AGOTADOS_PARA_DESACTIVAR` veces queda
-  `desactivada` el resto del rastreo: el cortacircuitos es lo que evita pagar
-  el tope en cada pagina.
+  XPath o un CSS NO se pueden cortar (lxml no tiene timeout): se miden, y la
+  que sola pasa del presupuesto de la pagina cuenta como agotada. Una regla
+  que agota el tiempo `AGOTADOS_PARA_DESACTIVAR` veces queda `desactivada` el
+  resto del rastreo: el cortacircuitos es lo que evita pagar el tope en cada
+  pagina.
 - **Sin fila no es «vacio».** Una URL sin fila de una regla no se evaluo (no
   es HTML 2xx, cae fuera de `solo_urls` o el censo es anterior a la regla).
   «No contiene» es exactamente `estado='sin_coincidencia'`; una busqueda sobre
@@ -46,6 +48,14 @@ from typing import Any
 
 NOMBRE_REGLA = r"^[a-z][a-z0-9_]{0,39}$"
 _RE_NOMBRE = re.compile(NOMBRE_REGLA)
+# Sufijos de los filtros `x.<nombre><sufijo>` del Explorador. Un nombre que
+# acabe asi seria ambiguo (`stock` y `stock_estado`: ¿el estado de `stock` o
+# el si/no de `stock_estado`?), asi que no se admite.
+SUFIJOS_FILTRO = ("_gte", "_lte", "_contains", "_estado")
+
+# Marca que deja el spider en Redis cuando las reglas no compilan: el worker la
+# convierte en `failed` + finish_reason=config_invalida (y registra el motivo).
+CLAVE_CONFIG_INVALIDA = "job:{job_id}:config_invalida"
 
 MAX_EXTRACTORES = 25
 MAX_BUSQUEDAS = 25
@@ -97,9 +107,11 @@ _HTML_PRUEBA = ("<html><head><title>t</title><meta name='d' content='c'></head><
 # Validacion
 # ---------------------------------------------------------------------------
 def _xpath_absoluto_en_predicado(expr: str) -> bool:
-    """`//a[//b]`: dentro del predicado, `//` recorre el documento ENTERO por
-    cada nodo candidato. Es cuadratico y es casi siempre un error (lo que se
-    quiere es `.//b`)."""
+    """`//a[//b]` o `//a[/html//b]`: dentro del predicado, una ruta absoluta
+    recorre el documento ENTERO por cada nodo candidato. Es cuadratico y es
+    casi siempre un error (lo que se quiere es `.//b`). Una `/` es absoluta
+    cuando abre una expresion (detras de `[`, `(`, `,` o un operador); detras
+    de un nombre es un paso (`a/b`)."""
     profundidad = 0
     comilla = None
     i = 0
@@ -114,11 +126,12 @@ def _xpath_absoluto_en_predicado(expr: str) -> bool:
             profundidad += 1
         elif c == "]":
             profundidad = max(0, profundidad - 1)
-        elif c == "/" and expr[i:i + 2] == "//" and profundidad > 0:
+        elif c == "/" and profundidad > 0:
             antes = expr[:i].rstrip()
-            if not antes or antes[-1] in "[(,=<>|!+*" or re.search(r"\b(and|or|div|mod)$", antes):
+            if not antes or antes[-1] in "[(,=<>|!+" or re.search(r"\b(and|or|div|mod)$", antes):
                 return True
-            i += 1
+            if expr[i:i + 2] == "//":
+                i += 1
         i += 1
     return False
 
@@ -209,6 +222,11 @@ def validar(ce: dict | None, cs: dict | None, *, extract_page_content: bool = Tr
                 errores.append(f"{ruta}: el nombre tiene que ser minusculas, cifras y _ "
                                f"empezando por letra, 40 caracteres como mucho")
                 continue
+            if nombre.endswith(SUFIJOS_FILTRO):
+                errores.append(f"{ruta}: el nombre no puede acabar en "
+                               f"{', '.join(SUFIJOS_FILTRO)} (son los sufijos de los "
+                               f"filtros x.<nombre>_gte, ...)")
+                continue
             total_bytes += _bytes_regla(r, clase)
             try:
                 errores += [f"{ruta}: {e}" for e in _validar_regla(r, clase, extract_page_content)]
@@ -276,8 +294,9 @@ def _validar_regla(r: dict, clase: str, extract_page_content: bool) -> list[str]
                 "XPath no valida: prefijo no definido " + ", ".join(sorted(_prefijos(expr)))
                 + ": (las extensiones EXSLT como re:test() no se admiten)"]
         if tipo == "xpath" and _xpath_absoluto_en_predicado(expr):
-            errores.append("XPath con // absoluto dentro de un predicado (recorre la "
-                           "pagina entera por cada nodo): usa .// para buscar dentro")
+            errores.append("XPath con una ruta absoluta (/ o //) dentro de un predicado "
+                           "(recorre la pagina entera por cada nodo): usa .// para "
+                           "buscar dentro")
         try:
             _probar_xpath(_compilar_xpath(xpath))
         except Exception as exc:
@@ -446,6 +465,9 @@ class Presupuesto:
     def __init__(self, ms_pagina: float | None = None, timeout_s: float | None = None,
                  agotados_max: int | None = None):
         self.ms_pagina = PRESUPUESTO_PAGINA_MS if ms_pagina is None else ms_pagina
+        # Lo que puede tardar UNA regla antes de contar como agotada: el
+        # presupuesto entero de la pagina.
+        self.ms_lenta = self.ms_pagina
         self.timeout_s = TIMEOUT_REGEX_S if timeout_s is None else timeout_s
         self.agotados_max = AGOTADOS_PARA_DESACTIVAR if agotados_max is None else agotados_max
         self.agotados: dict[str, int] = {}
@@ -503,11 +525,27 @@ def _valor_de_nodo(nodo, devuelve: str, atributo: str | None) -> str | None:
     return _texto_de(nodo)
 
 
+def _cuenta_como_nodo(x) -> bool:
+    if isinstance(x, str):
+        return bool(x.strip())
+    return isinstance(x, (bool, float)) or isinstance(getattr(x, "tag", None), str)
+
+
 def _fila(rc: ReglaCompilada, estado: str, render: bool | None, **kw) -> dict:
     fila = {"nombre": rc.nombre, "clase": rc.clase, "estado": estado, "n": None,
             "valor": None, "valor_clave": None, "valor_num": None, "valores": None,
             "truncado": False, "render": render, "detalle": None}
     fila.update(kw)
+    # Postgres no admite un NUL en un campo de texto, y un solo valor con NUL
+    # tumbaba el lote entero (y con su rollback, las paginas aun sin
+    # confirmar). lxml los quita en CSS y XPath; una regex sobre el HTML
+    # crudo, o el contexto de una busqueda, no.
+    for k in ("valor", "valor_clave", "detalle"):
+        if isinstance(fila[k], str) and "\x00" in fila[k]:
+            fila[k] = fila[k].replace("\x00", "")
+    if fila["valores"]:
+        fila["valores"] = [v.replace("\x00", "") if isinstance(v, str) else v
+                           for v in fila["valores"]]
     return fila
 
 
@@ -555,12 +593,19 @@ def _aplicar_extractor(rc: ReglaCompilada, raiz, html, texto, contenido, presupu
                          valor_clave=str(n), valor_num=float(n))
         valores = []
         n = 0
-        for nodo in resultado:
+        for i, nodo in enumerate(resultado):
             v = _valor_de_nodo(nodo, r.get("devuelve") or "texto", r.get("atributo"))
             if v:
                 n += 1
                 if len(valores) < max_val:
                     valores.append(v)
+                if cuantos == "primero":
+                    # Con el primero ya esta el valor: el texto del resto de
+                    # nodos no se calcula (con `div` en una pagina anidada eran
+                    # 330 ms por pagina). `n` cuenta desde aqui los NODOS que
+                    # casan, tengan texto o no.
+                    n += sum(1 for x in resultado[i + 1:] if _cuenta_como_nodo(x))
+                    break
     else:
         fuente, recortada = _fuente(rc, html, texto, contenido, raiz)
         valores = []
@@ -629,6 +674,24 @@ def _aplicar_busqueda(rc, raiz, html, texto, contenido, presupuesto, render) -> 
                  valor_num=float(n), truncado=n >= MAX_COINCIDENCIAS)
 
 
+# Un muro de WAF es una pagina PEQUENA: 5-6 kB medidos (decision 62), y los
+# de Akamai o AWS WAF, unos cientos de bytes. Un articulo titulado «Error 403
+# Forbidden: que es» o «Security check en el aeropuerto» lleva la plantilla
+# del sitio y pasa de largo de este tope: sin el, el titulo solo lo sacaba de
+# la extraccion y de «no contiene».
+MURO_MAX_CARACTERES = 64 * 1024
+
+
+def es_muro(titulo: str | None, html: str | None) -> bool:
+    """Titulo de un muro conocido Y pagina pequena."""
+    from shared.descarga_cruda import TITULOS_DE_BLOQUEO
+
+    if not titulo or len(html or "") > MURO_MAX_CARACTERES:
+        return False
+    t = titulo.strip().lower()
+    return any(m in t for m in TITULOS_DE_BLOQUEO)
+
+
 def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
             contenido: str | None = None, ruta: str | None = None,
             titulo: str | None = None, render: bool | None = None,
@@ -641,11 +704,9 @@ def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
     visible del body. `contenido`: el contenido principal (`page_content`).
     `medir`, si se pasa, recibe los ms de cada regla (lo usa la prueba).
     """
-    from shared.descarga_cruda import TITULOS_DE_BLOQUEO
-
     presupuesto = presupuesto or Presupuesto()
     filas: list[dict] = []
-    bloqueada = bool(titulo) and any(t in titulo.strip().lower() for t in TITULOS_DE_BLOQUEO)
+    bloqueada = es_muro(titulo, html)
     inicio_pagina = time.perf_counter()
     for rc in comp.reglas:
         if rc.solo_urls is not None:
@@ -676,6 +737,16 @@ def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
         except Exception as exc:  # noqa: BLE001 — una regla rota no tumba la pagina
             fila = _fila(rc, "error", render, detalle=f"{type(exc).__name__}: {exc}"[:200])
         ms = (time.perf_counter() - t0) * 1000
+        if ms > presupuesto.ms_lenta and fila["estado"] != "tiempo_agotado":
+            # Una XPath o un selector CSS no se pueden interrumpir (lxml no
+            # tiene timeout), asi que el tope no puede ser previo: se MIDE, y la
+            # regla que sola se come el presupuesto de una pagina cuenta como
+            # agotada. Lo calculado se conserva; a la tercera se desactiva. Sin
+            # esto, `div ~ div ~ div` (11 s por pagina medidos con 3.000
+            # bloques) pararia el reactor en cada pagina del rastreo.
+            presupuesto.anotar_agotado(rc.nombre)
+            fila["detalle"] = (f"la regla tardo {ms:.0f} ms (tope "
+                               f"{presupuesto.ms_lenta:.0f} ms por regla)")
         presupuesto.ms_por_regla[rc.nombre] = presupuesto.ms_por_regla.get(rc.nombre, 0.0) + ms
         if medir is not None:
             medir[rc.nombre] = ms

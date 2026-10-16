@@ -146,6 +146,11 @@ def create_job(
     if cliente is None:
         # Sin cliente, exactamente lo de siempre: el JobConfig entero.
         config = payload.config.model_dump()
+        # Un `null` en una regla es «quitar la heredada»; sin cliente no hay
+        # nada que quitar y no se guarda.
+        for clave in ("custom_extraction", "custom_search"):
+            config[clave] = {n: r for n, r in (config.get(clave) or {}).items()
+                             if r is not None}
     else:
         # Con cliente, solo lo que el job CAMBIA se pone encima de lo heredado.
         config = resolver_config(

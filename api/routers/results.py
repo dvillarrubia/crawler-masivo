@@ -361,7 +361,7 @@ def _clausula_contiene(col_expr, valor):
 # Extraccion y busqueda a medida (#34, decision 104): columnas `x.<nombre>`
 # ---------------------------------------------------------------------------
 _ESTADOS_EVALUADOS = ("ok", "sin_coincidencia", "conversion_fallida")
-_SUFIJOS_X = ("_gte", "_lte", "_contains", "_estado")
+from shared.extraccion_a_medida import SUFIJOS_FILTRO as _SUFIJOS_X  # noqa: E402
 
 
 def reglas_del_job(job_o_config) -> dict[str, tuple[str, dict]]:
