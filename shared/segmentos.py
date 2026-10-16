@@ -42,8 +42,14 @@ fichas» cuando es «este censo no tiene la extraccion».
 Si ninguna regla casa, el segmento es la forma de la ruta
 (`shared.plantillas.firma_de_ruta`), que siempre empieza por `/`; por eso un
 nombre de regla no puede empezar por `/`: se distingue a la vista que segmento
-viene de una regla y cual es el repuesto. Las URLs externas van a
-`SEGMENTO_EXTERNA`.
+viene de una regla y cual es el repuesto.
+
+Las reglas solo juzgan PAGINAS DEL SITIO. Antes de mirar ninguna, las URLs
+externas van a `SEGMENTO_EXTERNA` y los recursos internos que no son un
+documento (imagenes, CSS, JS, fuentes: `TIPOS_RECURSO`) a `SEGMENTO_RECURSO`:
+un enlace a `otro.com/blog/` no es del blog del cliente, y una imagen de
+`/blog/wp-content/` no es una pagina del blog; contarlas en el segmento
+inflaria el denominador de cada porcentaje (decision 108).
 
 Vive en `shared/` porque lo usan el analizador (al terminar `run_all`) y la API
 (re-segmentar sin el analisis entero, y validar al guardar la configuracion).
@@ -62,6 +68,11 @@ from typing import Any, Callable
 from shared.respuestas import NO_VALIDAS
 
 SEGMENTO_EXTERNA = "(externa)"
+SEGMENTO_RECURSO = "(recurso)"
+# Lo que no es un documento (decision 42: HTML y PDF, que Google indexa). Los
+# saltos (`redirect`), lo bloqueado por robots (`blocked`) y lo que fallo sin
+# respuesta (`other`) SI son paginas: tienen su segmento como cualquier otra.
+TIPOS_RECURSO = frozenset({"image", "svg", "css", "js", "font"})
 MAX_REGLAS = 200
 MAX_PROFUNDIDAD = 6
 MAX_HOJAS_POR_REGLA = 50
@@ -89,6 +100,16 @@ CAMPOS: dict[str, str] = {
 # DESCONOCIDA: la pagina no se llego a ver.
 CAMPOS_FIABLES_CON_MURO = frozenset({"url", "path", "host", "is_internal", "response_class"})
 
+# Columnas en las que NULL es un dato y no un «no se sabe»: el spider deja
+# `redirect_type` a None en toda respuesta que no es un salto. Con una
+# respuesta que no es 3xx, NULL = «no redirige», conocido; sin respuesta
+# (bloqueada, error de red) o en un salto sin codigo (JS), sigue sin saberse.
+def _null_conocido(campo: str, fila: dict) -> bool:
+    if campo == "redirect_type":
+        codigo = fila.get("status_code")
+        return codigo is not None and not 300 <= codigo < 400
+    return False
+
 _OPS_POR_TIPO = {
     "texto": {"igual", "en", "contiene", "regex", "vacio"},
     "numero": {"igual", "en", "gte", "lte", "vacio"},
@@ -113,11 +134,15 @@ def _compilar_regex(patron: str):
 # ---------------------------------------------------------------------------
 def validar(reglas: list[dict] | None, nombres_x: dict[str, str] | None = None) -> list[str]:
     """`nombres_x`: nombre -> clase (`extractor`/`busqueda`) de las reglas a
-    medida del MISMO config; una condicion `x` sobre otra es un error, porque
-    nunca casaria y se leeria como «no hay ninguna»."""
+    medida del config ENTERO; una condicion `x` sobre otra es un error, porque
+    nunca casaria y se leeria como «no hay ninguna».
+
+    `nombres_x=None` = no se conocen todavia: una capa de la herencia (cliente,
+    perfil, el override de un job) puede usar una extraccion que fija otra
+    capa, asi que ahi se valida la forma y el nombre se comprueba sobre la
+    configuracion FUSIONADA (`errores_de_config`)."""
     errores: list[str] = []
     reglas = reglas or []
-    nombres_x = nombres_x or {}
     if len(reglas) > MAX_REGLAS:
         return [f"segmentos: como mucho {MAX_REGLAS} reglas (hay {len(reglas)})"]
     for i, r in enumerate(reglas):
@@ -202,14 +227,18 @@ def _validar_cond(c, donde: str, nivel: int, nombres_x: dict, hojas: list[int]) 
                     f"validos: {sorted(_OPS_POR_TIPO[tipo])}"]
     else:
         nombre = c["x"]
+        if not isinstance(nombre, str) or not nombre:
+            return [f"{donde}: `x` es el nombre de una regla a medida"]
+        if op not in _OPS_X:
+            return [f"{donde}: operador desconocido {op!r}; validos: {sorted(_OPS_X)}"]
+        tipo = "numero" if op in ("gte", "lte") else "texto"
+        if nombres_x is None:
+            return _validar_valor(op, v, tipo, donde)
         if nombre not in nombres_x:
             return [f"{donde}: este config no tiene la regla a medida {nombre!r} "
                     f"(custom_extraction / custom_search)"]
-        if op not in _OPS_X:
-            return [f"{donde}: operador desconocido {op!r}; validos: {sorted(_OPS_X)}"]
         if op == "es" and nombres_x[nombre] != "busqueda":
             return [f"{donde}: `es` solo vale para una busqueda; {nombre!r} es un extractor"]
-        tipo = "numero" if op in ("gte", "lte") else "texto"
     return _validar_valor(op, v, tipo, donde)
 
 
@@ -334,7 +363,7 @@ def _compilar_cond(c: dict, cont: _Contadores) -> Cond:
             if campo not in CAMPOS_FIABLES_CON_MURO and f.get("response_class") in NO_VALIDAS:
                 return None  # un muro no es la pagina (decision 103)
             v = _valor_campo(f, campo)
-            if v is None and op != "vacio":
+            if v is None and op != "vacio" and not _null_conocido(campo, f):
                 return None  # NULL: no se sabe (indexable sin decidir, sin sitemap...)
             return _op_sobre_valor(op, esperado, v, cont, rx)
         return por_campo
@@ -400,6 +429,7 @@ class Segmentador:
         self.desconocidas = [0] * len(self._compiladas)
         self.por_defecto = 0
         self.externas = 0
+        self.recursos = 0
 
     @property
     def nombres_x(self) -> set[str]:
@@ -420,7 +450,15 @@ class Segmentador:
         return salida
 
     def segmento(self, fila: dict) -> str:
-        """La primera regla VERDADERA gana; lo desconocido no gana y se cuenta."""
+        """Externas y recursos aparte, ANTES de las reglas: no son paginas del
+        sitio. Luego la primera regla VERDADERA gana; lo desconocido no gana y
+        se cuenta."""
+        if fila.get("is_internal") is False:
+            self.externas += 1
+            return SEGMENTO_EXTERNA
+        if fila.get("resource_type") in TIPOS_RECURSO:
+            self.recursos += 1
+            return SEGMENTO_RECURSO
         for i, (nombre, cond) in enumerate(self._compiladas):
             r = cond(fila)
             if r is True:
@@ -428,9 +466,6 @@ class Segmentador:
                 return nombre
             if r is None:
                 self.desconocidas[i] += 1
-        if fila.get("is_internal") is False:
-            self.externas += 1
-            return SEGMENTO_EXTERNA
         from shared.plantillas import firma_de_ruta
 
         self.por_defecto += 1
@@ -445,6 +480,13 @@ def huella(reglas: list[dict] | None) -> str:
 
 def reglas_de_config(config: dict | None) -> list[dict]:
     return [r for r in ((config or {}).get("segmentos") or []) if isinstance(r, dict)]
+
+
+def errores_de_config(config: dict | None) -> list[str]:
+    """Los segmentos de una configuracion COMPLETA (fusionada o la de un job
+    sin cliente) contra sus reglas a medida: la comprobacion que una capa
+    suelta no puede hacer."""
+    return validar(reglas_de_config(config), nombres_a_medida(config))
 
 
 def nombres_a_medida(config: dict | None) -> dict[str, str]:
@@ -465,8 +507,15 @@ def segmentar(session, job_id, reglas: list[dict] | None = None, *, lote: int = 
     (que tambien queda en `jobs.segmentacion`). No hace commit.
 
     `reglas=None` lee las del propio job (`jobs.config.segmentos`). Recorre las
-    URLs por tramos de id (keyset) y escribe agrupando por segmento: un UPDATE
-    por (tramo, segmento) y no uno por URL.
+    URLs por tramos y escribe agrupando por segmento: un UPDATE por (tramo,
+    segmento) y no uno por URL.
+
+    El tramo va por `(job_id, url_hash)`, el indice unico `uq_job_url`, y NO
+    por `id`: no hay indice `(job_id, id)`, asi que `id > :ultimo ORDER BY id`
+    hacia que Postgres recorriese `urls_pkey` —la clave de TODOS los censos—
+    filtrando por job, y el coste crecia con la tabla entera y no con el censo.
+    Medido en una base sintetica de 6 M de filas (100 censos de 60.000): ver la
+    decision 108.
     """
     from sqlalchemy import select, update
 
@@ -479,18 +528,19 @@ def segmentar(session, job_id, reglas: list[dict] | None = None, *, lote: int = 
         reglas = reglas_de_config(job.config if job else None)
     seg = Segmentador(reglas)
     nombres_x = sorted(seg.nombres_x)
-    cols = [getattr(Url, c) for c in CAMPOS] + [Url.id]
-    ultimo = 0
+    cols = [getattr(Url, c) for c in CAMPOS] + [Url.id, Url.url_hash]
+    ultimo = ""
     total = 0
     distintos: dict[str, int] = {}
     while True:
         filas = session.execute(
-            select(*cols).where(Url.job_id == job_id, Url.id > ultimo).order_by(Url.id).limit(lote)
+            select(*cols).where(Url.job_id == job_id, Url.url_hash > ultimo)
+            .order_by(Url.url_hash).limit(lote)
         ).mappings().all()
         if not filas:
             break
         ids = [f["id"] for f in filas]
-        ultimo = ids[-1]
+        ultimo = filas[-1]["url_hash"]
         xs: dict[int, dict] = {}
         if nombres_x:
             CE = CustomExtraction
@@ -521,6 +571,7 @@ def segmentar(session, job_id, reglas: list[dict] | None = None, *, lote: int = 
         "por_regla": por_regla,
         "por_defecto": seg.por_defecto,
         "externas": seg.externas,
+        "recursos": seg.recursos,
         "segmentos_distintos": len(distintos),
         "regex_agotadas": seg.cont.regex_agotadas,
         "segundos": round(time.time() - inicio, 2),

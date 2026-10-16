@@ -2081,6 +2081,9 @@ function app() {
         let f = '';
         if (this.issueFilters.severity)   f += `&severity=${this.issueFilters.severity}`;
         if (this.issueFilters.issue_type) f += `&issue_type=${this.issueFilters.issue_type}`;
+        // El segmento elegido en la vista por tipos sigue mandando en la lista:
+        // si no, el recuento de la tarjeta y la lista hablarian de cosas distintas.
+        if (this.issuesSegmento) f += `&segmento=${encodeURIComponent(this.issuesSegmento)}`;
         const data = await api(`/jobs/${this.job.id}/issues?page=${this.issuesPage}&page_size=50${f}`);
         this.issues = data.items;
         this.issuesPages = data.pages;
@@ -2872,7 +2875,10 @@ function app() {
       try {
         const q = new URLSearchParams(this._buildExplorerParams());
         q.delete('page'); q.delete('page_size'); q.delete('ligero'); q.delete('plantilla');
-        if (this.expAgruparPor === 'segmento') { q.delete('segmento'); q.set('agrupar', 'segmento'); }
+        // Siempre con `agrupar`: el uso (api/uso.py) cuenta las dos agrupaciones,
+        // y sin el valor por defecto en la URL no se podrian comparar.
+        q.set('agrupar', this.expAgruparPor === 'segmento' ? 'segmento' : 'plantilla');
+        if (this.expAgruparPor === 'segmento') q.delete('segmento');
         this.expPlantillas = await api(`/jobs/${this.job.id}/urls/plantillas?${q}`);
         this.expTotal = this.expPlantillas.urls;
       } catch (e) { this.error = e.message; }
@@ -2922,6 +2928,7 @@ function app() {
     async elegirSegmentoProblemas(valor) {
       this.issuesSegmento = valor;
       this.issuesResumen = null;
+      if (this.issuesVista === 'lista' || this.issueFilters.issue_type) this.applyIssueFilters();
       await this.loadIssuesResumen();
       this.$nextTick(() => lucide.createIcons());
     },

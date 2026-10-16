@@ -213,7 +213,9 @@ cambiar las reglas re-segmenta un censo viejo en un par de segundos, sin volver
 a rastrear. En Druni: el 56 % de las fichas tiene el título demasiado largo y el
 82 % de las categorías es casi duplicada. Una página de la que no se sabe el dato
 (bloqueada, sin extracción) no se mete en un segmento por descarte: se cuenta
-aparte. Queda la pantalla para editar las reglas y las alertas por segmento.
+aparte. Los enlaces a otros sitios y las imágenes o CSS no entran en ningún
+segmento aunque su ruta case: no son páginas del cliente y falsearían los
+porcentajes. Queda la pantalla para editar las reglas y las alertas por segmento.
 
 ### Extracción a medida: precio, SKU, disponibilidad y «¿tiene el tag de GTM?» (16 de octubre)
 

@@ -156,21 +156,29 @@ def test_validar_acepta_un_arbol_correcto():
         {"precio": "extractor"}) == []
 
 
-def test_jobconfig_valida_los_segmentos_contra_sus_reglas_a_medida():
+def test_jobconfig_valida_la_forma_y_la_config_entera_los_nombres_x():
+    """Una capa suelta (perfil, override de un job) puede segmentar por una
+    extraccion que fija OTRA capa: JobConfig solo mira la forma, y que la `x`
+    exista se comprueba sobre la config completa (`errores_de_config`)."""
     pytest.importorskip("pydantic")
     from pydantic import ValidationError
 
     from api.schemas import JobConfig
+    from shared.segmentos import errores_de_config
 
     regla = {"nombre": "fichas", "si": {"x": "og_type", "igual": "product"}}
-    with pytest.raises(ValidationError, match="no tiene la regla a medida"):
-        JobConfig.model_validate({"segmentos": [regla]})
+    suelta = JobConfig.model_validate({"segmentos": [regla]})
+    assert any("no tiene la regla a medida 'og_type'" in e
+               for e in errores_de_config(suelta.model_dump()))
+    with pytest.raises(ValidationError, match="necesita un numero"):
+        JobConfig.model_validate({"segmentos": [{"nombre": "a", "si": {"x": "p", "gte": "1"}}]})
     cfg = JobConfig.model_validate({
         "segmentos": [regla, {"nombre": "legal", "patron": "aviso-legal"}],
         "custom_extraction": {"og_type": {"tipo": "css", "expresion": "meta[property='og:type']",
                                           "devuelve": "atributo", "atributo": "content"}},
     })
     assert [r.nombre for r in cfg.segmentos] == ["fichas", "legal"]
+    assert errores_de_config(cfg.model_dump()) == []
 
 
 def test_un_muro_no_es_la_pagina_sus_campos_no_se_saben():
@@ -184,3 +192,34 @@ def test_un_muro_no_es_la_pagina_sus_campos_no_se_saben():
     muro = _fila("/p/a", content_word_count=3, response_class="challenge_waf")
     assert seg.segmento(muro) == "fichas"
     assert seg.segmento(_fila("/b", content_word_count=3, response_class="contenido")) == "finas"
+
+
+def test_externas_y_recursos_no_entran_en_ningun_segmento_aunque_casen():
+    """Las reglas juzgan paginas del sitio: un enlace a `medium.com/blog/x` no
+    es del blog del cliente, ni una imagen de `/blog/wp-content/` una pagina
+    del blog. Si entraran, inflarian el denominador de cada porcentaje."""
+    from shared.segmentos import SEGMENTO_RECURSO
+
+    seg = Segmentador([{"nombre": "blog", "patron": "^/blog/"},
+                       {"nombre": "rotas", "si": {"campo": "status_group", "en": ["4xx"]}}])
+    assert seg.segmento(_fila("/blog/x", is_internal=False)) == SEGMENTO_EXTERNA
+    assert seg.segmento(_fila("/x", is_internal=False, status_group="4xx")) == SEGMENTO_EXTERNA
+    assert seg.segmento(_fila("/blog/wp-content/a.jpg", resource_type="image")) == SEGMENTO_RECURSO
+    assert seg.segmento(_fila("/blog/estilo.css", resource_type="css")) == SEGMENTO_RECURSO
+    # Un salto, lo bloqueado y un PDF SI son paginas.
+    assert seg.segmento(_fila("/blog/viejo", resource_type="redirect", status_code=301)) == "blog"
+    assert seg.segmento(_fila("/blog/x", resource_type="blocked", status_code=None)) == "blog"
+    assert seg.segmento(_fila("/blog/guia.pdf", resource_type="pdf")) == "blog"
+    assert seg.casadas == [3, 0] and (seg.externas, seg.recursos) == (2, 2)
+
+
+def test_redirect_type_null_en_una_respuesta_que_no_salta_es_un_dato():
+    """El spider deja `redirect_type` a None en toda respuesta que no es un
+    salto: en una 200 eso es «no redirige», conocido, no «no se sabe»."""
+    seg = Segmentador([{"nombre": "sin-301", "si": {"no": {"campo": "redirect_type", "igual": 301}}}])
+    assert seg.segmento(_fila("/a", status_code=200, redirect_type=None)) == "sin-301"
+    assert seg.segmento(_fila("/b", status_code=301, redirect_type=301)) != "sin-301"
+    assert seg.segmento(_fila("/c", status_code=302, redirect_type=302)) == "sin-301"
+    # Sin respuesta (bloqueada, error de red) sigue sin saberse.
+    assert seg.segmento(_fila("/d", status_code=None, redirect_type=None)) != "sin-301"
+    assert seg.casadas == [2] and seg.desconocidas == [1]

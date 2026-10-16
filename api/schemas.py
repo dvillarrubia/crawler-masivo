@@ -314,9 +314,11 @@ class JobConfig(BaseModel):
             return self
         from shared.segmentos import validar
 
-        nombres_x = {n: "extractor" for n, v in self.custom_extraction.items() if v is not None}
-        nombres_x.update({n: "busqueda" for n, v in self.custom_search.items() if v is not None})
-        errores = validar([r.model_dump(exclude_none=True) for r in self.segmentos], nombres_x)
+        # Solo la forma. Que cada `x` exista se comprueba sobre la config
+        # FUSIONADA (`resolver_config`, y `create_job` sin cliente): aqui puede
+        # llegar una capa suelta —el perfil, el override de un job— cuyos
+        # segmentos usan una extraccion que fija el cliente.
+        errores = validar([r.model_dump(exclude_none=True) for r in self.segmentos], None)
         if errores:
             raise ValueError("; ".join(errores))
         return self

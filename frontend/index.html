@@ -1666,6 +1666,9 @@
                       <strong x-text="fmt.num(r.paginas)"></strong> <span x-text="r.paginas === 1 ? 'página' : 'páginas'"></span>
                       <span class="text-dim" x-show="r.incidencias !== r.paginas" x-text="'· ' + fmt.num(r.incidencias) + ' incidencias'"></span>
                       <span class="text-dim" x-show="r.pct_paginas != null" x-text="'· ' + fmt.num(r.pct_paginas) + ' % de ' + fmt.num(r.urls_denominador) + ' URLs del segmento'"></span>
+                      <!-- Un tipo que solo tiene incidencias de un hallazgo para muchas
+                           paginas no se puede repartir: sale con 0 y lo dice, no desaparece. -->
+                      <span class="text-dim" x-show="issuesSegmento && r.agregadas" x-text="'· ' + fmt.num(r.agregadas) + ' sin repartir por segmento'"></span>
                     </span>
                     <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
                   </button>
@@ -1702,7 +1705,7 @@
                         <li><a :href="'#/rastreos/' + job.id + '/url/' + e.url_id" x-text="e.url" :title="e.url"></a></li>
                       </template>
                     </ul>
-                    <div class="flex gap-1 mt-1" style="flex-wrap:wrap">
+                    <div class="flex gap-1 mt-1" style="flex-wrap:wrap" x-show="r.incidencias > 0">
                       <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
                         Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
                       </button>
@@ -1737,6 +1740,14 @@
                   <option :value="t" :selected="t === issueFilters.issue_type" x-text="fmt.issue(t)"></option>
                 </template>
               </select>
+              <template x-if="issuesSegmento">
+                <!-- Solo las de paginas del segmento: las de un hallazgo para muchas
+                     paginas no se reparten (decision 108). -->
+                <button class="btn btn-sm" @click="elegirSegmentoProblemas('')" :title="'Quitar el segmento ' + issuesSegmento">
+                  <i data-lucide="x" style="width:12px;height:12px"></i>
+                  Segmento: <span class="truncate" style="max-width:16rem" x-text="issuesSegmento"></span>
+                </button>
+              </template>
               <span class="text-dim text-sm" style="margin-left:auto" x-text="loading ? 'Cargando…' : fmt.num(issuesTotal) + ' incidencias'"></span>
             </div>
             <template x-if="issueFilters.issue_type && ISSUE_INFO[issueFilters.issue_type]">

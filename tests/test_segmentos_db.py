@@ -141,3 +141,68 @@ def test_tramos_pequenos_dan_lo_mismo(censo):
     resumen = segmentar(s, job_id, lote=2)
     s.commit()
     assert _segmentos(s, job_id) == una and resumen["urls"] == 6
+
+
+N_PLAN = 20_000
+
+
+@pytest.mark.skipif(not URL_PG, reason="el plan solo se puede mirar en Postgres")
+def test_los_tramos_van_por_el_indice_del_censo_no_por_la_clave_de_la_tabla():
+    """Sin indice `(job_id, id)`, `id > :ultimo ORDER BY id` obligaba a
+    Postgres a elegir entre recorrer `urls_pkey` —la clave de TODOS los
+    censos— filtrando por job, u ordenar el censo entero en cada tramo: en una
+    tabla de 6 M de filas, 6-12 s solo en eso. Por `(job_id, url_hash)` el
+    tramo es un recorrido del indice unico `uq_job_url`, sin filtro ni orden.
+
+    Se EJECUTA `segmentar`, se capturan las consultas que manda y se mira su
+    plan (con el recorrido secuencial apagado: en una tabla de pruebas
+    pequena Postgres leeria la tabla entera de todas formas)."""
+    from sqlalchemy import event
+
+    from shared.segmentos import segmentar
+
+    engine = create_engine(URL_PG)
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine)()
+    job_id = uuid.uuid4()
+    s.add(Job(id=job_id, name="t", status="completed", seeds=["https://x.com/"], config={}))
+    s.flush()
+    # Las suficientes para que el planificador no lo resuelva todo ordenando
+    # en memoria: con cinco filas cualquier plan sirve y el test no mide nada.
+    from sqlalchemy import insert, text
+
+    s.execute(insert(Url), [
+        dict(job_id=job_id, url=f"https://x.com/{i}", url_hash=uuid.uuid4().hex, host="x.com",
+             path=f"/{i}", is_internal=True, is_html=True, status_code=200, status_group="2xx",
+             resource_type="html") for i in range(N_PLAN)])
+    s.commit()
+    s.execute(text("ANALYZE urls"))
+    s.commit()
+    capturadas: list[tuple[str, object]] = []
+
+    def capturar(_conn, _cursor, sentencia, parametros, _ctx, _many):
+        if sentencia.lstrip().upper().startswith("SELECT") and "FROM urls" in sentencia:
+            capturadas.append((sentencia, parametros))
+
+    event.listen(engine, "before_cursor_execute", capturar)
+    try:
+        segmentar(s, job_id, lote=5000)
+        s.rollback()
+    finally:
+        event.remove(engine, "before_cursor_execute", capturar)
+    assert len(capturadas) >= 3  # 20.000 URLs en tramos de 5.000, y el que vuelve vacio
+    crudo = engine.raw_connection()
+    try:
+        cur = crudo.cursor()
+        cur.execute("SET enable_seqscan = off")
+        for sentencia, parametros in capturadas:
+            cur.execute("EXPLAIN " + sentencia, parametros)
+            plan = "\n".join(f[0] for f in cur.fetchall())
+            assert "uq_job_url" in plan, plan
+            assert "Sort" not in plan and "Filter:" not in plan, plan
+    finally:
+        crudo.rollback()
+        crudo.close()
+        s.query(Job).filter(Job.id == job_id).delete()
+        s.commit()
+        s.close()
