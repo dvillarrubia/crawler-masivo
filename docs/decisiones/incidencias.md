@@ -415,3 +415,122 @@
    de 2 MB deja fuera el canonical aunque esté en el head); y la indexabilidad
    sigue leyendo el `meta robots` esté donde esté, porque no está comprobado
    que Google lo ignore en el body.
+
+<a id="d105"></a>
+105. **Soft 404 determinista: la página de error del sitio se pide, no se
+   adivina, y lo dudoso no se afirma** (ola 2.2 de `docs/PLAN_MEJOR_CRAWLER.md`;
+   [#11](https://github.com/dvillarrubia/crawler-masivo/issues/11) sigue viva
+   para la fase con modelo, que recibe los candidatos). Un soft 404 es una
+   página que responde **200** y es una página de error: Google la saca del
+   índice por su cuenta, Search Console la cuenta como «Soft 404» (y, si estaba
+   en el sitemap, como «La URL enviada parece un soft 404», que archivaba como
+   error), y cada enlace interno que llega a ella es un enlace roto disfrazado.
+   Ningún check lo veía: un 200 con título y texto pasa por página sana.
+   - **La sonda.** Al empezar el rastreo se pide una URL que no puede existir
+     (`shared/soft404.mangle_path`: el último tramo cambiado por un token
+     determinista por job, conservando tramos padre, extensión y barra final) por
+     host de las semillas, y otra por cada plantilla de ruta nueva
+     (`firma_de_ruta`), hasta `crawl_behavior.soft404_sondas` (12; 0 las apaga).
+     Lo que responde el sitio es SU página de error. Va con su propio callback
+     (`crawler/seo_crawler/sonda_soft404.py`): no pasa por `parse`, así que **no
+     gasta `max_urls`**; no emite ningún item, así que **no es una URL del
+     censo**; y su resultado vive en `jobs.soft404["sondas"]`, que no entra en
+     ningún recuento, CSV, grafo ni comparación. Respeta robots.txt, no sigue
+     redirecciones y usa el mismo render que el rastreo.
+   - **Qué sonda deja huella.** Un 200 (soft 404 de serie) y también un 404/410
+     con cuerpo: la página de error que el sitio sirve bien es la misma que otras
+     URLs sirven con 200, y ese fue el caso real (abajo). **Una que redirige, no**:
+     el destino es una página de verdad —la home casi siempre— y tomarlo por «la
+     página de error» marcaría la home. Un muro de WAF tampoco (títulos de la
+     decisión 62): con su huella, cada página bloqueada saldría soft 404, y eso
+     es un bloqueo.
+   - **La huella** es el contenido principal sin el eco de la URL pedida
+     («La página /es/zz… no existe»; `quitar_eco`). Casa por igualdad exacta
+     —con menos de 5 palabras, solo si además coincide el título— o por MinHash
+     ≥ 0,9 (`soft404_similitud`), que solo se calcula con 30 palabras o más en los
+     dos lados (`firma()` devuelve None por debajo): con 14 palabras no se
+     afirma nada por parecido. Dos guardias que no se pueden afirmar: si la
+     huella casa con **más de la mitad** de su alcance (host o plantilla,
+     `soft404_max_proporcion_huella`, con 3 coincidencias como mínimo), es la
+     plantilla —un esqueleto de SPA, una plantilla vacía—, no un error; y si casa
+     con una **portada** (`/`, `/es`), el sitio sirve la home para lo que no
+     existe. En los dos casos va UN `soft_404_candidato` agrupado
+     (`paginas_afectadas`, muestra de 20 y `group_key` por sonda), nunca uno por
+     página.
+   - **El titular dice que es un error** (`senal_titulo`, frases en
+     es/en/ca/eu/fr/de/pt/it). Seguro si el h1 entero, o un segmento del título
+     separado por la marca (`|`, ` - `, `–`), es la frase con dos palabras de
+     relleno como mucho; una frase corta sin «página/page/404» («no
+     encontrado», «not found») solo si no hay nada más que relleno de error
+     («Paraíso no encontrado» es un libro). **Y solo con menos de
+     `min_word_count` palabras propias**: una página de error no tiene contenido.
+     Las dos reglas salieron de revisar a mano: con los dos puntos como
+     separador y sin el recuento, «Inauguración JJOO 2012: ERROR 404», un post de
+     blogs.uoc.edu sobre la ceremonia, salía **`error`** (estaba en el sitemap).
+     Ahora es candidato.
+   - **Búsqueda interna sin resultados** (`es_busqueda` + frase): seguro, es el
+     ejemplo que pone la documentación de Google. La misma frase fuera de una
+     búsqueda (un listado que dice «no hay productos») y con poco texto, solo
+     candidato.
+   - **Agotado no es soft 404.** Google pide mantener la página de un producto
+     agotado y marcar la disponibilidad, así que `OutOfStock`/`SoldOut` no se
+     emite (se cuenta en el resumen: 7.700 en Druni, 789 en progym, que habrían
+     sido ruido puro). `Discontinued` —todas las ofertas— es candidato: algo que
+     no volverá, que Google puede acabar tratando como soft 404 si la página no
+     ofrece nada más. En los 8 censos no salió ninguno.
+   - **Severidad = consecuencia** (decisión 64): `error` si es indexable y está
+     en el sitemap; `warning` si es indexable; `info` si ya está fuera del índice
+     por noindex o canonical, donde lo que queda es el enlace roto disfrazado.
+     Excluirlas escondía todo lo de www.uoc.edu: sus 19 páginas de error con 200
+     estaban canonicalizadas. Los candidatos, solo en indexables. Un aviso por
+     hallazgo: varias señales van en una incidencia, y una `soft_404` no lleva
+     además `low_word_count` (CST: 44 → 21).
+   - **Medido** en 8 censos locales, con sondas tomadas en vivo el 2026-10-16
+     con `scripts/sonda_soft404.py` (renderizadas en los censos con
+     `render_js`) y `analyze_soft_404()` sobre una copia del censo. Antes: 0 en
+     todos, el tipo no existía.
+
+     | censo | páginas 200 | sondas: respuesta | `soft_404` | candidatos | s |
+     |---|---|---|---|---|---|
+     | Lopesan | 4.318 | 11×404, 1×302 | 0 | 0 | 6,5 |
+     | penguin | 28.454 | 8×3xx, 4×404 vacío | 0 | 0 | 7,6 |
+     | progym | 3.581 | 12×403 (Cloudflare) | 0 | 0 | 1,7 |
+     | Druni | 56.544 | 11×404, 1 redirección | 0 | 0 | 37,9 |
+     | www.uoc.edu | 21.826 | 12×404 | **19** (info; huella **y** título en las 19) | 0 | 27,7 |
+     | CST | 8.049 | 8×404, 4×200 que redirigen por JS | **23** (warning; título) | 0 | 4,1 |
+     | blogs.uoc.edu | 29.808 | 12×404 | **12** (info; búsquedas vacías) | 4 | 21,3 |
+     | Saunier Duval | 1.285 | 11×404, 1×200 | **1** (error; huella y título) | 0 | 1,0 |
+
+     La huella funcionó donde podía: en www.uoc.edu y en Saunier la página del
+     censo es **idéntica** a la que el sitio da hoy con 404 (eco quitado). En
+     CST no casa —la página de error de hoy no es la del censo, y con 14-18
+     palabras no se mide por parecido— y el título las encuentra igual. La sonda
+     también enseña cosas del sitio que no son de ninguna página: CST responde
+     200 y redirige por JS en dos plantillas, y el servicio técnico de Saunier
+     responde 200 a cualquier `/sats/<lo-que-sea>`; queda en `resumen.detalle_sondas`.
+   - **Revisión a mano: 25 casos**, descargados en vivo
+     (curl_cffi como `shared/descarga_cruda.py`, Chromium para CST) y contrastados
+     con lo guardado. **21 `soft_404`: 21 aciertos** (5 CST, 5 www.uoc.edu, 1
+     Saunier, 10 búsquedas de blogs.uoc.edu). 19 se confirman hoy tal cual
+     —las de www.uoc.edu y 4 de CST responden ya **404** con la misma página de
+     error, la de Saunier sigue en 200 diciendo «la página no existe», 9
+     búsquedas siguen vacías—; 2 cambiaron después del censo (una página de CST
+     hoy publicada, una búsqueda que hoy tiene resultados) y lo guardado
+     confirma que eran error en su día. **4 candidatos: 1 es un soft 404** (la
+     portada en inglés de un blog, «Not found any results») **y 3 no** (un
+     artículo sobre la obra «File not found 404», un listado cuyo primer post se
+     titula así, y el post de los JJOO). Para eso son candidatos: lo afirmado no
+     tuvo ni un fallo tras el arreglo, y lo dudoso es la lista para el modelo.
+     Antes del arreglo hubo **1 falso positivo** entre los seguros, y con
+     severidad `error`.
+   - **Censos anteriores**: el análisis funciona sin sondas (títulos,
+     búsquedas, disponibilidad); con `scripts/sonda_soft404.py <job> --escribir`
+     se le añaden sondas de HOY, marcadas `origen: "sonda_posterior"`, que viaja
+     a la incidencia (decisión 13: el sitio puede haber cambiado su página de
+     error). Una `soft_404` en el sitemap es `error`, así que también pesa en el
+     tope de la nota (decisión 92).
+   - **Fuera**: los soft 404 por redirección (URLs que mandan a la home; la sonda
+     lo anota, ningún check lo usa todavía), la ficha del job no enseña las
+     sondas (`JobResponse` no lleva `soft404`: cada sonda guarda hasta 4.000
+     caracteres de texto) y todo lo que necesita leer la página con un modelo
+     (#11).

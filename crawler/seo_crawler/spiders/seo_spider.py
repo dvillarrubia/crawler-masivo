@@ -74,6 +74,7 @@ from shared.respuestas import (
     NO_VALIDAS, UMBRAL_POR_DEFECTO, VENTANA_POR_DEFECTO, VentanaDeSalud,
     clasificar_respuesta,
 )
+from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -434,7 +435,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -603,6 +604,9 @@ class SeoSpider(scrapy.Spider):
                     self._config_invalida = str(exc)[:500]
                     logger.error("Reglas a medida no validas; el job no se rastrea: %s",
                                  self._config_invalida)
+
+            # -- Sondas de soft 404 (decision 105) --
+            self._iniciar_sondas(job)
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
@@ -901,6 +905,10 @@ class SeoSpider(scrapy.Spider):
             # set de vistas, cualquier enlace interno a la home la volvia a
             # rastrear a mayor profundidad y se perdia el depth 0.
             yield self._page_request(normalized, 0)
+
+        # Sondas de soft 404 por host (decision 105): no cuentan ni se guardan
+        # como URL del censo.
+        yield from self._sondas_de_semillas()
 
         # Sitemap discovery: robots.txt (Sitemap: directives) per seed host,
         # plus any explicitly configured sitemap URLs. Membership is recorded
@@ -1750,6 +1758,9 @@ class SeoSpider(scrapy.Spider):
 
         if refresh_target:
             yield from self._follow_redirect(url_for_record, refresh_target, depth)
+
+        if is_html and is_success and internal and not refresh_target:
+            yield from self._sonda_de_plantilla(final_url)  # decision 105
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces

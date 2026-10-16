@@ -210,6 +210,16 @@ const ISSUE_INFO = {
     google: 'Puede tratarlas como duplicadas y quedarse solo con una.',
     arreglo: 'Diferenciar el contenido o consolidar en una sola página.',
   },
+  'soft_404': {
+    que: 'La página responde 200 pero es una página de error: sirve lo mismo que el sitio da a una URL que no existe, su titular dice «Página no encontrada», o es una búsqueda interna sin resultados.',
+    google: 'La trata como un 404 («Soft 404» en Search Console) y la saca del índice; si está en el sitemap, como «URL enviada que parece un soft 404». Los enlaces internos que llegan a ella son enlaces rotos disfrazados.',
+    arreglo: 'Si el contenido ya no existe, responder 404 o 410 (o 301 a su sustituto) y quitarla del sitemap; si debería existir, arreglar lo que la deja vacía.',
+  },
+  'soft_404_candidato': {
+    que: 'Indicio de página de error sin certeza: un titular que solo contiene la frase («cómo arreglar el error 404»), un listado vacío, un producto descatalogado o una huella de error que casa con media plantilla.',
+    google: 'Puede tratarla como soft 404 si no ofrece nada más. No está afirmado: es la lista para revisar (y para la fase con modelo de #11).',
+    arreglo: 'Revisar a mano. Si es un error, como «Soft 404»; si es una página útil, nada.',
+  },
   'low_word_count': {
     que: 'La página indexable tiene poco contenido propio (sin contar menú ni pie).',
     google: 'Contenido escaso: difícil que posicione y, en cantidad, rebaja la calidad del sitio.',

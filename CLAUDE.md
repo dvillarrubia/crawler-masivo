@@ -111,6 +111,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
 - **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no
   contiene» es `estado='sin_coincidencia'` y nunca incluye bloqueadas ni errores. 104.
 - **Nada de un cliente en codigo**: va en `projects/<cliente>/config.json`.
+- **Una sonda de soft 404 no es una URL del censo**: su propio callback, sin item,
+  sin gastar `max_urls`; vive en `jobs.soft404`. Decision 105.
 - **Un aviso por hallazgo**, y lo que es de plantilla o de servidor se agrupa
   (una fila con `paginas_afectadas`, no una por pagina). 36, 53, 64, 73.
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un

@@ -131,6 +131,8 @@ const ISSUE_LABEL = {
   'missing_x_frame_options': 'Sin X-Frame-Options',
   'unsafe_crossorigin': 'Crossorigin inseguro',
   'low_word_count': 'Pocas palabras',
+  'soft_404': 'Soft 404',
+  'soft_404_candidato': 'Posible soft 404',
   'very_low_text_ratio': 'Ratio texto muy bajo',
   'low_text_ratio': 'Ratio texto bajo',
   'url_too_long': 'URL muy larga',
@@ -3503,7 +3505,7 @@ const EXP_TABS = [
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
   { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
-  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content'],
+  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },

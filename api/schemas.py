@@ -116,6 +116,10 @@ class CrawlBehaviorConfig(BaseModel):
     parar_si_bloqueado: bool = True
     salud_ventana: int = Field(default=50, ge=10, le=1000)
     salud_umbral: float = Field(default=0.8, ge=0.1, le=1.0)
+    # Sondas de soft 404 (decision 105): cuantas URLs inexistentes se piden
+    # como mucho (una por host de las semillas y una por plantilla de ruta).
+    # No gastan max_urls ni se guardan como URL del censo. 0 = sin sondas.
+    soft404_sondas: int = Field(default=12, ge=0, le=100)
 
 
 class UrlFilterConfig(BaseModel):
@@ -161,6 +165,17 @@ class AnalysisThresholdsConfig(BaseModel):
     # eso dejaba sin reportar 372 cadenas de dos saltos en un solo censo.
     max_redirect_chain_length: int = Field(default=1, ge=1, le=20)
     max_outlinks: int = Field(default=100, ge=1, le=10000)
+    # Soft 404 (decision 105). Similitud MinHash con la huella de la sonda a
+    # partir de la que una pagina ES la pagina de error del sitio (como en los
+    # casi duplicados, 0,9 = comparten nueve de cada diez trigramas).
+    soft404_similitud: float = Field(default=0.9, ge=0.6, le=1.0)
+    # Por debajo de estas palabras el contenido igual no basta: se exige
+    # tambien el mismo titulo.
+    soft404_min_palabras_igualdad: int = Field(default=5, ge=1, le=200)
+    # Si la huella de una sonda casa con mas de esta fraccion de las paginas de
+    # su alcance, no es una pagina de error sino la plantilla (un shell de SPA,
+    # una plantilla vacia): no se afirma, va como candidato agrupado.
+    soft404_max_proporcion_huella: float = Field(default=0.5, gt=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------

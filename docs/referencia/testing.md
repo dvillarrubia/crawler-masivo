@@ -81,6 +81,12 @@ cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
 cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
 medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
 corren tambien en el trabajo de la API.
+Soft 404 (decision 105): `test_soft404.py` (las reglas puras —sonda, eco, titulares
+seguros y dudosos en ocho idiomas, busquedas, disponibilidad— y el analisis contra
+SQLite: huella exacta y MinHash, sonda 404, redireccion y muro de WAF sin huella,
+huella de plantilla y portada como candidato agrupado, senales sin sonda) y
+`test_sonda_soft404_spider.py` (el `SeoSpider` real: una sonda por host y por
+plantilla, que no sale como URL y que no gasta `max_urls`).
 Extraccion y busqueda a medida (decision 104): `test_extraccion_a_medida.py`
 (la funcion pura: CSS, XPath, regex, `a_numero`, muro, tiempo y
 cortacircuitos, validacion, firma; y el esquema y la herencia, que necesitan

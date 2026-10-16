@@ -158,6 +158,10 @@ ARCHIVAR_DIAS_MINIMOS=14         # no se archiva nada que termino hace menos
 Umbral de casi duplicados: `job.config.analysis_thresholds.near_duplicate_similarity`
 (por defecto 0.9; ver decisiones 16-18).
 
+Soft 404 (decision 105): `analysis_thresholds.soft404_similitud` (0.9),
+`soft404_min_palabras_igualdad` (5) y `soft404_max_proporcion_huella` (0.5); y
+`crawl_behavior.soft404_sondas` (12; 0 = sin sondas).
+
 Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
 ## CI y despliegue
