@@ -112,8 +112,47 @@ def test_un_canonical_o_un_hreflang_a_un_muro_no_estan_rotos():
     a._flush_issues()
     s.commit()
 
-    assert _issues(s, j, "canonical_broken") == []
+    # Ningun aviso de canonical sobre el origen: `canonical_broken` ya no
+    # existe (decision 101) y lo que importa es que el muro no se lea como un
+    # destino que responde 4xx (canonical_a_error, canonical_a_no_indexable...).
+    assert [t for u, t, _ in _issues(s, j) if t.startswith("canonical_") and u == origen.id] == []
     rotos = [d for _, _, d in _issues(s, j, "hreflang_broken_target")]
     assert len(rotos) == 1 and "fr" in str(rotos[0])
     sin_retorno = [d for _, _, d in _issues(s, j, "hreflang_missing_return")]
     assert not any("en/a" in str(d) for d in sin_retorno)
+
+
+def test_un_muro_no_es_destino_de_error_ni_entrada_rota_del_sitemap():
+    """Los checks de la Ola 1 tampoco afirman lo que esconde un muro: una
+    redireccion hacia un desafio de 403 no es `redireccion_a_error`, una URL
+    del sitemap que respondio un muro no es «4xx» (`sitemap_no_indexable`), y el
+    HTML de un desafio no es el de la pagina (`html_supera_2mb`, decision 102).
+    Los errores de verdad siguen saliendo, en los tres."""
+    s, j = _montar()
+    salto_muro = _url(s, j, "/viejo", status=301, estado="Redirect (301)")
+    salto_muro.redirect_url = "https://x.com/muro"
+    salto_muro.is_html = False
+    salto_roto = _url(s, j, "/viejo2", status=301, estado="Redirect (301)")
+    salto_roto.redirect_url = "https://x.com/no-existe"
+    salto_roto.is_html = False
+    muro = _url(s, j, "/muro", status=403, clase="challenge_waf", estado="Bloqueada (WAF)")
+    roto = _url(s, j, "/no-existe", status=404, estado="Client Error (404)")
+    muro_grande = _url(s, j, "/muro-grande", status=200, clase="challenge_waf",
+                       estado="Bloqueada (WAF)")
+    grande = _url(s, j, "/grande")
+    for u in (muro, roto):
+        u.in_sitemap = True
+    for u in (muro_grande, grande):
+        u.content_length = 3 * 1024 * 1024
+        u.transfer_size = 3 * 1024 * 1024
+    s.commit()
+    a = SEOAnalyzer(s, j.id)
+    a.analyze_redirect_chains()
+    a._sitemap_no_indexable()
+    a.analyze_html_ignorado()
+    a._flush_issues()
+    s.commit()
+
+    assert [u for u, *_ in _issues(s, j, "redireccion_a_error")] == [salto_roto.id]
+    assert [u for u, *_ in _issues(s, j, "sitemap_no_indexable")] == [roto.id]
+    assert [u for u, *_ in _issues(s, j, "html_supera_2mb")] == [grande.id]

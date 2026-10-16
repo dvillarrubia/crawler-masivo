@@ -1754,7 +1754,20 @@ class SeoSpider(scrapy.Spider):
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces
         # que seguir (los de un desafio son del proveedor, no del sitio).
+        # Las reglas a medida si dejan fila, `pagina_bloqueada`: sin fila la
+        # URL se leeria como «no evaluada», y que no se pudo ver es un dato
+        # (decision 104).
         if muro:
+            if getattr(self, "_reglas_a_medida", None):
+                yield CustomExtractionItem(
+                    url_hash=final_hash, job_id=self.job_id,
+                    filas=extract_custom(
+                        None, "", self._reglas_a_medida, ruta=parsed.path or "/",
+                        render=bool(response.meta.get("playwright"))
+                        and not response.meta.get("_sin_render"),
+                        presupuesto=self._presupuesto_a_medida, bloqueada=True,
+                    ),
+                )
             return
         if not is_html or not is_success:
             # Las directivas de cabecera de un no HTML se GUARDAN, no solo se
