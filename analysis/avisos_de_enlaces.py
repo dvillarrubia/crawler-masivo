@@ -56,7 +56,7 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from sqlalchemy import and_, case, delete, func, literal, select
+from sqlalchemy import and_, case, delete, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,13 @@ def avisar_enlaces_a_respuestas(az, aristas) -> None:
             o.is_html.is_(True),
         )
     )
+    # Un destino que es un muro (decision 103) no se ha visto: ni redirige ni
+    # da error, asi que el enlace no se avisa.
+    from shared.respuestas import NO_VALIDAS
+
+    d_vista = or_(d.response_class.is_(None), d.response_class.notin_(sorted(NO_VALIDAS)))
     clase = case(
+        (~d_vista, literal(None)),
         (d.status_group == "3xx", literal("3xx")),
         (d.status_group.in_(("4xx", "5xx")), literal("error")),
         else_=literal(None),
@@ -132,7 +138,7 @@ def avisar_enlaces_a_respuestas(az, aristas) -> None:
         .select_from(aristas)
         .join(o, o.id == aristas.c.origen_id)
         .join(d, d.id == aristas.c.destino_id)
-        .where(base, d.status_group.in_(("3xx", "4xx", "5xx")))
+        .where(base, d_vista, d.status_group.in_(("3xx", "4xx", "5xx")))
         .group_by(aristas.c.destino_id, clase)
     ).all()
 
@@ -223,6 +229,7 @@ def _redirecciones_a_solo_enlazadas(az, ids: set[int]) -> set[int]:
 
 def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
     from shared.models import Issue, Link, Url
+    from shared.respuestas import NO_VALIDAS
 
     d = aliased(Url)
     filas = az.session.execute(
@@ -244,10 +251,11 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
     destinos = {f.destino_id for f in filas if f.destino_id is not None}
     info_destino: dict[int, tuple[str, bool | None, str | None]] = {}
     if destinos:
-        for i, url, indexable, grupo in az.session.execute(
-                select(d.id, d.url, d.indexable, d.status_group)
+        for i, url, indexable, grupo, clase_d in az.session.execute(
+                select(d.id, d.url, d.indexable, d.status_group, d.response_class)
                 .where(d.id.in_(destinos))).all():
-            info_destino[i] = (url, indexable, grupo)
+            # Un muro no dice que responde el destino (decision 103).
+            info_destino[i] = (url, indexable, None if clase_d in NO_VALIDAS else grupo)
 
     # La pagina de ejemplo (y de anclaje, si el destino no se rastreo) es la de
     # URL menor, no la de id menor: el id cambia con el orden de rastreo.

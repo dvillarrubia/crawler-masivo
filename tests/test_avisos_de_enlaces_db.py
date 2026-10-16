@@ -357,3 +357,24 @@ def test_el_anclaje_no_depende_del_orden_de_rastreo():
     assert plantilla.details["paginas_ejemplo"][0] == menor.url
     (utm,) = _issues(s, "utm_en_enlace_interno")
     assert utm.url_id == menor.id and utm.details["ejemplos_origen"] == [menor.url]
+
+
+def test_un_enlace_a_un_muro_no_es_un_enlace_a_un_error():
+    """Un destino que respondio un desafio de WAF o un 429 no se ha visto
+    (decision 103): no se sabe si esta roto, y avisar «enlace a un error»
+    mandaria al cliente a arreglar algo que puede estar bien."""
+    s, j = _montar()
+    p = _url(s, j, "/p")
+    muro = _url(s, j, "/muro", status=403)
+    muro.response_class = "challenge_waf"
+    limitada = _url(s, j, "/limitada", status=429)
+    limitada.response_class = "rate_limited"
+    rota = _url(s, j, "/rota", status=404)
+    for d in (muro, limitada, rota):
+        _enlace(s, j, p, d.url_hash)
+    s.commit()
+    _contar(s, j)
+
+    filas = _issues(s, "enlace_interno_a_error")
+    assert [(f.url_id, f.details["destinos"]) for f in filas] == [(p.id, 1)]
+    assert [e["status_code"] for e in filas[0].details["ejemplos"]] == [404]
