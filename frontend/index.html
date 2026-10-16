@@ -1625,6 +1625,24 @@
                         x-text="(n => n + (n === 1 ? ' tipo' : ' tipos'))(resumenIssues(g[0]).length)"></span>
                 </button>
               </template>
+              <!-- Segmento de negocio (decision 108): el % es sobre SUS URLs. -->
+              <select class="exp-problema" :class="issuesSegmento && 'has-value'" aria-label="Segmento"
+                      @focus="!segmentosJob && cargarSegmentos()" @change="elegirSegmentoProblemas($event.target.value)"
+                      style="width:auto;max-width:16rem">
+                <option value="" :selected="!issuesSegmento">Todos los segmentos</option>
+                <template x-if="segmentosParaElegir().regla.length">
+                  <optgroup label="Segmentos de negocio">
+                    <template x-for="g in segmentosParaElegir().regla" :key="g.segmento">
+                      <option :value="g.segmento" :selected="issuesSegmento === g.segmento" x-text="g.segmento + ' · ' + fmt.num(g.urls) + ' URLs'"></option>
+                    </template>
+                  </optgroup>
+                </template>
+                <optgroup label="Sin regla: forma de la ruta">
+                  <template x-for="g in segmentosParaElegir().forma" :key="g.segmento">
+                    <option :value="g.segmento" :selected="issuesSegmento === g.segmento" x-text="g.segmento + ' · ' + fmt.num(g.urls) + ' URLs'"></option>
+                  </template>
+                </optgroup>
+              </select>
               <button class="btn btn-sm" style="margin-left:auto" @click="issuesVista = 'lista'; issues = []; loadIssues()">
                 <i data-lucide="list" style="width:13px;height:13px"></i> Ver todas como lista</button>
             </div>
@@ -1647,6 +1665,7 @@
                     <span class="issue-group-count">
                       <strong x-text="fmt.num(r.paginas)"></strong> <span x-text="r.paginas === 1 ? 'página' : 'páginas'"></span>
                       <span class="text-dim" x-show="r.incidencias !== r.paginas" x-text="'· ' + fmt.num(r.incidencias) + ' incidencias'"></span>
+                      <span class="text-dim" x-show="r.pct_paginas != null" x-text="'· ' + fmt.num(r.pct_paginas) + ' % de ' + fmt.num(r.urls_denominador) + ' URLs del segmento'"></span>
                     </span>
                     <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
                   </button>
@@ -1656,6 +1675,26 @@
                         <dt>Qué decide Google</dt><dd x-text="ISSUE_INFO[r.issue_type].google"></dd>
                         <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[r.issue_type].arreglo"></dd>
                       </dl>
+                    </template>
+                    <template x-if="r.por_segmento && r.por_segmento.length && !issuesSegmento">
+                      <div class="issue-segmentos">
+                        <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Por segmento · páginas afectadas sobre las URLs del segmento</div>
+                        <ul>
+                          <template x-for="p in r.por_segmento" :key="p.segmento">
+                            <li>
+                              <button class="chip-tramo" @click="elegirSegmentoProblemas(p.segmento)" :title="'Ver solo ' + p.segmento">
+                                <code x-text="p.segmento || '(sin segmentar)'"></code>
+                              </button>
+                              <strong x-text="fmt.num(p.pct) + ' %'"></strong>
+                              <span class="text-dim" x-text="fmt.num(p.paginas) + ' de ' + fmt.num(p.urls)"></span>
+                            </li>
+                          </template>
+                        </ul>
+                      </div>
+                    </template>
+                    <template x-if="r.agregadas">
+                      <div class="text-sm text-dim" style="margin:.25rem 0"
+                           x-text="fmt.num(r.agregadas) + (r.agregadas === 1 ? ' incidencia se emite' : ' incidencias se emiten') + ' una vez por hallazgo (para muchas páginas) y no se reparte por segmento' + (issuesSegmento ? ': no sale en este filtro' : '')"></div>
                     </template>
                     <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Ejemplos</div>
                     <ul class="issue-ejemplos">
@@ -3471,11 +3510,37 @@
             </select>
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
             <!-- Agrupar por plantilla (#131): la unidad de trabajo del SEO tecnico. -->
-            <button class="exp-toolbar-btn" :class="expAgrupar && 'active'" @click="alternarAgrupar()"
-                    :aria-pressed="expAgrupar" data-tip="Agrupa las URLs de esta vista por la forma de su ruta">
+            <button class="exp-toolbar-btn" :class="expAgrupar && expAgruparPor === 'plantilla' && 'active'" @click="alternarAgrupar('plantilla')"
+                    :aria-pressed="expAgrupar && expAgruparPor === 'plantilla'" data-tip="Agrupa las URLs de esta vista por la forma de su ruta">
               <i data-lucide="layers" style="width:13px;height:13px"></i>
               <span>Por plantilla</span>
             </button>
+            <!-- Segmentos de negocio (decision 108): los de las reglas del
+                 cliente y, si ninguna casa, la forma de la ruta. -->
+            <button class="exp-toolbar-btn" :class="expAgrupar && expAgruparPor === 'segmento' && 'active'" @click="alternarAgrupar('segmento')"
+                    :aria-pressed="expAgrupar && expAgruparPor === 'segmento'" data-tip="Agrupa las URLs de esta vista por su segmento de negocio">
+              <i data-lucide="shapes" style="width:13px;height:13px"></i>
+              <span>Por segmento</span>
+            </button>
+            <select class="exp-problema exp-segmento" :class="expSegmento && 'has-value'" aria-label="Filtrar por segmento"
+                    @change="elegirSegmento($event.target.value)">
+              <option value="" :selected="!expSegmento">Todos los segmentos</option>
+              <template x-if="segmentosParaElegir().regla.length">
+                <optgroup label="Segmentos de negocio">
+                  <template x-for="g in segmentosParaElegir().regla" :key="g.segmento">
+                    <option :value="g.segmento" :selected="expSegmento === g.segmento" x-text="g.segmento + ' · ' + fmt.num(g.urls)"></option>
+                  </template>
+                </optgroup>
+              </template>
+              <optgroup label="Sin regla: forma de la ruta">
+                <template x-for="g in segmentosParaElegir().forma" :key="g.segmento">
+                  <option :value="g.segmento" :selected="expSegmento === g.segmento" x-text="g.segmento + ' · ' + fmt.num(g.urls)"></option>
+                </template>
+              </optgroup>
+              <template x-if="expSegmento && !((segmentosJob && segmentosJob.segmentos) || []).some(g => g.segmento === expSegmento)">
+                <option :value="expSegmento" selected x-text="expSegmento"></option>
+              </template>
+            </select>
             <template x-if="expPlantilla">
               <button class="exp-toolbar-btn active" @click="quitarPlantilla()" :title="'Quitar el filtro de plantilla ' + expPlantilla">
                 <i data-lucide="x" style="width:12px;height:12px"></i>
@@ -3653,7 +3718,7 @@
                   </template>
                   <table class="exp-table">
                     <thead><tr>
-                      <th style="min-width:280px">Plantilla</th><th>URLs</th><th>Indexables</th><th>Estados</th>
+                      <th style="min-width:280px" x-text="expAgruparPor === 'segmento' ? 'Segmento' : 'Plantilla'"></th><th>URLs</th><th>Indexables</th><th>Estados</th>
                       <th>Con errores</th><th data-tip="Mediana de palabras del contenido propio">Palabras</th>
                       <th data-tip="Mediana del PageRank (0-100)">PageRank</th><th data-tip="Mediana de clics desde la home">Clics</th>
                       <th>Inlinks</th><th>Tramos repetidos</th><th style="min-width:240px">Ejemplo</th>

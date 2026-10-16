@@ -493,6 +493,7 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    issuesSegmento: '',       // segmento elegido en Problemas (decision 108)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
     ISSUE_INFO,
@@ -749,8 +750,9 @@ function app() {
       if (this.expGravedad) q.set('gravedad', this.expGravedad);
       if (this.expSort) { q.set('orden', this.expSort); q.set('dir', this.expSortDir); }
       if (this.expPage > 1) q.set('pagina', this.expPage);
-      if (this.expAgrupar) q.set('agrupar', 'plantilla');
+      if (this.expAgrupar) q.set('agrupar', this.expAgruparPor);
       if (this.expPlantilla) q.set('plantilla', this.expPlantilla);
+      if (this.expSegmento) q.set('segmento', this.expSegmento);
       const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
         v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
       if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
@@ -765,7 +767,9 @@ function app() {
         problema: q.get('problema') || '', gravedad: q.get('gravedad') || '',
         orden: q.get('orden') || null, dir: q.get('dir') === 'desc' ? 'desc' : 'asc',
         pagina: +(q.get('pagina') || 1), filtros,
-        agrupar: q.get('agrupar') === 'plantilla', plantilla: q.get('plantilla') || '',
+        agrupar: ['plantilla', 'segmento'].includes(q.get('agrupar')),
+        agruparPor: q.get('agrupar') === 'segmento' ? 'segmento' : 'plantilla',
+        plantilla: q.get('plantilla') || '', segmento: q.get('segmento') || '',
       };
     },
 
@@ -1340,6 +1344,7 @@ function app() {
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
+      this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
@@ -2087,7 +2092,12 @@ function app() {
     async loadIssuesResumen() {
       if (!this.job) return;
       try {
-        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen`);
+        // El % por segmento (decision 108) va siempre: son tres consultas
+        // agrupadas. Con un segmento elegido, solo las paginas de ese segmento.
+        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: '8' });
+        if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
+        if (!this.segmentosJob) this.cargarSegmentos();
+        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen?${q}`);
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
     },
 
@@ -2651,6 +2661,9 @@ function app() {
     expVistas: [],              // vistas guardadas del cliente del rastreo
     expPlantillas: null,        // respuesta de /urls/plantillas
     expPlantilla: '',           // plantilla elegida: filtra la tabla
+    expAgruparPor: 'plantilla', // 'plantilla' (forma de ruta) o 'segmento' (decision 108)
+    expSegmento: '',            // segmento elegido: filtra la tabla (?segmento=)
+    segmentosJob: null,         // GET /jobs/{id}/segmentos
     expAMedida: [],             // reglas a medida del censo (decision 104): [{key, nombre, clase, etiqueta}]
     expAvisoRegla: '',          // 422 de una regla que este censo no tiene (vista guardada de otro)
     resumenAMedida: null,       // GET /jobs/{id}/extraccion
@@ -2746,7 +2759,10 @@ function app() {
       this.expProblema = preajuste.problema || '';
       this.expGravedad = preajuste.gravedad || '';
       this.expAgrupar = !!preajuste.agrupar;
+      this.expAgruparPor = preajuste.agruparPor || 'plantilla';
       this.expPlantilla = preajuste.plantilla || '';
+      this.expSegmento = preajuste.segmento || '';
+      if (!this.segmentosJob) this.cargarSegmentos();
       this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
@@ -2856,24 +2872,58 @@ function app() {
       try {
         const q = new URLSearchParams(this._buildExplorerParams());
         q.delete('page'); q.delete('page_size'); q.delete('ligero'); q.delete('plantilla');
+        if (this.expAgruparPor === 'segmento') { q.delete('segmento'); q.set('agrupar', 'segmento'); }
         this.expPlantillas = await api(`/jobs/${this.job.id}/urls/plantillas?${q}`);
         this.expTotal = this.expPlantillas.urls;
       } catch (e) { this.error = e.message; }
       this.expLoading = false;
     },
 
-    alternarAgrupar() {
-      this.expAgrupar = !this.expAgrupar;
+    alternarAgrupar(por = 'plantilla') {
+      // El mismo boton apaga; el otro cambia de agrupacion sin apagar.
+      this.expAgrupar = !(this.expAgrupar && this.expAgruparPor === por);
+      this.expAgruparPor = por;
+      this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expPage = 1;
       this.loadExplorerUrls();
     },
 
     entrarEnPlantilla(forma) {
-      this.expPlantilla = forma;
+      if (this.expAgruparPor === 'segmento') {
+        this.expSegmento = forma === '(sin segmentar)' ? '' : forma;
+      } else this.expPlantilla = forma;
       this.expAgrupar = false;
       this.expPage = 1;
       this.loadExplorerUrls();
+    },
+
+    // ---- Segmentos de negocio (decision 108) ----
+    // `urls.segmento` lo materializa el analisis con `config.segmentos`; sin
+    // reglas, cada URL lleva la forma de su ruta (empieza por «/»).
+    async cargarSegmentos() {
+      if (!this.job) return;
+      try { this.segmentosJob = await api(`/jobs/${this.job.id}/segmentos`); }
+      catch (_) { this.segmentosJob = { segmentos: [], reglas: [] }; }
+    },
+
+    // Los de regla primero (en su orden) y luego las formas de ruta con mas URLs.
+    segmentosParaElegir() {
+      const lista = (this.segmentosJob && this.segmentosJob.segmentos) || [];
+      return { regla: lista.filter(x => x.de_regla), forma: lista.filter(x => !x.de_regla).slice(0, 60) };
+    },
+
+    elegirSegmento(valor) {
+      this.expSegmento = valor;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    async elegirSegmentoProblemas(valor) {
+      this.issuesSegmento = valor;
+      this.issuesResumen = null;
+      await this.loadIssuesResumen();
+      this.$nextTick(() => lucide.createIcons());
     },
 
     quitarPlantilla() {
@@ -2928,7 +2978,7 @@ function app() {
 
     // Desde un tipo de Problemas: esas URLs, con las columnas que lo explican.
     verProblemaEnExplorador(tipo) {
-      this.openExplorer({ problema: tipo });
+      this.openExplorer({ problema: tipo, segmento: this.issuesSegmento || '' });
     },
 
     // El CSV de LO QUE SE VE: mismos filtros, mismo orden, columnas visibles
@@ -2994,6 +3044,7 @@ function app() {
       params.set('pestana', this.expTab);
       if (this.expProblema) params.set('issue_type', this.expProblema);
       if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
+      if (this.expSegmento) params.set('segmento', this.expSegmento);
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'h1')) params.set('h1', 'true');
       if (this.getExpColumns().includes('cambio')) params.set('cambios', 'true');
@@ -3353,6 +3404,9 @@ const EXP_COLUMN_DEFS = {
   indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },
   indexability_status:  { label: 'Razón noindex',   type: 'string',  sortable: false, filterKey: 'indexability_status_contains', width: 200, fmt: r => r.indexability_status ?? '' },
   is_internal:          { label: 'Interna',          type: 'boolean', sortable: false, filterKey: 'is_internal',             width: 130, fmt: r => r.is_internal === true ? 'Sí' : r.is_internal === false ? 'No' : '' },
+  segmento:             { label: 'Segmento',         type: 'string',  sortable: true,  width: 200, fmt: r => r.segmento ?? '',
+                          tip: r => r.segmento == null ? 'Sin segmentar: el censo se analizó antes de los segmentos (decisión 108)'
+                            : r.segmento.startsWith('/') ? 'Ninguna regla casa: es la forma de la ruta' : 'Segmento de negocio: ' + r.segmento },
   host:                 { label: 'Host',             type: 'string',  sortable: true,  filterKey: 'host_contains',           width: 200, fmt: r => r.host ?? '' },
   // html_meta fields
   title:                { label: 'Título',          type: 'string',  sortable: true,  filterKey: 'title_contains', vacio: 'title',          width: 260, fmt: r => r.html_meta?.title ?? '' },
@@ -3393,7 +3447,7 @@ const EXP_COLUMN_DEFS = {
 // lleva lo que no conviene usar para decidir: la escala 0-10 del PageRank
 // (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
 const EXP_GRUPOS_COLUMNAS = [
-  ['Respuesta',   ['url','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
+  ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
   ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],

@@ -93,6 +93,12 @@ el host al que redirige la semilla— y por plantilla, que no sale como URL y qu
 no gasta `max_urls`; la repeticion de una sonda que solo cambia de esquema; el
 plan del script). `test_insights.py` comprueba que una soft 404 no sube la nota
 de contenido.
+Segmentos de negocio (decision 108): `test_segmentos.py` (precedencia, Y/O/NO,
+logica de tres valores, muros y validacion; el esquema de `JobConfig` en el
+trabajo de la API), `test_segmentos_db.py` (`run_all` materializa, re-segmentar
+es retroactivo, funciona con los enlaces archivados; SQLite y Postgres) y
+`test_segmentos_api.py` (filtro en `/urls`, CSV, `/issues`, `%` por segmento con
+su denominador, agrupar, `POST /segmentos`, 422/409 y `api/uso.py`).
 Extraccion y busqueda a medida (decision 104): `test_extraccion_a_medida.py`
 (la funcion pura: CSS, XPath, regex, `a_numero`, muro, tiempo y
 cortacircuitos, validacion, firma; y el esquema y la herencia, que necesitan

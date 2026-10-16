@@ -337,6 +337,9 @@ class SEOAnalyzer:
         self.analyze_links()
         avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
         self.analyze_sitemap()
+        # Al final: sus condiciones pueden leer lo que acaba de escribir el
+        # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
+        self.segmentar()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -344,6 +347,19 @@ class SEOAnalyzer:
         self.session.commit()
 
         logger.info("SEO analysis completed for job %s", self.job_id)
+
+    def segmentar(self) -> dict:
+        """Materializa `urls.segmento` con las reglas de `config.segmentos`
+        (decision 108). Es lo mismo que hace `POST /segmentos` sin el analisis
+        entero: re-analizar un censo viejo con reglas nuevas lo segmenta sin
+        re-rastrear."""
+        from shared.segmentos import segmentar
+
+        resumen = segmentar(self.session, self.job_id)
+        logger.info("Segmentos: %d URLs en %d segmentos (%d por regla) en %.1f s",
+                    resumen["urls"], resumen["segmentos_distintos"],
+                    sum(r["urls"] for r in resumen["por_regla"]), resumen["segundos"])
+        return resumen
 
     def _sellar_version(self) -> None:
         """Con que version del codigo se calcularon estas cifras.

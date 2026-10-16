@@ -47,6 +47,15 @@ def _claves(qp, *, csv: bool) -> list[str]:
         if nombre == "a_medida":
             claves.append("columna:x.*")
             continue
+        if nombre == "segmento":
+            # El nombre del segmento lo pone el consultor (decision 108), como el
+            # de una regla a medida: se cuenta el filtro, nunca el valor.
+            claves.append("filtro:segmento")
+            continue
+        if nombre == "agrupar":
+            # Dos valores fijos (plantilla | segmento): ese si se cuenta.
+            claves.append("agrupar:" + (valor if valor in ("plantilla", "segmento") else "otro"))
+            continue
         if nombre == "sort_by":
             claves.append("orden:" + valor[:60])
         elif nombre == "issue_type":
