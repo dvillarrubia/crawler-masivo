@@ -40,6 +40,17 @@ milestone.
   problemáticas, páginas huérfanas y cobertura del sitemap, incluidas las URLs
   que el sitemap declara y no se pueden indexar (saltos, errores, noindex,
   canonicalizadas), con el motivo de cada una.
+- **Soft 404** (16 de octubre, decisión 105): páginas que responden 200 pero son
+  una página de error. Al empezar cada rastreo se pide una URL que no existe por
+  sitio y por tipo de página, y lo que el sitio responde es su huella de «no
+  encontrado»; además se leen los titulares de error en ocho idiomas y las
+  búsquedas internas sin resultados. Lo dudoso (un artículo sobre el error 404,
+  un listado vacío, un producto descatalogado) queda como **posible soft 404**
+  para revisar, sin afirmarlo: es lo que mirará la fase con modelo
+  ([#11](https://github.com/dvillarrubia/crawler-masivo/issues/11)). Una
+  página que es soft 404 no lleva además los avisos de su contenido (escaso,
+  título duplicado, sin description, sin h1), y en el Informe SEO resta en la
+  nota de contenido con su propia recomendación.
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;

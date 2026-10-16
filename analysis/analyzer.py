@@ -328,6 +328,7 @@ class SEOAnalyzer:
         self.analyze_images()
         self.analyze_security()
         self.analyze_content()
+        self.analyze_soft_404()
         self.analyze_url_issues()
         self.compute_link_counts()
         self.compute_pagerank()
@@ -2631,6 +2632,17 @@ class SEOAnalyzer:
             self._add_issue(url_id, "low_word_count", "warning", detalle)
 
         self._flush_issues()
+
+    def analyze_soft_404(self) -> None:
+        """Paginas 200 que son paginas de error (decision 105).
+
+        Va DESPUES de `analyze_content`: una pagina que es soft 404 no lleva
+        ademas `low_word_count`. La logica, en `analysis/soft404.py`.
+        """
+        from analysis import soft404
+
+        self._flush_issues()
+        soft404.analizar(self)
 
     # -- URL Issues ---------------------------------------------------------
 

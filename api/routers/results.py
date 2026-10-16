@@ -2435,6 +2435,21 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     desc_problems = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate"])
     h1_problems = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate"])
     thin_content = _paginas_con(job_id, db, ["low_word_count", "very_low_text_ratio", "low_text_ratio"])
+    # Soft 404 (decision 105). El analisis le QUITA a esas paginas el contenido
+    # escaso, el titulo, la description y el h1 (un aviso por hallazgo), asi
+    # que sin contarlas aqui la nota SUBIA por un hallazgo peor. En la nota
+    # cuentan como fallo en cada criterio de contenido —sirven una pagina de
+    # error—; en las recomendaciones, solo en la suya.
+    soft404 = _paginas_con(job_id, db, ["soft_404"])
+    soft404_indexables = db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.issue_type == "soft_404",
+        Issue.severity.in_(("error", "warning")),
+    ).scalar() or 0
+    soft404_candidatos = _paginas_con(job_id, db, ["soft_404_candidato"])
+    title_nota = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "soft_404"])
+    desc_nota = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate", "soft_404"])
+    h1_nota = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate", "soft_404"])
+    thin_nota = _paginas_con(job_id, db, ["low_word_count", "very_low_text_ratio", "low_text_ratio", "soft_404"])
 
     # Average word count
     avg_wc = float(db.query(func.avg(Url.word_count)).filter(
@@ -2442,14 +2457,34 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Url.status_code >= 200, Url.status_code < 300, Url.word_count.isnot(None),
     ).scalar() or 0)
 
-    pct_title_ok = _safe_pct(max(0, total_html - title_problems), total_html)
-    pct_desc_ok = _safe_pct(max(0, total_html - desc_problems), total_html)
-    pct_h1_ok = _safe_pct(max(0, total_html - h1_problems), total_html)
-    pct_thin = _safe_pct(thin_content, total_html)
+    pct_title_ok = _safe_pct(max(0, total_html - title_nota), total_html)
+    pct_desc_ok = _safe_pct(max(0, total_html - desc_nota), total_html)
+    pct_h1_ok = _safe_pct(max(0, total_html - h1_nota), total_html)
+    pct_thin = _safe_pct(thin_nota, total_html)
 
     score = pct_title_ok * 0.3 + pct_desc_ok * 0.25 + pct_h1_ok * 0.2 + max(0, 100 - pct_thin * 2) * 0.15 + min(100, avg_wc / 3) * 0.1
 
     recs: list[Recommendation] = []
+    if soft404 > 0:
+        recs.append(Recommendation(
+            priority="alta" if soft404_indexables else "media",
+            title="Corregir paginas de error que responden 200 (soft 404)",
+            description=(
+                f"Hay {soft404} paginas que responden 200 pero son una pagina de error"
+                + (f" ({soft404_indexables} indexables)" if soft404_indexables else "")
+                + ". Google las trata como «Soft 404» y las saca del indice; cada enlace interno "
+                "a ellas es un enlace roto. Si el contenido ya no existe, responder 404 o 410 "
+                "(o 301 a su sustituto) y quitarlas del sitemap."),
+            affected_count=soft404,
+            issue_types=["soft_404"],
+        ))
+    if soft404_candidatos > 0:
+        recs.append(Recommendation(
+            priority="baja", title="Revisar posibles soft 404",
+            description=f"Hay {soft404_candidatos} paginas con indicios de pagina de error sin certeza (un titular que menciona un error, un listado vacio, un producto descatalogado). Revisalas a mano.",
+            affected_count=soft404_candidatos,
+            issue_types=["soft_404_candidato"],
+        ))
     if title_missing > 0:
         recs.append(Recommendation(
             priority="alta", title="Agregar titulos faltantes",
@@ -2493,6 +2528,8 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             "total_html": total_html, "pct_title_ok": pct_title_ok, "pct_desc_ok": pct_desc_ok,
             "pct_h1_ok": pct_h1_ok, "avg_word_count": round(avg_wc),
             "pct_thin": pct_thin, "thin_count": thin_content,
+            "soft404_count": soft404, "soft404_indexables": soft404_indexables,
+            "soft404_candidatos": soft404_candidatos,
             "title_problems": title_problems, "desc_problems": desc_problems,
         },
         recommendations=recs,

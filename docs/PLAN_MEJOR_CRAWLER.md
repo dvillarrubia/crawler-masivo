@@ -58,7 +58,7 @@ Se desbloquea la parte que no necesita LLM. Las issues originales siguen vivas p
 | PR | Issue | Contenido | Hecho cuando |
 |---|---|---|---|
 | 2.1 | Separar de #10. **Nueva:** «Respuestas no válidas, versión determinista: `response_class`, salud del job y pausa» | Reutilizar `TITULOS_DE_BLOQUEO`/`NoEsLaPagina` (62, 82) en `seo_spider.parse`; señales de cf-ray/server, cuerpo binario y caída de tamaño; proporción por ventana, y marca en Redis que pasa a `finish_reason=bloqueado_por_waf`. Un muro no se guarda como indexable. La comparación (#36 F2) suprime las alertas SEO de un censo bloqueado | Reproducido con progym («Just a moment…»): el job acaba `failed`/pausado con su causa, 0 páginas de muro en `indexable`, y un censo bloqueado no dispara alertas |
-| 2.2 | Separar de #11. **Nueva:** «Soft 404 determinista: sonda por host y plantilla, títulos de error, búsquedas vacías, OutOfStock» | Sonda con `mangle_path` al empezar; igualdad por `content_hash` (por debajo de 30 palabras `firma()` devuelve None) o por MinHash ≥0,9; umbrales en `AnalysisThresholdsConfig` (33) | Medido en 3 censos y con 20 casos revisados a mano; los dudosos se marcan como candidatos para la fase LLM |
+| 2.2 | Separar de #11. **Nueva:** «Soft 404 determinista: sonda por host y plantilla, títulos de error, búsquedas vacías, OutOfStock» | Sonda con `mangle_path` al empezar; igualdad por `content_hash` (por debajo de 30 palabras `firma()` devuelve None) o por MinHash ≥0,9; umbrales en `AnalysisThresholdsConfig` (33) | Medido en 3 censos y con 20 casos revisados a mano; los dudosos se marcan como candidatos para la fase LLM. **Hecho: decisión 105** (8 censos medidos, cifras y revisión a mano en `docs/decisiones/incidencias.md#d105`) |
 | 2.3 | **Nueva:** «Enlaces que Google no puede seguir: javascript:, onclick sin href, span/div con href, utm internos» | `extract_links` guarda los no rastreables con `crawlability` en vez de descartarlos; incidencia agregada por página de origen (enlaces a 3xx/4xx/5xx); `utm_en_enlace_interno` | 58 páginas de control con la cifra antes y después; la incidencia por origen sale del agregado y no de unir con `urls` (37) |
 
 ### Ola 3. Datos a medida: extracción personalizada y segmentos
@@ -180,7 +180,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 4. Paginación: páginas 2+ en noindex o canonicalizadas a la 1, paginación sin `<a>`
 5. HTML que Google trunca o ignora: >2 MB, head roto, meta fuera del head
 6. Respuestas no válidas, versión determinista: `response_class`, salud del job y pausa (separada de #10)
-7. Soft 404 determinista: sonda por host y plantilla, títulos de error, búsquedas vacías (separada de #11)
+7. Soft 404 determinista: sonda por host y plantilla, títulos de error, búsquedas vacías (separada de #11). **Hecho (decisión 105).**
 8. Enlaces que Google no puede seguir: javascript:, onclick, span/div con href, utm internos
 9. Segmentos de negocio definidos por el usuario, retroactivos y aplicados a todo
 10. Search Console en el worker: clics, impresiones y posición por URL, cruzados con el censo
