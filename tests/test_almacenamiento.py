@@ -165,7 +165,8 @@ def test_en_sqlite_se_cuentan_las_filas_aunque_no_haya_bytes(sqlite):
     sqlite.commit()
 
     d = tamano_de_jobs(sqlite, [jid])[jid]
-    assert d["filas"] == {"urls": 4, "links": 4, "issues": 0}
+    # `custom_extraction` (decision 104) lleva job_id y se cuenta como las demas.
+    assert d["filas"] == {"urls": 4, "links": 4, "issues": 0, "custom_extraction": 0}
     assert d["bytes"] is None
 
 

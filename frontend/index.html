@@ -1024,6 +1024,38 @@
           </div>
         </template>
 
+        <!-- Extraccion a medida (decision 104): una linea por regla con lo
+             que dio, y enlaces al Explorador ya filtrado. -->
+        <template x-if="resumenAMedida && resumenAMedida.reglas.length">
+          <div class="card mb-2">
+            <div class="veredicto-titulo">
+              Extracción a medida
+              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en el Explorador</a>
+            </div>
+            <template x-if="resumenAMedida.render_js">
+              <div class="text-sm text-dim">Se extrae del DOM renderizado y sin banners: una etiqueta que inyecta el JavaScript sí está; un banner que el rastreo quitó, no.</div>
+            </template>
+            <div class="table-wrap"><table class="tbl">
+              <thead><tr><th>Regla</th><th>Evaluadas</th><th>Con valor</th><th>Sin coincidencia</th><th>Bloqueadas / error</th><th>Valores más frecuentes</th></tr></thead>
+              <tbody>
+                <template x-for="r in resumenAMedida.reglas" :key="r.nombre">
+                  <tr>
+                    <td x-text="r.etiqueta"></td>
+                    <td x-text="fmt.num(r.evaluadas)"></td>
+                    <td x-text="fmt.num(r.ok)"></td>
+                    <td><a href="#" @click.prevent="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')" x-text="fmt.num(r.sin_coincidencia)"></a></td>
+                    <td x-text="fmt.num(r.bloqueadas) + ' / ' + fmt.num(r.errores + r.desactivadas)"></td>
+                    <td class="text-sm" x-text="(r.top || []).map(t => t.valor + ' (' + t.paginas + ')').join(' · ')"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table></div>
+            <template x-for="a in (resumenAMedida.avisos || [])" :key="a">
+              <div class="text-sm orange" x-text="a"></div>
+            </template>
+          </div>
+        </template>
+
         <!-- Tarjetas (UX-13). Antes eran «URLs totales» y «Procesadas» con
              la misma cifra, y «Fallidas 0» en rojo. Ahora cada una contesta
              una pregunta y lleva a donde se mira el detalle. -->
@@ -2795,6 +2827,21 @@
                 <div class="text-sm text-dim" x-show="(urlDetail.issues || []).length > 5"
                      x-text="'y ' + ((urlDetail.issues || []).length - 5) + ' más'"></div>
               </div>
+              <!-- Extraccion a medida (decision 104): lo que dieron las reglas
+                   en esta URL. «No evaluada» no es «vacío». -->
+              <template x-if="expAMedida.length">
+                <div class="card">
+                  <div class="veredicto-titulo">Extracción a medida</div>
+                  <ul class="veredicto-lista">
+                    <template x-for="d in expAMedida" :key="d.key">
+                      <li>
+                        <strong x-text="d.etiqueta + ': '"></strong>
+                        <span x-text="EXP_COLUMN_DEFS[d.key].tip(urlDetail)"></span>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+              </template>
               <div class="card">
                 <div class="veredicto-titulo">Enlazado interno</div>
                 <!-- NULL no siempre es «sin camino»: en un censo analizado antes
@@ -3345,7 +3392,7 @@
                 <template x-if="tab.header">
                   <div class="exp-sidebar-titulo" x-text="tab.header"></div>
                 </template>
-                <template x-if="!tab.divider && !tab.header">
+                <template x-if="!tab.divider && !tab.header && (!tab.requiere || expAMedida.length)">
                   <button type="button" class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
@@ -3470,6 +3517,46 @@
               </div>
             </div>
           </div>
+
+          <!-- Una vista guardada con una regla a medida que este censo no tiene
+               (decision 104): el 422 se explica en vez de enseñar el censo entero. -->
+          <template x-if="expAvisoRegla">
+            <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)">
+              <span class="text-sm" x-text="expAvisoRegla"></span>
+              <button class="btn btn-sm" style="margin-left:.5rem" @click="quitarFiltrosAMedida()">Quitar el filtro</button>
+            </div>
+          </template>
+
+          <!-- Franja de la extraccion a medida: por regla, cuantas paginas no la
+               cumplen o no se pudieron evaluar. Cada chip filtra. -->
+          <template x-if="expTab === 'a_medida' && resumenAMedida">
+            <div class="exp-ambito">
+              <template x-for="r in resumenAMedida.reglas" :key="r.nombre">
+                <span class="chip-grupo-a-medida">
+                  <strong x-text="r.etiqueta"></strong>
+                  <span class="text-dim text-sm" x-text="fmt.num(r.ok) + ' de ' + fmt.num(r.evaluadas)"></span>
+                  <template x-if="r.sin_coincidencia">
+                    <button class="chip-ambito" :class="{ on: chipAMedidaActivo(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio') }" @click="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')">
+                      <span x-text="r.clase === 'busqueda' ? 'no contiene' : 'sin coincidencia'"></span> <strong x-text="fmt.num(r.sin_coincidencia)"></strong>
+                    </button>
+                  </template>
+                  <template x-if="r.bloqueadas">
+                    <button class="chip-ambito sev-warning" :class="{ on: chipAMedidaActivo(r.nombre, 'estado:pagina_bloqueada') }" @click="verAMedida(r.nombre, 'estado:pagina_bloqueada')">
+                      bloqueada <strong x-text="fmt.num(r.bloqueadas)"></strong>
+                    </button>
+                  </template>
+                  <template x-if="r.errores">
+                    <button class="chip-ambito sev-error" :class="{ on: chipAMedidaActivo(r.nombre, 'estado:error,tiempo_agotado,presupuesto_pagina') }" @click="verAMedida(r.nombre, 'estado:error,tiempo_agotado,presupuesto_pagina')">
+                      error <strong x-text="fmt.num(r.errores)"></strong>
+                    </button>
+                  </template>
+                </span>
+              </template>
+              <template x-for="a in (resumenAMedida.avisos || [])" :key="a">
+                <span class="text-sm orange" x-text="a"></span>
+              </template>
+            </div>
+          </template>
 
           <!-- Chips de la vista por ambito: un tipo de incidencia por chip -->
           <template x-if="(EXP_TABS.find(t => t.key === expTab) || {}).ambito">
@@ -3669,7 +3756,7 @@
                         @click="selectExplorerUrl(row, idx)"
                         @dblclick="openUrlFromExplorer(row.id)">
                       <template x-for="col in getExpColumns()" :key="row.id + '_' + col">
-                        <td :title="getExpCellValue(row, col)">
+                        <td :title="getExpCellTitle(row, col)">
                           <template x-if="col === 'status_code'">
                             <span class="exp-status" :class="expStatusClass(row.status_code)" x-text="row.status_code || ''"></span>
                           </template>
@@ -3772,6 +3859,12 @@
                               <span class="text-dim text-sm" x-text="fmt.detalles(i.details) ? '· ' + fmt.detalles(i.details) : ''"></span></div>
                           </template>
                         </dd>
+                        <template x-for="d in expAMedida" :key="d.key">
+                          <div style="display:contents">
+                            <dt x-text="d.etiqueta"></dt>
+                            <dd x-text="EXP_COLUMN_DEFS[d.key].tip(expUrlDetail)"></dd>
+                          </div>
+                        </template>
                       </dl>
                     </template>
                     <!-- Content tab: full text + markdown -->

@@ -146,6 +146,11 @@ def create_job(
     if cliente is None:
         # Sin cliente, exactamente lo de siempre: el JobConfig entero.
         config = payload.config.model_dump()
+        # Un `null` en una regla es «quitar la heredada»; sin cliente no hay
+        # nada que quitar y no se guarda.
+        for clave in ("custom_extraction", "custom_search"):
+            config[clave] = {n: r for n, r in (config.get(clave) or {}).items()
+                             if r is not None}
     else:
         # Con cliente, solo lo que el job CAMBIA se pone encima de lo heredado.
         config = resolver_config(
@@ -529,9 +534,14 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
         filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
             synchronize_session=False)
 
-    # Las tres grandes. `urls` arrastra html_meta, headings, page_content y
-    # demas por el ON DELETE CASCADE de la BD.
-    for nombre, modelo in (("links", Link), ("issues", Issue), ("urls", Url)):
+    # Las grandes. `urls` arrastra html_meta, headings, page_content y
+    # demas por el ON DELETE CASCADE de la BD. `custom_extraction` (decision
+    # 104) lleva `job_id` y va a mano: en SQLite no hay CASCADE, y por trozos
+    # como las otras, porque son una fila por URL y regla.
+    from shared.models import CustomExtraction
+
+    for nombre, modelo in (("links", Link), ("issues", Issue),
+                           ("custom_extraction", CustomExtraction), ("urls", Url)):
         borradas = 0
         while True:
             if trozo:

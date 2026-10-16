@@ -32,6 +32,7 @@ from shared.models import (
     SecurityHeaders,
     PageContent,
     Issue,
+    CustomExtraction,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ _CHILD_TABLES_1TON: list[tuple[str, type, bool]] = [
 _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     ("issues", Issue, "url_id"),
     ("links", Link, "from_url_id"),
+    # Extraccion a medida (decision 104). Un backup anterior no la trae y la
+    # importacion se la salta: no hace falta subir el formato.
+    ("custom_extraction", CustomExtraction, "url_id"),
 ]
 
 

@@ -15,7 +15,7 @@ from shared.database import init_db
 
 from api import dependencies
 from api.routers import (
-    almacenamiento, cleaning, clientes, enriquecido, jobs, programaciones,
+    almacenamiento, cleaning, clientes, enriquecido, extraccion, jobs, programaciones,
     results, semantic, uso,
 )
 
@@ -69,6 +69,7 @@ app.include_router(clientes.router)
 app.include_router(enriquecido.router)
 app.include_router(uso.router)
 app.include_router(almacenamiento.router)
+app.include_router(extraccion.router)
 
 
 @app.get("/health", tags=["system"])

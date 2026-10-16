@@ -35,6 +35,18 @@ def _claves(qp, *, csv: bool) -> list[str]:
     for nombre, valor in qp.items():
         if nombre in _IGNORAR or valor in (None, ""):
             continue
+        # Reglas a medida (decision 104): su NOMBRE lo pone el consultor y puede
+        # decir algo del cliente (`precio_outlet_nike`). Se cuenta `x.*`, nunca
+        # el nombre.
+        if nombre.startswith("x."):
+            claves.append("filtro:x.*")
+            continue
+        if nombre == "sort_by" and valor.startswith("x."):
+            claves.append("orden:x.*")
+            continue
+        if nombre == "a_medida":
+            claves.append("columna:x.*")
+            continue
         if nombre == "sort_by":
             claves.append("orden:" + valor[:60])
         elif nombre == "issue_type":
@@ -42,7 +54,8 @@ def _claves(qp, *, csv: bool) -> list[str]:
         elif nombre == "severity":
             claves.append("gravedad:" + valor[:20])
         elif nombre in ("vacio", "con_valor"):
-            claves += [f"filtro:{c.strip()[:40]}:{nombre}" for c in valor.split(",") if c.strip()]
+            claves += [f"filtro:{'x.*' if c.strip().startswith('x.') else c.strip()[:40]}:{nombre}"
+                       for c in valor.split(",") if c.strip()]
         elif nombre == "search":
             claves.append("busqueda")
         else:
@@ -56,7 +69,8 @@ def _claves(qp, *, csv: bool) -> list[str]:
     if qp.get("page") not in (None, "", "1"):
         claves.append("paginado")
     if csv:
-        claves += ["columna:" + c.strip()[:60] for c in (qp.get("columnas") or "").split(",") if c.strip()]
+        claves += ["columna:" + ("x.*" if c.strip().startswith("x.") else c.strip()[:60])
+                   for c in (qp.get("columnas") or "").split(",") if c.strip()]
     return claves
 
 

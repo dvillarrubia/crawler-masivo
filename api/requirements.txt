@@ -19,6 +19,12 @@ tldextract>=5.1
 # dispara nunca y nadie se entera.
 apscheduler>=3.10
 python-multipart>=0.0.12
+# Extraccion a medida (decision 104): la API valida las reglas al guardarlas y
+# las prueba contra un HTML pegado con la MISMA funcion que el spider
+# (`shared/extraccion_a_medida.py`). parsel trae lxml y cssselect; regex es el
+# motor de las expresiones, con `timeout` (el `re` de Python no se puede cortar).
+parsel>=1.9
+regex>=2024.11.6
 pgvector>=0.3.0
 numpy>=1.26.0
 pandas>=2.1.0

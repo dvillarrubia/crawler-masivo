@@ -111,6 +111,7 @@ def main() -> None:
 
     migrar_clientes()
     migrar_enriquecido()
+    migrar_custom_extraction()
 
     print("Done.")
 
@@ -210,6 +211,27 @@ def migrar_enriquecido() -> None:
                 "ALTER TABLE decisions ADD CONSTRAINT decisions_run_id_fkey FOREIGN KEY "
                 "(run_id) REFERENCES enrichment_runs(id) ON DELETE SET NULL"))
     print("Enriquecido: tabla enrichment_runs y FK de decisions.run_id al dia.")
+
+
+def migrar_custom_extraction() -> None:
+    """Extraccion a medida (#34, decision 104). Idempotente.
+
+    La tabla la crea create_all (por ser nueva, con sus indices). Aqui solo se
+    asegura que los indices existen en una instalacion donde la tabla se creo
+    antes que alguno de ellos. NO hay ningun ALTER sobre `jobs` ni `urls`: las
+    definiciones de las reglas viajan en `jobs.config`. Va bajo el
+    `lock_timeout` de `main()` (`limitar_espera_de_bloqueos`).
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_cext_url_nombre "
+            "ON custom_extraction (url_id, nombre)"))
+        for nombre, cols in (("ix_cext_job_nombre_estado", "job_id, nombre, estado"),
+                             ("ix_cext_job_nombre_num", "job_id, nombre, valor_num"),
+                             ("ix_cext_job_nombre_clave", "job_id, nombre, valor_clave")):
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {nombre} ON custom_extraction ({cols})"))
+    print("Extraccion a medida: tabla custom_extraction e indices al dia.")
 
 
 if __name__ == "__main__":

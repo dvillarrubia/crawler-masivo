@@ -16,6 +16,10 @@ extruct>=0.17
 # usa directamente en `_leer_json_ld`, asi que se declara aqui (decision 69).
 jstyleson>=0.0.2
 lxml>=5.0
+# Motor de las regex de la extraccion a medida (decision 104): con `timeout`,
+# para poder cortar una regex catastrofica. Venia con dateparser; se usa
+# directamente, asi que se declara (decision 69).
+regex>=2024.11.6
 scrapy-playwright>=0.0.40
 scrapy-impersonate
 html2text>=2024.2

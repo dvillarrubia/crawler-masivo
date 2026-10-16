@@ -154,6 +154,26 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Extracción a medida: precio, SKU, disponibilidad y «¿tiene el tag de GTM?» (16 de octubre)
+
+[#34](https://github.com/dvillarrubia/crawler-masivo/issues/34). Cada rastreo
+puede llevar sus propias reglas para sacar un dato de cada página —un selector
+CSS, una XPath o una expresión regular: el precio, el SKU, la disponibilidad,
+el autor— y búsquedas de «contiene / no contiene», como el tag de Google Tag
+Manager o un «sin stock». Las reglas se ponen en la configuración del cliente,
+del perfil o del rastreo (se heredan como el resto), y salen como columnas en el
+Explorador —filtrables, ordenables, en su propia pestaña y en el CSV de la
+vista— y al final del CSV completo. Probado contra fichas reales de Druni: precio,
+SKU y disponibilidad salen bien en las cuatro, una de ellas agotada, y cuesta
+menos del 1% del tiempo que ya se dedica a cada página. De once páginas reales de
+clientes, la única sin el tag de GTM es la portada de cst.gov.sa.
+
+Dos cosas que se cuidan: una página que no se pudo evaluar (un PDF, un muro del
+WAF) **no cuenta como «no contiene»**, y un precio que puede leerse de dos
+maneras (`1.234`) se marca como dudoso en vez de adivinarlo. Antes de rastrear,
+las reglas se pueden probar contra el HTML de una página. Queda para después la
+pantalla para editarlas y la prueba contra una URL en vivo.
+
 ### Borrar rastreos viejos en masa (15 de octubre)
 
 La base de datos crecía sin que nada lo dijera —57 GB para 50 rastreos en la
@@ -429,8 +449,9 @@ es cada plantilla— y va con
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
   mapas de redirección para recuperar enlaces perdidos.
 - [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34) **Extracción
-  personalizada**: sacar campos concretos de cada página (precio, SKU,
-  autor…).
+  personalizada**: hecha la base (arriba). Falta la pantalla para editar las
+  reglas, probarlas contra una URL en vivo, buscar en el HTML de origen cuando
+  el rastreo renderiza, avisar como incidencia y comparar valores entre censos.
 - [#35](https://github.com/dvillarrubia/crawler-masivo/issues/35) **Logs del
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)

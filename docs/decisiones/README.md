@@ -19,6 +19,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
+| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) | 104 |
 
 ## Por numero
 
@@ -124,6 +125,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 96 | Borrar censos viejos: en masa, con ids, y sin llevarse por delante la referencia de una serie | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d96) |
 | 97 | Un resultado enriquecido que Google ya no muestra no tiene propiedades obligatorias | [`datos-estructurados`](datos-estructurados.md#d97) |
 | 98 | Un preset de bot cambia también qué reglas de robots.txt se obedecen, y no engaña a un WAF | [`render-y-descarga`](render-y-descarga.md#d98) |
+| 104 | Extracción y búsqueda a medida: una fila por (URL, regla) evaluada, y sin fila no es «vacío» | [`extraccion-a-medida`](extraccion-a-medida.md#d104) |
 
 ## Anadir una decision
 

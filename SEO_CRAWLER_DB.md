@@ -240,6 +240,38 @@ filtrar por `urls.is_html`.
 | details | JSON | Detalles adicionales |
 | detected_at | timestamptz | |
 
+### `custom_extraction` — Extraccion y busqueda a medida (#34, decision 104)
+Una fila por (URL, regla) **evaluada**. Las definiciones viajan en `jobs.config`
+(`custom_extraction`, `custom_search`). Sin fila = no evaluada (no es HTML 2xx,
+cae fuera de `solo_urls` o el censo es anterior a la regla); «no contiene» es
+exactamente `estado = 'sin_coincidencia'`.
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | Para filtrar y borrar por censo sin unir con `urls` (decision 37) |
+| url_id | bigint (FK → urls, CASCADE) | |
+| nombre | varchar(40) | Nombre de la regla (`x.<nombre>` en el Explorador) |
+| clase | varchar(10) | extractor, busqueda |
+| estado | varchar(24) | ok, sin_coincidencia, incompleta, conversion_fallida, tiempo_agotado, presupuesto_pagina, desactivada, pagina_bloqueada, error |
+| n | integer | Coincidencias antes de recortar; NULL salvo en ok, sin_coincidencia y conversion_fallida |
+| valor | text | primero: el valor; todos: unidos con ` \| `; busqueda: ~120 caracteres de contexto |
+| valor_clave | varchar(256) | `valor` con espacios colapsados y recortado: ordenar, agrupar, comparar |
+| valor_num | float | valor=numero o recuento; en una busqueda, `n` |
+| valores | JSON | Solo con `cuantos=todos` |
+| truncado | boolean | Se recortaron valores o caracteres |
+| render | boolean | Extraido del DOM renderizado (False: HTML de la respuesta) |
+| detalle | varchar(200) | Motivo de un error, sin datos de la pagina |
+
+Indices: `uq_cext_url_nombre (url_id, nombre)`, `ix_cext_job_nombre_estado`,
+`ix_cext_job_nombre_num` y `ix_cext_job_nombre_clave`.
+
+```sql
+-- Paginas SIN el tag de GTM (solo las evaluadas: ni PDFs ni bloqueadas)
+SELECT u.url FROM custom_extraction c JOIN urls u ON u.id = c.url_id
+WHERE c.job_id = 'UUID-AQUI' AND c.nombre = 'gtm' AND c.estado = 'sin_coincidencia';
+```
+
 ### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)
 Registro de lo decidido y cache DURADERA: un recrawl busca aqui por `(clave, pregunta, version_pregunta, modelo)` antes de pagar otra vez.
 
