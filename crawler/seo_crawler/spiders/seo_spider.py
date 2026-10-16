@@ -46,6 +46,7 @@ from seo_crawler.extractors import (
     extract_hreflang,
     extract_links,
     agrupar_enlaces,
+    extract_enlaces_no_rastreables,
     extract_main_content,
     extract_main_content_markdown,
     extract_meta,
@@ -78,6 +79,7 @@ from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
+    EnlacesNoRastreablesItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -1898,6 +1900,14 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 alt_text=link.get("alt_text"),
                 link_type=link.get("link_type", "hyperlink"),
             )
+
+        # Los que Google no puede seguir (decision 106). Tabla aparte: no son
+        # aristas del grafo ni se siguen. Siempre se emite, aunque vaya vacio,
+        # para que una pagina re-rastreada pierda los que ya no tiene.
+        yield EnlacesNoRastreablesItem(
+            url_hash=final_hash, job_id=self.job_id,
+            filas=extract_enlaces_no_rastreables(selector, base_url, self.allowed_hosts),
+        )
 
         # Hreflang
         if self._extraction.get("extract_hreflang", True):

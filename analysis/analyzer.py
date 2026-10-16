@@ -40,6 +40,7 @@ from shared.config import (
 from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
+from analysis import avisos_de_enlaces
 from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
 from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
@@ -285,6 +286,7 @@ class SEOAnalyzer:
         # no se reportaba nunca. Un salto solo es una redireccion normal.
         self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+        self.enlaces_plantilla_min_paginas = t.get("enlaces_plantilla_min_paginas", 10)  # d106
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
         )
@@ -333,6 +335,7 @@ class SEOAnalyzer:
         self.compute_link_counts()
         self.compute_pagerank()
         self.analyze_links()
+        avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
         self.analyze_sitemap()
 
         # Flush any remaining buffered issues.
@@ -2777,7 +2780,8 @@ class SEOAnalyzer:
         # es un UUID y comparado como cadena no liga igual en todos los
         # motores, asi que la primera version de esto no actualizaba ni una
         # fila en los tests contra SQLite.
-        from sqlalchemy import BigInteger, Boolean, Column, Integer, MetaData, Table, insert
+        from sqlalchemy import (BigInteger, Boolean, Column, Integer, MetaData, String,
+                                Table, case, insert)
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         aristas = Table(
@@ -2792,6 +2796,9 @@ class SEOAnalyzer:
             # Apariciones identicas en la pagina (decision 94). Los conteos por
             # INSTANCIA suman esto; los de origenes distintos no lo miran.
             Column("veces", Integer),
+            # El hash del destino solo si lleva `utm_*` (decision 106). NULL en
+            # el resto: no engorda la temporal de un censo de millones.
+            Column("utm_hash", String(64)),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -2801,12 +2808,15 @@ class SEOAnalyzer:
         self.session.execute(
             insert(aristas).from_select(
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
-                 "veces"],
+                 "veces", "utm_hash"],
                 select(
                     destino.id, Link.from_url_id, Link.is_internal,
                     and_(origen.noindex.isnot(True), origen.status_code == 200),
                     Link.follow.isnot(False),
                     Link.repeticiones,
+                    case((or_(func.lower(Link.to_url).like("%?utm\\_%", escape="\\"),
+                              func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
+                          Link.to_url_hash), else_=None),
                 )
                 .join(origen, origen.id == Link.from_url_id)
                 .outerjoin(destino, and_(
@@ -2871,6 +2881,7 @@ class SEOAnalyzer:
         # Sobre las mismas aristas: una segunda lectura de `links` costaria lo
         # mismo que todo lo anterior (decision 41).
         self.compute_click_depth(aristas)
+        avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         self.session.flush()

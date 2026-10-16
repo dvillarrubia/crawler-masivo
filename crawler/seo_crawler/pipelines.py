@@ -18,6 +18,7 @@ from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
+    EnlacesNoRastreablesItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -63,6 +64,8 @@ class PostgresPipeline:
         # item por pagina lleva todas sus reglas. Si llegan dos de la misma
         # URL en el lote, gana el ultimo.
         self._custom_buffer: dict[int, tuple[str, list[dict]]] = {}
+        # Enlaces no rastreables (decision 106): igual, la pagina entera.
+        self._enr_buffer: dict[int, tuple[str, list[dict]]] = {}
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -145,6 +148,8 @@ class PostgresPipeline:
             self._handle_security(item, spider)
         elif isinstance(item, CustomExtractionItem):
             self._handle_custom(item, spider)
+        elif isinstance(item, EnlacesNoRastreablesItem):
+            self._handle_no_rastreables(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -360,6 +365,47 @@ class PostgresPipeline:
             logger.exception("Fallo al guardar la extraccion a medida de %d paginas", len(lote))
 
     # ------------------------------------------------------------------
+    # EnlacesNoRastreablesItem (decision 106)
+    # ------------------------------------------------------------------
+    def _handle_no_rastreables(self, item: EnlacesNoRastreablesItem):
+        url_id = self._resolve_url_id(item.get("url_hash"), item.get("job_id"))
+        if url_id is None:
+            return
+        self._enr_buffer[url_id] = (item.get("job_id"), list(item.get("filas") or []))
+        if len(self._enr_buffer) >= self.batch_size:
+            self._flush_no_rastreables()
+
+    def _flush_no_rastreables(self) -> None:
+        if not self._enr_buffer:
+            return
+        from shared.models import EnlaceNoRastreable
+
+        lote = self._enr_buffer
+        self._enr_buffer = {}
+        columnas = ("crawlability", "etiqueta", "href", "destino", "destino_interno",
+                    "destino_hash", "anchor_text", "link_position")
+        filas = [
+            {"job_id": job_id, "from_url_id": url_id,
+             "repeticiones": f.get("repeticiones") or 1,
+             **{c: (f.get(c).replace("\x00", "") if isinstance(f.get(c), str) else f.get(c))
+                for c in columnas}}
+            for url_id, (job_id, de_la_pagina) in lote.items()
+            for f in de_la_pagina
+        ]
+        try:
+            self.session.query(EnlaceNoRastreable).filter(
+                EnlaceNoRastreable.from_url_id.in_(list(lote))).delete(
+                    synchronize_session=False)
+            if filas:
+                self.session.bulk_insert_mappings(EnlaceNoRastreable, filas)
+            self.session.commit()
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al guardar los enlaces no rastreables de %d paginas",
+                             len(lote))
+
+    # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)
     # ------------------------------------------------------------------
     def _handle_security(self, item: SecurityItem, spider: Spider):
@@ -396,6 +442,7 @@ class PostgresPipeline:
     # ------------------------------------------------------------------
     def _flush(self, spider: Spider):
         self._flush_custom()
+        self._flush_no_rastreables()
         if not self._buffer:
             return
 

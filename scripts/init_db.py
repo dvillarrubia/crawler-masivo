@@ -122,6 +122,7 @@ def main() -> None:
     migrar_clientes()
     migrar_enriquecido()
     migrar_custom_extraction()
+    migrar_enlaces_no_rastreables()
 
     print("Done.")
 
@@ -242,6 +243,21 @@ def migrar_custom_extraction() -> None:
             conn.execute(text(
                 f"CREATE INDEX IF NOT EXISTS {nombre} ON custom_extraction ({cols})"))
     print("Extraccion a medida: tabla custom_extraction e indices al dia.")
+
+
+def migrar_enlaces_no_rastreables() -> None:
+    """Enlaces que Google no puede seguir (decision 106). Idempotente.
+
+    Tabla NUEVA, que crea create_all con sus indices: ningun ALTER sobre
+    `links` (decenas de GB) ni sobre `urls`. Aqui solo se aseguran los indices
+    por si la tabla se creo antes que ellos. Bajo el `lock_timeout` de `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_enr_job ON enlaces_no_rastreables (job_id)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_enr_from ON enlaces_no_rastreables (from_url_id)"))
+    print("Enlaces no rastreables: tabla enlaces_no_rastreables e indices al dia.")
 
 
 if __name__ == "__main__":

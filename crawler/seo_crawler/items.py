@@ -170,6 +170,19 @@ class ContentItem(scrapy.Item):
     raw_html = scrapy.Field()
 
 
+class EnlacesNoRastreablesItem(scrapy.Item):
+    """Los enlaces de una pagina que Google no puede seguir (decision 106).
+
+    Un item por pagina con todas sus filas, como `CustomExtractionItem`: el
+    pipeline reemplaza las de la URL enteras. Van aparte de `LinkItem` a
+    proposito: no son aristas del grafo y no pueden acabar en `links`.
+    """
+
+    url_hash = scrapy.Field()
+    job_id = scrapy.Field()
+    filas = scrapy.Field()
+
+
 class CustomExtractionItem(scrapy.Item):
     """Lo que dieron las reglas a medida en una pagina (decision 104).
 

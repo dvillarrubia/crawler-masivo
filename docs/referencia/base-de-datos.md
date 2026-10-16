@@ -4,7 +4,7 @@
 
 ## Database (PostgreSQL)
 
-16 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
+17 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
@@ -24,6 +24,7 @@
 | `decisions` | 1:N from jobs | clave, pregunta, version_pregunta, estado, respuesta, coste_usd, run_id (decision 84) |
 | `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
 | `custom_extraction` | 1:N from urls (con `job_id`) | nombre, clase (extractor/busqueda), estado, n, valor, valor_clave, valor_num, valores, render (decision 104). Una fila por (URL, regla) EVALUADA: sin fila = no evaluada, no «vacio». Migracion: `migrar_custom_extraction()` en `init_db.py` |
+| `enlaces_no_rastreables` | 1:N from urls (con `job_id`) | crawlability (javascript_href, onclick_sin_href, a_sin_href, href_fuera_de_a, onclick_en_otra_etiqueta, fragmento_como_ruta), etiqueta, href, destino, destino_interno, destino_hash, anchor_text, link_position, repeticiones (decision 106). Enlaces que Google no puede seguir: NO son aristas y no estan en `links`. Una pagina se reemplaza entera al re-rastrear. Migracion: `migrar_enlaces_no_rastreables()` |
 
 `urls.response_class` dice si la respuesta era la pagina o un muro delante
 (`contenido`, `challenge_waf`, `captcha`, `rate_limited`, `respuesta_binaria`,

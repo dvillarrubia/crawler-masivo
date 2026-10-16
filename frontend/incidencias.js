@@ -336,6 +336,26 @@ const ISSUE_INFO = {
     google: 'Reparte la autoridad entre muchos destinos.',
     arreglo: 'Revisar si todos esos enlaces aportan.',
   },
+  'enlace_no_rastreable': {
+    que: 'Enlaces que una persona puede pulsar y Google no puede seguir: href="javascript:…", <a onclick> sin href, <a routerLink>, <span href>, una tarjeta con onclick o una ruta en el fragmento (#/…). Si el mismo componente está en 10 páginas o más se cuenta una vez («plantilla»); si no, por página.',
+    google: 'Solo sigue un <a> con un href que sea una URL. Por estos enlaces no descubre el destino ni le pasa autoridad. Si es «aviso», detrás hay una URL interna; si es «info», el código no dice a dónde va (un desplegable con javascript:void(0)).',
+    arreglo: 'Convertirlos en <a href="/destino"> (el onclick puede quedarse). En una SPA, rutas con la History API en vez de #/. El de plantilla se arregla una vez, en el componente.',
+  },
+  'enlace_interno_a_error': {
+    que: 'La página enlaza a URLs internas que responden 4xx o 5xx. Los enlaces rotos que salen en 10 páginas o más no se repiten aquí: los avisa la propia URL rota.',
+    google: 'Rastrea un error por cada enlace, y la autoridad que pasaba por ahí se pierde.',
+    arreglo: 'Cambiar o quitar los enlaces de esta página; si el destino debería existir, arreglarlo o redirigirlo.',
+  },
+  'enlace_interno_a_redireccion': {
+    que: 'Enlaces internos a una URL que redirige. «Plantilla»: la URL que redirige está enlazada desde 10 páginas o más (el aviso va en ella); «página»: los de esta página.',
+    google: 'Sigue la redirección y pasa la señal, pero gasta un rastreo más por enlace y prefiere que se enlace la URL final.',
+    arreglo: 'Apuntar los enlaces a la URL final. Los de plantilla se cambian una vez, en el menú o el pie.',
+  },
+  'utm_en_enlace_interno': {
+    que: 'Enlaces internos con parámetros utm_*. Se avisa una vez por URL con utm, con cuántas páginas la enlazan.',
+    google: 'Es otra URL que rastrear; si se puede indexar (aviso) compite con la limpia. Además, en Analytics reinicia la sesión y atribuye la visita a una campaña falsa.',
+    arreglo: 'Quitar los utm de los enlaces internos. Para medir clics internos, usar eventos, no parámetros de campaña.',
+  },
 
   // ----- Imágenes -----
   'image_missing_alt': {

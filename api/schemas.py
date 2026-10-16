@@ -177,6 +177,10 @@ class AnalysisThresholdsConfig(BaseModel):
     # una plantilla vacia): no se afirma, va como candidato agrupado.
     soft404_max_proporcion_huella: float = Field(default=0.5, gt=0.0, le=1.0)
 
+    # Paginas distintas desde las que un mismo enlace (tipo y destino) cuenta
+    # como de plantilla: se avisa una vez y no en cada pagina (decision 106).
+    enlaces_plantilla_min_paginas: int = Field(default=10, ge=2, le=100000)
+
 
 # ---------------------------------------------------------------------------
 # Job configuration
