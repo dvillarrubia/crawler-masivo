@@ -147,6 +147,7 @@ const ISSUE_LABEL = {
   'solo_enlazada_por_redireccion': 'Solo se llega por una redirección',
   'not_reachable_from_home': 'Sin camino de enlaces desde la home',
   'not_in_sitemap': 'No incluida en el sitemap',
+  'sitemap_no_indexable': 'En el sitemap sin ser indexable',
 };
 
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
@@ -3466,16 +3467,26 @@ const EXP_TABS = [
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
   { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_multiple','h1_duplicate'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
-  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
+  // Las redirecciones no son HTML: el ambito va sobre las internas.
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redirect_chain','redirect_loop'],
+    columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','robots_invalid_syntax'],
     columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
-  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body'],
+  { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
+    columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
+  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente'],
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
+  // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
+  // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y
+  // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
+  { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap'],
+    columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],

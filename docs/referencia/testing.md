@@ -45,6 +45,14 @@ tres mas: `test_export_csv.py` (cada columna declarada del CSV tiene su valor
 en la fila; sin esto, anadir una y olvidar el dato desplaza en silencio todas
 las de la derecha), y `test_render_espera.py` (contrato de la espera de render:
 no resolver con peticiones en vuelo).
+Hreflang (decision 99): `test_hreflang_completo_db.py` ejecuta
+`analyze_hreflang` contra SQLite (autorreferencia, x-default por host, idioma
+repetido sin N², destino no indexable, retorno incoherente y que una fuente no
+indexable no da avisos; la autorreferencia por una variante canonicalizada a
+la propia pagina, el host y el ancla del x-default sin depender del orden de
+las filas, e `indexable` a NULL), y `test_catalogo_incidencias.py` falla si el
+analizador emite un tipo sin ficha en `frontend/incidencias.js` (los tipos
+salen con `ast`; una llamada con tipo no literal tiene que declararse).
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
@@ -84,6 +92,11 @@ reasignados; trabajo de la API) y `test_a_medida_db.py` (600.000 filas en
 Postgres con `_urls_filtradas` y `_ordenar` REALES: cada lectura de la tabla va
 acotada por `job_id` o `url_id`; corre en el trabajo de la API con
 `A_MEDIDA_TEST_DATABASE_URL`).
+
+HTML que Google trunca o ignora (decision 102): `test_head_html.py` (17 casos
+del head roto con lo que hace Chromium, y el contraste contra el navegador si
+esta instalado; en CI lo esta) y `test_html_ignorado_db.py` (el check contra
+SQLite, el spider guardando las columnas y `decodedBodySize` contra Chromium).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
@@ -95,3 +108,7 @@ De la capa de analisis contra BD ya hay tres tests
 (`test_analyzer_headings_db.py`, `test_analyzer_near_duplicates_db.py` y
 `test_pagerank_db.py`); el resto se sigue verificando con las consultas SQL de
 `docs/AUDITORIA_Y_VERIFICACION.md`.
+Sitemap (decision 100): `test_analyzer_sitemap_db.py` ejecuta `analyze_sitemap`
+contra SQLite: cada motivo de `sitemap_no_indexable` con su detalle, que un 429 o un 503
+o una URL sin respuesta no se afirman, que una no indexable del sitemap no sale
+ademas como `sitemap_orphan`, y que vale con los enlaces archivados.

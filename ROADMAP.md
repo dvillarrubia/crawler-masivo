@@ -29,18 +29,28 @@ milestone.
 
 - Códigos de respuesta, titles, descriptions, encabezados, canonicals,
   hreflang, datos estructurados e indexabilidad.
+- Hreflang completo: retorno, autorreferencia, x-default, idioma repetido,
+  versiones que apuntan a una página no indexable y códigos que no casan entre
+  versiones; solo sobre páginas indexables, que son las que Google lee.
 - Indexabilidad calculada sobre la URL final tras redirecciones; las páginas
   bloqueadas por robots.txt no cuentan como indexables.
 - Duplicados exactos y casi duplicados (páginas que comparten el 90 % del texto
   o más).
 - Cadenas de redirección, imágenes sin alt, seguridad, contenido escaso, URLs
-  problemáticas, páginas huérfanas y cobertura del sitemap.
+  problemáticas, páginas huérfanas y cobertura del sitemap, incluidas las URLs
+  que el sitemap declara y no se pueden indexar (saltos, errores, noindex,
+  canonicalizadas), con el motivo de cada una.
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;
   - mide cuánto PageRank se desperdicia en errores y redirecciones.
 - Aviso automático cuando el JavaScript esconde enlaces y el PageRank puede no
   ser fiable.
+- HTML que Google no llega a leer: páginas de más de 2 MB (Googlebot corta
+  ahí) y cabeceras `<head>` que se cortan antes de tiempo y dejan el robots,
+  el canonical o el título donde Google no los lee (decisión 102). Lo del
+  tamaño sale en los censos ya hechos sin JavaScript; lo de la cabecera, al
+  volver a rastrear.
 
 ### Contenido y entregables
 

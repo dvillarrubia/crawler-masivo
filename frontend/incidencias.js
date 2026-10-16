@@ -32,6 +32,11 @@ const ISSUE_INFO = {
     google: 'Sigue la cadena, pero cada salto gasta rastreo y Google pide evitarlas.',
     arreglo: 'Que la primera URL redirija directamente a la final, y actualizar los enlaces internos.',
   },
+  'redireccion_a_error': {
+    que: 'La redirección, o la cadena de redirecciones, lleva a otra ruta que da un error (4xx o 5xx). Las que solo cambian http/https, www o la barra final no salen aquí: ahí el error es la página, que ya avisa en su URL.',
+    google: 'Llega a un error: la URL vieja pierde lo que tenía y la nueva no existe.',
+    arreglo: 'Redirigir directamente a una página que responda 200, o quitar los enlaces que llevan a la URL vieja.',
+  },
   'redirect_loop': {
     que: 'Las redirecciones vuelven a una URL ya visitada y no terminan nunca.',
     google: 'La página no se puede indexar.',
@@ -59,10 +64,35 @@ const ISSUE_INFO = {
     google: 'Tiende a indexar la URL del otro dominio en lugar de esta. Si el otro dominio no es el tuyo, la página desaparece de tus resultados.',
     arreglo: 'Revisar la plantilla que genera el canonical: casi siempre es un dominio de pruebas o de origen del CMS que se ha colado.',
   },
+  'canonical_a_error': {
+    que: 'El canonical apunta a una URL que da error (4xx o 5xx), directamente o al final de sus redirecciones.',
+    google: 'Descarta el canonical. Si la página es una variante, el contenido se queda sin ninguna URL que indexar.',
+    arreglo: 'Apuntar el canonical a la URL buena, que responda 200; si la buena es la propia página, que sea autocanónica.',
+  },
+  'canonical_a_redireccion': {
+    que: 'El canonical apunta a una URL que redirige.',
+    google: 'Suele quedarse con la URL final, pero recibe dos señales que no coinciden y puede elegir otra.',
+    arreglo: 'Poner en el canonical la URL final de la redirección.',
+  },
+  'canonical_a_no_indexable': {
+    que: 'Una página indexable declara canonical a una página que está en noindex.',
+    google: 'Recibe dos señales que se contradicen: «la buena es aquella» y aquella pide no estar en el índice. Ninguna de las dos URLs queda indexada.',
+    arreglo: 'Si la canónica debe posicionar, quitarle el noindex; si el noindex es deliberado, nada urgente, pero mejor que la variante apunte a una página indexable o sea autocanónica.',
+  },
+  'canonical_encadenado': {
+    que: 'El canonical apunta a una página que a su vez declara otro canonical (A → B → C).',
+    google: 'Puede seguir la cadena o ignorarla y elegir por su cuenta. Si es «error», la cadena acaba en una URL que da error.',
+    arreglo: 'Que todas las variantes apunten directamente a la canónica final.',
+  },
+  'canonical_sin_enlazar': {
+    que: 'Una página canónica a la que no llega ningún enlace interno: los enlaces van a sus variantes.',
+    google: 'Usa los enlaces internos como señal de cuál es la canónica: con todos apuntando a la variante, puede quedarse con ella.',
+    arreglo: 'Cambiar los enlaces internos para que apunten a la canónica. Solo cuentan los enlaces de fuera del grupo: los de la canónica a sus variantes (el selector de color o talla) no.',
+  },
   'canonical_broken': {
     que: 'El canonical apunta a una URL que no responde 200.',
     google: 'Descarta el canonical y elige por su cuenta.',
-    arreglo: 'Apuntar el canonical a la URL buena y que esa URL responda 200.',
+    arreglo: 'Ya no se emite: desde la decisión 101 es canonical_a_error o canonical_a_redireccion. Sale solo en censos analizados antes.',
   },
   'canonical_multiple': {
     que: 'La página declara más de un canonical.',
@@ -78,6 +108,23 @@ const ISSUE_INFO = {
     que: 'Una página https declara un canonical en http.',
     google: 'Puede preferir la versión http, que normalmente redirige: una señal contradictoria.',
     arreglo: 'Cambiar el canonical a https.',
+  },
+
+  // ----- HTML que Google trunca o ignora (decisión 102) -----
+  'html_supera_2mb': {
+    que: 'El HTML de la página pasa de 2 MB descomprimido. Solo se cuenta en páginas indexables.',
+    google: 'Googlebot deja de descargar a los 2 MB e indexa lo que lleve: el contenido y los enlaces de detrás no existen para él.',
+    arreglo: 'Sacar del HTML lo que no es contenido (SVG en línea, JSON o CSS incrustados, filtros con miles de opciones) o paginar el listado.',
+  },
+  'head_cortado': {
+    que: 'Un elemento que no va en el <head> (una imagen, un div, un texto suelto) lo cierra antes de tiempo, y metadatos que venían detrás quedan en el <body>. Una fila por cada combinación de elemento y metadatos, con las páginas afectadas.',
+    google: 'Documenta que, al encontrar un elemento no válido, da el <head> por terminado y deja de leer lo que venga en él: lo de detrás (robots, canonical, título…) puede no aplicarse. Es error si lo que queda detrás es el robots, el googlebot o el canonical, porque decide si la página entra en el índice. Ojo: la indexabilidad de este informe sigue contando ese robots como aplicado, porque no está comprobado qué hace Google con él en el body; la página puede estar en el índice aunque aquí salga como noindex, o al revés.',
+    arreglo: 'Mover ese elemento al <body> o subir los metadatos por encima de él en la plantilla. Suele ser un pixel, un iframe o un bloque de un plugin. Solo se mide en rastreos sin render: en el DOM montado el corte ya no se ve.',
+  },
+  'meta_fuera_del_head': {
+    que: 'El título, la meta description o la meta robots están en el <body>, sin que nada haya cortado el <head>. Una fila por combinación, con las páginas afectadas.',
+    google: 'Documenta que van en el <head> y no dice qué hace con ellos fuera. Hay frameworks que los sirven en el body a propósito: Next.js 15.2 o posterior (streaming metadata) los sube al <head> con JavaScript y documenta que Googlebot los lee. Por eso es informativo, no un fallo.',
+    arreglo: 'Si el sitio no es de un framework que los suba con JavaScript, moverlos al <head> de la plantilla. Si lo es, comprobar con la inspección de URL de Search Console que Google ve el título y el robots que tocan. Solo se mide en rastreos sin render.',
   },
 
   // ----- Títulos, descripciones y encabezados -----
@@ -195,6 +242,31 @@ const ISSUE_INFO = {
     google: 'Solo las lee en el <head>, la cabecera HTTP o el sitemap.',
     arreglo: 'Mover las etiquetas al <head>.',
   },
+  'hreflang_sin_autorreferencia': {
+    que: 'La página anota sus otras versiones pero no se anota a sí misma con su idioma (a veces se anota con otra URL: la misma ruta con un parámetro, aunque esa variante se canonicalice a ella).',
+    google: 'Su documentación pide que cada versión se liste a sí misma; sin ella la página no declara en qué idioma está y el clúster queda cojo.',
+    arreglo: 'Añadir a la plantilla la etiqueta de la propia página, con su URL canónica exacta.',
+  },
+  'hreflang_sin_x_default': {
+    que: 'Ningún clúster hreflang de este host declara x-default (el aviso es uno por host, con cuántos clústeres afecta).',
+    google: 'Sin x-default, a quien no casa con ningún idioma le enseña la versión que él elija. No es un error: es la opción de no decidirlo.',
+    arreglo: 'Si hay una versión para «el resto del mundo» (o un selector de idioma), anotarla como x-default en todas las páginas del clúster.',
+  },
+  'hreflang_idioma_repetido': {
+    que: 'Dentro del mismo clúster, un código de idioma-región apunta a dos o más URLs distintas.',
+    google: 'No sabe cuál de las dos es la de ese idioma y puede ignorar las dos.',
+    arreglo: 'Dejar una sola URL por código; si son dos mercados, darles códigos distintos (es-ES, es-MX).',
+  },
+  'hreflang_destino_no_indexable': {
+    que: 'Esta página anota como versión de un idioma una URL que está canonicalizada a otra, en noindex o bloqueada por robots.txt (una incidencia por anotación; la URL anotada va en el detalle).',
+    google: 'Descarta esa alternativa: ese mercado se queda sin su versión en los resultados, igual que con un destino roto.',
+    arreglo: 'Si la canonicalización es un error, quitarla; si no, apuntar el hreflang a la URL canónica de ese idioma.',
+  },
+  'hreflang_retorno_incoherente': {
+    que: 'A anota B con un código (en-US), B devuelve el enlace a A pero se declara a sí misma con otro (en-GB).',
+    google: 'Ve dos códigos para la misma URL y no garantiza cuál usa: la versión puede salir en el país equivocado.',
+    arreglo: 'Usar el mismo código para cada URL en todas las páginas del clúster.',
+  },
 
   // ----- Datos estructurados -----
   'structured_data_error': {
@@ -228,6 +300,11 @@ const ISSUE_INFO = {
     que: 'Página indexable que no está en el sitemap.',
     google: 'Puede descubrirla por enlaces, pero el sitemap le ayuda a priorizar.',
     arreglo: 'Incluir en el sitemap todas las páginas indexables.',
+  },
+  'sitemap_no_indexable': {
+    que: 'Está en el sitemap, pero no es indexable: redirige, da error, lleva noindex, se canonicaliza a otra URL o robots.txt la bloquea. El motivo va en el detalle.',
+    google: 'El sitemap es para las URLs que quieres ver en los resultados, y es una de las señales que usa para elegir la canónica. Una entrada que redirige, falla o lleva noindex pide indexar algo que la página niega; con un canonical a otra URL, son dos señales de canónica que no coinciden.',
+    arreglo: 'Decidir cuál de las dos está mal: si la página no debe indexarse, quitarla del sitemap (suele ser una regla del generador, no URL a URL); si debe, quitar el noindex o el canonical. Un salto se cambia por la URL final.',
   },
   'solo_enlazada_por_redireccion': {
     que: 'Solo se llega a la página a través de una redirección: los enlaces internos apuntan a la URL vieja.',
@@ -337,9 +414,23 @@ const ISSUE_LABEL_EXTRA = {
   canonical_multiple: 'Varios canonicals',
   canonical_in_body: 'Canonical fuera del head',
   canonical_a_http: 'Canonical a http',
+  canonical_a_error: 'Canonical a un error',
+  canonical_a_redireccion: 'Canonical a una redirección',
+  canonical_a_no_indexable: 'Canonical a una noindex',
+  canonical_encadenado: 'Canonical encadenado',
+  canonical_sin_enlazar: 'Canónica sin enlaces internos',
+  redireccion_a_error: 'Redirección a un error',
   title_multiple: 'Varios títulos',
   description_multiple: 'Varias meta descriptions',
   hreflang_in_body: 'Hreflang fuera del head',
+  hreflang_sin_autorreferencia: 'Hreflang sin autorreferencia',
+  hreflang_sin_x_default: 'Hreflang sin x-default',
+  hreflang_idioma_repetido: 'Hreflang idioma repetido',
+  hreflang_destino_no_indexable: 'Hreflang a URL no indexable',
+  hreflang_retorno_incoherente: 'Hreflang retorno incoherente',
+  html_supera_2mb: 'HTML de más de 2 MB',
+  head_cortado: 'Head cortado antes de tiempo',
+  meta_fuera_del_head: 'Metadatos fuera del head',
 };
 
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
@@ -358,12 +449,34 @@ const DETALLE_LABEL = {
   canonical_href: 'canonical',
   target: 'destino',
   hops: 'saltos',
+  target_status: 'código del destino',
+  final_status: 'código final',
+  destino_final: 'destino final',
+  variantes: 'variantes',
+  variantes_enlazadas: 'variantes enlazadas',
+  enlaces_a_variantes: 'enlaces a las variantes',
   lang: 'idioma',
   href: 'destino',
   paginas_afectadas: 'páginas',
+  cluster: 'clúster',
+  alternativas: 'alternativas',
+  variante_propia: 'se anota como',
+  clusters_afectados: 'clústeres sin x-default',
+  clusters_del_host: 'clústeres del host',
+  cuantas_urls: 'URLs con ese código',
+  lang_del_destino: 'código del destino',
+  motivo: 'motivo',
+  ejemplos: 'ejemplos',
   similarity: 'similitud',
   outlinks: 'enlaces',
   schema_type: 'tipo',
   errors: 'errores',
   warnings: 'avisos',
+  bytes: 'bytes',
+  limite_bytes: 'límite',
+  bytes_sin_leer: 'bytes sin leer',
+  pct_sin_leer: '% sin leer',
+  cortado_por: 'lo corta',
+  fuera_del_head: 'quedan fuera',
+  directiva_en_duda: 'robots o canonical detrás del corte',
 };

@@ -32,6 +32,7 @@ from shared.config import (
     DESCRIPTION_MAX_LEN,
     DESCRIPTION_MAX_PIXELS,
     DESCRIPTION_MIN_LEN,
+    GOOGLEBOT_HTML_MAX_BYTES,
     TITLE_MAX_LEN,
     TITLE_MAX_PIXELS,
     TITLE_MIN_LEN,
@@ -78,6 +79,28 @@ def _clave_de_grupo(valor: str | None) -> str | None:
     if not texto:
         return None
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
+
+
+def _misma_ruta(a: tuple[str, str, str, str], b: tuple[str, str, str, str]) -> bool:
+    """Si dos claves de :func:`_clave` son la misma ruta salvo parametros o la
+    barra final: la forma de una variante de la misma pagina."""
+    return a[:2] == b[:2] and (a[2].rstrip("/") or "/") == (b[2].rstrip("/") or "/")
+
+
+def _url_de_clave(clave: tuple[str, str, str, str]) -> str:
+    """La URL que representa una clave de :func:`_clave`, para escribirla."""
+    esquema, host, ruta, query = clave
+    return f"{esquema}://{host}{ruta}" + (f"?{query}" if query else "")
+
+
+def _fuera_del_head(valor: str | None) -> list[str]:
+    """La lista guardada en `html_meta.fuera_del_head`."""
+    return [t for t in (valor or "").split(",") if t]
+
+
+def _lo_saca_el_corte(cortado_por: str | None, fuera: str | None, nombre: str) -> bool:
+    """Si *nombre* esta fuera del head porque algo corto el head antes."""
+    return bool(cortado_por) and nombre in _fuera_del_head(fuera)
 
 
 def _clave(url: str | None):
@@ -153,6 +176,28 @@ _REGIONES_INVENTADAS: dict[str, str] = {
     "po": "PT",
 }
 
+def _lang_hreflang_valido(lang: str | None) -> tuple[bool, str | None, str | None]:
+    """(valido, idioma que no es ISO 639-1, region inventada) de un codigo.
+
+    Una sola regla para el aviso de idioma invalido y para los checks de
+    cluster de la decision 99, que no deben contar una anotacion que Google
+    ignora.
+    """
+    valido = bool(lang) and bool(_LANG_TAG_RE.match(lang))
+    idioma_malo = region_mala = None
+    if valido and lang.lower() != "x-default":
+        idioma = lang.split("-")[0].lower()
+        if idioma not in _ISO_639_1:
+            idioma_malo = idioma
+            valido = False
+    if valido and "-" in lang:
+        region = lang.split("-")[-1].lower()
+        if region in _REGIONES_INVENTADAS and len(region) == 2:
+            region_mala = region
+            valido = False
+    return valido, idioma_malo, region_mala
+
+
 # Regex to detect non-ASCII characters in a URL.
 _NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 
@@ -213,6 +258,7 @@ class SEOAnalyzer:
         job = session.query(Job).filter(Job.id == job_id).one_or_none()
         t = (job.config or {}).get("analysis_thresholds", {}) if job else {}
         self._enlaces_archivados = getattr(job, "enlaces_archivados", None)
+        self._render_js = bool((job.config or {}).get("render_js")) if job else False
         self.title_min_len = t.get("title_min_length", TITLE_MIN_LEN)
         self.title_max_len = t.get("title_max_length", TITLE_MAX_LEN)
         self.desc_min_len = t.get("description_min_length", DESCRIPTION_MIN_LEN)
@@ -261,6 +307,7 @@ class SEOAnalyzer:
         self.analyze_canonicals()
         self.analyze_hreflang()
         self.analyze_structured_data()
+        self.analyze_html_ignorado()
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()
@@ -773,34 +820,26 @@ class SEOAnalyzer:
         """Validate canonical link declarations."""
         logger.debug("Analyzing canonicals ...")
 
-        # Build a lookup of url_hash -> status_code for the job so we can
-        # resolve canonical targets efficiently.
-        url_lookup_stmt = select(Url.url, Url.status_code, Url.host).where(
-            Url.job_id == self.job_id,
-        )
-        url_status: dict[str, int | None] = {}
-        url_host: dict[str, str | None] = {}
-        for row_url, sc, host in self.session.execute(url_lookup_stmt).all():
-            url_status[row_url] = sc
-            url_host[row_url] = host
-            # Tambien por la clave de `misma_url`, para que un canonical que
-            # solo difiere en el orden de los parametros, el escapado o el
-            # puerto por defecto encuentre su destino.
-            norm = _clave(row_url)
-            if norm and norm not in url_status:
-                url_status[norm] = sc
+        # Todas las URLs del job, por la URL tal cual y por la clave de
+        # `misma_url`: un canonical que solo difiere en el orden de los
+        # parametros, el escapado o el puerto por defecto encuentra su destino.
+        # Con lo que hace falta para seguir el destino (decision 101): su
+        # codigo, a donde redirige, si es noindex y su propio canonical.
+        fichas = _Fichas(self.session, self.job_id)
 
         # Iterate HTML pages with their canonical information.
         stmt = (
-            select(Url.id, Url.url, Url.host, HtmlMeta.canonical_href,
-                   HtmlMeta.canonical_count, HtmlMeta.canonical_in_body)
+            select(Url.id, Url.url, Url.host, Url.status_code, HtmlMeta.canonical_href,
+                   HtmlMeta.canonical_count, HtmlMeta.canonical_in_body,
+                   HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
         rows = self.session.execute(stmt).all()
 
-        for (url_id, page_url, page_host, canonical_href, canonical_count,
-             canonical_in_body) in rows:
+        for (url_id, page_url, page_host, page_status, canonical_href,
+             canonical_count, canonical_in_body, head_cortado_por,
+             fuera_del_head) in rows:
             # Con VARIOS canonicals Google los ignora todos y elige el por su
             # cuenta: la pagina esta sin canonicalizar, aunque el informe
             # mostrara el primero como si valiera.
@@ -811,11 +850,21 @@ class SEOAnalyzer:
                 )
             # Un canonical en el `<body>` Google lo ignora SIEMPRE: solo cuenta
             # en el `<head>`.
-            if canonical_in_body:
+            # Si esta en el body porque algo corto el head, el hallazgo es el
+            # corte y lo dice `head_cortado` (decision 102): un aviso por
+            # hallazgo (36).
+            cortado = _lo_saca_el_corte(head_cortado_por, fuera_del_head, "canonical")
+            if canonical_in_body and not cortado:
                 self._add_issue(url_id, "canonical_in_body", "warning")
 
             if not canonical_href or not canonical_href.strip():
-                self._add_issue(url_id, "canonical_missing", "info")
+                # El extractor solo toma el canonical del head tal como lo
+                # parsea lxml, asi que con el head cortado antes del canonical
+                # `canonical_href` llega vacio: la pagina SI lo declara, y el
+                # hallazgo es el corte (`head_cortado`, error). Decir ademas
+                # que falta era el mismo hallazgo dos veces (decision 36).
+                if not cortado:
+                    self._add_issue(url_id, "canonical_missing", "info")
                 continue
 
             canonical = canonical_href.strip()
@@ -833,6 +882,7 @@ class SEOAnalyzer:
                 canonical_parsed = urlparse(canonical)
                 canonical_host = canonical_parsed.hostname or ""
             except Exception:
+                canonical_parsed = None
                 canonical_host = ""
 
             # `www.x.com` y `x.com` no son otro dominio: son el mismo sitio
@@ -880,27 +930,133 @@ class SEOAnalyzer:
             # version sin cifrar: o se indexa la http (perdiendo la senal de
             # HTTPS) o se ignora el canonical. Pasa al migrar a https y dejar la
             # plantilla con la URL vieja escrita a mano.
-            if (
-                canonical_parsed.scheme == "http"
+            a_http = (
+                canonical_parsed is not None
+                and canonical_parsed.scheme == "http"
                 and urlparse(page_url).scheme == "https"
-            ):
+            )
+            if a_http:
                 self._add_issue(
                     url_id, "canonical_a_http", "warning", {"canonical": canonical},
                 )
 
-            # Canonical pointing to a non-200 URL (only if we crawled it).
-            target_status = url_status.get(canonical)
-            if target_status is None:
-                target_status = url_status.get(_clave(canonical))
-            if target_status is not None and target_status != 200:
-                self._add_issue(
-                    url_id,
-                    "canonical_broken",
-                    "error",
-                    {"canonical": canonical, "target_status": target_status},
+            # Lo que encuentra Google al llegar al destino (decision 101).
+            # Solo desde una pagina que responde 200: el canonical de un 404 o
+            # de un 500 Google no lo procesa, porque esa pagina sale del indice
+            # por su codigo antes de que importe a donde apunte.
+            if page_status == 200:
+                self._avisar_destino_del_canonical(
+                    url_id, page_url, canonical, fichas, a_http=a_http,
                 )
 
         self._flush_issues()
+
+    def _avisar_destino_del_canonical(
+        self, url_id: int, page_url: str, canonical: str, fichas: "_Fichas",
+        *, a_http: bool,
+    ) -> None:
+        """Que encuentra Google en el destino del canonical (decision 101).
+
+        Antes era UN tipo, `canonical_broken`, para «no responde 200» — un 301
+        y un 404 son hallazgos distintos con arreglos distintos, y un destino
+        200 en `noindex` o canonicalizado a su vez a otro no avisaba de nada.
+        Un aviso por hallazgo, el que dice que hay que arreglar:
+
+        - destino que es un error, directamente o al final de sus
+          redirecciones → `canonical_a_error` (error): el contenido no tiene
+          ninguna URL que Google pueda indexar.
+        - destino que redirige a una pagina buena → `canonical_a_redireccion`
+          (warning): Google suele quedarse con la final, pero la senal
+          contradice al canonical. Si la redireccion vuelve a la propia pagina
+          y ya salio `canonical_a_http`, ese es el aviso: no se repite.
+        - destino 200 en `noindex` → `canonical_a_no_indexable` (warning): la
+          variante se declara copia de una pagina que pide no estar en el
+          indice, y Google recibe dos senales que se contradicen. No es error
+          porque lo que saca el contenido del indice es el `noindex` del
+          destino, que ya avisa en su URL y muchas veces es deliberado (en
+          Druni, 52 variantes con `gclid` de paginaciones `?p=N` en noindex).
+        - destino 200 canonicalizado a otro → `canonical_encadenado`
+          (A → B → C). Error si la cadena acaba en un 4xx o 5xx —el contenido
+          se queda sin URL buena—; warning en lo demas.
+
+        Lo que no se sabe no se afirma: un destino no rastreado, bloqueado por
+        robots.txt, sin respuesta o con 429 —el sitio frenando al rastreador,
+        no su codigo real— no emite nada.
+        """
+        destino = fichas.buscar(canonical)
+        if destino is None:
+            return
+        base = {"canonical": canonical, "target_status": destino.status_code}
+
+        if destino.redirect_url and _es_redireccion(destino.status_code):
+            final, cadena, bucle = fichas.seguir_redirecciones(destino)
+            if final is not None and _es_error(final.status_code):
+                self._add_issue(url_id, "canonical_a_error", "error", {
+                    **base, "via_redireccion": True, "cadena": cadena,
+                    "final_status": final.status_code,
+                })
+            elif bucle:
+                self._add_issue(url_id, "canonical_a_error", "error", {
+                    **base, "via_redireccion": True, "cadena": cadena,
+                    "bucle_de_redireccion": True,
+                })
+            else:
+                # Que el destino redirige es un hecho aunque no se sepa donde
+                # acaba (sale de lo rastreado, o un 429): entonces
+                # `destino_final` va vacio.
+                bueno = final is not None and final.status_code == 200
+                vuelve = bueno and misma_url(final.url, page_url)
+                # Con `canonical_a_http` ya avisado, una redireccion que solo
+                # sube a https (a la propia pagina o a la version https del
+                # canonical) es el mismo hallazgo con el mismo arreglo.
+                if a_http and bueno and (
+                        vuelve or misma_url(final.url, _a_https(canonical))):
+                    return
+                self._add_issue(url_id, "canonical_a_redireccion", "warning", {
+                    **base, "destino_final": final.url if bueno else None,
+                    "cadena": cadena, "vuelve_a_la_pagina": vuelve,
+                })
+            return
+        if destino.status_code is not None and 300 <= destino.status_code < 400:
+            # Un 3xx sin destino guardado: redirige, no se sabe a donde.
+            self._add_issue(url_id, "canonical_a_redireccion", "warning", {
+                **base, "destino_final": None, "vuelve_a_la_pagina": False,
+            })
+            return
+
+        if _es_error(destino.status_code):
+            self._add_issue(url_id, "canonical_a_error", "error", base)
+            return
+        if destino.status_code != 200:
+            return
+
+        if destino.noindex:
+            # Si la propia pagina tambien es noindex no hay senales que se
+            # contradigan: no entra en el indice pase lo que pase, y lo que
+            # quede por revisar es el noindex del destino, que avisa en su URL.
+            origen = fichas.buscar(page_url)
+            if origen is not None and origen.noindex:
+                return
+            self._add_issue(url_id, "canonical_a_no_indexable", "warning", {
+                **base, "motivo": "noindex",
+            })
+            return
+
+        if destino.canonical and not misma_url(destino.canonical, destino.url):
+            cadena, final, bucle = fichas.seguir_canonicals(page_url, destino)
+            if final is destino:
+                # El canonical del destino vuelve a el por una redireccion: el
+                # de A es correcto, de un salto.
+                return
+            final_malo = final is not None and _es_error(final.status_code)
+            detalle = {**base, "cadena": cadena, "bucle": bucle}
+            if final is not None:
+                detalle["final_status"] = final.status_code
+                detalle["final_noindex"] = bool(final.noindex)
+            self._add_issue(
+                url_id, "canonical_encadenado",
+                "error" if final_malo else "warning", detalle,
+            )
 
     # -- Hreflang -----------------------------------------------------------
 
@@ -913,22 +1069,92 @@ class SEOAnalyzer:
         that do not return 200. Reciprocity is confirmed only when the target
         page was crawled and carries its own hreflang cluster; otherwise the
         return tag is left unknown to avoid false positives.
+
+        Y los cinco de la decision 99, que solo miran paginas INDEXABLES
+        (Google no usa el hreflang de una pagina canonicalizada o noindex: una
+        variante `?utm` que repite el cluster de su canonica no tiene nada que
+        arreglar): `hreflang_sin_autorreferencia` (por pagina),
+        `hreflang_sin_x_default` (por host), `hreflang_idioma_repetido`
+        (por cluster e idioma), `hreflang_destino_no_indexable` (por anotacion) y
+        `hreflang_retorno_incoherente` (por anotacion). Todo sale de diccionarios
+        montados con UNA consulta de URLs y una de anotaciones: nada por
+        anotacion y nada por pareja de paginas.
         """
         logger.debug("Analyzing hreflang ...")
 
-        # Preload URL id/status/normalised-url for target resolution.
+        # Precarga, una sola consulta para todo el censo: estado, indexable,
+        # motivo (`Noindex`, `Canonicalised`, robots...), redireccion y
+        # canonical de cada URL (decision 99). El canonical solo va
+        # al detalle —«este destino esta canonicalizado a X»—; quien decide si
+        # la pagina es indexable es `analyze_indexability`, que corre antes.
         url_status: dict[str, int | None] = {}
         url_id_by_norm: dict[str, int] = {}
         norm_by_id: dict[int, str] = {}
-        for uid, row_url, sc in self.session.execute(
-            select(Url.id, Url.url, Url.status_code).where(Url.job_id == self.job_id)
-        ).all():
+        url_by_id: dict[int, str] = {}
+        info_url: dict[int, tuple] = {}
+        # Interna y tipo de recurso, para dos cosas: una pagina EXTERNA no es
+        # fuente (no es del sitio auditado y la pestana Hreflang del Explorador
+        # no la ensena), y el x-default se ancla en una pagina HTML interna.
+        internas: set[int] = set()
+        html_200: set[int] = set()
+        # URL -> a donde salta, SOLO por redireccion (para anclar el x-default
+        # en la pagina a la que lleva la raiz, no en el 301).
+        salta_a: dict[tuple, tuple] = {}
+        consulta = (
+            select(Url.id, Url.url, Url.status_code, Url.indexable,
+                   Url.indexability_status, Url.redirect_url,
+                   HtmlMeta.canonical_href, Url.is_internal, Url.resource_type)
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == self.job_id)
+        )
+        # URL -> a donde la manda su redireccion o su canonical: una pagina
+        # que se anota a si misma por una variante que salta a ella no carece
+        # de autorreferencia; lo que tiene es un destino roto o no indexable,
+        # y ese es el aviso (uno por hallazgo).
+        alias_de: dict[str, str] = {}
+        for (uid, row_url, sc, indexable, estado_idx, redirige, canonical,
+             interna, tipo_recurso) in self.session.execute(
+            consulta.execution_options(yield_per=BATCH_SIZE)
+        ):
             url_status[row_url] = sc
+            url_by_id[uid] = row_url
+            info_url[uid] = (sc, indexable, estado_idx, canonical)
+            if interna:
+                internas.add(uid)
+                if sc == 200 and tipo_recurso == "html":
+                    html_200.add(uid)
             norm = _clave(row_url)
             if norm:
+                if redirige and _clave(redirige):
+                    salta_a[norm] = _clave(redirige)
                 url_status.setdefault(norm, sc)
                 url_id_by_norm[norm] = uid
                 norm_by_id[uid] = norm
+                otra = redirige if redirige else (
+                    canonical if estado_idx == "Canonicalised" else None)
+                otra = _clave(otra)
+                if otra and otra != norm:
+                    alias_de[norm] = otra
+
+        def indexable(uid: int | None) -> bool:
+            """Si la pagina cuenta como FUENTE de hreflang.
+
+            Google no usa el hreflang de una pagina que no es indexable: la
+            variante `/es` canonicalizada a `/es/` repite el cluster de su
+            canonica y nadie le devuelve el enlace, porque el retorno apunta,
+            bien, a `/es/`. Medido: de las 296 `hreflang_missing_return` de
+            Lopesan, las 296 venian de paginas canonicalizadas (decision 99).
+            NULL —un censo sin indexabilidad calculada— cuenta: no se descarta
+            por desconocimiento.
+            """
+            return uid is not None and info_url.get(uid, (None, None))[1] is not False
+
+        def fuente(uid: int | None) -> bool:
+            """Indexable y del sitio: una pagina externa que el rastreo leyo
+            (otro subdominio fuera del alcance) no es lo que se audita, y sus
+            avisos no se verian en la pestana Hreflang, que filtra por HTML
+            interno."""
+            return indexable(uid) and uid in internas
 
         stmt = (
             select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href,
@@ -943,33 +1169,41 @@ class SEOAnalyzer:
         # Los del `<body>` no: Google los ignora, asi que no son el retorno de
         # nadie.
         targets_by_page: dict[int, set[str]] = defaultdict(set)
-        for _hid, page_id, _lang, href, en_body in rows:
+        # Pagina -> destino -> codigos VALIDOS con que lo anota (casefold).
+        # Un codigo invalido ya tiene su aviso y Google ignora esa anotacion:
+        # contarlo aqui seria avisar dos veces de lo mismo.
+        codigos: dict[int, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        # Pagina -> destinos a los que apunta con cualquier codigo, valido o no:
+        # para la autorreferencia basta con que exista (si su codigo esta mal,
+        # el aviso es `hreflang_invalid_lang`, no este).
+        for _hid, page_id, lang, href, en_body in rows:
             nh = _clave(href)
             if nh and not en_body:
                 targets_by_page[page_id].add(nh)
+                if _lang_hreflang_valido(lang)[0]:
+                    codigos[page_id][nh].add(lang.casefold())
 
         # Anotaciones agrupadas por veredicto, para escribirlas por lotes.
         por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
         # Pagina -> idiomas anotados en el `<body>`.
         en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
+        # Destino no indexable -> pagina indexable que lo anota -> idiomas.
+        no_indexable: dict[int, dict[int, set[str]]] = {}
+        # Anotaciones sin retorno, pendientes de saber si son la autorreferencia.
+        sin_retorno: list[tuple] = []
 
         for hreflang_id, url_id, lang, href, en_body in rows:
             norm_href = _clave(href)
 
-            # Language code validity (x-default is always valid).
-            lang_is_valid = bool(lang) and bool(_LANG_TAG_RE.match(lang))
-            region_mala = None
-            idioma_malo = None
-            if lang_is_valid and lang.lower() != "x-default":
-                idioma = lang.split("-")[0].lower()
-                if idioma not in _ISO_639_1:
-                    idioma_malo = idioma
-                    lang_is_valid = False
-            if lang_is_valid and "-" in (lang or ""):
-                region = lang.split("-")[-1].lower()
-                if region in _REGIONES_INVENTADAS and len(region) == 2:
-                    region_mala = region
-                    lang_is_valid = False
+            lang_is_valid, idioma_malo, region_mala = _lang_hreflang_valido(lang)
+
+            # Una pagina no indexable no es fuente: se guarda si su codigo es
+            # valido, que sigue siendo verdad, y nada mas. Lo que tenga mal lo
+            # tendra tambien su canonica, y ahi es donde se avisa.
+            if not fuente(url_id):
+                por_veredicto.setdefault((lang_is_valid, None), []).append(
+                    hreflang_id)
+                continue
 
             # Un hreflang en el `<body>` Google lo ignora: esa anotacion no
             # existe para el, asi que no tiene sentido decir que le falta el
@@ -1006,23 +1240,49 @@ class SEOAnalyzer:
             if destino_roto:
                 return_ok = None
 
+            # Lo mismo con un destino que responde pero no es indexable
+            # (canonicalizado, noindex, bloqueado por robots): Google no lo usa
+            # como alternativa, asi que su retorno tampoco cuenta. Un aviso, por
+            # DESTINO, con las paginas que lo anotan (decision 99).
+            # Sin respuesta (timeout, DNS) es otra cosa: no se sabe que veria
+            # Google, asi que ni se avisa del destino ni se afirma que falte su
+            # retorno —un destino sin respuesta no tiene hreflang guardado y
+            # salia como `hreflang_missing_return`—.
+            sin_respuesta = (
+                target_uid is not None and estado_destino is None
+                and not (info_url[target_uid][2] or "").startswith("Blocked by robots")
+            )
+            destino_no_indexable = (
+                not destino_roto and not sin_respuesta
+                and target_uid is not None and target_uid != url_id
+                and info_url[target_uid][1] is False
+            )
+            if sin_respuesta and target_uid != url_id:
+                return_ok = None
+            if destino_no_indexable:
+                return_ok = None
+                no_indexable.setdefault(target_uid, {}).setdefault(
+                    url_id, set()).add(lang)
+
             # El veredicto se apunta y se escribe al final, por lotes. Se
             # escribia con un UPDATE POR ANOTACION —y con DOS cuando el destino
             # estaba roto, porque el segundo pisaba al primero—, y de ahi solo
             # salen SEIS combinaciones distintas: valido o no, por devuelve el
             # enlace / no lo devuelve / no se sabe. En el censo de penguin eso
             # son 438.957 sentencias para escribir seis valores.
-            por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
-                hreflang_id)
-
+            # La falta de retorno se decide DESPUES de la autorreferencia: si el
+            # destino es la variante con la que la pagina se anota a si misma
+            # (`?p=2` que se llama `es-es` con la URL de la pagina 1), el
+            # hallazgo es `hreflang_sin_autorreferencia` y su arreglo cierra
+            # los dos; avisar tambien de que la pagina 1 no devuelve el enlace
+            # era el mismo hallazgo dos veces (decision 36). Medido en progym:
+            # 139 de las 140 `hreflang_missing_return` eran esto.
             if return_ok is False:
-                self._add_issue(
-                    url_id,
-                    "hreflang_missing_return",
-                    "warning",
-                    {"lang": lang, "href": href},
-                    group_key=_clave_de_grupo(lang),
-                )
+                sin_retorno.append((hreflang_id, lang_is_valid, url_id, lang,
+                                    href, norm_href))
+            else:
+                por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
+                    hreflang_id)
 
             if not lang_is_valid:
                 detalle = {"lang": lang}
@@ -1050,10 +1310,44 @@ class SEOAnalyzer:
                     group_key=_clave_de_grupo(lang),
                 )
 
+        # Las que estan en el body porque algo corto el head van en
+        # `head_cortado` (decision 102), no aqui tambien.
+        cortadas = {
+            uid for uid, cortado, fuera in self.session.execute(
+                select(HtmlMeta.url_id, HtmlMeta.head_cortado_por,
+                       HtmlMeta.fuera_del_head)
+                .join(Url, Url.id == HtmlMeta.url_id)
+                .where(Url.job_id == self.job_id,
+                       HtmlMeta.head_cortado_por.isnot(None))
+            ).all()
+            if _lo_saca_el_corte(cortado, fuera, "hreflang")
+        } if en_body_por_pagina else set()
         for url_id, langs in en_body_por_pagina.items():
+            if url_id in cortadas:
+                continue
             self._add_issue(
                 url_id, "hreflang_in_body", "warning",
                 {"cuantos": len(langs), "langs": sorted(set(langs))[:20]},
+            )
+
+        variante_de = self._hreflang_completo(
+            targets_by_page, codigos, no_indexable, info_url, norm_by_id,
+            url_id_by_norm, url_by_id, fuente, alias_de, salta_a, html_200,
+        )
+
+        for hreflang_id, lang_valid, url_id, lang, href, norm_href in sin_retorno:
+            if norm_href is not None and variante_de.get(url_id) == norm_href:
+                # La autorreferencia escrita con otra URL: no se afirma que
+                # falte el retorno (ni en la nota de /insights).
+                por_veredicto.setdefault((lang_valid, None), []).append(hreflang_id)
+                continue
+            por_veredicto.setdefault((lang_valid, False), []).append(hreflang_id)
+            self._add_issue(
+                url_id,
+                "hreflang_missing_return",
+                "warning",
+                {"lang": lang, "href": href},
+                group_key=_clave_de_grupo(lang),
             )
 
         for (lang_valid, return_ok), ids in por_veredicto.items():
@@ -1066,6 +1360,231 @@ class SEOAnalyzer:
 
         self.session.flush()
         self._flush_issues()
+
+    # Cuantas URLs de ejemplo lleva una incidencia agrupada (decision 73).
+    _EJEMPLOS_HREFLANG = 5
+
+    def _hreflang_completo(self, targets_by_page, codigos, no_indexable,
+                           info_url, norm_by_id, url_id_by_norm, url_by_id,
+                           indexable, alias_de, salta_a, html_200) -> dict:
+        """Los cinco tipos de la decision 99, sobre lo ya precargado.
+
+        El CLUSTER de una pagina es el conjunto de URLs que anota mas ella
+        misma. En un cluster bien hecho todas sus paginas declaran el mismo
+        conjunto, asi que les sale la misma clave sin unir nada con nada: no
+        hay componentes conexas que un enlace de «idioma no disponible -> la
+        home» convierta en un cluster de medio sitio.
+
+        *indexable* es el criterio de FUENTE (indexable e interna). Devuelve,
+        por pagina sin autorreferencia, la clave de la variante con la que se
+        anota a si misma, para no afirmar ademas que esa variante no le
+        devuelve el enlace.
+        """
+        n_ej = self._EJEMPLOS_HREFLANG
+        clusters: dict[str, list[int]] = defaultdict(list)
+        cluster_de: dict[int, str] = {}
+        sin_auto: list[tuple[int, tuple | None]] = []
+        variante_de: dict[int, tuple] = {}
+
+        for page_id, destinos in targets_by_page.items():
+            if not indexable(page_id):
+                continue
+            yo = norm_by_id.get(page_id)
+            if not yo:
+                continue
+            otros = destinos - {yo}
+            if not otros:
+                continue  # solo se anota a si misma: no hay cluster
+            miembros = sorted(_url_de_clave(m) for m in destinos | {yo})
+            clave = _clave_de_grupo("\n".join(miembros))
+            clusters[clave].append(page_id)
+            cluster_de[page_id] = clave
+
+            # Autorreferencia: con cualquier codigo que no sea x-default. Si el
+            # unico que apunta a ella es x-default, la pagina no dice en que
+            # idioma esta.
+            propios = codigos.get(page_id, {}).get(yo)
+            autoref = yo in destinos and (
+                propios is None or bool(propios - {"x-default"})
+                # `propios is None`: se anota con un codigo invalido, que ya
+                # tiene su aviso.
+            )
+            if autoref:
+                continue
+            # Se anota con una VARIANTE de si misma —la misma ruta con un
+            # parametro, o con/sin barra final— que se canonicaliza a ella:
+            # es su autorreferencia escrita con una URL no canonica, y ningun
+            # mercado pierde su version (la pagina es indexable). El aviso es
+            # este, no `hreflang_destino_no_indexable`, que diria con un
+            # `error` que esa version desaparece (decision 99; medido: las 196
+            # de penguin 30-jul eran esto). Una variante con OTRA ruta —`/de/`
+            # canonicalizada a `/es/`— si es un mercado sin version, y sigue
+            # siendo el error del destino.
+            propias = sorted(
+                d for d in otros
+                if alias_de.get(d) == yo and _misma_ruta(d, yo)
+                and (info_url[url_id_by_norm[d]][2] if d in url_id_by_norm
+                     else None) == "Canonicalised"
+                and (codigos.get(page_id, {}).get(d) is None
+                     or bool(codigos[page_id][d] - {"x-default"}))
+            )
+            if propias:
+                for d in propias:
+                    fuentes = no_indexable.get(url_id_by_norm[d])
+                    if fuentes is not None:
+                        fuentes.pop(page_id, None)
+                        if not fuentes:
+                            del no_indexable[url_id_by_norm[d]]
+                sin_auto.append((page_id, propias[0]))
+            elif any(alias_de.get(d) == yo for d in otros):
+                continue  # por otra URL que es ella: el aviso es el del destino
+            else:
+                sin_auto.append((page_id, None))
+
+        for page_id, propia in sin_auto:
+            yo = norm_by_id[page_id]
+            otros = targets_by_page[page_id] - {yo}
+            detalle = {"cluster": cluster_de[page_id], "alternativas": len(otros)}
+            # Lo mas comun en los censos medidos: la pagina SI se anota, pero
+            # con otra URL —la misma ruta con un parametro de tienda o de
+            # pagina—, que para Google es otra URL. Se dice cual, porque el
+            # arreglo es ese.
+            variante = [propia] if propia else sorted(
+                (d for d in otros if d[:3] == yo[:3]), key=_url_de_clave)
+            if variante:
+                detalle["variante_propia"] = _url_de_clave(variante[0])
+                variante_de[page_id] = variante[0]
+            self._add_issue(page_id, "hreflang_sin_autorreferencia", "warning",
+                            detalle)
+
+        def ejemplos(ids) -> list[str]:
+            return sorted(url_by_id[i] for i in ids)[:n_ej]
+
+        def ancla(ids) -> int:
+            return min(ids, key=lambda i: url_by_id[i])
+
+        # x-default: se decide por cluster —basta con que una de sus paginas
+        # lo declare para no afirmar que falta— y se AVISA por host. Es una
+        # decision de plantilla y casi siempre de todo el sitio: medido en el
+        # censo de penguin del 30-jul, una fila por cluster eran 20.557 avisos
+        # `info` diciendo una sola cosa (decision 64).
+        sin_xd_por_host: dict[str, list[list[int]]] = defaultdict(list)
+        clusters_por_host: dict[str, int] = defaultdict(int)
+        esquema_de_host: dict[str, str] = {}
+        for clave, paginas in clusters.items():
+            # El host del cluster, elegido sin depender del orden de las filas
+            # (la consulta no lleva ORDER BY y el UPDATE por lotes reescribe las
+            # tuplas): con `paginas[0]`, un cluster que cruza hosts caia en uno
+            # u otro segun el analisis, y la comparacion entre censos lo daba
+            # por resuelto en uno y nuevo en el otro (decision 88).
+            host, esquema = min((norm_by_id[p][1], norm_by_id[p][0]) for p in paginas)
+            esquema_de_host.setdefault(host, esquema)
+            clusters_por_host[host] += 1
+            if not any("x-default" in cods
+                       for p in paginas
+                       for cods in codigos.get(p, {}).values()):
+                sin_xd_por_host[host].append(paginas)
+        for host, grupos in sorted(sin_xd_por_host.items()):
+            todas = [p for g in grupos for p in g]
+            # Anclado en la raiz del host si se rastreo: con la URL minima de
+            # las afectadas, el hallazgo cambiaba de URL en cuanto se arreglaba
+            # ese cluster o aparecia otro con una URL menor, y el diff lo
+            # contaba como uno resuelto y uno nuevo estando abierto.
+            # Si la raiz redirige (Lopesan: 302 a `/es/`; penguin: 301 a la
+            # https), se ancla en la pagina a la que lleva: el 302 no es una
+            # pagina HTML y la pestana Hreflang no lo ensenaba («1 pagina» en
+            # el chip y la lista vacia).
+            clave_raiz = _clave(f"{esquema_de_host[host]}://{host}/")
+            vistas = {clave_raiz}
+            while clave_raiz in salta_a and salta_a[clave_raiz] not in vistas:
+                clave_raiz = salta_a[clave_raiz]
+                vistas.add(clave_raiz)
+            raiz = url_id_by_norm.get(clave_raiz)
+            if raiz not in html_200:
+                raiz = None
+            self._add_issue(
+                raiz if raiz is not None else ancla(todas),
+                "hreflang_sin_x_default", "info",
+                {"host": host,
+                 "clusters_afectados": len(grupos),
+                 "clusters_del_host": clusters_por_host[host],
+                 "paginas_afectadas": len(todas),
+                 "ejemplos": sorted(url_by_id[ancla(g)] for g in grupos)[:n_ej]},
+                group_key=_clave_de_grupo(host),
+            )
+
+        for clave, paginas in clusters.items():
+            # Mismo codigo -> varias URLs dentro del cluster.
+            repetidos: dict[str, tuple[set[str], list[int]]] = {}
+            for p in paginas:
+                por_codigo: dict[str, set[str]] = defaultdict(set)
+                for destino, cods in codigos.get(p, {}).items():
+                    for c in cods:
+                        por_codigo[c].add(destino)
+                for c, urls_c in por_codigo.items():
+                    if len(urls_c) > 1:
+                        urls_r, pags = repetidos.setdefault(c, (set(), []))
+                        urls_r |= urls_c
+                        pags.append(p)
+            for c, (urls_r, pags) in sorted(repetidos.items()):
+                self._add_issue(
+                    ancla(pags), "hreflang_idioma_repetido", "warning",
+                    {"lang": c, "urls": sorted(_url_de_clave(u) for u in urls_r)[:10],
+                     "cuantas_urls": len(urls_r),
+                     "paginas_afectadas": len(pags), "ejemplos": ejemplos(pags)},
+                    group_key=_clave_de_grupo(f"{clave}|{c}"),
+                )
+
+        # Por ANOTACION y en la pagina que la escribe, como el destino roto
+        # (`hreflang_broken_target`): `error` por lo mismo —Google descarta esa
+        # alternativa y ese mercado se queda sin su version—, y la fila tiene
+        # que estar en una pagina del sitio. Anclada en el destino, en
+        # www.uoc.edu 9 de las 19 caian en URLs externas (`blogs.uoc.edu`,
+        # `recerca.uoc.edu`) que la pestana Hreflang no ensena, y el arreglo
+        # —apuntar el hreflang a la canonica, o quitar la canonicalizacion—
+        # se decide mirando la pagina que anota.
+        for destino_id, por_fuente in no_indexable.items():
+            _sc, _idx, estado_idx, canonical = info_url[destino_id]
+            for fuente_id, langs in por_fuente.items():
+                for lang in sorted(langs):
+                    detalle = {"href": url_by_id[destino_id], "lang": lang,
+                               "motivo": estado_idx}
+                    if canonical and estado_idx == "Canonicalised":
+                        detalle["canonical"] = canonical
+                    self._add_issue(
+                        fuente_id, "hreflang_destino_no_indexable", "error",
+                        detalle, group_key=_clave_de_grupo(lang),
+                    )
+
+        # Retorno incoherente: S anota D con un codigo, D devuelve el enlace a
+        # S, pero D se declara a si misma con OTRO. Una vez por anotacion de S;
+        # el caso simetrico (lo que D dice de S frente a lo que S dice de si
+        # misma) sale cuando D es la fuente.
+        for page_id in cluster_de:
+            yo = norm_by_id[page_id]
+            for destino, cods_s in codigos.get(page_id, {}).items():
+                if destino == yo:
+                    continue
+                cods_s = cods_s - {"x-default"}
+                if not cods_s:
+                    continue
+                d_id = url_id_by_norm.get(destino)
+                if d_id is None or not indexable(d_id):
+                    continue
+                if yo not in targets_by_page.get(d_id, ()):
+                    continue  # sin retorno: eso es `hreflang_missing_return`
+                cods_d = codigos.get(d_id, {}).get(destino, set()) - {"x-default"}
+                if not cods_d or cods_s & cods_d:
+                    continue
+                lang = ", ".join(sorted(cods_s))
+                self._add_issue(
+                    page_id, "hreflang_retorno_incoherente", "warning",
+                    {"href": url_by_id[d_id], "lang": lang,
+                     "lang_del_destino": sorted(cods_d)},
+                    group_key=_clave_de_grupo(lang),
+                )
+
+        return variante_de
 
     # -- Structured Data ----------------------------------------------------
 
@@ -1163,6 +1682,149 @@ class SEOAnalyzer:
             )
 
         self.session.flush()
+        self._flush_issues()
+
+    # -- HTML que Google trunca o ignora (decision 102) ---------------------
+
+    # Los que tienen su propio aviso cuando estan en el body sin que se haya
+    # cortado el head (`canonical_in_body`, `hreflang_in_body`).
+    _CON_AVISO_PROPIO = frozenset({"canonical", "hreflang"})
+    # Lo que, quedando detras del corte, decide si la pagina entra en el
+    # indice o cual de sus variantes (decision 64: la severidad es la
+    # consecuencia).
+    _PERDIDA_GRAVE = frozenset({"robots", "googlebot", "canonical"})
+
+    def analyze_html_ignorado(self) -> None:
+        """HTML que Googlebot no llega a leer: mas de 2 MB o un head cortado.
+
+        Tres tipos, todos sobre paginas HTML internas que responden 2xx:
+
+        - ``html_supera_2mb`` (por pagina, solo indexables): Googlebot corta la
+          descarga en los 2 MB del HTML descomprimido e indexa lo que tenga.
+          El tamano sale de ``html_bytes_servidos``; en un censo anterior a la
+          columna y SIN render, del mayor de ``content_length`` y
+          ``transfer_size`` (la decision 50 los cambio de sitio el 2026-10-07 y
+          el mayor es el descomprimido en las dos epocas). Con render y sin la
+          columna no se sabe —``content_length`` es el DOM montado— y no se
+          afirma nada.
+        - ``head_cortado`` (agrupado): un elemento que no va en el head lo
+          cerro antes de tiempo y algun metadato quedo detras, en el body.
+          Google: "it assumes the end of the <head> element and stops reading".
+          Severidad por lo que se pierde (decision 64): ``error`` si queda
+          detras el robots, el googlebot o el canonical —la pagina puede
+          acabar dentro o fuera del indice al reves de lo que pide—, y
+          ``warning`` si solo titulo, description o hreflang.
+        - ``meta_fuera_del_head`` (agrupado, ``info``): titulo, description o
+          robots en el body sin que nada cortara el head. Google documenta que
+          van en el head y no dice que hace con ellos fuera, y hay frameworks
+          que los sirven ahi a proposito (Next.js 15.2+ con streaming metadata
+          los sube al head con JavaScript, y documenta que Googlebot los lee):
+          un dato que mirar, no un fallo afirmado.
+
+        Los dos ultimos necesitan las columnas de la decision 102, que solo
+        rellena un rastreo SIN render (con render el DOM serializado ya no
+        conserva el corte; el spider las deja a NULL). En un censo anterior, o
+        con render, no se emiten.
+        """
+        logger.debug("Analyzing HTML que Google trunca o ignora ...")
+        base = (
+            Url.job_id == self.job_id,
+            Url.is_html.is_(True),
+            Url.is_internal.is_(True),
+            Url.status_code >= 200,
+            Url.status_code < 300,
+        )
+
+        # -- Mas de 2 MB --------------------------------------------------
+        limite = GOOGLEBOT_HTML_MAX_BYTES
+        sin_medir = 0
+        for url_id, servidos, content_length, transfer_size in self.session.execute(
+            select(Url.id, Url.html_bytes_servidos, Url.content_length,
+                   Url.transfer_size)
+            .where(*base, Url.indexable.is_(True))
+        ):
+            if servidos is not None:
+                tamano, fuente = servidos, "html_bytes_servidos"
+            elif not self._render_js:
+                tamano = max(content_length or 0, transfer_size or 0) or None
+                fuente = "cuerpo_descargado"
+            else:
+                tamano = None
+            if tamano is None:
+                sin_medir += 1
+                continue
+            if tamano > limite:
+                self._add_issue(
+                    url_id, "html_supera_2mb", "warning",
+                    {"bytes": tamano, "limite_bytes": limite,
+                     "bytes_sin_leer": tamano - limite,
+                     "pct_sin_leer": round(100 * (tamano - limite) / tamano, 1),
+                     "fuente": fuente},
+                )
+        if sin_medir:
+            logger.warning(
+                "html_supera_2mb: %d paginas indexables sin el tamano del HTML "
+                "servido (rastreo con render anterior a la decision 102); no se "
+                "afirma nada de ellas. Hay que re-rastrear.", sin_medir)
+
+        # -- Head cortado y metadatos en el body ----------------------------
+        if self._render_js:
+            # El DOM montado no dice si el head se corto: lo que el navegador
+            # movio al body pareceria «fuera del head sin corte» (102).
+            self._flush_issues()
+            return
+        filas = self.session.execute(
+            select(Url.id, HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head,
+                   HtmlMeta.title_count, HtmlMeta.meta_description_count)
+            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(*base, HtmlMeta.fuera_del_head.isnot(None),
+                   HtmlMeta.fuera_del_head != "")
+        ).all()
+        cortados: dict[tuple, list[int]] = {}
+        en_body: dict[tuple, list[int]] = {}
+        for url_id, cortado_por, fuera, n_titulos, n_descripciones in filas:
+            perdidos = tuple(_fuera_del_head(fuera))
+            if cortado_por:
+                cortados.setdefault((cortado_por, perdidos), []).append(url_id)
+                continue
+            # Un segundo <title> o una segunda description en el body, con el
+            # bueno en el head, ya es `title_multiple` / `description_multiple`:
+            # un aviso por hallazgo (36). Medido en penguin: las 552 paginas
+            # `/fragmento` incrustan un capitulo EPUB entero, con su propio
+            # `<head><title>cap-2</title>`, dentro del body.
+            ya_dicho = set(self._CON_AVISO_PROPIO)
+            if (n_titulos or 0) > 1:
+                ya_dicho.add("title")
+            if (n_descripciones or 0) > 1:
+                ya_dicho.add("description")
+            propios = tuple(p for p in perdidos if p not in ya_dicho)
+            if propios:
+                en_body.setdefault(propios, []).append(url_id)
+
+        for (cortado_por, perdidos), paginas in cortados.items():
+            grave = bool(self._PERDIDA_GRAVE.intersection(perdidos))
+            self._add_issue(
+                paginas[0], "head_cortado", "error" if grave else "warning",
+                {"cortado_por": cortado_por,
+                 "fuera_del_head": list(perdidos),
+                 # El estado de indexabilidad del crawler sigue leyendo el
+                 # robots que quedo en el body como si contara: no esta
+                 # comprobado que Google lo ignore ahi, y cambiarlo sin medir
+                 # sacaria o meteria paginas del indice. Lo que se afirma es
+                 # que la directiva esta donde Google deja de leer.
+                 "directiva_en_duda": grave,
+                 "paginas_afectadas": len(paginas),
+                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                group_key=_clave_de_grupo(f"{cortado_por}|" + ",".join(perdidos)),
+            )
+        for perdidos, paginas in en_body.items():
+            self._add_issue(
+                paginas[0], "meta_fuera_del_head", "info",
+                {"fuera_del_head": list(perdidos),
+                 "paginas_afectadas": len(paginas),
+                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                group_key=_clave_de_grupo(",".join(perdidos)),
+            )
         self._flush_issues()
 
     def _urls_de(self, url_ids: list[int]) -> list[str]:
@@ -1604,7 +2266,7 @@ class SEOAnalyzer:
         logger.debug("Analyzing redirect chains ...")
 
         # Build an in-memory redirect graph: url -> redirect_url.
-        stmt = select(Url.id, Url.url, Url.redirect_url).where(
+        stmt = select(Url.id, Url.url, Url.redirect_url, Url.is_internal).where(
             Url.job_id == self.job_id,
             Url.redirect_url.isnot(None),
             Url.redirect_url != "",
@@ -1617,9 +2279,15 @@ class SEOAnalyzer:
         # url_string -> (url_id, redirect_target_string)
         redirect_map: dict[str, str] = {}
         url_to_id: dict[str, int] = {}
-        for url_id, url_str, redirect_url in rows:
+        internas: set[str] = set()
+        for url_id, url_str, redirect_url, interna in rows:
             redirect_map[url_str] = redirect_url
             url_to_id[url_str] = url_id
+            if interna:
+                internas.add(url_str)
+
+        # Donde acaba cada cadena: el codigo de la ultima URL (decision 101).
+        estado_final = _estado_por_url(self.session, self.job_id)
 
         # Walk each redirect origin and trace the chain.
         for origin_url in list(redirect_map.keys()):
@@ -1638,12 +2306,46 @@ class SEOAnalyzer:
             origin_id = url_to_id[origin_url]
             hops = len(visited) - 1  # number of redirects
 
+            # Solo desde una URL interna: una cadena que empieza en otro sitio
+            # (`http://research.uoc.edu/...` enlazada desde el censo) no es del
+            # sitio auditado, y la pestana Redirecciones —que filtra por
+            # interna— la contaba en el chip sin ensenarla en la lista. Lo que
+            # el sitio puede hacer ahi es cambiar el enlace, y eso no es una
+            # cadena suya. Mismo criterio que `redireccion_a_error`.
+            if origin_url not in internas:
+                continue
+
             if is_loop:
                 self._add_issue(
                     origin_id,
                     "redirect_loop",
                     "error",
                     {"chain": visited + [redirect_map[current]]},
+                )
+                continue
+
+            # Una redireccion (o una cadena) que acaba en un 4xx o un 5xx: el
+            # usuario y Google llegan a un error, y lo que la URL vieja tenia de
+            # senal se pierde. El 404 ya avisa en SU URL, pero el salto que
+            # lleva a el no avisaba en ninguna: es otra regla que arreglar
+            # —redirigir a una pagina que exista—. Un aviso por hallazgo: si
+            # acaba en error, ese es el aviso y no tambien `redirect_chain`,
+            # porque redirigir directo a una pagina buena arregla las dos.
+            final_status = estado_final.get(current)
+            if final_status is None:
+                final_status = estado_final.get(_clave(current))
+            # Si el salto solo normaliza (http → https, www, barra final) la
+            # redireccion esta bien hecha: el error es el destino, que ya
+            # tiene su `4xx_error` / `5xx_error`. Medido en www.uoc.edu: 383 de
+            # las 473 redirecciones de un salto que acababan en error eran
+            # esto, casi todas el 307 de Chromium hacia https.
+            if (_es_error(final_status)
+                    and not _solo_normaliza(origin_url, current)):
+                self._add_issue(
+                    origin_id,
+                    "redireccion_a_error",
+                    "error",
+                    {"chain": visited, "hops": hops, "final_status": final_status},
                 )
             elif hops > self.max_redirect_chain:
                 self._add_issue(
@@ -2719,8 +3421,12 @@ class SEOAnalyzer:
         )
         rows = self.session.execute(stmt).all()
 
+        # La canonica que nadie enlaza ya tiene su aviso, que dice que hay que
+        # hacer (decision 101): un aviso por hallazgo.
+        sin_enlazar = self._avisar_canonical_sin_enlazar()
         for (url_id,) in rows:
-            self._add_issue(url_id, "orphan_page", "warning")
+            if url_id not in sin_enlazar:
+                self._add_issue(url_id, "orphan_page", "warning")
 
         self._avisar_solo_por_redireccion()
 
@@ -2768,6 +3474,153 @@ class SEOAnalyzer:
             )
 
         self._flush_issues()
+
+    def _ids_canonical_sin_enlazar(self) -> dict[int, dict[str, Any]]:
+        """Canonicas a las que no llega ni un enlace interno, y sus variantes.
+
+        `{url_id: detalle}` de las paginas que cumplen las dos cosas
+        (decision 101):
+
+        - la canonica: HTML interna, 200, indexable, con `inlinks_count` = 0
+          —que ya descuenta los enlaces desde `noindex` y desde paginas que no
+          dan 200, decisiones 38 y 57—, que no es semilla (misma exclusion que
+          `orphan_page`) ni destino de una redireccion (eso es
+          `solo_enlazada_por_redireccion`, decision 63);
+        - al menos una variante —200 y canonicalizada a ella— que SI recibe
+          enlaces desde FUERA del grupo (ni de la canonica ni de otra variante
+          suya). Si tampoco las variantes estan enlazadas, la pagina es
+          huerfana de verdad y lo dice `orphan_page` / `sitemap_orphan`.
+
+        `inlinks_count` NULL es «no se sabe» y no entra. Con los enlaces
+        archivados (decision 95) no se calcula: los conteos no se pueden
+        rehacer, y un aviso sobre conteos rancios seria inventado.
+        """
+        if getattr(self, "_cache_canonical_sin_enlazar", None) is not None:
+            return self._cache_canonical_sin_enlazar
+        resultado: dict[int, dict[str, Any]] = {}
+        self._cache_canonical_sin_enlazar = resultado
+        if self._enlaces_archivados:
+            logger.warning(
+                "canonical_sin_enlazar: los enlaces del job %s estan archivados; "
+                "no se evalua", self.job_id,
+            )
+            return resultado
+
+        candidatas = self.session.execute(
+            select(Url.id, Url.url, Url.in_sitemap).where(
+                Url.job_id == self.job_id,
+                Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+                Url.inlinks_count == 0,
+                (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
+                ~_es_destino_de_redireccion(),
+            )
+        ).all()
+        if not candidatas:
+            return resultado
+        por_clave: dict[Any, tuple[int, bool]] = {}
+        for uid, url, en_sitemap in candidatas:
+            por_clave[url] = (uid, bool(en_sitemap))
+            k = _clave(url)
+            if k is not None:
+                por_clave.setdefault(k, (uid, bool(en_sitemap)))
+
+        variantes = self.session.execute(
+            select(Url.id, Url.url, Url.url_hash, Url.inlinks_count,
+                   HtmlMeta.canonical_href, HtmlMeta.canonical_header)
+            .join(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                Url.indexability_status == "Canonicalised",
+            )
+        ).all()
+        # canonica -> [(id, url, hash, inlinks)] de sus variantes
+        grupos: dict[int, list[tuple[int, str, str, int]]] = defaultdict(list)
+        en_sitemap_de: dict[int, bool] = {}
+        for vid, url, h, inlinks, c_href, c_cab in variantes:
+            canonical = (c_href or "").strip() or (c_cab or "").strip()
+            if not canonical or misma_url(canonical, url):
+                continue
+            hallada = por_clave.get(canonical)
+            if hallada is None:
+                hallada = por_clave.get(_clave(canonical))
+            if hallada is None:
+                continue
+            uid, en_sitemap = hallada
+            grupos[uid].append((vid, url, h, int(inlinks or 0)))
+            en_sitemap_de[uid] = en_sitemap
+
+        # Un enlace a la variante desde la propia canonica o desde otra
+        # variante suya no dice que el SITIO enlace ese contenido: es el
+        # selector de color o de talla de la ficha. Con solo esos, el grupo
+        # entero es huerfano y lo sigue diciendo `orphan_page` /
+        # `sitemap_orphan`. Se cuentan los de fuera con el mismo criterio que
+        # `inlinks_count` (origen 200 y no noindex, SUM(repeticiones),
+        # decision 94), filtrando el job en `links` (decision 37).
+        hash_a_grupo: dict[str, tuple[int, int]] = {}
+        for uid, vs in grupos.items():
+            for vid, _url, h, inlinks in vs:
+                if inlinks > 0 and h:
+                    hash_a_grupo[h] = (uid, vid)
+        de_fuera: dict[int, int] = defaultdict(int)
+        if hash_a_grupo:
+            miembros = {uid: {uid} | {v[0] for v in vs} for uid, vs in grupos.items()}
+            origen = aliased(Url)
+            hashes = list(hash_a_grupo)
+            for n in range(0, len(hashes), 500):
+                lote = hashes[n:n + 500]
+                filas = self.session.execute(
+                    select(Link.to_url_hash, Link.from_url_id,
+                           func.sum(Link.repeticiones))
+                    .join(origen, origen.id == Link.from_url_id)
+                    .where(
+                        Link.job_id == self.job_id,
+                        Link.to_url_hash.in_(lote),
+                        origen.status_code == 200,
+                        origen.noindex.isnot(True),
+                    )
+                    .group_by(Link.to_url_hash, Link.from_url_id)
+                ).all()
+                for h, desde, veces in filas:
+                    uid, vid = hash_a_grupo[h]
+                    if desde in miembros[uid]:
+                        continue
+                    de_fuera[vid] += int(veces or 0)
+
+        for uid, vs in grupos.items():
+            d = {
+                "variantes": len(vs), "variantes_enlazadas": 0,
+                "enlaces_a_variantes": 0, "ejemplos_variante": [],
+                "en_sitemap": en_sitemap_de[uid],
+            }
+            for vid, url, _h, _inlinks in vs:
+                fuera = de_fuera.get(vid, 0)
+                if fuera > 0:
+                    d["variantes_enlazadas"] += 1
+                    d["enlaces_a_variantes"] += fuera
+                    if len(d["ejemplos_variante"]) < 5:
+                        d["ejemplos_variante"].append(url)
+            if d["variantes_enlazadas"]:
+                resultado[uid] = d
+        return resultado
+
+    def _avisar_canonical_sin_enlazar(self) -> dict[int, dict[str, Any]]:
+        """La canonica que el sitio no enlaza: enlaza sus variantes.
+
+        Google usa los enlaces internos como una senal mas de cual es la
+        canonica, y cuando todos apuntan a la variante puede quedarse con ella
+        e ignorar el canonical declarado. El arreglo es concreto: que los
+        enlaces apunten a la canonica. `warning`, como `orphan_page`, que es el
+        aviso que sustituye en esas paginas.
+        """
+        ids = self._ids_canonical_sin_enlazar()
+        for uid, detalle in ids.items():
+            self._add_issue(uid, "canonical_sin_enlazar", "warning", dict(detalle))
+        return ids
 
     def _avisar_solo_por_redireccion(self) -> None:
         """Paginas a las que SOLO se llega por un salto: ni un enlace directo.
@@ -2848,6 +3701,15 @@ class SEOAnalyzer:
           plain ``orphan_page``.
         - ``not_in_sitemap``: indexable internal 200 HTML page missing from
           the sitemap — should probably be listed.
+        - ``sitemap_no_indexable`` (decision 100): URL declarada en el sitemap
+          que no es indexable — salto, 4xx, 5xx, noindex, canonicalizada a
+          otra, bloqueada por robots.txt o sin contenido —, una por URL y con el
+          motivo en ``details``. Sustituye a ``sitemap_orphan`` en esas
+          paginas: lo que hay que arreglar es la contradiccion, no el enlazado
+          (decision 36).
+
+        No lee ``links``: solo ``urls`` y ``html_meta``, asi que vale igual en
+        un censo con los enlaces archivados (decision 95).
         """
         logger.debug("Analyzing sitemap coverage ...")
 
@@ -2868,11 +3730,19 @@ class SEOAnalyzer:
                 Url.status_code == 200,
                 (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
                 (Url.inlinks_count.is_(None)) | (Url.inlinks_count == 0),
+                # Una no indexable del sitemap ya lleva sitemap_no_indexable,
+                # y «enlazala» seria el consejo equivocado: lo que sobra es la
+                # entrada del sitemap o la directiva (decision 100).
+                Url.indexable.isnot(False),
                 ~_es_destino_de_redireccion(),
             )
         ).all()
+        sin_enlazar = self._ids_canonical_sin_enlazar()
         for (url_id,) in rows:
-            self._add_issue(url_id, "sitemap_orphan", "warning")
+            if url_id not in sin_enlazar:
+                self._add_issue(url_id, "sitemap_orphan", "warning")
+
+        self._sitemap_no_indexable()
 
         # Indexable page the sitemap forgot.
         rows = self.session.execute(
@@ -2890,10 +3760,262 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def _sitemap_no_indexable(self) -> None:
+        """URLs que el sitemap declara y que Google no va a indexar (decision 100).
+
+        El sitemap es la lista de URLs canonicas que el sitio pide indexar;
+        cada entrada que salta, falla, lleva noindex o se canonicaliza a otra
+        es una instruccion que la propia pagina contradice. Una incidencia por
+        URL —es la URL la que hay que quitar del sitemap, o la directiva la que
+        esta mal— con el motivo, el codigo y el destino en ``details``.
+
+        Lo que no se sabe no se afirma: un 429 o un 503 es el sitio frenando
+        al rastreador y una URL sin respuesta no dice como la ve Google, asi
+        que no se emiten (se cuentan en el log).
+        """
+        rows = self.session.execute(
+            select(
+                Url.id, Url.status_code, Url.indexability_status,
+                Url.redirect_url, HtmlMeta.canonical_href,
+                HtmlMeta.canonical_header,
+            )
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.in_sitemap.is_(True),
+                Url.is_internal.is_(True),
+                Url.indexable.isnot(True),
+            )
+        ).all()
+
+        por_motivo: dict[str, int] = defaultdict(int)
+        sin_comprobar = 0
+        for url_id, codigo, estado, salto, canonical, canonical_cab in rows:
+            motivo = motivo_sitemap_no_indexable(codigo, estado)
+            if motivo is None:
+                sin_comprobar += 1
+                continue
+            por_motivo[motivo] += 1
+            details: dict[str, Any] = {
+                "motivo": motivo,
+                "status_code": codigo,
+                "indexability_status": estado,
+            }
+            if motivo == "redireccion" and salto:
+                details["destino"] = salto
+            elif motivo == "canonicalizada" and (canonical or canonical_cab):
+                details["destino"] = canonical or canonical_cab
+            self._add_issue(url_id, "sitemap_no_indexable", "warning", details)
+
+        if por_motivo or sin_comprobar:
+            logger.info(
+                "Sitemap: %d URLs declaradas no indexables (%s); %d sin "
+                "comprobar (429, 503 o sin respuesta)",
+                sum(por_motivo.values()),
+                ", ".join(f"{m}={n}" for m, n in sorted(por_motivo.items())),
+                sin_comprobar,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+def _es_redireccion(status: int | None) -> bool:
+    """3xx, o sin codigo cuando la redireccion la siguio el navegador (render
+    JS, decision 27: se guarda `redirect_url` con el salto sin codigo)."""
+    return status is None or 300 <= status < 400
+
+
+def _es_error(status: int | None) -> bool:
+    """¿El codigo dice que ahi NO hay pagina? 4xx y 5xx, salvo el 429.
+
+    Un 429 es el sitio frenando al rastreador, no la respuesta que vera
+    Google: en el censo de penguin, 35 de las 132 redirecciones que «acababan
+    en 4xx» acababan en un 429. Afirmar que ahi hay un error seria inventarlo.
+    """
+    return status is not None and 400 <= status < 600 and status != 429
+
+
+def _solo_normaliza(a: str | None, b: str | None) -> bool:
+    """¿*a* y *b* son la misma ruta salvo el esquema, el `www` o la barra
+    final? Es la forma de una redireccion de normalizacion (http → https,
+    sin-www → www, `/a` → `/a/`), que esta bien hecha aunque el destino falle:
+    lo que hay que arreglar entonces es el destino, y ya avisa en su URL.
+    """
+    if not a or not b:
+        return False
+    try:
+        _, ha, ra, qa = clave_url(a)
+        _, hb, rb, qb = clave_url(b)
+    except Exception:
+        return False
+
+    def _host(h: str) -> str:
+        return h[4:] if h.startswith("www.") else h
+
+    def _ruta(r: str) -> str:
+        return r.rstrip("/") or "/"
+
+    return _host(ha) == _host(hb) and _ruta(ra) == _ruta(rb) and qa == qb
+
+
+def _a_https(url: str) -> str:
+    return "https://" + url.split("://", 1)[1] if "://" in url else url
+
+
+def _estado_por_url(session: Session, job_id) -> dict[Any, int | None]:
+    """Codigo de cada URL del job, por la URL tal cual y por su clave."""
+    estado: dict[Any, int | None] = {}
+    for url, sc in session.execute(
+        select(Url.url, Url.status_code).where(Url.job_id == job_id)
+    ).all():
+        estado[url] = sc
+        k = _clave(url)
+        if k is not None:
+            estado.setdefault(k, sc)
+    return estado
+
+
+class _Ficha:
+    __slots__ = ("id", "url", "status_code", "redirect_url", "noindex", "canonical")
+
+    def __init__(self, id, url, status_code, redirect_url, noindex, canonical):
+        self.id = id
+        self.url = url
+        self.status_code = status_code
+        self.redirect_url = (redirect_url or "").strip() or None
+        self.noindex = noindex
+        self.canonical = (canonical or "").strip() or None
+
+
+class _Fichas:
+    """Las URLs del job con lo que hace falta para seguir un canonical o una
+    redireccion hasta el final (decision 101).
+
+    Se buscan por la URL tal cual y por la clave de `misma_url` (decision 39):
+    con otro normalizador el mismo destino seria «rastreado» para la
+    indexabilidad y «desconocido» aqui. El canonical de cada una es el que
+    usa la indexabilidad: el del HTML y, si no hay, el de la cabecera `Link`.
+    """
+
+    MAX_SALTOS = 20
+
+    def __init__(self, session: Session, job_id) -> None:
+        self._por_url: dict[Any, _Ficha] = {}
+        filas = session.execute(
+            select(
+                Url.id, Url.url, Url.status_code, Url.redirect_url, Url.noindex,
+                HtmlMeta.canonical_href, HtmlMeta.canonical_header,
+            )
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == job_id)
+        ).all()
+        for uid, url, sc, red, noindex, c_href, c_cab in filas:
+            canonical = (c_href or "").strip() or (c_cab or "").strip()
+            f = _Ficha(uid, url, sc, red, noindex, canonical)
+            self._por_url[url] = f
+            k = _clave(url)
+            if k is not None:
+                self._por_url.setdefault(k, f)
+
+    def buscar(self, url: str | None) -> _Ficha | None:
+        if not url:
+            return None
+        f = self._por_url.get(url)
+        if f is None:
+            k = _clave(url)
+            if k is not None:
+                f = self._por_url.get(k)
+        return f
+
+    def seguir_redirecciones(self, inicio: _Ficha):
+        """``(final, cadena, bucle)``. `final` es None si la cadena sale de lo
+        rastreado o hace bucle: ahi no se sabe donde acaba."""
+        cadena = [inicio.url]
+        vistos = {inicio.id}
+        actual = inicio
+        for _ in range(self.MAX_SALTOS):
+            if not (actual.redirect_url and _es_redireccion(actual.status_code)):
+                return actual, cadena, False
+            sig = self.buscar(actual.redirect_url)
+            cadena.append(actual.redirect_url)
+            if sig is None:
+                return None, cadena, False
+            if sig.id in vistos:
+                return None, cadena, True
+            vistos.add(sig.id)
+            actual = sig
+        return None, cadena, False
+
+    def seguir_canonicals(self, page_url: str, inicio: _Ficha):
+        """``(cadena, final, bucle)`` desde la pagina A por los canonicals.
+
+        Se para en la primera pagina autocanonica o que no da 200 (ahi el
+        canonical ya no cuenta), y `final` es esa. Si vuelve a una ya vista,
+        bucle y `final` None: Google ignora los dos canonicals.
+        """
+        cadena = [page_url, inicio.url]
+        vistos = {_clave(page_url), _clave(inicio.url)}
+        actual = inicio
+        for _ in range(self.MAX_SALTOS):
+            if (actual.status_code != 200 or actual.noindex or not actual.canonical
+                    or misma_url(actual.canonical, actual.url)):
+                return cadena, actual, False
+            k = _clave(actual.canonical)
+            cadena.append(actual.canonical)
+            if k in vistos:
+                return cadena, None, True
+            vistos.add(k)
+            sig = self.buscar(actual.canonical)
+            if sig is None:
+                return cadena, None, False
+            if sig.redirect_url and _es_redireccion(sig.status_code):
+                sig, _, _ = self.seguir_redirecciones(sig)
+                if sig is None:
+                    return cadena, None, False
+            if sig.id == actual.id:
+                # El canonical de `actual` es una variante suya que redirige
+                # de vuelta a ella (barra final, http): es autocanonica de
+                # hecho, no un bucle. Lo que tenga de malo lo avisa en su URL.
+                return cadena, actual, False
+            actual = sig
+        return cadena, None, False
+
+
+# Prefijo de `indexability_status` (shared/indexabilidad.py) -> motivo de
+# `sitemap_no_indexable`. Lo que no esta aqui ("Sin respuesta", "Indexable",
+# NULL) no se afirma.
+_MOTIVOS_SITEMAP = (
+    ("Redirect", "redireccion"),
+    ("Client Error", "4xx"),
+    ("Server Error", "5xx"),
+    ("Noindex", "noindex"),
+    ("Canonicalised", "canonicalizada"),
+    ("Blocked by robots.txt", "bloqueada_robots"),
+    ("Sin contenido", "sin_contenido"),
+)
+
+
+# Respuestas que dicen «vuelve luego», no como es la pagina (decision 100).
+_CODIGOS_TEMPORALES = frozenset({429, 503})
+
+
+def motivo_sitemap_no_indexable(status_code, indexability_status) -> str | None:
+    """Por que una URL del sitemap no es indexable, o None si no se sabe.
+
+    El 429 y el 503 se descartan: Google documenta los dos como la senal
+    temporal de «frena», y Scrapy los reintenta igual (RETRY_HTTP_CODES). Son
+    el sitio frenando al rastreador, no lo que vera Google (decision 100). Un
+    500 si se afirma: es un error de la pagina, no una peticion de esperar.
+    """
+    if status_code in _CODIGOS_TEMPORALES or not indexability_status:
+        return None
+    for prefijo, motivo in _MOTIVOS_SITEMAP:
+        if indexability_status.startswith(prefijo):
+            return motivo
+    return None
+
 
 def _es_destino_de_redireccion():
     """EXISTS: la fila de `Url` es el destino de una redireccion interna.

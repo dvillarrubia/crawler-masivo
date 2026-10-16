@@ -2671,6 +2671,7 @@
                               {l:'Etiquetas hreflang', v:fmt.num(cat.metrics.total_hreflang)},
                               {l:'Idiomas', v:cat.metrics.languages?.join(', ') || '—'},
                               {l:'% retorno OK', v:fmt.pct(cat.metrics.pct_return_ok)},
+                              {l:'Hreflang a URL descartada', v:fmt.num(cat.metrics.destino_malo ?? 0)},
                               {l:'% idioma valido', v:fmt.pct(cat.metrics.pct_lang_valid)},
                             ]">
                               <div class="metric-item">

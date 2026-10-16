@@ -11,9 +11,9 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
-| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56 |
+| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
@@ -125,6 +125,10 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 96 | Borrar censos viejos: en masa, con ids, y sin llevarse por delante la referencia de una serie | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d96) |
 | 97 | Un resultado enriquecido que Google ya no muestra no tiene propiedades obligatorias | [`datos-estructurados`](datos-estructurados.md#d97) |
 | 98 | Un preset de bot cambia también qué reglas de robots.txt se obedecen, y no engaña a un WAF | [`render-y-descarga`](render-y-descarga.md#d98) |
+| 99 | Hreflang completo, y solo con lo que Google lee: el de una página no indexable no cuenta | [`indexabilidad`](indexabilidad.md#d99) |
+| 100 | Una URL del sitemap que no es indexable es una contradicción, y se dice por qué | [`incidencias`](incidencias.md#d100) |
+| 101 | Lo que importa de un canonical es lo que Google encuentra al llegar al destino, y de una redireccion, donde acaba | [`indexabilidad`](indexabilidad.md#d101) |
+| 102 | HTML que Google trunca o ignora: más de 2 MB y un `<head>` que se corta antes de tiempo | [`incidencias`](incidencias.md#d102) |
 | 104 | Extracción y búsqueda a medida: una fila por (URL, regla) evaluada, y sin fila no es «vacío» | [`extraccion-a-medida`](extraccion-a-medida.md#d104) |
 
 ## Anadir una decision

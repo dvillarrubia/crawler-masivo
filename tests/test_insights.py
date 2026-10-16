@@ -135,6 +135,42 @@ def test_i18n_sin_retorno_real_si_se_avisa(db, job):
     assert alta and alta[0].affected_count == 1
 
 
+def test_i18n_un_destino_descartado_resta_y_se_recomienda(db, job):
+    """Lopesan: 27 `hreflang_destino_no_indexable` y 4 `broken_target`
+    abiertos, con su `return_tag_ok` a NULL, y la categoria pasaba de 96 a 100
+    sin una recomendacion (decision 99)."""
+    u = _url(db, job, "/es/")
+    for lang in ("en", "fr", "de"):
+        db.add(Hreflang(url_id=u.id, lang=lang, href=f"https://x.com/{lang}/",
+                        return_tag_ok=True, lang_valid=True))
+    db.add(Hreflang(url_id=u.id, lang="it", href="https://x.com/it/",
+                    return_tag_ok=None, lang_valid=True))
+    db.add(Issue(job_id=job.id, url_id=u.id, issue_type="hreflang_destino_no_indexable",
+                 severity="error"))
+    db.commit()
+
+    ins = results._calc_i18n(job.id, db)
+    assert ins.metrics["destino_malo"] == 1
+    assert ins.metrics["pct_destino_ok"] == 75.0
+    assert ins.score == results.TOPE_CON_ERRORES  # media 91,7, con un error
+    alta = [r for r in ins.recommendations if r.priority == "alta"]
+    assert alta and alta[0].affected_count == 1
+    assert "hreflang_destino_no_indexable" in alta[0].issue_types
+
+
+def test_i18n_un_error_entre_miles_tampoco_deja_la_nota_en_100(db, job):
+    """Lopesan: 31 errores en 3.635 anotaciones; la media sola redondea a 100."""
+    u = _url(db, job, "/es/")
+    for i in range(300):
+        db.add(Hreflang(url_id=u.id, lang="en", href=f"https://x.com/en/{i}",
+                        return_tag_ok=True, lang_valid=True))
+    db.add(Issue(job_id=job.id, url_id=u.id, issue_type="hreflang_broken_target",
+                 severity="error"))
+    db.commit()
+    ins = results._calc_i18n(job.id, db)
+    assert ins.score == results.TOPE_CON_ERRORES
+
+
 @pytest.fixture()
 def db_completa():
     """El informe entero lee todas las tablas (enlaces, seguridad...)."""

@@ -157,3 +157,330 @@
    el caso típico de dos plugins escribiendo la cabecera— dan `title_multiple` /
    `description_multiple` (`html_meta.title_count`, `meta_description_count`).
    El valor guardado no cambia. Las tres necesitan **re-rastrear**.
+
+<a id="d99"></a>
+99. **Hreflang completo, y solo con lo que Google lee: el de una página no
+   indexable no cuenta** (PR 1.2 del plan, `docs/PLAN_MEJOR_CRAWLER.md`).
+   `analyze_hreflang` emite cinco tipos más, todos sobre fuentes indexables
+   y todos desde diccionarios montados con UNA consulta de URLs (estado,
+   `indexable`, `indexability_status`, `redirect_url` y `canonical_href`) y
+   una de anotaciones: nada por anotación y nada por pareja de páginas.
+   - **El clúster** de una página es el conjunto de URLs que anota más ella
+     misma, con la clave de `misma_url`. En un clúster bien hecho todas sus
+     páginas declaran el mismo conjunto, así que les sale la misma clave sin
+     unir nada: con componentes conexas, un «este idioma no existe, mando a la
+     portada» une medio sitio en un clúster (pasa en www.uoc.edu, cuyo
+     `walkin/` anota las portadas `ca` y `en`).
+   - `hreflang_sin_autorreferencia` (warning, por página): anota otras
+     versiones y a sí misma no, o solo con `x-default`. No cuenta como falta
+     si la autorreferencia lleva un código inválido (ese es
+     `hreflang_invalid_lang`). Si se anota con la misma ruta y otros
+     parámetros, `variante_propia` lo dice: es el caso de progym, `/compex`
+     anotada como `/compex?___store=progym_es_sp`. **Y también cuando esa
+     variante se canonicaliza a la propia página** (penguin, `?recomendados=1`):
+     ahí es este aviso y no el `error` del destino, porque ningún mercado pierde
+     su versión —la página es indexable—; lo que falla es que la
+     autorreferencia va a una URL no canónica. Solo si la página no se anota
+     además directamente a sí misma: si ya lo hace, la variante canonicalizada
+     a ella es OTRA versión fuera del índice (www.uoc.edu, `?lang=ca`
+     canonicalizada a `?lang=en`) y sigue siendo el error del destino. Una
+     variante de otra ruta que salta o se canonicaliza a ella (`/de/` a `/es/`)
+     tampoco cuenta como autorreferencia: el aviso es el del destino.
+   - `hreflang_sin_x_default` (info): se decide por clúster —basta con que
+     una de sus páginas lo declare— y se avisa **por host**, con
+     `clusters_afectados` de `clusters_del_host`. Una fila por clúster eran
+     20.557 avisos `info` en penguin diciendo una sola cosa (decisión 64). El
+     host de un clúster que cruza hosts es el **menor** de los de sus páginas,
+     no el de la primera fila (la consulta no tiene orden y el propio UPDATE
+     por lotes reescribe las tuplas), y la fila se ancla en la **raíz** del
+     host si se rastreó, no en la URL mínima de las afectadas: con cualquiera
+     de las dos cosas el hallazgo cambiaba de URL o de clave entre análisis y
+     la comparación (decisión 88) lo daba por resuelto y nuevo a la vez.
+     Si la raíz **redirige** se ancla en la página HTML 200 interna a la que
+     lleva (Lopesan: 302 a `/es/`; penguin: 301): anclada en el salto, el chip
+     de la pestaña decía «1 página» y la lista salía vacía. Si la cadena no
+     acaba en una así, cae a la URL mínima de las afectadas.
+   - `hreflang_idioma_repetido` (warning, por clúster y código, `group_key`
+     = clúster|código): el mismo código hacia dos URLs. Un error de plantilla
+     en un clúster de 30 páginas es UNA fila con `paginas_afectadas=30`.
+   - `hreflang_destino_no_indexable` (**error**, como el destino roto: la
+     consecuencia es la misma, ese mercado se queda sin su versión): una fila
+     por ANOTACIÓN hacia un destino canonicalizado, noindex o bloqueado por
+     robots, **en la página que la escribe** —como `hreflang_broken_target`,
+     con `group_key` = código y el destino en `details.href`—. La primera
+     versión daba una fila por destino anclada en él, y el destino puede ser
+     externo: en www.uoc.edu **9 de las 19** caían en `blogs.uoc.edu` o
+     `recerca.uoc.edu`, que la pestaña Hreflang (HTML interno) no enseña, así
+     que el chip decía 19 y la lista 10. Esas 9 solo las anotaban páginas
+     externas, que ya no son fuente (abajo), así que salen; las 10 internas
+     quedan como **17 anotaciones en 10 páginas**, todas visibles en la
+     pestaña. En Lopesan, los 27 destinos son 27 anotaciones en **14** páginas
+     `/es/`. Un destino roto sigue siendo solo
+     `hreflang_broken_target` (decisión 56).
+   - `hreflang_retorno_incoherente` (warning, por anotación): A llama a B
+     `en-US`, B devuelve el enlace a A pero se llama a sí misma `en-GB`. Basta
+     con que un código coincida: `/es/` para `es-ES` y `es-MX` es legítimo.
+     Sin retorno es `hreflang_missing_return`, no este.
+   - `group_key`: el clúster en lo que se avisa por clúster, el host en el
+     x-default, el código en lo que es por anotación (como sus hermanos) y
+     NULL en la autorreferencia, que es una por URL: una clave de clúster ahí
+     cambiaría al añadir un idioma y fingiría que el problema se resolvió
+     (decisión 88). El clúster va en `details.cluster`.
+
+   **Una página externa tampoco es fuente.** El rastreo lee el HTML de
+   algunos subdominios fuera del alcance (en www.uoc.edu, 139 páginas con
+   hreflang, como `guia-audiovisual.uoc.edu`, que daba su propio x-default);
+   no son el sitio auditado y nada de lo que se diga de ellas sale en la
+   pestaña Hreflang. Sus anotaciones se guardan con `return_tag_ok` NULL.
+   Medido en www.uoc.edu: el x-default pasa de 2 a **1** y los destinos no
+   indexables de 19 a 10 (los 9 de `blogs.uoc.edu` y `recerca.uoc.edu`, que
+   solo anotaban páginas de esos mismos subdominios); el resto de tipos no se
+   mueve.
+
+   **La variante propia sin retorno es solo `hreflang_sin_autorreferencia`.**
+   Si una página se anota con otra URL de su misma ruta (`?p=2` que se llama
+   `es-es` con la URL de la página 1), esa variante no le devuelve el enlace,
+   y salía también `hreflang_missing_return` sobre la misma anotación: un
+   arreglo y dos avisos (decisión 36). La falta de retorno se decide ahora
+   después de la autorreferencia, y la anotación hacia `variante_propia` queda
+   con `return_tag_ok` NULL. Solo esa: en penguin las 107 páginas con los dos
+   avisos anotan OTRA ruta, y ahí el retorno que falta es otro hallazgo.
+   Medido con `run_all` en ROLLBACK: progym **140 → 1** `missing_return` (la
+   que queda anota otra ruta); penguin 121, UOC 71 y Lopesan 0, sin cambio.
+
+   **La nota de Internacionalización de `/insights` cuenta los destinos
+   descartados.** Puntuaba solo con `return_tag_ok` y `lang_valid`, y las
+   anotaciones hacia un destino roto o no indexable tienen el retorno a NULL,
+   así que salían del denominador: Lopesan pasaba de 96 a 100 con 31 errores
+   de hreflang abiertos en Problemas, y UOC de 95 a 100 con 91. Ahora hay una
+   tercera parte, `pct_destino_ok` (de las anotaciones verificadas hacia otra
+   página, las que no van a un destino descartado), una recomendación `alta`
+   con `hreflang_broken_target` + `hreflang_destino_no_indexable` y otra
+   `media` con `hreflang_sin_autorreferencia`. Y con uno de esos dos errores
+   abiertos la categoría no pasa de `TOPE_CON_ERRORES` (79), el criterio de la
+   nota global (decisión 92): en Lopesan son 31 de 3.635 anotaciones y la
+   media sola redondeaba a 100. Medido con `run_all` + `/insights` en
+   ROLLBACK: **Lopesan 96 (master) → 79, UOC 95 → 79**; penguin 64 y progym
+   50, que sin destinos descartados casi no tienen retorno verificado (194.703
+   y 21.194 anotaciones con `return_tag_ok` NULL: se anotan a sí mismas o a
+   su variante). La nota global no cambia (Lopesan 49 por el tope); las URLs
+   con algún `error` en Lopesan quedan en 2.424 (2.405 en master).
+
+   **Lo que cambia de lo que ya había**, y es lo que más se mueve: una página
+   no indexable ya **no es fuente**. Google no usa el hreflang de una página
+   canonicalizada o noindex, y la variante `/es` canonicalizada a `/es/`
+   repite el clúster de su canónica sin que nadie le devuelva el enlace —el
+   retorno apunta, bien, a `/es/`—. Medido: **las 296 `hreflang_missing_return`
+   de Lopesan venían de páginas canonicalizadas**. Se sigue guardando
+   `lang_valid`, con `return_tag_ok` a NULL. Tampoco se afirma la falta de
+   retorno cuando el destino no es indexable (el aviso es el del destino) ni
+   cuando no respondió (`Sin respuesta`: un timeout nuestro no dice qué vería
+   Google, y como no tiene hreflang guardado salía «sin retorno»). Nada de
+   «hreflang no enlazado».
+
+   Medido sobre los censos de la BD local, re-ejecutando
+   `analyze_indexability` y `analyze_hreflang` dentro de una transacción que
+   acaba en ROLLBACK (el check no lee `links`, así que el archivo en Parquet
+   de www.uoc.edu no le afecta):
+
+   | censo (anotaciones) | sin autorref. | sin x-default | idioma rep. | destino no indexable | retorno incoh. | missing_return | broken_target |
+   |---|---|---|---|---|---|---|---|
+   | Lopesan es/en/de (17.268) | 0 | 1: 1 de 620 clústeres | 0 | **27** (en 14 páginas) | 0 | 296 → **0** | 12 → 4 |
+   | www.uoc.edu ca/es/en (81.960) | 34 | 1: 21 de 6.038 | 0 | 10 destinos, 17 anotaciones | 0 | 3.281 → **71** | 72 → 72 |
+   | penguin 30-jul (194.824) | **783** | 1: 20.557 de 20.557 | 0 | **0** | 0 | 5.957 → 121 | 61 → 10 |
+   | penguin 29-jul (315.076) | **1.014** | 1: 21.262 de 21.262 | 0 | **0** | 0 | 6.197 → 5.919 | 13 → 13 |
+   | Druni (139.981) | 304 | 1: 16 de 37.059 | 0 | 0 | 0 | 8.197 → 288 | 0 |
+   | progym (21.195) | 277 | 0 | 0 | 0 | 0 | 144 → **1** | 0 |
+   | CST (23.901) | 42 | 0 | 0 | 0 | 0 | 166 → 32 | 0 |
+
+   `idioma_repetido` y `retorno_incoherente` salen a **0 en todos**, y no por
+   el extractor (no deduplica): contado aparte con SQL sobre todos los censos
+   de la BD local, no hay ni una página con un código hacia dos URLs ni una
+   pareja con retorno y códigos que no casan. Es corrección de criterio,
+   cubierta por los tests.
+
+   Revisados a mano:
+   - Lopesan: los 27 destinos no indexables son 14 páginas `/en/` y 13 `/de/`
+     **canonicalizadas a su equivalente `/es/`** —`/en/` a `/es/`, `/en/hotels`
+     a `/es/hoteles`— y anotadas como `en-US`/`de-DE` desde la versión
+     española. Cierto, y grave: la versión inglesa y la alemana de esas
+     páginas están fuera del índice. **Antes no daba ningún aviso** desde las
+     indexables: esas 27 anotaciones tenían `return_tag_ok = true`. Las 36
+     «sin retorno» hacia destinos canonicalizados que había venían de fuentes
+     NO indexables (7 destinos) y son parte de las 296 falsas.
+   - penguin 30-jul: con la primera versión salían 196 «destinos no
+     indexables» y eran **todas** autorreferencias por variante —
+     `/es/recomendaciones/tendencias/dieta-keto-que-es-y-para-que-sirve` se
+     anota `es` y `es-ES` como la misma ruta con `?recomendados=1`,
+     canonicalizada a ella—. Ahora son 196 `hreflang_sin_autorreferencia` más
+     (587 → 783) con esa URL en `variante_propia`, y 0 errores. En penguin
+     29-jul pasa lo mismo con el único que había (1.013 → 1.014). Los 19 de
+     www.uoc.edu no cambian: los 7 de `recerca` que tienen esa forma
+     (`detalle?lang=ca` canonicalizada a `detalle?lang=en`) vienen de páginas
+     que ya se anotan a sí mismas, así que es la versión catalana fuera del
+     índice. Cierto, pero de `recerca.uoc.edu`, fuera del alcance del censo, y
+     anotada desde ese mismo subdominio: con la regla de que una página
+     externa no es fuente (más arriba) esas 7 y las 2 de `blogs.uoc.edu`
+     dejan de avisarse, y quedan las 10 de www.uoc.edu.
+   - Lopesan, las 296 «sin retorno» que desaparecen: `/es` sin barra,
+     canonicalizada a `/es/`, con el clúster de la canónica. Eran falsas.
+   - progym `/compex`: se anota como `/compex?___store=progym_es_sp`, que para
+     Google es otra URL. Cierto (las 277 son esa plantilla de Magento).
+   - www.uoc.edu `walkin/es/subscripcio.html`: anota `ca` → `https://www.uoc.edu/`
+     y `en` → `/en`, y a sí misma no. Cierto: la plantilla vieja de walkin
+     apunta a las portadas.
+   - Lopesan blog `meeting-rooms-in-madrid` (`en` y `de`, sin versión `es`):
+     el único de los 620 clústeres sin x-default. Cierto.
+
+   **Tiempo**: en penguin 29-jul (315.076 anotaciones), tres pasadas
+   alternas, 10,6 / 11,7 / 9,9 s antes y 12,6 / 13,7 / 10,7 s ahora: ×1,2.
+   Proyectado a las 438.957 de producción, unos 24 s frente al tope de 40,6
+   (2 × 20,3). Es re-analizar, no re-rastrear.
+   Tests: `tests/test_hreflang_completo_db.py` (ejecuta el check contra
+   SQLite) y `tests/test_catalogo_incidencias.py` (ningún tipo emitido sin
+   ficha en `incidencias.js`).
+
+<a id="d101"></a>
+101. **Lo que importa de un canonical es lo que Google encuentra al llegar al
+   destino, y de una redireccion, donde acaba** (PR 1.1 de
+   `docs/PLAN_MEJOR_CRAWLER.md`). `canonical_broken` metia en el mismo saco un
+   301 y un 404 —dos hallazgos con arreglos distintos—, y un destino que
+   responde 200 pero esta en `noindex` o canonicalizado a su vez a otro no
+   avisaba de nada. Una redireccion que acababa en 404 solo avisaba en el 404,
+   nunca en el salto que lleva a el. Y la canonica que el sitio no enlaza salia
+   como `orphan_page`, que manda a buscar enlaces que no faltan: los hay, pero
+   apuntan a la variante. Seis tipos, uno por hallazgo, con la severidad por la
+   consecuencia (decision 64):
+
+   | tipo | cuando | severidad |
+   |---|---|---|
+   | `canonical_a_error` | el destino da 4xx/5xx, directamente o al final de sus redirecciones, o las redirecciones hacen bucle | error: el contenido se queda sin URL que indexar |
+   | `canonical_a_redireccion` | el destino redirige (y no acaba en error) | warning: Google suele quedarse con la final, pero las dos senales no coinciden |
+   | `canonical_a_no_indexable` | una pagina que NO es noindex declara canonical a un destino 200 en `noindex` | warning (ver abajo) |
+   | `canonical_encadenado` | A → B → C: el destino da 200 y declara otro canonical; incluye el bucle A → B → A | error si la cadena acaba en 4xx/5xx; warning si no |
+   | `redireccion_a_error` | una redireccion interna, o su cadena, lleva a OTRA ruta que da 4xx/5xx (no una normalizacion: esquema, `www`, barra final) | error |
+   | `canonical_sin_enlazar` | canonica indexable con 0 entrantes y al menos una variante enlazada desde fuera del grupo | warning |
+
+   `canonical_broken` deja de emitirse; su ficha se queda en `incidencias.js`
+   para los censos analizados antes, y la comparacion entre censos no casa los
+   dos nombres porque dos analisis de codigo distinto ya no se comparan por
+   incidencias (decision 91). Criterios:
+
+   - **Solo desde una pagina que da 200.** El canonical de un 404 o de un 500
+     Google no lo procesa. Antes se avisaba igual (en UOC, 12 paginas 500 con
+     canonical; en penguin, 4 con 429).
+   - **Lo que no se sabe no se afirma.** Un destino sin rastrear, bloqueado por
+     robots.txt o sin respuesta no emite nada, y el **429 no es un error**: es
+     el sitio frenando al rastreador. En penguin, 35 de las 132 redirecciones
+     que «acababan en 4xx» acababan en un 429.
+   - **Un aviso por hallazgo.** Una cadena que acaba en error da
+     `redireccion_a_error` y no tambien `redirect_chain`: redirigir directo a
+     una pagina buena arregla las dos. Un canonical a `http` que redirige a la
+     propia pagina, o a la version https del mismo canonical, ya es
+     `canonical_a_http` y no se repite como redireccion. Una redireccion que
+     solo **normaliza** (http → https, `www`, barra final) y cuyo destino da
+     404 no es `redireccion_a_error`: esta bien hecha, el error es el destino
+     y ya tiene su `4xx_error` — en www.uoc.edu eran **383 de 594**, casi
+     todas el 307 interno de Chromium hacia https. Y si el canonical del
+     destino B es una variante suya que redirige de vuelta a B (`/b/` → `/b`),
+     B es autocanonica de hecho: A → B no es cadena ni bucle, y lo de B avisa
+     en B como `canonical_a_redireccion`. La
+     canonica sin enlazar sale de `orphan_page` y `sitemap_orphan` —es la
+     misma cura que la decision 63 con los destinos de redireccion—; si
+     TAMPOCO las variantes estan enlazadas, es huerfana de verdad y lo sigue
+     diciendo `orphan_page`. Una variante enlazada solo desde la propia
+     canonica o desde otra variante suya (el selector de color o de talla)
+     **no cuenta como enlazada**: se cuentan sus entrantes de fuera del grupo
+     sobre `links` (filtrando por `links.job_id`, decision 37; con
+     SUM(repeticiones), decision 94; origen 200 y no noindex, como
+     `inlinks_count`). En www.uoc.edu era una de las 16: una noticia cuyo unico
+     enlace a su variante `?idTag=` salia de ella misma.
+   - **`canonical_a_no_indexable` solo desde una pagina que no es noindex, y
+     es warning y no error**: lo que saca el contenido del indice es el
+     `noindex` del destino, que avisa en su propia URL y muchas veces es
+     deliberado. Si el origen TAMBIEN es noindex no hay senales que se
+     contradigan —no entra en el indice pase lo que pase— y no se emite. La
+     primera version no lo miraba y el 100% de lo que encontraba era eso: las
+     52 de Druni (variantes con `gclid` de paginaciones `?p=N` en noindex a
+     proposito, las dos URLs en noindex), las 3 de UOC y las 2 de penguin. Con
+     el criterio, **0 en los seis censos**: el tipo queda para el caso que si
+     es un conflicto, y hoy no aparece en ninguno.
+   - **El enlazado sigue las decisiones 38 y 57**: `inlinks_count` ya descuenta
+     los enlaces desde `noindex` y desde paginas que no dan 200, asi que una
+     canonica que solo enlaza una noindex sigue «sin enlazar» (hay test). Lee
+     el contador guardado, no `links`, y con `jobs.enlaces_archivados` (decision
+     95) no se evalua: se salta con un WARNING en el log.
+   - El canonical del destino es el que usa la indexabilidad: el del HTML y, si
+     no hay, el de la cabecera `Link`. Las URLs se buscan con la clave de
+     `misma_url` (decision 39).
+
+   **Medido** el 2026-10-16. Lopesan, penguin y UOC con `run_all` entero dentro de
+   una transaccion que acaba en ROLLBACK (commit anulado e incidencias
+   capturadas en memoria); los seis censos tambien con solo los tres checks en
+   una transaccion `READ ONLY`. Las cifras de los checks coinciden en los dos
+   modos donde se midieron los dos.
+
+   | censo | a_error | a_redireccion | a_no_indexable | encadenado | sin_enlazar | redireccion_a_error |
+   |---|---|---|---|---|---|---|
+   | Lopesan (5.751) | 0 | 4 | 0 | 2 | 0 | 9 |
+   | www.uoc.edu | 0 | 0 | 0 | 8 | 15 | 203 |
+   | penguin | 0 | 0 | 0 | 0 | 0 | 97 |
+   | Druni | 0 | 0 | 0 | 0 | 41 | 40 |
+   | progym | 0 | 0 | 0 | 0 | 0 | 1 |
+   | CST | 0 | 0 | 0 | 0 | 1 | 0 |
+
+   (Tras la revision: `canonical_a_no_indexable` 3/2/52 → 0 por el origen
+   noindex, `redireccion_a_error` en UOC 594 → 203 por las normalizaciones
+   —3 de ellas, cadenas de dos saltos, pasan a `redirect_chain`, 280 → 283— y
+   `canonical_sin_enlazar` en UOC 16 → 15. Medido con los tres checks en una
+   transaccion `READ ONLY` sobre lo guardado; ninguno de los seis censos tiene
+   los enlaces archivados.)
+
+   Los 4 `canonical_broken` de Lopesan son ahora sus 4 `canonical_a_redireccion`.
+   En UOC, `redirect_chain` pasa de 401 a 283: las cadenas que acaban en un
+   404 de otra ruta son ahora `redireccion_a_error`. Y de 283 a **278** tras
+   la revisión de la Ola 1: una cadena o un bucle solo se avisan si **empiezan
+   en una URL interna**, el criterio que ya tenía `redireccion_a_error`. Las 5
+   que se van empezaban en otro sitio (`http://research.uoc.edu/portal/es/ri/index.html`,
+   `http://estudios.uoc.edu/...`, todas 301) y la pestaña Redirecciones, que
+   filtra por interna, las contaba en el chip sin enseñarlas en la lista. En
+   Lopesan (29), penguin (0) y progym (1) no cambia nada. Los `canonical_sin_enlazar`
+   de UOC salen de `orphan_page` y `sitemap_orphan`, exactamente;
+   los 41 de Druni, de `sitemap_orphan`. Fuera de esas columnas, las demas
+   diferencias del total contra lo guardado (Lopesan 38.922 → 27.332, penguin
+   293.847 → 114.851, UOC 78.494 → 73.269) son de las decisiones posteriores
+   al ultimo analisis de cada censo, no de esta. `run_all` entero: 116 s en
+   Lopesan, 464 s en penguin y 691 s en UOC; los tres checks juntos, 2,0 s en
+   UOC y 3,1 s en Druni (61.236 URLs).
+
+   **Revisados a mano**, los cuatro que siguen saliendo, ciertos:
+   - Lopesan, `canonical_a_redireccion`: `/de/unternehmen/lopesan-for-good/nachhaltigkeitspolitik`
+     declara canonical `/es/corporativa/lopesan-for-good/politica-sostenibilidad`,
+     que da 301 a `/es/corporativa/politica-esg`. (Ademas apunta a otro idioma,
+     que es cosa del hreflang, PR 1.2.)
+   - Lopesan, `canonical_encadenado`: `/es/inicio?gclid=…` → `/es/inicio`
+     (200, 4.380 entrantes) → `/es/`. Todo el sitio enlaza `/es/inicio`, que
+     se canonicaliza a la home.
+   - UOC, `canonical_sin_enlazar`: `/es/estudios/grados/menciones` (en el
+     sitemap, 0 entrantes) recibe su senal por la variante
+     `?area=sis%3Aareas%2F18`, con **1.815 enlaces** de fuera del grupo. Hasta ahora era un
+     `sitemap_orphan` que mandaba a buscar enlaces que si existen.
+   - (Descartado en la revision: el ejemplo de `canonical_a_no_indexable` de
+     UOC, `precio-descuentos.html` → `precio-descuentos`, tiene el ORIGEN
+     tambien en noindex; con el criterio final no sale, y no queda ningun
+     caso de ese tipo en los seis censos.)
+   - Lopesan, `redireccion_a_error`: `/hoteles/tailandia` → 301 →
+     `/de/hoteles/tailandia`, que da 404 (el prefijo de idioma por defecto
+     mal resuelto; 9 asi).
+   Y uno que es cierto pero pequeno: en Druni, `/cosmetica/geles/ph-neutro` sale
+   sin enlazar porque el unico enlace, desde un post del blog, lleva el
+   `?srsltid=` que Google anade a sus resultados: se arregla cambiando ese
+   enlace.
+
+   Fuera, a proposito: el canonical **relativo o con fragmento** (exige
+   guardar el href crudo y re-rastrear), un destino **bloqueado por robots.txt**
+   (Google no puede leerlo, pero puede indexar la URL por sus enlaces: no se
+   afirma nada sin medirlo), las paginas que solo declaran canonical por
+   cabecera `Link` como ORIGEN (siguen el camino de antes) y el **informe de
+   cadenas** que mezcla redirecciones y canonicals de una migracion, que es
+   una vista y no un tipo.

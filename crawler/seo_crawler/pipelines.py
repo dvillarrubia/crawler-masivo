@@ -176,7 +176,7 @@ class PostgresPipeline:
                     "resource_type", "redirect_url", "body_hash",
                     # New Screaming Frog fields
                     "url_length", "folder_depth", "word_count",
-                    "content_word_count", "content_hash",
+                    "content_word_count", "content_hash", "html_bytes_servidos",
                     "text_ratio", "redirect_type", "status_text",
                     "last_modified", "http_version", "transfer_size",
                     "indexability_status", "blocked_by_robots",
@@ -229,6 +229,7 @@ class PostgresPipeline:
                     word_count=data.get("word_count"),
                     content_word_count=data.get("content_word_count"),
                     content_hash=data.get("content_hash"),
+                    html_bytes_servidos=data.get("html_bytes_servidos"),
                     text_ratio=data.get("text_ratio"),
                     redirect_type=data.get("redirect_type"),
                     status_text=data.get("status_text"),

@@ -16,7 +16,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from analysis.analyzer import SEOAnalyzer
-from shared.models import Base, Issue, Job, Link, Url
+from shared.models import Base, HtmlMeta, Issue, Job, Link, Url
 
 
 @compiles(BigInteger, "sqlite")
@@ -28,7 +28,8 @@ def _montar():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(
         engine,
-        tables=[Job.__table__, Url.__table__, Issue.__table__, Link.__table__],
+        tables=[Job.__table__, Url.__table__, Issue.__table__, Link.__table__,
+                HtmlMeta.__table__],
     )
     s = sessionmaker(bind=engine)()
     j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"], config={})

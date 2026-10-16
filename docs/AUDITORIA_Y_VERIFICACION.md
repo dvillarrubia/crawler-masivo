@@ -578,6 +578,12 @@ servidor con API y UI multi-usuario.
 
 ### Hecho desde entonces
 
+**Hreflang completo (2026-10-16, decisión 99).** Además del retorno, el idioma
+inválido y el destino roto: autorreferencia, x-default (por host), idioma
+repetido en el clúster, destino no indexable y retorno con otro código. Solo
+sobre páginas indexables. Paridad con la pestaña Hreflang de SF, sin «no
+enlazado».
+
 **Near-duplicate content (2026-09-14).** `analyze_near_duplicates()` +
 `analysis/near_duplicates.py`. MinHash sobre trigramas de
 `page_content.content_text` con LSH para los candidatos; umbral 0,9

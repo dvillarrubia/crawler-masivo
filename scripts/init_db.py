@@ -40,6 +40,10 @@ def main() -> None:
         # Hash del contenido normalizado: el de los bytes no detecta duplicados
         # en ningun CMS moderno (un token CSRF cambia el hash).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"))
+        # HTML que Google trunca o ignora (decision 102).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS html_bytes_servidos INTEGER"))
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS head_cortado_por VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS fuera_del_head VARCHAR(128)"))
         # Varios canonicals, o uno en el body: Google los ignora.
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_in_body BOOLEAN"))

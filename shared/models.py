@@ -308,6 +308,12 @@ class Url(Base):
     # bytes: con un token CSRF o un nonce dentro, dos paginas identicas nunca
     # coincidian y los duplicados exactos no se detectaban en ningun CMS.
     content_hash = Column(String(64), nullable=True, index=True)
+    # Bytes del HTML DESCOMPRIMIDO tal como lo sirvio el servidor, antes del
+    # render: lo que mide el limite de 2 MB de Googlebot (decision 102). Sin
+    # render es `content_length`; con render, `content_length` es el DOM ya
+    # montado y esto sale de Navigation Timing (`decodedBodySize`). NULL en
+    # los censos anteriores y cuando el navegador no lo da.
+    html_bytes_servidos = Column(Integer, nullable=True)
     text_ratio = Column(Float, nullable=True)                # text/HTML ratio percentage
     redirect_type = Column(Integer, nullable=True)           # HTTP redirect code (301, 302, 307, 308)
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"
@@ -418,7 +424,20 @@ class HtmlMeta(Base):
     title_pixel_width = Column(Integer, nullable=True)             # SERP pixel width at Arial 20px
     meta_description_pixel_width = Column(Integer, nullable=True)  # SERP pixel width at Arial 14px
     meta_refresh = Column(Text, nullable=True)                     # meta refresh content if present
-    has_meta_outside_head = Column(Boolean, nullable=True)         # meta tags found outside head
+    # OJO: cuenta cualquier <meta> en el body por lxml, incluidos los
+    # `itemprop` de microdatos, que son validos ahi. Salta en el 99,6% de las
+    # paginas de penguin: no sirve como incidencia (decision 102). Lo que si
+    # dice algo son las dos columnas de abajo.
+    has_meta_outside_head = Column(Boolean, nullable=True)
+    # Donde corta el navegador el head (`crawler/seo_crawler/head_html.py`,
+    # decision 102): la etiqueta que lo cerro antes de su </head> («img»,
+    # «div», «#texto»), NULL si acabo donde debia. Solo sin render: el DOM
+    # serializado ya no conserva el corte.
+    head_cortado_por = Column(String(64), nullable=True)
+    # Metadatos que quedan en el body, separados por comas, de entre
+    # canonical, description, googlebot, hreflang, robots y title. Cadena
+    # vacia = medido y no hay ninguno; NULL = no medido (censo anterior).
+    fuera_del_head = Column(String(128), nullable=True)
 
     url_rel = relationship("Url", back_populates="html_meta")
 
