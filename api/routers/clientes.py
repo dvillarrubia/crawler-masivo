@@ -109,6 +109,16 @@ def resolver_config(
         )
 
 
+def _validar_fusion(cliente: Client | None, config_perfil: dict | None) -> None:
+    """Un perfil valido por separado puede no serlo sobre su cliente: una regla
+    con `fuente=contenido` en un perfil de un cliente que apaga
+    `extract_page_content` (decision 104). Mejor el 422 al guardar el perfil que
+    al lanzar el primer rastreo programado."""
+    from types import SimpleNamespace
+
+    resolver_config(cliente, SimpleNamespace(config=config_perfil or {}), None)
+
+
 def nombres_de_clientes(db: Session, ids) -> dict[uuid.UUID, str]:
     ids = {i for i in ids if i}
     if not ids:
@@ -515,9 +525,10 @@ def listar_perfiles(client_id: uuid.UUID, db: Session = Depends(get_session)):
 def crear_perfil(
     client_id: uuid.UUID, cuerpo: ProfileCreate, db: Session = Depends(get_session)
 ):
-    _buscar(db, client_id)
+    cliente = _buscar(db, client_id)
     nombre = cuerpo.nombre.strip()
     _nombre_libre(db, client_id, nombre)
+    _validar_fusion(cliente, cuerpo.config)
     perfil = CrawlProfile(
         cliente_id=client_id, nombre=nombre, rol=cuerpo.rol, seeds=cuerpo.seeds,
         config=cuerpo.config, notas=cuerpo.notas, activo=cuerpo.activo,
@@ -548,6 +559,8 @@ def editar_perfil(
     if "nombre" in cambios:
         cambios["nombre"] = cambios["nombre"].strip()
         _nombre_libre(db, client_id, cambios["nombre"], salvo=perfil.id)
+    if "config" in cambios:
+        _validar_fusion(_buscar(db, client_id), cambios["config"])
     for campo, valor in cambios.items():
         setattr(perfil, campo, valor)
     perfil.updated_at = datetime.now(timezone.utc)

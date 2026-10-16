@@ -55,6 +55,7 @@ from seo_crawler.extractors import (
     extract_structured_data,
     extract_visible_text,
     extract_word_count,
+    extract_custom,
     http_status_text,
     is_internal_url,
     dominio_registrable,
@@ -69,6 +70,7 @@ from seo_crawler.sitemaps import (
 from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
 from seo_crawler.items import (
     ContentItem,
+    CustomExtractionItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -446,6 +448,13 @@ class SeoSpider(scrapy.Spider):
         # True si se alcanzo MAX_SITEMAP_FILES: la vista del sitemap es
         # parcial y no se puede afirmar que nada mas este fuera de el.
         self._sitemap_truncated: bool = False
+        # Extraccion y busqueda a medida (decision 104). None = el job no tiene
+        # reglas. `_config_invalida` = las tiene y no compilan: el job no se
+        # rastrea (sale `failed` con finish_reason=config_invalida), nunca se
+        # descartan en silencio.
+        self._reglas_a_medida = None
+        self._presupuesto_a_medida = None
+        self._config_invalida: str | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -532,6 +541,21 @@ class SeoSpider(scrapy.Spider):
 
             # -- Advanced config: Extraction toggles --
             self._extraction = self.job_config.get("extraction", {})
+
+            # -- Extraccion y busqueda a medida (decision 104) --
+            ce = self.job_config.get("custom_extraction") or {}
+            cs = self.job_config.get("custom_search") or {}
+            if ce or cs:
+                from shared.extraccion_a_medida import Presupuesto, compilar
+
+                try:
+                    self._reglas_a_medida = compilar(ce, cs)
+                    self._presupuesto_a_medida = Presupuesto()
+                    logger.info("Extraccion a medida: %d reglas", len(self._reglas_a_medida))
+                except Exception as exc:  # noqa: BLE001
+                    self._config_invalida = str(exc)[:500]
+                    logger.error("Reglas a medida no validas; el job no se rastrea: %s",
+                                 self._config_invalida)
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
@@ -663,6 +687,12 @@ class SeoSpider(scrapy.Spider):
     def spider_closed(self, spider, reason):
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
+        if getattr(self, "_presupuesto_a_medida", None) is not None:
+            # Lo que costo cada regla en el reactor: es la cifra con la que se
+            # decide si una regla merece la pena en un censo grande.
+            for nombre, ms in sorted(self._presupuesto_a_medida.ms_por_regla.items()):
+                logger.info("Extraccion a medida: %s %.0f ms en total%s", nombre, ms,
+                            " (desactivada)" if nombre in self._presupuesto_a_medida.desactivadas else "")
         if self._redis:
             try:
                 self._redis.set(
@@ -791,6 +821,16 @@ class SeoSpider(scrapy.Spider):
             yield request
 
     def start_requests(self) -> Generator[Request, None, None]:
+        # Reglas a medida que no compilan: no se rastrea nada. Cero URLs hace
+        # que el worker marque el job `failed`, y esta marca le da el motivo.
+        if getattr(self, "_config_invalida", None):
+            if self._redis is not None:
+                try:
+                    self._redis.set(f"job:{self.job_id}:config_invalida",
+                                    self._config_invalida, ex=86400)
+                except Exception:
+                    pass
+            return
         # Original seeds — skip any already crawled in a previous run.
         for url in self.seed_urls:
             normalized = normalize_url(url)
@@ -1829,6 +1869,26 @@ class SeoSpider(scrapy.Spider):
                     content_markdown=content_md,
                     raw_html=html_crudo,
                 )
+
+        # -- Extraccion y busqueda a medida (decision 104) -------------------
+        # Despues del contenido: `visible_text` y `main_content` ya estan
+        # calculados y se reutilizan como fuentes `texto` y `contenido`.
+        # getattr: hay tests que montan el spider sin __init__.
+        if getattr(self, "_reglas_a_medida", None):
+            renderizada = bool(response.meta.get("playwright")) and not response.meta.get("_sin_render")
+            filas = extract_custom(
+                selector, response.text, self._reglas_a_medida,
+                texto=visible_text, contenido=main_content, ruta=parsed.path or "/",
+                titulo=(meta or {}).get("title"), render=renderizada,
+                presupuesto=self._presupuesto_a_medida,
+            )
+            for nombre in self._presupuesto_a_medida.recien_desactivadas:
+                logger.warning(
+                    "Regla a medida %r DESACTIVADA para el resto del rastreo: agoto su "
+                    "tiempo %d veces (regex catastrofica?)", nombre,
+                    self._presupuesto_a_medida.agotados_max)
+            self._presupuesto_a_medida.recien_desactivadas.clear()
+            yield CustomExtractionItem(url_hash=final_hash, job_id=self.job_id, filas=filas)
 
         # -- Follow links (BFS) -----------------------------------------
         # extract_links no longer dedupes within a page (so every inlink is

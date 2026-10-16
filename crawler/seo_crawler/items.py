@@ -166,6 +166,19 @@ class ContentItem(scrapy.Item):
     raw_html = scrapy.Field()
 
 
+class CustomExtractionItem(scrapy.Item):
+    """Lo que dieron las reglas a medida en una pagina (decision 104).
+
+    Un item por pagina con todas sus filas: el pipeline REEMPLAZA las de la
+    URL enteras, asi que una regla que deja de casar al re-rastrear pasa a
+    `sin_coincidencia` en vez de conservar el valor viejo.
+    """
+
+    url_hash = scrapy.Field()
+    job_id = scrapy.Field()
+    filas = scrapy.Field()
+
+
 class SecurityItem(scrapy.Item):
     """Security header analysis for a page -- one per response."""
 

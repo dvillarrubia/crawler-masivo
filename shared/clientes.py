@@ -118,15 +118,25 @@ def fusionar_config(*capas: dict | None) -> dict:
     return resultado
 
 
-def _fusionar_en(destino: dict, capa: dict) -> None:
+# Dicts de reglas con nombre (decision 104): se suman por NOMBRE, pero cada
+# regla se sustituye ENTERA. Fusionarla campo a campo dejaria pegado lo que el
+# perfil no repite: un `solo_urls` del cliente seguiria acotando la regla que
+# el perfil ha reescrito para otra plantilla, sin que nadie lo viera.
+DICTS_DE_REGLAS = ("custom_extraction", "custom_search")
+
+
+def _fusionar_en(destino: dict, capa: dict, ruta: str = "") -> None:
     for clave, valor in capa.items():
+        aqui = f"{ruta}{clave}"
         if valor is None:
             destino.pop(clave, None)
+        elif ruta.rstrip(".") in DICTS_DE_REGLAS:
+            destino[clave] = copy.deepcopy(valor)
         elif isinstance(valor, dict) and isinstance(destino.get(clave), dict):
-            _fusionar_en(destino[clave], valor)
+            _fusionar_en(destino[clave], valor, aqui + ".")
         elif isinstance(valor, dict):
             destino[clave] = {}
-            _fusionar_en(destino[clave], valor)
+            _fusionar_en(destino[clave], valor, aqui + ".")
         else:
             destino[clave] = copy.deepcopy(valor)
 

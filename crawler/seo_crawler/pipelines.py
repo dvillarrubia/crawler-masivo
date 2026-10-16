@@ -17,6 +17,7 @@ from scrapy import Spider
 from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
     ContentItem,
+    CustomExtractionItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -56,6 +57,12 @@ class PostgresPipeline:
         # links/resources span multiple flushes).
         self._deleted_child_url_ids: dict[type, set[int]] = {}
         self._uncommitted: int = 0  # escrituras flusheadas sin commit
+        # Extraccion a medida (decision 104): url_id -> filas de la pagina. Se
+        # reemplaza la pagina ENTERA en cada escritura (DELETE + INSERT en la
+        # misma transaccion), sin el «solo la primera vez» de los hijos: un
+        # item por pagina lleva todas sus reglas. Si llegan dos de la misma
+        # URL en el lote, gana el ultimo.
+        self._custom_buffer: dict[int, tuple[str, list[dict]]] = {}
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -136,6 +143,8 @@ class PostgresPipeline:
             self._handle_content(item, spider)
         elif isinstance(item, SecurityItem):
             self._handle_security(item, spider)
+        elif isinstance(item, CustomExtractionItem):
+            self._handle_custom(item, spider)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -186,6 +195,15 @@ class PostgresPipeline:
                 existing.last_crawled_at = datetime.now(timezone.utc)
                 self.session.flush()
                 url_id = existing.id
+                # Una ficha que ahora da 404 o 301 no puede conservar su precio
+                # de antes (decision 104): sin HTML 2xx no hay reglas que
+                # aplicar, asi que no llega ningun item que reemplace las filas.
+                # Sin reglas en el job no hay filas que borrar: nos ahorramos un
+                # DELETE por cada redireccion o 404 re-visitado.
+                status = data.get("status_code") or 0
+                if getattr(spider, "_reglas_a_medida", None) and not (
+                        data.get("is_html") and 200 <= status < 300):
+                    self._borrar_custom(url_id)
             else:
                 url_obj = Url(
                     job_id=job_id,
@@ -291,6 +309,54 @@ class PostgresPipeline:
             logger.exception("Failed to persist ContentItem for url_id=%s", url_id)
 
     # ------------------------------------------------------------------
+    # CustomExtractionItem (decision 104)
+    # ------------------------------------------------------------------
+    def _handle_custom(self, item: CustomExtractionItem, spider: Spider):
+        url_id = self._resolve_url_id(item.get("url_hash"), item.get("job_id"))
+        if url_id is None:
+            logger.debug("No url_id for CustomExtractionItem, skipping")
+            return
+        self._custom_buffer[url_id] = (item.get("job_id"), list(item.get("filas") or []))
+        if len(self._custom_buffer) >= self.batch_size:
+            self._flush_custom()
+
+    def _borrar_custom(self, url_id: int) -> None:
+        from shared.models import CustomExtraction
+
+        self._custom_buffer.pop(url_id, None)
+        self.session.query(CustomExtraction).filter(
+            CustomExtraction.url_id == url_id).delete(synchronize_session=False)
+
+    def _flush_custom(self) -> None:
+        if not self._custom_buffer:
+            return
+        from shared.models import CustomExtraction
+
+        lote = self._custom_buffer
+        self._custom_buffer = {}
+        filas = []
+        for url_id, (job_id, de_la_pagina) in lote.items():
+            for f in de_la_pagina:
+                filas.append({
+                    "job_id": job_id, "url_id": url_id,
+                    "nombre": f["nombre"], "clase": f["clase"], "estado": f["estado"],
+                    "n": f.get("n"), "valor": f.get("valor"),
+                    "valor_clave": f.get("valor_clave"), "valor_num": f.get("valor_num"),
+                    "valores": f.get("valores"), "truncado": bool(f.get("truncado")),
+                    "render": f.get("render"), "detalle": (f.get("detalle") or None),
+                })
+        try:
+            self.session.query(CustomExtraction).filter(
+                CustomExtraction.url_id.in_(list(lote))).delete(synchronize_session=False)
+            if filas:
+                self.session.bulk_insert_mappings(CustomExtraction, filas)
+            self.session.commit()
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al guardar la extraccion a medida de %d paginas", len(lote))
+
+    # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)
     # ------------------------------------------------------------------
     def _handle_security(self, item: SecurityItem, spider: Spider):
@@ -326,6 +392,7 @@ class PostgresPipeline:
     # Batch flush for child items
     # ------------------------------------------------------------------
     def _flush(self, spider: Spider):
+        self._flush_custom()
         if not self._buffer:
             return
 

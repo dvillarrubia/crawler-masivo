@@ -1311,9 +1311,11 @@ function app() {
       this.loading = true;
       try {
         this.job = await api(`/jobs/${id}`);
+        this._registrarAMedida(this.job);
         await this.loadStats();
         this._startProgress();
         this.cargarEjecuciones();
+        this.cargarResumenAMedida();
       } catch (e) { this.error = e.message; }
       this.loading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2614,10 +2616,72 @@ function app() {
     expVistas: [],              // vistas guardadas del cliente del rastreo
     expPlantillas: null,        // respuesta de /urls/plantillas
     expPlantilla: '',           // plantilla elegida: filtra la tabla
+    expAMedida: [],             // reglas a medida del censo (decision 104): [{key, nombre, clase, etiqueta}]
+    expAvisoRegla: '',          // 422 de una regla que este censo no tiene (vista guardada de otro)
+    resumenAMedida: null,       // GET /jobs/{id}/extraccion
     EXP_GRUPOS_COLUMNAS,
     _expSearchTimer: null,
     _expFilterTimer: null,
     _expKeyHandler: null,
+
+    // ---- Extraccion y busqueda a medida (#34, decision 104) ----
+    // Las columnas `x.<nombre>` se inyectan en EXP_COLUMN_DEFS al abrir el
+    // censo: asi todo lo que ya lee EXP_COLUMN_DEFS[col] (cabecera, filtro,
+    // orden, celda, CSV) vale sin tocarlo. Las del censo anterior se quitan.
+    _registrarAMedida(job) {
+      for (const k of Object.keys(EXP_COLUMN_DEFS)) if (k.startsWith('x.')) delete EXP_COLUMN_DEFS[k];
+      const defs = _defsAMedida(job);
+      Object.assign(EXP_COLUMN_DEFS, defs);
+      this.expAMedida = Object.entries(defs).map(([key, d]) => ({ key, nombre: d.nombre, clase: d.clase, etiqueta: d.label }));
+      const grupos = this.EXP_GRUPOS_COLUMNAS || EXP_GRUPOS_COLUMNAS;
+      const grupo = grupos.find(g => g[0] === "A medida");
+      if (grupo) grupo[1] = Object.keys(defs);
+      else grupos.push(["A medida", Object.keys(defs)]);
+      const tab = EXP_TABS.find(t => t.key === 'a_medida');
+      if (tab) tab.columns = ['url', 'status_code', ...Object.keys(defs)];
+    },
+
+    async cargarResumenAMedida() {
+      this.resumenAMedida = null;
+      if (!this.job || !this.expAMedida.length) return;
+      try { this.resumenAMedida = await api(`/jobs/${this.job.id}/extraccion`); } catch (_) { /* sin resumen */ }
+    },
+
+    // Desde la ficha del job o la franja del Explorador: la pestaña a medida
+    // con un filtro ya puesto. `op`: 'vacio' (sin coincidencia), 'no' / 'si'
+    // (busqueda) o 'estado:<estado>'.
+    verAMedida(nombre, op) {
+      const key = 'x.' + nombre;
+      let f = null;
+      if (op === 'vacio') f = { op: 'vacio' };
+      else if (op === 'si' || op === 'no') f = { value: op === 'si' ? 'true' : 'false' };
+      else if (op && op.startsWith('estado:')) f = { op: 'estado', value: op.slice(7) };
+      if (this.view !== 'explorer') this.openExplorer({ tab: 'a_medida', filtros: f ? { [key]: f } : {} });
+      else {
+        this.expTab = 'a_medida';
+        this.expColumnFilters = f ? { ...this.expColumnFilters, [key]: f } : this.expColumnFilters;
+        this.expPage = 1;
+        this.loadExplorerUrls();
+      }
+    },
+
+    // Un 422 por una regla que el censo no tiene: se quitan los filtros y el
+    // orden `x.*` en vez de enseñar el censo entero como si nada.
+    quitarFiltrosAMedida() {
+      const f = { ...this.expColumnFilters };
+      for (const k of Object.keys(f)) if (k.startsWith('x.') && !EXP_COLUMN_DEFS[k]) delete f[k];
+      this.expColumnFilters = f;
+      if (this.expSort && this.expSort.startsWith('x.') && !EXP_COLUMN_DEFS[this.expSort]) this.expSort = null;
+      this.expAvisoRegla = '';
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    getExpCellTitle(row, col) {
+      const def = EXP_COLUMN_DEFS[col];
+      if (def && def.tip) { try { return def.tip(row, this.job); } catch { return ''; } }
+      return this.getExpCellValue(row, col);
+    },
 
     // `preajuste`: { tab, problema, gravedad, buscar, filtros, orden, dir, pagina }
     // Lo usan la ruta (#/rastreos/<id>/explorador?...) y «Ver en el Explorador»
@@ -2883,6 +2947,8 @@ function app() {
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'h1')) params.set('h1', 'true');
       if (this.getExpColumns().includes('cambio')) params.set('cambios', 'true');
+      const xs = this.getExpColumns().filter(c => c.startsWith('x.') && EXP_COLUMN_DEFS[c]);
+      if (xs.length) params.set('a_medida', xs.map(c => c.slice(2)).join(','));
       if (this.expGravedad) params.set('severity', this.expGravedad);
       const vacio = [], conValor = [];
       if (tabCfg.filter) {
@@ -2896,6 +2962,7 @@ function app() {
         if (!f) continue;
         const def = EXP_COLUMN_DEFS[colKey];
         if (!def || !def.filterKey) continue;
+        if (def.aMedida && f.op === 'estado') { if (f.value) params.set(`x.${def.nombre}_estado`, f.value); continue; }
         if (def.vacio && f.op === 'vacio') { vacio.push(def.vacio); continue; }
         if (def.vacio && f.op === 'con_valor') { conValor.push(def.vacio); continue; }
         const raw = (f.value ?? '').toString().trim();
@@ -2929,6 +2996,7 @@ function app() {
       this.expLoading = true;
       try {
         const params = this._buildExplorerParams();
+        this.expAvisoRegla = '';
         const data = await api(`/jobs/${this.job.id}/urls?${params}`);
         this.expUrls = data.items;
         this.expPages = data.pages;
@@ -2945,7 +3013,10 @@ function app() {
         } else {
           this.expSelectedIndex = -1;
         }
-      } catch (e) { this.error = e.message; }
+      } catch (e) {
+        if (/no tiene la regla/.test(e.message || '')) { this.expAvisoRegla = e.message; this.expUrls = []; this.expTotal = 0; }
+        else this.error = e.message;
+      }
       this.expLoading = false;
     },
 
@@ -3276,6 +3347,61 @@ const EXP_DEFAULT_COLUMNS = [
 
 const HTML_INTERNO = { resource_type: 'html', is_internal: true };
 
+// Columnas de las reglas a medida del censo (decision 104). Una celda que no
+// es un resultado se pinta «—» y el motivo va en el tooltip: «no evaluada»
+// (sin fila) no es «vacío» (sin coincidencia).
+const ESTADOS_A_MEDIDA = {
+  sin_coincidencia: 'sin coincidencia', incompleta: 'incompleta: la fuente pasaba de 2 MB',
+  conversion_fallida: 'no se pudo leer como número', tiempo_agotado: 'la regex agotó su tiempo',
+  presupuesto_pagina: 'sin tiempo en esta página', desactivada: 'regla desactivada (agotó su tiempo 3 veces)',
+  pagina_bloqueada: 'página bloqueada por un WAF', error: 'error',
+};
+
+function _defsAMedida(job) {
+  const cfg = (job && job.config) || {};
+  const out = {};
+  const render = !!cfg.render_js;
+  const marca = (f) => (render && f && f.render === false) ? ' *' : '';
+  const tip = (nombre) => (row) => {
+    const f = (row.a_medida || {})[nombre];
+    if (!f) return 'No evaluada: no es HTML 2xx o queda fuera de solo_urls';
+    const base = f.estado === 'ok' ? (f.valor ?? '') : (ESTADOS_A_MEDIDA[f.estado] || f.estado);
+    return base + (f.truncado ? ' (recortado)' : '') + (render && f.render === false ? ' · extraído SIN render' : '');
+  };
+  for (const [nombre, r] of Object.entries(cfg.custom_extraction || {})) {
+    if (!r) continue;
+    const numerica = r.valor === 'numero' || r.cuantos === 'recuento';
+    const key = 'x.' + nombre;
+    out[key] = {
+      label: r.etiqueta || nombre, nombre, clase: 'extractor', aMedida: true, sortable: true, width: 160,
+      type: numerica ? 'numeric' : 'string',
+      filterKey: numerica ? key : key + '_contains', vacio: key, tip: tip(nombre),
+      fmt: row => {
+        const f = (row.a_medida || {})[nombre];
+        if (!f || (f.estado !== 'ok' && f.estado !== 'conversion_fallida')) return '—';
+        const v = numerica && f.valor_num != null ? fmt.num(f.valor_num) : (f.valor ?? '');
+        return v + marca(f);
+      },
+    };
+  }
+  for (const [nombre, r] of Object.entries(cfg.custom_search || {})) {
+    if (!r) continue;
+    const key = 'x.' + nombre;
+    out[key] = {
+      label: r.etiqueta || nombre, nombre, clase: 'busqueda', aMedida: true, sortable: true, width: 140,
+      type: 'boolean', filterKey: key, tip: tip(nombre),
+      fmt: row => {
+        const f = (row.a_medida || {})[nombre];
+        if (!f) return '—';
+        if (f.estado === 'ok') return 'sí (' + f.n + ')' + marca(f);
+        if (f.estado === 'sin_coincidencia') return 'no' + marca(f);
+        return '—';
+      },
+    };
+  }
+  return out;
+}
+
 const EXP_TABS = [
   { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                   columns: EXP_DEFAULT_COLUMNS },
   { key: 'html',       label: 'HTML',        icon: 'file-text',   filter: { resource_type: 'html' },              columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','content_length','inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','indexable','canonical_href','meta_robots'] },
@@ -3297,6 +3423,9 @@ const EXP_TABS = [
   // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
   // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
   { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','click_depth'] },
+  // Extraccion y busqueda a medida (decision 104): solo si el censo tiene
+  // reglas. Sus columnas las rellena _registrarAMedida al abrir el censo.
+  { key: 'a_medida',   label: 'Extracción a medida', icon: 'scan-search', filter: HTML_INTERNO, requiere: 'a_medida', columns: ['url','status_code'] },
   // Vistas por ambito SEO (#131), como las pestañas de Screaming Frog pero
   // construidas con lo que ya calcula el analizador: cada una son las paginas
   // HTML internas, sus columnas y, encima de la tabla, un chip por tipo de

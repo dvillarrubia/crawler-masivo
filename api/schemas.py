@@ -158,6 +158,51 @@ class AnalysisThresholdsConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Job configuration
 # ---------------------------------------------------------------------------
+# Extraccion y busqueda a medida por job (#34, decision 104). La logica vive en
+# `shared/extraccion_a_medida.py`, que la comparten el spider y la API.
+NOMBRE_REGLA = r"^[a-z][a-z0-9_]{0,39}$"
+
+
+class ExtractorAMedida(BaseModel):
+    """Un dato que se saca de cada pagina: CSS, XPath o regex."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    etiqueta: str | None = Field(None, max_length=80)
+    tipo: Literal["css", "xpath", "regex"]
+    expresion: str = Field(..., min_length=1, max_length=2000)
+    # css/xpath: que devuelve cada elemento
+    devuelve: Literal["texto", "html_interno", "html", "atributo"] = "texto"
+    atributo: str | None = Field(None, pattern=r"^[A-Za-z_:][-A-Za-z0-9_:.]*$")
+    # regex: None = 1 si la regex tiene grupos, si no 0 (la coincidencia entera)
+    grupo: int | None = Field(None, ge=0, le=9)
+    ignorar_mayusculas: bool = False
+    # css/xpath solo "html"; una regex puede correr sobre el texto visible o el
+    # contenido principal
+    fuente: Literal["html", "texto", "contenido"] = "html"
+    cuantos: Literal["primero", "todos", "recuento"] = "primero"
+    max_valores: int = Field(20, ge=1, le=100)          # solo con "todos"
+    max_caracteres: int = Field(1000, ge=1, le=10_000)
+    valor: Literal["texto", "numero"] = "texto"         # "recuento" es siempre numero
+    # None = automatico; un caso ambiguo (`1.234`) da conversion_fallida
+    separador_decimal: Literal[",", "."] | None = None
+    solo_urls: str | None = Field(None, max_length=500)  # regex sobre el path
+
+
+class BusquedaAMedida(BaseModel):
+    """¿Contiene la pagina esto? Texto literal o regex."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    etiqueta: str | None = Field(None, max_length=80)
+    modo: Literal["texto", "regex"] = "texto"
+    patron: str = Field(..., min_length=1, max_length=1000)
+    ignorar_mayusculas: bool = True
+    fuente: Literal["html", "texto", "contenido"] = "html"
+    dentro_de: str | None = Field(None, max_length=500)  # selector CSS que acota
+    solo_urls: str | None = Field(None, max_length=500)
+
+
 class TemplateRule(BaseModel):
     """Regla de plantilla: la primera cuyo ``patron`` (regex sobre el path)
     casa da nombre a la plantilla. Las usan check_js_templates.py y
@@ -203,6 +248,29 @@ class JobConfig(BaseModel):
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     analysis_thresholds: AnalysisThresholdsConfig = Field(default_factory=AnalysisThresholdsConfig)
+
+    # Extraccion y busqueda a medida (#34, decision 104): nombre -> regla. Las
+    # columnas salen como `x.<nombre>` en el Explorador y en los CSV. En la
+    # herencia cliente -> perfil -> job una regla se SUSTITUYE entera por
+    # nombre y `null` la quita (`shared/clientes._fusionar_en`).
+    custom_extraction: dict[str, ExtractorAMedida] = Field(default_factory=dict)
+    custom_search: dict[str, BusquedaAMedida] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reglas_a_medida(self):
+        if not self.custom_extraction and not self.custom_search:
+            return self
+        from shared.extraccion_a_medida import validar
+
+        errores = validar(
+            {k: v.model_dump() for k, v in self.custom_extraction.items()},
+            {k: v.model_dump() for k, v in self.custom_search.items()},
+            extract_page_content=self.extraction.extract_page_content,
+            max_urls=self.max_urls,
+        )
+        if errores:
+            raise ValueError("; ".join(errores))
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +679,10 @@ class UrlResponse(BaseModel):
     # referencia (el de la comparacion automatica o `?con=<job>`). «nueva» si
     # no estaba; None si no cambio nada de lo que se compara.
     cambio: str | None = None
+    # Solo con `?a_medida=precio,sku|todas` (decision 104): las reglas a medida
+    # EVALUADAS en esta URL, por nombre ({estado, n, valor, valores, valor_num,
+    # truncado, render}). Un nombre que no esta es «no evaluada», no «vacio».
+    a_medida: dict[str, dict[str, Any]] | None = None
 
 
 class UrlDetailResponse(UrlResponse):
@@ -814,6 +886,12 @@ class PaginatedResponse(BaseModel, Generic[T]):
 # ---------------------------------------------------------------------------
 # Dicts que son DATOS del usuario: sus claves no las declara ningun schema.
 _DICTS_DE_DATOS = {"http.custom_headers", "http.cookies"}
+# Dicts de reglas con nombre (decision 104): sus claves son nombres que pone el
+# usuario y cada valor es una regla ENTERA. No se entra dentro de una regla: una
+# regla parcial no es valida (`tipo` y `expresion` son obligatorios) y en la
+# herencia se sustituye completa. `null` en `<dict>.<nombre>` es quitar una
+# regla heredada.
+_DICTS_DE_REGLAS = {"custom_extraction", "custom_search"}
 
 
 def _claves(d: Any, prefijo: str = "") -> set[str]:
@@ -824,7 +902,9 @@ def _claves(d: Any, prefijo: str = "") -> set[str]:
     for k, v in d.items():
         ruta = f"{prefijo}{k}"
         rutas.add(ruta)
-        if ruta not in _DICTS_DE_DATOS:
+        if ruta in _DICTS_DE_REGLAS and isinstance(v, dict):
+            rutas |= {f"{ruta}.{nombre}" for nombre in v}
+        elif ruta not in _DICTS_DE_DATOS:
             rutas |= _claves(v, ruta + ".")
     return rutas
 
@@ -837,6 +917,9 @@ def _separar_nones(d: dict, prefijo: str = "") -> tuple[dict, list[str]]:
         ruta = f"{prefijo}{k}"
         if v is None:
             borrados.append(ruta)
+        elif ruta in _DICTS_DE_REGLAS and isinstance(v, dict):
+            valores[k] = {n: r for n, r in v.items() if r is not None}
+            borrados += [f"{ruta}.{n}" for n, r in v.items() if r is None]
         elif isinstance(v, dict) and ruta not in _DICTS_DE_DATOS:
             sub, sub_borrados = _separar_nones(v, ruta + ".")
             valores[k] = sub
@@ -874,8 +957,10 @@ def validar_config_parcial(d: dict[str, Any] | None) -> dict[str, Any]:
     valores, borrados = _separar_nones(d)
     modelo = JobConfig.model_validate(valores)
     parcial = modelo.model_dump(exclude_unset=True, mode="json")
+    borrables = _claves(JobConfig().model_dump())
     tiradas = sorted((_claves(valores) - _claves(parcial))
-                     | (set(borrados) - _claves(JobConfig().model_dump())))
+                     | {b for b in borrados if b not in borrables
+                        and b.rpartition(".")[0] not in _DICTS_DE_REGLAS})
     if tiradas:
         raise ValueError(
             "claves de configuracion desconocidas (no tendrian ningun efecto): "

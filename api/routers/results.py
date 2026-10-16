@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import case, exists, func, or_
+from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from api.backup import stream_backup_zip
@@ -21,7 +21,7 @@ from shared import archivo_enlaces
 from shared.database import get_session
 from shared.models import (
     Job, Url, Issue, Link, HtmlMeta, PageContent,
-    Heading, Hreflang, StructuredData, Resource, SecurityHeaders,
+    Heading, Hreflang, StructuredData, Resource, SecurityHeaders, CustomExtraction,
 )
 
 from api.schemas import (
@@ -357,6 +357,207 @@ def _clausula_contiene(col_expr, valor):
     return or_(col_expr.is_(None), ~contiene) if negar else contiene
 
 
+# ---------------------------------------------------------------------------
+# Extraccion y busqueda a medida (#34, decision 104): columnas `x.<nombre>`
+# ---------------------------------------------------------------------------
+_ESTADOS_EVALUADOS = ("ok", "sin_coincidencia", "conversion_fallida")
+_SUFIJOS_X = ("_gte", "_lte", "_contains", "_estado")
+
+
+def reglas_del_job(job_o_config) -> dict[str, tuple[str, dict]]:
+    """nombre -> (clase, regla) de las reglas a medida del censo."""
+    config = getattr(job_o_config, "config", job_o_config)
+    config = config if isinstance(config, dict) else {}
+    salida: dict[str, tuple[str, dict]] = {}
+    for clase, clave in (("extractor", "custom_extraction"), ("busqueda", "custom_search")):
+        for nombre, regla in (config.get(clave) or {}).items():
+            if isinstance(regla, dict):
+                salida[nombre] = (clase, regla)
+    return salida
+
+
+def _es_numerica(clase: str, regla: dict) -> bool:
+    return clase == "busqueda" or regla.get("cuantos") == "recuento" or regla.get("valor") == "numero"
+
+
+def _regla_o_422(reglas: dict, nombre: str) -> tuple[str, dict]:
+    if nombre not in reglas:
+        # Una vista guardada con la regla de otro censo no puede devolver el
+        # censo ENTERO como si el filtro no existiera.
+        raise HTTPException(status_code=422,
+                            detail=f'este censo no tiene la regla "{nombre}" (x.{nombre})')
+    return reglas[nombre]
+
+
+def _parametro_x(clave: str, reglas: dict) -> tuple[str, str] | None:
+    """`x.precio_gte` -> ('precio', '_gte'); `x.gtm` -> ('gtm', ''). El nombre
+    puede llevar `_`, asi que primero se mira si la clave entera es una regla."""
+    if not clave.startswith("x."):
+        return None
+    resto = clave[2:]
+    if resto in reglas:
+        return resto, ""
+    for suf in _SUFIJOS_X:
+        if resto.endswith(suf):
+            return resto[: -len(suf)], suf
+    return resto, ""
+
+
+def _filtros_a_medida(db: Session, job_id: uuid.UUID, qp) -> list:
+    """Las clausulas de los filtros `x.*` sobre `Url`, cada una un
+    `Url.id IN (select url_id ...)` por (job, nombre) con su indice.
+
+    Sin fila = no evaluada. «No contiene» (`!a`, `=no`, `vacio`) solo mira las
+    filas que SI se evaluaron: una pagina bloqueada por el WAF no «no contiene»
+    el tag de GTM, simplemente no se sabe.
+    """
+    claves = [k for k in qp.keys() if k.startswith("x.")]
+    vacios = {param: [c.strip() for c in (qp.get(param) or "").split(",")
+                      if c.strip().startswith("x.")] for param in ("vacio", "con_valor")}
+    if not claves and not any(vacios.values()):
+        return []
+    reglas = reglas_del_job(db.get(Job, job_id))
+    CE = CustomExtraction
+    clausulas: list = []
+
+    def sub(nombre, *cond):
+        return Url.id.in_(db.query(CE.url_id).filter(CE.job_id == job_id, CE.nombre == nombre, *cond))
+
+    for clave in claves:
+        valor = qp.get(clave)
+        if valor in (None, ""):
+            continue
+        nombre, suf = _parametro_x(clave, reglas)
+        clase, regla = _regla_o_422(reglas, nombre)
+        col_num = CE.n if clase == "busqueda" else CE.valor_num
+        if suf in ("_gte", "_lte"):
+            try:
+                v = float(valor)
+            except ValueError:
+                raise HTTPException(status_code=422, detail=f"{clave}: no es un numero: {valor!r}")
+            clausulas.append(sub(nombre, col_num >= v if suf == "_gte" else col_num <= v))
+        elif suf == "_contains":
+            negar = str(valor).startswith("!")
+            cond = _clausula_contiene(CE.valor, valor)
+            if cond is None:
+                continue
+            if negar:
+                clausulas.append(sub(nombre, CE.estado.in_(("ok", "sin_coincidencia")), cond))
+            else:
+                clausulas.append(sub(nombre, cond))
+        elif suf == "_estado":
+            estados = [e.strip() for e in str(valor).split(",") if e.strip()]
+            clausulas.append(sub(nombre, CE.estado.in_(estados)))
+        else:
+            si = str(valor).strip().lower() in ("si", "sí", "true", "1")
+            no = str(valor).strip().lower() in ("no", "false", "0")
+            if not (si or no):
+                raise HTTPException(status_code=422, detail=f"{clave}: usa si o no")
+            clausulas.append(sub(nombre, CE.estado == ("ok" if si else "sin_coincidencia")))
+    for param, campos in vacios.items():
+        for campo in campos:
+            nombre = campo[2:]
+            _regla_o_422(reglas, nombre)
+            if param == "vacio":
+                # «Vacio» es exactamente «se evaluo y no hubo nada»: sin fila no
+                # es vacio, es no evaluada.
+                clausulas.append(sub(nombre, CE.estado == "sin_coincidencia"))
+            else:
+                clausulas.append(sub(nombre, CE.valor.isnot(None), CE.estado.in_(_ESTADOS_EVALUADOS)))
+    return clausulas
+
+
+def _ordenar(q, sort_by: str | None, sort_dir: str, db: Session, job_id: uuid.UUID):
+    """El orden del Explorador, compartido por `/urls` y su CSV.
+
+    `x.<nombre>` ordena por el valor numerico y luego por el texto (o por el
+    numero de coincidencias en una busqueda), con las no evaluadas al final en
+    los dos sentidos."""
+    if sort_by and sort_by.startswith("x."):
+        nombre = sort_by[2:]
+        clase, regla = _regla_o_422(reglas_del_job(db.get(Job, job_id)), nombre)
+        from sqlalchemy.orm import aliased
+
+        A = aliased(CustomExtraction)
+        # El job_id en la condicion del join no es redundante: sin el, Postgres
+        # recorre las filas de esa regla de TODOS los censos (decision 37).
+        q = q.outerjoin(A, and_(A.url_id == Url.id, A.job_id == job_id, A.nombre == nombre))
+        cols = [A.n] if clase == "busqueda" else [A.valor_num, A.valor_clave]
+        orden = [c.desc().nullslast() if sort_dir == "desc" else c.asc().nullslast() for c in cols]
+        return q.order_by(*orden, Url.id)
+    if sort_by and sort_by in SORT_COLUMNS:
+        col = SORT_COLUMNS[sort_by]
+        return q.order_by(col.desc().nullslast() if sort_dir == "desc" else col.asc().nullsfirst(),
+                          Url.id)
+    return q.order_by(Url.id)
+
+
+def _a_medida(db: Session, job_id: uuid.UUID, ids: list[int],
+              nombres: list[str] | None = None) -> dict[int, dict[str, dict]]:
+    """url_id -> {nombre: fila}. Una consulta por tramo, como `_h1s`."""
+    if not ids:
+        return {}
+    CE = CustomExtraction
+    q = db.query(CE.url_id, CE.nombre, CE.clase, CE.estado, CE.n, CE.valor, CE.valor_num,
+                 CE.valores, CE.truncado, CE.render, CE.detalle).filter(
+        CE.job_id == job_id, CE.url_id.in_(ids))
+    if nombres:
+        q = q.filter(CE.nombre.in_(nombres))
+    salida: dict[int, dict[str, dict]] = {}
+    for f in q:
+        salida.setdefault(f.url_id, {})[f.nombre] = {
+            "clase": f.clase, "estado": f.estado, "n": f.n, "valor": f.valor,
+            "valor_num": f.valor_num, "valores": f.valores, "truncado": bool(f.truncado),
+            "render": f.render, "detalle": f.detalle,
+        }
+    return salida
+
+
+def _nombres_pedidos(reglas: dict, pedido: str | None) -> list[str]:
+    if not pedido:
+        return []
+    if pedido.strip() == "todas":
+        return list(reglas)
+    nombres = [n.strip() for n in pedido.split(",") if n.strip()]
+    for n in nombres:
+        _regla_o_422(reglas, n)
+    return nombres
+
+
+_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
+
+def celda_segura(v):
+    """Un valor sacado de la pagina en una celda de CSV, sin que Excel o Sheets
+    lo ejecuten como formula (`=HYPERLINK(...)`, `@SUM`). Los numeros no se
+    tocan: un -5 sigue siendo un numero."""
+    if isinstance(v, str) and v.startswith(_FORMULA):
+        return "'" + v
+    return v
+
+
+def valor_csv_a_medida(fila: dict | None, clase: str, regla: dict, posicion: int | None = None):
+    """Lo que va en la celda de una regla. Vacio = no evaluada o sin
+    coincidencia; una busqueda dice `si`/`no`; un estado que no es un resultado
+    va entre corchetes (`[pagina_bloqueada]`) para que no se lea como «vacio»."""
+    if fila is None:
+        return ""
+    estado = fila["estado"]
+    if clase == "busqueda":
+        return {"ok": "si", "sin_coincidencia": "no"}.get(estado, f"[{estado}]")
+    if estado == "sin_coincidencia":
+        return ""
+    if estado not in ("ok", "conversion_fallida"):
+        return f"[{estado}]"
+    if posicion is not None:
+        valores = fila.get("valores") or []
+        return celda_segura(valores[posicion]) if posicion < len(valores) else ""
+    if estado == "ok" and fila.get("valor_num") is not None and _es_numerica(clase, regla):
+        num = fila["valor_num"]
+        return int(num) if float(num).is_integer() else num
+    return celda_segura(fila.get("valor"))
+
+
 def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
     """Las URLs de un job con los filtros del Explorador aplicados.
 
@@ -432,6 +633,8 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
 
     for clause in clauses:
         q = q.filter(clause)
+    for clause in _filtros_a_medida(db, job_id, qp):
+        q = q.filter(clause)
 
     # Buscador de arriba: URL o titulo
     if search:
@@ -484,24 +687,18 @@ def list_urls(
     h1: bool = Query(False, description="Anade el primer H1 visible y cuantos hay"),
     cambios: bool = Query(False, description="Anade que cambio frente al censo de referencia"),
     con: str | None = Query(None, description="Censo de referencia para `cambios` (por defecto, el de la comparacion automatica)"),
+    a_medida: str | None = Query(None, description="Reglas a medida a anadir a cada fila: nombres por comas o `todas`"),
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
     _anotar_uso(request.query_params)
 
     q = _urls_filtradas(db, job_id, request.query_params, unir_meta=sort_by in _SORT_META)
+    nombres_x = _nombres_pedidos(reglas_del_job(job), a_medida)
 
     total = q.count()
 
-    # Sorting
-    if sort_by and sort_by in SORT_COLUMNS:
-        col = SORT_COLUMNS[sort_by]
-        if sort_dir == "desc":
-            q = q.order_by(col.desc().nullslast())
-        else:
-            q = q.order_by(col.asc().nullsfirst())
-    else:
-        q = q.order_by(Url.id)
+    q = _ordenar(q, sort_by, sort_dir, db, job_id)
 
     # `ligero`: el Explorador no pinta el texto de cada pagina y el panel lo
     # pide aparte; con el, una pagina de 100 filas eran 1,6 MB (89% texto).
@@ -533,6 +730,10 @@ def list_urls(
         cs = _cambios(db, _referencia(db, job_id, con), rows)
         for it, r in zip(items, rows):
             it.cambio = cs.get(r.id)
+    if nombres_x:
+        xs = _a_medida(db, job_id, [r.id for r in rows], nombres_x)
+        for it, r in zip(items, rows):
+            it.a_medida = xs.get(r.id, {})
 
     return _paginate(
         items=items,
@@ -732,18 +933,39 @@ def export_vista(
     Como `/export`, sesion nueva por ventana de 1.000 filas (decision 5): se
     sacan primero los ids en el orden de la vista y luego se leen por tramos.
     """
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
     _anotar_uso(request.query_params, csv=True)
-    claves = [c for c in (x.strip() for x in columnas.split(",")) if c in COLUMNAS_VISTA]
+    reglas = reglas_del_job(job)
+    pedidas = [x.strip() for x in columnas.split(",") if x.strip()]
+    for c in pedidas:
+        if c.startswith("x."):
+            _regla_o_422(reglas, c[2:])
+    claves = [c for c in pedidas if c in COLUMNAS_VISTA or c.startswith("x.")]
     if not claves:
         raise HTTPException(status_code=422, detail="Ninguna columna exportable: " + columnas)
 
+    # Las columnas a medida: (clave, cabecera, nombre, posicion). Con `todos`,
+    # una columna por posicion («Precio 1», «Precio 2»...), tantas como el
+    # maximo de coincidencias del censo con el tope de la regla.
+    cabeceras: list[tuple[str, str, str | None, int | None]] = []
+    for c in claves:
+        if not c.startswith("x."):
+            cabeceras.append((c, COLUMNAS_VISTA[c][0], None, None))
+            continue
+        nombre = c[2:]
+        clase, regla = reglas[nombre]
+        etiqueta = regla.get("etiqueta") or nombre
+        if clase == "extractor" and regla.get("cuantos") == "todos":
+            maximo = db.query(func.max(CustomExtraction.n)).filter(
+                CustomExtraction.job_id == job_id, CustomExtraction.nombre == nombre).scalar() or 1
+            for i in range(min(int(maximo), int(regla.get("max_valores") or 20))):
+                cabeceras.append((c, f"{etiqueta} {i + 1}", nombre, i))
+        else:
+            cabeceras.append((c, etiqueta, nombre, None))
+    nombres_x = sorted({n for _, _, n, _ in cabeceras if n})
+
     q = _urls_filtradas(db, job_id, request.query_params, unir_meta=sort_by in _SORT_META)
-    if sort_by in SORT_COLUMNS:
-        col = SORT_COLUMNS[sort_by]
-        q = q.order_by(col.desc().nullslast() if sort_dir == "desc" else col.asc().nullsfirst(), Url.id)
-    else:
-        q = q.order_by(Url.id)
+    q = _ordenar(q, sort_by, sort_dir, db, job_id)
     ids = [i for (i,) in q.with_entities(Url.id).all()]
     ref = _referencia(db, job_id, request.query_params.get("con")) if "cambio" in claves else None
     # Sesiones por tramo sobre el MISMO motor que la peticion (en los tests,
@@ -755,7 +977,7 @@ def export_vista(
         buf = io.StringIO()
         w = csv.writer(buf)
         buf.write("\ufeff")  # BOM: Excel abre el UTF-8 con las tildes bien
-        w.writerow([COLUMNAS_VISTA[c][0] for c in claves])
+        w.writerow([cab for _, cab, _, _ in cabeceras])
         yield buf.getvalue()
         for i in range(0, len(ids), 1000):
             tramo = ids[i:i + 1000]
@@ -774,12 +996,22 @@ def export_vista(
                     hs = _h1s(s, list(por_id))
                     for u in por_id.values():
                         u._h1 = hs.get(u.id, (None, 0))
+                xs = _a_medida(s, job_id, list(por_id), nombres_x) if nombres_x else {}
                 buf = io.StringIO()
                 w = csv.writer(buf)
                 for uid in tramo:
                     u = por_id.get(uid)
-                    if u is not None:
-                        w.writerow(["" if (v := COLUMNAS_VISTA[c][1](u)) is None else v for c in claves])
+                    if u is None:
+                        continue
+                    fila = []
+                    for c, _cab, nombre, pos in cabeceras:
+                        if nombre:
+                            clase, regla = reglas[nombre]
+                            fila.append(valor_csv_a_medida(xs.get(uid, {}).get(nombre), clase, regla, pos))
+                        else:
+                            v = COLUMNAS_VISTA[c][1](u)
+                            fila.append("" if v is None else v)
+                    w.writerow(fila)
                 yield buf.getvalue()
 
     nombre = f"explorador-{str(job_id)[:8]}-{len(ids)}-urls.csv"
@@ -925,6 +1157,8 @@ def get_url_detail(
     resp.structured_data = [StructuredDataResponse.model_validate(s) for s in url_obj.structured_data]
     resp.security = SecurityHeadersResponse.model_validate(url_obj.security) if url_obj.security else None
     resp.issues = [IssueResponse.model_validate(i) for i in url_obj.issues]
+    # La ficha lleva todas las reglas a medida evaluadas en la URL (decision 104)
+    resp.a_medida = _a_medida(db, job_id, [url_obj.id]).get(url_obj.id, {})
 
     out_items = []
     for link_obj, src_url in outlink_rows:
@@ -1694,6 +1928,14 @@ def _pagerank_fiable(session: Session, job_id: uuid.UUID):
     return None
 
 
+def columnas_a_medida_export(config) -> list[tuple[str, str, str, dict]]:
+    """Las columnas `x_<nombre>` del CSV completo: AL FINAL y solo si el job
+    tiene reglas (decision 104). Las 83 fijas no se mueven, asi que un informe
+    montado sobre sus posiciones sigue valiendo."""
+    return [(f"x_{nombre}", nombre, clase, regla)
+            for nombre, (clase, regla) in reglas_del_job(config).items()]
+
+
 def _stream_csv(job_id: uuid.UUID):
     """Generator that yields CSV content in chunks using windowed queries."""
     # Each chunk opens its own session so we do not hold one long transaction.
@@ -1702,12 +1944,19 @@ def _stream_csv(job_id: uuid.UUID):
     batch_size = 1000
     last_id = 0
 
+    session = SessionLocal()
+    try:
+        x_cols = columnas_a_medida_export(
+            session.query(Job.config).filter(Job.id == job_id).scalar())
+    finally:
+        session.close()
+
     # Header row. Prefix a UTF-8 BOM so Excel opens the file with the correct
     # encoding (otherwise accented/Spanish characters render as mojibake).
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(CSV_COLUMNS)
-    yield "﻿" + buf.getvalue()
+    writer.writerow(CSV_COLUMNS + [c for c, _, _, _ in x_cols])
+    yield "\ufeff" + buf.getvalue()
 
     while True:
         session = SessionLocal()
@@ -1733,10 +1982,16 @@ def _stream_csv(job_id: uuid.UUID):
             for datos in extras.values():
                 datos["pagerank_fiable"] = fiable
 
+            xs = _a_medida(session, job_id, [r.id for r in rows]) if x_cols else {}
+
             buf = io.StringIO()
             writer = csv.writer(buf)
             for row in rows:
-                writer.writerow(_csv_row(row, extras.get(row.id)))
+                fila = _csv_row(row, extras.get(row.id))
+                for _c, nombre, clase, regla in x_cols:
+                    fila.append(_val(valor_csv_a_medida(
+                        xs.get(row.id, {}).get(nombre), clase, regla)))
+                writer.writerow(fila)
                 last_id = row.id
 
             yield buf.getvalue()

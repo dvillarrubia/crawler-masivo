@@ -129,7 +129,9 @@ PETICIONES: list[tuple[float, str, str]] = []
 def servir(robots_prohibe_todo: bool = False,
            robots_bloquea_privado: bool = False,
            con_recursos: bool = False,
-           robots_crawl_delay: float | None = None) -> tuple[ThreadingHTTPServer, int]:
+           robots_crawl_delay: float | None = None,
+           rutas_extra: dict | None = None,
+           puerto: int = 0) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -149,10 +151,16 @@ def servir(robots_prohibe_todo: bool = False,
         def log_message(self, *a):
             pass
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    # Puerto fijo para reanudar el MISMO job en dos ejecuciones: con uno
+    # aleatorio las URLs cambian y la reanudacion las veria como nuevas.
+    srv = ThreadingHTTPServer(("127.0.0.1", puerto), Handler)
     port = srv.server_address[1]
     rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado,
                                  con_recursos=con_recursos))
+    # Rutas propias de un test: {ruta: [codigo, cabeceras, cuerpo]}. El cuerpo
+    # admite {port}.
+    for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
+        rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
     if robots_bloquea_privado:
         # Un robots.txt que prohibe una carpeta concreta: el caso del informe
         # "Blocked by robots.txt" (R6 de #25). La URL la enlaza /home.
@@ -250,7 +258,9 @@ def main() -> None:
     srv, port = servir(entrada.get("robots_prohibe_todo", False),
                        entrada.get("robots_bloquea_privado", False),
                        entrada.get("con_recursos", False),
-                       entrada.get("robots_crawl_delay"))
+                       entrada.get("robots_crawl_delay"),
+                       entrada.get("rutas"),
+                       entrada.get("puerto", 0))
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -263,7 +273,28 @@ def main() -> None:
         seeds=[s.replace("{port}", str(port)) for s in entrada["seeds"]],
         config=entrada.get("config", {}),
     )
-    shared.database.SessionLocal = lambda: _SesionFalsa(job)
+    pipelines = {"spider_harness.Recolector": 1}
+    job_id = entrada.get("job_id", "test")
+    if entrada.get("bd"):
+        # BD de verdad (Postgres de pruebas): el job ya existe y se usa la
+        # tuberia real, para comprobar lo GUARDADO y no solo lo emitido.
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from shared.models import Base, Job
+
+        engine = create_engine(entrada["bd"])
+        Base.metadata.create_all(engine)
+        Sesion = sessionmaker(bind=engine)
+        with Sesion() as s:
+            fila = s.get(Job, __import__("uuid").UUID(job_id))
+            fila.seeds = job.seeds
+            fila.config = job.config
+            s.commit()
+        shared.database.SessionLocal = Sesion
+        pipelines["seo_crawler.pipelines.PostgresPipeline"] = 300
+    else:
+        shared.database.SessionLocal = lambda: _SesionFalsa(job)
 
     from seo_crawler.spiders.seo_spider import SeoSpider
 
@@ -315,9 +346,9 @@ def main() -> None:
             "scrapy.spidermiddlewares.depth.DepthMiddleware": None,
             "seo_crawler.middlewares.DepthMiddleware": 900,
         },
-        "ITEM_PIPELINES": {"spider_harness.Recolector": 1},
+        "ITEM_PIPELINES": pipelines,
     })
-    proceso.crawl(SeoSpider, job_id="test")
+    proceso.crawl(SeoSpider, job_id=job_id)
     proceso.start()
     srv.shutdown()
 
@@ -328,7 +359,7 @@ def main() -> None:
         fila = {k: v for k, v in it.items() if k in (
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
-            "blocked_by_robots", "status_group",
+            "blocked_by_robots", "status_group", "url_hash", "filas",
         )}
         for k in ("url", "redirect_url", "to_url"):
             if fila.get(k):

@@ -6,6 +6,8 @@ pytest>=8.0
 parsel>=1.9
 w3lib>=2.1
 lxml>=5.0
+# Extraccion a medida (decision 104): las regex corren con `timeout`.
+regex>=2024.11.6
 # Contraste del dia de la semana en las expresiones cron: implementa el
 # estandar, que APScheduler NO (ver `shared/programaciones._dia_de_semana`).
 croniter>=2.0

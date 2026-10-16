@@ -1012,6 +1012,9 @@ def _por_que_cero_urls(job_id: str) -> str:
     """
     try:
         rc = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=15)
+        # Reglas a medida que no compilan (decision 104): el spider no rastrea.
+        if rc.get(f"job:{job_id}:config_invalida"):
+            return "config_invalida"
         if rc.get(f"job:{job_id}:robots_bloquea_semillas"):
             return "robots_bloquea_todo"
     except Exception:

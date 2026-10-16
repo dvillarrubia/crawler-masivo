@@ -641,6 +641,56 @@ class Issue(Base):
 
 
 # ---------------------------------------------------------------------------
+# Extraccion y busqueda a medida (#34, decision 104)
+# ---------------------------------------------------------------------------
+class CustomExtraction(Base):
+    """Una fila por (URL, regla) EVALUADA.
+
+    Sin fila = «no evaluada» (no es HTML 2xx, cae fuera de `solo_urls`, o el
+    censo es anterior a la regla), que NO es «vacio»: «no contiene» es
+    exactamente `estado='sin_coincidencia'`. Las definiciones de las reglas
+    viajan en `jobs.config` (`custom_extraction` / `custom_search`).
+
+    `job_id` va en la fila a proposito: filtrar, borrar y pesar por censo sin
+    unir con `urls` (decision 37).
+    """
+
+    __tablename__ = "custom_extraction"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    nombre = Column(String(40), nullable=False)
+    clase = Column(String(10), nullable=False)        # extractor | busqueda
+    # ok, sin_coincidencia, incompleta, conversion_fallida, tiempo_agotado,
+    # presupuesto_pagina, desactivada, pagina_bloqueada, error
+    estado = Column(String(24), nullable=False)
+    # Coincidencias reales antes de recortar. NULL salvo en ok,
+    # sin_coincidencia y conversion_fallida: en los demas no se llego a contar.
+    n = Column(Integer, nullable=True)
+    # `primero`: el valor; `todos`: unidos con " | "; busqueda: ~120
+    # caracteres de contexto de la primera coincidencia.
+    valor = Column(Text, nullable=True)
+    # `valor` con los espacios colapsados y recortado a 256: para ordenar,
+    # agrupar y comparar sin pasarse del limite de una clave de B-tree.
+    valor_clave = Column(String(256), nullable=True)
+    valor_num = Column(Float, nullable=True)
+    valores = Column(JSON, nullable=True)              # solo con `todos`
+    truncado = Column(Boolean, nullable=False, default=False)
+    # True = se extrajo del DOM renderizado (y ya sin banners); False = del HTML
+    # de la respuesta: job sin render, o pagina que cayo en `_sin_render`.
+    render = Column(Boolean, nullable=True)
+    detalle = Column(String(200), nullable=True)       # motivo del error, sin datos de la pagina
+
+    __table_args__ = (
+        UniqueConstraint("url_id", "nombre", name="uq_cext_url_nombre"),
+        Index("ix_cext_job_nombre_estado", "job_id", "nombre", "estado"),
+        Index("ix_cext_job_nombre_num", "job_id", "nombre", "valor_num"),
+        Index("ix_cext_job_nombre_clave", "job_id", "nombre", "valor_clave"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Decisiones de un modelo (#7, decision 84)
 # ---------------------------------------------------------------------------
 class Decision(Base):

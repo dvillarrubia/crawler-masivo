@@ -81,7 +81,8 @@ jobs:
         run: |
           python -m pip install -q --upgrade pip
           pip install -q fastapi 'sqlalchemy>=2.0,<3.0' 'pydantic>=2.9' psycopg2-binary \
-            'w3lib>=2.1.2' tldextract 'apscheduler>=3.10' redis httpx python-multipart pgvector 'pyarrow>=15.0'
+            'w3lib>=2.1.2' tldextract 'apscheduler>=3.10' redis httpx python-multipart pgvector 'pyarrow>=15.0' \
+            'parsel>=1.9' 'regex>=2024.11.6'
           pip install -q -r tests/requirements.txt
       - name: pytest
         # `test_comparacion.py` corre tambien AQUI, y no solo en el trabajo del
@@ -95,7 +96,9 @@ jobs:
         # La capa de decisiones (#7) tambien aqui: vive en `shared/` y la API
         # sera quien la dispare (#40), asi que tiene que funcionar con las
         # dependencias de SU imagen. Y el analisis enriquecido (#40), cuyo
-        # endpoint con token vive aqui.
+        # endpoint con token vive aqui. La extraccion a medida (decision 104)
+        # tambien: la API valida y prueba las reglas con parsel y regex, que se
+        # instalan arriba igual que en su imagen.
         run: >
           python -m pytest -q -rs tests/test_export_csv.py tests/test_insights.py
           tests/test_raw_html.py tests/test_comparacion.py
@@ -106,6 +109,7 @@ jobs:
           tests/test_stats_api.py tests/test_rastreos_y_panel_api.py
           tests/test_explorador_api.py tests/test_archivo_enlaces.py
           tests/test_borrado_en_masa.py tests/test_almacenamiento.py
+          tests/test_extraccion_a_medida.py tests/test_a_medida_api.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales
