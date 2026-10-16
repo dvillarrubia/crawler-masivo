@@ -37,6 +37,7 @@ from sqlalchemy import String, cast, delete, func, or_, select, update
 from analysis import near_duplicates as nd
 from shared import soft404 as s4
 from shared.descarga_cruda import TITULOS_DE_BLOQUEO
+from shared.respuestas import NO_VALIDAS
 from shared.plantillas import firma_de_ruta
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,10 @@ def _sondas_utiles(sondas: list[dict]) -> list[dict]:
             continue
         if not (s.get("texto") or s.get("titulo")):
             continue
+        # La clasificacion del spider (decision 103), que ve codigo, cabeceras
+        # y cuerpo; el titulo de abajo queda para las sondas anteriores.
+        if s.get("response_class") in NO_VALIDAS:
+            continue
         # Un muro de WAF con 200 no es la pagina de error del sitio: con su
         # huella, cada pagina bloqueada del censo saldria como soft 404, y eso
         # es un bloqueo (decisiones 62 y 82), no un hallazgo del sitio.
@@ -176,6 +181,9 @@ def analizar(an) -> dict[str, Any]:
     base = (
         Url.job_id == an.job_id, Url.is_html.is_(True), Url.is_internal.is_(True),
         Url.status_code == 200,
+        # Un muro servido con 200 no es la pagina (decision 103): su titulo de
+        # «Just a moment...» no es un titular de error del sitio.
+        or_(Url.response_class.is_(None), Url.response_class.notin_(sorted(NO_VALIDAS))),
     )
 
     # -- Las sondas: su huella y el titulo de la pagina de error ------------------

@@ -206,6 +206,20 @@ class SondaSoft404Mixin:
         elif response.url != response.request.url:
             destino = response.url  # con render, Chromium sigue el salto solo
         fila["redirige_a"] = destino
+        try:
+            from shared.respuestas import clasificar_respuesta
+
+            cabeceras = {
+                k.decode("latin-1").lower(): ", ".join(
+                    v.decode("latin-1", "replace") for v in (vs or []))
+                for k, vs in response.headers.items()
+            }
+            fila["response_class"], _ = clasificar_respuesta(
+                response.status, cabeceras, response.body,
+                content_type=cabeceras.get("content-type"), url=response.url,
+                renderizada=bool(response.meta.get("playwright")))
+        except Exception:  # noqa: BLE001
+            fila["response_class"] = None
         if destino is None and isinstance(response, HtmlResponse):
             try:
                 fila.update(huella_de_respuesta(

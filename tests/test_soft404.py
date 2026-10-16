@@ -152,11 +152,11 @@ def sesion():
 
 
 def _pagina(s, job_id, uid, path, texto, titulo="Ficha | X", *, indexable=True,
-            in_sitemap=False, h1=None):
+            in_sitemap=False, h1=None, response_class=None):
     s.add(Url(id=uid, job_id=job_id, url=f"https://x.com{path}", url_hash=f"h{uid}",
               host="x.com", path=path.split("?")[0], is_html=True, is_internal=True,
               status_code=200, indexable=indexable, in_sitemap=in_sitemap,
-              content_word_count=len(texto.split())))
+              content_word_count=len(texto.split()), response_class=response_class))
     s.add(PageContent(url_id=uid, content_text=texto))
     s.add(HtmlMeta(url_id=uid, title=titulo))
     if h1:
@@ -226,6 +226,31 @@ def test_la_sonda_que_da_un_muro_de_waf_no_deja_huella(sesion):
     _pagina(sesion, job_id, 1, "/a/b", muro, titulo="Just a moment...")
     sesion.commit()
     assert not [k for k in _analizar(sesion, job_id) if k[1].startswith("soft_404")]
+
+
+def test_la_sonda_clasificada_como_muro_no_deja_huella_aunque_el_titulo_no_lo_diga(sesion):
+    """La clasificacion del spider (decision 103) manda: un desafio servido con
+    200 y un titulo cualquiera no es la pagina de error del sitio."""
+    job_id = uuid.uuid4()
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={},
+                   soft404={"sondas": [_sonda(titulo="x.com", response_class="challenge_waf")]}))
+    _pagina(sesion, job_id, 1, "/a/b", ERROR, titulo="x.com")
+    sesion.commit()
+    assert not [k for k in _analizar(sesion, job_id) if k[1].startswith("soft_404")]
+
+
+def test_una_pagina_de_muro_no_es_soft_404(sesion):
+    """Un muro guardado con 200 no se juzga: no es la pagina (decision 103), y
+    su titular de error seria el del WAF, no el del sitio."""
+    job_id = uuid.uuid4()
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={},
+                   soft404={"sondas": [_sonda()]}))
+    _pagina(sesion, job_id, 1, "/a/muro", ERROR, response_class="captcha")
+    _pagina(sesion, job_id, 2, "/a/viejo", ERROR)
+    sesion.commit()
+    issues = _analizar(sesion, job_id)
+    assert (2, "soft_404") in issues
+    assert not [k for k in issues if k[0] == 1 and k[1].startswith("soft_404")]
 
 
 def test_huella_que_casa_con_media_plantilla_no_se_afirma(sesion):
