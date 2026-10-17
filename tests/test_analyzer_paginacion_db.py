@@ -835,3 +835,41 @@ def test_e5_un_rel_de_la_pagina_1_es_evidencia_de_un_marcador_debil():
     _analizar_todo(s, j)
     filas = _issues(s, j, "paginacion_canonical_a_la_primera")
     assert [(f.url_id, f.details["paginas_afectadas"]) for f in filas] == [(x2.id, 1)]
+
+
+def test_m1_entradas_de_wordpress_con_p_no_son_la_serie_del_blog():
+    """Medido en blogs.uoc.edu: `/unescochair/?p=38` es una ENTRADA (su
+    canonical es la portada) y lleva `rel=next/prev` a otras entradas. Que las
+    paginas declaren un `rel` cualquiera no es evidencia de que `?p=` pagine:
+    hace falta que algo anuncie su pagina 2."""
+    s, j = _montar()
+    _pag(s, j, "/blog/", nxt="/blog/page/2/")
+    _pag(s, j, "/blog/page/2/", prv="/blog/")
+    _pag(s, j, "/blog/?p=38", canonical="/blog/", nxt="/blog/?p=39")
+    _pag(s, j, "/blog/?p=39", canonical="/blog/", prv="/blog/?p=38")
+    s.commit()
+    _analizar_todo(s, j)
+    assert _issues(s, j, "paginacion_canonical_a_la_primera") == []
+
+
+def test_m2_lo_que_solo_cuelga_de_la_pagina_1_noindex_de_un_archivo():
+    """Medido en blogs.uoc.edu (las «168» de la decision 38): un archivo por
+    mes entero en noindex, y su pagina 2 indexable y en el sitemap, a la que
+    solo enlaza la 1. Cuelga de la paginacion, no de nadie: ni `orphan_page`
+    ni `sitemap_orphan`, y el `warning` es de la pagina (el noindex del
+    archivo es deliberado)."""
+    s, j = _montar()
+    home = _pag(s, j, "/", depth=0)
+    m1 = _pag(s, j, "/2025/10/", robots="noindex", nxt="/2025/10/page/2/")
+    m2 = _pag(s, j, "/2025/10/page/2/", prv="/2025/10/", sitemap=True)
+    _a(s, j, home, "/2025/10/")
+    _a(s, j, m1, "/2025/10/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    assert _tipos_en(s, j, m2.id) & {"orphan_page", "sitemap_orphan",
+                                     "solo_enlazada_desde_paginacion_excluida"} == {
+        "solo_enlazada_desde_paginacion_excluida"}
+    fila = _issues(s, j, "solo_enlazada_desde_paginacion_excluida")
+    assert [(f.url_id, f.severity) for f in fila] == [(m2.id, "warning")]
+    # La 1 no es una pagina 2+: no sale en `paginacion_noindex`.
+    assert _issues(s, j, "paginacion_noindex") == []

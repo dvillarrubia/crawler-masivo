@@ -174,6 +174,7 @@ def _estado(az) -> None:
     az._paginacion_serie = {}          # id de pagina 2+ -> serie
     az._paginacion_promueve = {}       # id excluida -> su serie no es «toda noindex»
     az._paginacion_cadena = {}         # id de pagina 2+ de solo-rel -> serie
+    az._paginacion_primeras = {}       # id de pagina 1 noindex -> (serie, plantilla)
     az._paginacion_rel_next = {}       # id -> _Siguiente
     az._paginacion_grupos = defaultdict(lambda: defaultdict(list))
     az._enr_de_paginacion = set()      # filas de la 106 que son la paginacion
@@ -269,22 +270,23 @@ def analizar_paginacion(az) -> None:
             continue
         forma_de[f.id] = p
         if p.debil:
-            g = debiles[(p.serie, p.forma)]
-            g["n"].add(p.n)
-            g["rel"] = g["rel"] or bool(f.rel_next or f.rel_prev)
-    # Tambien es evidencia que OTRA pagina anuncie con `rel` una URL debil de
-    # esa serie: la ficha `x.html` con `rel=next` a `x.html?p=2` (progym).
+            debiles[(p.serie, p.forma)]["n"].add(p.n)
+    # Es evidencia que ALGUNA pagina anuncie con `rel` la pagina 2 de esa serie
+    # (la 1 de Magento con `rel=next` a `?p=2`; la ficha `x.html` de progym a
+    # `x.html?p=2`). Que las paginas declaren `rel` cualquiera no basta: en
+    # WordPress `/?p=38` es una entrada, y las entradas llevan `rel=next/prev`
+    # entre ellas (`adjacent_posts_rel_link`), que en blogs.uoc.edu metia dos
+    # posts en la serie del blog de unescochair.
     for f in paginas:
         for href in (f.rel_next, f.rel_prev):
             destino = _absoluta(f.url, href)
             if destino and _PUEDE_SER_PAGINA.search(destino):
                 pd = pagina_de(destino, debiles=True)
-                if pd is not None and pd.debil:
+                if pd is not None and pd.debil and pd.n == 2:
                     debiles[(pd.serie, pd.forma)]["rel"] = True
-    # Un marcador debil (?p=N, /N final) cuenta si alguna pagina de la serie
-    # declara rel=next/prev, o si en el censo estan la 2 y la 3. Dos valores
-    # cualesquiera no bastan: dos fichas `/producto/123` y `/producto/456`
-    # serian una «serie».
+    # Un marcador debil (?p=N, /N final) cuenta con ese anuncio, o si en el
+    # censo estan la 2 y la 3. Dos valores cualesquiera no bastan: dos fichas
+    # `/producto/123` y `/producto/456` serian una «serie».
     for pid, p in list(forma_de.items()):
         if p.debil:
             g = debiles[(p.serie, p.forma)]
@@ -331,6 +333,7 @@ def analizar_paginacion(az) -> None:
     def anotar(tipo: str, plantilla: str, serie, pid: int, url: str, ejemplo: dict) -> None:
         az._paginacion_grupos[tipo][plantilla].append((url, pid, serie, ejemplo))
 
+    primeras_noindex: list[tuple[int, tuple]] = []
     for f in paginas:
         p = forma_de.get(f.id)
         segunda = (p is not None and p.n >= 2) or (p is None and f.id in prev_de)
@@ -357,6 +360,8 @@ def analizar_paginacion(az) -> None:
             elif _serie_de_url(canonical) != serie:
                 continue
 
+        if not segunda and f.noindex and (p is None or p.n <= 1):
+            primeras_noindex.append((f.id, serie))
         if segunda:
             az._paginacion_plantilla[f.id] = plantilla
             az._paginacion_serie[f.id] = serie
@@ -436,6 +441,21 @@ def analizar_paginacion(az) -> None:
                     f.url, fila.destino, frozenset({hallada[0]} if hallada else ()),
                     pd.n, _plantilla(host, pd.serie[2], pd.forma), False, boton=True)
 
+    # La pagina 1 en noindex de una serie conocida tambien es una pagina de la
+    # paginacion que no cuenta: lo que solo cuelga de ella (las paginas 2+
+    # indexables de un archivo por fecha en noindex, en blogs.uoc.edu) cuelga
+    # de la paginacion, no de nadie. No es un aviso de serie (la 1 lleva su
+    # `noindex_page`), solo un origen.
+    plantilla_de_serie: dict[tuple, str] = {}
+    for i, serie in az._paginacion_serie.items():
+        plantilla_de_serie.setdefault(serie, az._paginacion_plantilla[i])
+    for sig in az._paginacion_rel_next.values():
+        plantilla_de_serie.setdefault(_serie_de_url(sig.siguiente), sig.plantilla)
+    for i, serie in primeras_noindex:
+        if serie in plantilla_de_serie:
+            az._paginacion_excluidas[i] = "noindex"
+            az._paginacion_primeras[i] = (serie, plantilla_de_serie[serie])
+
     logger.info(
         "Paginacion: %d paginas 2+ reconocidas, %d excluidas (noindex o canonical a la 1), "
         "%d con la siguiente anunciada (rel o boton)", len(az._paginacion_plantilla),
@@ -476,6 +496,7 @@ def preparar_temporal(az):
     con_rel = getattr(az, "_paginacion_rel_next", None) or {}
     ids = set(excluidas) | set(profundas) | set(con_rel)
     az.session.execute(text("DROP TABLE IF EXISTS paginacion_tmp"))
+    az._paginacion_tmp = None
     if not ids:
         return None
     tabla = Table(
@@ -491,11 +512,15 @@ def preparar_temporal(az):
               "con_rel": i in con_rel} for i in sorted(ids)]
     for n in range(0, len(filas), 5000):
         az.session.execute(insert(tabla), filas[n:n + 5000])
+    if az.session.get_bind().dialect.name == "postgresql":
+        az.session.execute(text("ANALYZE paginacion_tmp"))
+    az._paginacion_tmp = tabla
     return tabla
 
 
 def borrar_temporal(az) -> None:
     az.session.execute(text("DROP TABLE IF EXISTS paginacion_tmp"))
+    az._paginacion_tmp = None
 
 
 def desde_aristas(az, aristas) -> None:
@@ -558,8 +583,10 @@ def _descartar_cadenas_de_entradas(az, aristas) -> None:
     if not descartadas:
         return
     fuera = {i for s in descartadas for i in miembros[s]}
+    fuera |= {i for i, (serie, _pl) in az._paginacion_primeras.items() if serie in descartadas}
     for d in (az._paginacion_excluidas, az._paginacion_plantilla, az._paginacion_serie,
-              az._paginacion_cadena, az._paginacion_rel_next, az._paginacion_promueve):
+              az._paginacion_cadena, az._paginacion_rel_next, az._paginacion_promueve,
+              az._paginacion_primeras):
         for i in fuera:
             d.pop(i, None)
     az._paginacion_profundas -= fuera
@@ -574,8 +601,24 @@ def _descartar_cadenas_de_entradas(az, aristas) -> None:
         az.session.execute(
             update(aristas).where(aristas.c.origen_id.in_(lista[n:n + 2000]))
             .values(origen_pag_excluida=None, origen_pag_profunda=None))
+        pag = getattr(az, "_paginacion_tmp", None)
+        if pag is not None:
+            az.session.execute(update(pag).where(pag.c.url_id.in_(lista[n:n + 2000]))
+                               .values(excluida=False, profunda=False))
     logger.info("Paginacion: %d cadenas de rel descartadas (entradas, no listados), %d paginas",
                 len(descartadas), len(fuera))
+
+
+def desde_paginacion(az, aristas, columna: str):
+    """Las aristas que SALEN de las paginas de ``paginacion_tmp`` marcadas con
+    *columna*, entrando por la temporal pequena y el indice de origen: filtrar
+    ``aristas_tmp`` por su columna recorre la tabla entera (37,5 M de filas en
+    Druni) y la temporal no tiene estadisticas."""
+    pag = getattr(az, "_paginacion_tmp", None)
+    if pag is None:
+        return aristas
+    return pag.join(aristas, and_(aristas.c.origen_id == pag.c.url_id,
+                                  pag.c[columna].is_(True)))
 
 
 def _solo_desde_paginacion(az, aristas) -> None:
@@ -610,6 +653,7 @@ def _solo_desde_paginacion(az, aristas) -> None:
             func.count(func.distinct(aristas.c.origen_id))
             .filter(aristas.c.origen_cuenta.is_(True)).label("cuentan"),
         )
+        .select_from(desde_paginacion(az, aristas, "excluida"))
         .where(base, excl, ~hay_camino)
         .group_by(aristas.c.destino_id)
         .subquery()
@@ -658,8 +702,9 @@ def _solo_desde_paginacion(az, aristas) -> None:
             .order_by(aristas.c.destino_id, o.url)
         ).all():
             motivo = az._paginacion_excluidas.get(origen_id, "noindex")
-            grupo = (_TIPO_DE_MOTIVO[motivo], az._paginacion_plantilla.get(origen_id),
-                     origen_id)
+            pl_origen = az._paginacion_plantilla.get(origen_id) or \
+                (az._paginacion_primeras.get(origen_id) or (None, None))[1]
+            grupo = (_TIPO_DE_MOTIVO[motivo], pl_origen, origen_id)
             if destino_id in candidatas_colgadas:
                 candidatas_colgadas[destino_id].add(grupo[1])
                 continue
@@ -698,6 +743,7 @@ def _profundas(az, aristas) -> None:
     o = aliased(Url)
     filas = az.session.execute(
         select(aristas.c.destino_id, Url.url, aristas.c.origen_id, o.url).distinct()
+        .select_from(desde_paginacion(az, aristas, "profunda"))
         .join(Url, Url.id == aristas.c.destino_id)
         .join(o, o.id == aristas.c.origen_id)
         .where(
