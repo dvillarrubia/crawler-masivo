@@ -873,3 +873,16 @@ def test_m2_lo_que_solo_cuelga_de_la_pagina_1_noindex_de_un_archivo():
     assert [(f.url_id, f.severity) for f in fila] == [(m2.id, "warning")]
     # La 1 no es una pagina 2+: no sale en `paginacion_noindex`.
     assert _issues(s, j, "paginacion_noindex") == []
+
+
+def test_m3_un_enlace_a_la_siguiente_con_un_parametro_de_mas_es_un_enlace():
+    """blogs.uoc.edu: el `rel` dice `/page/6/` y el paginador enlaza
+    `/page/6/?page=0`. Hay `<a>`: es el `rel` el que no coincide."""
+    s, j = _montar()
+    p5 = _pag(s, j, "/cat/page/5/", nxt="/cat/page/6/", prv="/cat/page/4/")
+    _a(s, j, p5, "/cat/page/6/?page=0")
+    s.commit()
+    _analizar_todo(s, j)
+    assert _issues(s, j, "paginacion_sin_enlace") == []
+    rel = _issues(s, j, "paginacion_rel_incorrecto")
+    assert [f.details["motivos"] for f in rel] == [{"no_coincide_con_el_enlace": 1}]

@@ -13,7 +13,8 @@ Dos clases de marcador:
   ``?e-page-<id>=N`` de Elementor, que lleva el id del widget en el nombre (en
   Lopesan, la paginacion de las 45 categorias del blog).
 - **Debiles**, que solo cuentan con evidencia (``debiles=True``, y la
-  evidencia la decide quien llama): ``?p=N`` y un ``/N`` final. En WordPress,
+  evidencia la decide quien llama): ``?p=N`` y un ``/N`` final (no detras de
+  otro numero: ``/2023/04`` es un archivo por mes). En WordPress,
   ``?p=123`` es el id de una entrada, y en muchas tiendas ``/p/123`` o
   ``/producto/123`` es una ficha: tomarlos por paginacion llenaria el informe de
   «paginas 2+» que son productos.
@@ -128,7 +129,10 @@ def pagina_de(url: str | None, debiles: bool = False) -> Pagina | None:
         resto, n, nombre = casa
         return Pagina(clave_comparable(_rehacer(esquema, host, ruta, resto)), n,
                       f"?{nombre}", True)
-    if len(tramos) >= 3 and _RE_N.match(tramos[-1]):
+    # Un `/N` detras de otro numero es una fecha, no una pagina: los archivos
+    # por mes de WordPress (`/2023/04/`) con los meses 2 y 3 en el censo
+    # parecian las paginas 4, 2 y 3 de la serie `/2023` (blogs.uoc.edu).
+    if len(tramos) >= 3 and _RE_N.match(tramos[-1]) and not _RE_N.match(tramos[-2]):
         base = "/".join(tramos[:-1]) or "/"
         return Pagina(clave_comparable(_rehacer(esquema, host, base, query)),
                       int(tramos[-1]), "/N", True)

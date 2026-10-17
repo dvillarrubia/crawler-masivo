@@ -849,9 +849,12 @@ def _enlaza_la_pagina(n: int | None, destinos) -> bool:
     for u in destinos:
         if marca not in u:
             continue
-        p = pagina_de(u, debiles=True)
-        if p is not None and p.n == n:
-            return True
+        # Tambien sin la query: `/page/6/?page=0` (blogs.uoc.edu) ES la pagina
+        # 6, aunque el `?page=0` que arrastra la plantilla diga otra cosa.
+        for v in (u, u.split("?", 1)[0]):
+            p = pagina_de(v, debiles=True)
+            if p is not None and p.n == n:
+                return True
     return False
 
 

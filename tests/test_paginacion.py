@@ -79,3 +79,11 @@ def test_basura_no_rompe():
     assert pagina_de(None) is None
     assert pagina_de("") is None
     assert not es_primera_de(None, ("https", "x.com", "/", ""))
+
+
+def test_un_numero_detras_de_otro_es_una_fecha_y_no_una_pagina():
+    """blogs.uoc.edu: los archivos por mes (`/2023/04/`) con los meses 2 y 3 en
+    el censo parecian las paginas 4, 2 y 3 de la serie `/2023`."""
+    assert pagina_de("https://x.com/blog/2023/04/", debiles=True) is None
+    assert pagina_de("https://x.com/blog/2023/04/page/2/").n == 2
+    assert pagina_de("https://x.com/archivo/3", debiles=True).n == 3
