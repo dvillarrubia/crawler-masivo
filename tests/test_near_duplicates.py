@@ -208,3 +208,149 @@ def test_la_firma_es_lo_bastante_estable_para_decidir():
     assert real >= nd.UMBRAL_SIMILITUD          # de verdad son casi iguales
     assert estimada >= nd.UMBRAL_SIMILITUD      # y el metodo lo dice
     assert abs(estimada - real) < 0.05
+
+
+# -- Escrituras sin espacios y marcas combinantes (decision 107) ---------------
+
+# Texto latino fijo, con tildes, enye, cedilla, `ß`, `º`, `ª`, `²`, `_` y cifras.
+LATINO = (
+    "La política de privacidad de la Fundació: ¿qué datos tratamos? Señor Muñoz, "
+    "el 1º de enero de 2024 actualizamos los términos (versión 3ª) para el área de 25 m². "
+    "Garçon, l'été dernier, Straße und Größe; naïve café crème brûlée. "
+    "Los usuarios_registrados reciben 10% de descuento en compras superiores a 50 €. "
+) * 4
+
+# sha256 de `firma(LATINO)` con el tokenizador anterior (master 6126fd5, que
+# partia por `[^\w]+` de `re`). Si cambia, cambian las cifras de todos los
+# censos latinos ya entregados.
+FIRMA_LATINA_ANTERIOR = "9fe97b49e98da92640f03414bc08100fc50764b59e44c7316a7ff0ed07d2cf6b"
+
+
+def _tokenizar_anterior(texto: str) -> list[str]:
+    import re
+
+    return [t for t in re.split(r"[^\w]+", texto.lower()) if t]
+
+
+def test_el_texto_latino_tokeniza_y_firma_como_antes():
+    import hashlib
+
+    assert nd.tokenizar(LATINO) == _tokenizar_anterior(LATINO)
+    assert hashlib.sha256(nd.firma(LATINO).tobytes()).hexdigest() == FIRMA_LATINA_ANTERIOR
+    # Y los textos sinteticos de los demas tests, igual.
+    t = _texto(300, semilla=4)
+    assert nd.tokenizar(t) == _tokenizar_anterior(t)
+
+
+def test_cjk_un_token_por_caracter():
+    assert nd.tokenizar("東京は日本") == ["東", "京", "は", "日", "本"]
+    # Antes: una frase entera por token.
+    assert nd.tokenizar("中文没有空格，句子之间用标点分隔。")[:4] == ["中", "文", "没", "有"]
+    # El latin mezclado sigue yendo por palabras; `ー` no parte la palabra katakana.
+    assert nd.tokenizar("東京 Tokyo 2024 コーヒー") == [
+        "東", "京", "tokyo", "2024", "コ", "ー", "ヒ", "ー"]
+
+
+def test_ancho_completo_se_normaliza():
+    assert nd.tokenizar("１２３ＡＢＣ ｶﾞｲﾄﾞ") == nd.tokenizar("123abc ガイド")
+
+
+def test_las_marcas_combinantes_no_parten_la_palabra():
+    # Antes: ['ह', 'न', 'द', 'भ', 'ष'].
+    assert nd.tokenizar("हिन्दी भाषा") == ["हिन्दी", "भाषा"]
+    assert nd.tokenizar("தமிழ் மொழி") == ["தமிழ்", "மொழி"]
+    # Un texto latino en NFD da lo mismo que en NFC.
+    import unicodedata
+
+    assert nd.tokenizar(unicodedata.normalize("NFD", "canción pingüino")) == ["canción", "pingüino"]
+
+
+def test_coreano_igual_que_antes():
+    # El coreano lleva espacios: sigue por palabras.
+    t = "한국어는 띄어쓰기를 합니다"
+    assert nd.tokenizar(t) == _tokenizar_anterior(t) == ["한국어는", "띄어쓰기를", "합니다"]
+
+
+def test_tailandes_por_caracteres_con_sus_marcas():
+    # Antes salian trozos de silaba cortados en cada marca ('ภาษาไทยเป', 'นภาษาท'...).
+    tokens = nd.tokenizar("ภาษาไทยเป็นภาษา")
+    assert "".join(tokens) == "ภาษาไทยเป็นภาษา"
+    assert all(len(t) == 1 for t in tokens)
+
+
+_SILABAS_JA = list("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん")
+_KANJI = list("日本東京大学研究会社経済政治文化歴史地域情報技術環境教育医療産業")
+
+
+def _frases_ja(n: int, semilla: int) -> list[str]:
+    rnd = random.Random(semilla)
+    return [
+        "".join(rnd.choice(_KANJI if rnd.random() < 0.4 else _SILABAS_JA) for _ in range(20)) + "。"
+        for _ in range(n)
+    ]
+
+
+def _cambiar_en_frases(frases: list[str], indices, nuevo: str) -> list[str]:
+    casi = list(frases)
+    for i in indices:
+        casi[i] = casi[i][:8] + nuevo + casi[i][8 + len(nuevo):]
+    return casi
+
+
+def test_japones_casi_igual_se_detecta():
+    # 40 frases, una palabra cambiada en 3. Antes, con una frase por token, la
+    # Jaccard era 0,87 y no llegaba al umbral.
+    frases = _frases_ja(40, 1)
+    a = "".join(frases)
+    b = "".join(_cambiar_en_frases(frases, (5, 17, 31), "経済"))
+    assert nd.jaccard(a, b) >= 0.95
+    assert nd.similitud(nd.firma(a), nd.firma(b)) >= nd.UMBRAL_SIMILITUD
+
+
+def test_japones_distinto_no_se_parece():
+    a, b = "".join(_frases_ja(40, 1)), "".join(_frases_ja(40, 2))
+    assert nd.jaccard(a, b) < 0.3
+    assert nd.similitud(nd.firma(a), nd.firma(b)) < 0.3
+
+
+_HANZI = list("我们的公司产品服务客户质量价格市场发展技术管理系统网络信息数据中心国家城市学校工作")
+
+
+def test_chino_casi_igual_si_distinto_no():
+    rnd = random.Random(3)
+    base = "".join(rnd.choice(_HANZI) for _ in range(600))
+    casi = base[:100] + "政府" + base[102:400] + "银行" + base[402:]
+    otro = "".join(random.Random(4).choice(_HANZI) for _ in range(600))
+    assert nd.similitud(nd.firma(base), nd.firma(casi)) >= nd.UMBRAL_SIMILITUD
+    assert nd.similitud(nd.firma(base), nd.firma(otro)) < 0.3
+
+
+_HINDI = ("भारत देश में कई भाषाएँ बोली जाती हैं हिन्दी सबसे अधिक लोगों की भाषा है "
+          "सरकार ने नई शिक्षा नीति लागू की विद्यार्थी विद्यालय पुस्तक ज्ञान विज्ञान "
+          "समाचार मौसम बाज़ार किसान फसल पानी बिजली सड़क रेल यात्रा").split()
+
+
+def test_hindi_casi_igual_si_distinto_no():
+    rnd = random.Random(5)
+    base = [rnd.choice(_HINDI) for _ in range(600)]
+    casi = list(base)
+    for i in (40, 300, 520):
+        casi[i] = "परिवर्तन"
+    otro = [random.Random(6).choice(_HINDI) for _ in range(600)]
+    a, b, c = " ".join(base), " ".join(casi), " ".join(otro)
+    assert nd.jaccard(a, b) >= 0.95
+    assert nd.similitud(nd.firma(a), nd.firma(b)) >= nd.UMBRAL_SIMILITUD
+    assert nd.similitud(nd.firma(a), nd.firma(c)) < 0.3
+
+
+def test_minimo_de_texto_sin_espacios():
+    # Cada caracter cuenta media palabra: 60 caracteres CJK dan firma, 25 no.
+    texto = "".join(_frases_ja(5, 7)).replace("。", "")  # 100 caracteres
+    assert nd.firma(texto[:25]) is None
+    assert nd.firma(texto[: nd.MIN_PALABRAS * nd.CARACTERES_POR_PALABRA - 1]) is None
+    assert nd.firma(texto[: nd.MIN_PALABRAS * nd.CARACTERES_POR_PALABRA]) is not None
+    # Antes, nueve frases japonesas eran nueve "palabras": ni firma.
+    assert nd.firma("".join(_frases_ja(9, 8))) is not None
+    # Mixto: 20 palabras latinas + 20 caracteres = 30 palabras equivalentes.
+    assert nd.firma(_texto(20) + " " + texto[:20]) is not None
+    assert nd.firma(_texto(20) + " " + texto[:19]) is None
