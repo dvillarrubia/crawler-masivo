@@ -113,7 +113,7 @@ def resolver_config(
 
 def comprobar_segmentos(config: dict) -> None:
     """Las condiciones `x` de los segmentos contra las reglas a medida de la
-    config ENTERA (decision 108): un perfil puede segmentar por una extraccion
+    config ENTERA (decision 125): un perfil puede segmentar por una extraccion
     del cliente, pero una `x` que no fija ninguna capa no casaria nunca y se
     leeria como «no hay ninguna»."""
     from shared.segmentos import errores_de_config
@@ -414,7 +414,7 @@ def crear_cliente(cuerpo: ClientCreate, db: Session = Depends(get_session)):
             detail="El nombre no da un slug: escribe uno a mano")
     _slug_libre(db, slug)
     # Como al editarlo: la configuracion del cliente sola tiene que ser
-    # resoluble (un segmento sobre una `x` que no existe, decision 108).
+    # resoluble (un segmento sobre una `x` que no existe, decision 125).
     from types import SimpleNamespace
 
     resolver_config(SimpleNamespace(config_defecto=cuerpo.config_defecto or {}), None, None)

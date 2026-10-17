@@ -240,7 +240,7 @@ class TemplateRule(BaseModel):
 
 
 class ReglaSegmento(BaseModel):
-    """Una regla de segmento de negocio (decision 108, `shared/segmentos.py`).
+    """Una regla de segmento de negocio (decision 125, `shared/segmentos.py`).
 
     `patron` es el mismo de `TemplateRule` (regex sobre el path, sin distinguir
     mayusculas), asi que una lista de `templates` vale como lista de segmentos.
@@ -302,7 +302,7 @@ class JobConfig(BaseModel):
     # `fusionar_config`, asi que en `jobs.config` no llega a guardarse.
     custom_extraction: dict[str, ExtractorAMedida | None] = Field(default_factory=dict)
     custom_search: dict[str, BusquedaAMedida | None] = Field(default_factory=dict)
-    # Segmentos de negocio (decision 108): la PRIMERA regla que casa da el
+    # Segmentos de negocio (decision 125): la PRIMERA regla que casa da el
     # segmento de la URL; si ninguna, la forma de la ruta. Es una lista, asi
     # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
     # precedencia es el orden, y sumar listas la haria imposible de leer.
@@ -568,7 +568,7 @@ class JobResponse(BaseModel):
     # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
     # causa si el rastreo se dio por bloqueado (decision 103).
     health: dict[str, Any] | None = None
-    # Con que reglas se materializo `urls.segmento` y cuantas casaron (108).
+    # Con que reglas se materializo `urls.segmento` y cuantas casaron (125).
     segmentacion: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
@@ -711,7 +711,7 @@ class UrlResponse(BaseModel):
     resource_type: str | None = None
     redirect_url: str | None = None
     indexable: bool | None = None
-    segmento: str | None = None  # decision 108
+    segmento: str | None = None  # decision 125
     first_seen_at: datetime | None = None
     last_crawled_at: datetime | None = None
     # Screaming Frog parity

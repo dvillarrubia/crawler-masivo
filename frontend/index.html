@@ -1625,7 +1625,7 @@
                         x-text="(n => n + (n === 1 ? ' tipo' : ' tipos'))(resumenIssues(g[0]).length)"></span>
                 </button>
               </template>
-              <!-- Segmento de negocio (decision 108): el % es sobre SUS URLs. -->
+              <!-- Segmento de negocio (decision 125): el % es sobre SUS URLs. -->
               <select class="exp-problema" :class="issuesSegmento && 'has-value'" aria-label="Segmento"
                       @focus="!segmentosJob && cargarSegmentos()" @change="elegirSegmentoProblemas($event.target.value)"
                       style="width:auto;max-width:16rem">
@@ -1742,7 +1742,7 @@
               </select>
               <template x-if="issuesSegmento">
                 <!-- Solo las de paginas del segmento: las de un hallazgo para muchas
-                     paginas no se reparten (decision 108). -->
+                     paginas no se reparten (decision 125). -->
                 <button class="btn btn-sm" @click="elegirSegmentoProblemas('')" :title="'Quitar el segmento ' + issuesSegmento">
                   <i data-lucide="x" style="width:12px;height:12px"></i>
                   Segmento: <span class="truncate" style="max-width:16rem" x-text="issuesSegmento"></span>
@@ -3526,7 +3526,7 @@
               <i data-lucide="layers" style="width:13px;height:13px"></i>
               <span>Por plantilla</span>
             </button>
-            <!-- Segmentos de negocio (decision 108): los de las reglas del
+            <!-- Segmentos de negocio (decision 125): los de las reglas del
                  cliente y, si ninguna casa, la forma de la ruta. -->
             <button class="exp-toolbar-btn" :class="expAgrupar && expAgruparPor === 'segmento' && 'active'" @click="alternarAgrupar('segmento')"
                     :aria-pressed="expAgrupar && expAgruparPor === 'segmento'" data-tip="Agrupa las URLs de esta vista por su segmento de negocio">

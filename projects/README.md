@@ -23,7 +23,7 @@ projects/
 | `extraction.strip_promo_blocks` | patrones genéricos de promo (`carousel`, `newsletter`…). Ponlo a `false` si el hero con el H1 va en un carrusel |
 | `extraction.custom_boilerplate_selectors` | selectores CSS del ruido propio del cliente (modales, formularios, relacionados, pie dentro de `<main>`) |
 | `templates` | reglas `{nombre, patron}` (regex sobre el path, la primera que casa manda). Las usan `check_js_templates.py` (automático al acabar) y `check_content_quality.py` para muestrear por plantilla |
-| `segmentos` | segmentos de negocio (decision 108): lista de `{nombre, patron, si}`; `patron` es el de `templates`, `si` combina `todas`/`alguna`/`no` con `ruta`, `campo` y `x` (una regla a medida). La primera que casa manda; sin coincidencia, la forma de la ruta. Se aplican al analizar y se re-aplican a un censo viejo con `POST /api/jobs/{id}/segmentos` |
+| `segmentos` | segmentos de negocio (decision 125): lista de `{nombre, patron, si}`; `patron` es el de `templates`, `si` combina `todas`/`alguna`/`no` con `ruta`, `campo` y `x` (una regla a medida). La primera que casa manda; sin coincidencia, la forma de la ruta. Se aplican al analizar y se re-aplican a un censo viejo con `POST /api/jobs/{id}/segmentos` |
 | `http.accept_language`, `user_agent`, `impersonate` | identidad HTTP |
 | `concurrent_requests*`, `crawl_behavior.*` | ritmo; con WAF empezar en 4 / 2 / `request_delay` 0.5 |
 | `crawl_behavior.autothrottle_target_concurrency` | **la concurrencia efectiva**: AutoThrottle ajusta el retardo para mantener esta media, por debajo de `concurrent_requests*`. Un 2.0 heredado del canario dejó un rastreo con JS a 15 págs/min con 8/6 configurado. Ponlo igual que `concurrent_requests_per_domain` |

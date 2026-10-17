@@ -1,4 +1,4 @@
-"""Segmentos de negocio de un censo (Ola 3.3, decision 108).
+"""Segmentos de negocio de un censo (Ola 3.3, decision 125).
 
 - `GET /api/jobs/{id}/segmentos`: los segmentos materializados con sus cifras
   (URLs, indexables, paginas con error o aviso), las reglas y si `urls.segmento`

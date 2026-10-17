@@ -1,7 +1,7 @@
 # Decisiones: extracción y búsqueda a medida
 
 > Lo que el consultor pide a cada página con sus propias reglas (#34, Ola 3 de
-> `docs/PLAN_MEJOR_CRAWLER.md`), los segmentos de negocio (3.3, decisión 108)
+> `docs/PLAN_MEJOR_CRAWLER.md`), los segmentos de negocio (3.3, decisión 125)
 > y, cuando llegue, la comparación de valores extraídos (3.4). Índice de todas las
 > decisiones en [`README.md`](README.md).
 
@@ -174,8 +174,8 @@
    (PR 3), la comparación de valores entre censos (PR 4, 3.4) y re-extraer sobre
    `raw_html` sin re-rastrear. Esta PR no emite incidencias.
 
-<a id="d108"></a>
-108. **Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe
+<a id="d125"></a>
+125. **Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe
    no casa, y se materializan en `urls.segmento`** (Ola 3.3). Reglas del
    consultor que ponen a cada URL un nombre de negocio —«fichas de producto»,
    «blog», «categorías»— para que el resto de la herramienta pueda contestar

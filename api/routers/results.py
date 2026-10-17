@@ -560,7 +560,7 @@ def valor_csv_a_medida(fila: dict | None, clase: str, regla: dict, posicion: int
 
 
 # ---------------------------------------------------------------------------
-# Segmentos de negocio (decision 108): `urls.segmento`, materializado al analizar
+# Segmentos de negocio (decision 125): `urls.segmento`, materializado al analizar
 # ---------------------------------------------------------------------------
 def segmentos_pedidos(qp) -> list[str]:
     """`?segmento=a&segmento=b` (O). Repetido y no separado por comas: la forma
@@ -571,7 +571,7 @@ def segmentos_pedidos(qp) -> list[str]:
 
 def urls_de_segmentos(db: Session, job_id: uuid.UUID, segmentos: list[str]):
     """Subconsulta de los ids de URL de esos segmentos, con el `job_id` delante
-    (lo que usa el indice; `segmento` no tiene uno propio, decision 108)."""
+    (lo que usa el indice; `segmento` no tiene uno propio, decision 125)."""
     return db.query(Url.id).filter(Url.job_id == job_id, Url.segmento.in_(segmentos))
 
 
@@ -692,7 +692,7 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         if segmentos:
             # Lo mismo que cuenta Problemas con ese segmento: la pagina de
             # anclaje de un hallazgo de muchas paginas no es «la» pagina del
-            # segmento con ese problema (decision 108).
+            # segmento con ese problema (decision 125).
             sub = sub.filter(incidencia_por_pagina())
         q = q.filter(Url.id.in_(sub))
 
@@ -828,7 +828,7 @@ def urls_por_plantilla(
     request: Request,
     limite: int = Query(300, ge=1, le=2000),
     agrupar: str = Query("plantilla", pattern="^(plantilla|segmento)$",
-                         description="Por la forma de la ruta o por `urls.segmento` (decision 108)"),
+                         description="Por la forma de la ruta o por `urls.segmento` (decision 125)"),
     db: Session = Depends(get_session),
 ):
     """Las URLs de la vista agrupadas por la forma de su ruta (o por segmento).
@@ -1241,7 +1241,7 @@ def list_issues(
     page_size: int = Query(50, ge=1, le=200),
     severity: str | None = Query(None),
     issue_type: str | None = Query(None),
-    segmento: list[str] | None = Query(None, description="Solo las de paginas de esos segmentos (decision 108)"),
+    segmento: list[str] | None = Query(None, description="Solo las de paginas de esos segmentos (decision 125)"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
@@ -1311,7 +1311,7 @@ class _ResumenIssue(BaseModel):
     incidencias: int
     paginas: int
     ejemplos: list[_EjemploIssue] = []
-    # Decision 108. Con `?segmento=`: sobre las URLs de esos segmentos.
+    # Decision 125. Con `?segmento=`: sobre las URLs de esos segmentos.
     urls_denominador: int | None = None
     pct_paginas: float | None = None
     # Con `?por_segmento=true`: los segmentos con mas paginas afectadas, y
@@ -1325,7 +1325,7 @@ class _ResumenIssue(BaseModel):
 def resumen_issues(
     job_id: uuid.UUID,
     ejemplos: int = Query(3, ge=0, le=10),
-    segmento: list[str] | None = Query(None, description="Solo paginas de esos segmentos (decision 108)"),
+    segmento: list[str] | None = Query(None, description="Solo paginas de esos segmentos (decision 125)"),
     por_segmento: bool = Query(False, description="Anade el % de paginas afectadas por segmento"),
     segmentos_max: int = Query(10, ge=1, le=200),
     db: Session = Depends(get_session),

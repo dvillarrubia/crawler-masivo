@@ -1,4 +1,4 @@
-"""Lo que la interfaz PIDE con un segmento elegido (decision 108), ejecutando
+"""Lo que la interfaz PIDE con un segmento elegido (decision 125), ejecutando
 `frontend/app.js` en Chromium con `fetch` interceptado: no se lee el fuente,
 se llama a los metodos y se mira la URL que mandan.
 

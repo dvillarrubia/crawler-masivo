@@ -493,7 +493,7 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
-    issuesSegmento: '',       // segmento elegido en Problemas (decision 108)
+    issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
     ISSUE_INFO,
@@ -2095,7 +2095,7 @@ function app() {
     async loadIssuesResumen() {
       if (!this.job) return;
       try {
-        // El % por segmento (decision 108) va siempre: son tres consultas
+        // El % por segmento (decision 125) va siempre: son tres consultas
         // agrupadas. Con un segmento elegido, solo las paginas de ese segmento.
         const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: '8' });
         if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
@@ -2664,7 +2664,7 @@ function app() {
     expVistas: [],              // vistas guardadas del cliente del rastreo
     expPlantillas: null,        // respuesta de /urls/plantillas
     expPlantilla: '',           // plantilla elegida: filtra la tabla
-    expAgruparPor: 'plantilla', // 'plantilla' (forma de ruta) o 'segmento' (decision 108)
+    expAgruparPor: 'plantilla', // 'plantilla' (forma de ruta) o 'segmento' (decision 125)
     expSegmento: '',            // segmento elegido: filtra la tabla (?segmento=)
     segmentosJob: null,         // GET /jobs/{id}/segmentos
     expAMedida: [],             // reglas a medida del censo (decision 104): [{key, nombre, clase, etiqueta}]
@@ -2904,7 +2904,7 @@ function app() {
       this.loadExplorerUrls();
     },
 
-    // ---- Segmentos de negocio (decision 108) ----
+    // ---- Segmentos de negocio (decision 125) ----
     // `urls.segmento` lo materializa el analisis con `config.segmentos`; sin
     // reglas, cada URL lleva la forma de su ruta (empieza por «/»).
     async cargarSegmentos() {
@@ -3412,7 +3412,7 @@ const EXP_COLUMN_DEFS = {
   indexability_status:  { label: 'Razón noindex',   type: 'string',  sortable: false, filterKey: 'indexability_status_contains', width: 200, fmt: r => r.indexability_status ?? '' },
   is_internal:          { label: 'Interna',          type: 'boolean', sortable: false, filterKey: 'is_internal',             width: 130, fmt: r => r.is_internal === true ? 'Sí' : r.is_internal === false ? 'No' : '' },
   segmento:             { label: 'Segmento',         type: 'string',  sortable: true,  width: 200, fmt: r => r.segmento ?? '',
-                          tip: r => r.segmento == null ? 'Sin segmentar: el censo se analizó antes de los segmentos (decisión 108)'
+                          tip: r => r.segmento == null ? 'Sin segmentar: el censo se analizó antes de los segmentos (decisión 125)'
                             : r.segmento.startsWith('/') ? 'Ninguna regla casa: es la forma de la ruta' : 'Segmento de negocio: ' + r.segmento },
   host:                 { label: 'Host',             type: 'string',  sortable: true,  filterKey: 'host_contains',           width: 200, fmt: r => r.host ?? '' },
   // html_meta fields

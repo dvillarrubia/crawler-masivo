@@ -19,7 +19,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
-| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 108 |
+| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 125 |
 
 ## Por numero
 
@@ -133,7 +133,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 104 | Extracción y búsqueda a medida: una fila por (URL, regla) evaluada, y sin fila no es «vacío» | [`extraccion-a-medida`](extraccion-a-medida.md#d104) |
 | 105 | Soft 404 determinista: la página de error del sitio se pide, no se adivina, y lo dudoso no se afirma | [`incidencias`](incidencias.md#d105) |
 | 106 | Lo que Google no puede seguir se guarda aparte, y lo de la plantilla se avisa una vez | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d106) |
-| 108 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d108) |
+| 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
 
 ## Anadir una decision
 

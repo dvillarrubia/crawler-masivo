@@ -1,4 +1,4 @@
-"""Segmentos materializados en `urls.segmento` (decision 108), EJECUTANDO el
+"""Segmentos materializados en `urls.segmento` (decision 125), EJECUTANDO el
 analisis y el re-segmentado contra una base de verdad (SQLite; Postgres con
 PAGERANK_TEST_DATABASE_URL, como test_soft404).
 

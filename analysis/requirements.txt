@@ -14,6 +14,6 @@ tldextract>=5.1
 # falta DECISIONS_ENABLED=1, OPENROUTER_API_KEY y que alguien la dispare (#40).
 httpx>=0.28
 
-# Regex de los segmentos de negocio (decision 108, shared/segmentos.py): con
+# Regex de los segmentos de negocio (decision 125, shared/segmentos.py): con
 # `timeout`, como las de la extraccion a medida; sin el, `segmentar` no importa.
 regex>=2024.11.6

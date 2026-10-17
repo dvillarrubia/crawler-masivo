@@ -93,7 +93,7 @@ el host al que redirige la semilla— y por plantilla, que no sale como URL y qu
 no gasta `max_urls`; la repeticion de una sonda que solo cambia de esquema; el
 plan del script). `test_insights.py` comprueba que una soft 404 no sube la nota
 de contenido.
-Segmentos de negocio (decision 108): `test_segmentos.py` (precedencia, Y/O/NO,
+Segmentos de negocio (decision 125): `test_segmentos.py` (precedencia, Y/O/NO,
 logica de tres valores, muros, externas y recursos fuera de las reglas y
 validacion; el esquema de `JobConfig` en el trabajo de la API),
 `test_segmentos_db.py` (`run_all` materializa, re-segmentar es retroactivo,

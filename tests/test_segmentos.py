@@ -1,5 +1,5 @@
 """Segmentos de negocio: reglas, precedencia y logica de tres valores
-(decision 108, `shared/segmentos.py`).
+(decision 125, `shared/segmentos.py`).
 
 Lo que se sujeta, ejecutando el segmentador sobre filas como las que lee de
 `urls` y `custom_extraction`:

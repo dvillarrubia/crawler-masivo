@@ -115,7 +115,7 @@ jobs:
         # tambien: la API valida y prueba las reglas con parsel y regex, que se
         # instalan arriba igual que en su imagen. Y el backup de los enlaces no
         # rastreables (decision 106), que viaja por el mismo camino. Y los
-        # segmentos de negocio (decision 108): la API los valida, filtra y
+        # segmentos de negocio (decision 125): la API los valida, filtra y
         # re-segmenta con `regex`, instalado arriba como en su imagen.
         run: >
           python -m pytest -q -rs tests/test_export_csv.py tests/test_insights.py

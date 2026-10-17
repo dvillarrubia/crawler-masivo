@@ -60,7 +60,7 @@ def main() -> None:
         # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
-        # Segmentos de negocio (decision 108). Sin DEFAULT: solo catalogo. Sin
+        # Segmentos de negocio (decision 125). Sin DEFAULT: solo catalogo. Sin
         # indice a proposito: todo filtro por segmento va con `job_id`, que ya
         # tiene los suyos, y crear uno sobre `urls` bloquearia las escrituras
         # de un rastreo en marcha mientras se construye.

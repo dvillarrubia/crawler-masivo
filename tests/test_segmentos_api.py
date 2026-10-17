@@ -1,4 +1,4 @@
-"""Segmentos aplicados a todo (decision 108), EJECUTADO con TestClient y
+"""Segmentos aplicados a todo (decision 125), EJECUTADO con TestClient y
 SQLite: filtro en `/urls`, en su CSV, en `/issues` y `/issues/resumen`, el %
 por segmento con su denominador, la vista agrupada por segmento y el
 re-segmentado retroactivo por la API.

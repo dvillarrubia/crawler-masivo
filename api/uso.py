@@ -48,7 +48,7 @@ def _claves(qp, *, csv: bool) -> list[str]:
             claves.append("columna:x.*")
             continue
         if nombre == "segmento":
-            # El nombre del segmento lo pone el consultor (decision 108), como el
+            # El nombre del segmento lo pone el consultor (decision 125), como el
             # de una regla a medida: se cuenta el filtro, nunca el valor.
             claves.append("filtro:segmento")
             continue

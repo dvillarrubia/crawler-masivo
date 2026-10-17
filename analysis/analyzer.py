@@ -350,7 +350,7 @@ class SEOAnalyzer:
 
     def segmentar(self) -> dict:
         """Materializa `urls.segmento` con las reglas de `config.segmentos`
-        (decision 108). Es lo mismo que hace `POST /segmentos` sin el analisis
+        (decision 125). Es lo mismo que hace `POST /segmentos` sin el analisis
         entero: re-analizar un censo viejo con reglas nuevas lo segmenta sin
         re-rastrear."""
         from shared.segmentos import segmentar

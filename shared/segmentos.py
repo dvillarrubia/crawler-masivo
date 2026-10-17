@@ -1,4 +1,4 @@
-"""Segmentos de negocio definidos por el usuario (Ola 3.3, decision 108).
+"""Segmentos de negocio definidos por el usuario (Ola 3.3, decision 125).
 
 Un segmento es el nombre de negocio de un grupo de URLs: «fichas de producto»,
 «blog», «categorias». Lo decide el consultor con reglas que viajan en
@@ -49,7 +49,7 @@ externas van a `SEGMENTO_EXTERNA` y los recursos internos que no son un
 documento (imagenes, CSS, JS, fuentes: `TIPOS_RECURSO`) a `SEGMENTO_RECURSO`:
 un enlace a `otro.com/blog/` no es del blog del cliente, y una imagen de
 `/blog/wp-content/` no es una pagina del blog; contarlas en el segmento
-inflaria el denominador de cada porcentaje (decision 108).
+inflaria el denominador de cada porcentaje (decision 125).
 
 Vive en `shared/` porque lo usan el analizador (al terminar `run_all`) y la API
 (re-segmentar sin el analisis entero, y validar al guardar la configuracion).
@@ -515,7 +515,7 @@ def segmentar(session, job_id, reglas: list[dict] | None = None, *, lote: int = 
     hacia que Postgres recorriese `urls_pkey` —la clave de TODOS los censos—
     filtrando por job, y el coste crecia con la tabla entera y no con el censo.
     Medido en una base sintetica de 6 M de filas (100 censos de 60.000): ver la
-    decision 108.
+    decision 125.
     """
     from sqlalchemy import select, update
 

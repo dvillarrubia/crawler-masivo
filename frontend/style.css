@@ -1338,7 +1338,7 @@ code.tramo{font-size:.7rem;background:var(--orange-bg);padding:0 .25rem;border-r
 .barra-seleccion .text-dim{margin-right:auto}
 tr.fila-marcada td{background:var(--accent-subtle)}
 
-/* Segmentos de negocio (decision 108): reparto de un tipo de incidencia */
+/* Segmentos de negocio (decision 125): reparto de un tipo de incidencia */
 .issue-segmentos ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.35rem .9rem}
 .issue-segmentos li{display:flex;align-items:center;gap:.35rem;font-size:.8rem}
 .exp-segmento{max-width:14rem}
