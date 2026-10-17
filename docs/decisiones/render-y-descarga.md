@@ -417,3 +417,103 @@
    middlewares y la descarga de producción (curl_cffi y Playwright), y el
    servidor anotando lo que le llega. Contra `6126fd5`, 10 de los 16 que
    había entonces fallan.
+
+<a id="d119"></a>
+119. **La paridad móvil se mide con una muestra por plantilla, en la misma
+   ventana y con el dispositivo entero; lo que cambia solo no se afirma**
+   (#150, Ola 7.4 de `docs/PLAN_MEJOR_CRAWLER.md`). Google indexa lo que
+   recibe su UA de smartphone, y el censo se rastrea de escritorio: un sitio
+   con servido dinámico o con m-dot podía servir a un móvil otro canonical,
+   un `noindex` o un menú sin enlaces y no lo veía nada. Con
+   `crawl_behavior.paridad_movil_muestra` (0 de serie, apagado; hasta 500) el
+   spider vuelve a pedir, como mucho `paridad_movil_por_plantilla` (3) por
+   plantilla, las páginas internas HTML 2xx que no son un muro, con el **otro
+   perfil**: móvil si el UA del job es de escritorio, escritorio si ya es de
+   móvil (`shared/perfiles.py`, `es_ua_movil`). La plantilla es la de
+   `config.templates` del job o, sin ellas, `shared.plantillas.firma_de_ruta`
+   (la `plantilla_de` de la rama de #158 no está en esta base).
+   - **Un perfil es el dispositivo entero, no la cabecera.** Sin render, el UA
+     de móvil y la huella TLS `chrome131_android` de curl_cffi (si la versión
+     instalada no la tiene, se dice en el log y sale con la del job:
+     `scrapy-impersonate` no está fijado). Con render, un contexto de
+     Playwright con nombre por perfil (`perfil_movil`, creado con
+     `playwright_context_kwargs`: 412×915, `device_scale_factor` 2,625,
+     `is_mobile`, `has_touch` y el UA) y `PLAYWRIGHT_MAX_CONTEXTS` de 3 a 4.
+     Y de paso el contexto `custom` del censo lleva el UA del job: se
+     construía al importar `settings.py` con el del ENTORNO, así que el `-s
+     USER_AGENT` del worker cambiaba la cabecera pero no `navigator.userAgent`
+     ni la ventana (leído; `SeoSpider.update_settings` lo corrige cuando el UA
+     llega por `-s`, y con un UA de móvil el contexto pasa a ser de móvil).
+     Por defecto el móvil es un Chrome de Android y no Googlebot smartphone
+     (`paridad_movil_ua`): con el token de Googlebot desde nuestra IP, un WAF
+     que verifica bots lo bloquea o le sirve otra cosa (decisión 98) y se
+     mediría el WAF. La cadena de Googlebot smartphone vive ahora también en
+     `shared/perfiles.py`, y un test comprueba que es la del preset del
+     formulario.
+   - **Lo que se compara** (`shared/paridad.py`, con las mismas funciones de
+     extracción que el censo): title, primer H1 que se pinta, description,
+     canonical efectivo (`misma_url`; relativo frente a absoluto y «sin
+     canonical» frente a autocanónico son lo mismo), `noindex` y `nofollow`
+     por directiva (no la cadena de robots), palabras del contenido
+     PRINCIPAL (diferencia desde un 30 % con la mayor por encima de 50; el
+     30 % es el punto de partida de FreeCrawl, sin medir aún aquí) y destinos
+     internos seguibles (faltan al menos 5 y al menos el 20 % de los de la
+     base, con 10 ejemplos). Las dos capturas van en el **mismo modo**
+     (render las dos o ninguna): si no, se mediría 7.1 y no el dispositivo.
+   - **Lo que no se copia de FreeCrawl.** No sigue redirecciones: si la
+     versión móvil redirige (a `m.` o a otra ruta), es un hallazgo propio
+     (`estado='redirige'`), se pide el destino UNA vez con el mismo perfil y
+     se mira la anotación bidireccional (`rel=alternate media` en escritorio
+     hacia el destino y canonical del destino a la de escritorio). No compara
+     contra lo guardado horas antes: la línea base viaja en `meta` y la sonda
+     sale en segundos (prioridad 10). La muestra es por plantilla y no por
+     entrantes, que se lleva la home y el menú. Un muro en la sonda es «no
+     evaluada», no una diferencia.
+   - **Volatilidad (decisión 13).** Si algo difiere, se pide la página otra
+     vez con el perfil del censo; lo que también cambia entre las dos de
+     escritorio (un banner rotativo, «relacionados» al azar) va a `volatiles`
+     y no se afirma. Si ese control falla, la fila queda `no_evaluada`: sin
+     control no se sabe qué es del sitio. Coste: como mucho 2× la muestra (3×
+     con un m-dot), fuera de `max_urls`.
+   - **Sonda, no URL del censo** (patrón de la decisión 105): callback y
+     errback propios, sin `PageItem`, `dont_filter`, robots.txt respetado (lo
+     prohibido queda `no_evaluada` con el motivo), sin tocar la salud del
+     rastreo, jar de cookies propio si el job lo enciende (decisión 114) y
+     latido por tiempo cada 60 s. Al reanudar, lo ya muestreado cuenta.
+   - **Almacenamiento: `capturas_alternativas`**, pensada también para 7.1
+     (`perfil='crudo'`). Una fila por URL y perfil AUNQUE no difiera: «no
+     difiere» es un dato y sin fila es «no evaluada» (como la decisión 104).
+     Con `job_id` (decisión 37), en `TABLAS_POR_JOB`, `borrar_job` (96) y el
+     backup. La ficha de la URL (`GET /urls/{id}`) la trae en
+     `capturas_alternativas`.
+   - **Avisos agrupados por plantilla** (36, 53, 64, 88): una fila por
+     (perfil, plantilla, campo) con `paginas_afectadas` sobre
+     `paginas_muestreadas`, ejemplos y cuántas no llevan `Vary: User-Agent`
+     (servido dinámico sin `Vary`: una caché o CDN puede dar la versión
+     equivocada; va en los detalles, no como tipo), anclada en la URL menor.
+     Severidad por consecuencia: `paridad_movil_indexacion` es **error** con
+     `noindex` o canonical distintos y aviso con `nofollow`;
+     `paridad_movil_contenido` es aviso con title, H1, palabras o enlaces e
+     informativa con la description; `paridad_movil_respuesta` es aviso con
+     otro código o una redirección, e informativa si es un m-dot con la
+     anotación completa, que es una configuración válida.
+   - **Entre censos.** La paridad no se compara entre censos rastreados con UA
+     distinto: el perfil de base es otro (decisión 70). Y la comparación avisa
+     cuando un censo es de perfil móvil y el otro de escritorio
+     (`resumen_de_job` lleva `perfil`): en un sitio con servido dinámico, la
+     diferencia puede ser del perfil. Los tipos nuevos cambian
+     `analisis_version` y la comparación por incidencias se niega a cruzar
+     censos analizados con código distinto (decisión 91).
+   - **Lo que cambia en los censos.** Nada si no se enciende: re-analizar no
+     da avisos nuevos sin la tabla llena. Hay que **re-rastrear** con la clave
+     puesta. Pendiente de medir en un sitio con servido dinámico conocido y en
+     uno responsive como control (que debe dar 0 diferencias no volátiles), y
+     repetirlo al día siguiente (13). El viewport no se compara todavía: la
+     extracción del `<meta viewport>` va en otra rama (#155). Medido de paso
+     con Chromium 1194: un móvil sin `<meta viewport>` maqueta a 980 px de
+     ancho (`innerWidth`), así que una regla de CSS por ancho no ve el móvil.
+   Tests: `tests/test_paridad_movil.py` (el SeoSpider real con curl_cffi y,
+   si arranca el Chromium instalado, Playwright, contra un sitio que sirve
+   otro HTML a un UA de móvil; y la tubería real contra Postgres) y
+   `tests/test_paridad_movil_analisis.py` (la comparación, los perfiles, el
+   contexto `custom` y los avisos contra SQLite).

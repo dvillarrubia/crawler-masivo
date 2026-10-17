@@ -767,6 +767,60 @@ class EnlaceNoRastreable(Base):
     )
 
 
+class CapturaAlternativa(Base):
+    """La misma URL pedida con otro perfil, comparada con la del censo (decision 119).
+
+    Hoy, el perfil movil (Ola 7.4): una muestra por plantilla pedida con el UA
+    y el dispositivo de un movil durante el rastreo, como sonda fuera de
+    `max_urls` (patron de la decision 105). Pensada tambien para la Ola 7.1
+    (`perfil='crudo'`, la respuesta sin render frente al render).
+
+    Una fila por URL muestreada y perfil AUNQUE no haya diferencias: «no
+    difiere» es un dato y «sin fila» es «no evaluada» (como la decision 104).
+    `estado` dice que se pudo comparar: `comparada`, `redirige` (la otra
+    version manda a otra URL: m-dot o servido distinto, sin comparar campos),
+    `respuesta_distinta` (otro codigo) o `no_evaluada` (un muro, un error,
+    robots). `diferencias` son las de `shared.paridad.diferencias` sin los
+    campos `volatiles`: los que tambien cambian entre dos peticiones con el
+    perfil del censo (decision 13), que no se afirman.
+
+    `job_id` en la fila para filtrar y borrar por censo sin unir con `urls`
+    (decision 37).
+    """
+
+    __tablename__ = "capturas_alternativas"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    # movil | escritorio (la alternativa de un censo rastreado con UA movil);
+    # mas adelante, crudo (7.1)
+    perfil = Column(String(20), nullable=False)
+    # render | sin_render: las dos capturas van SIEMPRE en el mismo modo
+    modo = Column(String(12), nullable=True)
+    estado = Column(String(24), nullable=False)
+    # Con que se agrupo la muestra: `config.templates` o `firma_de_ruta`
+    plantilla = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    status_code = Column(Integer, nullable=True)
+    response_class = Column(String(32), nullable=True)
+    redirige_a = Column(Text, nullable=True)
+    # Cabecera `Vary` de la respuesta del censo y de la alternativa
+    vary_base = Column(Text, nullable=True)
+    vary = Column(Text, nullable=True)
+    medidas = Column(JSON, nullable=True)
+    diferencias = Column(JSON, nullable=True)
+    volatiles = Column(JSON, nullable=True)
+    # Lo que no es un campo: el destino de un m-dot y su anotacion, el error...
+    detalle = Column(JSON, nullable=True)
+    capturada_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_capalt_job_perfil", "job_id", "perfil"),
+        Index("ix_capalt_url", "url_id"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Decisiones de un modelo (#7, decision 84)
 # ---------------------------------------------------------------------------

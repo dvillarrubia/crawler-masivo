@@ -272,6 +272,39 @@ SELECT u.url FROM custom_extraction c JOIN urls u ON u.id = c.url_id
 WHERE c.job_id = 'UUID-AQUI' AND c.nombre = 'gtm' AND c.estado = 'sin_coincidencia';
 ```
 
+### `capturas_alternativas` — La misma URL con otro perfil (decision 119)
+Una fila por URL muestreada y perfil, de la sonda de paridad movil (Ola 7.4;
+pensada tambien para el crudo frente al render de la 7.1). Aunque no difiera:
+sin fila = no evaluada.
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | Para filtrar y borrar por censo sin unir con `urls` (decision 37) |
+| url_id | bigint (FK → urls, CASCADE) | La pagina del censo |
+| perfil | varchar(20) | movil, escritorio (la alternativa de un censo con UA movil); crudo (7.1) |
+| modo | varchar(12) | render, sin_render: el mismo que la pagina del censo |
+| estado | varchar(24) | comparada, redirige, respuesta_distinta, no_evaluada |
+| plantilla | text | `config.templates` o `firma_de_ruta` |
+| user_agent | text | El UA con que se pidio |
+| status_code, response_class | integer, varchar(32) | De la respuesta alternativa |
+| redirige_a | text | Destino si la alternativa redirige (no se sigue como si fuera la misma pagina) |
+| vary_base, vary | text | Cabecera `Vary` de la pagina del censo y de la alternativa |
+| medidas | JSON | title, h1, description, canonical, noindex, nofollow, palabras, enlaces (numero), alternate_movil |
+| diferencias | JSON | `[{campo, base, alternativa, ...}]` sin los volatiles |
+| volatiles | JSON | Campos que tambien cambian entre dos peticiones con el perfil del censo |
+| detalle | JSON | Motivo de un no_evaluada, destino del m-dot y su anotacion |
+| capturada_at | timestamptz | |
+
+Indices: `ix_capalt_job_perfil (job_id, perfil)` y `ix_capalt_url (url_id)`.
+
+```sql
+-- Paginas con noindex solo en movil
+SELECT u.url FROM capturas_alternativas c JOIN urls u ON u.id = c.url_id
+WHERE c.job_id = 'UUID-AQUI' AND c.perfil = 'movil'
+  AND c.diferencias::jsonb @> '[{"campo": "noindex"}]';
+```
+
 ### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)
 Registro de lo decidido y cache DURADERA: un recrawl busca aqui por `(clave, pregunta, version_pregunta, modelo)` antes de pagar otra vez.
 

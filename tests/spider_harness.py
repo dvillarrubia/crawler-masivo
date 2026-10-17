@@ -168,8 +168,11 @@ def servir(robots_prohibe_todo: bool = False,
            robots_crawl_delay: float | None = None,
            rutas_extra: dict | None = None,
            puerto: int = 0,
-           muro: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
+           muro: dict | None = None,
+           rutas_movil: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
+    # Lo que se sirve a un UA de movil, si la ruta esta aqui (decision 119)
+    movil: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
@@ -178,7 +181,15 @@ def servir(robots_prohibe_todo: bool = False,
                                self.path))
             CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
                               self.path, {k.lower(): v for k, v in self.headers.items()}))
-            status, headers, body = rutas.get(self.path.split("?")[0], (404, {}, b"no"))
+            ruta = self.path.split("?")[0]
+            ua = self.headers.get("User-Agent") or ""
+            if ruta in movil and ("Mobile" in ua or "iPhone" in ua):
+                status, headers, body = movil[ruta]
+            else:
+                status, headers, body = rutas.get(ruta, (404, {}, b"no"))
+            if b"{aleatorio}" in body:
+                # Contenido que cambia en CADA peticion: un campo volatil
+                body = body.replace(b"{aleatorio}", os.urandom(6).hex().encode())
             self.send_response(status)
             headers = {"Content-Type": "text/html; charset=utf-8", **headers}
             for k, v in headers.items():
@@ -201,6 +212,9 @@ def servir(robots_prohibe_todo: bool = False,
     for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
         cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
         rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
+    for ruta, (codigo, cabeceras, cuerpo) in (rutas_movil or {}).items():
+        cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
+        movil[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
     if muro is not None:
         rutas.update(construir_sitio_con_muro(**muro))
     if robots_bloquea_privado:
@@ -303,7 +317,8 @@ def main() -> None:
                        entrada.get("robots_crawl_delay"),
                        entrada.get("rutas"),
                        entrada.get("puerto", 0),
-                       entrada.get("muro"))
+                       entrada.get("muro"),
+                       entrada.get("rutas_movil"))
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -390,6 +405,11 @@ def main() -> None:
     con_crawl_delay = entrada.get("robots_crawl_delay") is not None
 
     ajustes_reales: dict = {}
+    if entrada.get("ua_real"):
+        # El UserAgentMiddleware de settings.py: respeta meta["user_agent"]
+        # de una peticion (la sonda de paridad, decision 119).
+        middlewares["scrapy.downloadermiddlewares.useragent.UserAgentMiddleware"] = None
+        middlewares["seo_crawler.middlewares.UserAgentMiddleware"] = 400
     if entrada.get("http_real"):
         # Los middlewares del bloque `http` del job, como en settings.py, y el
         # jar como lo deja el worker (decision 114).
@@ -467,8 +487,11 @@ def main() -> None:
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
             "blocked_by_robots", "status_group", "response_class", "url_hash",
             "from_url_hash", "filas",
+            # CapturaAlternativaItem (decision 119)
+            "perfil", "modo", "estado", "plantilla", "user_agent", "redirige_a",
+            "medidas", "diferencias", "volatiles", "detalle",
         )}
-        for k in ("url", "redirect_url", "to_url"):
+        for k in ("url", "redirect_url", "to_url", "redirige_a"):
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)

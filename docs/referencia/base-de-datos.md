@@ -25,6 +25,7 @@
 | `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
 | `custom_extraction` | 1:N from urls (con `job_id`) | nombre, clase (extractor/busqueda), estado, n, valor, valor_clave, valor_num, valores, render (decision 104). Una fila por (URL, regla) EVALUADA: sin fila = no evaluada, no «vacio». Migracion: `migrar_custom_extraction()` en `init_db.py` |
 | `enlaces_no_rastreables` | 1:N from urls (con `job_id`) | crawlability (javascript_href, onclick_sin_href, a_sin_href, href_fuera_de_a, onclick_en_otra_etiqueta, fragmento_como_ruta), etiqueta, href, destino, destino_interno, destino_hash, anchor_text, link_position, repeticiones (decision 106). Enlaces que Google no puede seguir: NO son aristas y no estan en `links`. Una pagina se reemplaza entera al re-rastrear. Migracion: `migrar_enlaces_no_rastreables()` |
+| `capturas_alternativas` | 1:N from urls (con `job_id`) | perfil (movil, escritorio; mas adelante crudo para la Ola 7.1), modo (render/sin_render), estado (comparada, redirige, respuesta_distinta, no_evaluada), plantilla, user_agent, status_code, response_class, redirige_a, vary_base, vary, medidas, diferencias, volatiles, detalle (decision 119). Una fila por URL muestreada y perfil aunque no difiera: sin fila = no evaluada. Migracion: `migrar_capturas_alternativas()` |
 
 `urls.response_class` dice si la respuesta era la pagina o un muro delante
 (`contenido`, `challenge_waf`, `captcha`, `rate_limited`, `respuesta_binaria`,

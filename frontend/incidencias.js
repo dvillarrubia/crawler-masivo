@@ -437,6 +437,22 @@ const ISSUE_INFO = {
     google: 'No afecta al posicionamiento; es seguridad.',
     arreglo: 'Enviar X-Frame-Options o frame-ancestors en la CSP.',
   },
+  // Paridad movil/escritorio (decision 119): una fila por plantilla y campo
+  'paridad_movil_indexacion': {
+    que: 'Con el perfil móvil la página lleva otro canonical, un noindex o un nofollow que la versión rastreada no tiene (o al revés). Va por plantilla: «páginas» de las muestreadas de esa plantilla.',
+    google: 'Indexa la versión que recibe su rastreador de smartphone (indexación mobile-first). Un noindex o un canonical a otra URL solo en móvil saca la página del índice o la consolida en otra aunque la de escritorio esté bien.',
+    arreglo: 'Servir las mismas directivas a móvil y escritorio: revisar la plantilla móvil o la regla del servidor/CDN que decide por User-Agent. Si es servido dinámico, añadir «Vary: User-Agent».',
+  },
+  'paridad_movil_contenido': {
+    que: 'Con el perfil móvil cambian el title, el H1 o la description, o faltan contenido principal o enlaces internos (por encima del umbral). Lo que también cambia entre dos peticiones de escritorio se descarta como volátil.',
+    google: 'Indexa y enlaza lo que ve en móvil: el texto o los enlaces que solo están en escritorio no cuentan, y un menú que solo se monta al pulsar no reparte enlazado.',
+    arreglo: 'Que la versión móvil lleve el mismo contenido principal, titulares y enlaces internos (en el HTML, no solo al interactuar).',
+  },
+  'paridad_movil_respuesta': {
+    que: 'Con el perfil móvil la URL responde otro código o redirige a otra URL (por ejemplo a un m-dot). Si es un m-dot con la anotación completa (rel=alternate media en escritorio y canonical a escritorio en móvil) sale como informativa.',
+    google: 'Con URLs separadas necesita la anotación en los dos sentidos para entender que son la misma página; sin ella puede indexar las dos o quedarse con la que no es. Otro código en móvil es lo que indexa.',
+    arreglo: 'Si el sitio usa URLs móviles separadas, anotar las dos versiones; si no, servir la misma URL y el mismo código a los dos.',
+  },
   'unsafe_crossorigin': {
     que: 'Enlace con target="_blank" sin rel="noopener".',
     google: 'Nada: desde 2021 los navegadores lo aplican solos. Ya no se emite.',
@@ -472,6 +488,9 @@ const ISSUE_LABEL_EXTRA = {
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
   utm_en_enlace_interno: 'Enlace interno con utm',
+  paridad_movil_indexacion: 'Móvil: otro canonical o noindex',
+  paridad_movil_contenido: 'Móvil: otro contenido',
+  paridad_movil_respuesta: 'Móvil: otra respuesta',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -545,4 +564,10 @@ const DETALLE_LABEL = {
   etiqueta: 'etiqueta',
   posicion: 'posición',
   ancla: 'ancla',
+  // Paridad movil (decision 119)
+  campo: 'campo',
+  perfil: 'perfil',
+  plantilla: 'plantilla',
+  paginas_muestreadas: 'muestreadas de la plantilla',
+  sin_vary_user_agent: 'sin «Vary: User-Agent»',
 };
