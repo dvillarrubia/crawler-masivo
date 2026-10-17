@@ -162,6 +162,11 @@ Soft 404 (decision 105): `analysis_thresholds.soft404_similitud` (0.9),
 `soft404_min_palabras_igualdad` (5) y `soft404_max_proporcion_huella` (0.5); y
 `crawl_behavior.soft404_sondas` (12; 0 = sin sondas).
 
+Paridad movil (decision 119): `crawl_behavior.paridad_movil_muestra` (0 =
+apagada; hasta 500 paginas), `paridad_movil_por_plantilla` (3) y
+`paridad_movil_ua` (`chrome_android` o `googlebot_smartphone`). Umbrales de la
+comparacion en `shared/paridad.py`. `PLAYWRIGHT_MAX_CONTEXTS` pasa a 4 de serie.
+
 Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
 ## CI y despliegue

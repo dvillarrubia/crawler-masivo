@@ -139,6 +139,16 @@ ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
 ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
 ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
 `test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
+
+Paridad movil/escritorio (decision 119): `test_paridad_movil.py` (el
+`SeoSpider` real con la descarga de produccion contra un sitio que sirve otro
+HTML a un UA de movil —`rutas_movil` y `{aleatorio}` del arnes—: noindex,
+canonical, menu, texto, m-dot con su anotacion, campo volatil, cupo por
+plantilla, sin gastar `max_urls`, nada con la muestra a 0; con Chromium, el
+contexto movil de verdad; y con Postgres, la tuberia, el analisis y que
+reanudar no repite) y `test_paridad_movil_analisis.py` (la comparacion, los
+perfiles, el preset del formulario, el contexto `custom` con el UA del job,
+los avisos contra SQLite y el aviso de perfil distinto entre censos).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

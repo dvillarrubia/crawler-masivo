@@ -28,6 +28,7 @@
 | `seo_crawler/middlewares.py` | UA rotation, proxy, job config, HTTP config middlewares |
 | `seo_crawler/settings.py` | Scrapy settings (BFS, autothrottle, Playwright, pipeline) |
 | `seo_crawler/sonda_soft404.py` | Sondas de soft 404 (decision 105): una URL inexistente por host de las semillas, por host interno nuevo y por plantilla nueva (y repetida en el destino si solo cambia de esquema o host), con su propio callback; no cuentan en `max_urls` ni se guardan en `urls`, van a `jobs.soft404["sondas"]` |
+| `seo_crawler/sonda_paridad.py` | Paridad movil/escritorio (decision 119): una muestra por plantilla (`config.templates` o `firma_de_ruta`) pedida con el otro perfil (UA, huella TLS y contexto de Playwright `perfil_<perfil>`), sin seguir redirecciones (el destino se pide una vez para mirar la anotacion del m-dot) y con control de volatilidad; `CapturaAlternativaItem`, fuera de `max_urls`. `contextos_del_perfil` pone el UA del job en el contexto `custom` |
 
 ### Analysis (`analysis/`)
 | File | Description |
@@ -55,6 +56,8 @@
 | `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `soft404.py` | Reglas puras del soft 404 (decision 105): `mangle_path`/`token_sonda` (la URL que no existe), `huella`/`misma_huella` (contenido sin el eco de la URL), `senal_titulo` (titulares de error en es/en/ca/eu/fr/de/pt/it), `es_busqueda`/`frase_sin_resultados`, `disponibilidades` |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
+| `perfiles.py` | Perfiles de dispositivo (decision 119): UA de Googlebot smartphone (el del preset del formulario) y de Chrome Android, `CHROME_EVERGREEN`, huella TLS movil, viewport de Playwright, `es_ua_movil`/`perfil_de_ua`, `contexto_playwright` |
+| `paridad.py` | `diferencias(base, alternativa)` campo a campo con sus umbrales (palabras del contenido principal, enlaces internos que faltan), `canonical_efectivo`, `vary_por_user_agent`, `resumen` (decision 119) |
 
 ## API Endpoints
 
@@ -93,6 +96,7 @@
 | GET | `/api/jobs/{id}/issues/resumen` | Una fila por tipo: incidencias, páginas distintas y ejemplos (vista agrupada de Problemas) |
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
+| GET | `/api/jobs/{id}/urls/{url_id}` (campo `capturas_alternativas`) | La ficha de la URL lleva sus capturas con otro perfil: estado, diferencias, volatiles, Vary y el destino de un m-dot (decision 119). Sin tabla, lista vacia |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
 | GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **84 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio), `response_class` (decision 103) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
 
@@ -142,6 +146,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
 | `analyze_soft_404()` | **soft_404** y **soft_404_candidato** (decision 105, logica en `analysis/soft404.py`): huella de la sonda, titular de error, busqueda sin resultados; descatalogados y huellas de plantilla como candidatos. Tapa en la misma pagina lo que describe su contenido (`TAPADAS`: contenido escaso, titulo, description, h1, duplicados) |
+| `analyze_paridad_movil()` | **paridad_movil_indexacion** (noindex/canonical error, nofollow aviso), **paridad_movil_contenido** (title, H1, palabras, enlaces aviso; description info) y **paridad_movil_respuesta** (otro codigo o redireccion aviso; m-dot bien anotado info), sobre `capturas_alternativas`: una fila por (perfil, plantilla, campo) con `paginas_afectadas`/`paginas_muestreadas` (decision 119) |
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
@@ -163,6 +168,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `ContentItem` | `page_content` | 1:1 with urls |
 | `SecurityItem` | `security_headers` | 1:1 with urls |
 | `EnlacesNoRastreablesItem` | `enlaces_no_rastreables` | uno por pagina con todas sus filas; la reemplaza entera (decision 106) |
+| `CapturaAlternativaItem` | `capturas_alternativas` | una por URL muestreada y perfil, de la sonda de paridad; reemplaza la anterior (decision 119) |
 
 ## Middleware Stack
 

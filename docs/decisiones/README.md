@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 114 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 114, 119 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106 |
@@ -134,6 +134,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 105 | Soft 404 determinista: la página de error del sitio se pide, no se adivina, y lo dudoso no se afirma | [`incidencias`](incidencias.md#d105) |
 | 106 | Lo que Google no puede seguir se guarda aparte, y lo de la plantilla se avisa una vez | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d106) |
 | 114 | Las credenciales del job solo van al sitio, y el rastreo no guarda cookies | [`render-y-descarga`](render-y-descarga.md#d114) |
+| 119 | La paridad móvil se mide con una muestra por plantilla, en la misma ventana y con el dispositivo entero; lo que cambia solo no se afirma | [`render-y-descarga`](render-y-descarga.md#d119) |
 
 ## Anadir una decision
 
