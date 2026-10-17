@@ -577,6 +577,33 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   último censo y sus alertas.
 - [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
 
+### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
+
+Índice: [#163](https://github.com/dvillarrubia/crawler-masivo/issues/163). Sale del cajón de aparcados con una investigación propia
+([`docs/INVESTIGACION_SEARCH_CONSOLE.md`](docs/INVESTIGACION_SEARCH_CONSOLE.md)):
+qué da hoy Google, qué no (datos de AI Overviews, búsquedas anonimizadas,
+tope de filas, impresiones infladas de mayo de 2025 a abril de 2026) y 21
+combinaciones. Los datos van por cliente y por día, con una cuenta de servicio
+cuya llave vive en el servidor; «sin datos» nunca se lee como «cero».
+
+- [#164](https://github.com/dvillarrubia/crawler-masivo/issues/164) **Base**: conexión por cliente, descarga nocturna en segundo plano,
+  columnas en el explorador, la ficha y el CSV; se retira la conexión antigua
+  de la prueba semántica, que guardaba la llave en la base de datos.
+- [#165](https://github.com/dvillarrubia/crawler-masivo/issues/165) **Lo que cuesta tráfico**: no indexables con clics, huérfanas con
+  tráfico, URLs con clics que el rastreo no encontró, indexables sin
+  impresiones, y el informe ordenado por tráfico.
+- [#166](https://github.com/dvillarrubia/crawler-masivo/issues/166) **Oportunidades**: posiciones 4-20 con poco enlazado (con las
+  páginas desde las que enlazar), CTR bajo para su posición, canibalización por
+  búsqueda, rendimiento por plantilla y sitemaps según Google.
+- [#167](https://github.com/dvillarrubia/crawler-masivo/issues/167) **Alertas con la causa**: la caída de clics agrupada por lo que
+  cambió entre dos rastreos.
+- [#168](https://github.com/dvillarrubia/crawler-masivo/issues/168) **Inspección de URL por muestra**: el canonical que elige Google,
+  indexables no indexadas y nuestro veredicto frente al de Google.
+- [#169](https://github.com/dvillarrubia/crawler-masivo/issues/169) **Jev con búsquedas reales**: intención, embudo, canibalización
+  juzgada, cobertura de las oportunidades y snippet. Amplía [#39](https://github.com/dvillarrubia/crawler-masivo/issues/39), [#18](https://github.com/dvillarrubia/crawler-masivo/issues/18) y
+  [#22](https://github.com/dvillarrubia/crawler-masivo/issues/22).
+- [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170) **Más adelante**: exportación a BigQuery, GA4 y DataForSEO.
+
 ### 4. Análisis enriquecido con Jev
 
 Índice: [#6](https://github.com/dvillarrubia/crawler-masivo/issues/6).
@@ -629,7 +656,7 @@ se lanza solo.
 
 ## Aparcado
 
-- Google Search Console y Google Analytics 4.
+- Google Analytics 4 por su cuenta (va con Search Console en [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170)).
 - Análisis semántico (`POC_centro_semantico/`): era una prueba y no se va a
   continuar.
 - La rama `v2-experimental` (6 de octubre). Su motor ya estaba en master y mas

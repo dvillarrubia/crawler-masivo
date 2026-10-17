@@ -139,6 +139,36 @@ de clientes antes de fiarnos de las cifras.
 
 ---
 
+## ⏳ Search Console: el rastreo con los datos de Google
+
+Índice: [#163](https://github.com/dvillarrubia/crawler-masivo/issues/163). Investigación en
+[`docs/INVESTIGACION_SEARCH_CONSOLE.md`](docs/INVESTIGACION_SEARCH_CONSOLE.md).
+
+El rastreo dice cómo está cada página; Search Console, qué consigue en Google.
+Juntos dicen qué arreglar primero porque cuesta tráfico y qué oportunidades
+hay a mano.
+
+- ⏳ **Conectar Search Console** de cada cliente y traer sus datos cada noche,
+  visibles en el explorador, la ficha y el CSV ([#164](https://github.com/dvillarrubia/crawler-masivo/issues/164)).
+- ⏳ **Tráfico en riesgo**: páginas con clics que no se pueden indexar o dan
+  error, huérfanas con tráfico, URLs con clics que el rastreo no encontró,
+  indexables que nunca salen en Google, y el informe ordenado por tráfico
+  ([#165](https://github.com/dvillarrubia/crawler-masivo/issues/165)).
+- ⏳ **Oportunidades**: páginas en posiciones 4-20 con poco enlazado, diciendo
+  desde qué páginas enlazarlas; CTR bajo para su posición; canibalización por
+  búsqueda; qué secciones rinden; sitemaps que Google no lee ([#166](https://github.com/dvillarrubia/crawler-masivo/issues/166)).
+- ⏳ **Alertas que explican la causa**: «han caído los clics en estas 40
+  páginas, y en las 40 cambió el canonical» ([#167](https://github.com/dvillarrubia/crawler-masivo/issues/167)).
+- ⏳ **Preguntar a Google por cada URL** (2.000 al día): qué canonical ha
+  elegido, si la tiene indexada y dónde no estamos de acuerdo con él
+  ([#168](https://github.com/dvillarrubia/crawler-masivo/issues/168)).
+- ⏳ **Con Jev**: si la página responde a la intención de las búsquedas que la
+  traen, el embudo con tráfico real y la canibalización juzgada ([#169](https://github.com/dvillarrubia/crawler-masivo/issues/169)).
+- ⏳ **Más adelante**: BigQuery para clientes grandes, GA4 para priorizar por
+  ventas y DataForSEO para explicar el CTR ([#170](https://github.com/dvillarrubia/crawler-masivo/issues/170)).
+
+---
+
 ## ⏳ Análisis con inteligencia artificial
 
 Índice: [#6](https://github.com/dvillarrubia/crawler-masivo/issues/6).
@@ -194,7 +224,6 @@ antes de lanzarlo, con un tope de gasto. Nada de pago se lanza solo.
 
 ## 💤 Aparcado
 
-- 💤 Search Console y Google Analytics 4 por URL.
 - 💤 El análisis semántico (la prueba anterior): no se continúa.
 
 ---
