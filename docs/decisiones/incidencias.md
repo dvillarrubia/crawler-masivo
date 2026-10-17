@@ -706,3 +706,27 @@
      por un hallazgo (decisión 36); va aparte, con su medida. Y `word_count`,
      `content_word_count` y `low_word_count` cuentan por espacios: en CJK dan
      cifras absurdas.
+   - **Revisión (2026-10-18).** La promesa «el latino no cambia» no se cumplía
+     con emojis: una marca `\p{M}` podía EMPEZAR un token, así que el selector
+     de variación de `❤️` (U+FE0F) o el keycap de `1️⃣` salían como palabra
+     propia y movían los shingles. Ahora una marca solo continúa una palabra,
+     solo cuentan las que escriben (Mn y Mc; las envolventes no) y los
+     selectores de variación se quitan antes de tokenizar. Lo que sigue
+     cambiando en latino es lo que estaba roto: NFD, letras matemáticas con
+     tilde combinante y los trozos en japonés o chino dentro de un post.
+     Medido con el código de `master` y el de esta rama sobre los mismos datos
+     guardados (transacción de solo lectura; la escritura, con ROLLBACK):
+
+     | censo | firmas | avisos | se van por |
+     |---|---|---|---|
+     | Lopesan | 4.298 → 1.818 | **1.940 → 4** | 1.848 canonicalizadas, 84 indexables cuyas parejas no lo eran, 4 noindex |
+     | blogs.uoc.edu | 25.244 → 21.830 | **3.545 → 1.835** | 1.018 canonicalizadas, 474 indexables, 218 noindex |
+     | progym | 3.574 → 3.533 | 1.578 → 1.559 | 10 canonicalizadas, 5 indexables, 4 noindex (medido antes de la revisión) |
+
+     Ninguna pareja nueva en los tres (son latinos). Firmas latinas distintas
+     de las de `master`: 0 en Lopesan y 93 de 25.151 en blogs.uoc.edu (169 con
+     la versión sin revisar). En Lopesan casi todas las canonicalizadas son las
+     2.367 que apuntan a `*.lfr.cloud` (decisión 64): no son variantes, pero
+     ese hallazgo ya es un `canonical_cross_domain` de gravedad `error`, y un
+     aviso por hallazgo (36). Al escribir, las URLs con recuento y no
+     indexables pasan de 1.852 a 0, que es la limpieza a NULL funcionando.

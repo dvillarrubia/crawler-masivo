@@ -265,6 +265,17 @@ def test_las_marcas_combinantes_no_parten_la_palabra():
     assert nd.tokenizar(unicodedata.normalize("NFD", "canción pingüino")) == ["canción", "pingüino"]
 
 
+@pytest.mark.parametrize("texto", [
+    "Te quiero ❤️ mucho, nos vemos ✌️ el lunes",
+    "Paso 1️⃣: abre la app ☺︎ y listo",
+])
+def test_los_emojis_no_cambian_los_tokens_latinos(texto):
+    # Un selector de variacion (U+FE0F) o un keycap suelto, detras de un emoji,
+    # salia como token propio: cambiaba la firma de todo texto latino con
+    # emojis, que es lo que este cambio prometia no tocar.
+    assert nd.tokenizar(texto) == _tokenizar_anterior(texto)
+
+
 def test_coreano_igual_que_antes():
     # El coreano lleva espacios: sigue por palabras.
     t = "한국어는 띄어쓰기를 합니다"

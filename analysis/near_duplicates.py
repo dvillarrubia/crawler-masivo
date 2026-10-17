@@ -130,9 +130,21 @@ _SIN_ESPACIOS = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myan
 # un texto latino en NFD. Sin marcas ni esas escrituras, `[\p{L}\p{N}_]` es
 # exactamente el `\w` de `re` (comprobado sobre todos los puntos de codigo
 # asignados): el texto latino da los mismos tokens que antes, y la misma firma.
+# Una marca CONTINUA una palabra pero no la empieza: suelta, detras de un emoji
+# o de un signo, no es texto, y como token propio cambiaba los shingles de
+# cualquier texto latino con emojis (revision de #153, medido en blogs.uoc.edu).
+# Y solo las que escriben (Mn, Mc): las envolventes (Me, el `⃣` de `1️⃣`) son
+# adorno.
+_EMPIEZA = rf"\p{{L}}\p{{N}}_--[{_SIN_ESPACIOS}]"
+_SIGUE = rf"\p{{L}}\p{{N}}\p{{Mn}}\p{{Mc}}_--[{_SIN_ESPACIOS}]"
 _TOKEN = regex.compile(
-    rf"([{_SIN_ESPACIOS}])|([\p{{L}}\p{{N}}\p{{M}}_--[{_SIN_ESPACIOS}]]+)", regex.V1
+    rf"([{_SIN_ESPACIOS}])|([{_EMPIEZA}][{_SIGUE}]*)", regex.V1
 )
+
+# Selectores de variacion (`❤️` es `❤` + U+FE0F; los de ideogramas, U+E0100 en
+# adelante): eligen como se PINTA un caracter, no cual es. Fuera antes de
+# tokenizar, para que `A️B` siga siendo una palabra y `❤` y `❤️` no difieran.
+_SELECTORES = regex.compile(r"\p{Variation_Selector}+")
 
 # Formas de ancho completo y medio ancho (`１２３`, `ＡＢＣ`, `ｶﾀｶﾅ`), que el
 # japones usa mezcladas con las normales. Solo ese bloque pasa por NFKC: NFKC
@@ -159,6 +171,7 @@ _A, _B = _coeficientes()
 def _tokens(texto: str) -> tuple[list[str], int]:
     """Tokens en minusculas y cuantos son caracteres de escrituras sin espacios."""
     texto = unicodedata.normalize("NFC", texto)
+    texto = _SELECTORES.sub("", texto)
     texto = _ANCHO.sub(lambda m: unicodedata.normalize("NFKC", m.group()), texto)
     tokens: list[str] = []
     caracteres = 0
