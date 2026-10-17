@@ -546,6 +546,16 @@
    pasan de Canonicalised a Indexable. Tests: `tests/test_canonical_distintos.py`
    (extractor, `estado_indexabilidad` y el analisis contra SQLite).
 
+   **Revision** (2026-10-18). La comparacion entre censos (decisiones 67-68)
+   leia `canonical_href` a secas, que con dos destinos distintos sigue
+   guardando el primero: 40 paginas con un segundo canonical a
+   `origen.lfr.cloud` disparaban `canonical_a_otro_host` —alerta critica, con
+   webhook (77)— y `canonical_a_otra_url`, cuando Google descarta ese canonical
+   y la pagina sigue «Indexable». `paginas_de_censo` trae ahora
+   `canonical_distintos` y las dos reglas leen el canonical que cuenta
+   (`_canonical_que_cuenta`); sin la columna, el primero, como antes. Test en
+   `tests/test_comparacion.py`.
+
 <a id="d116"></a>
 116. **Hreflang: una anotacion repetida es una, y la cabecera `Link` tambien
    es fuente** (#149). Dos huecos del mismo dato:
