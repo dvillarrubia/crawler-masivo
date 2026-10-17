@@ -76,6 +76,8 @@ TABLAS_POR_URL = (
 # por censo.
 TABLAS_DEL_CENSO = TABLAS_POR_JOB + TABLAS_POR_URL + (
     "decisions", "enrichment_runs", "semantic_analyses", "cleaning_rulesets",
+    # Un robots.txt por host (decisiones 112 y 113).
+    "robots_txt",
 )
 
 

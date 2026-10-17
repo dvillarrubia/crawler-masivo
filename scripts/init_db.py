@@ -60,6 +60,9 @@ def main() -> None:
         # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
+        # Si Googlebot puede pedir la URL segun el robots.txt guardado
+        # (decision 113). Sin DEFAULT: NULL = no evaluado, solo catalogo.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS bloqueada_googlebot BOOLEAN"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS crawler_version VARCHAR(64)"))
@@ -123,6 +126,7 @@ def main() -> None:
     migrar_enriquecido()
     migrar_custom_extraction()
     migrar_enlaces_no_rastreables()
+    migrar_robots_txt()
 
     print("Done.")
 
@@ -258,6 +262,21 @@ def migrar_enlaces_no_rastreables() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_enr_from ON enlaces_no_rastreables (from_url_id)"))
     print("Enlaces no rastreables: tabla enlaces_no_rastreables e indices al dia.")
+
+
+def migrar_robots_txt() -> None:
+    """robots.txt de cada host del censo (decisiones 112 y 113). Idempotente.
+
+    Tabla NUEVA, que crea create_all con sus indices; unas pocas filas por
+    censo. Aqui solo se aseguran los indices por si la tabla se creo antes que
+    ellos. Bajo el `lock_timeout` de `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_robots_txt_job_url ON robots_txt (job_id, url)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_robots_txt_job_host ON robots_txt (job_id, host)"))
+    print("robots.txt: tabla robots_txt e indices al dia.")
 
 
 if __name__ == "__main__":
