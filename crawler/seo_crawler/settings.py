@@ -108,6 +108,10 @@ ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
 # cambia con crawl_behavior.respetar_retry_after / retry_after_max_s.
 RETRY_AFTER_ENABLED = os.getenv("RETRY_AFTER_ENABLED", "1") != "0"
 RETRY_AFTER_MAX = float(os.getenv("RETRY_AFTER_MAX", "60"))
+# 429/503 seguidos a peticiones que ya respetaron la pausa, tras los que el
+# host deja de pausarse: es un muro y la ventana de salud (decision 103) tiene
+# que poder verlo. Con el tope de 60 s, 5 minutos como mucho.
+RETRY_AFTER_MAX_SEGUIDAS = int(os.getenv("RETRY_AFTER_MAX_SEGUIDAS", "5"))
 
 # ---------------------------------------------------------------------------
 # Database / Redis — fuente unica: shared.config (importados arriba).

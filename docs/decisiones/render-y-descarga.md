@@ -451,3 +451,29 @@
    Probado con el spider real contra un servidor local: un 429 con
    `Retry-After: 1` dos veces y un 503 con fecha a 2 s acaban en 200, con los
    huecos medidos en el servidor (≥ 0,9 s y ≥ 1 s) y `veces = 3`.
+
+   **Revisión (2026-10-18): una pausa no puede esconder un muro.** La frase
+   «la ventana de salud de la 103 no se toca: respetar la pausa baja los 429»
+   era falsa con un host que responde 429 a TODO. Con la frontera llena, el
+   reintento va con menos prioridad que los primeros intentos, así que cada
+   primer intento salía espaciado por la pausa y el primer 429 definitivo no
+   llegaba a `parse` —ni a la ventana— hasta haber pedido toda la frontera.
+   Reproducido con el arnés de la 103 (300 URLs en 429): **5,4 s** y
+   `rate_limited` sin el middleware; **más de 10 minutos sin cerrar** con él y
+   una pausa de solo 2 s. Con el `Retry-After: 30` real y 300 URLs son horas, y
+   con 20.000 en la frontera el rastreo moría por `max_runtime_hours` ocupando
+   el hueco del worker: el latido de cada pausa impedía además que el
+   vigilante lo cortara. Ahora, si un host devuelve `RETRY_AFTER_MAX_SEGUIDAS`
+   (5) respuestas 429/503 a peticiones que salieron **con la pausa ya
+   abierta** y sin ninguna de otra clase entre medias, deja de pausarse hasta
+   que responda otra cosa; la ventana de la 103 lo cierra como antes. Las que
+   estaban en vuelo al llegar el primer 429 no cuentan (salieron antes de la
+   pausa: con 8-16 por host, un límite pasajero las devuelve todas a la vez),
+   y se distinguen por `download_latency`. Como mucho son 5 pausas (5 minutos
+   con el tope de 60 s); queda en `jobs.health["retry_after"]["abandonos"]`.
+   Test: `test_un_429_masivo_para_tambien_respetando_el_retry_after` (el arnés
+   con el middleware, < 60 s; sin el arreglo agota los 180 s) y tres unitarios.
+   De paso, `crawl_behavior.retry_after_max_s` pasa a `None` por defecto: los
+   defaults del schema se copian en `jobs.config`, así que con un 60 el worker
+   pasaba siempre `-s RETRY_AFTER_MAX=60` y la variable de entorno no hacía
+   nada.

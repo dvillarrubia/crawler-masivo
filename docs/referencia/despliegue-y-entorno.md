@@ -114,6 +114,7 @@ ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision
 # crawl_behavior.respetar_retry_after / retry_after_max_s.
 RETRY_AFTER_ENABLED=1
 RETRY_AFTER_MAX=60               # tope de la pausa, en segundos
+RETRY_AFTER_MAX_SEGUIDAS=5       # 429/503 tras respetar la pausa: es un muro, se deja de pausar
 
 # Capa de decisiones: Jev por OpenRouter (decision 84). Sin clave o con
 # DECISIONS_ENABLED=0 no se llama a nadie; con las dos, tampoco solo (#40).

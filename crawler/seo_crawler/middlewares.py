@@ -365,6 +365,17 @@ class RetryAfterMiddleware:
     Lo que se respeto va a Redis (`job:<id>:retry_after`) y el worker lo deja
     en `jobs.health["retry_after"]`: si el sitio pedia mas que el tope, el
     informe tiene que poder decirlo. No es una incidencia SEO.
+
+    Una pausa es para un limite PASAJERO. Si un host devuelve
+    `RETRY_AFTER_MAX_SEGUIDAS` respuestas 429/503 a peticiones que salieron
+    CON la pausa ya abierta, sin una sola de otra clase entre medias, es un
+    muro (decision 103), y pausar no lo arregla: lo esconde. Con la
+    frontera llena, cada primer intento sale espaciado por la pausa antes de
+    que el primer reintento agotado llegue a `parse`, asi que la ventana de
+    salud no veia ni un 429 en horas (medido en el arnes con 300 URLs y una
+    pausa de 2 s: 5,4 s sin el middleware y mas de 10 minutos con el, sin
+    llegar a cerrar). Pasado ese numero el host deja de pausarse hasta que
+    responda otra cosa, y la ventana de la 103 cierra el rastreo como antes.
     """
 
     CODIGOS = (429, 503)
@@ -376,13 +387,19 @@ class RetryAfterMiddleware:
         self._reloj = reloj
         self._tope = max(0.0, crawler.settings.getfloat("RETRY_AFTER_MAX", 60.0))
         self._retraso_job = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+        # 429/503 seguidos por slot, y los slots que ya no se pausan (muro).
+        self._max_seguidas = max(1, crawler.settings.getint("RETRY_AFTER_MAX_SEGUIDAS", 5))
+        self._seguidas: dict[str, int] = {}
+        # Cuando se abrio la pausa de la racha de 429/503 en curso, por slot.
+        self._racha_desde: dict[str, float] = {}
+        self._sin_pausa: set[str] = set()
         # Lo que ya se respeto en ejecuciones anteriores del mismo job (se lee
         # de Redis la primera vez que hay algo que publicar).
         self._base: dict | None = None
         # clave -> (retraso, hasta, jitter que tenia el slot)
         self._pisos: dict[str, tuple[float, float, float | None]] = {}
         self.resumen = {"veces": 0, "max_pedido_s": 0.0, "max_aplicado_s": 0.0,
-                        "truncados": 0}
+                        "truncados": 0, "abandonos": 0}
         crawler.signals.connect(
             self._response_downloaded, signal=signals.response_downloaded
         )
@@ -465,14 +482,51 @@ class RetryAfterMiddleware:
         clave = request.meta.get("download_slot")
         if clave is None:
             return
-        if response.status in self.CODIGOS:
-            from shared.respuestas import retry_after_segundos
+        if response.status not in self.CODIGOS:
+            self._seguidas.pop(clave, None)
+            self._racha_desde.pop(clave, None)
+            self._sin_pausa.discard(clave)
+            self._aplicar(clave)
+            return
+        if clave in self._sin_pausa:
+            self._aplicar(clave)
+            return
+        desde = self._racha_desde.get(clave)
+        if desde is not None:
+            # Solo cuenta lo que SALIO con la pausa ya abierta: los que estaban
+            # en vuelo cuando llego el primer 429 no esperaron nada, y con 8 o
+            # 16 por host un limite pasajero los devuelve todos a la vez.
+            latencia = request.meta.get("download_latency")
+            latencia = latencia if isinstance(latencia, (int, float)) and latencia > 0 else 0.0
+            if self._reloj() - latencia >= desde:
+                self._seguidas[clave] = self._seguidas.get(clave, 0) + 1
+                if self._seguidas[clave] >= self._max_seguidas:
+                    self._abandonar(clave, self._seguidas[clave])
+                    return
+        from shared.respuestas import retry_after_segundos
 
-            pedido = retry_after_segundos(response.headers.get(b"Retry-After"))
-            if pedido is not None and pedido > 0:
-                self.anotar(clave, pedido)
-                return
+        pedido = retry_after_segundos(response.headers.get(b"Retry-After"))
+        if pedido is not None and pedido > 0:
+            self._racha_desde.setdefault(clave, self._reloj())
+            self.anotar(clave, pedido)
+            return
         self._aplicar(clave)
+
+    def _abandonar(self, clave: str, seguidas: int) -> None:
+        """Deja de pausar `clave`: sus 429/503 seguidos ya son un muro."""
+        self._sin_pausa.add(clave)
+        self.resumen["abandonos"] += 1
+        piso = self._pisos.get(clave)
+        if piso is not None:
+            # Caducar la pausa ya: vuelve al piso (Crawl-delay o el del job).
+            self._pisos[clave] = (piso[0], self._reloj(), piso[2])
+            self._aplicar(clave)
+        logger.warning(
+            "%s lleva %d respuestas 429/503 seguidas: es un muro, no una pausa; "
+            "se deja de respetar su Retry-After para que la ventana de salud "
+            "(decision 103) lo vea", clave, seguidas,
+        )
+        self._publicar()
 
     def process_request(self, request: Request, spider=None):
         if self._pisos:
@@ -502,6 +556,7 @@ class RetryAfterMiddleware:
                 "truncados": int(base.get("truncados", 0)) + r["truncados"],
                 "max_pedido_s": max(float(base.get("max_pedido_s", 0)), r["max_pedido_s"]),
                 "max_aplicado_s": max(float(base.get("max_aplicado_s", 0)), r["max_aplicado_s"]),
+                "abandonos": int(base.get("abandonos", 0)) + r["abandonos"],
                 "tope_s": self._tope,
             }
             cliente.set(clave, json.dumps(fusion), ex=30 * 86400)

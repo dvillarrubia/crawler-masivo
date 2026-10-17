@@ -124,7 +124,10 @@ class CrawlBehaviorConfig(BaseModel):
     # que pide el servidor, con este tope en segundos. Por debajo del vigilante
     # de estancamiento (30 min): el spider sigue estampando el latido.
     respetar_retry_after: bool = True
-    retry_after_max_s: int = Field(default=60, ge=0, le=600)
+    # None = el `RETRY_AFTER_MAX` del entorno (60). Con un 60 aqui, como los
+    # defaults se copian en `jobs.config`, el worker lo pasaba SIEMPRE por
+    # `-s` y la variable de entorno no tenia ningun efecto.
+    retry_after_max_s: int | None = Field(default=None, ge=0, le=600)
     # Sonda del certificado TLS, una vez por host https interno (decision 110).
     sonda_tls: bool = True
 

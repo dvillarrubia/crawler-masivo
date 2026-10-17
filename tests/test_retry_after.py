@@ -144,7 +144,7 @@ def test_funciona_sin_robotstxt_obey_y_con_tope():
 
     resumen = json.loads(redis["job:j1:retry_after"])
     assert resumen == {"veces": 1, "truncados": 1, "max_pedido_s": 3600.0,
-                       "max_aplicado_s": 60.0, "tope_s": 60.0}
+                       "max_aplicado_s": 60.0, "abandonos": 0, "tope_s": 60.0}
 
 
 def test_cada_pausa_estampa_el_latido():
@@ -162,6 +162,60 @@ def test_sin_cabecera_o_en_otro_codigo_no_hace_nada():
     m._response_downloaded(*respuesta(500, {"Retry-After": "9"}))
     m._response_downloaded(*respuesta(503, {"Retry-After": "basura"}))
     assert slot.delay == 0.0 and m.resumen["veces"] == 0
+
+
+def _en_vuelo(respuesta, status, latencia, cabeceras=None):
+    """Una respuesta cuya peticion tardo `latencia` s (salio hace tanto)."""
+    resp, req = respuesta(status, cabeceras)
+    req.meta["download_latency"] = latencia
+    return resp, req
+
+
+def test_la_rafaga_en_vuelo_no_cuenta_como_muro():
+    """Con 16 peticiones en vuelo, un limite pasajero las devuelve todas en 429
+    a la vez: ninguna salio con la pausa abierta, asi que no es un muro."""
+    m, slot, reloj, respuesta, *_ = _montar()
+    m._response_downloaded(*_en_vuelo(respuesta, 429, 0.2, {"Retry-After": "5"}))
+    for _ in range(15):
+        reloj.t += 0.01
+        m._response_downloaded(*_en_vuelo(respuesta, 429, 0.5, {"Retry-After": "5"}))
+    assert slot.delay == 5 and m.resumen["abandonos"] == 0
+
+
+def test_cinco_429_tras_respetar_la_pausa_son_un_muro():
+    """Decision 103: si tras esperar lo pedido el host sigue en 429, pausar
+    solo esconde el muro a la ventana de salud. Se deja de pausar."""
+    m, slot, reloj, respuesta, *_rest, redis = _montar()
+    m._response_downloaded(*_en_vuelo(respuesta, 429, 0.1, {"Retry-After": "30"}))
+    for i in range(4):
+        reloj.t += 30
+        m._response_downloaded(*_en_vuelo(respuesta, 429, 0.1, {"Retry-After": "30"}))
+        assert slot.delay == 30, i
+    reloj.t += 30
+    m._response_downloaded(*_en_vuelo(respuesta, 429, 0.1, {"Retry-After": "30"}))
+    assert slot.delay == 0.0 and "x.com" not in m._pisos
+    assert m.resumen["abandonos"] == 1
+    # Mientras siga en 429 no se vuelve a pausar...
+    reloj.t += 0.1
+    m._response_downloaded(*_en_vuelo(respuesta, 429, 0.05, {"Retry-After": "30"}))
+    assert slot.delay == 0.0
+    import json
+
+    assert json.loads(redis["job:j1:retry_after"])["abandonos"] == 1
+    # ...y si responde otra cosa, el siguiente 429 vuelve a ser una pausa.
+    m._response_downloaded(*_en_vuelo(respuesta, 200, 0.05))
+    m._response_downloaded(*_en_vuelo(respuesta, 429, 0.05, {"Retry-After": "7"}))
+    assert slot.delay == 7
+
+
+def test_una_respuesta_buena_entre_medias_reinicia_la_cuenta():
+    m, slot, reloj, respuesta, *_ = _montar()
+    for _ in range(3):
+        for _ in range(4):
+            reloj.t += 10
+            m._response_downloaded(*_en_vuelo(respuesta, 429, 0.1, {"Retry-After": "10"}))
+        m._response_downloaded(*_en_vuelo(respuesta, 200, 0.1))
+    assert m.resumen["abandonos"] == 0
 
 
 def test_se_puede_apagar():
@@ -206,7 +260,10 @@ def test_el_tope_queda_por_debajo_del_vigilante_de_estancamiento():
     maximo = campos["retry_after_max_s"]["le"]
     assert maximo < campos["stall_timeout_minutes"]["default"] * 60
     assert campos["respetar_retry_after"]["default"] is True
-    assert campos["retry_after_max_s"]["default"] == 60
+    # None: manda el RETRY_AFTER_MAX del entorno. Los defaults del schema se
+    # copian en `jobs.config`, asi que con un 60 aqui el worker pasaba siempre
+    # `-s RETRY_AFTER_MAX=60` y la variable no servia de nada.
+    assert campos["retry_after_max_s"]["default"] is None
 
 
 def test_el_worker_pasa_las_claves_por_s():
