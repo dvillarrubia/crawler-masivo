@@ -129,6 +129,16 @@ ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
 ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
 ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
 `test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
+
+Paginacion (decision 122): `test_paginacion.py` (las formas de `shared/paginacion.py`,
+`?p=123` sin evidencia, otros parametros, barra final, mayusculas),
+`test_analyzer_paginacion_db.py` (SQLite: canonical a la 1 agrupado por plantilla,
+autocanonica y «ver todo» sin aviso, serie por `rel=prev`, noindex agrupado, lo que
+solo cuelga de una paginacion noindex o canonicalizada sin `orphan_page` ni
+`sitemap_orphan`, `rel=next` sin `<a>` rastreada o no, `rel` a un 404 y a un 429; y,
+con SQLite y con Postgres —`run_all` entero—, que el paso no anade ninguna sentencia
+que lea `links`) y `test_incidencias_paginacion_frontend.py` (ficha, nombre, ambito y
+columnas).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
