@@ -6,7 +6,7 @@ detalle técnico de cada punto está en la issue de GitHub enlazada.
 ¿Sin conocimientos técnicos? La versión en lenguaje llano, con el estado de
 cada cosa de un vistazo, está en [`ROADMAP_SENCILLO.md`](ROADMAP_SENCILLO.md).
 
-Estado a 7 de octubre de 2026.
+Estado a 17 de octubre de 2026.
 
 Este documento cuenta **qué hay y qué viene**, en lenguaje de producto.
 `docs/PRIORIDADES.md` cuenta **por qué ese orden y con qué cifra**, y los
@@ -481,7 +481,16 @@ después lo nuevo.
   canonicalizadas, el rastreo guarda las cookies que pone el servidor (Google no
   lo hace), un robots.txt que falla se trata como «todo permitido» cuando Google
   lo trata como «todo bloqueado», y otros menores. La issue lleva una guía de
-  implementación punto por punto.
+  implementación punto por punto. En revisión, en cinco PRs:
+  [#152](https://github.com/dvillarrubia/crawler-masivo/pull/152) (la cabecera
+  `X-Robots-Tag`),
+  [#153](https://github.com/dvillarrubia/crawler-masivo/pull/153) (casi
+  duplicados),
+  [#154](https://github.com/dvillarrubia/crawler-masivo/pull/154) (esquemas,
+  credenciales en la URL, hreflang, canonical múltiple y cadenas largas),
+  [#156](https://github.com/dvillarrubia/crawler-masivo/pull/156) (credenciales
+  y cookies) y
+  [#157](https://github.com/dvillarrubia/crawler-masivo/pull/157) (robots.txt).
 
 ### 2. Arreglos pendientes de la auditoría
 
@@ -526,6 +535,12 @@ es cada plantilla— y va con
   personalizada**: hecha la base (arriba). Falta la pantalla para editar las
   reglas, probarlas contra una URL en vivo, buscar en el HTML de origen cuando
   el rastreo renderiza, avisar como incidencia y comparar valores entre censos.
+- **Segmentos de negocio** (ola 3.3, decisión 125, en revisión en
+  [#172](https://github.com/dvillarrubia/crawler-masivo/pull/172)): «fichas»,
+  «blog», «categorías» definidos por cliente, con el porcentaje de cada
+  incidencia por segmento. Después de esa PR quedan la pantalla para editar las
+  reglas y que las alertas por plantilla de la comparación pasen a ser por
+  segmento.
 - [#35](https://github.com/dvillarrubia/crawler-masivo/issues/35) **Logs del
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)
@@ -540,24 +555,32 @@ nosotros 78; en los que coinciden, nuestra definición suele ser la buena. De lo
 que les copiamos, la idea, no su definición. Por olas de
 [`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md):
 
-- **Con lo que ya guardamos, sin volver a rastrear** (ola 1): el canonical
-  del HTML distinto del de la cabecera, `noindex` junto a un canonical a otra
-  URL, redirecciones que acaban en noindex, avisar del uso de meta refresh, H1
-  vacío (hoy cuenta como presente), enlaces internos sin anchor, title de
-  plantilla sin rellenar y description igual al title, y la paginación
-  (página 2 o siguientes en noindex o canonicalizadas a la 1).
+- **Con lo que ya guardamos, sin volver a rastrear**, como la ola 1: el
+  canonical del HTML distinto del de la cabecera, `noindex` junto a un
+  canonical a otra URL, redirecciones que acaban en noindex, avisar del uso de
+  meta refresh, H1 vacío (hoy cuenta como presente), enlaces internos sin
+  anchor, title de plantilla sin rellenar y description igual al title
+  ([#159](https://github.com/dvillarrubia/crawler-masivo/pull/159)). Y la
+  paginación (página 2 o siguientes en noindex o canonicalizadas a la 1, y
+  páginas siguientes sin `<a>`), que es la ola 1.4 —lo único de la ola 1 que
+  quedaba— y va junto con el punto de #150 en
+  [#160](https://github.com/dvillarrubia/crawler-masivo/pull/160).
 - **Con un rastreo nuevo**: meta viewport, `lang` del HTML, charset, canonical
   relativo y Open Graph; redirecciones por JavaScript sin necesidad del
-  navegador; tiempo de respuesta real y HTML sin comprimir (hoy no se puede
-  saber); certificado TLS caducado o a punto de caducar; respetar
-  `Retry-After` cuando el servidor pide esperar.
+  navegador ([#155](https://github.com/dvillarrubia/crawler-masivo/pull/155));
+  tiempo de respuesta real y HTML sin comprimir (hoy no se puede saber);
+  certificado TLS caducado o a punto de caducar; respetar `Retry-After` cuando
+  el servidor pide esperar
+  ([#158](https://github.com/dvillarrubia/crawler-masivo/pull/158)).
 - **Peticiones aparte, sin gastar el límite de URLs**: enlaces externos rotos y
   dominios muertos, junto con los recursos rotos de
-  [#101](https://github.com/dvillarrubia/crawler-masivo/issues/101). Antes hay
+  [#101](https://github.com/dvillarrubia/crawler-masivo/issues/101)
+  ([#162](https://github.com/dvillarrubia/crawler-masivo/pull/162)). Antes hay
   que dejar de enviar a otros dominios las cookies y la contraseña de un
-  staging (#149).
+  staging (#149, #156).
 - **Móvil frente a escritorio** (ola 7.4): pedir una muestra con el
-  user-agent de smartphone y comparar lo que cambia.
+  user-agent de smartphone y comparar lo que cambia
+  ([#161](https://github.com/dvillarrubia/crawler-masivo/pull/161)).
 - **Descartado**: legibilidad y palabras más frecuentes, accesibilidad sin
   navegador (va con axe por muestra, ola 8), validador de AMP y «hreflang que
   nadie enlaza» (excluido a propósito en la decisión 99).
@@ -584,7 +607,9 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 qué da hoy Google, qué no (datos de AI Overviews, búsquedas anonimizadas,
 tope de filas, impresiones infladas de mayo de 2025 a abril de 2026) y 21
 combinaciones. Los datos van por cliente y por día, con una cuenta de servicio
-cuya llave vive en el servidor; «sin datos» nunca se lee como «cero».
+cuya llave vive en el servidor; «sin datos» nunca se lee como «cero». Por
+cliente y no por rastreo, como pide #164: el dato de Google no depende de
+cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»).
 
 - [#164](https://github.com/dvillarrubia/crawler-masivo/issues/164) **Base**: conexión por cliente, descarga nocturna en segundo plano,
   columnas en el explorador, la ficha y el CSV; se retira la conexión antigua

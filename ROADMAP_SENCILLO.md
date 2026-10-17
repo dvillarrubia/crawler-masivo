@@ -19,9 +19,11 @@ Cómo leer cada punto:
 
 La herramienta ya rastrea y audita sitios grandes como Screaming Frog, compara
 cada rastreo con el anterior y avisa sola cuando algo se rompe. Acabamos de
-terminar una tanda grande de comprobaciones nuevas (falta publicarla), y lo
-siguiente es elegir entre más funcionalidades «clásicas» o arrancar el análisis
-con inteligencia artificial.
+terminar una tanda grande de comprobaciones nuevas y los segmentos de negocio
+(falta publicarlos). Lo siguiente sigue el orden del plan
+([`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md)): Search Console,
+vigilar la cartera de clientes y los entregables. Nada de eso espera a la
+inteligencia artificial, que va por su cuenta en cuanto haya clave.
 
 ---
 
@@ -34,6 +36,8 @@ con inteligencia artificial.
   cuando uno nos bloquea lo dice, en vez de dar el sitio por limpio.
 - Se sigue en directo, se puede pausar, cancelar y reanudar.
 - Respeta el robots.txt y usa los sitemaps.
+- Puede rastrear como Googlebot móvil, Bingbot o los bots de buscadores de IA,
+  obedeciendo las reglas de robots.txt de ese bot.
 
 **Auditoría SEO**
 
@@ -41,6 +45,11 @@ con inteligencia artificial.
   canonicals, hreflang, datos estructurados e indexabilidad.
 - Duplicados y casi duplicados, cadenas de redirección, imágenes sin alt,
   contenido escaso, páginas huérfanas y cobertura del sitemap.
+- Canonicals que apuntan a errores, a redirecciones o a páginas no indexables,
+  y canonicals en cadena; redirecciones que acaban en error.
+- Hreflang completo: retorno, autorreferencia, x-default e idiomas repetidos.
+- URLs del sitemap que no se pueden indexar, con el motivo.
+- Páginas que Google corta por pasar de 2 MB o por una cabecera mal cerrada.
 - Páginas que dicen «no existe» pero responden como si existieran (soft 404).
 - Profundidad en clics desde la home.
 - PageRank interno: qué páginas reciben más fuerza del enlazado interno, sin
@@ -85,7 +94,10 @@ de clientes antes de fiarnos de las cifras.
   Google lo trata como «todo bloqueado».
 - 🟡 Ahora se distingue lo que el robots.txt le prohíbe a Googlebot en
   concreto.
-- 🟡 La contraseña de un sitio en pruebas ya no se envía a otros dominios.
+- 🟡 La contraseña de un sitio en pruebas ya no se envía a otros dominios, y
+  ya no guardamos las cookies que pone el servidor (Google tampoco).
+- 🟡 Cadenas de redirección muy largas, varios canonicals distintos en la misma
+  página y hreflang repetido o enviado por cabecera.
 
 **Comprobaciones nuevas** ([#150](https://github.com/dvillarrubia/crawler-masivo/issues/150))
 
@@ -96,7 +108,8 @@ de clientes antes de fiarnos de las cifras.
 - 🟡 H1 vacíos, titles de plantilla sin rellenar («Untitled», «Home»…) y
   descriptions iguales al title.
 - 🟡 Enlaces internos sin texto.
-- 🟡 Paginación mal hecha: páginas 2, 3… en noindex o canonicalizadas a la 1.
+- 🟡 Paginación mal hecha: páginas 2, 3… en noindex o canonicalizadas a la 1,
+  o a las que no se llega con un enlace normal.
 - 🟡 Viewport para móvil, idioma de la página, codificación y etiquetas para
   redes sociales (Open Graph).
 - 🟡 Velocidad de respuesta del servidor, páginas sin comprimir y certificado
@@ -106,28 +119,35 @@ de clientes antes de fiarnos de las cifras.
 - 🟡 Imágenes, estilos o scripts rotos dentro de las páginas
   ([#101](https://github.com/dvillarrubia/crawler-masivo/issues/101)).
 
+**Segmentos de negocio** ([#172](https://github.com/dvillarrubia/crawler-masivo/pull/172))
+
+- 🟡 Cada cliente define sus secciones («fichas», «blog», «categorías») y
+  Problemas dice qué porcentaje de cada una tiene cada fallo. Sirve también
+  para los rastreos ya hechos, sin volver a rastrear.
+
 ---
 
 ## ⏳ Lo siguiente: funcionalidades sin inteligencia artificial
 
-- ⏳ **Backlinks en el PageRank**
-  ([#31](https://github.com/dvillarrubia/crawler-masivo/issues/31)): sumar la
-  autoridad que llega desde fuera (Ahrefs o DataForSEO) para ver qué páginas
-  tienen fuerza de verdad, y recuperar enlaces externos que apuntan a páginas
-  rotas.
-- ⏳ **Logs del servidor**
-  ([#35](https://github.com/dvillarrubia/crawler-masivo/issues/35)): qué rastrea
-  Googlebot de verdad, comparado con lo que tiene el sitio.
-- ⏳ **WordPress**
-  ([#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)): cruzar lo
-  rastreado con lo que WordPress dice que tiene publicado.
-- ⏳ **Extracción a medida, segunda parte**
+En el orden del plan. Search Console tiene su propio apartado, más abajo.
+
+- ⏳ **Extracción a medida y segmentos, segunda parte**
   ([#34](https://github.com/dvillarrubia/crawler-masivo/issues/34)): una
   pantalla para crear las reglas sin tocar configuración, probarlas contra una
-  URL en vivo, que salgan como incidencia y ver cómo cambian entre rastreos.
-- ⏳ **Rastreo incremental**
-  ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)): volver a
-  pedir solo lo que ha cambiado desde la última vez.
+  URL en vivo, que salgan como incidencia y ver cómo cambian entre rastreos
+  (por ejemplo, un cambio masivo de precios).
+- ⏳ **Vigilar la cartera**
+  ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)): alertas
+  que se abren y se cierran solas, reglas propias por cliente («más de 20
+  errores en las fichas»), la evolución de cada cliente en gráficas y un modo
+  «comprobar esta lista de URLs tras un despliegue» que dice si pasa o falla.
+- ⏳ **Entregables y acceso del cliente**: contraseñas y enlaces de solo
+  lectura por cliente, el informe mensual en PDF sin retoques, Excel y Google
+  Sheets para Looker Studio, envío automático tras cada rastreo programado y
+  conexión con Claude y Cowork.
+- ⏳ **JavaScript y buscadores de IA**: lo que cambia entre la página tal como
+  llega y tal como se ve en el navegador, si la página deja que los buscadores
+  de IA la citen, y qué bloquea el robots.txt a cada bot de IA.
 - ⏳ **Sitios enormes más rápidos**
   ([#52](https://github.com/dvillarrubia/crawler-masivo/issues/52)): el análisis
   de un sitio con millones de enlaces todavía tarda.
@@ -136,6 +156,14 @@ de clientes antes de fiarnos de las cifras.
   teclado, uso en el móvil y detalles.
 - ⏳ Restos menores de auditorías anteriores
   ([#107](https://github.com/dvillarrubia/crawler-masivo/issues/107)).
+- ⏳ **Más adelante**, cuando haya hueco: logs del servidor
+  ([#35](https://github.com/dvillarrubia/crawler-masivo/issues/35), cuando un
+  cliente los dé), velocidad de carga por plantilla, textos de enlace genéricos,
+  accesibilidad, backlinks como entrada del PageRank
+  ([#31](https://github.com/dvillarrubia/crawler-masivo/issues/31)), WordPress
+  ([#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)) y, lo
+  último, el rastreo incremental que solo vuelve a pedir lo que cambió
+  ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)).
 
 ---
 
