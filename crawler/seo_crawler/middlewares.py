@@ -5,13 +5,16 @@ Custom Scrapy downloader middlewares for the SEO crawler.
 * **ProxyMiddleware**     -- optional proxy rotation.
 * **JobConfigMiddleware** -- attaches job config to every request's meta.
 * **RobotsCrawlDelayMiddleware** -- respeta el `Crawl-delay` de robots.txt.
+* **RetryAfterMiddleware** -- respeta el `Retry-After` de un 429 o un 503.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import math
+import time
 from typing import TYPE_CHECKING
 
 from scrapy import Request, signals
@@ -321,6 +324,189 @@ class RobotsCrawlDelayMiddleware:
         if self._retrasos:
             self._aplicar(self.crawler.engine.downloader.get_slot_key(request))
         return None
+
+
+def piso_de_slot(crawler: Crawler, clave: str) -> float:
+    """El retraso por debajo del cual no puede quedar el slot `clave`.
+
+    `max(DOWNLOAD_DELAY del job, Crawl-delay de robots.txt)`: lo que el job
+    pide y lo que respeta `RobotsCrawlDelayMiddleware` (decision 81), que solo
+    existe con `ROBOTSTXT_OBEY`. Es a donde vuelve el slot cuando caduca la
+    pausa de un `Retry-After` (decision 111): si volviera a 0, el Crawl-delay
+    quedaria deshecho hasta la siguiente respuesta. El Crawl-delay nunca baja
+    un retraso (solo lo sube), asi que no deshace la pausa.
+    """
+    piso = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+    gestor = getattr(getattr(crawler, "engine", None), "downloader", None)
+    for mw in getattr(getattr(gestor, "middleware", None), "middlewares", ()) or ():
+        if isinstance(mw, RobotsCrawlDelayMiddleware):
+            piso = max(piso, mw._retrasos.get(clave, 0.0))
+    return piso
+
+
+class RetryAfterMiddleware:
+    """Respeta el `Retry-After` de un 429 o un 503, en todos los `robots_mode`.
+
+    Sin esto, `RetryMiddleware` repetia el 429 al instante y AUTOTHROTTLE no
+    frena con un 429 rapido (no sube el retraso con respuestas que no son 200
+    salvo que tarden), asi que una rafaga de 429 seguia al mismo ritmo hasta
+    que la ventana de salud paraba el rastreo (decision 103). El servidor ya
+    dijo cuanto esperar.
+
+    Es el mecanismo de la decision 81 generalizado y con caducidad: con un
+    `Retry-After` de N s (acotado a `RETRY_AFTER_MAX`), el slot del host pasa
+    a un retraso de N s, sin jitter, durante N s. El reintento del 429 sale
+    del mismo slot, asi que espera. Se reaplica en cada `response_downloaded`
+    —que llega ANTES de que el slot saque la siguiente peticion y despues de
+    AutoThrottle, que con las respuestas 200 que siguen en vuelo lo bajaria—
+    y en `process_request` como red de seguridad. Pasada la ventana, el slot
+    vuelve a `piso_de_slot` (el Crawl-delay o el retraso del job).
+
+    Lo que se respeto va a Redis (`job:<id>:retry_after`) y el worker lo deja
+    en `jobs.health["retry_after"]`: si el sitio pedia mas que el tope, el
+    informe tiene que poder decirlo. No es una incidencia SEO.
+    """
+
+    CODIGOS = (429, 503)
+
+    def __init__(self, crawler: Crawler, reloj=time.monotonic):
+        if not crawler.settings.getbool("RETRY_AFTER_ENABLED", True):
+            raise NotConfigured
+        self.crawler = crawler
+        self._reloj = reloj
+        self._tope = max(0.0, crawler.settings.getfloat("RETRY_AFTER_MAX", 60.0))
+        self._retraso_job = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+        # Lo que ya se respeto en ejecuciones anteriores del mismo job (se lee
+        # de Redis la primera vez que hay algo que publicar).
+        self._base: dict | None = None
+        # clave -> (retraso, hasta, jitter que tenia el slot)
+        self._pisos: dict[str, tuple[float, float, float | None]] = {}
+        self.resumen = {"veces": 0, "max_pedido_s": 0.0, "max_aplicado_s": 0.0,
+                        "truncados": 0}
+        crawler.signals.connect(
+            self._response_downloaded, signal=signals.response_downloaded
+        )
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler)
+
+    def _downloader(self):
+        return self.crawler.engine.downloader
+
+    def anotar(self, clave: str, pedido: float) -> float:
+        """Abre (o alarga) la pausa del slot `clave`. Devuelve lo aplicado."""
+        aplicado = min(pedido, self._tope)
+        r = self.resumen
+        r["veces"] += 1
+        r["max_pedido_s"] = round(max(r["max_pedido_s"], pedido), 3)
+        r["max_aplicado_s"] = round(max(r["max_aplicado_s"], aplicado), 3)
+        if pedido > aplicado:
+            r["truncados"] += 1
+        if aplicado > 0:
+            ahora = self._reloj()
+            previo = self._pisos.get(clave)
+            slot = self._downloader().slots.get(clave)
+            jitter = previo[2] if previo else (slot.jitter if slot is not None else None)
+            retraso = max(aplicado, previo[0] if previo else 0.0)
+            hasta = max(ahora + aplicado, previo[1] if previo else 0.0)
+            self._pisos[clave] = (retraso, hasta, jitter)
+            ajustes = self._downloader().per_slot_settings.setdefault(clave, {})
+            ajustes["delay"] = retraso
+            ajustes["jitter"] = 0.0
+            self._aplicar(clave)
+        logger.info(
+            "%s pide Retry-After %.1f s; se espera %.1f s%s", clave, pedido, aplicado,
+            " (tope RETRY_AFTER_MAX)" if pedido > aplicado else "",
+        )
+        self._publicar()
+        # El latido: el spider solo lo estampa cada 50 URLs, y con un host en
+        # pausa (los reintentos no pasan por `parse`) el vigilante de
+        # estancamiento daria por muerto un rastreo que esta esperando a
+        # proposito. Con cada pausa, el hueco maximo entre latidos es el tope.
+        latido = getattr(getattr(self.crawler, "spider", None), "_write_heartbeat", None)
+        if callable(latido):
+            try:
+                latido()
+            except Exception:  # noqa: BLE001
+                pass
+        return aplicado
+
+    def _aplicar(self, clave: str) -> None:
+        piso = self._pisos.get(clave)
+        if piso is None:
+            return
+        retraso, hasta, jitter = piso
+        slot = self._downloader().slots.get(clave)
+        if self._reloj() >= hasta:
+            # Caducada: el slot vuelve al piso de siempre (Crawl-delay o el
+            # retraso del job), no a 0 ni al retraso de la pausa.
+            del self._pisos[clave]
+            base = piso_de_slot(self.crawler, clave)
+            ajustes = self._downloader().per_slot_settings.setdefault(clave, {})
+            if base > 0:
+                ajustes["delay"] = base
+            else:
+                ajustes.pop("delay", None)
+                ajustes.pop("jitter", None)
+            if slot is not None:
+                slot.delay = base
+                # Con Crawl-delay el jitter sigue apagado (decision 81).
+                if jitter is not None and base <= self._retraso_job:
+                    slot.jitter = jitter
+            return
+        if slot is None:
+            return
+        if slot.delay < retraso:
+            slot.delay = retraso
+        slot.jitter = 0.0
+
+    def _response_downloaded(self, response, request, spider=None) -> None:
+        clave = request.meta.get("download_slot")
+        if clave is None:
+            return
+        if response.status in self.CODIGOS:
+            from shared.respuestas import retry_after_segundos
+
+            pedido = retry_after_segundos(response.headers.get(b"Retry-After"))
+            if pedido is not None and pedido > 0:
+                self.anotar(clave, pedido)
+                return
+        self._aplicar(clave)
+
+    def process_request(self, request: Request, spider=None):
+        if self._pisos:
+            self._aplicar(self._downloader().get_slot_key(request))
+        return None
+
+    def _publicar(self) -> None:
+        """El resumen a Redis, para `jobs.health`. Best-effort."""
+        spider = getattr(self.crawler, "spider", None)
+        cliente = getattr(spider, "_redis", None)
+        job_id = getattr(spider, "job_id", None)
+        if cliente is None or not job_id:
+            return
+        try:
+            clave = f"job:{job_id}:retry_after"
+            if self._base is None:
+                # Acumulado entre reanudaciones del mismo job.
+                try:
+                    crudo = cliente.get(clave)
+                    previo = json.loads(crudo) if crudo else {}
+                except Exception:  # noqa: BLE001
+                    previo = {}
+                self._base = previo if isinstance(previo, dict) else {}
+            base, r = self._base, self.resumen
+            fusion = {
+                "veces": int(base.get("veces", 0)) + r["veces"],
+                "truncados": int(base.get("truncados", 0)) + r["truncados"],
+                "max_pedido_s": max(float(base.get("max_pedido_s", 0)), r["max_pedido_s"]),
+                "max_aplicado_s": max(float(base.get("max_aplicado_s", 0)), r["max_aplicado_s"]),
+                "tope_s": self._tope,
+            }
+            cliente.set(clave, json.dumps(fusion), ex=30 * 86400)
+        except Exception:  # noqa: BLE001 -- informativo
+            logger.debug("No se pudo publicar el resumen de Retry-After", exc_info=True)
 
 
 class HttpConfigMiddleware:
