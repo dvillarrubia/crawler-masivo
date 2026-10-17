@@ -55,6 +55,7 @@
 | `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `soft404.py` | Reglas puras del soft 404 (decision 105): `mangle_path`/`token_sonda` (la URL que no existe), `huella`/`misma_huella` (contenido sin el eco de la URL), `senal_titulo` (titulares de error en es/en/ca/eu/fr/de/pt/it), `es_busqueda`/`frase_sin_resultados`, `disponibilidades` |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
+| `indexabilidad.py` | `estado_indexabilidad`, `es_noindex`/`es_nofollow` y `misma_url`/`clave_url`: la indexabilidad de spider y analyzer (decision 39). `X-Robots-Tag` trozo a trozo con `x_robots_por_bot`/`directivas_x_robots` (una directiva con valor no es un bot; el bot dura hasta el siguiente) y `x_robots_para_bot` para la sintaxis (decision 107) |
 
 ## API Endpoints
 
@@ -134,7 +135,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_structured_data()` | structured data validation |
 | `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
 | `analyze_indexability()` | indexability status |
-| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
+| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
 | `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
 | `analyze_redirect_chains()` | redirect_chain, redirect_loop, **redireccion_a_error** (decision 101) |
