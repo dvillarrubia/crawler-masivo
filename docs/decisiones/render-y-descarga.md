@@ -332,3 +332,68 @@
    con otro contenido (precios a cero, «producto no disponible» en todas), la
    caída de tamaño por plantilla y la pausa con reanudación automática más
    tarde. Los censos anteriores no tienen la columna: hay que **re-rastrear**.
+
+<a id="d112"></a>
+112. **Un robots.txt que responde 5xx, 429 o no responde se guarda y se avisa
+   por host, y el rastreo sigue** (sección 6 de #149, primer paso de la Ola
+   7.3). Scrapy monta el parser con el cuerpo sea cual sea el código —Protego,
+   sobre el HTML de un 503, lo permite todo— y si la descarga lanza una
+   excepción deja el parser a `None` y deja pasar todo; nada llegaba a la base
+   de datos ni al informe (solo `robotstxt/response_status_count/<código>` en
+   las stats y un ERROR en el log). Google, en cambio, con un 5xx o un 429 da
+   el **sitio entero por bloqueado** mientras dure (los errores de red y los
+   timeouts cuentan como 5xx; pasados 30 días usa la última copia en caché), y
+   con un 4xx —401 y 403 incluidos— lo da todo por permitido.
+   - **Se guarda por host y job**, en la tabla `robots_txt` (la que #36 espera
+     para el historial): código, error, `response_class`, intentos (con los
+     reintentos de Scrapy), bytes, SHA-256 y, solo de un 2xx, el cuerpo
+     recortado a los 500 KiB que lee Google (`recortado`). Lo anota
+     `RobotsTxtRegistroMiddleware` (prioridad 90, por debajo de Retry y
+     Redirect, así que ve la respuesta FINAL) reconociendo la descarga por la
+     URL original `/robots.txt`: la de `RobotsTxtMiddleware` en `respect` y
+     `audit` y la del spider para los sitemaps, que es la única en `ignore`. No
+     se tocan `_parse_robots` ni `_robots_error`, privados de Scrapy (la
+     decisión 48 ya pagó replicar su middleware). Solo hosts internos y como
+     mucho 200 por job (`ROBOTS_TXT_MAX_HOSTS`): un multisite con
+     `crawl_subdomains` no llena la tabla, y lo que pase del tope queda «no
+     evaluado». La primera descarga de cada ejecución es la que cuenta
+     (con la que Scrapy decidió); reanudar sustituye la fila, no la duplica.
+   - **Se pide otra vez al cerrar**: si falló, cuando el spider se queda sin
+     trabajo (`spider_idle`) se repite UNA vez sin reintentos y se anota en
+     `comprobacion`. Nuestra IP no es la de Google, y un 503 puntual a mitad
+     de rastreo no es lo mismo que uno que dura. Si a la segunda respondió, su
+     cuerpo es el que se evalúa (decisión 113): es lo más parecido a la copia
+     que Google guarda de un robots.txt que va y viene. La espera tiene tope
+     (`DOWNLOAD_TIMEOUT` + 15 s): no puede dejar un rastreo sin cerrar.
+   - **`robots_txt_inaccesible`, una por host**, anclada en la raíz si se
+     rastreó y si no en la URL de id más bajo del host (no depende del orden de
+     las filas, lección de la 99). `error` si falló también al cerrar o no se
+     llegó a repetir (un rastreo cortado por `max_urls` no pasa por
+     `spider_idle`); `warning` si a la segunda respondió (`intermitente`) o si
+     es un **429**: para Google es un 5xx, pero un 429 a nuestra IP suele ser
+     un límite para el rastreador (es `rate_limited`, decisión 103) y Googlebot
+     puede no recibirlo. Un 4xx no avisa (es «sin robots.txt», también para
+     Google); un **muro** delante (403 de Cloudflare, captcha) tampoco: es «no
+     evaluado», no el 4xx del sitio que Google leería como «todo permitido»
+     (103). Un `IgnoreRequest` (tope de redirecciones) tampoco dice nada del
+     sitio.
+   - **El rastreo sigue pidiendo las URLs del host**, como hasta ahora (todo
+     permitido), y **no queda `failed`**. Seguir a Google al pie de la letra
+     sería tratarlo como `Disallow: /`: cero páginas con respuesta y un job
+     `failed` (48), cuando es un hallazgo del SITIO y no un fallo del dato
+     (28, 32), y desde una IP que no es la de Google. No es tampoco un muro
+     (103): no cuenta para la salud del job. La cortesía la siguen poniendo los
+     reintentos, AUTOTHROTTLE y el `Crawl-delay` de cuando sí responde (81).
+   - **La indexabilidad no cambia por el 5xx**: no sabemos si Google tiene
+     copia en caché ni si el fallo es pasajero. Se avisa; no se afirma (67).
+     `urls.bloqueada_googlebot` queda NULL en ese host.
+   Los censos anteriores no tienen filas: no se avisa nada ni se cambia nada,
+   y para tenerlo hay que **re-rastrear**. Tests: arnés real con 503, 500,
+   429, timeout, 404, el desafío real de Cloudflare y 200
+   (`tests/test_spider_robots_txt.py`, uno contra Postgres que comprueba la
+   fila y que reanudar la sustituye) y el analizador contra SQLite
+   (`tests/test_analyzer_robots_db.py`: un aviso por host aunque haya 500
+   URLs, dos hosts dos avisos, ancla estable con las filas desordenadas,
+   `indexable` sin cambios). Pendiente de medir en producción: cuántos hosts
+   de la cartera responden hoy 5xx/429 en `/robots.txt` (decisión 13: es hoy,
+   no el día del rastreo).

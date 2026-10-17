@@ -116,6 +116,19 @@ del head roto con lo que hace Chromium, y el contraste contra el navegador si
 esta instalado; en CI lo esta) y `test_html_ignorado_db.py` (el check contra
 SQLite, el spider guardando las columnas y `decodedBodySize` contra Chromium).
 
+robots.txt por job (decisiones 112 y 113): `test_robots_txt.py` (funciones
+puras: el estado con el criterio de Google, la tabla Chrome frente a Googlebot,
+los ejemplos de precedencia de Google con Protego y el recorte a 500 KiB),
+`test_spider_robots_txt.py` (el `SeoSpider` real con robots.txt 503, 500, 429,
+timeout, 404, un desafio de Cloudflare y 200: la fila, los intentos, la
+comprobacion al cerrar y que el rastreo sigue; con Postgres, que se guarda y que
+reanudar la sustituye), `test_analyzer_robots_db.py` (el analizador contra
+SQLite: un aviso por host, severidades, ancla estable, robots.txt que bloquea a
+Googlebot y no a Chrome y al reves, `audit` e `ignore`, censo sin filas sin
+cambios, re-analizar da lo mismo) y `test_backup_robots_txt.py` (ida y vuelta
+del backup y `borrar_job`). El arnes admite `robots_obey`, `lentas` (ruta ->
+segundos) y `settings`, y devuelve en `@@CIERRE@@` lo que anoto el middleware.
+
 Enlaces que Google no puede seguir (decision 106): `test_enlaces_no_rastreables.py`
 (los ejemplos de Google uno por uno, lo que NO se guarda, y que nada de ello
 entra en `extract_links`), `test_avisos_de_enlaces_db.py` (agregacion por
