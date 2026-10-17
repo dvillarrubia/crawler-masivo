@@ -40,9 +40,9 @@ order of priority:
    Dos columnas mas con relleno parcial, a proposito: `urls.http_version` solo
    se rellena con `render_js` (Navigation Timing; por el camino de curl_cffi
    habria que reimplementar el handler de scrapy-impersonate, que la
-   descarta), y `resources.size_bytes` no se recoge — el rastreo no descarga
-   el cuerpo de los recursos; el dato saldria de unir `resource_url` con
-   `urls.content_length` de los recursos que si se rastrearon.
+   descarta), y `resources.size_bytes` solo se rellena con la sonda de recursos
+   (`crawl_behavior.comprobar_recursos`, decision 124); sin ella sigue NULL, y
+   el de los recursos rastreados como URL esta en `urls.transfer_size`.
 
 ## What Does NOT Exist Yet
 
@@ -52,8 +52,9 @@ order of priority:
 - Custom extraction / custom search: hecho lo basico (decision 104, #34). Falta:
   - **PR 2**: pestaña «Extraccion» en el formulario (tablas de reglas, marca de
     heredada, `null` al quitar una heredada) y prueba con URL en vivo desde el
-    worker (cola `extraccion:pruebas`, subproceso, `shared/red.py` contra SSRF con
-    `CURLOPT_RESOLVE` y comprobacion en cada salto, `comparar_render`), mudando
+    worker (cola `extraccion:pruebas`, subproceso, `shared/red.py` contra SSRF (ya existe con
+    la comprobacion por la forma del host, decision 123; falta fijar la IP con
+    `CURLOPT_RESOLVE` y comprobarla en cada salto), `comparar_render`), mudando
     `_BOILERPLATE_REMOVAL_JS` y `_JS_ESPERAR_DOM_QUIETO` a `render.py`;
   - **PR 3**: `fuente=html_crudo` en jobs con render (`page.on("response")`) e
     incidencia agrupada opcional `busqueda_a_medida` (una fila por regla con

@@ -27,6 +27,7 @@
 | `seo_crawler/items.py` | Scrapy Item definitions (PageItem, HtmlMetaItem, LinkItem, etc.) |
 | `seo_crawler/middlewares.py` | UA rotation, proxy, job config, HTTP config middlewares |
 | `seo_crawler/settings.py` | Scrapy settings (BFS, autothrottle, Playwright, pipeline) |
+| `seo_crawler/sonda_respuestas.py` | Sondas de respuesta (decisiones 123 y 124): enlaces externos (`comprobar_enlaces_externos`) y recursos embebidos (`comprobar_recursos`, `check_external_resources`) con HEAD y GET+Range de repuesto, robots.txt del tercero, origen caido tras DNS confirmado o dos fallos, tope global y por host, latido por tiempo. No cuentan en `max_urls`, no son `urls` ni cuentan para la salud; van a `respuestas_sondeadas` |
 | `seo_crawler/sonda_soft404.py` | Sondas de soft 404 (decision 105): una URL inexistente por host de las semillas, por host interno nuevo y por plantilla nueva (y repetida en el destino si solo cambia de esquema o host), con su propio callback; no cuentan en `max_urls` ni se guardan en `urls`, van a `jobs.soft404["sondas"]` |
 
 ### Analysis (`analysis/`)
@@ -146,6 +147,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
 | `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
+| `avisos_de_sondas.py` | **enlace_externo_roto** (uno por destino, con `paginas_afectadas`) y **dominio_externo_muerto** (uno por host; sobre `externo_hash` de la temporal de aristas), **broken_resource** (uno por recurso) y `resources.size_bytes`, de `respuestas_sondeadas`; resumen en `jobs.sondas_resumen`. Decisiones 123 y 124 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
 
@@ -163,6 +165,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `ContentItem` | `page_content` | 1:1 with urls |
 | `SecurityItem` | `security_headers` | 1:1 with urls |
 | `EnlacesNoRastreablesItem` | `enlaces_no_rastreables` | uno por pagina con todas sus filas; la reemplaza entera (decision 106) |
+| `RespuestaSondeadaItem` | `respuestas_sondeadas` | uno por URL sondeada; upsert por (job_id, url_hash) (decisiones 123 y 124) |
 
 ## Middleware Stack
 

@@ -220,6 +220,29 @@ def _como_links(db: Session, job_id: uuid.UUID, filas: list[dict]) -> list[Any]:
     ]
 
 
+def _sondas_de(db: Session, job_id: uuid.UUID, hashes) -> dict[str, tuple[str, int | None]]:
+    """Veredicto y codigo de la sonda de cada destino (decision 123), filtrando
+    `respuestas_sondeadas` por job y hash (su indice unico)."""
+    from shared.models import RespuestaSondeada
+
+    lista = sorted({h for h in hashes if h})
+    if not lista:
+        return {}
+    return {
+        h: (v, st) for h, v, st in db.query(
+            RespuestaSondeada.url_hash, RespuestaSondeada.veredicto,
+            RespuestaSondeada.status_code)
+        .filter(RespuestaSondeada.job_id == job_id, RespuestaSondeada.url_hash.in_(lista))
+    }
+
+
+def _con_sondas(db: Session, job_id: uuid.UUID) -> bool:
+    from shared.models import RespuestaSondeada
+
+    return db.query(RespuestaSondeada.id).filter(
+        RespuestaSondeada.job_id == job_id).first() is not None
+
+
 def _es_enlace(tipo: str | None) -> bool:
     return tipo is None or tipo not in _TIPOS_NO_ENLACE
 
@@ -1356,10 +1379,15 @@ def list_links(
 
     if archivo_enlaces.esta_archivado(job):
         items = []
-        for r in _como_links(db, job_id, archivo_enlaces.pagina(
-                job_id, (page - 1) * page_size, page_size)):
+        filas = _como_links(db, job_id, archivo_enlaces.pagina(
+            job_id, (page - 1) * page_size, page_size))
+        sondas = _sondas_de(db, job_id, (getattr(r, "to_url_hash", None) for r in filas
+                                         if not getattr(r, "is_internal", True)))
+        for r in filas:
             resp = LinkResponse.model_validate(r)
             resp.from_url = r.from_url_rel.url
+            resp.estado_externo, resp.status_externo = sondas.get(
+                getattr(r, "to_url_hash", None), (None, None))
             items.append(resp)
         return _paginate(items=items, total=archivo_enlaces.contar(job_id),
                          page=page, page_size=page_size)
@@ -1383,11 +1411,13 @@ def list_links(
         .all()
     )
 
+    sondas = _sondas_de(db, job_id, (r.to_url_hash for r in rows if not r.is_internal))
     items = []
     for r in rows:
         resp = LinkResponse.model_validate(r)
         if r.from_url_rel:
             resp.from_url = r.from_url_rel.url
+        resp.estado_externo, resp.status_externo = sondas.get(r.to_url_hash, (None, None))
         items.append(resp)
 
     return _paginate(
@@ -2036,12 +2066,16 @@ LINKS_CSV_COLUMNS = [
     "is_internal",
     "alt_text",
     "repeticiones",
+    # Sonda de enlaces externos (decision 123); vacias si no se sondeo.
+    "estado_externo",
+    "status_externo",
 ]
 
 
-def _links_csv_row(link_obj: Link) -> list[str]:
+def _links_csv_row(link_obj: Link, sondas: dict | None = None) -> list[str]:
     """Build a flat CSV row from a Link (+ resolved source URL)."""
     from_url = link_obj.from_url_rel.url if link_obj.from_url_rel else ""
+    estado, status = (sondas or {}).get(getattr(link_obj, "to_url_hash", None), (None, None))
     return [
         _val(from_url),
         _val(link_obj.to_url),
@@ -2054,6 +2088,8 @@ def _links_csv_row(link_obj: Link) -> list[str]:
         _val(link_obj.is_internal),
         _val(link_obj.alt_text),
         _val(link_obj.repeticiones),
+        _val(estado),
+        _val(status),
     ]
 
 
@@ -2074,6 +2110,17 @@ def _stream_links_csv(job_id: uuid.UUID, archivado_en=None):
     writer.writerow(LINKS_CSV_COLUMNS)
     yield "\ufeff" + buf.getvalue()
 
+    # Si el censo tiene sondas (decision 123), una consulta por lote por el
+    # indice (job_id, url_hash); si no, ninguna.
+    with SessionLocal() as s:
+        con_sondas = _con_sondas(s, job_id)
+
+    def _sondas(s, filas):
+        if not con_sondas:
+            return {}
+        return _sondas_de(s, job_id, (getattr(f, "to_url_hash", None) for f in filas
+                                      if not getattr(f, "is_internal", True)))
+
     if archivado_en is not None:
         from sqlalchemy.orm import sessionmaker
 
@@ -2084,8 +2131,10 @@ def _stream_links_csv(job_id: uuid.UUID, archivado_en=None):
             with Sesion() as s:
                 buf = io.StringIO()
                 writer = csv.writer(buf)
-                for lk in _como_links(s, job_id, lote):
-                    writer.writerow(_links_csv_row(lk))
+                filas = _como_links(s, job_id, lote)
+                sondas = _sondas(s, filas)
+                for lk in filas:
+                    writer.writerow(_links_csv_row(lk, sondas))
                 return buf.getvalue()
 
         for fila in archivo_enlaces.recorrer(job_id):
@@ -2114,8 +2163,9 @@ def _stream_links_csv(job_id: uuid.UUID, archivado_en=None):
 
             buf = io.StringIO()
             writer = csv.writer(buf)
+            sondas = _sondas(session, rows)
             for row in rows:
-                writer.writerow(_links_csv_row(row))
+                writer.writerow(_links_csv_row(row, sondas))
                 last_id = row.id
 
             yield buf.getvalue()

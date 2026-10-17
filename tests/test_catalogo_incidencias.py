@@ -29,8 +29,20 @@ _NO_LITERALES = {
 }
 
 
+# Los modulos que emiten incidencias con `_add_issue`. Uno nuevo se anade aqui:
+# los tipos de `avisos_de_enlaces.py` se le escapaban a este test (#150).
+MODULOS = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_sondas.py")
+
+
 def _llamadas() -> list[ast.expr]:
-    arbol = ast.parse((RAIZ / "analysis" / "analyzer.py").read_text(encoding="utf-8"))
+    tipos = []
+    for modulo in MODULOS:
+        tipos += _llamadas_de(RAIZ / "analysis" / modulo)
+    return tipos
+
+
+def _llamadas_de(ruta: Path) -> list[ast.expr]:
+    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
     tipos = []
     for nodo in ast.walk(arbol):
         if (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
@@ -65,7 +77,8 @@ def test_el_patron_encuentra_los_tipos():
             "hreflang_destino_no_indexable", "hreflang_idioma_repetido",
             "hreflang_sin_x_default", "hreflang_sin_autorreferencia",
             "hreflang_retorno_incoherente", "structured_data_error",
-            "missing_csp"} <= tipos
+            "missing_csp", "enlace_interno_a_error", "enlace_externo_roto",
+            "dominio_externo_muerto", "broken_resource"} <= tipos
     assert len(tipos) > 40
 
 
