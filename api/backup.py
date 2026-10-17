@@ -34,6 +34,7 @@ from shared.models import (
     Issue,
     CustomExtraction,
     EnlaceNoRastreable,
+    CapturaAlternativa,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,8 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     # Enlaces no rastreables (decision 106). Lo mismo: un backup anterior no
     # la trae y se salta.
     ("enlaces_no_rastreables", EnlaceNoRastreable, "from_url_id"),
+    # Capturas con otro perfil (decision 119). Igual: opcional al importar.
+    ("capturas_alternativas", CapturaAlternativa, "url_id"),
 ]
 
 

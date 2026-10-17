@@ -159,8 +159,11 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
 PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = int(
     os.getenv("PLAYWRIGHT_MAX_PAGES", "4")
 )
-# Safety cap on total browser contexts (default + custom + margin)
-PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "3"))
+# Safety cap on total browser contexts: default + custom + el del perfil de
+# la paridad (`perfil_movil` o `perfil_escritorio`, decision 119) + margen.
+# Con 3 la paridad se quedaba justa y una pestaña de mas esperaba a que se
+# cerrase un contexto.
+PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "4"))
 # Named browser contexts — reused across requests to avoid creating a new
 # context per page.  The "custom" context carries the configured user-agent
 # and is referenced by the spider's _playwright_meta().

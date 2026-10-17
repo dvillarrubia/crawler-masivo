@@ -16,6 +16,7 @@ from scrapy import Spider
 
 from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
+    CapturaAlternativaItem,
     ContentItem,
     CustomExtractionItem,
     EnlacesNoRastreablesItem,
@@ -155,6 +156,8 @@ class PostgresPipeline:
             self._handle_custom(item, spider)
         elif isinstance(item, EnlacesNoRastreablesItem):
             self._handle_no_rastreables(item)
+        elif isinstance(item, CapturaAlternativaItem):
+            self._handle_captura(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -466,6 +469,41 @@ class PostgresPipeline:
             self._rollback()
             logger.exception("Fallo al confirmar los enlaces no rastreables de %d paginas",
                              len(lote))
+
+    # ------------------------------------------------------------------
+    # CapturaAlternativaItem (decision 119)
+    # ------------------------------------------------------------------
+    def _handle_captura(self, item: CapturaAlternativaItem) -> None:
+        """Reemplaza la captura de la URL con ese perfil, en un SAVEPOINT.
+
+        Son pocas (una muestra por plantilla) y llegan sueltas: se escriben al
+        momento. Sin tabla (la crea la API al arrancar, como la de la decision
+        106) o si falla, se pierde ESTA fila y no las paginas sin confirmar
+        que comparten la transaccion.
+        """
+        url_id = self._resolve_url_id(item.get("url_hash"), item.get("job_id"))
+        if url_id is None:
+            logger.debug("Captura alternativa sin url_id, se descarta")
+            return
+        from shared.models import CapturaAlternativa
+
+        datos = {k: item.get(k) for k in (
+            "perfil", "modo", "estado", "plantilla", "user_agent", "status_code",
+            "response_class", "redirige_a", "vary_base", "vary", "medidas",
+            "diferencias", "volatiles", "detalle")}
+        try:
+            with self.session.begin_nested():
+                self.session.query(CapturaAlternativa).filter(
+                    CapturaAlternativa.url_id == url_id,
+                    CapturaAlternativa.perfil == datos["perfil"],
+                ).delete(synchronize_session=False)
+                self.session.add(CapturaAlternativa(
+                    job_id=item.get("job_id"), url_id=url_id, **datos))
+        except Exception:
+            logger.warning("No se pudo guardar la captura %s de url_id=%s",
+                           datos.get("perfil"), url_id, exc_info=True)
+            return
+        self._maybe_commit()
 
     # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)

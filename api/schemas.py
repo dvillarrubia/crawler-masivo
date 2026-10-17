@@ -120,6 +120,16 @@ class CrawlBehaviorConfig(BaseModel):
     # como mucho (una por host de las semillas y una por plantilla de ruta).
     # No gastan max_urls ni se guardan como URL del censo. 0 = sin sondas.
     soft404_sondas: int = Field(default=12, ge=0, le=100)
+    # Paridad movil/escritorio (decision 119): cuantas paginas del censo se
+    # vuelven a pedir con el perfil movil (o con el de escritorio, si el UA
+    # del job ya es de movil), como mucho `paridad_movil_por_plantilla` por
+    # plantilla. Sondas fuera de max_urls; cada una cuesta 1 o 2 peticiones
+    # (la de control, solo si algo difiere). 0 = apagado, que es lo de serie.
+    paridad_movil_muestra: int = Field(default=0, ge=0, le=500)
+    paridad_movil_por_plantilla: int = Field(default=3, ge=1, le=50)
+    # chrome_android por defecto: con Googlebot desde nuestra IP un WAF que
+    # verifica bots lo bloquea o sirve otra cosa (decision 98)
+    paridad_movil_ua: Literal["chrome_android", "googlebot_smartphone"] = "chrome_android"
 
 
 class UrlFilterConfig(BaseModel):
@@ -739,6 +749,8 @@ class UrlDetailResponse(UrlResponse):
     issues: list[IssueResponse] = []
     inlinks: list[LinkResponse] = []
     outlinks: list[LinkResponse] = []
+    # La misma URL pedida con otro perfil (decision 119): una por perfil
+    capturas_alternativas: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

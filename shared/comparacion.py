@@ -53,6 +53,7 @@ import time
 
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
+from shared.perfiles import perfil_de_ua
 from shared.respuestas import MOTIVOS_BLOQUEO, NO_VALIDAS
 
 logger = logging.getLogger(__name__)
@@ -287,6 +288,16 @@ def comparar_censos(
             "Uno de los dos censos renderiza JavaScript y el otro no: el que "
             "renderiza ve enlaces y texto que el otro no llega a ver, asi que "
             "una diferencia puede ser del render y no del sitio."
+        )
+    # Un censo con UA de movil y otro de escritorio no ven la misma pagina en
+    # un sitio con servido dinamico o m-dot: lo que cambia puede ser el perfil
+    # (decision 119). Y la paridad movil de uno no se compara con la del otro.
+    perfil_a, perfil_b = job_a.get("perfil"), job_b.get("perfil")
+    if perfil_a and perfil_b and perfil_a != perfil_b:
+        avisos.append(
+            f"Un censo se rastreo con perfil {perfil_a} y el otro con perfil "
+            f"{perfil_b}: si el sitio sirve otra cosa a un movil, una diferencia "
+            f"puede ser del perfil y no del sitio."
         )
     ver_a, ver_b = job_a.get("crawler_version"), job_b.get("crawler_version")
     if not ver_a or not ver_b:
@@ -775,6 +786,8 @@ def resumen_de_job(job) -> dict[str, Any]:
         # no haber estado nunca en el alcance (decisión 70).
         "semillas": list(job.seeds or []),
         "render_js": (job.config or {}).get("render_js"),
+        # movil o escritorio, por el UA del job (decision 119)
+        "perfil": perfil_de_ua((job.config or {}).get("user_agent")),
         "status": job.status,
         "finish_reason": job.finish_reason,
         "crawler_version": job.crawler_version,

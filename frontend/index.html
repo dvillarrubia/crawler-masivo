@@ -4341,6 +4341,24 @@
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_subdomains"> Rastrear subdominios</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_nofollow"> Seguir nofollow</label>
           </div>
+          <!-- Paridad movil/escritorio (decision 119): sondas fuera de max_urls -->
+          <div class="form-row-3">
+            <div class="form-group">
+              <label title="Páginas que se vuelven a pedir con el perfil móvil (o escritorio, si el UA ya es de móvil) para compararlas. 0 = apagado">Paridad móvil: páginas (0 = no)</label>
+              <input type="number" x-model="createForm.paridad_movil_muestra" min="0" max="500">
+            </div>
+            <div class="form-group">
+              <label>Por plantilla</label>
+              <input type="number" x-model="createForm.paridad_movil_por_plantilla" min="1" max="50">
+            </div>
+            <div class="form-group">
+              <label title="Con Googlebot desde nuestra IP, un WAF que verifica bots puede bloquearlo o servirle otra cosa (decisión 98)">UA móvil</label>
+              <select x-model="createForm.paridad_movil_ua">
+                <option value="chrome_android">Chrome Android</option>
+                <option value="googlebot_smartphone">Googlebot smartphone</option>
+              </select>
+            </div>
+          </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="filter" style="width:14px;height:14px;opacity:.6"></i> Filtros de URL
