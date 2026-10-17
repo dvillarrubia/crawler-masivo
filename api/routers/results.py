@@ -2538,14 +2538,23 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     )
 
 
+TIPOS_SIN_ENLACE_QUE_CUENTE = (
+    "orphan_page", "sitemap_orphan", "solo_enlazada_desde_paginacion_excluida",
+)
+
+
 def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Links: orphan pages, inlinks distribution, nofollow, broken links."""
     # Huerfana solo puede serlo una pagina 200 (ver analyze_links)
     total_internal = _html_2xx(job_id, db)
 
-    # Orphan pages (0 inlinks)
-    orphan_count = db.query(func.count(Issue.id)).filter(
-        Issue.job_id == job_id, Issue.issue_type == "orphan_page",
+    # Paginas sin un enlace que cuente: las huerfanas, las del sitemap que
+    # nadie enlaza y las que solo cuelgan de una paginacion excluida (decision
+    # 122). La 122 pasa paginas de las dos primeras a la tercera: contando solo
+    # `orphan_page`, la nota SUBIA en el censo donde se encuentra el problema.
+    # Paginas distintas, no incidencias.
+    orphan_count = db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.issue_type.in_(TIPOS_SIN_ENLACE_QUE_CUENTE),
     ).scalar() or 0
 
     # Average inlinks
@@ -2592,9 +2601,9 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     if orphan_count > 0:
         recs.append(Recommendation(
             priority="alta", title="Enlazar paginas huerfanas",
-            description=f"Hay {orphan_count} paginas sin enlaces internos que apunten a ellas. Agrega enlaces desde paginas relevantes para que los buscadores las descubran.",
+            description=f"Hay {orphan_count} paginas sin un enlace interno que los buscadores sigan: nadie las enlaza, o solo las enlazan paginas 2+ de un listado en noindex o canonicalizadas a la 1. Agrega enlaces desde paginas indexables (o arregla esa paginacion) para que los buscadores las descubran.",
             affected_count=orphan_count,
-            issue_types=["orphan_page"],
+            issue_types=list(TIPOS_SIN_ENLACE_QUE_CUENTE),
         ))
     if broken_link_issues > 0:
         recs.append(Recommendation(

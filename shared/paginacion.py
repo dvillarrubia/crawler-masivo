@@ -9,7 +9,9 @@ Dos clases de marcador:
 
 - **Fuertes**, que cuentan solos: ``?page=N``, ``?pagina=N``, ``?pg=N``,
   ``?paged=N`` (WordPress) y los tramos ``/page/N``, ``/pagina/N`` y
-  ``/pag/N``. Nadie usa esos nombres para otra cosa.
+  ``/pag/N``. Nadie usa esos nombres para otra cosa. Tambien el
+  ``?e-page-<id>=N`` de Elementor, que lleva el id del widget en el nombre (en
+  Lopesan, la paginacion de las 45 categorias del blog).
 - **Debiles**, que solo cuentan con evidencia (``debiles=True``, y la
   evidencia la decide quien llama): ``?p=N`` y un ``/N`` final. En WordPress,
   ``?p=123`` es el id de una entrada, y en muchas tiendas ``/p/123`` o
@@ -41,6 +43,8 @@ TRAMOS_FUERTES = frozenset(("page", "pagina", "pag"))
 PARAMETROS_DEBILES = frozenset(("p",))
 
 _RE_N = re.compile(r"^\d{1,6}$")
+# Elementor: `?e-page-1f2a3b=2`, un parametro por widget paginado.
+_RE_ELEMENTOR = re.compile(r"^e-page-[0-9a-f]+$", re.IGNORECASE)
 
 
 class Pagina(NamedTuple):
@@ -78,9 +82,11 @@ def _sin_parametro(query: str, nombres: frozenset[str]) -> tuple[str, int, str] 
     partes = query.split("&")
     for i, parte in enumerate(partes):
         nombre, _, valor = parte.partition("=")
-        if nombre.lower() in nombres and _RE_N.match(valor):
+        bajo = nombre.lower()
+        elementor = nombres is PARAMETROS_FUERTES and _RE_ELEMENTOR.match(bajo)
+        if (bajo in nombres or elementor) and _RE_N.match(valor):
             resto = "&".join(partes[:i] + partes[i + 1:])
-            return resto, int(valor), nombre.lower()
+            return resto, int(valor), "e-page" if elementor else bajo
     return None
 
 

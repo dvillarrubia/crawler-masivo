@@ -27,7 +27,8 @@ _NO_LITERALES = {
     "tipo": {"missing_hsts", "missing_csp", "missing_x_content_type_options",
              "missing_x_frame_options"},
     "tipo_de_serie": {"paginacion_canonical_a_la_primera", "paginacion_noindex",
-                      "paginacion_siguiente_rota"},
+                      "solo_enlazada_desde_paginacion_profunda", "paginacion_sin_enlace",
+                      "paginacion_siguiente_rota", "paginacion_rel_incorrecto"},
 }
 
 # Los modulos que emiten con `az._add_issue` ademas del analizador. Estaban

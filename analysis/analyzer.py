@@ -2811,6 +2811,7 @@ class SEOAnalyzer:
             # el rel). NULL en el resto: no engorda la temporal.
             # No cambian `origen_cuenta`: es otra pregunta (decision 38).
             Column("origen_pag_excluida", Boolean),
+            Column("origen_pag_profunda", Boolean),
             Column("rel_destino_url", Text),
             prefixes=["TEMPORARY"],
         )
@@ -2828,6 +2829,7 @@ class SEOAnalyzer:
                       func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
                   Link.to_url_hash), else_=None),
             pag.c.excluida if pag is not None else null(),
+            pag.c.profunda if pag is not None else null(),
             case((and_(pag.c.con_rel.is_(True), destino.id.is_(None)), Link.to_url),
                  else_=None)
             if pag is not None else null(),
@@ -2839,7 +2841,8 @@ class SEOAnalyzer:
         self.session.execute(
             insert(aristas).from_select(
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
-                 "veces", "utm_hash", "origen_pag_excluida", "rel_destino_url"],
+                 "veces", "utm_hash", "origen_pag_excluida", "origen_pag_profunda",
+                 "rel_destino_url"],
                 consulta
                 .outerjoin(destino, and_(
                     destino.url_hash == Link.to_url_hash,
@@ -2901,10 +2904,12 @@ class SEOAnalyzer:
         )
 
         # Sobre las mismas aristas: una segunda lectura de `links` costaria lo
-        # mismo que todo lo anterior (decision 41).
+        # mismo que todo lo anterior (decision 41). La paginacion va antes que
+        # la profundidad: lo que solo cuelga de una serie excluida no lleva
+        # ademas `not_reachable_from_home` (36).
+        avisos_de_paginacion.desde_aristas(self, aristas)  # decision 122
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
-        avisos_de_paginacion.desde_aristas(self, aristas)  # decision 122
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         avisos_de_paginacion.borrar_temporal(self)
@@ -3079,7 +3084,10 @@ class SEOAnalyzer:
                 Url.inlinks_count > 0,
             )
         ).all()
+        de_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
         for url_id, entrantes, en_sitemap in sin_camino:
+            if url_id in de_paginacion:
+                continue
             self._add_issue(
                 url_id, "not_reachable_from_home", "warning",
                 {"inlinks": entrantes, "in_sitemap": en_sitemap},
@@ -3840,7 +3848,7 @@ class SEOAnalyzer:
             )
         ).all()
         sin_enlazar = self._ids_canonical_sin_enlazar()
-        desde_paginacion = getattr(self, "_solo_desde_paginacion", None) or {}  # d122
+        desde_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
         for (url_id,) in rows:
             if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "sitemap_orphan", "warning")

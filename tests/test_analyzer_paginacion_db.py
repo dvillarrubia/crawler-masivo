@@ -28,7 +28,8 @@ from sqlalchemy.orm import sessionmaker
 
 from analysis import avisos_de_paginacion
 from analysis.analyzer import SEOAnalyzer
-from shared.models import Base, Hreflang, HtmlMeta, Issue, Job, Link, Url
+from shared.models import (Base, EnlaceNoRastreable, Hreflang, HtmlMeta, Issue, Job, Link,
+                           Url)
 
 
 @compiles(BigInteger, "sqlite")
@@ -42,7 +43,8 @@ H = "https://x.com"
 def _montar():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine, tables=[Job.__table__, Url.__table__, Issue.__table__,
-                                             Link.__table__, HtmlMeta.__table__, Hreflang.__table__])
+                                             Link.__table__, HtmlMeta.__table__, Hreflang.__table__,
+                                             EnlaceNoRastreable.__table__])
     s = sessionmaker(bind=engine)()
     j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=[f"{H}/"], config={})
     s.add(j)
@@ -65,10 +67,10 @@ def _pag(s, j, ruta, status=200, *, robots=None, canonical=None, nxt=None, prv=N
     return u
 
 
-def _a(s, j, origen, ruta, veces=1):
+def _a(s, j, origen, ruta, veces=1, follow=True):
     s.add(Link(job_id=j.id, from_url_id=origen.id, to_url=f"{H}{ruta}",
                to_url_hash=f"{j.id}{ruta}", is_internal=True, link_position="content",
-               follow=True, repeticiones=veces))
+               follow=follow, repeticiones=veces))
     s.flush()
 
 
@@ -170,13 +172,16 @@ def test_noindex_agrupado_y_lo_que_solo_cuelga_de_ahi():
     filas = _issues(s, j, "paginacion_noindex")
     assert len(filas) == 1
     f = filas[0]
-    assert f.severity == "info"
+    # Deja indexables colgando: el `warning` va en la serie, que es donde se
+    # arregla (64), con la cuenta; cada pagina lleva el rastro en `info`.
+    assert f.severity == "warning"
     assert (f.details["series"], f.details["paginas_afectadas"]) == (1, 2)
+    assert f.details["indexables_que_solo_cuelgan_de_ella"] == 2
     assert f.url_id == p2.id
 
     solo = {f.url_id: f for f in _issues(s, j, "solo_enlazada_desde_paginacion_excluida")}
     assert set(solo) == {cat1.id, cat2.id}
-    assert solo[cat1.id].severity == "warning"
+    assert solo[cat1.id].severity == "info"
     d = solo[cat1.id].details
     assert (d["paginas_que_enlazan"], d["enlaces"], d["motivos"]) == (2, 4, {"noindex": 2})
     assert d["ejemplos_origen"] == [p2.url, p3.url]
@@ -224,7 +229,10 @@ def test_autocanonicas_e_indexables_no_avisan():
     s.commit()
     _analizar(s, j)
     tipos = {t for (t,) in s.execute(select(Issue.issue_type).where(Issue.job_id == j.id))}
-    assert not tipos & set(avisos_de_paginacion.TIPOS), tipos
+    # La entrada solo la enlaza la pagina 2: se alcanza, por la cola del
+    # listado (`info`). Nada de exclusiones.
+    assert tipos & set(avisos_de_paginacion.TIPOS) == {
+        "solo_enlazada_desde_paginacion_profunda"}, tipos
     assert "orphan_page" not in _tipos_en(s, j, entrada.id)
 
 
@@ -406,3 +414,424 @@ def test_la_paginacion_no_anade_lecturas_de_links(tmp_path, monkeypatch, motor):
             s.commit()
         s.close()
         engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Revision: lo que la rama de la ola 1 (decision 107, sin mergear) habia
+# medido en censos reales, reproducido contra este modulo. Cada test falla sin
+# su arreglo.
+# ---------------------------------------------------------------------------
+def _analizar_todo(s, j):
+    """Como `run_all` en lo que toca a la paginacion: tambien los botones de la
+    106, que consumen lo que la paginacion ya dice."""
+    from analysis import avisos_de_enlaces
+
+    az = SEOAnalyzer(s, j.id)
+    az.analyze_indexability()
+    avisos_de_paginacion.analizar_paginacion(az)
+    az.compute_link_counts()
+    az.analyze_links()
+    avisos_de_enlaces.avisar_enlaces_no_rastreables(az)
+    az.analyze_sitemap()
+    az._flush_issues()
+    s.commit()
+    return az
+
+
+def _boton(s, j, origen, ruta):
+    s.add(EnlaceNoRastreable(job_id=j.id, from_url_id=origen.id, crawlability="onclick_sin_href",
+                             etiqueta="button", href=f"location='{ruta}'",
+                             destino=f"{H}{ruta}", destino_interno=True,
+                             destino_hash=f"{j.id}{ruta}", anchor_text="Cargar más",
+                             link_position="content", repeticiones=1))
+    s.flush()
+
+
+def _todos(s, j):
+    return {(t, u) for t, u in s.execute(select(Issue.issue_type, Issue.url_id).where(
+        Issue.job_id == j.id))}
+
+
+def _listado(s, j, *, p1_robots=None):
+    """/cat/ -> /cat/page/2/ (noindex) -> /cat/page/3/ (noindex); la ficha
+    /producto-viejo solo sale en la 3."""
+    home = _pag(s, j, "/", depth=0)
+    p1 = _pag(s, j, "/cat/", robots=p1_robots, nxt="/cat/page/2/")
+    p2 = _pag(s, j, "/cat/page/2/", robots="noindex", prv="/cat/", nxt="/cat/page/3/")
+    p3 = _pag(s, j, "/cat/page/3/", robots="noindex", prv="/cat/page/2/")
+    ficha = _pag(s, j, "/producto-viejo")
+    _a(s, j, home, "/cat/")
+    _a(s, j, p1, "/cat/page/2/")
+    _a(s, j, p2, "/cat/page/3/")
+    _a(s, j, p3, "/producto-viejo")
+    s.commit()
+    return home, p1, p2, p3, ficha
+
+
+def test_r1_un_rel_a_un_muro_no_es_un_rel_roto():
+    """Decision 103: el muro no es la pagina; ni roto ni «no coincide»."""
+    s, j = _montar()
+    p1 = _pag(s, j, "/cat/", nxt="/cat/page/2/")
+    muro = _pag(s, j, "/cat/page/2/", status=403)
+    muro.response_class = "challenge_waf"
+    _a(s, j, p1, "/cat/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    tipos = {t for t, _u in _todos(s, j)}
+    assert not tipos & set(avisos_de_paginacion.TIPOS), tipos
+
+
+def test_r2_una_cadena_de_rel_entre_entradas_no_es_un_listado():
+    """`adjacent_posts_rel_link` de WordPress: rel=next/prev entre entradas
+    que la portada enlaza todas. Ni son paginas 2+, ni su `noindex` es el de
+    una paginacion, ni les falta un `<a>` a «la siguiente»."""
+    s, j = _montar()
+    home = _pag(s, j, "/", depth=0)
+    _pag(s, j, "/hola-mundo/", nxt="/segundo-post/")
+    b = _pag(s, j, "/segundo-post/", robots="noindex", prv="/hola-mundo/", nxt="/tercer-post/")
+    c = _pag(s, j, "/tercer-post/", robots="noindex", prv="/segundo-post/")
+    for ruta in ("/hola-mundo/", "/segundo-post/", "/tercer-post/"):
+        _a(s, j, home, ruta)
+    guia = _pag(s, j, "/guia/")
+    _a(s, j, b, "/guia/")
+    _a(s, j, c, "/guia/")
+    s.commit()
+    _analizar_todo(s, j)
+    tipos = {t for t, _u in _todos(s, j)}
+    assert not tipos & set(avisos_de_paginacion.TIPOS), tipos
+    # La guia solo la enlazan dos noindex: es huerfana, sin mas.
+    assert "orphan_page" in _tipos_en(s, j, guia.id)
+
+
+def test_r2_un_listado_que_solo_dice_el_rel_sigue_siendolo():
+    """La misma cadena sin enlaces desde fuera a las paginas 2+ es un listado
+    (`/alter/news/` -> `/alter/news/2/` en blogs.uoc.edu)."""
+    s, j = _montar()
+    home = _pag(s, j, "/", depth=0)
+    n1 = _pag(s, j, "/news/", nxt="/news/2/")
+    n2 = _pag(s, j, "/news/2/", robots="noindex", prv="/news/", nxt="/news/3/")
+    _pag(s, j, "/news/3/", robots="noindex", prv="/news/2/")
+    _a(s, j, home, "/news/")
+    _a(s, j, n1, "/news/2/")
+    _a(s, j, n2, "/news/3/")
+    s.commit()
+    _analizar_todo(s, j)
+    assert [f.url_id for f in _issues(s, j, "paginacion_noindex")] == [n2.id]
+
+
+def test_r3_el_boton_de_cargar_mas_es_la_paginacion_sin_enlace():
+    """El caso tipico: la pagina 2 solo la carga un boton, asi que ni se
+    rastreo ni hay `rel=next`. Es `paginacion_sin_enlace` (con el boton en los
+    detalles), y `enlace_no_rastreable` no lo repite (36)."""
+    s, j = _montar()
+    d1 = _pag(s, j, "/d/")
+    _boton(s, j, d1, "/d/page/2/")
+    otro = _pag(s, j, "/e")
+    s.add(EnlaceNoRastreable(job_id=j.id, from_url_id=otro.id, crawlability="javascript_href",
+                             etiqueta="a", href="javascript:abrir('/f')", destino=f"{H}/f",
+                             destino_interno=True, destino_hash=f"{j.id}/f",
+                             link_position="content", repeticiones=1))
+    # Con rel=next y boton: un aviso, no dos.
+    g1 = _pag(s, j, "/g/", nxt="/g/page/2/")
+    _boton(s, j, g1, "/g/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    sin = _issues(s, j, "paginacion_sin_enlace")
+    assert len(sin) == 1
+    d = sin[0].details
+    assert d["paginas_afectadas"] == 2 and d["con_boton_js"] == 2
+    assert {e["url"] for e in d["ejemplos"]} == {d1.url, g1.url}
+    assert [u for t, u in _todos(s, j) if t == "enlace_no_rastreable"] == [otro.id]
+
+
+def test_r3_el_boton_con_un_a_a_la_misma_pagina_no_le_quita_nada_a_google():
+    s, j = _montar()
+    d1 = _pag(s, j, "/d/")
+    _boton(s, j, d1, "/d/page/2/")
+    _a(s, j, d1, "/d/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    tipos = {t for t, _u in _todos(s, j)}
+    assert "paginacion_sin_enlace" not in tipos and "enlace_no_rastreable" not in tipos
+
+
+def test_r4_un_enlace_desde_una_noindex_de_fuera_tampoco_es_un_camino():
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    legal = _pag(s, j, "/aviso-legal", robots="noindex")
+    _a(s, j, home, "/aviso-legal")
+    _a(s, j, legal, "/producto-viejo")
+    s.commit()
+    _analizar_todo(s, j)
+    assert "solo_enlazada_desde_paginacion_excluida" in _tipos_en(s, j, ficha.id)
+    assert "orphan_page" not in _tipos_en(s, j, ficha.id)
+
+
+def test_r5_el_warning_va_en_la_serie_cuando_deja_indexables_colgando():
+    """Decision 64: el arreglo es quitar un `noindex` de plantilla, no enlazar
+    ficha a ficha. La serie lleva el `warning` y la cuenta; cada ficha, el
+    rastro en `info`."""
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    s.commit()
+    _analizar_todo(s, j)
+    serie = _issues(s, j, "paginacion_noindex")
+    assert len(serie) == 1 and serie[0].severity == "warning"
+    d = serie[0].details
+    assert d["indexables_que_solo_cuelgan_de_ella"] == 1
+    assert d["ejemplos_indexables"] == [ficha.url]
+    solo = _issues(s, j, "solo_enlazada_desde_paginacion_excluida")
+    assert [(f.url_id, f.severity) for f in solo] == [(ficha.id, "info")]
+
+
+def test_r6_la_pagina_3_que_solo_enlaza_la_2_noindex_no_es_huerfana():
+    """Es de la propia serie: se cuenta en ella (`solo_enlazadas_por_la_serie`)
+    y no como `orphan_page`, que diria que nadie la enlaza."""
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    _analizar_todo(s, j)
+    assert "orphan_page" not in _tipos_en(s, j, p3.id)
+    assert _issues(s, j, "paginacion_noindex")[0].details["solo_enlazadas_por_la_serie"] == 1
+
+
+def test_r6_ninguna_pagina_se_queda_sin_aviso():
+    """Lo que deja de ser `orphan_page`/`sitemap_orphan`/`not_reachable_from_home`
+    sale en otro aviso: por pagina, o contada en una serie que lo lleva."""
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    # /tag/x/ solo la enlaza la 2 noindex de OTRA serie, y no es indexable.
+    _pag(s, j, "/tag/x/", robots="noindex", nxt="/tag/x/page/2/")
+    _a(s, j, p2, "/tag/x/")
+    s.commit()
+    _analizar_todo(s, j)
+    tag = s.execute(select(Url).where(Url.url == f"{H}/tag/x/")).scalar_one()
+    assert _tipos_en(s, j, tag.id) & {"orphan_page", "solo_enlazada_desde_paginacion_excluida"}
+
+
+def test_r7_una_no_indexable_del_sitemap_no_lleva_el_aviso():
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    s.get(HtmlMeta, ficha.id).meta_robots = "noindex"
+    ficha.in_sitemap = True
+    s.commit()
+    _analizar_todo(s, j)
+    assert "solo_enlazada_desde_paginacion_excluida" not in _tipos_en(s, j, ficha.id)
+
+
+def test_r8_un_nofollow_desde_fuera_no_es_un_camino_y_se_dice():
+    """La home enlaza la ficha con `nofollow`: cuenta como entrante (38) pero no
+    es un camino (90). La ficha solo cuelga de la paginacion, y se dice."""
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j)
+    _a(s, j, home, "/producto-viejo", follow=False)
+    s.commit()
+    _analizar_todo(s, j)
+    tipos = _tipos_en(s, j, ficha.id)
+    assert "solo_enlazada_desde_paginacion_excluida" in tipos, tipos
+    assert "not_reachable_from_home" not in tipos
+    fila = _issues(s, j, "solo_enlazada_desde_paginacion_excluida")[0]
+    assert fila.details["otros_entrantes"] == 1
+
+
+def test_r9_la_serie_casa_entre_censos_aunque_cambie_el_ancla():
+    """Decision 88/89: el ancla es la pagina de URL menor del grupo, y se mueve
+    si en el censo siguiente se rastrea otra. Es el mismo hallazgo."""
+    from shared.comparacion import comparar_incidencias
+
+    def censo(rutas):
+        s, j = _montar()
+        for r in rutas:
+            _pag(s, j, r, robots="noindex")
+        s.commit()
+        _analizar_todo(s, j)
+        return [{"issue_type": t, "severity": sev, "group_key": g, "url": u}
+                for t, sev, g, u in s.execute(
+                    select(Issue.issue_type, Issue.severity, Issue.group_key, Url.url)
+                    .join(Url, Url.id == Issue.url_id)
+                    .where(Issue.issue_type == "paginacion_noindex")).all()]
+
+    a = censo(["/cat/page/3/", "/cat/page/4/"])
+    b = censo(["/cat/page/2/", "/cat/page/3/", "/cat/page/4/"])
+    assert a[0]["url"] != b[0]["url"] and a[0]["group_key"] == b[0]["group_key"]
+    r = comparar_incidencias(a, b, analisis_a="v", analisis_b="v",
+                             urls_del_nuevo={f"{H}/cat/page/{n}/" for n in (2, 3, 4)})
+    assert r["siguen"]["total"] == 1
+    assert r["nuevas"]["total"] == 0 and r["resueltas"]["total"] == 0
+
+
+def test_e1_lo_que_solo_enlazan_las_paginas_profundas():
+    s, j = _montar()
+    home = _pag(s, j, "/", depth=0)
+    p1 = _pag(s, j, "/blog/", nxt="/blog/page/2/")
+    p2 = _pag(s, j, "/blog/page/2/", prv="/blog/")
+    _a(s, j, home, "/blog/")
+    _a(s, j, p1, "/blog/page/2/")
+    nuevo = _pag(s, j, "/post-nuevo")
+    viejo = _pag(s, j, "/post-viejo")
+    _a(s, j, p1, "/post-nuevo")
+    _a(s, j, p2, "/post-viejo")
+    s.commit()
+    _analizar_todo(s, j)
+    filas = _issues(s, j, "solo_enlazada_desde_paginacion_profunda")
+    assert len(filas) == 1 and filas[0].severity == "info"
+    assert filas[0].details["paginas_afectadas"] == 1
+    assert filas[0].details["ejemplos"] == [{"url": viejo.url, "ejemplo_origen": p2.url}]
+    assert nuevo.id
+
+
+def test_e2_rel_que_no_coincide_con_el_enlace_no_es_sin_enlace():
+    """Lopesan: el `rel=next` dice `/page/2/` y la paginacion de Elementor
+    enlaza `?e-page-1f=2`. HAY `<a href>` a la pagina siguiente: lo que falla
+    es el `rel`. Y progym: el `rel` de la ficha dice `ficha.html?p=2` y su
+    paginador enlaza `home.html?p=2`."""
+    s, j = _montar()
+    b1 = _pag(s, j, "/b/", nxt="/b/page/2/")
+    _a(s, j, b1, "/b/?e-page-1f=2")
+    f1 = _pag(s, j, "/ficha.html", nxt="/ficha.html?p=2")
+    _a(s, j, f1, "/home.html?p=2")
+    a1 = _pag(s, j, "/a/", nxt="/a/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    sin = _issues(s, j, "paginacion_sin_enlace")
+    assert [e["url"] for f in sin for e in f.details["ejemplos"]] == [a1.url]
+    rel = _issues(s, j, "paginacion_rel_incorrecto")
+    motivos = {}
+    for f in rel:
+        assert f.severity == "info"
+        for k, v in f.details["motivos"].items():
+            motivos[k] = motivos.get(k, 0) + v
+    assert motivos == {"no_coincide_con_el_enlace": 2}
+
+
+def test_e2_rel_a_una_redireccion_y_fuera_de_la_serie():
+    s, j = _montar()
+    c1 = _pag(s, j, "/c/", nxt="/c/page/2/")
+    _pag(s, j, "/c/page/2/", status=301)
+    _a(s, j, c1, "/c/page/2/")
+    d1 = _pag(s, j, "/d/page/2/", prv="/otra/")
+    s.commit()
+    _analizar_todo(s, j)
+    motivos = {}
+    for f in _issues(s, j, "paginacion_rel_incorrecto"):
+        for k, v in f.details["motivos"].items():
+            motivos[k] = motivos.get(k, 0) + v
+    assert motivos == {"destino_redireccion": 1, "fuera_de_la_serie": 1}
+    assert d1.id
+
+
+def test_e3_elementor_e_page_es_paginacion():
+    from shared.paginacion import pagina_de
+
+    p = pagina_de("https://x.com/blog/?e-page-1f2a=3")
+    assert p is not None and p.n == 3 and not p.debil
+    assert pagina_de("https://x.com/blog/?e-page-1f2a=3").serie == \
+        pagina_de("https://x.com/blog/?e-page-1f2a=2").serie
+
+
+def test_e4_una_variante_canonicalizada_a_otra_serie_no_es_del_listado():
+    """blogs.uoc.edu: paginaciones enteras con parametros basura (`?x=ooo`)
+    canonicalizadas a la limpia. No son el listado: ni «sin enlace» por un
+    `rel` a la version limpia, ni otra serie en noindex."""
+    s, j = _montar()
+    _pag(s, j, "/blog/page/2/?x=ooo", robots="noindex", canonical="/blog/page/2/",
+         nxt="/blog/page/3/")
+    _pag(s, j, "/blog/page/3/?x=ooo", robots="noindex", canonical="/blog/page/3/",
+         prv="/blog/page/2/")
+    s.commit()
+    _analizar_todo(s, j)
+    tipos = {t for t, _u in _todos(s, j)}
+    assert not tipos & set(avisos_de_paginacion.TIPOS), tipos
+
+
+def test_r5_una_serie_entera_en_noindex_deja_el_warning_en_la_pagina():
+    """Si la pagina 1 tambien es noindex (un archivo por fecha), el noindex es
+    una decision sobre el listado: lo que hay que hacer es enlazar la ficha
+    desde otra parte, y el `warning` es de la ficha."""
+    s, j = _montar()
+    home, p1, p2, p3, ficha = _listado(s, j, p1_robots="noindex")
+    _analizar_todo(s, j)
+    serie = _issues(s, j, "paginacion_noindex")
+    assert [f.severity for f in serie] == ["info"]
+    assert "indexables_que_solo_cuelgan_de_ella" not in serie[0].details
+    solo = _issues(s, j, "solo_enlazada_desde_paginacion_excluida")
+    assert [(f.url_id, f.severity) for f in solo] == [(ficha.id, "warning")]
+
+
+def test_r9_los_tipos_de_plantilla_casan_por_grupo_en_la_comparacion():
+    """`shared.comparacion` no puede importar `analysis/` (la imagen de la API
+    no lo lleva): repite la lista, y esto comprueba que coinciden."""
+    from shared.comparacion import ANCLADOS_POR_GRUPO
+
+    assert ANCLADOS_POR_GRUPO == set(avisos_de_paginacion.TIPOS_DE_PLANTILLA)
+
+
+def test_r9_un_map_host_tambien_casa_la_serie():
+    from shared.comparacion import comparar_incidencias
+
+    a = [{"issue_type": "paginacion_noindex", "severity": "info", "group_key": "g",
+          "url": "https://pre.x.com/cat/page/3/"}]
+    b = [{"issue_type": "paginacion_noindex", "severity": "info", "group_key": "g",
+          "url": "https://x.com/cat/page/2/"}]
+    r = comparar_incidencias(a, b, analisis_a="v", analisis_b="v",
+                             mapa_hosts={"pre.x.com": "x.com"})
+    assert r["siguen"]["total"] == 1
+
+
+def test_r11_cada_clave_de_los_detalles_tiene_nombre_en_la_interfaz():
+    """Se EJECUTAN los escenarios y se miran las claves que salen (74)."""
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    js = open(os.path.join(raiz, "frontend", "incidencias.js"), encoding="utf-8").read()
+    bloque = js[js.index("const DETALLE_LABEL = {"):]
+    bloque = bloque[:bloque.index("\n};")]
+    nombres = set(re.findall(r"^\s*([a-z0-9_]+)\s*:", bloque, re.M))
+    nombres |= {"alcance"}  # lo pinta `fmt.detalles` aparte («de plantilla»)
+
+    claves = set()
+    for p1_robots in (None, "noindex"):
+        s, j = _montar()
+        home, p1, p2, p3, ficha = _listado(s, j, p1_robots=p1_robots)
+        _a(s, j, home, "/producto-viejo", follow=False)
+        _pag(s, j, "/x/page/3/", robots="noindex")       # cuelga solo de su serie
+        x2 = _pag(s, j, "/x/page/2/", robots="noindex")
+        _a(s, j, x2, "/x/page/3/")
+        _a(s, j, home, "/x/page/2/")
+        d1 = _pag(s, j, "/d/")
+        _boton(s, j, d1, "/d/page/2/")
+        b1 = _pag(s, j, "/b/", nxt="/b/page/2/")
+        _a(s, j, b1, "/b/?e-page-1f=2")
+        bl = _pag(s, j, "/blog/")
+        b2 = _pag(s, j, "/blog/page/2/", canonical="/blog/", nxt="/blog/page/3/")
+        _pag(s, j, "/blog/page/3/", status=404)
+        _a(s, j, bl, "/blog/page/2/")
+        _a(s, j, b2, "/solo-desde-b2")
+        _pag(s, j, "/solo-desde-b2")
+        t1 = _pag(s, j, "/t/")
+        t2 = _pag(s, j, "/t/page/2/")
+        _a(s, j, t1, "/t/page/2/")
+        _a(s, j, t2, "/hondo")
+        _pag(s, j, "/hondo")
+        s.commit()
+        _analizar_todo(s, j)
+        for (d,) in s.execute(select(Issue.details).where(
+                Issue.issue_type.in_(avisos_de_paginacion.TIPOS))).all():
+            claves |= set(d or {})
+    tipos = {t for (t,) in s.execute(select(Issue.issue_type).where(
+        Issue.issue_type.in_(avisos_de_paginacion.TIPOS)))}
+    assert tipos == set(avisos_de_paginacion.TIPOS), set(avisos_de_paginacion.TIPOS) - tipos
+    assert claves and not claves - nombres, sorted(claves - nombres)
+
+
+def test_e5_un_rel_de_la_pagina_1_es_evidencia_de_un_marcador_debil():
+    """progym: la ficha `x.html` declara `rel=next` a `x.html?p=2`, y esa
+    pagina 2 (sin `rel` propio) va canonicalizada a la ficha. `?p=N` solo es
+    paginacion con evidencia, y el `rel` de la 1 lo es."""
+    s, j = _montar()
+    _pag(s, j, "/x.html", nxt="/x.html?p=2")
+    x2 = _pag(s, j, "/x.html?p=2", canonical="/x.html")
+    # Sin nadie que la anuncie, `?p=2` sigue sin ser paginacion.
+    _pag(s, j, "/y.html")
+    _pag(s, j, "/y.html?p=2", canonical="/y.html")
+    s.commit()
+    _analizar_todo(s, j)
+    filas = _issues(s, j, "paginacion_canonical_a_la_primera")
+    assert [(f.url_id, f.details["paginas_afectadas"]) for f in filas] == [(x2.id, 1)]

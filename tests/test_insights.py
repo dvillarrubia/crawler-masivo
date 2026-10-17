@@ -19,7 +19,7 @@ from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from api.routers import results  # noqa: E402
-from shared.models import Base, Hreflang, Issue, Job, Url  # noqa: E402
+from shared.models import Base, Hreflang, Issue, Job, Link, Url  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -32,7 +32,8 @@ def _bigint_sqlite(tipo, compilador, **kw):
 def db():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(
-        engine, tables=[Job.__table__, Url.__table__, Issue.__table__, Hreflang.__table__]
+        engine, tables=[Job.__table__, Url.__table__, Issue.__table__, Hreflang.__table__,
+                        Link.__table__]
     )
     s = sessionmaker(bind=engine)()
     yield s
@@ -254,3 +255,28 @@ def test_una_soft_404_no_mejora_la_nota_de_contenido(db, job):
     assert recs["Revisar posibles soft 404"].affected_count == 1
     # Y no se recomienda arreglar el titulo de una pagina de error
     assert "Optimizar titulos" not in recs
+
+
+def test_lo_que_solo_cuelga_de_una_paginacion_excluida_resta_como_una_huerfana(db, job):
+    """Decision 122: el analisis pasa paginas de `orphan_page`/`sitemap_orphan`
+    a `solo_enlazada_desde_paginacion_excluida`. Contando solo `orphan_page`, la
+    nota de Enlazado SUBIA en el censo donde se encuentra el problema."""
+    paginas = [_url(db, job, f"/p{i}") for i in range(10)]
+    for p in paginas[:3]:
+        _issue(db, job, p, "orphan_page")
+    _issue(db, job, paginas[3], "sitemap_orphan")
+    db.commit()
+    antes = results._calc_links(job.id, db)
+
+    db.query(Issue).filter(Issue.job_id == job.id).delete()
+    _issue(db, job, paginas[0], "orphan_page")
+    for p in paginas[1:4]:
+        _issue(db, job, p, "solo_enlazada_desde_paginacion_excluida")
+    db.commit()
+    ahora = results._calc_links(job.id, db)
+
+    assert ahora.metrics["orphan_count"] == antes.metrics["orphan_count"] == 4
+    assert ahora.score == antes.score
+    rec = next(r for r in ahora.recommendations if r.title == "Enlazar paginas huerfanas")
+    assert rec.affected_count == 4
+    assert "solo_enlazada_desde_paginacion_excluida" in rec.issue_types

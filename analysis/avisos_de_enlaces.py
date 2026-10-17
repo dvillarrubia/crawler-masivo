@@ -382,7 +382,7 @@ def avisar_enlaces_no_rastreables(az) -> None:
     # clave primaria despues de filtrar la tabla por su job_id (37).
     origen = aliased(Url)
     filas = az.session.execute(
-        select(E.from_url_id, E.crawlability, E.href, E.destino, E.destino_interno,
+        select(E.id, E.from_url_id, E.crawlability, E.href, E.destino, E.destino_interno,
                E.destino_hash, E.anchor_text, E.etiqueta, E.link_position, E.repeticiones,
                origen.url.label("origen_url"))
         .join(origen, origen.id == E.from_url_id)
@@ -390,6 +390,12 @@ def avisar_enlaces_no_rastreables(az) -> None:
                origen.is_html.is_(True))
         .order_by(E.from_url_id, E.id)
     ).all()
+    # El boton que carga la pagina siguiente de un listado ya lo cuenta la
+    # paginacion (`paginacion_sin_enlace`, decision 122), o no hace falta
+    # porque la serie tambien enlaza esa pagina con un <a href>: un aviso por
+    # hallazgo (36).
+    de_paginacion = getattr(az, "_enr_de_paginacion", None) or set()
+    filas = [f for f in filas if f.id not in de_paginacion]
     url_de = {f.from_url_id: f.origen_url for f in filas}
 
     paginas_por_firma: dict[tuple, set[int]] = defaultdict(set)
