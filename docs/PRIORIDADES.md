@@ -63,6 +63,7 @@ Lo que corrompe o tapa dato **hoy**, en los censos que ya se entregan.
 | #26 | Indexabilidad: una única función con tabla de tests | El analizador normaliza peor que el extractor (`_norm_url` ignora puerto, barra final y www) |
 | #25 #27 #29 | Rastreo, contenido y analyzer | Ver cada issue |
 | #28 #30 | Recursos y scripts de control | P2 dentro de M1 |
+| #149 | Fallos de la comparativa con FreeCrawl (2026-10-17): `X-Robots-Tag`, credenciales del job a otros hosts, alcance de los casi duplicados, cookies, robots.txt con 5xx | `max-snippet:-1, noindex` y `bingbot: noindex, googlebot: noindex` dan «Indexable» (reproducido con `es_noindex`). El usuario y la contraseña de un staging se envían a cualquier host. Guía de implementación en la issue |
 
 **Definición de hecho de M1**: la CI corre en verde en cada PR, los conteos de
 enlaces se pueden recalcular dos veces y dan lo mismo, y un rastreo bloqueado
