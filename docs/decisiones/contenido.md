@@ -180,3 +180,56 @@
    fuera de `<main>` sigue sin entrar, porque trafilatura se queda dentro del
    contenedor elegido; y `role="dialog"` sobre un `<div>` sigue siendo
    plantilla, porque ahí no hay forma de saber si está abierto.
+
+<a id="d121"></a>
+121. **Un titular vacio no es un titular, un titulo de relleno se dice una
+   vez, y un enlace sin nombre sale de la temporal de aristas** (#150, parte B,
+   puntos 1-3). Re-analizar, sin re-rastrear.
+   - **`h1_vacio`** (warning, la consecuencia de `h1_missing`): la pagina tiene
+     h1 visibles (`oculto IS NOT TRUE`) y ninguno con texto. El extractor ya
+     guardaba `text=NULL` (`<h1></h1>`, `<h1><img src=logo></h1>` sin alt), y el
+     analizador lo contaba como h1 presente. Mismo ambito que `h1_missing`
+     (HTML 2xx, sin muros). **`h1_multiple` cuenta solo los que tienen texto**:
+     uno bueno y uno vacio es un titular, y solo vacios es `h1_vacio` (36).
+     **Guardia de epoca**: la regla del alt y `headings.oculto` entraron juntas
+     (46); si ningun titular del job tiene `oculto` escrito, el censo es
+     anterior y `h1_vacio` no se emite (un logo CON alt se guardo vacio). Los
+     **saltos de nivel no son incidencia**: Google no documenta el orden como
+     senal (sin verificar la cita); es accesibilidad, y va con axe en la Ola 8.
+   - **`title_generico`** (warning): el titulo, o lo que queda al quitarle la
+     marca, es un placeholder de una lista cerrada en es/en/ca/eu/fr/de/pt/it
+     (`shared/titulos.py`: «Sin título», «Untitled document», «Nueva página»,
+     la pagina por defecto de nginx o Apache...). La marca es el segmento
+     (separador del soft 404) que aparece en mas de la mitad de los titulos
+     indexables del host; con un solo titulo no se sabe cual es y el titulo
+     tiene que ser el placeholder entero. «Inicio | Marca» y «Home» no estan en
+     la lista. Se compara sin caja, acentos ni puntuacion en los extremos
+     («Título» = «título.»). Solo indexables, una fila por valor con
+     `paginas_afectadas`, y **tapa** el `title_duplicate` de ese grupo y el
+     `title_too_short` de esas paginas: el arreglo es el mismo (36). **El
+     titulo de una palabra se descarta**: lo que no caza `title_too_short`
+     («Electrodomésticos») no es un error demostrable, y la regla del espacio
+     da una palabra en cualquier titulo chino. El juicio semantico es de #16.
+   - **`description_igual_title`** (info): la description, normalizada igual,
+     es el titulo. Una que solo empieza por el no. Solo indexables y con
+     description (sin ella ya es `description_missing`); una fila por (host,
+     `firma_de_ruta`) porque suele ser el valor por defecto del CMS (64).
+   - **`enlace_sin_ancla`** (info): enlace interno sin texto, sin
+     `aria-label`/`title`/svg (que el extractor ya pone en el ancla, 46) y sin
+     alt (61). Sale de tres columnas nuevas de `aristas_tmp`, rellenas solo en
+     esas filas (el patron de `utm_hash`), en la unica lectura de `links` de
+     `compute_link_counts` (37, 41); un test lo cuenta. Solo desde un origen
+     que cuenta (200 y no noindex, 38 y 57). El mismo componente (posicion,
+     destino) en `enlaces_plantilla_min_paginas` paginas o mas es una fila
+     `alcance: plantilla` en la de URL menor (88); el resto, una por origen con
+     `SUM(veces)` (94). `tipo: imagen` cuando es un `<a><img></a>`: puede salir
+     tambien `image_missing_alt`, y el arreglo es el mismo. Misma guardia de
+     epoca que `h1_vacio`: antes de la 46 el ancla no leia `aria-label` ni
+     `title` y habria falsos positivos. Las anclas genericas («leer más») son
+     de la Ola 8 y #13.
+
+   Cambian cifras al re-analizar (72, 91): `h1_multiple` baja y salen tipos
+   nuevos. **Sin medir en censos reales** (no habia ninguno en esta rama): la
+   decision 46 cita 208 enlaces sin ancla en 58 paginas de control, 39
+   internos, casi todos iconos de redes sociales. Tests:
+   `tests/test_titulares_titulos_anclas_db.py`.

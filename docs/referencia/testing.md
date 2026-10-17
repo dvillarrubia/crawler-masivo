@@ -69,6 +69,14 @@ normalizar y semillas con credenciales rechazadas; decisiones 106 y 39),
 decision 117) y `test_spider_cabeceras_y_saltos.py` (spider real: `ftp://` y
 `ws://` internos no se rastrean, hreflang de un PDF por cabecera, tope de 20
 saltos).
+Re-analisis de #150: `test_senales_contradictorias_db.py` (canonical solo en
+la cabecera, HTML frente a cabecera, `noindex` con canonical a otra,
+redireccion a una noindex, meta refresh con y sin retardo, `_Fichas` siguiendo
+la meta refresh, y `run_all` dos veces con el mismo resultado en SQLite y
+Postgres; decision 120) y `test_titulares_titulos_anclas_db.py` (H1 vacio con
+la guardia de la decision 46, `title_generico`, `description_igual_title` y
+`enlace_sin_ancla` sobre la temporal de aristas con una sola lectura de
+`links`; decision 121).
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y

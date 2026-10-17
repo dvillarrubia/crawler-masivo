@@ -42,6 +42,16 @@ const ISSUE_INFO = {
     google: 'Llega a un error: la URL vieja pierde lo que tenía y la nueva no existe.',
     arreglo: 'Redirigir directamente a una página que responda 200, o quitar los enlaces que llevan a la URL vieja.',
   },
+  'redireccion_a_noindex': {
+    que: 'La redirección, o la cadena, acaba en una página que pide no ser indexada (noindex). Si diez o más redirecciones llegan a la misma, sale una sola vez, en ella: suele ser una regla deliberada (todo /mi-cuenta/ a /login). Las que solo cambian http/https, www o la barra final no salen.',
+    google: 'Sigue la redirección y encuentra un noindex: lo que tenía la URL vieja no pasa a ninguna página del índice.',
+    arreglo: 'Redirigir a la página indexable que sustituye a la vieja; si el destino es correcto, decidir si debe seguir en noindex.',
+  },
+  'meta_refresh_redireccion': {
+    que: 'La página redirige con <meta http-equiv="refresh"> en vez de con una redirección del servidor. Con retardo, el usuario la ve unos segundos antes de saltar. Una refresh sin URL (recargar) o dentro de <noscript> no cuenta. Con render JS, una refresh inmediata puede aparecer como redirección por JavaScript, y el retardo de un salto visto por el navegador no se conoce.',
+    google: 'La inmediata la trata como permanente; la de varios segundos, como temporal, y puede quedarse con la URL de origen. Recomienda la redirección del servidor.',
+    arreglo: 'Sustituirla por una redirección 301 en el servidor.',
+  },
   'redirect_loop': {
     que: 'Las redirecciones vuelven a una URL ya visitada y no terminan nunca.',
     google: 'La página no se puede indexar.',
@@ -53,6 +63,16 @@ const ISSUE_INFO = {
     que: 'La página pide no ser indexada (meta robots o cabecera X-Robots-Tag).',
     google: 'No la muestra en resultados y, con el tiempo, deja de seguir sus enlaces.',
     arreglo: 'Nada si es intencionado (búsquedas, filtros, privadas). Si es una página que debe posicionar, quitar el noindex.',
+  },
+  'noindex_y_canonical_a_otra': {
+    que: 'La página está en noindex y a la vez declara un canonical a otra URL: dos señales que piden cosas distintas. Va agrupado por plantilla. Si el destino también es noindex no sale (no hay contradicción útil).',
+    google: 'Suele obedecer el noindex, y la consolidación en la canónica no se produce. Es habitual y casi siempre deliberado en facetas y filtros.',
+    arreglo: 'Quedarse con una de las dos: noindex si la página no debe estar, o canonical (sin noindex) si es una copia de la canónica. Gana claridad, no índice.',
+  },
+  'canonical_html_y_cabecera_distintos': {
+    que: 'El canonical del HTML y el de la cabecera HTTP Link apuntan a URLs distintas (la barra final cuenta). Si pasa en diez páginas o más de un host, sale una vez por host.',
+    google: 'Recibe dos canonicals que se contradicen y puede ignorar los dos y elegir por su cuenta.',
+    arreglo: 'Que los dos digan lo mismo, o quitar uno (suele ser el CDN o un plugin el que añade la cabecera).',
   },
   'robots_invalid_syntax': {
     que: 'La meta robots está mal escrita (directivas separadas por «/», «|» o «;»).',
@@ -148,6 +168,16 @@ const ISSUE_INFO = {
     google: 'Lo corta con «…» o lo reescribe.',
     arreglo: 'Acortarlo dejando lo importante al principio.',
   },
+  'title_generico': {
+    que: 'El título es el de relleno del CMS («Sin título», «Untitled document», «Nueva página»…), solo o con la marca del sitio. Sale una vez por valor, con las páginas que lo llevan.',
+    google: 'No sabe de qué va la página por el título, y suele reescribirlo.',
+    arreglo: 'Escribir el título de cada página.',
+  },
+  'description_igual_title': {
+    que: 'La meta description repite el título, palabra por palabra. Va agrupado por plantilla: suele ser el valor por defecto del CMS o del plugin.',
+    google: 'No aporta nada que no diga ya el título, y la suele sustituir por un fragmento de la página.',
+    arreglo: 'Escribir una description que resuma la página, o configurar el plugin para que no copie el título.',
+  },
   'title_duplicate': {
     que: 'Varias páginas indexables comparten el mismo título.',
     google: 'Le cuesta distinguirlas y puede mostrar la que no es.',
@@ -187,6 +217,11 @@ const ISSUE_INFO = {
     que: 'La página no tiene un <h1> visible.',
     google: 'No es obligatorio, pero el titular visible ayuda a entender el tema.',
     arreglo: 'Añadir un <h1> con el titular de la página.',
+  },
+  'h1_vacio': {
+    que: 'La página tiene <h1>, pero vacío: sin texto, o con un logo sin alt dentro. Un logo sin alt dentro del <h1> deja la página sin titular.',
+    google: 'Es como no tenerlo: no hay titular que leer.',
+    arreglo: 'Poner el titular como texto, o el nombre en el alt de la imagen.',
   },
   'h1_multiple': {
     que: 'La página tiene varios <h1> visibles.',
@@ -346,6 +381,11 @@ const ISSUE_INFO = {
     google: 'Rastrea un error por cada enlace, y la autoridad que pasaba por ahí se pierde.',
     arreglo: 'Cambiar o quitar los enlaces de esta página; si el destino debería existir, arreglarlo o redirigirlo.',
   },
+  'enlace_sin_ancla': {
+    que: 'Enlace interno sin ningún nombre: sin texto, sin aria-label ni title, y sin alt si es una imagen. Si el mismo enlace (posición y destino) está en diez páginas o más, sale una vez, como plantilla. En el caso de una imagen, el arreglo es el mismo que el de «imagen sin alt».',
+    google: 'El enlace cuenta, pero el texto ancla es lo que le dice de qué va el destino, y aquí no hay ninguno.',
+    arreglo: 'Poner texto al enlace, o un alt descriptivo a la imagen (o aria-label si es un icono).',
+  },
   'enlace_interno_a_redireccion': {
     que: 'Enlaces internos a una URL que redirige. «Plantilla»: la URL que redirige está enlazada desde 10 páginas o más (el aviso va en ella); «página»: los de esta página.',
     google: 'Sigue la redirección y pasa la señal, pero gasta un rastreo más por enlace y prefiere que se enlace la URL final.',
@@ -472,6 +512,15 @@ const ISSUE_LABEL_EXTRA = {
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
   utm_en_enlace_interno: 'Enlace interno con utm',
+  enlace_sin_ancla: 'Enlace interno sin texto ancla',
+  // Decisiones 120 y 121
+  redireccion_a_noindex: 'Redirección a una noindex',
+  meta_refresh_redireccion: 'Redirección por meta refresh',
+  noindex_y_canonical_a_otra: 'Noindex con canonical a otra',
+  canonical_html_y_cabecera_distintos: 'Canonical del HTML ≠ cabecera',
+  h1_vacio: 'H1 vacío',
+  title_generico: 'Título de relleno',
+  description_igual_title: 'Description igual al título',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -545,4 +594,16 @@ const DETALLE_LABEL = {
   etiqueta: 'etiqueta',
   posicion: 'posición',
   ancla: 'ancla',
+  // Decisiones 120 y 121
+  fuente: 'de dónde sale',
+  canonical_html: 'canonical del HTML',
+  canonical_cabecera: 'canonical de la cabecera',
+  destino_indexable: 'destino indexable',
+  plantilla: 'plantilla',
+  paginas_ejemplo: 'páginas de ejemplo',
+  redirecciones_que_llegan: 'redirecciones que llegan',
+  final: 'URL final',
+  retardo_s: 'retardo (s)',
+  h1_vacios: 'h1 vacíos',
+  alcance: 'alcance',
 };

@@ -357,7 +357,9 @@ def test_una_cadena_o_un_bucle_que_empiezan_fuera_no_son_del_sitio():
 def _enlace(s, j, origen, destino):
     s.add(Link(job_id=j.id, from_url_id=origen.id, to_url=destino.url,
                to_url_hash=destino.url_hash, is_internal=True,
-               link_position="content", follow=True))
+               link_position="content", follow=True,
+               # Con ancla: un enlace sin nombre es otro aviso (decision 121).
+               anchor_text="ver"))
     s.flush()
 
 
