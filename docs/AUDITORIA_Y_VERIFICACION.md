@@ -640,7 +640,7 @@ lo que sí lo es son fichas o landings distintas con el mismo texto. Ver
 |-----------|-----|-------|
 | ⭐⭐⭐ | **Custom extraction / custom search** (XPath/CSS/regex por job) | La feature de SF más usada en consultoría; encaja en `extraction` del job config |
 | ⭐⭐ | **JavaScript tab** (HTML crudo vs renderizado) | Ya rastreamos con y sin JS; falta la doble captura y la comparación (palabras/enlaces solo-JS, render time) |
-| ✅ | **Pagination tab** | Hecho (decisión 122): páginas 2+ con canonical a la 1 o en noindex, lo que solo cuelga de ellas, paginación sin `<a>` y `rel` a un error; ámbito «Paginación» en el explorador. Fuera, a propósito: bucles y huecos de la secuencia (Google no usa `rel=next`) |
+| ✅ | **Pagination tab** | Hecho (decisión 122): páginas 2+ con canonical a la 1 o en noindex, lo que solo cuelga de ellas o solo de las páginas 2+, paginación sin `<a>` (también el botón «cargar más») y `rel` a un error o incorrecto; ámbito «Paginación» en el explorador. Fuera, a propósito: bucles y huecos de la secuencia (Google no usa `rel=next`) |
 | ⭐⭐ | **PageSpeed tab** (API PSI / CWV) | Integración de API, no crawling; ~50 métricas |
 | ⭐ | Sitemap: qué sitemap referencia cada URL | Hoy sólo booleano `in_sitemap` |
 | ⭐ | `resources.size_bytes` real | La columna existe pero nunca se rellena (habría que hacer HEAD/GET de recursos) |

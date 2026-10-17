@@ -570,79 +570,149 @@
    tiene consecuencia; lo que la tiene es la pagina 2+ en `noindex` o con el
    canonical a la 1 (deja de contar, y con ella lo que solo se enlaza desde
    ahi) y la paginacion que no es un `<a href>` (un «cargar mas»: Google no
-   descubre las paginas 2+). Cinco tipos, en `analysis/avisos_de_paginacion.py`:
-   - `paginacion_canonical_a_la_primera` (warning), `paginacion_noindex`
-     (info), `paginacion_sin_enlace` (warning) y `paginacion_siguiente_rota`
-     (warning, `rel` a un 4xx/5xx rastreado, sin el 429): **de plantilla**
-     (64), una fila por (host, forma de la serie —`firma_de_ruta` de la ruta
-     sin el marcador, mas el marcador—) con `series`, `paginas_afectadas` y
-     ejemplos, anclada en la pagina de URL menor (88) y con `group_key`.
-     Una pagina 2+ con `noindex` y canonical a la 1 va solo al primero (36).
-     El `noindex_page` de cada pagina no se toca: es el dato de la pagina, y
-     esto es el patron del listado.
-   - `solo_enlazada_desde_paginacion_excluida` (warning): pagina indexable a
-     la que solo llegan enlaces desde paginas 2+ excluidas. **Es el hallazgo
-     de la decision 38** («168 categorias colgando solo de su paginacion
-     noindex» en blogs.uoc.edu), que hasta ahora salia como `orphan_page` sin
-     decir por que. Una por pagina destino; sustituye a `orphan_page` y a
-     `sitemap_orphan` (con `en_sitemap` en los detalles) y cede ante
-     `canonical_sin_enlazar` (101), que pide algo mas concreto. Lo que cuelga
-     de una canonicalizada a la 1 tambien sale, aunque tenga `inlinks_count`
-     > 0: la canonicalizada SI cuenta como entrante y en el PageRank, y eso
-     **no cambia** (38 se mantiene; las columnas nuevas no tocan
-     `origen_cuenta`).
+   descubre las paginas 2+). Siete tipos, en `analysis/avisos_de_paginacion.py`:
+   - **De plantilla** (64), una fila por (host, forma de la serie
+     —`firma_de_ruta` de la ruta sin el marcador, mas el marcador—) con
+     `series`, `paginas_afectadas` y ejemplos, anclada en la pagina de URL
+     menor y con la plantilla (sin el host) en `group_key` (88):
+     `paginacion_canonical_a_la_primera` (warning); `paginacion_noindex`
+     (info, y **warning cuando deja indexables colgando solo de ella**, con
+     `indexables_que_solo_cuelgan_de_ella` y ejemplos: el arreglo es ese
+     `noindex` de plantilla, no enlazar ficha a ficha); 
+     `solo_enlazada_desde_paginacion_profunda` (info: indexables a las que
+     solo enlazan paginas 2+ que cuentan); `paginacion_sin_enlace` (warning:
+     la pagina anuncia la siguiente —`rel=next` o un boton de la 106— y no
+     tiene NINGUN `<a>` a ella); `paginacion_siguiente_rota` (warning, `rel` a
+     un 4xx/5xx rastreado, sin el 429 ni los muros de la 103) y
+     `paginacion_rel_incorrecto` (info: `rel` a un 3xx, fuera de la serie, o
+     distinto del `<a>` que la paginacion SI pinta). Una pagina 2+ con
+     `noindex` y canonical a la 1 va solo al primero (36). El `noindex_page`
+     de cada pagina no se toca: es el dato de la pagina, y esto es el patron.
+   - **Por pagina**: `solo_enlazada_desde_paginacion_excluida`, la indexable a
+     la que solo llegan enlaces **seguibles** desde paginas de la paginacion
+     que no cuentan (2+ en `noindex` o canonicalizadas a la 1, y la pagina 1
+     en `noindex` de una serie conocida). Es el hallazgo de la decision 38.
+     Sustituye a `orphan_page`, `sitemap_orphan` y `not_reachable_from_home`
+     (la paginacion va antes de la profundidad de clic) y cede ante
+     `canonical_sin_enlazar` (101). Es `info` cuando la serie de la que cuelga
+     ya lleva el `warning`, y `warning` si no (una serie entera en `noindex`
+     a proposito: lo que hay que hacer es enlazar la pagina desde otra parte).
+     Un `nofollow` desde fuera no es un camino (90) y se dice en
+     `otros_entrantes`; una no indexable del sitemap no lo lleva (100). Una
+     pagina 2+ excluida que solo cuelga de su propia serie se cuenta en ella
+     (`solo_enlazadas_por_la_serie`) y deja de ser `orphan_page`: «nadie la
+     enlaza» era falso. Lo que no cumple nada de eso conserva su aviso de
+     siempre: ninguna pagina pierde el suyo sin otro (medido, abajo).
+     La canonicalizada SI cuenta como entrante y en el PageRank: la 38 se
+     mantiene, las columnas nuevas no tocan `origen_cuenta`.
    - **Deteccion** (`shared/paginacion.py`, funcion pura): marcadores fuertes
-     (`?page=`, `?pagina=`, `?pg=`, `?paged=`, `/page/N`, `/pagina/N`,
-     `/pag/N`) y, con evidencia, los debiles (`?p=N`, `/N` final). La guia
-     pedia «la serie con al menos 2 valores de N»; eso convierte dos fichas
-     `/producto/123` y `/producto/456` en una serie, asi que se exige que
-     alguna pagina de la serie declare `rel` o que esten la 2 **y** la 3. La
-     serie lleva el resto de parametros (`?orden=precio&page=2` no es de la
-     serie sin orden) y no distingue la barra final (`/blog/` y `/blog` son
-     la misma 1). Una pagina sin marcador con `rel=prev` es 2+ y su 1 es donde
-     acaba la cadena de `rel=prev` (`?start=20`, `?offset=`). Una paginacion
-     que empieza en 0 (Drupal) se lee con una pagina de retraso: se pierde su
-     pagina 2, no se afirma nada falso de la 1.
+     (`?page=`, `?pagina=`, `?pg=`, `?paged=`, el `?e-page-<id>=` de
+     Elementor, `/page/N`, `/pagina/N`, `/pag/N`) y, con evidencia, los
+     debiles (`?p=N`, `/N` final que no va detras de otro numero —`/2023/04/`
+     es un archivo por mes—). Evidencia es que algo anuncie con `rel` la
+     pagina 2 de esa serie, o que esten la 2 **y** la 3; que las paginas
+     lleven un `rel` cualquiera no basta, porque las entradas de WordPress
+     (`/?p=38`) lo llevan entre ellas. La serie lleva el resto de parametros
+     (`?orden=precio&page=2` no es de la serie sin orden) y no distingue la
+     barra final. Una pagina sin marcador con `rel=prev` es 2+ y su 1 es donde
+     acaba la cadena; una cadena de solo-`rel` cuyas paginas 2+ enlaza el
+     resto del sitio (mas de la mitad) es una cadena de entradas
+     (`adjacent_posts_rel_link`) y se descarta. Una variante canonicalizada a
+     OTRA serie (`?x=ooo` canonicalizada a la limpia, «ver todo») no es del
+     listado. Una paginacion que empieza en 0 (Drupal) se lee con una pagina
+     de retraso.
    - **Sin ninguna lectura nueva de `links`** (#52 sigue abierta; 37, 41).
      `analizar_paginacion` lee `urls` + `html_meta` del job (como
-     `analyze_indexability`) y va justo antes de `compute_link_counts`; deja
-     en memoria las paginas excluidas y las que tienen `rel=next`, y
-     `compute_link_counts` las sube a una temporal pequena (`paginacion_tmp`,
-     por clave primaria) que se une en la MISMA lectura de `links` que
-     materializa `aristas_tmp`, con dos columnas: `origen_pag_excluida` y
+     `analyze_indexability`) y los botones de `enlaces_no_rastreables` por su
+     `job_id`, va justo antes de `compute_link_counts` y no emite nada; deja
+     en memoria las paginas excluidas, las 2+ que cuentan y lo que cada pagina
+     anuncia como siguiente, y `compute_link_counts` las sube a una temporal
+     pequena (`paginacion_tmp`, por clave primaria y con `ANALYZE`) que se une
+     en la MISMA lectura de `links` que materializa `aristas_tmp`, con tres
+     columnas: `origen_pag_excluida`, `origen_pag_profunda` y
      `rel_destino_url` (la URL solo de los destinos SIN rastrear de las
-     paginas con `rel=next`: el spider no sigue el `rel`, asi que la
-     siguiente de una paginacion por JavaScript no tiene id). Sin paginacion
-     en el censo, la consulta queda como estaba. Lo comprueba
-     `test_la_paginacion_no_anade_lecturas_de_links` contando las sentencias
-     que nombran `links` con el paso y sin el (`run_all` entero en Postgres):
-     las mismas, y solo cambia la de las aristas. El Parquet (95) no necesita
-     nada: `run_all` ya se niega a analizar un censo archivado y el paso va
-     dentro.
-   - **Coste, medido** en un censo sintetico en Postgres 16 (30.000 URLs, 2.000
-     series de 5 paginas —el 40% del censo es paginacion, peor que cualquier
-     sitio real—, 1,5 M enlaces): `compute_link_counts` pasa de 8,8 s a
-     11,5 s (la lectura de `links` no cambia; 1,6 s son los agregados sobre la
-     temporal) y `analizar_paginacion` anade 2,2 s. Por debajo del 2x que el
-     plan fija para estos checks. **Sin medir en un censo real**: no habia
-     acceso a produccion desde esta rama; el criterio del plan (las 168 de
-     blogs.uoc.edu) queda para la verificacion tras el despliegue, en
-     `READ ONLY`, junto con Druni (`?p=N` en noindex) y un WordPress.
+     paginas que anuncian una siguiente: el spider no sigue el `rel`). Las
+     consultas de lo que cuelga entran por esa temporal y el indice de origen,
+     y el EXISTS que busca «un camino de fuera» va sobre los destinos ya
+     agrupados. Lo comprueba `test_la_paginacion_no_anade_lecturas_de_links`
+     contando las sentencias que nombran `links` con el paso y sin el
+     (`run_all` entero en Postgres): las mismas, y solo cambia la de las
+     aristas. El Parquet (95) no necesita nada: `run_all` ya se niega a
+     analizar un censo archivado.
+   - **Medido** en censos reales con la transaccion deshecha (sin `ALTER
+     TABLE`: las columnas que le faltan a la base local salen de vistas
+     temporales), pasada A = sin el paso (master) y B = con el:
+
+     | censo | `orphan_page` | `sitemap_orphan` | solo desde paginacion excluida | avisos de plantilla (filas / paginas) | coste del paso |
+     |---|---|---|---|---|---|
+     | blogs.uoc.edu | 985 → **130** | 379 → 374 | 5 (warning) | noindex 17 / 857, profunda 53 / 1.124, rel incorrecto 29 / 140, sin enlace 1 / 1 | 6 s (`compute_link_counts` 125 → 131 s) |
+     | Druni | 4.848 → **2.079** | 9.224 → **3.612** | **5.612** (57 warning, 5.555 info) | **noindex 218 / 5.447 (192 warning)**, profunda 16 / 678 | 95 s (741 → 826 s, +11 %) |
+     | progym | = | = | 0 | profunda 7 / 930, rel incorrecto 1 / 3 | 2 s |
+     | Lopesan | = | = | 0 | rel incorrecto 3 / 45 | < 1 s |
+
+     `not_reachable_from_home` no cambia en ninguno, y en los cuatro la
+     cuenta de paginas que pierden `orphan_page`/`sitemap_orphan`/
+     `not_reachable_from_home` sin recibir otro aviso es **0**. Druni es el
+     hallazgo: su paginacion `?p=N` de categoria lleva `noindex` con la 1
+     indexable, y 5.612 productos indexables (casi todos en el sitemap) solo
+     se enlazan desde ahi; antes salian como huerfanos, lo que mandaba a
+     enlazarlos uno a uno en vez de quitar un `noindex` de 192 plantillas.
+     **Las «168» de la decision 38**, con su consulta repetida hoy, son 169
+     URLs: 108 son paginas 2+ en `noindex` de archivos por mes enteros en
+     `noindex` (`/2025/10/page/2/`), que ahora se cuentan en su serie; 5 salen
+     como `solo_enlazada_desde_paginacion_excluida` (las enlaza solo una
+     busqueda paginada en noindex); 54 son el subsitio `catedra-randstad`
+     entero en noindex, que no es paginacion, y siguen como `orphan_page`; 1
+     queda en `sitemap_orphan` y 1 sin aviso de enlazado (tampoco lo tenia).
+     Coste: las cifras de `compute_link_counts` son de pasadas en
+     transacciones separadas (repetir la B en la misma transaccion que la A
+     la medía sobre la tabla `urls` hinchada por la A deshecha: 426 s en
+     blogs.uoc.edu, todo en la profundidad de clic). Por debajo del 2x que el
+     plan fija para estos checks.
    - **Lo que no se afirma**: `paginacion_sin_enlace` dice «esta pagina no
-     enlaza con `<a>` a su siguiente», no que la siguiente sea inalcanzable
-     (puede estar enlazada desde otra, y en un censo truncado no se sabe;
-     67, 70). Un `rel` a una URL sin rastrear no es «roto». Huecos en la
-     numeracion, bucles de `rel` y la pagina 1 duplicada (`/blog/` y
-     `/blog/page/1/`, ya lo cubren el duplicado y el canonical) no se avisan.
+     enlaza con `<a>` a su siguiente, con ninguna URL», no que la siguiente
+     sea inalcanzable (67, 70). Un `rel` a una URL sin rastrear no es «roto».
+     Huecos en la numeracion, bucles de `rel` y la pagina 1 duplicada
+     (`/blog/` y `/blog/page/1/`, ya lo cubren el duplicado y el canonical) no
+     se avisan.
    - **Re-analizar cambia las cifras** de los censos entregados: salen los
-     cinco tipos y algunas `orphan_page`/`sitemap_orphan` pasan a
-     `solo_enlazada_desde_paginacion_excluida`. `analisis_version` lo deja
-     registrado (72) y la comparacion por incidencias se niega a comparar
-     censos analizados con codigo distinto (91).
-   - **En la interfaz**: ficha y nombre de los cinco (`incidencias.js`, sin
-     decir que Google usa `rel=next`), ambito «Paginación» en el explorador
-     con las columnas `rel=next` y `rel=prev` (tambien en el selector y en el
-     CSV de la vista), y `solo_enlazada_desde_paginacion_excluida` tambien en
-     «Enlazado», donde se busca la huerfana. `test_catalogo_incidencias.py`
-     lee ahora tambien `avisos_de_enlaces.py` y este modulo: sus tipos se le
-     escapaban.
+     siete tipos y miles de `orphan_page`/`sitemap_orphan` pasan a
+     `solo_enlazada_desde_paginacion_excluida` o se cuentan en su serie.
+     `analisis_version` lo deja registrado (72) y la comparacion por
+     incidencias se niega a comparar censos analizados con codigo distinto
+     (91). Entre dos censos con el mismo codigo, los seis de plantilla se
+     casan por (tipo, host, `group_key`) y no por la URL del ancla, que se
+     mueve en cuanto se rastrea otra pagina de la serie
+     (`shared.comparacion.ANCLADOS_POR_GRUPO`); si el ancla vieja no se volvio
+     a visitar sigue siendo «no se sabe» (89).
+   - **En la interfaz**: ficha y nombre de los siete (`incidencias.js`, sin
+     decir que Google usa `rel=next`) y nombre de cada clave de los detalles
+     (un test ejecuta los escenarios y lo comprueba), ambito «Paginación» en
+     el explorador con las columnas `rel=next` y `rel=prev` (tambien en el
+     selector y en el CSV de la vista), y
+     `solo_enlazada_desde_paginacion_excluida` tambien en «Enlazado». La nota
+     de Enlazado de `/insights` cuenta paginas distintas con `orphan_page`,
+     `sitemap_orphan` o `solo_enlazada_desde_paginacion_excluida`: contando
+     solo la primera, **subia** en el censo donde se encuentra el problema.
+     `test_catalogo_incidencias.py` lee tambien `avisos_de_enlaces.py` y este
+     modulo: sus tipos se le escapaban.
+   - **Revision** (2026-10-18): habia una segunda implementacion sin mergear
+     (rama `claude/ola1-paginacion`, modulo propio, medida en seis censos). Se
+     tomo esta como base y se porto el comportamiento, cada punto con un test
+     que falla contra el codigo de la primera version de esta PR: cadenas de
+     entradas de WordPress; boton «cargar mas» con y sin pagina 2 (y la 106
+     sin repetirlo); el `warning` en la serie; la pagina 2+ contada en su
+     serie; el `nofollow` de fuera y `not_reachable_from_home`; la
+     comparacion por `group_key`; la nota de `/insights`; las profundas y el
+     `rel` incorrecto; Elementor; las variantes canonicalizadas a otra serie;
+     «sin enlace» solo sin NINGUN `<a>` a la siguiente. Midiendo salieron
+     cuatro mas, tambien con test: `?p=N` sin anuncio de su pagina 2 (dos
+     entradas de unescochair salian «canonicalizadas a la 1»), los archivos
+     por mes leidos como `/N`, la pagina 1 `noindex` como origen que no cuenta
+     y el `/page/6/?page=0` que ES la pagina 6. Medida la primera version en
+     los mismos censos: Lopesan sacaba **72 paginas en
+     `paginacion_sin_enlace`** que si enlazan la siguiente (con
+     `?e-page-<id>=2`), progym 3 y blogs.uoc.edu **1.019**; y en
+     blogs.uoc.edu `orphan_page` se quedaba en 985. Ya lo resolvia (quedan
+     como test): el muro en el destino del `rel`, la `noindex` de fuera que no
+     es camino y la no indexable del sitemap.
