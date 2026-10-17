@@ -110,6 +110,11 @@ MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 # robots.txt
 ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision 81)
 
+# Retry-After de un 429/503 (decision 111). El job los cambia con
+# crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED=1
+RETRY_AFTER_MAX=60               # tope de la pausa, en segundos
+
 # Capa de decisiones: Jev por OpenRouter (decision 84). Sin clave o con
 # DECISIONS_ENABLED=0 no se llama a nadie; con las dos, tampoco solo (#40).
 DECISIONS_ENABLED=0

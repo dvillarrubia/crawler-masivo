@@ -76,6 +76,7 @@ from shared.respuestas import (
     clasificar_respuesta,
 )
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
+from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -317,12 +318,59 @@ _JS_BYTES_DOCUMENTO = (
     " catch (e) { return null; } }"
 )
 
+# Tiempo del servidor y compresion del documento con render (decision 109).
+# `responseStart - requestStart` es el TTFB sin DNS, TCP ni TLS, lo mismo que
+# STARTTRANSFER - PRETRANSFER de curl sin render; `encodedBodySize` frente a
+# `decodedBodySize` dice si llego comprimido. Comprobado contra Chromium con
+# la interceptacion de scrapy-playwright y un servidor con 300 ms de espera:
+# ttfb 301 ms, gzip 157 frente a 34.026 bytes y sin comprimir 34.026 = 34.026.
+# El nombre del Content-Encoding no lo da, y scrapy-playwright quita la
+# cabecera: con render se guarda `comprimido` sin el nombre.
+_JS_TIEMPOS_DOCUMENTO = (
+    "() => { try { const n = performance.getEntriesByType('navigation')[0];"
+    " if (!n) return null;"
+    " return {ttfb: n.responseStart > 0 && n.requestStart > 0"
+    " ? n.responseStart - n.requestStart : null,"
+    " codificado: n.encodedBodySize, decodificado: n.decodedBodySize}; }"
+    " catch (e) { return null; } }"
+)
+
 _PROTOCOLO_LEGIBLE = {
     "h2": "HTTP/2",
     "h3": "HTTP/3",
     "http/1.1": "HTTP/1.1",
     "http/1.0": "HTTP/1.0",
 }
+
+
+def medidas_de_respuesta(response) -> tuple[float | None, str | None]:
+    """``(ttfb_ms, content_encoding)`` de una respuesta (decision 109).
+
+    Sin render las deja el handler en ``meta`` (curl). Con render salen del
+    `PageMethod` de Navigation Timing. Una pagina de un job con render que se
+    repitio sin el (`_sin_render`, decision 17) no da TTFB: mezclaria dos
+    fuentes en la mediana de su plantilla. Lo que no se pudo medir es None,
+    nunca 0.
+    """
+    meta = response.meta
+    if meta.get("playwright"):
+        for metodo in meta.get("playwright_page_methods") or []:
+            if getattr(metodo, "args", None) and _JS_TIEMPOS_DOCUMENTO in metodo.args:
+                valor = metodo.result if isinstance(getattr(metodo, "result", None), dict) else {}
+                ttfb = valor.get("ttfb")
+                ttfb = round(float(ttfb), 2) if isinstance(ttfb, (int, float)) and ttfb >= 0 else None
+                cod, dec = valor.get("codificado"), valor.get("decodificado")
+                encoding = None
+                if isinstance(cod, (int, float)) and isinstance(dec, (int, float)) and cod > 0:
+                    encoding = "comprimido" if cod < dec else "identity"
+                return ttfb, encoding
+        return None, None
+    ttfb_s = meta.get("ttfb_s")
+    ttfb = None
+    if isinstance(ttfb_s, (int, float)) and ttfb_s >= 0 and not meta.get("_sin_render"):
+        ttfb = round(ttfb_s * 1000, 2)
+    encoding = meta.get("content_encoding_servido")
+    return ttfb, (encoding if isinstance(encoding, str) and encoding else None)
 
 
 def _normaliza_protocolo(valor) -> str | None:
@@ -437,7 +485,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -504,7 +552,17 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         spider = super().from_crawler(crawler, *args, **kwargs)
         crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
         crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
+        crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
         return spider
+
+    def spider_idle(self, spider=None):
+        """Sin peticiones pendientes, pero con una sonda TLS en su hilo: se
+        espera (decision 110). Scrapy vuelve a preguntar cada 5 s, y la sonda
+        tiene su propio timeout, asi que no puede colgar el cierre."""
+        if self._tls_en_vuelo():
+            from scrapy.exceptions import DontCloseSpider
+
+            raise DontCloseSpider
 
     def spider_opened(self, spider):
         """Load job config from PostgreSQL and connect to Redis."""
@@ -607,8 +665,9 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                     logger.error("Reglas a medida no validas; el job no se rastrea: %s",
                                  self._config_invalida)
 
-            # -- Sondas de soft 404 (decision 105) --
+            # -- Sondas de soft 404 (decision 105) y TLS por host (110) --
             self._iniciar_sondas(job)
+            self._iniciar_sonda_tls(job)
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
@@ -793,9 +852,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 # antes de que el banner exista.
                 PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
                 PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
-                # Los dos ultimos: su resultado se lee luego desde response.meta.
+                # Los tres ultimos: su resultado se lee luego desde response.meta.
                 PageMethod(_evaluar_tolerante, _JS_PROTOCOLO),
                 PageMethod(_evaluar_tolerante, _JS_BYTES_DOCUMENTO),
+                PageMethod(_evaluar_tolerante, _JS_TIEMPOS_DOCUMENTO),
             ],
         }
 
@@ -1234,6 +1294,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             status_code=status,
             status_group=compute_status_group(status),
             response_time_ms=round(response_time_ms, 2),
+            ttfb_ms=medidas_de_respuesta(response)[0],
             is_html=False,
             resource_type="redirect",
             redirect_url=location,
@@ -1427,6 +1488,8 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         is_html = isinstance(response, HtmlResponse)
         resource_type = classify_resource_type(content_type, url)
         internal = self._is_internal(url)
+        if internal:
+            self._sondear_tls(url, response)  # decision 110
 
         # Redireccion HTTP: se registra el salto y se sigue el destino a mano
         # (ver _page_request). Va antes del filtro de tipo: un 301 no es un
@@ -1716,6 +1779,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         # yielded above.
         final_hash = compute_url_hash(final_url)
         final_parsed = urlparse(final_url)
+        ttfb_ms_val, content_encoding_val = medidas_de_respuesta(response)
         yield PageItem(
             url=final_url,
             url_hash=final_hash,
@@ -1729,6 +1793,8 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             status_code=status_code,
             status_group=compute_status_group(status_code),
             response_time_ms=round(response_time_ms, 2),
+            ttfb_ms=ttfb_ms_val,
+            content_encoding=content_encoding_val,
             is_html=is_html,
             resource_type=resource_type,
             redirect_url=refresh_target,  # destino final, salvo meta refresh
@@ -2169,12 +2235,22 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             TimeoutError,
             ConnectionRefusedError,
         )
+        # Un certificado caducado, de otro nombre o un handshake imposible
+        # (curl 60/35, net::ERR_CERT_* de Chromium): con su motivo en
+        # `status_text`, no un `error` mudo (decision 110).
+        motivo_tls = motivo_error_tls(failure.value)
+        status_text = None
         if failure.check(DNSLookupError):
             status_group = "dns_error"
         elif failure.check(TimeoutError, TCPTimedOutError):
             status_group = "timeout"
         elif failure.check(ConnectionRefusedError):
             status_group = "conn_refused"
+        elif motivo_tls:
+            status_group = "tls_error"
+            status_text = f"TLS: {motivo_tls}"[:64]
+            if self._is_internal(url):
+                self._sondear_tls(url)
         else:
             status_group = "error"
 
@@ -2215,7 +2291,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             word_count=None,
             text_ratio=None,
             redirect_type=None,
-            status_text=http_status_text(status_code) if status_code else None,
+            status_text=http_status_text(status_code) if status_code else status_text,
             last_modified=None,
             http_version=None,
             transfer_size=0,
