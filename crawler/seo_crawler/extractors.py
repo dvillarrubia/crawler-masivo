@@ -3012,68 +3012,6 @@ def extract_main_content_markdown(
     return _con_hero(_prepend_hero(md, hero), container)
 
 
-def compute_indexability_status(
-    status_code: int | None,
-    meta_robots: str | None,
-    x_robots: str | None,
-    canonical_href: str | None,
-    page_url: str,
-) -> tuple[bool, str | None]:
-    """Determine whether a page is indexable and, if not, why.
-
-    Parameters
-    ----------
-    status_code:
-        HTTP response status code.
-    meta_robots:
-        Value of the ``<meta name="robots">`` tag (may be ``None``).
-    x_robots:
-        Value of the ``X-Robots-Tag`` response header (may be ``None``).
-    canonical_href:
-        The resolved ``<link rel="canonical">`` href (may be ``None``).
-    page_url:
-        The URL of the page itself (used for canonical comparison).
-
-    Returns
-    -------
-    tuple[bool, str | None]
-        ``(is_indexable, reason)`` -- *reason* is ``None`` when the page
-        is indexable; otherwise a short human-readable explanation.
-    """
-    # 1. Server errors
-    if status_code is not None and 500 <= status_code < 600:
-        return False, "5xx Server Error"
-
-    # 2. Client errors
-    if status_code is not None and 400 <= status_code < 500:
-        return False, "4xx Client Error"
-
-    # 3. Redirects
-    if status_code is not None and 300 <= status_code < 400:
-        return False, "3xx Redirect"
-
-    # 4. Noindex in meta robots. ``none`` is Google shorthand for
-    #    "noindex, nofollow"; tokens are split on commas AND whitespace so
-    #    lenient markup like content="noindex nofollow" still counts.
-    tokens = robots_tokens(meta_robots)
-    if "noindex" in tokens or "none" in tokens:
-        return False, "Noindex"
-
-    # 5. Noindex in X-Robots-Tag header (same token rules).
-    tokens = robots_tokens(x_robots)
-    if "noindex" in tokens or "none" in tokens:
-        return False, "Noindex"
-
-    # 6. Canonicalised to a different URL
-    if canonical_href:
-        normalized_canonical = normalize_url(canonical_href)
-        normalized_page = normalize_url(page_url)
-        if normalized_canonical != normalized_page:
-            return False, "Canonicalised"
-
-    return True, None
-
-
 # ---------------------------------------------------------------------------
 # Extraccion y busqueda a medida (#34, decision 104)
 # ---------------------------------------------------------------------------
