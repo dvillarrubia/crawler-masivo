@@ -60,6 +60,7 @@ from seo_crawler.extractors import (
     extract_custom,
     http_status_text,
     is_internal_url,
+    url_en_hosts,
     dominio_registrable,
     normalize_host,
     normalize_url,
@@ -626,6 +627,17 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                     dominio_registrable(host) for host in self.allowed_hosts
                 } - {""}
 
+            # Hosts que reciben las cabeceras, cookies y credenciales del job
+            # (decision 114): los de las semillas, con y sin www, y sus
+            # subdominios con crawl_subdomains. Una foto tomada AQUI, antes
+            # de rastrear: el host al que salta una semilla pasa a ser interno
+            # para el rastreo, pero no para las credenciales; ese salto (un
+            # staging que manda a un SSO) es justo por donde se iban a otro.
+            self._hosts_credenciales = frozenset(self.allowed_hosts)
+            self._raices_credenciales = frozenset(
+                getattr(self, "_root_domains", ()) if self._crawl_subdomains else ()
+            )
+
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
                 self.job_id,
@@ -784,6 +796,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             "playwright": True,
             "playwright_include_page": False,
             "playwright_context": "custom",
+            # Por peticion, no como setting: scrapy-playwright no tiene
+            # PLAYWRIGHT_PAGE_INIT_CALLBACK y el que habia en settings.py no
+            # corria (decision 114). Corre antes de navegar.
+            "playwright_page_init_callback": "seo_crawler.render.preparar_pagina",
             "playwright_page_goto_kwargs": {
                 "wait_until": "domcontentloaded",
             },
@@ -1105,15 +1121,19 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
 
     def _is_internal(self, url: str) -> bool:
         """Check if URL is internal, with subdomain support."""
-        internal = is_internal_url(url, self.allowed_hosts)
-        if not internal and self._crawl_subdomains and hasattr(self, "_root_domains"):
-            try:
-                host = normalize_host(urlparse(url).hostname)
-            except ValueError:
-                return False
-            # Con punto delante: sin el, `notx.com` salia interno para `x.com`
-            internal = any(host == rd or host.endswith("." + rd) for rd in self._root_domains)
-        return internal
+        raices = getattr(self, "_root_domains", ()) if self._crawl_subdomains else ()
+        return url_en_hosts(url, self.allowed_hosts, raices)
+
+    def _lleva_credenciales(self, url: str) -> bool:
+        """Si a *url* se le pueden mandar las cabeceras, cookies y Basic del job.
+
+        Como `_is_internal`, pero con los hosts de las semillas (decision 114).
+        Sin job cargado no hay hosts, y entonces no se manda nada.
+        """
+        hosts = getattr(self, "_hosts_credenciales", None)
+        if not hosts:
+            return False
+        return url_en_hosts(url, hosts, getattr(self, "_raices_credenciales", ()))
 
     def _page_request(self, url: str, depth: int) -> Request:
         """Peticion de pagina con la redireccion desactivada.
@@ -1200,6 +1220,15 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         if not (300 <= response.status < 400) or response.status == 304:
             return None
         raw = response.headers.get(b"Location")
+        if not raw:
+            # Con render y credenciales, la preparacion de la pagina descarga
+            # el documento ella misma, le quita el Location para que Chromium
+            # no siga la redireccion con las credenciales puestas, y lo deja
+            # aqui (decision 114): la sigue el spider, como sin render.
+            try:
+                raw = (response.meta.get("_location_render") or "").encode()
+            except AttributeError:  # una respuesta sin peticion
+                raw = b""
         if not raw:
             return None
         try:
@@ -1396,7 +1425,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 )
             meta = {
                 k: v for k, v in response.meta.items()
-                if not k.startswith("playwright") and k not in ("redirect_urls", "redirect_times", "redirect_reasons")
+                if not k.startswith("playwright") and k not in (
+                    "redirect_urls", "redirect_times", "redirect_reasons",
+                    "_http_render", "_location_render",
+                )
             }
             meta["_sin_render"] = True
             yield scrapy.Request(

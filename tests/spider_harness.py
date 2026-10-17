@@ -157,6 +157,9 @@ def construir_sitio_con_muro(n_muros: int = 30, codigo: int = 403) -> dict:
 # (instante, host, ruta) de cada peticion que llega al sitio: para medir el
 # ritmo al que el spider pide a cada host (Crawl-delay).
 PETICIONES: list[tuple[float, str, str]] = []
+# (host, ruta, cabeceras) de cada peticion: para ver a que host llegan las
+# cookies, el Basic y las cabeceras propias del job (decision 114).
+CABECERAS: list[tuple[str, str, dict]] = []
 
 
 def servir(robots_prohibe_todo: bool = False,
@@ -173,6 +176,8 @@ def servir(robots_prohibe_todo: bool = False,
             PETICIONES.append((time.monotonic(),
                                (self.headers.get("Host") or "").split(":")[0],
                                self.path))
+            CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
+                              self.path, {k.lower(): v for k, v in self.headers.items()}))
             status, headers, body = rutas.get(self.path.split("?")[0], (404, {}, b"no"))
             self.send_response(status)
             headers = {"Content-Type": "text/html; charset=utf-8", **headers}
@@ -192,8 +197,9 @@ def servir(robots_prohibe_todo: bool = False,
     rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado,
                                  con_recursos=con_recursos))
     # Rutas propias de un test: {ruta: [codigo, cabeceras, cuerpo]}. El cuerpo
-    # admite {port}.
+    # y los valores de las cabeceras admiten {port}.
     for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
+        cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
         rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
     if muro is not None:
         rutas.update(construir_sitio_con_muro(**muro))
@@ -383,6 +389,35 @@ def main() -> None:
         middlewares["seo_crawler.middlewares.RobotsCrawlDelayMiddleware"] = 110
     con_crawl_delay = entrada.get("robots_crawl_delay") is not None
 
+    ajustes_reales: dict = {}
+    if entrada.get("http_real"):
+        # Los middlewares del bloque `http` del job, como en settings.py, y el
+        # jar como lo deja el worker (decision 114).
+        middlewares["seo_crawler.middlewares.HttpConfigMiddleware"] = 420
+        middlewares["seo_crawler.middlewares.CookiesTrasElJarMiddleware"] = 705
+        ajustes_reales["COOKIES_ENABLED"] = bool(
+            ((entrada.get("config") or {}).get("http") or {}).get("conservar_cookies"))
+    if entrada.get("descarga_real"):
+        # La descarga de produccion: curl_cffi y, con render_js, Playwright con
+        # los contextos y la preparacion de pagina de settings.py.
+        import seo_crawler.settings as prod
+
+        lanzar = dict(prod.PLAYWRIGHT_LAUNCH_OPTIONS)
+        if entrada.get("chromium"):
+            lanzar["executable_path"] = entrada["chromium"]
+        ajustes_reales.update({
+            "DOWNLOAD_HANDLERS": prod.DOWNLOAD_HANDLERS,
+            "IMPERSONATE": prod.IMPERSONATE,
+            "TWISTED_REACTOR": prod.TWISTED_REACTOR,
+            "PLAYWRIGHT_BROWSER_TYPE": prod.PLAYWRIGHT_BROWSER_TYPE,
+            "PLAYWRIGHT_LAUNCH_OPTIONS": lanzar,
+            "PLAYWRIGHT_CONTEXTS": prod.PLAYWRIGHT_CONTEXTS,
+            "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": prod.PLAYWRIGHT_MAX_PAGES_PER_CONTEXT,
+            "PLAYWRIGHT_MAX_CONTEXTS": prod.PLAYWRIGHT_MAX_CONTEXTS,
+            "PLAYWRIGHT_ABORT_REQUEST": prod.PLAYWRIGHT_ABORT_REQUEST,
+            "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": prod.PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT,
+        })
+
     proceso = CrawlerProcess({
         "LOG_LEVEL": entrada.get("log_level", "WARNING"),
         "TELNETCONSOLE_ENABLED": False,
@@ -409,6 +444,7 @@ def main() -> None:
             "seo_crawler.middlewares.DepthMiddleware": 900,
         },
         "ITEM_PIPELINES": pipelines,
+        **ajustes_reales,
     })
     cierre: dict = {}
     original_closed = SeoSpider.spider_closed
@@ -436,6 +472,8 @@ def main() -> None:
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
+    if entrada.get("ver_cabeceras"):
+        print("@@CABECERAS@@" + json.dumps(CABECERAS))
     print("@@CIERRE@@" + json.dumps(cierre))
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))

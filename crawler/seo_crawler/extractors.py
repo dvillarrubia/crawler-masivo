@@ -262,6 +262,28 @@ def is_internal_url(url: str, allowed_hosts: set[str]) -> bool:
     return bare in allowed_hosts or host in allowed_hosts
 
 
+def url_en_hosts(url: str, hosts, raices=()) -> bool:
+    """True si *url* es de *hosts* (con y sin www) o de un subdominio de *raices*.
+
+    Es el criterio de interno del spider (`SeoSpider._is_internal`) como
+    funcion pura, para que lo usen tambien el middleware de credenciales y la
+    preparacion de la pagina de Playwright, que no ven el spider (decision
+    114). `raices` solo trae algo con `crawl_subdomains`.
+    """
+    if is_internal_url(url, hosts):
+        return True
+    if not raices:
+        return False
+    try:
+        host = normalize_host(urlparse(url).hostname)
+    except ValueError:
+        return False
+    if not host:
+        return False
+    # Con punto delante: sin el, `notx.com` salia interno para `x.com`
+    return any(host == rd or host.endswith("." + rd) for rd in raices)
+
+
 def effective_base_url(selector, page_url: str) -> str:
     """Return the base URL used to resolve relative links on this page.
 
