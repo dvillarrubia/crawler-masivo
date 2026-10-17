@@ -52,6 +52,8 @@ from seo_crawler.extractors import (
     extract_meta,
     extract_meta_refresh,
     extract_meta_refresh_target,
+    extract_redireccion_js,
+    charset_declarado,
     extract_resources,
     extract_security_headers,
     extract_structured_data,
@@ -1813,6 +1815,20 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         # un framework sube al head con JavaScript (Next.js con streaming
         # metadata) ya esta en el head del DOM. Con render: NULL, no medido.
         head = None if response.meta.get("playwright") else leer_head(response.text)
+        # Lo que solo dice el HTML SERVIDO (decision 108): con render, el
+        # cuerpo es el DOM ya ejecutado —si la pagina redirigia por JS, ya es
+        # el destino— y scrapy-playwright lo vuelve a codificar, asi que los
+        # bytes originales y su charset se pierden. Con render: NULL, no medido.
+        servido = None
+        if head is not None:
+            servido = charset_declarado(response.body)
+            servido["texto_mal_codificado"] = (
+                "\ufffd" in (meta["title"] or "") or "\ufffd" in (visible_text or "")
+            )
+            servido["redireccion_js"] = extract_redireccion_js(
+                selector, base_url, page_url=final_url)
+        content_language = (response.headers.get(b"Content-Language") or b"").decode(
+            "latin-1", errors="ignore").strip() or None
 
         yield HtmlMetaItem(
             url_hash=final_hash,
@@ -1854,6 +1870,19 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             has_meta_outside_head=has_meta_outside_head,
             head_cortado_por=head["cortado_por"] if head else None,
             fuera_del_head=",".join(head["fuera_del_head"]) if head else None,
+            # Decision 108
+            viewport=meta.get("viewport"),
+            viewport_count=meta.get("viewport_count"),
+            html_lang=meta.get("html_lang"),
+            content_language=content_language[:64] if content_language else None,
+            canonical_crudo=meta.get("canonical_crudo"),
+            og_image_forma=meta.get("og_image_forma"),
+            twitter_image=meta.get("twitter_image"),
+            redireccion_js=(servido or {}).get("redireccion_js"),
+            charset_meta=(servido or {}).get("charset_meta"),
+            charset_bom=(servido or {}).get("charset_bom"),
+            cuerpo_solo_ascii=(servido or {}).get("cuerpo_solo_ascii"),
+            texto_mal_codificado=(servido or {}).get("texto_mal_codificado"),
         )
 
         # Headings
