@@ -484,3 +484,57 @@
    cabecera `Link` como ORIGEN (siguen el camino de antes) y el **informe de
    cadenas** que mezcla redirecciones y canonicals de una migracion, que es
    una vista y no un tipo.
+
+<a id="d107"></a>
+107. **Un `X-Robots-Tag` se lee trozo a trozo: una directiva con valor no es un
+   bot, y el bot dura hasta el siguiente** (#149) — `_directivas` tomaba por
+   nombre de bot lo que iba antes de los PRIMEROS dos puntos de la cabecera y,
+   si no era `googlebot` ni `robots`, descartaba la cabecera ENTERA. La
+   salvaguarda (`posible_bot not in robots_tokens(cabecera)`) no servia: el
+   token de `max-snippet:-1` es `max-snippet:-1`, no `max-snippet`. Asi se
+   perdia el `noindex` de `max-snippet:-1, noindex`, `max-snippet: -1, noindex`,
+   `max-image-preview:large, noindex`, `unavailable_after: <fecha>, noindex`
+   (con cualquier formato de fecha: ISO, `25 Jun 2010 15:00:00 PST` o RFC 850
+   `Wednesday, 25-Jun-2010 15:00:00 GMT`, que ademas lleva coma) y el de una
+   cabecera que nombra dos bots (`bingbot: noindex, googlebot: noindex`). Al
+   reves tambien fallaba: `googlebot: nofollow, bingbot: noindex` salia noindex
+   para Google, porque todo lo que seguia a `googlebot:` se le atribuia.
+
+   El criterio, el de Google: «las reglas sin user agent valen para todos los
+   rastreadores», el user agent va delante de sus directivas seguido de dos
+   puntos, y ni la cabecera ni el nombre distinguen mayusculas. Ahora
+   (`x_robots_por_bot` y `directivas_x_robots` en `shared/indexabilidad.py`) se
+   parte por comas y cada trozo `nombre: resto` abre el ambito de un bot **solo
+   si `nombre` no es una directiva** (`DIRECTIVAS` de `shared/robots.py`) **y
+   tiene forma de token** (sin espacios: `25-jun-2010 15` es el trozo de una
+   fecha). El ambito dura hasta el siguiente bot de la MISMA cabecera, asi que
+   `bingbot: noindex, nofollow` es todo de Bing; cada cabecera (una por linea,
+   decision 39) empieza sin bot. Cuentan lo que no va a nadie, `robots:` y
+   `googlebot:` (`GoogleBot:` incluido); `googlebot-news:` es otro bot.
+   `noindex: true` no es sintaxis valida y no se convierte en `noindex`. Lo
+   demas sigue igual: `none` es `noindex, nofollow`, varias cabeceras se suman,
+   la barra no separa (decision 22).
+
+   **Un solo criterio tambien para la sintaxis**: `analyze_robots_syntax` pasaba
+   la cabecera entera a `robots_bad_separators`, asi que avisaba de un
+   `bingbot: noindex/nofollow` que a Google no le quita nada, y con el prefijo
+   pegado (`googlebot:noindex/nofollow`) el token era `googlebot:noindex` y solo
+   veia perdido el `nofollow`. Ahora lee `x_robots_para_bot`, lo que va a
+   Google sin los prefijos; el `raw` del aviso sigue siendo la cabecera tal cual.
+
+   Y se borro `compute_indexability_status` de `extractors.py`: no la llamaba
+   nadie salvo sus tests y aplicaba otro criterio (`bingbot: noindex` sacaba la
+   pagina del indice, un 204 era indexable). Sus casos pasan a la funcion real.
+
+   **Se arregla re-analizando**: `analyze_indexability` lee `html_meta.x_robots_tag`
+   y reescribe `indexable`, `noindex` e `indexability_status` (con
+   `noindex` cambian los entrantes y el PageRank, decision 38). Lo que NO
+   arregla es `links.follow`: el nofollow de pagina por cabecera se decide al
+   rastrear (`es_nofollow` en el spider), y una pagina con
+   `max-snippet:-1, nofollow` dejo sus enlaces como follow hasta re-rastrearla.
+   Los censos anteriores a la decision 39 (cabeceras unidas por coma) siguen
+   sin arreglo: `bingbot: noindex` + `noindex` quedo como
+   `bingbot: noindex, noindex`, y con el ambito que dura ese segundo `noindex`
+   es de Bing, igual que antes. Cuantas URLs cambian en los censos entregados
+   esta por medir (consulta: `html_meta.x_robots_tag` con `:` y
+   `noindex|nofollow|none`, aplicando la funcion vieja y la nueva).
