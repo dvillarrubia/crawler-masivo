@@ -33,7 +33,7 @@
 | File | Description |
 |------|-------------|
 | `analyzer.py` | `SEOAnalyzer` class with 17 check methods + `run_analysis()` entry point |
-| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 107) |
+| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 118) |
 | `sd_validation.py` | Validación conservadora de datos estructurados |
 | `soft404.py` | Soft 404 determinista (decision 105): cruza las sondas de `jobs.soft404` y las senales de `shared/soft404.py` con el censo |
 
@@ -136,7 +136,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_indexability()` | indexability status |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
-| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 107) |
+| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
 | `analyze_redirect_chains()` | redirect_chain, redirect_loop, **redireccion_a_error** (decision 101) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |

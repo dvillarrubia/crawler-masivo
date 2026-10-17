@@ -6,7 +6,7 @@ el analisis ENTERO de cada job sin que ningun test lo viese: `Select.yield_per`
 (no existe en SQLAlchemy 2.x) y un UPDATE en lote con WHERE que SQLAlchemy
 rechaza. El job quedaba `completed` sin issues ni PageRank.
 
-Y el alcance (decision 107): solo internas, 200 HTML e indexables, como el
+Y el alcance (decision 118): solo internas, 200 HTML e indexables, como el
 duplicado exacto; una variante canonicalizada no es casi duplicada de su
 canonica.
 """

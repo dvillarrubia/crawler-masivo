@@ -2228,7 +2228,7 @@ class SEOAnalyzer:
         Una variante canonicalizada comparte el texto con su canonica a
         proposito, una noindex o una externa no compite con nadie en el indice
         del cliente; medirlas daba la variante como casi duplicada de su propia
-        canonica (decision 107).
+        canonica (decision 118).
         """
         logger.debug("Analyzing near-duplicate content ...")
 

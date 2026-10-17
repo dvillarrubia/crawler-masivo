@@ -210,7 +210,7 @@ def test_la_firma_es_lo_bastante_estable_para_decidir():
     assert abs(estimada - real) < 0.05
 
 
-# -- Escrituras sin espacios y marcas combinantes (decision 107) ---------------
+# -- Escrituras sin espacios y marcas combinantes (decision 118) ---------------
 
 # Texto latino fijo, con tildes, enye, cedilla, `ß`, `º`, `ª`, `²`, `_` y cifras.
 LATINO = (

@@ -55,7 +55,7 @@ def procesar(job_id: str, umbral: float, dry_run: bool) -> None:
             # Mismo recorrido que el analyzer pero sin escribir: interesa saber
             # cuantas paginas saldrian marcadas antes de tocar un censo entregado.
             # Las firmas salen del propio analyzer: con su copia de la consulta,
-            # el dry-run seguia midiendo noindex y externas (decision 107).
+            # el dry-run seguia midiendo noindex y externas (decision 118).
             firmas, _urls = analizador.firmas_casi_duplicados()
 
             resultado = nd.analizar(firmas, umbral) if len(firmas) > 1 else {}

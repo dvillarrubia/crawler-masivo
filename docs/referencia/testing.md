@@ -32,7 +32,7 @@ decision 98), el enlace del aviso contra las rutas de `_irARuta`
 (`test_avisos.py`), sitemap parsing (`test_sitemaps.py`) and
 casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
 estimada contra la Jaccard exacta, y fija la firma de un texto latino y la
-tokenizacion de CJK, hindi y tailandes, decision 107) y un test de integracion del spider
+tokenizacion de CJK, hindi y tailandes, decision 118) y un test de integracion del spider
 (`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
 local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
 refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
@@ -44,7 +44,7 @@ que repite los muros; las clases van en
 `test_respuestas.py`, el analizador en `test_analyzer_muros_db.py` y el worker
 en `test_worker_bloqueo.py`. Y `test_analyzer_near_duplicates_db.py`, que
 pasa `analyze_near_duplicates` contra SQLite en memoria (alcance de la
-decision 107, limpieza al re-analizar y el `--dry-run` del script), y `test_worker.py`
+decision 118, limpieza al re-analizar y el `--dry-run` del script), y `test_worker.py`
 (que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
 (modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
 de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el

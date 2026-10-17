@@ -96,7 +96,7 @@
    dos rastreos). Los rastreos anteriores a la columna caen a `body_hash` con un
    aviso en el log.
    El casi duplicado (`near_duplicate_content`) sigue el mismo alcance desde la
-   decisión 107: medía también noindex, canonicalizadas y externas.
+   decisión 118: medía también noindex, canonicalizadas y externas.
 
 <a id="d53"></a>
 53. **Las cabeceras de seguridad son del servidor, no de la página** — HSTS,
@@ -611,8 +611,8 @@
      caracteres de texto) y todo lo que necesita leer la página con un modelo
      (#11).
 
-<a id="d107"></a>
-107. **Un casi duplicado se mide entre las mismas páginas que el duplicado
+<a id="d118"></a>
+118. **Un casi duplicado se mide entre las mismas páginas que el duplicado
    exacto, y una escritura sin espacios se parte en caracteres**
    ([#149](https://github.com/dvillarrubia/crawler-masivo/issues/149)). Dos
    fallos de `near_duplicate_content`, que la ficha de `incidencias.js` ya
