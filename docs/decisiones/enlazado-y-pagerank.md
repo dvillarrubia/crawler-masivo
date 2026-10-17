@@ -679,3 +679,50 @@
      en dos sitios con muchos externos, revisar a mano 20 `roto` y 10
      `dominio_externo_muerto` con `curl` desde fuera y anotar aqui el numero de
      sondas, el tiempo anadido y el porcentaje de `no_verificable`.
+   - **Revision (2026-10-18)**, cuatro fallos reproducidos ejecutando el mixin
+     y el arnes (`tests/test_sondas_revision.py` y
+     `test_el_crawl_delay_del_tercero_espacia_sus_sondas`; los cuatro fallan
+     contra la version anterior):
+     - **SSRF por redireccion.** El filtro de `shared/red.py` miraba la URL
+       ENLAZADA y no los saltos: un tercero que responde
+       `302 Location: http://169.254.169.254/...` hacia que el rastreo pidiera
+       los metadatos de la nube del VPS. Ahora cada salto pasa por el filtro y
+       uno a la red interna queda `no_verificable` («redirige a la red
+       interna»), sin pedirlo. Lo mismo con el robots.txt del tercero, que lo
+       redirigia el `RedirectMiddleware` de Scrapy a donde dijera el tercero:
+       ahora lleva `dont_redirect` y sus saltos (cinco, como Google) los sigue
+       la sonda con el mismo filtro; uno a la red interna se trata como «sin
+       robots».
+     - **Un resolver que no contesta no es un dominio muerto.** Un fallo de
+       DNS que `getaddrinfo` da por temporal (`EAI_AGAIN`) salia
+       `sin_conexion`, que esta en `MUERTOS`, y con dos fallos el host acababa
+       en `dominio_externo_muerto`: un fallo del rastreo afirmado como un
+       hallazgo del tercero, y fuera del alcance del guardia del resolver, que
+       solo mira los `dominio_inexistente`. Ahora es `no_verificable`; el
+       origen se sigue dejando de pedir tras dos fallos (se cuentan por tipo de
+       fallo de red, no por veredicto), pero no se afirma nada.
+     - **El `Crawl-delay` del tercero no se aplicaba.** Su robots.txt se
+       respetaba en los `Disallow` y no en el retraso, porque la sonda lo pide
+       con `dont_obey_robotstxt` y el `RobotsCrawlDelayMiddleware` nunca lo
+       veia: con `Crawl-delay: 1`, cuatro sondas al mismo host salian en el
+       mismo milisegundo (medido en el arnes). Ahora se pone como retraso del
+       slot del host, con el tope `ROBOTS_CRAWL_DELAY_MAX` y reaplicado tras
+       cada respuesta (AUTOTHROTTLE lo bajaba), como la decision 81. Siempre,
+       sea cual sea el `robots_mode`: el robots del tercero no es decision del
+       cliente. Peor caso: 50 sondas x 10 s = 8 min de cola por host, en
+       paralelo entre hosts.
+     - **Un `max_urls` deja sondas en la cola sin decirlo.** Van detras de las
+       paginas (prioridad -100) y el cierre por `max_urls` las descarta: en un
+       arnes de 60 paginas con `max_urls=15`, 4 de 15 se quedaron sin fila, y
+       en un censo con frontera grande seran casi todas. El log decia
+       «15 pedidas». Ahora, al cerrar, un WARNING dice cuantas quedaron sin
+       respuesta y por que; `sondas_resumen` ya lo deja ver
+       (`comprobados < distintos`). No se cambia la prioridad: adelantarlas
+       quitaria concurrencia a las paginas con render (8 peticiones en total).
+     Sin reproducir, y por eso sin tocar: que una IP del rastreo bloqueada por
+     un cortafuegos que RECHAZA conexiones (no que las descarta) saldria como
+     `dominio_externo_muerto` —desde un solo punto de la red no se distingue
+     de un servidor apagado—; y el coste en Postgres, medido con datos
+     sinteticos (10 M aristas, 30% externas, 5.000 sondas): 5,2 s el recuento
+     de destinos distintos y ~1 s cada lote de 2.000, sin indice (crearlo
+     costaria 7,7 s y ahorraria medio segundo por lote).

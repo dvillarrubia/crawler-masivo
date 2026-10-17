@@ -496,7 +496,7 @@ def main() -> None:
         "DOWNLOADER_MIDDLEWARES": middlewares,
         # Como en produccion (settings.py): AUTOTHROTTLE encendido, que es lo
         # que bajaba el retraso del slot tras cada respuesta.
-        "AUTOTHROTTLE_ENABLED": con_crawl_delay,
+        "AUTOTHROTTLE_ENABLED": con_crawl_delay or bool(entrada.get("autothrottle")),
         "AUTOTHROTTLE_START_DELAY": 0,
         "AUTOTHROTTLE_MAX_DELAY": 10,
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,

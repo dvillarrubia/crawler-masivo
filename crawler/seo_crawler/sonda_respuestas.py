@@ -25,7 +25,9 @@ Una peticion es `HEAD`, y se repite UNA vez con `GET` (y `Range`, para no bajar
 el cuerpo entero) ante los codigos en los que un `HEAD` no es de fiar
 (`shared.sondas.HEAD_POCO_FIABLE`), incluidos el 404 y el 410: un «roto» se
 confirma con `GET`. Las redirecciones las sigue la sonda (hasta 10 saltos), y
-cada salto a otro host pasa por su robots.txt.
+cada salto a otro host pasa por su robots.txt. Un salto a la red interna no se
+sigue (`no_verificable`): el filtro SSRF vale para cada salto, no solo para la
+URL enlazada, y por eso el robots.txt del tercero tampoco lo redirige Scrapy.
 
 **robots.txt del tercero, siempre.** El `robots_mode` del job es la decision
 del cliente sobre SU sitio; la de otro sitio no es suya. Cada origen externo se
@@ -36,7 +38,8 @@ robots del sitio como cualquier peticion del rastreo.
 
 **Un host que no responde se deja de pedir.** El robots.txt es tambien la prueba
 de vida del origen: si falla por DNS se pregunta al resolver del sistema (en un
-hilo) y un «no existe» da el origen por caido sin pedir nada mas; si falla por
+hilo) y un «no existe» da el origen por caido sin pedir nada mas (un resolver
+que no contesta es `no_verificable`, nunca un dominio muerto); si falla por
 la red, se prueba UNA URL antes de soltar las demas, y un segundo fallo lo da
 por caido. Las URLs de un origen caido se anotan con su veredicto y
 `host_caido`, sin pedirlas: un dominio muerto cuesta una peticion, no cincuenta
@@ -64,6 +67,8 @@ PRIORIDAD = -100
 PRIORIDAD_ROBOTS = -99
 # Cada cuanto late (y mira si hay que cancelar) una cola de sondas sin paginas.
 LATIDO_S = 60.0
+# Saltos que se siguen del robots.txt de un tercero (los de Google).
+MAX_SALTOS_ROBOTS = 5
 
 TOPE_ENLACES = 5000
 TOPE_RECURSOS = 20000
@@ -157,6 +162,10 @@ class SondaRespuestasMixin:
         self._sr_red_privada = bool(ajustes.getbool("SONDAS_RED_PRIVADA")) if ajustes else False
         self._sr_vistas: set[int] = set()
         self._sr_usadas = {"enlace": 0, "recurso": 0}
+        # De esta sesion: URLs distintas encoladas y filas emitidas. La
+        # diferencia al cerrar es lo que se quedo en la cola (max_urls, cancelar).
+        self._sr_encoladas = 0
+        self._sr_filas = 0
         self._sr_por_host: dict[str, int] = {}
         # origen -> {estado: robots|probando|abierto|caido, robots, espera,
         # fallos, veredicto, error}
@@ -165,6 +174,9 @@ class SondaRespuestasMixin:
         self._sr_sin_comprobar = {"tope": 0, "por_host": 0, "red_privada": 0}
         self._sr_tope_avisado: set[str] = set()
         self._sr_ultimo_latido = time.monotonic()
+        # Crawl-delay de cada tercero: slot -> segundos.
+        self._sr_retrasos: dict[str, float] = {}
+        self._sr_senal_conectada = False
         if not any(self._sr_activa.values()):
             return
         logger.info("Sondas de respuesta: %s, topes %s, %d por host",
@@ -191,6 +203,22 @@ class SondaRespuestasMixin:
                 sesion.close()
         except Exception as exc:  # noqa: BLE001 -- sin la tabla se empieza de cero
             logger.warning("No se pudieron leer las sondas de respuesta previas: %s", exc)
+
+    def _sr_al_cerrar(self, motivo: str) -> None:
+        """Lo pedido, lo que no se compruebo y lo que el cierre dejo en la cola.
+
+        Las sondas van detras de las paginas (prioridad -100), asi que un
+        rastreo que corta `max_urls` con frontera por delante cierra con ellas
+        encoladas: sin esto el log decia «N pedidas» de sondas que nunca
+        salieron.
+        """
+        logger.info("Sondas de respuesta: %s pedidas; sin comprobar %s",
+                    self._sr_usadas, self._sr_sin_comprobar)
+        en_cola = self._sr_encoladas - self._sr_filas
+        if en_cola > 0:
+            logger.warning(
+                "Sondas de respuesta: %d de %d sin respuesta al cerrar (%s): quedan sin fila, "
+                "que es «no comprobado», no «bien»", en_cola, self._sr_encoladas, motivo)
 
     def _sondas_activas(self) -> bool:
         act = getattr(self, "_sr_activa", None)
@@ -255,9 +283,16 @@ class SondaRespuestasMixin:
             self._sr_por_host[host] = self._sr_por_host.get(host, 0) + 1
         self._sr_vistas.add(clave)
         self._sr_usadas[uso] += 1
+        self._sr_encoladas += 1
         ctx = {"url": url, "url_hash": url_hash, "uso": uso, "interno": interno,
                "host": host, "saltos": 0, "status": None}
         yield from self._pedir(url, ctx)
+
+    def _es_red_interna(self, url: str) -> bool:
+        """Si *url* apunta a la red interna y no es del sitio (decision 123)."""
+        if self._sr_red_privada or self._is_internal(url):
+            return False
+        return es_host_privado(urlsplit(url).hostname)
 
     def _pedir(self, url: str, ctx: dict) -> Generator:
         """La peticion de *url* (la enlazada o un salto), o la espera por el
@@ -284,11 +319,8 @@ class SondaRespuestasMixin:
     def _pedir_si_robots_permite(self, url: str, ctx: dict, est: dict, origen: str) -> Generator:
         robots = est.get("robots")
         if robots is not None:
-            ua = (getattr(self, "custom_user_agent", None)
-                  or (self.settings.get("USER_AGENT") if getattr(self, "settings", None) else None)
-                  or "*")
             try:
-                permitido = robots.can_fetch(url, ua)
+                permitido = robots.can_fetch(url, self._sr_ua())
             except Exception:  # noqa: BLE001 -- un robots raro no prohibe
                 permitido = True
             if not permitido:
@@ -317,14 +349,17 @@ class SondaRespuestasMixin:
                               errback=self._sonda_respuesta_error,
                               meta=meta, dont_filter=True, priority=PRIORIDAD)
 
-    def _peticion_robots(self, origen: str) -> scrapy.Request:
-        # Sin `handle_httpstatus_all`: asi el RedirectMiddleware sigue la
-        # redireccion del robots.txt (http -> https), como haria Google.
+    def _peticion_robots(self, origen: str, url: str | None = None,
+                         saltos: int = 0) -> scrapy.Request:
+        # Las redirecciones del robots.txt (http -> https, como haria Google)
+        # las sigue la sonda y no el RedirectMiddleware de Scrapy: el de Scrapy
+        # iria a donde dijera el tercero, red interna incluida (SSRF).
         return scrapy.Request(
-            f"{origen}/robots.txt", callback=self._sonda_robots,
+            url or f"{origen}/robots.txt", callback=self._sonda_robots,
             errback=self._sonda_robots_error,
             meta={"depth": 0, "dont_obey_robotstxt": True, "dont_retry": True,
-                  "sonda_robots": origen},
+                  "dont_redirect": True, "handle_httpstatus_all": True,
+                  "sonda_robots": origen, "sonda_robots_saltos": saltos},
             dont_filter=True, priority=PRIORIDAD_ROBOTS)
 
     # -- filas -----------------------------------------------------------------
@@ -333,6 +368,7 @@ class SondaRespuestasMixin:
         from seo_crawler.items import RespuestaSondeadaItem
 
         saltos = ctx.get("saltos") or 0
+        self._sr_filas = getattr(self, "_sr_filas", 0) + 1
         fila = {
             "job_id": self.job_id, "url_hash": ctx["url_hash"], "url": ctx["url"],
             "host": ctx["host"], "uso": ctx["uso"], "interno": bool(ctx["interno"]),
@@ -385,7 +421,11 @@ class SondaRespuestasMixin:
             partes = urlsplit(url)
             host = (partes.hostname or "").lower()
             resultado = await self._resolver(host, partes.port or (443 if partes.scheme == "https" else 80))
-            return S.DOMINIO_INEXISTENTE if resultado == "no_existe" else S.SIN_CONEXION
+            if resultado == "no_existe":
+                return S.DOMINIO_INEXISTENTE
+            # El resolver no contesto (EAI_AGAIN) o si resuelve y curl no: no
+            # se sabe nada del dominio. `sin_conexion` lo contaria como muerto.
+            return S.NO_VERIFICABLE
         return {"conexion": S.SIN_CONEXION, "tiempo": S.TIEMPO_AGOTADO,
                 "tls": S.TLS_INVALIDO}.get(tipo, S.NO_VERIFICABLE)
 
@@ -426,6 +466,18 @@ class SondaRespuestasMixin:
         self._sr_latir()
         origen = response.meta["sonda_robots"]
         est = self._sr_origenes[origen]
+        if 300 <= response.status < 400 and response.headers.get(b"Location"):
+            destino = response.urljoin(response.headers[b"Location"].decode("latin-1").strip())
+            saltos = int(response.meta.get("sonda_robots_saltos") or 0) + 1
+            # Google sigue cinco saltos del robots.txt; despues, sin reglas.
+            if (saltos <= MAX_SALTOS_ROBOTS
+                    and urlsplit(destino).scheme in ("http", "https")
+                    and not self._es_red_interna(destino)):
+                yield self._peticion_robots(origen, destino, saltos)
+                return
+            est["robots"] = None
+            yield from self._soltar(origen)
+            return
         parser = None
         if 200 <= response.status < 300 and response.body:
             try:
@@ -437,7 +489,68 @@ class SondaRespuestasMixin:
         # 4xx: no hay reglas. 5xx: Scrapy tambien lo trata como permitido; la
         # sonda es un HEAD por URL y con tope por host.
         est["robots"] = parser
+        if parser is not None:
+            self._sr_aplicar_crawl_delay(response.request, parser)
         yield from self._soltar(origen)
+
+    def _sr_ua(self) -> str:
+        return (getattr(self, "custom_user_agent", None)
+                or (self.settings.get("USER_AGENT") if getattr(self, "settings", None) else None)
+                or "*")
+
+    def _sr_aplicar_crawl_delay(self, request, parser) -> None:
+        """El `Crawl-delay` del tercero, como retraso de su slot (decision 81).
+
+        Su robots.txt se respeta siempre (es la decision del tercero, no del
+        cliente), y el `Crawl-delay` es parte de el: sin esto las 50 sondas de un
+        host salian con la concurrencia por dominio del rastreo aunque pidiera
+        una cada 10 s. Con el mismo tope que el del sitio y reaplicado tras cada
+        respuesta, porque AUTOTHROTTLE reescribe `slot.delay`.
+        """
+        from seo_crawler.middlewares import CRAWL_DELAY_MAX_SEGUNDOS, crawl_delay_aplicable
+
+        ajustes = getattr(self, "settings", None)
+        tope = (ajustes.getfloat("ROBOTS_CRAWL_DELAY_MAX", CRAWL_DELAY_MAX_SEGUNDOS)
+                if ajustes else CRAWL_DELAY_MAX_SEGUNDOS)
+        retraso = crawl_delay_aplicable(parser, self._sr_ua(), tope)
+        if retraso is None:
+            return
+        try:
+            downloader = self.crawler.engine.downloader
+            clave = downloader.get_slot_key(request)
+        except Exception:  # noqa: BLE001 -- sin motor (tests del mixin)
+            return
+        if ajustes:
+            retraso = max(retraso, ajustes.getfloat("DOWNLOAD_DELAY", 0.0))
+        self._sr_retrasos[clave] = retraso
+        por_slot = downloader.per_slot_settings.setdefault(clave, {})
+        por_slot["delay"] = retraso
+        por_slot["jitter"] = 0.0
+        self._sr_reaplicar_retraso(clave)
+        if not self._sr_senal_conectada:
+            self._sr_senal_conectada = True
+            from scrapy import signals
+
+            self.crawler.signals.connect(self._sr_tras_descarga,
+                                         signal=signals.response_downloaded)
+        logger.info("Sondas: robots.txt de %s pide Crawl-delay; %.1f s entre sondas", clave,
+                    retraso)
+
+    def _sr_reaplicar_retraso(self, clave: str) -> None:
+        retraso = self._sr_retrasos.get(clave)
+        if retraso is None:
+            return
+        slot = self.crawler.engine.downloader.slots.get(clave)
+        if slot is None:
+            return
+        if slot.delay < retraso:
+            slot.delay = retraso
+        slot.jitter = 0.0
+
+    def _sr_tras_descarga(self, response, request, spider=None) -> None:
+        clave = request.meta.get("download_slot")
+        if clave is not None and clave in self._sr_retrasos:
+            self._sr_reaplicar_retraso(clave)
 
     async def _sonda_robots_error(self, failure) -> AsyncGenerator:
         self._sr_latir()
@@ -488,6 +601,13 @@ class SondaRespuestasMixin:
                 if urlsplit(destino).scheme not in ("http", "https"):
                     yield self._fila(ctx, destino, metodo=metodo, veredicto=S.NO_VERIFICABLE,
                                      error="redirige a un esquema que no es web")
+                    return
+                if self._es_red_interna(destino):
+                    # El filtro de `_sondear` mira la URL enlazada; un tercero
+                    # puede redirigir a donde quiera (SSRF por redireccion).
+                    yield self._fila(ctx, destino, metodo=metodo, final_status=status,
+                                     veredicto=S.NO_VERIFICABLE,
+                                     error="redirige a la red interna: no se sigue")
                     return
                 ctx.pop("get_tras_fallo", None)
                 yield from self._pedir(destino, ctx)
@@ -546,8 +666,10 @@ class SondaRespuestasMixin:
         caido = False
         if origen is not None and origen in self._sr_origenes:
             est = self._sr_origenes[origen]
-            if veredicto in (S.DOMINIO_INEXISTENTE, S.SIN_CONEXION, S.TIEMPO_AGOTADO,
-                             S.TLS_INVALIDO):
+            # Por el TIPO de fallo, no por el veredicto: un DNS que no contesta
+            # (`no_verificable`) tambien es un origen al que no se llega, y se
+            # deja de pedir, aunque no se afirme que este muerto.
+            if tipo in ("dns", "conexion", "tiempo", "tls"):
                 est["fallos"] = est.get("fallos", 0) + 1
                 if est["estado"] != "caido" and (
                         veredicto == S.DOMINIO_INEXISTENTE or est["fallos"] >= 2):
@@ -559,8 +681,8 @@ class SondaRespuestasMixin:
                     extra.append(r)
             # Lo que estaba en vuelo cuando el origen se dio por caido tambien
             # es del origen caido.
-            caido = caido or (est["estado"] == "caido" and veredicto in (
-                S.DOMINIO_INEXISTENTE, S.SIN_CONEXION, S.TIEMPO_AGOTADO, S.TLS_INVALIDO))
+            caido = caido or (est["estado"] == "caido"
+                              and tipo in ("dns", "conexion", "tiempo", "tls"))
         yield self._fila(ctx, req.url, metodo=req.method, veredicto=veredicto, error=texto,
                          host_caido=True if caido else None)
         for fila in extra:

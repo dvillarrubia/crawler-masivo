@@ -761,8 +761,7 @@ class SeoSpider(SondaSoft404Mixin, SondaRespuestasMixin, scrapy.Spider):
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
         if self._sondas_activas():
-            logger.info("Sondas de respuesta: %s pedidas; sin comprobar %s",
-                        self._sr_usadas, self._sr_sin_comprobar)
+            self._sr_al_cerrar(reason)
         if getattr(self, "_presupuesto_a_medida", None) is not None:
             # Lo que costo cada regla en el reactor: es la cifra con la que se
             # decide si una regla merece la pena en un censo grande.

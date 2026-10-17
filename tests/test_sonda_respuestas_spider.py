@@ -247,3 +247,34 @@ def test_con_la_descarga_de_twisted_los_fallos_se_clasifican_igual():
     assert filas["http://x.invalid/a"]["veredicto"] == "dominio_inexistente"
     assert _f(filas, "/a", "127.0.0.3:P")["veredicto"] == "sin_conexion"
     assert _f(filas, "/404")["veredicto"] == "roto"
+
+
+def test_el_crawl_delay_del_tercero_espacia_sus_sondas():
+    """Revision: su robots.txt se respetaba en los `Disallow` pero no en el
+    `Crawl-delay`; las cuatro sondas del host salian a la vez. Con AUTOTHROTTLE
+    encendido, como en produccion, que es lo que baja el retraso del slot."""
+    lento = "http://127.0.0.4:{port}"
+    rutas = {"/s/inicio": [200, {}, _html("".join(
+        f'<a href="{lento}/p{i}">e</a>' for i in range(4)))]}
+    externos = {"127.0.0.4": {
+        "/robots.txt": [200, {"Content-Type": "text/plain"},
+                        "User-agent: *\nCrawl-delay: 1\n"],
+        **{f"/p{i}": [200, {}, _html("ok")] for i in range(4)},
+    }}
+    entrada = {
+        "seeds": ["http://localhost:{port}/s/inicio"],
+        "config": {"max_depth": 1, "use_sitemap": False,
+                   "crawl_behavior": {"soft404_sondas": 0,
+                                      "comprobar_enlaces_externos": True}},
+        "rutas": rutas, "externos": externos, "http_real": True, "descarga_real": True,
+        "autothrottle": True, "log_level": "INFO",
+    }
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=240, cwd=RAIZ)
+    assert "@@PETICIONES@@" in proc.stdout, proc.stderr[-4000:]
+    peticiones = json.loads(proc.stdout.split("@@PETICIONES@@", 1)[1].split("\n", 1)[0])
+    tiempos = sorted(t for t, host, ruta in peticiones
+                     if host == "127.0.0.4" and ruta.startswith("/p"))
+    assert len(tiempos) == 4, peticiones
+    huecos = [b - a for a, b in zip(tiempos, tiempos[1:])]
+    assert min(huecos) >= 0.9, huecos
