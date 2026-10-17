@@ -561,3 +561,121 @@
        (`ISSUE_LABEL_EXTRA`), entran en el ambito «Enlazado» del explorador y
        sus detalles se leen («de plantilla», «páginas que la enlazan», el
        reparto por tipo, un ejemplo).
+
+<a id="d123"></a>
+123. **Los enlaces externos se comprueban con una sonda, no con
+   `follow_external`, y lo que no se puede afirmar no se avisa** (#150, punto 1).
+   Los enlaces a otros sitios se guardaban en `links` y no se pedian nunca: un
+   enlace roto a un tercero, o a un dominio caducado, no salia en ningun informe.
+   La casilla «Verificar recursos ext.» (`resource_types.check_external_resources`)
+   estaba en el formulario y no la leia ningun fichero de `crawler/`.
+   - **No sobre `follow_external`.** Con `follow_external=true` los externos ya
+     se piden, pero entran en el CENSO: gastan `max_urls`, sus 404 salen como
+     `4xx_error` y `/insights` los cuenta como «paginas con errores HTTP» del
+     sitio, y se siguen los enlaces de las paginas externas (la condicion de
+     `parse` no mira si el origen es interno). La comprobacion es una **sonda**
+     con el patron de la decision 105 (`crawler/seo_crawler/sonda_respuestas.py`,
+     `SondaRespuestasMixin`): callback y errback propios (nunca `parse` ni
+     `handle_error`, que cuentan), sin `PageItem`, `dont_filter`, prioridad
+     -100 (detras de las paginas), su propio tope y **sin `_anotar_salud`**: el
+     403 de Cloudflare delante de LinkedIn no puede parar la auditoria (103).
+     La cola final de sondas no tiene paginas y el latido del spider va por
+     paginas: la sonda late por tiempo (cada 60 s) y mira la cancelacion, o el
+     vigilante del worker daria el rastreo por estancado.
+   - **Clave nueva, apagada:** `crawl_behavior.comprobar_enlaces_externos`, con
+     `enlaces_externos_max` (5.000 URLs distintas) y `sondas_por_host` (50 por
+     host externo, enlaces y recursos juntos). No se reutiliza
+     `check_external_resources`: habla de recursos, y es la de la 124. Las dos
+     casillas dicen en el formulario que hacen. **Sin medir el coste en censos
+     reales**: la guia pedia contar destinos externos distintos en tres censos
+     antes de fijar los topes, y esta rama no tiene acceso a produccion ni a
+     una base con censos; los topes son los propuestos y se revisan con el
+     canario de abajo.
+   - **`HEAD`, y `GET` cuando el `HEAD` no es de fiar.** Ante 400, 401, 403,
+     404, 405, 406, 409, 410, 429, 501 o 5xx se repite una vez con `GET` y
+     `Range: bytes=0-1023` (la lista de FreeCrawl mas el 404 y el 410: antes de
+     afirmar «roto» con un `HEAD` se confirma, porque hay CMS que solo enrutan
+     GET; cuesta solo lo que sale roto). Un servidor que corta la conexion a un
+     `HEAD` tambien se repite con `GET`. Muchos ignoran el `Range`: el `GET` va
+     con `MAXFILESIZE` de curl a 10 MB, y lo que anuncia mas existe. Las
+     redirecciones las sigue la sonda (hasta 10 saltos, como Google), con el
+     codigo de la URL enlazada y el final. `dont_retry`: el `RetryMiddleware`
+     repetia tres veces el 429 de un tercero.
+   - **Nada del job a un tercero.** Va encima de la 114: cabeceras, cookies y
+     Basic solo a los hosts de las semillas. Comprobado con el arnes, mirando
+     lo que LLEGA al servidor del tercero (sin `Authorization`, sin la cabecera
+     propia, sin la cookie). La sonda no anade nada suyo. Y no pide a la red
+     interna: un enlace a `10.x`, `169.254.169.254`, `localhost` o `.local` no
+     se pide (`shared/red.py`, SSRF; solo por la forma del host, sin cubrir un
+     nombre publico que resuelva a una IP privada).
+   - **El robots.txt del tercero, siempre.** El `robots_mode` del job es lo que
+     el cliente decide sobre SU sitio. Cada origen externo pide su robots.txt
+     una vez (con `dont_obey_robotstxt` en la sonda, para que el middleware de
+     Scrapy no lo pida otra vez) y lo prohibido queda `prohibido_por_robots`,
+     sin pedirlo: «no evaluado», no «bien».
+   - **Un dominio muerto cuesta una peticion.** El robots.txt es tambien la
+     prueba de vida del origen. curl dice «Could not resolve host» igual para
+     un NXDOMAIN que para un resolver que no contesta: se pregunta a
+     `getaddrinfo` en un hilo y solo `EAI_NONAME`/`EAI_NODATA` es
+     `dominio_inexistente`; entonces el origen se da por caido y sus URLs se
+     anotan sin pedirlas (`host_caido`). Si el robots falla por la red se prueba
+     UNA URL, y un segundo fallo de conexion lo da por caido. Comprobado con el
+     arnes: `x.invalid` no recibe ninguna peticion de URL, y de un host que
+     rechaza conexiones se pide una y la otra no.
+   - **Veredictos** (`shared/sondas.py`, compartido por spider, analizador y
+     API): `ok`, `roto` (404, 410 y los 4xx que no son de permisos),
+     `redirige_a_error`, `error_servidor` (5xx), `no_verificable` (401, 403,
+     406, 407, 429, 451, 999 de LinkedIn, un desafio que
+     `clasificar_respuesta` reconoce aunque venga con 200 o 503),
+     `prohibido_por_robots`, `dominio_inexistente`, `sin_conexion`,
+     `tiempo_agotado`, `tls_invalido`. **Solo `roto` y `redirige_a_error`
+     avisan.** Un 5xx puede ser una caida de un minuto y un 403/429 es lo que
+     responde un WAF a un rastreador: afirmarlo seria lo que prohiben la 67, la
+     89 y la 91. Salen como dato en la tabla.
+   - **Tabla nueva `respuestas_sondeadas`**, una fila por URL distinta del job
+     (unica por `job_id, url_hash`, el mismo hash que `links.to_url_hash`), con
+     `job_id` para filtrar y borrar sin unir con nada (37). Va en
+     `TABLAS_POR_JOB`, en `borrar_job` (96), en el backup (sin url FK: solo se
+     remapea el job) y la crea create_all (`migrar_respuestas_sondeadas` en
+     `init_db.py` asegura el indice). Sin fila = no comprobada (sondas
+     apagadas, tope, tope del host, red interna), que no es «responde bien»
+     (104). La tuberia la escribe por lotes con un upsert en un SAVEPOINT
+     (nada de un `UPDATE` por sonda como el soft 404), y mira si la tabla
+     existe como con la 106. Al reanudar, lo ya sondeado no se repite y gasta
+     su presupuesto.
+   - **Avisos** (`analysis/avisos_de_sondas.py`): `enlace_externo_roto`
+     (warning) **uno por destino, no por aparicion ni por pagina**, con
+     `paginas_afectadas`, `enlaces` (`SUM(veces)`, 94), ejemplos de origen y
+     `misma_casa` (el propio blog con `crawl_subdomains=false` pesa mas).
+     `dominio_externo_muerto` (warning, `group_key` del host) uno por host: hace
+     falta una fila con `host_caido` y un fallo de DNS o de conexion, y ninguna
+     respuesta HTTP en todo el host (un 404 dice que el dominio existe). Sus URLs
+     no llevan ademas `enlace_externo_roto` (36). Lo que **NO** se copia de
+     FreeCrawl (`project-db.ts:10055-10085`): alli un host es muerto con un 80%
+     de `status >= 400`, asi que un 403/429 de WAF lo mata, y al exigir
+     `status_code IS NOT NULL` deja fuera justo el fallo de DNS; y lo emite por
+     pagina de origen. Si «no existe» mas de la mitad de los hosts externos (y
+     al menos 10), lo que fallo es el resolver del rastreo: no se afirma
+     ninguno. Origen: HTML que responde 200 (57); un `noindex` y un `nofollow`
+     SI cuentan, el enlace lo pulsa una persona. Una URL que esta en el censo
+     (con `follow_external`) ya tiene su `4xx_error` y no se repite. Sin pagina
+     propia, se anclan en la pagina de URL menor (88). Los enlaces salen de la
+     temporal de aristas (columna `externo_hash`, solo si el censo tiene
+     sondas), sin otra lectura de `links` (37, 41).
+   - **El resumen** va a `jobs.sondas_resumen` (lo escribe el analisis):
+     destinos externos distintos, comprobados, rotos y muertos, y el reparto
+     por veredicto. Con «comprobados < distintos», que no haya aviso no dice
+     que no haya enlaces rotos.
+   - **Limitaciones conocidas.** Un dominio caducado y aparcado responde 200
+     con una pagina de parking: por codigo no se detecta. El UA de las sondas
+     es el del job (un preset de Googlebot desde una IP que no es de Google
+     saca mas `no_verificable`). Un `HEAD` va sin cuerpo, asi que un desafio
+     de WAF servido con 200 solo se ve si lo dicen las cabeceras.
+   - **Al re-analizar** no cambia nada de lo ya entregado: sin filas en
+     `respuestas_sondeadas` no se emite nada nuevo. Los censos rastreados con
+     la clave encendida llevan tipos nuevos y `analisis_version` distinto (72,
+     91). **Pendiente de verificar en un canario** (13): `lanzar_job.py
+     <cliente> --canary --set crawl_behavior.comprobar_enlaces_externos=true`
+     en dos sitios con muchos externos, revisar a mano 20 `roto` y 10
+     `dominio_externo_muerto` con `curl` desde fuera y anotar aqui el numero de
+     sondas, el tiempo anadido y el porcentaje de `no_verificable`.

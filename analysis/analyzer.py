@@ -40,7 +40,7 @@ from shared.config import (
 from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
-from analysis import avisos_de_enlaces
+from analysis import avisos_de_enlaces, avisos_de_sondas
 from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
 from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
@@ -265,6 +265,12 @@ class SEOAnalyzer:
         self.session = session
         self.job_id = job_id
         self._pending_issues: list[dict[str, Any]] = []
+        # Sondas de respuesta (decisiones 123 y 124): lo ya avisado como enlace
+        # externo o dominio muerto (para no repetirlo como recurso) y el resumen
+        # que va a `jobs.sondas_resumen`.
+        self.sondas_avisadas: set[str] = set()
+        self.sondas_resumen: dict[str, Any] = {}
+        self._con_sondas: bool | None = None
 
         # Per-job thresholds (fallback to module-level constants)
         from shared.models import Job
@@ -336,6 +342,7 @@ class SEOAnalyzer:
         self.compute_pagerank()
         self.analyze_links()
         avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
+        avisos_de_sondas.avisar_recursos_rotos(self)  # decision 124
         self.analyze_sitemap()
 
         # Flush any remaining buffered issues.
@@ -359,7 +366,11 @@ class SEOAnalyzer:
         from shared.version import VERSION
 
         self.session.execute(
-            update(Job).where(Job.id == self.job_id).values(analisis_version=VERSION)
+            update(Job).where(Job.id == self.job_id).values(
+                analisis_version=VERSION,
+                # NULL si el censo no tiene sondas: no un resumen de ceros.
+                sondas_resumen=self.sondas_resumen or None,
+            )
         )
 
     # -- helpers ------------------------------------------------------------
@@ -2781,8 +2792,9 @@ class SEOAnalyzer:
         # motores, asi que la primera version de esto no actualizaba ni una
         # fila en los tests contra SQLite.
         from sqlalchemy import (BigInteger, Boolean, Column, Integer, MetaData, String,
-                                Table, case, insert)
+                                Table, case, insert, literal)
 
+        con_sondas = self._con_sondas = avisos_de_sondas.hay_sondas(self)
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         aristas = Table(
             "aristas_tmp", MetaData(),
@@ -2799,6 +2811,9 @@ class SEOAnalyzer:
             # El hash del destino solo si lleva `utm_*` (decision 106). NULL en
             # el resto: no engorda la temporal de un censo de millones.
             Column("utm_hash", String(64)),
+            # El del destino EXTERNO, para cruzarlo con `respuestas_sondeadas`
+            # (decision 123). Solo si el censo tiene sondas; si no, NULL.
+            Column("externo_hash", String(64)),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -2808,7 +2823,7 @@ class SEOAnalyzer:
         self.session.execute(
             insert(aristas).from_select(
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
-                 "veces", "utm_hash"],
+                 "veces", "utm_hash", "externo_hash"],
                 select(
                     destino.id, Link.from_url_id, Link.is_internal,
                     and_(origen.noindex.isnot(True), origen.status_code == 200),
@@ -2817,6 +2832,8 @@ class SEOAnalyzer:
                     case((or_(func.lower(Link.to_url).like("%?utm\\_%", escape="\\"),
                               func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
                           Link.to_url_hash), else_=None),
+                    (case((Link.is_internal.is_(False), Link.to_url_hash), else_=None)
+                     if con_sondas else literal(None, String(64))),
                 )
                 .join(origen, origen.id == Link.from_url_id)
                 .outerjoin(destino, and_(
@@ -2882,6 +2899,8 @@ class SEOAnalyzer:
         # mismo que todo lo anterior (decision 41).
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
+        if con_sondas:
+            avisos_de_sondas.avisar_enlaces_externos(self, aristas)  # decision 123
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         self.session.flush()

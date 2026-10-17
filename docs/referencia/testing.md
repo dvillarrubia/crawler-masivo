@@ -139,6 +139,22 @@ ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
 ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
 ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
 `test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
+
+Sondas de respuesta (decisiones 123 y 124): `test_sondas.py` (veredictos, cuando
+un HEAD no basta, tamano, SSRF, el mixin sin red: un robots por origen, tope por
+host, recursos internos y externos por separado, latido y cancelacion),
+`test_sonda_respuestas_spider.py` (el `SeoSpider` real con curl_cffi contra
+servidores de «tercero» en 127.0.0.2 y 127.0.0.3 y un `x.invalid`: 404/410,
+403 de WAF, 429, 5xx, HEAD 405 → GET, HEAD 404 confirmado con GET, redireccion a
+un 404, robots.txt del tercero, host que rechaza conexiones, DNS inexistente,
+ninguna credencial del job en el tercero, no gastan `max_urls`, topes; y una
+pasada con el handler de Twisted), `test_avisos_de_sondas_db.py` (los avisos
+contra SQLite: uno por destino, dominio muerto sin duplicar, lo dudoso sin aviso,
+resolver caido, origen 404, recursos y `size_bytes`), `test_sondas_db.py`
+(Postgres: upsert de la tuberia, reanudacion con el presupuesto gastado y el
+`run_all` entero) y `test_backup_sondas.py` (trabajo de la API). El arnes
+(`tests/spider_harness.py`) sirve ahora `HEAD` y, con `externos`, un servidor por
+IP de tercero en el mismo puerto (`@@EXTERNAS@@`: metodo, ruta y cabeceras).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

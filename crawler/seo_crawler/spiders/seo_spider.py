@@ -76,6 +76,7 @@ from shared.respuestas import (
     NO_VALIDAS, UMBRAL_POR_DEFECTO, VENTANA_POR_DEFECTO, VentanaDeSalud,
     clasificar_respuesta,
 )
+from seo_crawler.sonda_respuestas import SondaRespuestasMixin
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.items import (
     ContentItem,
@@ -438,7 +439,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, SondaRespuestasMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -611,6 +612,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             # -- Sondas de soft 404 (decision 105) --
             self._iniciar_sondas(job)
 
+            # -- Sondas de respuesta: enlaces externos y recursos (123, 124) --
+            # Despues de los patrones: los de exclusion valen tambien para ellas.
+            self._iniciar_sondas_respuesta()
+
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
             self._extra_sitemap_urls = self.job_config.get("sitemap_urls", []) or []
@@ -755,6 +760,9 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
     def spider_closed(self, spider, reason):
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
+        if self._sondas_activas():
+            logger.info("Sondas de respuesta: %s pedidas; sin comprobar %s",
+                        self._sr_usadas, self._sr_sin_comprobar)
         if getattr(self, "_presupuesto_a_medida", None) is not None:
             # Lo que costo cada regla en el reactor: es la cifra con la que se
             # decide si una regla merece la pena en un censo grande.
@@ -1971,7 +1979,8 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
 
         # Resources (extract_resources already returns width, height,
         # is_mixed_content)
-        for resource in extract_resources(selector, base_url):
+        resources = extract_resources(selector, base_url)
+        for resource in resources:
             yield ResourceItem(
                 url_hash=final_hash,
                 job_id=self.job_id,
@@ -1983,6 +1992,13 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 height=resource.get("height"),
                 is_mixed_content=resource.get("is_mixed_content", False),
             )
+
+        # Sondas de lo que la pagina enlaza fuera y de lo que embebe
+        # (decisiones 123 y 124): no son URLs del censo ni gastan max_urls.
+        # Solo desde paginas del sitio: con follow_external, lo que enlaza un
+        # tercero no es del informe del cliente.
+        if internal:
+            yield from self._sondas_de_pagina(links, resources)
 
         # -- SecurityItem -------------------------------------------------
         if self._extraction.get("extract_security_headers", True):

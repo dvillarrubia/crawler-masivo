@@ -3514,14 +3514,14 @@ const EXP_TABS = [
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
   // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
   { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
-  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato'],
+  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },
@@ -3558,6 +3558,9 @@ function _freshForm() {
     // Spider — behavior
     crawl_subdomains: false,
     follow_nofollow: false,
+    // Sondas de respuesta (decisiones 123 y 124): fuera del censo y de max_urls
+    comprobar_enlaces_externos: false,
+    comprobar_recursos: false,
     exclude_patterns: '',
     include_patterns: '',
     max_url_length: 0,
@@ -3646,6 +3649,8 @@ function _configDesdeForm(f) {
       follow_nofollow: f.follow_nofollow,
       crawl_subdomains: f.crawl_subdomains,
       max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
+      comprobar_enlaces_externos: !!f.comprobar_enlaces_externos,
+      comprobar_recursos: !!f.comprobar_recursos,
     },
     url_filters: {
       max_url_length: parseInt(f.max_url_length) || 0,
@@ -3697,7 +3702,8 @@ function _formDesdeConfig(f, cfg) {
   sub(cfg.resource_types, ['crawl_images', 'crawl_css', 'crawl_js', 'crawl_pdfs', 'crawl_fonts',
     'crawl_svg', 'crawl_other', 'check_external_resources']);
   sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
-    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours']);
+    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
+    'comprobar_enlaces_externos', 'comprobar_recursos']);
   sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
   sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
     'extract_page_content', 'store_raw_html']);

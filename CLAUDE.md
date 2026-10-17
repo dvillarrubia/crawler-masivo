@@ -115,8 +115,9 @@ Una linea por regla; el porque y la medida, en la decision citada.
 - **Nada de un cliente en codigo**: va en `projects/<cliente>/config.json`.
 - **Las cabeceras, cookies y Basic del job solo van a los hosts de las semillas**,
   tambien con render y tras una redireccion; sin jar de cookies por defecto. 114.
-- **Una sonda de soft 404 no es una URL del censo**: su propio callback, sin item,
-  sin gastar `max_urls`; vive en `jobs.soft404`. Decision 105.
+- **Una sonda no es una URL del censo** (soft 404, enlace externo, recurso): su
+  propio callback, sin `PageItem`, sin gastar `max_urls` ni contar para la salud;
+  vive en `jobs.soft404` o `respuestas_sondeadas`. Decisiones 105, 123 y 124.
 - **Un aviso por hallazgo**, y lo que es de plantilla o de servidor se agrupa
   (una fila con `paginas_afectadas`, no una por pagina). 36, 53, 64, 73.
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un

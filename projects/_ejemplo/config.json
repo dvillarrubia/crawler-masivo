@@ -44,7 +44,12 @@
     "follow_nofollow": false,
     "crawl_subdomains": false,
     "max_runtime_hours": 48,
-    "stall_timeout_minutes": 30
+    "stall_timeout_minutes": 30,
+    "comprobar_enlaces_externos": false,
+    "enlaces_externos_max": 5000,
+    "comprobar_recursos": false,
+    "recursos_max": 20000,
+    "sondas_por_host": 50
   },
   "extraction": {
     "extract_structured_data": true,

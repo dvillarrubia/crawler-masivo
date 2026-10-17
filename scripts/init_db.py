@@ -68,6 +68,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS comparacion JSON"))
         # Sondas y resumen de soft 404 (decision 105)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS soft404 JSON"))
+        # Resumen de las sondas de respuesta (decisiones 123 y 124)
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sondas_resumen JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).
@@ -123,6 +125,7 @@ def main() -> None:
     migrar_enriquecido()
     migrar_custom_extraction()
     migrar_enlaces_no_rastreables()
+    migrar_respuestas_sondeadas()
 
     print("Done.")
 
@@ -258,6 +261,21 @@ def migrar_enlaces_no_rastreables() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_enr_from ON enlaces_no_rastreables (from_url_id)"))
     print("Enlaces no rastreables: tabla enlaces_no_rastreables e indices al dia.")
+
+
+def migrar_respuestas_sondeadas() -> None:
+    """Enlaces externos y recursos embebidos sondeados (decisiones 123 y 124).
+
+    Tabla NUEVA, que crea create_all con su indice unico (job_id, url_hash):
+    ningun ALTER sobre `links`, `urls` ni `resources`. Aqui solo se asegura el
+    indice por si la tabla se creo antes que el. Bajo el `lock_timeout` de
+    `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_rsond_job_hash "
+            "ON respuestas_sondeadas (job_id, url_hash)"))
+    print("Respuestas sondeadas: tabla respuestas_sondeadas e indice al dia.")
 
 
 if __name__ == "__main__":

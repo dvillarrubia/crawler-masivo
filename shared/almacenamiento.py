@@ -49,7 +49,7 @@ from typing import Any, Iterable
 # Tablas que llevan `job_id` y que, por tanto, se pueden contar por censo sin
 # unir con nada (decision 37).
 TABLAS_POR_JOB = ("urls", "links", "issues", "custom_extraction",
-                  "enlaces_no_rastreables")
+                  "enlaces_no_rastreables", "respuestas_sondeadas")
 
 # Tablas que cuelgan de `urls.url_id`. No se cuentan por job: se reparten por
 # URL con la proporcion global (ver el docstring). Las cuatro ultimas son de
@@ -192,7 +192,8 @@ def filas_por_job(db, job_ids: Iterable[Any], *, presupuesto_s: float = 20.0,
 
     from sqlalchemy import func, select
 
-    from shared.models import CustomExtraction, EnlaceNoRastreable, Issue, Link, Url
+    from shared.models import (CustomExtraction, EnlaceNoRastreable, Issue, Link,
+                               RespuestaSondeada, Url)
 
     ids = list(job_ids)
     salida: dict[Any, dict[str, int]] = {i: {} for i in ids}
@@ -207,7 +208,8 @@ def filas_por_job(db, job_ids: Iterable[Any], *, presupuesto_s: float = 20.0,
 
     for tabla, modelo in (("urls", Url), ("issues", Issue),
                           ("custom_extraction", CustomExtraction),
-                          ("enlaces_no_rastreables", EnlaceNoRastreable)):
+                          ("enlaces_no_rastreables", EnlaceNoRastreable),
+                          ("respuestas_sondeadas", RespuestaSondeada)):
         try:
             if pg:
                 _tope_de_consulta(db, max(1.0, fin - time.monotonic()))

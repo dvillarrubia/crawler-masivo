@@ -162,6 +162,14 @@ Soft 404 (decision 105): `analysis_thresholds.soft404_similitud` (0.9),
 `soft404_min_palabras_igualdad` (5) y `soft404_max_proporcion_huella` (0.5); y
 `crawl_behavior.soft404_sondas` (12; 0 = sin sondas).
 
+Sondas de respuesta (decisiones 123 y 124), todas apagadas por defecto:
+`crawl_behavior.comprobar_enlaces_externos` (con `enlaces_externos_max`, 5.000),
+`crawl_behavior.comprobar_recursos` y `resource_types.check_external_resources`
+(con `recursos_max`, 20.000), y `crawl_behavior.sondas_por_host` (50 por host
+externo; 0 = sin tope). El setting de Scrapy `SONDAS_RED_PRIVADA` solo existe
+para el arnes de tests (sus «terceros» viven en 127.0.0.x): en produccion no se
+pone, y una sonda nunca pide a una IP privada, loopback o link-local.
+
 Additional thresholds in `analyzer.py`: `LOW_WORD_COUNT_THRESHOLD=200`, `URL_MAX_LENGTH=115`, `HIGH_OUTLINK_THRESHOLD=100`.
 
 ## CI y despliegue

@@ -48,6 +48,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | total_urls_crawled | int | URLs crawleadas |
 | decisiones_resumen | JSON | Capa de decisiones (#7): `llamadas`, `tokens_entrada`, `coste_usd` (real, de `usage.cost`), `aciertos_cache`, `n_429`, `latencia_p50_ms`/`p95`, `por_pregunta` con la distribucion de respuestas, `avisos` y `estado` (ok, degradado, desactivado, sin_credito, presupuesto_agotado). NULL = nunca se pregunto nada a un modelo |
 | enlaces_archivados | JSON | Enlaces archivados en Parquet (decision 95): `filas`, `apariciones`, `internos`, `nofollow_internos`, `fichero`, `bytes`, `fecha`. Con valor, `links` NO tiene filas de este job: se leen de `$ARCHIVO_DIR/enlaces/<job_id>.parquet`. NULL = en `links` |
+| sondas_resumen | JSON | Sondas de respuesta (decisiones 123 y 124), lo escribe el analisis: `enlaces_externos` (`distintos`, `comprobados`, `rotos`, `dominios_muertos`, `por_veredicto`) y `recursos` (`comprobados`, `rotos`, `por_veredicto`). Con comprobados < distintos, que no haya aviso no dice nada. NULL = sin sondas |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 
@@ -218,6 +219,7 @@ filtrar por `urls.is_html`.
 | alt_text | text | Texto alt (imagenes) |
 | width / height | int | Dimensiones del atributo HTML |
 | is_mixed_content | bool | Recurso HTTP en pagina HTTPS |
+| size_bytes | bigint | Bytes por el cable segun la sonda de recursos (`Content-Range` o `Content-Length`; decision 124). NULL = no sondeado |
 
 ### `security_headers` — Cabeceras de seguridad (1:1 con urls)
 | Columna | Tipo | Descripcion |
@@ -270,6 +272,39 @@ Indices: `uq_cext_url_nombre (url_id, nombre)`, `ix_cext_job_nombre_estado`,
 -- Paginas SIN el tag de GTM (solo las evaluadas: ni PDFs ni bloqueadas)
 SELECT u.url FROM custom_extraction c JOIN urls u ON u.id = c.url_id
 WHERE c.job_id = 'UUID-AQUI' AND c.nombre = 'gtm' AND c.estado = 'sin_coincidencia';
+```
+
+### `respuestas_sondeadas` — Enlaces externos y recursos sondeados (decisiones 123 y 124)
+Lo que respondio una URL que el rastreo pidio SIN que sea del censo: un enlace a
+otro sitio o un recurso embebido (imagen, CSS, JS). Una fila por URL distinta del
+job; sin fila = no se comprobo (sondas apagadas, tope, tope por host, red interna).
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | Sin url FK: el destino no es del censo |
+| url_hash | varchar(64) | El de `links.to_url_hash` |
+| url / host | text / varchar(255) | |
+| uso | varchar(10) | enlace, recurso (por que se pidio la primera vez) |
+| interno | bool | Recurso del propio sitio |
+| metodo | varchar(8) | HEAD o GET (el ultimo); NULL = no se pidio (robots, origen caido) |
+| status_code | int | Lo que respondio la URL enlazada |
+| final_url / final_status / saltos | text / int / int | Si redirigia: a donde y con que codigo |
+| veredicto | varchar(32) | ok, roto, redirige_a_error, error_servidor, no_verificable, prohibido_por_robots, dominio_inexistente, sin_conexion, tiempo_agotado, tls_invalido |
+| response_class | varchar(32) | `shared/respuestas.py` (un desafio de WAF es `no_verificable`) |
+| host_caido | bool | El spider dio el origen por inalcanzable y dejo de pedirle |
+| content_type / content_length | varchar(255) / bigint | Bytes por el cable (`Content-Range` o `Content-Length`) |
+| error | text | El fallo de red, recortado |
+| fecha | timestamptz | |
+
+Indice: `uq_rsond_job_hash (job_id, url_hash)`.
+
+```sql
+-- Enlaces externos rotos con cuantas paginas los enlazan (filtrando links por job, decision 37)
+SELECT r.url, r.status_code, count(DISTINCT l.from_url_id) AS paginas
+FROM respuestas_sondeadas r JOIN links l ON l.job_id = r.job_id AND l.to_url_hash = r.url_hash
+WHERE r.job_id = 'UUID-AQUI' AND r.veredicto IN ('roto', 'redirige_a_error')
+GROUP BY r.url, r.status_code ORDER BY paginas DESC;
 ```
 
 ### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)

@@ -538,12 +538,14 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     # demas por el ON DELETE CASCADE de la BD. `custom_extraction` (decision
     # 104) lleva `job_id` y va a mano: en SQLite no hay CASCADE, y por trozos
     # como las otras, porque son una fila por URL y regla.
-    from shared.models import CustomExtraction, EnlaceNoRastreable
+    from shared.models import CustomExtraction, EnlaceNoRastreable, RespuestaSondeada
 
     for nombre, modelo in (("links", Link), ("issues", Issue),
                            ("custom_extraction", CustomExtraction),
                            # Enlaces no rastreables (decision 106): job_id, igual.
-                           ("enlaces_no_rastreables", EnlaceNoRastreable), ("urls", Url)):
+                           ("enlaces_no_rastreables", EnlaceNoRastreable),
+                           # Sondas de respuesta (decisiones 123 y 124): job_id, igual.
+                           ("respuestas_sondeadas", RespuestaSondeada), ("urls", Url)):
         borradas = 0
         while True:
             if trozo:

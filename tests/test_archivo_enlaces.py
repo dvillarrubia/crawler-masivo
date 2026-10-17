@@ -30,7 +30,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared import archivo_enlaces  # noqa: E402
 from shared.database import get_session  # noqa: E402
-from shared.models import Base, HtmlMeta, Job, Link, Url  # noqa: E402
+from shared.models import Base, HtmlMeta, Job, Link, RespuestaSondeada, Url  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -86,6 +86,11 @@ def entorno(tmp_path, monkeypatch):
         Link(job_id=job.id, from_url_id=urls["/c"].id, to_url=urls["/a"].url,
              to_url_hash="h/a", is_internal=True, link_type="redirect", follow=True),
     ])
+    # La sonda del enlace externo (decision 123): sale en /links y en su CSV,
+    # archivado o no.
+    s.add(RespuestaSondeada(job_id=job.id, url_hash="hext", url="https://otro.com/",
+                            host="otro.com", uso="enlace", interno=False, metodo="GET",
+                            status_code=404, veredicto="roto"))
     s.commit()
     ids = {k: v.id for k, v in urls.items()}
     s.close()
@@ -146,6 +151,23 @@ def test_archivar_no_cambia_nada_de_lo_que_devuelve_la_api(entorno):
     assert archivo_enlaces.ruta(jid).exists()
 
     assert _todo(api, jid, ids) == antes
+
+
+def test_el_veredicto_de_la_sonda_sale_en_links_y_en_el_csv(entorno):
+    api, jid, _, Sesion = entorno
+    for archivado in (False, True):
+        if archivado:
+            with Sesion() as s:
+                archivo_enlaces.archivar(s, jid)
+        items = [i for p in (1, 2, 3, 4) for i in
+                 api.get(f"/api/jobs/{jid}/links?page={p}&page_size=7").json()["items"]]
+        externos = [(i["to_url"], i["estado_externo"], i["status_externo"]) for i in items
+                    if not i["is_internal"]]
+        assert externos == [("https://otro.com/", "roto", 404)], archivado
+        assert all(i["estado_externo"] is None for i in items if i["is_internal"])
+        cabecera, *filas = api.get(f"/api/jobs/{jid}/links/export").text.splitlines()
+        assert cabecera.lstrip("\ufeff").endswith("estado_externo,status_externo")
+        assert [f for f in filas if "otro.com" in f][0].endswith(",roto,404"), archivado
 
 
 def test_restaurar_deja_links_como_estaba(entorno):
