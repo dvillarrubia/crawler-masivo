@@ -28,6 +28,7 @@ Sin dependencias en lo que importa la API: Protego se importa solo al evaluar.
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -192,34 +193,77 @@ def fila_de_respuesta(url: str, *, status_code: int | None = None,
     return fila
 
 
+# Linea `User-agent` en las tres grafias que aceptan Google y Protego, con su
+# valor hasta el comentario.
+_LINEA_UA = re.compile(r"^([ \t]*user[- ]?agent[ \t]*:[ \t]*)([^#\r\n]*)", re.I | re.M)
+_TOKEN = re.compile(r"[A-Za-z_-]*")
+# Nombre que se le da a un grupo que no es del bot: no puede aparecer dentro
+# del token de ningun bot, que es como casa Protego.
+_GRUPO_AJENO = "grupo-de-otro-bot-0"
+
+
+def grupos_como_google(texto: str, token: str) -> str:
+    """El robots.txt con los grupos `User-agent` reescritos como los lee Google.
+
+    Google saca del valor el token de producto (letras, `_` y `-`: robots.cc,
+    `ExtractUserAgent`) y lo compara ENTERO con el del bot, sin caja. Protego
+    busca el del grupo DENTRO del nombre del bot, asi que `User-agent: Google`
+    le aplicaba a Googlebot y `User-agent: Googlebot/2.1` no (revision de la
+    decision 113). Aqui el grupo del bot pasa a llamarse exactamente como el
+    token y cualquier otro a un nombre que no casa con nada; `*` se queda.
+    """
+    bajo = token.lower()
+
+    def _uno(m: re.Match) -> str:
+        valor = m.group(2).strip()
+        if valor == "*":
+            return m.group(0)
+        producto = _TOKEN.match(valor).group(0).lower()
+        return m.group(1) + (token if producto == bajo else _GRUPO_AJENO)
+
+    return _LINEA_UA.sub(_uno, texto)
+
+
 class EvaluadorRobots:
     """Que puede pedir cada bot segun UN robots.txt guardado.
 
     `permitido` devuelve None cuando no se puede afirmar nada: robots.txt
     inaccesible (Google para el sitio, pero puede tener una copia en cache y no
     sabemos si el fallo fue pasajero: decision 67), muro delante o sin dato.
+
+    Un parser por bot: el texto se reescribe con `grupos_como_google` para el
+    token de cada uno.
     """
 
     def __init__(self, estado_robots: str, cuerpo: str | None = None) -> None:
         self.estado = estado_robots
-        self._parser = None
+        self._texto: str | None = None
+        self._parsers: dict[str, Any] = {}
         if estado_robots == PROCESADO:
-            from protego import Protego
+            import protego  # noqa: F401 -- que falte se nota al construir
 
             # Se vuelve a recortar por si la fila se guardo sin el tope.
             leido, _ = recortar((cuerpo or "").encode("utf-8"))
-            self._parser = Protego.parse(leido.decode("utf-8", "ignore"))
+            self._texto = leido.decode("utf-8", "ignore")
+
+    def _parser(self, token: str):
+        if token not in self._parsers:
+            from protego import Protego
+
+            self._parsers[token] = Protego.parse(grupos_como_google(self._texto or "", token))
+        return self._parsers[token]
 
     def permitido(self, url: str, bot: str) -> bool | None:
         if self.estado == SIN_RESTRICCIONES:
             return True
-        if self._parser is None:
+        if self._texto is None:
             return None
-        return bool(self._parser.can_fetch(url, BOTS.get(bot, bot)))
+        token = BOTS.get(bot, bot)
+        return bool(self._parser(token).can_fetch(url, token))
 
 
 __all__ = [
     "BOTS", "EvaluadorRobots", "INACCESIBLE", "LIMITE_BYTES", "MAX_HOSTS_POR_JOB",
     "NO_EVALUADO", "PROCESADO", "SIN_RESTRICCIONES", "es_url_de_robots", "estado",
-    "fila_de_respuesta", "limitado", "origen", "recortar",
+    "fila_de_respuesta", "grupos_como_google", "limitado", "origen", "recortar",
 ]

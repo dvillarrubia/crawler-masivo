@@ -142,3 +142,30 @@ def test_fila_solo_guarda_el_cuerpo_de_un_2xx_y_sin_nul():
     assert f429["response_class"] == "rate_limited"
     ferr = fila_de_respuesta("https://e.com/robots.txt", error="TimeoutError: " + "x" * 400)
     assert len(ferr["error"]) == 200 and ferr["status_code"] is None
+
+
+@pytest.mark.parametrize("grupo,permitido", [
+    # Google extrae el token del grupo ([A-Za-z_-]) y lo compara ENTERO con el
+    # del bot (robots.cc). Protego busca el del grupo dentro del nombre del bot,
+    # asi que `Google` le aplicaba a Googlebot y `Googlebot/2.1` no
+    # (revision de la decision 113).
+    ("Google", True),
+    ("Googlebot/2.1", False),
+    ("googlebot ", False),
+    ("Googlebot # el de busqueda", False),
+    ("bot", True),
+    ("Googlebot-Image", True),
+])
+def test_el_grupo_se_elige_por_token_entero_como_google(grupo, permitido):
+    cuerpo = f"User-agent: {grupo}\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+    assert _ev(cuerpo).permitido("https://e.com/x", "googlebot") is permitido
+
+
+def test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva():
+    cuerpo = ("User-agent: Bingbot\nuser agent: Googlebot/2.1\nDisallow: /a/\n\n"
+              "useragent: Google\nDisallow: /b/\n\nUser-agent: *\nDisallow: /c/\n")
+    ev = _ev(cuerpo)
+    assert ev.permitido("https://e.com/a/x", "googlebot") is False
+    assert ev.permitido("https://e.com/b/x", "googlebot") is True
+    # El grupo de Googlebot sustituye al de `*`
+    assert ev.permitido("https://e.com/c/x", "googlebot") is True

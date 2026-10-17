@@ -545,3 +545,17 @@
    medir: en cuántas URLs de la cartera difiere el veredicto entre Chrome y
    Googlebot (robots.txt de hoy contra las URLs del último censo, script de
    solo lectura) y el canario con `count(*) FILTER (WHERE bloqueada_googlebot)`.
+   **Revisión (2026-10-18): el grupo se elige por token ENTERO, como Google.**
+   Pasarle a Protego el token en vez del UA (decisión 98) no basta: Protego
+   busca el nombre del grupo *dentro* del del bot, así que `User-agent:
+   Google` se le aplicaba a Googlebot (Google no: compara el token entero) y
+   `User-agent: Googlebot/2.1` no se le aplicaba (Google sí: saca el token
+   hasta el primer carácter que no es letra, `_` o `-`, `ExtractUserAgent` de
+   robots.cc). Con `Disallow: /` en ese grupo, el veredicto salía al revés en
+   los dos casos. Ahora `grupos_como_google` reescribe cada línea
+   `User-agent` antes de parsear —el grupo del bot con su token exacto, los
+   demás con un nombre que no casa con nada, `*` intacto— y el evaluador
+   guarda un parser por bot. Coste medido: 6,3 µs por URL (500.000 en 3,1 s).
+   Tests: `test_el_grupo_se_elige_por_token_entero_como_google` y
+   `test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva`, que
+   fallan sin el arreglo.
