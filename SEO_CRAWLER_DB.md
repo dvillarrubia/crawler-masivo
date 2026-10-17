@@ -107,6 +107,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | content_word_count | int | palabras del contenido principal, sin menu ni pie |
 | content_hash | varchar(64) | SHA-256 del contenido principal normalizado (caja y espacios). Es el que detecta duplicados exactos; `body_hash` cambia con cualquier token de la pagina |
 | indexability_status | varchar(64) | Indexable, Noindex, Canonicalised, Redirect... |
+| bloqueada_googlebot | bool | Si Googlebot tiene prohibida la URL segun el robots.txt guardado (`robots_txt`). La escribe el analisis; NULL = no evaluado. Si se conoce, manda en la indexabilidad (decision 113) |
 | inlinks_count | int | Total inlinks recibidos |
 | outlinks_count | int | Total outlinks internos |
 | external_outlinks_count | int | Outlinks externos |
@@ -270,6 +271,40 @@ Indices: `uq_cext_url_nombre (url_id, nombre)`, `ix_cext_job_nombre_estado`,
 -- Paginas SIN el tag de GTM (solo las evaluadas: ni PDFs ni bloqueadas)
 SELECT u.url FROM custom_extraction c JOIN urls u ON u.id = c.url_id
 WHERE c.job_id = 'UUID-AQUI' AND c.nombre = 'gtm' AND c.estado = 'sin_coincidencia';
+```
+
+### `robots_txt` — robots.txt de cada host del censo (decisiones 112 y 113)
+Lo que respondio el robots.txt de cada host durante el rastreo, con la respuesta
+FINAL (tras reintentos y redirecciones). Una fila por (job, URL del robots.txt):
+Google trata aparte cada esquema, host y puerto. Solo hosts internos y como
+mucho 200 por job. Sin fila = no evaluado, nunca «sin robots.txt».
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | |
+| host | varchar(512) | Hostname |
+| url | text | `https://host/robots.txt` pedido |
+| url_final | text | Si redirigio, a donde |
+| status_code | int | NULL = no hubo respuesta |
+| error | varchar(200) | Excepcion de la descarga (timeout, DNS, conexion) |
+| response_class | varchar(32) | `shared/respuestas.py`: un 429 es `rate_limited`, un desafio de Cloudflare `challenge_waf` (decision 103) |
+| intentos | int | Con los reintentos de Scrapy (503 y 429 se reintentan dos veces; 500 no) |
+| bytes | int | Tamano del cuerpo entero (solo 2xx) |
+| sha256 | varchar(64) | Del cuerpo entero (solo 2xx): para ver si cambio entre censos (#36) |
+| cuerpo | text | Solo de un 2xx, recortado a los 500 KiB que lee Google |
+| recortado | bool | Pasaba de 500 KiB |
+| comprobacion | JSON | `{status_code, error, response_class, fecha}` de la segunda peticion al cerrar, si la primera fallo |
+| evaluacion | JSON | La escribe el analisis: `{"googlebot": {estado, evaluadas, bloqueadas}}` |
+| fecha | timestamptz | |
+
+Indices: `uq_robots_txt_job_url (job_id, url)` y `ix_robots_txt_job_host (job_id, host)`.
+
+```sql
+-- Hosts cuyo robots.txt fallo (5xx, 429 o sin respuesta) en un censo
+SELECT host, status_code, error, intentos, comprobacion
+FROM robots_txt WHERE job_id = 'UUID-AQUI'
+  AND (status_code >= 500 OR status_code = 429 OR error IS NOT NULL);
 ```
 
 ### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)

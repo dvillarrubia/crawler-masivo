@@ -96,6 +96,9 @@ DOWNLOADER_MIDDLEWARES = {
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,
+    # Guarda lo que respondio el robots.txt de cada host (decision 112). Por
+    # debajo de Retry (550) y Redirect (600): ve la respuesta FINAL.
+    "seo_crawler.middlewares.RobotsTxtRegistroMiddleware": 90,
 }
 # Tope del Crawl-delay que se respeta, en segundos.
 ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
