@@ -893,6 +893,8 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "meta_description_pixel_width": ("Descripción (px)", _m("meta_description_pixel_width")),
     "canonical_href": ("Canonical", _m("canonical_href")),
     "canonical_header": ("Canonical (cabecera)", _m("canonical_header")),
+    "rel_next": ("rel=next", _m("rel_next")),
+    "rel_prev": ("rel=prev", _m("rel_prev")),
     "meta_robots": ("Meta robots", _m("meta_robots")),
     "x_robots_tag": ("X-Robots-Tag", _m("x_robots_tag")),
     "meta_refresh": ("Meta refresh", _m("meta_refresh")),

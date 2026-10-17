@@ -54,6 +54,7 @@
 | `texto_visible.py` | Texto que el navegador pinta, linea a linea (`_lineas_visibles`, `_nodo_oculto`...). Mudado desde `extractors.py`, que lo reexporta, para que la API lo comparta (decision 104) |
 | `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `soft404.py` | Reglas puras del soft 404 (decision 105): `mangle_path`/`token_sonda` (la URL que no existe), `huella`/`misma_huella` (contenido sin el eco de la URL), `senal_titulo` (titulares de error en es/en/ca/eu/fr/de/pt/it), `es_busqueda`/`frase_sin_resultados`, `disponibilidades` |
+| `paginacion.py` | `pagina_de(url, debiles=False)` -> (serie, n, forma): pagina N de una serie por la forma de la URL (`?page=`, `/page/N`...; `?p=N` y `/N` solo con evidencia), `clave_comparable` y `es_primera_de` (decision 122) |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
 
 ## API Endpoints
@@ -145,6 +146,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
+| `avisos_de_paginacion.py` | Paginacion (decision 122): **paginacion_canonical_a_la_primera**, **paginacion_noindex**, **paginacion_siguiente_rota** (paso `analizar_paginacion`, antes de `compute_link_counts`, sobre `urls` + `html_meta`) y **paginacion_sin_enlace** y **solo_enlazada_desde_paginacion_excluida** (sobre `aristas_tmp`, con las columnas `origen_pag_excluida` y `rel_destino_url` que rellena la misma lectura de `links` uniendo la temporal `paginacion_tmp`). Las cuatro de serie, por plantilla; la ultima, por pagina, sustituye a orphan_page/sitemap_orphan |
 | `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.

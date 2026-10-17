@@ -62,7 +62,6 @@ order of priority:
     `shared/comparacion.py` (misma firma, sin mezclar `render`, umbral de la 68);
   - `scripts/reextraer_a_medida.py` sobre `raw_html`, con el candado del job.
 - JavaScript comparison tab (raw HTML vs rendered)
-- Pagination (rel next/prev) analysis
 - Structured data rich-result validation (only basic @type/required-prop checks)
 - Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40
 

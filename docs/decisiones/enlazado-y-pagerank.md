@@ -561,3 +561,88 @@
        (`ISSUE_LABEL_EXTRA`), entran en el ambito «Enlazado» del explorador y
        sus detalles se leen («de plantilla», «páginas que la enlazan», el
        reparto por tipo, un ejemplo).
+
+<a id="d122"></a>
+122. **Paginacion: lo que importa es la pagina 2+ que no cuenta y la siguiente a
+   la que no se llega por un `<a>`** (ola 1.4 del plan, #150). `rel_next` y
+   `rel_prev` se guardaban desde siempre y el analizador no los leia. Google
+   dejo de usar `rel=next/prev` en 2019, asi que una «secuencia rota» casi no
+   tiene consecuencia; lo que la tiene es la pagina 2+ en `noindex` o con el
+   canonical a la 1 (deja de contar, y con ella lo que solo se enlaza desde
+   ahi) y la paginacion que no es un `<a href>` (un «cargar mas»: Google no
+   descubre las paginas 2+). Cinco tipos, en `analysis/avisos_de_paginacion.py`:
+   - `paginacion_canonical_a_la_primera` (warning), `paginacion_noindex`
+     (info), `paginacion_sin_enlace` (warning) y `paginacion_siguiente_rota`
+     (warning, `rel` a un 4xx/5xx rastreado, sin el 429): **de plantilla**
+     (64), una fila por (host, forma de la serie —`firma_de_ruta` de la ruta
+     sin el marcador, mas el marcador—) con `series`, `paginas_afectadas` y
+     ejemplos, anclada en la pagina de URL menor (88) y con `group_key`.
+     Una pagina 2+ con `noindex` y canonical a la 1 va solo al primero (36).
+     El `noindex_page` de cada pagina no se toca: es el dato de la pagina, y
+     esto es el patron del listado.
+   - `solo_enlazada_desde_paginacion_excluida` (warning): pagina indexable a
+     la que solo llegan enlaces desde paginas 2+ excluidas. **Es el hallazgo
+     de la decision 38** («168 categorias colgando solo de su paginacion
+     noindex» en blogs.uoc.edu), que hasta ahora salia como `orphan_page` sin
+     decir por que. Una por pagina destino; sustituye a `orphan_page` y a
+     `sitemap_orphan` (con `en_sitemap` en los detalles) y cede ante
+     `canonical_sin_enlazar` (101), que pide algo mas concreto. Lo que cuelga
+     de una canonicalizada a la 1 tambien sale, aunque tenga `inlinks_count`
+     > 0: la canonicalizada SI cuenta como entrante y en el PageRank, y eso
+     **no cambia** (38 se mantiene; las columnas nuevas no tocan
+     `origen_cuenta`).
+   - **Deteccion** (`shared/paginacion.py`, funcion pura): marcadores fuertes
+     (`?page=`, `?pagina=`, `?pg=`, `?paged=`, `/page/N`, `/pagina/N`,
+     `/pag/N`) y, con evidencia, los debiles (`?p=N`, `/N` final). La guia
+     pedia «la serie con al menos 2 valores de N»; eso convierte dos fichas
+     `/producto/123` y `/producto/456` en una serie, asi que se exige que
+     alguna pagina de la serie declare `rel` o que esten la 2 **y** la 3. La
+     serie lleva el resto de parametros (`?orden=precio&page=2` no es de la
+     serie sin orden) y no distingue la barra final (`/blog/` y `/blog` son
+     la misma 1). Una pagina sin marcador con `rel=prev` es 2+ y su 1 es donde
+     acaba la cadena de `rel=prev` (`?start=20`, `?offset=`). Una paginacion
+     que empieza en 0 (Drupal) se lee con una pagina de retraso: se pierde su
+     pagina 2, no se afirma nada falso de la 1.
+   - **Sin ninguna lectura nueva de `links`** (#52 sigue abierta; 37, 41).
+     `analizar_paginacion` lee `urls` + `html_meta` del job (como
+     `analyze_indexability`) y va justo antes de `compute_link_counts`; deja
+     en memoria las paginas excluidas y las que tienen `rel=next`, y
+     `compute_link_counts` las sube a una temporal pequena (`paginacion_tmp`,
+     por clave primaria) que se une en la MISMA lectura de `links` que
+     materializa `aristas_tmp`, con dos columnas: `origen_pag_excluida` y
+     `rel_destino_url` (la URL solo de los destinos SIN rastrear de las
+     paginas con `rel=next`: el spider no sigue el `rel`, asi que la
+     siguiente de una paginacion por JavaScript no tiene id). Sin paginacion
+     en el censo, la consulta queda como estaba. Lo comprueba
+     `test_la_paginacion_no_anade_lecturas_de_links` contando las sentencias
+     que nombran `links` con el paso y sin el (`run_all` entero en Postgres):
+     las mismas, y solo cambia la de las aristas. El Parquet (95) no necesita
+     nada: `run_all` ya se niega a analizar un censo archivado y el paso va
+     dentro.
+   - **Coste, medido** en un censo sintetico en Postgres 16 (30.000 URLs, 2.000
+     series de 5 paginas —el 40% del censo es paginacion, peor que cualquier
+     sitio real—, 1,5 M enlaces): `compute_link_counts` pasa de 8,8 s a
+     11,5 s (la lectura de `links` no cambia; 1,6 s son los agregados sobre la
+     temporal) y `analizar_paginacion` anade 2,2 s. Por debajo del 2x que el
+     plan fija para estos checks. **Sin medir en un censo real**: no habia
+     acceso a produccion desde esta rama; el criterio del plan (las 168 de
+     blogs.uoc.edu) queda para la verificacion tras el despliegue, en
+     `READ ONLY`, junto con Druni (`?p=N` en noindex) y un WordPress.
+   - **Lo que no se afirma**: `paginacion_sin_enlace` dice «esta pagina no
+     enlaza con `<a>` a su siguiente», no que la siguiente sea inalcanzable
+     (puede estar enlazada desde otra, y en un censo truncado no se sabe;
+     67, 70). Un `rel` a una URL sin rastrear no es «roto». Huecos en la
+     numeracion, bucles de `rel` y la pagina 1 duplicada (`/blog/` y
+     `/blog/page/1/`, ya lo cubren el duplicado y el canonical) no se avisan.
+   - **Re-analizar cambia las cifras** de los censos entregados: salen los
+     cinco tipos y algunas `orphan_page`/`sitemap_orphan` pasan a
+     `solo_enlazada_desde_paginacion_excluida`. `analisis_version` lo deja
+     registrado (72) y la comparacion por incidencias se niega a comparar
+     censos analizados con codigo distinto (91).
+   - **En la interfaz**: ficha y nombre de los cinco (`incidencias.js`, sin
+     decir que Google usa `rel=next`), ambito «Paginación» en el explorador
+     con las columnas `rel=next` y `rel=prev` (tambien en el selector y en el
+     CSV de la vista), y `solo_enlazada_desde_paginacion_excluida` tambien en
+     «Enlazado», donde se busca la huerfana. `test_catalogo_incidencias.py`
+     lee ahora tambien `avisos_de_enlaces.py` y este modulo: sus tipos se le
+     escapaban.

@@ -357,6 +357,33 @@ const ISSUE_INFO = {
     arreglo: 'Quitar los utm de los enlaces internos. Para medir clics internos, usar eventos, no parámetros de campaña.',
   },
 
+  // ----- Paginación (decisión 122) -----
+  'paginacion_canonical_a_la_primera': {
+    que: 'Las páginas 2, 3… de un listado declaran como canonical la página 1 de su serie. Es de plantilla: una fila por forma de listado, con cuántas series y páginas.',
+    google: 'Pide que cada página de la serie sea su propia canónica. Con el canonical a la 1 puede dejar de indexar las 2+ y dejar de seguir lo que solo enlazan ellas (productos o artículos antiguos). rel=next/prev no influye: Google no lo usa desde 2019.',
+    arreglo: 'Que cada página paginada sea autocanónica (la 2 a la 2). Si existe una «ver todo» que carga rápido, el canonical a ella es otra opción válida, y no sale aquí.',
+  },
+  'paginacion_noindex': {
+    que: 'Las páginas 2, 3… de un listado llevan noindex. Es de plantilla: una fila por forma de listado.',
+    google: 'Es una práctica corriente y no es un error en sí: la página 1 sigue indexada. Pero con el tiempo trata sus enlaces como nofollow, así que lo que solo se enlaza desde ahí deja de estar enlazado (lo dice «Solo enlazada desde paginación excluida»).',
+    arreglo: 'Nada si todo lo que listan se enlaza también desde otro sitio. Si no, quitar el noindex de la paginación o enlazar esas páginas desde la navegación.',
+  },
+  'solo_enlazada_desde_paginacion_excluida': {
+    que: 'Página indexable a la que solo llegan enlaces desde páginas 2+ de un listado que están en noindex o canonicalizadas a la página 1. Sustituye a «Página huérfana» en esa página.',
+    google: 'Va dejando de rastrear las páginas 2+ excluidas y no cuenta sus enlaces: para Google esta página acaba sin enlaces internos, aunque en el sitio se pueda llegar a ella.',
+    arreglo: 'Enlazarla desde una página que cuente (la 1 del listado, la navegación, un artículo relacionado), o hacer indexable y autocanónica la paginación.',
+  },
+  'paginacion_sin_enlace': {
+    que: 'La página declara rel=next hacia la siguiente pero no tiene ningún <a href> rastreable a ella: la paginación es un botón «cargar más», un enlace por JavaScript o solo el rel. No dice que la siguiente sea inalcanzable: puede estar enlazada desde otra página.',
+    google: 'Solo sigue los <a href>. No usa rel=next para descubrir ni para indexar, así que las páginas 2+ (y lo que solo enlazan ellas) pueden no descubrirse nunca.',
+    arreglo: 'Poner enlaces <a href="…/page/2/"> a las páginas siguientes en el HTML, aunque el «cargar más» siga funcionando con JavaScript encima.',
+  },
+  'paginacion_siguiente_rota': {
+    que: 'rel=next o rel=prev apunta a una URL rastreada que responde 4xx o 5xx (el 429 no cuenta: es el sitio frenando al rastreador).',
+    google: 'No usa rel=next/prev, así que no afecta al índice; pero suele delatar que la plantilla calcula mal la última página, y el mismo error puede estar en los <a>.',
+    arreglo: 'Corregir la plantilla para que la última página no declare siguiente y los enlaces de paginación apunten a páginas que existen.',
+  },
+
   // ----- Imágenes -----
   'image_missing_alt': {
     que: 'Imagen sin texto alternativo. Se cuenta una vez por imagen, no por página.',
@@ -472,6 +499,11 @@ const ISSUE_LABEL_EXTRA = {
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
   utm_en_enlace_interno: 'Enlace interno con utm',
+  paginacion_canonical_a_la_primera: 'Paginación con canonical a la página 1',
+  paginacion_noindex: 'Paginación en noindex',
+  solo_enlazada_desde_paginacion_excluida: 'Solo enlazada desde paginación excluida',
+  paginacion_sin_enlace: 'Paginación sin <a> a la siguiente',
+  paginacion_siguiente_rota: 'rel=next/prev a un error',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -545,4 +577,13 @@ const DETALLE_LABEL = {
   etiqueta: 'etiqueta',
   posicion: 'posición',
   ancla: 'ancla',
+  // Paginación (decision 122)
+  plantilla: 'plantilla',
+  series: 'series',
+  motivos: 'por qué no cuentan',
+  ejemplos_origen: 'enlazada desde',
+  en_sitemap: 'en el sitemap',
+  con_parametros: 'URL con parámetros',
+  siguiente: 'siguiente',
+  rel: 'rel',
 };

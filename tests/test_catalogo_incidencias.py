@@ -26,11 +26,24 @@ _NO_LITERALES = {
                                     "structured_data_warning"},
     "tipo": {"missing_hsts", "missing_csp", "missing_x_content_type_options",
              "missing_x_frame_options"},
+    "tipo_de_serie": {"paginacion_canonical_a_la_primera", "paginacion_noindex",
+                      "paginacion_siguiente_rota"},
 }
+
+# Los modulos que emiten con `az._add_issue` ademas del analizador. Estaban
+# fuera y sus tipos se escapaban del test (decisiones 106 y 122).
+FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py")
 
 
 def _llamadas() -> list[ast.expr]:
-    arbol = ast.parse((RAIZ / "analysis" / "analyzer.py").read_text(encoding="utf-8"))
+    tipos = []
+    for fuente in FUENTES:
+        tipos.extend(_llamadas_de(RAIZ / "analysis" / fuente))
+    return tipos
+
+
+def _llamadas_de(ruta: Path) -> list[ast.expr]:
+    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
     tipos = []
     for nodo in ast.walk(arbol):
         if (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
