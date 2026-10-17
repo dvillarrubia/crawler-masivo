@@ -27,6 +27,8 @@
 | `seo_crawler/items.py` | Scrapy Item definitions (PageItem, HtmlMetaItem, LinkItem, etc.) |
 | `seo_crawler/middlewares.py` | UA rotation, proxy, job config, HTTP config middlewares |
 | `seo_crawler/settings.py` | Scrapy settings (BFS, autothrottle, Playwright, pipeline) |
+| `seo_crawler/handlers.py` | `CompositeDownloadHandler` (Playwright o curl_cffi) e `ImpersonateConMedidas`: el `_download_request` de scrapy-impersonate 1.10.0 (fijado) con `curl_infos`, que deja en `meta` el TTFB, el `Content-Encoding` servido y la version HTTP (decision 109) |
+| `seo_crawler/sonda_tls.py` | Clasificacion del error TLS de una descarga (`tls_error` con motivo) y sonda del certificado, una vez por host https interno, en un hilo y fuera de `max_urls`; va a `jobs.tls` (decision 110) |
 | `seo_crawler/sonda_soft404.py` | Sondas de soft 404 (decision 105): una URL inexistente por host de las semillas, por host interno nuevo y por plantilla nueva (y repetida en el destino si solo cambia de esquema o host), con su propio callback; no cuentan en `max_urls` ni se guardan en `urls`, van a `jobs.soft404["sondas"]` |
 
 ### Analysis (`analysis/`)
@@ -145,6 +147,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
+| `avisos_de_servidor.py` | **respuesta_lenta** por (host, plantilla) con la mediana del TTFB (`respuesta_lenta_ms` 1.000 / `respuesta_lenta_grave_ms` 3.000, `respuesta_lenta_min_paginas` 20), **html_sin_comprimir** por host, y **tls_certificado_invalido**, **tls_caduca_pronto** (`tls_dias_aviso`, 7) y **tls_version_antigua** por host desde `jobs.tls`. Decisiones 109 y 110 |
 | `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
@@ -173,6 +176,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `ProxyMiddleware` | 410 | Optional proxy rotation from `PROXY_LIST` |
 | `HttpConfigMiddleware` | 420 | Per-job HTTP overrides |
 | `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
+| `RetryAfterMiddleware` | 560 | `Retry-After` de un 429/503 como pausa del slot con tope, en todos los `robots_mode`; vuelve a `piso_de_slot` al caducar (decision 111) |
 
 ## Scrapy Settings
 

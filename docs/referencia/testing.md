@@ -129,6 +129,19 @@ ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
 ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
 ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
 `test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
+
+Tiempo, compresion, TLS y Retry-After (decisiones 109-111):
+`test_handler_medidas.py` (el `SeoSpider` real con el handler de produccion
+contra servidores locales: TTFB con 300 ms de espera, gzip e `identity`,
+`http_version` sin render, un 429 con `Retry-After` en segundos y un 503 con
+fecha HTTP con los huecos medidos en el servidor, y un HTTPS caducado que da
+`tls_error` con su motivo y la ficha de la sonda; ademas Navigation Timing
+contra Chromium), `test_sonda_tls.py` (la sonda contra certificados hechos en
+el test: caducado, a 3 dias, otro nombre, autofirmado, solo TLS 1.0; y la
+excepcion real de curl_cffi), `test_retry_after.py` (el parser y el
+middleware con un slot simulado: sube, no lo baja AUTOTHROTTLE, vuelve al
+Crawl-delay, tope, latido) y `test_avisos_de_servidor_db.py` (los cinco
+avisos contra SQLite, con su ficha y su ambito en el frontend).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

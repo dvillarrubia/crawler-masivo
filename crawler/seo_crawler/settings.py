@@ -96,9 +96,18 @@ DOWNLOADER_MIDDLEWARES = {
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,
+    # Retry-After de un 429/503 (decision 111), en todos los robots_mode. La
+    # pausa se fija en `response_downloaded`, antes de que el slot saque la
+    # siguiente peticion; por encima de RetryMiddleware (550) para ver la
+    # respuesta antes de que la reprograme.
+    "seo_crawler.middlewares.RetryAfterMiddleware": 560,
 }
 # Tope del Crawl-delay que se respeta, en segundos.
 ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
+# Retry-After: si se respeta y el tope de la pausa, en segundos. El job los
+# cambia con crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED = os.getenv("RETRY_AFTER_ENABLED", "1") != "0"
+RETRY_AFTER_MAX = float(os.getenv("RETRY_AFTER_MAX", "60"))
 
 # ---------------------------------------------------------------------------
 # Database / Redis — fuente unica: shared.config (importados arriba).

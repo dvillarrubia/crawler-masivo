@@ -487,6 +487,11 @@ def _run_job(job_id: str) -> None:
             cmd += ["-s", "AUTOTHROTTLE_ENABLED=False"]
         elif crawl_behavior.get("autothrottle_target_concurrency", 8.0) != 8.0:
             cmd += ["-s", f"AUTOTHROTTLE_TARGET_CONCURRENCY={crawl_behavior['autothrottle_target_concurrency']}"]
+        # Retry-After de un 429/503 (decision 111)
+        if crawl_behavior.get("respetar_retry_after", True) is False:
+            cmd += ["-s", "RETRY_AFTER_ENABLED=False"]
+        if crawl_behavior.get("retry_after_max_s") is not None:
+            cmd += ["-s", f"RETRY_AFTER_MAX={crawl_behavior['retry_after_max_s']}"]
 
         # Vigilancia por ESTANCAMIENTO, no por reloj.
         #
@@ -1168,6 +1173,15 @@ def _salud_del_job(job_id: str, job_config: dict | None) -> dict | None:
         if marca:
             # Lo que vio el spider al parar: la ventana, no el total.
             salud["ventana"] = marca
+        try:
+            crudo = rc.get(f"job:{job_id}:retry_after")
+            pausas = json.loads(crudo) if crudo else None
+        except Exception:
+            pausas = None
+        if isinstance(pausas, dict):
+            # Lo que se respeto de los Retry-After (decision 111): no es una
+            # incidencia SEO, es cortesia y confianza del dato.
+            salud["retry_after"] = pausas
         return salud
     except Exception:
         logger.exception("Job %s: no se pudo calcular la salud del rastreo", job_id)

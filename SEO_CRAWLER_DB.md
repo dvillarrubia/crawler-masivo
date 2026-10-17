@@ -48,6 +48,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | total_urls_crawled | int | URLs crawleadas |
 | decisiones_resumen | JSON | Capa de decisiones (#7): `llamadas`, `tokens_entrada`, `coste_usd` (real, de `usage.cost`), `aciertos_cache`, `n_429`, `latencia_p50_ms`/`p95`, `por_pregunta` con la distribucion de respuestas, `avisos` y `estado` (ok, degradado, desactivado, sin_credito, presupuesto_agotado). NULL = nunca se pregunto nada a un modelo |
 | enlaces_archivados | JSON | Enlaces archivados en Parquet (decision 95): `filas`, `apariciones`, `internos`, `nofollow_internos`, `fichero`, `bytes`, `fecha`. Con valor, `links` NO tiene filas de este job: se leen de `$ARCHIVO_DIR/enlaces/<job_id>.parquet`. NULL = en `links` |
+| tls | JSON | Sonda del certificado TLS (decision 110): `{"hosts": {host: {verificado, motivo, detalle, version, not_after, dias_restantes (del dia del rastreo), emisor, fuente: socket\|navegador, fecha}}}`; `omitida: proxy` o `error` si no se pudo medir. No son URLs del censo |
+| health | JSON | Salud del rastreo (decision 103) y, si hubo, `retry_after`: `veces`, `max_pedido_s`, `max_aplicado_s`, `truncados`, `tope_s` (decision 111) |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 
@@ -94,10 +96,12 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | is_internal | bool | Si pertenece al dominio semilla |
 | crawl_depth | int | Profundidad BFS desde la seed |
 | status_code | int | Codigo HTTP (200, 301, 404...) |
-| status_group | varchar(10) | 2xx, 3xx, 4xx, 5xx, timeout, dns_error |
+| status_group | varchar(10) | 2xx, 3xx, 4xx, 5xx, timeout, dns_error, conn_refused, tls_error (certificado o handshake; el motivo en `status_text`, decision 110), error |
 | content_type | varchar(256) | Content-Type header |
 | content_length | bigint | Tamano del recurso en bytes, ya descomprimido |
-| response_time_ms | float | Tiempo de respuesta |
+| response_time_ms | float | Tiempo de la peticion entera (con render, incluida la espera del navegador). NO es TTFB |
+| ttfb_ms | float | Tiempo del servidor hasta el primer byte, sin DNS, TCP ni TLS (decision 109): curl `STARTTRANSFER - PRETRANSFER` sin render, Navigation Timing `responseStart - requestStart` con render. NULL = censo anterior, sin respuesta o no medido |
+| content_encoding | varchar(32) | `Content-Encoding` servido (gzip, br, zstd, deflate...), `identity` si llego sin comprimir, `comprimido` con render (Chromium no da el nombre); NULL = no se sabe (decision 109) |
 | is_html | bool | Si es pagina HTML |
 | resource_type | varchar(20) | html, image, css, js, pdf, redirect, other |
 | redirect_url | text | Destino si es redireccion |
