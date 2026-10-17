@@ -41,7 +41,9 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
-from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
+from shared.indexabilidad import (
+    BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, misma_url,
+)
 from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
@@ -311,6 +313,9 @@ class SEOAnalyzer:
         self.clear_existing_issues()
 
         self.analyze_status_codes()
+        # robots.txt de cada host (decisiones 112 y 113): antes de la
+        # indexabilidad, que lo usa para saber que puede pedir Googlebot.
+        self.analyze_robots_txt()
         # La indexabilidad va ANTES que los titulos, las descripciones y los
         # duplicados: los tres agrupan solo paginas indexables y necesitan
         # `Url.indexable` escrito. Estaba despues, asi que la columna era NULL y
@@ -1955,6 +1960,7 @@ class SEOAnalyzer:
         _MOTIVOS_PROPIOS = {"Indexable", "Canonicalised", "Noindex"}
         estados_por_motivo: dict[str, list[int]] = {}
 
+        robots = getattr(self, "_robots", None)
         for (
             url_id,
             page_url,
@@ -1968,6 +1974,17 @@ class SEOAnalyzer:
             canonical_href,
             canonical_header,
         ) in rows:
+            # Lo que hizo el rastreo, y lo que puede pedir Googlebot segun el
+            # robots.txt guardado (decision 113). Si se sabe, manda Googlebot:
+            # una pagina que rastreamos y Google no puede pedir no es indexable.
+            bloqueada_rastreo = bool(bloqueada_robots) or (estado_actual or "").startswith("Blocked")
+            # Para comparar, solo lo que decidio el RASTREO: el «Blocked» que
+            # escribe este mismo paso en una pagina que si se pidio no cuenta,
+            # o re-analizar se compararia consigo mismo.
+            bloqueada_g = (self._veredicto_googlebot(
+                url_id, page_url,
+                bool(bloqueada_robots) or (status_code is None and bloqueada_rastreo))
+                if robots else None)
             # Una sola funcion, la misma que usa el spider
             # (shared/indexabilidad.py). Antes aqui se repetian las reglas con
             # otro normalizador de URLs —w3lib, que no quita el puerto por
@@ -1990,8 +2007,8 @@ class SEOAnalyzer:
                 canonical_href=canonical_href,
                 canonical_header=canonical_header,
                 page_url=page_url,
-                bloqueada_por_robots=bool(bloqueada_robots)
-                or (estado_actual or "").startswith("Blocked"),
+                bloqueada_por_robots=(bloqueada_rastreo if bloqueada_g is None
+                                      else bloqueada_g),
                 response_class=clase_respuesta,
             )
             has_noindex = es_noindex(meta_robots=meta_robots, x_robots=x_robots)
@@ -2021,7 +2038,12 @@ class SEOAnalyzer:
             # spider, pero los rastreos ya guardados solo se reparan desde
             # aqui: re-analizar un job corrige el dato. Ademas evita que las
             # dos columnas del mismo CSV se contradigan.
-            if estado_actual is None or estado_actual in _MOTIVOS_PROPIOS:
+            # El «Blocked by robots.txt» del rastreo de una pagina que SI se
+            # pidio (modo audit) se recalcula si Googlebot puede pedirla.
+            recalcular = (estado_actual is None or estado_actual in _MOTIVOS_PROPIOS
+                          or (bloqueada_g is not None and status_code is not None
+                              and estado_actual == "Blocked by robots.txt"))
+            if recalcular:
                 if motivo_calc and motivo_calc != estado_actual:
                     estados_por_motivo.setdefault(motivo_calc, []).append(url_id)
 
@@ -2033,8 +2055,151 @@ class SEOAnalyzer:
         for motivo, ids in estados_por_motivo.items():
             self._bulk_update_estado(ids, motivo)
             logger.info("indexability_status corregido a %r en %d URLs", motivo, len(ids))
+        if robots:
+            self._cerrar_robots_googlebot()
 
         self._flush_issues()
+
+    # -- robots.txt (decisiones 112 y 113) -----------------------------------
+
+    def analyze_robots_txt(self) -> None:
+        """Un aviso por host cuyo robots.txt respondio 5xx, 429 o no respondio.
+
+        Para Google eso es el sitio entero bloqueado mientras dure (y los
+        errores de red cuentan como 5xx); Scrapy lo trataba como «todo
+        permitido» sin que quedara rastro. El rastreo sigue pidiendo las URLs
+        del host (decision 112): el aviso es un hallazgo del sitio, no un fallo
+        del dato, y la indexabilidad no cambia por el (no sabemos si Google
+        tiene copia en cache ni si el fallo fue pasajero).
+
+        - `error` si fallo tambien la comprobacion al cerrar, o no la hubo;
+          `warning` si a la segunda respondio (intermitente) o si es un 429,
+          que suele ser un limite para nuestra IP y no para Googlebot.
+        - 4xx (salvo 429): nada, es «todo permitido» tambien para Google. Un
+          muro delante (403 de Cloudflare): nada, no se ha visto el robots.txt.
+        - Una fila por host, anclada en la raiz si se rastreo y si no en la URL
+          de id mas bajo de ese host (no depende del orden de las filas).
+        """
+        from analysis.robots_txt import RobotsDelJob, estado_de_comprobacion, estado_de_fila
+        from shared.models import Job
+        from shared.robots_txt import INACCESIBLE, PROCESADO, SIN_RESTRICCIONES, limitado
+
+        self._robots = None
+        try:
+            # En un SAVEPOINT: sin la tabla (una base sin migrar) el analisis
+            # sigue como antes, sin robots.txt, y no se pierde lo ya escrito.
+            with self.session.begin_nested():
+                self._robots = RobotsDelJob(self.session, self.job_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("No se pudo leer robots_txt del job %s; se analiza sin el",
+                           self.job_id, exc_info=True)
+            return
+        self._robots_conteo: dict[str, dict[str, Any]] = {}
+        self._robots_googlebot: dict[bool, list[int]] = {True: [], False: []}
+        self._robots_anclas: dict[str, int | None] = {}
+        job = self.session.query(Job).filter(Job.id == self.job_id).one_or_none()
+        config = (job.config or {}) if job else {}
+        self._robots_mode = config.get("robots_mode", "respect")
+        self._robots_ua = config.get("user_agent") or None
+        for o, fila in self._robots.filas.items():
+            if estado_de_fila(fila) != INACCESIBLE:
+                continue
+            ancla = self._ancla_de_origen(o)
+            if ancla is None:
+                continue
+            segundo = estado_de_comprobacion(fila)
+            intermitente = segundo in (PROCESADO, SIN_RESTRICCIONES)
+            lim = limitado(fila.status_code, fila.response_class)
+            self._add_issue(
+                ancla, "robots_txt_inaccesible",
+                "warning" if intermitente or lim else "error",
+                {"host": fila.host, "url": fila.url, "status_code": fila.status_code,
+                 "error": fila.error, "intentos": fila.intentos,
+                 "response_class": fila.response_class,
+                 "comprobacion": fila.comprobacion,
+                 "intermitente": intermitente, "limitado": lim},
+                group_key=_clave_de_grupo(o),
+            )
+        self._flush_issues()
+
+    def _ancla_de_origen(self, o: str) -> int | None:
+        """La URL del censo en la que se cuelga un aviso de un host."""
+        if o in self._robots_anclas:
+            return self._robots_anclas[o]
+        partes = urlparse(o)
+        filtro = (Url.job_id == self.job_id, Url.host == (partes.hostname or ""),
+                  Url.scheme == partes.scheme)
+        ancla = self.session.execute(
+            select(Url.id).where(*filtro, Url.path.in_(["/", ""]))
+            .order_by(Url.id).limit(1)).scalar()
+        if ancla is None:
+            ancla = self.session.execute(select(func.min(Url.id)).where(*filtro)).scalar()
+        self._robots_anclas[o] = ancla
+        return ancla
+
+    def _veredicto_googlebot(self, url_id: int, url: str, bloqueada_rastreo: bool) -> bool | None:
+        """Si Googlebot tiene prohibida la URL; None = no evaluado."""
+        o, permitida = self._robots.veredicto(url, BOT_POR_DEFECTO)
+        if permitida is None:
+            return None
+        bloqueada = not permitida
+        self._robots_googlebot[bloqueada].append(url_id)
+        c = self._robots_conteo.setdefault(o, {
+            "evaluadas": 0, "bloqueadas": 0, "solo_rastreador": 0, "solo_googlebot": 0,
+            "ejemplos_solo_rastreador": [], "ejemplos_solo_googlebot": []})
+        c["evaluadas"] += 1
+        c["bloqueadas"] += bloqueada
+        # En `ignore` el rastreo no obedecio nada: no hay veredicto propio que
+        # comparar. En `respect` lo bloqueado no se pidio; en `audit` se pidio
+        # y quedo marcado. En los dos, `blocked_by_robots` es lo que decidio.
+        if self._robots_mode in ("respect", "audit") and bloqueada != bloqueada_rastreo:
+            clave = "solo_googlebot" if bloqueada else "solo_rastreador"
+            c[clave] += 1
+            if len(c["ejemplos_" + clave]) < self._MUESTRA_EJEMPLOS:
+                c["ejemplos_" + clave].append(url)
+        return bloqueada
+
+    def _cerrar_robots_googlebot(self) -> None:
+        """Escribe `urls.bloqueada_googlebot`, el resumen por host y el aviso.
+
+        `robots_difiere_para_googlebot`: una fila por host donde el veredicto
+        como Googlebot no es el de nuestro rastreo, con los dos contadores y
+        ejemplos; nunca una por URL (decision 36).
+        """
+        from analysis.robots_txt import estado_evaluable
+        from shared.models import RobotsTxt
+
+        # Lo que dijera un analisis anterior se borra antes: con otro codigo
+        # una URL puede pasar a «no evaluada».
+        self.session.execute(
+            update(Url).where(Url.job_id == self.job_id, Url.bloqueada_googlebot.isnot(None))
+            .values(bloqueada_googlebot=None))
+        for valor, ids in self._robots_googlebot.items():
+            self._bulk_update_campo(ids, Url.bloqueada_googlebot, valor)
+        for o, fila in self._robots.filas.items():
+            c = self._robots_conteo.get(o)
+            self.session.execute(
+                update(RobotsTxt).where(RobotsTxt.id == fila.id).values(evaluacion={
+                    BOT_POR_DEFECTO: {"estado": estado_evaluable(fila),
+                                      "evaluadas": c["evaluadas"] if c else 0,
+                                      "bloqueadas": c["bloqueadas"] if c else 0}}))
+            if not c or not (c["solo_rastreador"] or c["solo_googlebot"]):
+                continue
+            ancla = self._ancla_de_origen(o)
+            if ancla is None:
+                continue
+            self._add_issue(
+                ancla, "robots_difiere_para_googlebot", "warning",
+                {"host": fila.host, "url": fila.url, "bot": BOT_POR_DEFECTO,
+                 "user_agent": self._robots_ua, "robots_mode": self._robots_mode,
+                 "evaluadas": c["evaluadas"],
+                 "solo_rastreador": c["solo_rastreador"],
+                 "solo_googlebot": c["solo_googlebot"],
+                 "ejemplos_solo_rastreador": c["ejemplos_solo_rastreador"],
+                 "ejemplos_solo_googlebot": c["ejemplos_solo_googlebot"]},
+                group_key=_clave_de_grupo(f"{o}|{BOT_POR_DEFECTO}"),
+            )
+        self.session.flush()
 
     def _bulk_update_campo(self, url_ids: list[int], columna, valor) -> None:
         """Escribe una columna de `urls` por lotes."""

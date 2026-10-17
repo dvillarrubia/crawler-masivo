@@ -619,7 +619,8 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         if qp.get(campo) not in (None, ""):
             q = q.filter(col == qp.get(campo))
     for campo, col in (("is_internal", Url.is_internal), ("indexable", Url.indexable),
-                       ("in_sitemap", Url.in_sitemap)):
+                       ("in_sitemap", Url.in_sitemap),
+                       ("bloqueada_googlebot", Url.bloqueada_googlebot)):
         v = _bool(qp.get(campo))
         if v is not None:
             q = q.filter(col == v)
@@ -884,6 +885,8 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "indexability_status": ("Indexabilidad", lambda u: u.indexability_status),
     "is_internal": ("Interna", lambda u: _si_no(u.is_internal)),
     "in_sitemap": ("En el sitemap", lambda u: _si_no(u.in_sitemap)),
+    # Segun el robots.txt guardado (decision 113); vacio = no evaluado.
+    "bloqueada_googlebot": ("Bloqueada para Googlebot", lambda u: _si_no(u.bloqueada_googlebot)),
     "host": ("Host", lambda u: u.host),
     "title": ("Título", _m("title")),
     "title_len": ("Long. título", _m("title_len")),
@@ -1682,6 +1685,8 @@ CSV_COLUMNS = [
     "has_mixed_content",
     # Otros
     "blocked_by_robots",
+    # Si Googlebot puede pedirla segun el robots.txt guardado (decision 113)
+    "bloqueada_googlebot",
     # La respuesta era la pagina o un muro delante (decision 103)
     "response_class",
     "body_hash",
@@ -1806,6 +1811,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(sec.has_mixed_content) if sec else "",
         # Otros
         _val(url_obj.blocked_by_robots),
+        _val(getattr(url_obj, "bloqueada_googlebot", None)),
         _val(getattr(url_obj, "response_class", None)),
         _val(url_obj.body_hash),
         _val(url_obj.content_hash),

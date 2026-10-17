@@ -59,6 +59,16 @@ const ISSUE_INFO = {
     google: 'Ignora lo que no entiende: un «noindex/nofollow» no se aplica.',
     arreglo: 'Separar las directivas por comas: «noindex, nofollow».',
   },
+  'robots_txt_inaccesible': {
+    que: 'El robots.txt del host respondió con un error del servidor (5xx), con un 429 o no respondió (timeout, DNS, conexión). Va una fila por host, con el código, los intentos y si al acabar el rastreo se volvió a pedir y respondió (intermitente). Un 404 no sale aquí: es «sin robots.txt».',
+    google: 'Mientras dure, Google da el sitio entero por bloqueado y deja de rastrearlo; los errores de red cuentan igual que un 5xx. Si sigue así más de 30 días usa la última copia que guardó, y sin copia rastrea sin restricciones. Lo que ya está indexado no sale por esto, pero no se rastrea nada nuevo. Un 429 a nuestra IP puede ser solo un límite para el rastreador: Googlebot puede no recibirlo.',
+    arreglo: 'Que /robots.txt responda siempre 200 (o 404 si no hay reglas), también con el servidor cargado y desde las IPs de Google: revisar el WAF, la caché y el origen. Comprobarlo en el informe de robots.txt de Search Console. El rastreo no se para por esto: las páginas del host se auditan igual.',
+  },
+  'robots_difiere_para_googlebot': {
+    que: 'El robots.txt de este host no dice lo mismo para Googlebot que para nuestro rastreador: tiene un grupo propio para Googlebot, o uno (como «User-agent: Mozilla») que casa con nuestro user-agent. «Solo Googlebot» son URLs que rastreamos y Google no puede pedir; «solo el rastreador», URLs que no pedimos y Google sí puede.',
+    google: 'Aplica el grupo que nombra a Googlebot y, si no hay, el de «*». Una página que Googlebot no puede pedir no se rastrea (puede indexarse sin contenido si tiene enlaces); por eso sale «Blocked by robots.txt» y no indexable aunque nosotros sí la viéramos. El robots.txt evaluado es el que nos sirvió a nosotros: si el sitio sirve otro a Googlebot, no se puede ver desde aquí.',
+    arreglo: '«Solo Googlebot»: si esas páginas deben posicionar, quitar la regla del grupo de Googlebot. «Solo el rastreador»: no se auditaron; relanzar con el preset de user-agent de Googlebot para verlas como las ve Google.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -468,6 +478,8 @@ const ISSUE_LABEL_EXTRA = {
   meta_fuera_del_head: 'Metadatos fuera del head',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
+  robots_txt_inaccesible: 'robots.txt con error o sin respuesta',
+  robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
@@ -545,4 +557,13 @@ const DETALLE_LABEL = {
   etiqueta: 'etiqueta',
   posicion: 'posición',
   ancla: 'ancla',
+  // robots.txt (decisiones 112 y 113)
+  intentos: 'intentos',
+  intermitente: 'intermitente: a la segunda respondió',
+  limitado: '429: puede ser un límite solo para el rastreador',
+  evaluadas: 'URLs evaluadas',
+  solo_googlebot: 'solo Googlebot bloqueado',
+  solo_rastreador: 'solo el rastreador bloqueado',
+  ejemplos_solo_googlebot: 'ejemplos solo Googlebot',
+  ejemplos_solo_rastreador: 'ejemplos solo el rastreador',
 };

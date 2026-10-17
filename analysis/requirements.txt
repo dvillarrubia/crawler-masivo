@@ -13,3 +13,7 @@ tldextract>=5.1
 # desde el spider sin bloquear el reactor. Ninguna llamada sale sola: hace
 # falta DECISIONS_ENABLED=1, OPENROUTER_API_KEY y que alguien la dispare (#40).
 httpx>=0.28
+# El robots.txt guardado se evalua como Googlebot (`shared/robots_txt.py`,
+# decision 113). Hoy llega con Scrapy en la imagen del crawler, pero la del
+# analisis no lo trae: se declara aqui (decision 69).
+protego>=0.3
