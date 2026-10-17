@@ -355,10 +355,14 @@ def _spider(semillas: list[str], http: dict, subdominios: bool = False):
         h = normalize_host(urlparse(s).hostname)
         hosts |= {h, h.removeprefix("www.")}
     raices = frozenset(dominio_registrable(h) for h in hosts) if subdominios else frozenset()
+    from seo_crawler.spiders.seo_spider import SeoSpider
+
+    esquemas = frozenset(urlparse(s).scheme for s in semillas)
     spider = types.SimpleNamespace(_http_config=http, _hosts_credenciales=frozenset(hosts),
-                                   _raices_credenciales=raices)
-    spider._lleva_credenciales = lambda u: url_en_hosts(u, spider._hosts_credenciales,
-                                                        spider._raices_credenciales)
+                                   _raices_credenciales=raices,
+                                   _esquemas_credenciales=esquemas)
+    # El metodo de verdad, no una copia: la regla vive en el spider
+    spider._lleva_credenciales = lambda u: SeoSpider._lleva_credenciales(spider, u)
     return spider
 
 
@@ -467,3 +471,59 @@ def test_cookies_tras_el_jar():
     r.headers["Cookie"] = "configurada=abc; servidor=1"
     mw.process_request(r, None)
     assert not r.cookies and r.headers.get("Cookie") == b"configurada=abc; servidor=1"
+
+
+def test_con_semillas_https_no_van_en_claro_por_http():
+    """Revision de la decision 114: con la semilla en https, un enlace
+    `http://` al mismo host (los que luego redirigen a https) mandaba el Basic,
+    las cabeceras y las cookies en claro. Un navegador ata la autenticacion al
+    origen, esquema incluido."""
+    middlewares, _, _ = _piezas()
+    spider = _spider(["https://www.ejemplo.com/"], HTTP_STAGING)
+    mw = middlewares.HttpConfigMiddleware(con_jar=False)
+    claro = _peticion("http://www.ejemplo.com/vieja")
+    mw.process_request(claro, spider)
+    assert b"Authorization" not in claro.headers and b"Cookie" not in claro.headers
+    assert b"X-Secreto" not in claro.headers
+    seguro = _peticion("https://www.ejemplo.com/vieja")
+    mw.process_request(seguro, spider)
+    assert seguro.headers.get("Authorization") == BASIC.encode()
+    # Con render: sin cabeceras en el documento y las cookies con `secure`
+    r = _peticion("http://www.ejemplo.com/vieja", playwright=True)
+    mw.process_request(r, spider)
+    assert r.meta["_http_render"]["cabeceras"] == {}
+    assert r.meta["_http_render"]["solo_https"] is True
+    # Con alguna semilla http, por http siguen yendo
+    mixto = _spider(["http://www.ejemplo.com/"], HTTP_STAGING)
+    r = _peticion("http://www.ejemplo.com/vieja")
+    mw.process_request(r, mixto)
+    assert r.headers.get("Authorization") == BASIC.encode()
+    r = _peticion("http://www.ejemplo.com/", playwright=True)
+    mw.process_request(r, mixto)
+    assert r.meta["_http_render"]["solo_https"] is False
+
+
+def test_render_cookies_con_secure_si_solo_hay_semillas_https():
+    import asyncio
+    import types
+
+    sys.path.insert(0, os.path.join(RAIZ, "crawler"))
+    from seo_crawler.render import preparar_http
+
+    puestas = []
+
+    class Contexto:
+        async def cookies(self):
+            return []
+
+        async def add_cookies(self, cookies):
+            puestas.extend(cookies)
+
+    page = types.SimpleNamespace(context=Contexto())
+    for solo_https in (True, False):
+        puestas.clear()
+        req = types.SimpleNamespace(url="https://ejemplo.com/", meta={"_http_render": {
+            "cookies": {"a": "1"}, "hosts": ["ejemplo.com"], "raices": [],
+            "conservar": False, "cabeceras": {}, "solo_https": solo_https}})
+        asyncio.run(preparar_http(page, req))
+        assert puestas and all(c["secure"] is solo_https for c in puestas), puestas
