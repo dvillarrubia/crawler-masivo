@@ -282,3 +282,20 @@ def test_dos_censos_con_perfil_distinto_se_avisa():
     assert any("perfil movil" in a for a in r["avisos"]), r["avisos"]
     r = comparar_censos(pag, pag, job_a=escritorio, job_b={**escritorio, "fecha": "2026-03-01"})
     assert not any("perfil" in a for a in r["avisos"])
+
+
+def test_m_dot_cuyo_destino_es_un_muro_o_un_error_no_avisa_de_anotacion():
+    """Si el destino del m-dot es un muro (decision 103) o no se pudo pedir,
+    la anotacion no se sabe: no es un m-dot «sin anotar» (revision de #161)."""
+    s, j = _montar()
+    a = _pagina(s, j, "/a/1")
+    b = _pagina(s, j, "/b/1")
+    muro = {"tipo": "otro_host", "alternate_en_base": "https://m.x.com/a/1",
+            "destino": {"url": "https://m.x.com/a/1", "status": 403, "clase": "challenge_waf"}}
+    error = {"tipo": "otro_host",
+             "destino": {"url": "https://m.x.com/b/1", "error": "bloqueada_por_robots"}}
+    _captura_bd(s, j, a, estado="redirige", plantilla="/a/:slug (2n)", status_code=302,
+                redirige_a="https://m.x.com/a/1", detalle=muro)
+    _captura_bd(s, j, b, estado="redirige", plantilla="/b/:slug (2n)", status_code=302,
+                redirige_a="https://m.x.com/b/1", detalle=error)
+    assert _analizar(s, j) == []

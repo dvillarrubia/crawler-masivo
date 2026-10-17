@@ -169,8 +169,13 @@ def servir(robots_prohibe_todo: bool = False,
            rutas_extra: dict | None = None,
            puerto: int = 0,
            muro: dict | None = None,
-           rutas_movil: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
+           rutas_movil: dict | None = None,
+           caer_tras_primera: list | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
+    # Rutas que responden bien la PRIMERA vez y 500 despues: un sitio que se
+    # cae a media faena, con cualquier UA (revision de la decision 119)
+    caidas = set(caer_tras_primera or ())
+    vistas: dict = {}
     # Lo que se sirve a un UA de movil, si la ruta esta aqui (decision 119)
     movil: dict = {}
 
@@ -183,7 +188,10 @@ def servir(robots_prohibe_todo: bool = False,
                               self.path, {k.lower(): v for k, v in self.headers.items()}))
             ruta = self.path.split("?")[0]
             ua = self.headers.get("User-Agent") or ""
-            if ruta in movil and ("Mobile" in ua or "iPhone" in ua):
+            vistas[ruta] = vistas.get(ruta, 0) + 1
+            if ruta in caidas and vistas[ruta] > 1:
+                status, headers, body = 500, {}, b"<html><body>Error</body></html>"
+            elif ruta in movil and ("Mobile" in ua or "iPhone" in ua):
                 status, headers, body = movil[ruta]
             else:
                 status, headers, body = rutas.get(ruta, (404, {}, b"no"))
@@ -318,7 +326,8 @@ def main() -> None:
                        entrada.get("rutas"),
                        entrada.get("puerto", 0),
                        entrada.get("muro"),
-                       entrada.get("rutas_movil"))
+                       entrada.get("rutas_movil"),
+                       entrada.get("caer_tras_primera"))
 
     trampa = None
     if entrada.get("trampa_llm"):

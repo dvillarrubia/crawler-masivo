@@ -256,3 +256,27 @@ def test_se_guarda_se_analiza_y_reanudar_no_repite(bd):
         assert avisos[("paridad_movil_respuesta", "urls_separadas")].severity == "info"
         assert not any(campo == "title" for (_, campo) in avisos), "el volatil no se afirma"
         s.rollback()
+
+
+# -- Revision de la PR (#161) ---------------------------------------------------
+
+def test_el_destino_del_m_dot_se_comprueba_aunque_quede_fuera_de_los_patrones():
+    """Un `include_patterns` que acota el censo al host de escritorio no puede
+    dejar sin comprobar la anotacion del m-dot: el destino es una sonda, no
+    una URL del censo. Antes salia `redirige` sin destino y el analizador lo
+    daba por m-dot SIN anotar (aviso) cuando estaba bien anotado."""
+    r = _rastrear(config={"include_patterns": ["re:^http://localhost"]})
+    m = r["capturas"]["/mdot/x-1"]
+    assert m["estado"] == "redirige", m
+    assert m["detalle"]["destino"]["canonical_a_base"] is True, m["detalle"]
+    assert m["detalle"]["destino"]["alternate_al_destino"] is True
+
+
+def test_otro_codigo_que_tambien_da_el_perfil_del_censo_no_se_afirma():
+    """Si la version movil responde 500 y la de escritorio, pedida justo
+    despues, tambien, lo que ha cambiado es el sitio, no el dispositivo
+    (decision 13): no se afirma `respuesta_distinta`."""
+    r = _rastrear(extra={"caer_tras_primera": ["/igual/i-1"]})
+    c = r["capturas"]["/igual/i-1"]
+    assert c["estado"] == "no_evaluada", c
+    assert c["detalle"]["motivo"] == "control_fallido"

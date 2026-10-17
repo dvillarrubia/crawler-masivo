@@ -2706,6 +2706,13 @@ class SEOAnalyzer:
                 continue
             if estado not in ("comparada", "redirige", "respuesta_distinta"):
                 continue
+            destino = (detalle or {}).get("destino") or {}
+            if estado == "redirige" and (destino.get("error")
+                                         or destino.get("clase") in NO_VALIDAS):
+                # El destino del m-dot es un muro o no se pudo pedir: la
+                # anotacion no se sabe, y no se afirma que falte (decision 103,
+                # revision de #161).
+                continue
             plantilla = plantilla or "?"
             muestreadas[(perfil, plantilla)] += 1
             sin_vary = not (vary_por_user_agent(vary_base) or vary_por_user_agent(vary))
@@ -2717,7 +2724,6 @@ class SEOAnalyzer:
                 grupos[(perfil, plantilla, "status")].append(
                     {**base, "base": status_base, "alternativa": status})
             else:
-                destino = (detalle or {}).get("destino") or {}
                 anotada = ((detalle or {}).get("tipo") == "otro_host"
                            and destino.get("canonical_a_base") is True
                            and destino.get("alternate_al_destino") is True)

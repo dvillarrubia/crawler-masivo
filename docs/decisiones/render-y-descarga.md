@@ -473,8 +473,11 @@
      vez con el perfil del censo; lo que también cambia entre las dos de
      escritorio (un banner rotativo, «relacionados» al azar) va a `volatiles`
      y no se afirma. Si ese control falla, la fila queda `no_evaluada`: sin
-     control no se sabe qué es del sitio. Coste: como mucho 2× la muestra (3×
-     con un m-dot), fuera de `max_urls`.
+     control no se sabe qué es del sitio. Lo mismo con otro CÓDIGO: si la
+     versión móvil responde un 500 o un 403 sin firma de muro, se pide otra
+     vez con el perfil del censo y, si también falla, queda `no_evaluada`
+     (lo que se ha caído es el sitio, no el dispositivo). Coste: como mucho
+     2× la muestra (3× con un m-dot), fuera de `max_urls`.
    - **Sonda, no URL del censo** (patrón de la decisión 105): callback y
      errback propios, sin `PageItem`, `dont_filter`, robots.txt respetado (lo
      prohibido queda `no_evaluada` con el motivo), sin tocar la salud del
@@ -517,3 +520,13 @@
    otro HTML a un UA de móvil; y la tubería real contra Postgres) y
    `tests/test_paridad_movil_analisis.py` (la comparación, los perfiles, el
    contexto `custom` y los avisos contra SQLite).
+   **Revisión** (antes de fusionar #161), tres fallos reproducidos con test:
+   (a) el destino del m-dot pasaba por `_should_follow`, así que con un
+   `include_patterns` acotado al host de escritorio —lo normal en un cliente—
+   no se pedía nunca y un m-dot BIEN anotado salía como aviso «redirige sin
+   anotar»; ahora el destino es una sonda y solo se exige http(s) (robots.txt
+   se sigue respetando); (b) otro código en móvil se afirmaba sin control, y
+   un sitio que se cae a media faena daba `paridad_movil_respuesta`; ahora
+   lleva la petición de control de arriba; (c) si el destino del m-dot es un
+   muro (decisión 103) o no se pudo pedir (error, robots), la anotación no se
+   sabe y el analizador ya no lo cuenta como m-dot sin anotar.

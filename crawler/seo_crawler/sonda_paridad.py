@@ -344,6 +344,18 @@ class ParidadMovilMixin:
         if etapa == "destino":
             yield from self._cerrar_destino(datos, response, clase, captura)
             return
+        if etapa == "control" and datos.get("control_de") == "respuesta":
+            if captura is None:
+                yield self._item_paridad(
+                    datos, estado="no_evaluada", status=datos["status"], clase=datos["clase"],
+                    vary=datos["vary"],
+                    detalle={"motivo": "control_fallido", "control_status": response.status,
+                             "control_clase": clase})
+                return
+            yield self._item_paridad(datos, estado="respuesta_distinta", status=datos["status"],
+                                     clase=datos["clase"], vary=datos["vary"],
+                                     detalle={"status_base": datos["base"].get("status")})
+            return
         if etapa == "control":
             if captura is None:
                 # Sin control no se sabe que es volatil: no se afirma nada.
@@ -372,9 +384,13 @@ class ParidadMovilMixin:
             dest_host = (urlparse(destino).hostname or "").lower()
             detalle = {"tipo": "otro_host" if dest_host != base_host else "otra_url",
                        "alternate_en_base": datos["base"].get("alternate_movil")}
-            if destino.startswith(("http://", "https://")) and self._should_follow(destino):
+            if destino.startswith(("http://", "https://")):
                 # El destino una vez, con el mismo perfil y sin seguir mas:
-                # para ver si es un m-dot bien anotado.
+                # para ver si es un m-dot bien anotado. Sin `_should_follow`:
+                # el destino es una sonda, no una URL del censo, y un
+                # `include_patterns` acotado al host de escritorio dejaba sin
+                # comprobar justo el m-dot (revision de #161). robots.txt del
+                # destino se sigue respetando (middleware).
                 datos.update({"etapa": "destino", "status": response.status, "clase": clase,
                               "vary": vary, "redirige_a": destino, "detalle": detalle})
                 yield self._peticion_paridad(destino, datos)
@@ -383,9 +399,12 @@ class ParidadMovilMixin:
                                      clase=clase, redirige_a=destino, vary=vary, detalle=detalle)
             return
         if not (200 <= response.status < 300):
-            yield self._item_paridad(datos, estado="respuesta_distinta", status=response.status,
-                                     clase=clase, vary=vary,
-                                     detalle={"status_base": datos["base"].get("status")})
+            # Otro codigo: antes de afirmarlo, otra vez con el perfil del
+            # censo. Si tambien falla, lo que ha cambiado es el sitio (se cae,
+            # limita sin firma de muro), no el dispositivo (decision 13).
+            datos.update({"etapa": "control", "control_de": "respuesta",
+                          "status": response.status, "clase": clase, "vary": vary})
+            yield self._peticion_paridad(datos["url"], datos, perfil_del_censo=True)
             return
         if captura is None:
             yield self._item_paridad(datos, estado="no_evaluada", status=response.status,
@@ -437,7 +456,9 @@ class ParidadMovilMixin:
             return
         detalle = {"motivo": "error", "error": motivo}
         if datos["etapa"] == "control":
-            detalle.update(motivo="control_fallido", diferencias_sin_control=datos["difs"])
+            detalle.update(motivo="control_fallido")
+            if datos.get("difs"):
+                detalle["diferencias_sin_control"] = datos["difs"]
         yield self._item_paridad(datos, estado="no_evaluada", detalle=detalle,
                                  status=datos.get("status"), clase=datos.get("clase"),
                                  vary=datos.get("vary"), medidas=datos.get("alternativa"))
