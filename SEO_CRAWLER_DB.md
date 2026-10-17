@@ -150,6 +150,18 @@ filtrar por `urls.is_html`.
 | rel_next / rel_prev | text | Paginacion |
 | meta_refresh | text | Meta refresh si existe |
 | has_meta_outside_head | bool | Meta tags fuera de `<head>` |
+| viewport | text | `content` del primer `<meta name="viewport">` (`""` si va vacio). Decision 108 |
+| viewport_count | int | Cuantos viewports hay. 0 = ninguno; NULL = rastreo anterior (marca de «medido» de viewport y lang) |
+| html_lang | varchar(35) | `lang` (o `xml:lang`) del `<html>`. `""` = atributo vacio, NULL = no esta |
+| content_language | varchar(64) | Cabecera `Content-Language` |
+| canonical_crudo | text | El href del canonical tal como se escribio (`canonical_href` va resuelto) |
+| og_image_forma | varchar(24) | absoluta, relativa_a_raiz, relativa, relativa_al_protocolo, con_fragmento |
+| twitter_image | text | `twitter:image`, resuelta |
+| redireccion_js | text | Destino de un `location = "..."` a nivel superior de un script (pagina puente). Solo sin render |
+| charset_meta | varchar(40) | Charset del `<meta>` en los 1.024 primeros bytes, normalizado (`""` = no hay). Solo sin render; NULL = no medido |
+| charset_bom | varchar(40) | Charset del BOM, si lo hay. Solo sin render |
+| cuerpo_solo_ascii | bool | Sin bytes por encima de 127. Solo sin render |
+| texto_mal_codificado | bool | El titulo o el texto llevan U+FFFD. Solo sin render |
 
 ### `headings` — Encabezados H1-H6
 | Columna | Tipo | Descripcion |

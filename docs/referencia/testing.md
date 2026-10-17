@@ -129,6 +129,19 @@ ahora falla pierde las suyas), `test_incidencias_enlaces_frontend.py` (nombre,
 ficha y ambito de los cuatro tipos en el frontend), el de `test_worker.py` que
 ejecuta `_run_job` y mira que el analisis ya ve `finish_reason`, y
 `test_backup_no_rastreables.py` (ida y vuelta del backup; trabajo de la API).
+
+Lo que el HTML declara de si mismo (decision 108):
+`test_extractors_declaraciones.py` (viewport, lang, charset con BOM, meta mas
+alla del byte 1.024 y cabecera incoherente, forma del canonical y de la
+og:image, la redireccion JS con los ocho casos de la guia de #150 y los de
+minificado, regex, `ld+json` y `noscript`, y la meta refresh a `javascript:`),
+`test_spider_declaraciones.py` (`SeoSpider.parse`: bytes latin1 servidos como
+utf-8, con render todo lo del HTML servido a NULL; y el arnes con Postgres: las
+columnas llegan a la BD y el destino JS no se sigue),
+`test_avisos_de_html_db.py` (los doce tipos contra SQLite: agrupados por
+plantilla y anclados en la URL menor, solo indexables, NULL de un censo viejo
+sin aviso, muros fuera) y `test_incidencias_html_frontend.py` (ficha, nombre y
+ambito de cada tipo; el catalogo general solo lee `analyzer.py`).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
