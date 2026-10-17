@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -415,6 +416,15 @@ def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list
             continue
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"Seed URL must start with http:// or https://: {url}")
+        # Una semilla con credenciales se guardaria en `jobs.seeds`, que lee
+        # cualquiera (decision 83), y el rastreo las quitaria al normalizar:
+        # el staging se quedaria en el login sin aviso. Se rechaza y se dice
+        # donde van.
+        if "@" in urlsplit(url).netloc:
+            raise ValueError(
+                "La semilla lleva credenciales (usuario:clave@): quitalas y usa "
+                "http.basic_auth_user / http.basic_auth_password"
+            )
         cleaned.append(url)
     if obligatorias and not cleaned:
         raise ValueError("At least one valid seed URL is required")
@@ -624,6 +634,7 @@ class HreflangResponse(BaseModel):
     href: str
     return_tag_ok: bool | None = None
     lang_valid: bool | None = None
+    origen: str | None = None  # html | cabecera; None = rastreo anterior (html)
 
 
 class StructuredDataResponse(BaseModel):

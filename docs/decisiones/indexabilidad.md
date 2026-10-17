@@ -93,6 +93,21 @@
    `clave_url`, la clave de `misma_url`: un canonical a `https://x.com:443/b`
    ya encuentra el 404 de `/b`. Ningun test existente cambio de resultado.
 
+   **Las credenciales de la URL se quitan al normalizar** (#149).
+   `https://usuario:clave@x.com/a` se guardaba tal cual en `urls.url`, en los
+   enlaces y en los CSV —que lee cualquiera, decision 83—, y con el puerto por
+   defecto `normalize_url` reconstruia el host conservando la clave. Ahora el
+   `userinfo` (hasta el ULTIMO `@` del host: uno dentro de la clave va como
+   `%40`) sale siempre, asi que el hash, los enlaces, los destinos de
+   redireccion y los sitemaps quedan limpios a la vez. `https://x.com@evil.com/`
+   tiene host `evil.com` y sigue siendo externa; una `@` en la ruta o en la query
+   no se toca. Una **semilla** con credenciales se rechaza con un 422 que manda a
+   `http.basic_auth_user`/`basic_auth_password`: quitarlas en silencio dejaria
+   un staging rastreando su pantalla de login. El hash de esas URLs cambia (la
+   reanudacion y la comparacion por `url_hash` las ven nuevas; son raras), y lo
+   ya guardado no se arregla re-analizando: hace falta re-rastrear. Tests:
+   `tests/test_esquemas_y_credenciales.py`.
+
 <a id="d48"></a>
 48. **Lo que robots.txt prohíbe existe, y el modo auditoría estaba muerto** —
    las URLs que el sitio enlaza y robots.txt bloquea no llegaban a la base de
@@ -484,3 +499,90 @@
    cabecera `Link` como ORIGEN (siguen el camino de antes) y el **informe de
    cadenas** que mezcla redirecciones y canonicals de una migracion, que es
    una vista y no un tipo.
+
+<a id="d115"></a>
+115. **Varios canonicals son varios DESTINOS, y con dos Google no usa ninguno**
+   (#149). `canonical_multiple` contaba etiquetas (`html_meta.canonical_count`,
+   del head y del body): el mismo canonical escrito dos veces —relativo y
+   absoluto, o dos plugins de SEO que escriben lo mismo— salia como «varios
+   canonicals», y uno en el head mas el mismo en el body daba dos avisos
+   (`canonical_multiple` y `canonical_in_body`) para un solo arreglo. Y al
+   reves: con `/a` y `/b` en `/c`, que Google descarta (decision 56: con
+   canonicals que no coinciden, los ignora todos y elige por su cuenta), la
+   pagina salia «Canonicalised» a `/a` y heredaba todo lo que eso implica.
+   - **`html_meta.canonical_distintos`**: cuantos destinos distintos declaran
+     los canonicals del `<head>`, con la clave de `misma_url` (decision 39;
+     puerto por defecto, caja del host, escapado y fragmento no cuentan). Solo
+     el head: los del body Google no los lee y ya son `canonical_in_body`. Un
+     `href=""` no es un destino. Con el head cortado (decision 102) quedan en el
+     body y cuentan 0: el hallazgo es el corte.
+   - **`canonical_multiple` sale con `distintos > 1`**, con
+     `{"cuantos", "distintos"}`. Si la columna es NULL (censo anterior) se
+     sigue mirando `canonical_count > 1`, con `distintos: null`: lo que no se
+     sabe no se calla ni se inventa.
+   - **Con dos destinos distintos el canonical se ignora**:
+     `estado_indexabilidad(..., canonicals_distintos=)` devuelve «Indexable»
+     (si el codigo y el robots lo permiten), igual en el spider y en
+     `analyze_indexability`. Tambien se ignora el de la cabecera `Link`: es una
+     senal mas del mismo conflicto. Que hace Google en ese caso con la cabecera
+     no esta verificado, y no se afirma la canonicalizacion. Lo que va por
+     `indexability_status = 'Canonicalised'` —el PageRank que consolida en la
+     canonica, `canonical_sin_enlazar`, los alias del hreflang, el sitemap— lo
+     hereda sin tocarlo.
+   - **No se evalua a donde apunta**: con `distintos > 1` no salen
+     `canonical_cross_domain`, `canonical_a_http` ni los avisos del destino
+     (decision 101). Y un destino con varios canonicals distintos cuenta como
+     autocanonico en `_Fichas`: A → B no es `canonical_encadenado` porque B
+     declare dos. Un aviso por hallazgo (36).
+   - Lo que queda para #150: el canonical del HTML frente al de la cabecera
+     cuando discrepan. `canonical_distintos` es dato del HTML, para poder
+     compararlo con `canonical_header`.
+
+   **Exige re-rastrear**: un censo anterior no tiene la columna y re-analizarlo
+   no cambia nada. Sin medir en censos reales (no habia ninguno en la BD de esta
+   rama); la consulta para medirlo en un rastreo nuevo es
+   `count(*) FILTER (WHERE canonical_count > 1)` frente a
+   `FILTER (WHERE canonical_distintos > 1)` sobre `html_meta` del job, y cuantas
+   pasan de Canonicalised a Indexable. Tests: `tests/test_canonical_distintos.py`
+   (extractor, `estado_indexabilidad` y el analisis contra SQLite).
+
+<a id="d116"></a>
+116. **Hreflang: una anotacion repetida es una, y la cabecera `Link` tambien
+   es fuente** (#149). Dos huecos del mismo dato:
+   - **Repetidas.** `extract_hreflang` no deduplicaba: `en-GB → /en/`,
+     `en-GB → https://x.com/en/`, `EN-gb → /en/` y `en-GB → /en/#top` eran
+     cuatro filas, y con el destino en 404 salian **dos
+     `hreflang_broken_target` identicos** para una sola anotacion. Ahora una
+     fila por `(lang sin caja, clave_url(href))`; gana la primera, salvo que
+     este en el body y otra no (Google lee la del head, decision 56). El `lang`
+     se guarda como venia. **Tambien en el analisis**: `analyze_hreflang`
+     analiza la representante y escribe en las repetidas su mismo
+     `lang_valid`/`return_tag_ok`, asi que re-analizar arregla los censos ya
+     guardados sin dejar NULL que bajen la nota de /insights. El mismo codigo
+     hacia dos URLs sigue siendo dos filas: eso es `hreflang_idioma_repetido`.
+   - **Cabecera `Link`.** Google lee el hreflang de la cabecera HTTP igual que
+     el del `<head>`, y en un PDF es la unica forma de declararlo; el spider
+     solo sacaba de ahi el canonical. `enlaces_de_cabecera` parte la cabecera
+     (respetando comas y `;` entre `<>` o comillas; `canonical_de_cabecera`
+     la usa y no cambia), `hreflang_de_cabecera` coge las entradas con el
+     token `alternate` en `rel` y un `hreflang`, y el spider las emite para el
+     HTML y para todo no HTML 2xx, deduplicadas con las del head. Columna
+     **`hreflang.origen`** (`html` | `cabecera`; NULL = rastreo anterior, del
+     HTML), con sitio para `sitemap` (#107).
+   - **Un PDF es retorno, no fuente de avisos.** La pestana Hreflang filtra por
+     HTML interno: un aviso anclado en el PDF saldria en el chip y no en la
+     lista. Asi que las anotaciones de un no HTML cuentan como destino y como
+     retorno (un HTML que anota su PDF y recibe el retorno por cabecera esta
+     bien), pero el PDF no es fuente (`fuente()` excluye lo que tiene
+     `resource_type` distinto de `html`). Ampliar la pestana a los PDF queda
+     pendiente, con #107.
+
+   **Que pide cada cosa**: la deduplicacion se aplica re-analizando; la cabecera
+   exige re-rastrear. Sin medir en censos reales (contado con SQL en la decision
+   99, ningun censo local tenia un codigo hacia dos URLs; las repetidas hacia la
+   MISMA no se contaron). Queda fuera: el conteo de /insights sigue sumando
+   filas, no anotaciones distintas, en los censos viejos con repetidas (llevan
+   el mismo veredicto, asi que los porcentajes apenas se mueven). Tests:
+   `tests/test_hreflang_repetido_y_cabecera.py` (extractor y analisis contra
+   SQLite) y `tests/test_spider_cabeceras_y_saltos.py` (spider real: un PDF con
+   hreflang en la cabecera guarda sus dos filas con `origen='cabecera'`).
