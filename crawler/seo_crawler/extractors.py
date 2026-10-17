@@ -21,6 +21,7 @@ from w3lib.url import canonicalize_url
 # copia `crawler/`, necesita leerlas igual. Se reexportan aqui para no
 # romper a quien ya importaba `extractors.robots_tokens`.
 from shared.dominios import dominio_registrable  # noqa: F401
+from shared.indexabilidad import clave_url
 # El texto visible vive en `shared/` porque la API lo necesita para la
 # extraccion a medida (decision 104) y no puede importar `crawler/`.
 from shared.texto_visible import (  # noqa: F401
@@ -145,20 +146,41 @@ def normalize_url(url: str) -> str:
     except ValueError:
         port = None
     netloc = parts.netloc
-    if (port is not None and port == _DEFAULT_PORTS.get(parts.scheme)) or host.endswith("."):
-        userinfo = netloc.rpartition("@")[0]
+    # Las credenciales (`https://usuario:clave@x.com/`) se quitan SIEMPRE: con
+    # ellas iban a `urls.url`, a los enlaces, a los CSV y a `jobs.seeds`, que
+    # lee cualquiera (decision 83), y la misma pagina tenia dos hashes. El
+    # `userinfo` acaba en el ULTIMO `@` del netloc: un `@` dentro de la clave
+    # va escapado (`%40`). Google no rastrea con ellas; la autenticacion de un
+    # staging va en `http.basic_auth_user`/`basic_auth_password`.
+    con_credenciales = "@" in netloc
+    if (con_credenciales
+            or (port is not None and port == _DEFAULT_PORTS.get(parts.scheme))
+            or host.endswith(".")):
         host_limpio = host.rstrip(".")
         if ":" in host_limpio:  # IPv6
             host_limpio = f"[{host_limpio}]"
         netloc = host_limpio
         if port is not None and port != _DEFAULT_PORTS.get(parts.scheme):
             netloc += f":{port}"
-        if userinfo:
-            netloc = f"{userinfo}@{netloc}"
     path = _remove_dot_segments(parts.path)
     if netloc == parts.netloc and path == parts.path:
         return canon
     return urlunsplit((parts.scheme, netloc, path, parts.query, parts.fragment))
+
+
+# Lo unico que es una pagina para Google: un enlace `ftp://`, `ws://`, `sms:`,
+# `whatsapp:` o `intent:` no es una arista del grafo ni se rastrea (decision 106).
+ESQUEMAS_WEB = ("http", "https")
+
+
+def es_url_web(url: str | None) -> bool:
+    """Si *url* es absoluta y http(s), sin distinguir mayusculas."""
+    if not url:
+        return False
+    try:
+        return urlsplit(url.strip()).scheme.lower() in ESQUEMAS_WEB
+    except ValueError:
+        return False
 
 
 def absolutize_url(base_url: str, href: str) -> str | None:
@@ -250,7 +272,14 @@ def tipo_por_extension(url: str) -> str | None:
 
 
 def is_internal_url(url: str, allowed_hosts: set[str]) -> bool:
-    """Check whether *url* belongs to one of the *allowed_hosts*."""
+    """Check whether *url* belongs to one of the *allowed_hosts*.
+
+    Solo una URL web puede ser interna: `ftp://x.com/f.zip` o `ws://x.com/s`
+    salian internas, el BFS las pedia y acababan como una peticion FTP o un
+    error de esquema contados como paginas del sitio.
+    """
+    if not es_url_web(url):
+        return False
     try:
         host = normalize_host(urlparse(url).hostname)
     except ValueError:
@@ -478,6 +507,19 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
     # Google IGNORA un canonical que esta en el body: no se usa como valor, pero
     # se cuenta para poder avisar.
     canonical = _resolve(base_url, _clean(canonicals_head[0])) if canonicals_head else None
+    # Lo que decide si Google los ignora es cuantos DESTINOS distintos hay, no
+    # cuantas etiquetas: `/a` y `https://x.com/a` dos veces (dos plugins de
+    # SEO escribiendo lo mismo) es un canonical, y salia `canonical_multiple`.
+    # Solo los del head: los del body Google no los lee (ya es
+    # `canonical_in_body`). Un `href=""` no es un destino.
+    destinos: set = set()
+    for h in canonicals_head:
+        resuelto = _resolve(base_url, _clean(h))
+        if resuelto:
+            try:
+                destinos.add(clave_url(resuelto))
+            except ValueError:
+                destinos.add(resuelto)
 
     return {
         "title": title_text,
@@ -495,6 +537,7 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         # primero en silencio.
         "canonical_count": len(canonicals_todos),
         "canonical_in_body": len(canonicals_todos) > len(canonicals_head),
+        "canonical_distintos": len(destinos),
         # OG
         "og_title": _meta("og:title", con_property=True),
         "og_description": _meta("og:description", con_property=True),
@@ -646,11 +689,17 @@ def extract_links(
         f" | descendant-or-self::area[@href]{_XPATH_FUERA_DEL_DOM}"
     ):
         raw_href = a.attrib.get("href", "").strip()
-        if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
+        # El esquema no distingue mayusculas: `JavaScript:void(0)` entraba en
+        # `links` y ADEMAS en `enlaces_no_rastreables`, rompiendo la disyuncion
+        # de la decision 106, y `Mailto:`/`TEL:` salian como enlaces externos.
+        if not raw_href or raw_href.lower().startswith(
+                ("javascript:", "mailto:", "tel:", "data:", "#")):
             continue
 
         normalized = absolutize_url(base_url, raw_href)
-        if normalized is None:
+        # Lista blanca, no negra: `sms:`, `whatsapp:`, `intent:`, `skype:`,
+        # `file:`, `ftp:`, `ws:`... no son paginas que Google pueda rastrear.
+        if normalized is None or not es_url_web(normalized):
             continue
 
         tag_name = (a.xpath("name()").get() or "a").lower()
@@ -1118,8 +1167,48 @@ def extract_hreflang(selector, base_url: str | None = None) -> list[dict[str, An
                 # que el analyzer pueda decir por que ese idioma no esta
                 # anotado aunque la plantilla lo escriba.
                 "en_body": not link.xpath("ancestor::head"),
+                "origen": ORIGEN_HREFLANG_HTML,
             })
-    return results
+    return deduplicar_hreflang(results)
+
+
+# De donde sale una anotacion hreflang (`hreflang.origen`). Google lee tres:
+# el `<head>`, la cabecera HTTP `Link` (la unica en un PDF) y el sitemap, que
+# aun no se guarda (#107). NULL en BD = rastreo anterior: era del HTML.
+ORIGEN_HREFLANG_HTML = "html"
+ORIGEN_HREFLANG_CABECERA = "cabecera"
+
+
+def clave_hreflang(lang: str, href: str) -> tuple:
+    """Lo que hace que dos anotaciones sean LA MISMA: el codigo sin caja y el
+    destino con la clave de `misma_url` (decision 39), que ignora el fragmento,
+    el puerto por defecto y el escapado."""
+    try:
+        destino: Any = clave_url(href)
+    except ValueError:
+        destino = href.strip()
+    return (lang.casefold(), destino)
+
+
+def deduplicar_hreflang(entradas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Una fila por (idioma, destino), en el orden de la primera aparicion.
+
+    Un plugin y la plantilla escribiendo el mismo `en-GB` daban dos filas y
+    DOS `hreflang_broken_target` identicos para una sola anotacion. Gana la
+    primera, salvo que fuera del `<body>` y una posterior no: Google lee la del
+    head (decision 56), y esa es la que cuenta. El `lang` se guarda como venia.
+    """
+    salida: list[dict[str, Any]] = []
+    posicion: dict[tuple, int] = {}
+    for entrada in entradas:
+        clave = clave_hreflang(entrada["lang"], entrada["href"])
+        i = posicion.get(clave)
+        if i is None:
+            posicion[clave] = len(salida)
+            salida.append(entrada)
+        elif salida[i].get("en_body") and not entrada.get("en_body"):
+            salida[i] = entrada
+    return salida
 
 
 # El CDATA es sintaxis de XHTML y hay plantillas (Drupal, portales antiguos)
@@ -1919,47 +2008,90 @@ def canonical_de_cabecera(valor_link: str | None, base_url: str = "") -> str | N
     Es la unica forma de declarar un canonical en un PDF o una imagen, asi que
     leerla mal es decir que un PDF canonicaliza a una hoja de estilos.
     """
+    for destino, parametros in enlaces_de_cabecera(valor_link, base_url):
+        if "canonical" in parametros.get("rel", "").lower().split():
+            return destino
+    return None
+
+
+def enlaces_de_cabecera(
+    valor_link: str | None, base_url: str = "",
+) -> list[tuple[str, dict[str, str]]]:
+    """Los enlaces de una cabecera ``Link`` (RFC 8288): ``(destino, parametros)``.
+
+    El destino va resuelto contra *base_url* (si se da); los nombres de los
+    parametros, en minusculas, y los valores sin comillas y con su caja. Con un
+    parametro repetido vale el primero, como pide la RFC para `rel`. Un `;` o
+    una `,` entre comillas (`title="a; b"`) no parten nada.
+    """
     if not valor_link:
-        return None
+        return []
+    enlaces: list[tuple[str, dict[str, str]]] = []
     for entrada in _separar_cabecera_link(valor_link):
-        partes = [p.strip() for p in entrada.split(";")]
+        partes = [p.strip() for p in _partir_fuera_de_comillas(entrada, ";")]
         if not partes or not partes[0].startswith("<") or ">" not in partes[0]:
             continue
         destino = partes[0][1:partes[0].index(">")].strip()
+        parametros: dict[str, str] = {}
         for parametro in partes[1:]:
             if "=" not in parametro:
                 continue
             nombre, _, bruto = parametro.partition("=")
-            if nombre.strip().lower() != "rel":
-                continue
-            tokens = bruto.strip().strip('"\'').lower().split()
-            if "canonical" in tokens:
-                return _resolve(base_url, destino) if base_url else destino
-    return None
+            nombre = nombre.strip().lower()
+            if nombre and nombre not in parametros:
+                parametros[nombre] = bruto.strip().strip('"\'').strip()
+        enlaces.append((_resolve(base_url, destino) if base_url else destino, parametros))
+    return enlaces
+
+
+def hreflang_de_cabecera(valor_link: str | None, base_url: str = "") -> list[dict[str, Any]]:
+    """Las anotaciones hreflang de la cabecera ``Link``.
+
+    Google las lee igual que las del `<head>`, y en un PDF son la unica forma
+    de declararlas; antes no se leian en ningun sitio. `rel` se compara por
+    token (`rel="alternate nofollow"` vale, decision 56). Deduplicadas como
+    las del HTML.
+    """
+    salida: list[dict[str, Any]] = []
+    for destino, parametros in enlaces_de_cabecera(valor_link, base_url):
+        lang = _clean(parametros.get("hreflang"))
+        if not lang or not destino or "alternate" not in rel_tokens(parametros.get("rel")):
+            continue
+        salida.append({"lang": lang, "href": destino, "en_body": False,
+                       "origen": ORIGEN_HREFLANG_CABECERA})
+    return deduplicar_hreflang(salida)
+
+
+def _partir_fuera_de_comillas(valor: str, separador: str) -> list[str]:
+    """Parte *valor* por *separador* salvo dentro de comillas dobles o de <>."""
+    trozos: list[str] = []
+    actual: list[str] = []
+    en_url = en_comillas = False
+    for ch in valor:
+        if ch == '"' and not en_url:
+            en_comillas = not en_comillas
+        elif ch == "<" and not en_comillas:
+            en_url = True
+        elif ch == ">" and not en_comillas:
+            en_url = False
+        if ch == separador and not en_url and not en_comillas:
+            trozos.append("".join(actual))
+            actual = []
+            continue
+        actual.append(ch)
+    if actual:
+        trozos.append("".join(actual))
+    return trozos
 
 
 def _separar_cabecera_link(valor: str) -> list[str]:
     """Separa los enlaces de una cabecera ``Link`` por las comas de FUERA de <>.
 
     Una URL puede llevar comas (`<https://x.com/a,b>`), asi que partir por coma
-    a secas rompe el enlace en dos.
+    a secas rompe el enlace en dos. Tampoco cuentan las de un valor entre
+    comillas (`title="Ingles, Reino Unido"`).
     """
-    entradas: list[str] = []
-    actual: list[str] = []
-    dentro = False
-    for ch in valor:
-        if ch == "<":
-            dentro = True
-        elif ch == ">":
-            dentro = False
-        if ch == "," and not dentro:
-            entradas.append("".join(actual))
-            actual = []
-            continue
-        actual.append(ch)
-    if actual:
-        entradas.append("".join(actual))
-    return [e for e in (x.strip() for x in entradas) if e]
+    return [e for e in (x.strip() for x in _partir_fuera_de_comillas(valor, ",")) if e]
 
 
 def extract_security_headers(headers: dict) -> dict:

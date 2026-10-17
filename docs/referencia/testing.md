@@ -59,6 +59,16 @@ la propia pagina, el host y el ancla del x-default sin depender del orden de
 las filas, e `indexable` a NULL), y `test_catalogo_incidencias.py` falla si el
 analizador emite un tipo sin ficha en `frontend/incidencias.js` (los tipos
 salen con `ast`; una llamada con tipo no literal tiene que declararse).
+Extraccion de #149: `test_esquemas_y_credenciales.py` (lista blanca de
+esquemas en `extract_links` e `is_internal_url`, credenciales fuera al
+normalizar y semillas con credenciales rechazadas; decisiones 106 y 39),
+`test_hreflang_repetido_y_cabecera.py` (deduplicacion y hreflang de la cabecera
+`Link`, extractor y `analyze_hreflang` contra SQLite; decision 116),
+`test_canonical_distintos.py` (destinos distintos del canonical; decision 115),
+`test_cadenas_largas_db.py` (un aviso por cadena y error pasados 10 saltos;
+decision 117) y `test_spider_cabeceras_y_saltos.py` (spider real: `ftp://` y
+`ws://` internos no se rastrean, hreflang de un PDF por cabecera, tope de 20
+saltos).
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y

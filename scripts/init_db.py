@@ -54,6 +54,12 @@ def main() -> None:
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS title_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_description_count INTEGER"))
         conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
+        # De donde sale la anotacion: `html` o `cabecera` (Link). NULL = rastreo
+        # anterior, del HTML (decision 116).
+        conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS origen VARCHAR(16)"))
+        # Canonicals del head con DESTINO distinto: con dos, Google los ignora
+        # todos. NULL = rastreo anterior; se mira `canonical_count` (decision 115).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_distintos INTEGER"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # La respuesta era la pagina o un muro delante, y la salud del job
