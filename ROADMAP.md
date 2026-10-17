@@ -3,6 +3,9 @@
 Qué hace hoy el crawler y qué viene después, contado por funcionalidades. El
 detalle técnico de cada punto está en la issue de GitHub enlazada.
 
+¿Sin conocimientos técnicos? La versión en lenguaje llano, con el estado de
+cada cosa de un vistazo, está en [`ROADMAP_SENCILLO.md`](ROADMAP_SENCILLO.md).
+
 Estado a 7 de octubre de 2026.
 
 Este documento cuenta **qué hay y qué viene**, en lenguaje de producto.
