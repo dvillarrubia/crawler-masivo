@@ -454,7 +454,8 @@ class HtmlMeta(Base):
     fuera_del_head = Column(String(128), nullable=True)
 
     # --- Lo que el HTML declara de si mismo (decision 108) ---
-    # `content` del primer `<meta name=viewport>` ("" si lo tiene vacio) y
+    # `content` del ULTIMO `<meta name=viewport>`, el que aplica el navegador
+    # ("" si lo tiene vacio), y
     # cuantos hay. `viewport_count` es la marca de «medido» de todo el bloque:
     # 0 = no hay viewport; NULL = rastreo anterior a la columna, y entonces el
     # analizador no afirma que falte nada (decisiones 67 y 89).

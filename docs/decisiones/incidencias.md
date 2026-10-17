@@ -618,7 +618,7 @@
    comparten (forma de una URL, viewport, idioma principal, normalización del
    charset) viven en `shared/metadatos_html.py` (23, 39 y 64), sin w3lib: la
    imagen del análisis no lo instala.
-   - **Lo que se guarda.** `viewport` (el `content` del primer
+   - **Lo que se guarda.** `viewport` (el `content` del último
      `<meta name=viewport>`, `""` si va vacío) y `viewport_count`; `html_lang`
      (`lang` o, si no, `xml:lang` del primer `<html>`; `""` = atributo vacío,
      NULL = no está) y la cabecera `content_language`; `canonical_crudo`, el
@@ -700,3 +700,16 @@
      comparación del canonical del HTML con el de la cabecera (parte A de
      #150, re-análisis) y el `viewport` en `_META_RELEVANTES` del head cortado
      (cambiaría las cifras de la 102).
+   - **Revisión** (2026-10-18), dos fallos reproducidos y arreglados:
+     - **Con varios viewports manda el ÚLTIMO, no el primero.** Comprobado en
+       Chromium con emulación móvil a 390 px: `device-width` seguido de
+       `width=1024` pinta a 1.024 px, y al revés a 390. Guardando el primero,
+       la plantilla que se ve bien salía `viewport_incorrecto` y la que se ve
+       mal se callaba. `viewport` guarda ahora el `content` del último.
+     - **El script envuelto en un comentario HTML** (`<script><!-- …
+       //--></script>`, la forma de los portales antiguos, que son justo los
+       que tienen páginas puente) no se veía: el escáner leía `<!--` como
+       operadores y la sentencia siguiente quedaba «abierta». En JavaScript es
+       un comentario de una línea (Anexo B de ECMAScript, y Chromium ejecuta el
+       script); `-->` también, pero solo a principio de línea (`a-->b` es un
+       decremento y una comparación).

@@ -530,7 +530,8 @@ def _declaraciones_de_pagina(selector, canonicals_head: list[str],
 
     - ``viewport_count`` es tambien la marca de «medido»: 0 es que no hay
       viewport; NULL, una fila de un rastreo anterior. ``viewport`` es el
-      ``content`` del primero (``""`` si lo tiene vacio).
+      ``content`` del ultimo, que es el que aplica el navegador (``""`` si lo
+      tiene vacio).
     - ``html_lang``: el ``lang`` del primer ``<html>`` o, si no lo tiene, su
       ``xml:lang``. ``""`` si el atributo esta pero vacio, None si no esta (el
       mismo criterio que el alt). Recortado a la columna.
@@ -542,9 +543,13 @@ def _declaraciones_de_pagina(selector, canonicals_head: list[str],
     viewports = selector.xpath(
         f"//meta[normalize-space(translate(@name, '{_XP_UPPER}', '{_XP_LOWER}')) = 'viewport']"
     )
+    # Con varios, el navegador aplica el ULTIMO (comprobado en Chromium con
+    # emulacion movil: `device-width` y luego `width=1024` pinta a 1.024 px).
+    # Guardar el primero daba `viewport_incorrecto` a una plantilla que se ve
+    # bien y callaba la que se ve mal.
     viewport = None
     if viewports:
-        viewport = _clean(viewports[0].xpath("@content").get()) or ""
+        viewport = _clean(viewports[-1].xpath("@content").get()) or ""
     lang = selector.xpath("(//html)[1]/@lang").get()
     if lang is None:
         lang = selector.xpath("(//html)[1]/@*[name()='xml:lang']").get()
@@ -1957,7 +1962,14 @@ def _sentencias_de_nivel_superior(js: str) -> set[int]:
                 hubo_salto = True
             i += 1
             continue
-        if c == "/" and i + 1 < n and js[i + 1] == "/":
+        # Comentarios al estilo HTML (Anexo B de ECMAScript): `<!--` en
+        # cualquier sitio y `-->` a principio de linea son comentarios de una
+        # linea. Los portales antiguos envuelven asi el script entero
+        # (`<script><!-- ... //--></script>`), y sin esto el `-` del `<!--`
+        # dejaba abierta la sentencia y la pagina puente no se veia.
+        if (c == "/" and i + 1 < n and js[i + 1] == "/") \
+                or js.startswith("<!--", i) \
+                or (js.startswith("-->", i) and (hubo_salto or ultimo == "")):
             fin = js.find("\n", i)
             i = n if fin < 0 else fin
             continue

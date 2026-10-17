@@ -45,12 +45,23 @@ def test_viewport_sin_distinguir_mayusculas_ni_espacios():
     assert motivo_viewport(meta["viewport"]) is None
 
 
-def test_dos_viewports_se_cuentan_y_vale_el_primero():
+def test_dos_viewports_se_cuentan_y_vale_el_ultimo():
+    # El navegador aplica el ULTIMO: comprobado en Chromium con emulacion movil
+    # (390 px): `width=1024` y luego `device-width` pinta a 390; al reves, a
+    # 1.024. Con el primero, este caso salia `viewport_incorrecto` y el
+    # contrario se callaba.
     meta = extract_meta(_sel('<meta name="viewport" content="width=1024">'
                              '<meta name="viewport" content="width=device-width">'),
                         base_url=PAGINA)
     assert meta["viewport_count"] == 2
+    assert meta["viewport"] == "width=device-width"
+    assert motivo_viewport(meta["viewport"]) is None
+
+    meta = extract_meta(_sel('<meta name="viewport" content="width=device-width">'
+                             '<meta name="viewport" content="width=1024">'),
+                        base_url=PAGINA)
     assert meta["viewport"] == "width=1024"
+    assert motivo_viewport(meta["viewport"]) == "ancho_fijo"
 
 
 def test_viewport_con_content_vacio_se_guarda_vacio():
@@ -226,6 +237,21 @@ def test_redireccion_js_solo_scripts_que_se_ejecutan():
     # Un comentario condicional de IE es un comentario: no hay <script>.
     assert _js(codigo, envoltura="<!--[if lt IE 9]>{}<![endif]-->") is None
 
+
+
+@pytest.mark.parametrize("codigo, destino", [
+    # Portales antiguos: el script entero envuelto en un comentario HTML, que
+    # en JavaScript es un comentario de una linea (Anexo B). Chromium lo
+    # ejecuta; con el `<!--` leido como operadores se dejaba de ver.
+    ('<!--\nwindow.location.href = "/puente";\n//-->', "https://x.com/puente"),
+    ('<!--\nlocation = "/p2"\n-->', "https://x.com/p2"),
+    # Lo comentado sigue sin contar.
+    ('<!-- location.href = "/no"\nvar a = 1;', None),
+    # Un `-->` a media linea no es un comentario: `a-- > b`.
+    ('if (a) {}\nx = a-->b; location = "/m"', "https://x.com/m"),
+])
+def test_redireccion_js_dentro_de_comentario_html(codigo, destino):
+    assert _js(codigo) == destino
 
 def test_redireccion_js_en_el_body_y_con_base():
     sel = Selector(text='<html><head><base href="https://x.com/es/"></head>'
