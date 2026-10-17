@@ -470,6 +470,15 @@ después lo nuevo.
 - [#37](https://github.com/dvillarrubia/crawler-masivo/issues/37) La cola de
   trabajos va al revés, se ignora la opción «usar sitemap» y un sitio bloqueado
   por robots.txt da un trabajo «completado» con 0 URLs.
+- [#149](https://github.com/dvillarrubia/crawler-masivo/issues/149) **Fallos
+  encontrados al compararnos con FreeCrawl** (17 de octubre). El más grave: una
+  página con `noindex` en la cabecera HTTP sale como indexable cuando esa
+  cabecera lleva antes otra directiva con valor (`max-snippet:-1, noindex`) o
+  nombra dos buscadores. Además: los casi duplicados cuentan páginas noindex y
+  canonicalizadas, el rastreo guarda las cookies que pone el servidor (Google no
+  lo hace), un robots.txt que falla se trata como «todo permitido» cuando Google
+  lo trata como «todo bloqueado», y otros menores. La issue lleva una guía de
+  implementación punto por punto.
 
 ### 2. Arreglos pendientes de la auditoría
 
@@ -519,6 +528,36 @@ es cada plantilla— y va con
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)
   **WordPress**: cruzar el rastreo con lo que el propio WordPress dice que tiene
   publicado.
+
+### 3a. Lo que FreeCrawl tiene y nos falta (17 de octubre)
+
+[#150](https://github.com/dvillarrubia/crawler-masivo/issues/150), con dos guías
+de implementación verificadas contra el código. FreeCrawl tiene 171 checks y
+nosotros 78; en los que coinciden, nuestra definición suele ser la buena. De lo
+que les copiamos, la idea, no su definición. Por olas de
+[`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md):
+
+- **Con lo que ya guardamos, sin volver a rastrear** (ola 1): el canonical
+  del HTML distinto del de la cabecera, `noindex` junto a un canonical a otra
+  URL, redirecciones que acaban en noindex, avisar del uso de meta refresh, H1
+  vacío (hoy cuenta como presente), enlaces internos sin anchor, title de
+  plantilla sin rellenar y description igual al title, y la paginación
+  (página 2 o siguientes en noindex o canonicalizadas a la 1).
+- **Con un rastreo nuevo**: meta viewport, `lang` del HTML, charset, canonical
+  relativo y Open Graph; redirecciones por JavaScript sin necesidad del
+  navegador; tiempo de respuesta real y HTML sin comprimir (hoy no se puede
+  saber); certificado TLS caducado o a punto de caducar; respetar
+  `Retry-After` cuando el servidor pide esperar.
+- **Peticiones aparte, sin gastar el límite de URLs**: enlaces externos rotos y
+  dominios muertos, junto con los recursos rotos de
+  [#101](https://github.com/dvillarrubia/crawler-masivo/issues/101). Antes hay
+  que dejar de enviar a otros dominios las cookies y la contraseña de un
+  staging (#149).
+- **Móvil frente a escritorio** (ola 7.4): pedir una muestra con el
+  user-agent de smartphone y comparar lo que cambia.
+- **Descartado**: legibilidad y palabras más frecuentes, accesibilidad sin
+  navegador (va con axe por muestra, ola 8), validador de AMP y «hreflang que
+  nadie enlaza» (excluido a propósito en la decisión 99).
 
 ### 3b. Que la interfaz se entienda (milestone M6)
 
