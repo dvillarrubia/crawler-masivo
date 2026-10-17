@@ -538,3 +538,14 @@
    es de Bing, igual que antes. Cuantas URLs cambian en los censos entregados
    esta por medir (consulta: `html_meta.x_robots_tag` con `:` y
    `noindex|nofollow|none`, aplicando la funcion vieja y la nueva).
+
+   **Revision (2026-10-18).** Medido en la base local (50 rastreos, entre
+   ellos Lopesan, UOC, penguin, progym, Druni, CST y blogs.uoc.edu): **ninguna
+   URL cambia**. La unica `X-Robots-Tag` guardada es `none` (18 filas), sin
+   dos puntos. Ninguno de esos censos tenia el caso, asi que la cifra de
+   produccion sigue por medir con la misma consulta. Se probaron ademas 20
+   cabeceras raras: fechas RFC 822 y 850 e ISO, `googlebot : noindex`,
+   `noindex:true`, `Googlebot:none`, `googlebot-image:` y `otherbot: none,
+   noindex`. Todas dan lo que dice el criterio. La unica que falla es una
+   fecha que no es de ningun formato (`Wednesday, 2010-06-25T15:00:00Z`): su
+   segundo trozo no lleva espacios y se toma por bot. No se toca.
