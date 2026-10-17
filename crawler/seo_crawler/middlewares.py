@@ -377,6 +377,10 @@ class HttpConfigMiddleware:
                 "conservar": bool(http_config.get("conservar_cookies")),
                 "hosts": sorted(getattr(spider, "_hosts_credenciales", ()) or ()),
                 "raices": sorted(getattr(spider, "_raices_credenciales", ()) or ()),
+                # Sin semillas http, las cookies van con `secure` y Chromium
+                # no las manda por http (revision de la decision 114)
+                "solo_https": "http" not in (getattr(spider, "_esquemas_credenciales", None)
+                                             or {"http"}),
             }
             return None
         if not lleva:

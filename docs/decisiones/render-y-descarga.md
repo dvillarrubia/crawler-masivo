@@ -417,3 +417,15 @@
    middlewares y la descarga de producción (curl_cffi y Playwright), y el
    servidor anotando lo que le llega. Contra `6126fd5`, 10 de los 16 que
    había entonces fallan.
+   **Revisión (2026-10-17).** El host no basta: un enlace `http://` al host
+   de una semilla `https` (los viejos, que luego redirigen con un 301) llevaba
+   el Basic, las cabeceras y las cookies **en claro**, antes del salto. Un
+   navegador ata la autenticación al origen. Ahora `_lleva_credenciales` exige
+   además el esquema de alguna semilla, y con render las cookies se ponen con
+   `secure` si ninguna semilla es `http`. Comprobado sin reproducir fallo: con
+   `add_cookies` y un dominio sin punto, Chromium la trata como cookie de host
+   (medido: `sso.a.test` no la recibe), así que el SSO de un subdominio no la
+   ve; y un puerto distinto del mismo host sigue recibiéndolas, que se deja
+   así. Tests: `test_con_semillas_https_no_van_en_claro_por_http` y
+   `test_render_cookies_con_secure_si_solo_hay_semillas_https`, que fallan
+   sin el arreglo.

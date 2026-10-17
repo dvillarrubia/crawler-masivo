@@ -637,6 +637,13 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             self._raices_credenciales = frozenset(
                 getattr(self, "_root_domains", ()) if self._crawl_subdomains else ()
             )
+            # Y solo por los esquemas de las semillas: con una semilla https,
+            # un enlace `http://` al mismo host mandaba el Basic y las cookies
+            # en claro antes de que el 301 lo subiera a https (revision de la
+            # decision 114). Un navegador ata la autenticacion al origen.
+            self._esquemas_credenciales = frozenset(
+                (urlparse(s).scheme or "").lower() for s in self.seed_urls
+            ) - {""}
 
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
@@ -1132,6 +1139,9 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         """
         hosts = getattr(self, "_hosts_credenciales", None)
         if not hosts:
+            return False
+        esquemas = getattr(self, "_esquemas_credenciales", None)
+        if esquemas and (urlparse(url).scheme or "").lower() not in esquemas:
             return False
         return url_en_hosts(url, hosts, getattr(self, "_raices_credenciales", ()))
 
