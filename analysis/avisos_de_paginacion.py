@@ -635,16 +635,6 @@ def _solo_desde_paginacion(az, aristas) -> None:
     # pagina que cuenta y no esta excluida: un EXISTS por el indice de destino.
     # Un `nofollow` no es un camino (90) y una noindex no cuenta (38); una
     # canonicalizada a la 1 si cuenta como entrante y por eso se resta.
-    otro = aristas.alias("otro")
-    hay_camino = (
-        select(otro.c.destino_id).where(
-            otro.c.destino_id == aristas.c.destino_id,
-            otro.c.seguible.is_(True),
-            otro.c.origen_cuenta.is_(True),
-            otro.c.origen_pag_excluida.isnot(True),
-            otro.c.origen_id != otro.c.destino_id,
-        ).exists()
-    )
     agregado = (
         select(
             aristas.c.destino_id.label("destino_id"),
@@ -654,10 +644,30 @@ def _solo_desde_paginacion(az, aristas) -> None:
             .filter(aristas.c.origen_cuenta.is_(True)).label("cuentan"),
         )
         .select_from(desde_paginacion(az, aristas, "excluida"))
-        .where(base, excl, ~hay_camino)
+        .where(base, excl)
         .group_by(aristas.c.destino_id)
         .subquery()
     )
+    # El EXISTS va sobre los destinos ya agrupados y filtrados, no arista a
+    # arista: en Druni son 5.551 paginas excluidas con decenas de enlaces cada
+    # una hacia productos que reciben miles.
+    otro = aristas.alias("otro")
+    hay_camino = (
+        select(otro.c.destino_id).where(
+            otro.c.destino_id == agregado.c.destino_id,
+            otro.c.seguible.is_(True),
+            otro.c.origen_cuenta.is_(True),
+            otro.c.origen_pag_excluida.isnot(True),
+            otro.c.origen_id != otro.c.destino_id,
+        ).exists()
+    )
+    pag = getattr(az, "_paginacion_tmp", None)
+    interesa = Url.indexable.is_(True)
+    if pag is not None:
+        # Las no indexables solo interesan si son paginas 2+ excluidas (para
+        # contarlas en su serie).
+        interesa = interesa | select(pag.c.url_id).where(
+            pag.c.url_id == agregado.c.destino_id, pag.c.excluida.is_(True)).exists()
     filas = az.session.execute(
         select(agregado.c.destino_id, agregado.c.paginas, agregado.c.enlaces,
                agregado.c.cuentan, Url.in_sitemap, Url.url, Url.indexable,
@@ -668,6 +678,8 @@ def _solo_desde_paginacion(az, aristas) -> None:
             Url.is_html.is_(True), Url.is_internal.is_(True), Url.status_code == 200,
             (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
             ~_es_destino_de_redireccion(),
+            interesa,
+            ~hay_camino,
         )
     ).all()
     if not filas:
@@ -729,10 +741,20 @@ def _profundas(az, aristas) -> None:
 
     if not az._paginacion_profundas:
         return
+    profunda = and_(aristas.c.origen_pag_profunda.is_(True), aristas.c.seguible.is_(True),
+                    aristas.c.destino_id.isnot(None),
+                    aristas.c.origen_id != aristas.c.destino_id)
+    # Primero los destinos (agrupados), y el EXISTS sobre ellos: por arista,
+    # cada enlace de una pagina 2+ probaba todos los entrantes de su destino.
+    destinos = (
+        select(aristas.c.destino_id.label("destino_id"))
+        .select_from(desde_paginacion(az, aristas, "profunda"))
+        .where(profunda).group_by(aristas.c.destino_id).subquery()
+    )
     otro = aristas.alias("otro")
     hay_otro = (
         select(otro.c.destino_id).where(
-            otro.c.destino_id == aristas.c.destino_id,
+            otro.c.destino_id == destinos.c.destino_id,
             otro.c.seguible.is_(True),
             otro.c.origen_cuenta.is_(True),
             otro.c.origen_pag_profunda.isnot(True),
@@ -740,25 +762,27 @@ def _profundas(az, aristas) -> None:
             otro.c.origen_id != otro.c.destino_id,
         ).exists()
     )
-    o = aliased(Url)
-    filas = az.session.execute(
-        select(aristas.c.destino_id, Url.url, aristas.c.origen_id, o.url).distinct()
-        .select_from(desde_paginacion(az, aristas, "profunda"))
-        .join(Url, Url.id == aristas.c.destino_id)
-        .join(o, o.id == aristas.c.origen_id)
+    ids = sorted(i for (i,) in az.session.execute(
+        select(destinos.c.destino_id)
+        .join(Url, Url.id == destinos.c.destino_id)
         .where(
-            aristas.c.origen_pag_profunda.is_(True),
-            aristas.c.seguible.is_(True),
-            aristas.c.destino_id.isnot(None),
-            aristas.c.origen_id != aristas.c.destino_id,
-            ~hay_otro,
             Url.job_id == az.job_id,
             Url.is_html.is_(True), Url.is_internal.is_(True), Url.status_code == 200,
             Url.indexable.is_(True),
             (Url.crawl_depth.is_(None)) | (Url.crawl_depth > 0),
             ~_es_destino_de_redireccion(),
+            ~hay_otro,
         )
-    ).all()
+    ).all() if i not in az._paginacion_plantilla)
+    o = aliased(Url)
+    filas = []
+    for n in range(0, len(ids), 5000):
+        filas.extend(az.session.execute(
+            select(aristas.c.destino_id, Url.url, aristas.c.origen_id, o.url).distinct()
+            .join(Url, Url.id == aristas.c.destino_id)
+            .join(o, o.id == aristas.c.origen_id)
+            .where(profunda, aristas.c.destino_id.in_(ids[n:n + 5000]))
+        ).all())
     # Por destino, el origen de URL menor decide la plantilla (y el ejemplo).
     elegido: dict[int, tuple[str, int, str]] = {}
     for destino_id, destino_url, origen_id, origen_url in filas:
