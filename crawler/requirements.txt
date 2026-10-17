@@ -21,6 +21,9 @@ lxml>=5.0
 # directamente, asi que se declara (decision 69).
 regex>=2024.11.6
 scrapy-playwright>=0.0.40
+# `clear_cookies(name=, domain=)` (1.43) y `route.fetch(max_redirects=)` de la
+# preparacion de pagina (`seo_crawler/render.py`, decision 114).
+playwright>=1.43
 scrapy-impersonate
 html2text>=2024.2
 trafilatura>=2.0

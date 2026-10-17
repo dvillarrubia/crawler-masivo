@@ -142,13 +142,17 @@ class ExtractionConfig(BaseModel):
 
 
 class HttpConfig(BaseModel):
-    """Custom HTTP settings sent with every request."""
+    """Ajustes HTTP del job. Las cabeceras propias, las cookies y el Basic solo
+    van a los hosts de las semillas (decision 114); Accept-Language, a todas."""
 
     custom_headers: dict[str, str] = Field(default_factory=dict)
     accept_language: str = ""
     cookies: dict[str, str] = Field(default_factory=dict)
     basic_auth_user: str = ""
     basic_auth_password: str = ""
+    # Guardar las cookies que pone el sitio entre paginas. Por defecto no,
+    # como Googlebot; las de `cookies` se mandan igual (decision 114).
+    conservar_cookies: bool = False
 
 
 class AnalysisThresholdsConfig(BaseModel):

@@ -41,7 +41,17 @@ con el desafio real de Cloudflare de progym, el cuerpo binario y un 429 masivo
 `spider_opened` de verdad para el render, los hosts externos y la reanudacion
 que repite los muros; las clases van en
 `test_respuestas.py`, el analizador en `test_analyzer_muros_db.py` y el worker
-en `test_worker_bloqueo.py`. Y `test_analyzer_near_duplicates_db.py`, que
+en `test_worker_bloqueo.py`. `test_credenciales_y_cookies.py` (decision
+114) usa el arnes con `http_real` (los middlewares del bloque `http` y el jar
+como lo deja el worker), `descarga_real` (curl_cffi y Playwright con los
+ajustes de settings.py; `chromium` para un ejecutable concreto) y
+`ver_cabeceras` (vuelca las cabeceras que llegan al servidor): las
+credenciales solo llegan a `localhost` y nunca a `127.0.0.1` (un tercero: su
+robots.txt, el destino de una redireccion y un enlace externo), las sondas las
+llevan, las cookies del servidor no se guardan salvo con `conservar_cookies`, y
+con render las configuradas llegan a la pagina. Los de render buscan un
+Chromium que lance (el de Playwright o uno en `PLAYWRIGHT_BROWSERS_PATH`) y se
+saltan sin el. Y `test_analyzer_near_duplicates_db.py`, que
 pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
 (que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
 (modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
