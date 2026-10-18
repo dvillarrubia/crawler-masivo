@@ -57,26 +57,46 @@ def ultimo_corte(dia: int, hora: int, zona: str | None, ahora: datetime) -> date
     return candidato
 
 
-def toca(cliente, ahora: datetime) -> datetime | None:
+def toca(cliente, ahora: datetime, db=None) -> datetime | None:
     """El corte de esta semana si toca generarlo ahora (dentro de la gracia),
     o None. No mira si ya existe: eso lo decide la restriccion unica."""
     e = efectivas(getattr(cliente, "reglas_alerta", None))
     rs = e["resumen_semanal"]
     if not rs.get("activo"):
         return None
-    if not _tiene_perfil_propio(cliente):
-        # Sin un perfil propio y activo no hay semana que resumir: un
-        # «sin alertas» de un cliente que no se rastrea es ruido.
+    if not _tiene_serie(cliente, db):
+        # Sin un perfil propio y activo ni una programacion activa no hay
+        # semana que resumir: un «sin alertas» de un cliente que no se rastrea
+        # es ruido.
         return None
     corte = ultimo_corte(int(rs["dia"]), int(rs["hora"]),
                          getattr(cliente, "zona_horaria", None), ahora)
     return corte if ahora - corte <= GRACIA else None
 
 
-def _tiene_perfil_propio(cliente) -> bool:
+def _tiene_serie(cliente, db=None) -> bool:
+    """Si el cliente tiene algo que se rastrea solo: un perfil propio activo o
+    una programacion activa. En produccion, el 18-oct-2026, ningun cliente
+    tenia perfiles y los censos semanales iban por programacion: contando solo
+    perfiles, el resumen no habria salido para nadie."""
     perfiles = getattr(cliente, "perfiles", None) or []
-    return any(getattr(p, "activo", True) and getattr(p, "rol", "propio") != "competidor"
-               for p in perfiles)
+    if any(getattr(p, "activo", True) and getattr(p, "rol", "propio") != "competidor"
+           for p in perfiles):
+        return True
+    if db is None:
+        return False
+    return bool(_programaciones_sueltas(db, cliente))
+
+
+def _programaciones_sueltas(db, cliente) -> list:
+    """Las programaciones activas del cliente que no van por un perfil (las
+    que si, ya salen con su perfil)."""
+    from shared.models import Programacion
+
+    return (db.query(Programacion)
+            .filter(Programacion.cliente_id == cliente.id, Programacion.activa.is_(True),
+                    Programacion.profile_id.is_(None))
+            .order_by(Programacion.nombre).all())
 
 
 def _fila_evolucion(db, job_id) -> dict[str, Any] | None:
@@ -176,7 +196,19 @@ def componer(db, cliente, desde: datetime, hasta: datetime) -> dict[str, Any]:
             fila["fallidos"] = sum(1 for j in suyos if j.status != "completed")
         salida_perfiles.append(fila)
 
-    sin_perfil = [j for j in jobs if j.profile_id is None]
+    # Una programacion sin perfil es una serie igual que un perfil: lo que se
+    # rastrea cada semana sin que nadie lo lance.
+    for prog in _programaciones_sueltas(db, cliente):
+        suyos = [j for j in jobs if j.profile_id is None and j.programacion_id == prog.id]
+        fila = {"programacion_id": str(prog.id), "nombre": prog.nombre, "rastreos": len(suyos)}
+        if suyos:
+            fila["ultimo"] = _resumen_de_rastreo(db, suyos[-1])
+            fila["fallidos"] = sum(1 for j in suyos if j.status != "completed")
+        salida_perfiles.append(fila)
+    en_serie = {f.get("programacion_id") for f in salida_perfiles if f.get("programacion_id")}
+
+    sin_perfil = [j for j in jobs if j.profile_id is None
+                  and str(j.programacion_id or "") not in en_serie]
     # Lo que salto en rastreos sin perfil tambien se lee: un rastreo lanzado a
     # mano tras un despliegue es justo donde aparece un fallo.
     sueltos = []

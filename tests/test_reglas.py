@@ -484,3 +484,30 @@ def test_la_cabecera_usa_las_fechas_de_la_zona_del_cliente(s):
     c = _cliente(s, nombre="Acme")
     corte = datetime(2026, 10, 19, 0, 30, tzinfo=ZoneInfo("Europe/Madrid"))
     assert RS.generar(s, c, corte)["texto"].startswith("*Acme* · resumen del 12/10 al 19/10")  # en UTC decia 11/10
+
+
+def test_una_programacion_sin_perfil_es_una_serie_del_resumen(s):
+    """Produccion, 18-oct-2026: ningun cliente tenia perfiles y los censos
+    semanales iban por programacion. Contando solo perfiles, el resumen no
+    habria salido para nadie."""
+    from shared.models import Programacion
+
+    c = _cliente(s, nombre="Lopesan")
+    lunes_830 = datetime(2026, 10, 19, 6, 30, tzinfo=timezone.utc)
+    assert RS.toca(c, lunes_830, s) is None
+    prog = Programacion(id=uuid.uuid4(), nombre="lopesan.com (semanal)", cliente_id=c.id,
+                        seeds=["https://x.com/"], config={}, cron="0 3 * * 3", activa=True)
+    s.add(prog)
+    s.flush()
+    assert RS.toca(c, lunes_830, s) is not None
+    semanal = _censo(s, c, dia=14, programacion_id=prog.id)
+    _censo(s, c, dia=15)   # uno a mano: va aparte
+    s.flush()
+    r = RS.generar(s, c, datetime(2026, 10, 19, 8, tzinfo=timezone.utc))
+    (serie,) = r["contenido"]["perfiles"]
+    assert (serie["nombre"], serie["rastreos"], serie["ultimo"]["job_id"]) == (
+        "lopesan.com (semanal)", 1, str(semanal.id))
+    assert r["contenido"]["rastreos_sin_perfil"] == 1
+    prog.activa = False
+    s.flush()
+    assert RS.toca(c, lunes_830, s) is None

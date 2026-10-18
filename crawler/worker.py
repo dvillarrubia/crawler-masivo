@@ -1373,7 +1373,7 @@ def _generar_resumenes() -> None:
     session = SessionLocal()
     try:
         for cliente in session.query(Client).all():
-            corte = toca(cliente, ahora)
+            corte = toca(cliente, ahora, session)
             if corte is None:
                 continue
             try:
