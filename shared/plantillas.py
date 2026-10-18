@@ -74,3 +74,43 @@ def firma_de_ruta(path: str) -> str:
     else:
         forma = [":slug"]
     return "/" + "/".join(forma) + f" ({len(partes)}n)"
+
+
+def reglas_de_plantilla(templates) -> list[tuple[str, str]]:
+    """Las reglas `config.templates` de un job como `(nombre, patron)`.
+
+    Acepta la forma del schema (`{"nombre", "patron"}`), la inglesa y pares
+    sueltos. Una regla incompleta o cuya regex no compila se descarta: una
+    plantilla mal escrita no puede tumbar un analisis.
+    """
+    reglas: list[tuple[str, str]] = []
+    for regla in templates or []:
+        if isinstance(regla, dict):
+            nombre = regla.get("nombre") or regla.get("name")
+            patron = regla.get("patron") or regla.get("pattern")
+        else:
+            try:
+                nombre, patron = (list(regla) + [None, None])[:2]
+            except TypeError:
+                continue
+        if not (nombre and patron):
+            continue
+        try:
+            re.compile(str(patron))
+        except re.error:
+            continue
+        reglas.append((str(nombre), str(patron)))
+    return reglas
+
+
+def plantilla_de(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
+    """La plantilla de una ruta: la primera regla que casa y, si no, su forma.
+
+    Primero las reglas del cliente (`config.templates`) y despues
+    `firma_de_ruta`. La usan el analizador (avisos por plantilla) y
+    `scripts/check_js_templates.py`: dos copias acabarian discrepando.
+    """
+    for nombre, patron in reglas or []:
+        if re.search(patron, path or "/", re.I):
+            return nombre
+    return firma_de_ruta(path)

@@ -34,6 +34,7 @@ from shared.models import (
     Issue,
     CustomExtraction,
     EnlaceNoRastreable,
+    RobotsTxt,
     CapturaAlternativa,
 )
 
@@ -75,6 +76,12 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     ("enlaces_no_rastreables", EnlaceNoRastreable, "from_url_id"),
     # Capturas con otro perfil (decision 119). Igual: opcional al importar.
     ("capturas_alternativas", CapturaAlternativa, "url_id"),
+]
+
+# Con job_id y SIN url: no hay nada que remapear salvo el job. El robots.txt de
+# cada host (decisiones 112 y 113); un backup anterior no lo trae y se salta.
+_TABLAS_SOLO_JOB: list[tuple[str, type]] = [
+    ("robots_txt", RobotsTxt),
 ]
 
 
@@ -320,6 +327,8 @@ def stream_backup_zip(
             if fname == "links" and archivado:
                 yield fname, _iter_enlaces_archivados(job_id)
                 continue
+            yield fname, _iter_table(job_id, model, "job_id")
+        for fname, model in _TABLAS_SOLO_JOB:
             yield fname, _iter_table(job_id, model, "job_id")
 
     with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -617,6 +626,17 @@ def import_backup_zip(
             if skipped:
                 rows_skipped[fname] = skipped
 
+        for fname, model in _TABLAS_SOLO_JOB:
+            jsonl_name = f"{fname}.jsonl"
+            if jsonl_name not in zf.namelist():
+                continue
+            imported, skipped = _import_child_table(
+                zf, jsonl_name, model, old_to_new_url, new_job_id, None, db, warnings,
+            )
+            rows_imported[fname] = imported
+            if skipped:
+                rows_skipped[fname] = skipped
+
         db.commit()
 
     return {
@@ -674,6 +694,7 @@ def _insert_url_batch(
             unique_inlinks_count=d.get("unique_inlinks_count", 0),
             pagerank=d.get("pagerank"),
             in_sitemap=d.get("in_sitemap"),
+            bloqueada_googlebot=d.get("bloqueada_googlebot"),
         )
         db.add(url)
         db.flush()
@@ -687,11 +708,15 @@ def _import_child_table(
     model: type,
     old_to_new_url: dict[int, int],
     new_job_id: uuid.UUID | None,
-    url_fk_field: str,
+    url_fk_field: str | None,
     db: Session,
     warnings: list[str],
 ) -> tuple[int, int]:
-    """Import rows from a child NDJSON file. Returns (imported, skipped)."""
+    """Import rows from a child NDJSON file. Returns (imported, skipped).
+
+    `url_fk_field=None`: la tabla no cuelga de una URL (`robots_txt`) y solo se
+    remapea el job.
+    """
     imported = 0
     skipped = 0
     unmapped_fk = 0  # filas cuyo url FK no existe en el remap old→new
@@ -717,17 +742,18 @@ def _import_child_table(
             continue
 
         # Remap url FK
-        old_url_id = d.get(url_fk_field)
-        if old_url_id is None:
-            warnings.append(f"{jsonl_name} linea {lineno}: falta {url_fk_field}, omitida")
-            skipped += 1
-            continue
-        new_url_id = old_to_new_url.get(old_url_id)
-        if new_url_id is None:
-            skipped += 1
-            unmapped_fk += 1
-            continue
-        d[url_fk_field] = new_url_id
+        if url_fk_field is not None:
+            old_url_id = d.get(url_fk_field)
+            if old_url_id is None:
+                warnings.append(f"{jsonl_name} linea {lineno}: falta {url_fk_field}, omitida")
+                skipped += 1
+                continue
+            new_url_id = old_to_new_url.get(old_url_id)
+            if new_url_id is None:
+                skipped += 1
+                unmapped_fk += 1
+                continue
+            d[url_fk_field] = new_url_id
 
         # Remap job_id if applicable
         if new_job_id is not None and "job_id" in table_cols:

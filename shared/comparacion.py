@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any
+from urllib.parse import urlsplit
 
 import logging
 import os
@@ -453,9 +454,25 @@ def _era_indexable(pagina: dict[str, Any]) -> bool:
             and (pagina.get("indexability_status") or "") == "Indexable")
 
 
+def _canonical_que_cuenta(pagina: dict[str, Any]) -> str | None:
+    """El canonical que Google usa, o None.
+
+    Con dos o más canonicals de destino distinto en el head Google los ignora
+    TODOS (decisión 115): la página no está canonicalizada a ninguno, y
+    `canonical_href` guarda el primero solo como dato. Leerlo aquí disparaba
+    `canonical_a_otro_host` —una alerta crítica con webhook— por un canonical
+    que Google descarta. Sin la columna (censo anterior), manda el primero,
+    como antes.
+    """
+    distintos = pagina.get("canonical_distintos")
+    if distintos is not None and distintos > 1:
+        return None
+    return pagina.get("canonical_href")
+
+
 def _canonical_a_otra(pagina: dict[str, Any]) -> str | None:
     """El canonical de la página si apunta a OTRA URL; None si es la suya."""
-    can = pagina.get("canonical_href")
+    can = _canonical_que_cuenta(pagina)
     if not can:
         return None
     return can if _norm(can) != _norm(pagina.get("url")) else None
@@ -479,7 +496,7 @@ BASE_DE_LA_REGLA: dict[str, str] = {
 
 def _canonical_fuera(pagina: dict[str, Any]) -> str | None:
     """El canonical si apunta a un host distinto del de la propia página."""
-    can = pagina.get("canonical_href")
+    can = _canonical_que_cuenta(pagina)
     hc = _host(can)
     return can if can and hc and hc != _host(pagina.get("url")) else None
 
@@ -594,6 +611,25 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
     return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))
 
 
+# Tipos que van UNO POR PLANTILLA anclados en una URL elegida entre las del
+# grupo (decision 122: la de URL menor). Entre dos censos el ancla se mueve en
+# cuanto se rastrea otra pagina de la serie sin que el hallazgo cambie, asi que
+# se casan por (tipo, host, group_key) y no por la URL; sin esto la misma serie
+# salia «resuelta» en /cat/page/3/ y «nueva» en /cat/page/2/. Repite
+# `analysis.avisos_de_paginacion.TIPOS_DE_PLANTILLA` (la imagen de la API no
+# lleva `analysis/`; un test comprueba que coinciden). Otros avisos por grupo
+# (imagenes, cabeceras por host) tienen el mismo riesgo y no se tocan aqui:
+# cambiar como casan es otra decision, con su propia medida.
+ANCLADOS_POR_GRUPO = frozenset({
+    "paginacion_canonical_a_la_primera",
+    "paginacion_noindex",
+    "solo_enlazada_desde_paginacion_profunda",
+    "paginacion_sin_enlace",
+    "paginacion_siguiente_rota",
+    "paginacion_rel_incorrecto",
+})
+
+
 def incidencias_de_censo(db, job_id) -> list[dict[str, Any]]:
     """Las incidencias de un censo con lo que las identifica entre censos.
 
@@ -674,10 +710,15 @@ def comparar_incidencias(
 
     mapa_hosts = mapa_hosts or {}
 
+    def url_de(i):
+        return _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts))
+
     def clave(i):
-        return (i["issue_type"],
-                _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts)),
-                i.get("group_key"))
+        if i["issue_type"] in ANCLADOS_POR_GRUPO and i.get("group_key"):
+            # El hallazgo es la plantilla del listado en ese host, y la URL
+            # donde se ancla puede cambiar entre censos (decision 122).
+            return (i["issue_type"], urlsplit(url_de(i)).hostname or "", i["group_key"])
+        return (i["issue_type"], url_de(i), i.get("group_key"))
 
     a = {clave(i): i for i in incidencias_a}
     b = {clave(i): i for i in incidencias_b}
@@ -687,7 +728,7 @@ def comparar_incidencias(
 
     idas, sin_pagina = [], []
     for k in a.keys() - b.keys():
-        if urls_del_nuevo is not None and k[1] not in urls_del_nuevo:
+        if urls_del_nuevo is not None and url_de(a[k]) not in urls_del_nuevo:
             sin_pagina.append(a[k])      # su pagina no se volvio a visitar
         else:
             idas.append(a[k])
@@ -748,6 +789,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
             HtmlMeta.canonical_href, HtmlMeta.title,
+            HtmlMeta.canonical_distintos,
         )
         .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
         .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
@@ -770,6 +812,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "url": f.url, "status_code": f.status_code,
             "indexability_status": f.indexability_status,
             "canonical_href": f.canonical_href, "title": f.title,
+            "canonical_distintos": f.canonical_distintos,
             "h1": h1s.get(f.url), "word_count": f.word_count,
             "response_class": f.response_class,
         }

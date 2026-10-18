@@ -83,6 +83,7 @@ SORT_COLUMNS = {
     "word_count": Url.word_count,
     "content_word_count": Url.content_word_count,
     "response_time_ms": Url.response_time_ms,
+    "ttfb_ms": Url.ttfb_ms,
     "content_length": Url.content_length,
     "transfer_size": Url.transfer_size,
     "crawl_depth": Url.crawl_depth,
@@ -99,6 +100,7 @@ SORT_COLUMNS = {
     "folder_depth": Url.folder_depth,
     "text_ratio": Url.text_ratio,
     "host": Url.host,
+    "segmento": Url.segmento,
     "last_crawled_at": Url.last_crawled_at,
     "title": HtmlMeta.title,
     "title_len": HtmlMeta.title_len,
@@ -126,6 +128,7 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "word_count": (Url.word_count, False),
     "content_word_count": (Url.content_word_count, False),
     "response_time_ms": (Url.response_time_ms, False),
+    "ttfb_ms": (Url.ttfb_ms, False),
     "inlinks_count": (Url.inlinks_count, False),
     "outlinks_count": (Url.outlinks_count, False),
     "external_outlinks_count": (Url.external_outlinks_count, False),
@@ -153,6 +156,7 @@ _STRING_CONTAINS_FILTERS: dict[str, tuple[Any, bool]] = {
     "redirect_url_contains":         (Url.redirect_url,        False),
     "indexability_status_contains":  (Url.indexability_status, False),
     "http_version_contains":         (Url.http_version,        False),
+    "content_encoding_contains":     (Url.content_encoding,    False),
     "last_modified_contains":        (Url.last_modified,       False),
     "title_contains":                (HtmlMeta.title,                True),
     "description_contains":          (HtmlMeta.meta_description,     True),
@@ -169,6 +173,9 @@ _STRING_CONTAINS_FILTERS: dict[str, tuple[Any, bool]] = {
     "x_robots_tag_contains":         (HtmlMeta.x_robots_tag,         True),
     "canonical_header_contains":     (HtmlMeta.canonical_header,     True),
     "meta_refresh_contains":         (HtmlMeta.meta_refresh,         True),
+    "redireccion_js_contains":       (HtmlMeta.redireccion_js,       True),
+    "viewport_contains":             (HtmlMeta.viewport,             True),
+    "html_lang_contains":            (HtmlMeta.html_lang,            True),
 }
 
 # Campos que se pueden pedir vacios o con valor: `?vacio=title,canonical_href`
@@ -558,6 +565,42 @@ def valor_csv_a_medida(fila: dict | None, clase: str, regla: dict, posicion: int
     return celda_segura(fila.get("valor"))
 
 
+# ---------------------------------------------------------------------------
+# Segmentos de negocio (decision 125): `urls.segmento`, materializado al analizar
+# ---------------------------------------------------------------------------
+def segmentos_pedidos(qp) -> list[str]:
+    """`?segmento=a&segmento=b` (O). Repetido y no separado por comas: la forma
+    de la ruta, que es el segmento por defecto, puede llevar una coma."""
+    valores = qp.getlist("segmento") if hasattr(qp, "getlist") else [qp.get("segmento")]
+    return [v for v in valores if v not in (None, "")]
+
+
+def urls_de_segmentos(db: Session, job_id: uuid.UUID, segmentos: list[str]):
+    """Subconsulta de los ids de URL de esos segmentos, con el `job_id` delante
+    (lo que usa el indice; `segmento` no tiene uno propio, decision 125)."""
+    return db.query(Url.id).filter(Url.job_id == job_id, Url.segmento.in_(segmentos))
+
+
+def incidencia_por_pagina():
+    """Las incidencias que son de SU pagina. Las que se emiten una vez por
+    hallazgo (una imagen sin alt en mil paginas, una cabecera por host, un
+    bloque de datos estructurados de plantilla, un enlace de plantilla:
+    decisiones 53, 64, 73 y 106) llevan `paginas_afectadas` y cuelgan de una
+    pagina de anclaje: repartirlas por el segmento de esa pagina afirmaria algo
+    que no se sabe.
+
+    Con `paginas_afectadas` = 1 el hallazgo SI es de una sola pagina —la foto
+    propia de un producto—, y es la de anclaje: esa se reparte. Son la mayoria
+    de las imagenes sin alt (310 de 354 en progym)."""
+    pa = Issue.details["paginas_afectadas"].as_integer()
+    return or_(pa.is_(None), pa <= 1)
+
+
+def incidencia_agregada():
+    """El complemento de `incidencia_por_pagina`: un hallazgo de varias paginas."""
+    return Issue.details["paginas_afectadas"].as_integer() > 1
+
+
 def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
     """Las URLs de un job con los filtros del Explorador aplicados.
 
@@ -619,7 +662,8 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
         if qp.get(campo) not in (None, ""):
             q = q.filter(col == qp.get(campo))
     for campo, col in (("is_internal", Url.is_internal), ("indexable", Url.indexable),
-                       ("in_sitemap", Url.in_sitemap)):
+                       ("in_sitemap", Url.in_sitemap),
+                       ("bloqueada_googlebot", Url.bloqueada_googlebot)):
         v = _bool(qp.get(campo))
         if v is not None:
             q = q.filter(col == v)
@@ -645,13 +689,22 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
     # vistas por ambito piden varios a la vez) y/o de esa gravedad.
     tipos = [t.strip() for t in (qp.get("issue_type") or "").split(",") if t.strip()]
     severidad = qp.get("severity")
+    segmentos = segmentos_pedidos(qp)
     if tipos or severidad:
         sub = db.query(Issue.url_id).filter(Issue.job_id == job_id)
         if tipos:
             sub = sub.filter(Issue.issue_type.in_(tipos))
         if severidad:
             sub = sub.filter(Issue.severity == severidad)
+        if segmentos:
+            # Lo mismo que cuenta Problemas con ese segmento: la pagina de
+            # anclaje de un hallazgo de muchas paginas no es «la» pagina del
+            # segmento con ese problema (decision 125).
+            sub = sub.filter(incidencia_por_pagina())
         q = q.filter(Url.id.in_(sub))
+
+    if segmentos:
+        q = q.filter(Url.segmento.in_(segmentos))
 
     # Una plantilla (forma de ruta, `shared.plantillas.firma_de_ruta`). La
     # forma se calcula en Python —no hay forma de escribirla en SQL sin atarse a
@@ -781,9 +834,11 @@ def urls_por_plantilla(
     job_id: uuid.UUID,
     request: Request,
     limite: int = Query(300, ge=1, le=2000),
+    agrupar: str = Query("plantilla", pattern="^(plantilla|segmento)$",
+                         description="Por la forma de la ruta o por `urls.segmento` (decision 125)"),
     db: Session = Depends(get_session),
 ):
-    """Las URLs de la vista agrupadas por la forma de su ruta.
+    """Las URLs de la vista agrupadas por la forma de su ruta (o por segmento).
 
     En SEO tecnico casi nada se arregla URL a URL: se arregla una plantilla. En
     Lopesan, `/de/null`, `/en/null`, `/es/null`… salian como doce 404 sueltos
@@ -800,7 +855,7 @@ def urls_por_plantilla(
     q = _urls_filtradas(db, job_id, request.query_params)
     filas = q.with_entities(
         Url.id, Url.url, Url.path, Url.status_group, Url.indexable, Url.content_word_count,
-        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count,
+        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count, Url.segmento,
     ).all()
     con_error = {
         uid for (uid,) in db.query(Issue.url_id)
@@ -817,7 +872,12 @@ def urls_por_plantilla(
 
     grupos: dict[str, list] = defaultdict(list)
     for f in filas:
-        grupos[firma_de_ruta(f.path or "/")].append(f)
+        if agrupar == "segmento":
+            # Sin segmentar = censo analizado antes de la columna: se dice, no se
+            # inventa la forma de la ruta como si fuera su segmento.
+            grupos[f.segmento if f.segmento is not None else "(sin segmentar)"].append(f)
+        else:
+            grupos[firma_de_ruta(f.path or "/")].append(f)
 
     salida = []
     for forma, fs in grupos.items():
@@ -862,6 +922,8 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "content_length": ("Tamaño (bytes)", lambda u: u.content_length),
     "transfer_size": ("Transferido (bytes)", lambda u: u.transfer_size),
     "response_time_ms": ("Tiempo (ms)", lambda u: u.response_time_ms),
+    "ttfb_ms": ("TTFB (ms)", lambda u: u.ttfb_ms),
+    "content_encoding": ("Compresión", lambda u: u.content_encoding),
     "click_depth": ("Clics desde home", lambda u: u.click_depth),
     "crawl_depth": ("Prof. rastreo", lambda u: u.crawl_depth),
     "folder_depth": ("Niveles", lambda u: u.folder_depth),
@@ -884,7 +946,10 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "indexability_status": ("Indexabilidad", lambda u: u.indexability_status),
     "is_internal": ("Interna", lambda u: _si_no(u.is_internal)),
     "in_sitemap": ("En el sitemap", lambda u: _si_no(u.in_sitemap)),
+    # Segun el robots.txt guardado (decision 113); vacio = no evaluado.
+    "bloqueada_googlebot": ("Bloqueada para Googlebot", lambda u: _si_no(u.bloqueada_googlebot)),
     "host": ("Host", lambda u: u.host),
+    "segmento": ("Segmento", lambda u: u.segmento),
     "title": ("Título", _m("title")),
     "title_len": ("Long. título", _m("title_len")),
     "title_pixel_width": ("Título (px)", _m("title_pixel_width")),
@@ -893,9 +958,14 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "meta_description_pixel_width": ("Descripción (px)", _m("meta_description_pixel_width")),
     "canonical_href": ("Canonical", _m("canonical_href")),
     "canonical_header": ("Canonical (cabecera)", _m("canonical_header")),
+    "rel_next": ("rel=next", _m("rel_next")),
+    "rel_prev": ("rel=prev", _m("rel_prev")),
     "meta_robots": ("Meta robots", _m("meta_robots")),
     "x_robots_tag": ("X-Robots-Tag", _m("x_robots_tag")),
     "meta_refresh": ("Meta refresh", _m("meta_refresh")),
+    "redireccion_js": ("Redirección JS", _m("redireccion_js")),
+    "viewport": ("Viewport", _m("viewport")),
+    "html_lang": ("html lang", _m("html_lang")),
     "og_title": ("OG title", _m("og_title")),
     "og_image": ("OG image", _m("og_image")),
     "og_type": ("OG type", _m("og_type")),
@@ -1213,11 +1283,15 @@ def list_issues(
     page_size: int = Query(50, ge=1, le=200),
     severity: str | None = Query(None),
     issue_type: str | None = Query(None),
+    segmento: list[str] | None = Query(None, description="Solo las de paginas de esos segmentos (decision 125)"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
 
     q = db.query(Issue).filter(Issue.job_id == job_id)
+    segs = [x for x in (segmento or []) if x]
+    if segs:
+        q = q.filter(Issue.url_id.in_(urls_de_segmentos(db, job_id, segs)), incidencia_por_pagina())
 
     if severity is not None:
         q = q.filter(Issue.severity == severity)
@@ -1266,18 +1340,36 @@ class _EjemploIssue(BaseModel):
     url: str | None = None
 
 
+class _PorSegmento(BaseModel):
+    segmento: str | None
+    paginas: int          # paginas del segmento con esta incidencia
+    urls: int             # URLs del segmento: el denominador
+    pct: float            # paginas / urls, en %
+
+
 class _ResumenIssue(BaseModel):
     issue_type: str
     severity: str
     incidencias: int
     paginas: int
     ejemplos: list[_EjemploIssue] = []
+    # Decision 125. Con `?segmento=`: sobre las URLs de esos segmentos.
+    urls_denominador: int | None = None
+    pct_paginas: float | None = None
+    # Con `?por_segmento=true`: los segmentos con mas paginas afectadas, y
+    # cuantas incidencias de este tipo NO se pueden repartir (una por
+    # hallazgo, ver `incidencia_por_pagina`).
+    por_segmento: list[_PorSegmento] | None = None
+    agregadas: int | None = None
 
 
 @router.get("/issues/resumen", response_model=list[_ResumenIssue])
 def resumen_issues(
     job_id: uuid.UUID,
     ejemplos: int = Query(3, ge=0, le=10),
+    segmento: list[str] | None = Query(None, description="Solo paginas de esos segmentos (decision 125)"),
+    por_segmento: bool = Query(False, description="Anade el % de paginas afectadas por segmento"),
+    segmentos_max: int = Query(10, ge=1, le=200),
     db: Session = Depends(get_session),
 ):
     """Lo que enseña la vista agrupada de Problemas (UX-04): cuántas
@@ -1295,12 +1387,16 @@ def resumen_issues(
         (Issue.severity == "info", 2),
         else_=3,
     )
+    segs = [x for x in (segmento or []) if x]
+    filtro_seg: list = []
+    if segs:
+        filtro_seg = [Issue.url_id.in_(urls_de_segmentos(db, job_id, segs)), incidencia_por_pagina()]
     filas = (
         db.query(
             Issue.issue_type, Issue.severity,
             func.count(Issue.id), func.count(func.distinct(Issue.url_id)),
         )
-        .filter(Issue.job_id == job_id)
+        .filter(Issue.job_id == job_id, *filtro_seg)
         .group_by(Issue.issue_type, Issue.severity)
         .order_by(gravedad, func.count(func.distinct(Issue.url_id)).desc(), Issue.issue_type)
         .all()
@@ -1320,7 +1416,8 @@ def resumen_issues(
             for uid, u in (
                 db.query(Issue.url_id, Url.url)
                 .join(Url, Url.id == Issue.url_id)
-                .filter(Issue.job_id == job_id, Issue.issue_type == tipo, Issue.severity == sev)
+                .filter(Issue.job_id == job_id, Issue.issue_type == tipo, Issue.severity == sev,
+                        *filtro_seg)
                 .order_by(Issue.id)
                 .limit(ejemplos * 5)
                 .all()
@@ -1334,7 +1431,63 @@ def resumen_issues(
         resultado.append(_ResumenIssue(
             issue_type=tipo, severity=sev, incidencias=n, paginas=paginas, ejemplos=muestra,
         ))
+    if segs or por_segmento:
+        _anadir_segmentos(db, job_id, resultado, segs, por_segmento, segmentos_max)
     return resultado
+
+
+_ORDEN_GRAVEDAD = {"error": 0, "warning": 1, "info": 2}
+
+
+def _anadir_segmentos(db: Session, job_id: uuid.UUID, resultado: list, segs: list[str],
+                      por_segmento: bool, maximo: int) -> None:
+    """El denominador es el numero de URLs del segmento, TODAS (con sus 404 y
+    sus saltos): «el 12 % de las fichas» tiene que poder leerse sin preguntar
+    sobre que. Tres consultas agrupadas, no una por tipo."""
+    urls_por_seg = dict(
+        db.query(Url.segmento, func.count(Url.id)).filter(Url.job_id == job_id)
+        .group_by(Url.segmento).all())
+    agregadas = dict(
+        ((t, sv), n) for t, sv, n in
+        db.query(Issue.issue_type, Issue.severity, func.count(Issue.id))
+        .filter(Issue.job_id == job_id, incidencia_agregada())
+        .group_by(Issue.issue_type, Issue.severity))
+    if segs:
+        # Un tipo que solo tiene hallazgos de muchas paginas no puede
+        # desaparecer del filtro: se leeria «este segmento no tiene ninguno»
+        # cuando es «no se puede repartir» (decisiones 67 y 89). Sale con 0
+        # paginas y sus `agregadas`.
+        vistos = {(r.issue_type, r.severity) for r in resultado}
+        for (t, sv), n in agregadas.items():
+            if (t, sv) not in vistos:
+                resultado.append(_ResumenIssue(issue_type=t, severity=sv, incidencias=0, paginas=0))
+        resultado.sort(key=lambda r: (_ORDEN_GRAVEDAD.get(r.severity, 3), -r.paginas, r.issue_type))
+        den = sum(urls_por_seg.get(x, 0) for x in segs)
+        for r in resultado:
+            r.urls_denominador = den
+            r.pct_paginas = round(100.0 * r.paginas / den, 2) if den else None
+    for r in resultado:
+        r.agregadas = agregadas.get((r.issue_type, r.severity), 0)
+    if not por_segmento:
+        return
+    cond = [Issue.job_id == job_id, incidencia_por_pagina()]
+    if segs:
+        cond.append(Url.segmento.in_(segs))
+    reparto: dict[tuple[str, str], list] = {}
+    for tipo, sev, seg, paginas in (
+        db.query(Issue.issue_type, Issue.severity, Url.segmento, func.count(func.distinct(Issue.url_id)))
+        .join(Url, Url.id == Issue.url_id)
+        .filter(*cond)
+        .group_by(Issue.issue_type, Issue.severity, Url.segmento)
+    ):
+        total = urls_por_seg.get(seg, 0)
+        reparto.setdefault((tipo, sev), []).append(_PorSegmento(
+            segmento=seg, paginas=paginas, urls=total,
+            pct=round(100.0 * paginas / total, 2) if total else 0.0))
+    for r in resultado:
+        filas = sorted(reparto.get((r.issue_type, r.severity), []),
+                       key=lambda p: (-p.paginas, -p.pct, p.segmento or ""))
+        r.por_segmento = filas[:maximo]
 
 
 # ---------------------------------------------------------------------------
@@ -1675,6 +1828,14 @@ CSV_COLUMNS = [
     "rel_prev",
     "meta_refresh",
     "has_meta_outside_head",
+    # Lo que el HTML declara de si mismo (decision 108)
+    "viewport",
+    "html_lang",
+    "content_language",
+    "canonical_crudo",
+    "redireccion_js",
+    "charset_meta",
+    "texto_mal_codificado",
     # Encabezados: lo primero que mira cualquier auditoria y lo unico que
     # obligaba a abrir el backup ZIP para verlo.
     "h1_count",
@@ -1691,6 +1852,7 @@ CSV_COLUMNS = [
     "twitter_card",
     "twitter_title",
     "twitter_description",
+    "twitter_image",
     # Internacionalizacion
     "hreflang_count",
     "hreflang_langs",
@@ -1708,6 +1870,8 @@ CSV_COLUMNS = [
     "has_mixed_content",
     # Otros
     "blocked_by_robots",
+    # Si Googlebot puede pedirla segun el robots.txt guardado (decision 113)
+    "bloqueada_googlebot",
     # La respuesta era la pagina o un muro delante (decision 103)
     "response_class",
     "body_hash",
@@ -1800,6 +1964,13 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(meta.rel_prev) if meta else "",
         _val(meta.meta_refresh) if meta else "",
         _val(meta.has_meta_outside_head) if meta else "",
+        _val(meta.viewport) if meta else "",
+        _val(meta.html_lang) if meta else "",
+        _val(meta.content_language) if meta else "",
+        _val(meta.canonical_crudo) if meta else "",
+        _val(meta.redireccion_js) if meta else "",
+        _val(meta.charset_meta) if meta else "",
+        _val(meta.texto_mal_codificado) if meta else "",
         # Encabezados
         _val(ex.get("h1_count", 0)),
         _val(ex.get("h1_1")),
@@ -1815,6 +1986,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(meta.twitter_card) if meta else "",
         _val(meta.twitter_title) if meta else "",
         _val(meta.twitter_description) if meta else "",
+        _val(meta.twitter_image) if meta else "",
         # Hreflang
         _val(ex.get("hreflang_count", 0)),
         _val(ex.get("hreflang_langs")),
@@ -1832,6 +2004,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(sec.has_mixed_content) if sec else "",
         # Otros
         _val(url_obj.blocked_by_robots),
+        _val(getattr(url_obj, "bloqueada_googlebot", None)),
         _val(getattr(url_obj, "response_class", None)),
         _val(url_obj.body_hash),
         _val(url_obj.content_hash),
@@ -2354,6 +2527,28 @@ def _paginas_con(job_id: uuid.UUID, db: Session, tipos: list[str]) -> int:
     ).scalar() or 0
 
 
+def _paginas_de_mas_en_grupos(job_id: uuid.UUID, db: Session, tipo: str) -> int:
+    """Paginas que cubre una incidencia agrupada ADEMAS de la suya.
+
+    `title_generico` (decision 121) es una fila por valor, en la pagina de URL
+    menor, con `paginas_afectadas`, y les quita a las demas su
+    `title_duplicate` y su `title_too_short` (36). `_paginas_con` cuenta
+    `url_id` distintos, asi que sin esto tres paginas «Sin título | Marca»
+    restaban una y la nota SUBIA por un hallazgo mas preciso (revision de
+    #159, el mismo caso que la soft 404 de la decision 105). Puede contar dos
+    veces una de esas paginas si ademas tiene `title_too_long`: el resultado
+    se acota abajo con `max(0, ...)` y la pagina sigue teniendo un problema.
+    """
+    extra = 0
+    for (detalles,) in db.query(Issue.details).filter(
+        Issue.job_id == job_id, Issue.issue_type == tipo,
+    ):
+        n = detalles.get("paginas_afectadas") if isinstance(detalles, dict) else None
+        if isinstance(n, int) and n > 1:
+            extra += n - 1
+    return extra
+
+
 def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Crawlability: status codes, indexability, redirects."""
     total = db.query(func.count(Url.id)).filter(
@@ -2456,7 +2651,8 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     issue_map: dict[str, int] = {it: c for it, c in issue_rows}
 
     title_missing = issue_map.get("title_missing", 0)
-    title_problems = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate"])
+    title_relleno_extra = _paginas_de_mas_en_grupos(job_id, db, "title_generico")
+    title_problems = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "title_generico"]) + title_relleno_extra
     desc_missing = issue_map.get("description_missing", 0)
     desc_problems = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate"])
     h1_problems = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate"])
@@ -2472,7 +2668,7 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Issue.severity.in_(("error", "warning")),
     ).scalar() or 0
     soft404_candidatos = _paginas_con(job_id, db, ["soft_404_candidato"])
-    title_nota = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "soft_404"])
+    title_nota = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "title_generico", "soft_404"]) + title_relleno_extra
     desc_nota = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate", "soft_404"])
     h1_nota = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate", "soft_404"])
     thin_nota = _paginas_con(job_id, db, ["low_word_count", "very_low_text_ratio", "low_text_ratio", "soft_404"])
@@ -2521,9 +2717,9 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     if title_problems - title_missing > 0:
         recs.append(Recommendation(
             priority="media", title="Optimizar titulos",
-            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico, tenga al menos 10 caracteres y no pase de 580 pixeles de ancho (que es por donde Google lo corta).",
+            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (de relleno, demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico, tenga al menos 10 caracteres y no pase de 580 pixeles de ancho (que es por donde Google lo corta).",
             affected_count=title_problems - title_missing,
-            issue_types=["title_too_short", "title_too_long", "title_duplicate"],
+            issue_types=["title_too_short", "title_too_long", "title_duplicate", "title_generico"],
         ))
     if desc_missing > 0:
         recs.append(Recommendation(
@@ -2562,14 +2758,23 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     )
 
 
+TIPOS_SIN_ENLACE_QUE_CUENTE = (
+    "orphan_page", "sitemap_orphan", "solo_enlazada_desde_paginacion_excluida",
+)
+
+
 def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Links: orphan pages, inlinks distribution, nofollow, broken links."""
     # Huerfana solo puede serlo una pagina 200 (ver analyze_links)
     total_internal = _html_2xx(job_id, db)
 
-    # Orphan pages (0 inlinks)
-    orphan_count = db.query(func.count(Issue.id)).filter(
-        Issue.job_id == job_id, Issue.issue_type == "orphan_page",
+    # Paginas sin un enlace que cuente: las huerfanas, las del sitemap que
+    # nadie enlaza y las que solo cuelgan de una paginacion excluida (decision
+    # 122). La 122 pasa paginas de las dos primeras a la tercera: contando solo
+    # `orphan_page`, la nota SUBIA en el censo donde se encuentra el problema.
+    # Paginas distintas, no incidencias.
+    orphan_count = db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.issue_type.in_(TIPOS_SIN_ENLACE_QUE_CUENTE),
     ).scalar() or 0
 
     # Average inlinks
@@ -2616,9 +2821,9 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     if orphan_count > 0:
         recs.append(Recommendation(
             priority="alta", title="Enlazar paginas huerfanas",
-            description=f"Hay {orphan_count} paginas sin enlaces internos que apunten a ellas. Agrega enlaces desde paginas relevantes para que los buscadores las descubran.",
+            description=f"Hay {orphan_count} paginas sin un enlace interno que los buscadores sigan: nadie las enlaza, o solo las enlazan paginas 2+ de un listado en noindex o canonicalizadas a la 1. Agrega enlaces desde paginas indexables (o arregla esa paginacion) para que los buscadores las descubran.",
             affected_count=orphan_count,
-            issue_types=["orphan_page"],
+            issue_types=list(TIPOS_SIN_ENLACE_QUE_CUENTE),
         ))
     if broken_link_issues > 0:
         recs.append(Recommendation(

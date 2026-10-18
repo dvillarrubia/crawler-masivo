@@ -234,3 +234,20 @@ def test_un_solo_titulo_o_un_rastreo_viejo_no_avisan():
     SEOAnalyzer(s, j.id).analyze_titles()
     s.flush()
     assert "title_multiple" not in _tipos(s, j, a.id) + _tipos(s, j, b.id)
+
+
+# -- Sintaxis de X-Robots-Tag con el criterio de la indexabilidad (decision 107)
+
+def test_la_sintaxis_de_x_robots_mira_solo_lo_que_va_a_google():
+    s, j = _montar()
+    otro = _url(s, j, "https://x.com/a", x_robots_tag="bingbot: noindex/nofollow")
+    pegado = _url(s, j, "https://x.com/b", x_robots_tag="googlebot:noindex/nofollow")
+    SEOAnalyzer(s, j.id).analyze_robots_syntax()
+    s.flush()
+    assert _tipos(s, j, otro.id) == []
+    [aviso] = [i for i in s.query(Issue).all() if i.url_id == pegado.id]
+    assert aviso.issue_type == "robots_invalid_syntax"
+    assert aviso.severity == "warning"
+    # Antes el prefijo pegado escondia el noindex: solo se veia el nofollow.
+    assert aviso.details["ignored_directives"] == ["nofollow", "noindex"]
+    assert aviso.details["raw"] == "googlebot:noindex/nofollow"

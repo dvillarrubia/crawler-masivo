@@ -185,7 +185,8 @@ class PostgresPipeline:
                 # Update mutable fields
                 for field in (
                     "status_code", "status_group", "content_type",
-                    "content_length", "response_time_ms", "is_html",
+                    "content_length", "response_time_ms", "ttfb_ms",
+                    "content_encoding", "is_html",
                     "resource_type", "redirect_url", "body_hash",
                     # New Screaming Frog fields
                     "url_length", "folder_depth", "word_count",
@@ -238,6 +239,8 @@ class PostgresPipeline:
                     status_code=data.get("status_code"),
                     status_group=data.get("status_group"),
                     response_time_ms=data.get("response_time_ms"),
+                    ttfb_ms=data.get("ttfb_ms"),
+                    content_encoding=data.get("content_encoding"),
                     is_html=data.get("is_html", False),
                     resource_type=data.get("resource_type"),
                     redirect_url=data.get("redirect_url"),
@@ -674,6 +677,7 @@ class PostgresPipeline:
             lang=data.get("lang"),
             href=data.get("href"),
             en_body=data.get("en_body"),
+            origen=data.get("origen"),
         )
 
     def _make_structured_data(self, data: dict):

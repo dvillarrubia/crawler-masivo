@@ -29,8 +29,11 @@ lleva parsel.
 
 from __future__ import annotations
 
+import math
 import re
+import time
 from collections import Counter, deque
+from email.utils import parsedate_to_datetime
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
@@ -467,8 +470,48 @@ def resumen_de_salud(recuentos: Mapping[str, int], umbral: float,
     }
 
 
+def retry_after_segundos(valor: Any, *, ahora: float | None = None) -> float | None:
+    """Segundos que pide esperar una cabecera `Retry-After` (RFC 9110, 10.2.3).
+
+    Admite las dos formas del estandar: un numero de segundos (`120`) o una
+    fecha HTTP (`Wed, 21 Oct 2026 07:28:00 GMT`). Una fecha ya pasada da 0
+    (se puede volver a pedir ya); un numero negativo, infinito o basura, None:
+    lo que no se sabe leer no se convierte en espera, porque equivocarse aqui
+    frena un rastreo entero. `retry-after-ms` no es HTTP: solo lo manda el
+    cliente del modelo, y lo lee `shared/llm.py`.
+
+    Una sola copia para el rastreo (decision 111) y para la capa de
+    decisiones: dos acabarian discrepando.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, (bytes, bytearray)):
+        valor = bytes(valor).decode("latin-1", "replace")
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    try:
+        segundos = float(texto)
+    except ValueError:
+        segundos = None
+    if segundos is not None:
+        return segundos if math.isfinite(segundos) and segundos >= 0 else None
+    try:
+        fecha = parsedate_to_datetime(texto)
+    except (TypeError, ValueError, OverflowError, IndexError):
+        return None
+    if fecha is None:
+        return None
+    if fecha.tzinfo is None:  # sin zona: HTTP-date es siempre GMT
+        from datetime import timezone
+
+        fecha = fecha.replace(tzinfo=timezone.utc)
+    return max(0.0, fecha.timestamp() - (time.time() if ahora is None else ahora))
+
+
 __all__ = [
     "CLASES", "NO_VALIDAS", "ESTADO_INDEXABILIDAD", "MOTIVOS_BLOQUEO",
     "BLOQUEADO_POR_WAF", "TITULOS_DE_BLOQUEO", "clasificar_respuesta",
     "es_titulo_de_muro", "causa_de_bloqueo", "VentanaDeSalud", "resumen_de_salud",
+    "retry_after_segundos",
 ]

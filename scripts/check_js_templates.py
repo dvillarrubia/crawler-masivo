@@ -118,27 +118,20 @@ def cargar_reglas(job_id: str) -> list[tuple[str, str]]:
             sesion.close()
     except Exception:
         plantillas = []
-    reglas: list[tuple[str, str]] = []
-    for regla in plantillas:
-        if isinstance(regla, dict):
-            nombre, patron = regla.get("nombre") or regla.get("name"), regla.get("patron") or regla.get("pattern")
-        else:
-            nombre, patron = (list(regla) + [None, None])[:2]
-        if nombre and patron:
-            reglas.append((str(nombre), str(patron)))
+    from shared.plantillas import reglas_de_plantilla
+
+    reglas = reglas_de_plantilla(plantillas)
     return reglas or list(REGLAS)
 
 
 def clasificar(path: str, reglas: list[tuple[str, str]] | None = None) -> str:
-    for nombre, patron in (reglas if reglas is not None else REGLAS):
-        if re.search(patron, path, re.I):
-            return nombre
     # Por la FORMA de la ruta, no por el numero de tramos: "otras · 2 niveles"
     # metia en el mismo monton una ficha de producto y una pagina legal, y lo
-    # que se muestreaba era azar.
-    from shared.plantillas import firma_de_ruta
+    # que se muestreaba era azar. La resolucion vive en `shared/plantillas.py`
+    # porque el analizador la usa igual.
+    from shared.plantillas import plantilla_de
 
-    return firma_de_ruta(path)
+    return plantilla_de(path, reglas if reglas is not None else REGLAS)
 
 
 # El crudo se baja por el MISMO camino que el rastreo (curl_cffi con la huella

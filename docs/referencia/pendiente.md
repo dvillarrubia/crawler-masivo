@@ -15,8 +15,8 @@ order of priority:
    sus enlaces— se cerro el 2026-10-07 con el censo de progym: 1.157 paginas
    con `noindex,nofollow` en sintaxis valida y sus 267.063 enlaces en
    `follow=false`, sin tocar los del resto del sitio. Lo unico abierto de esa
-   seccion es `http_version`, que solo se rellena con `render_js` y esta en las
-   limitaciones conocidas. No hay que volver a pasarlo.
+   seccion era `http_version`, que solo se rellenaba con `render_js`: desde la
+   decision 109 lo da tambien curl. No hay que volver a pasarlo.
 2. **Impact diagnosis for pre-fix crawls (section 10, D1–D7)**: tambien
    **ejecutado** (2026-09-11, sobre todos los jobs de mas de 50 URLs), con el
    resultado ya escrito ahi. Lo que hay que saber sin abrir el documento: los
@@ -37,10 +37,9 @@ order of priority:
    https site is recorded as **307** (Chromium's internal upgrade redirect), not the
    server's real 301. Treat http→https 307s in JS crawls as 301.: backup is not truly streaming (OOM risk
    on huge jobs), word_count includes hidden text, SD validation is basic.
-   Dos columnas mas con relleno parcial, a proposito: `urls.http_version` solo
-   se rellena con `render_js` (Navigation Timing; por el camino de curl_cffi
-   habria que reimplementar el handler de scrapy-impersonate, que la
-   descarta), y `resources.size_bytes` no se recoge — el rastreo no descarga
+   Una columna mas con relleno parcial, a proposito (`urls.http_version` ya
+   se rellena sin render desde la decision 109, que reimplementa el handler
+   de scrapy-impersonate): `resources.size_bytes` no se recoge — el rastreo no descarga
    el cuerpo de los recursos; el dato saldria de unir `resource_url` con
    `urls.content_length` de los recursos que si se rastrearon.
 
@@ -62,7 +61,6 @@ order of priority:
     `shared/comparacion.py` (misma firma, sin mezclar `render`, umbral de la 68);
   - `scripts/reextraer_a_medida.py` sobre `raw_html`, con el candado del job.
 - JavaScript comparison tab (raw HTML vs rendered)
-- Pagination (rel next/prev) analysis
 - Structured data rich-result validation (only basic @type/required-prop checks)
 - Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40
 

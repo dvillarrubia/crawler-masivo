@@ -157,6 +157,91 @@ def construir_sitio_con_muro(n_muros: int = 30, codigo: int = 403) -> dict:
 # (instante, host, ruta) de cada peticion que llega al sitio: para medir el
 # ritmo al que el spider pide a cada host (Crawl-delay).
 PETICIONES: list[tuple[float, str, str]] = []
+# Cuantas veces se ha pedido cada ruta (para `_primeras`).
+_VECES: dict[str, int] = {}
+
+
+def _cabeceras_especiales(ruta: str, status: int, headers: dict, body: bytes):
+    """Pseudo-cabeceras de las rutas de un test (decisiones 109 y 111), que el
+    servidor interpreta y no envia:
+
+    - ``_retardo_ms``: espera antes de responder (el TTFB que se mide);
+    - ``_gzip``: sirve el cuerpo comprimido con ``Content-Encoding: gzip``;
+    - ``_primeras``: solo las N primeras peticiones llevan este codigo y estas
+      cabeceras; las siguientes, 200 con el mismo cuerpo;
+    - ``Retry-After: +N`` se envia como fecha HTTP a N segundos.
+    """
+    import gzip as _gzip
+    from email.utils import formatdate
+
+    headers = dict(headers)
+    retardo = float(headers.pop("_retardo_ms", 0) or 0)
+    comprimir = headers.pop("_gzip", None)
+    primeras = headers.pop("_primeras", None)
+    _VECES[ruta] = _VECES.get(ruta, 0) + 1
+    if primeras is not None and _VECES[ruta] > int(primeras):
+        status, headers = 200, {}
+    if str(headers.get("Retry-After", "")).startswith("+"):
+        headers["Retry-After"] = formatdate(time.time() + float(headers["Retry-After"][1:]),
+                                            usegmt=True)
+    if retardo:
+        time.sleep(retardo / 1000)
+    if comprimir:
+        body = _gzip.compress(body)
+        headers["Content-Encoding"] = "gzip"
+    return status, headers, body
+
+
+def servir_tls_caducado() -> tuple[ThreadingHTTPServer, int]:
+    """Un HTTPS en localhost con un certificado autofirmado CADUCADO
+    (decision 110). Lo que tiene que hacer el spider: `tls_error` con el
+    motivo, y la sonda TLS del host."""
+    import datetime as _dt
+    import ssl
+    import tempfile
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    clave = ec.generate_private_key(ec.SECP256R1())
+    nombre = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    ahora = _dt.datetime.now(_dt.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(nombre).issuer_name(nombre)
+            .public_key(clave.public_key()).serial_number(1)
+            .not_valid_before(ahora - _dt.timedelta(days=30))
+            .not_valid_after(ahora - _dt.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), False)
+            .sign(clave, hashes.SHA256()))
+    d = tempfile.mkdtemp()
+    with open(f"{d}/c.pem", "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+    with open(f"{d}/k.pem", "wb") as f:
+        f.write(clave.private_bytes(serialization.Encoding.PEM,
+                                    serialization.PrivateFormat.PKCS8,
+                                    serialization.NoEncryption()))
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            cuerpo = _html("<p>no deberia verse</p>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(cuerpo)))
+            self.end_headers()
+            self.wfile.write(cuerpo)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(f"{d}/c.pem", f"{d}/k.pem")
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
 # (host, ruta, cabeceras) de cada peticion: para ver a que host llegan las
 # cookies, el Basic y las cabeceras propias del job (decision 114).
 CABECERAS: list[tuple[str, str, dict]] = []
@@ -169,9 +254,12 @@ def servir(robots_prohibe_todo: bool = False,
            rutas_extra: dict | None = None,
            puerto: int = 0,
            muro: dict | None = None,
+           lentas: dict | None = None,
            rutas_movil: dict | None = None,
            caer_tras_primera: list | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
+    # {ruta: segundos} que el servidor tarda en contestar: para un timeout.
+    lentas = lentas or {}
     # Rutas que responden bien la PRIMERA vez y 500 despues: un sitio que se
     # cae a media faena, con cualquier UA (revision de la decision 119)
     caidas = set(caer_tras_primera or ())
@@ -186,6 +274,8 @@ def servir(robots_prohibe_todo: bool = False,
                                self.path))
             CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
                               self.path, {k.lower(): v for k, v in self.headers.items()}))
+            if self.path in lentas:
+                time.sleep(lentas[self.path])
             ruta = self.path.split("?")[0]
             ua = self.headers.get("User-Agent") or ""
             vistas[ruta] = vistas.get(ruta, 0) + 1
@@ -198,6 +288,7 @@ def servir(robots_prohibe_todo: bool = False,
             if b"{aleatorio}" in body:
                 # Contenido que cambia en CADA peticion: un campo volatil
                 body = body.replace(b"{aleatorio}", os.urandom(6).hex().encode())
+            status, headers, body = _cabeceras_especiales(ruta, status, headers, body)
             self.send_response(status)
             headers = {"Content-Type": "text/html; charset=utf-8", **headers}
             for k, v in headers.items():
@@ -251,6 +342,10 @@ def servir(robots_prohibe_todo: bool = False,
 # ---------------------------------------------------------------------------
 # BD simulada y recolector de items
 # ---------------------------------------------------------------------------
+# Lo que el spider escribe en su fila de `jobs` (sondas): `update({...})`.
+ACTUALIZACIONES_JOB: list[dict] = []
+
+
 class _SesionFalsa:
     def __init__(self, job):
         self._job = job
@@ -271,6 +366,8 @@ class _SesionFalsa:
         return 0
 
     def update(self, *a, **k):
+        if a and isinstance(a[0], dict):
+            ACTUALIZACIONES_JOB.append(a[0])
         return 0
 
     def commit(self):
@@ -326,8 +423,13 @@ def main() -> None:
                        entrada.get("rutas"),
                        entrada.get("puerto", 0),
                        entrada.get("muro"),
+                       entrada.get("lentas"),
                        entrada.get("rutas_movil"),
                        entrada.get("caer_tras_primera"))
+
+    tls_port = None
+    if entrada.get("tls_caducado"):
+        _srv_tls, tls_port = servir_tls_caducado()
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -337,7 +439,8 @@ def main() -> None:
     from scrapy.crawler import CrawlerProcess
 
     job = types.SimpleNamespace(
-        seeds=[s.replace("{port}", str(port)) for s in entrada["seeds"]],
+        seeds=[s.replace("{port}", str(port)).replace("{tls_port}", str(tls_port))
+               for s in entrada["seeds"]],
         config=entrada.get("config", {}),
     )
     pipelines = {"spider_harness.Recolector": 1}
@@ -397,8 +500,8 @@ def main() -> None:
         # meta["playwright"].
         original = SeoSpider._page_request
 
-        def _page_request(self, url, depth):
-            req = original(self, url, depth)
+        def _page_request(self, url, depth, *a, **k):
+            req = original(self, url, depth, *a, **k)
             req.meta.pop("dont_redirect", None)
             req.meta["playwright"] = True
             return req
@@ -411,7 +514,25 @@ def main() -> None:
         # Condicional para que el test del Crawl-delay falle contra el codigo
         # anterior por lo que mide (el ritmo), no por un ImportError.
         middlewares["seo_crawler.middlewares.RobotsCrawlDelayMiddleware"] = 110
+    if hasattr(mw, "RobotsTxtRegistroMiddleware"):
+        # Como en settings.py (decision 112). Condicional por lo mismo.
+        middlewares["seo_crawler.middlewares.RobotsTxtRegistroMiddleware"] = 90
     con_crawl_delay = entrada.get("robots_crawl_delay") is not None
+    if entrada.get("retry_after") and hasattr(mw, "RetryAfterMiddleware"):
+        middlewares["seo_crawler.middlewares.RetryAfterMiddleware"] = 560
+    extra_settings = {}
+    if entrada.get("handler_real"):
+        # El handler de produccion (curl_cffi con huella de Chrome y las
+        # medidas de la decision 109), no el de Twisted por defecto.
+        extra_settings = {
+            "DOWNLOAD_HANDLERS": {
+                "http": "seo_crawler.handlers.CompositeDownloadHandler",
+                "https": "seo_crawler.handlers.CompositeDownloadHandler",
+            },
+            "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
+            "IMPERSONATE": "chrome124",
+        }
+    extra_settings.update(entrada.get("settings") or {})
 
     ajustes_reales: dict = {}
     if entrada.get("ua_real"):
@@ -454,7 +575,7 @@ def main() -> None:
         # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
         "ROBOTSTXT_OBEY": bool(
             entrada.get("robots_prohibe_todo") or entrada.get("robots_bloquea_privado")
-            or con_crawl_delay
+            or con_crawl_delay or entrada.get("robots_obey")
         ) and entrada.get("robots_mode") not in ("audit", "ignore"),
         "ROBOTS_MODE": entrada.get("robots_mode", "respect"),
         "DOWNLOADER_MIDDLEWARES": middlewares,
@@ -474,12 +595,20 @@ def main() -> None:
         },
         "ITEM_PIPELINES": pipelines,
         **ajustes_reales,
+        **extra_settings,
     })
     cierre: dict = {}
     original_closed = SeoSpider.spider_closed
 
     def _spider_closed(self, spider, reason):
         cierre["reason"] = reason
+        # Lo que anoto el registro de robots.txt (decision 112).
+        try:
+            for m in self.crawler.engine.downloader.middleware.middlewares:
+                if type(m).__name__ == "RobotsTxtRegistroMiddleware":
+                    cierre["robots_txt"] = list(m.filas.values())
+        except Exception:  # noqa: BLE001
+            pass
         return original_closed(self, spider, reason)
 
     SeoSpider.spider_closed = _spider_closed
@@ -495,7 +624,8 @@ def main() -> None:
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
             "blocked_by_robots", "status_group", "response_class", "url_hash",
-            "from_url_hash", "filas",
+            "from_url_hash", "filas", "lang", "href", "origen", "en_body",
+            "ttfb_ms", "content_encoding", "http_version", "status_text",
             # CapturaAlternativaItem (decision 119)
             "perfil", "modo", "estado", "plantilla", "user_agent", "redirige_a",
             "medidas", "diferencias", "volatiles", "detalle",
@@ -506,11 +636,15 @@ def main() -> None:
         salida.append(fila)
     if entrada.get("ver_cabeceras"):
         print("@@CABECERAS@@" + json.dumps(CABECERAS))
-    print("@@CIERRE@@" + json.dumps(cierre))
+    print("@@CIERRE@@" + json.dumps(cierre, default=str))
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))
     if redis_falso is not None:
         print("@@REDIS@@" + json.dumps(redis_falso, default=str))
+    if entrada.get("ver_job"):
+        # Solo si se pide: los tests que parten la salida entre marcas no
+        # esperan esta linea.
+        print("@@JOB@@" + json.dumps(ACTUALIZACIONES_JOB, default=str))
     print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 

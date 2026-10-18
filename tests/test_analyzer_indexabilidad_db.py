@@ -92,3 +92,19 @@ def test_sin_directivas_sigue_siendo_indexable():
                 canonical_href="https://x.com/a")
     _analizar(s, j)
     assert tuple(_estado(s, u)) == (True, "Indexable", False)
+
+
+def test_un_noindex_detras_de_una_directiva_con_valor_se_corrige_al_reanalizar():
+    """Decision 107: `max-snippet:-1, noindex` perdia el noindex (el prefijo se
+    tomaba por un bot). El rastreo la guardo "Indexable"; re-analizar lo
+    corrige con lo que ya hay en `html_meta`, sin re-rastrear."""
+    s, j = _montar()
+    u = _pagina(s, j, "/a", "Indexable", x_robots_tag="max-snippet:-1, noindex")
+    v = _pagina(s, j, "/b", "Indexable",
+                x_robots_tag=SEPARADOR_CABECERAS.join(
+                    ["bingbot: noindex", "googlebot: max-snippet:-1, noindex"]))
+    w = _pagina(s, j, "/c", "Indexable", x_robots_tag="bingbot: noindex, nofollow")
+    _analizar(s, j)
+    assert tuple(_estado(s, u)) == (False, "Noindex", True)
+    assert tuple(_estado(s, v)) == (False, "Noindex", True)
+    assert tuple(_estado(s, w)) == (True, "Indexable", False)

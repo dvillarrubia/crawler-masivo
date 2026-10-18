@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -120,6 +121,16 @@ class CrawlBehaviorConfig(BaseModel):
     # como mucho (una por host de las semillas y una por plantilla de ruta).
     # No gastan max_urls ni se guardan como URL del censo. 0 = sin sondas.
     soft404_sondas: int = Field(default=12, ge=0, le=100)
+    # Retry-After de un 429 o un 503 (decision 111): pausa del host durante lo
+    # que pide el servidor, con este tope en segundos. Por debajo del vigilante
+    # de estancamiento (30 min): el spider sigue estampando el latido.
+    respetar_retry_after: bool = True
+    # None = el `RETRY_AFTER_MAX` del entorno (60). Con un 60 aqui, como los
+    # defaults se copian en `jobs.config`, el worker lo pasaba SIEMPRE por
+    # `-s` y la variable de entorno no tenia ningun efecto.
+    retry_after_max_s: int | None = Field(default=None, ge=0, le=600)
+    # Sonda del certificado TLS, una vez por host https interno (decision 110).
+    sonda_tls: bool = True
     # Paridad movil/escritorio (decision 119): cuantas paginas del censo se
     # vuelven a pedir con el perfil movil (o con el de escritorio, si el UA
     # del job ya es de movil), como mucho `paridad_movil_por_plantilla` por
@@ -195,6 +206,16 @@ class AnalysisThresholdsConfig(BaseModel):
     # como de plantilla: se avisa una vez y no en cada pagina (decision 106).
     enlaces_plantilla_min_paginas: int = Field(default=10, ge=2, le=100000)
 
+    # Respuesta lenta (decision 109): mediana del TTFB por (host, plantilla)
+    # por encima de estos ms, en plantillas con al menos `_min_paginas`.
+    # Valores de partida: hay que medirlos en censos antes de fijarlos (13).
+    respuesta_lenta_ms: int = Field(default=1000, ge=100, le=60000)
+    respuesta_lenta_grave_ms: int = Field(default=3000, ge=100, le=120000)
+    respuesta_lenta_min_paginas: int = Field(default=20, ge=1, le=100000)
+    # Certificado que caduca en estos dias o menos (decision 110). No 30: con
+    # renovaciones a 30 dias y certificados de 45, uno sano estaria siempre.
+    tls_dias_aviso: int = Field(default=7, ge=1, le=90)
+
 
 # ---------------------------------------------------------------------------
 # Job configuration
@@ -253,6 +274,23 @@ class TemplateRule(BaseModel):
     patron: str = Field(..., min_length=1, max_length=500)
 
 
+class ReglaSegmento(BaseModel):
+    """Una regla de segmento de negocio (decision 125, `shared/segmentos.py`).
+
+    `patron` es el mismo de `TemplateRule` (regex sobre el path, sin distinguir
+    mayusculas), asi que una lista de `templates` vale como lista de segmentos.
+    `si` es el arbol de condiciones (Y/O/NO, campo, regla a medida); con los dos
+    tienen que casar los dos. La valida `shared.segmentos.validar`, que conoce
+    las reglas a medida del config entero, desde `JobConfig`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(..., min_length=1, max_length=80)
+    etiqueta: str | None = Field(None, max_length=120)
+    patron: str | None = Field(None, max_length=500)
+    si: dict[str, Any] | None = None
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -299,6 +337,26 @@ class JobConfig(BaseModel):
     # `fusionar_config`, asi que en `jobs.config` no llega a guardarse.
     custom_extraction: dict[str, ExtractorAMedida | None] = Field(default_factory=dict)
     custom_search: dict[str, BusquedaAMedida | None] = Field(default_factory=dict)
+    # Segmentos de negocio (decision 125): la PRIMERA regla que casa da el
+    # segmento de la URL; si ninguna, la forma de la ruta. Es una lista, asi
+    # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
+    # precedencia es el orden, y sumar listas la haria imposible de leer.
+    segmentos: list[ReglaSegmento] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reglas_de_segmento(self):
+        if not self.segmentos:
+            return self
+        from shared.segmentos import validar
+
+        # Solo la forma. Que cada `x` exista se comprueba sobre la config
+        # FUSIONADA (`resolver_config`, y `create_job` sin cliente): aqui puede
+        # llegar una capa suelta —el perfil, el override de un job— cuyos
+        # segmentos usan una extraccion que fija el cliente.
+        errores = validar([r.model_dump(exclude_none=True) for r in self.segmentos], None)
+        if errores:
+            raise ValueError("; ".join(errores))
+        return self
 
     @model_validator(mode="after")
     def _reglas_a_medida(self):
@@ -429,6 +487,15 @@ def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list
             continue
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"Seed URL must start with http:// or https://: {url}")
+        # Una semilla con credenciales se guardaria en `jobs.seeds`, que lee
+        # cualquiera (decision 83), y el rastreo las quitaria al normalizar:
+        # el staging se quedaria en el login sin aviso. Se rechaza y se dice
+        # donde van.
+        if "@" in urlsplit(url).netloc:
+            raise ValueError(
+                "La semilla lleva credenciales (usuario:clave@): quitalas y usa "
+                "http.basic_auth_user / http.basic_auth_password"
+            )
         cleaned.append(url)
     if obligatorias and not cleaned:
         raise ValueError("At least one valid seed URL is required")
@@ -545,6 +612,8 @@ class JobResponse(BaseModel):
     # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
     # causa si el rastreo se dio por bloqueado (decision 103).
     health: dict[str, Any] | None = None
+    # Con que reglas se materializo `urls.segmento` y cuantas casaron (125).
+    segmentacion: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
     # pregunto nada a un modelo sobre este job.
@@ -597,6 +666,19 @@ class HtmlMetaResponse(BaseModel):
     # Decision 102: donde corta el navegador el head y que queda fuera.
     head_cortado_por: str | None = None
     fuera_del_head: str | None = None
+    # Decision 108: lo que el HTML declara de si mismo.
+    viewport: str | None = None
+    viewport_count: int | None = None
+    html_lang: str | None = None
+    content_language: str | None = None
+    canonical_crudo: str | None = None
+    og_image_forma: str | None = None
+    twitter_image: str | None = None
+    redireccion_js: str | None = None
+    charset_meta: str | None = None
+    charset_bom: str | None = None
+    cuerpo_solo_ascii: bool | None = None
+    texto_mal_codificado: bool | None = None
 
 
 class PageContentResponse(BaseModel):
@@ -638,6 +720,7 @@ class HreflangResponse(BaseModel):
     href: str
     return_tag_ok: bool | None = None
     lang_valid: bool | None = None
+    origen: str | None = None  # html | cabecera; None = rastreo anterior (html)
 
 
 class StructuredDataResponse(BaseModel):
@@ -682,10 +765,14 @@ class UrlResponse(BaseModel):
     status_code: int | None = None
     status_group: str | None = None
     response_time_ms: float | None = None
+    # Decision 109: TTFB real y Content-Encoding servido.
+    ttfb_ms: float | None = None
+    content_encoding: str | None = None
     is_html: bool | None = None
     resource_type: str | None = None
     redirect_url: str | None = None
     indexable: bool | None = None
+    segmento: str | None = None  # decision 125
     first_seen_at: datetime | None = None
     last_crawled_at: datetime | None = None
     # Screaming Frog parity
@@ -703,6 +790,9 @@ class UrlResponse(BaseModel):
     transfer_size: int | None = None
     indexability_status: str | None = None
     blocked_by_robots: bool | None = None
+    # Si Googlebot puede pedirla segun el robots.txt guardado (decision 113).
+    # NULL = no evaluado.
+    bloqueada_googlebot: bool | None = None
     # La respuesta era la pagina o un muro delante (decision 103).
     response_class: str | None = None
     inlinks_count: int | None = None

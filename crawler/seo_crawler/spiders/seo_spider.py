@@ -43,7 +43,9 @@ from seo_crawler.extractors import (
     estimate_description_pixel_width,
     estimate_title_pixel_width,
     extract_headings,
+    deduplicar_hreflang,
     extract_hreflang,
+    hreflang_de_cabecera,
     extract_links,
     agrupar_enlaces,
     extract_enlaces_no_rastreables,
@@ -52,6 +54,8 @@ from seo_crawler.extractors import (
     extract_meta,
     extract_meta_refresh,
     extract_meta_refresh_target,
+    extract_redireccion_js,
+    charset_declarado,
     extract_resources,
     extract_security_headers,
     extract_structured_data,
@@ -59,6 +63,7 @@ from seo_crawler.extractors import (
     extract_word_count,
     extract_custom,
     http_status_text,
+    es_url_web,
     is_internal_url,
     url_en_hosts,
     dominio_registrable,
@@ -77,6 +82,7 @@ from shared.respuestas import (
     clasificar_respuesta,
 )
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
+from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
 from seo_crawler.sonda_paridad import ParidadMovilMixin, contextos_del_perfil
 from seo_crawler.items import (
     ContentItem,
@@ -93,6 +99,13 @@ from seo_crawler.items import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Redirecciones seguidas que se siguen en una cadena, como Chromium y Firefox
+# (20, `ERR_TOO_MANY_REDIRECTS`). Google deja de seguir a las 10, pero cortar
+# ahi, como FreeCrawl, deja sin saber donde acaba la cadena: el analisis avisa
+# a partir de 10 (`LIMITE_SALTOS_GOOGLE`, decision 117).
+MAX_SALTOS_SEGUIDOS = 20
+
 # trafilatura avisa con "empty link" por cada <a> sin texto (iconos, tarjetas
 # enteras enlazadas): decenas por pagina en cualquier sitio moderno, y tapa
 # los avisos que si importan (Playwright, spider). No es un error de nada.
@@ -319,12 +332,59 @@ _JS_BYTES_DOCUMENTO = (
     " catch (e) { return null; } }"
 )
 
+# Tiempo del servidor y compresion del documento con render (decision 109).
+# `responseStart - requestStart` es el TTFB sin DNS, TCP ni TLS, lo mismo que
+# STARTTRANSFER - PRETRANSFER de curl sin render; `encodedBodySize` frente a
+# `decodedBodySize` dice si llego comprimido. Comprobado contra Chromium con
+# la interceptacion de scrapy-playwright y un servidor con 300 ms de espera:
+# ttfb 301 ms, gzip 157 frente a 34.026 bytes y sin comprimir 34.026 = 34.026.
+# El nombre del Content-Encoding no lo da, y scrapy-playwright quita la
+# cabecera: con render se guarda `comprimido` sin el nombre.
+_JS_TIEMPOS_DOCUMENTO = (
+    "() => { try { const n = performance.getEntriesByType('navigation')[0];"
+    " if (!n) return null;"
+    " return {ttfb: n.responseStart > 0 && n.requestStart > 0"
+    " ? n.responseStart - n.requestStart : null,"
+    " codificado: n.encodedBodySize, decodificado: n.decodedBodySize}; }"
+    " catch (e) { return null; } }"
+)
+
 _PROTOCOLO_LEGIBLE = {
     "h2": "HTTP/2",
     "h3": "HTTP/3",
     "http/1.1": "HTTP/1.1",
     "http/1.0": "HTTP/1.0",
 }
+
+
+def medidas_de_respuesta(response) -> tuple[float | None, str | None]:
+    """``(ttfb_ms, content_encoding)`` de una respuesta (decision 109).
+
+    Sin render las deja el handler en ``meta`` (curl). Con render salen del
+    `PageMethod` de Navigation Timing. Una pagina de un job con render que se
+    repitio sin el (`_sin_render`, decision 17) no da TTFB: mezclaria dos
+    fuentes en la mediana de su plantilla. Lo que no se pudo medir es None,
+    nunca 0.
+    """
+    meta = response.meta
+    if meta.get("playwright"):
+        for metodo in meta.get("playwright_page_methods") or []:
+            if getattr(metodo, "args", None) and _JS_TIEMPOS_DOCUMENTO in metodo.args:
+                valor = metodo.result if isinstance(getattr(metodo, "result", None), dict) else {}
+                ttfb = valor.get("ttfb")
+                ttfb = round(float(ttfb), 2) if isinstance(ttfb, (int, float)) and ttfb >= 0 else None
+                cod, dec = valor.get("codificado"), valor.get("decodificado")
+                encoding = None
+                if isinstance(cod, (int, float)) and isinstance(dec, (int, float)) and cod > 0:
+                    encoding = "comprimido" if cod < dec else "identity"
+                return ttfb, encoding
+        return None, None
+    ttfb_s = meta.get("ttfb_s")
+    ttfb = None
+    if isinstance(ttfb_s, (int, float)) and ttfb_s >= 0 and not meta.get("_sin_render"):
+        ttfb = round(ttfb_s * 1000, 2)
+    encoding = meta.get("content_encoding_servido")
+    return ttfb, (encoding if isinstance(encoding, str) and encoding else None)
 
 
 def _normaliza_protocolo(valor) -> str | None:
@@ -439,7 +499,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -523,7 +583,17 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         spider = super().from_crawler(crawler, *args, **kwargs)
         crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
         crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
+        crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
         return spider
+
+    def spider_idle(self, spider=None):
+        """Sin peticiones pendientes, pero con una sonda TLS en su hilo: se
+        espera (decision 110). Scrapy vuelve a preguntar cada 5 s, y la sonda
+        tiene su propio timeout, asi que no puede colgar el cierre."""
+        if self._tls_en_vuelo():
+            from scrapy.exceptions import DontCloseSpider
+
+            raise DontCloseSpider
 
     def spider_opened(self, spider):
         """Load job config from PostgreSQL and connect to Redis."""
@@ -626,8 +696,9 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
                     logger.error("Reglas a medida no validas; el job no se rastrea: %s",
                                  self._config_invalida)
 
-            # -- Sondas de soft 404 (decision 105) --
+            # -- Sondas de soft 404 (decision 105) y TLS por host (110) --
             self._iniciar_sondas(job)
+            self._iniciar_sonda_tls(job)
             # -- Paridad movil/escritorio (decision 119) --
             self._iniciar_paridad(session)
 
@@ -836,9 +907,10 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
                 # antes de que el banner exista.
                 PageMethod(_evaluar_tolerante, _JS_ESPERAR_DOM_QUIETO),
                 PageMethod(_evaluar_tolerante, _BOILERPLATE_REMOVAL_JS),
-                # Los dos ultimos: su resultado se lee luego desde response.meta.
+                # Los tres ultimos: su resultado se lee luego desde response.meta.
                 PageMethod(_evaluar_tolerante, _JS_PROTOCOLO),
                 PageMethod(_evaluar_tolerante, _JS_BYTES_DOCUMENTO),
+                PageMethod(_evaluar_tolerante, _JS_TIEMPOS_DOCUMENTO),
             ],
         }
 
@@ -1165,7 +1237,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             return False
         return url_en_hosts(url, hosts, getattr(self, "_raices_credenciales", ()))
 
-    def _page_request(self, url: str, depth: int) -> Request:
+    def _page_request(self, url: str, depth: int, saltos: int = 0) -> Request:
         """Peticion de pagina con la redireccion desactivada.
 
         `dont_redirect`: el spider sigue las redirecciones el mismo (ver
@@ -1178,8 +1250,13 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter, sino
         que ademas NO registra la peticion como vista, y la URL se rastrearia
         otra vez al encontrarla enlazada.
+
+        `saltos` es cuantas redirecciones seguidas lleva la cadena que trae
+        hasta aqui (ver `MAX_SALTOS_SEGUIDOS`).
         """
         meta: dict[str, Any] = {"depth": depth, "dont_redirect": True}
+        if saltos:
+            meta["saltos_redireccion"] = saltos
         if self.render_js and _url_likely_html(url):
             meta.update(self._playwright_meta())
         return scrapy.Request(
@@ -1293,6 +1370,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             status_code=status,
             status_group=compute_status_group(status),
             response_time_ms=round(response_time_ms, 2),
+            ttfb_ms=medidas_de_respuesta(response)[0],
             is_html=False,
             resource_type="redirect",
             redirect_url=location,
@@ -1312,7 +1390,8 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             # Solo `login_requerido` dice algo de un salto; el resto, NULL.
             response_class=response_class if response_class != "contenido" else None,
         )
-        yield from self._follow_redirect(url, location, depth)
+        yield from self._follow_redirect(
+            url, location, depth, response.meta.get("saltos_redireccion", 0) + 1)
 
     def _adoptar_host_de_semilla(self, origen: str, destino: str) -> Generator:
         """Si una semilla redirige a otro host, ese host pasa a ser interno.
@@ -1337,13 +1416,29 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             if req is not None:
                 yield req
 
-    def _follow_redirect(self, origen: str, destino: str, depth: int) -> Generator:
+    def _follow_redirect(self, origen: str, destino: str, depth: int,
+                         saltos: int = 1) -> Generator:
         """Sigue el destino de una redireccion (HTTP o meta refresh).
 
         Misma profundidad que el origen: una redireccion no es un clic. Si
         sumara un nivel, una semilla `http://x.com` → `https://x.com/` le
         quitaria al rastreo un nivel entero con el max_depth por defecto.
+
+        `saltos` es el numero de este salto en su cadena. Pasado
+        `MAX_SALTOS_SEGUIDOS` el salto queda registrado (su fila ya lleva el
+        destino) pero no se sigue: sin tope, solo el dupefilter y `max_urls`
+        paraban una cadena de URLs siempre nuevas (decision 117).
         """
+        if saltos > MAX_SALTOS_SEGUIDOS:
+            logger.warning(
+                "Cadena de mas de %d redirecciones: %s -> %s se registra sin seguir",
+                MAX_SALTOS_SEGUIDOS, origen, destino,
+            )
+            return
+        # Un `Location: intent://...` o `itms-apps://...` queda registrado
+        # como destino del salto, pero no es una pagina: no se sigue.
+        if not es_url_web(destino):
+            return
         yield from self._adoptar_host_de_semilla(origen, destino)
         if not (self._is_internal(destino) or self.follow_external):
             return
@@ -1352,7 +1447,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         if self._already_crawled_hashes and \
                 _hash_key(compute_url_hash(destino)) in self._already_crawled_hashes:
             return
-        yield self._page_request(destino, depth)
+        yield self._page_request(destino, depth, saltos)
 
     # ------------------------------------------------------------------
     # Main parse
@@ -1388,6 +1483,30 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         )
         canonical_header = canonical_de_cabecera(link_header, base_url)
         return cabeceras_robots, x_robots, canonical_header
+
+    @staticmethod
+    def _hreflang_de_cabecera(response: Response) -> list[dict]:
+        """Hreflang de las cabeceras `Link`, resueltos contra la URL de la respuesta.
+
+        Google los lee igual que los del `<head>`, y en un PDF son lo unico que
+        hay (decision 116). Todas las cabeceras, como el canonical.
+        """
+        link_header = ", ".join(
+            v.decode("utf-8", errors="ignore")
+            for v in response.headers.getlist(b"Link") if v
+        )
+        return hreflang_de_cabecera(link_header, response.url)
+
+    def _hreflang_items(self, url_hash: str, entradas: list[dict]) -> Generator:
+        for hreflang in deduplicar_hreflang(entradas):
+            yield HreflangItem(
+                url_hash=url_hash,
+                job_id=self.job_id,
+                lang=hreflang["lang"],
+                href=hreflang["href"],
+                en_body=hreflang.get("en_body"),
+                origen=hreflang.get("origen"),
+            )
 
     def parse(self, response: Response) -> Generator:
         # Check cancel signal
@@ -1489,6 +1608,8 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         is_html = isinstance(response, HtmlResponse)
         resource_type = classify_resource_type(content_type, url)
         internal = self._is_internal(url)
+        if internal:
+            self._sondear_tls(url, response)  # decision 110
 
         # Redireccion HTTP: se registra el salto y se sigue el destino a mano
         # (ver _page_request). Va antes del filtro de tipo: un 301 no es un
@@ -1733,6 +1854,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
                 canonical_href=meta.get("canonical_href"),
                 page_url=final_url,
                 canonical_header=canonical_header,
+                canonicals_distintos=meta.get("canonical_distintos"),
                 bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
             )
 
@@ -1778,6 +1900,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         # yielded above.
         final_hash = compute_url_hash(final_url)
         final_parsed = urlparse(final_url)
+        ttfb_ms_val, content_encoding_val = medidas_de_respuesta(response)
         yield PageItem(
             url=final_url,
             url_hash=final_hash,
@@ -1791,6 +1914,8 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             status_code=status_code,
             status_group=compute_status_group(status_code),
             response_time_ms=round(response_time_ms, 2),
+            ttfb_ms=ttfb_ms_val,
+            content_encoding=content_encoding_val,
             is_html=is_html,
             resource_type=resource_type,
             redirect_url=refresh_target,  # destino final, salvo meta refresh
@@ -1821,7 +1946,9 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             self._anotar_salud(clase, url)
 
         if refresh_target:
-            yield from self._follow_redirect(url_for_record, refresh_target, depth)
+            yield from self._follow_redirect(
+                url_for_record, refresh_target, depth,
+                response.meta.get("saltos_redireccion", 0) + 1)
 
         if is_html and is_success and internal and not refresh_target:
             yield from self._sonda_de_plantilla(final_url)  # decision 105
@@ -1861,6 +1988,10 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
                     x_robots_tag=x_robots,
                     canonical_header=canonical_header,
                 )
+            # Y su hreflang, que en un PDF solo puede ir en la cabecera `Link`.
+            if is_success and self._extraction.get("extract_hreflang", True):
+                yield from self._hreflang_items(
+                    final_hash, self._hreflang_de_cabecera(response))
             return
 
         selector = response.selector
@@ -1877,6 +2008,20 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         # un framework sube al head con JavaScript (Next.js con streaming
         # metadata) ya esta en el head del DOM. Con render: NULL, no medido.
         head = None if response.meta.get("playwright") else leer_head(response.text)
+        # Lo que solo dice el HTML SERVIDO (decision 108): con render, el
+        # cuerpo es el DOM ya ejecutado —si la pagina redirigia por JS, ya es
+        # el destino— y scrapy-playwright lo vuelve a codificar, asi que los
+        # bytes originales y su charset se pierden. Con render: NULL, no medido.
+        servido = None
+        if head is not None:
+            servido = charset_declarado(response.body)
+            servido["texto_mal_codificado"] = (
+                "\ufffd" in (meta["title"] or "") or "\ufffd" in (visible_text or "")
+            )
+            servido["redireccion_js"] = extract_redireccion_js(
+                selector, base_url, page_url=final_url)
+        content_language = (response.headers.get(b"Content-Language") or b"").decode(
+            "latin-1", errors="ignore").strip() or None
 
         yield HtmlMetaItem(
             url_hash=final_hash,
@@ -1894,6 +2039,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             canonical_href=meta["canonical_href"],
             canonical_count=meta.get("canonical_count"),
             canonical_in_body=meta.get("canonical_in_body"),
+            canonical_distintos=meta.get("canonical_distintos"),
             canonical_header=canonical_header,
             og_title=meta["og_title"],
             og_description=meta["og_description"],
@@ -1918,6 +2064,19 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             has_meta_outside_head=has_meta_outside_head,
             head_cortado_por=head["cortado_por"] if head else None,
             fuera_del_head=",".join(head["fuera_del_head"]) if head else None,
+            # Decision 108
+            viewport=meta.get("viewport"),
+            viewport_count=meta.get("viewport_count"),
+            html_lang=meta.get("html_lang"),
+            content_language=content_language[:64] if content_language else None,
+            canonical_crudo=meta.get("canonical_crudo"),
+            og_image_forma=meta.get("og_image_forma"),
+            twitter_image=meta.get("twitter_image"),
+            redireccion_js=(servido or {}).get("redireccion_js"),
+            charset_meta=(servido or {}).get("charset_meta"),
+            charset_bom=(servido or {}).get("charset_bom"),
+            cuerpo_solo_ascii=(servido or {}).get("cuerpo_solo_ascii"),
+            texto_mal_codificado=(servido or {}).get("texto_mal_codificado"),
         )
 
         # Headings
@@ -1974,15 +2133,14 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
         )
 
         # Hreflang
+        # El del HTML y el de la cabecera `Link`, sin repetir lo que esten en
+        # las dos (gana el del HTML, salvo que este en el body).
         if self._extraction.get("extract_hreflang", True):
-            for hreflang in extract_hreflang(selector, base_url=base_url):
-                yield HreflangItem(
-                    url_hash=final_hash,
-                    job_id=self.job_id,
-                    lang=hreflang["lang"],
-                    href=hreflang["href"],
-                    en_body=hreflang.get("en_body"),
-                )
+            yield from self._hreflang_items(
+                final_hash,
+                extract_hreflang(selector, base_url=base_url)
+                + self._hreflang_de_cabecera(response),
+            )
 
         # Structured data
         if self._extraction.get("extract_structured_data", True):
@@ -2233,12 +2391,22 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             TimeoutError,
             ConnectionRefusedError,
         )
+        # Un certificado caducado, de otro nombre o un handshake imposible
+        # (curl 60/35, net::ERR_CERT_* de Chromium): con su motivo en
+        # `status_text`, no un `error` mudo (decision 110).
+        motivo_tls = motivo_error_tls(failure.value)
+        status_text = None
         if failure.check(DNSLookupError):
             status_group = "dns_error"
         elif failure.check(TimeoutError, TCPTimedOutError):
             status_group = "timeout"
         elif failure.check(ConnectionRefusedError):
             status_group = "conn_refused"
+        elif motivo_tls:
+            status_group = "tls_error"
+            status_text = f"TLS: {motivo_tls}"[:64]
+            if self._is_internal(url):
+                self._sondear_tls(url)
         else:
             status_group = "error"
 
@@ -2279,7 +2447,7 @@ class SeoSpider(SondaSoft404Mixin, ParidadMovilMixin, scrapy.Spider):
             word_count=None,
             text_ratio=None,
             redirect_type=None,
-            status_text=http_status_text(status_code) if status_code else None,
+            status_text=http_status_text(status_code) if status_code else status_text,
             last_modified=None,
             http_version=None,
             transfer_size=0,

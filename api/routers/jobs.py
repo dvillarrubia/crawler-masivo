@@ -137,7 +137,8 @@ def create_job(
     payload: JobCreate,
     db: Session = Depends(get_session),
 ):
-    from api.routers.clientes import resolver_cliente_y_perfil, resolver_config
+    from api.routers.clientes import (comprobar_segmentos, resolver_cliente_y_perfil,
+                                      resolver_config)
 
     cliente, perfil = resolver_cliente_y_perfil(
         db, cliente_id=payload.cliente_id, profile_id=payload.profile_id,
@@ -151,6 +152,7 @@ def create_job(
         for clave in ("custom_extraction", "custom_search"):
             config[clave] = {n: r for n, r in (config.get(clave) or {}).items()
                              if r is not None}
+        comprobar_segmentos(config)
     else:
         # Con cliente, solo lo que el job CAMBIA se pone encima de lo heredado.
         config = resolver_config(
@@ -498,7 +500,7 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     lo guardaria en un Parquet vacio (decision 95). Ninguno de los dos mira un
     job que no este terminado, y `deleting` no lo esta.
     """
-    from shared.models import CleaningRuleset, CrawlProfile, Decision, EnrichmentRun
+    from shared.models import CleaningRuleset, CrawlProfile, Decision, EnrichmentRun, RobotsTxt
 
     job_id = job.id
     filas: dict[str, int] = {}
@@ -529,8 +531,9 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     # entonces el `create_all` de los tests contra un Postgres SIN la
     # extension (el `postgres:16-alpine` de CI) revienta — se llevaria por
     # delante `test_pagerank_db.py`, que no tiene nada que ver con esto.
+    # El robots.txt de cada host (decisiones 112 y 113): unas pocas filas.
     for nombre, modelo in (("decisions", Decision), ("enrichment_runs", EnrichmentRun),
-                           ("cleaning_rulesets", CleaningRuleset)):
+                           ("cleaning_rulesets", CleaningRuleset), ("robots_txt", RobotsTxt)):
         filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
             synchronize_session=False)
 
