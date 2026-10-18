@@ -2230,8 +2230,12 @@ class SEOAnalyzer:
 
         Se mide sobre `page_content.content_text` --el contenido sin plantilla--
         y no sobre el body: con cabecera y pie dentro, todo el sitio saldria
-        duplicado de todo. Solo se miran las 200 HTML: un 404 o un redirect no
-        canibaliza a nadie.
+        duplicado de todo. Y entre las mismas paginas que el duplicado exacto
+        (`analyze_duplicates`, decision 47): internas, 200 HTML e indexables.
+        Una variante canonicalizada comparte el texto con su canonica a
+        proposito, una noindex o una externa no compite con nadie en el indice
+        del cliente; medirlas daba la variante como casi duplicada de su propia
+        canonica (decision 118).
         """
         logger.debug("Analyzing near-duplicate content ...")
 
@@ -2245,30 +2249,26 @@ class SEOAnalyzer:
                 self.near_duplicate_similarity,
             )
 
-        stmt = (
-            select(Url.id, Url.url, PageContent.content_text)
-            .join(PageContent, PageContent.url_id == Url.id)
-            .where(
+        firmas, urls = self.firmas_casi_duplicados()
+
+        # Lo que no se mide en ESTE analisis queda en NULL ("no medido"), no con
+        # el recuento de un analisis anterior: al re-analizar un censo, una
+        # pagina que ahora es noindex, o cuyo texto ya no llega al minimo,
+        # conservaba su `near_duplicate_count` viejo.
+        medidas_antes = self.session.execute(
+            select(Url.id).where(
                 Url.job_id == self.job_id,
-                Url.is_html.is_(True),
-                Url.status_code == 200,
+                or_(
+                    Url.near_duplicate_count.isnot(None),
+                    Url.closest_similarity.isnot(None),
+                ),
             )
+        ).scalars()
+        self._bulk_update_near_duplicates(
+            {uid: (None, None) for uid in medidas_antes if uid not in firmas}
         )
 
-        firmas: dict[int, Any] = {}
-        urls: dict[int, str] = {}
-        # `yield_per` importa: el texto de un censo grande no cabe en memoria de
-        # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
-        for url_id, url, texto in self.session.execute(
-            stmt.execution_options(yield_per=BATCH_SIZE)
-        ):
-            f = nd.firma(texto)
-            if f is None:
-                continue
-            firmas[url_id] = f
-            urls[url_id] = url
-
-        if len(firmas) < 2:
+        if not firmas:
             return
 
         resultado = nd.analizar(firmas, self.near_duplicate_similarity)
@@ -2306,8 +2306,41 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def firmas_casi_duplicados(self) -> tuple[dict[int, Any], dict[int, str]]:
+        """Firma MinHash y URL de cada pagina que entra en los casi duplicados.
+
+        Las mismas condiciones que `analyze_duplicates`. La usa tambien el
+        `--dry-run` de `scripts/near_duplicates.py`, para que la prevision y el
+        analisis no midan conjuntos distintos.
+        """
+        stmt = (
+            select(Url.id, Url.url, PageContent.content_text)
+            .join(PageContent, PageContent.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+            )
+        )
+
+        firmas: dict[int, Any] = {}
+        urls: dict[int, str] = {}
+        # `yield_per` importa: el texto de un censo grande no cabe en memoria de
+        # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
+        for url_id, url, texto in self.session.execute(
+            stmt.execution_options(yield_per=BATCH_SIZE)
+        ):
+            f = nd.firma(texto)
+            if f is None:
+                continue
+            firmas[url_id] = f
+            urls[url_id] = url
+        return firmas, urls
+
     def _bulk_update_near_duplicates(
-        self, valores: dict[int, tuple[int, float | None]]
+        self, valores: dict[int, tuple[int | None, float | None]]
     ) -> None:
         """Guardar recuento y mejor similitud por URL, en lotes."""
         if not valores:
