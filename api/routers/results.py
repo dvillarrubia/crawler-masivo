@@ -1725,6 +1725,7 @@ def get_diff(
     job_id: uuid.UUID,
     otro_id: uuid.UUID,
     map_host: str | None = None,
+    map_rutas: str | None = None,
     db: Session = Depends(get_session),
 ):
     """Que cambio entre este censo y otro del mismo sitio.
@@ -1732,9 +1733,18 @@ def get_diff(
     `map_host=pre.x.com=x.com` reescribe el host del primero, para comparar
     preproduccion contra produccion; sin el, dos origenes distintos se
     rechazan en vez de devolver "ha desaparecido el sitio entero" (#32).
+
+    `map_rutas` (decision 131) es una lista JSON de pares `[patron,
+    reemplazo]` que reescriben la RUTA de las URLs del censo ANTERIOR antes de
+    emparejar: una migracion (`[["^/es/hoteles/(.+)\\.html$", "/es/hotel/\\1/"]]`).
+    Va en JSON y no como `map_host` porque una regex lleva comas e iguales.
+    Una regex que no compila es un 422 que dice cual; la respuesta lleva
+    `mapeo_rutas` con cuantas URLs reescribe cada regla y el % emparejado.
     """
+    import json as _json
+
     from shared.comparacion import (
-        _truncado, comparar_censos, comparar_incidencias,
+        _truncado, comparar_censos, comparar_incidencias, compilar_mapa_rutas,
         incidencias_de_censo, paginas_de_censo, resumen_de_job,
     )
 
@@ -1748,12 +1758,30 @@ def get_diff(
                 origen, destino = par.split("=", 1)
                 mapa[origen.strip().lower()] = destino.strip().lower()
 
+    rutas = None
+    if map_rutas:
+        try:
+            rutas = _json.loads(map_rutas)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=(
+                f"map_rutas tiene que ser una lista JSON de pares [patron, "
+                f"reemplazo]: {e}"))
+        try:
+            compilar_mapa_rutas(rutas)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"map_rutas: {e}")
+
+    # Cada censo se lee UNA vez: con los datos estructurados y el hreflang
+    # (decision 131) la lectura ya no es barata para repetirla tres veces.
+    pag_a = paginas_de_censo(db, job_id)
+    pag_b = paginas_de_censo(db, otro_id)
     resultado = comparar_censos(
-        paginas_de_censo(db, job_id),
-        paginas_de_censo(db, otro_id),
+        pag_a,
+        pag_b,
         job_a=resumen_de_job(a),
         job_b=resumen_de_job(b),
         mapa_hosts=mapa,
+        mapa_rutas=rutas,
     )
     # Que se arreglo, que aparecio y que sigue. Comparar paginas no contesta
     # "que arreglo el cliente desde la auditoria anterior", que es para lo que
@@ -1769,21 +1797,29 @@ def get_diff(
         # los dos jobs es el anterior, no el primer parametro.
         viejo_id = job_id if antes.get("fecha") == _resumen_fecha(a) else otro_id
         nuevo_id = otro_id if viejo_id == job_id else job_id
-        from shared.comparacion import _norm
+        pag_viejo, pag_nuevo = (pag_a, pag_b) if viejo_id == job_id else (pag_b, pag_a)
+        from shared.comparacion import _aplicar_rutas, _norm
         from shared.respuestas import NO_VALIDAS
 
+        reglas_rutas = compilar_mapa_rutas(rutas)
         resultado["incidencias"] = comparar_incidencias(
             incidencias_de_censo(db, viejo_id),
             incidencias_de_censo(db, nuevo_id),
             mapa_hosts=mapa,
+            mapa_rutas=rutas,
             puede_afirmar_resueltas=not _truncado(
                 antes.get("status"), antes.get("finish_reason")),
             # Una incidencia cuya pagina ya no esta en el censo no esta
             # resuelta: no se sabe.
             # Ni si ahora es un muro: no se ha visto (decision 103).
             urls_del_nuevo={_norm(_aplicar(p["url"]))
-                            for p in paginas_de_censo(db, nuevo_id)
+                            for p in pag_nuevo
                             if p.get("response_class") not in NO_VALIDAS},
+            # Nueva en una URL que ya existia (regresion) o en una nueva
+            # (publicada mal), con el mapeo de rutas ya aplicado (131).
+            urls_del_anterior={_norm(_aplicar_rutas(_aplicar(p["url"]), reglas_rutas)[0])
+                               for p in pag_viejo
+                               if p.get("response_class") not in NO_VALIDAS},
             # Dos censos analizados con codigo distinto no se comparan por
             # incidencias: un hallazgo puede salir "resuelto" solo porque la
             # regla que lo emitia ha cambiado.

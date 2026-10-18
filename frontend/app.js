@@ -331,6 +331,13 @@ const fmt = {
     title: 'Título',
     h1: 'H1',
     word_count: 'Palabras (cambio de mas del 20%)',
+    // Decision 131: con los mismos umbrales que las alertas
+    meta_description: 'Meta description',
+    sd_tipos: 'Tipos de datos estructurados',
+    hreflang: 'Idiomas del hreflang',
+    inlinks: 'Páginas que la enlazan (la mitad, y 10 o más)',
+    click_depth: 'Clics desde la home (2 o más, o sin camino)',
+    pagerank_score: 'PageRank 0-100 (25 puntos o más, una década)',
   }[c] || c),
   // Si lo que llego era la pagina o un muro delante (decision 103).
   claseRespuesta: c => ({
@@ -354,6 +361,13 @@ const fmt = {
     cambia_el_titulo: 'Páginas que han cambiado de título',
     desaparecen: 'Páginas que ya no se encuentran en el sitio',
     entran_en_el_indice: 'Páginas que han entrado en el índice',
+    // Decision 131
+    se_alejan_de_la_home: 'Páginas que se han alejado de la home',
+    pierden_enlaces_internos: 'Páginas que han perdido enlaces internos',
+    pierden_pagerank: 'Páginas que han perdido PageRank',
+    pierden_datos_estructurados: 'Páginas que han perdido datos estructurados',
+    pierden_hreflang: 'Páginas que han perdido idiomas del hreflang',
+    cambia_la_description: 'Páginas que han cambiado de meta description',
     // Extraccion a medida (decision 127): el nombre de la regla va al lado
     extraido_cambia: 'Cambia el valor extraído',
     extraido_desaparece: 'El valor extraído ya no aparece',
@@ -1544,6 +1558,30 @@ function app() {
     diffOtro: '',
     diffCandidatos: [],
     diffCargando: false,
+    // Migracion (decision 131): host y rutas del censo ANTERIOR reescritos
+    // antes de emparejar. Las rutas, una regla por linea: `patron => reemplazo`.
+    diffMigracion: false,
+    diffMapHost: '',
+    diffMapRutas: '',
+    diffOtrosSitios: false,
+
+    // `patron => reemplazo` por linea; el separador lleva espacios para no
+    // partir una regex que contenga `=>` pegado.
+    reglasMapRutas() {
+      return (this.diffMapRutas || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+        const i = l.indexOf(' => ');
+        return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 4).trim()];
+      });
+    },
+
+    // Las nuevas de un tipo, separadas entre URL que ya estaba (algo se ha
+    // roto) y URL nueva (algo se ha publicado mal), decision 131.
+    nuevasPorUrl(tipo) {
+      const n = this.diff && this.diff.incidencias && this.diff.incidencias.nuevas;
+      if (!n || !n.en_url_existente) return null;
+      const de = l => ((l.por_tipo || []).find(f => f.tipo === tipo) || {}).total || 0;
+      return { existente: de(n.en_url_existente), nueva: de(n.en_url_nueva) };
+    },
 
     // Las tres columnas (resueltas / nuevas / siguen) en una sola fila por
     // tipo: tres tablas separadas obligan a cruzarlas a ojo, que es lo que
@@ -1652,6 +1690,9 @@ function app() {
       this.diffCandidatos = (d.items || []).filter(j => {
         if (j.id === this.job.id) return false;
         if (j.status !== 'completed') return false;
+        // Una migracion de dominio se compara con otro host, con el mapeo de
+        // host explicito: el servidor rechaza dos origenes sin el.
+        if (this.diffOtrosSitios) return true;
         const h = (j.seeds && j.seeds[0] || '').replace(/^https?:\/\//, '').split('/')[0];
         return h && h === miHost;
       });
@@ -1667,9 +1708,15 @@ function app() {
       if (!this.job || !this.diffOtro) { this.diff = null; return; }
       this.diffCargando = true;
       try {
-        this.diff = await api(`/jobs/${this.job.id}/diff/${this.diffOtro}`);
+        const q = new URLSearchParams();
+        if (this.diffMigracion && this.diffMapHost.trim()) q.set('map_host', this.diffMapHost.trim());
+        const reglas = this.diffMigracion ? this.reglasMapRutas() : [];
+        if (reglas.length) q.set('map_rutas', JSON.stringify(reglas));
+        const qs = q.toString();
+        this.diff = await api(`/jobs/${this.job.id}/diff/${this.diffOtro}` + (qs ? '?' + qs : ''));
       } catch (e) {
-        this.diff = { comparable: false, motivo: 'No se pudo comparar: ' + e };
+        // Un 422 de una regex que no compila dice cual: se ensena tal cual.
+        this.diff = { comparable: false, motivo: 'No se pudo comparar: ' + (e.message || e) };
       } finally {
         this.diffCargando = false;
         this.$nextTick(() => lucide.createIcons());

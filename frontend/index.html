@@ -1359,6 +1359,29 @@
               <div x-show="!diffCandidatos.length" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
                 No hay otro rastreo completado del mismo sitio con el que comparar.
               </div>
+              <!-- Migracion (decision 131): sin decirle como se corresponden
+                   las rutas viejas con las nuevas, una migracion se lee como
+                   «han desaparecido 3.000 paginas y han aparecido 3.000». -->
+              <div style="margin-top:.6rem">
+                <label style="font-size:.8rem;display:inline-flex;gap:.35rem;align-items:center">
+                  <input type="checkbox" id="diff-migracion" x-model="diffMigracion"> Es una migración: mapear URLs del censo anterior
+                </label>
+              </div>
+              <div x-show="diffMigracion" style="margin-top:.5rem;max-width:44rem">
+                <label style="font-size:.8rem;display:flex;gap:.35rem;align-items:center;margin-bottom:.45rem">
+                  <input type="checkbox" x-model="diffOtrosSitios" @change="cargarCandidatosDiff()"> Ofrecer rastreos de otros sitios (cambio de dominio)
+                </label>
+                <label style="font-size:.8rem;display:block;margin-bottom:.45rem">Host (opcional): <code>viejo.com=nuevo.com</code>, separados por comas
+                  <input type="text" id="diff-map-host" x-model="diffMapHost" placeholder="www.viejo.com=www.nuevo.com"
+                         style="width:100%;padding:.3rem .45rem;font-size:.85rem;font-family:monospace">
+                </label>
+                <label style="font-size:.8rem;display:block;margin-bottom:.45rem">Rutas: una regla por línea, <code>patrón =&gt; reemplazo</code> (regex de Python sobre la ruta y la query; gana la primera que casa)
+                  <textarea id="diff-map-rutas" x-model="diffMapRutas" rows="3"
+                            placeholder="^/es/hoteles/([^/]+)\.html$ => /es/hotel/\1/"
+                            style="width:100%;padding:.3rem .45rem;font-size:.85rem;font-family:monospace"></textarea>
+                </label>
+                <div><button class="btn btn-sm" id="diff-aplicar-mapeo" @click="cargarDiff()" :disabled="!diffOtro || diffCargando">Comparar con el mapeo</button></div>
+              </div>
             </div>
 
             <template x-if="diff && !diff.comparable">
@@ -1423,6 +1446,27 @@
                         <span x-show="e.ahora !== undefined">: <s x-text="String(e.antes ?? '—').slice(0,36)"></s> → <strong x-text="String(e.ahora ?? '—').slice(0,36)"></strong></span>
                       </div>
                     </template>
+                  </div>
+                </template>
+
+                <template x-if="diff.mapeo_rutas">
+                  <div class="card mb-2" id="diff-mapeo-resultado">
+                    <div class="text-sm">
+                      <strong>Mapeo de rutas:</strong>
+                      <strong x-text="fmt.num(diff.mapeo_rutas.emparejadas)"></strong> de
+                      <span x-text="fmt.num(diff.mapeo_rutas.urls_del_anterior)"></span> URLs del censo anterior emparejadas
+                      (<strong x-text="diff.mapeo_rutas.pct_emparejadas + '%'"></strong>);
+                      <span x-text="fmt.num(diff.mapeo_rutas.reescritas)"></span> reescritas por el mapeo, de las que casan
+                      <span x-text="fmt.num(diff.mapeo_rutas.reescritas_emparejadas)"></span>.
+                    </div>
+                    <template x-for="(rg, i) in diff.mapeo_rutas.reglas" :key="'mr' + i">
+                      <div class="text-dim" style="font-size:.78rem;margin-left:.6rem">
+                        <code x-text="rg.patron"></code> → <code x-text="rg.reemplazo"></code>:
+                        <span x-text="fmt.num(rg.reescritas) + ' URLs'"></span>
+                      </div>
+                    </template>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.3rem" x-show="diff.mapeo_rutas.colisiones"
+                         x-text="fmt.num(diff.mapeo_rutas.colisiones) + ' URLs viejas caen en la misma URL nueva que otra: solo una de cada grupo entra en la comparación.'"></div>
                   </div>
                 </template>
 
@@ -1506,6 +1550,13 @@
                     <div class="stat-card" style="border-top:2px solid var(--red,#d32f2f)">
                       <div class="stat-value" x-text="fmt.num(diff.incidencias.nuevas.total)"></div>
                       <div class="stat-label">nuevas</div>
+                      <!-- Decision 131: en una URL que ya estaba es algo que se
+                           ha roto; en una URL nueva, algo publicado mal. -->
+                      <div class="text-dim" style="font-size:.75rem;margin-top:.2rem" id="diff-nuevas-reparto"
+                           x-show="diff.incidencias.nuevas.en_url_existente"
+                           x-text="diff.incidencias.nuevas.en_url_existente ? fmt.num(diff.incidencias.nuevas.en_url_existente.total) + ' en URLs que ya existían · '
+                             + fmt.num(diff.incidencias.nuevas.en_url_nueva.total)
+                             + (diff.incidencias.nuevas.url_nueva_afirmable ? ' en URLs nuevas' : ' en URLs que el anterior no vio (estaba truncado)') : ''"></div>
                     </div>
                     <div class="stat-card">
                       <div class="stat-value" x-text="fmt.num(diff.incidencias.siguen.total)"></div>
@@ -1521,6 +1572,8 @@
                         <th style="text-align:left">incidencias por tipo</th>
                         <th style="text-align:right;width:6rem">resueltas</th>
                         <th style="text-align:right;width:6rem">nuevas</th>
+                        <th style="text-align:right;width:9rem" x-show="diff.incidencias.nuevas.en_url_existente"
+                            title="De las nuevas, cuántas en URLs que ya estaban en el censo anterior (regresiones) y cuántas en URLs nuevas">en URL existente / nueva</th>
                         <th style="text-align:right;width:6rem">siguen</th>
                       </tr></thead>
                       <tbody>
@@ -1535,6 +1588,8 @@
                                 x-text="t.resueltas || ''"></td>
                             <td style="text-align:right;color:var(--red,#d32f2f)"
                                 x-text="t.nuevas || ''"></td>
+                            <td style="text-align:right" class="text-dim" x-show="diff.incidencias.nuevas.en_url_existente"
+                                x-text="t.nuevas && nuevasPorUrl(t.tipo) ? nuevasPorUrl(t.tipo).existente + ' / ' + nuevasPorUrl(t.tipo).nueva : ''"></td>
                             <td style="text-align:right" class="text-dim"
                                 x-text="t.siguen || ''"></td>
                           </tr>
@@ -1564,15 +1619,19 @@
                         <tr :style="v.total ? '' : 'opacity:.45'">
                           <td>
                             <div x-text="fmt.campoDiff(campo)"></div>
+                            <!-- Sin el dato en los dos censos, o con el grafo
+                                 incompleto, «0» mentiria: se dice por que no. -->
+                            <div class="text-dim" style="font-size:.75rem;margin-left:.6rem" x-show="v.total === null" x-text="'No se compara: ' + (v.motivo || '')"></div>
                             <template x-for="e in v.ejemplos.slice(0,3)" :key="e.url">
                               <div class="text-dim" style="font-size:.75rem;margin-left:.6rem">
                                 <span x-text="e.url.replace(/^https?:\/\//,'').slice(0,70)"></span>
-                                <span x-show="campo !== 'word_count'">: <s x-text="String(e.antes ?? '—').slice(0,40)"></s> → <strong x-text="String(e.ahora ?? '—').slice(0,40)"></strong></span>
+                                <span x-show="campo !== 'word_count' && !e.pierde">: <s x-text="String(e.antes ?? '—').slice(0,40)"></s> → <strong x-text="String(e.ahora ?? '—').slice(0,40)"></strong></span>
                                 <span x-show="campo === 'word_count'">: <s x-text="e.antes"></s> → <strong x-text="e.ahora"></strong> palabras</span>
+                                <span x-show="e.pierde" x-text="(e.pierde && e.pierde.length ? ': pierde ' + e.pierde.join(', ') : '') + (e.gana && e.gana.length ? (e.pierde && e.pierde.length ? ' · ' : ': ') + 'gana ' + e.gana.join(', ') : '')"></span>
                               </div>
                             </template>
                           </td>
-                          <td style="text-align:right;vertical-align:top" x-text="fmt.num(v.total)"></td>
+                          <td style="text-align:right;vertical-align:top" x-text="v.total === null ? '—' : fmt.num(v.total)"></td>
                         </tr>
                       </template>
                     </tbody>
