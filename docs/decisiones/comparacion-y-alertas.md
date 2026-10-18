@@ -276,6 +276,100 @@
      `test_no_se_archiva_un_censo_que_se_esta_analizando`, que falla quitando
      el candado.
 
+<a id="d127"></a>
+127. **Lo extraído a medida también se compara entre censos, y las alertas
+   saltan por segmento de negocio, no solo por forma de ruta** (Ola 3.4 y lo
+   que quedaba de 3.3). Dos piezas en `shared/comparacion.py`, las dos dentro
+   de `comparar_censos` y por tanto en `jobs.comparacion` (el worker) y en
+   `GET /diff` (la API):
+
+   - **(a) Los valores de `custom_extraction` (104) son campos comparables.**
+     Por cada regla, sobre las páginas comunes y sin los muros (103): qué
+     cambia de valor (`extraido_cambia`), qué deja de encontrarse en la misma
+     URL (`extraido_desaparece`), qué aparece (`extraido_aparece`, info) y,
+     para una búsqueda, qué deja de contener o pasa a contener lo buscado
+     (`busqueda_deja_de_contener`, `busqueda_pasa_a_contener`, info). Cada una
+     con su denominador: un cambio se cuenta sobre las que tenían valor en los
+     dos, una desaparición sobre las que lo tenían antes. Mismo umbral que la
+     68 (5 % con piso de 20, o el 50 % de una plantilla o un segmento). Un
+     número se compara como número y la alerta dice cuántos suben, cuántos
+     bajan y la variación mediana; un texto, las cinco transiciones más
+     comunes («InStock → OutOfStock: 2.300»). Son `warning`, no `critical`: no
+     es una decisión de Google por sí misma, y el webhook (77) solo lleva las
+     críticas.
+   - **Lo que no se puede afirmar, no se afirma**, con cuatro guardias propios:
+     (1) solo se compara una regla que exista **con el mismo nombre en los dos
+     censos** (`jobs.config`, `reglas_a_medida`), y la que falta en uno sale en
+     `extraido.no_comparadas` con el motivo; (2) **ni con el mismo nombre si la
+     definición cambió** (otra expresión, otro `devuelve`, otro separador):
+     una diferencia puede ser de la regla y no del sitio, la idea de la 91 con
+     la extracción; el rótulo y `solo_urls` no cuentan (el alcance ya lo marca
+     la falta de fila), y solo se comparan los campos que están en los dos
+     `config` para que un config guardado sin los valores por defecto no se
+     lea como «la regla cambió»; (3) **sin fila no es vacío** (104): una URL
+     que tiene fila en un censo y no en el otro (pasó a 404, cayó fuera de
+     `solo_urls`, se rastreó antes de la regla) no es un cambio y se cuenta
+     como `sin_dato`, y solo `ok` y `sin_coincidencia` son un dato —
+     `tiempo_agotado`, `pagina_bloqueada`, `incompleta`… son `sin_saber`—; (4)
+     un valor del DOM renderizado y otro del HTML de la respuesta
+     (`custom_extraction.render`) no leen la misma página: `render_distinto`.
+     Los guardias de página siguen: censo bloqueado, sin alertas (103); sin
+     fecha en los dos, sin alertas (67); el truncado y el de alcance (67, 70)
+     solo afectan a las ausencias, y aquí no se afirma ninguna. La 91 no se
+     aplica: el valor lo escribe el rastreo, no el análisis, y la diferencia de
+     versión del crawler ya va en los avisos (66).
+   - **(b) Las alertas de la 68 saltan también por segmento** (`urls.segmento`,
+     125). Las bases se cuentan por (forma de ruta, segmento) y cada alerta
+     lleva `segmentos` además de `plantillas`, con `por` = `sitio`,
+     `segmento` o `plantilla`. Solo los segmentos que pone una regla: el de
+     repuesto es la forma de la ruta, que ya es la plantilla, y `(externa)` o
+     `(recurso)` no son páginas del sitio. **Un aviso por hallazgo** (36): si
+     las páginas de un segmento son exactamente las de una plantilla (la regla
+     `^/blog/` y la forma `/blog/:slug`), sale una vez, como segmento y con la
+     plantilla al lado (`plantilla`), y la plantilla no se repite en su lista.
+     El segmento es el del censo **anterior**, nunca el del nuevo: una regla
+     de segmento puede leer `indexable`, el código o un valor extraído (125), y
+     en el censo nuevo «no indexables» o «agotados» son justo las páginas que
+     cambiaron, así que 25 de 1.000 fichas fuera del índice salían como
+     «no indexables 25/25 = 100 %». El porcentaje se cuenta sobre la población
+     de antes del cambio. Si el anterior no tiene segmento (previo a la
+     columna, sin re-segmentar) no se usa el del nuevo: queda la plantilla y un
+     aviso que dice cómo re-segmentarlo. (Lo encontró la revisión de la PR,
+     con dos tests que fallaban: el segmento sacado del resultado.) El caso que lo justifica, en test: 40 fichas repartidas en 40
+     formas de ruta en un sitio de 1.000 páginas cambian todas de título; sin
+     segmentos no salta nada (ninguna plantilla llega al piso de 20 y el sitio
+     se queda en el 4 %), con ellos salta «fichas 40/40 = 100 %».
+
+   **Medido** (2026-10-18, base local en solo lectura). **No hay ningún censo
+   con extracción a medida**: la base local no tiene aún la tabla
+   `custom_extraction` ni `urls.segmento`. Así que la parte (a) va probada con
+   fixtures (`tests/test_comparar_extraido.py`, 21 casos, dos de ellos ejecutando
+   `comparar_con_el_anterior` contra SQLite), y contra datos reales se
+   midió simulando dos extracciones con lo que ya se guarda —`og:type` y
+   `og:title` de `html_meta`, con fila solo en las HTML 2xx como haría la
+   104— y los segmentos aplicando `shared.segmentos` en memoria sobre cuatro
+   parejas de censos:
+
+   | pareja | comunes | cambios de `og:title` / `og:type` | alertas sin → con segmentos |
+   |---|---|---|---|
+   | Lopesan 27-jul contra 27-jul (control) | 7.082 | 0 / 0 de 5.682 | 0 → 0 |
+   | Lopesan 27-jul contra 6-oct | 4.157 | 4 / 0 de 4.133 | 2 → 2 |
+   | progym 6-oct contra 7-oct | 3.592 | 0 / 0 de 3.581 | 1 → 1 |
+   | progym 6-oct contra 7-oct (M1 + nofollow) | 4.176 | 0 / 0 de 4.170 | 1 → 1 |
+
+   Ninguna alerta de extracción salta por la variación normal de un sitio, y
+   los segmentos no añaden ni quitan ninguna alerta en esas parejas: cambian
+   cómo se leen. La de Lopesan es el fallo de la 68 (`canonical_a_otro_host`,
+   2.333 de 4.157) y ahora dice **«hoteles 2.151 de 2.167, 99,3 %»** en vez de
+   solo `/:idioma/hotels/spain/:slug (8n) 199/199`, con el segmento escrito por
+   ruta (`^/(es|en|de)/(hoteles|hotels)/`). Comparar cuesta 0,2-0,5 s en esas
+   parejas; leer `custom_extraction` es una consulta por `job_id`
+   (`ix_cext_job_nombre_estado`), sin unir con `urls` (37), y no está medida
+   contra una tabla real.
+
+   **Fuera de esta PR**: la columna `cambios` del Explorador (`?cambios=`) no
+   mira la extracción; la evolución por segmento entre más de dos censos (5.3).
+
 <a id="d128"></a>
 128. **Una lista de URLs clave es un censo, y su veredicto no puede decir
    «pasa» sin saberlo** (Ola 5.5). La pregunta de un CI de despliegue es

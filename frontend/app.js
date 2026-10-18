@@ -351,7 +351,29 @@ const fmt = {
     cambia_el_titulo: 'Páginas que han cambiado de título',
     desaparecen: 'Páginas que ya no se encuentran en el sitio',
     entran_en_el_indice: 'Páginas que han entrado en el índice',
+    // Extraccion a medida (decision 127): el nombre de la regla va al lado
+    extraido_cambia: 'Cambia el valor extraído',
+    extraido_desaparece: 'El valor extraído ya no aparece',
+    extraido_aparece: 'Aparece un valor extraído que antes no estaba',
+    busqueda_deja_de_contener: 'Páginas que ya no contienen lo buscado',
+    busqueda_pasa_a_contener: 'Páginas que ahora contienen lo buscado',
   }[r] || r),
+  // Titulo de una alerta de la comparacion: la regla y, si es de la
+  // extraccion a medida, sobre que regla del consultor (decision 127).
+  tituloAlerta: al => fmt.reglaDiff(al.regla) + (al.extraccion ? ' · «' + al.extraccion + '»' : ''),
+  // Lo que resume una alerta de extraccion en una linea: la variacion de un
+  // numero o las transiciones de un texto («InStock → OutOfStock: 2.300»).
+  detalleAlerta: al => {
+    if (al.variacion) {
+      const v = al.variacion;
+      return 'Suben ' + fmt.num(v.suben) + ', bajan ' + fmt.num(v.bajan)
+        + (v.mediana_pct !== null && v.mediana_pct !== undefined ? ' · variación mediana ' + (v.mediana_pct > 0 ? '+' : '') + v.mediana_pct + '%' : '');
+    }
+    if (al.transiciones && al.transiciones.length) {
+      return al.transiciones.slice(0, 3).map(t => (t.antes || '—') + ' → ' + (t.ahora || '—') + ': ' + fmt.num(t.paginas)).join(' · ');
+    }
+    return '';
+  },
   // El color de una alerta sale de SU severidad. La tarjeta de la ficha
   // llevaba el rojo fijo, asi que un aviso se pintaba como una critica: si
   // todo es rojo, el rojo no significa nada.

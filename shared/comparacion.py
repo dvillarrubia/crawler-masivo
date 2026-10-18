@@ -356,6 +356,15 @@ def comparar_censos(
         a.pop(k, None)
         b.pop(k, None)
     comunes = a.keys() & b.keys()
+    # Las alertas se reparten por el segmento de ANTES (`_grupo`): si solo el
+    # nuevo esta segmentado, se dice, para que «sin segmentos» no se lea como
+    # «ningun segmento ha cambiado».
+    if (any(_segmento_propio(p.get("segmento")) for p in b.values())
+            and not any(_segmento_propio(p.get("segmento")) for p in a.values())):
+        avisos.append(
+            "El censo anterior no tiene segmentos: las alertas se reparten por "
+            "plantilla y no por segmento. Re-segmentarlo con las reglas de hoy "
+            "(POST /api/jobs/<id>/segmentos) para verlas por segmento.")
 
     cambios: dict[str, list[dict[str, Any]]] = {
         "status_code": [], "indexability_status": [], "canonical_href": [],
@@ -364,8 +373,9 @@ def comparar_censos(
     # Páginas por regla de alerta, y el denominador de cada regla: cuántas
     # podían haberle pasado. "2.367 páginas" no dice nada sin "de 2.379".
     afectadas: dict[str, list[dict[str, Any]]] = {r: [] for r in REGLAS}
-    # Por forma de ruta, para poder decir "99,5% de ESTA plantilla".
-    bases: dict[str, dict[str, int]] = {
+    # Por (forma de ruta, segmento), para poder decir "99,5% de ESTA
+    # plantilla" o "del 60% de las fichas" (decision 127).
+    bases: dict[str, dict[tuple[str, str | None], int]] = {
         "era_indexable": defaultdict(int),
         "no_era_indexable": defaultdict(int),
         "era_indexable_en_el_primero": defaultdict(int),
@@ -390,6 +400,10 @@ def comparar_censos(
 
         _clasificar(pa, pb, afectadas, bases, umbral_palabras)
 
+    # Lo que extraen las reglas a medida, sobre las mismas paginas comunes y
+    # sin los muros (decision 127).
+    extraido, entradas_extraido = _comparar_extraido(a, b, comunes, job_a, job_b)
+
     nuevas = sorted(b.keys() - a.keys())
     desaparecidas = sorted(a.keys() - b.keys()) if concluyente else []
     if concluyente:
@@ -399,9 +413,10 @@ def comparar_censos(
         # no está en las comunes por definición.
         for pagina in a.values():
             if _era_indexable(pagina):
-                bases["era_indexable_en_el_primero"][_firma(pagina.get("url"))] += 1
+                bases["era_indexable_en_el_primero"][_grupo(pagina)] += 1
         afectadas["desaparecen"] = [
-            {"url": a[k]["url"]} for k in desaparecidas if _era_indexable(a[k])]
+            {"url": a[k]["url"], "_g": _grupo(a[k])}
+            for k in desaparecidas if _era_indexable(a[k])]
 
     resultado = {
         "comparable": True,
@@ -423,12 +438,15 @@ def comparar_censos(
             campo: {"total": len(filas), "ejemplos": filas[:MUESTRA]}
             for campo, filas in cambios.items()
         },
+        "extraido": extraido,
     }
     if bloqueo_a or bloqueo_b:
         resultado["alertas"] = []
         resultado["bloqueado"] = bloqueo_b or bloqueo_a
     elif direccion_sabida:
-        resultado["alertas"] = _alertas(afectadas, bases, umbral_absoluto)
+        resultado["alertas"] = _ordenar_alertas(
+            _alertas(afectadas, bases, umbral_absoluto)
+            + _alertas_extraido(entradas_extraido, umbral_absoluto))
     else:
         resultado["alertas"] = []
         avisos.append(
@@ -446,10 +464,12 @@ def _sin_semillas(job: dict[str, Any]) -> dict[str, Any]:
     URLs en la respuesta del censo de penguin. Queda el recuento, que es lo
     unico que alguien va a leer.
     """
-    if "semillas" not in job:
-        return job
     recortado = dict(job)
-    recortado["n_semillas"] = len(recortado.pop("semillas") or [])
+    if "semillas" in recortado:
+        recortado["n_semillas"] = len(recortado.pop("semillas") or [])
+    # Las definiciones de las reglas a medida tampoco: basta con sus nombres.
+    if isinstance(recortado.get("reglas_a_medida"), dict):
+        recortado["reglas_a_medida"] = sorted(recortado["reglas_a_medida"])
     return recortado
 
 
@@ -514,6 +534,269 @@ def _firma(url: str | None) -> str:
         return "?"
 
 
+# --- Extraccion a medida (decisiones 104 y 127) ------------------------------
+#
+# Lo que el consultor pide a cada pagina —precio, disponibilidad, SKU, «¿lleva
+# el tag de GTM?»— comparado entre dos censos. Lo que no es obvio:
+#
+# - Solo se compara una regla que existe con el MISMO nombre en los dos censos
+#   y con la misma definicion. Si la expresion cambio, una diferencia puede ser
+#   de la regla y no del sitio, y eso no se afirma (la misma idea que la
+#   decision 91 con el analisis).
+# - Sin fila no es «vacio» (decision 104): si en uno de los dos censos la URL no
+#   tiene fila para esa regla (no era HTML 2xx, cayo fuera de `solo_urls`, se
+#   rastreo antes de la regla), NO es un cambio. Se cuenta como `sin_dato`.
+# - Solo dos estados son un dato: `ok` y `sin_coincidencia`. Lo demas
+#   (`tiempo_agotado`, `pagina_bloqueada`, `incompleta`...) es «no se sabe» y se
+#   cuenta como `sin_saber`, nunca como «el precio ha desaparecido».
+# - Un valor sacado del DOM renderizado y otro del HTML de la respuesta
+#   (`custom_extraction.render`) no se comparan: `render_distinto`.
+
+# Estados que dicen algo de la pagina; el resto es «no se pudo evaluar».
+ESTADOS_CON_DATO = frozenset({"ok", "sin_coincidencia"})
+
+# Campos de la definicion que NO cambian lo que significa el valor: el rotulo
+# y el alcance (`solo_urls` acota que URLs llevan fila; las que no la llevan ya
+# quedan fuera por la regla de «sin fila»).
+_CAMPOS_COSMETICOS = frozenset({"etiqueta", "solo_urls"})
+
+REGLAS_EXTRAIDO: dict[str, tuple[str, str, str]] = {
+    # id: (severidad, clase de la regla, que decide Google)
+    "extraido_cambia": ("warning", "extractor",
+        "El valor que extrae esta regla ha cambiado en una parte grande de las "
+        "paginas a la vez: es un cambio de catalogo, de plantilla o de un "
+        "proceso, no de una ficha. Si es un precio o la disponibilidad, Google "
+        "lo lee del marcado de producto y lo muestra en el resultado "
+        "enriquecido: un cambio masivo que nadie decidio se ve en la SERP."),
+    "extraido_desaparece": ("warning", "extractor",
+        "Paginas que tenian este dato y ahora la regla no lo encuentra en la "
+        "misma URL. Si es el precio o el stock de una ficha, el resultado "
+        "enriquecido de Google se queda sin el; si la plantilla cambio, hay "
+        "que reescribir la regla antes de leer la cifra."),
+    "extraido_aparece": ("info",
+        "extractor",
+        "Paginas en las que la regla ahora encuentra un dato que antes no "
+        "estaba. Si no era lo esperado, es una plantilla nueva."),
+    "busqueda_deja_de_contener": ("warning", "busqueda",
+        "Paginas que contenian lo que busca esta regla y ya no: si es un tag "
+        "de analitica, un marcado o un texto legal, se ha caido de la "
+        "plantilla en bloque."),
+    "busqueda_pasa_a_contener": ("info", "busqueda",
+        "Paginas que ahora contienen lo que busca esta regla y antes no. Si "
+        "es un texto que no deberia estar (un «sin stock», un error), es una "
+        "plantilla, no una pagina."),
+}
+
+# A que base se compara cada una: «2.300 fichas cambian de precio» sin «de las
+# 2.400 que tenian precio en los dos» no dice nada (decision 68).
+BASE_EXTRAIDO: dict[str, str] = {
+    "extraido_cambia": "ok_en_los_dos",
+    "extraido_desaparece": "ok_antes",
+    "extraido_aparece": "sin_antes",
+    "busqueda_deja_de_contener": "ok_antes",
+    "busqueda_pasa_a_contener": "sin_antes",
+}
+
+
+def _definicion(regla: dict[str, Any] | None) -> dict[str, Any]:
+    return {k: v for k, v in (regla or {}).items() if k not in _CAMPOS_COSMETICOS}
+
+
+def reglas_a_medida(config: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """{nombre: {clase, definicion}} de las reglas a medida de un `jobs.config`."""
+    config = config or {}
+    salida: dict[str, dict[str, Any]] = {}
+    for clave, clase in (("custom_extraction", "extractor"), ("custom_search", "busqueda")):
+        for nombre, regla in (config.get(clave) or {}).items():
+            if isinstance(regla, dict):
+                salida[nombre] = {"clase": clase, "definicion": _definicion(regla)}
+    return salida
+
+
+def _reglas_comparables(job_a, job_b, a, b) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Que reglas se comparan ({nombre: clase}) y cuales no, con el motivo."""
+    ra, rb = job_a.get("reglas_a_medida"), job_b.get("reglas_a_medida")
+    if ra is None or rb is None:
+        # Sin la configuracion (un resumen sin ella) se mira que nombres tienen
+        # filas en los dos censos. No hay forma de saber si la regla cambio.
+        def nombres(pags):
+            vistos: dict[str, str] = {}
+            for p in pags.values():
+                for n, e in (p.get("extraido") or {}).items():
+                    vistos.setdefault(n, e.get("clase") or "extractor")
+            return vistos
+        na, nb = nombres(a), nombres(b)
+        return {n: na[n] for n in na.keys() & nb.keys()}, []
+
+    comparables: dict[str, str] = {}
+    fuera: list[dict[str, Any]] = []
+    for n in sorted(ra.keys() | rb.keys()):
+        if n not in ra or n not in rb:
+            fuera.append({"nombre": n, "motivo": (
+                "solo existe en el censo " + ("posterior" if n in rb else "anterior")
+                + ": lo que no se extrajo en uno no es un cambio")})
+            continue
+        if ra[n]["clase"] != rb[n]["clase"]:
+            fuera.append({"nombre": n, "motivo": "en un censo es una extraccion y en el otro una busqueda"})
+            continue
+        da, db_ = ra[n]["definicion"], rb[n]["definicion"]
+        # Solo los campos que estan en los dos: un `jobs.config` guardado sin
+        # los valores por defecto no puede leerse como «la regla cambio».
+        distintos = sorted(k for k in da.keys() & db_.keys() if da[k] != db_[k])
+        if distintos:
+            fuera.append({"nombre": n, "motivo": (
+                "la regla cambio entre los dos censos (" + ", ".join(distintos)
+                + "): una diferencia puede ser de la regla y no del sitio")})
+            continue
+        comparables[n] = ra[n]["clase"]
+    return comparables, fuera
+
+
+def _mismo_valor(ea: dict[str, Any], eb: dict[str, Any]) -> bool:
+    na, nb = ea.get("num"), eb.get("num")
+    if na is not None and nb is not None:
+        return abs(na - nb) <= 1e-9 * max(1.0, abs(na), abs(nb))
+    return (ea.get("valor") or "") == (eb.get("valor") or "")
+
+
+def _mediana(valores: list[float]) -> float | None:
+    if not valores:
+        return None
+    v = sorted(valores)
+    m = len(v) // 2
+    return v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2
+
+
+def _comparar_extraido(a, b, comunes, job_a, job_b) -> tuple[dict[str, Any], list[tuple]]:
+    """El resumen por regla y las entradas de alerta (`_alerta`) que salen."""
+    comparables, no_comparadas = _reglas_comparables(job_a, job_b, a, b)
+    resumen: list[dict[str, Any]] = []
+    entradas: list[tuple] = []
+    for nombre in sorted(comparables):
+        clase = comparables[nombre]
+        filas: dict[str, list[dict[str, Any]]] = {r: [] for r in REGLAS_EXTRAIDO
+                                                   if REGLAS_EXTRAIDO[r][1] == clase}
+        bases: dict[str, dict] = {"ok_en_los_dos": defaultdict(int),
+                                  "ok_antes": defaultdict(int),
+                                  "sin_antes": defaultdict(int)}
+        sin_dato = sin_saber = comparadas = render_distinto = 0
+        transiciones: dict[tuple, int] = defaultdict(int)
+        variaciones: list[float] = []
+        sube = baja = 0
+        for k in sorted(comunes):
+            pa, pb = a[k], b[k]
+            ea = (pa.get("extraido") or {}).get(nombre)
+            eb = (pb.get("extraido") or {}).get(nombre)
+            if ea is None and eb is None:
+                continue                      # fuera del alcance de la regla
+            if ea is None or eb is None:
+                sin_dato += 1                 # sin fila no es «vacio» (104)
+                continue
+            if ea.get("estado") not in ESTADOS_CON_DATO or eb.get("estado") not in ESTADOS_CON_DATO:
+                sin_saber += 1
+                continue
+            # Uno del DOM renderizado y otro del HTML de la respuesta no leen la
+            # misma pagina: lo que monta el JavaScript solo esta en uno.
+            ra_, rb_ = ea.get("render"), eb.get("render")
+            if ra_ is not None and rb_ is not None and bool(ra_) != bool(rb_):
+                render_distinto += 1
+                continue
+            comparadas += 1
+            g = _grupo(pb, pa)
+            url = pb.get("url")
+            antes_ok, ahora_ok = ea["estado"] == "ok", eb["estado"] == "ok"
+            if antes_ok:
+                bases["ok_antes"][g] += 1
+            else:
+                bases["sin_antes"][g] += 1
+            if clase == "busqueda":
+                if antes_ok and not ahora_ok:
+                    filas["busqueda_deja_de_contener"].append({"url": url, "_g": g})
+                elif ahora_ok and not antes_ok:
+                    filas["busqueda_pasa_a_contener"].append(
+                        {"url": url, "ahora": eb.get("valor"), "_g": g})
+                continue
+            if antes_ok and ahora_ok:
+                bases["ok_en_los_dos"][g] += 1
+                if not _mismo_valor(ea, eb):
+                    filas["extraido_cambia"].append(
+                        {"url": url, "antes": ea.get("valor"), "ahora": eb.get("valor"), "_g": g})
+                    na, nb = ea.get("num"), eb.get("num")
+                    if na is not None and nb is not None:
+                        sube += nb > na
+                        baja += nb < na
+                        if na:
+                            variaciones.append(100 * (nb - na) / abs(na))
+                    else:
+                        transiciones[(str(ea.get("valor") or "")[:80],
+                                      str(eb.get("valor") or "")[:80])] += 1
+            elif antes_ok:
+                filas["extraido_desaparece"].append(
+                    {"url": url, "antes": ea.get("valor"), "_g": g})
+            elif ahora_ok:
+                filas["extraido_aparece"].append(
+                    {"url": url, "ahora": eb.get("valor"), "_g": g})
+
+        extra: dict[str, Any] = {"extraccion": nombre}
+        if clase == "extractor" and (sube or baja or variaciones):
+            med = _mediana(variaciones)
+            extra["variacion"] = {"suben": sube, "bajan": baja,
+                                  "mediana_pct": round(med, 1) if med is not None else None}
+        if transiciones:
+            extra["transiciones"] = [
+                {"antes": t[0], "ahora": t[1], "paginas": n}
+                for t, n in sorted(transiciones.items(), key=lambda x: -x[1])[:5]]
+        resumen.append({
+            "nombre": nombre, "clase": clase, "comparadas": comparadas,
+            "sin_dato": sin_dato, "sin_saber": sin_saber,
+            "render_distinto": render_distinto,
+            "cambios": {r: {"total": len(f), "ejemplos": [_sin_grupo(x) for x in f[:MUESTRA]]}
+                        for r, f in filas.items()},
+            **{k: v for k, v in extra.items() if k != "extraccion"},
+        })
+        for regla, f in filas.items():
+            entradas.append((regla, f, bases[BASE_EXTRAIDO[regla]], extra))
+    return {"reglas": resumen, "no_comparadas": no_comparadas}, entradas
+
+
+def _alertas_extraido(entradas, umbral_absoluto=None) -> list[dict[str, Any]]:
+    salida = []
+    for regla, filas, base, extra in entradas:
+        severidad, _clase, que_decide = REGLAS_EXTRAIDO[regla]
+        al = _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto)
+        if al is not None:
+            al.update(extra)
+            salida.append(al)
+    return salida
+
+
+def _segmento_propio(seg: str | None) -> bool:
+    """Si el segmento lo puso una regla del consultor (decision 125).
+
+    El repuesto es la forma de la ruta (empieza por `/`), que es exactamente
+    la plantilla: contarlo tambien como segmento seria el mismo aviso dos
+    veces. `(externa)` y `(recurso)` no son paginas del sitio.
+    """
+    return bool(seg) and not seg.startswith("/") and not seg.startswith("(")
+
+
+def _grupo(pagina: dict[str, Any], antes: dict[str, Any] | None = None) -> tuple[str, str | None]:
+    """(forma de ruta, segmento) de una pagina, para repartir las alertas.
+
+    La forma sale de la URL de `pagina`; el segmento, SIEMPRE del censo
+    ANTERIOR (`antes`, o la propia `pagina` cuando es del anterior). Un
+    segmento puede depender de `indexable`, del codigo o de un valor extraido
+    (decision 125), y el del censo nuevo puede estar definido por el propio
+    cambio: «no indexables» contiene justo las paginas que salieron del indice
+    y la alerta saldria al 100% con 25 de 1.000 fichas. El porcentaje se cuenta
+    sobre la poblacion de ANTES del cambio. Si el anterior no tiene segmento
+    (censo previo a la columna o sin re-segmentar) no se usa el del nuevo, por
+    el mismo motivo: queda solo la plantilla.
+    """
+    seg = (antes if antes is not None else pagina).get("segmento")
+    return _firma(pagina.get("url")), seg
+
+
 def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
     """Pone una página en la regla que nombra su CAUSA, y solo en una.
 
@@ -522,7 +805,8 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
     `salen_del_indice`, que diría lo mismo sin decir qué arreglar.
     """
     url = pb.get("url")
-    bases["todas_las_comunes"][_firma(url)] += 1
+    g = _grupo(pb, pa)
+    bases["todas_las_comunes"][g] += 1
 
     # El canonical se va a otro host: se mira ANTES de todo lo demás y sin
     # exigir que la página fuera indexable. Lo que abandona el sitio es el
@@ -531,15 +815,15 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
     fuera_ahora = _canonical_fuera(pb)
     if fuera_ahora and not fuera_antes:
         afectadas["canonical_a_otro_host"].append(
-            {"url": url, "antes": pa.get("canonical_href"), "ahora": fuera_ahora})
+            {"url": url, "antes": pa.get("canonical_href"), "ahora": fuera_ahora, "_g": g})
 
     if not _era_indexable(pa):
-        bases["no_era_indexable"][_firma(url)] += 1
+        bases["no_era_indexable"][g] += 1
         if _era_indexable(pb):
-            afectadas["entran_en_el_indice"].append({"url": url})
+            afectadas["entran_en_el_indice"].append({"url": url, "_g": g})
         return
 
-    bases["era_indexable"][_firma(url)] += 1
+    bases["era_indexable"][g] += 1
 
     codigo = pb.get("status_code")
     can_antes, can_ahora = _canonical_a_otra(pa), _canonical_a_otra(pb)
@@ -548,79 +832,139 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
         # hallazgo (decisión 36), y el de fuera dice qué arreglar.
         if not fuera_ahora:
             afectadas["canonical_a_otra_url"].append(
-                {"url": url, "antes": pa.get("canonical_href"), "ahora": can_ahora})
+                {"url": url, "antes": pa.get("canonical_href"), "ahora": can_ahora, "_g": g})
     elif codigo and 400 <= codigo < 600:
-        afectadas["rotas"].append({"url": url, "antes": 200, "ahora": codigo})
+        afectadas["rotas"].append({"url": url, "antes": 200, "ahora": codigo, "_g": g})
     elif codigo and 300 <= codigo < 400:
-        afectadas["redirigidas"].append({"url": url, "antes": 200, "ahora": codigo})
+        afectadas["redirigidas"].append({"url": url, "antes": 200, "ahora": codigo, "_g": g})
     elif not _era_indexable(pb):
         afectadas["salen_del_indice"].append(
             {"url": url, "antes": pa.get("indexability_status"),
-             "ahora": pb.get("indexability_status")})
+             "ahora": pb.get("indexability_status"), "_g": g})
     else:
         # Sigue indexable: los cambios de grado, que no la sacan del índice.
         wa, wb = pa.get("word_count") or 0, pb.get("word_count") or 0
         if wa and (wa - wb) / wa >= umbral_palabras:
             afectadas["pierden_contenido"].append(
-                {"url": url, "antes": wa, "ahora": wb})
+                {"url": url, "antes": wa, "ahora": wb, "_g": g})
         if pa.get("title") != pb.get("title"):
             afectadas["cambia_el_titulo"].append(
-                {"url": url, "antes": pa.get("title"), "ahora": pb.get("title")})
+                {"url": url, "antes": pa.get("title"), "ahora": pb.get("title"), "_g": g})
+
+
+def _sin_grupo(fila: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in fila.items() if k != "_g"}
+
+
+def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None) -> dict[str, Any] | None:
+    """Una regla contra su umbral: en el sitio, en un segmento o en una plantilla.
+
+    Tres disparadores, porque una plantilla entera rota se diluye en el total:
+    las 2.367 páginas de Lopesan son el 99,5% de su plantilla y el 11% del
+    sitio. Si solo se mirara el total, el fallo más grave que hemos encontrado
+    en un cliente no habría disparado nada. Y el segmento de negocio (decisión
+    125) es como lo lee el consultor: «el 60% de las fichas» dice qué mirar,
+    `/:slug (1n)` no (decisión 127).
+
+    `base` cuenta por (forma de ruta, segmento). Un segmento cuyas páginas son
+    EXACTAMENTE las de una plantilla —la regla `^/blog/` y la forma
+    `/blog/:slug`— es el mismo hallazgo con dos nombres: sale una vez, como
+    segmento, con la plantilla al lado, y no se repite en la lista de
+    plantillas (un aviso por hallazgo, decisión 36).
+    """
+    de = sum(base.values())
+    if not filas or not de:
+        return None
+
+    base_pl: dict[str, int] = defaultdict(int)
+    base_seg: dict[str, int] = defaultdict(int)
+    firmas_de_seg: dict[str, set] = defaultdict(set)
+    segs_de_firma: dict[str, set] = defaultdict(set)
+    for (firma, seg), n in base.items():
+        if not n:
+            continue
+        base_pl[firma] += n
+        segs_de_firma[firma].add(seg if _segmento_propio(seg) else None)
+        if _segmento_propio(seg):
+            base_seg[seg] += n
+            firmas_de_seg[seg].add(firma)
+
+    por_pl: dict[str, int] = defaultdict(int)
+    por_seg: dict[str, int] = defaultdict(int)
+    for f in filas:
+        firma, seg = f.get("_g") or (_firma(f.get("url")), None)
+        por_pl[firma] += 1
+        if _segmento_propio(seg):
+            por_seg[seg] += 1
+
+    def coincide(seg: str) -> str | None:
+        fs = firmas_de_seg.get(seg) or set()
+        if len(fs) != 1:
+            return None
+        (firma,) = fs
+        return firma if segs_de_firma.get(firma) == {seg} else None
+
+    segmentos = sorted(
+        ({"segmento": k, "paginas": v, "de": base_seg.get(k, v),
+          "pct": round(100 * v / max(1, base_seg.get(k, v)), 1),
+          "plantilla": coincide(k)}
+         for k, v in por_seg.items()),
+        key=lambda d: (-d["pct"], -d["paginas"]))
+    ya_dichas = {s["plantilla"] for s in segmentos if s["plantilla"]}
+    plantillas = sorted(
+        ({"plantilla": k, "paginas": v, "de": base_pl.get(k, v),
+          "pct": round(100 * v / max(1, base_pl.get(k, v)), 1)}
+         for k, v in por_pl.items() if k not in ya_dichas),
+        key=lambda d: (-d["pct"], -d["paginas"]))
+
+    def salta(grupos):
+        return any(p["paginas"] >= MINIMO_PAGINAS
+                   and p["pct"] >= PCT_ALERTA_PLANTILLA * 100 for p in grupos)
+
+    pct = len(filas) / de
+    if umbral_absoluto is not None:
+        # Una lista (decision 128): cada URL la eligio alguien, y el piso
+        # de 20 impedia alertar en una lista de 50 aunque fallaran 10.
+        salta_sitio = len(filas) >= umbral_absoluto
+        salta_segmento = salta_plantilla = False
+    else:
+        salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
+        salta_segmento = salta(segmentos)
+        salta_plantilla = salta(plantillas)
+    if not (salta_sitio or salta_segmento or salta_plantilla):
+        return None
+    return {
+        "regla": regla,
+        "severidad": severidad,
+        "que_decide_google": que_decide,
+        "paginas": len(filas),
+        "de": de,
+        "pct": round(pct * 100, 1),
+        "por": ("lista" if umbral_absoluto is not None
+                else "sitio" if salta_sitio
+                else "segmento" if salta_segmento else "plantilla"),
+        "segmentos": segmentos[:5],
+        "plantillas": plantillas[:5],
+        "ejemplos": [_sin_grupo(f) for f in filas[:MUESTRA]],
+    }
+
+
+_ORDEN_SEVERIDAD = {"critical": 0, "warning": 1, "info": 2}
+
+
+def _ordenar_alertas(alertas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(alertas, key=lambda d: (_ORDEN_SEVERIDAD[d["severidad"]], -d["paginas"]))
 
 
 def _alertas(afectadas, bases, umbral_absoluto=None) -> list[dict[str, Any]]:
-    """Las reglas que superan el umbral, en el sitio o en una plantilla.
-
-    Dos disparadores, porque una plantilla entera rota se diluye en el total:
-    las 2.367 páginas de Lopesan son el 99,5% de su plantilla y el 11% del
-    sitio. Si solo se mirara el total, el fallo más grave que hemos encontrado
-    en un cliente no habría disparado nada.
-    """
+    """Las reglas de página que superan el umbral (ver `_alerta`)."""
     salida = []
     for regla, (severidad, que_decide) in REGLAS.items():
-        filas = afectadas[regla]
-        base = bases[BASE_DE_LA_REGLA[regla]]
-        de = sum(base.values())
-        if not filas or not de:
-            continue
-
-        por_plantilla: dict[str, int] = {}
-        for f in filas:
-            firma = _firma(f.get("url"))
-            por_plantilla[firma] = por_plantilla.get(firma, 0) + 1
-        plantillas = sorted(
-            ({"plantilla": k, "paginas": v, "de": base.get(k, v),
-              "pct": round(100 * v / max(1, base.get(k, v)), 1)}
-             for k, v in por_plantilla.items()),
-            key=lambda d: (-d["pct"], -d["paginas"]))
-
-        pct = len(filas) / de
-        if umbral_absoluto is not None:
-            # Una lista (decision 128): cada URL la eligio alguien, y el piso
-            # de 20 impedia alertar en una lista de 50 aunque fallaran 10.
-            salta_sitio, salta_plantilla = len(filas) >= umbral_absoluto, False
-        else:
-            salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
-            salta_plantilla = any(
-                p["paginas"] >= MINIMO_PAGINAS
-                and p["pct"] >= PCT_ALERTA_PLANTILLA * 100
-                for p in plantillas)
-        if not (salta_sitio or salta_plantilla):
-            continue
-        salida.append({
-            "regla": regla,
-            "severidad": severidad,
-            "que_decide_google": que_decide,
-            "paginas": len(filas),
-            "de": de,
-            "pct": round(pct * 100, 1),
-            "por": ("lista" if umbral_absoluto is not None
-                    else "sitio" if salta_sitio else "plantilla"),
-            "plantillas": plantillas[:5],
-            "ejemplos": filas[:MUESTRA],
-        })
-    orden = {"critical": 0, "warning": 1, "info": 2}
-    return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))
+        al = _alerta(regla, severidad, que_decide, afectadas[regla],
+                     bases[BASE_DE_LA_REGLA[regla]], umbral_absoluto)
+        if al is not None:
+            salida.append(al)
+    return _ordenar_alertas(salida)
 
 
 # Tipos que van UNO POR PLANTILLA anclados en una URL elegida entre las del
@@ -798,6 +1142,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
 
     filas = (
         db.query(
+            Url.id, Url.segmento,
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
             HtmlMeta.canonical_href, HtmlMeta.title,
@@ -819,6 +1164,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
         .group_by(Url.url)
         .all()
     )
+    extraido = extraido_de_censo(db, job_id)
     return [
         {
             "url": f.url, "status_code": f.status_code,
@@ -827,9 +1173,32 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "canonical_distintos": f.canonical_distintos,
             "h1": h1s.get(f.url), "word_count": f.word_count,
             "response_class": f.response_class,
+            "segmento": f.segmento,
+            "extraido": extraido.get(f.id) or {},
         }
         for f in filas
     ]
+
+
+def extraido_de_censo(db, job_id) -> dict[int, dict[str, dict[str, Any]]]:
+    """{url_id: {regla: {clase, estado, valor, num}}} de la extraccion a medida.
+
+    Por `custom_extraction.job_id`, sin unir con `urls` (decision 37): el indice
+    `ix_cext_job_nombre_estado` empieza por el job. `valor_clave` y no `valor`:
+    ya va con los espacios colapsados y recortado a 256, que es lo que hace
+    falta para comparar sin arrastrar el contexto entero de una busqueda.
+    """
+    from shared.models import CustomExtraction as C
+
+    salida: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for f in (db.query(C.url_id, C.nombre, C.clase, C.estado, C.valor_clave,
+                       C.valor_num, C.render)
+              .filter(C.job_id == job_id)
+              .yield_per(5000)):
+        salida[f.url_id][f.nombre] = {"clase": f.clase, "estado": f.estado,
+                                      "valor": f.valor_clave, "num": f.valor_num,
+                                      "render": f.render}
+    return salida
 
 
 def resumen_de_job(job) -> dict[str, Any]:
@@ -851,6 +1220,9 @@ def resumen_de_job(job) -> dict[str, Any]:
         "salud": getattr(job, "health", None),
         "nombre": job.name,
         "fecha": job.started_at.isoformat() if job.started_at else None,
+        # Que reglas a medida se aplicaron y como: solo se compara una que
+        # exista igual en los dos censos (decision 127).
+        "reglas_a_medida": reglas_a_medida(job.config),
     }
 
 
@@ -1118,4 +1490,6 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         "avisos": r.get("avisos", []),
         "urls": r.get("urls"),
         "alertas": r.get("alertas", []),
+        # Lo que cambio en la extraccion a medida, regla a regla (decision 127).
+        "extraido": r.get("extraido"),
     }
