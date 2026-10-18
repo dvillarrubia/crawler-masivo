@@ -899,8 +899,8 @@
      la vista quedó parcial o recortada por el tope.
 
    Tres incidencias nuevas (`analysis/avisos_de_sitemaps.py`), las tres con la
-   unidad en la que se arreglan, ancladas como las de robots.txt (decisión
-   112: la raíz del host del fichero, o la URL de id más bajo) y con
+   unidad en la que se arreglan, ancladas en la raíz del host del fichero o, si
+   no se rastreó, en la URL MENOR de ese host o del censo, y con
    `group_key` del fichero o de la combinación (88):
    - **`sitemap_supera_limite`** (warning, uno por FICHERO): más de 50.000
      entradas o más de 50 MB sin comprimir, los límites de Google para un
@@ -930,8 +930,10 @@
      Por combinación y no por URL por lo mismo que las imágenes (64b) y los
      datos estructurados (73): que el sitemap de páginas y el de entradas de un
      WordPress repitan 63 URLs es UN ajuste del generador. Se ancla en la URL
-     afectada de id más bajo que esté en el censo; si ninguna lo está, en el
-     host del primer fichero. Con más de 200 combinaciones se avisan las 200
+     afectada MENOR que esté en el censo; si ninguna lo está, en el host del
+     primer fichero. Por URL y no por id (como la decisión 108): el id depende
+     del orden de rastreo, y con él la comparación entre censos (88) daba el
+     mismo hallazgo por «resuelto» y «nuevo» a la vez (test). Con más de 200 combinaciones se avisan las 200
      mayores y el resto va al log.
 
    Sin `jobs.sitemaps` (censo anterior) no se emite nada, y sin la tabla

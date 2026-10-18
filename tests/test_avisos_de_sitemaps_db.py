@@ -144,7 +144,9 @@ def test_en_varios_sitemaps_uno_por_combinacion_anclado_en_una_afectada():
     assert len(avisos) == 2
     grande, chica = avisos
     assert grande.severity == "info"
-    assert grande.url_id == min(p1.id, p2.id)
+    # En la URL MENOR de las afectadas, no en la de id menor (decision 88):
+    # /p2 se rastreo antes y tiene el id mas bajo.
+    assert p2.id < p1.id and grande.url_id == p1.id
     assert grande.details["ficheros"] == sorted([A, B])
     assert grande.details["paginas_afectadas"] == 3 and grande.details["en_el_censo"] == 2
     assert grande.details["lastmod_distinto"] == 1
@@ -154,6 +156,49 @@ def test_en_varios_sitemaps_uno_por_combinacion_anclado_en_una_afectada():
     assert chica.details["ficheros"] == sorted([A, C])
     assert chica.details["en_el_censo"] == 0
     assert grande.group_key != chica.group_key
+
+
+def test_el_ancla_no_depende_del_orden_de_rastreo():
+    """Dos censos iguales rastreados en otro orden anclan los tres avisos en la
+    MISMA URL: la comparacion casa por (tipo, url, group_key) (decision 88), y
+    anclar en el id menor daria «resuelto» y «nuevo» a la vez."""
+    def censo(orden):
+        s, j = _montar([_fichero(C, declaradas=60_000)])
+        for ruta in orden:                       # sin raiz rastreada en ningun host
+            _url(s, j, ruta)
+        for ruta in ("/p1", "/p2"):
+            _entrada(s, j, ruta, A)
+            _entrada(s, j, ruta, B)
+        _avisar(s, j)
+        ancla = lambda tipo: {u.url for u in s.query(Url).filter(  # noqa: E731
+            Url.id.in_([i.url_id for i in _issues(s, j, tipo)]))}
+        return ancla("en_varios_sitemaps"), ancla("sitemap_supera_limite")
+
+    assert censo(["/p2", "/p1", "/z"]) == censo(["/z", "/p1", "/p2"]) == (
+        {"https://x.com/p1"}, {"https://x.com/p1"})
+
+
+def test_run_all_los_emite():
+    """Enchufado al analisis completo, ejecutandolo (decision 74)."""
+    s, j = _montar([_fichero(A, declaradas=60_000)])
+    _url(s, j, "/")
+    from shared.models import HtmlMeta, Hreflang
+
+    HtmlMeta.__table__.create(s.get_bind(), checkfirst=True)
+    Hreflang.__table__.create(s.get_bind(), checkfirst=True)
+    az = SEOAnalyzer(s, j.id)
+    for nombre in dir(az):
+        if nombre.startswith(("analyze_", "compute_")) and nombre != "analyze_indexability":
+            setattr(az, nombre, lambda *a, **k: None)
+    import analysis.analyzer as modulo
+
+    original = modulo.avisos_de_enlaces.avisar_enlaces_no_rastreables
+    modulo.avisos_de_enlaces.avisar_enlaces_no_rastreables = lambda a: None
+    try:
+        az.run_all()
+    finally:
+        modulo.avisos_de_enlaces.avisar_enlaces_no_rastreables = original
+    assert len(_issues(s, j, "sitemap_supera_limite")) == 1
 
 
 def test_sin_resumen_de_sitemaps_no_se_afirma_nada():

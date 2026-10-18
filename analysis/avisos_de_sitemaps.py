@@ -17,11 +17,12 @@ fichero leido) y en `sitemap_entries` (una fila por fichero y URL interna):
   del generador (decisiones 53, 64 y 73).
 
 Ninguna tiene pagina propia —un fichero de sitemap no es una URL del censo—:
-se anclan en la raiz del host del fichero si se rastreo, y si no en la URL de
-id mas bajo de ese host o del censo, con `group_key` del fichero (o de la
+se anclan en la raiz del host del fichero si se rastreo, y si no en la URL
+MENOR de ese host o del censo, con `group_key` del fichero (o de la
 combinacion) para que la comparacion entre censos identifique el hallazgo
-(decision 88). Lo de `en_varios_sitemaps` se ancla en la URL de id mas bajo de
-las afectadas que este en el censo.
+(decision 88). Lo de `en_varios_sitemaps` se ancla en la URL menor de las
+afectadas que este en el censo. Por URL y no por id, que depende del orden de
+rastreo.
 
 No lee `links` (decision 95). Sin `jobs.sitemaps` (rastreo anterior) o sin la
 tabla no se emite nada: «no se sabe» no es «sitemap limpio».
@@ -66,12 +67,18 @@ def _leido(fichero: dict, respaldo: datetime) -> datetime:
 
 
 class _Anclas:
-    """La URL del censo en la que se cuelga un aviso de un fichero."""
+    """La URL del censo en la que se cuelga un aviso de un fichero.
+
+    Siempre por la URL y nunca por el id, que depende del orden de rastreo: la
+    comparacion entre censos casa por (tipo, url, group_key) (decision 88), y
+    con el id menor el mismo hallazgo saldria «resuelto» y «nuevo» a la vez.
+    """
 
     def __init__(self, az):
         self.az = az
         self._cache: dict[str, int | None] = {}
         self._minimo: int | None = None
+        self._minimo_buscado = False
 
     def de_fichero(self, url: str) -> int | None:
         from shared.models import Url
@@ -82,16 +89,18 @@ class _Anclas:
             filtro = (Url.job_id == self.az.job_id, Url.host == (p.hostname or ""))
             ancla = self.az.session.execute(
                 select(Url.id).where(*filtro, Url.path.in_(["/", ""]))
-                .order_by((Url.scheme != p.scheme), Url.id).limit(1)).scalar()
+                .order_by((Url.scheme != p.scheme), Url.url).limit(1)).scalar()
             if ancla is None:
                 ancla = self.az.session.execute(
-                    select(func.min(Url.id)).where(*filtro)).scalar()
+                    select(Url.id).where(*filtro).order_by(Url.url).limit(1)).scalar()
             self._cache[clave] = ancla
         if self._cache[clave] is not None:
             return self._cache[clave]
-        if self._minimo is None:
+        if not self._minimo_buscado:
+            self._minimo_buscado = True
             self._minimo = self.az.session.execute(
-                select(func.min(Url.id)).where(Url.job_id == self.az.job_id)).scalar()
+                select(Url.id).where(Url.job_id == self.az.job_id)
+                .order_by(Url.url).limit(1)).scalar()
         return self._minimo
 
 
@@ -223,12 +232,14 @@ def _en_varios(az, anclas: _Anclas, recortadas: bool) -> int:
     for url_hash, d in por_url.items():
         combinaciones[tuple(sorted(d["ficheros"]))].append(url_hash)
 
-    ids: dict[str, int] = {}
+    # (url, id) de las afectadas que estan en el censo: el ancla es la de URL
+    # menor, no la de id menor (decision 88).
+    ids: dict[str, tuple[str, int]] = {}
     hashes = sorted(por_url)
     for i in range(0, len(hashes), LOTE):
-        ids.update({h: i_ for h, i_ in az.session.execute(
-            select(Url.url_hash, Url.id).where(Url.job_id == az.job_id,
-                                               Url.url_hash.in_(hashes[i:i + LOTE])))})
+        ids.update({h: (u, i_) for h, u, i_ in az.session.execute(
+            select(Url.url_hash, Url.url, Url.id).where(
+                Url.job_id == az.job_id, Url.url_hash.in_(hashes[i:i + LOTE])))})
     orden = sorted(combinaciones.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     if len(orden) > MAX_COMBINACIONES:
         logger.warning("Sitemaps: %d combinaciones de ficheros con URLs repetidas; se "
@@ -236,7 +247,7 @@ def _en_varios(az, anclas: _Anclas, recortadas: bool) -> int:
     emitidos = 0
     for ficheros, miembros in orden[:MAX_COMBINACIONES]:
         en_censo = sorted(ids[h] for h in miembros if h in ids)
-        ancla = en_censo[0] if en_censo else anclas.de_fichero(ficheros[0])
+        ancla = en_censo[0][1] if en_censo else anclas.de_fichero(ficheros[0])
         if ancla is None:
             continue
         # Por url de los afectados, para que la muestra no dependa del orden de
