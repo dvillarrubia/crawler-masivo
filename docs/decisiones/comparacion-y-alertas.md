@@ -714,7 +714,9 @@
      leerlo y lo que no vale se queda con lo de serie. La comparación lleva
      además su propio `try` alrededor de las reglas.
    - **El resumen** solo se genera para clientes con algún perfil propio y
-     activo. Si el webhook falla, se reintenta mientras dura la gracia, y sus
+     activo o con una programación activa. Una programación sin perfil cuenta
+     como una serie más: el 18-oct-2026 ningún cliente de producción tenía
+     perfiles, y los censos semanales iban por programación. Si el webhook falla, se reintenta mientras dura la gracia, y sus
      cifras no se comparan contra un censo truncado ni detrás de un muro.
    - La pestaña Comparar (`/diff`, bajo demanda) usa los umbrales de serie y
      la alerta guardada en el rastreo los del cliente, así que pueden no
