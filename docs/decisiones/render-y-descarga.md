@@ -868,6 +868,13 @@
    de 200 con contenido (`response_class`) no puede ser peor que la del ultimo
    censo de cada uno. Si lo es en alguno, `impersonate: chrome124` en su
    `projects/<cliente>/config.json` lo devuelve a lo de antes sin desplegar.
+   **Hecho el 2026-10-18 desde el VPS**, como A/B y no contra el ultimo
+   censo: por sitio, dos canarios de 100 URLs seguidos con las mismas
+   semillas, uno con `chrome124` + UA 124 y otro con `chrome150` + UA 150
+   (los dos de Windows). Identicos en los tres: UOC 99/99 HTML con 200 y
+   contenido en los dos, progym 96/96, Lopesan 56/56, con los mismos codigos
+   (los 302 de Lopesan son sus saltos de idioma) y `health` sin una sola
+   respuesta no valida. La huella nueva se queda.
    **Ojo, que el cambio de serie no llega a todo**: los `projects/*/config.json`
    de UOC, blogs-uoc, progym y workoholics fijan YA los dos (`chrome124` y el UA
    de 124), y una programacion guarda su config entera al crearse
