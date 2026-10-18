@@ -684,6 +684,23 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
 
 
+class JobDetailResponse(JobResponse):
+    """La ficha de UN job: lo de `JobResponse` y lo que solo se mira ahi.
+
+    `sitemaps` (decision 126) es una fila por fichero leido, y un sitio con un
+    indice de 500 ficheros la haria viajar en cada fila de `GET /api/jobs`, que
+    pinta la lista de rastreos y no la usa. Por eso va en la ficha (GET, PATCH,
+    cancelar y reanudar de un job) y no en `JobResponse`.
+    """
+
+    # Los ficheros de sitemap que se leyeron: `{ficheros: [{url, status,
+    # formato, declaradas, devueltas, hijos, internas, bytes, cortado,
+    # entradas_guardadas, leido_at}], pedidos, leidos, parcial, tope_entradas,
+    # entradas_guardadas, entradas_recortadas}`. NULL = rastreo anterior o sin
+    # sitemap.
+    sitemaps: dict[str, Any] | None = None
+
+
 # ---------------------------------------------------------------------------
 # URL / HTML meta
 # ---------------------------------------------------------------------------

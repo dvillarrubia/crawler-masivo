@@ -35,6 +35,9 @@ SONDAS = {"enlaces_externos": {"distintos": 451, "comprobados": 212, "rotos": 0,
           "recursos": {"comprobados": 16, "rotos": 0}}
 TLS = {"hosts": {"x.com": {"verificado": True, "dias_restantes": 40.5}}}
 SOFT404 = {"sondas": {"x.com": {"status_code": 404}}}
+SITEMAPS = {"ficheros": [{"url": "https://x.com/sitemap.xml", "status": 200,
+                          "formato": "urlset", "declaradas": 3, "devueltas": 3}],
+            "pedidos": 1, "leidos": 1, "parcial": False, "entradas_recortadas": False}
 CON, SIN = uuid.uuid4(), uuid.uuid4()
 
 
@@ -47,7 +50,8 @@ def api(tmp_path):
     Sesion = sessionmaker(bind=engine, expire_on_commit=False)
     with Sesion() as s:
         s.add(Job(id=CON, name="con", status="completed", seeds=["https://x.com/"],
-                  config={}, sondas_resumen=SONDAS, tls=TLS, soft404=SOFT404))
+                  config={}, sondas_resumen=SONDAS, tls=TLS, soft404=SOFT404,
+                  sitemaps=SITEMAPS))
         s.add(Job(id=SIN, name="sin", status="completed", seeds=["https://x.com/"],
                   config={}))
         s.commit()
@@ -73,3 +77,15 @@ def test_sin_resumen_es_null_no_un_dict_vacio(api):
     """NULL = analisis anterior o sin sondas: no se convierte en «0 rotos»."""
     d = api.get(f"/api/jobs/{SIN}").json()
     assert d["sondas_resumen"] is None and d["tls"] is None and d["soft404"] is None
+
+
+def test_los_sitemaps_van_en_la_ficha_y_no_en_la_lista(api):
+    """`jobs.sitemaps` (decision 126) es una fila por fichero: en la ficha si,
+    en cada fila de la lista de rastreos no (la lista no lo pinta)."""
+    assert api.get(f"/api/jobs/{CON}").json()["sitemaps"] == SITEMAPS
+    assert api.get(f"/api/jobs/{SIN}").json()["sitemaps"] is None
+    filas = api.get("/api/jobs").json()["items"]
+    assert filas and all("sitemaps" not in f for f in filas)
+    # Renombrar devuelve la ficha: la interfaz la pone en `this.job` y no puede
+    # perder la tarjeta de sitemaps por haber editado el nombre.
+    assert api.patch(f"/api/jobs/{CON}", json={"name": "otro"}).json()["sitemaps"] == SITEMAPS

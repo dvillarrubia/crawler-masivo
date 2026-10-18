@@ -1346,3 +1346,7 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 /* La linea de robots.txt que bloquea una URL (decision 129) */
 .robots-regla{margin:.25rem 0;word-break:break-all}
 .robots-regla code{font-size:.75rem;background:var(--orange-bg);padding:0 .3rem;border-radius:3px;margin:0 .25rem}
+
+/* Tarjetas de comprobaciones de la ficha (TLS, soft 404, sondas, sitemaps) y
+   veredicto del modo lista: el tono de cada lectura. */
+.chk .green{color:var(--green)}.chk .red{color:var(--red)}.chk .orange{color:var(--orange)}

@@ -978,6 +978,37 @@
           </div>
         </template>
 
+        <!-- Modo lista (decision 128): el veredicto de GET /veredicto, arriba
+             y antes que las alertas, que es lo que se mira en un QA de
+             despliegue. Los motivos traen su mensaje y una muestra de URLs. -->
+        <template x-if="veredicto && VEREDICTO_TEXTO[veredicto.veredicto]">
+          <div class="card mb-2 chk" data-testid="veredicto-lista"
+               :style="'border-left:3px solid var(--' + VEREDICTO_TEXTO[veredicto.veredicto][1] + ')'">
+            <div class="text-sm" style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline;flex-wrap:wrap">
+              <span>
+                <strong :class="VEREDICTO_TEXTO[veredicto.veredicto][1]" x-text="VEREDICTO_TEXTO[veredicto.veredicto][0]"></strong>
+                <span class="text-dim" x-text="' · lista de ' + fmt.num(veredicto.urls_de_la_lista) + (veredicto.urls_de_la_lista === 1 ? ' URL' : ' URLs')"></span>
+              </span>
+              <a class="text-sm" :href="'/api/jobs/' + job.id + '/veredicto'" target="_blank" rel="noopener">JSON para CI</a>
+            </div>
+            <template x-if="veredicto.veredicto === 'pasa'">
+              <div class="text-sm text-dim">Todas las URLs de la lista responden 200, siguen indexables y con el mismo canonical que en el censo de referencia.</div>
+            </template>
+            <template x-for="(m, i) in (veredicto.motivos || []).concat(veredicto.no_concluyente_por || [])" :key="m.tipo + (m.regla || '') + i">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid var(--' + (i < (veredicto.motivos || []).length ? 'red' : 'orange') + ')'">
+                <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
+                  <span class="text-sm" x-text="m.mensaje.charAt(0).toUpperCase() + m.mensaje.slice(1) + (m.causa ? ' (' + m.causa + ')' : '')"></span>
+                  <strong x-show="m.paginas" style="white-space:nowrap" x-text="fmt.num(m.paginas)"></strong>
+                </div>
+                <template x-for="e in (m.ejemplos || []).slice(0, 5)" :key="e.url">
+                  <div class="text-dim" style="font-size:.78rem;word-break:break-all"
+                       x-text="e.url + (e.antes !== undefined ? '  ·  ' + (e.antes ?? '—') + ' → ' + (e.ahora ?? '—') : (e.ahora !== undefined && e.ahora !== null ? '  ·  ' + e.ahora : '')) + (e.destino ? '  → ' + e.destino : '')"></div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
         <!-- Que cambio respecto al censo anterior del mismo sitio, calculado
              al cerrar el rastreo. Va ARRIBA y antes que las cifras: una
              alerta a la que hay que ir no es una alerta. En Lopesan, media
@@ -1646,6 +1677,114 @@
                     </template>
                   </div>
                 </template>
+              </div>
+            </template>
+
+            <!-- Comprobaciones fuera del censo: certificado (110), soft 404
+                 (105), sondas de respuesta (123/124) y sitemaps (126). Cada
+                 tarjeta solo si el job trae ese dato: sin el, un rastreo viejo
+                 o con la sonda apagada se leeria como «sin problemas». -->
+            <template x-if="filasTls(job)">
+              <div class="card chk" data-testid="tarjeta-tls">
+                <div class="card-header"><h2>Certificado TLS</h2>
+                  <span class="text-sm text-dim" x-text="'el día del rastreo · aviso a ' + ((job.config.analysis_thresholds || {}).tls_dias_aviso || 7) + ' días'"></span></div>
+                <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
+                  <thead><tr><th>Host</th><th>Estado</th><th>Emisor</th><th>Caduca</th><th>Días</th><th>Versión</th></tr></thead>
+                  <tbody>
+                    <template x-for="t in filasTls(job)" :key="t.host">
+                      <tr :title="t.detalle || ''">
+                        <td x-text="t.host"></td>
+                        <td :class="t.nivel === 'dim' ? 'text-dim' : t.nivel" x-text="t.estado"></td>
+                        <td x-text="t.emisor || '—'"></td>
+                        <td x-text="t.caduca ? fmt.dia(t.caduca) : '—'"></td>
+                        <td x-text="t.dias == null ? '—' : fmt.num(t.dias)"></td>
+                        <td x-text="t.version || '—'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table></div>
+              </div>
+            </template>
+
+            <template x-if="resumenSoft404(job)">
+              <div class="card chk" data-testid="tarjeta-soft404" x-data="{ get s4() { return resumenSoft404(job) } }">
+                <div class="card-header"><h2>Soft 404</h2>
+                  <span class="text-sm text-dim">qué responde el sitio a una URL que no existe</span></div>
+                <div class="text-sm mb-1">
+                  <template x-if="s4.analizado">
+                    <span>
+                      <strong :class="s4.soft_404 ? 'red' : 'green'" x-text="fmt.num(s4.soft_404) + (s4.soft_404 === 1 ? ' página' : ' páginas')"></strong>
+                      son la página de error del sitio con un 200<span x-show="s4.indexables" x-text="' (' + fmt.num(s4.indexables) + ' indexables)'"></span><span x-show="s4.candidatos" x-text="' · ' + fmt.num(s4.candidatos) + ' candidatas sin afirmar'"></span>.
+                      <a href="#" @click.prevent="verTipoDeIncidencia('soft_404', ''); switchTab('issues')" x-show="s4.soft_404">Ver</a>
+                    </span>
+                  </template>
+                  <template x-if="!s4.analizado">
+                    <span class="text-dim">Sondas hechas, sin analizar todavía.</span>
+                  </template>
+                  <span class="text-dim" x-text="' ' + fmt.num(s4.sondas) + (s4.sondas === 1 ? ' sonda' : ' sondas') + (s4.con_huella != null ? ', ' + fmt.num(s4.con_huella) + ' con huella' : '') + '.'"></span>
+                </div>
+                <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
+                  <thead><tr><th>Host</th><th>Plantilla</th><th>Respuesta</th><th title="Páginas del censo con la huella de esta sonda, sobre las de su host o su plantilla">Con su huella</th></tr></thead>
+                  <tbody>
+                    <template x-for="f in s4.filas" :key="f.clave">
+                      <tr :title="f.url + (f.redirige_a ? ' → ' + f.redirige_a : '')">
+                        <td x-text="f.host"></td>
+                        <td x-text="f.plantilla || 'raíz'"></td>
+                        <td :class="f.nivel === 'dim' ? 'text-dim' : f.nivel" x-text="f.lectura"></td>
+                        <td x-text="f.coincidencias == null ? '—' : fmt.num(f.coincidencias) + ' de ' + fmt.num(f.alcance) + (f.devuelve_portada ? ' · devuelve la portada' : (f.ambigua ? ' · huella de plantilla' : ''))"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table></div>
+              </div>
+            </template>
+
+            <template x-if="resumenSondas(job)">
+              <div class="card chk" data-testid="tarjeta-sondas">
+                <div class="card-header"><h2>Enlaces externos y recursos</h2>
+                  <span class="text-sm text-dim">sondas fuera del censo</span></div>
+                <template x-for="b in resumenSondas(job)" :key="b.etiqueta">
+                  <div class="mb-1">
+                    <div class="text-sm">
+                      <strong x-text="b.etiqueta"></strong>:
+                      <span x-text="fmt.num(b.comprobados) + (b.distintos != null ? ' comprobados de ' + fmt.num(b.distintos) + ' distintos' : ' comprobados')"></span>
+                      · <span :class="b.rotos ? 'red' : 'green'" x-text="fmt.num(b.rotos) + (b.rotos === 1 ? ' roto' : ' rotos')"></span>
+                      <span x-show="b.dominios_muertos" class="orange" x-text="' · ' + fmt.num(b.dominios_muertos) + (b.dominios_muertos === 1 ? ' dominio muerto' : ' dominios muertos')"></span>
+                    </div>
+                    <div x-show="b.parcial" class="text-sm orange">No se comprobaron todos (tope alcanzado): que no haya aviso no dice que el resto esté bien.</div>
+                    <div class="text-dim" style="font-size:.78rem" x-show="b.por_veredicto.length"
+                         x-text="b.por_veredicto.map(([v, n]) => v.replace(/_/g, ' ') + ': ' + fmt.num(n)).join(' · ')"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <template x-if="resumenSitemaps(job)">
+              <div class="card chk" data-testid="tarjeta-sitemaps" x-data="{ get sm() { return resumenSitemaps(job) }, abierto: false }">
+                <div class="card-header"><h2>Sitemaps</h2>
+                  <span class="text-sm text-dim" x-text="fmt.num(sm.leidos) + ' de ' + fmt.num(sm.pedidos) + (sm.pedidos === 1 ? ' fichero leído' : ' ficheros leídos')"></span></div>
+                <div class="text-sm">
+                  <span x-text="fmt.num(sm.devueltas) + ' entradas' + (sm.declaradas && sm.declaradas !== sm.devueltas ? ' de ' + fmt.num(sm.declaradas) + ' declaradas' : '')"></span>
+                  <span class="text-dim" x-show="sm.formatos.length" x-text="' · ' + sm.formatos.map(([f, n]) => f + (n > 1 ? ' ×' + n : '')).join(', ')"></span>
+                </div>
+                <div x-show="sm.parcial" class="text-sm orange">Lectura parcial: hubo ficheros sin leer o cortados, así que «fuera del sitemap» no se puede afirmar para todo el sitio.</div>
+                <div x-show="sm.fallidos" class="text-sm orange" x-text="fmt.num(sm.fallidos) + (sm.fallidos === 1 ? ' fichero no respondió 200' : ' ficheros no respondieron 200')"></div>
+                <div x-show="sm.recortadas" class="text-sm text-dim" x-text="'Se guardaron ' + fmt.num(sm.guardadas) + ' entradas (tope ' + fmt.num(sm.tope) + '): la ficha de una URL puede no decir de qué fichero viene.'"></div>
+                <a href="#" class="text-sm" x-show="sm.ficheros.length" @click.prevent="abierto = !abierto" x-text="abierto ? 'Ocultar ficheros' : 'Ver ficheros'"></a>
+                <div class="table-wrap" x-show="abierto"><table class="tbl" style="font-size:.8rem">
+                  <thead><tr><th>Fichero</th><th>Código</th><th>Formato</th><th>Entradas</th><th>Hijos</th></tr></thead>
+                  <tbody>
+                    <template x-for="f in sm.ficheros.slice(0, 200)" :key="f.url">
+                      <tr>
+                        <td style="word-break:break-all"><a :href="f.url" target="_blank" rel="noopener" x-text="f.url"></a></td>
+                        <td :class="f.status && f.status !== 200 ? 'orange' : ''" x-text="f.status ?? '—'"></td>
+                        <td x-text="f.formato || '—'"></td>
+                        <td x-text="f.devueltas == null ? '—' : fmt.num(f.devueltas) + (f.cortado ? ' (cortado)' : '')"></td>
+                        <td x-text="f.hijos ? fmt.num(f.hijos) : '—'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table></div>
               </div>
             </template>
 
@@ -4518,7 +4657,6 @@
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_fonts"> Fuentes</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_svg"> SVG</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_other"> Otros</label>
-            <label class="checkbox-label" title="Comprueba con una petición HEAD las imágenes, CSS y JS que la página carga de OTROS hosts (un CDN, un script de terceros). No entran en el censo ni gastan el máximo de URLs; respetan el robots.txt de ese host y no llevan cabeceras, cookies ni credenciales del rastreo."><input type="checkbox" x-model="createForm.check_external_resources"> Comprobar recursos de otros hosts</label>
           </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
@@ -4527,10 +4665,37 @@
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_subdomains"> Rastrear subdominios</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_nofollow"> Seguir nofollow</label>
-            <label class="checkbox-label" title="Pide con HEAD (y GET si hace falta) cada URL de otro sitio que enlaza el sitio, para avisar de enlaces externos rotos y dominios muertos. No entran en el censo ni gastan el máximo de URLs (tope propio: 5.000, y 50 por host); respetan el robots.txt del tercero y no llevan cabeceras, cookies ni credenciales del rastreo. A diferencia de «Seguir externos», que mete las páginas externas en el censo."><input type="checkbox" x-model="createForm.comprobar_enlaces_externos"> Comprobar enlaces externos</label>
-            <label class="checkbox-label" title="Pide con HEAD las imágenes, CSS y JS del propio sitio que la página carga y el censo no rastrea, para avisar de recursos rotos y anotar su peso. Fuera del máximo de URLs (tope propio: 20.000)."><input type="checkbox" x-model="createForm.comprobar_recursos"> Comprobar recursos embebidos</label>
           </div>
-          <!-- Paridad movil/escritorio (decision 119): sondas fuera de max_urls -->
+          <!-- Sondas fuera del censo: paridad movil (119), enlaces externos
+               (123) y recursos embebidos (124). Apagadas de serie: multiplican
+               las peticiones. Las de 123/124 solo se mandan si se tocan. -->
+          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="radar" style="width:14px;height:14px;opacity:.6"></i> Sondas fuera del censo
+          </div>
+          <p class="text-sm text-dim" style="margin:0 0 .5rem" data-testid="sondas-aviso">
+            Piden URLs que no son del censo y no cuentan para el máximo de URLs:
+            cada una es una petición más al sitio (o a un tercero). Respetan el
+            robots.txt de cada host y no llevan cabeceras, cookies ni credenciales del rastreo.
+          </p>
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+            <label class="checkbox-label" title="Pide con HEAD (y GET si hace falta) cada URL de otro sitio que enlaza el sitio, para avisar de enlaces externos rotos y dominios muertos. A diferencia de «Seguir externos», que mete las páginas externas en el censo."><input type="checkbox" x-model="createForm.comprobar_enlaces_externos" data-testid="sonda-enlaces"> Comprobar enlaces externos</label>
+            <label class="checkbox-label" title="Pide con HEAD las imágenes, CSS y JS del propio sitio que la página carga y el censo no rastrea, para avisar de recursos rotos y anotar su peso."><input type="checkbox" x-model="createForm.comprobar_recursos" data-testid="sonda-recursos"> Comprobar recursos embebidos</label>
+            <label class="checkbox-label" title="Comprueba también las imágenes, CSS y JS que la página carga de OTROS hosts (un CDN, un script de terceros), con el mismo tope que los recursos."><input type="checkbox" x-model="createForm.check_external_resources"> Recursos de otros hosts</label>
+          </div>
+          <div class="form-row-3" x-show="createForm.comprobar_enlaces_externos || createForm.comprobar_recursos || createForm.check_external_resources">
+            <div class="form-group" x-show="createForm.comprobar_enlaces_externos">
+              <label title="URLs externas distintas que se comprueban como mucho">Enlaces externos: tope</label>
+              <input type="number" x-model="createForm.enlaces_externos_max" min="0" max="100000">
+            </div>
+            <div class="form-group" x-show="createForm.comprobar_recursos || createForm.check_external_resources">
+              <label title="Recursos distintos (internos y externos) que se comprueban como mucho">Recursos: tope</label>
+              <input type="number" x-model="createForm.recursos_max" min="0" max="500000">
+            </div>
+            <div class="form-group">
+              <label title="URLs como mucho por host externo, enlaces y recursos juntos. 0 = sin tope">Por host externo (0 = sin tope)</label>
+              <input type="number" x-model="createForm.sondas_por_host" min="0" max="10000">
+            </div>
+          </div>
           <div class="form-row-3">
             <div class="form-group">
               <label title="Páginas que se vuelven a pedir con el perfil móvil (o escritorio, si el UA ya es de móvil) para compararlas. 0 = apagado">Paridad móvil: páginas (0 = no)</label>
