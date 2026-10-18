@@ -4,12 +4,11 @@ Para seguir el proyecto sin saber programar. Cuenta qué hace la herramienta,
 qué está a punto de llegar y qué viene después, sin tecnicismos. El detalle
 técnico está en [`ROADMAP.md`](ROADMAP.md) y en cada issue enlazada.
 
-**Última actualización: 17 de octubre de 2026.**
+**Última actualización: 18 de octubre de 2026.**
 
 Cómo leer cada punto:
 
 - ✅ Funciona hoy en la herramienta.
-- 🟡 Terminado, pendiente de publicar y de probar con rastreos reales.
 - ⏳ En cola, sin empezar.
 - 💤 Aparcado: no se va a hacer de momento.
 
@@ -18,12 +17,12 @@ Cómo leer cada punto:
 ## En una frase
 
 La herramienta ya rastrea y audita sitios grandes como Screaming Frog, compara
-cada rastreo con el anterior y avisa sola cuando algo se rompe. Acabamos de
-terminar una tanda grande de comprobaciones nuevas y los segmentos de negocio
-(falta publicarlos). Lo siguiente sigue el orden del plan
-([`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md)): Search Console,
-vigilar la cartera de clientes y los entregables. Nada de eso espera a la
-inteligencia artificial, que va por su cuenta en cuanto haya clave.
+cada rastreo con el anterior y avisa sola cuando algo se rompe. El 17 y el 18
+de octubre se publicó una tanda grande: todo lo que salió de compararnos con
+FreeCrawl, los segmentos de negocio, la evolución de la cartera, el modo lista
+para revisar despliegues y la comparación ampliada entre rastreos. Lo
+siguiente es Search Console, y después vigilar la cartera y los entregables.
+La inteligencia artificial va por su cuenta en cuanto haya clave.
 
 ---
 
@@ -79,51 +78,83 @@ inteligencia artificial, que va por su cuenta en cuanto haya clave.
 
 ---
 
-## 🟡 Terminado, pendiente de publicar (17 de octubre)
+## ✅ Publicado el 17 y el 18 de octubre
 
-Salió de compararnos con otra herramienta (FreeCrawl). Está todo programado y
-revisado; falta publicarlo por partes y probarlo con rastreos reales de un par
-de clientes antes de fiarnos de las cifras.
+Ya está en la herramienta. Falta comprobar algunas cifras con rastreos reales
+de un par de clientes (sobre todo lo de Googlebot en robots.txt, la
+comparación móvil/escritorio y cuántos enlaces externos se comprueban) antes de
+fiarnos del todo.
 
 **Arreglos de cosas que hacíamos mal** ([#149](https://github.com/dvillarrubia/crawler-masivo/issues/149))
 
-- 🟡 Algunas páginas con noindex enviado «por cabecera» salían como
+- ✅ Algunas páginas con noindex enviado «por cabecera» salían como
   indexables.
-- 🟡 Los casi duplicados contaban páginas que Google no indexa.
-- 🟡 Si el robots.txt de un sitio fallaba, lo tratábamos como «todo permitido»;
+- ✅ Los casi duplicados contaban páginas que Google no indexa.
+- ✅ Si el robots.txt de un sitio fallaba, lo tratábamos como «todo permitido»;
   Google lo trata como «todo bloqueado».
-- 🟡 Ahora se distingue lo que el robots.txt le prohíbe a Googlebot en
+- ✅ Ahora se distingue lo que el robots.txt le prohíbe a Googlebot en
   concreto.
-- 🟡 La contraseña de un sitio en pruebas ya no se envía a otros dominios, y
+- ✅ La contraseña de un sitio en pruebas ya no se envía a otros dominios, y
   ya no guardamos las cookies que pone el servidor (Google tampoco).
-- 🟡 Cadenas de redirección muy largas, varios canonicals distintos en la misma
+- ✅ Cadenas de redirección muy largas, varios canonicals distintos en la misma
   página y hreflang repetido o enviado por cabecera.
 
 **Comprobaciones nuevas** ([#150](https://github.com/dvillarrubia/crawler-masivo/issues/150))
 
-- 🟡 Canonicals que se contradicen, o noindex junto a una canonical a otra
+- ✅ Canonicals que se contradicen, o noindex junto a una canonical a otra
   página.
-- 🟡 Redirecciones que acaban en una página noindex, y redirecciones hechas con
+- ✅ Redirecciones que acaban en una página noindex, y redirecciones hechas con
   meta refresh o con JavaScript.
-- 🟡 H1 vacíos, titles de plantilla sin rellenar («Untitled», «Home»…) y
+- ✅ H1 vacíos, titles de plantilla sin rellenar («Untitled», «Home»…) y
   descriptions iguales al title.
-- 🟡 Enlaces internos sin texto.
-- 🟡 Paginación mal hecha: páginas 2, 3… en noindex o canonicalizadas a la 1,
+- ✅ Enlaces internos sin texto.
+- ✅ Paginación mal hecha: páginas 2, 3… en noindex o canonicalizadas a la 1,
   o a las que no se llega con un enlace normal.
-- 🟡 Viewport para móvil, idioma de la página, codificación y etiquetas para
+- ✅ Viewport para móvil, idioma de la página, codificación y etiquetas para
   redes sociales (Open Graph).
-- 🟡 Velocidad de respuesta del servidor, páginas sin comprimir y certificado
+- ✅ Velocidad de respuesta del servidor, páginas sin comprimir y certificado
   de seguridad caducado o a punto de caducar.
-- 🟡 Diferencias entre la versión móvil y la de escritorio de cada plantilla.
-- 🟡 Enlaces a otros sitios que están rotos y dominios que ya no existen.
-- 🟡 Imágenes, estilos o scripts rotos dentro de las páginas
+- ✅ Diferencias entre la versión móvil y la de escritorio de cada plantilla.
+- ✅ Enlaces a otros sitios que están rotos y dominios que ya no existen.
+- ✅ Imágenes, estilos o scripts rotos dentro de las páginas
   ([#101](https://github.com/dvillarrubia/crawler-masivo/issues/101)).
 
 **Segmentos de negocio** ([#172](https://github.com/dvillarrubia/crawler-masivo/pull/172))
 
-- 🟡 Cada cliente define sus secciones («fichas», «blog», «categorías») y
+- ✅ Cada cliente define sus secciones («fichas», «blog», «categorías») y
   Problemas dice qué porcentaje de cada una tiene cada fallo. Sirve también
   para los rastreos ya hechos, sin volver a rastrear.
+
+**Seguimiento de clientes**
+
+- ✅ **Evolución y panel de cartera** ([#181](https://github.com/dvillarrubia/crawler-masivo/pull/181)): cómo evoluciona
+  cada sitio de rastreo en rastreo (errores, indexables, profundidad,
+  PageRank desperdiciado) y un panel con todos los clientes.
+- ✅ **Comparación ampliada entre rastreos** ([#183](https://github.com/dvillarrubia/crawler-masivo/pull/183)): avisa si
+  las páginas se alejan de la home, pierden enlaces internos, PageRank, datos
+  estructurados o hreflang; separa los fallos de páginas que ya existían de los
+  de páginas recién publicadas, y entiende los cambios de ruta de una
+  migración.
+- ✅ **Lo extraído a medida, comparado entre rastreos** ([#175](https://github.com/dvillarrubia/crawler-masivo/pull/175)):
+  por ejemplo, cuántos precios suben o bajan, o cuántas fichas pasan de «en
+  stock» a «agotado», con alertas por segmento.
+- ✅ **Modo lista para revisar un despliegue** ([#176](https://github.com/dvillarrubia/crawler-masivo/pull/176)): se le da
+  una lista de URLs y dice si pasa o falla frente a la vez anterior.
+
+**Rastreo**
+
+- ✅ **robots.txt por bot de IA** ([#177](https://github.com/dvillarrubia/crawler-masivo/pull/177)): qué dejan pasar a
+  Googlebot, Bingbot, ChatGPT, Claude, Perplexity y los bots de entrenamiento,
+  y qué línea concreta bloquea cada URL.
+- ✅ **Sitemaps fichero a fichero** ([#178](https://github.com/dvillarrubia/crawler-masivo/pull/178)): de qué sitemap viene
+  cada URL, su fecha de modificación y avisos por fichero: sitemaps que pasan
+  del límite de Google, fechas de modificación en el futuro y URLs repetidas
+  en varios sitemaps.
+- ✅ **Huella de navegador actualizada** a Chrome 150 ([#182](https://github.com/dvillarrubia/crawler-masivo/pull/182)),
+  para pasar mejor los cortafuegos anti-bots.
+- ✅ La ficha del rastreo enseña el certificado, los soft 404, los enlaces
+  rotos y los sitemaps, y el formulario trae las casillas de enlaces y
+  recursos externos ([#180](https://github.com/dvillarrubia/crawler-masivo/pull/180)).
 
 ---
 
@@ -134,26 +165,28 @@ En el orden del plan. Search Console tiene su propio apartado, más abajo.
 - ⏳ **Extracción a medida y segmentos, segunda parte**
   ([#34](https://github.com/dvillarrubia/crawler-masivo/issues/34)): una
   pantalla para crear las reglas sin tocar configuración, probarlas contra una
-  URL en vivo, que salgan como incidencia y ver cómo cambian entre rastreos
-  (por ejemplo, un cambio masivo de precios).
+  URL en vivo y que salgan como incidencia. Compararlas entre rastreos ya
+  está hecho.
 - ⏳ **Vigilar la cartera**
   ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)): alertas
-  que se abren y se cierran solas, reglas propias por cliente («más de 20
-  errores en las fichas»), la evolución de cada cliente en gráficas y un modo
-  «comprobar esta lista de URLs tras un despliegue» que dice si pasa o falla.
+  que se abren y se cierran solas y reglas propias por cliente («más de 20
+  errores en las fichas»). La evolución por cliente y el modo lista ya están.
 - ⏳ **Entregables y acceso del cliente**: contraseñas y enlaces de solo
   lectura por cliente, el informe mensual en PDF sin retoques, Excel y Google
   Sheets para Looker Studio, envío automático tras cada rastreo programado y
   conexión con Claude y Cowork.
 - ⏳ **JavaScript y buscadores de IA**: lo que cambia entre la página tal como
-  llega y tal como se ve en el navegador, si la página deja que los buscadores
-  de IA la citen, y qué bloquea el robots.txt a cada bot de IA.
+  llega y tal como se ve en el navegador, y si la página deja que los
+  buscadores de IA la citen. Lo de robots.txt por bot de IA ya está.
 - ⏳ **Sitios enormes más rápidos**
   ([#52](https://github.com/dvillarrubia/crawler-masivo/issues/52)): el análisis
   de un sitio con millones de enlaces todavía tarda.
 - ⏳ **Pulido de la interfaz**
   ([#123](https://github.com/dvillarrubia/crawler-masivo/issues/123)): atajos de
   teclado, uso en el móvil y detalles.
+- ⏳ **Restos de la comparación con FreeCrawl**
+  ([#184](https://github.com/dvillarrubia/crawler-masivo/issues/184)): saltos de nivel en los encabezados, tamaño real de
+  la imagen para redes sociales, vídeos y AMP.
 - ⏳ Restos menores de auditorías anteriores
   ([#107](https://github.com/dvillarrubia/crawler-masivo/issues/107)).
 - ⏳ **Más adelante**, cuando haya hueco: logs del servidor
