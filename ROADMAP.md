@@ -192,6 +192,28 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Comparar rastreos: enlazado, datos estructurados, hreflang y migraciones (18 de octubre)
+
+Ola 5.4 del plan (decisión 131, [#32](https://github.com/dvillarrubia/crawler-masivo/issues/32)). La pestaña
+**Comparar** y la comparación automática miran ahora también:
+
+- **Enlazado**: páginas que se alejan dos clics o más de la home (o se quedan
+  sin camino), que pierden la mitad de las páginas que las enlazan, o que bajan
+  una década de PageRank. Solo con los dos rastreos enteros: con uno cortado,
+  «pierde enlaces» podría ser que no se rastreó quien la enlazaba.
+- **Datos estructurados, hreflang y meta description**: qué páginas pierden un
+  tipo de marcado (adiós al resultado enriquecido) o un idioma del hreflang.
+- **Incidencias nuevas en dos grupos**: en páginas que ya existían (algo se ha
+  roto) y en páginas nuevas (algo se ha publicado mal).
+- **Migraciones**: se escriben reglas «ruta vieja ⇒ ruta nueva» (expresiones
+  regulares) y la comparación empareja cada URL vieja con la nueva, diciendo
+  qué porcentaje casa. Probado con una migración simulada de progym: sin
+  reglas casaba el 10 % y parecía que el sitio había desaparecido; con dos
+  reglas, el 100 %.
+
+Con dos rastreos reales de progym separados por un día, nada de esto da una
+alerta: el ruido normal (un clic arriba o abajo, unos pocos enlaces de un
+bloque de relacionados) queda por debajo de los umbrales.
 ### Evolución de cada cliente y panel de cartera (18 de octubre)
 
 Ola 5.3 del plan (decisión 130), en revisión. Para la pregunta del seguimiento

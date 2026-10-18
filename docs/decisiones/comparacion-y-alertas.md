@@ -543,3 +543,89 @@
    Queda abierto: la evolución por segmento de negocio (125), que necesitaría
    el agregado por `urls.segmento`; reglas y umbrales sobre estas métricas
    (5.2); y el informe exportable (6.2), que leerá de aquí.
+
+<a id="d131"></a>
+131. **Comparar también el enlazado, el marcado y el hreflang; separar lo que
+   se ha roto de lo que se ha publicado mal; y una migración se empareja con
+   reglas, no se lee como «ha desaparecido el sitio»** (Ola 5.4 de #32). Tres
+   piezas en `shared/comparacion.py`, las tres en `comparar_censos` /
+   `comparar_incidencias` y por tanto en `jobs.comparacion` (worker) y en
+   `GET /diff` (API):
+
+   - **(a) Seis campos más por página**: páginas que la enlazan
+     (`unique_inlinks_count`, no instancias: un menú que repite el enlace no es
+     otra página), `click_depth`, `pagerank_score`, meta description, tipos de
+     datos estructurados (sin los nodos sin tipo, 51) e idiomas del hreflang
+     (sin los del `<body>`, 56, y sin caja). Van a la tabla de cambios y a seis
+     reglas nuevas: `se_alejan_de_la_home` (+2 clics o sin camino),
+     `pierden_enlaces_internos` (la mitad **y** 10 o más),
+     `pierden_pagerank` (25 puntos, una década, decisión 34) —una sola familia:
+     un menú que deja de enlazar una sección aleja, quita entrantes y quita
+     PageRank a la vez, y es un hallazgo (36), el primero de los tres—,
+     `pierden_datos_estructurados` y `pierden_hreflang` (sobre las que los
+     tenían, no sobre todas las indexables: «30 de 1.000» es «30 de 30») y
+     `cambia_la_description` (info: Google la reescribe a menudo). Todo
+     warning o info: el webhook (77) solo lleva las críticas, y ninguna de
+     estas saca una página del índice.
+   - **El grafo solo se compara con los dos censos enteros y del mismo
+     alcance.** Con uno truncado o con semillas que no se contienen (67, 70),
+     las páginas que enlazaban pueden no haberse rastreado y «pierde enlaces»
+     sería falso: la tabla dice `total: null` con el motivo, no «0». Igual con
+     una medida que uno de los dos censos no tiene (anterior a la columna:
+     NULL en todas es «no se sabe»), y solo entre páginas 200 en los dos: si
+     pasa a 404 ya es `rotas`. Tampoco con una **lista** (`max_depth` 0,
+     decisión 128) ni con dos profundidades máximas distintas —lo que uno no
+     rastreó no enlaza, y frente al censo completo todas las URLs de la lista
+     «perderían» sus entrantes—, ni con dos **versiones del analizador** o
+     una desconocida: entrantes, profundidad y PageRank los calcula el
+     análisis, no el rastreo, y un re-análisis los mueve sin que cambie el
+     sitio (38, 57). Es la regla de la 91 llevada al grafo; lo que sale del
+     rastreo (description, marcado, hreflang) sí se sigue comparando. Un
+     JSON-LD con `json_invalido` (80) no cuenta como tipo: Google tira el
+     bloque entero, así que perderlo así es perder el resultado enriquecido.
+   - **(b) Las incidencias nuevas se separan** en `en_url_existente` (la URL
+     estaba y ahora tiene el problema: una regresión) y `en_url_nueva` (se ha
+     publicado así). Mezcladas, «300 nuevas» no dice si alguien estropeó lo que
+     había. Con el anterior truncado la URL «nueva» puede ser una que no se
+     alcanzó: `url_nueva_afirmable: false` y la interfaz lo dice así. Las
+     páginas que antes fueron un muro (103) no cuentan como existentes.
+   - **(c) Mapeo de rutas por regex** (`map_rutas`, lista JSON de
+     `[patrón, reemplazo]`): reescribe la **ruta + query** de las URLs del
+     censo **anterior** —el que diga la fecha, no el desplegable— antes de
+     emparejar, también sus semillas (si no, el guardia 70 declara otro
+     alcance) y su canonical para la tabla de cambios. Sobre la ruta y no la
+     URL entera: el host es de `map_host`. Gana la primera regla que casa,
+     como en un mapa de redirecciones. Una regex que no compila, o un
+     reemplazo con un grupo que no existe (`\2` con un grupo; Python lo valida
+     antes de buscar), es un **422** que dice cuál. La respuesta lleva
+     `mapeo_rutas`: reescritas por regla, emparejadas y su %, y las
+     **colisiones** (dos URLs viejas que caen en la misma nueva: solo una entra
+     en la comparación, y se dice). Los guardias 67, 70 y 91 no cambian:
+     `test_comparacion_ampliada.py` los ejecuta con mapeo.
+   - **Al importar un backup se perdían `finish_reason`, las versiones y
+     `health`**, así que un censo truncado importado se comparaba como entero
+     (lo vi al medir: el censo de Lopesan del 27-jul parado en 8.765 URLs salía
+     `concluyente` frente al completo del mismo día). Ahora se conservan.
+
+   Medido re-analizando con el código de hoy censos importados de `crawler_db`
+   local (solo lectura; en una BD propia). **Control de un día** —progym 6-oct
+   contra 7-oct, 3.540 indexables comunes—: **0 alertas nuevas y 0 cambios** en
+   los seis campos; el ruido real es ±1 clic en 6 páginas, PageRank dentro de
+   ±9 puntos en todas, y 140 páginas que pierden 10 o más entrantes sin llegar
+   a la mitad y 21 que pierden la mitad con menos de 10 —por eso las dos
+   condiciones juntas—. Lopesan 27-jul contra 27-jul (el primero truncado): el
+   grafo no se compara y lo demás da 0 alertas (2 descriptions cambiadas de
+   7.082). **Fallo simulado** sobre el control —las fichas sin `Product`—:
+   `pierden_datos_estructurados` 3.076 de 3.539 (86,9%). **Migración
+   simulada** —progym con `/x.html` → `/producto/x/` y `/marca` → `/marca/x`,
+   dos reglas—: sin mapeo empareja el 10,1% y dispara `desaparecen` (3.186);
+   con mapeo **100%** (3.593/3.593, 0 colisiones, 0 alertas, 0 cambios de
+   canonical); contra el censo de la víspera recupera el 100% de lo que
+   emparejaba sin migración (3.592; el 74,9% del anterior, porque entre esos
+   dos censos desaparecieron 1.205 URLs, decisión 89). La comparación con todo
+   esto tarda 0,3-0,5 s y la lectura de cada censo 0,6-1 s.
+
+   Queda abierto: el mapeo es del endpoint y de la pestaña, no de una
+   programación (la comparación automática del worker no lo aplica), y los
+   enlaces ganados y perdidos URL a URL (leerían `links` o el Parquet, 95) no
+   están.

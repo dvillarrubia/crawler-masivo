@@ -553,6 +553,21 @@ def import_backup_zip(
             profile_id=perfil.id if perfil else None,
             owner_id=job_data.get("owner_id"),
             status=job_data.get("status", "completed"),
+            # Lo que la comparacion entre censos necesita para no mentir
+            # (decision 131): sin `finish_reason` un censo truncado por
+            # `max_urls` se importaba como entero y la comparacion afirmaba
+            # ausencias y «pierde enlaces» que eran paginas no rastreadas
+            # (decision 67); sin las versiones, un censo viejo pasaba por
+            # hecho con el mismo codigo (66, 72); sin `health`, uno rastreado
+            # detras de un muro pasaba por el sitio (103). Medido importando
+            # el censo de Lopesan del 27-jul parado en 8.765 URLs: salia
+            # `concluyente` frente al completo del mismo dia. Y sin la version
+            # del analisis, la fila de `profile_runs` (decision 130) no casaba
+            # con la del job y el punto salia `desfasado` para siempre.
+            finish_reason=job_data.get("finish_reason"),
+            crawler_version=job_data.get("crawler_version"),
+            analisis_version=job_data.get("analisis_version"),
+            health=job_data.get("health"),
             seeds=job_data.get("seeds", []),
             config=job_data.get("config", {}),
             # censo | canario | prueba (UX-07); sin el, se deduce del nombre.
@@ -566,14 +581,6 @@ def import_backup_zip(
             # Lo leido de cada fichero de sitemap (decision 126): sin el, los
             # avisos de sitemaps no salen al re-analizar el censo importado.
             sitemaps=job_data.get("sitemaps"),
-            # Como acabo y con que codigo se rastreo y se analizo (decisiones
-            # 66, 67 y 72). Sin ellos un censo truncado importado se leia como
-            # completo, y su fila de `profile_runs` (decision 130), que lleva
-            # la version del analisis, no casaba con la del job y el punto
-            # salia `desfasado` para siempre.
-            finish_reason=job_data.get("finish_reason"),
-            crawler_version=job_data.get("crawler_version"),
-            analisis_version=job_data.get("analisis_version"),
         )
         db.add(job)
         db.flush()
