@@ -427,6 +427,11 @@ class HtmlMeta(Base):
     # a una URL que Google no usa.
     canonical_count = Column(Integer, nullable=True)
     canonical_in_body = Column(Boolean, nullable=True)
+    # Cuantos DESTINOS distintos declaran los canonicals del head (con la clave
+    # de `misma_url`): `/a` y `https://x.com/a` son uno. Con mas de uno Google
+    # los ignora todos y la pagina no esta canonicalizada (decision 115). NULL =
+    # rastreo anterior a la columna: se cae a `canonical_count`.
+    canonical_distintos = Column(Integer, nullable=True)
     canonical_header = Column(Text, nullable=True)
 
     og_title = Column(Text, nullable=True)
@@ -536,6 +541,10 @@ class Hreflang(Base):
     # retorno de nadie y se avisa con `hreflang_in_body`. NULL = rastreo
     # anterior a la columna (no se sabe; se trata como del head).
     en_body = Column(Boolean, nullable=True)
+    # `html` (el `<head>` o el body) o `cabecera` (HTTP `Link`, la unica fuente
+    # de un PDF). Preparado para `sitemap` (#107). NULL = rastreo anterior, del
+    # HTML.
+    origen = Column(String(16), nullable=True)
 
     url_rel = relationship("Url", back_populates="hreflangs")
 

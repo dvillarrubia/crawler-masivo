@@ -4519,6 +4519,9 @@
             <label>Cookies (una por linea, formato "nombre=valor")</label>
             <textarea x-model="createForm.cookies" rows="3" placeholder="session_id=abc123&#10;lang=es"></textarea>
           </div>
+          <div style="margin-bottom:1rem">
+            <label class="checkbox-label" title="Por defecto no, como Googlebot. Las cookies de arriba se mandan siempre, y solo a los hosts de las semillas."><input type="checkbox" x-model="createForm.conservar_cookies"> Guardar las cookies que pone el sitio entre páginas</label>
+          </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="lock" style="width:14px;height:14px;opacity:.6"></i> Autenticacion basica

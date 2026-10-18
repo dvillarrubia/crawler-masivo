@@ -10,9 +10,14 @@ anteriores resolvian mal o de forma distinta entre si.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, es_noindex, estado_indexabilidad, misma_url
+from shared.indexabilidad import (
+    SEPARADOR_CABECERAS, directivas_x_robots, es_nofollow, es_noindex,
+    estado_indexabilidad, misma_url, x_robots_para_bot,
+)
 
 URL = "https://x.com/pagina"
 
@@ -152,3 +157,96 @@ def test_es_nofollow_con_las_reglas_del_noindex():
     assert es_nofollow(x_robots=["bingbot: nofollow"]) is False
     assert es_nofollow(x_robots="none") is True
     assert es_nofollow(meta_robots="index, follow") is False
+
+
+# -- X-Robots-Tag con directivas con valor y con varios bots (decision 107) ---
+# ANTES: lo que iba antes de los primeros dos puntos se tomaba por un bot, y si
+# no era googlebot se descartaba la cabecera ENTERA. `max-snippet:-1, noindex`
+# perdia el noindex, y `bingbot: noindex, googlebot: noindex` tambien. El nombre
+# de bot solo cuenta si no es una directiva y no lleva espacios (una fecha
+# lleva dos puntos y espacios), y su ambito dura hasta el siguiente bot.
+
+X_ROBOTS = [
+    # (cabecera, noindex para Google)
+    ("noindex", True),
+    ("none", True),
+    ("max-snippet:-1, noindex", True),
+    ("max-snippet: -1, noindex", True),
+    ("max-image-preview:large, noindex", True),
+    ("unavailable_after: 2020-01-01, noindex", True),
+    ("unavailable_after: 25 Jun 2010 15:00:00 PST, noindex", True),
+    # RFC 850: la fecha lleva coma, y `25-Jun-2010 15` no es un bot.
+    ("unavailable_after: Wednesday, 25-Jun-2010 15:00:00 GMT, noindex", True),
+    ("unavailable_after: 25 Jun 2010 15:00:00 PST", False),
+    ("bingbot: noindex, googlebot: noindex", True),
+    ("bingbot:noindex,googlebot:noindex", True),
+    ("bingbot: noindex", False),
+    # El ambito de bingbot dura hasta el siguiente bot: todo es de Bing.
+    ("bingbot: noindex, nofollow", False),
+    ("noindex, bingbot: nofollow", True),
+    ("googlebot: nofollow, bingbot: noindex", False),
+    ("googlebot: max-snippet: -1, noindex", True),
+    ("GoogleBot: NOINDEX", True),
+    ("robots: noindex", True),
+    ("googlebot: none", True),
+    # Otro bot, aunque empiece igual: el informe es de Google.
+    ("googlebot-news: noindex", False),
+    ("max-snippet: -1", False),
+    # Una directiva no es un bot: `noindex: true` no es sintaxis valida.
+    ("noindex: true", False),
+]
+
+
+def _a_nofollow(cabecera):
+    """La misma cabecera con `noindex` y `nofollow` intercambiados."""
+    return re.sub(
+        "no(index|follow)",
+        lambda m: "nofollow" if m.group(1).lower() == "index" else "noindex",
+        cabecera, flags=re.IGNORECASE,
+    )
+
+
+@pytest.mark.parametrize("cabecera,esperado", X_ROBOTS, ids=[c[0] for c in X_ROBOTS])
+def test_x_robots_noindex(cabecera, esperado):
+    # Como lista de cabeceras (el spider) y como cadena guardada (el analyzer).
+    assert es_noindex(x_robots=[cabecera]) is esperado
+    assert es_noindex(x_robots=SEPARADOR_CABECERAS.join([cabecera])) is esperado
+    # Detras de otra cabecera de otro bot: su ambito acaba en su linea.
+    otra = ["bingbot: noarchive", cabecera]
+    assert es_noindex(x_robots=otra) is esperado
+    assert es_noindex(x_robots=SEPARADOR_CABECERAS.join(otra)) is esperado
+
+
+@pytest.mark.parametrize("cabecera,esperado", X_ROBOTS, ids=[c[0] for c in X_ROBOTS])
+def test_x_robots_nofollow(cabecera, esperado):
+    cabecera = _a_nofollow(cabecera)
+    assert es_nofollow(x_robots=[cabecera]) is esperado
+    assert es_nofollow(x_robots=SEPARADOR_CABECERAS.join([cabecera])) is esperado
+    otra = ["bingbot: noarchive", cabecera]
+    assert es_nofollow(x_robots=otra) is esperado
+    assert es_nofollow(x_robots=SEPARADOR_CABECERAS.join(otra)) is esperado
+
+
+def test_el_nofollow_de_otro_bot_no_cuenta():
+    assert es_nofollow(x_robots=["bingbot: noindex, nofollow"]) is False
+    assert es_nofollow(x_robots=["noindex, bingbot: nofollow"]) is False
+    assert es_nofollow(x_robots=["googlebot: nofollow, bingbot: noindex"]) is True
+
+
+def test_varias_cabeceras_con_bots_y_valores():
+    guardado = "bingbot: noindex\ngooglebot: max-snippet:-1, noindex"
+    assert estado_indexabilidad(200, x_robots=guardado, page_url=URL) == (False, "Noindex")
+
+
+def test_las_directivas_con_valor_se_conservan():
+    assert directivas_x_robots("googlebot: max-snippet:-1, noarchive") == {
+        "max-snippet:-1", "noarchive"}
+    assert directivas_x_robots("bingbot: noindex", bot="bingbot") == {"noindex"}
+
+
+def test_la_sintaxis_se_lee_con_el_mismo_criterio():
+    """`robots_invalid_syntax` mira solo lo que va a Google, sin los prefijos."""
+    assert x_robots_para_bot("bingbot: noindex/nofollow") == ""
+    assert x_robots_para_bot("googlebot:noindex/nofollow") == "noindex/nofollow"
+    assert x_robots_para_bot("noarchive\nbingbot: noindex, googlebot: nosnippet") == (
+        "noarchive, nosnippet")

@@ -9,11 +9,11 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103 |
-| [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79 |
-| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 114 |
+| [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121 |
+| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 115, 116, 120 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 117, 118 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
@@ -133,6 +133,14 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 104 | Extracción y búsqueda a medida: una fila por (URL, regla) evaluada, y sin fila no es «vacío» | [`extraccion-a-medida`](extraccion-a-medida.md#d104) |
 | 105 | Soft 404 determinista: la página de error del sitio se pide, no se adivina, y lo dudoso no se afirma | [`incidencias`](incidencias.md#d105) |
 | 106 | Lo que Google no puede seguir se guarda aparte, y lo de la plantilla se avisa una vez | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d106) |
+| 107 | Un `X-Robots-Tag` se lee trozo a trozo: una directiva con valor no es un bot, y el bot dura hasta el siguiente | [`indexabilidad`](indexabilidad.md#d107) |
+| 114 | Las credenciales del job solo van al sitio, y el rastreo no guarda cookies | [`render-y-descarga`](render-y-descarga.md#d114) |
+| 115 | Varios canonicals son varios DESTINOS, y con dos Google no usa ninguno | [`indexabilidad`](indexabilidad.md#d115) |
+| 116 | Hreflang: una anotacion repetida es una, y la cabecera `Link` tambien es fuente | [`indexabilidad`](indexabilidad.md#d116) |
+| 117 | Una cadena de redirecciones es un aviso, y pasados 10 saltos es un error | [`incidencias`](incidencias.md#d117) |
+| 118 | Un casi duplicado se mide entre las mismas páginas que el duplicado exacto, y una escritura sin espacios se parte en caracteres | [`incidencias`](incidencias.md#d118) |
+| 120 | Señales que se contradicen, y una meta refresh es una redirección, no la página | [`indexabilidad`](indexabilidad.md#d120) |
+| 121 | Un titular vacío no es un titular, un título de relleno se dice una vez, y un enlace sin nombre sale de la temporal de aristas | [`contenido`](contenido.md#d121) |
 | 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
 
 ## Anadir una decision

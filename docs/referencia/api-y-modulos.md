@@ -34,7 +34,7 @@
 | File | Description |
 |------|-------------|
 | `analyzer.py` | `SEOAnalyzer` class with 17 check methods + `run_analysis()` entry point |
-| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto |
+| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 118) |
 | `sd_validation.py` | Validación conservadora de datos estructurados |
 | `soft404.py` | Soft 404 determinista (decision 105): cruza las sondas de `jobs.soft404` y las senales de `shared/soft404.py` con el censo |
 
@@ -57,6 +57,7 @@
 | `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `soft404.py` | Reglas puras del soft 404 (decision 105): `mangle_path`/`token_sonda` (la URL que no existe), `huella`/`misma_huella` (contenido sin el eco de la URL), `senal_titulo` (titulares de error en es/en/ca/eu/fr/de/pt/it), `es_busqueda`/`frase_sin_resultados`, `disponibilidades` |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
+| `indexabilidad.py` | `estado_indexabilidad`, `es_noindex`/`es_nofollow` y `misma_url`/`clave_url`: la indexabilidad de spider y analyzer (decision 39). `X-Robots-Tag` trozo a trozo con `x_robots_por_bot`/`directivas_x_robots` (una directiva con valor no es un bot; el bot dura hasta el siguiente) y `x_robots_para_bot` para la sintaxis (decision 107) |
 
 ## API Endpoints
 
@@ -130,18 +131,18 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | Method | Issue Types Detected |
 |--------|---------------------|
 | `analyze_status_codes()` | status_4xx, status_5xx (sin los muros), **respuesta_no_valida** por host y clase (decision 103) |
-| `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title |
-| `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description |
-| `analyze_headings()` | missing_h1, multiple_h1 |
-| `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101) |
-| `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas indexables |
+| `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title, **title_generico** (placeholder del CMS por valor, `shared/titulos.py`; tapa su `title_too_short` y su `title_duplicate`: decision 121) |
+| `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description, **description_igual_title** (por host y plantilla, decision 121) |
+| `analyze_headings()` | missing_h1, multiple_h1 (solo los h1 con texto), **h1_vacio** (no en censos anteriores a la decision 46; decision 121) |
+| `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101). El canonical es el del HTML o, si no hay, el de la cabecera `Link` (`fuente: cabecera`); **canonical_html_y_cabecera_distintos** y **noindex_y_canonical_a_otra** (por plantilla, sustituye al `noindex_page`), sin evaluar las meta refresh (decision 120) |
+| `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas HTML indexables; las anotaciones repetidas cuentan una vez (decision 116) |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
 | `analyze_indexability()` | indexability status |
-| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
+| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
-| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
-| `analyze_redirect_chains()` | redirect_chain, redirect_loop, **redireccion_a_error** (decision 101) |
+| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
+| `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101), **redireccion_a_noindex** y **meta_refresh_redireccion** (retardo con `shared/meta_refresh.py`; decision 120) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
@@ -149,7 +150,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
-| `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
+| `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** y **enlace_sin_ancla** (decision 121) (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
 
@@ -175,7 +176,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `JobConfigMiddleware` | 100 | Injects per-job settings from Redis/DB |
 | `UserAgentMiddleware` | 400 | UA rotation (replaces Scrapy default) |
 | `ProxyMiddleware` | 410 | Optional proxy rotation from `PROXY_LIST` |
-| `HttpConfigMiddleware` | 420 | Per-job HTTP overrides |
+| `HttpConfigMiddleware` | 420 | Bloque `http` del job. Cabeceras propias, cookies y Basic **solo** a los hosts de las semillas (con y sin www, subdominios con `crawl_subdomains`; no el host al que salta una semilla) y se quitan de las demas; `Accept-Language` a todas. Sin jar, las cookies van como cabecera `Cookie`; con render, en `meta["_http_render"]` para `render.preparar_pagina` (decision 114) |
+| `CookiesTrasElJarMiddleware` | 705 | Solo con `COOKIES_ENABLED` (`http.conservar_cookies`): tras el `CookiesMiddleware` de Scrapy vacia `request.cookies` para que curl_cffi mande la cabecera del jar (decision 114) |
 | `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
 
 ## Scrapy Settings
@@ -187,6 +189,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `DOWNLOAD_TIMEOUT` | 30s | |
 | `RETRY_TIMES` | 2 | Only for 502, 503, 504, 408, 429 |
 | `ROBOTSTXT_OBEY` | True | Overridable per-job |
+| `COOKIES_ENABLED` | False | Sin jar, como Googlebot; `http.conservar_cookies` lo enciende (worker, `-s`). Las de `http.cookies` se mandan igual (decision 114) |
 | `AUTOTHROTTLE_ENABLED` | True | Target concurrency: 8.0 |
 | `HTTPERROR_ALLOW_ALL` | True | All status codes reach spider (Screaming Frog parity) |
 | `DEPTH_PRIORITY` | 1 | BFS scheduling |
@@ -194,4 +197,5 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | Playwright | chromium, headless | JS rendering via `scrapy-playwright` |
 | `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 8 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
 | `PLAYWRIGHT_MAX_CONTEXTS` | 3 | Safety cap on browser contexts (env-overridable) |
+| `playwright_page_init_callback` | `seo_crawler.render.preparar_pagina` | Es **meta** por peticion (`_playwright_meta`), no setting: el `PLAYWRIGHT_PAGE_INIT_CALLBACK` de settings.py no lo leia scrapy-playwright. Instala el contador de peticiones en vuelo (12b) y las cookies y credenciales del job (114) |
 | JS auto-cap | 8 / 4 | When `render_js=true`, worker auto-caps concurrency (env-overridable) |

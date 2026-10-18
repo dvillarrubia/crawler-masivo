@@ -76,6 +76,7 @@
     "store_raw_html": false
   },
   "http": {
-    "accept_language": "es,en;q=0.8"
+    "accept_language": "es,en;q=0.8",
+    "conservar_cookies": false
   }
 }

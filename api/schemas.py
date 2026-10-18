@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -142,13 +143,17 @@ class ExtractionConfig(BaseModel):
 
 
 class HttpConfig(BaseModel):
-    """Custom HTTP settings sent with every request."""
+    """Ajustes HTTP del job. Las cabeceras propias, las cookies y el Basic solo
+    van a los hosts de las semillas (decision 114); Accept-Language, a todas."""
 
     custom_headers: dict[str, str] = Field(default_factory=dict)
     accept_language: str = ""
     cookies: dict[str, str] = Field(default_factory=dict)
     basic_auth_user: str = ""
     basic_auth_password: str = ""
+    # Guardar las cookies que pone el sitio entre paginas. Por defecto no,
+    # como Googlebot; las de `cookies` se mandan igual (decision 114).
+    conservar_cookies: bool = False
 
 
 class AnalysisThresholdsConfig(BaseModel):
@@ -452,6 +457,15 @@ def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list
             continue
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"Seed URL must start with http:// or https://: {url}")
+        # Una semilla con credenciales se guardaria en `jobs.seeds`, que lee
+        # cualquiera (decision 83), y el rastreo las quitaria al normalizar:
+        # el staging se quedaria en el login sin aviso. Se rechaza y se dice
+        # donde van.
+        if "@" in urlsplit(url).netloc:
+            raise ValueError(
+                "La semilla lleva credenciales (usuario:clave@): quitalas y usa "
+                "http.basic_auth_user / http.basic_auth_password"
+            )
         cleaned.append(url)
     if obligatorias and not cleaned:
         raise ValueError("At least one valid seed URL is required")
@@ -663,6 +677,7 @@ class HreflangResponse(BaseModel):
     href: str
     return_tag_ok: bool | None = None
     lang_valid: bool | None = None
+    origen: str | None = None  # html | cabecera; None = rastreo anterior (html)
 
 
 class StructuredDataResponse(BaseModel):

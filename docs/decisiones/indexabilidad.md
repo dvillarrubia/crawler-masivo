@@ -93,6 +93,21 @@
    `clave_url`, la clave de `misma_url`: un canonical a `https://x.com:443/b`
    ya encuentra el 404 de `/b`. Ningun test existente cambio de resultado.
 
+   **Las credenciales de la URL se quitan al normalizar** (#149).
+   `https://usuario:clave@x.com/a` se guardaba tal cual en `urls.url`, en los
+   enlaces y en los CSV —que lee cualquiera, decision 83—, y con el puerto por
+   defecto `normalize_url` reconstruia el host conservando la clave. Ahora el
+   `userinfo` (hasta el ULTIMO `@` del host: uno dentro de la clave va como
+   `%40`) sale siempre, asi que el hash, los enlaces, los destinos de
+   redireccion y los sitemaps quedan limpios a la vez. `https://x.com@evil.com/`
+   tiene host `evil.com` y sigue siendo externa; una `@` en la ruta o en la query
+   no se toca. Una **semilla** con credenciales se rechaza con un 422 que manda a
+   `http.basic_auth_user`/`basic_auth_password`: quitarlas en silencio dejaria
+   un staging rastreando su pantalla de login. El hash de esas URLs cambia (la
+   reanudacion y la comparacion por `url_hash` las ven nuevas; son raras), y lo
+   ya guardado no se arregla re-analizando: hace falta re-rastrear. Tests:
+   `tests/test_esquemas_y_credenciales.py`.
+
 <a id="d48"></a>
 48. **Lo que robots.txt prohíbe existe, y el modo auditoría estaba muerto** —
    las URLs que el sitio enlaza y robots.txt bloquea no llegaban a la base de
@@ -484,3 +499,251 @@
    cabecera `Link` como ORIGEN (siguen el camino de antes) y el **informe de
    cadenas** que mezcla redirecciones y canonicals de una migracion, que es
    una vista y no un tipo.
+
+<a id="d107"></a>
+107. **Un `X-Robots-Tag` se lee trozo a trozo: una directiva con valor no es un
+   bot, y el bot dura hasta el siguiente** (#149) — `_directivas` tomaba por
+   nombre de bot lo que iba antes de los PRIMEROS dos puntos de la cabecera y,
+   si no era `googlebot` ni `robots`, descartaba la cabecera ENTERA. La
+   salvaguarda (`posible_bot not in robots_tokens(cabecera)`) no servia: el
+   token de `max-snippet:-1` es `max-snippet:-1`, no `max-snippet`. Asi se
+   perdia el `noindex` de `max-snippet:-1, noindex`, `max-snippet: -1, noindex`,
+   `max-image-preview:large, noindex`, `unavailable_after: <fecha>, noindex`
+   (con cualquier formato de fecha: ISO, `25 Jun 2010 15:00:00 PST` o RFC 850
+   `Wednesday, 25-Jun-2010 15:00:00 GMT`, que ademas lleva coma) y el de una
+   cabecera que nombra dos bots (`bingbot: noindex, googlebot: noindex`). Al
+   reves tambien fallaba: `googlebot: nofollow, bingbot: noindex` salia noindex
+   para Google, porque todo lo que seguia a `googlebot:` se le atribuia.
+
+   El criterio, el de Google: «las reglas sin user agent valen para todos los
+   rastreadores», el user agent va delante de sus directivas seguido de dos
+   puntos, y ni la cabecera ni el nombre distinguen mayusculas. Ahora
+   (`x_robots_por_bot` y `directivas_x_robots` en `shared/indexabilidad.py`) se
+   parte por comas y cada trozo `nombre: resto` abre el ambito de un bot **solo
+   si `nombre` no es una directiva** (`DIRECTIVAS` de `shared/robots.py`) **y
+   tiene forma de token** (sin espacios: `25-jun-2010 15` es el trozo de una
+   fecha). El ambito dura hasta el siguiente bot de la MISMA cabecera, asi que
+   `bingbot: noindex, nofollow` es todo de Bing; cada cabecera (una por linea,
+   decision 39) empieza sin bot. Cuentan lo que no va a nadie, `robots:` y
+   `googlebot:` (`GoogleBot:` incluido); `googlebot-news:` es otro bot.
+   `noindex: true` no es sintaxis valida y no se convierte en `noindex`. Lo
+   demas sigue igual: `none` es `noindex, nofollow`, varias cabeceras se suman,
+   la barra no separa (decision 22).
+
+   **Un solo criterio tambien para la sintaxis**: `analyze_robots_syntax` pasaba
+   la cabecera entera a `robots_bad_separators`, asi que avisaba de un
+   `bingbot: noindex/nofollow` que a Google no le quita nada, y con el prefijo
+   pegado (`googlebot:noindex/nofollow`) el token era `googlebot:noindex` y solo
+   veia perdido el `nofollow`. Ahora lee `x_robots_para_bot`, lo que va a
+   Google sin los prefijos; el `raw` del aviso sigue siendo la cabecera tal cual.
+
+   Y se borro `compute_indexability_status` de `extractors.py`: no la llamaba
+   nadie salvo sus tests y aplicaba otro criterio (`bingbot: noindex` sacaba la
+   pagina del indice, un 204 era indexable). Sus casos pasan a la funcion real.
+
+   **Se arregla re-analizando**: `analyze_indexability` lee `html_meta.x_robots_tag`
+   y reescribe `indexable`, `noindex` e `indexability_status` (con
+   `noindex` cambian los entrantes y el PageRank, decision 38). Lo que NO
+   arregla es `links.follow`: el nofollow de pagina por cabecera se decide al
+   rastrear (`es_nofollow` en el spider), y una pagina con
+   `max-snippet:-1, nofollow` dejo sus enlaces como follow hasta re-rastrearla.
+   Los censos anteriores a la decision 39 (cabeceras unidas por coma) siguen
+   sin arreglo: `bingbot: noindex` + `noindex` quedo como
+   `bingbot: noindex, noindex`, y con el ambito que dura ese segundo `noindex`
+   es de Bing, igual que antes. Cuantas URLs cambian en los censos entregados
+   esta por medir (consulta: `html_meta.x_robots_tag` con `:` y
+   `noindex|nofollow|none`, aplicando la funcion vieja y la nueva).
+
+   **Revision (2026-10-18).** Medido en la base local (50 rastreos, entre
+   ellos Lopesan, UOC, penguin, progym, Druni, CST y blogs.uoc.edu): **ninguna
+   URL cambia**. La unica `X-Robots-Tag` guardada es `none` (18 filas), sin
+   dos puntos. Ninguno de esos censos tenia el caso, asi que la cifra de
+   produccion sigue por medir con la misma consulta. Se probaron ademas 20
+   cabeceras raras: fechas RFC 822 y 850 e ISO, `googlebot : noindex`,
+   `noindex:true`, `Googlebot:none`, `googlebot-image:` y `otherbot: none,
+   noindex`. Todas dan lo que dice el criterio. La unica que falla es una
+   fecha que no es de ningun formato (`Wednesday, 2010-06-25T15:00:00Z`): su
+   segundo trozo no lleva espacios y se toma por bot. No se toca.
+
+<a id="d115"></a>
+115. **Varios canonicals son varios DESTINOS, y con dos Google no usa ninguno**
+   (#149). `canonical_multiple` contaba etiquetas (`html_meta.canonical_count`,
+   del head y del body): el mismo canonical escrito dos veces —relativo y
+   absoluto, o dos plugins de SEO que escriben lo mismo— salia como «varios
+   canonicals», y uno en el head mas el mismo en el body daba dos avisos
+   (`canonical_multiple` y `canonical_in_body`) para un solo arreglo. Y al
+   reves: con `/a` y `/b` en `/c`, que Google descarta (decision 56: con
+   canonicals que no coinciden, los ignora todos y elige por su cuenta), la
+   pagina salia «Canonicalised» a `/a` y heredaba todo lo que eso implica.
+   - **`html_meta.canonical_distintos`**: cuantos destinos distintos declaran
+     los canonicals del `<head>`, con la clave de `misma_url` (decision 39;
+     puerto por defecto, caja del host, escapado y fragmento no cuentan). Solo
+     el head: los del body Google no los lee y ya son `canonical_in_body`. Un
+     `href=""` no es un destino. Con el head cortado (decision 102) quedan en el
+     body y cuentan 0: el hallazgo es el corte.
+   - **`canonical_multiple` sale con `distintos > 1`**, con
+     `{"cuantos", "distintos"}`. Si la columna es NULL (censo anterior) se
+     sigue mirando `canonical_count > 1`, con `distintos: null`: lo que no se
+     sabe no se calla ni se inventa.
+   - **Con dos destinos distintos el canonical se ignora**:
+     `estado_indexabilidad(..., canonicals_distintos=)` devuelve «Indexable»
+     (si el codigo y el robots lo permiten), igual en el spider y en
+     `analyze_indexability`. Tambien se ignora el de la cabecera `Link`: es una
+     senal mas del mismo conflicto. Que hace Google en ese caso con la cabecera
+     no esta verificado, y no se afirma la canonicalizacion. Lo que va por
+     `indexability_status = 'Canonicalised'` —el PageRank que consolida en la
+     canonica, `canonical_sin_enlazar`, los alias del hreflang, el sitemap— lo
+     hereda sin tocarlo.
+   - **No se evalua a donde apunta**: con `distintos > 1` no salen
+     `canonical_cross_domain`, `canonical_a_http` ni los avisos del destino
+     (decision 101). Y un destino con varios canonicals distintos cuenta como
+     autocanonico en `_Fichas`: A → B no es `canonical_encadenado` porque B
+     declare dos. Un aviso por hallazgo (36).
+   - Lo que queda para #150: el canonical del HTML frente al de la cabecera
+     cuando discrepan. `canonical_distintos` es dato del HTML, para poder
+     compararlo con `canonical_header`.
+
+   **Exige re-rastrear**: un censo anterior no tiene la columna y re-analizarlo
+   no cambia nada. Sin medir en censos reales (no habia ninguno en la BD de esta
+   rama); la consulta para medirlo en un rastreo nuevo es
+   `count(*) FILTER (WHERE canonical_count > 1)` frente a
+   `FILTER (WHERE canonical_distintos > 1)` sobre `html_meta` del job, y cuantas
+   pasan de Canonicalised a Indexable. Tests: `tests/test_canonical_distintos.py`
+   (extractor, `estado_indexabilidad` y el analisis contra SQLite).
+
+   **Revision** (2026-10-18). La comparacion entre censos (decisiones 67-68)
+   leia `canonical_href` a secas, que con dos destinos distintos sigue
+   guardando el primero: 40 paginas con un segundo canonical a
+   `origen.lfr.cloud` disparaban `canonical_a_otro_host` —alerta critica, con
+   webhook (77)— y `canonical_a_otra_url`, cuando Google descarta ese canonical
+   y la pagina sigue «Indexable». `paginas_de_censo` trae ahora
+   `canonical_distintos` y las dos reglas leen el canonical que cuenta
+   (`_canonical_que_cuenta`); sin la columna, el primero, como antes. Test en
+   `tests/test_comparacion.py`.
+
+<a id="d116"></a>
+116. **Hreflang: una anotacion repetida es una, y la cabecera `Link` tambien
+   es fuente** (#149). Dos huecos del mismo dato:
+   - **Repetidas.** `extract_hreflang` no deduplicaba: `en-GB → /en/`,
+     `en-GB → https://x.com/en/`, `EN-gb → /en/` y `en-GB → /en/#top` eran
+     cuatro filas, y con el destino en 404 salian **dos
+     `hreflang_broken_target` identicos** para una sola anotacion. Ahora una
+     fila por `(lang sin caja, clave_url(href))`; gana la primera, salvo que
+     este en el body y otra no (Google lee la del head, decision 56). El `lang`
+     se guarda como venia. **Tambien en el analisis**: `analyze_hreflang`
+     analiza la representante y escribe en las repetidas su mismo
+     `lang_valid`/`return_tag_ok`, asi que re-analizar arregla los censos ya
+     guardados sin dejar NULL que bajen la nota de /insights. El mismo codigo
+     hacia dos URLs sigue siendo dos filas: eso es `hreflang_idioma_repetido`.
+   - **Cabecera `Link`.** Google lee el hreflang de la cabecera HTTP igual que
+     el del `<head>`, y en un PDF es la unica forma de declararlo; el spider
+     solo sacaba de ahi el canonical. `enlaces_de_cabecera` parte la cabecera
+     (respetando comas y `;` entre `<>` o comillas; `canonical_de_cabecera`
+     la usa y no cambia), `hreflang_de_cabecera` coge las entradas con el
+     token `alternate` en `rel` y un `hreflang`, y el spider las emite para el
+     HTML y para todo no HTML 2xx, deduplicadas con las del head. Columna
+     **`hreflang.origen`** (`html` | `cabecera`; NULL = rastreo anterior, del
+     HTML), con sitio para `sitemap` (#107).
+   - **Un PDF es retorno, no fuente de avisos.** La pestana Hreflang filtra por
+     HTML interno: un aviso anclado en el PDF saldria en el chip y no en la
+     lista. Asi que las anotaciones de un no HTML cuentan como destino y como
+     retorno (un HTML que anota su PDF y recibe el retorno por cabecera esta
+     bien), pero el PDF no es fuente (`fuente()` excluye lo que tiene
+     `resource_type` distinto de `html`). Ampliar la pestana a los PDF queda
+     pendiente, con #107.
+
+   **Que pide cada cosa**: la deduplicacion se aplica re-analizando; la cabecera
+   exige re-rastrear. Sin medir en censos reales (contado con SQL en la decision
+   99, ningun censo local tenia un codigo hacia dos URLs; las repetidas hacia la
+   MISMA no se contaron). Queda fuera: el conteo de /insights sigue sumando
+   filas, no anotaciones distintas, en los censos viejos con repetidas (llevan
+   el mismo veredicto, asi que los porcentajes apenas se mueven). Tests:
+   `tests/test_hreflang_repetido_y_cabecera.py` (extractor y analisis contra
+   SQLite) y `tests/test_spider_cabeceras_y_saltos.py` (spider real: un PDF con
+   hreflang en la cabecera guarda sus dos filas con `origen='cabecera'`).
+
+<a id="d120"></a>
+120. **Senales que se contradicen, y una meta refresh es una redireccion,
+   no la pagina** (#150, parte A, PR de re-analisis). Todo sale de datos ya
+   guardados: re-analizar un censo lo aplica sin re-rastrear.
+   - **El canonical que vale es el del HTML y, si no hay, el de la cabecera
+     `Link`** tambien en `analyze_canonicals`, como ya hacian la indexabilidad
+     y `_Fichas`. Solo se leia `canonical_href`: una pagina «Canonicalised» por
+     cabecera salia a la vez con `canonical_missing`, y su destino no se
+     comprobaba (B1). Ahora `canonical_missing` solo sale sin ninguno de los
+     dos, y lo que sale del de la cabecera (`canonical_cross_domain`,
+     `canonical_a_http`, los avisos del destino de la 101) lleva
+     `fuente: cabecera`.
+   - **`canonical_html_y_cabecera_distintos`** (warning): los dos existen y no
+     son `misma_url` (la barra final cuenta, el orden de los parametros no;
+     decision 39), en paginas 200 y sin `canonical_multiple` (115: si Google ya
+     ignora los del HTML, el hallazgo es ese). Manda el del HTML, como hasta
+     ahora; que Google ignore los dos es la lectura de la documentacion de
+     consolidacion, sin verificar la cita exacta. Con
+     `enlaces_plantilla_min_paginas` paginas o mas en un host (un CDN o un
+     plugin que mete la cabecera en todo el sitio) es una fila por host con
+     `paginas_afectadas` (53). El umbral es el de la 106, sin medir.
+   - **`noindex_y_canonical_a_otra`** (info): pagina 200 con `Url.noindex` y un
+     canonical efectivo a otra URL. `estado_indexabilidad` devuelve «Noindex»
+     antes de mirar el canonical, asi que la contradiccion no se veia: solo
+     `noindex_page`. **Sustituye al `noindex_page`** de esas paginas (36, como
+     `canonical_sin_enlazar` a `orphan_page`); con un destino 200 que tambien es
+     noindex no hay contradiccion util (101) y la pagina se queda con su
+     `noindex_page`. Una fila por (host, `firma_de_ruta`) con
+     `paginas_afectadas`: «faceta en noindex con canonical a la categoria» es
+     deliberado y masivo (38). `destino_indexable` es None si el destino no se
+     rastreo: no se afirma. Las reglas `config.templates` del job no se usan
+     todavia (`plantilla_de` llega con la rama de tiempos, #158).
+   - **`redireccion_a_noindex`** (warning), al lado de `redireccion_a_error`, con
+     el mismo recorrido y los mismos filtros: origen interno, sin bucle, sin
+     pasar de 10 saltos (117) y `not _solo_normaliza` (un http → https de una
+     noindex esta bien hecho; el noindex es de la pagina). El final es una
+     pagina 200 con `Url.noindex`, que `analyze_indexability` acaba de
+     escribir; un muro, un destino sin rastrear o un 429 no dicen nada.
+     Sustituye a `redirect_chain` en ese origen. Con
+     `enlaces_plantilla_min_paginas` redirecciones o mas al mismo destino
+     (`/mi-cuenta/*` → `/login`) es UNA fila en el destino con
+     `redirecciones_que_llegan`.
+   - **`meta_refresh_redireccion`**: la fuente de verdad es
+     `indexability_status = 'Redirect (meta refresh)'` con `redirect_url`, que
+     el spider solo pone con un destino fuera de `<noscript>` y distinto de la
+     propia URL. `html_meta.meta_refresh` no nulo no basta (B5: una refresh en
+     `<noscript>` o una recarga `content="300"` no redirigen). El retardo se lee
+     del `content` con `shared/meta_refresh.py`: 0 = `info` (Google la trata
+     como permanente), mas de 0 = `warning` (como temporal; el usuario ve la
+     pagina N segundos; `0.5` cuenta como mas de 0). Con render el salto va sin
+     `html_meta`: `retardo_s` None e `info`, no 0. Y con render una refresh
+     inmediata puede registrarse como «Redirect (JS)» (sin verificar con
+     Chromium), asi que en esos censos puede faltar. Si la URL ya tiene
+     `redireccion_a_error`, `redireccion_a_noindex` o `redirect_loop`, ese es el
+     aviso (36); con `redirect_chain` convive. Una plantilla entera (umbral de
+     la 106) es una fila por (host, plantilla, tipo de retardo).
+   - **Una meta refresh no es indexable** (B2): `analyze_indexability` la deja
+     `indexable=false` como un 3xx, y `analyze_canonicals` no evalua sus
+     senales (ni las de un muro, 103). Antes entraba en los grupos de titulos y
+     descriptions duplicados y salia `canonical_missing` en el puente.
+   - **`_Fichas.seguir_redirecciones` sigue la meta refresh** (B6), como ya hacia
+     `analyze_redirect_chains`: un canonical a una pagina con meta refresh es
+     `canonical_a_redireccion` con su destino final, no un destino 200.
+
+   **Cambia cifras de censos entregados**: menos `canonical_missing` (B1),
+   menos `noindex_page` y paginas indexables (B2), tipos nuevos. Lo registra
+   `analisis_version` (72) y la comparacion por incidencias no cruza versiones
+   (91). **Sin medir en censos reales**: en esta rama no habia ninguno, y la
+   medicion `READ ONLY` en los seis censos de la 101 queda pendiente (cuantos
+   `canonical_missing` quita B1, cuantas meta refresh y con que retardos).
+   Depende de que `Url.noindex` lea bien el `X-Robots-Tag` con directivas con
+   valor (#152): sin ese arreglo `noindex_y_canonical_a_otra` y
+   `redireccion_a_noindex` miden de menos. Tests:
+   `tests/test_senales_contradictorias_db.py` (incluido `run_all` dos veces con
+   el mismo resultado, en SQLite y en Postgres).
+
+   **Medido en la revision (#159)**, re-analizando con `ROLLBACK` copias de
+   cuatro censos locales (progym x2, Lopesan, blogs.uoc.edu; cifras en la
+   decision 121): B1 no quita ningun `canonical_missing` (ninguno de los
+   cuatro declara canonical en la cabecera `Link`), no hay meta refresh ni
+   `canonical_html_y_cabecera_distintos`, `noindex_y_canonical_a_otra` sale
+   9 veces en Lopesan (11 paginas, todas con el canonical a `*.lfr.cloud`) y 1
+   en progym (6 paginas) y `redireccion_a_noindex` 14 en Lopesan y 3 en blogs.uoc.edu. Volumen bajo: nada
+   de ruido. Las cifras de B1 y de las meta refresh siguen pendientes de un
+   censo que las tenga.

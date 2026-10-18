@@ -3,7 +3,10 @@
 Qué hace hoy el crawler y qué viene después, contado por funcionalidades. El
 detalle técnico de cada punto está en la issue de GitHub enlazada.
 
-Estado a 7 de octubre de 2026.
+¿Sin conocimientos técnicos? La versión en lenguaje llano, con el estado de
+cada cosa de un vistazo, está en [`ROADMAP_SENCILLO.md`](ROADMAP_SENCILLO.md).
+
+Estado a 17 de octubre de 2026.
 
 Este documento cuenta **qué hay y qué viene**, en lenguaje de producto.
 `docs/PRIORIDADES.md` cuenta **por qué ese orden y con qué cifra**, y los
@@ -487,6 +490,24 @@ después lo nuevo.
 - [#37](https://github.com/dvillarrubia/crawler-masivo/issues/37) La cola de
   trabajos va al revés, se ignora la opción «usar sitemap» y un sitio bloqueado
   por robots.txt da un trabajo «completado» con 0 URLs.
+- [#149](https://github.com/dvillarrubia/crawler-masivo/issues/149) **Fallos
+  encontrados al compararnos con FreeCrawl** (17 de octubre). El más grave: una
+  página con `noindex` en la cabecera HTTP sale como indexable cuando esa
+  cabecera lleva antes otra directiva con valor (`max-snippet:-1, noindex`) o
+  nombra dos buscadores. Además: los casi duplicados cuentan páginas noindex y
+  canonicalizadas, el rastreo guarda las cookies que pone el servidor (Google no
+  lo hace), un robots.txt que falla se trata como «todo permitido» cuando Google
+  lo trata como «todo bloqueado», y otros menores. La issue lleva una guía de
+  implementación punto por punto. En revisión, en cinco PRs:
+  [#152](https://github.com/dvillarrubia/crawler-masivo/pull/152) (la cabecera
+  `X-Robots-Tag`),
+  [#153](https://github.com/dvillarrubia/crawler-masivo/pull/153) (casi
+  duplicados),
+  [#154](https://github.com/dvillarrubia/crawler-masivo/pull/154) (esquemas,
+  credenciales en la URL, hreflang, canonical múltiple y cadenas largas),
+  [#156](https://github.com/dvillarrubia/crawler-masivo/pull/156) (credenciales
+  y cookies) y
+  [#157](https://github.com/dvillarrubia/crawler-masivo/pull/157) (robots.txt).
 
 ### 2. Arreglos pendientes de la auditoría
 
@@ -531,11 +552,55 @@ es cada plantilla— y va con
   personalizada**: hecha la base (arriba). Falta la pantalla para editar las
   reglas, probarlas contra una URL en vivo, buscar en el HTML de origen cuando
   el rastreo renderiza, avisar como incidencia y comparar valores entre censos.
+- **Segmentos de negocio** (ola 3.3, decisión 125, en revisión en
+  [#172](https://github.com/dvillarrubia/crawler-masivo/pull/172)): «fichas»,
+  «blog», «categorías» definidos por cliente, con el porcentaje de cada
+  incidencia por segmento. Después de esa PR quedan la pantalla para editar las
+  reglas y que las alertas por plantilla de la comparación pasen a ser por
+  segmento.
 - [#35](https://github.com/dvillarrubia/crawler-masivo/issues/35) **Logs del
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)
   **WordPress**: cruzar el rastreo con lo que el propio WordPress dice que tiene
   publicado.
+
+### 3a. Lo que FreeCrawl tiene y nos falta (17 de octubre)
+
+[#150](https://github.com/dvillarrubia/crawler-masivo/issues/150), con dos guías
+de implementación verificadas contra el código. FreeCrawl tiene 171 checks y
+nosotros 78; en los que coinciden, nuestra definición suele ser la buena. De lo
+que les copiamos, la idea, no su definición. Por olas de
+[`docs/PLAN_MEJOR_CRAWLER.md`](docs/PLAN_MEJOR_CRAWLER.md):
+
+- **Con lo que ya guardamos, sin volver a rastrear**, como la ola 1: el
+  canonical del HTML distinto del de la cabecera, `noindex` junto a un
+  canonical a otra URL, redirecciones que acaban en noindex, avisar del uso de
+  meta refresh, H1 vacío (hoy cuenta como presente), enlaces internos sin
+  anchor, title de plantilla sin rellenar y description igual al title
+  ([#159](https://github.com/dvillarrubia/crawler-masivo/pull/159)). Y la
+  paginación (página 2 o siguientes en noindex o canonicalizadas a la 1, y
+  páginas siguientes sin `<a>`), que es la ola 1.4 —lo único de la ola 1 que
+  quedaba— y va junto con el punto de #150 en
+  [#160](https://github.com/dvillarrubia/crawler-masivo/pull/160).
+- **Con un rastreo nuevo**: meta viewport, `lang` del HTML, charset, canonical
+  relativo y Open Graph; redirecciones por JavaScript sin necesidad del
+  navegador ([#155](https://github.com/dvillarrubia/crawler-masivo/pull/155));
+  tiempo de respuesta real y HTML sin comprimir (hoy no se puede saber);
+  certificado TLS caducado o a punto de caducar; respetar `Retry-After` cuando
+  el servidor pide esperar
+  ([#158](https://github.com/dvillarrubia/crawler-masivo/pull/158)).
+- **Peticiones aparte, sin gastar el límite de URLs**: enlaces externos rotos y
+  dominios muertos, junto con los recursos rotos de
+  [#101](https://github.com/dvillarrubia/crawler-masivo/issues/101)
+  ([#162](https://github.com/dvillarrubia/crawler-masivo/pull/162)). Antes hay
+  que dejar de enviar a otros dominios las cookies y la contraseña de un
+  staging (#149, #156).
+- **Móvil frente a escritorio** (ola 7.4): pedir una muestra con el
+  user-agent de smartphone y comparar lo que cambia
+  ([#161](https://github.com/dvillarrubia/crawler-masivo/pull/161)).
+- **Descartado**: legibilidad y palabras más frecuentes, accesibilidad sin
+  navegador (va con axe por muestra, ola 8), validador de AMP y «hreflang que
+  nadie enlaza» (excluido a propósito en la decisión 99).
 
 ### 3b. Que la interfaz se entienda (milestone M6)
 
@@ -551,6 +616,35 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 - [#122](https://github.com/dvillarrubia/crawler-masivo/issues/122) **El cliente como entrada**: portada por cliente, con su
   último censo y sus alertas.
 - [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
+
+### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
+
+Índice: [#163](https://github.com/dvillarrubia/crawler-masivo/issues/163). Sale del cajón de aparcados con una investigación propia
+([`docs/INVESTIGACION_SEARCH_CONSOLE.md`](docs/INVESTIGACION_SEARCH_CONSOLE.md)):
+qué da hoy Google, qué no (datos de AI Overviews, búsquedas anonimizadas,
+tope de filas, impresiones infladas de mayo de 2025 a abril de 2026) y 21
+combinaciones. Los datos van por cliente y por día, con una cuenta de servicio
+cuya llave vive en el servidor; «sin datos» nunca se lee como «cero». Por
+cliente y no por rastreo, como pide #164: el dato de Google no depende de
+cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»).
+
+- [#164](https://github.com/dvillarrubia/crawler-masivo/issues/164) **Base**: conexión por cliente, descarga nocturna en segundo plano,
+  columnas en el explorador, la ficha y el CSV; se retira la conexión antigua
+  de la prueba semántica, que guardaba la llave en la base de datos.
+- [#165](https://github.com/dvillarrubia/crawler-masivo/issues/165) **Lo que cuesta tráfico**: no indexables con clics, huérfanas con
+  tráfico, URLs con clics que el rastreo no encontró, indexables sin
+  impresiones, y el informe ordenado por tráfico.
+- [#166](https://github.com/dvillarrubia/crawler-masivo/issues/166) **Oportunidades**: posiciones 4-20 con poco enlazado (con las
+  páginas desde las que enlazar), CTR bajo para su posición, canibalización por
+  búsqueda, rendimiento por plantilla y sitemaps según Google.
+- [#167](https://github.com/dvillarrubia/crawler-masivo/issues/167) **Alertas con la causa**: la caída de clics agrupada por lo que
+  cambió entre dos rastreos.
+- [#168](https://github.com/dvillarrubia/crawler-masivo/issues/168) **Inspección de URL por muestra**: el canonical que elige Google,
+  indexables no indexadas y nuestro veredicto frente al de Google.
+- [#169](https://github.com/dvillarrubia/crawler-masivo/issues/169) **Jev con búsquedas reales**: intención, embudo, canibalización
+  juzgada, cobertura de las oportunidades y snippet. Amplía [#39](https://github.com/dvillarrubia/crawler-masivo/issues/39), [#18](https://github.com/dvillarrubia/crawler-masivo/issues/18) y
+  [#22](https://github.com/dvillarrubia/crawler-masivo/issues/22).
+- [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170) **Más adelante**: exportación a BigQuery, GA4 y DataForSEO.
 
 ### 4. Análisis enriquecido con Jev
 
@@ -604,7 +698,7 @@ se lanza solo.
 
 ## Aparcado
 
-- Google Search Console y Google Analytics 4.
+- Google Analytics 4 por su cuenta (va con Search Console en [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170)).
 - Análisis semántico (`POC_centro_semantico/`): era una prueba y no se va a
   continuar.
 - La rama `v2-experimental` (6 de octubre). Su motor ya estaba en master y mas

@@ -43,7 +43,9 @@ from seo_crawler.extractors import (
     estimate_description_pixel_width,
     estimate_title_pixel_width,
     extract_headings,
+    deduplicar_hreflang,
     extract_hreflang,
+    hreflang_de_cabecera,
     extract_links,
     agrupar_enlaces,
     extract_enlaces_no_rastreables,
@@ -59,7 +61,9 @@ from seo_crawler.extractors import (
     extract_word_count,
     extract_custom,
     http_status_text,
+    es_url_web,
     is_internal_url,
+    url_en_hosts,
     dominio_registrable,
     normalize_host,
     normalize_url,
@@ -91,6 +95,13 @@ from seo_crawler.items import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Redirecciones seguidas que se siguen en una cadena, como Chromium y Firefox
+# (20, `ERR_TOO_MANY_REDIRECTS`). Google deja de seguir a las 10, pero cortar
+# ahi, como FreeCrawl, deja sin saber donde acaba la cadena: el analisis avisa
+# a partir de 10 (`LIMITE_SALTOS_GOOGLE`, decision 117).
+MAX_SALTOS_SEGUIDOS = 20
+
 # trafilatura avisa con "empty link" por cada <a> sin texto (iconos, tarjetas
 # enteras enlazadas): decenas por pagina en cualquier sitio moderno, y tapa
 # los avisos que si importan (Playwright, spider). No es un error de nada.
@@ -626,6 +637,24 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                     dominio_registrable(host) for host in self.allowed_hosts
                 } - {""}
 
+            # Hosts que reciben las cabeceras, cookies y credenciales del job
+            # (decision 114): los de las semillas, con y sin www, y sus
+            # subdominios con crawl_subdomains. Una foto tomada AQUI, antes
+            # de rastrear: el host al que salta una semilla pasa a ser interno
+            # para el rastreo, pero no para las credenciales; ese salto (un
+            # staging que manda a un SSO) es justo por donde se iban a otro.
+            self._hosts_credenciales = frozenset(self.allowed_hosts)
+            self._raices_credenciales = frozenset(
+                getattr(self, "_root_domains", ()) if self._crawl_subdomains else ()
+            )
+            # Y solo por los esquemas de las semillas: con una semilla https,
+            # un enlace `http://` al mismo host mandaba el Basic y las cookies
+            # en claro antes de que el 301 lo subiera a https (revision de la
+            # decision 114). Un navegador ata la autenticacion al origen.
+            self._esquemas_credenciales = frozenset(
+                (urlparse(s).scheme or "").lower() for s in self.seed_urls
+            ) - {""}
+
             logger.info(
                 "Job %s loaded: %d seeds, max_depth=%d, max_urls=%s, hosts=%s",
                 self.job_id,
@@ -784,6 +813,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             "playwright": True,
             "playwright_include_page": False,
             "playwright_context": "custom",
+            # Por peticion, no como setting: scrapy-playwright no tiene
+            # PLAYWRIGHT_PAGE_INIT_CALLBACK y el que habia en settings.py no
+            # corria (decision 114). Corre antes de navegar.
+            "playwright_page_init_callback": "seo_crawler.render.preparar_pagina",
             "playwright_page_goto_kwargs": {
                 "wait_until": "domcontentloaded",
             },
@@ -1105,17 +1138,24 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
 
     def _is_internal(self, url: str) -> bool:
         """Check if URL is internal, with subdomain support."""
-        internal = is_internal_url(url, self.allowed_hosts)
-        if not internal and self._crawl_subdomains and hasattr(self, "_root_domains"):
-            try:
-                host = normalize_host(urlparse(url).hostname)
-            except ValueError:
-                return False
-            # Con punto delante: sin el, `notx.com` salia interno para `x.com`
-            internal = any(host == rd or host.endswith("." + rd) for rd in self._root_domains)
-        return internal
+        raices = getattr(self, "_root_domains", ()) if self._crawl_subdomains else ()
+        return url_en_hosts(url, self.allowed_hosts, raices)
 
-    def _page_request(self, url: str, depth: int) -> Request:
+    def _lleva_credenciales(self, url: str) -> bool:
+        """Si a *url* se le pueden mandar las cabeceras, cookies y Basic del job.
+
+        Como `_is_internal`, pero con los hosts de las semillas (decision 114).
+        Sin job cargado no hay hosts, y entonces no se manda nada.
+        """
+        hosts = getattr(self, "_hosts_credenciales", None)
+        if not hosts:
+            return False
+        esquemas = getattr(self, "_esquemas_credenciales", None)
+        if esquemas and (urlparse(url).scheme or "").lower() not in esquemas:
+            return False
+        return url_en_hosts(url, hosts, getattr(self, "_raices_credenciales", ()))
+
+    def _page_request(self, url: str, depth: int, saltos: int = 0) -> Request:
         """Peticion de pagina con la redireccion desactivada.
 
         `dont_redirect`: el spider sigue las redirecciones el mismo (ver
@@ -1128,8 +1168,13 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         Sin dont_filter: en Scrapy ese flag no solo salta el dupefilter, sino
         que ademas NO registra la peticion como vista, y la URL se rastrearia
         otra vez al encontrarla enlazada.
+
+        `saltos` es cuantas redirecciones seguidas lleva la cadena que trae
+        hasta aqui (ver `MAX_SALTOS_SEGUIDOS`).
         """
         meta: dict[str, Any] = {"depth": depth, "dont_redirect": True}
+        if saltos:
+            meta["saltos_redireccion"] = saltos
         if self.render_js and _url_likely_html(url):
             meta.update(self._playwright_meta())
         return scrapy.Request(
@@ -1201,6 +1246,15 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             return None
         raw = response.headers.get(b"Location")
         if not raw:
+            # Con render y credenciales, la preparacion de la pagina descarga
+            # el documento ella misma, le quita el Location para que Chromium
+            # no siga la redireccion con las credenciales puestas, y lo deja
+            # aqui (decision 114): la sigue el spider, como sin render.
+            try:
+                raw = (response.meta.get("_location_render") or "").encode()
+            except AttributeError:  # una respuesta sin peticion
+                raw = b""
+        if not raw:
             return None
         try:
             location = raw.decode("utf-8")
@@ -1253,7 +1307,8 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             # Solo `login_requerido` dice algo de un salto; el resto, NULL.
             response_class=response_class if response_class != "contenido" else None,
         )
-        yield from self._follow_redirect(url, location, depth)
+        yield from self._follow_redirect(
+            url, location, depth, response.meta.get("saltos_redireccion", 0) + 1)
 
     def _adoptar_host_de_semilla(self, origen: str, destino: str) -> Generator:
         """Si una semilla redirige a otro host, ese host pasa a ser interno.
@@ -1278,13 +1333,29 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             if req is not None:
                 yield req
 
-    def _follow_redirect(self, origen: str, destino: str, depth: int) -> Generator:
+    def _follow_redirect(self, origen: str, destino: str, depth: int,
+                         saltos: int = 1) -> Generator:
         """Sigue el destino de una redireccion (HTTP o meta refresh).
 
         Misma profundidad que el origen: una redireccion no es un clic. Si
         sumara un nivel, una semilla `http://x.com` → `https://x.com/` le
         quitaria al rastreo un nivel entero con el max_depth por defecto.
+
+        `saltos` es el numero de este salto en su cadena. Pasado
+        `MAX_SALTOS_SEGUIDOS` el salto queda registrado (su fila ya lleva el
+        destino) pero no se sigue: sin tope, solo el dupefilter y `max_urls`
+        paraban una cadena de URLs siempre nuevas (decision 117).
         """
+        if saltos > MAX_SALTOS_SEGUIDOS:
+            logger.warning(
+                "Cadena de mas de %d redirecciones: %s -> %s se registra sin seguir",
+                MAX_SALTOS_SEGUIDOS, origen, destino,
+            )
+            return
+        # Un `Location: intent://...` o `itms-apps://...` queda registrado
+        # como destino del salto, pero no es una pagina: no se sigue.
+        if not es_url_web(destino):
+            return
         yield from self._adoptar_host_de_semilla(origen, destino)
         if not (self._is_internal(destino) or self.follow_external):
             return
@@ -1293,7 +1364,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         if self._already_crawled_hashes and \
                 _hash_key(compute_url_hash(destino)) in self._already_crawled_hashes:
             return
-        yield self._page_request(destino, depth)
+        yield self._page_request(destino, depth, saltos)
 
     # ------------------------------------------------------------------
     # Main parse
@@ -1329,6 +1400,30 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         )
         canonical_header = canonical_de_cabecera(link_header, base_url)
         return cabeceras_robots, x_robots, canonical_header
+
+    @staticmethod
+    def _hreflang_de_cabecera(response: Response) -> list[dict]:
+        """Hreflang de las cabeceras `Link`, resueltos contra la URL de la respuesta.
+
+        Google los lee igual que los del `<head>`, y en un PDF son lo unico que
+        hay (decision 116). Todas las cabeceras, como el canonical.
+        """
+        link_header = ", ".join(
+            v.decode("utf-8", errors="ignore")
+            for v in response.headers.getlist(b"Link") if v
+        )
+        return hreflang_de_cabecera(link_header, response.url)
+
+    def _hreflang_items(self, url_hash: str, entradas: list[dict]) -> Generator:
+        for hreflang in deduplicar_hreflang(entradas):
+            yield HreflangItem(
+                url_hash=url_hash,
+                job_id=self.job_id,
+                lang=hreflang["lang"],
+                href=hreflang["href"],
+                en_body=hreflang.get("en_body"),
+                origen=hreflang.get("origen"),
+            )
 
     def parse(self, response: Response) -> Generator:
         # Check cancel signal
@@ -1396,7 +1491,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 )
             meta = {
                 k: v for k, v in response.meta.items()
-                if not k.startswith("playwright") and k not in ("redirect_urls", "redirect_times", "redirect_reasons")
+                if not k.startswith("playwright") and k not in (
+                    "redirect_urls", "redirect_times", "redirect_reasons",
+                    "_http_render", "_location_render",
+                )
             }
             meta["_sin_render"] = True
             yield scrapy.Request(
@@ -1671,6 +1769,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                 canonical_href=meta.get("canonical_href"),
                 page_url=final_url,
                 canonical_header=canonical_header,
+                canonicals_distintos=meta.get("canonical_distintos"),
                 bloqueada_por_robots=bool(response.meta.get("blocked_by_robots")),
             )
 
@@ -1759,7 +1858,9 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             self._anotar_salud(clase, url)
 
         if refresh_target:
-            yield from self._follow_redirect(url_for_record, refresh_target, depth)
+            yield from self._follow_redirect(
+                url_for_record, refresh_target, depth,
+                response.meta.get("saltos_redireccion", 0) + 1)
 
         if is_html and is_success and internal and not refresh_target:
             yield from self._sonda_de_plantilla(final_url)  # decision 105
@@ -1797,6 +1898,10 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
                     x_robots_tag=x_robots,
                     canonical_header=canonical_header,
                 )
+            # Y su hreflang, que en un PDF solo puede ir en la cabecera `Link`.
+            if is_success and self._extraction.get("extract_hreflang", True):
+                yield from self._hreflang_items(
+                    final_hash, self._hreflang_de_cabecera(response))
             return
 
         selector = response.selector
@@ -1830,6 +1935,7 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
             canonical_href=meta["canonical_href"],
             canonical_count=meta.get("canonical_count"),
             canonical_in_body=meta.get("canonical_in_body"),
+            canonical_distintos=meta.get("canonical_distintos"),
             canonical_header=canonical_header,
             og_title=meta["og_title"],
             og_description=meta["og_description"],
@@ -1910,15 +2016,14 @@ class SeoSpider(SondaSoft404Mixin, scrapy.Spider):
         )
 
         # Hreflang
+        # El del HTML y el de la cabecera `Link`, sin repetir lo que esten en
+        # las dos (gana el del HTML, salvo que este en el body).
         if self._extraction.get("extract_hreflang", True):
-            for hreflang in extract_hreflang(selector, base_url=base_url):
-                yield HreflangItem(
-                    url_hash=final_hash,
-                    job_id=self.job_id,
-                    lang=hreflang["lang"],
-                    href=hreflang["href"],
-                    en_body=hreflang.get("en_body"),
-                )
+            yield from self._hreflang_items(
+                final_hash,
+                extract_hreflang(selector, base_url=base_url)
+                + self._hreflang_de_cabecera(response),
+            )
 
         # Structured data
         if self._extraction.get("extract_structured_data", True):
