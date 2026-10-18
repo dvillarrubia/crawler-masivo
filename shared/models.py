@@ -204,6 +204,67 @@ class Incidente(Base):
     silenciado_hasta = Column(Date, nullable=True)
 
 
+class GscPagina(Base):
+    """Search Console por URL y dia, de un cliente (decision 141, Ola 4.1).
+
+    Por cliente y dia, NO por job (`docs/INVESTIGACION_SEARCH_CONSOLE.md`): es
+    una serie del sitio, que se cruza con un censo por ventana de fechas al
+    analizarlo. Se guardan TODAS las URLs que da Google, tambien las que el
+    rastreo no encontro: son de las mas interesantes (huerfanas, fuera del
+    alcance). `url_clave` es `shared.indexabilidad.clave_url` en SHA-256, la
+    misma regla con la que se empareja con `urls` (decision 39).
+    """
+
+    __tablename__ = "gsc_paginas"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "propiedad", "fecha", "url_clave", name="uq_gsc_pagina_dia"),
+        Index("ix_gsc_paginas_cliente_clave", "cliente_id", "url_clave"),
+        Index("ix_gsc_paginas_cliente_fecha", "cliente_id", "fecha"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    propiedad = Column(String(512), nullable=False)
+    fecha = Column(Date, nullable=False)
+    url = Column(Text, nullable=False)
+    url_clave = Column(String(64), nullable=False)
+    clics = Column(Integer, nullable=False, default=0)
+    impresiones = Column(Integer, nullable=False, default=0)
+    # Posicion media ponderada por impresiones, la que da Google.
+    posicion = Column(Float, nullable=True)
+
+
+class GscEstado(Base):
+    """Como va la sincronizacion de Search Console de un cliente (decision 141).
+
+    Una fila por (cliente, propiedad). Lo que la interfaz ensena: con que
+    cuenta, que dias hay, cuando fue bien la ultima vez y, si fallo, por que en
+    castellano («la cuenta X no tiene acceso a la propiedad Y»). `pedida_en`
+    lo pone el boton «Sincronizar ahora».
+    """
+
+    __tablename__ = "gsc_estado"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "propiedad", name="uq_gsc_estado"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    propiedad = Column(String(512), nullable=False)
+    cuenta = Column(String(512), nullable=True)
+    estado = Column(String(16), nullable=False, default="pendiente")  # pendiente | en_curso | ok | error
+    motivo = Column(Text, nullable=True)
+    ultimo_intento = Column(DateTime(timezone=True), nullable=True)
+    ultimo_ok = Column(DateTime(timezone=True), nullable=True)
+    pedida_en = Column(DateTime(timezone=True), nullable=True)
+    primer_dia = Column(Date, nullable=True)
+    ultimo_dia = Column(Date, nullable=True)
+    filas = Column(BigInteger, nullable=True)
+    # Dias en los que Google corto en el tope de filas (50.000/dia): ahi no se
+    # puede afirmar que una URL no tuvo impresiones.
+    dias_truncados = Column(JSON, nullable=True)
+
+
 class Programacion(Base):
     """Un rastreo que se repite: cuando toca y que lanzar.
 

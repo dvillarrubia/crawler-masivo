@@ -41,3 +41,7 @@ apscheduler>=3.10
 # Enlaces de los censos superados en Parquet (`shared/archivo_enlaces.py`,
 # decision 95): 68 MB donde Postgres necesita 9-30 GB.
 pyarrow>=15.0
+# Search Console (decision 141): la llave de la cuenta de servicio y las
+# llamadas a la API, en el worker, que es quien descarga cada noche.
+google-auth>=2.29
+requests>=2.31

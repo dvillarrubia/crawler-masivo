@@ -534,6 +534,8 @@ function app() {
     reglasCliente: null,      // GET /clients/{id}/reglas
     reglasForm: null,         // copia editable de `efectivas`
     incidentes: null,         // GET /clients/{id}/incidentes (decision 139)
+    // Search Console del cliente (decision 141)
+    gsc: { estado: null, llaves: [], llave: '', nombreNueva: '', propiedades: null, propiedad: '', error: '', ocupado: false },
     incidentesVer: 'vivos',
     reglasError: '',
     reglasPrueba: null,       // POST /clients/{id}/reglas/probar
@@ -1467,6 +1469,80 @@ function app() {
       this.clienteForm = _formCliente(null);
       this.clienteTab = 'config';
       this.clienteError = '';
+    },
+
+    // --- Search Console (decision 141) ---------------------------------
+    async cargarGsc() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      this.gsc = { estado: null, llaves: [], llave: '', nombreNueva: 'GSC_' + this.cliente.slug.toUpperCase().replace(/[^A-Z0-9]/g, '_'),
+                   propiedades: null, propiedad: '', error: '', ocupado: false };
+      try {
+        const [estado, llaves] = await Promise.all([api(`/clients/${id}/gsc`), api('/credenciales?tipo=gsc')]);
+        if (!this.cliente || this.cliente.id !== id) return;
+        this.gsc.estado = estado;
+        this.gsc.llaves = llaves;
+        const actual = estado.find(e => e.credencial);
+        this.gsc.llave = actual ? actual.credencial : (llaves[0] ? llaves[0].nombre : '');
+        this.gsc.propiedad = actual && actual.propiedad ? actual.propiedad : '';
+      } catch (e) { this.gsc.error = e.message; }
+    },
+
+    async subirLlaveGsc(ev) {
+      const fichero = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      this.gsc.error = ''; this.gsc.ocupado = true;
+      try {
+        const contenido = await fichero.text();
+        const r = await api('/credenciales', { method: 'POST',
+          body: JSON.stringify({ tipo: 'gsc', nombre: this.gsc.nombreNueva, contenido }) });
+        this.gsc.llaves = await api('/credenciales?tipo=gsc');
+        this.gsc.llave = r.nombre;
+        this.showToast('Llave subida: ' + r.client_email);
+        await this.verPropiedadesGsc();
+      } catch (e) { this.gsc.error = e.message; }
+      this.gsc.ocupado = false;
+    },
+
+    async verPropiedadesGsc() {
+      if (!this.gsc.llave) return;
+      this.gsc.error = ''; this.gsc.propiedades = null; this.gsc.ocupado = true;
+      try {
+        this.gsc.propiedades = await api(`/credenciales/${this.gsc.llave}/propiedades`);
+        if (!this.gsc.propiedad && this.gsc.propiedades.length === 1) this.gsc.propiedad = this.gsc.propiedades[0].propiedad;
+      } catch (e) { this.gsc.error = e.message; this.gsc.propiedades = []; }
+      this.gsc.ocupado = false;
+    },
+
+    // Escribe la integracion `gsc` en el formulario, guarda el cliente y pide
+    // la primera sincronizacion: desde ahi la hace el worker cada noche.
+    async conectarGsc() {
+      if (!this.gsc.llave || !this.gsc.propiedad) return;
+      let integ = this.clienteForm.integraciones.find(i => i.tipo === 'gsc');
+      if (!integ) {
+        this.agregarIntegracion();
+        integ = this.clienteForm.integraciones[this.clienteForm.integraciones.length - 1];
+      }
+      integ.credencial_env = this.gsc.llave;
+      integ.parametros = 'propiedad=' + this.gsc.propiedad;
+      integ.activa = true;
+      await this.guardarCliente();
+      if (this.clienteError) { this.gsc.error = this.clienteError; return; }
+      await this.sincronizarGsc();
+    },
+
+    async sincronizarGsc() {
+      try {
+        await api(`/clients/${this.cliente.id}/gsc/sincronizar`, { method: 'POST' });
+        this.showToast('Sincronización pedida: el worker la empieza en menos de un minuto');
+        await this.cargarGsc();
+      } catch (e) { this.gsc.error = e.message; }
+    },
+
+    textoEstadoGsc(e) {
+      return ({ ok: 'Sincronizado', error: 'Error', en_curso: 'Descargando…', pendiente: 'Pendiente de la primera descarga',
+                sin_configurar: 'Sin configurar' })[e.estado] || e.estado;
     },
 
     agregarIntegracion() {

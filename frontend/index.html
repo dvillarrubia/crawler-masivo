@@ -842,6 +842,83 @@
               </div>
             </div>
 
+            <!-- Search Console (decision 141): la llave se sube y va a un
+                 fichero del servidor, nunca a la base de datos. Aqui solo se
+                 ve el email de la cuenta, que es el que hay que dar de alta en
+                 Search Console, y como va la descarga diaria. -->
+            <template x-if="cliente">
+              <div x-init="cargarGsc()" data-testid="gsc" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+                <h3 style="font-size:1rem;margin-bottom:.3rem">Search Console</h3>
+                <p class="text-dim text-sm mb-1">Con la llave de una cuenta de servicio y la propiedad, se descargan solos cada noche los clics, las impresiones y la posición de cada URL (la primera vez, 90 días hacia atrás).</p>
+                <template x-if="gsc.error">
+                  <div class="card mb-1" style="border-color:var(--red);color:var(--red);padding:.4rem .6rem;font-size:.85rem" x-text="gsc.error"></div>
+                </template>
+                <template x-for="e in (gsc.estado || [])" :key="e.propiedad || 'x'">
+                  <div class="card mb-1 gsc-estado" :class="'gsc-' + e.estado" data-testid="gsc-estado">
+                    <div class="flex items-center gap-1" style="flex-wrap:wrap">
+                      <span class="badge" :class="e.estado === 'ok' ? 'badge-completed' : e.estado === 'error' ? 'badge-failed' : 'badge-pending'" x-text="textoEstadoGsc(e)"></span>
+                      <strong x-text="e.propiedad || 'sin propiedad'"></strong>
+                      <button class="btn btn-sm" style="margin-left:auto" x-show="e.propiedad && e.configurada" @click="sincronizarGsc()">Sincronizar ahora</button>
+                    </div>
+                    <div class="text-sm" x-show="e.cuenta" style="margin-top:.3rem">
+                      Cuenta: <code x-text="e.cuenta"></code>
+                      <span class="text-dim">— tiene que estar como usuario en esta propiedad de Search Console</span>
+                    </div>
+                    <div class="text-sm" x-show="e.motivo" :class="e.estado === 'error' ? 'text-red' : 'text-dim'" x-text="e.motivo" style="margin-top:.3rem"></div>
+                    <div class="text-sm text-dim" x-show="e.ultimo_dia" style="margin-top:.3rem"
+                         x-text="'Datos del ' + fmt.dia(e.primer_dia) + ' al ' + fmt.dia(e.ultimo_dia) + ' · última descarga ' + fmt.date(e.ultimo_ok) + (e.dias_truncados ? ' · ' + e.dias_truncados + ' días cortados en el tope de Google' : '')"></div>
+                    <template x-if="e.ultimos_28_dias">
+                      <div class="text-sm" style="margin-top:.3rem">
+                        Últimos 28 días: <strong x-text="fmt.num(e.ultimos_28_dias.clics)"></strong> clics ·
+                        <strong x-text="fmt.num(e.ultimos_28_dias.impresiones)"></strong> impresiones ·
+                        <strong x-text="fmt.num(e.ultimos_28_dias.urls)"></strong> URLs
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <details class="mb-1" :open="!(gsc.estado || []).some(e => e.configurada && e.propiedad)">
+                  <summary class="text-sm" style="cursor:pointer" x-text="(gsc.estado || []).length ? 'Cambiar la llave o la propiedad' : 'Conectar Search Console'"></summary>
+                  <div class="gsc-pasos">
+                    <div class="form-group">
+                      <label>1. Llave de la cuenta de servicio</label>
+                      <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                        <select x-model="gsc.llave" @change="gsc.propiedades = null" style="width:auto;min-width:16rem">
+                          <option value="">— elige una llave ya subida —</option>
+                          <template x-for="l in gsc.llaves" :key="l.nombre">
+                            <option :value="l.nombre" x-text="l.nombre + ' · ' + (l.client_email || 'no válida')"></option>
+                          </template>
+                        </select>
+                        <span class="text-sm text-dim">o sube una nueva como</span>
+                        <input type="text" x-model="gsc.nombreNueva" style="width:12rem;font-family:monospace">
+                        <label class="btn btn-sm" :class="gsc.ocupado && 'disabled'">Subir JSON…
+                          <input type="file" accept=".json,application/json" style="display:none" @change="subirLlaveGsc($event)" data-testid="gsc-fichero">
+                        </label>
+                      </div>
+                      <div class="form-hint">La misma llave puede servir a varios clientes. Se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar: solo su email.</div>
+                    </div>
+                    <div class="form-group">
+                      <label>2. Propiedad</label>
+                      <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                        <button class="btn btn-sm" @click="verPropiedadesGsc()" :disabled="!gsc.llave || gsc.ocupado">Ver las propiedades a las que tiene acceso</button>
+                        <template x-if="gsc.propiedades && gsc.propiedades.length">
+                          <select x-model="gsc.propiedad" style="width:auto;min-width:16rem">
+                            <template x-for="p in gsc.propiedades" :key="p.propiedad">
+                              <option :value="p.propiedad" x-text="p.propiedad + ' (' + p.permiso + ')'"></option>
+                            </template>
+                          </select>
+                        </template>
+                        <template x-if="gsc.propiedades && !gsc.propiedades.length">
+                          <span class="text-sm text-orange">Esta cuenta aún no tiene acceso a ninguna propiedad: añade su email como usuario en Search Console.</span>
+                        </template>
+                      </div>
+                      <input type="text" x-model="gsc.propiedad" placeholder="o escríbela: sc-domain:cliente.com o https://www.cliente.com/" style="margin-top:.35rem;font-family:monospace">
+                    </div>
+                    <button class="btn btn-primary btn-sm" @click="conectarGsc()" :disabled="!gsc.llave || !gsc.propiedad" data-testid="gsc-conectar">3. Guardar y empezar a descargar</button>
+                  </div>
+                </details>
+              </div>
+            </template>
+
             <!-- Integraciones: NUNCA el secreto. Se guarda el nombre de la
                  variable de entorno; la API solo dice si esta puesta. -->
             <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
@@ -851,9 +928,9 @@
               </div>
               <p class="text-dim text-sm mb-1">
                 APIs externas del cliente (Search Console, DataForSEO, Ahrefs, Semrush...). <strong>Las claves no se
-                guardan aquí</strong>: la API no tiene autenticación y cualquiera que llegue a ella podría leerlas.
-                Se escribe el <em>nombre</em> de la variable de entorno y el secreto se pone en el
-                <code>.env</code> del servidor, por ejemplo <code>DATAFORSEO_LIN3S=login:password</code>.
+                guardan en la base de datos</strong>: se escribe el <em>nombre</em> de la credencial y el secreto va en
+                el <code>.env</code> del servidor (<code>DATAFORSEO_LIN3S=login:password</code>) o, para Search Console,
+                se sube arriba.
               </p>
               <template x-for="(i, idx) in clienteForm.integraciones" :key="idx">
                 <div class="card mb-1" style="padding:.6rem .75rem">

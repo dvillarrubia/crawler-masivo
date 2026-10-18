@@ -116,7 +116,12 @@ def esta_configurada(integracion: Mapping[str, Any], entorno: Mapping[str, str] 
     if not nombre:
         return False
     entorno = os.environ if entorno is None else entorno
-    return bool(entorno.get(nombre))
+    if entorno.get(nombre):
+        return True
+    # O subida desde la interfaz a `SECRETOS_DIR` (decision 141).
+    from shared import secretos
+
+    return secretos.existe(nombre)
 
 
 def credencial(integracion: Mapping[str, Any], entorno: Mapping[str, str] | None = None) -> str:
@@ -138,9 +143,17 @@ def credencial(integracion: Mapping[str, Any], entorno: Mapping[str, str] | None
     entorno = os.environ if entorno is None else entorno
     valor = entorno.get(nombre)
     if not valor:
+        # La subida desde la interfaz (decision 141): un fichero en el
+        # volumen de secretos con el mismo nombre. Manda la variable si
+        # existen las dos: la puso a mano el operador.
+        from shared import secretos
+
+        valor = secretos.leer(nombre)
+    if not valor:
         raise CredencialNoDisponible(
-            f"la variable {nombre} no esta puesta en el entorno de este proceso "
-            "(se define en el .env del servidor)")
+            f"la credencial {nombre} no esta ni en el entorno de este proceso ni "
+            "subida (se define en el .env del servidor o se sube desde la ficha "
+            "del cliente)")
     return valor
 
 
