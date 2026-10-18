@@ -242,20 +242,32 @@ def servir_tls_caducado() -> tuple[ThreadingHTTPServer, int]:
     return srv, srv.server_address[1]
 
 
+# (host, ruta, cabeceras) de cada peticion: para ver a que host llegan las
+# cookies, el Basic y las cabeceras propias del job (decision 114).
+CABECERAS: list[tuple[str, str, dict]] = []
+
+
 def servir(robots_prohibe_todo: bool = False,
            robots_bloquea_privado: bool = False,
            con_recursos: bool = False,
            robots_crawl_delay: float | None = None,
            rutas_extra: dict | None = None,
            puerto: int = 0,
-           muro: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
+           muro: dict | None = None,
+           lentas: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
+    # {ruta: segundos} que el servidor tarda en contestar: para un timeout.
+    lentas = lentas or {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             PETICIONES.append((time.monotonic(),
                                (self.headers.get("Host") or "").split(":")[0],
                                self.path))
+            CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
+                              self.path, {k.lower(): v for k, v in self.headers.items()}))
+            if self.path in lentas:
+                time.sleep(lentas[self.path])
             status, headers, body = rutas.get(self.path.split("?")[0], (404, {}, b"no"))
             status, headers, body = _cabeceras_especiales(
                 self.path.split("?")[0], status, headers, body)
@@ -277,8 +289,9 @@ def servir(robots_prohibe_todo: bool = False,
     rutas.update(construir_sitio(port, con_privado=robots_bloquea_privado,
                                  con_recursos=con_recursos))
     # Rutas propias de un test: {ruta: [codigo, cabeceras, cuerpo]}. El cuerpo
-    # admite {port}.
+    # y los valores de las cabeceras admiten {port}.
     for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
+        cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
         rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
     if muro is not None:
         rutas.update(construir_sitio_con_muro(**muro))
@@ -388,7 +401,8 @@ def main() -> None:
                        entrada.get("robots_crawl_delay"),
                        entrada.get("rutas"),
                        entrada.get("puerto", 0),
-                       entrada.get("muro"))
+                       entrada.get("muro"),
+                       entrada.get("lentas"))
 
     tls_port = None
     if entrada.get("tls_caducado"):
@@ -463,8 +477,8 @@ def main() -> None:
         # meta["playwright"].
         original = SeoSpider._page_request
 
-        def _page_request(self, url, depth):
-            req = original(self, url, depth)
+        def _page_request(self, url, depth, *a, **k):
+            req = original(self, url, depth, *a, **k)
             req.meta.pop("dont_redirect", None)
             req.meta["playwright"] = True
             return req
@@ -477,6 +491,9 @@ def main() -> None:
         # Condicional para que el test del Crawl-delay falle contra el codigo
         # anterior por lo que mide (el ritmo), no por un ImportError.
         middlewares["seo_crawler.middlewares.RobotsCrawlDelayMiddleware"] = 110
+    if hasattr(mw, "RobotsTxtRegistroMiddleware"):
+        # Como en settings.py (decision 112). Condicional por lo mismo.
+        middlewares["seo_crawler.middlewares.RobotsTxtRegistroMiddleware"] = 90
     con_crawl_delay = entrada.get("robots_crawl_delay") is not None
     if entrada.get("retry_after") and hasattr(mw, "RetryAfterMiddleware"):
         middlewares["seo_crawler.middlewares.RetryAfterMiddleware"] = 560
@@ -494,6 +511,35 @@ def main() -> None:
         }
     extra_settings.update(entrada.get("settings") or {})
 
+    ajustes_reales: dict = {}
+    if entrada.get("http_real"):
+        # Los middlewares del bloque `http` del job, como en settings.py, y el
+        # jar como lo deja el worker (decision 114).
+        middlewares["seo_crawler.middlewares.HttpConfigMiddleware"] = 420
+        middlewares["seo_crawler.middlewares.CookiesTrasElJarMiddleware"] = 705
+        ajustes_reales["COOKIES_ENABLED"] = bool(
+            ((entrada.get("config") or {}).get("http") or {}).get("conservar_cookies"))
+    if entrada.get("descarga_real"):
+        # La descarga de produccion: curl_cffi y, con render_js, Playwright con
+        # los contextos y la preparacion de pagina de settings.py.
+        import seo_crawler.settings as prod
+
+        lanzar = dict(prod.PLAYWRIGHT_LAUNCH_OPTIONS)
+        if entrada.get("chromium"):
+            lanzar["executable_path"] = entrada["chromium"]
+        ajustes_reales.update({
+            "DOWNLOAD_HANDLERS": prod.DOWNLOAD_HANDLERS,
+            "IMPERSONATE": prod.IMPERSONATE,
+            "TWISTED_REACTOR": prod.TWISTED_REACTOR,
+            "PLAYWRIGHT_BROWSER_TYPE": prod.PLAYWRIGHT_BROWSER_TYPE,
+            "PLAYWRIGHT_LAUNCH_OPTIONS": lanzar,
+            "PLAYWRIGHT_CONTEXTS": prod.PLAYWRIGHT_CONTEXTS,
+            "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": prod.PLAYWRIGHT_MAX_PAGES_PER_CONTEXT,
+            "PLAYWRIGHT_MAX_CONTEXTS": prod.PLAYWRIGHT_MAX_CONTEXTS,
+            "PLAYWRIGHT_ABORT_REQUEST": prod.PLAYWRIGHT_ABORT_REQUEST,
+            "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": prod.PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT,
+        })
+
     proceso = CrawlerProcess({
         "LOG_LEVEL": entrada.get("log_level", "WARNING"),
         "TELNETCONSOLE_ENABLED": False,
@@ -501,7 +547,7 @@ def main() -> None:
         # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
         "ROBOTSTXT_OBEY": bool(
             entrada.get("robots_prohibe_todo") or entrada.get("robots_bloquea_privado")
-            or con_crawl_delay
+            or con_crawl_delay or entrada.get("robots_obey")
         ) and entrada.get("robots_mode") not in ("audit", "ignore"),
         "ROBOTS_MODE": entrada.get("robots_mode", "respect"),
         "DOWNLOADER_MIDDLEWARES": middlewares,
@@ -520,6 +566,7 @@ def main() -> None:
             "seo_crawler.middlewares.DepthMiddleware": 900,
         },
         "ITEM_PIPELINES": pipelines,
+        **ajustes_reales,
         **extra_settings,
     })
     cierre: dict = {}
@@ -527,6 +574,13 @@ def main() -> None:
 
     def _spider_closed(self, spider, reason):
         cierre["reason"] = reason
+        # Lo que anoto el registro de robots.txt (decision 112).
+        try:
+            for m in self.crawler.engine.downloader.middleware.middlewares:
+                if type(m).__name__ == "RobotsTxtRegistroMiddleware":
+                    cierre["robots_txt"] = list(m.filas.values())
+        except Exception:  # noqa: BLE001
+            pass
         return original_closed(self, spider, reason)
 
     SeoSpider.spider_closed = _spider_closed
@@ -542,14 +596,16 @@ def main() -> None:
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
             "blocked_by_robots", "status_group", "response_class", "url_hash",
-            "from_url_hash", "filas", "ttfb_ms", "content_encoding", "http_version",
-            "status_text",
+            "from_url_hash", "filas", "lang", "href", "origen", "en_body",
+            "ttfb_ms", "content_encoding", "http_version", "status_text",
         )}
         for k in ("url", "redirect_url", "to_url"):
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
-    print("@@CIERRE@@" + json.dumps(cierre))
+    if entrada.get("ver_cabeceras"):
+        print("@@CABECERAS@@" + json.dumps(CABECERAS))
+    print("@@CIERRE@@" + json.dumps(cierre, default=str))
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))
     if redis_falso is not None:

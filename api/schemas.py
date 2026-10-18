@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -152,13 +153,17 @@ class ExtractionConfig(BaseModel):
 
 
 class HttpConfig(BaseModel):
-    """Custom HTTP settings sent with every request."""
+    """Ajustes HTTP del job. Las cabeceras propias, las cookies y el Basic solo
+    van a los hosts de las semillas (decision 114); Accept-Language, a todas."""
 
     custom_headers: dict[str, str] = Field(default_factory=dict)
     accept_language: str = ""
     cookies: dict[str, str] = Field(default_factory=dict)
     basic_auth_user: str = ""
     basic_auth_password: str = ""
+    # Guardar las cookies que pone el sitio entre paginas. Por defecto no,
+    # como Googlebot; las de `cookies` se mandan igual (decision 114).
+    conservar_cookies: bool = False
 
 
 class AnalysisThresholdsConfig(BaseModel):
@@ -259,6 +264,23 @@ class TemplateRule(BaseModel):
     patron: str = Field(..., min_length=1, max_length=500)
 
 
+class ReglaSegmento(BaseModel):
+    """Una regla de segmento de negocio (decision 125, `shared/segmentos.py`).
+
+    `patron` es el mismo de `TemplateRule` (regex sobre el path, sin distinguir
+    mayusculas), asi que una lista de `templates` vale como lista de segmentos.
+    `si` es el arbol de condiciones (Y/O/NO, campo, regla a medida); con los dos
+    tienen que casar los dos. La valida `shared.segmentos.validar`, que conoce
+    las reglas a medida del config entero, desde `JobConfig`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(..., min_length=1, max_length=80)
+    etiqueta: str | None = Field(None, max_length=120)
+    patron: str | None = Field(None, max_length=500)
+    si: dict[str, Any] | None = None
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -305,6 +327,26 @@ class JobConfig(BaseModel):
     # `fusionar_config`, asi que en `jobs.config` no llega a guardarse.
     custom_extraction: dict[str, ExtractorAMedida | None] = Field(default_factory=dict)
     custom_search: dict[str, BusquedaAMedida | None] = Field(default_factory=dict)
+    # Segmentos de negocio (decision 125): la PRIMERA regla que casa da el
+    # segmento de la URL; si ninguna, la forma de la ruta. Es una lista, asi
+    # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
+    # precedencia es el orden, y sumar listas la haria imposible de leer.
+    segmentos: list[ReglaSegmento] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reglas_de_segmento(self):
+        if not self.segmentos:
+            return self
+        from shared.segmentos import validar
+
+        # Solo la forma. Que cada `x` exista se comprueba sobre la config
+        # FUSIONADA (`resolver_config`, y `create_job` sin cliente): aqui puede
+        # llegar una capa suelta —el perfil, el override de un job— cuyos
+        # segmentos usan una extraccion que fija el cliente.
+        errores = validar([r.model_dump(exclude_none=True) for r in self.segmentos], None)
+        if errores:
+            raise ValueError("; ".join(errores))
+        return self
 
     @model_validator(mode="after")
     def _reglas_a_medida(self):
@@ -435,6 +477,15 @@ def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list
             continue
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"Seed URL must start with http:// or https://: {url}")
+        # Una semilla con credenciales se guardaria en `jobs.seeds`, que lee
+        # cualquiera (decision 83), y el rastreo las quitaria al normalizar:
+        # el staging se quedaria en el login sin aviso. Se rechaza y se dice
+        # donde van.
+        if "@" in urlsplit(url).netloc:
+            raise ValueError(
+                "La semilla lleva credenciales (usuario:clave@): quitalas y usa "
+                "http.basic_auth_user / http.basic_auth_password"
+            )
         cleaned.append(url)
     if obligatorias and not cleaned:
         raise ValueError("At least one valid seed URL is required")
@@ -551,6 +602,8 @@ class JobResponse(BaseModel):
     # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
     # causa si el rastreo se dio por bloqueado (decision 103).
     health: dict[str, Any] | None = None
+    # Con que reglas se materializo `urls.segmento` y cuantas casaron (125).
+    segmentacion: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
     # pregunto nada a un modelo sobre este job.
@@ -603,6 +656,19 @@ class HtmlMetaResponse(BaseModel):
     # Decision 102: donde corta el navegador el head y que queda fuera.
     head_cortado_por: str | None = None
     fuera_del_head: str | None = None
+    # Decision 108: lo que el HTML declara de si mismo.
+    viewport: str | None = None
+    viewport_count: int | None = None
+    html_lang: str | None = None
+    content_language: str | None = None
+    canonical_crudo: str | None = None
+    og_image_forma: str | None = None
+    twitter_image: str | None = None
+    redireccion_js: str | None = None
+    charset_meta: str | None = None
+    charset_bom: str | None = None
+    cuerpo_solo_ascii: bool | None = None
+    texto_mal_codificado: bool | None = None
 
 
 class PageContentResponse(BaseModel):
@@ -644,6 +710,7 @@ class HreflangResponse(BaseModel):
     href: str
     return_tag_ok: bool | None = None
     lang_valid: bool | None = None
+    origen: str | None = None  # html | cabecera; None = rastreo anterior (html)
 
 
 class StructuredDataResponse(BaseModel):
@@ -695,6 +762,7 @@ class UrlResponse(BaseModel):
     resource_type: str | None = None
     redirect_url: str | None = None
     indexable: bool | None = None
+    segmento: str | None = None  # decision 125
     first_seen_at: datetime | None = None
     last_crawled_at: datetime | None = None
     # Screaming Frog parity
@@ -712,6 +780,9 @@ class UrlResponse(BaseModel):
     transfer_size: int | None = None
     indexability_status: str | None = None
     blocked_by_robots: bool | None = None
+    # Si Googlebot puede pedirla segun el robots.txt guardado (decision 113).
+    # NULL = no evaluado.
+    bloqueada_googlebot: bool | None = None
     # La respuesta era la pagina o un muro delante (decision 103).
     response_class: str | None = None
     inlinks_count: int | None = None

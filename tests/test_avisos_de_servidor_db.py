@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from analysis import avisos_de_servidor
 from analysis.analyzer import SEOAnalyzer
-from shared.models import Base, Issue, Job, Url
+from shared.models import Base, HtmlMeta, Issue, Job, Url
 
 
 @compiles(BigInteger, "sqlite")
@@ -27,7 +27,9 @@ def _bigint_sqlite(tipo, compilador, **kw):
 
 def _censo(config: dict | None = None, tls: dict | None = None):
     engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine, tables=[Job.__table__, Url.__table__, Issue.__table__])
+    # `html_meta` la lee `run_all` en los avisos de la decision 108.
+    Base.metadata.create_all(engine, tables=[Job.__table__, Url.__table__, Issue.__table__,
+                                             HtmlMeta.__table__])
     s = sessionmaker(bind=engine)()
     j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"],
             config=config or {}, tls=tls)
