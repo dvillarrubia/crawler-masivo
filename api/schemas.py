@@ -893,6 +893,9 @@ class UrlDetailResponse(UrlResponse):
     outlinks: list[LinkResponse] = []
     # La misma URL pedida con otro perfil (decision 119): una por perfil
     capturas_alternativas: list[dict[str, Any]] = []
+    # La linea de robots.txt que bloquea la URL, para Googlebot y para nuestro
+    # rastreo (decision 129). None = no esta bloqueada o no se puede afirmar.
+    robots_regla: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

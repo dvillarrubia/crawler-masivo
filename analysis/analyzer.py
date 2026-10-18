@@ -2432,6 +2432,10 @@ class SEOAnalyzer:
         config = (job.config or {}) if job else {}
         self._robots_mode = config.get("robots_mode", "respect")
         self._robots_ua = config.get("user_agent") or None
+        # La muestra por plantilla con la que se evaluan los demas bots (129).
+        from analysis.robots_txt import MuestraPorPlantilla
+
+        self._robots_muestra = MuestraPorPlantilla(config.get("templates"))
         for o, fila in self._robots.filas.items():
             if estado_de_fila(fila) != INACCESIBLE:
                 continue
@@ -2475,6 +2479,7 @@ class SEOAnalyzer:
             return None
         bloqueada = not permitida
         self._robots_googlebot[bloqueada].append(url_id)
+        self._robots_muestra.anadir(o, url_id, url)
         c = self._robots_conteo.setdefault(o, {
             "evaluadas": 0, "bloqueadas": 0, "solo_rastreador": 0, "solo_googlebot": 0,
             "ejemplos_solo_rastreador": [], "ejemplos_solo_googlebot": []})
@@ -2497,7 +2502,7 @@ class SEOAnalyzer:
         como Googlebot no es el de nuestro rastreo, con los dos contadores y
         ejemplos; nunca una por URL (decision 36).
         """
-        from analysis.robots_txt import estado_evaluable
+        from analysis.robots_txt import estado_evaluable, evaluar_bots
         from shared.models import RobotsTxt
 
         # Lo que dijera un analisis anterior se borra antes: con otro codigo
@@ -2509,11 +2514,15 @@ class SEOAnalyzer:
             self._bulk_update_campo(ids, Url.bloqueada_googlebot, valor)
         for o, fila in self._robots.filas.items():
             c = self._robots_conteo.get(o)
+            evaluacion = {
+                BOT_POR_DEFECTO: {"estado": estado_evaluable(fila),
+                                  "evaluadas": c["evaluadas"] if c else 0,
+                                  "bloqueadas": c["bloqueadas"] if c else 0}}
+            bots = self._evaluar_bots_de_origen(o, fila, evaluar_bots)
+            if bots is not None:
+                evaluacion["bots"] = bots
             self.session.execute(
-                update(RobotsTxt).where(RobotsTxt.id == fila.id).values(evaluacion={
-                    BOT_POR_DEFECTO: {"estado": estado_evaluable(fila),
-                                      "evaluadas": c["evaluadas"] if c else 0,
-                                      "bloqueadas": c["bloqueadas"] if c else 0}}))
+                update(RobotsTxt).where(RobotsTxt.id == fila.id).values(evaluacion=evaluacion))
             if not c or not (c["solo_rastreador"] or c["solo_googlebot"]):
                 continue
             ancla = self._ancla_de_origen(o)
@@ -2531,6 +2540,46 @@ class SEOAnalyzer:
                 group_key=_clave_de_grupo(f"{o}|{BOT_POR_DEFECTO}"),
             )
         self.session.flush()
+
+    def _evaluar_bots_de_origen(self, o: str, fila, evaluar_bots) -> dict | None:
+        """Que bloquea cada bot en un host, y el aviso si es un buscador de IA.
+
+        `bot_busqueda_ia_bloqueado` (info, uno por host) solo cuando un bot de
+        BUSQUEDA de IA tiene cerrado el sitio entero: la home y toda la muestra.
+        Bloquear uno de entrenamiento es una decision legitima del cliente y no
+        saca de ninguna busqueda, asi que no avisa (decision 129).
+        """
+        from shared.robots_txt import BOTS_INFO, BUSQUEDA_IA
+
+        ev = self._robots.evaluador(o)
+        if ev is None:
+            return None
+        muestra = getattr(self, "_robots_muestra", None)
+        plantillas = muestra.de(o) if muestra else {}
+        try:
+            bots = evaluar_bots(ev, o, plantillas, muestra.total(o) if muestra else 0)
+        except Exception:  # noqa: BLE001 -- la tabla por bot no tumba el analisis
+            logger.warning("No se pudo evaluar por bot el robots.txt de %s", o, exc_info=True)
+            return None
+        cerrados = [
+            {"bot": b["bot"], "token": b["token"], "proveedor": b["proveedor"],
+             "regla": bots[b["bot"]].get("regla_home")}
+            for b in BOTS_INFO
+            if b["tipo"] == BUSQUEDA_IA and bots.get(b["bot"], {}).get("alcance") == "todo"]
+        if cerrados:
+            ancla = self._ancla_de_origen(o)
+            if ancla is not None:
+                self._add_issue(
+                    ancla, "bot_busqueda_ia_bloqueado", "info",
+                    {"host": fila.host, "url": fila.url, "bots": cerrados,
+                     # Con `*` cerrado tambien esta fuera Google, y eso cambia
+                     # lo que hay que leer del aviso.
+                     "googlebot_alcance": bots.get(BOT_POR_DEFECTO, {}).get("alcance"),
+                     "evaluadas": bots[cerrados[0]["bot"]]["evaluadas"],
+                     "plantillas": bots[cerrados[0]["bot"]]["plantillas"]},
+                    group_key=_clave_de_grupo(f"{o}|busqueda_ia"),
+                )
+        return bots
 
     def _bulk_update_campo(self, url_ids: list[int], columna, valor) -> None:
         """Escribe una columna de `urls` por lotes."""

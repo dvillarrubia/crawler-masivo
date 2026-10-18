@@ -822,3 +822,101 @@
    en progym (6 paginas) y `redireccion_a_noindex` 14 en Lopesan y 3 en blogs.uoc.edu. Volumen bajo: nada
    de ruido. Las cifras de B1 y de las meta refresh siguen pendientes de un
    censo que las tenga.
+
+<a id="d129"></a>
+129. **El robots.txt se evalúa también para los bots de IA, separando
+   entrenamiento de búsqueda, y la ficha de una URL bloqueada dice la línea
+   que la bloquea** (lo que faltaba de la Ola 7.3, tras las decisiones 112 y
+   113). Dos cosas, las dos sobre el robots.txt ya guardado en `robots_txt`:
+   no se pide nada nuevo al sitio y basta **re-analizar** (la línea, ni eso).
+   - **Doce bots, con su tipo** (`shared/robots_txt.BOTS_INFO`). Tokens y
+     efectos comprobados el 2026-10-18 en la documentación de cada proveedor:
+     OpenAI (`developers.openai.com/api/docs/bots`: `OAI-SearchBot` decide si
+     el sitio sale en ChatGPT search, `GPTBot` es entrenamiento y «cada
+     ajuste es independiente», `ChatGPT-User` «no se usa para decidir si el
+     contenido aparece en la búsqueda» y «robots.txt puede no aplicarse»);
+     Anthropic (`support.claude.com`, artículo 8896518: `ClaudeBot`
+     entrenamiento, `Claude-SearchBot` índice de búsqueda, `Claude-User`
+     descargas a petición de un usuario); Perplexity
+     (`docs.perplexity.ai/guides/bots`: `PerplexityBot` es el de los
+     resultados y no entrena; `Perplexity-User` «generalmente ignora
+     robots.txt», por eso no está); Google (`google-common-crawlers`:
+     `Google-Extended` es un token de control, «no afecta a la inclusión en
+     Google Search ni es una señal de posicionamiento»); Apple
+     (`support.apple.com/en-us/119829`: `Applebot-Extended` «no rastrea»,
+     solo decide el uso para entrenar lo que rastrea Applebot); Common Crawl
+     (`commoncrawl.org/ccbot`: `CCBot`). `bingbot`: la página de Bing
+     Webmaster no se pudo leer (sin texto en la descarga); el token sale de
+     su anuncio de 2010 (`blogs.bing.com`) y de las cadenas de UA que publica.
+     Tipos: `buscador` (Googlebot, bingbot), `busqueda_ia` (OAI-SearchBot,
+     Claude-SearchBot, PerplexityBot), `usuario_ia` (ChatGPT-User,
+     Claude-User) y `entrenamiento` (GPTBot, ClaudeBot, Google-Extended,
+     Applebot-Extended, CCBot).
+   - **Home y una muestra por plantilla, no todas las URLs**: tres URLs de id
+     más bajo por plantilla (las reglas `templates` del job y si no
+     `firma_de_ruta`), hasta 200 plantillas por host —las que más URLs
+     tienen—, alimentada en la misma pasada que evalúa Googlebot (no relee
+     `urls`). La plantilla **lleva los nombres de los parámetros**
+     (`/:slug ?cat&price`): con la ruta sola, en Druni había 2.057 URLs
+     bloqueadas para Googlebot en el censo y **0** en la muestra, porque las
+     variantes con filtro caían en la plantilla de la limpia; con los
+     parámetros, 90 de 600 y 30 plantillas enteras. El veredicto es el de
+     Protego (`EvaluadorRobots`, el mismo de la decisión 113). Resultado en
+     `robots_txt.evaluacion["bots"][bot]`: `alcance` (`todo` = la home y toda
+     la muestra; `parte`; `nada`; None = no evaluable), la regla que decide en
+     la home, bloqueadas de evaluadas, plantillas enteras bloqueadas y cinco
+     ejemplos con su línea. Expuesto en `GET /api/jobs/{id}/robots` y pintado
+     en el resumen del rastreo («robots.txt por bot»).
+   - **Un aviso solo para la búsqueda de IA, y solo si cierra el sitio
+     entero**: `bot_busqueda_ia_bloqueado`, `info`, uno por host, con los bots
+     y la línea. Bloquear uno de entrenamiento es una decisión legítima del
+     cliente y no saca de ninguna búsqueda —según OpenAI, bloquear GPTBot no
+     saca de ChatGPT search; bloquear OAI-SearchBot sí—, así que no avisa. Una
+     sección cerrada (`parte`) tampoco: se ve en la tabla. El error típico que
+     caza es poner GPTBot y OAI-SearchBot en el mismo grupo `User-agent`.
+   - **La línea que bloquea una URL** (`shared/robots_regla.regla_que_decide`).
+     Protego da el veredicto y no la regla, así que el emparejamiento se repite
+     con el número de línea de cada regla, con el mismo criterio: grupo por
+     puntuación (token en frontera, `*` vale 1, grupos del mismo nombre
+     fusionados), la regla más larga gana y `Allow` en empate, `*` y `$`, el
+     escapado por ciento normalizado igual en los dos lados, `Allow:
+     /index.html` permite `/`, `/robots.txt` siempre se puede pedir y la misma
+     tolerancia de grafía (`User agent`, `Dissallow`). Con `como_google`
+     reescribe antes los grupos con `grupos_como_google`, como
+     `EvaluadorRobots`. Va en la ficha de la URL (`robots_regla`) para los dos
+     bloqueos: el de Googlebot (`urls.bloqueada_googlebot`) y el de nuestro
+     rastreo (`blocked_by_robots`, con el UA entero del job, como decidió
+     Scrapy). Se calcula **al pedir la ficha** con el cuerpo guardado: pura
+     Python, porque la imagen de la API no lleva Protego. Si la línea no
+     reproduce el veredicto guardado, no se afirma.
+   - **Contraste con Protego, en tests y en datos reales.** Tabla de 18 casos
+     y 600 robots.txt generados al azar (más de 20.000 veredictos por token y
+     por UA entero) en `tests/test_robots_regla.py`: cero discrepancias. Sobre
+     datos reales —el robots.txt de hoy de nueve hosts de la cartera (una
+     petición a `/robots.txt` cada uno, nada más) contra las URLs de su último
+     censo local, en solo lectura—: **2.101.116 veredictos (12 bots × 175.095
+     URLs), 0 discrepancias**. Coste del análisis por host: entre 2 y 470 ms
+     (Druni, 60.391 URLs). La línea cuesta ~0,3 ms por llamada en un
+     robots.txt de 4 kB: se llama para la home y los ejemplos, no por URL.
+   - **Lo que salió al medir** (robots.txt de hoy, no el del censo): ningún
+     host de la cartera cierra el sitio entero a un buscador de IA, así que el
+     aviso no salta en ninguno. Penguin abre explícitamente GPTBot,
+     OAI-SearchBot, ChatGPT-User y PerplexityBot (`Allow: /`). Y el hallazgo
+     es progym: los tres bots de Anthropic tienen un grupo propio con solo
+     `Crawl-delay: 10`, y como un grupo propio sustituye al de `*` en vez de
+     sumarse, **no heredan ninguna de sus 58 reglas `Allow`/`Disallow` (casi todas de facetas)**: en la
+     muestra Googlebot tiene bloqueadas 236 de 430 URLs (95 plantillas
+     enteras) y Claude-SearchBot 0. Es justo lo que la tabla tiene que dejar
+     ver.
+   - **Lo que no se ve**, como en la 113: el robots.txt guardado es el que nos
+     sirvieron a nosotros; uno distinto por UA o por IP no se detecta. Y
+     ChatGPT-User y Perplexity-User pueden no obedecer robots.txt: la tabla
+     dice lo que el fichero pide, no lo que el bot hace. Los censos analizados
+     antes de esta decisión traen `bots` a None hasta re-analizarlos; la
+     línea de la ficha sale ya en cualquier censo con `robots_txt`.
+   - **Dos cosas de la revisión.** El propio `/robots.txt` no entra en la
+     muestra: siempre se puede pedir, así que si el sitio lo enlaza un
+     `Disallow: /` a OAI-SearchBot salía «parte» y el aviso no saltaba. Y el
+     aviso lleva `googlebot_alcance`: si el cierre viene del grupo `*`, Google
+     también está fuera, y la ficha ya no puede decir sin más que «a Google
+     no le afecta».

@@ -89,6 +89,11 @@ const ISSUE_INFO = {
     google: 'Aplica el grupo que nombra a Googlebot y, si no hay, el de «*». Una página que Googlebot no puede pedir no se rastrea (puede indexarse sin contenido si tiene enlaces); por eso sale «Blocked by robots.txt» y no indexable aunque nosotros sí la viéramos. El robots.txt evaluado es el que nos sirvió a nosotros: si el sitio sirve otro a Googlebot, no se puede ver desde aquí.',
     arreglo: '«Solo Googlebot»: si esas páginas deben posicionar, quitar la regla del grupo de Googlebot. «Solo el rastreador»: no se auditaron; relanzar con el preset de user-agent de Googlebot para verlas como las ve Google.',
   },
+  'bot_busqueda_ia_bloqueado': {
+    que: 'El robots.txt de este host cierra el sitio entero (la home y todas las URLs de la muestra por plantilla) a un bot de BÚSQUEDA de IA: OAI-SearchBot (ChatGPT search), Claude-SearchBot o PerplexityBot. Va una fila por host con los bots y la línea que los bloquea. Los bots de entrenamiento (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot) no avisan: bloquearlos es una decisión legítima y no saca de ninguna búsqueda. La tabla completa por bot está en la ficha del rastreo.',
+    google: 'Por sí mismo no toca a Google: Googlebot se decide aparte y Google-Extended no cambia nada en la Búsqueda. Pero si el bloqueo viene del grupo «*» (en los detalles, Googlebot con alcance «todo»), el sitio está cerrado también para Google, y eso es lo primero que hay que mirar. Lo que pierde el sitio es la otra búsqueda: según OpenAI, un sitio que bloquea OAI-SearchBot no sale en las respuestas de ChatGPT search (solo como enlace de navegación), y bloquear GPTBot NO saca de ahí; lo mismo dicen Anthropic de Claude-SearchBot y Perplexity de PerplexityBot. ChatGPT-User y Claude-User son descargas que pide una persona y no deciden si el sitio aparece.',
+    arreglo: 'Si el cliente quiere aparecer en esas búsquedas, abrir el grupo de ese bot (o quitarlo de una lista «User-agent» compartida con los de entrenamiento: es el error típico, bloquear GPTBot y OAI-SearchBot en el mismo bloque). Si quiere no entrenar modelos, basta con bloquear los de entrenamiento. Es informativo: puede ser deliberado.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -689,6 +694,7 @@ const ISSUE_LABEL_EXTRA = {
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
   robots_txt_inaccesible: 'robots.txt con error o sin respuesta',
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
+  bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',

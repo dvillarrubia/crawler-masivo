@@ -1611,6 +1611,44 @@
               </div>
             </div>
 
+            <!-- Que bloquea cada bot por host (decision 129): la home y una
+                 muestra por plantilla, con el robots.txt guardado. -->
+            <template x-if="robotsBots && robotsBots.hosts.length">
+              <div class="card" style="grid-column:1/-1">
+                <div class="card-header"><h2>robots.txt por bot</h2>
+                  <span class="text-sm text-dim">Home y una muestra por plantilla, sin pedir nada al sitio</span></div>
+                <p class="text-sm text-dim">Bloquear un bot de <b>entrenamiento</b> (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot) es una decisión legítima y no saca de ninguna búsqueda. Bloquear uno de <b>búsqueda de IA</b> (OAI-SearchBot, Claude-SearchBot, PerplexityBot) saca al sitio de esas respuestas. Los de <b>usuario</b> (ChatGPT-User, Claude-User) son descargas que pide una persona en el chat.</p>
+                <template x-for="h in robotsBots.hosts" :key="h.origen">
+                  <div class="mb-2">
+                    <div class="text-sm"><a :href="h.url" target="_blank" rel="noopener" x-text="h.origen"></a>
+                      <span class="text-dim" x-text="' · ' + (h.status_code || h.error || '—') + ' · ' + h.estado"></span></div>
+                    <template x-if="!h.bots">
+                      <div class="text-sm text-dim">Sin evaluar por bot: censo analizado antes de la decisión 129 o robots.txt no procesado. Re-analizar lo rellena.</div>
+                    </template>
+                    <template x-if="h.bots">
+                      <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
+                        <thead><tr><th>Bot</th><th>Tipo</th><th>Home</th><th>Muestra bloqueada</th><th>Alcance</th><th>Regla de la home</th></tr></thead>
+                        <tbody>
+                          <template x-for="b in robotsBots.bots" :key="b.bot">
+                            <tr x-data="{ r: h.bots[b.bot] || {} }">
+                              <td x-text="b.token + ' (' + b.proveedor + ')'"></td>
+                              <td x-text="({buscador:'Buscador', busqueda_ia:'Búsqueda IA', usuario_ia:'Usuario IA', entrenamiento:'Entrenamiento'})[b.tipo]"></td>
+                              <td :class="r.home_bloqueada ? 'orange' : ''" x-text="r.alcance == null ? '—' : (r.home_bloqueada ? 'Bloqueada' : 'Permitida')"></td>
+                              <td x-text="r.alcance == null ? '—' : (fmt.num(r.bloqueadas) + ' de ' + fmt.num(r.evaluadas) + (r.n_plantillas_bloqueadas ? ' · ' + r.n_plantillas_bloqueadas + ' plantillas enteras' : ''))"
+                                  :title="(r.plantillas_bloqueadas || []).join(', ')"></td>
+                              <td :class="r.alcance === 'todo' && b.tipo === 'busqueda_ia' ? 'red' : (r.alcance === 'todo' || r.alcance === 'parte' ? 'orange' : '')"
+                                  x-text="({todo:'Todo el sitio', parte:'Una parte', nada:'Nada'})[r.alcance] || 'No evaluado'"></td>
+                              <td><code x-show="r.regla_home" x-text="r.regla_home ? ('l.' + r.regla_home.linea + ' ' + r.regla_home.texto) : ''"></code></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table></div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+
             <div class="card" style="grid-column:1/-1">
               <div class="card-header"><h2>Configuración</h2></div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;font-size:.85rem">
@@ -2916,6 +2954,23 @@
                 </template>
                 <template x-if="urlDetail.redirect_url">
                   <div class="text-sm text-dim truncate" :title="urlDetail.redirect_url" x-text="'Redirige a ' + urlDetail.redirect_url"></div>
+                </template>
+                <!-- La linea de robots.txt que la bloquea (decision 129): es lo
+                     que hay que tocar, y sin ella habia que abrir el fichero y
+                     repetir a mano la regla mas larga. -->
+                <template x-if="urlDetail.robots_regla">
+                  <div class="text-sm robots-regla">
+                    <template x-for="lado in [['googlebot','Googlebot'],['rastreador','Nuestro rastreo']]" :key="lado[0]">
+                      <template x-if="urlDetail.robots_regla[lado[0]]">
+                        <div>
+                          <span class="text-dim" x-text="lado[1] + ': línea ' + urlDetail.robots_regla[lado[0]].linea + ' de '"></span>
+                          <a :href="urlDetail.robots_regla.robots_url" target="_blank" rel="noopener">robots.txt</a>
+                          <code x-text="urlDetail.robots_regla[lado[0]].texto"></code>
+                          <span class="text-dim" x-text="'(grupo «' + (urlDetail.robots_regla[lado[0]].grupo || '*') + '», línea ' + (urlDetail.robots_regla[lado[0]].linea_grupo ?? '—') + ')'"></span>
+                        </div>
+                      </template>
+                    </template>
+                  </div>
                 </template>
                 <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
               </div>

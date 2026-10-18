@@ -282,3 +282,163 @@ def test_sin_la_tabla_el_analisis_sigue_como_antes():
     _url(s, j, "/")
     _analizar(s, j)
     assert _col(s, j, Url.indexable) == {"/": True}
+
+
+# ---------------------------------------------------------------------------
+# Bots de IA y buscadores por host (decision 129)
+# ---------------------------------------------------------------------------
+IA_EN_UN_BLOQUE = b"""User-agent: *
+Allow: /
+
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+Disallow: /
+"""
+
+SOLO_ENTRENAMIENTO = b"""User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Google-Extended
+Disallow: /
+"""
+
+PERPLEXITY_UNA_SECCION = b"""User-agent: PerplexityBot
+Disallow: /privado/
+"""
+
+
+def _bots(s):
+    return s.execute(select(RobotsTxt.evaluacion)).scalar()["bots"]
+
+
+def _sitio(s, j):
+    for ruta in ("/", "/blog/a", "/blog/b", "/tienda/1", "/privado/x"):
+        _url(s, j, ruta)
+
+
+def test_buscador_de_ia_cerrado_en_todo_el_sitio_avisa_una_vez_con_la_linea():
+    """El error tipico: GPTBot y OAI-SearchBot en el mismo grupo. Lo de
+    GPTBot es legitimo; lo de OAI-SearchBot saca al sitio de ChatGPT search."""
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    bots = _bots(s)
+    assert bots["gptbot"]["alcance"] == "todo"
+    assert bots["oai-searchbot"]["alcance"] == "todo"
+    assert bots["googlebot"]["alcance"] == "nada"
+    assert bots["claudebot"]["alcance"] == "nada"
+    assert bots["oai-searchbot"]["regla_home"] == {
+        "linea": 6, "texto": "Disallow: /", "grupo": "User-agent: OAI-SearchBot"}
+    assert bots["oai-searchbot"]["evaluadas"] == 5
+    [fila] = _issues(s, "bot_busqueda_ia_bloqueado")
+    assert fila.severity == "info"
+    assert [b["token"] for b in fila.details["bots"]] == ["OAI-SearchBot"]
+    assert fila.details["bots"][0]["regla"]["linea"] == 6
+    # La indexabilidad (Googlebot) no se toca.
+    assert set(_col(s, j, Url.indexable).values()) == {True}
+
+
+def test_bloquear_solo_los_de_entrenamiento_no_avisa():
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=SOLO_ENTRENAMIENTO)
+    _analizar(s, j)
+    bots = _bots(s)
+    for bot in ("gptbot", "claudebot", "ccbot", "google-extended"):
+        assert bots[bot]["alcance"] == "todo", bot
+    for bot in ("oai-searchbot", "claude-searchbot", "perplexitybot", "googlebot", "bingbot"):
+        assert bots[bot]["alcance"] == "nada", bot
+    assert _issues(s, "bot_busqueda_ia_bloqueado") == []
+
+
+def test_una_seccion_cerrada_a_un_buscador_de_ia_es_parte_y_no_avisa():
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=PERPLEXITY_UNA_SECCION)
+    _analizar(s, j)
+    p = _bots(s)["perplexitybot"]
+    assert (p["alcance"], p["bloqueadas"], p["plantillas_bloqueadas"]) == ("parte", 1, ["/privado/:slug (2n)"])
+    assert p["ejemplos"] == [{"url": "https://x.com/privado/x", "regla": {
+        "linea": 2, "texto": "Disallow: /privado/", "grupo": "User-agent: PerplexityBot"}}]
+    assert _issues(s, "bot_busqueda_ia_bloqueado") == []
+
+
+def test_la_muestra_es_por_plantilla_y_de_id_mas_bajo():
+    s, j = _montar()
+    _url(s, j, "/")
+    for n in range(10):
+        _url(s, j, f"/blog/post-{n}")
+    _robots(s, j, cuerpo=PERPLEXITY_UNA_SECCION)
+    _analizar(s, j)
+    # home + 3 de /blog/:slug
+    assert _bots(s)["perplexitybot"]["evaluadas"] == 4
+    assert _bots(s)["perplexitybot"]["plantillas"] == 2
+
+
+def test_robots_404_todo_permitido_para_todos_los_bots():
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, status=404, cuerpo=b"<html>no</html>")
+    _analizar(s, j)
+    assert {b["alcance"] for b in _bots(s).values()} == {"nada"}
+
+
+def test_reanalizar_bots_da_lo_mismo():
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    antes = _bots(s)
+    s.execute(Issue.__table__.delete())
+    _analizar(s, j)
+    assert _bots(s) == antes
+    assert len(_issues(s, "bot_busqueda_ia_bloqueado")) == 1
+
+
+def test_la_variante_con_parametros_es_otra_plantilla_de_la_muestra():
+    """`Disallow: /*?cat=` solo bloquea la variante con parametros. Con la
+    plantilla por ruta, las limpias (de id mas bajo) llenaban la muestra y el
+    bloqueo no se veia (Druni: 2.057 en el censo, 0 en la muestra)."""
+    s, j = _montar()
+    _url(s, j, "/")
+    for n in range(5):
+        _url(s, j, f"/tienda/p-{n}")
+    _url(s, j, "/tienda/p-0?cat=3")
+    _robots(s, j, cuerpo=b"User-agent: *\nDisallow: /*?cat=\n")
+    _analizar(s, j)
+    g = _bots(s)["googlebot"]
+    assert (g["plantillas"], g["bloqueadas"], g["plantillas_bloqueadas"]) == (
+        3, 1, ["/tienda/:slug (2n) ?cat"])
+    assert g["ejemplos"][0]["regla"]["texto"] == "Disallow: /*?cat="
+
+
+def test_el_propio_robots_txt_en_el_censo_no_abre_el_sitio():
+    """`/robots.txt` siempre se puede pedir (Protego y Google), asi que si el
+    sitio lo enlaza y entra en el censo no puede contar en la muestra: con el
+    dentro, un `Disallow: /` a OAI-SearchBot salia «parte» y no avisaba."""
+    s, j = _montar()
+    _sitio(s, j)
+    _url(s, j, "/robots.txt")
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    assert _bots(s)["oai-searchbot"]["alcance"] == "todo"
+    assert len(_issues(s, "bot_busqueda_ia_bloqueado")) == 1
+
+
+def test_el_aviso_dice_si_googlebot_tambien_esta_fuera():
+    """Con `User-agent: *` / `Disallow: /` el buscador de IA esta fuera, pero
+    tambien Google: el aviso lo tiene que decir, o la ficha («a Google no le
+    afecta») se lee al reves de lo que pasa."""
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=b"User-agent: *\nDisallow: /\n")
+    _analizar(s, j)
+    [fila] = _issues(s, "bot_busqueda_ia_bloqueado")
+    assert fila.details["googlebot_alcance"] == "todo"
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    [fila] = _issues(s, "bot_busqueda_ia_bloqueado")
+    assert fila.details["googlebot_alcance"] == "nada"
