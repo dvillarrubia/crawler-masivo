@@ -2,11 +2,14 @@
 
 Las alertas avisan de lo que se rompe; el resumen contesta la otra pregunta
 del seguimiento: «¿como ha ido la semana?». Por cada perfil propio y activo
-del cliente, su ultimo rastreo de la semana: si termino bien, sus alertas
+del cliente que se rastrea (programado, o lanzado a mano esa semana), su
+ultimo rastreo de la semana: si termino bien, sus alertas
 (las de la comparacion y las reglas propias), las incidencias nuevas y las
 resueltas frente al censo anterior, y cuatro cifras con su cambio. Y lo que
-NO paso: un perfil sin rastreo en toda la semana es un hallazgo (una
-programacion parada no avisa de nada por si sola).
+NO paso: un perfil PROGRAMADO sin rastreo en toda la semana es un hallazgo
+(una programacion parada no avisa de nada por si sola). Uno sin programacion
+—una lista de QA que se lanza tras cada despliegue— no tiene por que correr
+cada semana: sale si se lanzo y, si no, no dice nada.
 
 Lo genera el worker (`_quizas_resumir`) el dia y la hora que diga el cliente,
 lo guarda en `resumenes_semanales` y, si hay webhook, lo manda. Lo que no se
@@ -75,17 +78,26 @@ def toca(cliente, ahora: datetime, db=None) -> datetime | None:
 
 
 def _tiene_serie(cliente, db=None) -> bool:
-    """Si el cliente tiene algo que se rastrea solo: un perfil propio activo o
-    una programacion activa. En produccion, el 18-oct-2026, ningun cliente
+    """Si el cliente tiene algo que se rastrea solo: una programacion activa,
+    vaya por un perfil o no. En produccion, el 18-oct-2026, ningun cliente
     tenia perfiles y los censos semanales iban por programacion: contando solo
-    perfiles, el resumen no habria salido para nadie."""
-    perfiles = getattr(cliente, "perfiles", None) or []
-    if any(getattr(p, "activo", True) and getattr(p, "rol", "propio") != "competidor"
-           for p in perfiles):
-        return True
+    perfiles, el resumen no habria salido para nadie. Y un perfil sin
+    programacion tampoco basta: se lanza a mano, y un «sin alertas» semanal de
+    algo que nadie ha lanzado es ruido."""
     if db is None:
         return False
-    return bool(_programaciones_sueltas(db, cliente))
+    return bool(_perfiles_programados(db, cliente) or _programaciones_sueltas(db, cliente))
+
+
+def _perfiles_programados(db, cliente) -> set:
+    """Los perfiles del cliente con alguna programacion activa: los que se
+    espera ver rastreados cada semana."""
+    from shared.models import Programacion
+
+    filas = (db.query(Programacion.profile_id)
+             .filter(Programacion.cliente_id == cliente.id, Programacion.activa.is_(True),
+                     Programacion.profile_id.isnot(None)).all())
+    return {f[0] for f in filas}
 
 
 def _programaciones_sueltas(db, cliente) -> list:
@@ -184,13 +196,17 @@ def componer(db, cliente, desde: datetime, hasta: datetime) -> dict[str, Any]:
                     | (fecha.is_(None) & (Job.created_at >= desde) & (Job.created_at < hasta)))
             .order_by(Job.created_at).all())
 
+    programados = _perfiles_programados(db, cliente)
     salida_perfiles = []
     for p in perfiles:
         if p.rol == "competidor" or not p.activo:
             continue
         suyos = [j for j in jobs if j.profile_id == p.id]
+        if not suyos and p.id not in programados:
+            # A mano y sin lanzar esta semana: no es un hallazgo.
+            continue
         fila: dict[str, Any] = {"perfil_id": str(p.id), "nombre": p.nombre,
-                                "rastreos": len(suyos)}
+                                "rastreos": len(suyos), "programado": p.id in programados}
         if suyos:
             fila["ultimo"] = _resumen_de_rastreo(db, suyos[-1])
             fila["fallidos"] = sum(1 for j in suyos if j.status != "completed")

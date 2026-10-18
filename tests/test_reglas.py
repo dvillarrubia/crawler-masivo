@@ -152,6 +152,17 @@ def _perfil(s, cliente, nombre="semanal", rol="propio"):
     return p
 
 
+def _programar(s, cliente, perfil=None, nombre="semanal"):
+    from shared.models import Programacion
+
+    prog = Programacion(id=uuid.uuid4(), nombre=nombre, cliente_id=cliente.id,
+                        profile_id=perfil.id if perfil else None,
+                        seeds=["https://x.com/"], config={}, cron="0 3 * * 3", activa=True)
+    s.add(prog)
+    s.flush()
+    return prog
+
+
 def _censo(s, cliente, *, fichas_4xx=0, blog_4xx=0, indexables=50, perfil=None,
            version="v1", status="completed", finish_reason="finished", dia=2, **kw):
     """Un censo con 50 fichas y 50 entradas de blog; las primeras N de cada
@@ -364,23 +375,22 @@ def test_el_corte_es_el_lunes_a_las_8_en_la_zona_del_cliente():
 def test_toca_dentro_de_la_gracia_y_no_despues(s):
     c = _cliente(s, zona_horaria="Europe/Madrid")
     lunes_830 = datetime(2026, 10, 19, 6, 30, tzinfo=timezone.utc)
-    assert RS.toca(c, lunes_830) is None   # sin perfil propio no hay semana que resumir
-    _perfil(s, c, "rival", rol="competidor")
-    s.refresh(c)
-    assert RS.toca(c, lunes_830) is None
-    _perfil(s, c, "semanal")
-    s.refresh(c)
-    assert RS.toca(c, lunes_830) is not None
-    assert RS.toca(c, lunes_830 + timedelta(hours=13)) is None
+    assert RS.toca(c, lunes_830, s) is None   # sin nada programado no hay semana que resumir
+    semanal = _perfil(s, c, "semanal")
+    assert RS.toca(c, lunes_830, s) is None   # un perfil a mano tampoco
+    _programar(s, c, semanal)
+    assert RS.toca(c, lunes_830, s) is not None
+    assert RS.toca(c, lunes_830 + timedelta(hours=13), s) is None
     c.reglas_alerta = {"resumen_semanal": {"activo": False}}
-    assert RS.toca(c, lunes_830) is None
+    assert RS.toca(c, lunes_830, s) is None
 
 
 def test_el_resumen_cuenta_la_semana_y_dice_lo_que_no_paso(s):
     c = _cliente(s, nombre="Acme")
     semanal = _perfil(s, c, "semanal")
-    _perfil(s, c, "mensual")   # sin rastreo esta semana
-    _perfil(s, c, "rival", rol="competidor")
+    _programar(s, c, semanal)
+    _programar(s, c, _perfil(s, c, "mensual"), nombre="mensual")   # sin rastreo esta semana
+    _programar(s, c, _perfil(s, c, "rival", rol="competidor"), nombre="rival")
     job = _censo(s, c, perfil=semanal, fichas_4xx=3, dia=14)
     job.comparacion = {"comparable": True, "alertas": [
         {"regla": "rotas", "severidad": "critical", "paginas": 30, "de": 100, "pct": 30.0,
@@ -511,3 +521,25 @@ def test_una_programacion_sin_perfil_es_una_serie_del_resumen(s):
     prog.activa = False
     s.flush()
     assert RS.toca(c, lunes_830, s) is None
+
+
+def test_un_perfil_a_mano_solo_sale_si_se_lanzo(s):
+    """Produccion, 18-oct-2026: el perfil «lista» de Lopesan (QA tras cada
+    despliegue, se lanza a mano) salia cada semana como «no se ha rastreado
+    esta semana», que no es un hallazgo: nadie espera que corra cada lunes."""
+    c = _cliente(s, nombre="Lopesan")
+    _programar(s, c, nombre="lopesan.com (semanal)")
+    lista = _perfil(s, c, "lista")
+    corte = datetime(2026, 10, 19, 8, tzinfo=timezone.utc)
+    r = RS.generar(s, c, corte)
+    assert [p["nombre"] for p in r["contenido"]["perfiles"]] == ["lopesan.com (semanal)"]
+    assert not any(t.startswith("lista:") for t in r["contenido"]["destacado"])
+    job = _censo(s, c, perfil=lista, dia=15)
+    job.comparacion = {"comparable": True, "alertas": [
+        {"regla": "rotas", "severidad": "critical", "paginas": 3, "de": 52, "pct": 5.8,
+         "que_decide_google": "Sale del índice."}]}
+    s.flush()
+    r = RS.generar(s, c, corte)
+    fila = next(p for p in r["contenido"]["perfiles"] if p["nombre"] == "lista")
+    assert (fila["rastreos"], fila["programado"]) == (1, False)
+    assert any(t.startswith("lista: 3 de 52") for t in r["contenido"]["destacado"])
