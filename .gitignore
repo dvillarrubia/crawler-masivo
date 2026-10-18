@@ -45,3 +45,7 @@ exports/saunierduval_md/
 # Configuracion por cliente: fuera del repo (solo _ejemplo se versiona)
 projects/*/
 !projects/_ejemplo/
+
+# Restos de parches y merges a mano (un middlewares.py.orig llego a master)
+*.orig
+*.rej

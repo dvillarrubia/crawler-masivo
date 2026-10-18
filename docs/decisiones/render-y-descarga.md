@@ -511,8 +511,8 @@
      que Google guarda de un robots.txt que va y viene. La espera tiene tope
      (`DOWNLOAD_TIMEOUT` + 15 s): no puede dejar un rastreo sin cerrar.
    - **`robots_txt_inaccesible`, una por host**, anclada en la raíz si se
-     rastreó y si no en la URL de id más bajo del host (no depende del orden de
-     las filas, lección de la 99). `error` si falló también al cerrar o no se
+     rastreó y si no en la URL MENOR del host (no depende del orden de las
+     filas ni del de rastreo, lección de la 99; ver la revisión al final). `error` si falló también al cerrar o no se
      llegó a repetir (un rastreo cortado por `max_urls` no pasa por
      `spider_idle`); `warning` si a la segunda respondió (`intermitente`) o si
      es un **429**: para Google es un 5xx, pero un 429 a nuestra IP suele ser
@@ -542,6 +542,39 @@
    `indexable` sin cambios). Pendiente de medir en producción: cuántos hosts
    de la cartera responden hoy 5xx/429 en `/robots.txt` (decisión 13: es hoy,
    no el día del rastreo).
+   **Revisión (2026-10-18): el ancla es la URL MENOR, no la de id más bajo.**
+   «No depende del orden de las filas» era verdad dentro de un censo, pero el
+   id sigue al orden de RASTREO: dos censos iguales rastreados en otro orden
+   anclaban el aviso en páginas distintas, y la comparación, que casa por
+   (tipo, url, group_key) (decisión 88), daba el mismo hallazgo por resuelto y
+   por nuevo a la vez. Ahora `_ancla_de_origen` elige por URL, como
+   `avisos_de_html` (108) y `avisos_de_sitemaps` (126); también entre la raíz y
+   su variante con parámetros, que tienen el mismo `path`. Vale para los tres
+   avisos que cuelgan de ahí (`robots_txt_inaccesible`,
+   `robots_difiere_para_googlebot`, `bot_busqueda_ia_bloqueado`), y la muestra
+   por plantilla de la 129 y los ejemplos de `robots_difiere_para_googlebot`
+   son ahora las URLs menores, no las primeras que llegan: con otra muestra un
+   bot de IA podía pasar de «todo» a «parte» y el aviso salir o no. Buscando el
+   mismo patrón salieron seis avisos agregados más que anclaban en la primera
+   fila leída (`order_by(Url.id)` o una consulta sin orden, que en la práctica
+   es el de inserción): `respuesta_no_valida` (103), `structured_data_*` (73),
+   `head_cortado` y `meta_fuera_del_head` (102), `image_missing_alt` (64b) y las
+   cuatro cabeceras de seguridad por host (53); sus `paginas_ejemplo` también
+   van por URL. Test: `tests/test_anclas_por_url_db.py` monta el mismo censo en
+   orden de URL y al revés, ejecuta los checks y exige los mismos (tipo, URL,
+   clave) y los mismos detalles; falla sin el arreglo. Los censos ya
+   analizados cambian de ancla al re-analizarlos: la primera comparación de un
+   censo nuevo contra uno viejo sin re-analizar puede dar estos avisos por
+   movidos una vez (y la 91 ya exige re-analizar el viejo si el código
+   difiere).
+   En la revisión de esa PR salieron dos más: `soft_404_candidato` agrupado
+   (la huella de una sonda que casa con una plantilla) se anclaba en el id
+   menor de sus páginas —`sorted()` sobre ids— y ahora va por URL; y las
+   cabeceras de seguridad se anclaban en la URL menor del HOST, que con una
+   página en `http://` (menor que `https://`) dejaba `missing_hsts` justo en
+   la página donde HSTS no aplica y que no entra en su cuenta. Cada tipo se
+   ancla ahora en la URL menor de las páginas a las que les falta ESA
+   cabecera.
 
 <a id="d114"></a>
 114. **Las credenciales del job solo van al sitio, y el rastreo no guarda

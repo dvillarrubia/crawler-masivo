@@ -17,6 +17,7 @@ from shared.robots_txt import (
     PROCESADO,
     SIN_RESTRICCIONES,
     EvaluadorRobots,
+    grupos_como_google,
     es_url_de_robots,
     estado,
     fila_de_respuesta,
@@ -169,3 +170,46 @@ def test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva():
     assert ev.permitido("https://e.com/b/x", "googlebot") is True
     # El grupo de Googlebot sustituye al de `*`
     assert ev.permitido("https://e.com/c/x", "googlebot") is True
+
+
+_FINALES = {"lf": "\n", "crlf": "\r\n", "cr": "\r"}
+
+
+@pytest.mark.parametrize("final", sorted(_FINALES))
+@pytest.mark.parametrize("cuerpo,ruta,permitido", [
+    # Grupo que Protego elige mal y hay que reescribir (revision de 113):
+    # `Google` no es el grupo de Googlebot, y `Googlebot/2.1` si.
+    ("User-agent: Google|Disallow: /||User-agent: *|Allow: /|", "/x", True),
+    ("User-agent: Googlebot/2.1|Disallow: /a/||User-agent: *|Disallow: /|", "/a/x", False),
+    ("User-agent: Googlebot/2.1|Disallow: /a/||User-agent: *|Disallow: /|", "/b", True),
+    # El grupo mal elegido NO es el primero: la primera linea casaba con `^`
+    # aunque el fichero fuera de CR solos; las siguientes no.
+    ("User-agent: *|Allow: /||User-agent: Google|Disallow: /|", "/x", True),
+    ("User-agent: *|Disallow: /||User-agent: Googlebot/2.1|Allow: /|", "/x", True),
+    # Sin nada que reescribir: lo mismo que Protego a secas.
+    ("User-agent: Googlebot|Disallow: /p/|Allow: /p/ok|", "/p/ok", True),
+    ("User-agent: Googlebot|Disallow: /p/|Allow: /p/ok|", "/p/no", False),
+    ("User-agent: *|Disallow: /privado/  # c||User-agent: Bingbot|Disallow: /|",
+     "/privado/x", False),
+])
+def test_los_finales_de_linea_no_cambian_el_veredicto(final, cuerpo, ruta, permitido):
+    """RFC 9309 admite CR, CRLF y LF. Con `^` y `re.M` solo se veia un principio
+    de linea tras `\\n`: con CR solos no se reescribia ningun grupo y Googlebot
+    heredaba `User-agent: Google`."""
+    from protego import Protego
+
+    texto = cuerpo.replace("|", _FINALES[final])
+    url = f"https://e.com{ruta}"
+    assert _ev(texto).permitido(url, "googlebot") is permitido
+    # El veredicto sigue siendo el de Protego sobre el MISMO fichero en LF, y
+    # la reescritura no depende del final de linea.
+    en_lf = cuerpo.replace("|", "\n")
+    assert grupos_como_google(texto, "Googlebot") == grupos_como_google(en_lf, "Googlebot")
+    assert Protego.parse(grupos_como_google(texto, "Googlebot")).can_fetch(url, "Googlebot") is \
+        Protego.parse(grupos_como_google(en_lf, "Googlebot")).can_fetch(url, "Googlebot")
+    if "Google|" not in cuerpo and "/2.1" not in cuerpo:
+        assert Protego.parse(texto).can_fetch(url, "Googlebot") is permitido
+    # Y la linea que decide (decision 129) parte igual.
+    from shared.robots_regla import regla_que_decide
+
+    assert regla_que_decide(texto, url, "Googlebot")["permitida"] is permitido

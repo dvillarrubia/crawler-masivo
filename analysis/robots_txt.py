@@ -120,11 +120,13 @@ MAX_EJEMPLOS = 5
 
 
 class MuestraPorPlantilla:
-    """Las URLs de id mas bajo de cada plantilla, por origen.
+    """Las URLs menores de cada plantilla, por origen.
 
     Se alimenta en la misma pasada que evalua Googlebot, asi que no relee
-    `urls`. De id mas bajo para que dos analisis del mismo censo cojan la misma
-    muestra aunque las filas lleguen en otro orden.
+    `urls`. Las de URL menor —no las de id mas bajo— para que dos analisis del
+    mismo censo cojan la misma muestra aunque las filas lleguen en otro orden,
+    y tambien dos censos iguales rastreados en otro orden: el id sigue al orden
+    de rastreo (decision 88).
 
     La plantilla lleva los NOMBRES de los parametros (`/:slug ?cat&price`):
     robots.txt bloquea mucho por parametro (`Disallow: /*?cat=`), y con la
@@ -162,12 +164,15 @@ class MuestraPorPlantilla:
         cuenta = self._n.setdefault(o, {})
         cuenta[p] = cuenta.get(p, 0) + 1
         lista = self._urls.setdefault(o, {}).setdefault(p, [])
+        # Las de URL menor, no las de id menor: el id sigue al orden de
+        # rastreo, y con otra muestra el mismo censo podia pasar de «todo» a
+        # «parte» y emitir o no `bot_busqueda_ia_bloqueado` (decision 88).
         if len(lista) < MUESTRA_POR_PLANTILLA:
             lista.append((url_id, url))
-            lista.sort()
-        elif url_id < lista[-1][0]:
+            lista.sort(key=lambda e: (e[1], e[0]))
+        elif (url, url_id) < (lista[-1][1], lista[-1][0]):
             lista[-1] = (url_id, url)
-            lista.sort()
+            lista.sort(key=lambda e: (e[1], e[0]))
 
     def de(self, o: str) -> dict[str, list[tuple[int, str]]]:
         """Las plantillas del origen que se evaluan: las `MAX_PLANTILLAS` con mas URLs."""

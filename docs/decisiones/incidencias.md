@@ -998,3 +998,25 @@
    `jobs.sitemaps`. No se pudo medir sobre un rastreo nuevo de Lopesan (no se
    lanzan rastreos en producción desde aquí): es el canario de después del
    merge.
+
+   **Revisión (2026-10-18), dos restos:**
+   - **Reanudar sin entradas dejaba las del proceso anterior.** La tubería
+     borra las del job con el PRIMER fichero que trae entradas; si al reanudar
+     ninguno trae (el sitemap ya solo lista URLs de otro sitio, o responde
+     404), no se borraba nada mientras `jobs.sitemaps` se sobrescribía con lo
+     leído ahora, y los avisos cruzaban los ficheros de un proceso con las
+     entradas de otro. Ahora el spider, al escribir `jobs.sitemaps` con cero
+     entradas guardadas en este proceso, borra las del job en la misma
+     transacción (en un SAVEPOINT: sin la tabla, el resumen se guarda igual).
+     Test contra Postgres con el arnés real:
+     `test_al_reanudar_no_quedan_entradas_del_proceso_anterior` (sitemap solo
+     externo, 404 y, de control, con entradas); los dos primeros fallan sin el
+     arreglo.
+   - **`lastmod_futuro` no decía que su cuenta es un mínimo** con el tope de
+     entradas alcanzado, como sí lo decía `en_varios_sitemaps`. Lleva
+     `entradas_recortadas`, y por FICHERO: es `true` solo si de ese fichero se
+     guardaron menos entradas internas de las que tenía (`entradas_guardadas` <
+     `internas` en `jobs.sitemaps`), porque un fichero leído entero antes del
+     tope da una cifra exacta aunque el censo se recortara después. Sin las dos
+     cifras (un resumen anterior) vale la marca global. Tests en
+     `tests/test_avisos_de_sitemaps_db.py`.

@@ -161,7 +161,10 @@ def test_dos_hosts_dos_avisos_y_el_ancla_no_depende_del_orden():
     _analizar(s, j)
     filas = _issues(s, "robots_txt_inaccesible")
     assert {(f.details["host"], f.url_id) for f in filas} == {
-        ("x.com", raiz.id), ("b.x.com", min(u.id for u in urls))}
+        # La URL menor, no el id menor: el id sigue al orden de rastreo y la
+        # comparacion entre censos casa por URL (decision 88).
+        ("x.com", raiz.id), ("b.x.com", min(urls, key=lambda u: u.url).id)}
+    assert min(urls, key=lambda u: u.url).id != min(u.id for u in urls)
     assert len({f.group_key for f in filas}) == 2
 
 
