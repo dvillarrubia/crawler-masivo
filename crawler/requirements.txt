@@ -24,7 +24,12 @@ scrapy-playwright>=0.0.40
 # `clear_cookies(name=, domain=)` (1.43) y `route.fetch(max_redirects=)` de la
 # preparacion de pagina (`seo_crawler/render.py`, decision 114).
 playwright>=1.43
-scrapy-impersonate
+# Version FIJA: `handlers.ImpersonateConMedidas` sobrescribe su
+# `_download_request`, que es privado, para medir el TTFB y el
+# Content-Encoding servido (decision 109). Al subirla, recopiar el metodo.
+# `curl_infos` en la sesion existe en curl_cffi 0.16 (comprobado con 0.16.3).
+scrapy-impersonate==1.10.0
+curl_cffi>=0.16,<0.17
 html2text>=2024.2
 trafilatura>=2.0
 # Solo por su `CronTrigger`: es el motor de tiempos de las programaciones

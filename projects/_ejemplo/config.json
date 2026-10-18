@@ -64,7 +64,9 @@
     "follow_nofollow": false,
     "crawl_subdomains": false,
     "max_runtime_hours": 48,
-    "stall_timeout_minutes": 30
+    "stall_timeout_minutes": 30,
+    "respetar_retry_after": true,
+    "sonda_tls": true
   },
   "extraction": {
     "extract_structured_data": true,

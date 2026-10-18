@@ -249,6 +249,11 @@ class Job(Base):
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.
     # Las sondas NO son URLs del censo: no estan en `urls` ni cuentan en nada.
     soft404 = Column(JSON, nullable=True)
+    # Certificado TLS por host (decision 110): `{"hosts": {host: {...}}}`
+    # con la caducidad, los dias que le quedaban EL DIA DEL RASTREO, la
+    # version negociada y si la verificacion fallo y por que. Lo escribe la
+    # sonda del spider, una vez por host https interno; no son URLs del censo.
+    tls = Column(JSON, nullable=True)
     # Con que reglas y cuando se materializo `urls.segmento`, y cuantas URLs
     # casaron con cada regla o no se pudieron juzgar (decision 125).
     segmentacion = Column(JSON, nullable=True)
@@ -293,6 +298,18 @@ class Url(Base):
     status_code = Column(Integer, nullable=True)
     status_group = Column(String(10))  # 2xx, 3xx, 4xx, 5xx, timeout, dns_error
     response_time_ms = Column(Float, nullable=True)
+    # Tiempo del servidor hasta el primer byte, en ms (decision 109): sin
+    # DNS, TCP ni TLS. `response_time_ms` NO es esto: es la peticion entera
+    # (y con render, la espera del navegador). Sin render lo mide curl
+    # (STARTTRANSFER - PRETRANSFER); con render, Navigation Timing
+    # (responseStart - requestStart). NULL en los censos anteriores, en las
+    # paginas sin respuesta y cuando no se pudo medir.
+    ttfb_ms = Column(Float, nullable=True)
+    # `Content-Encoding` que sirvio el servidor (decision 109): gzip, br,
+    # zstd, deflate... Los handlers lo quitan al descomprimir, asi que antes
+    # se perdia. `identity` = se midio y llego sin comprimir; NULL = no se
+    # sabe (censo anterior, error, o con render sin el dato).
+    content_encoding = Column(String(32), nullable=True)
 
     is_html = Column(Boolean, default=False)
     resource_type = Column(String(20))  # html, image, css, js, pdf, other

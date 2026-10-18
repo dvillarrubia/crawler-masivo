@@ -3386,6 +3386,9 @@ const EXP_COLUMN_DEFS = {
   content_length:       { label: 'Tamaño',           type: 'numeric', sortable: true,  filterKey: 'content_length',          width: 140, fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
   transfer_size:        { label: 'Transferido',      type: 'numeric', sortable: true,  filterKey: 'transfer_size',           width: 140, fmt: r => r.transfer_size != null ? fmt.bytes(r.transfer_size) : '' },
   response_time_ms:     { label: 'Tiempo (ms)',      type: 'numeric', sortable: true,  filterKey: 'response_time_ms',        width: 140, fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
+  // Tiempo del servidor hasta el primer byte y compresion servida (decision 109).
+  ttfb_ms:              { label: 'TTFB (ms)',        type: 'numeric', sortable: true,  filterKey: 'ttfb_ms',                 width: 130, fmt: r => r.ttfb_ms != null ? Math.round(r.ttfb_ms) + 'ms' : '' },
+  content_encoding:     { label: 'Compresión',       type: 'string',  sortable: false, filterKey: 'content_encoding_contains', width: 130, fmt: r => r.content_encoding ?? '' },
   click_depth:          { label: 'Clics desde home', type: 'numeric', sortable: true,  filterKey: 'click_depth',             width: 160, fmt: r => r.click_depth ?? '' },
   crawl_depth:          { label: 'Prof. rastreo',    type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 140, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
@@ -3461,7 +3464,7 @@ const EXP_COLUMN_DEFS = {
 // lleva lo que no conviene usar para decidir: la escala 0-10 del PageRank
 // (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
 const EXP_GRUPOS_COLUMNAS = [
-  ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
+  ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','ttfb_ms','content_length','transfer_size','content_encoding','http_version','last_modified','host','is_internal']],
   ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
@@ -3598,6 +3601,11 @@ const EXP_TABS = [
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },
+  // Lo del servidor (decisiones 109 y 110): tiempo hasta el primer byte,
+  // compresion y certificado. Sobre las internas: un host con el certificado
+  // roto no tiene ni una HTML 200.
+  { key: 'a_servidor', label: 'Servidor',      icon: 'server',       filter: { is_internal: true }, ambito: ['respuesta_lenta','html_sin_comprimir','tls_certificado_invalido','tls_caduca_pronto','tls_version_antigua'],
+    columns: ['url','status_code','status_text','ttfb_ms','response_time_ms','content_encoding','http_version'] },
 ];
 
 function _freshForm() {

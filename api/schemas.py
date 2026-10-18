@@ -121,6 +121,16 @@ class CrawlBehaviorConfig(BaseModel):
     # como mucho (una por host de las semillas y una por plantilla de ruta).
     # No gastan max_urls ni se guardan como URL del censo. 0 = sin sondas.
     soft404_sondas: int = Field(default=12, ge=0, le=100)
+    # Retry-After de un 429 o un 503 (decision 111): pausa del host durante lo
+    # que pide el servidor, con este tope en segundos. Por debajo del vigilante
+    # de estancamiento (30 min): el spider sigue estampando el latido.
+    respetar_retry_after: bool = True
+    # None = el `RETRY_AFTER_MAX` del entorno (60). Con un 60 aqui, como los
+    # defaults se copian en `jobs.config`, el worker lo pasaba SIEMPRE por
+    # `-s` y la variable de entorno no tenia ningun efecto.
+    retry_after_max_s: int | None = Field(default=None, ge=0, le=600)
+    # Sonda del certificado TLS, una vez por host https interno (decision 110).
+    sonda_tls: bool = True
 
 
 class UrlFilterConfig(BaseModel):
@@ -185,6 +195,16 @@ class AnalysisThresholdsConfig(BaseModel):
     # Paginas distintas desde las que un mismo enlace (tipo y destino) cuenta
     # como de plantilla: se avisa una vez y no en cada pagina (decision 106).
     enlaces_plantilla_min_paginas: int = Field(default=10, ge=2, le=100000)
+
+    # Respuesta lenta (decision 109): mediana del TTFB por (host, plantilla)
+    # por encima de estos ms, en plantillas con al menos `_min_paginas`.
+    # Valores de partida: hay que medirlos en censos antes de fijarlos (13).
+    respuesta_lenta_ms: int = Field(default=1000, ge=100, le=60000)
+    respuesta_lenta_grave_ms: int = Field(default=3000, ge=100, le=120000)
+    respuesta_lenta_min_paginas: int = Field(default=20, ge=1, le=100000)
+    # Certificado que caduca en estos dias o menos (decision 110). No 30: con
+    # renovaciones a 30 dias y certificados de 45, uno sano estaria siempre.
+    tls_dias_aviso: int = Field(default=7, ge=1, le=90)
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +755,9 @@ class UrlResponse(BaseModel):
     status_code: int | None = None
     status_group: str | None = None
     response_time_ms: float | None = None
+    # Decision 109: TTFB real y Content-Encoding servido.
+    ttfb_ms: float | None = None
+    content_encoding: str | None = None
     is_html: bool | None = None
     resource_type: str | None = None
     redirect_url: str | None = None

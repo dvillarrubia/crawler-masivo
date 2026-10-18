@@ -94,6 +94,11 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS comparacion JSON"))
         # Sondas y resumen de soft 404 (decision 105)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS soft404 JSON"))
+        # TTFB y compresion servida (decision 109) y la sonda TLS (110).
+        # Nullables y sin DEFAULT: solo catalogo.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS ttfb_ms FLOAT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_encoding VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tls JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).

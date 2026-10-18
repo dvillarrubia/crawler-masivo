@@ -39,6 +39,8 @@ no evaluado (censo anterior, host sin fila, robots.txt inaccesible o con un muro
 delante). Si se conoce, es lo que usa la indexabilidad; `blocked_by_robots` sigue
 siendo lo que hizo el rastreo. Migracion en `init_db.py`.
 
+`urls.ttfb_ms` y `urls.content_encoding` (decision 109): el tiempo del servidor hasta el primer byte y la compresion servida, medidos en el handler; `response_time_ms` sigue siendo la peticion entera. `jobs.tls` (JSON, decision 110): la sonda del certificado por host. `jobs.health["retry_after"]` (decision 111): lo que se respeto de los `Retry-After`. Las tres columnas, nullables y sin DEFAULT, con su `ALTER ... IF NOT EXISTS` en `init_db.py`.
+
 `jobs.soft404` (JSON, decision 105): `sondas` las escribe el spider (lo que el sitio responde a una URL que no existe) y `resumen` el analisis. Las sondas NO son URLs del censo. Migracion en `init_db.py`.
 
 `jobs.cliente_id` / `jobs.profile_id` son las FK al cliente y al perfil; `jobs.client_id` sigue siendo el texto libre de siempre (decision 83).

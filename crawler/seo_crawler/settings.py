@@ -101,6 +101,11 @@ DOWNLOADER_MIDDLEWARES = {
     # Guarda lo que respondio el robots.txt de cada host (decision 112). Por
     # debajo de Retry (550) y Redirect (600): ve la respuesta FINAL.
     "seo_crawler.middlewares.RobotsTxtRegistroMiddleware": 90,
+    # Retry-After de un 429/503 (decision 111), en todos los robots_mode. La
+    # pausa se fija en `response_downloaded`, antes de que el slot saque la
+    # siguiente peticion; por encima de RetryMiddleware (550) para ver la
+    # respuesta antes de que la reprograme.
+    "seo_crawler.middlewares.RetryAfterMiddleware": 560,
 }
 # Sin jar de cookies, como Googlebot, que no guarda las que pone el sitio: una
 # cookie de idioma, geo o consentimiento cambiaba lo que se media frente a lo
@@ -110,6 +115,14 @@ COOKIES_ENABLED = False
 
 # Tope del Crawl-delay que se respeta, en segundos.
 ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
+# Retry-After: si se respeta y el tope de la pausa, en segundos. El job los
+# cambia con crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED = os.getenv("RETRY_AFTER_ENABLED", "1") != "0"
+RETRY_AFTER_MAX = float(os.getenv("RETRY_AFTER_MAX", "60"))
+# 429/503 seguidos a peticiones que ya respetaron la pausa, tras los que el
+# host deja de pausarse: es un muro y la ventana de salud (decision 103) tiene
+# que poder verlo. Con el tope de 60 s, 5 minutos como mucho.
+RETRY_AFTER_MAX_SEGUIDAS = int(os.getenv("RETRY_AFTER_MAX_SEGUIDAS", "5"))
 
 # ---------------------------------------------------------------------------
 # Database / Redis — fuente unica: shared.config (importados arriba).

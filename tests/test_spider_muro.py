@@ -20,11 +20,12 @@ pytest.importorskip("scrapy")
 HARNESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spider_harness.py")
 
 
-def _rastrear(config: dict, muro: dict | None = None):
+def _rastrear(config: dict, muro: dict | None = None, **extra):
     entrada = {
         "seeds": ["http://localhost:{port}/muro-home"],
         "config": {"max_depth": 2, "use_sitemap": False, **config},
         "muro": muro or {},
+        **extra,
     }
     proc = subprocess.run(
         [sys.executable, HARNESS, json.dumps(entrada)],
@@ -115,3 +116,23 @@ def test_un_429_masivo_para_como_rate_limited():
     limitadas = [p for p in _paginas(items).values() if p["status_code"] == 429]
     assert limitadas and all(p["response_class"] == "rate_limited" for p in limitadas)
     assert all(p["indexability_status"] == "Limitada (rate limit)" for p in limitadas)
+
+
+def test_un_429_masivo_para_tambien_respetando_el_retry_after():
+    """Con `RetryAfterMiddleware` (decision 111), como en produccion. Cada
+    primer intento salia espaciado por la pausa y el primer 429 definitivo no
+    llegaba a la ventana hasta pedir los 300: 5 s sin el middleware y mas de
+    10 minutos con el, con una pausa de 1-2 s. Con un `Retry-After: 30` real,
+    horas detras de un muro que la 103 cerraba en segundos."""
+    import time
+
+    inicio = time.monotonic()
+    items, cierre, stderr = _rastrear(
+        {"crawl_behavior": {"salud_ventana": 10}},
+        muro={"codigo": 429, "n_muros": 300},
+        retry_after=True, settings={"RETRY_AFTER_MAX": 1},
+    )
+    assert cierre["reason"] == "rate_limited"
+    assert len(_paginas(items)) < 100
+    assert "es un muro, no una pausa" in stderr
+    assert time.monotonic() - inicio < 60

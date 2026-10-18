@@ -333,6 +333,151 @@
    caída de tamaño por plantilla y la pausa con reanudación automática más
    tarde. Los censos anteriores no tienen la columna: hay que **re-rastrear**.
 
+<a id="d109"></a>
+109. **El tiempo del servidor y la compresión se miden en el handler, y un
+   aviso de servidor va por host o por plantilla** (B3 de #150) —
+   `response_time_ms` **no es TTFB**: sin render es `download_latency` de
+   scrapy-impersonate, que abre una `AsyncSession` nueva por petición y mide
+   DNS, TCP, TLS, el servidor y el cuerpo entero; con render, desde `goto`
+   hasta el último `PageMethod`, espera de render incluida. Y
+   `Content-Encoding` lo quitaban los dos handlers al descomprimir: con lo
+   guardado, `transfer_size == content_length` no demostraba «sin comprimir»
+   (sin `Content-Length`, `transfer_size` es el cuerpo). Ahora
+   `handlers.ImpersonateConMedidas` sobrescribe el `_download_request` de
+   scrapy-impersonate (privado: versión **fijada a 1.10.0**, la instalada; la
+   guía hablaba de 1.9.0) con `curl_infos` en la sesión y deja en `meta`
+   `ttfb_s = STARTTRANSFER − PRETRANSFER` (el servidor sin DNS, TCP ni TLS),
+   la cabecera servida (`identity` si no venía), los bytes del cable y la
+   versión HTTP — que **cierra la limitación de `http_version` sin render**
+   (`CURLINFO_HTTP_VERSION`: 1→1.0, 2→1.1, 3→2, 30→3). Las borra al empezar
+   cada descarga: `RetryMiddleware` copia la `meta` y el reintento de un 503
+   heredaría su TTFB. Con render, un `PageMethod` de Navigation Timing:
+   `responseStart − requestStart` y `encodedBodySize` frente a
+   `decodedBodySize` (`comprimido` sin el nombre: scrapy-playwright quita la
+   cabecera aunque Chromium la tiene). Comprobado con un servidor local con
+   300 ms de espera: curl da 302 ms y Chromium, con la interceptación de
+   scrapy-playwright, 301 ms; gzip 157 frente a 34.026 bytes. Una página
+   `_sin_render` de un job con render no da TTFB (mezclaría dos fuentes), y
+   una sonda de soft 404 no da nada (no es URL del censo). Columnas
+   `urls.ttfb_ms` y `urls.content_encoding`; `response_time_ms` se queda como
+   está (CSV, filtros, Explorador).
+   Avisos (`analysis/avisos_de_servidor.py`), solo sobre HTML interno 200 que
+   es la respuesta del sitio (103): `respuesta_lenta` por **(host,
+   plantilla)** —`config.templates` y si no, `firma_de_ruta`, ahora
+   `shared.plantillas.plantilla_de`, que usa también `check_js_templates.py`—
+   con 20 páginas o más, la **mediana** y el p90, `info` por encima de 1.000 ms
+   y `warning` por encima de 3.000 ms (`AnalysisThresholdsConfig`; **valores a
+   medir en censos antes de darlos por buenos**, 13), con la fuente y la
+   concurrencia del job en el detalle: con 32 peticiones a la vez un origen
+   lento sale más lento que con 2. Nada de FreeCrawl: ni por página (en un
+   sitio lento sale en todas) ni los 600 ms como Core Web Vitals (CrUX mide a
+   usuarios). Un censo sin `ttfb_ms` no avisa: caer a `response_time_ms` sería
+   afirmar lo que no se midió (67). `html_sin_comprimir`, `info`, por **host**
+   (53): solo con la cabecera medida, cuerpos de 1 KB o más, `por_plantilla`
+   cuando el host mezcla; `zstd` cuenta como comprimido, y si el job pisa
+   `Accept-Encoding` en sus cabeceras no se dice nada. Anclados en la raíz
+   del host (o la HTML 200 a la que redirige) y en la URL menor del grupo,
+   nunca en el primer id (88). La ficha cita lo que dice Google: un servidor
+   lento o sin comprimir se rastrea menos; no habla de posicionamiento.
+   **Sin medir todavía en un censo real** (no había rastreos en esta sesión):
+   la estabilidad de la mediana entre dos canarios del mismo día (±30%) es la
+   condición para fijar los umbrales. Con proxy (`PROXY_LIST`) el TTFB incluye
+   el salto al proxy y el detalle no lo distingue.
+
+<a id="d110"></a>
+110. **Un certificado inválido se dice, una vez por host, y con el umbral de
+   7 días, no 30** (B6 de #150) — curl_cffi rechaza un certificado caducado
+   con `CertificateVerifyError` (código 60) y `handle_error` solo conocía las
+   excepciones de Twisted: la página quedaba `status_group='error'` con el
+   motivo solo en el log. Ahora `tls_error` (curl 35, 51, 58, 59, 60, 83, 90 y
+   91, o `net::ERR_CERT_*`/`ERR_SSL_*` de Chromium) con el motivo en
+   `status_text` («TLS: curl 60: SSL certificate OpenSSL verify result: self
+   signed certificate (18)» es lo que dice curl-impersonate). Y una **sonda
+   por host** (`seo_crawler/sonda_tls.py`, el patrón de la 105: sin item, sin
+   gastar `max_urls`, a `jobs.tls`): la primera vez que un host https interno
+   responde o falla, dos conexiones con `ssl` en un hilo —una verificada con
+   el almacén del sistema y el nombre del host, que da el motivo por el
+   `verify_code` de OpenSSL (caducado, nombre, autofirmado, cadena
+   incompleta…), y si falla, otra sin verificar y admitiendo TLS 1.0 para leer
+   el certificado (`binary_form=True` + `cryptography`; sin verificar,
+   `getpeercert()` da `{}`) y la versión—. Con render se usa
+   `playwright_security_details`, que nadie leía; con proxy se omite (un
+   socket directo sale por otra IP). `spider_idle` espera a la sonda en vuelo.
+   Tres avisos por host, anclados en la raíz: `tls_certificado_invalido`
+   (`error`), `tls_caduca_pronto` (`warning`, **7 días** o menos,
+   `tls_dias_aviso`): Let's Encrypt renueva a 30 días y con certificados de 45
+   o 47 días un sitio sano estaría siempre por debajo de 30, que es el umbral
+   de FreeCrawl; y `tls_version_antigua` (`error`, TLS 1.0/1.1: Chrome no
+   conecta desde 2020). Lo negociado es el **máximo** que admite el servidor:
+   que además acepte 1.0 no se mide y no se afirma. La firma SHA-1 no tiene
+   consecuencia SEO y no se mira. Si el host respondió 2xx por https en el
+   rastreo, curl o Chromium sí validaron el certificado: un fallo de la sonda
+   es del almacén de CA o de un WAF que corta el handshake, y no se afirma.
+   Las páginas `tls_error` de un host con el certificado confirmado inválido
+   no repiten `connection_error` (36). Los días son los **del día del
+   rastreo** (`dias_restantes` en el JSON): re-analizar no los recalcula.
+   Probado con servidores locales: caducado (con una CA propia →
+   `caducado`; con el almacén del sistema → `autofirmado`), a 3 días, de otro
+   nombre y uno que solo habla TLS 1.0 → `TLSv1`.
+
+<a id="d111"></a>
+111. **El `Retry-After` de un 429 o un 503 se respeta en todos los modos, con
+   tope y sin que AUTOTHROTTLE lo deshaga** (B5 de #150) — `RetryMiddleware`
+   repetía el 429 al instante y AUTOTHROTTLE no frena con un 429 rápido (no
+   sube el retraso con respuestas que no son 200 salvo que tarden), así que
+   una ráfaga de 429 seguía al mismo ritmo. `RetryAfterMiddleware` generaliza
+   la 81 con caducidad y **sin depender de `ROBOTSTXT_OBEY`**: con un
+   `Retry-After` de N s (segundos o fecha HTTP, `shared.respuestas.
+   retry_after_segundos`, la misma función que usa ya `shared/llm.py`; una
+   fecha pasada es 0 y lo ilegible no es espera), el slot del host pasa a N s
+   de retraso sin jitter durante N s, acotado a `retry_after_max_s` (60 por
+   defecto, máximo 600). Se fija en `response_downloaded`, que llega **antes**
+   de que el slot saque la siguiente petición y después de AutoThrottle; se
+   reaplica con cada respuesta de la ventana (las 200 que siguen en vuelo lo
+   bajarían) y en `process_request`. El reintento sale del mismo slot, así que
+   espera. Caducada la ventana, el slot vuelve a `piso_de_slot`: el
+   `Crawl-delay` de la 81 o el `DOWNLOAD_DELAY` del job, nunca a 0 (el
+   Crawl-delay solo sube un retraso, así que no deshace la pausa). Cada pausa
+   estampa el **latido** del spider: con un host en pausa los reintentos no
+   pasan por `parse`, el latido va cada 50 URLs y el vigilante de
+   estancamiento daba por muerto un rastreo que esperaba a propósito (600 s
+   × 3 intentos eran justo los 30 minutos). Lo respetado va a
+   `jobs.health["retry_after"]` (`veces`, `max_pedido_s`, `max_aplicado_s`,
+   `truncados`, `tope_s`), por Redis y acumulado entre reanudaciones: no es
+   una incidencia SEO, es cortesía y confianza del dato. La ventana de salud
+   de la 103 no se toca: respetar la pausa baja los 429. Google dice que un
+   429 o un 503 le hacen bajar el ritmo; **no** está comprobado que honre
+   `Retry-After`, así que esto no se vende como paridad con Googlebot.
+   Probado con el spider real contra un servidor local: un 429 con
+   `Retry-After: 1` dos veces y un 503 con fecha a 2 s acaban en 200, con los
+   huecos medidos en el servidor (≥ 0,9 s y ≥ 1 s) y `veces = 3`.
+
+   **Revisión (2026-10-18): una pausa no puede esconder un muro.** La frase
+   «la ventana de salud de la 103 no se toca: respetar la pausa baja los 429»
+   era falsa con un host que responde 429 a TODO. Con la frontera llena, el
+   reintento va con menos prioridad que los primeros intentos, así que cada
+   primer intento salía espaciado por la pausa y el primer 429 definitivo no
+   llegaba a `parse` —ni a la ventana— hasta haber pedido toda la frontera.
+   Reproducido con el arnés de la 103 (300 URLs en 429): **5,4 s** y
+   `rate_limited` sin el middleware; **más de 10 minutos sin cerrar** con él y
+   una pausa de solo 2 s. Con el `Retry-After: 30` real y 300 URLs son horas, y
+   con 20.000 en la frontera el rastreo moría por `max_runtime_hours` ocupando
+   el hueco del worker: el latido de cada pausa impedía además que el
+   vigilante lo cortara. Ahora, si un host devuelve `RETRY_AFTER_MAX_SEGUIDAS`
+   (5) respuestas 429/503 a peticiones que salieron **con la pausa ya
+   abierta** y sin ninguna de otra clase entre medias, deja de pausarse hasta
+   que responda otra cosa; la ventana de la 103 lo cierra como antes. Las que
+   estaban en vuelo al llegar el primer 429 no cuentan (salieron antes de la
+   pausa: con 8-16 por host, un límite pasajero las devuelve todas a la vez),
+   y se distinguen por `download_latency`. Como mucho son 5 pausas (5 minutos
+   con el tope de 60 s); queda en `jobs.health["retry_after"]["abandonos"]`.
+   Test: `test_un_429_masivo_para_tambien_respetando_el_retry_after` (el arnés
+   con el middleware, < 60 s; sin el arreglo agota los 180 s) y tres unitarios.
+   De paso, `crawl_behavior.retry_after_max_s` pasa a `None` por defecto: los
+   defaults del schema se copian en `jobs.config`, así que con un 60 el worker
+   pasaba siempre `-s RETRY_AFTER_MAX=60` y la variable de entorno no hacía
+   nada.
+
 <a id="d112"></a>
 112. **Un robots.txt que responde 5xx, 429 o no responde se guarda y se avisa
    por host, y el rastreo sigue** (sección 6 de #149, primer paso de la Ola

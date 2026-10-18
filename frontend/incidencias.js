@@ -519,6 +519,33 @@ const ISSUE_INFO = {
   },
 
   // ----- Seguridad -----
+  // ----- Servidor: tiempo, compresión y certificado (decisiones 109 y 110) -----
+  'respuesta_lenta': {
+    que: 'El servidor tarda en empezar a responder (TTFB: el tiempo hasta el primer byte, sin DNS, conexión ni TLS) en una plantilla entera. Va una fila por host y plantilla con la mediana y el p90; solo plantillas con 20 páginas o más. La cifra depende de la concurrencia del rastreo: el detalle la dice.',
+    google: 'Google rastrea menos un servidor lento (Search Console, «Estadísticas de rastreo», tiempo medio de respuesta). No es una señal de posicionamiento por sí misma, y no es Core Web Vitals: CrUX mide a usuarios reales.',
+    arreglo: 'Mirar con el equipo técnico qué hace esa plantilla en el servidor (consultas, caché de página, CDN). Comparar con las plantillas rápidas del mismo host.',
+  },
+  'html_sin_comprimir': {
+    que: 'El HTML se sirve sin Content-Encoding (ni gzip, ni Brotli, ni zstd) aunque el rastreador lo pide como un navegador. Una fila por host; las páginas de menos de 1 KB no cuentan. Si el host mezcla, «por plantilla» dice dónde mirar.',
+    google: 'Los rastreadores de Google admiten gzip, deflate y Brotli. Sin compresión cada página tarda más en bajar y se rastrean menos con el mismo presupuesto. No afecta al posicionamiento.',
+    arreglo: 'Activar gzip o Brotli para text/html en el servidor o el CDN.',
+  },
+  'tls_certificado_invalido': {
+    que: 'El certificado del host no vale: caducado, de otro nombre, autofirmado o con la cadena incompleta. Una fila por host, con el motivo y las páginas que fallaron por eso.',
+    google: 'El navegador no abre la página sin un aviso de seguridad y Googlebot no puede rastrearla por https: si dura, sale del índice.',
+    arreglo: 'Renovar o reinstalar el certificado (con la cadena intermedia completa) y revisar la renovación automática.',
+  },
+  'tls_caduca_pronto': {
+    que: 'El certificado caduca en 7 días o menos, contados desde el día del rastreo (no se recalcula al re-analizar). Con certificados de 45 a 90 días y renovación a 30 días, un sitio sano no baja de ahí: si sale, la renovación automática probablemente ha fallado.',
+    google: 'Nada todavía. El día que caduque, lo de «certificado inválido».',
+    arreglo: 'Comprobar la renovación automática (certbot, el panel del CDN) antes de la fecha.',
+  },
+  'tls_version_antigua': {
+    que: 'El servidor solo negocia TLS 1.0 o 1.1. Lo negociado es lo máximo que admite: que además acepte versiones viejas no se mide.',
+    google: 'Chrome y los demás navegadores no conectan con TLS 1.0 ni 1.1 desde 2020: la página no se abre.',
+    arreglo: 'Habilitar TLS 1.2 y 1.3 en el servidor o el balanceador.',
+  },
+
   'http_url': {
     que: 'La página se sirve por http, sin cifrar.',
     google: 'HTTPS es señal de posicionamiento y el navegador avisa de «no seguro».',
@@ -598,6 +625,11 @@ const ISSUE_LABEL_EXTRA = {
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
   utm_en_enlace_interno: 'Enlace interno con utm',
+  respuesta_lenta: 'Servidor lento (TTFB por plantilla)',
+  html_sin_comprimir: 'HTML sin comprimir',
+  tls_certificado_invalido: 'Certificado TLS no válido',
+  tls_caduca_pronto: 'Certificado TLS a punto de caducar',
+  tls_version_antigua: 'TLS antiguo (1.0/1.1)',
   enlace_sin_ancla: 'Enlace interno sin texto ancla',
   // Decisiones 120 y 121
   redireccion_a_noindex: 'Redirección a una noindex',
@@ -697,6 +729,22 @@ const DETALLE_LABEL = {
   etiqueta: 'etiqueta',
   posicion: 'posición',
   ancla: 'ancla',
+  // Avisos del servidor (decisiones 109 y 110)
+  paginas: 'páginas',
+  mediana_ms: 'mediana (ms)',
+  p90_ms: 'p90 (ms)',
+  umbral_ms: 'umbral (ms)',
+  concurrencia_por_dominio: 'concurrencia por dominio',
+  paginas_del_host: 'páginas del host',
+  bytes_medianos: 'bytes (mediana)',
+  por_plantilla: 'por plantilla',
+  not_after: 'caduca',
+  dias_restantes: 'días que quedaban',
+  umbral_dias: 'umbral (días)',
+  version: 'versión TLS',
+  emisor: 'emisor',
+  fecha_sonda: 'medido el',
+  paginas_con_error_tls: 'páginas que fallaron por TLS',
   // robots.txt (decisiones 112 y 113)
   intentos: 'intentos',
   intermitente: 'intermitente: a la segunda respondió',

@@ -23,6 +23,8 @@ class PageItem(scrapy.Item):
     status_code = scrapy.Field()
     status_group = scrapy.Field()
     response_time_ms = scrapy.Field()
+    ttfb_ms = scrapy.Field()  # decision 109
+    content_encoding = scrapy.Field()  # decision 109
     is_html = scrapy.Field()
     resource_type = scrapy.Field()
     redirect_url = scrapy.Field()

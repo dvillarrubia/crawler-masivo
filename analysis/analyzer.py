@@ -41,6 +41,7 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
+from analysis import avisos_de_servidor
 from analysis import avisos_de_html
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, misma_url,
@@ -294,6 +295,13 @@ class SEOAnalyzer:
         self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
         self.enlaces_plantilla_min_paginas = t.get("enlaces_plantilla_min_paginas", 10)  # d106
+        # Avisos del servidor (decisiones 109 y 110, `avisos_de_servidor.py`).
+        self.respuesta_lenta_ms = t.get("respuesta_lenta_ms", 1000)
+        self.respuesta_lenta_grave_ms = t.get("respuesta_lenta_grave_ms", 3000)
+        self.respuesta_lenta_min_paginas = t.get("respuesta_lenta_min_paginas", 20)
+        self.tls_dias_aviso = t.get("tls_dias_aviso", 7)
+        self._job_config = (job.config or {}) if job else {}
+        self._job_tls = getattr(job, "tls", None) if job else None
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
         )
@@ -340,6 +348,7 @@ class SEOAnalyzer:
         self.analyze_redirect_chains()
         self.analyze_images()
         self.analyze_security()
+        avisos_de_servidor.avisar(self)  # decisiones 109 y 110
         self.analyze_content()
         self.analyze_soft_404()
         self.analyze_url_issues()
@@ -587,10 +596,17 @@ class SEOAnalyzer:
         rows = self.session.execute(
             select(Url.id, Url.status_group).where(
                 Url.job_id == self.job_id,
-                Url.status_group.in_(["timeout", "dns_error", "conn_refused", "error", "unknown"]),
+                Url.status_group.in_(["timeout", "dns_error", "conn_refused", "tls_error",
+                                      "error", "unknown"]),
             )
         ).all()
+        # Una pagina que falla por el certificado de su host no lleva ademas
+        # su `connection_error` cuando la sonda lo confirma: lo dice una vez
+        # `tls_certificado_invalido`, con las paginas afectadas (36, 110).
+        ya_contadas = avisos_de_servidor.ids_tls_de_hosts_invalidos(self)
         for url_id, status_group in rows:
+            if url_id in ya_contadas:
+                continue
             self._add_issue(
                 url_id,
                 "connection_error",

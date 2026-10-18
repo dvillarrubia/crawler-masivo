@@ -197,6 +197,18 @@ columnas llegan a la BD y el destino JS no se sigue),
 plantilla y anclados en la URL menor, solo indexables, NULL de un censo viejo
 sin aviso, muros fuera) y `test_incidencias_html_frontend.py` (ficha, nombre y
 ambito de cada tipo; el catalogo general solo lee `analyzer.py`).
+Tiempo, compresion, TLS y Retry-After (decisiones 109-111):
+`test_handler_medidas.py` (el `SeoSpider` real con el handler de produccion
+contra servidores locales: TTFB con 300 ms de espera, gzip e `identity`,
+`http_version` sin render, un 429 con `Retry-After` en segundos y un 503 con
+fecha HTTP con los huecos medidos en el servidor, y un HTTPS caducado que da
+`tls_error` con su motivo y la ficha de la sonda; ademas Navigation Timing
+contra Chromium), `test_sonda_tls.py` (la sonda contra certificados hechos en
+el test: caducado, a 3 dias, otro nombre, autofirmado, solo TLS 1.0; y la
+excepcion real de curl_cffi), `test_retry_after.py` (el parser y el
+middleware con un slot simulado: sube, no lo baja AUTOTHROTTLE, vuelve al
+Crawl-delay, tope, latido) y `test_avisos_de_servidor_db.py` (los cinco
+avisos contra SQLite, con su ficha y su ambito en el frontend).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
