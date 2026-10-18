@@ -41,6 +41,7 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
+from analysis import avisos_de_html
 from shared.indexabilidad import (
     clave_url, es_noindex, estado_indexabilidad, misma_url, x_robots_para_bot,
 )
@@ -328,6 +329,7 @@ class SEOAnalyzer:
         self.analyze_hreflang()
         self.analyze_structured_data()
         self.analyze_html_ignorado()
+        avisos_de_html.avisar_declaraciones_html(self)  # decision 108
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()

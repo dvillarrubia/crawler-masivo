@@ -466,6 +466,37 @@ class HtmlMeta(Base):
     # vacia = medido y no hay ninguno; NULL = no medido (censo anterior).
     fuera_del_head = Column(String(128), nullable=True)
 
+    # --- Lo que el HTML declara de si mismo (decision 108) ---
+    # `content` del ULTIMO `<meta name=viewport>`, el que aplica el navegador
+    # ("" si lo tiene vacio), y
+    # cuantos hay. `viewport_count` es la marca de «medido» de todo el bloque:
+    # 0 = no hay viewport; NULL = rastreo anterior a la columna, y entonces el
+    # analizador no afirma que falte nada (decisiones 67 y 89).
+    viewport = Column(Text, nullable=True)
+    viewport_count = Column(Integer, nullable=True)
+    # `<html lang>` (o `xml:lang`): "" = atributo vacio, NULL = no esta.
+    html_lang = Column(String(35), nullable=True)
+    # Cabecera `Content-Language`, tal cual.
+    content_language = Column(String(64), nullable=True)
+    # El href del canonical tal como se escribio: `canonical_href` va resuelto
+    # y la forma (relativa, con fragmento) se perdia al extraer.
+    canonical_crudo = Column(Text, nullable=True)
+    # Forma de la og:image (`shared.metadatos_html.forma_de_href`).
+    og_image_forma = Column(String(24), nullable=True)
+    twitter_image = Column(Text, nullable=True)
+    # Destino de un `location = "..."` a nivel superior de un script (la
+    # pagina puente), absoluto y normalizado, sin render. Lo condicional no se
+    # guarda.
+    redireccion_js = Column(Text, nullable=True)
+    # Charset del meta en los 1.024 primeros bytes ("" = no hay) y del BOM,
+    # normalizados; si el cuerpo es solo ASCII, y si el titulo o el texto
+    # llevan U+FFFD (bytes que no casan con la codificacion). Solo sin
+    # render: con render los bytes originales se pierden, todo NULL.
+    charset_meta = Column(String(40), nullable=True)
+    charset_bom = Column(String(40), nullable=True)
+    cuerpo_solo_ascii = Column(Boolean, nullable=True)
+    texto_mal_codificado = Column(Boolean, nullable=True)
+
     url_rel = relationship("Url", back_populates="html_meta")
 
 

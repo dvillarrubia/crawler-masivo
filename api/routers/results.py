@@ -170,6 +170,9 @@ _STRING_CONTAINS_FILTERS: dict[str, tuple[Any, bool]] = {
     "x_robots_tag_contains":         (HtmlMeta.x_robots_tag,         True),
     "canonical_header_contains":     (HtmlMeta.canonical_header,     True),
     "meta_refresh_contains":         (HtmlMeta.meta_refresh,         True),
+    "redireccion_js_contains":       (HtmlMeta.redireccion_js,       True),
+    "viewport_contains":             (HtmlMeta.viewport,             True),
+    "html_lang_contains":            (HtmlMeta.html_lang,            True),
 }
 
 # Campos que se pueden pedir vacios o con valor: `?vacio=title,canonical_href`
@@ -950,6 +953,9 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "meta_robots": ("Meta robots", _m("meta_robots")),
     "x_robots_tag": ("X-Robots-Tag", _m("x_robots_tag")),
     "meta_refresh": ("Meta refresh", _m("meta_refresh")),
+    "redireccion_js": ("Redirección JS", _m("redireccion_js")),
+    "viewport": ("Viewport", _m("viewport")),
+    "html_lang": ("html lang", _m("html_lang")),
     "og_title": ("OG title", _m("og_title")),
     "og_image": ("OG image", _m("og_image")),
     "og_type": ("OG type", _m("og_type")),
@@ -1786,6 +1792,14 @@ CSV_COLUMNS = [
     "rel_prev",
     "meta_refresh",
     "has_meta_outside_head",
+    # Lo que el HTML declara de si mismo (decision 108)
+    "viewport",
+    "html_lang",
+    "content_language",
+    "canonical_crudo",
+    "redireccion_js",
+    "charset_meta",
+    "texto_mal_codificado",
     # Encabezados: lo primero que mira cualquier auditoria y lo unico que
     # obligaba a abrir el backup ZIP para verlo.
     "h1_count",
@@ -1802,6 +1816,7 @@ CSV_COLUMNS = [
     "twitter_card",
     "twitter_title",
     "twitter_description",
+    "twitter_image",
     # Internacionalizacion
     "hreflang_count",
     "hreflang_langs",
@@ -1911,6 +1926,13 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(meta.rel_prev) if meta else "",
         _val(meta.meta_refresh) if meta else "",
         _val(meta.has_meta_outside_head) if meta else "",
+        _val(meta.viewport) if meta else "",
+        _val(meta.html_lang) if meta else "",
+        _val(meta.content_language) if meta else "",
+        _val(meta.canonical_crudo) if meta else "",
+        _val(meta.redireccion_js) if meta else "",
+        _val(meta.charset_meta) if meta else "",
+        _val(meta.texto_mal_codificado) if meta else "",
         # Encabezados
         _val(ex.get("h1_count", 0)),
         _val(ex.get("h1_1")),
@@ -1926,6 +1948,7 @@ def _csv_row(url_obj: Url, extras: dict[str, Any] | None = None) -> list[str]:
         _val(meta.twitter_card) if meta else "",
         _val(meta.twitter_title) if meta else "",
         _val(meta.twitter_description) if meta else "",
+        _val(meta.twitter_image) if meta else "",
         # Hreflang
         _val(ex.get("hreflang_count", 0)),
         _val(ex.get("hreflang_langs")),

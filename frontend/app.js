@@ -3429,6 +3429,11 @@ const EXP_COLUMN_DEFS = {
   x_robots_tag:         { label: 'X-Robots-Tag',    type: 'string',  sortable: false, filterKey: 'x_robots_tag_contains', vacio: 'x_robots_tag',   width: 180, fmt: r => (r.html_meta?.x_robots_tag ?? '').replace(/\n/g, ' | ') },
   canonical_header:     { label: 'Canonical (cabecera)', type: 'string', sortable: false, filterKey: 'canonical_header_contains', width: 240, fmt: r => r.html_meta?.canonical_header ?? '' },
   meta_refresh:         { label: 'Meta refresh',    type: 'string',  sortable: false, filterKey: 'meta_refresh_contains',   width: 200, fmt: r => r.html_meta?.meta_refresh ?? '' },
+  // Decision 108: lo que el HTML declara de si mismo. La redireccion JS solo
+  // se mide sin render y solo la incondicional (la pagina puente).
+  redireccion_js:       { label: 'Redirección JS',  type: 'string',  sortable: false, filterKey: 'redireccion_js_contains', width: 240, fmt: r => r.html_meta?.redireccion_js ?? '' },
+  viewport:             { label: 'Viewport',        type: 'string',  sortable: false, filterKey: 'viewport_contains',       width: 240, fmt: r => r.html_meta?.viewport ?? '' },
+  html_lang:            { label: 'html lang',       type: 'string',  sortable: false, filterKey: 'html_lang_contains',      width: 110, fmt: r => r.html_meta?.html_lang ?? '' },
   in_sitemap:           { label: 'En el sitemap',   type: 'boolean', sortable: false, filterKey: 'in_sitemap',              width: 140, fmt: r => r.in_sitemap === true ? 'Sí' : r.in_sitemap === false ? 'No' : '' },
   og_title:             { label: 'OG title',        type: 'string',  sortable: false, filterKey: 'og_title_contains', vacio: 'og_title',       width: 220, fmt: r => r.html_meta?.og_title ?? '' },
   og_image:             { label: 'OG image',        type: 'string',  sortable: false, filterKey: 'og_image_contains', vacio: 'og_image',       width: 240, fmt: r => r.html_meta?.og_image ?? '' },
@@ -3455,11 +3460,12 @@ const EXP_COLUMN_DEFS = {
 // (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
 const EXP_GRUPOS_COLUMNAS = [
   ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
-  ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap']],
+  ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
+  ['Móvil e idioma', ['viewport','html_lang']],
   ['Frente al censo anterior', ['cambio']],
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
@@ -3562,17 +3568,21 @@ const EXP_TABS = [
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
   { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_vacio','h1_multiple','h1_duplicate'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
-  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra'],
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
   // Las redirecciones no son HTML: el ambito va sobre las internas.
-  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop'],
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax'],
     columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
-  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente'],
+  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','html_lang_no_coincide_hreflang'],
     columns: ['url','status_code','title','indexable','inlinks_count'] },
+  // Decision 108: lo que el HTML declara de si mismo. Casi todo de plantilla
+  // o de servidor (una fila por grupo), y nada saca una pagina del indice.
+  { key: 'a_declara',  label: 'Móvil, charset y OG', icon: 'smartphone', filter: HTML_INTERNO, ambito: ['viewport_ausente','viewport_incorrecto','html_lang_ausente','texto_mal_codificado','charset_incoherente','charset_ausente','og_ausente','og_image_relativa'],
+    columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla'],

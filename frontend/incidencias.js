@@ -152,6 +152,68 @@ const ISSUE_INFO = {
     arreglo: 'Si el sitio no es de un framework que los suba con JavaScript, moverlos al <head> de la plantilla. Si lo es, comprobar con la inspección de URL de Search Console que Google ve el título y el robots que tocan. Solo se mide en rastreos sin render.',
   },
 
+  // ----- Lo que el HTML declara de sí mismo (decisión 108) -----
+  'viewport_ausente': {
+    que: 'Páginas indexables sin <meta name="viewport">. Una fila por plantilla, con las páginas afectadas.',
+    google: 'No decide si se indexa: la indexación mobile-first indexa la versión que ve el rastreador de smartphone, con o sin viewport. Lo que cambia es cómo se ve: sin viewport, el móvil pinta la página a 980 px de ancho y la encoge, y el usuario tiene que hacer zoom. Si el rastreo fue sin render y el sitio lo pone con JavaScript, aquí sale como ausente: compruébalo en el navegador.',
+    arreglo: 'Añadir <meta name="viewport" content="width=device-width, initial-scale=1"> en el <head> de la plantilla.',
+  },
+  'viewport_incorrecto': {
+    que: 'El viewport existe pero no adapta la página al móvil: un ancho fijo (width=1024), sin width=device-width ni initial-scale, o sin content. Una fila por plantilla y motivo.',
+    google: 'Igual que sin viewport: no afecta a la indexación, sino a cómo se ve en el móvil (la página se pinta al ancho fijo y se encoge). user-scalable=no y maximum-scale no cuentan aquí: impiden hacer zoom, que es accesibilidad, no adaptación.',
+    arreglo: 'Usar content="width=device-width, initial-scale=1" y que la maqueta sea adaptable. Si hay dos viewports, dejar uno.',
+  },
+  'html_lang_ausente': {
+    que: 'Páginas indexables sin atributo lang en <html>, o con el atributo vacío. Una fila por plantilla.',
+    google: 'Google no usa el lang para decidir el idioma de la página: lo saca del contenido visible. Sirve a los lectores de pantalla, a la traducción del navegador y a la accesibilidad (WCAG 3.1.1). Es informativo, no un problema de posicionamiento.',
+    arreglo: 'Poner <html lang="es"> (o el idioma de cada versión) en la plantilla.',
+  },
+  'html_lang_no_coincide_hreflang': {
+    que: 'El idioma del <html lang> no es el del código con que la página se anota a sí misma en su hreflang (se compara solo el idioma: es y es-ES coinciden; es-MX y es-ES también). Una fila por plantilla y pareja de idiomas.',
+    google: 'Google se guía por el hreflang y por el contenido, no por el lang. Que no coincidan dice que uno de los dos está mal, pero no cuál: puede ser un lang="es" fijo en todo un sitio multidioma, o un hreflang mal asignado. Hasta comparar con el idioma real del contenido no se puede afirmar más.',
+    arreglo: 'Mirar las páginas de ejemplo: si el contenido está en el idioma del hreflang, corregir el lang de la plantilla; si está en el del lang, revisar el hreflang.',
+  },
+  'texto_mal_codificado': {
+    que: 'El título o el texto de la página llevan caracteres sustituidos (�): los bytes no casan con la codificación con que se leen. Una fila por plantilla, con lo que declaran la cabecera, el meta y el BOM.',
+    google: 'Lee la página con la misma codificación que el navegador y, si los bytes no casan, indexa y enseña en el resultado los caracteres rotos: el título y el snippet salen con símbolos de interrogación.',
+    arreglo: 'Servir el HTML en la codificación que declara la cabecera Content-Type (lo normal: guardar las plantillas y la base de datos en UTF-8 y declarar charset=utf-8). Solo se mide en rastreos sin render.',
+  },
+  'charset_incoherente': {
+    que: 'La cabecera Content-Type, el <meta charset> y el BOM declaran codificaciones distintas (latin1, iso-8859-1 y windows-1252 cuentan como la misma). El texto sale bien. Una fila por host y combinación.',
+    google: 'Manda el BOM y, sin él, la cabecera, como en el navegador: hoy no se rompe nada, pero basta con que el servidor deje de mandar la cabecera (una caché, un CDN, una copia estática) para que se lea con la otra y salga roto.',
+    arreglo: 'Declarar la misma codificación en la cabecera y en el <meta charset> de la plantilla. Solo se mide en rastreos sin render.',
+  },
+  'charset_ausente': {
+    que: 'Ni la cabecera Content-Type, ni un <meta charset> en los primeros 1.024 bytes, ni un BOM dicen la codificación, y el HTML lleva caracteres no ASCII. Una fila por host.',
+    google: 'Tiene que adivinarla, como el navegador. Suele acertar, pero si no, los acentos salen rotos en el índice y en el snippet. Un meta escrito más abajo de los 1.024 bytes el navegador no lo ve.',
+    arreglo: 'Mandar charset=utf-8 en la cabecera Content-Type o poner <meta charset="utf-8"> como primer elemento del <head>.',
+  },
+  'canonical_relativo': {
+    que: 'El canonical está escrito como ruta relativa (/x, x o ../x) o relativa al protocolo (//host/x), no como URL absoluta. Una fila por plantilla y forma.',
+    google: 'Admite las rutas relativas y recomienda las absolutas. Lo que rompe es el contexto: con un <base href> a otro sitio, o con la página servida desde un dominio espejo o de staging, la ruta relativa apunta al host equivocado. Es informativo.',
+    arreglo: 'Escribir el canonical como URL absoluta, con esquema y host de producción.',
+  },
+  'canonical_con_fragmento': {
+    que: 'El canonical lleva un fragmento (#…). Una fila por plantilla; aparte las que, quitado el fragmento, apuntan a otra página.',
+    google: 'Quita el fragmento: un canonical a /p#top es un canonical a /p. Si eso es la propia página, no pasa nada (informativo). Si es otra —lo típico de un enrutado con #/, donde /#/producto/1 queda en la portada—, la página le pide a Google que la consolide en esa otra, y es un aviso.',
+    arreglo: 'Quitar el fragmento del canonical. Si el sitio enruta con #, pasar a rutas reales (History API): Google no indexa lo que va detrás del #.',
+  },
+  'og_ausente': {
+    que: 'Páginas indexables sin og:title ni og:image. Una fila por plantilla.',
+    google: 'No lo usa para posicionar. Lo usan las redes sociales y las aplicaciones de mensajería al compartir el enlace: sin ellos, la vista previa sale sin imagen o con lo primero que encuentren.',
+    arreglo: 'Añadir og:title, og:description y og:image (URL absoluta, imagen grande) en la plantilla.',
+  },
+  'og_image_relativa': {
+    que: 'La og:image está escrita como ruta relativa, no como URL absoluta. Una fila por plantilla y forma.',
+    google: 'No afecta al posicionamiento. El protocolo Open Graph pide una URL absoluta, y hay redes que no resuelven la relativa: la vista previa sale sin imagen.',
+    arreglo: 'Escribir la og:image como URL absoluta, con esquema y host.',
+  },
+  'redireccion_por_javascript': {
+    que: 'La página redirige con JavaScript (location = "…", location.replace("…")) en cuanto carga, sin condición: una página puente. Se detecta en el HTML servido, sin render, y solo con un destino literal a nivel superior del script; lo que va dentro de una función, de un if o de un temporizador no se afirma.',
+    google: 'Google ejecuta el JavaScript al renderizar y suele seguir la redirección, pero más tarde y con menos garantías que una del servidor, y quien no ejecuta JavaScript se queda en la página puente. El destino no se ha seguido en este rastreo: si aparece su código, es porque se llegó a él por otro camino.',
+    arreglo: 'Sustituirla por una redirección 301 en el servidor y enlazar directamente el destino.',
+  },
+
   // ----- Títulos, descripciones y encabezados -----
   'title_missing': {
     que: 'La página no tiene <title>.',
@@ -506,6 +568,18 @@ const ISSUE_LABEL_EXTRA = {
   html_supera_2mb: 'HTML de más de 2 MB',
   head_cortado: 'Head cortado antes de tiempo',
   meta_fuera_del_head: 'Metadatos fuera del head',
+  viewport_ausente: 'Sin meta viewport',
+  viewport_incorrecto: 'Viewport que no adapta al móvil',
+  html_lang_ausente: 'Sin <html lang>',
+  html_lang_no_coincide_hreflang: 'html lang distinto del hreflang',
+  texto_mal_codificado: 'Texto mal codificado',
+  charset_incoherente: 'Charset incoherente',
+  charset_ausente: 'Charset sin declarar',
+  canonical_relativo: 'Canonical relativo',
+  canonical_con_fragmento: 'Canonical con fragmento',
+  og_ausente: 'Sin Open Graph',
+  og_image_relativa: 'og:image relativa',
+  redireccion_por_javascript: 'Redirección por JavaScript',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
@@ -580,6 +654,23 @@ const DETALLE_LABEL = {
   cortado_por: 'lo corta',
   fuera_del_head: 'quedan fuera',
   directiva_en_duda: 'robots o canonical detrás del corte',
+  // Lo que el HTML declara de sí mismo (decisión 108)
+  plantilla: 'plantilla',
+  rastreo_con_render: 'rastreo con render',
+  con_varios_viewports: 'con varios viewports',
+  atributo_vacio: 'con lang vacío',
+  html_lang: 'html lang',
+  hreflang: 'se anota en hreflang como',
+  charset_cabecera: 'charset de la cabecera',
+  charset_meta: 'charset del meta',
+  charset_bom: 'BOM',
+  manda: 'manda',
+  forma: 'forma',
+  apunta_a_si_misma: 'apunta a la propia página',
+  fuente: 'fuente',
+  palabras: 'palabras',
+  destino_status: 'código del destino',
+  destino_no_comprobado: 'destino no comprobado',
   // Avisos de enlaces (decision 106)
   paginas_que_enlazan: 'páginas que la enlazan',
   enlaces: 'enlaces',

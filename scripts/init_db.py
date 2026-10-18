@@ -60,6 +60,17 @@ def main() -> None:
         # Canonicals del head con DESTINO distinto: con dos, Google los ignora
         # todos. NULL = rastreo anterior; se mira `canonical_count` (decision 115).
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_distintos INTEGER"))
+        # Lo que el HTML declara de si mismo (decision 108). Nullable y sin
+        # DEFAULT: solo catalogo.
+        for columna, tipo in (
+            ("viewport", "TEXT"), ("viewport_count", "INTEGER"),
+            ("html_lang", "VARCHAR(35)"), ("content_language", "VARCHAR(64)"),
+            ("canonical_crudo", "TEXT"), ("og_image_forma", "VARCHAR(24)"),
+            ("twitter_image", "TEXT"), ("redireccion_js", "TEXT"),
+            ("charset_meta", "VARCHAR(40)"), ("charset_bom", "VARCHAR(40)"),
+            ("cuerpo_solo_ascii", "BOOLEAN"), ("texto_mal_codificado", "BOOLEAN"),
+        ):
+            conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # La respuesta era la pagina o un muro delante, y la salud del job

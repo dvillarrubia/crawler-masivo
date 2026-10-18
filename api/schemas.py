@@ -636,6 +636,19 @@ class HtmlMetaResponse(BaseModel):
     # Decision 102: donde corta el navegador el head y que queda fuera.
     head_cortado_por: str | None = None
     fuera_del_head: str | None = None
+    # Decision 108: lo que el HTML declara de si mismo.
+    viewport: str | None = None
+    viewport_count: int | None = None
+    html_lang: str | None = None
+    content_language: str | None = None
+    canonical_crudo: str | None = None
+    og_image_forma: str | None = None
+    twitter_image: str | None = None
+    redireccion_js: str | None = None
+    charset_meta: str | None = None
+    charset_bom: str | None = None
+    cuerpo_solo_ascii: bool | None = None
+    texto_mal_codificado: bool | None = None
 
 
 class PageContentResponse(BaseModel):

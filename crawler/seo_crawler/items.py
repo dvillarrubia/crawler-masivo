@@ -91,6 +91,20 @@ class HtmlMetaItem(scrapy.Item):
     head_cortado_por = scrapy.Field()
     fuera_del_head = scrapy.Field()
 
+    # Lo que el HTML declara de si mismo (decision 108)
+    viewport = scrapy.Field()
+    viewport_count = scrapy.Field()
+    html_lang = scrapy.Field()
+    content_language = scrapy.Field()
+    canonical_crudo = scrapy.Field()
+    og_image_forma = scrapy.Field()
+    twitter_image = scrapy.Field()
+    redireccion_js = scrapy.Field()
+    charset_meta = scrapy.Field()
+    charset_bom = scrapy.Field()
+    cuerpo_solo_ascii = scrapy.Field()
+    texto_mal_codificado = scrapy.Field()
+
 
 class HeadingItem(scrapy.Item):
     """A single heading element (h1-h6)."""

@@ -15,6 +15,7 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
+from w3lib.encoding import html_body_declared_encoding, read_bom
 from w3lib.url import canonicalize_url
 
 # Las reglas robots viven en `shared` porque el analyzer, cuya imagen no
@@ -33,6 +34,7 @@ from shared.texto_visible import (  # noqa: F401
     _nodo_oculto,
     _segmentos_visibles,
 )
+from shared.metadatos_html import forma_de_href, normalizar_charset
 from shared.robots import (  # noqa: F401
     robots_bad_separators,
     robots_tokens,
@@ -542,6 +544,7 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
                 destinos.add(clave_url(resuelto))
             except ValueError:
                 destinos.add(resuelto)
+    og_image_crudo = _meta("og:image", con_property=True)
 
     return {
         "title": title_text,
@@ -563,7 +566,7 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         # OG
         "og_title": _meta("og:title", con_property=True),
         "og_description": _meta("og:description", con_property=True),
-        "og_image": _resolve(base_url, _meta("og:image", con_property=True)),
+        "og_image": _resolve(base_url, og_image_crudo),
         "og_url": _resolve(base_url, _meta("og:url", con_property=True)),
         "og_type": _meta("og:type", con_property=True),
         # Twitter
@@ -578,6 +581,51 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
             base_url,
             _links_por_rel(selector, "prev") or _links_por_rel(selector, "previous"),
         ),
+        # Decision 108: lo que el HTML declara de si mismo, en crudo. El
+        # analizador decide con `shared/metadatos_html.py`.
+        **_declaraciones_de_pagina(selector, canonicals_head, og_image_crudo),
+        "twitter_image": _resolve(base_url, _meta("twitter:image", con_property=True)),
+    }
+
+
+def _declaraciones_de_pagina(selector, canonicals_head: list[str],
+                             og_image_crudo: str | None) -> dict[str, Any]:
+    """Viewport, `<html lang>` y la forma en que se escribieron el canonical y
+    la og:image (decision 108).
+
+    - ``viewport_count`` es tambien la marca de «medido»: 0 es que no hay
+      viewport; NULL, una fila de un rastreo anterior. ``viewport`` es el
+      ``content`` del ultimo, que es el que aplica el navegador (``""`` si lo
+      tiene vacio).
+    - ``html_lang``: el ``lang`` del primer ``<html>`` o, si no lo tiene, su
+      ``xml:lang``. ``""`` si el atributo esta pero vacio, None si no esta (el
+      mismo criterio que el alt). Recortado a la columna.
+    - ``canonical_crudo``: el ``href`` del canonical que se usa, tal como se
+      escribio. ``canonical_href`` lo guarda ya resuelto, y la forma —relativa,
+      con fragmento— se perdia (`AUDITORIA_Y_VERIFICACION`, seccion 10).
+    - ``og_image_forma``: solo la forma; la URL resuelta ya va en ``og_image``.
+    """
+    viewports = selector.xpath(
+        f"//meta[normalize-space(translate(@name, '{_XP_UPPER}', '{_XP_LOWER}')) = 'viewport']"
+    )
+    # Con varios, el navegador aplica el ULTIMO (comprobado en Chromium con
+    # emulacion movil: `device-width` y luego `width=1024` pinta a 1.024 px).
+    # Guardar el primero daba `viewport_incorrecto` a una plantilla que se ve
+    # bien y callaba la que se ve mal.
+    viewport = None
+    if viewports:
+        viewport = _clean(viewports[-1].xpath("@content").get()) or ""
+    lang = selector.xpath("(//html)[1]/@lang").get()
+    if lang is None:
+        lang = selector.xpath("(//html)[1]/@*[name()='xml:lang']").get()
+    if lang is not None:
+        lang = (_clean(lang) or "")[:35]
+    return {
+        "viewport": viewport,
+        "viewport_count": len(viewports),
+        "html_lang": lang,
+        "canonical_crudo": _clean(canonicals_head[0]) if canonicals_head else None,
+        "og_image_forma": forma_de_href(og_image_crudo),
     }
 
 
@@ -1967,7 +2015,207 @@ def extract_meta_refresh_target(selector, base_url: str) -> str | None:
     destino = (m.group(1) if m else "").strip().strip("'\"").strip()
     if not destino:
         return None
-    return absolutize_url(base_url, destino)
+    absoluta = absolutize_url(base_url, destino)
+    # `content="0; url=javascript:void(0)"` no lleva a ninguna parte: se tomaba
+    # como redireccion a `javascript:void(0)` y el spider intentaba seguirla
+    # (B3 de #150). Ni `data:` ni `mailto:` son paginas.
+    if not es_url_web(absoluta):
+        return None
+    return absoluta
+
+
+# -- Redireccion por JavaScript (decision 108) --------------------------------
+
+# Tipos de `<script>` que el navegador ejecuta. Un `application/ld+json` o un
+# `text/template` que dice «location» no redirige a nadie.
+_TIPOS_SCRIPT_EJECUTABLE = frozenset({
+    "", "text/javascript", "application/javascript", "module",
+    "text/ecmascript", "application/ecmascript", "application/x-javascript",
+    "text/x-javascript", "text/jscript", "text/livescript",
+})
+_LOCATION = r"(?<![\w$.])(?:(?:window|document|top|self)\.){0,2}location"
+_RE_REDIRECCION_JS = re.compile(
+    _LOCATION + r"""(?:\s*\.\s*href)?\s*=(?!=)\s*(["'])([^"'\\\n]*)\1(?=[ \t]*(?:[;}\r\n]|$))"""
+    + "|" + _LOCATION + r"""\s*\.\s*(?:replace|assign)\s*\(\s*(["'])([^"'\\\n]*)\3\s*\)"""
+)
+# Lo que puede ir justo antes de una expresion regular literal (y no de una
+# division): sin distinguirlas, el `'` de `/it's/` abria una cadena falsa.
+_ANTES_DE_REGEX = set("(,=:[!&|?{};+-*%<>~^")
+# Una sentencia que empieza tras estas palabras no se ejecuta siempre.
+_PALABRAS_CONDICIONALES = frozenset({"else", "do", "return", "case", "default"})
+_MAX_SCRIPT = 200_000
+
+
+def _sentencias_de_nivel_superior(js: str) -> set[int]:
+    """Posiciones de `js` donde empieza una sentencia que se ejecuta SIEMPRE.
+
+    Un escaner minimo de JavaScript, sin dependencias: salta cadenas,
+    plantillas, comentarios y expresiones regulares, y cuenta llaves,
+    parentesis y corchetes. Una posicion vale si esta a profundidad 0 y lo
+    anterior cierra una sentencia (`;`, `}`, el inicio, o un salto de linea
+    tras algo que no la deja abierta). Lo que va dentro de una funcion, de un
+    `if (...) {` , de un `setTimeout(...)` o de un `addEventListener` queda a
+    profundidad mayor que 0; el `if (x) location = ...` sin llaves, tras un
+    `)`, y el de despues de un `else` o un `=>`, se descartan: lo condicional
+    no se afirma.
+    """
+    validas: set[int] = set()
+    n = len(js)
+    i = 0
+    profundidad = 0
+    ultimo = ""          # ultimo caracter significativo
+    ultima_palabra = ""  # ultima palabra significativa
+    hubo_salto = False
+    while i < n:
+        c = js[i]
+        if c in " \t\r\n":
+            if c == "\n":
+                hubo_salto = True
+            i += 1
+            continue
+        # Comentarios al estilo HTML (Anexo B de ECMAScript): `<!--` en
+        # cualquier sitio y `-->` a principio de linea son comentarios de una
+        # linea. Los portales antiguos envuelven asi el script entero
+        # (`<script><!-- ... //--></script>`), y sin esto el `-` del `<!--`
+        # dejaba abierta la sentencia y la pagina puente no se veia.
+        if (c == "/" and i + 1 < n and js[i + 1] == "/") \
+                or js.startswith("<!--", i) \
+                or (js.startswith("-->", i) and (hubo_salto or ultimo == "")):
+            fin = js.find("\n", i)
+            i = n if fin < 0 else fin
+            continue
+        if c == "/" and i + 1 < n and js[i + 1] == "*":
+            fin = js.find("*/", i + 2)
+            hubo_salto = hubo_salto or fin < 0 or "\n" in js[i:fin]
+            i = n if fin < 0 else fin + 2
+            continue
+        # Donde empieza algo significativo: ¿es una sentencia que siempre corre?
+        if profundidad == 0:
+            if ultimo == "" or ultimo in ";}":
+                abierta = ultima_palabra in _PALABRAS_CONDICIONALES
+            elif hubo_salto:
+                # ASI: un salto de linea cierra la sentencia anterior si esta
+                # acabo en algo que no pide continuacion.
+                abierta = (ultimo == ")" or ultimo in _ANTES_DE_REGEX
+                           or ultima_palabra in _PALABRAS_CONDICIONALES)
+            else:
+                abierta = True
+            if not abierta:
+                validas.add(i)
+        hubo_salto = False
+        if c in "'\"`":
+            j = i + 1
+            while j < n and js[j] != c:
+                if js[j] == "\\":
+                    j += 1
+                elif c != "`" and js[j] == "\n":
+                    break
+                j += 1
+            i = j + 1
+            ultimo, ultima_palabra = c, ""
+            continue
+        if c == "/" and (ultimo == "" or ultimo in _ANTES_DE_REGEX):
+            j = i + 1
+            en_clase = False
+            while j < n and js[j] != "\n":
+                if js[j] == "\\":
+                    j += 1
+                elif js[j] == "[":
+                    en_clase = True
+                elif js[j] == "]":
+                    en_clase = False
+                elif js[j] == "/" and not en_clase:
+                    break
+                j += 1
+            i = j + 1
+            ultimo, ultima_palabra = "/", ""
+            continue
+        if c.isalnum() or c in "_$":
+            j = i
+            while j < n and (js[j].isalnum() or js[j] in "_$"):
+                j += 1
+            ultima_palabra = js[i:j]
+            ultimo = js[j - 1]
+            i = j
+            continue
+        if c in "({[":
+            profundidad += 1
+        elif c in ")}]":
+            profundidad = max(0, profundidad - 1)
+        # `=>` acaba en `>`, que deja abierta la sentencia: el cuerpo de una
+        # flecha no corre ya.
+        ultimo, ultima_palabra = c, ""
+        i += 1
+    return validas
+
+
+def extract_redireccion_js(selector, base_url: str, page_url: str | None = None) -> str | None:
+    """Destino de una redireccion por JavaScript que corre SIEMPRE, o None.
+
+    Solo `location = "..."`, `location.href = "..."` y
+    `location.replace/assign("...")` con un literal, en un `<script>` en linea
+    que se ejecuta (no `ld+json`, ni dentro de `<noscript>` o `<template>`), y
+    a nivel superior del script: la pagina puente. Lo que va en una funcion, un
+    `if`, un temporizador o un evento no se afirma —FreeCrawl, con el primer
+    literal que aparece, daba 4 falsos positivos de 5 casos (repro de la guia
+    de #150)—, ni un destino concatenado, ni `#...`, `javascript:` o la propia
+    pagina. Devuelve el destino absoluto y normalizado como las URLs del censo
+    (`absolutize_url`), para poder buscarlo entre ellas.
+    """
+    propia = absolutize_url(page_url, "") if page_url else None
+    scripts = selector.xpath(
+        "//script[not(@src)][not(ancestor::noscript)][not(ancestor::template)]"
+    )
+    for script in scripts:
+        tipo = (script.xpath("@type").get() or "").strip().lower().split(";")[0].strip()
+        if tipo not in _TIPOS_SCRIPT_EJECUTABLE:
+            continue
+        js = "".join(script.xpath("text()").getall())
+        if "location" not in js or len(js) > _MAX_SCRIPT:
+            continue
+        validas = None
+        for m in _RE_REDIRECCION_JS.finditer(js):
+            if validas is None:
+                validas = _sentencias_de_nivel_superior(js)
+            if m.start() not in validas:
+                continue
+            destino = (m.group(2) if m.group(2) is not None else m.group(4)).strip()
+            if not destino or destino.startswith("#"):
+                continue
+            absoluta = absolutize_url(base_url, destino)
+            if not absoluta or urlparse(absoluta).scheme not in ("http", "https"):
+                continue
+            if absoluta == propia:
+                continue
+            return absoluta
+    return None
+
+
+# -- Charset (decision 108) ---------------------------------------------------
+
+# El navegador solo busca el `<meta charset>` en los 1.024 primeros bytes
+# (WHATWG, «prescan»); w3lib mira 4.096. Un meta mas abajo no cuenta.
+BYTES_PRESCAN_CHARSET = 1024
+
+
+def charset_declarado(body: bytes) -> dict[str, Any]:
+    """Lo que el cuerpo declara de su codificacion, normalizado.
+
+    - ``charset_meta``: el del `<meta charset>` o `http-equiv` en los 1.024
+      primeros bytes; ``""`` si no hay (medido y ausente).
+    - ``charset_bom``: el del BOM, o None.
+    - ``cuerpo_solo_ascii``: sin bytes por encima de 127 no hay nada que
+      adivinar, y un charset ausente no rompe nada.
+
+    La cabecera no va aqui: ya se guarda entera en ``urls.content_type``.
+    """
+    bom, _ = read_bom(body)
+    meta = html_body_declared_encoding(body[:BYTES_PRESCAN_CHARSET])
+    return {
+        "charset_meta": (normalizar_charset(meta) or "")[:40],
+        "charset_bom": (normalizar_charset(bom) or "")[:40] or None,
+        "cuerpo_solo_ascii": body.isascii(),
+    }
 
 
 def detect_mixed_content(selector, page_url: str) -> list[str]:

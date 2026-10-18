@@ -611,6 +611,111 @@
      caracteres de texto) y todo lo que necesita leer la página con un modelo
      (#11).
 
+<a id="d108"></a>
+108. **Lo que el HTML declara de sí mismo se guarda en crudo y se avisa por
+   plantilla, con la severidad de lo que rompe: nada de esto saca una página
+   del índice** (#150, partes A3, A6 y B6-B8 y B10). Doce columnas nuevas en
+   `html_meta`, que exigen **re-rastrear**, y doce tipos en un módulo propio,
+   `analysis/avisos_de_html.py`. Las reglas que el spider y el analizador
+   comparten (forma de una URL, viewport, idioma principal, normalización del
+   charset) viven en `shared/metadatos_html.py` (23, 39 y 64), sin w3lib: la
+   imagen del análisis no lo instala.
+   - **Lo que se guarda.** `viewport` (el `content` del último
+     `<meta name=viewport>`, `""` si va vacío) y `viewport_count`; `html_lang`
+     (`lang` o, si no, `xml:lang` del primer `<html>`; `""` = atributo vacío,
+     NULL = no está) y la cabecera `content_language`; `canonical_crudo`, el
+     `href` del canonical tal como se escribió —`canonical_href` lo guarda
+     resuelto, y la forma se perdía al extraer (`AUDITORIA_Y_VERIFICACION`,
+     sección 10)—; `og_image_forma` (solo la forma: la URL resuelta ya va en
+     `og_image`) y `twitter_image` como dato; `redireccion_js`; y el charset
+     del `<meta>` en los **1.024** primeros bytes (el «prescan» del navegador;
+     w3lib mira 4.096), el del BOM, si el cuerpo es solo ASCII y si el título
+     o el texto llevan U+FFFD (`texto_mal_codificado`).
+   - **Lo que no se midió no se afirma** (67, 89). NULL es «rastreo
+     anterior», nunca «falta»: `viewport_count` es la marca de medido del
+     viewport y del lang (0 = no hay viewport) y `charset_meta` la del charset
+     y la redirección JS. **Con render**, el charset y la redirección JS quedan
+     a NULL, como `head_cortado_por` (102): el cuerpo es el DOM ya ejecutado
+     —si la página redirigía por JS, ya es el destino— y scrapy-playwright lo
+     vuelve a codificar. Viewport, lang y OG sí se leen del DOM: es lo que ve
+     Google tras renderizar. `og_ausente` es la excepción y vale para los
+     censos ya guardados: `og_title` y `og_image` existen desde siempre.
+   - **Agrupado** (36, 53, 64, 73): una fila por (host, `firma_de_ruta`) —por
+     host lo que es del servidor: `charset_incoherente` y `charset_ausente`—
+     con `paginas_afectadas`, 5 `paginas_ejemplo` y `group_key`, anclada en la
+     página de **URL menor** del grupo (88). Solo HTML interno 2xx con
+     respuesta válida (103) y sin las meta refresh con destino, que son una
+     redirección; viewport, lang y OG solo en indexables (47). La plantilla es
+     la forma de la ruta: las reglas `config.templates` del cliente las usa por
+     ahora solo `scripts/check_js_templates.py`.
+   - **Severidad.** `warning`: `viewport_ausente` y `viewport_incorrecto`
+     (ancho fijo, sin `width=device-width` ni `initial-scale`, o sin
+     `content`) —el móvil pinta a 980 px y encoge; la indexación mobile-first
+     indexa la versión del rastreador de smartphone con o sin viewport, así que
+     no es un error de indexación—; `texto_mal_codificado`, porque el carácter
+     roto es lo que acaba en el índice y el snippet (va solo: la incoherencia
+     que lo causa sale en su detalle, 36); y `canonical_con_fragmento` cuando,
+     quitado el fragmento, apunta a OTRA página (el enrutado `/#/producto/1`
+     consolida en la portada). `info`: el fragmento que apunta a la propia
+     página, `canonical_relativo` (Google admite la ruta relativa; lo que rompe
+     es un `<base href>` o un dominio espejo), `og_ausente` (faltan `og:title`
+     **y** `og:image`) y `og_image_relativa` (redes sociales, no
+     posicionamiento), `html_lang_ausente` (WCAG 3.1.1; Google saca el idioma
+     del contenido), `html_lang_no_coincide_hreflang` (solo el idioma principal
+     frente al código con que la página se anota **a sí misma**, sin
+     `x-default` ni el hreflang del body; no se sabe cuál de los dos está mal
+     hasta tener el idioma real del contenido, #16), `charset_incoherente`
+     (cabecera, meta y BOM normalizados con las equivalencias de WHATWG, que
+     hacen `latin1` = `iso-8859-1` = `windows-1252`; el texto sale bien) y
+     `charset_ausente` (nada declarado **y** bytes no ASCII).
+     `user-scalable=no` y `maximum-scale` no hacen incorrecto un viewport: son
+     accesibilidad, no adaptación al móvil.
+   - **Redirección por JavaScript, sin render: solo la que corre siempre.**
+     `location = "…"`, `location.href = "…"` y `location.replace/assign("…")`
+     con un literal, en un `<script>` en línea que se ejecuta (no `ld+json`,
+     `<noscript>` ni `<template>`), **a nivel superior** del script: un escáner
+     mínimo salta cadenas, comentarios y regex y cuenta llaves y paréntesis;
+     dentro de una función, un `if`, un temporizador o un evento no se afirma,
+     ni tras un `)` (un `if (x)` sin llaves), un `else` o un `=>`, ni con el
+     destino concatenado, `#…`, `javascript:` o la propia página. La traducción
+     de las regex de FreeCrawl daba 4 falsos positivos en 5 casos (repro de la
+     guía); con esto, ninguno. Se guarda el destino absoluto y normalizado, y
+     `redireccion_por_javascript` (`info`, **por página**: cada página puente
+     es su hallazgo) lleva el destino, las palabras del contenido y el código
+     del destino si el rastreo llegó a él por otro camino; si no, «destino no
+     comprobado». **No se sigue**: no es un enlace ni un salto y no gasta
+     `max_urls`. Con render no se emite: el salto «Redirect (JS)» que ya se
+     registra no lleva aviso, porque antes hay que reproducir con Chromium si
+     una meta refresh de 0 s acaba ahí también (guía de #150).
+   - **Una meta refresh a `javascript:` no es una redirección** (B3 de #150):
+     `extract_meta_refresh_target` devuelve None si el destino no es http(s);
+     antes la página quedaba «Redirect (meta refresh)» con
+     `redirect_url = javascript:void(0)` y el spider intentaba seguirla.
+   - **Re-analizar cambia cifras** (72, 91): `og_ausente` sale ya en los
+     censos guardados al re-analizarlos; el resto, solo en rastreos nuevos. No
+     entran en las notas de `/insights` (92). **Sin medir en un censo real**
+     (13): la sesión que lo implementó no tenía censos ni podía lanzar
+     rastreos; antes de mergear, un canario sin render y otro con render del
+     mismo sitio, y 5 páginas por tipo contrastadas a mano con `curl`.
+   - **Fuera**: las dimensiones reales de la `og:image` (van con #101, con la
+     misma sonda de recursos), `twitter_missing` (X usa OG de respaldo), la
+     comparación del canonical del HTML con el de la cabecera (parte A de
+     #150, re-análisis) y el `viewport` en `_META_RELEVANTES` del head cortado
+     (cambiaría las cifras de la 102).
+   - **Revisión** (2026-10-18), dos fallos reproducidos y arreglados:
+     - **Con varios viewports manda el ÚLTIMO, no el primero.** Comprobado en
+       Chromium con emulación móvil a 390 px: `device-width` seguido de
+       `width=1024` pinta a 1.024 px, y al revés a 390. Guardando el primero,
+       la plantilla que se ve bien salía `viewport_incorrecto` y la que se ve
+       mal se callaba. `viewport` guarda ahora el `content` del último.
+     - **El script envuelto en un comentario HTML** (`<script><!-- …
+       //--></script>`, la forma de los portales antiguos, que son justo los
+       que tienen páginas puente) no se veía: el escáner leía `<!--` como
+       operadores y la sentencia siguiente quedaba «abierta». En JavaScript es
+       un comentario de una línea (Anexo B de ECMAScript, y Chromium ejecuta el
+       script); `-->` también, pero solo a principio de línea (`a-->b` es un
+       decremento y una comparación).
+
 <a id="d117"></a>
 117. **Una cadena de redirecciones es un aviso, y pasados 10 saltos es un
    error** (#149, duplicado en #150). Dos cosas de `redirect_chain` (decision 43):
