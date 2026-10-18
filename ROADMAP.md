@@ -192,6 +192,18 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Search Console por cliente (19 de octubre)
+
+En la ficha del cliente, Configuración → **Search Console**: se sube la llave
+de la cuenta de servicio (una por cliente o una para todos), se elige la
+propiedad de entre las que ve esa cuenta, y desde ahí se descargan solos cada
+noche los clics, las impresiones y la posición de cada URL (la primera vez, 90
+días hacia atrás). La llave se guarda en el servidor, nunca en la base de
+datos, y solo se enseña su email. Si algo falla, dice qué hacer («añade la
+cuenta X como usuario en la propiedad Y»). El siguiente paso es cruzarlo con
+el rastreo: tráfico en páginas rotas o fuera del índice, huérfanas con tráfico.
+[Decisión 141](docs/decisiones/api-clientes-y-frontend.md#d141).
+
 ### Las alertas tienen estado: no repiten y se cierran solas (18 de octubre)
 
 Una alerta de un rastreo programado ya no avisa cada semana mientras dure el

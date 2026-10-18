@@ -313,3 +313,57 @@
    **Pendiente** de la 6.2: generarlo en el worker al terminar un programado y
    mandarlo (6.4), la evolución del perfil en gráfica (decisión 130), y que el
    equipo lo revise como entregable.
+
+<a id="d141"></a>
+141. **Search Console por cliente: la llave se sube, va a un fichero del
+   servidor y la descarga es diaria y sola** (Ola 4.1 de
+   `docs/PLAN_MEJOR_CRAWLER.md`, primera parte). Criterio del usuario
+   (19-oct-2026): acceso por cliente, con una cuenta de servicio por cliente o
+   una para todos, subida desde la interfaz, y que una vez configurado «haga lo
+   que tenga que hacer».
+   - **La llave se sube y no va a la base de datos.** La decisión 83 dejó los
+     secretos en el `.env` del servidor; obligar a editarlo por ssh para cada
+     cliente es lo que hace que no se configure nunca. `POST /api/credenciales`
+     guarda el JSON en `SECRETOS_DIR` (`/secretos`, volumen `secretos` de
+     Docker: lectura y escritura en la API, solo lectura en el worker) como
+     `<NOMBRE>.json` con permisos 600 y escritura atómica
+     (`shared/secretos.py`). Lo que protegía la 83 se mantiene: no está en la
+     base de datos ni en los backups, la API **no devuelve nunca** su contenido
+     (solo `client_email` y `project_id`, lo que hay que dar de alta en Search
+     Console), y el nombre lleva el prefijo de su tipo (`GSC_*`) con la misma
+     validación que las variables. `credencial()` lee primero el entorno y si
+     no el fichero: manda lo que el operador puso a mano. Una llave sirve a
+     varios clientes; no se borra si alguno la usa (409 con sus nombres).
+     `GET /api/credenciales/{nombre}/propiedades` lista lo que ve la cuenta,
+     para elegir la propiedad sin escribirla y saber si el cliente ya dio acceso.
+   - **Por cliente y día, no por job** (`docs/INVESTIGACION_SEARCH_CONSOLE.md`):
+     tabla `gsc_paginas` (cliente, propiedad, fecha, URL, `url_clave`, clics,
+     impresiones, posición), con **todas** las URLs que da Google, también las
+     que el rastreo no encontró. `url_clave` es `clave_url` (decisión 39) en
+     SHA-256, y dos URLs que esa regla iguala (orden de parámetros) se suman.
+   - **La descarga** (`shared/gsc.py`, en el worker, un hilo propio para no
+     quitar huecos a los rastreos y con candado en Redis entre réplicas): la
+     primera vez, `SEARCH_CONSOLE_DIAS_INICIALES` (90) días; después, una vez
+     al día a partir de las 4:00 UTC, desde tres días antes del último guardado
+     hasta hoy menos dos (Google tarda 2-3 días y los últimos cambian hasta ser
+     finales). Por día, de 25.000 en 25.000 filas, y el día se reescribe entero
+     en su transacción. Google corta en 50.000 filas por día: esos días quedan
+     en `gsc_estado.dias_truncados`, porque ahí «sin impresiones» no se puede
+     afirmar. Un error se reintenta a las 6 horas; «Sincronizar ahora» lo pide
+     para la siguiente vuelta del worker.
+   - **Los errores dicen qué hacer**: un 403 es «la cuenta X no tiene acceso a
+     la propiedad Y: añádela como usuario en Search Console → Configuración →
+     Usuarios y permisos»; un 400/404, cómo se escribe la propiedad; un 401,
+     que la llave está revocada.
+   - **Interfaz**: tarjeta Search Console en Configuración del cliente (estado,
+     cuenta, días guardados, clics e impresiones de los últimos 28 días,
+     «Sincronizar ahora», y conectar en tres pasos: llave subida o nueva,
+     propiedad de entre las que ve la cuenta, guardar).
+   Comprobado contra Google con la llave real de Lopesan (sin guardar nada): la
+   cuenta ve `https://www.lopesan.com/` con permiso completo, y un día (15-oct)
+   son **3.609 URLs, 5.714 clics y 252.555 impresiones**, en 0,6 s. Ningún
+   test llama a la red. **Segunda parte**, aparte: los cruces con el rastreo
+   (tráfico en páginas rotas o fuera del índice, huérfanas con tráfico, lo que
+   Google conoce y el rastreo no encontró, prioridad por clics) y la columna en
+   el Explorador. Ojo para ella: las URLs con más clics de Lopesan llevan
+   `?partner=` y no casarán con la del censo sin tratar ese parámetro.

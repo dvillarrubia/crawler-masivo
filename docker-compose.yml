@@ -46,10 +46,14 @@ services:
     environment:
       - PYTHONPATH=/app
       - ARCHIVO_DIR=/data/archivo
+      - SECRETOS_DIR=/secretos
     # Enlaces archivados en Parquet (decision 95): lo escribe el worker y lo
     # lee la API, asi que es el mismo volumen en los dos.
+    # Secretos subidos desde la interfaz (decision 141): los escribe la API y
+    # los lee el worker. Fuera de la base de datos y de los backups.
     volumes:
       - archivo:/data/archivo
+      - secretos:/secretos
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,10 +71,12 @@ services:
     environment:
       - PYTHONPATH=/app
       - ARCHIVO_DIR=/data/archivo
+      - SECRETOS_DIR=/secretos
     # Enlaces archivados en Parquet (decision 95): lo escribe el worker y lo
     # lee la API, asi que es el mismo volumen en los dos.
     volumes:
       - archivo:/data/archivo
+      - secretos:/secretos:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,3 +108,4 @@ volumes:
   pgdata:
   redisdata:
   archivo:
+  secretos:

@@ -1515,6 +1515,77 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Search Console (decision 141)
+# ---------------------------------------------------------------------------
+def _sincronizar_gsc(cliente_id: str, propiedad: str) -> None:
+    """Una sincronizacion, en su propio hilo y con su sesion. El candado de
+    Redis evita que dos replicas descarguen lo mismo a la vez."""
+    from datetime import datetime, timezone
+
+    from shared.database import SessionLocal
+    from shared.gsc import sincronizar
+    from shared.models import Client
+
+    rconn = None
+    candado = f"gsc:sync:{cliente_id}:{propiedad}"
+    try:
+        rconn = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+        if not rconn.set(candado, "1", nx=True, ex=3 * 3600):
+            return
+        s = SessionLocal()
+        try:
+            cliente = s.query(Client).filter(Client.id == cliente_id).one_or_none()
+            integ = next((i for i in (cliente.integraciones or []) if isinstance(i, dict)
+                          and i.get("tipo") == "gsc"
+                          and str((i.get("parametros") or {}).get("propiedad") or "").strip() == propiedad),
+                         None) if cliente else None
+            if integ is None:
+                return
+            e = sincronizar(s, cliente, integ, ahora=datetime.now(timezone.utc))
+            if e is not None:
+                logger.info("Search Console de %s (%s): %s %s", cliente.slug, propiedad, e.estado,
+                            e.motivo or f"{e.primer_dia} a {e.ultimo_dia}, {e.filas} filas")
+        finally:
+            s.close()
+    except Exception:
+        # El try cubre la funcion entera (decision 74): esto no tumba el bucle.
+        logger.exception("Search Console de %s: fallo al sincronizar", cliente_id)
+    finally:
+        if rconn is not None:
+            try:
+                rconn.delete(candado)
+            except Exception:
+                pass
+
+
+def _quizas_sincronizar_gsc(executor, activos: dict, ultima_vez: float, ahora: float) -> float:
+    """Con la cadencia del planificador: lanza las que tocan, de una en una
+    por (cliente, propiedad)."""
+    from datetime import datetime, timezone
+
+    if ahora - ultima_vez < PROGRAMACION_INTERVAL_SECONDS:
+        return ultima_vez
+    for k in [k for k, f in activos.items() if f.done()]:
+        activos.pop(k)
+    try:
+        from shared.database import SessionLocal
+        from shared.gsc import pendientes
+
+        s = SessionLocal()
+        try:
+            for cliente, integ in pendientes(s, datetime.now(timezone.utc)):
+                propiedad = str(integ["parametros"]["propiedad"]).strip()
+                clave = f"{cliente.id}:{propiedad}"
+                if clave not in activos:
+                    activos[clave] = executor.submit(_sincronizar_gsc, str(cliente.id), propiedad)
+        finally:
+            s.close()
+    except Exception:
+        logger.exception("Fallo la pasada de Search Console")
+    return ahora
+
+
+# ---------------------------------------------------------------------------
 # Analisis enriquecido (#40, decision 85)
 # ---------------------------------------------------------------------------
 def _ejecutar_enriquecido(run_id: str) -> None:
@@ -1682,6 +1753,10 @@ def main() -> None:
     active_futures: dict[str, Future] = {}
     executor_enr = ThreadPoolExecutor(max_workers=max(1, MAX_CONCURRENT_ENRIQUECIDOS))
     enriquecidos: dict[str, Future] = {}
+    # Search Console (decision 141): un hilo; descargar no compite con rastrear.
+    executor_gsc = ThreadPoolExecutor(max_workers=1)
+    sincronizaciones: dict[str, Future] = {}
+    ultima_gsc = 0.0
 
     try:
         while not _shutdown_event.is_set():
@@ -1696,6 +1771,7 @@ def main() -> None:
             # llenos el bucle hace `continue` y la cola de enriquecido no se
             # leeria nunca.
             _quizas_enriquecer(rconn, executor_enr, enriquecidos)
+            ultima_gsc = _quizas_sincronizar_gsc(executor_gsc, sincronizaciones, ultima_gsc, time.time())
 
             # Clean up finished futures
             done_ids = [
@@ -1758,6 +1834,7 @@ def main() -> None:
         logger.info("Waiting for %d active job(s) to finish ...", len(active_futures))
         executor.shutdown(wait=True)
         executor_enr.shutdown(wait=True)
+        executor_gsc.shutdown(wait=False, cancel_futures=True)
         logger.info("Worker stopped")
 
 

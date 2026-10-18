@@ -1425,3 +1425,10 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .incidentes>li.sev-critical{border-left-color:var(--red,#c62828)}
 .incidentes>li.sev-warning{border-left-color:var(--orange,#d97706)}
 .incidente-cabecera{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+
+/* Search Console del cliente (decision 141) */
+.gsc-estado{padding:.55rem .75rem;border-left:3px solid var(--border)}
+.gsc-estado.gsc-ok{border-left-color:var(--green,#2e7d32)}
+.gsc-estado.gsc-error{border-left-color:var(--red,#c62828)}
+.gsc-pasos{padding:.5rem 0 0 .25rem}
+.gsc-pasos .form-group{margin-bottom:.6rem}
