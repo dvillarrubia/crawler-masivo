@@ -481,6 +481,10 @@ function app() {
     panelClientes: null,
     clienteSerie: [],
     serieSoloCensos: true,
+    // Evolucion por perfil (decision 130): la respuesta de /evolucion y la
+    // serie elegida en el desplegable.
+    clienteEvolucion: null,
+    evolucionClave: null,
     cliente: null,
     clienteTab: 'rastreos',
     clienteForm: _formCliente(null),
@@ -1192,6 +1196,57 @@ function app() {
         this.clienteSerie = serie || [];
         this.clienteForm = _formCliente(c);
       } catch (e) { this.error = e.message; }
+      // Aparte: si la evolucion falla (o la tabla aun no existe), la ficha se
+      // abre igual, sin graficas.
+      try {
+        this.clienteEvolucion = await api(`/clients/${id}/evolucion`);
+        const s = this.clienteEvolucion.series || [];
+        if (!s.find(x => x.clave === this.evolucionClave))
+          this.evolucionClave = (s.find(x => x.comparables >= 2) || s[0] || {}).clave || null;
+      } catch (e) { this.clienteEvolucion = null; }
+    },
+
+    serieEvolucion() {
+      const s = (this.clienteEvolucion && this.clienteEvolucion.series) || [];
+      return s.find(x => x.clave === this.evolucionClave) || s[0] || null;
+    },
+
+    etiquetaMetrica(k) {
+      const m = this.clienteEvolucion && this.clienteEvolucion.metricas && this.clienteEvolucion.metricas[k];
+      return m ? m.etiqueta : k;
+    },
+
+    graficaEvolucion(metrica) {
+      const serie = this.serieEvolucion();
+      if (!serie) return '';
+      return svgGrafica(modeloGrafica(serie.puntos, metrica, { etiqueta: this.etiquetaMetrica(metrica) }));
+    },
+
+    // El ultimo valor comparable de una metrica y la flecha frente al
+    // anterior comparable (sin flecha si cambio la version del analisis).
+    resumenMetrica(metrica) {
+      const serie = this.serieEvolucion();
+      const c = serie ? serie.puntos.filter(p => p.comparable && p[metrica] != null) : [];
+      if (!c.length) return { valor: '—', tendencia: null };
+      const ultimo = c[c.length - 1], previo = c.length > 1 ? c[c.length - 2] : null;
+      let tendencia = null;
+      if (previo) {
+        const mejor = ((this.clienteEvolucion.metricas || {})[metrica] || {}).mejor || 'baja';
+        const delta = ultimo[metrica] - previo[metrica];
+        tendencia = textoTendencia({
+          direccion: ultimo.cambio_version && ultimo.cambio_version.analisis ? 'no_comparable'
+            : delta > 0 ? 'sube' : delta < 0 ? 'baja' : 'igual',
+          delta: Math.round(delta * 100) / 100, antes: previo[metrica], fecha_antes: previo.fecha,
+          mejora: delta === 0 ? null : ((delta > 0 ? 'sube' : 'baja') === mejor),
+          cambio_version: ultimo.cambio_version,
+          motivo: 'Entre los dos últimos censos cambió la versión del análisis: el salto puede ser nuestro, no del sitio.',
+        });
+      }
+      return { valor: _valorMetrica(ultimo[metrica], metrica), tendencia };
+    },
+
+    noComparables(serie) {
+      return serie ? serie.puntos.filter(p => !p.comparable) : [];
     },
 
     nuevoCliente() {
@@ -4074,4 +4129,148 @@ function _formCliente(c) {
       configurada: i.configurada,
     })) : [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Evolucion de un perfil (decision 130): graficas SVG propias, sin librerias.
+// ---------------------------------------------------------------------------
+// Por que un punto no entra en la linea: lo devuelve la API en `motivo`.
+const MOTIVO_NO_COMPARABLE = {
+  failed: 'rastreo fallido', stalled: 'rastreo estancado', truncado: 'censo truncado',
+  canario: 'canario', prueba: 'prueba', lista: 'lista de URLs (modo lista)',
+  desfasado: 'agregado de otra versión del análisis: pasa rellenar_evolucion.py',
+  sin_agregado: 'sin agregar: pasa rellenar_evolucion.py',
+};
+
+// Lo que se grafica en la ficha del cliente, en este orden. Las etiquetas y el
+// sentido («mejor si baja») vienen de `shared.evolucion.METRICAS`.
+const METRICAS_GRAFICADAS = ['errores', 'urls_4xx', 'urls_5xx', 'indexables',
+  'pagerank_desperdiciado', 'click_depth_medio'];
+
+function _escSvg(t) {
+  return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _valorMetrica(v, metrica) {
+  if (v == null) return '—';
+  if (metrica === 'pagerank_desperdiciado') return String(v).replace('.', ',') + ' %';
+  if (metrica === 'click_depth_medio') return Number(v).toFixed(1).replace('.', ',');
+  return fmt.num(v);
+}
+
+// El modelo de una grafica: posiciones y textos, sin pintar nada. Separado del
+// SVG para poder comprobarlo. Reglas (decisiones 67, 72 y 91):
+// - x por orden, con TODOS los puntos: un hueco tambien es informacion;
+// - la escala y la linea, solo con los comparables: un rastreo bloqueado de 3
+//   URLs en una serie de 5.000 hundiria la escala y se leeria como «el sitio
+//   se ha caido». Los no comparables van abajo, con una ×, y su motivo;
+// - entre dos puntos con distinta version del analisis, el tramo es
+//   discontinuo y hay un corte vertical: el salto puede ser nuestro.
+function modeloGrafica(puntos, metrica, opciones) {
+  const o = Object.assign({ ancho: 300, alto: 120, margen: 14 }, opciones || {});
+  const lista = puntos || [];
+  const n = lista.length;
+  const izq = o.margen + 26, der = o.ancho - o.margen, arriba = o.margen, abajo = o.alto - o.margen - 10;
+  const x = i => n <= 1 ? (izq + der) / 2 : izq + (der - izq) * i / (n - 1);
+  const valores = lista.filter(p => p.comparable && p[metrica] != null).map(p => p[metrica]);
+  let min = valores.length ? Math.min(...valores) : 0;
+  let max = valores.length ? Math.max(...valores) : 1;
+  if (min === max) { min = min - (min ? Math.abs(min) * .1 : 1); max = max + (max ? Math.abs(max) * .1 : 1); }
+  if (min < 0 && valores.every(v => v >= 0)) min = 0;
+  const y = v => abajo - (abajo - arriba) * (v - min) / (max - min);
+  const m = { ancho: o.ancho, alto: o.alto, metrica, etiqueta: o.etiqueta || metrica, min, max, base: abajo + 6,
+              izq, der, arriba, abajo, puntos: [], fuera: [], tramos: [], cortes: [] };
+  let anterior = null;
+  lista.forEach((p, i) => {
+    const titulo = fmt.dia(p.fecha) + ' · ' + (p.name || '') + ' · ';
+    if (!p.comparable || p[metrica] == null) {
+      m.fuera.push({ x: x(i), job_id: p.job_id,
+        titulo: titulo + (p.comparable ? 'sin dato' : 'no comparable: ' + (MOTIVO_NO_COMPARABLE[p.motivo] || p.motivo)) });
+      return;
+    }
+    const punto = { x: x(i), y: y(p[metrica]), valor: p[metrica], job_id: p.job_id,
+                    titulo: titulo + _valorMetrica(p[metrica], metrica) };
+    const cambio = p.cambio_version || null;
+    if (anterior) {
+      m.tramos.push({ x1: anterior.x, y1: anterior.y, x2: punto.x, y2: punto.y,
+                      discontinuo: !!(cambio && cambio.analisis) });
+      if (cambio && (cambio.analisis || cambio.rastreo)) {
+        const desc = v => v || 'desconocida';
+        m.cortes.push({ x: (anterior.x + punto.x) / 2, analisis: !!cambio.analisis,
+          titulo: cambio.analisis
+            ? 'Cambió la versión del análisis (' + desc(cambio.analisis_antes) + ' → ' + desc(cambio.analisis_despues)
+              + '): el salto puede ser nuestro, no del sitio'
+            : 'Cambió la versión del rastreo (' + desc(cambio.rastreo_antes) + ' → ' + desc(cambio.rastreo_despues) + ')' });
+      }
+    }
+    m.puntos.push(punto);
+    anterior = punto;
+  });
+  m.ultimo = m.puntos.length ? m.puntos[m.puntos.length - 1].valor : null;
+  return m;
+}
+
+function svgGrafica(m) {
+  const partes = [`<svg class="evo-svg" viewBox="0 0 ${m.ancho} ${m.alto}" role="img" `
+    + `aria-label="${_escSvg(m.etiqueta + ': ' + m.puntos.length + ' censos comparables')}">`];
+  partes.push(`<line x1="${m.izq}" y1="${m.abajo}" x2="${m.der}" y2="${m.abajo}" style="stroke:var(--border)"/>`);
+  partes.push(`<text x="${m.izq - 4}" y="${m.arriba + 4}" text-anchor="end" class="evo-eje">${_escSvg(_valorMetrica(+m.max.toFixed(2), m.metrica))}</text>`);
+  partes.push(`<text x="${m.izq - 4}" y="${m.abajo}" text-anchor="end" class="evo-eje">${_escSvg(_valorMetrica(+m.min.toFixed(2), m.metrica))}</text>`);
+  for (const c of m.cortes) {
+    partes.push(`<line x1="${c.x}" y1="${m.arriba - 4}" x2="${c.x}" y2="${m.abajo}" class="${c.analisis ? 'evo-corte' : 'evo-corte-rastreo'}"><title>${_escSvg(c.titulo)}</title></line>`);
+    if (c.analisis) partes.push(`<text x="${c.x}" y="${m.arriba - 5}" text-anchor="middle" class="evo-corte-txt"><title>${_escSvg(c.titulo)}</title>v</text>`);
+  }
+  for (const t of m.tramos) {
+    partes.push(`<line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}" class="evo-linea${t.discontinuo ? ' discontinua' : ''}"/>`);
+  }
+  for (const p of m.puntos) {
+    partes.push(`<a href="#/rastreos/${_escSvg(p.job_id)}"><circle cx="${p.x}" cy="${p.y}" r="3.2" class="evo-punto"><title>${_escSvg(p.titulo)}</title></circle></a>`);
+  }
+  for (const f of m.fuera) {
+    partes.push(`<a href="#/rastreos/${_escSvg(f.job_id)}"><text x="${f.x}" y="${m.base + 3}" text-anchor="middle" class="evo-fuera"><title>${_escSvg(f.titulo)}</title>×</text></a>`);
+  }
+  partes.push('</svg>');
+  return partes.join('');
+}
+
+// La linea pequena del panel de cartera: solo valores, sin ejes.
+// `cortes`: indices donde cambio la version del analisis; la linea se parte
+// ahi (con un tramo gris discontinuo) en vez de unir los dos lados.
+function sparkline(valores, cortes, opciones) {
+  const o = Object.assign({ ancho: 80, alto: 22 }, opciones || {});
+  const v = (valores || []).filter(x => x != null);
+  if (v.length < 2) return '';
+  const min = Math.min(...v), max = Math.max(...v), rango = (max - min) || 1;
+  const pts = v.map((y, i) => [2 + (o.ancho - 4) * i / (v.length - 1),
+                               o.alto - 2 - (o.alto - 4) * (y - min) / rango]);
+  const txt = ps => ps.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
+  const partes = [];
+  let desde = 0;
+  for (const c of [...(cortes || []).filter(c => c > 0 && c < pts.length), pts.length]) {
+    const tramo = pts.slice(desde, c);
+    if (tramo.length > 1) partes.push(`<polyline points="${txt(tramo)}" class="evo-linea"/>`);
+    if (c < pts.length)
+      partes.push(`<polyline points="${txt([pts[c - 1], pts[c]])}" class="evo-linea discontinua"/>`);
+    desde = c;
+  }
+  const ultimo = pts[pts.length - 1];
+  return `<svg class="evo-spark" viewBox="0 0 ${o.ancho} ${o.alto}" width="${o.ancho}" height="${o.alto}" aria-hidden="true">`
+    + partes.join('')
+    + `<circle cx="${ultimo[0].toFixed(1)}" cy="${ultimo[1].toFixed(1)}" r="2" class="evo-punto"/></svg>`;
+}
+
+// La tendencia de errores en palabras: flecha, color y por que. A traves de un
+// cambio de version del analisis no hay flecha (decision 91).
+function textoTendencia(t) {
+  if (!t) return null;
+  if (t.direccion === 'no_comparable')
+    return { texto: '≠ versión', clase: 'neutra', titulo: t.motivo || 'Cambió la versión del análisis' };
+  if (t.direccion == null) return null;
+  const desde = fmt.dia(t.fecha_antes) + ': ' + fmt.num(t.antes);
+  if (t.direccion === 'igual') return { texto: '=', clase: '', titulo: 'Igual que el ' + desde };
+  return { texto: (t.direccion === 'sube' ? '▲ ' : '▼ ') + fmt.num(Math.abs(t.delta)),
+           clase: t.mejora ? 'mejor' : 'peor',
+           titulo: 'Frente al censo comparable anterior (' + desde + ')'
+             + (t.cambio_version && t.cambio_version.rastreo ? '. Ojo: rastreado con otra versión del crawler' : '') };
 }

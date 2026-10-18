@@ -312,8 +312,18 @@ def panel(db: Session = Depends(get_session)):
     nada."""
     from shared.clientes import tipo_de_rastreo
 
+    from shared.evolucion import tendencias_de_clientes
+
     clientes = db.query(Client).order_by(func.lower(Client.nombre)).all()
     cuentas = _cuentas(db, [c.id for c in clientes])
+    # La tendencia sale de `profile_runs` (decision 130): una consulta para
+    # todos los clientes, sin tocar `urls` ni `issues`. Si la tabla no
+    # existe aun (primer minuto de un despliegue), el panel sale sin ella.
+    try:
+        tendencias = tendencias_de_clientes(db, [c.id for c in clientes])
+    except Exception:
+        db.rollback()
+        tendencias = {}
     salida = []
     for c in clientes:
         recientes = (
@@ -327,6 +337,7 @@ def panel(db: Session = Depends(get_session)):
             n_rastreos=(cuentas.get(c.id) or {}).get("n_jobs", 0),
             ultimo=serie[0] if serie else None,
             anterior=serie[1] if len(serie) > 1 else None,
+            evolucion=tendencias.get(c.id),
         ))
     # Los que tienen censo reciente, primero; dentro, por fecha.
     salida.sort(key=lambda p: (p.ultimo is None, -(p.ultimo.created_at.timestamp() if p.ultimo else 0)))
@@ -348,6 +359,41 @@ def serie_de_censos(
         .order_by(Job.created_at.desc()).limit(limite).all()
     )
     return _serie(db, jobs)
+
+
+@router.get("/{client_id}/evolucion")
+def evolucion_del_cliente(
+    client_id: uuid.UUID,
+    profile_id: uuid.UUID | None = Query(None),
+    limite: int = Query(26, ge=2, le=200),
+    db: Session = Depends(get_session),
+):
+    """La evolucion del cliente, una serie por perfil (decision 130).
+
+    Cada punto es una ejecucion terminada con sus cifras de `profile_runs`,
+    si es comparable (y si no, por que: fallido, truncado, canario, lista...)
+    y si entre el y el anterior comparable cambio la version del analisis o
+    del rastreo. No lee `urls`, `issues` ni `links`: lo caro ya esta agregado.
+    `sin_agregado` cuenta los rastreos terminados sin fila (anteriores a la
+    tabla: `scripts/rellenar_evolucion.py`).
+    """
+    from shared.evolucion import leer
+
+    _buscar(db, client_id)
+    if profile_id is not None:
+        _perfil(db, client_id, profile_id)
+    return leer(db, client_id, profile_id=profile_id, limite=limite)
+
+
+@router.get("/{client_id}/profiles/{profile_id}/evolucion")
+def evolucion_del_perfil(
+    client_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    limite: int = Query(26, ge=2, le=200),
+    db: Session = Depends(get_session),
+):
+    """Lo mismo, solo el perfil."""
+    return evolucion_del_cliente(client_id, profile_id=profile_id, limite=limite, db=db)
 
 
 # ---------------------------------------------------------------------------

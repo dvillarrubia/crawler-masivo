@@ -37,6 +37,7 @@ from shared.models import (
     RobotsTxt,
     CapturaAlternativa,
     RespuestaSondeada,
+    ProfileRun,
     SitemapEntry,
 )
 
@@ -89,6 +90,10 @@ _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
     ("respuestas_sondeadas", RespuestaSondeada),
     # Entradas de cada fichero de sitemap (decision 126).
     ("sitemap_entries", SitemapEntry),
+    # La fila de la evolucion del job (decision 130). Se podria rehacer con
+    # `rellenar_evolucion.py`, pero viaja: un censo importado tiene que salir
+    # en la evolucion de su cliente sin pasos aparte.
+    ("profile_runs", ProfileRun),
 ]
 
 
