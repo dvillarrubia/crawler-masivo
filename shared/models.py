@@ -249,6 +249,9 @@ class Job(Base):
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.
     # Las sondas NO son URLs del censo: no estan en `urls` ni cuentan en nada.
     soft404 = Column(JSON, nullable=True)
+    # Con que reglas y cuando se materializo `urls.segmento`, y cuantas URLs
+    # casaron con cada regla o no se pudieron juzgar (decision 125).
+    segmentacion = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -373,6 +376,11 @@ class Url(Base):
     closest_similarity = Column(Float, nullable=True, default=None)
     # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
     in_sitemap = Column(Boolean, nullable=True, default=None)
+    # Segmento de negocio (decision 125, `shared/segmentos.py`): el nombre de la
+    # primera regla de `config.segmentos` que casa o, si ninguna, la forma de la
+    # ruta (empieza por `/`). Lo escribe el analisis y el re-segmentado; NULL =
+    # censo anterior a la columna o aun sin analizar.
+    segmento = Column(Text, nullable=True)
 
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
@@ -424,6 +432,11 @@ class HtmlMeta(Base):
     # a una URL que Google no usa.
     canonical_count = Column(Integer, nullable=True)
     canonical_in_body = Column(Boolean, nullable=True)
+    # Cuantos DESTINOS distintos declaran los canonicals del head (con la clave
+    # de `misma_url`): `/a` y `https://x.com/a` son uno. Con mas de uno Google
+    # los ignora todos y la pagina no esta canonicalizada (decision 115). NULL =
+    # rastreo anterior a la columna: se cae a `canonical_count`.
+    canonical_distintos = Column(Integer, nullable=True)
     canonical_header = Column(Text, nullable=True)
 
     og_title = Column(Text, nullable=True)
@@ -457,6 +470,37 @@ class HtmlMeta(Base):
     # canonical, description, googlebot, hreflang, robots y title. Cadena
     # vacia = medido y no hay ninguno; NULL = no medido (censo anterior).
     fuera_del_head = Column(String(128), nullable=True)
+
+    # --- Lo que el HTML declara de si mismo (decision 108) ---
+    # `content` del ULTIMO `<meta name=viewport>`, el que aplica el navegador
+    # ("" si lo tiene vacio), y
+    # cuantos hay. `viewport_count` es la marca de «medido» de todo el bloque:
+    # 0 = no hay viewport; NULL = rastreo anterior a la columna, y entonces el
+    # analizador no afirma que falte nada (decisiones 67 y 89).
+    viewport = Column(Text, nullable=True)
+    viewport_count = Column(Integer, nullable=True)
+    # `<html lang>` (o `xml:lang`): "" = atributo vacio, NULL = no esta.
+    html_lang = Column(String(35), nullable=True)
+    # Cabecera `Content-Language`, tal cual.
+    content_language = Column(String(64), nullable=True)
+    # El href del canonical tal como se escribio: `canonical_href` va resuelto
+    # y la forma (relativa, con fragmento) se perdia al extraer.
+    canonical_crudo = Column(Text, nullable=True)
+    # Forma de la og:image (`shared.metadatos_html.forma_de_href`).
+    og_image_forma = Column(String(24), nullable=True)
+    twitter_image = Column(Text, nullable=True)
+    # Destino de un `location = "..."` a nivel superior de un script (la
+    # pagina puente), absoluto y normalizado, sin render. Lo condicional no se
+    # guarda.
+    redireccion_js = Column(Text, nullable=True)
+    # Charset del meta en los 1.024 primeros bytes ("" = no hay) y del BOM,
+    # normalizados; si el cuerpo es solo ASCII, y si el titulo o el texto
+    # llevan U+FFFD (bytes que no casan con la codificacion). Solo sin
+    # render: con render los bytes originales se pierden, todo NULL.
+    charset_meta = Column(String(40), nullable=True)
+    charset_bom = Column(String(40), nullable=True)
+    cuerpo_solo_ascii = Column(Boolean, nullable=True)
+    texto_mal_codificado = Column(Boolean, nullable=True)
 
     url_rel = relationship("Url", back_populates="html_meta")
 
@@ -533,6 +577,10 @@ class Hreflang(Base):
     # retorno de nadie y se avisa con `hreflang_in_body`. NULL = rastreo
     # anterior a la columna (no se sabe; se trata como del head).
     en_body = Column(Boolean, nullable=True)
+    # `html` (el `<head>` o el body) o `cabecera` (HTTP `Link`, la unica fuente
+    # de un PDF). Preparado para `sitemap` (#107). NULL = rastreo anterior, del
+    # HTML.
+    origen = Column(String(16), nullable=True)
 
     url_rel = relationship("Url", back_populates="hreflangs")
 

@@ -50,6 +50,10 @@ def test_fila_completa_tambien_cuadra():
         meta_refresh=None, has_meta_outside_head=False, og_title="o",
         og_description=None, og_image=None, og_type="article",
         twitter_card="summary", twitter_title=None, twitter_description=None,
+        # Decision 108
+        viewport="width=device-width", html_lang="es", content_language="es-ES",
+        canonical_crudo="/a", redireccion_js=None, charset_meta="", twitter_image=None,
+        texto_mal_codificado=False,
     )
     pc = types.SimpleNamespace(content_text="x" * 900, content_length=900)
     sec = types.SimpleNamespace(
@@ -67,6 +71,11 @@ def test_fila_completa_tambien_cuadra():
     assert datos["hreflang_langs"] == "es|en"
     assert datos["structured_data_types"] == "Article"
     assert datos["images_missing_alt"] == "1"
+    assert datos["viewport"] == "width=device-width"
+    assert datos["html_lang"] == "es"
+    assert datos["canonical_crudo"] == "/a"
+    assert datos["texto_mal_codificado"] == "False"
+    assert datos["og_type"] == "article"  # lo de detras no se ha desplazado
 
 
 def test_el_texto_va_recortado_y_la_columna_lo_dice():

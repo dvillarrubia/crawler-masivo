@@ -137,7 +137,8 @@ def create_job(
     payload: JobCreate,
     db: Session = Depends(get_session),
 ):
-    from api.routers.clientes import resolver_cliente_y_perfil, resolver_config
+    from api.routers.clientes import (comprobar_segmentos, resolver_cliente_y_perfil,
+                                      resolver_config)
 
     cliente, perfil = resolver_cliente_y_perfil(
         db, cliente_id=payload.cliente_id, profile_id=payload.profile_id,
@@ -151,6 +152,7 @@ def create_job(
         for clave in ("custom_extraction", "custom_search"):
             config[clave] = {n: r for n, r in (config.get(clave) or {}).items()
                              if r is not None}
+        comprobar_segmentos(config)
     else:
         # Con cliente, solo lo que el job CAMBIA se pone encima de lo heredado.
         config = resolver_config(

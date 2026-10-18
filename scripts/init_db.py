@@ -54,12 +54,35 @@ def main() -> None:
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS title_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_description_count INTEGER"))
         conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
+        # De donde sale la anotacion: `html` o `cabecera` (Link). NULL = rastreo
+        # anterior, del HTML (decision 116).
+        conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS origen VARCHAR(16)"))
+        # Canonicals del head con DESTINO distinto: con dos, Google los ignora
+        # todos. NULL = rastreo anterior; se mira `canonical_count` (decision 115).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_distintos INTEGER"))
+        # Lo que el HTML declara de si mismo (decision 108). Nullable y sin
+        # DEFAULT: solo catalogo.
+        for columna, tipo in (
+            ("viewport", "TEXT"), ("viewport_count", "INTEGER"),
+            ("html_lang", "VARCHAR(35)"), ("content_language", "VARCHAR(64)"),
+            ("canonical_crudo", "TEXT"), ("og_image_forma", "VARCHAR(24)"),
+            ("twitter_image", "TEXT"), ("redireccion_js", "TEXT"),
+            ("charset_meta", "VARCHAR(40)"), ("charset_bom", "VARCHAR(40)"),
+            ("cuerpo_solo_ascii", "BOOLEAN"), ("texto_mal_codificado", "BOOLEAN"),
+        ):
+            conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # La respuesta era la pagina o un muro delante, y la salud del job
         # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
+        # Segmentos de negocio (decision 125). Sin DEFAULT: solo catalogo. Sin
+        # indice a proposito: todo filtro por segmento va con `job_id`, que ya
+        # tiene los suyos, y crear uno sobre `urls` bloquearia las escrituras
+        # de un rastreo en marcha mientras se construye.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS segmento TEXT"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS segmentacion JSON"))
         # Si Googlebot puede pedir la URL segun el robots.txt guardado
         # (decision 113). Sin DEFAULT: NULL = no evaluado, solo catalogo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS bloqueada_googlebot BOOLEAN"))

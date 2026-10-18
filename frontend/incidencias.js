@@ -33,14 +33,24 @@ const ISSUE_INFO = {
     arreglo: 'Comprobar con Search Console (inspección de URL) que Google sí ve la página. Para auditarla: lista blanca de la IP del rastreador en el WAF, menos concurrencia o render de JavaScript, y reanudar el rastreo (las páginas de muro se repiten al reanudar).',
   },
   'redirect_chain': {
-    que: 'Para llegar a la URL final hay dos saltos o más (A → B → C).',
-    google: 'Sigue la cadena, pero cada salto gasta rastreo y Google pide evitarlas.',
+    que: 'Para llegar a la URL final hay dos saltos o más (A → B → C). Con más de 10 es un error: Google deja de seguirla.',
+    google: 'Sigue hasta 10 saltos, y cada uno gasta rastreo; pasados 10 no llega al destino y Search Console da un error de redirección.',
     arreglo: 'Que la primera URL redirija directamente a la final, y actualizar los enlaces internos.',
   },
   'redireccion_a_error': {
     que: 'La redirección, o la cadena de redirecciones, lleva a otra ruta que da un error (4xx o 5xx). Las que solo cambian http/https, www o la barra final no salen aquí: ahí el error es la página, que ya avisa en su URL.',
     google: 'Llega a un error: la URL vieja pierde lo que tenía y la nueva no existe.',
     arreglo: 'Redirigir directamente a una página que responda 200, o quitar los enlaces que llevan a la URL vieja.',
+  },
+  'redireccion_a_noindex': {
+    que: 'La redirección, o la cadena, acaba en una página que pide no ser indexada (noindex). Si diez o más redirecciones llegan a la misma, sale una sola vez, en ella: suele ser una regla deliberada (todo /mi-cuenta/ a /login). Las que solo cambian http/https, www o la barra final no salen.',
+    google: 'Sigue la redirección y encuentra un noindex: lo que tenía la URL vieja no pasa a ninguna página del índice.',
+    arreglo: 'Redirigir a la página indexable que sustituye a la vieja; si el destino es correcto, decidir si debe seguir en noindex.',
+  },
+  'meta_refresh_redireccion': {
+    que: 'La página redirige con <meta http-equiv="refresh"> en vez de con una redirección del servidor. Con retardo, el usuario la ve unos segundos antes de saltar. Una refresh sin URL (recargar) o dentro de <noscript> no cuenta. Con render JS, una refresh inmediata puede aparecer como redirección por JavaScript, y el retardo de un salto visto por el navegador no se conoce.',
+    google: 'La inmediata la trata como permanente; la de varios segundos, como temporal, y puede quedarse con la URL de origen. Recomienda la redirección del servidor.',
+    arreglo: 'Sustituirla por una redirección 301 en el servidor.',
   },
   'redirect_loop': {
     que: 'Las redirecciones vuelven a una URL ya visitada y no terminan nunca.',
@@ -53,6 +63,16 @@ const ISSUE_INFO = {
     que: 'La página pide no ser indexada (meta robots o cabecera X-Robots-Tag).',
     google: 'No la muestra en resultados y, con el tiempo, deja de seguir sus enlaces.',
     arreglo: 'Nada si es intencionado (búsquedas, filtros, privadas). Si es una página que debe posicionar, quitar el noindex.',
+  },
+  'noindex_y_canonical_a_otra': {
+    que: 'La página está en noindex y a la vez declara un canonical a otra URL: dos señales que piden cosas distintas. Va agrupado por plantilla. Si el destino también es noindex no sale (no hay contradicción útil).',
+    google: 'Suele obedecer el noindex, y la consolidación en la canónica no se produce. Es habitual y casi siempre deliberado en facetas y filtros.',
+    arreglo: 'Quedarse con una de las dos: noindex si la página no debe estar, o canonical (sin noindex) si es una copia de la canónica. Gana claridad, no índice.',
+  },
+  'canonical_html_y_cabecera_distintos': {
+    que: 'El canonical del HTML y el de la cabecera HTTP Link apuntan a URLs distintas (la barra final cuenta). Si pasa en diez páginas o más de un host, sale una vez por host.',
+    google: 'Recibe dos canonicals que se contradicen y puede ignorar los dos y elegir por su cuenta.',
+    arreglo: 'Que los dos digan lo mismo, o quitar uno (suele ser el CDN o un plugin el que añade la cabecera).',
   },
   'robots_invalid_syntax': {
     que: 'La meta robots está mal escrita (directivas separadas por «/», «|» o «;»).',
@@ -110,8 +130,8 @@ const ISSUE_INFO = {
     arreglo: 'Ya no se emite: desde la decisión 101 es canonical_a_error o canonical_a_redireccion. Sale solo en censos analizados antes.',
   },
   'canonical_multiple': {
-    que: 'La página declara más de un canonical.',
-    google: 'Si no coinciden, los ignora todos y elige por su cuenta.',
+    que: 'La página declara en el <head> varios canonicals con destinos distintos. El mismo destino escrito dos veces no sale aquí.',
+    google: 'Los ignora todos, también el de la cabecera Link, y elige por su cuenta: la página cuenta como indexable, no como canonicalizada.',
     arreglo: 'Dejar uno solo; suele ser un plugin y la plantilla escribiendo los dos.',
   },
   'canonical_in_body': {
@@ -142,6 +162,68 @@ const ISSUE_INFO = {
     arreglo: 'Si el sitio no es de un framework que los suba con JavaScript, moverlos al <head> de la plantilla. Si lo es, comprobar con la inspección de URL de Search Console que Google ve el título y el robots que tocan. Solo se mide en rastreos sin render.',
   },
 
+  // ----- Lo que el HTML declara de sí mismo (decisión 108) -----
+  'viewport_ausente': {
+    que: 'Páginas indexables sin <meta name="viewport">. Una fila por plantilla, con las páginas afectadas.',
+    google: 'No decide si se indexa: la indexación mobile-first indexa la versión que ve el rastreador de smartphone, con o sin viewport. Lo que cambia es cómo se ve: sin viewport, el móvil pinta la página a 980 px de ancho y la encoge, y el usuario tiene que hacer zoom. Si el rastreo fue sin render y el sitio lo pone con JavaScript, aquí sale como ausente: compruébalo en el navegador.',
+    arreglo: 'Añadir <meta name="viewport" content="width=device-width, initial-scale=1"> en el <head> de la plantilla.',
+  },
+  'viewport_incorrecto': {
+    que: 'El viewport existe pero no adapta la página al móvil: un ancho fijo (width=1024), sin width=device-width ni initial-scale, o sin content. Una fila por plantilla y motivo.',
+    google: 'Igual que sin viewport: no afecta a la indexación, sino a cómo se ve en el móvil (la página se pinta al ancho fijo y se encoge). user-scalable=no y maximum-scale no cuentan aquí: impiden hacer zoom, que es accesibilidad, no adaptación.',
+    arreglo: 'Usar content="width=device-width, initial-scale=1" y que la maqueta sea adaptable. Si hay dos viewports, dejar uno.',
+  },
+  'html_lang_ausente': {
+    que: 'Páginas indexables sin atributo lang en <html>, o con el atributo vacío. Una fila por plantilla.',
+    google: 'Google no usa el lang para decidir el idioma de la página: lo saca del contenido visible. Sirve a los lectores de pantalla, a la traducción del navegador y a la accesibilidad (WCAG 3.1.1). Es informativo, no un problema de posicionamiento.',
+    arreglo: 'Poner <html lang="es"> (o el idioma de cada versión) en la plantilla.',
+  },
+  'html_lang_no_coincide_hreflang': {
+    que: 'El idioma del <html lang> no es el del código con que la página se anota a sí misma en su hreflang (se compara solo el idioma: es y es-ES coinciden; es-MX y es-ES también). Una fila por plantilla y pareja de idiomas.',
+    google: 'Google se guía por el hreflang y por el contenido, no por el lang. Que no coincidan dice que uno de los dos está mal, pero no cuál: puede ser un lang="es" fijo en todo un sitio multidioma, o un hreflang mal asignado. Hasta comparar con el idioma real del contenido no se puede afirmar más.',
+    arreglo: 'Mirar las páginas de ejemplo: si el contenido está en el idioma del hreflang, corregir el lang de la plantilla; si está en el del lang, revisar el hreflang.',
+  },
+  'texto_mal_codificado': {
+    que: 'El título o el texto de la página llevan caracteres sustituidos (�): los bytes no casan con la codificación con que se leen. Una fila por plantilla, con lo que declaran la cabecera, el meta y el BOM.',
+    google: 'Lee la página con la misma codificación que el navegador y, si los bytes no casan, indexa y enseña en el resultado los caracteres rotos: el título y el snippet salen con símbolos de interrogación.',
+    arreglo: 'Servir el HTML en la codificación que declara la cabecera Content-Type (lo normal: guardar las plantillas y la base de datos en UTF-8 y declarar charset=utf-8). Solo se mide en rastreos sin render.',
+  },
+  'charset_incoherente': {
+    que: 'La cabecera Content-Type, el <meta charset> y el BOM declaran codificaciones distintas (latin1, iso-8859-1 y windows-1252 cuentan como la misma). El texto sale bien. Una fila por host y combinación.',
+    google: 'Manda el BOM y, sin él, la cabecera, como en el navegador: hoy no se rompe nada, pero basta con que el servidor deje de mandar la cabecera (una caché, un CDN, una copia estática) para que se lea con la otra y salga roto.',
+    arreglo: 'Declarar la misma codificación en la cabecera y en el <meta charset> de la plantilla. Solo se mide en rastreos sin render.',
+  },
+  'charset_ausente': {
+    que: 'Ni la cabecera Content-Type, ni un <meta charset> en los primeros 1.024 bytes, ni un BOM dicen la codificación, y el HTML lleva caracteres no ASCII. Una fila por host.',
+    google: 'Tiene que adivinarla, como el navegador. Suele acertar, pero si no, los acentos salen rotos en el índice y en el snippet. Un meta escrito más abajo de los 1.024 bytes el navegador no lo ve.',
+    arreglo: 'Mandar charset=utf-8 en la cabecera Content-Type o poner <meta charset="utf-8"> como primer elemento del <head>.',
+  },
+  'canonical_relativo': {
+    que: 'El canonical está escrito como ruta relativa (/x, x o ../x) o relativa al protocolo (//host/x), no como URL absoluta. Una fila por plantilla y forma.',
+    google: 'Admite las rutas relativas y recomienda las absolutas. Lo que rompe es el contexto: con un <base href> a otro sitio, o con la página servida desde un dominio espejo o de staging, la ruta relativa apunta al host equivocado. Es informativo.',
+    arreglo: 'Escribir el canonical como URL absoluta, con esquema y host de producción.',
+  },
+  'canonical_con_fragmento': {
+    que: 'El canonical lleva un fragmento (#…). Una fila por plantilla; aparte las que, quitado el fragmento, apuntan a otra página.',
+    google: 'Quita el fragmento: un canonical a /p#top es un canonical a /p. Si eso es la propia página, no pasa nada (informativo). Si es otra —lo típico de un enrutado con #/, donde /#/producto/1 queda en la portada—, la página le pide a Google que la consolide en esa otra, y es un aviso.',
+    arreglo: 'Quitar el fragmento del canonical. Si el sitio enruta con #, pasar a rutas reales (History API): Google no indexa lo que va detrás del #.',
+  },
+  'og_ausente': {
+    que: 'Páginas indexables sin og:title ni og:image. Una fila por plantilla.',
+    google: 'No lo usa para posicionar. Lo usan las redes sociales y las aplicaciones de mensajería al compartir el enlace: sin ellos, la vista previa sale sin imagen o con lo primero que encuentren.',
+    arreglo: 'Añadir og:title, og:description y og:image (URL absoluta, imagen grande) en la plantilla.',
+  },
+  'og_image_relativa': {
+    que: 'La og:image está escrita como ruta relativa, no como URL absoluta. Una fila por plantilla y forma.',
+    google: 'No afecta al posicionamiento. El protocolo Open Graph pide una URL absoluta, y hay redes que no resuelven la relativa: la vista previa sale sin imagen.',
+    arreglo: 'Escribir la og:image como URL absoluta, con esquema y host.',
+  },
+  'redireccion_por_javascript': {
+    que: 'La página redirige con JavaScript (location = "…", location.replace("…")) en cuanto carga, sin condición: una página puente. Se detecta en el HTML servido, sin render, y solo con un destino literal a nivel superior del script; lo que va dentro de una función, de un if o de un temporizador no se afirma.',
+    google: 'Google ejecuta el JavaScript al renderizar y suele seguir la redirección, pero más tarde y con menos garantías que una del servidor, y quien no ejecuta JavaScript se queda en la página puente. El destino no se ha seguido en este rastreo: si aparece su código, es porque se llegó a él por otro camino.',
+    arreglo: 'Sustituirla por una redirección 301 en el servidor y enlazar directamente el destino.',
+  },
+
   // ----- Títulos, descripciones y encabezados -----
   'title_missing': {
     que: 'La página no tiene <title>.',
@@ -157,6 +239,16 @@ const ISSUE_INFO = {
     que: 'El título pasa del ancho que Google enseña (~580 px).',
     google: 'Lo corta con «…» o lo reescribe.',
     arreglo: 'Acortarlo dejando lo importante al principio.',
+  },
+  'title_generico': {
+    que: 'El título es el de relleno del CMS («Sin título», «Untitled document», «Nueva página»…), solo o con la marca del sitio. Sale una vez por valor, con las páginas que lo llevan.',
+    google: 'No sabe de qué va la página por el título, y suele reescribirlo.',
+    arreglo: 'Escribir el título de cada página.',
+  },
+  'description_igual_title': {
+    que: 'La meta description repite el título, palabra por palabra. Va agrupado por plantilla: suele ser el valor por defecto del CMS o del plugin.',
+    google: 'No aporta nada que no diga ya el título, y la suele sustituir por un fragmento de la página.',
+    arreglo: 'Escribir una description que resuma la página, o configurar el plugin para que no copie el título.',
   },
   'title_duplicate': {
     que: 'Varias páginas indexables comparten el mismo título.',
@@ -197,6 +289,11 @@ const ISSUE_INFO = {
     que: 'La página no tiene un <h1> visible.',
     google: 'No es obligatorio, pero el titular visible ayuda a entender el tema.',
     arreglo: 'Añadir un <h1> con el titular de la página.',
+  },
+  'h1_vacio': {
+    que: 'La página tiene <h1>, pero vacío: sin texto, o con un logo sin alt dentro. Un logo sin alt dentro del <h1> deja la página sin titular.',
+    google: 'Es como no tenerlo: no hay titular que leer.',
+    arreglo: 'Poner el titular como texto, o el nombre en el alt de la imagen.',
   },
   'h1_multiple': {
     que: 'La página tiene varios <h1> visibles.',
@@ -356,6 +453,11 @@ const ISSUE_INFO = {
     google: 'Rastrea un error por cada enlace, y la autoridad que pasaba por ahí se pierde.',
     arreglo: 'Cambiar o quitar los enlaces de esta página; si el destino debería existir, arreglarlo o redirigirlo.',
   },
+  'enlace_sin_ancla': {
+    que: 'Enlace interno sin ningún nombre: sin texto, sin aria-label ni title, y sin alt si es una imagen. Si el mismo enlace (posición y destino) está en diez páginas o más, sale una vez, como plantilla. En el caso de una imagen, el arreglo es el mismo que el de «imagen sin alt».',
+    google: 'El enlace cuenta, pero el texto ancla es lo que le dice de qué va el destino, y aquí no hay ninguno.',
+    arreglo: 'Poner texto al enlace, o un alt descriptivo a la imagen (o aria-label si es un icono).',
+  },
   'enlace_interno_a_redireccion': {
     que: 'Enlaces internos a una URL que redirige. «Plantilla»: la URL que redirige está enlazada desde 10 páginas o más (el aviso va en ella); «página»: los de esta página.',
     google: 'Sigue la redirección y pasa la señal, pero gasta un rastreo más por enlace y prefiere que se enlace la URL final.',
@@ -476,6 +578,18 @@ const ISSUE_LABEL_EXTRA = {
   html_supera_2mb: 'HTML de más de 2 MB',
   head_cortado: 'Head cortado antes de tiempo',
   meta_fuera_del_head: 'Metadatos fuera del head',
+  viewport_ausente: 'Sin meta viewport',
+  viewport_incorrecto: 'Viewport que no adapta al móvil',
+  html_lang_ausente: 'Sin <html lang>',
+  html_lang_no_coincide_hreflang: 'html lang distinto del hreflang',
+  texto_mal_codificado: 'Texto mal codificado',
+  charset_incoherente: 'Charset incoherente',
+  charset_ausente: 'Charset sin declarar',
+  canonical_relativo: 'Canonical relativo',
+  canonical_con_fragmento: 'Canonical con fragmento',
+  og_ausente: 'Sin Open Graph',
+  og_image_relativa: 'og:image relativa',
+  redireccion_por_javascript: 'Redirección por JavaScript',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
   robots_txt_inaccesible: 'robots.txt con error o sin respuesta',
@@ -484,6 +598,15 @@ const ISSUE_LABEL_EXTRA = {
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
   utm_en_enlace_interno: 'Enlace interno con utm',
+  enlace_sin_ancla: 'Enlace interno sin texto ancla',
+  // Decisiones 120 y 121
+  redireccion_a_noindex: 'Redirección a una noindex',
+  meta_refresh_redireccion: 'Redirección por meta refresh',
+  noindex_y_canonical_a_otra: 'Noindex con canonical a otra',
+  canonical_html_y_cabecera_distintos: 'Canonical del HTML ≠ cabecera',
+  h1_vacio: 'H1 vacío',
+  title_generico: 'Título de relleno',
+  description_igual_title: 'Description igual al título',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -543,6 +666,23 @@ const DETALLE_LABEL = {
   cortado_por: 'lo corta',
   fuera_del_head: 'quedan fuera',
   directiva_en_duda: 'robots o canonical detrás del corte',
+  // Lo que el HTML declara de sí mismo (decisión 108)
+  plantilla: 'plantilla',
+  rastreo_con_render: 'rastreo con render',
+  con_varios_viewports: 'con varios viewports',
+  atributo_vacio: 'con lang vacío',
+  html_lang: 'html lang',
+  hreflang: 'se anota en hreflang como',
+  charset_cabecera: 'charset de la cabecera',
+  charset_meta: 'charset del meta',
+  charset_bom: 'BOM',
+  manda: 'manda',
+  forma: 'forma',
+  apunta_a_si_misma: 'apunta a la propia página',
+  fuente: 'fuente',
+  palabras: 'palabras',
+  destino_status: 'código del destino',
+  destino_no_comprobado: 'destino no comprobado',
   // Avisos de enlaces (decision 106)
   paginas_que_enlazan: 'páginas que la enlazan',
   enlaces: 'enlaces',
@@ -566,4 +706,16 @@ const DETALLE_LABEL = {
   solo_rastreador: 'solo el rastreador bloqueado',
   ejemplos_solo_googlebot: 'ejemplos solo Googlebot',
   ejemplos_solo_rastreador: 'ejemplos solo el rastreador',
+  // Decisiones 120 y 121
+  fuente: 'de dónde sale',
+  canonical_html: 'canonical del HTML',
+  canonical_cabecera: 'canonical de la cabecera',
+  destino_indexable: 'destino indexable',
+  plantilla: 'plantilla',
+  paginas_ejemplo: 'páginas de ejemplo',
+  redirecciones_que_llegan: 'redirecciones que llegan',
+  final: 'URL final',
+  retardo_s: 'retardo (s)',
+  h1_vacios: 'h1 vacíos',
+  alcance: 'alcance',
 };

@@ -99,7 +99,7 @@ def resolver_config(
         override or {},
     )
     try:
-        return JobConfig.model_validate(fusion).model_dump()
+        config = JobConfig.model_validate(fusion).model_dump()
     except ValidationError as exc:
         # Cada capa es valida por separado, pero la mezcla puede no serlo
         # (p. ej. un tope de un sitio y un minimo de otro). Se dice cual.
@@ -107,6 +107,20 @@ def resolver_config(
             status_code=422,
             detail=f"La configuracion heredada no es valida: {exc.errors()}",
         )
+    comprobar_segmentos(config)
+    return config
+
+
+def comprobar_segmentos(config: dict) -> None:
+    """Las condiciones `x` de los segmentos contra las reglas a medida de la
+    config ENTERA (decision 125): un perfil puede segmentar por una extraccion
+    del cliente, pero una `x` que no fija ninguna capa no casaria nunca y se
+    leeria como «no hay ninguna»."""
+    from shared.segmentos import errores_de_config
+
+    errores = errores_de_config(config)
+    if errores:
+        raise HTTPException(status_code=422, detail="; ".join(errores))
 
 
 def _validar_fusion(cliente: Client | None, config_perfil: dict | None) -> None:
@@ -399,6 +413,11 @@ def crear_cliente(cuerpo: ClientCreate, db: Session = Depends(get_session)):
             status_code=422,
             detail="El nombre no da un slug: escribe uno a mano")
     _slug_libre(db, slug)
+    # Como al editarlo: la configuracion del cliente sola tiene que ser
+    # resoluble (un segmento sobre una `x` que no existe, decision 125).
+    from types import SimpleNamespace
+
+    resolver_config(SimpleNamespace(config_defecto=cuerpo.config_defecto or {}), None, None)
     cliente = Client(
         nombre=cuerpo.nombre.strip(),
         slug=slug,

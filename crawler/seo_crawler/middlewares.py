@@ -524,41 +524,133 @@ class RobotsTxtRegistroMiddleware:
 
 
 class HttpConfigMiddleware:
-    """
-    Apply per-job HTTP configuration (custom headers, cookies, auth)
-    to every outgoing request.
+    """Cabeceras propias, cookies y Basic del job (bloque ``http``), solo a
+    los hosts del sitio (decision 114).
 
-    Reads ``spider._http_config`` which is populated from the job's
-    ``http`` configuration block.
+    Lee ``spider._http_config``. Antes se ponian en TODAS las peticiones: con
+    una semilla que salta a otro dominio o con ``follow_external``, el usuario
+    y la contrasena de un staging llegaban a terceros. Ahora solo las lleva una
+    peticion a un host de las semillas (``spider._lleva_credenciales``), y a
+    las demas se les quitan si les llegaron copiadas de otra peticion.
+    ``Accept-Language`` no es un dato del cliente sino como se mide: va a todas.
+
+    Con render no se ponen en la peticion de Scrapy: scrapy-playwright las
+    aplicaria con ``route.continue_`` y Chromium las conserva al seguir una
+    redireccion a otro host (medido). Viajan en ``meta["_http_render"]`` y las
+    aplica ``render.preparar_pagina``.
+
+    Sin jar (lo normal, decision 114) las cookies van como cabecera ``Cookie``
+    escrita aqui: por ``request.cookies`` las pasa scrapy-impersonate al motor
+    de cookies de curl, que las descarta para un host sin punto
+    (``localhost``; medido con curl_cffi 0.16). Con jar van por
+    ``request.cookies``, para que el ``CookiesMiddleware`` de Scrapy las junte
+    con las del servidor (ver ``CookiesTrasElJarMiddleware``).
     """
+
+    def __init__(self, con_jar: bool = False):
+        self._con_jar = con_jar
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings.getbool("COOKIES_ENABLED"))
 
     def process_request(self, request: Request, spider):
-        http_config = getattr(spider, "_http_config", None)
-        if not http_config:
+        http_config = getattr(spider, "_http_config", None) or {}
+        es_render = bool(request.meta.get("playwright"))
+        if not http_config and not es_render:
             return None
 
-        # Custom headers
-        for key, value in http_config.get("custom_headers", {}).items():
-            request.headers[key.encode()] = value.encode()
-
-        # Accept-Language
         accept_lang = http_config.get("accept_language", "")
         if accept_lang:
             request.headers[b"Accept-Language"] = accept_lang.encode()
 
-        # Cookies
-        for name, val in http_config.get("cookies", {}).items():
-            request.cookies[name] = val
+        cabeceras = cabeceras_del_job(http_config)
+        cookies = {str(k): str(v) for k, v in (http_config.get("cookies") or {}).items()}
+        lleva = bool(getattr(spider, "_lleva_credenciales", lambda _u: False)(request.url))
 
-        # Basic Auth
-        basic_user = http_config.get("basic_auth_user", "")
-        if basic_user:
-            import base64
+        if es_render or not lleva:
+            _quitar_credenciales(request, cabeceras, cookies)
+        if es_render:
+            request.meta["_http_render"] = {
+                "cabeceras": cabeceras if lleva else {},
+                "cookies": cookies,
+                "conservar": bool(http_config.get("conservar_cookies")),
+                "hosts": sorted(getattr(spider, "_hosts_credenciales", ()) or ()),
+                "raices": sorted(getattr(spider, "_raices_credenciales", ()) or ()),
+                # Sin semillas http, las cookies van con `secure` y Chromium
+                # no las manda por http (revision de la decision 114)
+                "solo_https": "http" not in (getattr(spider, "_esquemas_credenciales", None)
+                                             or {"http"}),
+            }
+            return None
+        if not lleva:
+            return None
 
-            password = http_config.get("basic_auth_password", "")
-            cred = base64.b64encode(f"{basic_user}:{password}".encode()).decode()
-            request.headers[b"Authorization"] = f"Basic {cred}".encode()
+        for key, value in cabeceras.items():
+            request.headers[key.encode()] = value.encode()
+        if cookies and self._con_jar:
+            for name, val in cookies.items():
+                request.cookies[name] = val
+        elif cookies:
+            request.headers[b"Cookie"] = "; ".join(
+                f"{name}={val}" for name, val in cookies.items()).encode()
+        return None
 
+
+def cabeceras_del_job(http_config: dict) -> dict[str, str]:
+    """Las cabeceras que solo van a los hosts del sitio: las propias y el Basic."""
+    cabeceras = {str(k): str(v) for k, v in (http_config.get("custom_headers") or {}).items()}
+    basic_user = http_config.get("basic_auth_user", "")
+    if basic_user:
+        import base64
+
+        password = http_config.get("basic_auth_password", "")
+        cred = base64.b64encode(f"{basic_user}:{password}".encode()).decode()
+        cabeceras["Authorization"] = f"Basic {cred}"
+    return cabeceras
+
+
+def _quitar_credenciales(request: Request, cabeceras: dict, cookies: dict) -> None:
+    """Quita de *request* lo del job que le haya llegado copiado de otra peticion.
+
+    Una cabecera se quita solo si lleva el valor del job: si el job pone
+    `Accept: x`, el `Accept` por defecto de una peticion externa se queda.
+    """
+    for key, value in cabeceras.items():
+        if request.headers.get(key) == value.encode():
+            del request.headers[key]
+    if cookies and request.headers.get(b"Cookie") == "; ".join(
+            f"{n}={v}" for n, v in cookies.items()).encode():
+        del request.headers[b"Cookie"]
+    if isinstance(request.cookies, dict):
+        for name in cookies:
+            request.cookies.pop(name, None)
+    elif isinstance(request.cookies, list):
+        request.cookies = [c for c in request.cookies
+                           if not (isinstance(c, dict) and c.get("name") in cookies)]
+
+
+class CookiesTrasElJarMiddleware:
+    """Con el jar de Scrapy encendido, la cabecera ``Cookie`` del jar manda.
+
+    Solo existe con ``COOKIES_ENABLED`` (``http.conservar_cookies``, decision
+    114). Va detras del ``CookiesMiddleware`` de Scrapy (700), que ya ha metido
+    en el jar las cookies configuradas de ``request.cookies`` y ha escrito la
+    cabecera con todas. Si ``request.cookies`` sigue lleno, curl_cffi lo manda
+    en lugar de la cabecera y las cookies del servidor no llegaban nunca
+    (medido): con jar y cookies configuradas, el jar no servia de nada.
+    """
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        if not crawler.settings.getbool("COOKIES_ENABLED"):
+            raise NotConfigured
+        return cls()
+
+    def process_request(self, request: Request, spider):
+        if request.cookies and b"Cookie" in request.headers \
+                and not request.meta.get("playwright"):
+            request.cookies = {}
         return None
 
 
