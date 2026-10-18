@@ -563,3 +563,25 @@ def test_la_soft_404_tampoco_lleva_su_h1_vacio(sesion):
     issues = {(i.url_id, i.issue_type) for i in sesion.query(Issue).all()}
     assert (1, "soft_404") in issues
     assert (1, "h1_vacio") not in issues
+
+
+@pytest.mark.parametrize("ids", [range(1, 6), range(5, 0, -1)])
+def test_el_candidato_agrupado_se_ancla_en_la_url_menor(sesion, ids):
+    """La comparacion entre censos casa por (tipo, url, group_key) (decision
+    88): con el id menor, el mismo censo rastreado en otro orden daba el
+    candidato agrupado por resuelto y nuevo a la vez."""
+    from shared.models import Url as U
+
+    job_id = uuid.uuid4()
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={},
+                   soft404={"sondas": [_sonda(texto=NORMAL, titulo="App")]}))
+    for n, uid in enumerate(ids, start=1):
+        _pagina(sesion, job_id, uid, f"/p/{n}", NORMAL, titulo="App")
+    _pagina(sesion, job_id, 6, "/p/otra", ERROR)
+    sesion.commit()
+    issues = _analizar(sesion, job_id)
+    agrupada = [i for k, i in issues.items() if k[1] == "soft_404_candidato"]
+    assert len(agrupada) == 1
+    assert sesion.get(U, agrupada[0].url_id).url == "https://x.com/p/1"
+    assert agrupada[0].details["paginas_ejemplo"][:3] == [
+        "https://x.com/p/1", "https://x.com/p/2", "https://x.com/p/3"]

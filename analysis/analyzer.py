@@ -3297,7 +3297,7 @@ class SEOAnalyzer:
         )
         rows = self.session.execute(stmt).all()
 
-        # Por host: (primera url_id vista, paginas, paginas sin cada cabecera).
+        # Por host: paginas, paginas sin cada cabecera y el ancla de cada tipo.
         por_host: dict[str, dict] = {}
 
         for (
@@ -3322,26 +3322,33 @@ class SEOAnalyzer:
                 self._add_issue(url_id, "mixed_content", "warning")
 
             resumen = por_host.setdefault(
-                host or "", {"url_id": url_id, "url": page_url, "paginas": 0,
+                host or "", {"paginas": 0, "anclas": {},
                              "missing_hsts": 0, "missing_csp": 0,
                              "missing_x_content_type_options": 0,
                              "missing_x_frame_options": 0}
             )
             resumen["paginas"] += 1
-            # El ancla es la URL menor del host, no la primera fila leida: el
-            # orden de lectura sigue al de rastreo (decision 88).
-            if (page_url, url_id) < (resumen["url"], resumen["url_id"]):
-                resumen["url"], resumen["url_id"] = page_url, url_id
+            faltan = []
             # HSTS solo tiene sentido sobre https: en http el navegador ignora
             # la cabecera, asi que avisarlo ahi era pedir algo que no aplica.
             if has_hsts is False and is_https is not False:
-                resumen["missing_hsts"] += 1
+                faltan.append("missing_hsts")
             if has_csp is False:
-                resumen["missing_csp"] += 1
+                faltan.append("missing_csp")
             if has_x_content_type_options is False:
-                resumen["missing_x_content_type_options"] += 1
+                faltan.append("missing_x_content_type_options")
             if has_x_frame_options is False:
-                resumen["missing_x_frame_options"] += 1
+                faltan.append("missing_x_frame_options")
+            for tipo in faltan:
+                resumen[tipo] += 1
+                # El ancla de cada tipo es la URL menor de las paginas a las que
+                # les FALTA esa cabecera: no la primera fila leida, que sigue al
+                # orden de rastreo (decision 88), ni la menor del host, que con
+                # una pagina en http (`http://` < `https://`) dejaba
+                # `missing_hsts` anclado justo donde HSTS no aplica.
+                actual = resumen["anclas"].get(tipo)
+                if actual is None or (page_url, url_id) < actual:
+                    resumen["anclas"][tipo] = (page_url, url_id)
 
         for host, resumen in por_host.items():
             for tipo in ("missing_hsts", "missing_csp",
@@ -3350,7 +3357,7 @@ class SEOAnalyzer:
                 if not resumen[tipo]:
                     continue
                 self._add_issue(
-                    resumen["url_id"],
+                    resumen["anclas"][tipo][1],
                     tipo,
                     "info",
                     {"host": host, "paginas_afectadas": resumen[tipo],

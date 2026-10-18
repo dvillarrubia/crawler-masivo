@@ -492,7 +492,10 @@ def analizar(an) -> dict[str, Any]:
     agrupados = 0
     for g in grupos:
         # Las que ya se afirman por otra senal no se cuentan otra vez.
-        paginas = sorted(u for u in g["paginas"] if u not in seguras)
+        # Por URL y no por id: el id sigue al orden de rastreo, y el ancla y los
+        # ejemplos identifican el hallazgo al comparar censos (decision 88).
+        paginas = sorted((u for u in g["paginas"] if u not in seguras),
+                         key=lambda u: (info[u]["url"], u))
         if not paginas:
             continue
         sondas_g = [s.get("url") for s in g["miembros"]]

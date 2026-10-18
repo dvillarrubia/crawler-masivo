@@ -567,6 +567,14 @@
    censo nuevo contra uno viejo sin re-analizar puede dar estos avisos por
    movidos una vez (y la 91 ya exige re-analizar el viejo si el código
    difiere).
+   En la revisión de esa PR salieron dos más: `soft_404_candidato` agrupado
+   (la huella de una sonda que casa con una plantilla) se anclaba en el id
+   menor de sus páginas —`sorted()` sobre ids— y ahora va por URL; y las
+   cabeceras de seguridad se anclaban en la URL menor del HOST, que con una
+   página en `http://` (menor que `https://`) dejaba `missing_hsts` justo en
+   la página donde HSTS no aplica y que no entra en su cuenta. Cada tipo se
+   ancla ahora en la URL menor de las páginas a las que les falta ESA
+   cabecera.
 
 <a id="d114"></a>
 114. **Las credenciales del job solo van al sitio, y el rastreo no guarda

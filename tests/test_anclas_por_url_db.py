@@ -170,3 +170,34 @@ def test_la_muestra_de_robots_por_plantilla_no_depende_del_orden():
         return [u for _, u in next(iter(m.de("https://x.com").values()))]
 
     assert muestra(urls) == muestra(list(reversed(urls))) == urls[:MUESTRA_POR_PLANTILLA]
+
+
+def test_missing_hsts_no_se_ancla_en_una_pagina_http():
+    """`http://` es menor que `https://`: anclado en la URL menor del host,
+    `missing_hsts` caia en una pagina en http, que es justo donde HSTS no
+    aplica y que no cuenta en `paginas_afectadas`. Cada tipo se ancla en la
+    menor de las paginas a las que les falta ESA cabecera."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        Job.__table__, Url.__table__, Issue.__table__, SecurityHeaders.__table__])
+    s = sessionmaker(bind=engine)()
+    j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"], config={})
+    s.add(j)
+    s.flush()
+    for url, https in (("http://x.com/viejo", False), ("https://x.com/b", True),
+                       ("https://x.com/a", True)):
+        u = Url(job_id=j.id, url=url, url_hash=url, host="x.com",
+                scheme="https" if https else "http", path="/", is_internal=True,
+                is_html=True, status_code=200)
+        s.add(u)
+        s.flush()
+        s.add(SecurityHeaders(url_id=u.id, is_https=https, has_hsts=False, has_csp=False,
+                              has_x_content_type_options=True, has_x_frame_options=True))
+    s.flush()
+    az = SEOAnalyzer(s, j.id)
+    az.analyze_security()
+    s.commit()
+    anclas = dict(s.execute(
+        select(Issue.issue_type, Url.url).join(Url, Url.id == Issue.url_id)
+        .where(Issue.issue_type.in_(["missing_hsts", "missing_csp"]))).all())
+    assert anclas == {"missing_hsts": "https://x.com/a", "missing_csp": "http://x.com/viejo"}
