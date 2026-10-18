@@ -31,7 +31,8 @@ presets de User-Agent contra el middleware de robots real (`test_ua_presets.py`,
 decision 98), el enlace del aviso contra las rutas de `_irARuta`
 (`test_avisos.py`), sitemap parsing (`test_sitemaps.py`) and
 casi-duplicados (`test_near_duplicates.py`, que contrasta la similitud
-estimada contra la Jaccard exacta) y un test de integracion del spider
+estimada contra la Jaccard exacta, y fija la firma de un texto latino y la
+tokenizacion de CJK, hindi y tailandes, decision 118) y un test de integracion del spider
 (`test_spider_rastreo.py`: lanza el `SeoSpider` real contra un sitio servido en
 local por `spider_harness.py`, con BD y Redis simulados — redirecciones, meta
 refresh, sitemaps, patrones y hrefs malformados, tambien en el modo en que la
@@ -41,8 +42,19 @@ con el desafio real de Cloudflare de progym, el cuerpo binario y un 429 masivo
 `spider_opened` de verdad para el render, los hosts externos y la reanudacion
 que repite los muros; las clases van en
 `test_respuestas.py`, el analizador en `test_analyzer_muros_db.py` y el worker
-en `test_worker_bloqueo.py`. Y `test_analyzer_near_duplicates_db.py`, que
-pasa `analyze_near_duplicates` contra SQLite en memoria, y `test_worker.py`
+en `test_worker_bloqueo.py`. `test_credenciales_y_cookies.py` (decision
+114) usa el arnes con `http_real` (los middlewares del bloque `http` y el jar
+como lo deja el worker), `descarga_real` (curl_cffi y Playwright con los
+ajustes de settings.py; `chromium` para un ejecutable concreto) y
+`ver_cabeceras` (vuelca las cabeceras que llegan al servidor): las
+credenciales solo llegan a `localhost` y nunca a `127.0.0.1` (un tercero: su
+robots.txt, el destino de una redireccion y un enlace externo), las sondas las
+llevan, las cookies del servidor no se guardan salvo con `conservar_cookies`, y
+con render las configuradas llegan a la pagina. Los de render buscan un
+Chromium que lance (el de Playwright o uno en `PLAYWRIGHT_BROWSERS_PATH`) y se
+saltan sin el. Y `test_analyzer_near_duplicates_db.py`, que
+pasa `analyze_near_duplicates` contra SQLite en memoria (alcance de la
+decision 118, limpieza al re-analizar y el `--dry-run` del script), y `test_worker.py`
 (que errores del spider suben al log del worker). PageRank: `test_pagerank.py`
 (modelo sobre grafos pequenos) y `test_pagerank_db.py`, que necesita Postgres
 de verdad y se salta sin `PAGERANK_TEST_DATABASE_URL` (instrucciones en el
@@ -59,6 +71,24 @@ la propia pagina, el host y el ancla del x-default sin depender del orden de
 las filas, e `indexable` a NULL), y `test_catalogo_incidencias.py` falla si el
 analizador emite un tipo sin ficha en `frontend/incidencias.js` (los tipos
 salen con `ast`; una llamada con tipo no literal tiene que declararse).
+Extraccion de #149: `test_esquemas_y_credenciales.py` (lista blanca de
+esquemas en `extract_links` e `is_internal_url`, credenciales fuera al
+normalizar y semillas con credenciales rechazadas; decisiones 106 y 39),
+`test_hreflang_repetido_y_cabecera.py` (deduplicacion y hreflang de la cabecera
+`Link`, extractor y `analyze_hreflang` contra SQLite; decision 116),
+`test_canonical_distintos.py` (destinos distintos del canonical; decision 115),
+`test_cadenas_largas_db.py` (un aviso por cadena y error pasados 10 saltos;
+decision 117) y `test_spider_cabeceras_y_saltos.py` (spider real: `ftp://` y
+`ws://` internos no se rastrean, hreflang de un PDF por cabecera, tope de 20
+saltos).
+Re-analisis de #150: `test_senales_contradictorias_db.py` (canonical solo en
+la cabecera, HTML frente a cabecera, `noindex` con canonical a otra,
+redireccion a una noindex, meta refresh con y sin retardo, `_Fichas` siguiendo
+la meta refresh, y `run_all` dos veces con el mismo resultado en SQLite y
+Postgres; decision 120) y `test_titulares_titulos_anclas_db.py` (H1 vacio con
+la guardia de la decision 46, `title_generico`, `description_igual_title` y
+`enlace_sin_ancla` sobre la temporal de aristas con una sola lectura de
+`links`; decision 121).
 Capa de decisiones (decision 84): `test_llm.py` (transporte: reintentos,
 429/AIMD, cortes), `test_decisiones.py` (agrupacion, cache, presupuesto,
 confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
@@ -93,6 +123,18 @@ el host al que redirige la semilla— y por plantilla, que no sale como URL y qu
 no gasta `max_urls`; la repeticion de una sonda que solo cambia de esquema; el
 plan del script). `test_insights.py` comprueba que una soft 404 no sube la nota
 de contenido.
+Segmentos de negocio (decision 125): `test_segmentos.py` (precedencia, Y/O/NO,
+logica de tres valores, muros, externas y recursos fuera de las reglas y
+validacion; el esquema de `JobConfig` en el trabajo de la API),
+`test_segmentos_db.py` (`run_all` materializa, re-segmentar es retroactivo,
+funciona con los enlaces archivados; SQLite y Postgres; y, solo en Postgres, que
+los tramos van por `uq_job_url` mirando el plan de las consultas que manda),
+`test_segmentos_api.py` (filtro en `/urls`, CSV, `/issues`, `%` por segmento con
+su denominador, agregadas que no desaparecen, la herencia cliente -> perfil ->
+job con condiciones `x`, agrupar, `POST /segmentos`, 422/409 y `api/uso.py`) y
+`test_segmentos_frontend.py` (ejecuta `app.js` en Chromium y mira lo que pide:
+la lista de Problemas conserva el segmento y la vista agrupada manda siempre
+`agrupar`).
 Extraccion y busqueda a medida (decision 104): `test_extraccion_a_medida.py`
 (la funcion pura: CSS, XPath, regex, `a_numero`, muro, tiempo y
 cortacircuitos, validacion, firma; y el esquema y la herencia, que necesitan

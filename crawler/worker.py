@@ -333,6 +333,14 @@ def _reencolar_si_pedido(job_id: str) -> bool:
     return True
 
 
+def _ajustes_de_cookies(job_config: dict) -> list[str]:
+    """`-s` del jar de cookies: apagado en settings.py, como Googlebot, salvo
+    con `http.conservar_cookies` (decision 114)."""
+    if (job_config.get("http") or {}).get("conservar_cookies"):
+        return ["-s", "COOKIES_ENABLED=True"]
+    return []
+
+
 def _run_job(job_id: str) -> None:
     """Execute a single Scrapy crawl for *job_id* via subprocess."""
     from shared.database import SessionLocal
@@ -464,6 +472,7 @@ def _run_job(job_id: str) -> None:
         elif robots_mode == "audit":
             # Disable built-in blocking middleware; enable our audit one.
             cmd += ["-s", "ROBOTSTXT_OBEY=False", "-s", "ROBOTS_MODE=audit"]
+        cmd += _ajustes_de_cookies(job_config)
         if job_config.get("user_agent"):
             cmd += ["-s", f"USER_AGENT={job_config['user_agent']}"]
         if job_config.get("impersonate"):

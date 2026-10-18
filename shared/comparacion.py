@@ -442,9 +442,25 @@ def _era_indexable(pagina: dict[str, Any]) -> bool:
             and (pagina.get("indexability_status") or "") == "Indexable")
 
 
+def _canonical_que_cuenta(pagina: dict[str, Any]) -> str | None:
+    """El canonical que Google usa, o None.
+
+    Con dos o más canonicals de destino distinto en el head Google los ignora
+    TODOS (decisión 115): la página no está canonicalizada a ninguno, y
+    `canonical_href` guarda el primero solo como dato. Leerlo aquí disparaba
+    `canonical_a_otro_host` —una alerta crítica con webhook— por un canonical
+    que Google descarta. Sin la columna (censo anterior), manda el primero,
+    como antes.
+    """
+    distintos = pagina.get("canonical_distintos")
+    if distintos is not None and distintos > 1:
+        return None
+    return pagina.get("canonical_href")
+
+
 def _canonical_a_otra(pagina: dict[str, Any]) -> str | None:
     """El canonical de la página si apunta a OTRA URL; None si es la suya."""
-    can = pagina.get("canonical_href")
+    can = _canonical_que_cuenta(pagina)
     if not can:
         return None
     return can if _norm(can) != _norm(pagina.get("url")) else None
@@ -468,7 +484,7 @@ BASE_DE_LA_REGLA: dict[str, str] = {
 
 def _canonical_fuera(pagina: dict[str, Any]) -> str | None:
     """El canonical si apunta a un host distinto del de la propia página."""
-    can = pagina.get("canonical_href")
+    can = _canonical_que_cuenta(pagina)
     hc = _host(can)
     return can if can and hc and hc != _host(pagina.get("url")) else None
 
@@ -737,6 +753,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
             HtmlMeta.canonical_href, HtmlMeta.title,
+            HtmlMeta.canonical_distintos,
         )
         .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
         .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
@@ -759,6 +776,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "url": f.url, "status_code": f.status_code,
             "indexability_status": f.indexability_status,
             "canonical_href": f.canonical_href, "title": f.title,
+            "canonical_distintos": f.canonical_distintos,
             "h1": h1s.get(f.url), "word_count": f.word_count,
             "response_class": f.response_class,
         }

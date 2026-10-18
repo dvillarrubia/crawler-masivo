@@ -144,6 +144,7 @@ filtrar por `urls.is_html`.
 | canonical_href | text | `<link rel="canonical">` href |
 | canonical_count | int | Cuantos `rel=canonical` lleva la pagina. Con mas de uno Google los ignora todos |
 | canonical_in_body | bool | Hay algun canonical fuera del `<head>`: Google lo ignora siempre |
+| canonical_distintos | int | Destinos distintos de los canonicals del `<head>` (clave de `misma_url`). Con mas de uno Google los ignora todos: `canonical_multiple` y la pagina Indexable (decision 115). NULL = rastreo anterior |
 | canonical_header | text | Canonical via Link header HTTP |
 | og_title / og_description / og_image / og_url / og_type | text | Open Graph |
 | twitter_card / twitter_title / twitter_description | text | Twitter Cards |
@@ -219,6 +220,7 @@ filtrar por `urls.is_html`.
 | return_tag_ok | bool | La pagina destino devuelve el enlace (NULL = no se sabe: sin rastrear, autorreferencia, x-default, destino roto o en el body) |
 | lang_valid | bool | Idioma ISO 639-1 y region existente |
 | en_body | bool | Anotacion fuera del `<head>`: Google la ignora (`hreflang_in_body`). NULL = rastreo anterior a la columna |
+| origen | varchar(16) | `html` o `cabecera` (HTTP `Link`, la unica fuente de un PDF). NULL = rastreo anterior, del HTML (decision 116) |
 
 ### `resources` — Recursos referenciados (img, css, js)
 | Columna | Tipo | Descripcion |

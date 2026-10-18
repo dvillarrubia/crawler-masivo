@@ -54,6 +54,12 @@ def main() -> None:
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS title_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_description_count INTEGER"))
         conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
+        # De donde sale la anotacion: `html` o `cabecera` (Link). NULL = rastreo
+        # anterior, del HTML (decision 116).
+        conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS origen VARCHAR(16)"))
+        # Canonicals del head con DESTINO distinto: con dos, Google los ignora
+        # todos. NULL = rastreo anterior; se mira `canonical_count` (decision 115).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_distintos INTEGER"))
         # Lo que el HTML declara de si mismo (decision 108). Nullable y sin
         # DEFAULT: solo catalogo.
         for columna, tipo in (
@@ -71,6 +77,12 @@ def main() -> None:
         # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
+        # Segmentos de negocio (decision 125). Sin DEFAULT: solo catalogo. Sin
+        # indice a proposito: todo filtro por segmento va con `job_id`, que ya
+        # tiene los suyos, y crear uno sobre `urls` bloquearia las escrituras
+        # de un rastreo en marcha mientras se construye.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS segmento TEXT"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS segmentacion JSON"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS crawler_version VARCHAR(64)"))

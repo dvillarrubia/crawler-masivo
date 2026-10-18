@@ -332,3 +332,100 @@
    con otro contenido (precios a cero, «producto no disponible» en todas), la
    caída de tamaño por plantilla y la pausa con reanudación automática más
    tarde. Los censos anteriores no tienen la columna: hay que **re-rastrear**.
+
+<a id="d114"></a>
+114. **Las credenciales del job solo van al sitio, y el rastreo no guarda
+   cookies** — `HttpConfigMiddleware` ponía las cabeceras propias, las cookies
+   y el `Authorization: Basic` del bloque `http` en **todas** las peticiones.
+   Medido con el arnés y el código de `6126fd5` (semilla en `localhost`,
+   `127.0.0.1` como tercero, curl_cffi 0.16.3, Chromium 1194): el Basic, la
+   cabecera propia y la cookie configurada llegaban al tercero en su
+   robots.txt, en el destino de un 302 (el staging que manda a un SSO) y en un
+   enlace externo con `follow_external`. Con render, además, Chromium conserva
+   las cabeceras que pone `route.continue_` al seguir una redirección, también
+   a otro host: el Basic llegaba al SSO dentro de la misma navegación, antes
+   de que el spider pudiera hacer nada. Y `use_scrapy_headers` da las
+   cabeceras de Scrapy a toda navegación, iframes de terceros incluidos
+   (revisado en el código de scrapy-playwright 0.0.48).
+   - **A quién.** A los hosts de las semillas, con y sin www, y a sus
+     subdominios con `crawl_subdomains`: el mismo criterio que
+     `_is_internal` (`url_en_hosts`, con el host en IDNA), pero con una foto
+     tomada al cargar el job. El host al que salta una semilla pasa a ser
+     interno para el rastreo (se sigue y se enlaza), **no** para las
+     credenciales: ese salto es justo el del staging a su SSO. Si el sitio de
+     verdad está en el destino, se añade como semilla. A las demás peticiones
+     se les quita lo del job que les llegue copiado (el `RedirectMiddleware`
+     de Scrapy, el de robots.txt, copia cabeceras). `Accept-Language` no es un
+     dato del cliente sino cómo se mide, y va a todas.
+   - **Redirecciones.** Sin render las sigue el spider (decisión 27): cada
+     salto es una petición nueva y decide en el middleware. Con render no se
+     puede impedir que Chromium siga un 3xx, y el salto ni pasa por
+     `page.route`, así que lo sensible no va nunca en la petición de Scrapy
+     de una página con render: las cookies se ponen en el contexto con
+     `add_cookies` atadas a los dominios del sitio (Chromium no las manda a
+     otro), y las cabeceras propias y el Basic, solo en el documento
+     principal, que `render.preparar_pagina` descarga con `route.fetch(...,
+     max_redirects=0)`. Un 3xx se le entrega a Chromium **sin** `Location`
+     (que no lo siga) y el destino queda en `meta["_location_render"]`: lo
+     sigue el spider, como sin render. Contrapartida: `route.fetch` sale por
+     la red de Playwright y no por la de Chromium, con otra huella TLS; solo
+     pasa en los jobs con render **y** cabeceras propias o Basic, que son los
+     staging. Recursos, iframes y navegaciones de la propia página van sin
+     nada del job.
+   - **Cookies del servidor.** Googlebot no guarda cookies, y una de idioma,
+     geo, A/B o consentimiento cambiaba lo que medíamos frente a lo que ve
+     Google: el jar de Scrapy estaba encendido (`COOKIES_ENABLED` no se fijaba
+     y Scrapy lo trae a `True`) y con render las del sitio y las puestas por JS
+     se acumulaban en el contexto (medido: `/c/lee` recibía `servidor=1;
+     js=1`). Ahora `COOKIES_ENABLED = False` en settings.py, y la clave nueva
+     `http.conservar_cookies` (por defecto `false`, en `HttpConfig`, en el
+     formulario y en `projects/_ejemplo`) lo enciende con `-s` desde el
+     worker. Con render y sin conservar, cada pestaña borra del contexto, por
+     nombre y dominio, las cookies que no son las configuradas: un
+     `clear_cookies()` a secas dejaría sin la cookie del staging a otra de
+     las 4 pestañas que esté navegando. `localStorage` y `sessionStorage` no
+     se vacían (Google tampoco los conserva entre cargas): queda por medir.
+   - **Las configuradas se siguen mandando** (son las de los staging y del
+     consentimiento, plan, «Qué NO hacer» 7). Sin jar, como cabecera `Cookie`
+     escrita por el middleware: por `request.cookies` las pasa
+     scrapy-impersonate al motor de cookies de curl, que las descarta para un
+     host sin punto como `localhost` (medido). Con jar, por `request.cookies`
+     para que el `CookiesMiddleware` las junte con las del servidor, y
+     `CookiesTrasElJarMiddleware` (705) vacía `request.cookies` después: con
+     las dos cosas, curl_cffi 0.16.3 mandaba `configurada=abc;
+     configurada=abc; servidor=1` (la guía de #149 decía que las sustituía;
+     con esta versión las concatena). **Con render no llegaban nunca**:
+     Chromium ignora la cabecera `Cookie` de scrapy-playwright (medido:
+     `/c/inicio` sin cookie, `/c/lee` solo con las del sitio). Ahora llegan.
+   - **La preparación de la pestaña no corría.** `PLAYWRIGHT_PAGE_INIT_CALLBACK`
+     no es un setting de scrapy-playwright (0.0.48 solo lee
+     `meta["playwright_page_init_callback"]`), así que `preparar_pagina` no se
+     ejecutaba en producción y el contador de peticiones en vuelo de la
+     decisión 12b no estaba instalado: el laboratorio
+     (`scripts/prueba_espera_render.py`) lo inyecta él mismo. Va ahora en
+     `_playwright_meta`. Efecto esperado en los rastreos con render: la
+     espera deja de resolver con un XHR en vuelo (+500/900 ms por página
+     medidos en 12b, acotado por el tope) y pueden salir más enlaces y texto.
+   - **Lo que cambia en los censos.** Hay que **re-rastrear**: nada de esto se
+     arregla re-analizando. En sitios con cookie de idioma, geo, A/B o
+     consentimiento, la comparación con el censo anterior (decisión 68)
+     puede sacar cambios que son nuestros y no del sitio; con render, además,
+     por el contador de 12b. Repetirlo con la config vieja antes de atribuirlo
+     (decisión 13): `--set http.conservar_cookies=true`. La comparación de
+     configuración entre censos (#36) debe contar `conservar_cookies`.
+   Tests: `tests/test_credenciales_y_cookies.py`, con el SeoSpider real, sus
+   middlewares y la descarga de producción (curl_cffi y Playwright), y el
+   servidor anotando lo que le llega. Contra `6126fd5`, 10 de los 16 que
+   había entonces fallan.
+   **Revisión (2026-10-17).** El host no basta: un enlace `http://` al host
+   de una semilla `https` (los viejos, que luego redirigen con un 301) llevaba
+   el Basic, las cabeceras y las cookies **en claro**, antes del salto. Un
+   navegador ata la autenticación al origen. Ahora `_lleva_credenciales` exige
+   además el esquema de alguna semilla, y con render las cookies se ponen con
+   `secure` si ninguna semilla es `http`. Comprobado sin reproducir fallo: con
+   `add_cookies` y un dominio sin punto, Chromium la trata como cookie de host
+   (medido: `sso.a.test` no la recibe), así que el SSO de un subdominio no la
+   ve; y un puerto distinto del mismo host sigue recibiéndolas, que se deja
+   así. Tests: `test_con_semillas_https_no_van_en_claro_por_http` y
+   `test_render_cookies_con_secure_si_solo_hay_semillas_https`, que fallan
+   sin el arreglo.
