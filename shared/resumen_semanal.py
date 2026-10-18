@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from shared.reglas import efectivas, silenciado
+from shared.reglas import _referencia_valida, efectivas, silenciado
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,19 @@ def toca(cliente, ahora: datetime) -> datetime | None:
     rs = e["resumen_semanal"]
     if not rs.get("activo"):
         return None
+    if not _tiene_perfil_propio(cliente):
+        # Sin un perfil propio y activo no hay semana que resumir: un
+        # «sin alertas» de un cliente que no se rastrea es ruido.
+        return None
     corte = ultimo_corte(int(rs["dia"]), int(rs["hora"]),
                          getattr(cliente, "zona_horaria", None), ahora)
     return corte if ahora - corte <= GRACIA else None
+
+
+def _tiene_perfil_propio(cliente) -> bool:
+    perfiles = getattr(cliente, "perfiles", None) or []
+    return any(getattr(p, "activo", True) and getattr(p, "rol", "propio") != "competidor"
+               for p in perfiles)
 
 
 def _fila_evolucion(db, job_id) -> dict[str, Any] | None:
@@ -121,8 +131,10 @@ def _resumen_de_rastreo(db, job) -> dict[str, Any]:
         salida["incidencias_motivo"] = inc.get("motivo")
 
     ahora = _fila_evolucion(db, job.id)
-    antes = (_fila_evolucion(db, _como_uuid(salida["comparado_con"]))
-             if salida["comparable"] else None)
+    # Las cifras se comparan con el mismo criterio que las reglas: nunca contra
+    # un censo truncado, con otro alcance o detras de un muro.
+    referencia, _motivo = _referencia_valida(job, comp)
+    antes = _fila_evolucion(db, _como_uuid(referencia)) if referencia else None
     if ahora:
         cifras = {}
         for k in CIFRAS:
@@ -217,8 +229,10 @@ def _num(n) -> str:
 
 def texto(c: dict[str, Any]) -> str:
     """El resumen en texto, para el webhook (Slack, n8n → correo)."""
-    d = datetime.fromisoformat(c["desde"]).date()
-    h = (datetime.fromisoformat(c["hasta"]) - timedelta(seconds=1)).date()
+    # En la zona del cliente: en UTC un corte a las 0:00 de Madrid cae el dia
+    # anterior y la cabecera decia una semana que no era.
+    d = datetime.fromisoformat(c.get("desde_local") or c["desde"]).date()
+    h = (datetime.fromisoformat(c.get("hasta_local") or c["hasta"]) - timedelta(seconds=1)).date()
     lineas = [f"*{c['cliente']['nombre']}* · resumen del {d:%d/%m} al {h:%d/%m}"]
     if c["destacado"]:
         lineas.append("")
@@ -254,6 +268,7 @@ def generar(db, cliente, corte: datetime) -> dict[str, Any]:
     """El resumen de la semana que termina en `corte` (sin guardar)."""
     desde = corte - timedelta(days=7)
     c = componer(db, cliente, desde.astimezone(timezone.utc), corte.astimezone(timezone.utc))
+    c["desde_local"], c["hasta_local"] = desde.isoformat(), corte.isoformat()
     return {"semana": corte.date(), "desde": desde, "hasta": corte,
             "contenido": c, "texto": texto(c)}
 
@@ -265,8 +280,16 @@ def guardar_y_enviar(db, cliente, corte: datetime, enviar=None) -> bool:
 
     from shared.models import ResumenSemanal
 
-    if db.query(ResumenSemanal).filter(ResumenSemanal.cliente_id == cliente.id,
-                                       ResumenSemanal.semana == corte.date()).first():
+    ya = db.query(ResumenSemanal).filter(ResumenSemanal.cliente_id == cliente.id,
+                                         ResumenSemanal.semana == corte.date()).first()
+    if ya is not None:
+        # Guardado pero no enviado (webhook caido, proceso muerto entre medias):
+        # se reintenta mientras dure la gracia, que es cuando se llama a esto.
+        if not ya.enviado and enviar is not None and not silenciado(
+                efectivas(getattr(cliente, "reglas_alerta", None)), corte.date()):
+            if enviar(ya.texto, ya.contenido):
+                ya.enviado = True
+                db.commit()
         return False
     r = generar(db, cliente, corte)
     fila = ResumenSemanal(cliente_id=cliente.id, semana=r["semana"],

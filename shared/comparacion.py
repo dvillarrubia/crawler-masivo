@@ -1331,7 +1331,10 @@ def _alertas(afectadas, bases, umbral_absoluto=None, umbrales=None) -> list[dict
     """
     salida = []
     for regla, (severidad, que_decide) in REGLAS.items():
-        u = (umbrales or {}).get(regla) or {}
+        # En una lista (decision 128) mandan su umbral absoluto y todas las
+        # reglas: el veredicto de un QA de despliegue no puede depender de que
+        # alguien apagara una regla ruidosa para los censos completos.
+        u = {} if umbral_absoluto is not None else ((umbrales or {}).get(regla) or {})
         if u.get("activa") is False:
             continue
         al = _alerta(regla, severidad, que_decide, afectadas[regla],
@@ -1893,14 +1896,21 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     # umbrales. Sin cliente, las de serie.
     from shared.reglas import reglas_de_job, umbrales_de_comparacion
 
-    reglas = reglas_de_job(db, job)
+    try:
+        umbrales = umbrales_de_comparacion(reglas_de_job(db, job) or {}) or None
+    except Exception:
+        # Unas reglas ilegibles no pueden llevarse por delante la comparacion
+        # ni su alerta critica: se compara con lo de serie.
+        logger.exception("Reglas del cliente ilegibles en el job %s; se usan las de serie",
+                         job.id)
+        umbrales = None
     r = comparar_censos(
         paginas_ant,
         paginas_nuevas,
         job_a=resumen_ant_cmp,
         job_b=resumen_de_job(job),
         umbral_absoluto=umbral_absoluto(job.config),
-        umbrales=umbrales_de_comparacion(reglas) if reglas else None,
+        umbrales=umbrales,
     )
     incidencias = None
     if r.get("comparable"):

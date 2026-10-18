@@ -1234,6 +1234,9 @@ function app() {
     // --- Reglas de alerta (decision 135) -------------------------------------
     async cargarReglas() {
       if (!this.cliente) return;
+      // Sin esto, el formulario del cliente anterior seguia en pantalla (y se
+      // podia guardar sobre este) mientras llegaban las reglas nuevas.
+      this.reglasCliente = null; this.reglasForm = null; this.resumenes = [];
       this.reglasError = ''; this.reglasPrueba = null; this.resumenPrevia = null;
       try {
         const [r, res] = await Promise.all([
@@ -1262,16 +1265,22 @@ function app() {
     _cuerpoReglas() {
       const f = this.reglasForm, serie = this.reglasCliente.de_serie;
       const comparacion = {};
+      const numero = (v, que) => {
+        // `Number('')` es 0: un campo vaciado se guardaba como umbral 0.
+        if (v === '' || v === null || v === undefined || Number.isNaN(Number(v)))
+          throw new Error(que + ': falta el número');
+        return Number(v);
+      };
       for (const [regla, c] of Object.entries(f.comparacion)) {
         const d = serie.comparacion[regla] || {}, cambios = {};
         for (const k of ['activa', 'avisar', 'pct_sitio', 'min_paginas', 'pct_plantilla']) {
-          const v = ['activa', 'avisar'].includes(k) ? !!c[k] : Number(c[k]);
+          const v = ['activa', 'avisar'].includes(k) ? !!c[k] : numero(c[k], regla.replaceAll('_', ' '));
           if (v !== d[k]) cambios[k] = v;
         }
         if (Object.keys(cambios).length) comparacion[regla] = cambios;
       }
       const propias = f.propias.map(r => ({
-        ...r, umbral: Number(r.umbral), segmento: (r.segmento || '').trim() || null,
+        ...r, umbral: numero(r.umbral, r.nombre || r.id), segmento: (r.segmento || '').trim() || null,
         nombre: (r.nombre || '').trim(),
       }));
       const cuerpo = {};

@@ -8,9 +8,10 @@ y 15 en 404 ya es grave; para otro, un 4% de un blog de 30.000 entradas no le
 importa a nadie.
 
 Las reglas viven en `clients.reglas_alerta` (JSON) y se editan desde el panel
-del cliente. **Un cliente sin reglas guardadas tiene las de serie**, que son
-exactamente el comportamiento de antes mas dos reglas propias razonables: no
-configurar nada no puede cambiar lo que se avisaba. Lo guardado es PARCIAL —se
+del cliente. **Un cliente sin reglas guardadas tiene las de serie**: las de la
+comparacion con sus umbrales de siempre (avisan solo las criticas, decision
+77) mas dos reglas propias razonables, de las que la critica —caen las
+indexables— tambien avisa. Lo guardado es PARCIAL —se
 fusiona sobre lo de serie—, asi que una regla nueva de serie llega tambien a
 quien ya habia tocado las suyas.
 
@@ -197,7 +198,9 @@ def validar(raw: dict[str, Any] | None) -> dict[str, Any] | None:
                     c[k] = bool(cambios[k])
             for k in ("pct_sitio", "pct_plantilla"):
                 if k in cambios:
-                    c[k] = _numero(cambios[k], f"{regla}.{k}", 0, 100)
+                    # 0 no es un umbral: haria saltar la regla con cualquier
+                    # pagina. Es lo que se guardaba al vaciar el campo.
+                    c[k] = _numero(cambios[k], f"{regla}.{k}", 0.1, 100)
             if "min_paginas" in cambios:
                 c["min_paginas"] = int(_numero(cambios["min_paginas"], f"{regla}.min_paginas",
                                                1, 1_000_000))
@@ -238,10 +241,19 @@ def efectivas(raw: dict[str, Any] | None) -> dict[str, Any]:
     e = de_serie()
     if not isinstance(raw, dict):
         return e
-    for regla, cambios in (raw.get("comparacion") or {}).items():
-        if regla in e["comparacion"] and isinstance(cambios, dict):
-            e["comparacion"][regla].update(
-                {k: v for k, v in cambios.items() if k in e["comparacion"][regla]})
+    comp = raw.get("comparacion")
+    for regla, cambios in (comp.items() if isinstance(comp, dict) else ()):
+        if regla not in e["comparacion"] or not isinstance(cambios, dict):
+            continue
+        # Cada valor pasa por la misma validacion que al guardar: un "5" de
+        # texto escrito a mano reventaba la comparacion entera (y con ella la
+        # alerta critica). Lo que no valida se queda con lo de serie.
+        try:
+            limpio = (validar({"comparacion": {regla: cambios}}) or {}).get(
+                "comparacion", {}).get(regla, {})
+        except (ReglaInvalida, TypeError, ValueError):
+            continue
+        e["comparacion"][regla].update(limpio)
     if isinstance(raw.get("propias"), list):
         propias = []
         for r in raw["propias"]:
@@ -253,8 +265,11 @@ def efectivas(raw: dict[str, Any] | None) -> dict[str, Any]:
     if raw.get("silenciado_hasta"):
         e["silenciado_hasta"] = raw["silenciado_hasta"]
     if isinstance(raw.get("resumen_semanal"), dict):
-        e["resumen_semanal"].update(
-            {k: v for k, v in raw["resumen_semanal"].items() if k in e["resumen_semanal"]})
+        try:
+            e["resumen_semanal"].update(
+                validar({"resumen_semanal": raw["resumen_semanal"]})["resumen_semanal"])
+        except (ReglaInvalida, TypeError, ValueError):
+            pass
     return e
 
 
@@ -321,8 +336,9 @@ def medir(db, job_id, medida: str, segmento: str | None = None) -> float | None:
     def paginas_con(*cond):
         q = (select(func.count(func.distinct(Issue.url_id)))
              .where(Issue.job_id == job_id, *cond))
+        q = q.join(Url, Url.id == Issue.url_id).where(Url.is_internal.is_(True))
         if segmento:
-            q = q.join(Url, Url.id == Issue.url_id).where(Url.segmento == segmento)
+            q = q.where(Url.segmento == segmento)
         return db.execute(q).scalar() or 0
 
     if medida == "urls":

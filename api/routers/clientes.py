@@ -456,15 +456,20 @@ def leer_reglas(client_id: uuid.UUID, db: Session = Depends(get_session)):
     """Las reglas del cliente: lo guardado (parcial), lo que aplica y el
     catalogo para el editor. Los segmentos son los del ultimo censo completo."""
     from shared.comparacion import REGLAS
-    from shared.models import Url
     from shared.reglas import MEDIDAS, MODOS, OPERADORES, SEVERIDADES, de_serie, efectivas
 
     cliente = _buscar(db, client_id)
     ultimo = _ultimo_completado(db, cliente.id)
+    # Los nombres salen del resumen de la segmentacion (decision 125), no de un
+    # DISTINCT sobre las URLs del censo: eso son millones de filas cada vez
+    # que se abre la pestaña.
     segmentos: list[str] = []
-    if ultimo is not None:
-        segmentos = sorted(s for (s,) in db.query(Url.segmento).filter(
-            Url.job_id == ultimo.id, Url.segmento.isnot(None)).distinct().limit(200))
+    seg = (ultimo.segmentacion if ultimo is not None
+           and isinstance(ultimo.segmentacion, dict) else {})
+    nombres = {r.get("nombre") for r in seg.get("por_regla") or [] if isinstance(r, dict)}
+    if isinstance(seg.get("por_defecto"), str):
+        nombres.add(seg["por_defecto"])
+    segmentos = sorted(n for n in nombres if n)
     return {
         "guardadas": cliente.reglas_alerta,
         "efectivas": efectivas(cliente.reglas_alerta),
@@ -507,7 +512,9 @@ def probar_reglas(client_id: uuid.UUID, cuerpo: dict | None = None,
 
     cliente = _buscar(db, client_id)
     try:
-        reglas = efectivas(validar(cuerpo) if cuerpo else cliente.reglas_alerta)
+        # Un cuerpo `{}` es «lo de serie» —lo que hay en pantalla—, no «lo
+        # guardado»: solo sin cuerpo se prueba lo guardado.
+        reglas = efectivas(validar(cuerpo) if cuerpo is not None else cliente.reglas_alerta)
     except ReglaInvalida as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     job = db.get(Job, job_id) if job_id else _ultimo_completado(db, cliente.id)

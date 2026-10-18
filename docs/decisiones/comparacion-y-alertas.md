@@ -661,10 +661,10 @@
    es comparable** (Ola 5.2; criterio del usuario: se editan en el panel del
    cliente y arrancan con algo por defecto).
    - **Dónde viven.** En `clients.reglas_alerta`, que es PARCIAL sobre
-     `shared.reglas.de_serie()`. Un cliente sin nada guardado tiene exactamente
-     el comportamiento anterior: las 15 reglas de la comparación con sus
-     umbrales de la decisión 68, y avisan solo las críticas (decisión 77). A
-     eso se suman dos reglas propias de serie. Se guardan solo las
+     `shared.reglas.de_serie()`. Un cliente sin nada guardado tiene las 15
+     reglas de la comparación con sus umbrales de la decisión 68, y de ellas
+     avisan solo las críticas (decisión 77). A eso se suman dos reglas propias
+     de serie; la crítica, que caigan un 10 % las indexables, también avisa. Se guardan solo las
      diferencias, así que una regla de serie nueva llega también a quien ya
      tocó las suyas. Lo que no valida en la BD (editada a mano) se ignora sin
      tumbar las demás.
@@ -707,6 +707,19 @@
      enrute aparte.
    - **Probar antes de fiarse.** `POST /api/clients/{id}/reglas/probar` evalúa
      lo que hay en pantalla contra el último rastreo completado, sin guardar.
+   - **En una lista (decisión 128) mandan todas las reglas** con su umbral
+     absoluto: apagar una regla ruidosa para los censos completos no puede
+     cambiar el veredicto de un QA de despliegue.
+   - **Unas reglas ilegibles no paran nada.** Lo guardado se revalida al
+     leerlo y lo que no vale se queda con lo de serie. La comparación lleva
+     además su propio `try` alrededor de las reglas.
+   - **El resumen** solo se genera para clientes con algún perfil propio y
+     activo. Si el webhook falla, se reintenta mientras dura la gracia, y sus
+     cifras no se comparan contra un censo truncado ni detrás de un muro.
+   - La pestaña Comparar (`/diff`, bajo demanda) usa los umbrales de serie y
+     la alerta guardada en el rastreo los del cliente, así que pueden no
+     coincidir. Es a propósito: Comparar sirve para mirar dos censos
+     cualesquiera, y la alerta es la del cliente.
    Queda de 5.1: incidentes con estado (abierto/visto/cerrado, «solo el job
    más reciente abre o cierra») y canales por cliente. Y una regla nueva solo
    vale para los rastreos que terminen después: no se re-evalúan los viejos.

@@ -364,6 +364,12 @@ def test_el_corte_es_el_lunes_a_las_8_en_la_zona_del_cliente():
 def test_toca_dentro_de_la_gracia_y_no_despues(s):
     c = _cliente(s, zona_horaria="Europe/Madrid")
     lunes_830 = datetime(2026, 10, 19, 6, 30, tzinfo=timezone.utc)
+    assert RS.toca(c, lunes_830) is None   # sin perfil propio no hay semana que resumir
+    _perfil(s, c, "rival", rol="competidor")
+    s.refresh(c)
+    assert RS.toca(c, lunes_830) is None
+    _perfil(s, c, "semanal")
+    s.refresh(c)
     assert RS.toca(c, lunes_830) is not None
     assert RS.toca(c, lunes_830 + timedelta(hours=13)) is None
     c.reglas_alerta = {"resumen_semanal": {"activo": False}}
@@ -410,3 +416,71 @@ def test_silenciado_se_guarda_pero_no_se_manda(s):
     assert RS.guardar_y_enviar(s, c, datetime(2026, 10, 19, 8, tzinfo=timezone.utc),
                                enviar=lambda t, cont: mandados.append(t) or True)
     assert mandados == []
+
+
+def test_unas_reglas_de_comparacion_escritas_mal_a_mano_no_rompen_nada():
+    e = R.efectivas({"comparacion": {"salen_del_indice": {"pct_sitio": "5", "min_paginas": 3},
+                                     "rotas": ["x"]}})
+    # El valor de texto invalida esa entrada entera; lo demas, de serie.
+    assert e["comparacion"]["salen_del_indice"]["pct_sitio"] == 5.0
+    assert e["comparacion"]["salen_del_indice"]["min_paginas"] == 20
+    assert e["comparacion"]["rotas"]["activa"] is True
+    R.umbrales_de_comparacion(e)   # no revienta
+    assert R.efectivas({"comparacion": ["x"]})["comparacion"] == R.de_serie()["comparacion"]
+
+
+def test_un_umbral_de_cero_no_se_acepta():
+    with pytest.raises(R.ReglaInvalida):
+        R.validar({"comparacion": {"rotas": {"pct_sitio": 0}}})
+
+
+def test_en_una_lista_mandan_todas_las_reglas():
+    """Decision 128: el veredicto de un QA no depende de que el cliente apagara
+    una regla ruidosa para sus censos completos."""
+    u = R.umbrales_de_comparacion(R.efectivas({"comparacion": {"rotas": {"activa": False}}}))
+    a = [_pag(i) for i in range(N)]
+    b = [_pag(i, status_code=404, indexability_status="Client Error (404)") if i < 3
+         else _pag(i) for i in range(N)]
+    r = comparar_censos(a, b, job_a=JOB_A, job_b=JOB_B, umbral_absoluto=1, umbrales=u)
+    assert [x["regla"] for x in r["alertas"]] == ["rotas"]
+
+
+def test_un_resumen_no_enviado_se_reintenta(s):
+    c = _cliente(s)
+    corte = datetime(2026, 10, 19, 8, tzinfo=timezone.utc)
+    assert RS.guardar_y_enviar(s, c, corte, enviar=lambda t, cont: False)
+    mandados = []
+    assert not RS.guardar_y_enviar(s, c, corte, enviar=lambda t, cont: mandados.append(t) or True)
+    assert len(mandados) == 1
+    from shared.models import ResumenSemanal
+
+    assert s.query(ResumenSemanal).one().enviado is True
+
+
+def test_las_cifras_del_resumen_no_se_comparan_con_un_censo_truncado(s):
+    c = _cliente(s)
+    semanal = _perfil(s, c)
+    from shared.evolucion import registrar
+
+    antes = _censo(s, c, perfil=semanal, dia=10)
+    ahora = _censo(s, c, perfil=semanal, fichas_4xx=10, dia=14)
+    registrar(s, antes.id)
+    registrar(s, ahora.id)
+    ahora.comparacion = {"comparable": True, "concluyente": False,
+                         "comparado_con": str(antes.id), "alertas": []}
+    s.flush()
+    r = RS.generar(s, c, datetime(2026, 10, 19, 8, tzinfo=timezone.utc))
+    (p,) = r["contenido"]["perfiles"]
+    assert all("cambio" not in v for v in p["ultimo"]["cifras"].values())
+    ahora.comparacion = {**ahora.comparacion, "concluyente": True}
+    s.flush()
+    r = RS.generar(s, c, datetime(2026, 10, 19, 8, tzinfo=timezone.utc))
+    assert r["contenido"]["perfiles"][0]["ultimo"]["cifras"]["urls"]["cambio"] == 0
+
+
+def test_la_cabecera_usa_las_fechas_de_la_zona_del_cliente(s):
+    from zoneinfo import ZoneInfo
+
+    c = _cliente(s, nombre="Acme")
+    corte = datetime(2026, 10, 19, 0, 30, tzinfo=ZoneInfo("Europe/Madrid"))
+    assert RS.generar(s, c, corte)["texto"].startswith("*Acme* · resumen del 12/10 al 19/10")  # en UTC decia 11/10

@@ -42,6 +42,7 @@ def entorno(tmp_path):
     s.flush()
     j = Job(id=uuid.uuid4(), name="acme semanal", status="completed", seeds=["https://x.com/"],
             config={}, cliente_id=acme.id, profile_id=perfil.id, finish_reason="finished",
+            segmentacion={"por_regla": [{"nombre": "fichas", "urls": 30}]},
             created_at=datetime(2026, 10, 14, tzinfo=timezone.utc),
             completed_at=datetime(2026, 10, 14, 5, tzinfo=timezone.utc))
     s.add(j)
@@ -125,3 +126,13 @@ def test_vista_previa_y_lista_de_resumenes(entorno):
     r = c.get(f"/api/clients/{ids['cliente']}/resumenes/vista-previa")
     assert r.status_code == 200, r.text
     assert r.json()["texto"].startswith("*Acme*")
+
+
+def test_probar_con_cuerpo_vacio_prueba_lo_de_serie_no_lo_guardado(entorno):
+    c, _S, ids = entorno
+    url = f"/api/clients/{ids['cliente']}/reglas"
+    c.put(url, json={"propias": [FICHAS]})
+    d = c.post(url + "/probar", json={}).json()
+    assert "fichas-rotas" not in [a["id"] for a in d["disparadas"]]
+    d = c.post(url + "/probar").json()
+    assert [a["id"] for a in d["disparadas"]] == ["fichas-rotas"]
