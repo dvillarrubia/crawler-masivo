@@ -50,6 +50,7 @@ from urllib.parse import urlsplit
 
 import logging
 import os
+import re
 import time
 
 from shared.dominios import dominio_registrable
@@ -88,6 +89,24 @@ MINIMO_PAGINAS = 20
 # ruta, con un umbral alto porque ahí el denominador es pequeño.
 PCT_ALERTA_PLANTILLA = 0.50
 
+# Los campos de la decision 131 (enlazado, description, datos estructurados y
+# hreflang). Cada umbral esta medido contra pares de censos reales de control
+# para que la variacion normal de un sitio entre dos rastreos no dispare nada
+# (decisiones 13 y 68); las cifras, en la decision 131.
+#
+# Enlaces internos: paginas DISTINTAS que la enlazan (`unique_inlinks_count`),
+# no instancias: un menu que repite el enlace dos veces no es otra pagina. Se
+# cuenta cuando pierde la mitad o mas Y al menos `MINIMO_INLINKS_PERDIDOS`: de
+# 3 a 1 es un 66% y es ruido de un listado que rota.
+UMBRAL_INLINKS = 0.50
+MINIMO_INLINKS_PERDIDOS = 10
+# Profundidad en clics desde la home (decision 90): dos clics mas, o quedarse
+# sin camino. Un clic se mueve solo cuando un listado pagina distinto.
+UMBRAL_CLICS = 2
+# PageRank 0-100: cada 25 puntos son una decada (decision 34). Bajar una decada
+# entera es diez veces menos autoridad; menos que eso se mueve solo.
+UMBRAL_PAGERANK = 25
+
 # Qué decide Google con cada cosa. Sin esta columna una alerta es un número
 # (regla 0 de docs/PRIORIDADES.md).
 REGLAS: dict[str, tuple[str, str]] = {
@@ -124,7 +143,41 @@ REGLAS: dict[str, tuple[str, str]] = {
     "entran_en_el_indice": ("info",
         "Páginas que antes no podían aparecer en resultados y ahora sí. Si no "
         "era lo que se buscaba, es contenido entrando al índice sin querer."),
+    # Decision 131. Las tres de enlazado son UNA familia: una pagina que pierde
+    # los enlaces del menu se aleja de la home, pierde entrantes y pierde
+    # PageRank a la vez, y es un solo hallazgo (decision 36). Va a la primera
+    # que cumple, en este orden.
+    "se_alejan_de_la_home": ("warning",
+        "Están dos clics o más lejos de la home, o ya no se llega a ellas "
+        "desde la home: Google rastrea con menos frecuencia lo que queda "
+        "lejos, y les llega menos autoridad interna."),
+    "pierden_enlaces_internos": ("warning",
+        "Las enlazan la mitad de páginas o menos que antes: es la señal con la "
+        "que Google descubre la página y decide cuánto importa. Un cambio "
+        "masivo es un menú o un listado que ha dejado de enlazarlas."),
+    "pierden_pagerank": ("warning",
+        "Reciben diez veces menos autoridad interna que antes (una década de "
+        "PageRank): el enlazado del sitio ha dejado de empujarlas."),
+    "pierden_datos_estructurados": ("warning",
+        "Un tipo de datos estructurados que tenían ya no está: sin el marcado "
+        "Google deja de poder mostrar el resultado enriquecido de ese tipo "
+        "(estrellas, precio, migas, preguntas)."),
+    "pierden_hreflang": ("warning",
+        "Han perdido la anotación hreflang de algún idioma: Google deja de "
+        "saber qué versión enseñar en ese idioma o país y puede mostrar la "
+        "equivocada, o tratarlas como duplicadas."),
+    "cambia_la_description": ("info",
+        "La meta description es la propuesta de fragmento del resultado. "
+        "Google la reescribe a menudo, así que no decide el posicionamiento, "
+        "pero un cambio masivo es una plantilla, no una redacción."),
 }
+
+# Las reglas que miden el GRAFO de enlaces. Con un censo truncado o con
+# alcances distintos el grafo de las paginas comunes esta incompleto —las que
+# las enlazaban pueden no haberse rastreado—, y «pierde enlaces» seria falso:
+# no se comparan, igual que no se afirman ausencias (decisiones 67 y 70).
+REGLAS_DE_GRAFO = frozenset({
+    "se_alejan_de_la_home", "pierden_enlaces_internos", "pierden_pagerank"})
 
 
 def _norm(url: str | None) -> str:
@@ -176,6 +229,92 @@ def _aplicar_mapa(url: str, mapa: dict[str, str]) -> str:
     return url.replace(f"//{h}", f"//{destino}", 1)
 
 
+# --- Mapeo de rutas por regex (decision 131) ---------------------------------
+#
+# Una migracion cambia las rutas (`/es/hoteles/x.html` -> `/es/hotel/x/`) y,
+# sin decirle al comparador como se corresponden, el resultado es «han
+# desaparecido 3.000 paginas y han aparecido 3.000 nuevas»: cierto y sin
+# ninguna utilidad. El mapeo reescribe las URLs del censo ANTERIOR antes de
+# emparejar, igual que `map_host` reescribe el host.
+
+MAX_REGLAS_RUTAS = 50
+MAX_LONGITUD_PATRON = 500
+
+
+def compilar_mapa_rutas(reglas) -> list[tuple[re.Pattern, str, str]]:
+    """[(regex compilada, reemplazo, patron)] o ValueError con el motivo.
+
+    Acepta pares `[patron, reemplazo]` o `{"patron", "reemplazo"}`. El
+    reemplazo se valida tambien: `\\2` con un solo grupo no falla al compilar
+    la regex sino al sustituir, y sustituir es ya emparejar. Python valida la
+    plantilla entera antes de buscar, asi que basta con sustituir en vacio.
+    """
+    if not reglas:
+        return []
+    if not isinstance(reglas, (list, tuple)):
+        raise ValueError("el mapeo de rutas es una lista de pares [patron, reemplazo]")
+    if len(reglas) > MAX_REGLAS_RUTAS:
+        raise ValueError(f"como mucho {MAX_REGLAS_RUTAS} reglas de mapeo de rutas")
+    salida = []
+    for i, r in enumerate(reglas, 1):
+        if isinstance(r, dict):
+            patron, reemplazo = r.get("patron"), r.get("reemplazo")
+        elif isinstance(r, (list, tuple)) and len(r) == 2:
+            patron, reemplazo = r
+        else:
+            raise ValueError(f"regla {i}: tiene que ser [patron, reemplazo]")
+        if not isinstance(patron, str) or not patron or not isinstance(reemplazo, str):
+            raise ValueError(f"regla {i}: patron y reemplazo son texto, y el patron no puede ir vacio")
+        if len(patron) > MAX_LONGITUD_PATRON:
+            raise ValueError(f"regla {i}: el patron pasa de {MAX_LONGITUD_PATRON} caracteres")
+        try:
+            rx = re.compile(patron)
+        except re.error as e:
+            raise ValueError(f"regla {i}: el patron {patron!r} no compila: {e}") from None
+        try:
+            rx.sub(reemplazo, "")
+        except (re.error, IndexError) as e:
+            raise ValueError(f"regla {i}: el reemplazo {reemplazo!r} no vale para {patron!r}: {e}") from None
+        salida.append((rx, reemplazo, patron))
+    return salida
+
+
+def _ruta_de(url: str) -> tuple[str, str]:
+    """(origen `https://host`, ruta con su `?query`) de una URL."""
+    p = urlsplit(url)
+    origen = f"{p.scheme}://{p.netloc}" if p.netloc else ""
+    return origen, p.path + (f"?{p.query}" if p.query else "")
+
+
+def _aplicar_rutas(url: str, reglas) -> tuple[str, int | None]:
+    """La URL con la RUTA reescrita por la primera regla que casa, y cual fue.
+
+    Sobre la ruta y no sobre la URL entera: el host lo cambia `map_host`, y
+    una regex escrita para rutas que tocara el host haria saltar el guardia de
+    origen (decision 67) sin que nadie entendiera por que. La primera que casa
+    gana, como en un mapa de redirecciones: aplicarlas en cadena haria que una
+    regla reescribiera lo que ya reescribio otra.
+    """
+    if not reglas:
+        return url, None
+    origen, ruta = _ruta_de(url)
+    for i, (rx, reemplazo, _p) in enumerate(reglas):
+        nueva, n = rx.subn(reemplazo, ruta, count=1)
+        if n:
+            return origen + nueva, i
+    return url, None
+
+
+def _con_dato(paginas, campo: str) -> bool:
+    """Si el censo tiene la medida: un censo anterior a la columna la lleva a
+    NULL en todas, y eso es «no se sabe», no «ninguna llega desde la home»."""
+    return any(p.get(campo) is not None for p in paginas)
+
+
+def _conjunto(valor) -> frozenset:
+    return frozenset(v for v in (valor or ()) if v)
+
+
 def comparar_censos(
     paginas_a: list[dict[str, Any]],
     paginas_b: list[dict[str, Any]],
@@ -183,6 +322,7 @@ def comparar_censos(
     job_a: dict[str, Any],
     job_b: dict[str, Any],
     mapa_hosts: dict[str, str] | None = None,
+    mapa_rutas=None,
     umbral_palabras: float = UMBRAL_PALABRAS,
     umbral_absoluto: int | None = None,
 ) -> dict[str, Any]:
@@ -194,8 +334,13 @@ def comparar_censos(
     `umbral_absoluto` (decisión 128, modo lista): una alerta salta con ese
     número de páginas, sin porcentaje ni el piso de `MINIMO_PAGINAS`. Lo
     calcula `shared.modo_lista.umbral_absoluto`; None = el criterio de la 68.
+
+    `mapa_rutas` (decision 131): pares `(patron, reemplazo)` que reescriben la
+    RUTA de las URLs del censo anterior antes de emparejar (una migracion).
+    Lanza ValueError si una regex no compila; la API lo convierte en un 422.
     """
     mapa_hosts = mapa_hosts or {}
+    reglas_rutas = compilar_mapa_rutas(mapa_rutas)
 
     # El orden lo pone la FECHA. Si no, "antes" y "ahora" los decide el
     # desplegable: la misma pareja de censos diria que 2.367 paginas salen del
@@ -272,8 +417,11 @@ def comparar_censos(
     sem_a, sem_b = job_a.get("semillas"), job_b.get("semillas")
     if sem_a is not None and sem_b is not None:
         conj_b = {_norm(_aplicar_mapa(u, mapa_hosts)) for u in sem_b}
+        # Las del anterior, con el mapeo de rutas: tras una migracion la
+        # semilla vieja es la nueva con otro nombre, no otro alcance.
         fuera = [u for u in sem_a
-                 if _norm(_aplicar_mapa(u, mapa_hosts)) not in conj_b]
+                 if _norm(_aplicar_rutas(_aplicar_mapa(u, mapa_hosts), reglas_rutas)[0])
+                 not in conj_b]
         if fuera:
             concluyente = False
             avisos.append(
@@ -346,7 +494,38 @@ def comparar_censos(
             if p.get("url")
         }
 
-    a, b = indexar(paginas_a), indexar(paginas_b)
+    if reglas_rutas and not direccion_sabida:
+        avisos.append(
+            "Sin la fecha de los dos censos no se sabe cual es el anterior: el "
+            "mapeo de rutas se ha aplicado al primero de los dos que se ha "
+            "pedido.")
+    # El mapeo de rutas va SOLO sobre el anterior: describe como se llaman
+    # hoy las URLs de antes. Se cuenta cuantas reescribe cada regla y cuantas
+    # caen en la misma URL nueva (dos viejas que pasan a ser una: la segunda
+    # se pierde de la comparacion, y eso se dice).
+    reescritas_por_regla = [0] * len(reglas_rutas)
+    reescritas: set[str] = set()
+    colisiones = 0
+    a = {}
+    for p in paginas_a:
+        if not p.get("url"):
+            continue
+        u, i = _aplicar_rutas(_aplicar_mapa(p["url"], mapa_hosts), reglas_rutas)
+        k = _norm(u)
+        if i is not None:
+            reescritas_por_regla[i] += 1
+            reescritas.add(k)
+        if k in a:
+            colisiones += 1
+        if reglas_rutas and p.get("canonical_href"):
+            # El canonical de antes, con el mismo mapeo: tras una migracion
+            # `/x.html` con canonical `/x.html` y `/x/` con canonical `/x/`
+            # no han cambiado de canonical. Solo para la tabla de cambios;
+            # las alertas comparan cada canonical con la URL de SU censo.
+            p = {**p, "_canonical_cmp": _norm(_aplicar_rutas(
+                _aplicar_mapa(p["canonical_href"], mapa_hosts), reglas_rutas)[0])}
+        a[k] = p
+    b = indexar(paginas_b)
     # Una pagina que en cualquiera de los dos censos fue un muro no se ha visto
     # en ese censo: ni cambia, ni desaparece, ni sale del indice. Fuera de la
     # comparacion, y se cuenta (decision 103).
@@ -369,6 +548,26 @@ def comparar_censos(
     cambios: dict[str, list[dict[str, Any]]] = {
         "status_code": [], "indexability_status": [], "canonical_href": [],
         "title": [], "h1": [], "word_count": [],
+        # Decision 131.
+        "meta_description": [], "sd_tipos": [], "hreflang": [],
+        "inlinks": [], "click_depth": [], "pagerank_score": [],
+    }
+    # Que se puede comparar de lo de la 131. El grafo solo con los dos censos
+    # enteros y del mismo alcance; cada medida, solo si los DOS la tienen.
+    motivo_grafo = _motivo_sin_grafo(job_a, job_b, concluyente)
+    grafo = motivo_grafo is None
+    medidas = {
+        "grafo": grafo,
+        "click_depth": grafo and _con_dato(a.values(), "click_depth")
+                       and _con_dato(b.values(), "click_depth"),
+        "pagerank_score": grafo and _con_dato(a.values(), "pagerank_score")
+                          and _con_dato(b.values(), "pagerank_score"),
+        "inlinks": grafo and _con_dato(a.values(), "inlinks")
+                   and _con_dato(b.values(), "inlinks"),
+        "sd_tipos": _con_dato(a.values(), "sd_tipos") and _con_dato(b.values(), "sd_tipos"),
+        "hreflang": _con_dato(a.values(), "hreflang") and _con_dato(b.values(), "hreflang"),
+        "meta_description": ("meta_description" in next(iter(a.values()), {})
+                             and "meta_description" in next(iter(b.values()), {})),
     }
     # Páginas por regla de alerta, y el denominador de cada regla: cuántas
     # podían haberle pasado. "2.367 páginas" no dice nada sin "de 2.379".
@@ -380,12 +579,18 @@ def comparar_censos(
         "no_era_indexable": defaultdict(int),
         "era_indexable_en_el_primero": defaultdict(int),
         "todas_las_comunes": defaultdict(int),
+        # Decision 131: «pierden el hreflang» sobre las que lo tenian.
+        "indexable_con_datos_estructurados": defaultdict(int),
+        "indexable_con_hreflang": defaultdict(int),
     }
 
     for clave in sorted(comunes):
         pa, pb = a[clave], b[clave]
         for campo in ("status_code", "indexability_status", "canonical_href", "title", "h1"):
             va, vb = pa.get(campo), pb.get(campo)
+            if campo == "canonical_href" and "_canonical_cmp" in pa:
+                if pa["_canonical_cmp"] == _norm(vb or ""):
+                    continue
             if va != vb:
                 cambios[campo].append({"url": pb.get("url"), "antes": va, "ahora": vb})
         wa, wb = pa.get("word_count") or 0, pb.get("word_count") or 0
@@ -397,8 +602,9 @@ def comparar_censos(
         mayor = max(wa, wb)
         if mayor and abs(wb - wa) / mayor >= umbral_palabras:
             cambios["word_count"].append({"url": pb.get("url"), "antes": wa, "ahora": wb})
+        _cambios_131(pa, pb, cambios, medidas)
 
-        _clasificar(pa, pb, afectadas, bases, umbral_palabras)
+        _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas)
 
     # Lo que extraen las reglas a medida, sobre las mismas paginas comunes y
     # sin los muros (decision 127).
@@ -435,11 +641,31 @@ def comparar_censos(
             "ejemplos_desaparecidas": [a[k]["url"] for k in desaparecidas[:MUESTRA]],
         },
         "cambios": {
-            campo: {"total": len(filas), "ejemplos": filas[:MUESTRA]}
+            campo: ({"total": len(filas), "ejemplos": filas[:MUESTRA]}
+                    if medidas.get(campo, True) else
+                    {"total": None, "ejemplos": [],
+                     "motivo": motivo_grafo if campo in CAMPOS_DE_GRAFO and motivo_grafo
+                     else "uno de los dos censos no tiene este dato (anterior a la columna)"})
             for campo, filas in cambios.items()
         },
         "extraido": extraido,
     }
+    resultado["urls"]["pct_emparejadas_del_anterior"] = (
+        round(100 * len(comunes) / len(a), 1) if a else None)
+    if reglas_rutas:
+        resultado["mapeo_rutas"] = {
+            "reglas": [
+                {"patron": pat, "reemplazo": rep, "reescritas": n}
+                for (_rx, rep, pat), n in zip(reglas_rutas, reescritas_por_regla)],
+            "urls_del_anterior": len(a),
+            "reescritas": len(reescritas),
+            "reescritas_emparejadas": len(reescritas & comunes),
+            "emparejadas": len(comunes),
+            "pct_emparejadas": round(100 * len(comunes) / len(a), 1) if a else None,
+            # Dos URLs viejas que el mapeo convierte en la misma: solo una
+            # entra en la comparacion.
+            "colisiones": colisiones,
+        }
     if bloqueo_a or bloqueo_b:
         resultado["alertas"] = []
         resultado["bloqueado"] = bloqueo_b or bloqueo_a
@@ -516,6 +742,12 @@ BASE_DE_LA_REGLA: dict[str, str] = {
     "cambia_el_titulo": "era_indexable",
     "entran_en_el_indice": "no_era_indexable",
     "desaparecen": "era_indexable_en_el_primero",
+    "se_alejan_de_la_home": "era_indexable",
+    "pierden_enlaces_internos": "era_indexable",
+    "pierden_pagerank": "era_indexable",
+    "pierden_datos_estructurados": "indexable_con_datos_estructurados",
+    "pierden_hreflang": "indexable_con_hreflang",
+    "cambia_la_description": "era_indexable",
 }
 
 
@@ -797,7 +1029,97 @@ def _grupo(pagina: dict[str, Any], antes: dict[str, Any] | None = None) -> tuple
     return _firma(pagina.get("url")), seg
 
 
-def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
+CAMPOS_DE_GRAFO = ("click_depth", "pagerank_score", "inlinks")
+
+
+def _motivo_sin_grafo(job_a, job_b, concluyente) -> str | None:
+    """Por que no se puede comparar el grafo de enlaces, o None si se puede.
+
+    Tres cosas, y cualquiera basta:
+    - un censo truncado, bloqueado o con otro alcance: las paginas que
+      enlazaban pueden no haberse rastreado (decisiones 67 y 70);
+    - una lista (`max_depth` 0, decision 128) o dos profundidades distintas:
+      lo que no se rastreo no enlaza, y frente al censo completo TODAS las
+      URLs de la lista «perderian» sus entrantes;
+    - dos versiones del ANALIZADOR, o una desconocida: entrantes, profundidad
+      y PageRank los calcula el analisis, no el rastreo, y un re-analisis los
+      mueve sin que cambie el sitio (decisiones 38 y 57; la misma regla que la
+      91 aplica a las incidencias).
+    """
+    if not concluyente:
+        return ("el grafo de enlaces no se compara: uno de los dos censos esta "
+                "truncado, bloqueado o tiene otro alcance, y las paginas que "
+                "enlazaban pueden no haberse rastreado (decisiones 67 y 70)")
+    pa, pb = job_a.get("max_depth"), job_b.get("max_depth")
+    if pa == 0 or pb == 0 or (pa is not None and pb is not None and pa != pb):
+        return (f"el grafo de enlaces no se compara: los censos tienen otra "
+                f"profundidad maxima ({pa} y {pb}; 0 es una lista, que no sigue "
+                f"enlaces), y lo que uno no rastreo no enlaza (decision 128)")
+    ana_a, ana_b = job_a.get("analisis_version"), job_b.get("analisis_version")
+    if not (ana_a and ana_b and ana_a == ana_b):
+        return (f"el grafo de enlaces no se compara: los censos se analizaron "
+                f"con versiones distintas del codigo ({ana_a or 'desconocida'} y "
+                f"{ana_b or 'desconocida'}), y los entrantes, la profundidad y "
+                f"el PageRank los calcula el analisis (decision 91). Vuelve a "
+                f"analizar el mas antiguo con el codigo de hoy.")
+    return None
+
+
+def _tipos(pagina) -> frozenset:
+    return _conjunto(pagina.get("sd_tipos"))
+
+
+def _idiomas(pagina) -> frozenset:
+    return _conjunto(pagina.get("hreflang"))
+
+
+def _cambios_131(pa, pb, cambios, medidas) -> None:
+    """La tabla de «que cambio» con los campos de la decision 131.
+
+    Solo entre paginas que responden 200 en los dos: si una pasa a 404 ya lo
+    cuenta `status_code`, y que «pierda» sus datos estructurados es el mismo
+    hallazgo (decision 36). Con los mismos umbrales que las alertas: una
+    tabla que cuenta como cambio el ruido de un rastreo a otro no se lee.
+    """
+    if pa.get("status_code") != 200 or pb.get("status_code") != 200:
+        return
+    url = pb.get("url")
+    if medidas["meta_description"] and (pa.get("meta_description") or None) != (pb.get("meta_description") or None):
+        cambios["meta_description"].append(
+            {"url": url, "antes": pa.get("meta_description"), "ahora": pb.get("meta_description")})
+    for campo, leer in (("sd_tipos", _tipos), ("hreflang", _idiomas)):
+        if medidas[campo]:
+            ta, tb = leer(pa), leer(pb)
+            if ta != tb:
+                cambios[campo].append({
+                    "url": url, "antes": ", ".join(sorted(ta)) or None,
+                    "ahora": ", ".join(sorted(tb)) or None,
+                    "pierde": sorted(ta - tb), "gana": sorted(tb - ta)})
+    if medidas["inlinks"] and _inlinks_cambian(pa.get("inlinks"), pb.get("inlinks")):
+        cambios["inlinks"].append({"url": url, "antes": pa.get("inlinks"), "ahora": pb.get("inlinks")})
+    if medidas["click_depth"]:
+        ca, cb = pa.get("click_depth"), pb.get("click_depth")
+        if (ca is None) != (cb is None) or (ca is not None and abs(cb - ca) >= UMBRAL_CLICS):
+            cambios["click_depth"].append({"url": url, "antes": ca, "ahora": cb})
+    if medidas["pagerank_score"]:
+        ra, rb = pa.get("pagerank_score"), pb.get("pagerank_score")
+        if ra is not None and rb is not None and abs(rb - ra) >= UMBRAL_PAGERANK:
+            cambios["pagerank_score"].append({"url": url, "antes": ra, "ahora": rb})
+
+
+def _inlinks_cambian(ia, ib) -> bool:
+    """Si los entrantes se mueven de verdad, en cualquiera de los dos sentidos."""
+    ia, ib = ia or 0, ib or 0
+    mayor = max(ia, ib)
+    return bool(mayor) and abs(ib - ia) >= MINIMO_INLINKS_PERDIDOS and abs(ib - ia) / mayor >= UMBRAL_INLINKS
+
+
+def _pierde_inlinks(ia, ib) -> bool:
+    ia, ib = ia or 0, ib or 0
+    return ia > 0 and (ia - ib) >= MINIMO_INLINKS_PERDIDOS and (ia - ib) / ia >= UMBRAL_INLINKS
+
+
+def _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas=None) -> None:
     """Pone una página en la regla que nombra su CAUSA, y solo en una.
 
     Un aviso por hallazgo (decisión 36): una página que pierde el índice porque
@@ -850,6 +1172,48 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
         if pa.get("title") != pb.get("title"):
             afectadas["cambia_el_titulo"].append(
                 {"url": url, "antes": pa.get("title"), "ahora": pb.get("title"), "_g": g})
+        if medidas:
+            _clasificar_131(pa, pb, afectadas, bases, medidas, url, g)
+
+
+def _clasificar_131(pa, pb, afectadas, bases, medidas, url, g) -> None:
+    """Los cambios de grado de la decision 131, en una pagina que sigue indexable."""
+    # Enlazado: una familia, un hallazgo por pagina (decision 36).
+    ca, cb = pa.get("click_depth"), pb.get("click_depth")
+    if (medidas["click_depth"] and ca is not None
+            and (cb is None or cb - ca >= UMBRAL_CLICS)):
+        afectadas["se_alejan_de_la_home"].append(
+            {"url": url, "antes": ca, "ahora": cb, "_g": g})
+    elif medidas["inlinks"] and _pierde_inlinks(pa.get("inlinks"), pb.get("inlinks")):
+        afectadas["pierden_enlaces_internos"].append(
+            {"url": url, "antes": pa.get("inlinks"), "ahora": pb.get("inlinks"), "_g": g})
+    elif (medidas["pagerank_score"] and pa.get("pagerank_score") is not None
+          and pb.get("pagerank_score") is not None
+          and pa["pagerank_score"] - pb["pagerank_score"] >= UMBRAL_PAGERANK):
+        afectadas["pierden_pagerank"].append(
+            {"url": url, "antes": pa["pagerank_score"], "ahora": pb["pagerank_score"], "_g": g})
+
+    if medidas["sd_tipos"] and _tipos(pa):
+        bases["indexable_con_datos_estructurados"][g] += 1
+        perdidos = _tipos(pa) - _tipos(pb)
+        if perdidos:
+            afectadas["pierden_datos_estructurados"].append(
+                {"url": url, "antes": ", ".join(sorted(_tipos(pa))),
+                 "ahora": ", ".join(sorted(_tipos(pb))) or None,
+                 "pierde": sorted(perdidos), "_g": g})
+    if medidas["hreflang"] and _idiomas(pa):
+        bases["indexable_con_hreflang"][g] += 1
+        perdidos = _idiomas(pa) - _idiomas(pb)
+        if perdidos:
+            afectadas["pierden_hreflang"].append(
+                {"url": url, "antes": ", ".join(sorted(_idiomas(pa))),
+                 "ahora": ", ".join(sorted(_idiomas(pb))) or None,
+                 "pierde": sorted(perdidos), "_g": g})
+    if (medidas["meta_description"]
+            and (pa.get("meta_description") or None) != (pb.get("meta_description") or None)):
+        afectadas["cambia_la_description"].append(
+            {"url": url, "antes": pa.get("meta_description"),
+             "ahora": pb.get("meta_description"), "_g": g})
 
 
 def _sin_grupo(fila: dict[str, Any]) -> dict[str, Any]:
@@ -1016,8 +1380,10 @@ def comparar_incidencias(
     mapa_hosts: dict[str, str] | None = None,
     puede_afirmar_resueltas: bool = True,
     urls_del_nuevo: set[str] | None = None,
+    urls_del_anterior: set[str] | None = None,
     analisis_a: str | None = None,
     analisis_b: str | None = None,
+    mapa_rutas=None,
 ) -> dict[str, Any]:
     """Qué se arregló, qué apareció y qué sigue, entre dos censos.
 
@@ -1037,6 +1403,19 @@ def comparar_incidencias(
     `noindex_page`, 1.146 `canonical_missing`, 938 `hreflang_missing_return`—
     eran páginas que sencillamente no se volvieron a visitar. Decírselo así a
     un cliente es felicitarle por un trabajo que no ha hecho.
+
+    `urls_del_anterior` (decision 131) separa las NUEVAS en dos preguntas
+    distintas: una incidencia nueva en una URL que ya existia es algo que se
+    ha ROTO (una regresion: la pagina estaba y ahora tiene el problema), y una
+    en una URL nueva es algo que se ha PUBLICADO mal. Mezcladas, «300 nuevas»
+    no dice si alguien ha estropeado lo que habia o si la seccion recien
+    lanzada viene sin description. Son las URLs del censo anterior ya con los
+    mapeos aplicados y sin los muros: una pagina que antes fue un muro no se
+    vio, y su incidencia no es una regresion que se pueda afirmar.
+
+    `mapa_rutas` reescribe las URLs de las incidencias del ANTERIOR, igual que
+    en `comparar_censos`: tras una migracion, el titulo duplicado de
+    `/es/hoteles/x.html` es el de `/es/hotel/x/`.
     """
     # Dos censos analizados con codigo distinto NO se comparan por incidencias.
     # Un aviso no basta: no impide que la cifra sea falsa ni que alguien la
@@ -1065,18 +1444,22 @@ def comparar_incidencias(
         }
 
     mapa_hosts = mapa_hosts or {}
+    reglas_rutas = compilar_mapa_rutas(mapa_rutas)
 
-    def url_de(i):
-        return _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts))
+    def url_de(i, rutas=None):
+        u = _aplicar_mapa(i.get("url") or "", mapa_hosts)
+        if rutas:
+            u = _aplicar_rutas(u, rutas)[0]
+        return _norm(u)
 
-    def clave(i):
+    def clave(i, rutas=None):
         if i["issue_type"] in ANCLADOS_POR_GRUPO and i.get("group_key"):
             # El hallazgo es la plantilla del listado en ese host, y la URL
             # donde se ancla puede cambiar entre censos (decision 122).
-            return (i["issue_type"], urlsplit(url_de(i)).hostname or "", i["group_key"])
-        return (i["issue_type"], url_de(i), i.get("group_key"))
+            return (i["issue_type"], urlsplit(url_de(i, rutas)).hostname or "", i["group_key"])
+        return (i["issue_type"], url_de(i, rutas), i.get("group_key"))
 
-    a = {clave(i): i for i in incidencias_a}
+    a = {clave(i, reglas_rutas): i for i in incidencias_a}
     b = {clave(i): i for i in incidencias_b}
 
     nuevas = [b[k] for k in b.keys() - a.keys()]
@@ -1084,7 +1467,7 @@ def comparar_incidencias(
 
     idas, sin_pagina = [], []
     for k in a.keys() - b.keys():
-        if urls_del_nuevo is not None and url_de(a[k]) not in urls_del_nuevo:
+        if urls_del_nuevo is not None and url_de(a[k], reglas_rutas) not in urls_del_nuevo:
             sin_pagina.append(a[k])      # su pagina no se volvio a visitar
         else:
             idas.append(a[k])
@@ -1106,6 +1489,21 @@ def comparar_incidencias(
                    "ejemplos": [i["url"] for i in nuevas[:MUESTRA]]},
         "siguen": {"total": len(siguen), "por_tipo": por_tipo(siguen)},
     }
+    if urls_del_anterior is not None:
+        # Las ancladas por grupo (decision 122) cuentan por la URL donde se
+        # anclan hoy: es la pagina del listado en la que se ve el problema.
+        existentes = [i for i in nuevas if url_de(i) in urls_del_anterior]
+        en_nueva = [i for i in nuevas if url_de(i) not in urls_del_anterior]
+        resultado["nuevas"]["en_url_existente"] = {
+            "total": len(existentes), "por_tipo": por_tipo(existentes),
+            "ejemplos": [i["url"] for i in existentes[:MUESTRA]]}
+        resultado["nuevas"]["en_url_nueva"] = {
+            "total": len(en_nueva), "por_tipo": por_tipo(en_nueva),
+            "ejemplos": [i["url"] for i in en_nueva[:MUESTRA]]}
+        # Con el anterior truncado, una URL que «no estaba» puede ser una que
+        # no se alcanzo: la regresion se puede afirmar (la URL estaba y ahora
+        # tiene el problema), la novedad de la URL no (decision 67).
+        resultado["nuevas"]["url_nueva_afirmable"] = puede_afirmar_resueltas
     resultado["sin_pagina_en_el_nuevo"] = len(sin_pagina)
     if puede_afirmar_resueltas:
         resultado["resueltas"] = {
@@ -1145,8 +1543,9 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.id, Url.segmento,
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
+            Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score,
             HtmlMeta.canonical_href, HtmlMeta.title,
-            HtmlMeta.canonical_distintos,
+            HtmlMeta.canonical_distintos, HtmlMeta.meta_description,
         )
         .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
         .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True))
@@ -1165,6 +1564,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
         .all()
     )
     extraido = extraido_de_censo(db, job_id)
+    tipos, idiomas = _tipos_e_idiomas_de_censo(db, job_id)
     return [
         {
             "url": f.url, "status_code": f.status_code,
@@ -1175,9 +1575,51 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "response_class": f.response_class,
             "segmento": f.segmento,
             "extraido": extraido.get(f.id) or {},
+            # Decision 131. `inlinks` son las paginas DISTINTAS que la enlazan.
+            "inlinks": f.unique_inlinks_count,
+            "click_depth": f.click_depth,
+            "pagerank_score": f.pagerank_score,
+            "meta_description": f.meta_description,
+            "sd_tipos": tipos.get(f.id, []),
+            "hreflang": idiomas.get(f.id, []),
         }
         for f in filas
     ]
+
+
+def _tipos_e_idiomas_de_censo(db, job_id) -> tuple[dict[int, list], dict[int, list]]:
+    """Tipos de datos estructurados y codigos hreflang de cada pagina del censo.
+
+    Las dos tablas cuelgan de `url_id` y no llevan `job_id`, asi que se une con
+    `urls`: son decenas de filas por pagina, no los cientos de millones de
+    `links` que prohiben unir (decision 37). Los tipos sin nombre (un nodo
+    que solo es una referencia, decision 51) no cuentan, ni los de un JSON-LD
+    que Google descarta por no ser JSON estricto (80), y el hreflang del
+    `<body>` tampoco, porque Google no lo lee (decision 56).
+    """
+    from sqlalchemy import or_
+
+    from shared.models import Hreflang, StructuredData, Url
+
+    tipos: dict[int, set] = defaultdict(set)
+    for url_id, tipo in (db.query(StructuredData.url_id, StructuredData.schema_type)
+                         .join(Url, Url.id == StructuredData.url_id)
+                         # Un JSON-LD que no es JSON estricto Google lo tira
+                         # entero (decision 80): aunque el lector permisivo
+                         # saque su tipo, para el resultado enriquecido no esta.
+                         .filter(Url.job_id == job_id, StructuredData.schema_type.isnot(None),
+                                 StructuredData.json_invalido.is_(None))
+                         .distinct()):
+        tipos[url_id].add(tipo)
+    idiomas: dict[int, set] = defaultdict(set)
+    for url_id, lang in (db.query(Hreflang.url_id, Hreflang.lang)
+                         .join(Url, Url.id == Hreflang.url_id)
+                         .filter(Url.job_id == job_id,
+                                 or_(Hreflang.en_body.is_(False), Hreflang.en_body.is_(None)))
+                         .distinct()):
+        idiomas[url_id].add((lang or "").strip().lower())
+    return ({k: sorted(v) for k, v in tipos.items()},
+            {k: sorted(v) for k, v in idiomas.items()})
 
 
 def extraido_de_censo(db, job_id) -> dict[int, dict[str, dict[str, Any]]]:
@@ -1210,6 +1652,9 @@ def resumen_de_job(job) -> dict[str, Any]:
         # no haber estado nunca en el alcance (decisión 70).
         "semillas": list(job.seeds or []),
         "render_js": (job.config or {}).get("render_js"),
+        # 0 es una lista (decision 128): no sigue enlaces, y su grafo no se
+        # compara con el de un censo (decision 131).
+        "max_depth": (job.config or {}).get("max_depth"),
         # movil o escritorio, por el UA del job (decision 119)
         "perfil": perfil_de_ua((job.config or {}).get("user_agent")),
         "status": job.status,
@@ -1428,9 +1873,12 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     # «desaparecido», es que no se pidio.
     paginas_ant, resumen_ant_cmp = acotar_a_la_lista(
         paginas_de_censo(db, anterior.id), resumen_anterior, job)
+    # Una sola lectura del censo nuevo: con los tipos de datos estructurados y
+    # el hreflang (decision 131) ya no es una consulta barata para repetirla.
+    paginas_nuevas = paginas_de_censo(db, job.id)
     r = comparar_censos(
         paginas_ant,
-        paginas_de_censo(db, job.id),
+        paginas_nuevas,
         job_a=resumen_ant_cmp,
         job_b=resumen_de_job(job),
         umbral_absoluto=umbral_absoluto(job.config),
@@ -1449,7 +1897,6 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
             anterior_entero = not _truncado(
                 resumen_anterior.get("status"),
                 resumen_anterior.get("finish_reason"))
-            paginas_nuevas = paginas_de_censo(db, job.id)
             incidencias = comparar_incidencias(
                 incidencias_de_censo(db, anterior.id),
                 incidencias_de_censo(db, job.id),
@@ -1458,6 +1905,10 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
                 # incidencias de antes «no se sabe», no «resueltas» (103).
                 urls_del_nuevo={_norm(p["url"]) for p in paginas_nuevas
                                 if p.get("response_class") not in NO_VALIDAS},
+                # Nueva en una URL que ya estaba (regresion) o en una URL
+                # nueva (publicada mal), decision 131.
+                urls_del_anterior={_norm(p["url"]) for p in paginas_ant
+                                   if p.get("response_class") not in NO_VALIDAS},
                 analisis_a=resumen_anterior.get("analisis_version"),
                 analisis_b=getattr(job, "analisis_version", None),
             )
