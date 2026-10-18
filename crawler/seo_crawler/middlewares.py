@@ -26,6 +26,8 @@ from scrapy.exceptions import DontCloseSpider, NotConfigured
 from scrapy.http import Response
 from scrapy.utils.misc import load_object
 
+from shared.perfiles import UA_POR_DEFECTO
+
 if TYPE_CHECKING:
     from scrapy.crawler import Crawler
 
@@ -34,11 +36,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Default UA pool
 # ---------------------------------------------------------------------------
+# Todas con la version de la huella de serie (decision 132): rotar entre
+# versiones con una huella fija es un navegador que no existe. Sin macOS: con
+# el Chrome de macOS el Cloudflare de progym responde 403 a cualquier huella.
 DEFAULT_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    UA_POR_DEFECTO,
+    UA_POR_DEFECTO.replace("Windows NT 10.0; Win64; x64", "X11; Linux x86_64"),
 ]
 
 

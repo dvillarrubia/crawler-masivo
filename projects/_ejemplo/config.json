@@ -8,8 +8,6 @@
   "follow_external": false,
   "robots_mode": "respect",
   "render_js": false,
-  "impersonate": "chrome124",
-  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "concurrent_requests": 4,
   "concurrent_requests_per_domain": 2,
   "exclude_patterns": [],

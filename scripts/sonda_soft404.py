@@ -92,7 +92,7 @@ def planificar(job_id: str, semillas: list[str], urls: list[str], maximo: int) -
 
 
 def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, extraction: dict,
-            _repetida: bool = False) -> dict:
+            _repetida: bool = False, user_agent: str | None = None) -> dict:
     from curl_cffi import requests as cr
     from parsel import Selector
 
@@ -102,7 +102,10 @@ def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, ex
             "origen": "sonda_posterior", "render_js": False,
             "fecha": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     try:
-        r = cr.get(url, impersonate=impersonate, timeout=40, allow_redirects=False)
+        from shared.descarga_cruda import huella_y_cabeceras
+
+        perfil, cabeceras = huella_y_cabeceras(impersonate, user_agent)
+        r = cr.get(url, impersonate=perfil, headers=cabeceras, timeout=40, allow_redirects=False)
     except Exception as exc:  # noqa: BLE001
         fila.update(status=None, error=f"{type(exc).__name__}: {exc}"[:200])
         return fila
@@ -116,7 +119,8 @@ def sondear(url: str, clave: str, plantilla: str | None, *, impersonate: str, ex
         nuevo_host = (urlsplit(destino).hostname or "").lower()
         nueva = sondear(urlsplit(destino)._replace(query="", fragment="").geturl(),
                         f"{nuevo_host}|{plantilla or 'raiz'}", plantilla,
-                        impersonate=impersonate, extraction=extraction, _repetida=True)
+                        impersonate=impersonate, extraction=extraction, _repetida=True,
+                        user_agent=user_agent)
         return nueva
     if fila["redirige_a"] is None and "html" in (r.headers.get("content-type") or "html"):
         fila.update(huella_de_respuesta(Selector(text=r.text), url, extraction=extraction))
@@ -187,7 +191,8 @@ def main() -> None:
         if render:
             sondas = sondear_con_render(plan, extraction=cfg.get("extraction") or {})
         else:
-            sondas = [sondear(u, c, p, impersonate=cfg.get("impersonate") or "chrome124",
+            sondas = [sondear(u, c, p, impersonate=cfg.get("impersonate"),
+                              user_agent=cfg.get("user_agent"),
                               extraction=cfg.get("extraction") or {}) for c, u, p in plan]
         print(json.dumps(sondas, ensure_ascii=False, indent=1))
         if args.escribir:

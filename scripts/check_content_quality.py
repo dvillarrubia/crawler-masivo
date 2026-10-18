@@ -53,10 +53,8 @@ def _preparar_rutas() -> None:
 
 _preparar_rutas()
 
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+# El UA de serie del rastreo (decision 132), no una copia que se quede atras.
+from shared.perfiles import UA_POR_DEFECTO as UA  # noqa: E402
 
 RE_FECHA = re.compile(r"^\d{4}([-/]\d{1,2}){0,2}$")
 RE_NUM = re.compile(r"^\d+$")

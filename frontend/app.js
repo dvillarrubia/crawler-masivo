@@ -10,8 +10,10 @@ const API = '/api';
 // (`UA_TOKEN_ROBOTS`), que no cambia con la version.
 const CHROME_EVERGREEN = '155.0.8059.84';
 const UA_PRESETS = {
-  chrome_win:  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  chrome_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  // Los dos Chrome con la version de la huella TLS de serie (`chrome150`,
+  // decision 132): `UA_POR_DEFECTO` de `shared/perfiles.py`, comprobado por test.
+  chrome_win:  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
+  chrome_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   safari_mac:  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
   firefox_win: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
   edge_win:    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
@@ -3840,7 +3842,9 @@ function _freshForm() {
     use_sitemap: true,
     user_agent_preset: 'chrome_win',
     user_agent_custom: '',
-    impersonate: 'chrome124',
+    // '' = automatica: la API la deduce del UA (decision 132), asi un preset de
+    // Firefox no sale con la huella de Chrome.
+    impersonate: '',
     // Spider — resource types
     crawl_images: true,
     crawl_css: true,
@@ -3933,7 +3937,8 @@ function _configDesdeForm(f) {
     render_js:       f.render_js,
     use_sitemap:     f.use_sitemap,
     user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
-    impersonate:     f.impersonate || 'chrome124',
+    // Sin huella elegida no se manda: la deduce la API del UA (decision 132).
+    ...(f.impersonate ? { impersonate: f.impersonate } : {}),
     exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
     include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
     resource_types: {

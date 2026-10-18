@@ -1817,7 +1817,7 @@
                 <div><span class="text-dim">Seguir externos:</span> <span x-text="job.config?.follow_external ? 'Si' : 'No'"></span></div>
                 <div><span class="text-dim">Robots.txt:</span> <span x-text="({respect:'Respetar',ignore:'Ignorar',audit:'Auditar (no bloquea)'})[job.config?.robots_mode] || 'Respetar'"></span></div>
                 <div><span class="text-dim">Renderizar JS:</span> <span x-text="job.config?.render_js ? 'Si' : 'No'"></span></div>
-                <div><span class="text-dim">Huella TLS:</span> <span x-text="({'chrome124':'Chrome','safari17_0':'Safari','edge101':'Edge'})[job.config?.impersonate] || job.config?.impersonate || 'Chrome'"></span></div>
+                <div><span class="text-dim">Huella TLS:</span> <span x-text="job.config?.impersonate || 'Chrome'"></span></div>
                 <div style="grid-column:1/-1"><span class="text-dim">User Agent:</span> <span class="text-sm" x-text="job.config?.user_agent" style="word-break:break-all"></span></div>
                 <div><span class="text-dim">Iniciado:</span> <span x-text="fmt.date(job.started_at)"></span></div>
                 <div><span class="text-dim">Finalizado:</span> <span x-text="fmt.date(job.completed_at)"></span></div>
@@ -4591,7 +4591,7 @@
           <div class="form-row">
             <div class="form-group">
               <label>User Agent</label>
-              <select x-model="createForm.user_agent_preset">
+              <select x-model="createForm.user_agent_preset" @change="createForm.impersonate = ''">
                 <option value="chrome_win">Chrome - Windows (recomendado)</option>
                 <option value="chrome_mac">Chrome - macOS</option>
                 <option value="safari_mac">Safari - macOS</option>
@@ -4614,15 +4614,18 @@
             <div class="form-group">
               <label>Huella TLS (anti-WAF)</label>
               <select x-model="createForm.impersonate">
-                <option value="chrome124">Chrome (recomendado)</option>
-                <option value="safari17_0">Safari</option>
-                <option value="edge101">Edge</option>
+                <option value="">Automática: la del navegador del User Agent (recomendado)</option>
+                <option value="chrome150">Chrome 150</option>
+                <option value="chrome124">Chrome 124 (la de serie hasta octubre de 2026)</option>
+                <option value="firefox147">Firefox 147</option>
+                <option value="safari260">Safari 26</option>
+                <option value="edge101">Edge 101</option>
               </select>
             </div>
           </div>
           <div class="form-group" x-show="createForm.user_agent_preset === 'custom'">
             <label>User Agent personalizado</label>
-            <input type="text" x-model="createForm.user_agent_custom" placeholder="Mozilla/5.0 ...">
+            <input type="text" x-model="createForm.user_agent_custom" @change="createForm.impersonate = ''" placeholder="Mozilla/5.0 ...">
           </div>
           <div class="form-hint aviso-ua-bot" x-show="botDelFormulario()" style="margin-bottom:.5rem">
             <strong>Te haces pasar por <span x-text="botDelFormulario()"></span>.</strong>

@@ -19,6 +19,7 @@ from shared.config import (  # noqa: E402
     DEFAULT_USER_AGENT,
     REDIS_URL,
 )
+from shared.perfiles import IMPERSONATE_POR_DEFECTO  # noqa: E402
 
 BOT_NAME = "seo_crawler"
 SPIDER_MODULES = ["seo_crawler.spiders"]
@@ -151,7 +152,8 @@ DOWNLOAD_HANDLERS = {
     "https": "seo_crawler.handlers.CompositeDownloadHandler",
 }
 # Browser TLS profile for non-Playwright requests (curl_cffi impersonation)
-IMPERSONATE = os.getenv("IMPERSONATE", "chrome124")
+# (decision 132: el de serie y el UA de serie salen de `shared.perfiles`)
+IMPERSONATE = os.getenv("IMPERSONATE", IMPERSONATE_POR_DEFECTO)
 PLAYWRIGHT_BROWSER_TYPE = "chromium"
 PLAYWRIGHT_LAUNCH_OPTIONS = {
     "headless": True,

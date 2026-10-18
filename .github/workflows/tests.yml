@@ -129,7 +129,7 @@ jobs:
           tests/test_borrado_en_masa.py tests/test_almacenamiento.py
           tests/test_extraccion_a_medida.py tests/test_a_medida_api.py
           tests/test_a_medida_db.py tests/test_backup_a_medida.py
-          tests/test_respuestas.py
+          tests/test_respuestas.py tests/test_huella_y_ua.py
           tests/test_backup_no_rastreables.py tests/test_backup_sondas.py
           tests/test_segmentos.py tests/test_segmentos_api.py
           tests/test_job_resumenes_api.py tests/test_comparar_extraido.py

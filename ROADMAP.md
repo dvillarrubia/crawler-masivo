@@ -192,6 +192,19 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### El crawler se presenta como un Chrome actual, y entero (18 de octubre)
+
+Sin JavaScript, el crawler se hace pasar por un Chrome con su «huella» de
+conexión. Era la de Chrome 124, de hace dos años y medio, y ahora es la de
+Chrome 150, con el User Agent de esa misma versión: si solo se cambia uno, el
+otro se ajusta solo, para no parecer un navegador que no existe. Medido contra
+UOC, progym y Lopesan: la versión de la huella no cambia nada en ninguno; lo
+que sí bloquea el cortafuegos de progym es el User Agent de Chrome de Mac, que
+es el que usaban las herramientas que revisan un rastreo después — por eso
+alguna daba «aquí se ha perdido el contenido» sobre progym sin que fuera
+verdad. Los clientes que tenían fijado el User Agent antiguo siguen igual que
+antes. Decisión 132; falta el canario en producción.
+
 ### Modo lista y veredicto pasa/falla para QA de despliegues (18 de octubre)
 
 Ola 5.5 del plan (decisión 128). Para la pregunta de después de cada

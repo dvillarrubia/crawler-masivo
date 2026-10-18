@@ -654,6 +654,18 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             # User-agent override for middlewares
             if self.job_config.get("user_agent"):
                 self.custom_user_agent = self.job_config["user_agent"]
+            # Un UA y una huella TLS de navegadores distintos (decision 132):
+            # `JobConfig` deduce uno del otro cuando solo se fija uno, asi que
+            # esto solo pasa si alguien fijo los dos. Se respeta y se dice.
+            from shared.perfiles import IMPERSONATE_POR_DEFECTO, incoherencia_ua_huella
+
+            motivo = incoherencia_ua_huella(
+                self.job_config.get("user_agent") or self.settings.get("USER_AGENT"),
+                self.job_config.get("impersonate") or self.settings.get(
+                    "IMPERSONATE", IMPERSONATE_POR_DEFECTO))
+            if motivo:
+                logger.warning("UA y huella TLS no son el mismo navegador: %s. Un WAF "
+                               "puede verlo; ver decision 132", motivo)
 
             # -- Advanced config: Resource types --
             rt = self.job_config.get("resource_types", {})

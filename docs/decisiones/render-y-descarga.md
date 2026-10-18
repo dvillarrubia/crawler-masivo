@@ -786,3 +786,89 @@
    lleva la petición de control de arriba; (c) si el destino del m-dot es un
    muro (decisión 103) o no se pudo pedir (error, robots), la anotación no se
    sabe y el analizador ya no lo cuenta como m-dot sin anotar.
+
+<a id="d132"></a>
+132. **La huella TLS de serie es `chrome150`, y el UA va con ella: lo que delata
+   no es la version de la huella sino un UA que no casa** (0.4 del plan). Medido
+   el 2026-10-18 **desde fuera de produccion** (una IP de oficina, no la del
+   VPS) con curl_cffi 0.16.3 a pelo: 15 URLs con 200 por sitio sacadas de
+   censos locales, 2 s entre peticiones, una sesion por variante, tres pasadas
+   (la segunda en orden inverso, la tercera solo con las variantes que
+   decidian). «Pasa» = 200 y `clasificar_respuesta` no dice muro (decision 103);
+   el tamano mediano coincide al byte con el de la variante de produccion en
+   todos los sitios, asi que es la pagina y no otra cosa.
+
+   | variante (perfil + cabeceras) | UOC (AWS WAF) | progym (Cloudflare) | Lopesan | 3 de control |
+   |---|---|---|---|---|
+   | produccion hasta hoy: `chrome124` + UA Chrome 124 de Windows + cabeceras de Scrapy | 45/45 | 45/45 | 45/45 | 105/105 |
+   | `chrome150` + UA Chrome 150 de Windows + plataforma `"Windows"` + cabeceras de Scrapy (**la nueva**) | 30/30 | 30/30 | 30/30 | 60/60 |
+   | `chrome124` / `chrome150` + UA de Windows de su version, sin cabeceras de Scrapy | 30/30 c.u. | 30/30 c.u. | 30/30 c.u. | 60/60 c.u. |
+   | `chrome150` + UA Chrome 150 de **Linux** | 15/15 | 15/15 | 15/15 | 15/15 |
+   | `chrome150` + UA Chrome 124 de Windows (huella y UA descasados) | 30/30 | 30/30 | 30/30 | 90/90 |
+   | `chrome124`, `136`, `142`, `146`, `150` con el UA **de curl_cffi** (Chrome de macOS) | 30/30 c.u. | **0/30 c.u. (403 de desafio)** | 30/30 c.u. | 90/90 c.u. |
+   | `chrome150` + UA Chrome de macOS con plataforma `"Windows"` | 15/15 | **0/15** | 15/15 | 15/15 |
+   | `firefox147`, `safari260` con su UA | 30/30 c.u. | 30/30 c.u. | 30/30 c.u. | 90/90 c.u. |
+
+   (c.u. = cada una; `chrome150` con el UA de macOS se midio en las tres pasadas: 45/45, **0/45** y 45/45 en UOC, progym y Lopesan.)
+
+   Tres conclusiones, las tres repetidas en dos y tres pasadas (decision 13):
+   - **Ningun WAF de los tres distingue la version de la huella.** De 124 a 150
+     da lo mismo; tiempos y bytes iguales (Lopesan, mediana 0,80 s frente a
+     0,67 s; UOC y progym salen de cache de CDN en 0,02-0,11 s). Por la regla de
+     0.4 —igual o mejor en los tres— se cambia: un perfil de hace dos anos y
+     medio es el que un WAF aprende primero, y la regla «igual» ya se cumple.
+   - **Lo que bloquea el Cloudflare de progym es el UA de Chrome de macOS**,
+     con cualquier huella y con cualquier `sec-ch-ua-platform`: es la cadena
+     que manda curl_cffi cuando no se le da otra. El rastreo nunca la mandaba
+     (el UA lo pone Scrapy), pero **las herramientas de control si**:
+     `descargar_crudo` (`check_js_templates.py`, `check_content_quality.py`) y
+     `scripts/sonda_soft404.py` bajaban sin UA. Es el «`Just a moment...` desde
+     mi IP» de la decision 62: no era la IP, era el UA. Ahora bajan con el UA
+     de su huella (`huella_y_cabeceras`).
+   - **El descasado no lo penaliza ninguno de los tres hoy** (UA 124 con huella
+     150 pasa en todos), pero es un navegador que no existe y se corrige igual:
+     ademas produccion mandaba un Chrome de Windows con
+     `sec-ch-ua-platform: "macOS"`, que es lo que curl_cffi pone de serie.
+
+   Lo que cambia:
+   - **Una sola constante**: `shared.perfiles.IMPERSONATE_POR_DEFECTO`, y de ella
+     sale `UA_POR_DEFECTO` (= `shared.config.DEFAULT_USER_AGENT`) con
+     `ua_para_huella`. `settings.py`, el handler, la sonda de paridad,
+     `descarga_cruda` y los scripts la leen; no queda un `"chrome124"` literal.
+     Subir la huella sube el UA.
+   - **`JobConfig.impersonate` se valida** contra `PERFILES_IMPERSONATE`, la
+     lista de curl_cffi 0.16.3 copiada a mano (la imagen de la API no lleva
+     curl_cffi; un test en la del crawler la contrasta con la instalada). Sin
+     alias (`chrome`, `safari`): se mueven solos al actualizar y la huella deja
+     de casar con el UA, el mismo motivo que el `*-latest` de la decision 84.
+   - **Si solo se fija uno de los dos, el otro se deduce** (`_ua_y_huella`,
+     sobre la config FUSIONADA y por `__dict__`, como `_lista_sin_sitemap`): un
+     config con el UA de Chrome 124 y sin huella sigue saliendo con `chrome124`
+     —asi siguen los `projects/*/config.json` y los clientes que fijaron el UA,
+     sin cambio de comportamiento—, uno de Firefox sale con `firefox147` y no
+     con la huella de Chrome, y una huella sin UA lleva el de su navegador. Un
+     bot no cambia nada. **Si se fijan los dos, mandan los dos** y el spider lo
+     dice en WARNING (`incoherencia_ua_huella`): rechazarlo dejaria sin lanzar
+     una programacion guardada asi.
+   - **`sec-ch-ua-platform` sale del UA** (`_casar_client_hints` en el handler,
+     solo sin render y si la peticion no la trae): Windows con el UA de serie.
+   - **El UA de la paridad movil** pasa de `Chrome/155` (evergreen) a
+     `Chrome/131`, la version de su huella (`chrome131_android`, decision 119).
+     Googlebot smartphone sigue con la evergreen: es un bot.
+   - **El formulario** ofrece «Automatica» por defecto (no manda la clave y la
+     API la deduce del UA), y al cambiar el UA vuelve a automatica; los presets
+     de Chrome pasan a la 150. El pool de UA de respaldo deja macOS fuera.
+   - No hace falta re-rastrear ni re-analizar nada: cambia como se piden las
+     paginas a partir de ahora, no lo guardado.
+
+   **Lo que esta medida no dice**: es desde otra IP. El WAF de produccion puede
+   puntuar la del VPS de otra manera, y el Cloudflare de progym ya ha servido
+   desafios a esa IP (decision 62). Canario tras el merge, en produccion: los
+   tres sitios (UOC, progym, Lopesan) con un canario corto cada uno, y la tasa
+   de 200 con contenido (`response_class`) no puede ser peor que la del ultimo
+   censo de cada uno. Si lo es en alguno, `impersonate: chrome124` en su
+   `projects/<cliente>/config.json` lo devuelve a lo de antes sin desplegar.
+   Tests: `tests/test_huella_en_la_peticion.py` (el SeoSpider real con curl_cffi
+   contra un servidor que anota lo que LLEGA: UA, `sec-ch-ua` y plataforma; y
+   `descargar_crudo`) y `tests/test_huella_y_ua.py` (la lista contra curl_cffi,
+   la validacion, la deduccion y la herencia, en las dos imagenes).

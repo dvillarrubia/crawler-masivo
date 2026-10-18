@@ -10,6 +10,12 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from shared.perfiles import (
+    IMPERSONATE_POR_DEFECTO,
+    PERFILES_IMPERSONATE,
+    huella_para_ua,
+    ua_para_huella,
+)
 from shared.config import (
     DEFAULT_CONCURRENT_REQUESTS,
     DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN,
@@ -338,7 +344,9 @@ class JobConfig(BaseModel):
     )
     user_agent: str = DEFAULT_USER_AGENT
     render_js: bool = False
-    impersonate: str = "chrome124"
+    # Huella TLS de curl_cffi para lo que no va por Chromium (decision 132). Va
+    # con el UA: si solo se fija uno, el otro se deduce (`_ua_y_huella`).
+    impersonate: str = IMPERSONATE_POR_DEFECTO
     exclude_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
     use_sitemap: bool = True
@@ -368,6 +376,39 @@ class JobConfig(BaseModel):
     # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
     # precedencia es el orden, y sumar listas la haria imposible de leer.
     segmentos: list[ReglaSegmento] = Field(default_factory=list)
+
+    @field_validator("impersonate")
+    @classmethod
+    def _huella_soportada(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v not in PERFILES_IMPERSONATE:
+            raise ValueError(
+                f"perfil de huella TLS desconocido: {v!r}. Los de curl_cffi 0.16: "
+                + ", ".join(sorted(PERFILES_IMPERSONATE)))
+        return v
+
+    @model_validator(mode="after")
+    def _ua_y_huella(self):
+        """El UA y la huella TLS son el mismo navegador (decision 132).
+
+        Si solo se fija uno, el otro se deduce de el: un config que fija el UA
+        de Chrome 124 y no la huella sigue saliendo con la de Chrome 124 (era
+        la de serie), y uno que pide `safari17_0` sin UA sale con el de Safari,
+        no con un Chrome de Windows encima. Si se fijan los dos, mandan los dos:
+        quien escribe una combinacion rara puede tener su motivo, y el spider la
+        avisa en el log. Por `__dict__`, como `_lista_sin_sitemap`, para que la
+        clave deducida no cuente como fijada al fusionar capas.
+        """
+        fijadas = self.model_fields_set
+        if "impersonate" not in fijadas and "user_agent" in fijadas:
+            huella = huella_para_ua(self.user_agent)
+            if huella:
+                self.__dict__["impersonate"] = huella
+        elif "impersonate" in fijadas and "user_agent" not in fijadas:
+            ua = ua_para_huella(self.impersonate)
+            if ua:
+                self.__dict__["user_agent"] = ua
+        return self
 
     @model_validator(mode="after")
     def _lista_sin_sitemap(self):
