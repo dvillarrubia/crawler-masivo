@@ -54,23 +54,9 @@ def procesar(job_id: str, umbral: float, dry_run: bool) -> None:
         if dry_run:
             # Mismo recorrido que el analyzer pero sin escribir: interesa saber
             # cuantas paginas saldrian marcadas antes de tocar un censo entregado.
-            from shared.models import PageContent
-
-            filas = sesion.execute(
-                select(Url.id, Url.url, PageContent.content_text)
-                .join(PageContent, PageContent.url_id == Url.id)
-                .where(
-                    Url.job_id == job_id,
-                    Url.is_html.is_(True),
-                    Url.status_code == 200,
-                )
-                .yield_per(500)
-            )
-            firmas = {}
-            for url_id, _url, texto in filas:
-                f = nd.firma(texto)
-                if f is not None:
-                    firmas[url_id] = f
+            # Las firmas salen del propio analyzer: con su copia de la consulta,
+            # el dry-run seguia midiendo noindex y externas (decision 118).
+            firmas, _urls = analizador.firmas_casi_duplicados()
 
             resultado = nd.analizar(firmas, umbral) if len(firmas) > 1 else {}
             tramos = Counter()

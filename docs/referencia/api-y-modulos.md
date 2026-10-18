@@ -33,7 +33,7 @@
 | File | Description |
 |------|-------------|
 | `analyzer.py` | `SEOAnalyzer` class with 17 check methods + `run_analysis()` entry point |
-| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto |
+| `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 118) |
 | `sd_validation.py` | Validación conservadora de datos estructurados |
 | `soft404.py` | Soft 404 determinista (decision 105): cruza las sondas de `jobs.soft404` y las senales de `shared/soft404.py` con el censo |
 
@@ -55,6 +55,7 @@
 | `respuestas.py` | `clasificar_respuesta(status, cabeceras, cuerpo)`: la pagina o un muro (desafio de WAF, captcha, 429, cuerpo binario, login), y `VentanaDeSalud` / `causa_de_bloqueo` para parar un rastreo bloqueado. La usan el spider y `descarga_cruda.py` (decision 103) |
 | `soft404.py` | Reglas puras del soft 404 (decision 105): `mangle_path`/`token_sonda` (la URL que no existe), `huella`/`misma_huella` (contenido sin el eco de la URL), `senal_titulo` (titulares de error en es/en/ca/eu/fr/de/pt/it), `es_busqueda`/`frase_sin_resultados`, `disponibilidades` |
 | `robots.py` | Lectura de directivas robots — tokenizado y detección de separadores inválidos. En `shared/` porque el analyzer y el extractor deben leerlas igual |
+| `indexabilidad.py` | `estado_indexabilidad`, `es_noindex`/`es_nofollow` y `misma_url`/`clave_url`: la indexabilidad de spider y analyzer (decision 39). `X-Robots-Tag` trozo a trozo con `x_robots_por_bot`/`directivas_x_robots` (una directiva con valor no es un bot; el bot dura hasta el siguiente) y `x_robots_para_bot` para la sintaxis (decision 107) |
 
 ## API Endpoints
 
@@ -134,9 +135,9 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_structured_data()` | structured data validation |
 | `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
 | `analyze_indexability()` | indexability status |
-| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`) |
+| `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
-| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable) |
+| `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
 | `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
@@ -171,7 +172,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `JobConfigMiddleware` | 100 | Injects per-job settings from Redis/DB |
 | `UserAgentMiddleware` | 400 | UA rotation (replaces Scrapy default) |
 | `ProxyMiddleware` | 410 | Optional proxy rotation from `PROXY_LIST` |
-| `HttpConfigMiddleware` | 420 | Per-job HTTP overrides |
+| `HttpConfigMiddleware` | 420 | Bloque `http` del job. Cabeceras propias, cookies y Basic **solo** a los hosts de las semillas (con y sin www, subdominios con `crawl_subdomains`; no el host al que salta una semilla) y se quitan de las demas; `Accept-Language` a todas. Sin jar, las cookies van como cabecera `Cookie`; con render, en `meta["_http_render"]` para `render.preparar_pagina` (decision 114) |
+| `CookiesTrasElJarMiddleware` | 705 | Solo con `COOKIES_ENABLED` (`http.conservar_cookies`): tras el `CookiesMiddleware` de Scrapy vacia `request.cookies` para que curl_cffi mande la cabecera del jar (decision 114) |
 | `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
 
 ## Scrapy Settings
@@ -183,6 +185,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `DOWNLOAD_TIMEOUT` | 30s | |
 | `RETRY_TIMES` | 2 | Only for 502, 503, 504, 408, 429 |
 | `ROBOTSTXT_OBEY` | True | Overridable per-job |
+| `COOKIES_ENABLED` | False | Sin jar, como Googlebot; `http.conservar_cookies` lo enciende (worker, `-s`). Las de `http.cookies` se mandan igual (decision 114) |
 | `AUTOTHROTTLE_ENABLED` | True | Target concurrency: 8.0 |
 | `HTTPERROR_ALLOW_ALL` | True | All status codes reach spider (Screaming Frog parity) |
 | `DEPTH_PRIORITY` | 1 | BFS scheduling |
@@ -190,4 +193,5 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | Playwright | chromium, headless | JS rendering via `scrapy-playwright` |
 | `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 8 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
 | `PLAYWRIGHT_MAX_CONTEXTS` | 3 | Safety cap on browser contexts (env-overridable) |
+| `playwright_page_init_callback` | `seo_crawler.render.preparar_pagina` | Es **meta** por peticion (`_playwright_meta`), no setting: el `PLAYWRIGHT_PAGE_INIT_CALLBACK` de settings.py no lo leia scrapy-playwright. Instala el contador de peticiones en vuelo (12b) y las cookies y credenciales del job (114) |
 | JS auto-cap | 8 / 4 | When `render_js=true`, worker auto-caps concurrency (env-overridable) |
