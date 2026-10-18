@@ -631,6 +631,14 @@ class JobResponse(BaseModel):
     health: dict[str, Any] | None = None
     # Con que reglas se materializo `urls.segmento` y cuantas casaron (125).
     segmentacion: dict[str, Any] | None = None
+    # Lo que el sitio responde a una URL que no existe, por host (decision 105).
+    soft404: dict[str, Any] | None = None
+    # Certificado TLS por host, el dia del rastreo (decision 110).
+    tls: dict[str, Any] | None = None
+    # Enlaces externos y recursos comprobados (decisiones 123 y 124). Con
+    # «comprobados < distintos», que no haya aviso no dice nada: sin este campo
+    # en la respuesta, eso solo se veia entrando en la base de datos.
+    sondas_resumen: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
     # pregunto nada a un modelo sobre este job.
