@@ -3712,7 +3712,8 @@ function _parseKV(text, separator) {
 // (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
 function _configDesdeForm(f) {
   return {
-    max_depth:     parseInt(f.max_depth)     || 3,
+    // `|| 3` convertia el 0 del modo lista (decision 128) en 3.
+    max_depth:     Number.isInteger(parseInt(f.max_depth)) ? parseInt(f.max_depth) : 3,
     max_urls:      parseInt(f.max_urls)      || 50000,
     concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
     concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,

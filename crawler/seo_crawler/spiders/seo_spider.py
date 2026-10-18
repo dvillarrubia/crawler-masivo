@@ -1072,6 +1072,13 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
                 meta=req_meta,
                 dont_filter=True,
             )
+        # Modo lista (`max_depth=0`, decision 128): la frontera son los
+        # destinos de los enlaces de las semillas, que una lista NO rastrea.
+        # Sin esto, un estancamiento reanudado convertia la lista de 50 URLs
+        # en un rastreo de todo lo que enlazan (a profundidad 1). Las semillas
+        # que falten ya se han vuelto a pedir arriba.
+        if self.max_depth < 1:
+            return
         for url in self._iter_frontier():
             normalized = normalize_url(url)
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:

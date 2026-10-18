@@ -275,3 +275,78 @@
      y luego ve la marca y se niega. Probado contra Postgres en
      `test_no_se_archiva_un_censo_que_se_esta_analizando`, que falla quitando
      el candado.
+
+<a id="d128"></a>
+128. **Una lista de URLs clave es un censo, y su veredicto no puede decir
+   «pasa» sin saberlo** (Ola 5.5). La pregunta de un CI de despliegue es
+   «¿estas 50 URLs siguen respondiendo, indexables y con su canonical?», y
+   ninguna pieza la contestaba:
+   - **El modo lista es `max_depth=0`.** El spider ya no seguía enlaces con
+     profundidad 0 (`depth < max_depth`), pero la API lo rechazaba (`ge=1`), el
+     formulario lo convertía en 3 (`parseInt(...) || 3`), el sitemap se leía por
+     defecto —una lista de 50 sembraba el sitemap entero a profundidad 1— y al
+     **reanudar** se rastreaba la frontera, que en una lista son los destinos de
+     los enlaces de las semillas. Ahora `JobConfig` admite 0, con 0 apaga
+     `use_sitemap` **si la clave no viene** (pedirlo explícitamente vale, y por
+     `__dict__` para que el `max_depth: 0` de un job no pise el `use_sitemap`
+     de su perfil al fusionar), y una lista no rastrea la frontera. El destino
+     de una semilla que redirige sí se rastrea: una redirección no es un clic
+     (decisión 27).
+   - **Umbral absoluto en listas**: `analysis_thresholds.alerta_lista_min_paginas`
+     (por defecto **1**, configurable por cliente, perfil o job). En una lista
+     una alerta salta con ese número de páginas, sin el 5 % ni el piso de 20 de
+     la decisión 68: ese piso existe para no alertar por la variación normal de
+     un sitio de miles de páginas (decisión 13), y en una lista cada URL la
+     eligió alguien. Con él, 10 de 50 URLs clave en noindex **no alertaban**.
+     En `shared/comparacion.py` es un parámetro (`umbral_absoluto`) y la
+     alerta sale con `por: "lista"`; el resto vive en `shared/modo_lista.py`.
+   - **La referencia de una lista se recorta a la lista** (`acotar_a_la_lista`):
+     si es el censo completo del sitio, sus demás páginas no «desaparecen», no
+     se pidieron. Sin el recorte, el guardia de alcance (70) lo dejaba pasar
+     —la semilla del completo, la home, está en la lista— y la comparación
+     habría dicho «desaparecen» miles de páginas.
+   - **`GET /api/jobs/{id}/veredicto`**: `pasa`, `falla` o `no_concluyente`,
+     con `motivos` y `no_concluyente_por`. **200 siempre** que el job exista (404
+     si no): un CI no puede confundir «el despliegue está roto» con «la API se ha
+     caído». `falla` = algo afirmable: una alerta crítica de `jobs.comparacion`,
+     o una URL de la lista que no responde 200, que robots.txt prohíbe, que era
+     indexable y ya no lo es, o que cambia de canonical (una causa por URL,
+     decisión 36: si cambia el canonical no se cuenta además como «deja de ser
+     indexable»). Un rastreo `failed` por `robots_bloquea_todo` (decisión 32)
+     es `falla`, no duda: es el `Disallow: /` de preproducción llegando a
+     producción. **Lo no concluyente no es `pasa`**: sin terminar, fallido,
+     sin referencia, truncado, URLs de la lista sin rastrear o sin referencia, y
+     un censo **bloqueado**, que es `no_concluyente` aunque todo dé 403 porque
+     esos códigos son los del muro (103). Las alertas y los fallos URL a URL se
+     solapan a propósito: las alertas miden el censo (también uno que no es
+     lista), los fallos la lista.
+   - **En una lista, la comparación «no concluyente» no es duda** si cada URL
+     de la lista tiene referencia: lo que protege esa marca —afirmar ausencias
+     que el anterior, truncado, quizá no vio— se mira URL a URL. Medido: con
+     los canarios truncados de blogs.uoc.edu (`4eaf885d`) y www.uoc.edu
+     (`95ecd56d`) como referencia de sus censos completos, una lista de las 50
+     URLs indexables de más PageRank salía `no_concluyente` con las 50
+     presentes y sin un cambio; ahora `pasa`.
+
+   Medido sobre `crawler_db` local en solo lectura, con la lista = las N
+   indexables de más `pagerank_score` del censo anterior. Control —progym
+   6-oct contra 7-oct (`8c513c30` → `1f929d93`)—: con N=50 y N=500, **0 alertas
+   críticas** con umbral 1 y veredicto `pasa`; sí sale `pierden_contenido`
+   (warning, 48 de 50 y 148 de 500), que es el cambio NUESTRO de la extracción
+   M1 entre esos dos censos (decisión 67) y no entra en el veredicto, que solo
+   mira las críticas. Fallo simulado sobre el mismo par —10 de las 50 a
+   `Noindex` en memoria—: sin umbral absoluto **0 alertas críticas**; con él,
+   `salen_del_indice` **10 de 50** y veredicto `falla` (alerta + 10
+   `deja_de_ser_indexable`). Comparar y juzgar una lista de 500 cuesta 0,2 s.
+   La base local va por detrás del esquema (sin `health`, `response_class` ni
+   `canonical_distintos`), así que se midió con SQL directo y esas columnas a
+   NULL: lo que dependa de muros y canonicals múltiples no está medido sobre
+   datos reales, solo en tests.
+
+   Queda abierto: `censo_anterior` sigue eligiendo por alcance de semillas
+   (86), así que la primera ejecución de una lista cae al censo más reciente
+   del host —que con el recorte funciona si ese censo vio las URLs, y si no
+   sale como `sin_referencia_url`—; el diff manual (`/diff/{otro}`) no aplica el
+   modo lista; y con umbral 1 los avisos `warning` (título, contenido) de una
+   lista saltan con una página: no van al veredicto ni al webhook, pero sí a la
+   ficha.

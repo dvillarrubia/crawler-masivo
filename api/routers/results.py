@@ -1690,6 +1690,24 @@ def get_diff(
     return resultado
 
 
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/veredicto  --  pasa / falla / no_concluyente (128)
+# ---------------------------------------------------------------------------
+@router.get("/veredicto")
+def get_veredicto(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Veredicto para un CI de despliegue: `pasa`, `falla` o `no_concluyente`.
+
+    **Siempre 200** (para un job que existe) y el veredicto en el cuerpo: un CI
+    no puede confundir «el despliegue esta roto» con «la API ha fallado». Lo
+    no concluyente —sin referencia, truncado, bloqueado, sin terminar— no es
+    `pasa`: quien lo lea como verde despliega a ciegas. Ver
+    `shared.modo_lista.veredicto` y la decision 128.
+    """
+    from shared.modo_lista import veredicto
+
+    return veredicto(db, _get_job_or_404(job_id, db))
+
+
 def _resumen_fecha(job) -> str | None:
     return job.started_at.isoformat() if job.started_at else None
 

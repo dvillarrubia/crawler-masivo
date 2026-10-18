@@ -184,11 +184,16 @@ def comparar_censos(
     job_b: dict[str, Any],
     mapa_hosts: dict[str, str] | None = None,
     umbral_palabras: float = UMBRAL_PALABRAS,
+    umbral_absoluto: int | None = None,
 ) -> dict[str, Any]:
     """Compara dos listas de páginas ya cargadas. Función pura, sin BD.
 
     Cada página es un dict con: `url`, `status_code`, `indexability_status`,
     `canonical_href`, `title`, `h1`, `word_count`.
+
+    `umbral_absoluto` (decisión 128, modo lista): una alerta salta con ese
+    número de páginas, sin porcentaje ni el piso de `MINIMO_PAGINAS`. Lo
+    calcula `shared.modo_lista.umbral_absoluto`; None = el criterio de la 68.
     """
     mapa_hosts = mapa_hosts or {}
 
@@ -423,7 +428,7 @@ def comparar_censos(
         resultado["alertas"] = []
         resultado["bloqueado"] = bloqueo_b or bloqueo_a
     elif direccion_sabida:
-        resultado["alertas"] = _alertas(afectadas, bases)
+        resultado["alertas"] = _alertas(afectadas, bases, umbral_absoluto)
     else:
         resultado["alertas"] = []
         avisos.append(
@@ -563,7 +568,7 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras) -> None:
                 {"url": url, "antes": pa.get("title"), "ahora": pb.get("title")})
 
 
-def _alertas(afectadas, bases) -> list[dict[str, Any]]:
+def _alertas(afectadas, bases, umbral_absoluto=None) -> list[dict[str, Any]]:
     """Las reglas que superan el umbral, en el sitio o en una plantilla.
 
     Dos disparadores, porque una plantilla entera rota se diluye en el total:
@@ -590,10 +595,16 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
             key=lambda d: (-d["pct"], -d["paginas"]))
 
         pct = len(filas) / de
-        salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
-        salta_plantilla = any(
-            p["paginas"] >= MINIMO_PAGINAS and p["pct"] >= PCT_ALERTA_PLANTILLA * 100
-            for p in plantillas)
+        if umbral_absoluto is not None:
+            # Una lista (decision 128): cada URL la eligio alguien, y el piso
+            # de 20 impedia alertar en una lista de 50 aunque fallaran 10.
+            salta_sitio, salta_plantilla = len(filas) >= umbral_absoluto, False
+        else:
+            salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
+            salta_plantilla = any(
+                p["paginas"] >= MINIMO_PAGINAS
+                and p["pct"] >= PCT_ALERTA_PLANTILLA * 100
+                for p in plantillas)
         if not (salta_sitio or salta_plantilla):
             continue
         salida.append({
@@ -603,7 +614,8 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
             "paginas": len(filas),
             "de": de,
             "pct": round(pct * 100, 1),
-            "por": "sitio" if salta_sitio else "plantilla",
+            "por": ("lista" if umbral_absoluto is not None
+                    else "sitio" if salta_sitio else "plantilla"),
             "plantillas": plantillas[:5],
             "ejemplos": filas[:MUESTRA],
         })
@@ -1029,11 +1041,19 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     reanalizado, sin_reanalizar = _poner_al_dia_el_anterior(
         db, anterior, job, reanalizar)
     resumen_anterior = resumen_de_job(anterior)
+    from shared.modo_lista import acotar_a_la_lista, umbral_absoluto
+
+    # Una lista (decision 128) se compara SOLO en sus URLs: del anterior —que
+    # puede ser un censo completo— lo que no esta en la lista no ha
+    # «desaparecido», es que no se pidio.
+    paginas_ant, resumen_ant_cmp = acotar_a_la_lista(
+        paginas_de_censo(db, anterior.id), resumen_anterior, job)
     r = comparar_censos(
-        paginas_de_censo(db, anterior.id),
+        paginas_ant,
         paginas_de_censo(db, job.id),
-        job_a=resumen_anterior,
+        job_a=resumen_ant_cmp,
         job_b=resumen_de_job(job),
+        umbral_absoluto=umbral_absoluto(job.config),
     )
     incidencias = None
     if r.get("comparable"):

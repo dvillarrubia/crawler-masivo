@@ -4311,8 +4311,9 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Profundidad máxima</label>
-              <input type="number" x-model="createForm.max_depth" min="1" max="50">
+              <label data-tip="0 = modo lista: solo las semillas, sin seguir enlaces ni leer el sitemap (QA de despliegues; veredicto en /api/jobs/{id}/veredicto)">Profundidad máxima</label>
+              <input type="number" x-model="createForm.max_depth" min="0" max="1000"
+                     @change="if (parseInt(createForm.max_depth) === 0) createForm.use_sitemap = false">
             </div>
             <div class="form-group">
               <label>Máximo de URLs</label>

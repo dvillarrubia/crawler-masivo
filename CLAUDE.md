@@ -128,6 +128,7 @@ Una linea por regla; el porque y la medida, en la decision citada.
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Lo que no se puede afirmar no se afirma**: ausencias en censos truncados o
   de otro alcance, incidencias entre censos analizados con codigo distinto. 67, 70, 89, 91.
+  Y un veredicto no concluyente nunca es `pasa` (`GET /api/jobs/{id}/veredicto`, 128).
 - **Un `noindex` o una pagina que no da 200 no reparten enlazado.** 38, 57.
 - **Best-effort significa el `try` cubriendo la funcion ENTERA**, y un test que lee
   el fuente no sustituye a ejecutar. 40, 74.
