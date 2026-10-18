@@ -202,6 +202,17 @@ vista o silenciar hasta una fecha; el panel de cartera dice cuántas hay abierta
 por cliente y el resumen semanal dice desde cuándo sigue abierta cada una.
 [Decisión 139](docs/decisiones/comparacion-y-alertas.md#d139).
 
+### Lo que cambia entre el HTML del servidor y el render (18 de octubre)
+
+En los rastreos con JavaScript, una muestra de páginas por plantilla se pide
+también sin navegador y se compara con lo renderizado. Avisa de un `noindex`
+que solo está en el HTML inicial (Google ni siquiera renderiza esa página), de
+un canonical que cambia el JavaScript, y del texto o los enlaces que solo
+aparecen al renderizar (los rastreadores de IA no los ven nunca). Vista
+**JavaScript** en el Explorador. En la UOC, el megamenú —unos 480 enlaces por
+página— solo existe tras el render.
+[Decisión 140](docs/decisiones/render-y-descarga.md#d140).
+
 ### Informe para el cliente en PDF (18 de octubre)
 
 En la ficha de un rastreo, Exportar → **Informe para el cliente** abre una

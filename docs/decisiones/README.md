@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
@@ -166,6 +166,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 137 | Una página indexable que niega el fragmento también se niega a la IA de Google | [`indexabilidad`](indexabilidad.md#d137) |
 | 138 | El informe para el cliente junta lo que ya se calcula, y la fiabilidad va dentro, no en una nota aparte | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d138) |
 | 139 | Una alerta con estado: se avisa al abrirse, se cierra sola y solo la cierra quien puede afirmarlo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d139) |
+| 140 | El HTML del servidor frente al render, por muestra de plantilla | [`render-y-descarga`](render-y-descarga.md#d140) |
 
 ## Anadir una decision
 

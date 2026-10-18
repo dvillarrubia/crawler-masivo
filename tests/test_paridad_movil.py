@@ -79,8 +79,10 @@ RUTAS_MOVIL = {
 
 def _rastrear(render: bool = False, chromium: str | None = None,
               config: dict | None = None, extra: dict | None = None, **cb) -> dict:
+    # Sin la sonda de render frente a crudo (decision 140), que con render va
+    # de serie: sus capturas y peticiones no son las de este test.
     crawl_behavior = {"paridad_movil_muestra": 50, "paridad_movil_por_plantilla": 2,
-                      "soft404_sondas": 0, **cb}
+                      "soft404_sondas": 0, "render_crudo_muestra": 0, **cb}
     entrada = {
         "seeds": ["http://localhost:{port}/p/home"],
         "config": {"max_depth": 2, "use_sitemap": False, "render_js": render,

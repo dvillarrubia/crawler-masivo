@@ -26,6 +26,11 @@ _NO_LITERALES = {
                                     "structured_data_warning"},
     "tipo": {"missing_hsts", "missing_csp", "missing_x_content_type_options",
              "missing_x_frame_options"},
+    # avisos_de_render.py (decision 140)
+    "tipo_render": {"noindex_solo_en_crudo", "noindex_solo_al_renderizar",
+                    "canonical_cambia_al_renderizar", "nofollow_cambia_al_renderizar",
+                    "contenido_solo_con_js", "cambia_al_renderizar",
+                    "respuesta_cambia_al_renderizar"},
     "tipo_de_serie": {"paginacion_canonical_a_la_primera", "paginacion_noindex",
                       "solo_enlazada_desde_paginacion_profunda", "paginacion_sin_enlace",
                       "paginacion_siguiente_rota", "paginacion_rel_incorrecto"},
@@ -35,7 +40,7 @@ _NO_LITERALES = {
 # fuera y sus tipos se escapaban del test (decisiones 106 y 122).
 FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
            "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py",
-           "avisos_de_sitemaps.py")
+           "avisos_de_sitemaps.py", "avisos_de_render.py")
 
 
 def _llamadas() -> list[ast.expr]:
