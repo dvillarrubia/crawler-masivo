@@ -245,7 +245,8 @@ que sí bloquea el cortafuegos de progym es el User Agent de Chrome de Mac, que
 es el que usaban las herramientas que revisan un rastreo después — por eso
 alguna daba «aquí se ha perdido el contenido» sobre progym sin que fuera
 verdad. Los clientes que tenían fijado el User Agent antiguo siguen igual que
-antes. Decisión 132; falta el canario en producción.
+antes. Decisión 132. Probado en producción con dos canarios por sitio, uno
+con cada huella: los mismos resultados en los tres (UOC, progym y Lopesan).
 
 ### Modo lista y veredicto pasa/falla para QA de despliegues (18 de octubre)
 
