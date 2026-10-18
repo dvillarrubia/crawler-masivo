@@ -17,11 +17,12 @@ Lo que hace falta saber antes de tocar esto:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, ValidationError, field_validator
-from sqlalchemy import func
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -324,6 +325,16 @@ def panel(db: Session = Depends(get_session)):
     except Exception:
         db.rollback()
         tendencias = {}
+    # Incidentes vivos por cliente (decision 139): una consulta para todos.
+    try:
+        from shared.models import Incidente
+
+        vivos = dict(db.query(Incidente.cliente_id, func.count(Incidente.id))
+                     .filter(Incidente.estado.in_(("abierto", "visto")))
+                     .group_by(Incidente.cliente_id).all())
+    except Exception:
+        db.rollback()
+        vivos = {}
     salida = []
     for c in clientes:
         recientes = (
@@ -338,6 +349,7 @@ def panel(db: Session = Depends(get_session)):
             ultimo=serie[0] if serie else None,
             anterior=serie[1] if len(serie) > 1 else None,
             evolucion=tendencias.get(c.id),
+            incidentes_vivos=vivos.get(c.id, 0),
         ))
     # Los que tienen censo reciente, primero; dentro, por fecha.
     salida.sort(key=lambda p: (p.ultimo is None, -(p.ultimo.created_at.timestamp() if p.ultimo else 0)))
@@ -547,6 +559,64 @@ def vista_previa_resumen(client_id: uuid.UUID, db: Session = Depends(get_session
     r = generar(db, cliente, datetime.now(timezone.utc))
     return {"semana": r["semana"].isoformat(), "desde": r["desde"].isoformat(),
             "hasta": r["hasta"].isoformat(), "texto": r["texto"], "contenido": r["contenido"]}
+
+
+# ---------------------------------------------------------------------------
+# Incidentes (decision 139): las alertas con estado de las series del cliente
+# ---------------------------------------------------------------------------
+class IncidenteCambio(BaseModel):
+    """Lo que puede hacer una persona: marcarlo visto (o devolverlo a abierto)
+    y silenciarlo hasta un dia. Cerrar no: lo cierra el rastreo que ya no lo
+    ve, que es el unico que puede afirmarlo."""
+    model_config = ConfigDict(extra="forbid")
+
+    estado: Literal["abierto", "visto"] | None = None
+    silenciado_hasta: date | None = None
+
+
+@router.get("/{client_id}/incidentes")
+def listar_incidentes(client_id: uuid.UUID,
+                      estado: Literal["vivos", "cerrados", "todos"] = Query("vivos"),
+                      limite: int = Query(100, ge=1, le=500),
+                      db: Session = Depends(get_session)):
+    from shared.incidentes import VIVOS, a_dict
+    from shared.models import Incidente
+
+    cliente = _buscar(db, client_id)
+    q = db.query(Incidente).filter(Incidente.cliente_id == cliente.id)
+    if estado == "vivos":
+        q = q.filter(Incidente.estado.in_(VIVOS))
+    elif estado == "cerrados":
+        q = q.filter(Incidente.estado == "cerrado")
+    orden = case((Incidente.severidad == "critical", 0), (Incidente.severidad == "warning", 1), else_=2)
+    filas = q.order_by(orden, Incidente.abierto_en.desc()).limit(limite).all()
+    return [a_dict(i) for i in filas]
+
+
+@router.patch("/{client_id}/incidentes/{incidente_id}")
+def cambiar_incidente(client_id: uuid.UUID, incidente_id: uuid.UUID, cambio: IncidenteCambio,
+                      db: Session = Depends(get_session)):
+    from shared.incidentes import CERRADO, a_dict
+    from shared.models import Incidente
+
+    cliente = _buscar(db, client_id)
+    inc = (db.query(Incidente)
+           .filter(Incidente.id == incidente_id, Incidente.cliente_id == cliente.id).one_or_none())
+    if inc is None:
+        raise HTTPException(404, "Incidente no encontrado")
+    datos = cambio.model_dump(exclude_unset=True)
+    ahora = datetime.now(timezone.utc)
+    if "estado" in datos and datos["estado"]:
+        if inc.estado == CERRADO:
+            raise HTTPException(409, "Ya está cerrado: lo cerró un rastreo que no lo vio. "
+                                     "Si vuelve, se abre otro.")
+        inc.estado = datos["estado"]
+        inc.visto_en = ahora if datos["estado"] == "visto" else None
+    if "silenciado_hasta" in datos:
+        inc.silenciado_hasta = datos["silenciado_hasta"]
+    inc.actualizado_en = ahora
+    db.commit()
+    return a_dict(inc)
 
 
 # ---------------------------------------------------------------------------

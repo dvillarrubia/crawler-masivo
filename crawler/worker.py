@@ -945,7 +945,24 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
         # marque como «avisar», salvo silenciado. La competencia no avisa.
         if perfil is not None and getattr(perfil, "rol", None) == "competidor":
             return
+        # Incidentes (decision 139): en un rastreo con serie solo se avisa de
+        # lo que ABRE incidente; lo que sigue abierto de la semana pasada ya se
+        # aviso. Con su propio try: si falla, se avisa como antes —repetir un
+        # aviso es mejor que callarse uno—.
+        from shared.incidentes import actualizar as actualizar_incidentes, clave_de_alerta
+
+        nuevas = None
+        try:
+            nuevas = actualizar_incidentes(session, job, resultado, propias)
+            session.commit()
+        except Exception:
+            session.rollback()
+            nuevas = None
+            logger.exception("Job %s: fallo al actualizar los incidentes", job_id)
         enviar = a_avisar(reglas, alertas, propias.get("disparadas") or [])
+        if nuevas is not None:
+            abren = {clave_de_alerta(a) for a in nuevas}
+            enviar = [a for a in enviar if clave_de_alerta(a) in abren]
         if enviar:
             avisar_de_alertas(job_id, job.name, enviar)
     except Exception:

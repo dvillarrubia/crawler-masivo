@@ -240,8 +240,29 @@ def componer(db, cliente, desde: datetime, hasta: datetime) -> dict[str, Any]:
         "rastreos_sin_perfil_fallidos": sum(1 for j in sin_perfil if j.status != "completed"),
         "sin_perfil_con_alertas": sueltos,
     }
+    contenido["incidentes_vivos"] = _incidentes_vivos(db, cliente)
     contenido["destacado"] = _destacado(contenido)
     return contenido
+
+
+def _incidentes_vivos(db, cliente) -> list[dict[str, Any]]:
+    """Lo que sigue abierto (decision 139), con desde cuando: el resumen es
+    donde se ve que un fallo lleva tres semanas sin arreglarse, ya que el
+    aviso solo salio la primera."""
+    from shared.models import Incidente
+
+    try:
+        with db.begin_nested():
+            filas = (db.query(Incidente)
+                     .filter(Incidente.cliente_id == cliente.id,
+                             Incidente.estado.in_(("abierto", "visto")))
+                     .order_by(Incidente.abierto_en).all())
+    except Exception:  # noqa: BLE001 — sin la tabla (despliegue a medias), sin la seccion
+        logger.warning("Resumen de %s sin incidentes", getattr(cliente, "slug", "?"), exc_info=True)
+        return []
+    return [{"titulo": i.titulo, "serie": i.nombre_serie, "estado": i.estado, "veces": i.veces,
+             "severidad": i.severidad,
+             "desde": i.abierto_en.isoformat() if i.abierto_en else None} for i in filas]
 
 
 def _destacado(c: dict[str, Any]) -> list[str]:
@@ -304,6 +325,18 @@ def texto(c: dict[str, Any]) -> str:
                              if inc.get("resueltas") is not None else ""))
         lineas.append("")
         lineas.append(f"_{p['nombre']}_ · {p['rastreos']} rastreo(s): " + ("; ".join(partes) or "sin cifras"))
+    vivos = c.get("incidentes_vivos") or []
+    if vivos:
+        lineas.append("")
+        lineas.append(f"*Siguen abiertos ({len(vivos)}):*")
+        for i in vivos[:10]:
+            desde = datetime.fromisoformat(i["desde"]).date() if i.get("desde") else None
+            lineas.append(f"• {i['titulo']}"
+                          + (f" — desde el {desde:%d/%m}" if desde else "")
+                          + (f", {i['veces']} rastreos" if (i.get("veces") or 1) > 1 else "")
+                          + (" (visto)" if i.get("estado") == "visto" else ""))
+        if len(vivos) > 10:
+            lineas.append(f"• … y {len(vivos) - 10} más")
     if c.get("rastreos_sin_perfil"):
         lineas.append("")
         lineas.append(f"Otros rastreos del cliente: {c['rastreos_sin_perfil']}"

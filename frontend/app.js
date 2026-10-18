@@ -533,6 +533,8 @@ function app() {
     // Reglas de alerta y resumen semanal del cliente (decision 135)
     reglasCliente: null,      // GET /clients/{id}/reglas
     reglasForm: null,         // copia editable de `efectivas`
+    incidentes: null,         // GET /clients/{id}/incidentes (decision 139)
+    incidentesVer: 'vivos',
     reglasError: '',
     reglasPrueba: null,       // POST /clients/{id}/reglas/probar
     resumenes: [],
@@ -724,7 +726,7 @@ function app() {
         return '#/rastreos' + (q.toString() ? '?' + q : '');
       }
       if (v === 'clients') return '#/clientes';
-      if (v === 'client') return this.cliente ? '#/clientes/' + this.cliente.id : '#/clientes/nuevo';
+      if (v === 'client') return this.cliente ? '#/clientes/' + this.cliente.id + (this.clienteTab === 'alertas' ? '/alertas' : '') : '#/clientes/nuevo';
       if (v === 'programados') return '#/programados';
       if (!this.job) return '';
       const base = '#/rastreos/' + this.job.id;
@@ -778,7 +780,17 @@ function app() {
         } else if (p[0] === 'clientes') {
           if (!p[1]) await this.verClientes();
           else if (p[1] === 'nuevo') this.nuevoCliente();
-          else if (!this.cliente || this.cliente.id !== p[1] || this.view !== 'client') await this.abrirCliente(p[1]);
+          else {
+            // `#/clientes/<id>/alertas`: el enlace de incidentes del panel (decision 139).
+            const alertas = p[2] === 'alertas';
+            if (!this.cliente || this.cliente.id !== p[1] || this.view !== 'client') {
+              await this.abrirCliente(p[1], alertas ? 'alertas' : 'rastreos');
+              if (alertas) this.cargarReglas();
+            } else if (alertas && this.clienteTab !== 'alertas') {
+              this.clienteTab = 'alertas';
+              this.cargarReglas();
+            }
+          }
         } else if (p[0] === 'programados') {
           await this.verProgramados();
         } else if (p[0] === 'rastreos') {
@@ -1265,12 +1277,43 @@ function app() {
     },
 
     // --- Reglas de alerta (decision 135) -------------------------------------
+    // Decision 139
+    async cargarIncidentes() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      this.incidentes = null;
+      try {
+        const r = await api(`/clients/${id}/incidentes?estado=${this.incidentesVer}`);
+        if (this.cliente && this.cliente.id === id) this.incidentes = r;
+      } catch (e) { this.incidentes = []; this.reglasError = e.message; }
+    },
+
+    async cambiarIncidente(i, cambio) {
+      try {
+        const r = await api(`/clients/${this.cliente.id}/incidentes/${i.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cambio),
+        });
+        Object.assign(i, r);
+      } catch (e) { this.reglasError = e.message; }
+    },
+
+    // El titular: el de la regla de la comparacion si lo es (fmt.tituloAlerta)
+    // y, si no, el texto de la regla del cliente.
+    tituloIncidente(i) {
+      const d = i.detalle || {};
+      if (i.regla && !i.regla.startsWith('cliente:') && d.regla) {
+        return fmt.tituloAlerta(d) + (d.paginas != null ? ` · ${fmt.num(d.paginas)} de ${fmt.num(d.de)} páginas (${fmt.num(d.pct)} %)` : '');
+      }
+      return i.titulo;
+    },
+
     async cargarReglas() {
       if (!this.cliente) return;
       // Sin esto, el formulario del cliente anterior seguia en pantalla (y se
       // podia guardar sobre este) mientras llegaban las reglas nuevas.
       this.reglasCliente = null; this.reglasForm = null; this.resumenes = [];
       this.reglasError = ''; this.reglasPrueba = null; this.resumenPrevia = null;
+      this.cargarIncidentes();
       try {
         const [r, res] = await Promise.all([
           api(`/clients/${this.cliente.id}/reglas`),

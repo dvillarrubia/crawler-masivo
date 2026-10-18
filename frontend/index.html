@@ -361,6 +361,11 @@
                               x-text="(p.ultimo.alertas_criticas ? p.ultimo.alertas_criticas + ' críticas · ' : '') + p.ultimo.alertas + (p.ultimo.alertas === 1 ? ' alerta' : ' alertas')"></span>
                       </template>
                       <template x-if="!p.ultimo || !p.ultimo.alertas"><span class="text-dim">—</span></template>
+                      <!-- Decision 139: lo que sigue abierto de sus series. -->
+                      <template x-if="p.incidentes_vivos">
+                        <div><a :href="'#/clientes/' + p.id + '/alertas'" @click.stop class="text-red"
+                                x-text="p.incidentes_vivos + (p.incidentes_vivos === 1 ? ' incidente abierto' : ' incidentes abiertos')"></a></div>
+                      </template>
                     </td>
                   </tr>
                 </template>
@@ -587,6 +592,51 @@
             <template x-if="reglasError">
               <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="reglasError"></div>
             </template>
+            <!-- Incidentes (decision 139): cada alerta de una serie con su
+                 estado. La abre el primer rastreo que la ve, la cierra solo el
+                 que puede afirmar que ya no esta; aqui se marca vista o se
+                 silencia. -->
+            <div class="card mb-2" data-testid="incidentes">
+              <div class="flex items-center gap-1" style="flex-wrap:wrap;margin-bottom:.4rem">
+                <h3 style="margin:0;font-size:1rem">Incidentes</h3>
+                <template x-for="o in [['vivos', 'Abiertos'], ['cerrados', 'Cerrados']]" :key="o[0]">
+                  <button class="btn btn-sm chip" :class="incidentesVer === o[0] && 'chip-on'"
+                          @click="incidentesVer = o[0]; cargarIncidentes()" x-text="o[1]"></button>
+                </template>
+              </div>
+              <p class="text-sm text-dim" style="margin:.2rem 0 .5rem">Una alerta de un perfil o de una programación se abre la primera vez que salta y solo entonces se avisa. Se cierra sola cuando un rastreo posterior que puede comprobarlo ya no la ve.</p>
+              <template x-if="incidentes === null"><div class="text-dim text-sm">Cargando…</div></template>
+              <template x-if="incidentes && !incidentes.length">
+                <div class="text-dim text-sm" x-text="incidentesVer === 'vivos' ? 'Ningún incidente abierto.' : 'Ningún incidente cerrado todavía.'"></div>
+              </template>
+              <ul class="incidentes" x-show="incidentes && incidentes.length">
+                <template x-for="i in incidentes || []" :key="i.id">
+                  <li :class="'sev-' + i.severidad">
+                    <div class="incidente-cabecera">
+                      <span class="badge" :class="i.estado === 'abierto' ? 'badge-failed' : i.estado === 'visto' ? 'badge-pending' : 'badge-completed'" x-text="i.estado"></span>
+                      <strong x-text="tituloIncidente(i)"></strong>
+                    </div>
+                    <div class="text-sm text-dim">
+                      <span x-text="i.nombre_serie || i.serie"></span>
+                      · desde el <a :href="'#/rastreos/' + i.abierto_job_id" x-show="i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></a><span x-show="!i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></span>
+                      <span x-show="i.veces > 1" x-text="'· en ' + i.veces + ' rastreos seguidos'"></span>
+                      <template x-if="i.cerrado_en">
+                        <span>· cerrado el <a :href="'#/rastreos/' + i.cerrado_job_id" x-text="fmt.dia(i.cerrado_en)"></a></span>
+                      </template>
+                      <span x-show="i.silenciado_hasta && i.estado !== 'cerrado'" x-text="'· sin avisos hasta el ' + fmt.dia(i.silenciado_hasta)"></span>
+                    </div>
+                    <div class="flex gap-1 mt-1" style="flex-wrap:wrap" x-show="i.estado !== 'cerrado'">
+                      <button class="btn btn-sm" x-show="i.estado === 'abierto'" @click="cambiarIncidente(i, {estado: 'visto'})">Marcar como visto</button>
+                      <button class="btn btn-sm" x-show="i.estado === 'visto'" @click="cambiarIncidente(i, {estado: 'abierto'})">Volver a abierto</button>
+                      <label class="text-sm" style="display:flex;gap:.3rem;align-items:center">Silenciar hasta
+                        <input type="date" :value="i.silenciado_hasta || ''" @change="cambiarIncidente(i, {silenciado_hasta: $event.target.value || null})">
+                      </label>
+                      <a class="btn btn-sm" x-show="i.ultimo_job_id" :href="'#/rastreos/' + i.ultimo_job_id">Último rastreo que lo vio</a>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
             <template x-if="!reglasForm && !reglasError"><div class="card text-dim text-sm">Cargando reglas…</div></template>
             <template x-if="reglasForm">
               <div>
