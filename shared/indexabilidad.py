@@ -269,8 +269,39 @@ def es_nofollow(meta_robots=None, x_robots=None, bot: str = BOT_POR_DEFECTO) -> 
     return "nofollow" in tokens or "none" in tokens
 
 
+_MAX_SNIPPET = re.compile(r"max-snippet\s*:\s*(-?\d+)", re.IGNORECASE)
+
+
+def limite_de_fragmento(meta_robots=None, x_robots=None,
+                        bot: str = BOT_POR_DEFECTO) -> tuple[bool, int | None]:
+    """``(sin_fragmento, max_snippet)`` de las directivas que aplican a *bot*
+    (decision 137).
+
+    `nosnippet` o `max-snippet:0` quitan el fragmento del resultado y, segun
+    la documentacion de Google sobre las funciones de IA de la busqueda, que
+    el contenido se use como entrada directa de AI Overviews y AI Mode. Con
+    varias `max-snippet`, Google aplica la mas restrictiva; `-1` es «sin
+    limite» y no restringe nada. `max_snippet` es None si ninguna fija un
+    limite. Con las mismas fuentes y ambitos que el `noindex`: un
+    `X-Robots-Tag: bingbot: nosnippet` no es para Google.
+    """
+    tokens = _directivas(meta_robots, x_robots, bot)
+    textos: list[str] = []
+    if isinstance(meta_robots, dict):
+        textos += [v or "" for n, v in meta_robots.items()
+                   if (n or "").strip().lower() in ("robots", bot)]
+    else:
+        textos.append(meta_robots or "")
+    textos.append(x_robots_para_bot(x_robots, bot))
+    limites = [int(m) for t in textos for m in _MAX_SNIPPET.findall(t)]
+    limites = [n for n in limites if n >= 0]
+    maximo = min(limites) if limites else None
+    return ("nosnippet" in tokens or maximo == 0), maximo
+
+
 __all__ = [
     "estado_indexabilidad", "es_noindex", "es_nofollow", "misma_url", "clave_url",
+    "limite_de_fragmento",
     "hay_noindex", "directivas_x_robots", "x_robots_por_bot", "x_robots_para_bot",
     "SEPARADOR_CABECERAS",
 ]

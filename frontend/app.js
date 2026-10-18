@@ -3879,6 +3879,10 @@ const EXP_TABS = [
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
+  // Decision 137: lo que decide si la pagina sale en el fragmento y en las
+  // funciones de IA de la Busqueda, y si los buscadores de IA pueden entrar.
+  { key: 'a_ia',       label: 'IA',            icon: 'sparkles',     filter: HTML_INTERNO, ambito: ['nosnippet_en_indexable','max_snippet_restrictivo','bot_busqueda_ia_bloqueado'],
+    columns: ['url','status_code','indexable','meta_robots','x_robots_tag','pagerank_score'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
   { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','html_lang_no_coincide_hreflang'],
