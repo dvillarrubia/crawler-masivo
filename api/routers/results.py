@@ -7,7 +7,7 @@ import io
 import math
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -1491,6 +1491,11 @@ class _ResumenIssue(BaseModel):
     # hallazgo, ver `incidencia_por_pagina`).
     por_segmento: list[_PorSegmento] | None = None
     agregadas: int | None = None
+    # Decision 136 (Ola 4.3): suma de la importancia (0,1-1) de las paginas
+    # afectadas —«paginas equivalentes»— y gravedad x eso. Lo que se arregla
+    # primero.
+    importancia: float | None = None
+    prioridad: float | None = None
 
 
 @router.get("/issues/resumen", response_model=list[_ResumenIssue])
@@ -1500,6 +1505,8 @@ def resumen_issues(
     segmento: list[str] | None = Query(None, description="Solo paginas de esos segmentos (decision 125)"),
     por_segmento: bool = Query(False, description="Anade el % de paginas afectadas por segmento"),
     segmentos_max: int = Query(10, ge=1, le=200),
+    orden: Literal["gravedad", "prioridad"] = Query(
+        "gravedad", description="prioridad = gravedad x importancia de las paginas (decision 136)"),
     db: Session = Depends(get_session),
 ):
     """Lo que enseña la vista agrupada de Problemas (UX-04): cuántas
@@ -1563,7 +1570,57 @@ def resumen_issues(
         ))
     if segs or por_segmento:
         _anadir_segmentos(db, job_id, resultado, segs, por_segmento, segmentos_max)
+    _anadir_prioridad(db, job_id, resultado, filtro_seg)
+    if orden == "prioridad":
+        resultado.sort(key=lambda r: (-(r.prioridad or 0), _ORDEN_GRAVEDAD.get(r.severity, 3),
+                                      -r.paginas, r.issue_type))
     return resultado
+
+
+def _anadir_prioridad(db: Session, job_id: uuid.UUID, resultado: list, filtro_seg: list) -> None:
+    """Decision 136. Dos consultas agrupadas sobre todo el censo, no una por
+    tipo. Una incidencia de su pagina cuenta la importancia de esa pagina UNA
+    vez (un hreflang sin retorno emite una por idioma); un hallazgo de muchas
+    paginas (imagen de plantilla, cabecera por host) cuenta `paginas_afectadas`
+    veces la de su pagina de anclaje, que es la unica que se conoce."""
+    from shared.prioridad import expresion_importancia, prioridad
+
+    imp = expresion_importancia(Url)
+    pares = (
+        db.query(Issue.issue_type.label("t"), Issue.severity.label("sv"), Issue.url_id.label("u"))
+        .filter(Issue.job_id == job_id, incidencia_por_pagina(), *filtro_seg)
+        .distinct()
+        .subquery()
+    )
+    suma: dict[tuple[str, str], float] = {}
+    for t, sv, v in (
+        db.query(pares.c.t, pares.c.sv, func.sum(imp))
+        .join(Url, Url.id == pares.c.u)
+        .group_by(pares.c.t, pares.c.sv)
+    ):
+        suma[(t, sv)] = float(v or 0)
+    if not filtro_seg:
+        pa = Issue.details["paginas_afectadas"].as_integer()
+        for t, sv, v in (
+            db.query(Issue.issue_type, Issue.severity, func.sum(pa * imp))
+            .join(Url, Url.id == Issue.url_id)
+            .filter(Issue.job_id == job_id, incidencia_agregada())
+            .group_by(Issue.issue_type, Issue.severity)
+        ):
+            suma[(t, sv)] = suma.get((t, sv), 0.0) + float(v or 0)
+    # Tope: el sitio entero. Los hallazgos de plantilla se solapan (el mismo
+    # logo sin alt en cinco variantes, cada una en todas las paginas).
+    tope = float(
+        db.query(func.sum(imp))
+        .filter(Url.job_id == job_id, Url.is_internal.is_(True), Url.is_html.is_(True),
+                Url.status_code >= 200, Url.status_code < 300)
+        .scalar() or 0.0)
+    for r in resultado:
+        total = suma.get((r.issue_type, r.severity), 0.0)
+        if tope:
+            total = min(total, tope)
+        r.importancia = round(total, 2)
+        r.prioridad = prioridad(r.severity, total)
 
 
 _ORDEN_GRAVEDAD = {"error": 0, "warning": 1, "info": 2}
