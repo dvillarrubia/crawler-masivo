@@ -76,6 +76,13 @@ def _parsear_valor(texto: str):
         return texto
 
 
+def _autenticacion() -> dict[str, str]:
+    """La API pide `API_TOKEN` (decision 134): se lee del entorno, como el resto
+    de secretos. Sin el, la API responde 401 y se dice abajo."""
+    token = (os.getenv("API_TOKEN") or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cliente", help="carpeta en projects/<cliente>/ con config.json")
@@ -130,13 +137,16 @@ def main() -> int:
 
     req = urllib.request.Request(
         f"{args.api.rstrip('/')}/api/jobs", data=cuerpo,
-        headers={"Content-Type": "application/json; charset=utf-8"}, method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8", **_autenticacion()},
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             datos = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         print(f"HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:800]}", file=sys.stderr)
+        if e.code == 401:
+            print("Falta API_TOKEN en el entorno (o no es el del servidor).", file=sys.stderr)
         return 1
     print(f"{datos.get('id')} {datos.get('status')}  ->  {args.api.rstrip('/')}/api/jobs/{datos.get('id')}")
 

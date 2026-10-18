@@ -31,6 +31,14 @@ def fake_llm():
 
 
 @pytest.fixture(autouse=True)
+def _api_sin_autenticacion(monkeypatch):
+    """Los tests de la API llaman a los endpoints sin token: la autenticacion
+    (decision 134) la cubre `test_autenticacion.py`, que borra esta variable."""
+    monkeypatch.setenv("API_AUTH_DESACTIVADA", "1")
+    monkeypatch.delenv("API_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _sin_llamadas_a_modelos_de_pago(monkeypatch):
     """Red de seguridad para TODA la suite: aunque alguien tenga una clave en
     su entorno, ningun test sale hacia OpenRouter ni TypeSafe. Se borran la

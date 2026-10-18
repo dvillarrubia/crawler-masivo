@@ -1,5 +1,6 @@
 """FastAPI application entry point for the SEO crawler API."""
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,9 +15,10 @@ from shared.config import REDIS_URL
 from shared.database import init_db
 
 from api import dependencies
+from api.auth import AutenticacionMiddleware
 from api.routers import (
     almacenamiento, cleaning, clientes, enriquecido, extraccion, jobs, programaciones,
-    results, segmentos, semantic, uso,
+    results, segmentos, semantic, sesion, uso,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -50,14 +52,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS -- allow everything during development; tighten for production.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Autenticacion (decision 134): todo `/api` salvo `/api/sesion` pide sesion o
+# token. Va como middleware y no como dependencia de cada router para que uno
+# nuevo nazca protegido.
+app.add_middleware(AutenticacionMiddleware)
+
+# CORS: la interfaz se sirve desde el mismo origen y no lo necesita. Antes era
+# `allow_origins=["*"]` con `allow_credentials=True`, que Starlette resuelve
+# devolviendo el origen de quien pregunta: cualquier web podia leer la API con
+# la sesion del navegador. Solo los origenes de `CORS_ORIGINS` (por comas).
+_ORIGENES = [o.strip() for o in (os.getenv("CORS_ORIGINS") or "").split(",") if o.strip()]
+if _ORIGENES:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_ORIGENES,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Routers
 app.include_router(jobs.router)
@@ -71,6 +83,7 @@ app.include_router(uso.router)
 app.include_router(almacenamiento.router)
 app.include_router(extraccion.router)
 app.include_router(segmentos.router)
+app.include_router(sesion.router)
 
 
 @app.get("/health", tags=["system"])
@@ -122,6 +135,11 @@ if FRONTEND_DIR.is_dir():
         if path.is_file():
             return FileResponse(str(path), media_type="image/svg+xml")
         return Response(status_code=404)
+
+    @app.get("/entrar", include_in_schema=False)
+    def entrar_html() -> Response:
+        return FileResponse(str(FRONTEND_DIR / "entrar.html"),
+                            headers={"Cache-Control": "no-cache"})
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon_ico() -> Response:

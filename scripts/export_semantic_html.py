@@ -41,7 +41,9 @@ RING_DESCRIPTIONS = {
 # ---------------------------------------------------------------------------
 def _get(path: str, api: str) -> Any:
     url = f"{api.rstrip('/')}{path}"
-    with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310
+    token = (os.environ.get("API_TOKEN") or "").strip()  # decision 134
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"} if token else {})
+    with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
         return json.loads(r.read().decode("utf-8"))
 
 

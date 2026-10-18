@@ -64,6 +64,8 @@
           <button role="menuitem" @click="menuAbierto = ''; toggleTheme()">
             <i data-lucide="contrast" style="width:14px;height:14px"></i>
             <span x-text="theme === 'terminal' ? 'Tema claro' : 'Tema terminal'"></span></button>
+          <button role="menuitem" @click="menuAbierto = ''; salirDeLaSesion()">
+            <i data-lucide="log-out" style="width:14px;height:14px"></i> Cerrar sesión</button>
         </div>
       </div>
     </div>

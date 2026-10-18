@@ -171,5 +171,7 @@ Una linea por regla; el porque y la medida, en la decision citada.
 - SQLAlchemy 2.0 estilo `select()` en el analizador; estilo ORM en la API.
 - `extractors.py` son funciones puras, sin imports de Scrapy.
 - Los Items de Scrapy mapean 1:1 a los modelos de SQLAlchemy.
-- Sin autenticacion y con CORS abierto: lo que se guarda lo lee cualquiera
-  (por eso los secretos van en el entorno, decision 83).
+- La API pide `API_TOKEN` (Bearer para scripts, cookie de `/entrar` para el
+  navegador; decision 134) y el CORS esta cerrado. Es un token unico, sin
+  roles: los secretos siguen yendo en el entorno (decision 83). Los scripts
+  que llaman a la API leen `API_TOKEN` del entorno.

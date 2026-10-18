@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Entrar · SEO Crawler</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script>
+    (function () {
+      var t = 'light';
+      try { t = localStorage.getItem('seo-crawler-theme') || t; } catch (_) {}
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/theme-terminal.css">
+  <style>
+    body { display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 16px; }
+    .entrar { width: 100%; max-width: 380px; }
+    .entrar h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+    .entrar p { margin: 0 0 1rem; }
+    .entrar input { width: 100%; }
+    .entrar .error { color: var(--red); min-height: 1.2em; margin-top: .5rem; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <!-- Decision 134: la interfaz es la misma pagina de siempre, pero todo lo que
+       pinta llega por /api, que ahora pide sesion. Aqui se cambia el token por
+       una cookie que el JavaScript no puede leer (HttpOnly). -->
+  <form class="card entrar" id="form" autocomplete="on">
+    <h1>SEO Crawler</h1>
+    <p class="text-dim text-sm" id="texto">Escribe el token de acceso para entrar.</p>
+    <div class="form-group">
+      <label for="token">Token de acceso</label>
+      <input type="password" id="token" name="password" autocomplete="current-password" required autofocus>
+    </div>
+    <button class="btn btn-primary" type="submit" id="boton">Entrar</button>
+    <div class="error" id="error" role="alert"></div>
+  </form>
+  <script>
+    (function () {
+      var form = document.getElementById('form');
+      var error = document.getElementById('error');
+      var boton = document.getElementById('boton');
+      // Solo se vuelve a una ruta de la propia aplicacion (#/...): un
+      // parametro libre seria una redireccion abierta.
+      var volver = new URLSearchParams(location.search).get('volver') || '';
+      if (!/^#\/[^\s]*$/.test(volver)) volver = '';
+      function ir() { location.replace('/' + volver); }
+
+      fetch('/api/sesion', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (e) {
+          if (e.autenticado) return ir();
+          if (e.configurada === false) {
+            document.getElementById('texto').textContent =
+              'La API no tiene token configurado (API_TOKEN en el .env del servidor): no se puede entrar todavia.';
+            boton.disabled = true;
+          }
+        })
+        .catch(function () {});
+
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        error.textContent = '';
+        boton.disabled = true;
+        fetch('/api/sesion', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: document.getElementById('token').value }),
+        }).then(function (r) {
+          if (r.ok) return ir();
+          return r.json().catch(function () { return {}; }).then(function (d) {
+            error.textContent = d.detail || ('Error ' + r.status);
+            boton.disabled = false;
+          });
+        }).catch(function () {
+          error.textContent = 'No se pudo contactar con la API.';
+          boton.disabled = false;
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
