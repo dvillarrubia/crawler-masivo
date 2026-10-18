@@ -268,3 +268,35 @@ def test_la_tuberia_guarda_las_entradas_y_reanudar_no_las_duplica(tuberia):
     assert filas == [(B, "https://x.com/a", "2026-01-01"),
                      (A, "https://x.com/a", "2026-01-01"),
                      (A, "https://x.com/b", None)]
+
+
+def test_lastmod_futuro_dice_si_la_cuenta_es_un_minimo():
+    """Con el tope de entradas alcanzado, de un fichero a medias no se guardaron
+    todas: `entradas_futuras` es un minimo y el aviso tiene que decirlo, como
+    ya lo decia `en_varios_sitemaps` (revision de la decision 126)."""
+    s, j = _montar([_fichero(A, internas=3, entradas_guardadas=3),
+                    _fichero(B, internas=3, entradas_guardadas=1)], recortadas=True)
+    _url(s, j, "/")
+    _entrada(s, j, "/a", A, "2099-01-01")
+    _entrada(s, j, "/b", B, "2099-01-01")
+    _avisar(s, j)
+    marca = {a.details["fichero"]: a.details["entradas_recortadas"]
+             for a in _issues(s, j, "lastmod_futuro")}
+    # A se guardo entero: su cuenta es exacta aunque el censo se recortara.
+    assert marca == {A: False, B: True}
+
+
+def test_lastmod_futuro_sin_tope_no_es_minimo_y_censo_viejo_usa_la_marca_global():
+    s, j = _montar([_fichero(A)])
+    _url(s, j, "/")
+    _entrada(s, j, "/a", A, "2099-01-01")
+    _avisar(s, j)
+    (aviso,) = _issues(s, j, "lastmod_futuro")
+    assert aviso.details["entradas_recortadas"] is False
+
+    s, j = _montar([_fichero(A)], recortadas=True)   # sin `internas`
+    _url(s, j, "/")
+    _entrada(s, j, "/a", A, "2099-01-01")
+    _avisar(s, j)
+    (aviso,) = _issues(s, j, "lastmod_futuro")
+    assert aviso.details["entradas_recortadas"] is True

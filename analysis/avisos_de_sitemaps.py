@@ -134,7 +134,7 @@ def avisar(az) -> dict[str, Any] | None:
     resumen["sitemap_supera_limite"] = _supera_limite(az, ficheros, anclas)
     if _hay_tabla(az):
         recortadas = bool(resumen_spider.get("entradas_recortadas"))
-        resumen["lastmod_futuro"] = _lastmod_futuro(az, ficheros, respaldo, anclas)
+        resumen["lastmod_futuro"] = _lastmod_futuro(az, ficheros, respaldo, anclas, recortadas)
         resumen["en_varios_sitemaps"] = _en_varios(az, anclas, recortadas)
     az._flush_issues()
     logger.info("Sitemaps: %s", resumen)
@@ -165,10 +165,29 @@ def _supera_limite(az, ficheros: list[dict], anclas: _Anclas) -> int:
     return n
 
 
-def _lastmod_futuro(az, ficheros: list[dict], respaldo: datetime, anclas: _Anclas) -> int:
+def _fichero_recortado(f: dict | None, recortadas: bool) -> bool:
+    """Si de ESTE fichero se guardaron menos entradas internas de las que tenia.
+
+    Con el tope de entradas (SITEMAP_ENTRIES_MAX) un fichero puede quedarse a
+    medias: lo que se cuenta de el es un minimo. Si el resumen no trae las dos
+    cifras (un rastreo anterior), vale la marca global del censo.
+    """
+    if not recortadas:
+        return False
+    if not f:
+        return True
+    guardadas, internas = f.get("entradas_guardadas"), f.get("internas")
+    if guardadas is None or internas is None:
+        return True
+    return guardadas < internas
+
+
+def _lastmod_futuro(az, ficheros: list[dict], respaldo: datetime, anclas: _Anclas,
+                    recortadas: bool = False) -> int:
     from shared.models import SitemapEntry as E
 
     leidos = {f["url"]: _leido(f, respaldo) for f in ficheros}
+    por_url = {f["url"]: f for f in ficheros}
     por_fichero: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"n": 0, "con_lastmod": 0, "ilegibles": 0, "ejemplos": [], "maximo": None})
     filas = az.session.execute(
@@ -208,6 +227,9 @@ def _lastmod_futuro(az, ficheros: list[dict], respaldo: datetime, anclas: _Ancla
             "leido_at": leidos.get(fichero, respaldo).isoformat(),
             "margen_horas": int(S.MARGEN_LASTMOD.total_seconds() // 3600),
             "ejemplos": d["ejemplos"],
+            # Con el tope de entradas alcanzado en este fichero no se guardaron
+            # todas: `entradas_futuras` es un minimo, no el total.
+            "entradas_recortadas": _fichero_recortado(por_url.get(fichero), recortadas),
         }, group_key=_clave(fichero))
     return emitidos
 

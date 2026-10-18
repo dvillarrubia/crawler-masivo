@@ -439,6 +439,12 @@ class _SesionFalsa:
             ACTUALIZACIONES_JOB.append({getattr(k, "key", k): v for k, v in a[0].items()})
         return 0
 
+    def delete(self, *a, **k):
+        return 0
+
+    def begin_nested(self):
+        return __import__("contextlib").nullcontext()
+
     def commit(self):
         pass
 

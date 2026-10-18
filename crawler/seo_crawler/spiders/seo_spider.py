@@ -1245,11 +1245,39 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             try:
                 sesion.query(Job).filter(Job.id == self.job_id).update(
                     {"sitemaps": resumen}, synchronize_session=False)
+                if not self._sitemap_entradas_guardadas:
+                    self._borrar_entradas_anteriores(sesion)
                 sesion.commit()
             finally:
                 sesion.close()
         except Exception as exc:  # noqa: BLE001 -- no tumba el cierre del rastreo
             logger.warning("No se pudo guardar el resumen de sitemaps: %s", exc)
+
+    def _borrar_entradas_anteriores(self, sesion) -> None:
+        """Sin entradas en este proceso, fuera las del anterior (decision 126).
+
+        La tuberia borra las del job con el PRIMER fichero que trae entradas.
+        Si al reanudar ninguno trae —el sitemap ya no tiene URLs internas, o
+        respondio 404—, las del proceso anterior se quedaban mientras
+        `jobs.sitemaps` se sobrescribia con lo leido ahora: los avisos de
+        sitemaps cruzaban ficheros de un rastreo con entradas de otro.
+        """
+        import uuid
+
+        from shared.models import SitemapEntry
+
+        try:
+            job_id = uuid.UUID(str(self.job_id))
+        except ValueError:
+            job_id = self.job_id
+        try:
+            # En un SAVEPOINT: sin la tabla (base sin migrar) se deshace solo
+            # esto y el resumen se guarda igual.
+            with sesion.begin_nested():
+                sesion.query(SitemapEntry).filter(
+                    SitemapEntry.job_id == job_id).delete(synchronize_session=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudieron borrar las entradas de sitemap anteriores: %s", exc)
 
     def handle_sitemap_error(self, failure) -> None:
         logger.debug("Sitemap fetch failed: %s", failure.request.url)

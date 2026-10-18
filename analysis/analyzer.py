@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import logging
@@ -70,6 +71,21 @@ from shared.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _ejemplos_por_url(paginas: list[tuple[str, int]], n: int = 5) -> list[str]:
+    """Las `n` primeras URLs distintas de unos pares (url, id) ya ordenados.
+
+    Por URL y no por id, como el ancla: si no, la muestra de un aviso agregado
+    cambia entre dos censos iguales rastreados en otro orden (decision 88).
+    """
+    vistas: list[str] = []
+    for url, _ in paginas:
+        if not vistas or vistas[-1] != url:
+            vistas.append(url)
+            if len(vistas) >= n:
+                break
+    return vistas
 
 
 def _clave_de_grupo(valor: str | None) -> str | None:
@@ -653,7 +669,9 @@ class SEOAnalyzer:
             select(Url.id, Url.host, Url.url, Url.response_class, Url.status_code)
             .where(Url.job_id == self.job_id,
                    Url.response_class.in_(sorted(NO_VALIDAS)))
-            .order_by(Url.id)
+            # Por URL, no por id: el ancla y los ejemplos no pueden depender
+            # del orden de rastreo (decision 88).
+            .order_by(Url.url, Url.id)
         ).all()
         grupos: dict[tuple[str, str], dict[str, Any]] = {}
         for url_id, host, url, clase, status in filas:
@@ -1998,6 +2016,7 @@ class SEOAnalyzer:
                 StructuredData.schema_type,
                 StructuredData.raw,
                 StructuredData.json_invalido,
+                Url.url,
             )
             .join(Url, Url.id == StructuredData.url_id)
             .where(Url.job_id == self.job_id)
@@ -2017,13 +2036,15 @@ class SEOAnalyzer:
         # No se pierde nada: cada fila lleva cuantas paginas la llevan y hasta
         # cinco ejemplos, y `structured_data` conserva TODOS los bloques con su
         # validacion.
-        por_hallazgo: dict[tuple, list[int]] = {}
+        # (url, url_id) de cada bloque: el ancla es la URL menor, no el id menor,
+        # que depende del orden de rastreo (decision 88).
+        por_hallazgo: dict[tuple, list[tuple[str, int]]] = {}
         # Los ids de bloque agrupados por veredicto, para no hacer un UPDATE
         # por bloque: en penguin eran 226.651 sentencias para escribir cuatro
         # valores distintos.
         por_veredicto: dict[tuple, list[int]] = {}
 
-        for sd_id, url_id, schema_type, raw, json_invalido in rows:
+        for sd_id, url_id, schema_type, raw, json_invalido, page_url in rows:
             problemas = problemas_structured_data(raw, json_invalido=json_invalido)
             niveles = {n for n, _ in problemas}
             status = next(
@@ -2045,9 +2066,10 @@ class SEOAnalyzer:
             retirados = tuple(m for n, m in problemas if n == "info")
             if resto:
                 nivel = "error" if "error" in niveles else "warning"
-                por_hallazgo.setdefault((nivel, schema_type, resto), []).append(url_id)
+                por_hallazgo.setdefault((nivel, schema_type, resto), []).append((page_url, url_id))
             if retirados:
-                por_hallazgo.setdefault(("info", schema_type, retirados), []).append(url_id)
+                por_hallazgo.setdefault(("info", schema_type, retirados), []).append(
+                    (page_url, url_id))
 
         for (status, issues_json), ids in por_veredicto.items():
             valores = {"validation_status": status,
@@ -2060,8 +2082,9 @@ class SEOAnalyzer:
                 )
 
         for (status, schema_type, issues), paginas in por_hallazgo.items():
+            paginas.sort()
             self._add_issue(
-                paginas[0],
+                paginas[0][1],
                 f"structured_data_{status}",
                 status,
                 group_key=_clave_de_grupo(f"{schema_type}|" + "|".join(issues)),
@@ -2069,7 +2092,7 @@ class SEOAnalyzer:
                     "schema_type": schema_type,
                     "validation_issues": list(issues),
                     "paginas_afectadas": len(paginas),
-                    "paginas_ejemplo": self._urls_de(paginas[:5]),
+                    "paginas_ejemplo": _ejemplos_por_url(paginas),
                 },
             )
 
@@ -2169,17 +2192,18 @@ class SEOAnalyzer:
             return
         filas = self.session.execute(
             select(Url.id, HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head,
-                   HtmlMeta.title_count, HtmlMeta.meta_description_count)
+                   HtmlMeta.title_count, HtmlMeta.meta_description_count, Url.url)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(*base, HtmlMeta.fuera_del_head.isnot(None),
                    HtmlMeta.fuera_del_head != "")
         ).all()
-        cortados: dict[tuple, list[int]] = {}
-        en_body: dict[tuple, list[int]] = {}
-        for url_id, cortado_por, fuera, n_titulos, n_descripciones in filas:
+        # (url, url_id): anclados en la URL menor, no en el id menor (88).
+        cortados: dict[tuple, list[tuple[str, int]]] = {}
+        en_body: dict[tuple, list[tuple[str, int]]] = {}
+        for url_id, cortado_por, fuera, n_titulos, n_descripciones, page_url in filas:
             perdidos = tuple(_fuera_del_head(fuera))
             if cortado_por:
-                cortados.setdefault((cortado_por, perdidos), []).append(url_id)
+                cortados.setdefault((cortado_por, perdidos), []).append((page_url, url_id))
                 continue
             # Un segundo <title> o una segunda description en el body, con el
             # bueno en el head, ya es `title_multiple` / `description_multiple`:
@@ -2193,12 +2217,13 @@ class SEOAnalyzer:
                 ya_dicho.add("description")
             propios = tuple(p for p in perdidos if p not in ya_dicho)
             if propios:
-                en_body.setdefault(propios, []).append(url_id)
+                en_body.setdefault(propios, []).append((page_url, url_id))
 
         for (cortado_por, perdidos), paginas in cortados.items():
             grave = bool(self._PERDIDA_GRAVE.intersection(perdidos))
+            paginas.sort()
             self._add_issue(
-                paginas[0], "head_cortado", "error" if grave else "warning",
+                paginas[0][1], "head_cortado", "error" if grave else "warning",
                 {"cortado_por": cortado_por,
                  "fuera_del_head": list(perdidos),
                  # El estado de indexabilidad del crawler sigue leyendo el
@@ -2208,27 +2233,19 @@ class SEOAnalyzer:
                  # que la directiva esta donde Google deja de leer.
                  "directiva_en_duda": grave,
                  "paginas_afectadas": len(paginas),
-                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                 "paginas_ejemplo": _ejemplos_por_url(paginas)},
                 group_key=_clave_de_grupo(f"{cortado_por}|" + ",".join(perdidos)),
             )
         for perdidos, paginas in en_body.items():
+            paginas.sort()
             self._add_issue(
-                paginas[0], "meta_fuera_del_head", "info",
+                paginas[0][1], "meta_fuera_del_head", "info",
                 {"fuera_del_head": list(perdidos),
                  "paginas_afectadas": len(paginas),
-                 "paginas_ejemplo": self._urls_de(paginas[:5])},
+                 "paginas_ejemplo": _ejemplos_por_url(paginas)},
                 group_key=_clave_de_grupo(",".join(perdidos)),
             )
         self._flush_issues()
-
-    def _urls_de(self, url_ids: list[int]) -> list[str]:
-        """Las URLs de unos cuantos ids, para poder ir a mirar la pagina."""
-        if not url_ids:
-            return []
-        filas = self.session.execute(
-            select(Url.url).where(Url.id.in_(url_ids))
-        ).all()
-        return [f[0] for f in filas]
 
     # -- Indexability --------------------------------------------------------
 
@@ -2411,7 +2428,9 @@ class SEOAnalyzer:
         - 4xx (salvo 429): nada, es «todo permitido» tambien para Google. Un
           muro delante (403 de Cloudflare): nada, no se ha visto el robots.txt.
         - Una fila por host, anclada en la raiz si se rastreo y si no en la URL
-          de id mas bajo de ese host (no depende del orden de las filas).
+          MENOR de ese host. Nunca la de id mas bajo: el id sigue al orden de
+          rastreo, y el mismo aviso saldria resuelto y nuevo a la vez al
+          comparar dos censos (decision 88).
         """
         from analysis.robots_txt import RobotsDelJob, estado_de_comprobacion, estado_de_fila
         from shared.models import Job
@@ -2466,11 +2485,16 @@ class SEOAnalyzer:
         partes = urlparse(o)
         filtro = (Url.job_id == self.job_id, Url.host == (partes.hostname or ""),
                   Url.scheme == partes.scheme)
+        # Por URL y nunca por id: el id depende del orden de rastreo y la
+        # comparacion entre censos casa por (tipo, url, group_key) (decision
+        # 88); con el id menor, dos censos iguales rastreados en otro orden
+        # darian el mismo aviso por resuelto y por nuevo a la vez.
         ancla = self.session.execute(
             select(Url.id).where(*filtro, Url.path.in_(["/", ""]))
-            .order_by(Url.id).limit(1)).scalar()
+            .order_by(Url.url, Url.id).limit(1)).scalar()
         if ancla is None:
-            ancla = self.session.execute(select(func.min(Url.id)).where(*filtro)).scalar()
+            ancla = self.session.execute(
+                select(Url.id).where(*filtro).order_by(Url.url, Url.id).limit(1)).scalar()
         self._robots_anclas[o] = ancla
         return ancla
 
@@ -2493,8 +2517,12 @@ class SEOAnalyzer:
         if self._robots_mode in ("respect", "audit") and bloqueada != bloqueada_rastreo:
             clave = "solo_googlebot" if bloqueada else "solo_rastreador"
             c[clave] += 1
-            if len(c["ejemplos_" + clave]) < self._MUESTRA_EJEMPLOS:
-                c["ejemplos_" + clave].append(url)
+            # Las URLs menores, no las primeras que llegan: las filas vienen en
+            # el orden de rastreo y dos censos iguales darian otra muestra.
+            ejemplos = c["ejemplos_" + clave]
+            if len(ejemplos) < self._MUESTRA_EJEMPLOS or url < ejemplos[-1]:
+                bisect.insort(ejemplos, url)
+                del ejemplos[self._MUESTRA_EJEMPLOS:]
         return bloqueada
 
     def _cerrar_robots_googlebot(self) -> None:
@@ -3173,7 +3201,7 @@ class SEOAnalyzer:
         logger.debug("Analyzing images ...")
 
         stmt = (
-            select(Resource.url_id, Resource.resource_url)
+            select(Resource.url_id, Resource.resource_url, Url.url)
             .join(Url, Url.id == Resource.url_id)
             .where(
                 Url.job_id == self.job_id,
@@ -3205,13 +3233,20 @@ class SEOAnalyzer:
         # y entre el 30% y el 75% menos en los otros cuatro. No se pierde nada:
         # la fila va con cuantas paginas la llevan y un ejemplo, y `resources`
         # sigue teniendo todas las apariciones.
+        # Anclada en la pagina de URL menor que la lleva, no en la de id menor:
+        # el id depende del orden de rastreo y la comparacion entre censos casa
+        # por (tipo, url, group_key) (decision 88).
         por_imagen: dict[str, list[int]] = {}
-        for url_id, resource_url in rows:
+        ancla_de_imagen: dict[str, tuple[str, int]] = {}
+        for url_id, resource_url, page_url in rows:
             por_imagen.setdefault(resource_url, []).append(url_id)
+            actual = ancla_de_imagen.get(resource_url)
+            if actual is None or (page_url, url_id) < actual:
+                ancla_de_imagen[resource_url] = (page_url, url_id)
 
         for resource_url, paginas in por_imagen.items():
             self._add_issue(
-                paginas[0],
+                ancla_de_imagen[resource_url][1],
                 "image_missing_alt",
                 "warning",
                 {
@@ -3249,6 +3284,7 @@ class SEOAnalyzer:
             select(
                 Url.id,
                 Url.host,
+                Url.url,
                 SecurityHeaders.is_https,
                 SecurityHeaders.has_mixed_content,
                 SecurityHeaders.has_hsts,
@@ -3267,6 +3303,7 @@ class SEOAnalyzer:
         for (
             url_id,
             host,
+            page_url,
             is_https,
             has_mixed_content,
             has_hsts,
@@ -3285,12 +3322,16 @@ class SEOAnalyzer:
                 self._add_issue(url_id, "mixed_content", "warning")
 
             resumen = por_host.setdefault(
-                host or "", {"url_id": url_id, "paginas": 0,
+                host or "", {"url_id": url_id, "url": page_url, "paginas": 0,
                              "missing_hsts": 0, "missing_csp": 0,
                              "missing_x_content_type_options": 0,
                              "missing_x_frame_options": 0}
             )
             resumen["paginas"] += 1
+            # El ancla es la URL menor del host, no la primera fila leida: el
+            # orden de lectura sigue al de rastreo (decision 88).
+            if (page_url, url_id) < (resumen["url"], resumen["url_id"]):
+                resumen["url"], resumen["url_id"] = page_url, url_id
             # HSTS solo tiene sentido sobre https: en http el navegador ignora
             # la cabecera, asi que avisarlo ahi era pedir algo que no aplica.
             if has_hsts is False and is_https is not False:

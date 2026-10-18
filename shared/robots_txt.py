@@ -250,8 +250,16 @@ def grupos_como_google(texto: str, token: str) -> str:
     le aplicaba a Googlebot y `User-agent: Googlebot/2.1` no (revision de la
     decision 113). Aqui el grupo del bot pasa a llamarse exactamente como el
     token y cualquier otro a un nombre que no casa con nada; `*` se queda.
+
+    Los finales de linea se normalizan antes a `\n`, partiendo con
+    `str.splitlines` —que es como parte Protego—: con `^` y `re.M` solo se ve
+    un principio de linea tras `\n`, asi que un fichero con finales `\r`
+    solos (validos segun RFC 9309) no reescribia ningun grupo y Googlebot
+    volvia a heredar el `User-agent: Google`. Partir igual que el parser
+    mantiene tambien la numeracion de lineas que usa `robots_regla`.
     """
     bajo = token.lower()
+    texto = "\n".join(texto.splitlines())
 
     def _uno(m: re.Match) -> str:
         valor = m.group(2).strip()

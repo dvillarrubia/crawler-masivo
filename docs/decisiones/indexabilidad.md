@@ -639,6 +639,19 @@
    Tests: `test_el_grupo_se_elige_por_token_entero_como_google` y
    `test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva`, que
    fallan sin el arreglo.
+   **Revisión (2026-10-18): los finales de línea.** `grupos_como_google`
+   buscaba las líneas `User-agent` con `^` y `re.M`, que solo ve un principio
+   de línea tras `\n`. RFC 9309 admite CR, CRLF y LF, y Protego parte con
+   `str.splitlines()`, que entiende los tres: con CR solos el parser veía todos
+   los grupos y la reescritura solo el primero (el que está al principio del
+   fichero), así que un `User-agent: Google` en segundo lugar volvía a
+   aplicarse a Googlebot. Ahora el texto se parte con `splitlines()` —igual
+   que Protego y que `robots_regla`, así que la numeración de líneas de la 129
+   no se mueve— y se une con `\n` antes de reescribir. Test:
+   `test_los_finales_de_linea_no_cambian_el_veredicto`, una tabla de casos en
+   CR, CRLF y LF con el grupo mal elegido en primera y en segunda posición, que
+   contrasta el veredicto con Protego sobre el mismo fichero en LF y con
+   `regla_que_decide`; con CR falla sin el arreglo.
 
 <a id="d115"></a>
 115. **Varios canonicals son varios DESTINOS, y con dos Google no usa ninguno**
