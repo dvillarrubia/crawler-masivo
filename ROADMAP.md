@@ -192,6 +192,17 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Qué arreglar primero (18 de octubre)
+
+En Problemas, «Ordenar: Prioridad» pone arriba lo que hay que arreglar
+primero. No basta con la gravedad: cuenta también lo importantes que son las
+páginas afectadas (su PageRank, a cuántos clics de la home están y si el
+sitemap las declara). Un aviso en la home y en todas las fichas pasa por
+delante de un error en tres etiquetas perdidas. En el censo de Lopesan, arriba
+quedan el error de datos estructurados de la plantilla y los 51 canonicals a
+otro dominio. El equipo SEO tiene que validar ese orden antes de ponerlo por
+defecto. [Decisión 136](docs/decisiones/incidencias.md#d136).
+
 ### Alertas a medida de cada cliente y resumen semanal (18 de octubre)
 
 Ola 5.2 del plan (decisión 135). En la ficha del cliente hay una pestaña

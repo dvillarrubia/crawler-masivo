@@ -2186,6 +2186,16 @@
                   </template>
                 </optgroup>
               </select>
+              <!-- Decision 136: prioridad = gravedad x importancia de las paginas
+                   afectadas (PageRank, clics desde la home, sitemap). -->
+              <div class="flex gap-1 items-center" role="group" aria-label="Orden">
+                <span class="text-sm text-dim">Ordenar:</span>
+                <button class="btn btn-sm chip" :class="issuesOrden === 'gravedad' && 'chip-on'"
+                        @click="issuesOrden = 'gravedad'; loadIssuesResumen()">Gravedad</button>
+                <button class="btn btn-sm chip" :class="issuesOrden === 'prioridad' && 'chip-on'"
+                        data-tip="Gravedad × importancia de las páginas afectadas: su PageRank, a cuántos clics de la home están y si el sitemap las declara. Arriba, lo que hay que arreglar primero."
+                        @click="issuesOrden = 'prioridad'; loadIssuesResumen()">Prioridad</button>
+              </div>
               <button class="btn btn-sm" style="margin-left:auto" @click="issuesVista = 'lista'; issues = []; loadIssues()">
                 <i data-lucide="list" style="width:13px;height:13px"></i> Ver todas como lista</button>
             </div>
@@ -2212,6 +2222,9 @@
                       <!-- Un tipo que solo tiene incidencias de un hallazgo para muchas
                            paginas no se puede repartir: sale con 0 y lo dice, no desaparece. -->
                       <span class="text-dim" x-show="issuesSegmento && r.agregadas" x-text="'· ' + fmt.num(r.agregadas) + ' sin repartir por segmento'"></span>
+                      <span class="text-dim" x-show="issuesOrden === 'prioridad' && r.prioridad != null"
+                            :title="'Equivale a ' + fmt.num(r.importancia) + ' páginas de máxima importancia'"
+                            x-text="'· prioridad ' + fmt.num(Math.round(r.prioridad))"></span>
                     </span>
                     <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
                   </button>

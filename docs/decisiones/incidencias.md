@@ -1020,3 +1020,50 @@
      tope da una cifra exacta aunque el censo se recortara después. Sin las dos
      cifras (un resumen anterior) vale la marca global. Tests en
      `tests/test_avisos_de_sitemaps_db.py`.
+
+<a id="d136"></a>
+136. **Qué se arregla primero: gravedad × importancia de las páginas, con el
+   sitio entero de tope** (Ola 4.3 de `docs/PLAN_MEJOR_CRAWLER.md`). Problemas
+   ordenaba por gravedad y luego por número de páginas, así que un error en
+   tres etiquetas perdidas iba por delante de un aviso en la home y en todas
+   las fichas. `GET /api/jobs/{id}/issues/resumen` devuelve ahora en cada tipo
+   `importancia` (la suma de la importancia de las páginas afectadas,
+   «páginas equivalentes») y `prioridad` (peso de la gravedad × importancia), y
+   con `?orden=prioridad` ordena por ella. La vista de Problemas tiene el
+   selector «Ordenar: Gravedad / Prioridad»; por defecto sigue por gravedad
+   hasta que el equipo valide el orden.
+   - **Importancia de una página, entre 0,1 y 1** (`shared/prioridad.py`):
+     `pagerank_score` (0,25 + 0,75 × pr/100), por un factor de clics desde la
+     home (hasta 2: 1; 3: 0,85; 4: 0,7; 5 o más, o sin camino: 0,55) y por
+     0,85 si el sitemap no la declara. `indexable` **no** entra: muchas
+     incidencias graves son la causa de que la página deje de ser indexable, y
+     bajarle el peso por eso hundiría justo ese hallazgo. La misma regla está
+     en Python y en SQL, y un test compara las dos ejecutando el endpoint.
+   - **Cada página cuenta una vez por tipo** (un hreflang sin retorno emite una
+     incidencia por idioma). Un hallazgo de muchas páginas (decisiones 53, 64,
+     73 y 106) cuenta `paginas_afectadas` veces la importancia de su página de
+     anclaje, que es la única que se conoce.
+   - **Tope: el sitio entero**, la importancia de todas las páginas HTML
+     internas con 2xx. Sin él, los hallazgos de plantilla cuentan las mismas
+     páginas una vez por hallazgo: en el censo semanal de Lopesan,
+     `image_missing_alt` sumaba 18.527 páginas en un sitio de 3.848.
+   - **Cada gravedad pesa diez veces la siguiente** (error 100, aviso 10,
+     info 1). Es un juicio, como los topes de la decisión 92. Con tres veces,
+     en ese censo un `info` que cubre todo el sitio (`missing_csp`, que no
+     afecta al posicionamiento, decisión 53) quedaba por encima de los 51
+     canonicals a otro dominio.
+   Orden resultante en Lopesan (censo del 14-oct-2026), los diez primeros:
+   `structured_data_error` (2.496 páginas por plantilla),
+   `structured_data_warning`, `image_missing_alt`, `canonical_cross_domain`
+   (51), `enlace_sin_ancla`, `missing_csp`, `url_too_long` (424),
+   `not_in_sitemap`, `low_word_count` (249) y `4xx_error` (35). Por gravedad,
+   los diez primeros eran los seis tipos de error y cuatro avisos por número
+   de páginas.
+   **Punto débil conocido**: una página canonicalizada pasa su PageRank a la
+   canónica (decisión 29), así que la que tiene un canonical a otro dominio
+   puntúa baja justo por el problema que se avisa (media 0,55 en esas 51). No
+   se compensa todavía: haría falta la importancia de la canónica, y eso es
+   otro criterio que medir. **Pendiente** de la 4.3: que el equipo SEO valide
+   el top 10, el campo `tipo` (problema, oportunidad o aviso) de
+   `incidencias.js` y, cuando exista Search Console (4.1), los clics en la
+   importancia.

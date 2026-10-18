@@ -13,7 +13,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134 |
@@ -162,6 +162,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 133 | Una URL de la lista que redirige a una página sana es un aviso, no un fallo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d133) |
 | 134 | La API pide un token, y sin él está cerrada, no abierta | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d134) |
 | 135 | Las reglas de alerta son del cliente, con valores de serie que reproducen lo de antes | [`comparacion-y-alertas`](comparacion-y-alertas.md#d135) |
+| 136 | Qué se arregla primero: gravedad × importancia de las páginas, con el sitio entero de tope | [`incidencias`](incidencias.md#d136) |
 
 ## Anadir una decision
 

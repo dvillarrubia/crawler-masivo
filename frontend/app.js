@@ -572,6 +572,7 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    issuesOrden: 'gravedad',  // o 'prioridad': gravedad x importancia de las paginas (decision 136)
     issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
@@ -2380,6 +2381,7 @@ function app() {
         // agrupadas. Con un segmento elegido, solo las paginas de ese segmento.
         const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: '8' });
         if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
+        q.set('orden', this.issuesOrden);
         if (!this.segmentosJob) this.cargarSegmentos();
         this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen?${q}`);
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
