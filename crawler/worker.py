@@ -777,6 +777,13 @@ def _run_job(job_id: str) -> None:
     finally:
         session.close()
 
+    # La fila de la evolucion (decision 130): el analisis ya la escribio si
+    # termino; esto cubre lo que no se analiza (un rastreo bloqueado o sin
+    # URLs) y el analisis que revento, que tambien son un punto de la serie,
+    # pintado aparte. Best-effort: nunca lanza.
+    if final_status in ("completed", "failed", "stalled"):
+        _registrar_evolucion(job_id)
+
     # La comparacion con el censo anterior va DESPUES de escribir el estado
     # final, y no junto a la comprobacion de render. En ese punto la fila del
     # job todavia dice `analyzing`, y para la comparacion cualquier estado que
@@ -794,6 +801,18 @@ def _run_job(job_id: str) -> None:
         # el analisis y el archivado, y que la comparacion no re-analiza un
         # censo ya archivado.
         _archivar_enlaces_superados(job_id)
+
+
+def _registrar_evolucion(job_id: str) -> None:
+    """`profile_runs` del job si falta o esta desfasada. El `try` cubre la
+    funcion entera, import incluido (decision 74): un fallo deja el job como
+    estaba, que es lo que importa."""
+    try:
+        from shared.evolucion import registrar_en_sesion_propia
+
+        registrar_en_sesion_propia(job_id, solo_si_falta=True)
+    except Exception:
+        logger.exception("Job %s: no se pudo registrar su evolucion", job_id)
 
 
 def _archivar_enlaces_superados(job_id: str) -> None:

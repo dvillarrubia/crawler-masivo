@@ -982,6 +982,76 @@ class SitemapEntry(Base):
     )
 
 
+class ProfileRun(Base):
+    """Lo que dejo una ejecucion, en una fila: la evolucion de un perfil o un
+    cliente a lo largo de sus rastreos (#36 F3, decision 130).
+
+    Una fila por job TERMINADO, escrita al acabar el analisis y al cerrar el
+    rastreo (`shared/evolucion.py`, best-effort) y rellenada hacia atras con
+    `scripts/rellenar_evolucion.py`. Sale de `urls`, `issues` y
+    `jobs.pagerank_resumen`, **nunca de `links`** (decision 37): asi una ficha
+    con 50 ejecuciones lee 50 filas y no 50 censos.
+
+    Solo cifras. De quien es (cliente, perfil, programacion), su tipo y si es
+    comparable se leen de `jobs` al pedir la evolucion: el cliente y el tipo de
+    un job se pueden cambiar despues (`PATCH /api/jobs/{id}`), y copiarlos aqui
+    los dejaria desfasados. `analisis_version` SI se copia: es la version con
+    la que se contaron ESTAS incidencias, y si ya no coincide con la del job el
+    agregado esta desfasado (alguien re-analizo sin pasar por aqui).
+    """
+
+    __tablename__ = "profile_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    nullable=False, unique=True)
+    # Version de la DEFINICION de este agregado (`shared.evolucion.CRITERIO`):
+    # si cambia lo que se cuenta, las filas viejas se rehacen con el script.
+    criterio = Column(Integer, nullable=False, default=1)
+    analisis_version = Column(String(64), nullable=True)
+    crawler_version = Column(String(64), nullable=True)
+    # Foto del estado al calcular (informativo; el que manda es el de `jobs`).
+    status = Column(String(20), nullable=True)
+    finish_reason = Column(String(32), nullable=True)
+    # Host de la primera semilla, para la serie de los rastreos sin perfil ni
+    # programacion. Copiado aqui porque las semillas no cambian y leerlas al
+    # pedir la evolucion cuesta cientos de kB por job (un censo sembrado desde
+    # el sitemap: 3.040 semillas, 233 kB).
+    host = Column(String(255), nullable=True)
+
+    # URLs internas del censo, por grupo de estado.
+    urls = Column(Integer, nullable=False, default=0)
+    urls_2xx = Column(Integer, nullable=False, default=0)
+    urls_3xx = Column(Integer, nullable=False, default=0)
+    urls_4xx = Column(Integer, nullable=False, default=0)
+    urls_5xx = Column(Integer, nullable=False, default=0)
+    urls_bloqueadas = Column(Integer, nullable=False, default=0)
+    # Paginas HTML internas con 2xx, y de ellas las indexables: el mismo
+    # criterio que `/stats` y la serie del cliente.
+    paginas_html = Column(Integer, nullable=False, default=0)
+    indexables = Column(Integer, nullable=False, default=0)
+    # Clics desde la home (decision 90) de las indexables con camino, y
+    # cuantas indexables no tienen camino. NULL = sin ninguna con camino.
+    click_depth_medio = Column(Float, nullable=True)
+    indexables_sin_camino = Column(Integer, nullable=False, default=0)
+
+    incidencias = Column(Integer, nullable=False, default=0)
+    errores = Column(Integer, nullable=False, default=0)
+    avisos = Column(Integer, nullable=False, default=0)
+    info = Column(Integer, nullable=False, default=0)
+    urls_con_error = Column(Integer, nullable=False, default=0)
+    # `[{"tipo", "severidad", "n"}]`, los 10 tipos con mas filas.
+    top_tipos = Column(JSON, nullable=True)
+
+    # De `jobs.pagerank_resumen`: fraccion (0-1) que acaba en errores y
+    # sin respuesta, y la que acaba en indexables. NULL = sin PageRank.
+    pagerank_desperdiciado = Column(Float, nullable=True)
+    pagerank_indexable = Column(Float, nullable=True)
+
+    segundos = Column(Float, nullable=True)
+    calculado_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 class RespuestaSondeada(Base):
     """Lo que respondio una URL que el rastreo pidio SIN que sea del censo.
 

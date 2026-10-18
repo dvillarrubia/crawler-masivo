@@ -300,58 +300,70 @@
           </a>
         </template>
 
-        <!-- Panel (UX-07): cada cliente con su ultimo CENSO y la diferencia con
-             el anterior. Los canarios y las pruebas no cuentan. -->
+        <!-- Panel de cartera (UX-07 y decision 130): una fila por cliente con
+             su ultimo CENSO y la tendencia de errores de su serie, de
+             `profile_runs`. Los canarios y las pruebas no cuentan, y a traves
+             de un cambio de version del analisis no hay flecha. -->
         <template x-if="clientes.length">
-          <div class="panel-clientes">
-            <template x-for="p in (panelClientes ? panelClientes.clientes : [])" :key="p.id">
-              <a class="card panel-cliente" :href="'#/clientes/' + p.id">
-                <div class="panel-cliente-cab">
-                  <strong x-text="p.nombre"></strong>
-                  <span class="text-dim text-sm" x-text="p.n_rastreos + (p.n_rastreos === 1 ? ' rastreo' : ' rastreos')"></span>
-                </div>
-                <template x-if="!p.ultimo">
-                  <div class="text-dim text-sm">Sin ningún censo completado todavía.</div>
-                </template>
-                <template x-if="p.ultimo">
-                  <div>
-                    <div class="text-sm text-dim truncate" :title="p.ultimo.name"
-                         x-text="'Último censo: ' + fmt.dia(p.ultimo.created_at)"></div>
-                    <div class="panel-cifras">
-                      <div>
-                        <div class="panel-num" x-text="fmt.num(p.ultimo.paginas_html)"></div>
-                        <div class="panel-lbl">páginas</div>
+          <div class="card table-wrap">
+            <table class="panel-cartera" style="width:100%;font-size:.85rem">
+              <thead><tr>
+                <th style="text-align:left">cliente</th>
+                <th style="text-align:left">último censo</th>
+                <th style="text-align:right">páginas</th>
+                <th style="text-align:right">indexables</th>
+                <th style="text-align:right">errores</th>
+                <th style="text-align:left">tendencia de errores</th>
+                <th style="text-align:left">alertas</th>
+              </tr></thead>
+              <tbody>
+                <template x-for="p in (panelClientes ? panelClientes.clientes : [])" :key="p.id">
+                  <tr @click="location.hash = '#/clientes/' + p.id" style="cursor:pointer">
+                    <td>
+                      <a :href="'#/clientes/' + p.id" @click.stop><strong x-text="p.nombre"></strong></a>
+                      <span class="text-dim text-sm" x-text="p.n_rastreos + (p.n_rastreos === 1 ? ' rastreo' : ' rastreos')"></span>
+                      <div class="panel-integ">
+                        <template x-for="i in ((clientes.find(c => c.id === p.id) || {}).integraciones || [])" :key="i.tipo + (i.credencial_env || '')">
+                          <span class="badge" :class="i.configurada ? 'badge-completed' : 'badge-pending'" x-text="i.tipo"></span>
+                        </template>
                       </div>
-                      <div>
-                        <div class="panel-num" :class="p.ultimo.paginas_html && p.ultimo.indexables / p.ultimo.paginas_html < .5 ? 'orange' : ''"
-                             x-text="p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></div>
-                        <div class="panel-lbl">indexables</div>
-                      </div>
-                      <div>
-                        <div class="panel-num" :class="p.ultimo.errores ? 'red' : 'green'" x-text="fmt.num(p.ultimo.errores)"></div>
-                        <div class="panel-lbl">
-                          errores
-                          <template x-if="p.anterior">
-                            <span class="delta" :class="p.ultimo.errores > p.anterior.errores ? 'peor' : (p.ultimo.errores < p.anterior.errores ? 'mejor' : '')"
-                                  :title="'El censo anterior (' + fmt.dia(p.anterior.created_at) + ') tenía ' + fmt.num(p.anterior.errores)"
-                                  x-text="p.ultimo.errores === p.anterior.errores ? '=' : (p.ultimo.errores > p.anterior.errores ? '▲ ' : '▼ ') + fmt.num(Math.abs(p.ultimo.errores - p.anterior.errores))"></span>
-                          </template>
+                    </td>
+                    <td>
+                      <template x-if="!p.ultimo"><span class="text-dim">sin censo completado</span></template>
+                      <template x-if="p.ultimo">
+                        <div>
+                          <div x-text="fmt.dia(p.ultimo.created_at)"></div>
+                          <div class="text-dim text-sm truncate" style="max-width:16rem" :title="p.ultimo.name" x-text="p.ultimo.name"></div>
                         </div>
-                      </div>
-                    </div>
-                    <template x-if="p.ultimo.alertas">
-                      <div class="panel-alerta" :class="p.ultimo.alertas_criticas ? 'critica' : ''"
-                           x-text="(p.ultimo.alertas_criticas ? p.ultimo.alertas_criticas + ' críticas · ' : '') + p.ultimo.alertas + (p.ultimo.alertas === 1 ? ' alerta' : ' alertas') + ' frente al censo anterior'"></div>
-                    </template>
-                  </div>
+                      </template>
+                    </td>
+                    <td style="text-align:right" x-text="p.ultimo ? fmt.num(p.ultimo.paginas_html) : '—'"></td>
+                    <td style="text-align:right"
+                        :class="p.ultimo && p.ultimo.paginas_html && p.ultimo.indexables / p.ultimo.paginas_html < .5 ? 'text-orange' : ''"
+                        x-text="p.ultimo && p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></td>
+                    <td style="text-align:right" :class="p.ultimo && p.ultimo.errores ? 'text-red' : ''"
+                        x-text="p.ultimo ? fmt.num(p.ultimo.errores) : '—'"></td>
+                    <td style="white-space:nowrap">
+                      <template x-if="!p.evolucion || !p.evolucion.tendencia"><span class="text-dim text-sm">—</span></template>
+                      <template x-if="p.evolucion && p.evolucion.tendencia">
+                        <span class="evo-tendencia" :title="'Serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
+                          <span x-html="sparkline(p.evolucion.valores, p.evolucion.cortes)"></span>
+                          <span class="delta" :class="(textoTendencia(p.evolucion.tendencia) || {}).clase"
+                                x-text="(textoTendencia(p.evolucion.tendencia) || {}).texto"></span>
+                        </span>
+                      </template>
+                    </td>
+                    <td class="text-sm">
+                      <template x-if="p.ultimo && p.ultimo.alertas">
+                        <span :class="p.ultimo.alertas_criticas ? 'text-red' : 'text-orange'"
+                              x-text="(p.ultimo.alertas_criticas ? p.ultimo.alertas_criticas + ' críticas · ' : '') + p.ultimo.alertas + (p.ultimo.alertas === 1 ? ' alerta' : ' alertas')"></span>
+                      </template>
+                      <template x-if="!p.ultimo || !p.ultimo.alertas"><span class="text-dim">—</span></template>
+                    </td>
+                  </tr>
                 </template>
-                <div class="panel-integ">
-                  <template x-for="i in ((clientes.find(c => c.id === p.id) || {}).integraciones || [])" :key="i.tipo + (i.credencial_env || '')">
-                    <span class="badge" :class="i.configurada ? 'badge-completed' : 'badge-pending'" x-text="i.tipo"></span>
-                  </template>
-                </div>
-              </a>
-            </template>
+              </tbody>
+            </table>
           </div>
         </template>
       </div>
@@ -406,6 +418,7 @@
                 <div class="text-dim text-sm">Sin perfiles todavía.</div>
               </template>
               <template x-if="clientePerfiles.length">
+                <div class="table-wrap">
                 <table style="width:100%;font-size:.85rem">
                   <thead><tr>
                     <th style="text-align:left">perfil</th>
@@ -439,8 +452,62 @@
                     </template>
                   </tbody>
                 </table>
+                </div>
               </template>
             </div>
+
+            <!-- Evolucion por perfil (decision 130): graficas de `profile_runs`.
+                 Solo los censos comparables hacen linea; lo fallido, truncado,
+                 canario o lista va abajo con una ×. Un corte «v» marca que entre
+                 dos puntos cambio la version del analisis. -->
+            <template x-if="clienteEvolucion && clienteEvolucion.series && clienteEvolucion.series.length">
+              <div class="card mb-2 evo">
+                <div class="flex items-center mb-1" style="gap:.5rem;flex-wrap:wrap">
+                  <h3 style="font-size:1rem">Evolución por perfil</h3>
+                  <template x-if="clienteEvolucion.series.length > 1">
+                    <select x-model="evolucionClave" class="text-sm" style="margin-left:auto;max-width:18rem">
+                      <template x-for="s in clienteEvolucion.series" :key="s.clave">
+                        <option :value="s.clave" :selected="s.clave === evolucionClave"
+                                x-text="s.nombre + ' (' + s.comparables + (s.comparables === 1 ? ' censo' : ' censos') + ')'"></option>
+                      </template>
+                    </select>
+                  </template>
+                </div>
+                <template x-if="serieEvolucion() && serieEvolucion().comparables < 2">
+                  <p class="text-dim text-sm">Hacen falta dos censos comparables (completos, ni canarios ni pruebas) para dibujar una evolución.</p>
+                </template>
+                <template x-if="serieEvolucion() && serieEvolucion().comparables >= 2">
+                  <div>
+                    <div class="evo-rejilla">
+                      <template x-for="k in METRICAS_GRAFICADAS" :key="k">
+                        <div class="evo-grafica">
+                          <div class="evo-cab">
+                            <span class="text-sm" x-text="etiquetaMetrica(k)"></span>
+                            <span class="evo-valor">
+                              <span x-text="resumenMetrica(k).valor"></span>
+                              <template x-if="resumenMetrica(k).tendencia">
+                                <span class="delta" :class="resumenMetrica(k).tendencia.clase"
+                                      :title="resumenMetrica(k).tendencia.titulo"
+                                      x-text="resumenMetrica(k).tendencia.texto"></span>
+                              </template>
+                            </span>
+                          </div>
+                          <div x-html="graficaEvolucion(k)"></div>
+                        </div>
+                      </template>
+                    </div>
+                    <p class="text-dim text-sm evo-leyenda">
+                      <span class="evo-ley-punto"></span> censo comparable ·
+                      <span class="evo-fuera-txt">×</span> no comparable (fallido, truncado, canario, prueba o lista; pasa el ratón para el motivo) ·
+                      <span class="evo-ley-corte">v</span> cambió la versión del análisis: el salto puede ser nuestro, no del sitio.
+                    </p>
+                  </div>
+                </template>
+                <template x-if="clienteEvolucion.sin_agregado">
+                  <p class="text-dim text-sm" x-text="fmt.num(clienteEvolucion.sin_agregado) + (clienteEvolucion.sin_agregado === 1 ? ' rastreo terminado no tiene' : ' rastreos terminados no tienen') + ' sus cifras agregadas (son anteriores a la evolución): scripts/rellenar_evolucion.py los rellena.'"></p>
+                </template>
+              </div>
+            </template>
 
             <div class="card">
               <!-- La serie (UX-08): cada rastreo con las cifras que se comparan

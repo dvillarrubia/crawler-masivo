@@ -214,6 +214,26 @@ Ola 5.4 del plan (decisión 131, [#32](https://github.com/dvillarrubia/crawler-m
 Con dos rastreos reales de progym separados por un día, nada de esto da una
 alerta: el ruido normal (un clic arriba o abajo, unos pocos enlaces de un
 bloque de relacionados) queda por debajo de los umbrales.
+### Evolución de cada cliente y panel de cartera (18 de octubre)
+
+Ola 5.3 del plan (decisión 130), en revisión. Para la pregunta del seguimiento
+mensual: **«¿cómo va este sitio desde que lo llevamos?»**.
+
+- **Gráficas en la ficha del cliente**, una serie por perfil: errores, URLs
+  4xx y 5xx, páginas indexables, PageRank desperdiciado y clics medios desde la
+  home, con la flecha frente al censo anterior.
+- **Lo que no es un censo entero no cuenta**: un rastreo fallido, cortado, un
+  canario, una prueba o una lista salen abajo con una × y su motivo, fuera de la
+  línea y de la escala.
+- **Donde cambió nuestro código se ve**: si entre dos censos cambió la versión
+  del análisis, la línea sale discontinua con una «v», y la tendencia no dice
+  «sube» ni «baja»: el salto puede ser nuestro, no del sitio.
+- **Portada en tabla**: cada cliente con su último censo, sus errores y la
+  tendencia de errores en una línea pequeña.
+
+Las cifras de cada rastreo se guardan al terminar (sin leer los enlaces), así
+que la ficha no recorre los censos. Los rastreos anteriores se rellenan con
+`scripts/rellenar_evolucion.py`: medido en local, 46 rastreos en 4,6 segundos.
 
 ### Modo lista y veredicto pasa/falla para QA de despliegues (18 de octubre)
 

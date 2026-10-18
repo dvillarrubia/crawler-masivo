@@ -37,6 +37,7 @@ from shared.models import (
     RobotsTxt,
     CapturaAlternativa,
     RespuestaSondeada,
+    ProfileRun,
     SitemapEntry,
 )
 
@@ -89,6 +90,10 @@ _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
     ("respuestas_sondeadas", RespuestaSondeada),
     # Entradas de cada fichero de sitemap (decision 126).
     ("sitemap_entries", SitemapEntry),
+    # La fila de la evolucion del job (decision 130). Se podria rehacer con
+    # `rellenar_evolucion.py`, pero viaja: un censo importado tiene que salir
+    # en la evolucion de su cliente sin pasos aparte.
+    ("profile_runs", ProfileRun),
 ]
 
 
@@ -556,7 +561,9 @@ def import_backup_zip(
             # hecho con el mismo codigo (66, 72); sin `health`, uno rastreado
             # detras de un muro pasaba por el sitio (103). Medido importando
             # el censo de Lopesan del 27-jul parado en 8.765 URLs: salia
-            # `concluyente` frente al completo del mismo dia.
+            # `concluyente` frente al completo del mismo dia. Y sin la version
+            # del analisis, la fila de `profile_runs` (decision 130) no casaba
+            # con la del job y el punto salia `desfasado` para siempre.
             finish_reason=job_data.get("finish_reason"),
             crawler_version=job_data.get("crawler_version"),
             analisis_version=job_data.get("analisis_version"),

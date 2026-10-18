@@ -5240,6 +5240,18 @@ class EnlacesArchivados(RuntimeError):
     """El job tiene sus enlaces en Parquet: no se puede analizar sin restaurar."""
 
 
+def _registrar_evolucion(session, job_id) -> None:
+    """`profile_runs` del job, sin dejar escapar nada (decisiones 74 y 77): el
+    `try` cubre tambien el import. Un fallo aqui no puede dejar en `failed` un
+    analisis que ha terminado bien."""
+    try:
+        from shared.evolucion import registrar_sin_fallar
+
+        registrar_sin_fallar(session, job_id)
+    except Exception:
+        logger.exception("Job %s: no se pudo registrar su evolucion", job_id)
+
+
 def run_analysis(job_id: str) -> None:
     """Entry point called by the crawler worker after a crawl completes.
 
@@ -5254,6 +5266,12 @@ def run_analysis(job_id: str) -> None:
         try:
             analyzer = SEOAnalyzer(session, job_id)
             analyzer.run_all()
+            # La fila de la evolucion del perfil (decision 130), con las
+            # cifras que acaban de quedar. Aqui y no en el worker porque esto
+            # cubre tambien el re-analisis a mano y el de la referencia
+            # (decision 93), que cambian las cifras de un censo viejo.
+            # Best-effort: nunca lanza.
+            _registrar_evolucion(session, job_id)
         finally:
             session.close()
 

@@ -195,6 +195,13 @@ def test_los_tramos_van_por_el_indice_del_censo_no_por_la_clave_de_la_tabla():
     try:
         cur = crudo.cursor()
         cur.execute("SET enable_seqscan = off")
+        # La base de pruebas es compartida con el resto de la suite: con las
+        # filas que dejan otros tests, el planificador pasa a un recorrido de
+        # bitmap en paralelo por `job_id` + orden, que en una tabla pequena
+        # cuesta lo mismo. Lo que se mide es que el tramo PUEDE ir por
+        # `uq_job_url` sin filtro ni orden, no que gane por centesimas.
+        cur.execute("SET enable_bitmapscan = off")
+        cur.execute("SET max_parallel_workers_per_gather = 0")
         for sentencia, parametros in capturadas:
             cur.execute("EXPLAIN " + sentencia, parametros)
             plan = "\n".join(f[0] for f in cur.fetchall())

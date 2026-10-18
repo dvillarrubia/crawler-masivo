@@ -504,7 +504,8 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     lo guardaria en un Parquet vacio (decision 95). Ninguno de los dos mira un
     job que no este terminado, y `deleting` no lo esta.
     """
-    from shared.models import CleaningRuleset, CrawlProfile, Decision, EnrichmentRun, RobotsTxt
+    from shared.models import (CleaningRuleset, CrawlProfile, Decision, EnrichmentRun,
+                               ProfileRun, RobotsTxt)
 
     job_id = job.id
     filas: dict[str, int] = {}
@@ -537,7 +538,9 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     # delante `test_pagerank_db.py`, que no tiene nada que ver con esto.
     # El robots.txt de cada host (decisiones 112 y 113): unas pocas filas.
     for nombre, modelo in (("decisions", Decision), ("enrichment_runs", EnrichmentRun),
-                           ("cleaning_rulesets", CleaningRuleset), ("robots_txt", RobotsTxt)):
+                           ("cleaning_rulesets", CleaningRuleset), ("robots_txt", RobotsTxt),
+                           # La fila de su evolucion (decision 130): una por job.
+                           ("profile_runs", ProfileRun)):
         filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
             synchronize_session=False)
 

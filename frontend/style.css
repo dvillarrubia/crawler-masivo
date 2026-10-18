@@ -1350,3 +1350,27 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 /* Tarjetas de comprobaciones de la ficha (TLS, soft 404, sondas, sitemaps) y
    veredicto del modo lista: el tono de cada lectura. */
 .chk .green{color:var(--green)}.chk .red{color:var(--red)}.chk .orange{color:var(--orange)}
+
+/* Evolucion por perfil (decision 130): graficas SVG propias */
+.text-orange{color:var(--orange)}
+.evo-rejilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.75rem}
+.evo-grafica{border:1px solid var(--border);border-radius:var(--radius);padding:.4rem .5rem .2rem}
+.evo-cab{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.evo-valor{font-weight:700;white-space:nowrap}
+.evo-svg{width:100%;height:auto;display:block;overflow:visible}
+.evo-eje{font-size:9px;fill:var(--text-dim)}
+.evo-linea{stroke:var(--accent);stroke-width:1.8;fill:none}
+.evo-linea.discontinua{stroke-dasharray:4 3;stroke:var(--text-dim)}
+.evo-punto{fill:var(--accent);stroke:var(--bg-card);stroke-width:1}
+.evo-fuera{font-size:11px;fill:var(--text-dim);cursor:pointer}
+.evo-corte{stroke:var(--orange);stroke-width:1;stroke-dasharray:2 2}
+.evo-corte-rastreo{stroke:var(--border);stroke-width:1;stroke-dasharray:1 3}
+.evo-corte-txt{font-size:9px;font-weight:700;fill:var(--orange);cursor:help}
+.evo-leyenda{margin-top:.5rem;line-height:1.6}
+.evo-ley-punto{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);vertical-align:middle}
+.evo-fuera-txt{color:var(--text-dim);font-weight:700}
+.evo-ley-corte{color:var(--orange);font-weight:700}
+.evo-tendencia{display:inline-flex;align-items:center;gap:.35rem}
+.evo-spark{display:block}
+.delta.neutra{color:var(--text-dim)}
+.panel-cartera td{vertical-align:top}

@@ -157,6 +157,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 128 | Una lista de URLs clave es un censo, y su veredicto no puede decir «pasa» sin saberlo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d128) |
 | 129 | El robots.txt se evalúa también para los bots de IA, separando entrenamiento de búsqueda, y la ficha de una URL bloqueada dice la línea que la bloquea | [`indexabilidad`](indexabilidad.md#d129) |
 | 131 | Comparar también el enlazado, el marcado y el hreflang; separar lo roto de lo publicado mal; y una migración se empareja con reglas | [`comparacion-y-alertas`](comparacion-y-alertas.md#d131) |
+| 130 | La evolución de un perfil se agrega por ejecución, sin leer `links`, y un punto que no es un censo entero no hace línea | [`comparacion-y-alertas`](comparacion-y-alertas.md#d130) |
 
 ## Anadir una decision
 
