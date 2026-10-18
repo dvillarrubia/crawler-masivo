@@ -925,9 +925,17 @@ def censo_anterior(db, job):
         .order_by(Job.started_at.desc())
     )
     mias = {_norm(u) for u in (job.seeds or [])}
+    from shared.modo_lista import es_lista
+
+    yo_lista = es_lista(job.config)
     mas_reciente = None
     for c in consulta.yield_per(200):
         if not c.seeds or _host(c.seeds[0]) != host:
+            continue
+        # Una lista (decision 128) no es referencia de un rastreo que sigue
+        # enlaces: la de QA suele llevar la home, asi que «abarca» a un censo
+        # sembrado en la home y, siendo la mas reciente, ganaba.
+        if es_lista(c.config) and not yo_lista:
             continue
         if mas_reciente is None:
             mas_reciente = c

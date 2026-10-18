@@ -140,6 +140,63 @@ def _destino_canonico(pagina: dict[str, Any]) -> str:
     return _norm(_canonical_que_cuenta(pagina) or pagina.get("url"))
 
 
+def _valida(p: dict[str, Any] | None) -> bool:
+    return (p is not None and p.get("status_code") == 200
+            and p.get("response_class") not in NO_VALIDAS)
+
+
+def _cambio(r: dict[str, Any], p: dict[str, Any]) -> str | None:
+    """Que cambio de `r` a `p` (las dos 200) es un fallo; una causa (36)."""
+    if _destino_canonico(r) != _destino_canonico(p):
+        return "cambia_el_canonical"
+    if _era_indexable(r) and not _era_indexable(p):
+        return "deja_de_ser_indexable"
+    return None
+
+
+# Cuantos censos hacia atras se sigue la cadena de `comparado_con`.
+MAX_CADENA = 10
+
+
+def _referencias(db, comparado_con, semillas, maximo=MAX_CADENA) -> dict[str, dict[str, Any]]:
+    """Para cada URL de la lista, su ULTIMO ESTADO QUE PASO, no la del censo anterior.
+
+    Comparar solo con el anterior pone en verde lo que sigue roto: el CI falla
+    porque 10 URLs clave pasan a noindex, alguien relanza la lista, el censo
+    nuevo se compara con el roto, no hay cambio y sale `pasa`. Se sigue la
+    cadena de `jobs.comparacion.comparado_con` (hasta `MAX_CADENA` censos) y se
+    recorre del mas antiguo al mas reciente: el estado de una URL solo pasa a
+    ser su referencia si ese censo no fallaba en ella. Un cambio intencionado
+    (una URL que se quiere en noindex) falla hasta que se quita de la lista,
+    que es lo que dice una lista de URLs clave (o durante `MAX_CADENA` censos:
+    pasado eso, el estado roto mas antiguo de la ventana se toma por bueno).
+    Fuera de una lista (`maximo`
+    1) solo el anterior: las semillas de un censo completo pueden ser 87.000.
+    """
+    from shared.models import Job
+
+    cadena: list[str] = []
+    actual = comparado_con
+    while actual and len(cadena) < maximo and str(actual) not in cadena:
+        cadena.append(str(actual))
+        try:
+            j = db.get(Job, uuid.UUID(str(actual)))
+        except ValueError:
+            j = None
+        comp = getattr(j, "comparacion", None) if j is not None else None
+        actual = comp.get("comparado_con") if isinstance(comp, dict) and comp.get("comparable") else None
+    referencia: dict[str, dict[str, Any]] = {}
+    for censo in reversed(cadena):
+        for clave, p in _paginas_de(db, censo, semillas).items():
+            if not _valida(p):
+                continue  # un fallo (o un muro) no es referencia
+            p = {**p, "_censo": censo}
+            r = referencia.get(clave)
+            if r is None or _cambio(r, p) is None:
+                referencia[clave] = p
+    return referencia
+
+
 MENSAJES = {
     "alerta": "alerta critica de la comparacion con el censo anterior",
     "bloqueada_por_robots": "robots.txt prohibe rastrear estas URLs de la lista",
@@ -157,6 +214,16 @@ MENSAJES = {
     "no_rastreadas": "estas URLs de la lista no se llegaron a rastrear",
     "muro": "en estas URLs se recibio un muro, no la pagina",
     "sin_referencia_url": "estas URLs no estaban (o no respondian 200) en el censo anterior",
+}
+
+
+# La regla de la comparacion (`shared.comparacion.REGLAS`) y el grupo URL a URL
+# del veredicto que dicen lo mismo de una pagina.
+EQUIVALENTE = {
+    "rotas": "no_responde_200",
+    "salen_del_indice": "deja_de_ser_indexable",
+    "canonical_a_otra_url": "cambia_el_canonical",
+    "canonical_a_otro_host": "cambia_el_canonical",
 }
 
 
@@ -183,6 +250,7 @@ def veredicto(db, job) -> dict[str, Any]:
     semillas = list(job.seeds or [])
     fallos: list[dict[str, Any]] = []
     dudas: list[dict[str, Any]] = []
+    alertas: list[dict[str, Any]] = []
     comp = job.comparacion if isinstance(getattr(job, "comparacion", None), dict) else None
     comparado_con = (comp or {}).get("comparado_con")
 
@@ -241,15 +309,13 @@ def veredicto(db, job) -> dict[str, Any]:
                                 avisos=comp.get("avisos") or []))
         for a in comp.get("alertas") or []:
             if a.get("severidad") == "critical":
-                fallos.append(_grupo(
-                    "alerta", a.get("ejemplos") or [],
-                    mensaje=a.get("que_decide_google") or MENSAJES["alerta"],
-                    regla=a.get("regla"), de=a.get("de"), pct=a.get("pct"))
-                    | {"paginas": a.get("paginas")})
+                alertas.append(a)
 
     # URL a URL, sobre la lista. Una causa por URL (decision 36).
     ahora = _paginas_de(db, job.id, semillas)
-    antes = _paginas_de(db, comparado_con, semillas) if comparado_con else {}
+    antes = (_referencias(db, comparado_con, semillas,
+                          MAX_CADENA if es_lista(config) else 1)
+             if comparado_con else {})
     por_tipo: dict[str, list[dict[str, Any]]] = {}
     vistas: set[str] = set()
     for semilla in semillas:
@@ -284,19 +350,46 @@ def veredicto(db, job) -> dict[str, Any]:
         if r is None or r.get("status_code") != 200 or r.get("response_class") in NO_VALIDAS:
             por_tipo.setdefault("sin_referencia_url", []).append({"url": p["url"]})
             continue
-        if _destino_canonico(r) != _destino_canonico(p):
-            por_tipo.setdefault("cambia_el_canonical", []).append(
-                {"url": p["url"], "antes": _canonical_que_cuenta(r),
-                 "ahora": _canonical_que_cuenta(p)})
-        elif _era_indexable(r) and not _era_indexable(p):
-            por_tipo.setdefault("deja_de_ser_indexable", []).append(
-                {"url": p["url"], "antes": r.get("indexability_status"),
-                 "ahora": p.get("indexability_status")})
+        tipo = _cambio(r, p)
+        if tipo == "cambia_el_canonical":
+            fila = {"url": p["url"], "antes": _canonical_que_cuenta(r),
+                    "ahora": _canonical_que_cuenta(p)}
+        elif tipo:
+            fila = {"url": p["url"], "antes": r.get("indexability_status"),
+                    "ahora": p.get("indexability_status")}
+        if tipo:
+            if r.get("_censo") and r["_censo"] != str(comparado_con):
+                fila["referencia"] = r["_censo"]  # el ultimo estado que paso
+            por_tipo.setdefault(tipo, []).append(fila)
+
+    # Un aviso por hallazgo (decision 36): la alerta de la comparacion y la
+    # comprobacion URL a URL pueden nombrar las MISMAS paginas (en una lista,
+    # siempre: la comparacion se acota a ella). Si todas las de la alerta ya
+    # estan en el grupo URL a URL que dice lo mismo, la alerta no es otro
+    # motivo: su regla y lo que decide Google viajan con ese grupo.
+    en_grupo = {t: {_norm(f["url"]) for f in filas} for t, filas in por_tipo.items()}
+    contexto: dict[str, dict[str, Any]] = {}
+    for a in alertas:
+        tipo = EQUIVALENTE.get(a.get("regla"))
+        # Los ejemplos de la alerta son una muestra (`MUESTRA`): cubierta si la
+        # muestra esta en el grupo y el grupo tiene al menos tantas paginas.
+        suyas = {_norm(e.get("url")) for e in a.get("ejemplos") or []}
+        grupo = en_grupo.get(tipo, set())
+        if tipo and suyas <= grupo and len(grupo) >= (a.get("paginas") or 0):
+            contexto.setdefault(tipo, {
+                "regla": a.get("regla"), "que_decide_google": a.get("que_decide_google"),
+                "de": a.get("de"), "pct": a.get("pct")})
+            continue
+        fallos.append(_grupo(
+            "alerta", a.get("ejemplos") or [],
+            mensaje=a.get("que_decide_google") or MENSAJES["alerta"],
+            regla=a.get("regla"), de=a.get("de"), pct=a.get("pct"))
+            | {"paginas": a.get("paginas")})
 
     for tipo in ("bloqueada_por_robots", "no_responde_200",
                  "deja_de_ser_indexable", "cambia_el_canonical"):
         if por_tipo.get(tipo):
-            fallos.append(_grupo(tipo, por_tipo[tipo]))
+            fallos.append(_grupo(tipo, por_tipo[tipo], **contexto.get(tipo, {})))
     for tipo in ("no_rastreadas", "muro", "sin_referencia_url"):
         if por_tipo.get(tipo):
             dudas.append(_grupo(tipo, por_tipo[tipo]))

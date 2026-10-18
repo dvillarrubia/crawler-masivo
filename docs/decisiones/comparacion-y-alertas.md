@@ -317,9 +317,32 @@
      producción. **Lo no concluyente no es `pasa`**: sin terminar, fallido,
      sin referencia, truncado, URLs de la lista sin rastrear o sin referencia, y
      un censo **bloqueado**, que es `no_concluyente` aunque todo dé 403 porque
-     esos códigos son los del muro (103). Las alertas y los fallos URL a URL se
-     solapan a propósito: las alertas miden el censo (también uno que no es
-     lista), los fallos la lista.
+     esos códigos son los del muro (103). Las alertas miden el censo (también
+     uno que no es lista) y los fallos la lista, pero **un hallazgo es un
+     motivo** (36): si la muestra de una alerta crítica está en el grupo URL a
+     URL que dice lo mismo (`rotas` → `no_responde_200`, `salen_del_indice` →
+     `deja_de_ser_indexable`, los dos de canonical → `cambia_el_canonical`) y
+     ese grupo tiene al menos sus páginas, la alerta no se repite: su regla y
+     lo que decide Google viajan con el grupo. En una lista pasa siempre —la
+     comparación se acota a ella— y el CI contaba 20 problemas donde había 10.
+   - **La referencia de cada URL es su último estado que pasó, no el censo
+     anterior.** Comparar solo con el anterior pone en verde lo que sigue
+     roto: el CI falla, alguien relanza la lista, el censo nuevo se compara con
+     el roto, no hay cambio y sale `pasa`. Se sigue la cadena de
+     `comparacion.comparado_con` (10 censos como mucho) y el estado de una URL
+     solo pasa a ser su referencia si ese censo no fallaba en ella; un noindex
+     intencionado falla hasta que la URL sale de la lista. Fuera de una lista,
+     solo el anterior.
+   - **Una lista no es referencia de un rastreo que sigue enlaces**
+     (`censo_anterior`). La lista de QA suele llevar la home, así que sus
+     semillas «abarcan» las de un censo sembrado en la home (decisión 86) y,
+     siendo la más reciente —corre tras cada despliegue—, ganaba: el censo
+     completo medía sus alertas sobre 50 páginas en común, el silencio de las
+     decisiones 78 y 86. Al revés sí vale: una lista se compara con un
+     completo, recortado.
+   - **El formulario con un perfil en modo lista** precarga la configuración
+     PARCIAL, sin `use_sitemap`, y la casilla marcada por defecto mandaba
+     `use_sitemap: true` explícito: ahora `_formDesdeConfig` la desmarca.
    - **En una lista, la comparación «no concluyente» no es duda** si cada URL
      de la lista tiene referencia: lo que protege esa marca —afirmar ausencias
      que el anterior, truncado, quizá no vio— se mira URL a URL. Medido: con
@@ -336,8 +359,8 @@
    M1 entre esos dos censos (decisión 67) y no entra en el veredicto, que solo
    mira las críticas. Fallo simulado sobre el mismo par —10 de las 50 a
    `Noindex` en memoria—: sin umbral absoluto **0 alertas críticas**; con él,
-   `salen_del_indice` **10 de 50** y veredicto `falla` (alerta + 10
-   `deja_de_ser_indexable`). Comparar y juzgar una lista de 500 cuesta 0,2 s.
+   `salen_del_indice` **10 de 50** y veredicto `falla` (un motivo,
+   `deja_de_ser_indexable` 10, con la regla de la alerta). Comparar y juzgar una lista de 500 cuesta 0,2 s.
    La base local va por detrás del esquema (sin `health`, `response_class` ni
    `canonical_distintos`), así que se midió con SQL directo y esas columnas a
    NULL: lo que dependa de muros y canonicals múltiples no está medido sobre

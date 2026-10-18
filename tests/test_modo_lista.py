@@ -173,7 +173,8 @@ def test_diez_urls_clave_a_noindex_alertan_y_el_veredicto_es_falla(s):
     tipos = {m["tipo"]: m for m in v["motivos"]}
     assert tipos["deja_de_ser_indexable"]["paginas"] == 10
     assert tipos["deja_de_ser_indexable"]["ejemplos"][0]["ahora"] == "Noindex"
-    assert tipos["alerta"]["regla"] == "salen_del_indice"
+    # La alerta dice lo mismo de las mismas 10: viaja con el grupo (decision 36)
+    assert tipos["deja_de_ser_indexable"]["regla"] == "salen_del_indice"
 
 
 def test_la_misma_lista_sin_cambios_pasa(s):
@@ -287,3 +288,93 @@ def test_si_a_la_referencia_le_falta_una_url_de_la_lista_no_es_pasa(s):
     assert v["veredicto"] == "no_concluyente"
     (d,) = v["no_concluyente_por"]
     assert d["tipo"] == "sin_referencia_url" and d["ejemplos"] == [{"url": SEMILLAS[5]}]
+
+
+# --- Revision adversarial ------------------------------------------------------
+
+def test_un_rastreo_completo_no_se_compara_con_una_lista(s):
+    """Una lista de QA tras cada despliegue suele llevar la home, asi que sus
+    semillas «abarcan» las de un rastreo completo sembrado en la home (decision
+    86) y, al ser la mas reciente, la elegia como referencia: las alertas del
+    censo completo se median sobre 50 paginas en comun (el silencio de las
+    decisiones 78 y 86)."""
+    from shared.comparacion import censo_anterior
+
+    home = "https://x.com/"
+    completo = _censo(s, "completo", 1, config={"max_depth": 3}, seeds=[home])
+    _censo(s, "lista", 2, seeds=[home] + SEMILLAS)
+    nuevo = _censo(s, "nuevo", 3, config={"max_depth": 3}, seeds=[home])
+    assert censo_anterior(s, nuevo).id == completo.id
+
+
+def test_una_lista_si_puede_compararse_con_su_lista_anterior(s):
+    from shared.comparacion import censo_anterior
+
+    antes = _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2)
+    assert censo_anterior(s, ahora).id == antes.id
+
+
+def test_un_hallazgo_es_un_motivo_aunque_lo_diga_tambien_la_alerta(s):
+    """Decision 36: en una lista la alerta `salen_del_indice` y la comprobacion
+    URL a URL `deja_de_ser_indexable` son las MISMAS 10 paginas. Contarlas dos
+    veces hace que el CI informe de 20 problemas donde hay 10."""
+    _censo(s, "antes", 1)
+    noindex = {i: {"indexability_status": "Noindex"} for i in range(10)}
+    v = _comparar_y_juzgar(s, _censo(s, "ahora", 2, paginas=noindex))
+    assert v["veredicto"] == "falla"
+    assert sum(m["paginas"] for m in v["motivos"]) == 10, v["motivos"]
+    (m,) = v["motivos"]
+    # Lo que dice la alerta no se pierde: viaja con el motivo URL a URL
+    assert m["tipo"] == "deja_de_ser_indexable" and m["regla"] == "salen_del_indice"
+    assert m["que_decide_google"]
+
+
+def test_con_mas_paginas_que_la_muestra_tampoco_se_cuentan_dos_veces(s):
+    """Los ejemplos de la alerta son 10 (`MUESTRA`): con 25 no se puede
+    comprobar pagina a pagina, y seguian saliendo 50 problemas donde hay 25."""
+    _censo(s, "antes", 1)
+    noindex = {i: {"indexability_status": "Noindex"} for i in range(25)}
+    v = _comparar_y_juzgar(s, _censo(s, "ahora", 2, paginas=noindex))
+    assert [(m["tipo"], m["paginas"]) for m in v["motivos"]] == [("deja_de_ser_indexable", 25)]
+
+
+def test_una_alerta_que_no_cubre_el_url_a_url_sigue_siendo_un_motivo():
+    """Sin el grupo equivalente (p. ej. la referencia no respondia 200 y la
+    pagina queda en `sin_referencia_url`), la alerta no se pierde."""
+    from types import SimpleNamespace
+
+    job = SimpleNamespace(
+        id=uuid.uuid4(), name="j", status="completed", finish_reason="finished",
+        config=LISTA, seeds=[], health=None,
+        comparacion={"comparable": True, "concluyente": True, "comparado_con": None,
+                     "alertas": [{"severidad": "critical", "regla": "canonical_a_otro_host",
+                                  "paginas": 1, "de": 1, "pct": 100.0,
+                                  "que_decide_google": "x",
+                                  "ejemplos": [{"url": SEMILLAS[0]}]}]})
+    v = veredicto(None, job)
+    assert v["veredicto"] == "falla"
+    assert [m["tipo"] for m in v["motivos"]] == ["alerta"]
+
+
+def test_relanzar_la_lista_no_pone_en_verde_lo_que_sigue_roto(s):
+    """El CI falla, alguien pulsa «re-run» y la lista se compara con el censo
+    ROTO: las 10 seguian en noindex y, como no cambiaban, salia `pasa`. La
+    referencia de cada URL es el ultimo estado que paso, no el ultimo censo."""
+    _censo(s, "antes", 1)
+    noindex = {i: {"indexability_status": "Noindex"} for i in range(10)}
+    assert _comparar_y_juzgar(s, _censo(s, "roto", 2, paginas=noindex))["veredicto"] == "falla"
+    v = _comparar_y_juzgar(s, _censo(s, "reintento", 3, paginas=noindex))
+    assert v["veredicto"] == "falla", v
+    (m,) = v["motivos"]
+    assert (m["tipo"], m["paginas"]) == ("deja_de_ser_indexable", 10)
+    # Arreglado, vuelve a pasar
+    assert _comparar_y_juzgar(s, _censo(s, "arreglado", 4))["veredicto"] == "pasa"
+
+
+def test_relanzar_tampoco_pone_en_verde_un_canonical_cambiado(s):
+    _censo(s, "antes", 1)
+    otro = {3: {"canonical": "https://x.com/otra-url", "indexability_status": "Canonicalised"}}
+    assert _comparar_y_juzgar(s, _censo(s, "roto", 2, paginas=otro))["veredicto"] == "falla"
+    v = _comparar_y_juzgar(s, _censo(s, "reintento", 3, paginas=otro))
+    assert [m["tipo"] for m in v["motivos"]] == ["cambia_el_canonical"], v

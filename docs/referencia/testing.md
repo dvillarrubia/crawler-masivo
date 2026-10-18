@@ -270,4 +270,8 @@ el control `pasa`, y sin referencia, truncado, bloqueado o sin terminar es
 `no_concluyente`), `test_veredicto_api.py` (el endpoint con TestClient: 200
 siempre) —los dos tambien en el trabajo de la API— y `test_modo_lista_spider.py`
 (spider real: solo semillas y sus saltos, sitemap solo si se pide, y al
-reanudar una lista no se rastrea la frontera).
+reanudar una lista no se rastrea la frontera). `test_modo_lista.py` cubre
+tambien que relanzar la lista no pone en verde lo que sigue roto, que un
+hallazgo es un motivo aunque lo diga tambien la alerta y que un rastreo
+completo no toma una lista como referencia; `test_modo_lista_frontend.py`
+(Chromium) que un perfil en modo lista se lanza sin sitemap desde el modal.

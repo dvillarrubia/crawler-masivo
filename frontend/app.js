@@ -3789,6 +3789,12 @@ function _formDesdeConfig(f, cfg) {
   ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
    'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
     .forEach(k => poner(k, cfg[k]));
+  // Modo lista (decision 128): un perfil con `max_depth: 0` y sin
+  // `use_sitemap` hereda «sin sitemap» en la API. La casilla marcada por
+  // defecto lo mandaba como `true` explicito y la lista sembraba el sitemap.
+  if (Number(cfg.max_depth) === 0 && (cfg.use_sitemap === undefined || cfg.use_sitemap === null)) {
+    f.use_sitemap = false;
+  }
   if (cfg.user_agent) {
     const preset = presetDeUserAgent(cfg.user_agent);
     f.user_agent_preset = preset || 'custom';

@@ -82,7 +82,7 @@ def test_diez_a_noindex_es_falla_con_200(api):
     assert r.status_code == 200
     d = r.json()
     assert d["veredicto"] == "falla"
-    assert {m["tipo"] for m in d["motivos"]} == {"alerta", "deja_de_ser_indexable"}
+    assert {m["tipo"] for m in d["motivos"]} == {"deja_de_ser_indexable"}  # decision 36
 
 
 def test_el_control_sin_cambios_pasa(api):
