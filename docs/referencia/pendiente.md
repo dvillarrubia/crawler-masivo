@@ -59,8 +59,8 @@ order of priority:
   - **PR 3**: `fuente=html_crudo` en jobs con render (`page.on("response")`) e
     incidencia agrupada opcional `busqueda_a_medida` (una fila por regla con
     `paginas_afectadas`, `group_key = sha16(firma)`, ficha en `incidencias.js`);
-  - **PR 4 (3.4)**: comparar valores extraidos entre censos en
-    `shared/comparacion.py` (misma firma, sin mezclar `render`, umbral de la 68);
+  - ~~**PR 4 (3.4)**~~: hecho en la decision 127. Queda que la columna
+    `cambios` del Explorador mire tambien la extraccion;
   - `scripts/reextraer_a_medida.py` sobre `raw_html`, con el candado del job.
 - JavaScript comparison tab (raw HTML vs rendered)
 - Structured data rich-result validation (only basic @type/required-prop checks)

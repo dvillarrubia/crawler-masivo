@@ -15,7 +15,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
@@ -152,6 +152,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 123 | Los enlaces externos se comprueban con una sonda, no con `follow_external`, y lo que no se puede afirmar no se avisa | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d123) |
 | 124 | Los recursos embebidos se comprueban con la misma sonda, por recurso y fuera de `max_urls` | [`contenido`](contenido.md#d124) |
 | 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
+| 127 | Lo extraído a medida también se compara entre censos, y las alertas saltan por segmento de negocio, no solo por forma de ruta | [`comparacion-y-alertas`](comparacion-y-alertas.md#d127) |
 
 ## Anadir una decision
 
