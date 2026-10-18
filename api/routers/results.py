@@ -1179,6 +1179,22 @@ def export_enlaces_entrantes(
                              headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
+def _sitemaps_de_url(db: Session, job_id: uuid.UUID, url_hash: str) -> list[dict]:
+    """Los ficheros de sitemap que declaran la URL, con su lastmod (decision
+    126). Por el indice (job_id, url_hash). Sin tabla, lista vacia: es un dato
+    opcional del censo, como las capturas."""
+    from shared.models import SitemapEntry as E
+
+    try:
+        with db.begin_nested():
+            filas = (db.query(E.fichero, E.lastmod)
+                     .filter(E.job_id == job_id, E.url_hash == url_hash)
+                     .order_by(E.fichero).all())
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"fichero": f, "lastmod": lm} for f, lm in filas]
+
+
 def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[dict]:
     """Las capturas de la URL con otro perfil (decision 119), una por perfil.
 
@@ -1368,6 +1384,7 @@ def get_url_detail(
     resp.a_medida = _a_medida(db, job_id, [url_obj.id]).get(url_obj.id, {})
     resp.capturas_alternativas = _capturas_alternativas(db, job_id, url_obj.id)
     resp.robots_regla = _robots_regla(db, job_id, url_obj)
+    resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
 
     out_items = []
     for link_obj, src_url in outlink_rows:

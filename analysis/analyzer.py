@@ -43,6 +43,7 @@ from analysis import pagerank as prk
 from analysis import avisos_de_enlaces, avisos_de_sondas
 from analysis import avisos_de_paginacion
 from analysis import avisos_de_servidor
+from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, misma_url,
@@ -370,6 +371,7 @@ class SEOAnalyzer:
         avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
         avisos_de_sondas.avisar_recursos_rotos(self)  # decision 124
         self.analyze_sitemap()
+        avisos_de_sitemaps.avisar(self)  # decision 126
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()

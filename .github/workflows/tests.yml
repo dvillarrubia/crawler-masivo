@@ -134,6 +134,7 @@ jobs:
           tests/test_segmentos.py tests/test_segmentos_api.py
           tests/test_job_resumenes_api.py tests/test_comparar_extraido.py
           tests/test_modo_lista.py tests/test_veredicto_api.py tests/test_robots_api.py
+          tests/test_sitemaps_api.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales

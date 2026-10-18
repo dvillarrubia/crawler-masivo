@@ -37,6 +37,7 @@ from shared.models import (
     RobotsTxt,
     CapturaAlternativa,
     RespuestaSondeada,
+    SitemapEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
     ("robots_txt", RobotsTxt),
     # Sondas de respuesta: enlaces externos y recursos (decisiones 123 y 124).
     ("respuestas_sondeadas", RespuestaSondeada),
+    # Entradas de cada fichero de sitemap (decision 126).
+    ("sitemap_entries", SitemapEntry),
 ]
 
 
@@ -555,6 +558,9 @@ def import_backup_zip(
             created_at=_parse_datetime(job_data.get("created_at")),
             started_at=_parse_datetime(job_data.get("started_at")),
             completed_at=_parse_datetime(job_data.get("completed_at")),
+            # Lo leido de cada fichero de sitemap (decision 126): sin el, los
+            # avisos de sitemaps no salen al re-analizar el censo importado.
+            sitemaps=job_data.get("sitemaps"),
         )
         db.add(job)
         db.flush()

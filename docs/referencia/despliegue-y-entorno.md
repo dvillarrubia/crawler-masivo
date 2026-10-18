@@ -106,6 +106,7 @@ SCRAPY_LOG_DIR=/tmp/scrapy-logs  # log de Scrapy por job, en vivo
 MAX_SITEMAP_FILES=500            # cuantos ficheros de sitemap se siguen
 MAX_URLS_PER_SITEMAP=50000       # URLs por fichero
 MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
+SITEMAP_ENTRIES_MAX=250000       # filas de sitemap_entries por rastreo (decision 126)
 
 # robots.txt
 ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision 81)

@@ -150,6 +150,9 @@ const ISSUE_LABEL = {
   'not_reachable_from_home': 'Sin camino de enlaces desde la home',
   'not_in_sitemap': 'No incluida en el sitemap',
   'sitemap_no_indexable': 'En el sitemap sin ser indexable',
+  'sitemap_supera_limite': 'Sitemap por encima del límite de Google',
+  'lastmod_futuro': 'Sitemap con lastmod en el futuro',
+  'en_varios_sitemaps': 'URL en varios ficheros de sitemap',
 };
 
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
@@ -3628,7 +3631,7 @@ const EXP_TABS = [
   // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
   // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
-  { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap'],
+  { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap','sitemap_supera_limite','lastmod_futuro','en_varios_sitemaps'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },

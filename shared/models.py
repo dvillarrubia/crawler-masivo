@@ -262,6 +262,13 @@ class Job(Base):
     # comprobaron, rotos y dominios muertos. NULL = analisis anterior o sin
     # sondas. Con «comprobados < distintos» que no haya aviso no dice nada.
     sondas_resumen = Column(JSON, nullable=True)
+    # Los ficheros de sitemap que se leyeron (decision 126), lo escribe el
+    # spider al cerrar: `{"ficheros": [{url, formato, declaradas, devueltas,
+    # bytes, cortado, hijos, entradas_guardadas, leido_at}], "pedidos",
+    # "leidos", "parcial", "tope_entradas", "entradas_guardadas",
+    # "entradas_recortadas"}`. NULL = rastreo anterior o sin sitemap. Las
+    # entradas, una por (fichero, URL), van a `sitemap_entries`.
+    sitemaps = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -938,6 +945,40 @@ class RobotsTxt(Base):
     __table_args__ = (
         UniqueConstraint("job_id", "url", name="uq_robots_txt_job_url"),
         Index("ix_robots_txt_job_host", "job_id", "host"),
+    )
+
+
+class SitemapEntry(Base):
+    """Una URL declarada en UN fichero de sitemap (decision 126).
+
+    Una fila por (fichero, URL) y no por URL: la misma URL en tres ficheros
+    son tres filas, que es lo que dice `en_varios_sitemaps` y de donde sale el
+    «viene de» de la ficha. Solo URLs internas, las mismas que marcan
+    `urls.in_sitemap`. `url_hash` es el de `urls.url_hash` (compute_url_hash
+    de la URL normalizada), asi que una URL del sitemap que no se llego a
+    rastrear tiene fila aqui y no en `urls`; por eso va tambien `url`.
+
+    `lastmod` tal cual lo escribe el sitemap (recortado a 64): se juzga en el
+    analisis (`shared/sitemaps.py`) para que re-analizar cambie el criterio sin
+    re-rastrear. Lo que se sabe de cada FICHERO (tamano, cuantas declara, si se
+    corto) esta en `jobs.sitemaps`. Con tope de filas por censo
+    (`SITEMAP_ENTRIES_MAX`): pasado el tope, `jobs.sitemaps` lo dice.
+
+    `job_id` en la fila para filtrar, borrar y pesar por censo sin unir con
+    `urls` (decision 37).
+    """
+
+    __tablename__ = "sitemap_entries"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    url_hash = Column(String(64), nullable=False)
+    url = Column(Text, nullable=False)
+    fichero = Column(Text, nullable=False)
+    lastmod = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        Index("ix_sment_job_hash", "job_id", "url_hash"),
     )
 
 

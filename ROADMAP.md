@@ -51,6 +51,12 @@ milestone.
   problemáticas, páginas huérfanas y cobertura del sitemap, incluidas las URLs
   que el sitemap declara y no se pueden indexar (saltos, errores, noindex,
   canonicalizadas), con el motivo de cada una.
+- **De qué sitemap viene cada URL** (18 de octubre, decisión 126): la ficha de
+  una URL dice en qué fichero(s) de sitemap está declarada y con qué fecha de
+  modificación (lastmod). Y tres avisos sobre los propios ficheros: el que pasa
+  de los límites de Google (50.000 URLs o 50 MB), el que lleva fechas de
+  modificación en el futuro, y las URLs repetidas en varios ficheros (una vez
+  por grupo de ficheros, no por URL). Necesita un rastreo nuevo.
 - **Soft 404** (16 de octubre, decisión 105): páginas que responden 200 pero son
   una página de error. Al empezar cada rastreo se pide una URL que no existe por
   sitio y por tipo de página, y lo que el sitio responde es su huella de «no

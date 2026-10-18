@@ -248,6 +248,14 @@ resolver caido, origen 404, recursos y `size_bytes`), `test_sondas_db.py`
 `run_all` entero) y `test_backup_sondas.py` (trabajo de la API). El arnes
 (`tests/spider_harness.py`) sirve ahora `HEAD` y, con `externos`, un servidor por
 IP de tercero en el mismo puerto (`@@EXTERNAS@@`: metodo, ruta y cabeceras).
+Sitemaps por fichero (decision 126): `test_sitemaps.py` (`leer_sitemap` cuenta
+lo que pasa del tope, mide el XML descomprimido y sabe que un gzip cortado lo
+pasaba), `test_sitemaps_criterio.py` (lastmod W3C, el dia de margen y los
+limites de Google), `test_spider_sitemap_entradas.py` (el spider real con un
+indice de varios ficheros: fichero y lastmod por entrada, `jobs.sitemaps`, el
+tope de filas), `test_avisos_de_sitemaps_db.py` (los tres avisos contra SQLite,
+su unidad y su ancla, y que reanudar no duplica en la tuberia) y
+`test_sitemaps_api.py` (la ficha y el backup; trabajo de la API).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

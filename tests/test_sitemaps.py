@@ -269,3 +269,59 @@ def test_los_formatos_sin_lastmod_salen_sin_el():
     assert [(e.url, e.lastmod, e.hreflang) for e in entradas] == [
         ("https://x.com/a", None, []), ("https://x.com/b", None, []),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Lectura con lo que hace falta para los limites de Google (decision 126)
+# ---------------------------------------------------------------------------
+def test_leer_sitemap_cuenta_lo_que_pasa_del_tope(monkeypatch):
+    """El limite de Google es 50.000: un fichero con mas hay que CONTARLO
+    entero aunque el rastreador solo se quede con las primeras. Antes el bucle
+    cortaba en el tope y no habia forma de saber si el fichero lo pasaba."""
+    import seo_crawler.sitemaps as sm
+
+    monkeypatch.setattr(sm, "MAX_URLS_PER_SITEMAP", 3)
+    xml = f"<urlset {SITEMAP_NS}>" + "".join(
+        f"<url><loc>https://e.com/{i}</loc></url>" for i in range(7)) + "</urlset>"
+    lectura = sm.leer_sitemap(xml)
+    assert [e.url for e in lectura.entradas] == ["https://e.com/0", "https://e.com/1",
+                                                 "https://e.com/2"]
+    assert lectura.declaradas == 7 and lectura.formato == "urlset"
+    assert lectura.recortada is True
+    assert lectura.bytes == len(xml.encode())
+
+
+def test_leer_sitemap_indice_cuenta_hijos_y_texto_cuenta_lineas(monkeypatch):
+    import seo_crawler.sitemaps as sm
+
+    monkeypatch.setattr(sm, "MAX_URLS_PER_SITEMAP", 2)
+    indice = (f"<sitemapindex {SITEMAP_NS}>"
+              "<sitemap><loc>https://e.com/a.xml</loc></sitemap>"
+              "<sitemap><loc>https://e.com/b.xml</loc></sitemap></sitemapindex>")
+    lectura = sm.leer_sitemap(indice)
+    assert lectura.formato == "sitemapindex" and lectura.declaradas == 2
+    assert lectura.hijos == ["https://e.com/a.xml", "https://e.com/b.xml"]
+    texto = sm.leer_sitemap(b"https://e.com/1\nhttps://e.com/2\nhttps://e.com/3\n")
+    assert texto.formato == "texto" and texto.declaradas == 3 and len(texto.entradas) == 2
+
+
+def test_leer_sitemap_gzip_mide_el_xml_descomprimido(monkeypatch):
+    import seo_crawler.sitemaps as sm
+
+    xml = (f"<urlset {SITEMAP_NS}><url><loc>https://e.com/a</loc>"
+           "<lastmod>2026-01-01</lastmod></url></urlset>").encode()
+    lectura = sm.leer_sitemap(gzip.compress(xml))
+    assert lectura.bytes == len(xml) and lectura.cortado is False
+    assert lectura.entradas[0].lastmod == "2026-01-01"
+
+    # Pasado el tope no se lee, pero se sabe que lo pasaba.
+    monkeypatch.setattr(sm, "MAX_SITEMAP_BYTES", 100)
+    grande = sm.leer_sitemap(gzip.compress(xml * 10))
+    assert grande.cortado is True and grande.bytes > 100 and grande.entradas == []
+
+
+def test_un_html_de_error_es_formato_desconocido():
+    from seo_crawler.sitemaps import leer_sitemap
+
+    lectura = leer_sitemap(b"<html><body>404</body></html>")
+    assert lectura.formato == "desconocido" and lectura.declaradas == 0

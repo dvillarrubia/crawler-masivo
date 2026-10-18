@@ -101,6 +101,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tls JSON"))
         # Resumen de las sondas de respuesta (decisiones 123 y 124)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sondas_resumen JSON"))
+        # Ficheros de sitemap leidos (decision 126)
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sitemaps JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).
@@ -159,6 +161,7 @@ def main() -> None:
     migrar_robots_txt()
     migrar_capturas_alternativas()
     migrar_respuestas_sondeadas()
+    migrar_sitemap_entries()
 
     print("Done.")
 
@@ -340,6 +343,20 @@ def migrar_respuestas_sondeadas() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_rsond_job_hash "
             "ON respuestas_sondeadas (job_id, url_hash)"))
     print("Respuestas sondeadas: tabla respuestas_sondeadas e indice al dia.")
+
+
+def migrar_sitemap_entries() -> None:
+    """Entradas de cada fichero de sitemap (decision 126).
+
+    Tabla NUEVA, que crea create_all con su indice (job_id, url_hash): ningun
+    ALTER sobre `urls`. Aqui solo se asegura el indice por si la tabla se creo
+    antes que el. Bajo el `lock_timeout` de `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sment_job_hash "
+            "ON sitemap_entries (job_id, url_hash)"))
+    print("Sitemaps: tabla sitemap_entries e indice al dia.")
 
 
 if __name__ == "__main__":

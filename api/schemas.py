@@ -896,6 +896,10 @@ class UrlDetailResponse(UrlResponse):
     # La linea de robots.txt que bloquea la URL, para Googlebot y para nuestro
     # rastreo (decision 129). None = no esta bloqueada o no se puede afirmar.
     robots_regla: dict[str, Any] | None = None
+    # De que ficheros de sitemap viene y con que lastmod (decision 126): uno
+    # por fichero. Vacio = no esta en ningun fichero guardado (o el censo es
+    # anterior a la tabla; `in_sitemap` dice si estaba).
+    sitemaps: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

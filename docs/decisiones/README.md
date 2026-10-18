@@ -13,7 +13,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
@@ -152,6 +152,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 123 | Los enlaces externos se comprueban con una sonda, no con `follow_external`, y lo que no se puede afirmar no se avisa | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d123) |
 | 124 | Los recursos embebidos se comprueban con la misma sonda, por recurso y fuera de `max_urls` | [`contenido`](contenido.md#d124) |
 | 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
+| 126 | De qué fichero viene cada URL del sitemap, y los avisos son del fichero, no de la URL | [`incidencias`](incidencias.md#d126) |
 | 127 | Lo extraído a medida también se compara entre censos, y las alertas saltan por segmento de negocio, no solo por forma de ruta | [`comparacion-y-alertas`](comparacion-y-alertas.md#d127) |
 | 128 | Una lista de URLs clave es un censo, y su veredicto no puede decir «pasa» sin saberlo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d128) |
 | 129 | El robots.txt se evalúa también para los bots de IA, separando entrenamiento de búsqueda, y la ficha de una URL bloqueada dice la línea que la bloquea | [`indexabilidad`](indexabilidad.md#d129) |

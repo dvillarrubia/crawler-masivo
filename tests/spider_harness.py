@@ -435,7 +435,8 @@ class _SesionFalsa:
 
     def update(self, *a, **k):
         if a and isinstance(a[0], dict):
-            ACTUALIZACIONES_JOB.append(a[0])
+            # Las de `urls` (in_sitemap) llegan con la columna como clave.
+            ACTUALIZACIONES_JOB.append({getattr(k, "key", k): v for k, v in a[0].items()})
         return 0
 
     def commit(self):
@@ -706,10 +707,14 @@ def main() -> None:
             # RespuestaSondeadaItem (decisiones 123 y 124)
             "veredicto", "metodo", "uso", "host", "final_url", "final_status", "saltos",
             "host_caido", "content_length", "interno", "error",
+            # SitemapEntradasItem (decision 126)
+            "fichero", "entradas",
         )}
-        for k in ("url", "redirect_url", "to_url", "redirige_a"):
+        for k in ("url", "redirect_url", "to_url", "redirige_a", "fichero"):
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
+        for e in fila.get("entradas") or []:
+            e["url"] = e["url"].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
     if entrada.get("ver_cabeceras"):
         print("@@CABECERAS@@" + json.dumps(CABECERAS))
