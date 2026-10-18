@@ -378,3 +378,100 @@ def test_relanzar_tampoco_pone_en_verde_un_canonical_cambiado(s):
     assert _comparar_y_juzgar(s, _censo(s, "roto", 2, paginas=otro))["veredicto"] == "falla"
     v = _comparar_y_juzgar(s, _censo(s, "reintento", 3, paginas=otro))
     assert [m["tipo"] for m in v["motivos"]] == ["cambia_el_canonical"], v
+
+
+# --- Una URL de la lista que redirige (decision 133) --------------------------
+
+def _destino(s, job, url, **campos):
+    from shared.models import HtmlMeta, Url
+
+    campos = {"status_code": 200, "indexability_status": "Indexable", **campos}
+    u = Url(job_id=job.id, url=url, url_hash=f"{job.name}-{url}", is_internal=True,
+            is_html=True, word_count=500, **campos)
+    s.add(u)
+    s.flush()
+    s.add(HtmlMeta(url_id=u.id, title="T", canonical_href=url))
+    s.flush()
+
+
+def _redirige(i, destino, codigo=301):
+    return {i: {"status_code": codigo, "indexability_status": f"Redirect ({codigo})",
+                "redirect_url": destino}}
+
+
+def test_redirigir_a_una_pagina_sana_es_aviso_con_el_destino(s):
+    """Una URL clave que ahora redirige a otra que responde 200 indexable."""
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://x.com/nueva"))
+    _destino(s, ahora, "https://x.com/nueva")
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "aviso", v
+    assert v["motivos"] == [] and v["no_concluyente_por"] == []
+    (a,) = v["avisos"]
+    assert a["tipo"] == "redirige" and a["paginas"] == 1
+    assert a["ejemplos"] == [{"url": SEMILLAS[4], "ahora": 301, "antes": 200,
+                              "destino": "https://x.com/nueva"}]
+
+
+def test_se_sigue_la_cadena_hasta_el_final(s):
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://x.com/paso"))
+    _destino(s, ahora, "https://x.com/paso", status_code=302,
+             indexability_status="Redirect (302)", redirect_url="https://x.com/final")
+    _destino(s, ahora, "https://x.com/final")
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "aviso", v
+    (e,) = v["avisos"][0]["ejemplos"]
+    assert (e["destino"], e["saltos"]) == ("https://x.com/final", 2)
+
+
+def test_redirigir_a_una_pagina_rota_es_falla(s):
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://x.com/rota"))
+    _destino(s, ahora, "https://x.com/rota", status_code=404,
+             indexability_status="Client Error (404)")
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "falla"
+    (m,) = [m for m in v["motivos"] if m["tipo"] == "no_responde_200"]
+    assert m["ejemplos"][0]["destino"] == "https://x.com/rota"
+    assert m["ejemplos"][0]["estado_destino"] == 404
+    assert v["avisos"] == []
+
+
+def test_redirigir_a_una_pagina_noindex_es_falla(s):
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://x.com/oculta"))
+    _destino(s, ahora, "https://x.com/oculta", indexability_status="Noindex")
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "falla"
+    (m,) = [m for m in v["motivos"] if m["tipo"] == "no_responde_200"]
+    assert m["ejemplos"][0]["estado_destino"] == "Noindex"
+
+
+def test_una_cadena_que_da_la_vuelta_es_falla(s):
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://x.com/bucle"))
+    _destino(s, ahora, "https://x.com/bucle", status_code=301,
+             indexability_status="Redirect (301)", redirect_url=SEMILLAS[4])
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "falla"
+    assert [m["tipo"] for m in v["motivos"]] == ["no_responde_200"]
+
+
+def test_redirigir_a_algo_que_no_se_rastreo_no_es_concluyente(s):
+    _censo(s, "antes", 1)
+    ahora = _censo(s, "ahora", 2, paginas=_redirige(4, "https://otro.com/fuera"))
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "no_concluyente", v
+    assert [d["tipo"] for d in v["no_concluyente_por"]] == ["destino_sin_rastrear"]
+
+
+def test_un_fallo_pesa_mas_que_un_aviso(s):
+    _censo(s, "antes", 1)
+    paginas = {**_redirige(4, "https://x.com/nueva"),
+               7: {"status_code": 500, "indexability_status": "Server Error (500)"}}
+    ahora = _censo(s, "ahora", 2, paginas=paginas)
+    _destino(s, ahora, "https://x.com/nueva")
+    v = _comparar_y_juzgar(s, ahora)
+    assert v["veredicto"] == "falla"
+    assert [a["tipo"] for a in v["avisos"]] == ["redirige"]

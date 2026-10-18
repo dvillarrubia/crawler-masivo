@@ -629,3 +629,28 @@
    programación (la comparación automática del worker no lo aplica), y los
    enlaces ganados y perdidos URL a URL (leerían `links` o el Parquet, 95) no
    están.
+
+<a id="d133"></a>
+133. **Una URL de la lista que redirige a una página sana es un aviso, no un
+   fallo** (criterio del usuario, 2026-10-18). Hasta ahora cualquier URL de la
+   lista que no respondiera 200 era `falla`, y una redirección también. Las dos
+   lecturas tienen su razón: quien pone una URL en la lista espera esa
+   dirección exacta, pero tras una migración las redirecciones son lo normal y
+   marcarlas todas de rojo llena el veredicto de falsas alarmas. El término
+   medio:
+   - **Se sigue la cadena** dentro del mismo censo (el spider pide cada destino
+     como su propia fila, decisión 27, también con `max_depth=0`), hasta
+     `MAX_SALTOS` = 10.
+   - **Acaba en una página 200, indexable y que no es un muro** → grupo
+     `redirige` en `avisos`, con el destino final y los saltos si son más de
+     uno. El veredicto es **`aviso`** si no hay nada más: ni pasa ni falla. Un
+     CI que comprueba `== "pasa"` no despliega con un aviso, que es el lado
+     seguro de equivocarse.
+   - **Acaba en un error, en una página no indexable, o da la vuelta** →
+     `no_responde_200`, como antes, con el destino y `estado_destino` (el
+     código, o el estado de indexabilidad si respondía 200).
+   - **El destino no se rastreó** (otro host, o el rastreo no llegó) → duda
+     `destino_sin_rastrear`: no se sabe si está bien, así que no se afirma.
+   Precedencia: `falla` > `no_concluyente` > `aviso` > `pasa`. La regla
+   `redirigidas` de la comparación es `warning`, así que nunca fue motivo de
+   `falla` en el veredicto y no cambia.

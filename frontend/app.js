@@ -3900,6 +3900,7 @@ function resumenSitemaps(job) {
 // El veredicto del modo lista con sus textos (decision 128).
 const VEREDICTO_TEXTO = {
   pasa: ['La lista pasa', 'green'],
+  aviso: ['La lista pasa con avisos', 'blue'],
   falla: ['La lista falla', 'red'],
   no_concluyente: ['No concluyente', 'orange'],
 };

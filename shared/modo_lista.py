@@ -14,8 +14,9 @@ Tres piezas, las tres aqui para tocar `shared/comparacion.py` lo minimo:
   alertaban.
 - `acotar_a_la_lista(...)`: la referencia de una lista puede ser un censo
   completo del sitio; solo cuentan sus URLs que estan en la lista.
-- `veredicto(db, job)`: `pasa`, `falla` o `no_concluyente`, con los motivos.
-  Lo no concluyente NO es `pasa`: un CI que lee «pasa» despliega.
+- `veredicto(db, job)`: `pasa`, `aviso`, `falla` o `no_concluyente`, con los
+  motivos. Lo no concluyente NO es `pasa`: un CI que lee «pasa» despliega.
+  `aviso` es una URL de la lista que redirige a un destino sano (decision 133).
 
 Vive en `shared/` porque lo usan el worker (la comparacion automatica) y la API
 (el endpoint), y la imagen de la API no lleva `analysis/` ni `crawler/`.
@@ -38,7 +39,11 @@ from shared.respuestas import MOTIVOS_BLOQUEO, NO_VALIDAS
 
 UMBRAL_LISTA_POR_DEFECTO = 1
 
-PASA, FALLA, NO_CONCLUYENTE = "pasa", "falla", "no_concluyente"
+PASA, AVISO, FALLA, NO_CONCLUYENTE = "pasa", "aviso", "falla", "no_concluyente"
+
+# Cuantos saltos se siguen desde una URL de la lista que redirige. El spider
+# pide cada destino como su propia fila (decision 27), tambien en una lista.
+MAX_SALTOS = 10
 
 # Por que un rastreo fallido SI es un veredicto: robots.txt prohibiendo las
 # semillas es el despliegue roto mas clasico (`Disallow: /` de preproduccion
@@ -214,6 +219,10 @@ MENSAJES = {
     "no_rastreadas": "estas URLs de la lista no se llegaron a rastrear",
     "muro": "en estas URLs se recibio un muro, no la pagina",
     "sin_referencia_url": "estas URLs no estaban (o no respondian 200) en el censo anterior",
+    "destino_sin_rastrear": "estas URLs de la lista redirigen a un destino que no se rastreo",
+    # aviso
+    "redirige": ("estas URLs de la lista redirigen a una pagina que responde 200 y "
+                 "es indexable: Google indexa el destino, no la URL de la lista"),
 }
 
 
@@ -227,6 +236,28 @@ EQUIVALENTE = {
 }
 
 
+def _seguir_saltos(db, job_id, p: dict[str, Any]) -> tuple[dict[str, Any] | None, int]:
+    """La ultima pagina de la cadena que empieza en `p` y cuantos saltos tiene.
+
+    None si un destino no se rastreo, o si la cadena da la vuelta o pasa de
+    `MAX_SALTOS`: en los dos ultimos casos no hay destino sano al que llegar,
+    y se devuelve la pagina en la que se corto para que no parezca un 200.
+    """
+    vistas = {_norm(p["url"])}
+    actual, saltos = p, 0
+    while actual.get("redirect_url"):
+        destino = actual["redirect_url"]
+        clave = _norm(destino)
+        if clave in vistas or saltos >= MAX_SALTOS:
+            return actual, saltos
+        vistas.add(clave)
+        siguiente = _paginas_de(db, job_id, [destino]).get(clave)
+        if siguiente is None:
+            return None, saltos + 1
+        actual, saltos = siguiente, saltos + 1
+    return actual, saltos
+
+
 def _grupo(tipo, filas=None, mensaje=None, **extra):
     filas = filas or []
     g = {"tipo": tipo, "mensaje": mensaje or MENSAJES[tipo], "paginas": len(filas),
@@ -236,7 +267,7 @@ def _grupo(tipo, filas=None, mensaje=None, **extra):
 
 
 def veredicto(db, job) -> dict[str, Any]:
-    """`pasa`, `falla` o `no_concluyente` para un rastreo, con los motivos.
+    """`pasa`, `aviso`, `falla` o `no_concluyente` para un rastreo, con los motivos.
 
     `falla` si hay cualquier cosa AFIRMABLE: una alerta critica de la
     comparacion automatica (`jobs.comparacion`), o una URL de la lista (las
@@ -245,11 +276,18 @@ def veredicto(db, job) -> dict[str, Any]:
     eso pero tampoco se puede afirmar que este bien (sin referencia, truncado,
     URLs sin rastrear o sin referencia). Un censo bloqueado es SIEMPRE
     `no_concluyente`: sus codigos son los del muro, no los del sitio (103).
+
+    Una URL de la lista que redirige (decision 133) NO falla si la cadena
+    acaba en una pagina 200 e indexable: es `aviso`, con el destino. Falla si
+    acaba en un error, en una pagina no indexable o da la vuelta; si el
+    destino no se rastreo es una duda. `aviso` solo sale si no hay fallos ni
+    dudas, porque es lo mas cerca de `pasa` que hay.
     """
     config = job.config or {}
     semillas = list(job.seeds or [])
     fallos: list[dict[str, Any]] = []
     dudas: list[dict[str, Any]] = []
+    avisos: list[dict[str, Any]] = []
     alertas: list[dict[str, Any]] = []
     comp = job.comparacion if isinstance(getattr(job, "comparacion", None), dict) else None
     comparado_con = (comp or {}).get("comparado_con")
@@ -266,6 +304,7 @@ def veredicto(db, job) -> dict[str, Any]:
             "comparado_con": comparado_con,
             "motivos": fallos,
             "no_concluyente_por": dudas,
+            "avisos": avisos,
         }
 
     motivo = job.finish_reason or ""
@@ -337,11 +376,25 @@ def veredicto(db, job) -> dict[str, Any]:
             continue
         if codigo != 200:
             fila = {"url": p["url"], "ahora": codigo}
-            if p.get("redirect_url"):
-                fila["destino"] = p["redirect_url"]
             r = antes.get(clave)
             if r is not None:
                 fila["antes"] = r.get("status_code")
+            if p.get("redirect_url"):
+                fila["destino"] = p["redirect_url"]
+                final, saltos = _seguir_saltos(db, job.id, p)
+                if final is None:
+                    por_tipo.setdefault("destino_sin_rastrear", []).append(fila)
+                    continue
+                fila["destino"] = final["url"]
+                if saltos > 1:
+                    fila["saltos"] = saltos
+                if (_valida(final) and _era_indexable(final)
+                        and not final.get("redirect_url")):
+                    por_tipo.setdefault("redirige", []).append(fila)
+                    continue
+                fila["estado_destino"] = (final.get("status_code")
+                                          if final.get("status_code") != 200
+                                          else final.get("indexability_status"))
             por_tipo.setdefault("no_responde_200", []).append(fila)
             continue
         if not comparado_con:
@@ -390,12 +443,16 @@ def veredicto(db, job) -> dict[str, Any]:
                  "deja_de_ser_indexable", "cambia_el_canonical"):
         if por_tipo.get(tipo):
             fallos.append(_grupo(tipo, por_tipo[tipo], **contexto.get(tipo, {})))
-    for tipo in ("no_rastreadas", "muro", "sin_referencia_url"):
+    for tipo in ("no_rastreadas", "muro", "sin_referencia_url", "destino_sin_rastrear"):
         if por_tipo.get(tipo):
             dudas.append(_grupo(tipo, por_tipo[tipo]))
+    if por_tipo.get("redirige"):
+        avisos.append(_grupo("redirige", por_tipo["redirige"]))
 
     if fallos:
         return _salida(FALLA)
     if dudas:
         return _salida(NO_CONCLUYENTE)
+    if avisos:
+        return _salida(AVISO)
     return _salida(PASA)
