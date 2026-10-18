@@ -110,6 +110,12 @@ MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 # robots.txt
 ROBOTS_CRAWL_DELAY_MAX=10        # tope del Crawl-delay que se respeta (decision 81)
 
+# Retry-After de un 429/503 (decision 111). El job los cambia con
+# crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED=1
+RETRY_AFTER_MAX=60               # tope de la pausa, en segundos
+RETRY_AFTER_MAX_SEGUIDAS=5       # 429/503 tras respetar la pausa: es un muro, se deja de pausar
+
 # Capa de decisiones: Jev por OpenRouter (decision 84). Sin clave o con
 # DECISIONS_ENABLED=0 no se llama a nadie; con las dos, tampoco solo (#40).
 DECISIONS_ENABLED=0
@@ -161,6 +167,11 @@ Umbral de casi duplicados: `job.config.analysis_thresholds.near_duplicate_simila
 Soft 404 (decision 105): `analysis_thresholds.soft404_similitud` (0.9),
 `soft404_min_palabras_igualdad` (5) y `soft404_max_proporcion_huella` (0.5); y
 `crawl_behavior.soft404_sondas` (12; 0 = sin sondas).
+
+Paridad movil (decision 119): `crawl_behavior.paridad_movil_muestra` (0 =
+apagada; hasta 500 paginas), `paridad_movil_por_plantilla` (3) y
+`paridad_movil_ua` (`chrome_android` o `googlebot_smartphone`). Umbrales de la
+comparacion en `shared/paridad.py`. `PLAYWRIGHT_MAX_CONTEXTS` pasa a 4 de serie.
 
 Sondas de respuesta (decisiones 123 y 124), todas apagadas por defecto:
 `crawl_behavior.comprobar_enlaces_externos` (con `enlaces_externos_max`, 5.000),

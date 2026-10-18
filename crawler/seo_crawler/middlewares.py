@@ -5,18 +5,24 @@ Custom Scrapy downloader middlewares for the SEO crawler.
 * **ProxyMiddleware**     -- optional proxy rotation.
 * **JobConfigMiddleware** -- attaches job config to every request's meta.
 * **RobotsCrawlDelayMiddleware** -- respeta el `Crawl-delay` de robots.txt.
+* **RobotsTxtRegistroMiddleware** -- guarda lo que respondio el robots.txt de
+  cada host (decisiones 112 y 113).
+* **RetryAfterMiddleware** -- respeta el `Retry-After` de un 429 o un 503.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import math
+import time
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from scrapy import Request, signals
 from scrapy.downloadermiddlewares.robotstxt import RobotsTxtMiddleware
-from scrapy.exceptions import NotConfigured
+from scrapy.exceptions import DontCloseSpider, NotConfigured
 from scrapy.http import Response
 from scrapy.utils.misc import load_object
 
@@ -323,6 +329,440 @@ class RobotsCrawlDelayMiddleware:
         return None
 
 
+class RobotsTxtRegistroMiddleware:
+    """Guarda en `robots_txt` lo que respondio el robots.txt de cada host.
+
+    Scrapy monta el parser con el cuerpo sea cual sea el codigo y, si la
+    descarga lanza una excepcion, deja pasar todo: un robots.txt que responde
+    503, 429 o no responde se rastreaba como «todo permitido» sin que llegara a
+    ningun informe, y Google, con eso, deja de rastrear el sitio (decision 112).
+    Aqui solo se ANOTA: lo que se pide no cambia.
+
+    Prioridad 90, por debajo del RetryMiddleware (550) y del RedirectMiddleware
+    (600): `process_response` y `process_exception` corren de la prioridad mas
+    alta a la mas baja, asi que aqui llega el resultado FINAL, tras reintentos y
+    redirecciones. Se reconoce la descarga por la URL ORIGINAL (`/robots.txt`
+    de raiz), no por la meta: es la que pide `RobotsTxtMiddleware` en `respect`
+    y en `audit` y la del spider para los sitemaps (la unica en `ignore`). No se
+    toca `_parse_robots` ni `_robots_error`: son privados de Scrapy, y la
+    decision 48 ya pago replicar a ojo su middleware.
+
+    Una fila por URL de robots.txt y ejecucion: la primera descarga, que es con
+    la que Scrapy decidio. Solo de hosts internos y con tope
+    (`ROBOTS_TXT_MAX_HOSTS`): lo que pase de ahi queda «no evaluado». Si fallo
+    (5xx, 429, red), al quedarse el spider sin trabajo se pide UNA vez mas
+    (`comprobacion`): nuestra IP no es la de Google, y un fallo pasajero no es
+    lo mismo que uno que dura todo el rastreo. Todo best-effort, con el `try`
+    cubriendo cada entrada: guardar esto no puede tumbar un rastreo.
+    """
+
+    PRIORIDAD_DESCARGA = 1000
+
+    def __init__(self, crawler: Crawler):
+        from shared.robots_txt import MAX_HOSTS_POR_JOB
+
+        self.crawler = crawler
+        self.filas: dict[str, dict] = {}
+        self._tope = crawler.settings.getint("ROBOTS_TXT_MAX_HOSTS", MAX_HOSTS_POR_JOB)
+        self._comprobar = crawler.settings.getbool("ROBOTS_TXT_COMPROBAR", True)
+        self._espera = crawler.settings.getfloat("DOWNLOAD_TIMEOUT", 30.0) + 15.0
+        self._avisado_tope = False
+        self._comprobado = False
+        self._pendientes = 0
+        self._limite = 0.0
+        crawler.signals.connect(self._spider_idle, signal=signals.spider_idle)
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler)
+
+    # -- descargas ---------------------------------------------------------
+    @staticmethod
+    def _url_de_robots(request: Request) -> str | None:
+        from shared.robots_txt import es_url_de_robots
+
+        original = (request.meta.get("redirect_urls") or [request.url])[0]
+        return original if es_url_de_robots(original) else None
+
+    def process_response(self, request: Request, response: Response, spider=None):
+        try:
+            url = self._url_de_robots(request)
+            if url is not None:
+                cabeceras = {
+                    k.decode("latin-1").lower(): ", ".join(
+                        v.decode("latin-1", "replace") for v in (vs or []))
+                    for k, vs in response.headers.items()
+                }
+                self._registrar(request, url, status_code=response.status,
+                                cabeceras=cabeceras, cuerpo=response.body,
+                                url_final=response.url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo registrar el robots.txt de %s: %s", request.url, exc)
+        return response
+
+    def process_exception(self, request: Request, exception, spider=None):
+        try:
+            url = self._url_de_robots(request)
+            if url is not None:
+                self._registrar(request, url,
+                                error=f"{type(exception).__name__}: {exception}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo registrar el robots.txt de %s: %s", request.url, exc)
+        return None
+
+    def _registrar(self, request: Request, url: str, **datos) -> None:
+        from shared.robots_txt import fila_de_respuesta
+
+        clave = url.lower()
+        intentos = int(request.meta.get("retry_times") or 0) + 1
+        if request.meta.get("robots_txt_comprobacion"):
+            fila = self.filas.get(clave)
+            if fila is None:
+                return
+            nueva = fila_de_respuesta(url, intentos=intentos, **datos)
+            fila["comprobacion"] = {
+                "status_code": nueva["status_code"], "error": nueva["error"],
+                "response_class": nueva["response_class"],
+                "fecha": nueva["fecha"].isoformat(timespec="seconds"),
+            }
+            # Si a la segunda respondio, ese es el robots.txt que se evalua:
+            # la primera no dejo cuerpo.
+            if nueva["cuerpo"] is not None and fila.get("cuerpo") is None:
+                for k in ("bytes", "sha256", "cuerpo", "recortado"):
+                    fila[k] = nueva[k]
+            logger.info("robots.txt %s comprobado al cerrar: %s", url,
+                        nueva["status_code"] or nueva["error"])
+            self._guardar(fila)
+            return
+        if clave in self.filas:
+            return  # la primera de esta ejecucion es con la que decidio Scrapy
+        spider = getattr(self.crawler, "spider", None)
+        interno = getattr(spider, "_is_internal", None)
+        if callable(interno) and not interno(url):
+            return
+        if len(self.filas) >= self._tope:
+            if not self._avisado_tope:
+                self._avisado_tope = True
+                logger.warning("robots.txt: tope de %d hosts guardados; los demas quedan "
+                               "sin evaluar", self._tope)
+            return
+        fila = fila_de_respuesta(url, intentos=intentos, **datos)
+        self.filas[clave] = fila
+        if fila["status_code"] is None or fila["status_code"] >= 400:
+            logger.warning("robots.txt %s: %s tras %d intento(s)", url,
+                           fila["status_code"] or fila["error"], intentos)
+        self._guardar(fila)
+
+    def _guardar(self, fila: dict) -> None:
+        """Una fila por (job, URL): la de una ejecucion anterior se sustituye."""
+        try:
+            from shared.database import SessionLocal
+            from shared.models import RobotsTxt
+
+            spider = getattr(self.crawler, "spider", None)
+            job_id = getattr(spider, "job_id", None)
+            if not job_id:
+                return
+            sesion = SessionLocal()
+            try:
+                datos = {k: v for k, v in fila.items() if not k.startswith("_")}
+                existente = (sesion.query(RobotsTxt)
+                             .filter(RobotsTxt.job_id == job_id, RobotsTxt.url == fila["url"])
+                             .one_or_none())
+                if existente is None:
+                    sesion.add(RobotsTxt(job_id=job_id, **datos))
+                else:
+                    for k, v in datos.items():
+                        setattr(existente, k, v)
+                    existente.evaluacion = None
+                sesion.commit()
+            finally:
+                sesion.close()
+        except Exception as exc:  # noqa: BLE001 -- el registro no tumba un rastreo
+            logger.warning("No se pudo guardar el robots.txt de %s: %s", fila.get("url"), exc)
+
+    # -- comprobacion al cerrar --------------------------------------------
+    def _spider_idle(self, spider=None) -> None:
+        if self._pendientes > 0 and time.monotonic() < self._limite:
+            raise DontCloseSpider
+        if self._comprobado or not self._comprobar:
+            return
+        self._comprobado = True
+        try:
+            lanzadas = self._lanzar_comprobaciones()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo comprobar de nuevo robots.txt: %s", exc)
+            return
+        if lanzadas:
+            raise DontCloseSpider
+
+    def _lanzar_comprobaciones(self) -> int:
+        from scrapy.http.request import NO_CALLBACK
+        from scrapy.utils.defer import deferred_from_coro
+
+        from shared.robots_txt import INACCESIBLE, estado
+
+        engine = self.crawler.engine
+        lanzadas = 0
+        for fila in list(self.filas.values()):
+            if estado(fila["status_code"], fila["error"], fila["response_class"]) != INACCESIBLE:
+                continue
+            req = Request(fila["url"], priority=self.PRIORIDAD_DESCARGA, callback=NO_CALLBACK,
+                          dont_filter=True,
+                          meta={"dont_obey_robotstxt": True, "dont_retry": True,
+                                "robots_txt_comprobacion": True})
+            descarga = getattr(engine, "download_async", None)
+            d = deferred_from_coro(descarga(req)) if descarga else engine.download(req)
+            d.addBoth(self._fin_comprobacion)
+            self._pendientes += 1
+            lanzadas += 1
+        self._limite = time.monotonic() + self._espera
+        return lanzadas
+
+    def _fin_comprobacion(self, _resultado) -> None:
+        # La respuesta o el error ya los anoto process_response/process_exception.
+        self._pendientes -= 1
+        return None
+
+
+def piso_de_slot(crawler: Crawler, clave: str) -> float:
+    """El retraso por debajo del cual no puede quedar el slot `clave`.
+
+    `max(DOWNLOAD_DELAY del job, Crawl-delay de robots.txt)`: lo que el job
+    pide y lo que respeta `RobotsCrawlDelayMiddleware` (decision 81), que solo
+    existe con `ROBOTSTXT_OBEY`. Es a donde vuelve el slot cuando caduca la
+    pausa de un `Retry-After` (decision 111): si volviera a 0, el Crawl-delay
+    quedaria deshecho hasta la siguiente respuesta. El Crawl-delay nunca baja
+    un retraso (solo lo sube), asi que no deshace la pausa.
+    """
+    piso = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+    gestor = getattr(getattr(crawler, "engine", None), "downloader", None)
+    for mw in getattr(getattr(gestor, "middleware", None), "middlewares", ()) or ():
+        if isinstance(mw, RobotsCrawlDelayMiddleware):
+            piso = max(piso, mw._retrasos.get(clave, 0.0))
+    return piso
+
+
+class RetryAfterMiddleware:
+    """Respeta el `Retry-After` de un 429 o un 503, en todos los `robots_mode`.
+
+    Sin esto, `RetryMiddleware` repetia el 429 al instante y AUTOTHROTTLE no
+    frena con un 429 rapido (no sube el retraso con respuestas que no son 200
+    salvo que tarden), asi que una rafaga de 429 seguia al mismo ritmo hasta
+    que la ventana de salud paraba el rastreo (decision 103). El servidor ya
+    dijo cuanto esperar.
+
+    Es el mecanismo de la decision 81 generalizado y con caducidad: con un
+    `Retry-After` de N s (acotado a `RETRY_AFTER_MAX`), el slot del host pasa
+    a un retraso de N s, sin jitter, durante N s. El reintento del 429 sale
+    del mismo slot, asi que espera. Se reaplica en cada `response_downloaded`
+    —que llega ANTES de que el slot saque la siguiente peticion y despues de
+    AutoThrottle, que con las respuestas 200 que siguen en vuelo lo bajaria—
+    y en `process_request` como red de seguridad. Pasada la ventana, el slot
+    vuelve a `piso_de_slot` (el Crawl-delay o el retraso del job).
+
+    Lo que se respeto va a Redis (`job:<id>:retry_after`) y el worker lo deja
+    en `jobs.health["retry_after"]`: si el sitio pedia mas que el tope, el
+    informe tiene que poder decirlo. No es una incidencia SEO.
+
+    Una pausa es para un limite PASAJERO. Si un host devuelve
+    `RETRY_AFTER_MAX_SEGUIDAS` respuestas 429/503 a peticiones que salieron
+    CON la pausa ya abierta, sin una sola de otra clase entre medias, es un
+    muro (decision 103), y pausar no lo arregla: lo esconde. Con la
+    frontera llena, cada primer intento sale espaciado por la pausa antes de
+    que el primer reintento agotado llegue a `parse`, asi que la ventana de
+    salud no veia ni un 429 en horas (medido en el arnes con 300 URLs y una
+    pausa de 2 s: 5,4 s sin el middleware y mas de 10 minutos con el, sin
+    llegar a cerrar). Pasado ese numero el host deja de pausarse hasta que
+    responda otra cosa, y la ventana de la 103 cierra el rastreo como antes.
+    """
+
+    CODIGOS = (429, 503)
+
+    def __init__(self, crawler: Crawler, reloj=time.monotonic):
+        if not crawler.settings.getbool("RETRY_AFTER_ENABLED", True):
+            raise NotConfigured
+        self.crawler = crawler
+        self._reloj = reloj
+        self._tope = max(0.0, crawler.settings.getfloat("RETRY_AFTER_MAX", 60.0))
+        self._retraso_job = crawler.settings.getfloat("DOWNLOAD_DELAY", 0.0)
+        # 429/503 seguidos por slot, y los slots que ya no se pausan (muro).
+        self._max_seguidas = max(1, crawler.settings.getint("RETRY_AFTER_MAX_SEGUIDAS", 5))
+        self._seguidas: dict[str, int] = {}
+        # Cuando se abrio la pausa de la racha de 429/503 en curso, por slot.
+        self._racha_desde: dict[str, float] = {}
+        self._sin_pausa: set[str] = set()
+        # Lo que ya se respeto en ejecuciones anteriores del mismo job (se lee
+        # de Redis la primera vez que hay algo que publicar).
+        self._base: dict | None = None
+        # clave -> (retraso, hasta, jitter que tenia el slot)
+        self._pisos: dict[str, tuple[float, float, float | None]] = {}
+        self.resumen = {"veces": 0, "max_pedido_s": 0.0, "max_aplicado_s": 0.0,
+                        "truncados": 0, "abandonos": 0}
+        crawler.signals.connect(
+            self._response_downloaded, signal=signals.response_downloaded
+        )
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler)
+
+    def _downloader(self):
+        return self.crawler.engine.downloader
+
+    def anotar(self, clave: str, pedido: float) -> float:
+        """Abre (o alarga) la pausa del slot `clave`. Devuelve lo aplicado."""
+        aplicado = min(pedido, self._tope)
+        r = self.resumen
+        r["veces"] += 1
+        r["max_pedido_s"] = round(max(r["max_pedido_s"], pedido), 3)
+        r["max_aplicado_s"] = round(max(r["max_aplicado_s"], aplicado), 3)
+        if pedido > aplicado:
+            r["truncados"] += 1
+        if aplicado > 0:
+            ahora = self._reloj()
+            previo = self._pisos.get(clave)
+            slot = self._downloader().slots.get(clave)
+            jitter = previo[2] if previo else (slot.jitter if slot is not None else None)
+            retraso = max(aplicado, previo[0] if previo else 0.0)
+            hasta = max(ahora + aplicado, previo[1] if previo else 0.0)
+            self._pisos[clave] = (retraso, hasta, jitter)
+            ajustes = self._downloader().per_slot_settings.setdefault(clave, {})
+            ajustes["delay"] = retraso
+            ajustes["jitter"] = 0.0
+            self._aplicar(clave)
+        logger.info(
+            "%s pide Retry-After %.1f s; se espera %.1f s%s", clave, pedido, aplicado,
+            " (tope RETRY_AFTER_MAX)" if pedido > aplicado else "",
+        )
+        self._publicar()
+        # El latido: el spider solo lo estampa cada 50 URLs, y con un host en
+        # pausa (los reintentos no pasan por `parse`) el vigilante de
+        # estancamiento daria por muerto un rastreo que esta esperando a
+        # proposito. Con cada pausa, el hueco maximo entre latidos es el tope.
+        latido = getattr(getattr(self.crawler, "spider", None), "_write_heartbeat", None)
+        if callable(latido):
+            try:
+                latido()
+            except Exception:  # noqa: BLE001
+                pass
+        return aplicado
+
+    def _aplicar(self, clave: str) -> None:
+        piso = self._pisos.get(clave)
+        if piso is None:
+            return
+        retraso, hasta, jitter = piso
+        slot = self._downloader().slots.get(clave)
+        if self._reloj() >= hasta:
+            # Caducada: el slot vuelve al piso de siempre (Crawl-delay o el
+            # retraso del job), no a 0 ni al retraso de la pausa.
+            del self._pisos[clave]
+            base = piso_de_slot(self.crawler, clave)
+            ajustes = self._downloader().per_slot_settings.setdefault(clave, {})
+            if base > 0:
+                ajustes["delay"] = base
+            else:
+                ajustes.pop("delay", None)
+                ajustes.pop("jitter", None)
+            if slot is not None:
+                slot.delay = base
+                # Con Crawl-delay el jitter sigue apagado (decision 81).
+                if jitter is not None and base <= self._retraso_job:
+                    slot.jitter = jitter
+            return
+        if slot is None:
+            return
+        if slot.delay < retraso:
+            slot.delay = retraso
+        slot.jitter = 0.0
+
+    def _response_downloaded(self, response, request, spider=None) -> None:
+        clave = request.meta.get("download_slot")
+        if clave is None:
+            return
+        if response.status not in self.CODIGOS:
+            self._seguidas.pop(clave, None)
+            self._racha_desde.pop(clave, None)
+            self._sin_pausa.discard(clave)
+            self._aplicar(clave)
+            return
+        if clave in self._sin_pausa:
+            self._aplicar(clave)
+            return
+        desde = self._racha_desde.get(clave)
+        if desde is not None:
+            # Solo cuenta lo que SALIO con la pausa ya abierta: los que estaban
+            # en vuelo cuando llego el primer 429 no esperaron nada, y con 8 o
+            # 16 por host un limite pasajero los devuelve todos a la vez.
+            latencia = request.meta.get("download_latency")
+            latencia = latencia if isinstance(latencia, (int, float)) and latencia > 0 else 0.0
+            if self._reloj() - latencia >= desde:
+                self._seguidas[clave] = self._seguidas.get(clave, 0) + 1
+                if self._seguidas[clave] >= self._max_seguidas:
+                    self._abandonar(clave, self._seguidas[clave])
+                    return
+        from shared.respuestas import retry_after_segundos
+
+        pedido = retry_after_segundos(response.headers.get(b"Retry-After"))
+        if pedido is not None and pedido > 0:
+            self._racha_desde.setdefault(clave, self._reloj())
+            self.anotar(clave, pedido)
+            return
+        self._aplicar(clave)
+
+    def _abandonar(self, clave: str, seguidas: int) -> None:
+        """Deja de pausar `clave`: sus 429/503 seguidos ya son un muro."""
+        self._sin_pausa.add(clave)
+        self.resumen["abandonos"] += 1
+        piso = self._pisos.get(clave)
+        if piso is not None:
+            # Caducar la pausa ya: vuelve al piso (Crawl-delay o el del job).
+            self._pisos[clave] = (piso[0], self._reloj(), piso[2])
+            self._aplicar(clave)
+        logger.warning(
+            "%s lleva %d respuestas 429/503 seguidas: es un muro, no una pausa; "
+            "se deja de respetar su Retry-After para que la ventana de salud "
+            "(decision 103) lo vea", clave, seguidas,
+        )
+        self._publicar()
+
+    def process_request(self, request: Request, spider=None):
+        if self._pisos:
+            self._aplicar(self._downloader().get_slot_key(request))
+        return None
+
+    def _publicar(self) -> None:
+        """El resumen a Redis, para `jobs.health`. Best-effort."""
+        spider = getattr(self.crawler, "spider", None)
+        cliente = getattr(spider, "_redis", None)
+        job_id = getattr(spider, "job_id", None)
+        if cliente is None or not job_id:
+            return
+        try:
+            clave = f"job:{job_id}:retry_after"
+            if self._base is None:
+                # Acumulado entre reanudaciones del mismo job.
+                try:
+                    crudo = cliente.get(clave)
+                    previo = json.loads(crudo) if crudo else {}
+                except Exception:  # noqa: BLE001
+                    previo = {}
+                self._base = previo if isinstance(previo, dict) else {}
+            base, r = self._base, self.resumen
+            fusion = {
+                "veces": int(base.get("veces", 0)) + r["veces"],
+                "truncados": int(base.get("truncados", 0)) + r["truncados"],
+                "max_pedido_s": max(float(base.get("max_pedido_s", 0)), r["max_pedido_s"]),
+                "max_aplicado_s": max(float(base.get("max_aplicado_s", 0)), r["max_aplicado_s"]),
+                "abandonos": int(base.get("abandonos", 0)) + r["abandonos"],
+                "tope_s": self._tope,
+            }
+            cliente.set(clave, json.dumps(fusion), ex=30 * 86400)
+        except Exception:  # noqa: BLE001 -- informativo
+            logger.debug("No se pudo publicar el resumen de Retry-After", exc_info=True)
+
+
 class HttpConfigMiddleware:
     """Cabeceras propias, cookies y Basic del job (bloque ``http``), solo a
     los hosts del sitio (decision 114).
@@ -377,6 +817,10 @@ class HttpConfigMiddleware:
                 "conservar": bool(http_config.get("conservar_cookies")),
                 "hosts": sorted(getattr(spider, "_hosts_credenciales", ()) or ()),
                 "raices": sorted(getattr(spider, "_raices_credenciales", ()) or ()),
+                # Sin semillas http, las cookies van con `secure` y Chromium
+                # no las manda por http (revision de la decision 114)
+                "solo_https": "http" not in (getattr(spider, "_esquemas_credenciales", None)
+                                             or {"http"}),
             }
             return None
         if not lleva:

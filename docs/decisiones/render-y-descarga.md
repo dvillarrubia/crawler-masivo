@@ -333,6 +333,216 @@
    caída de tamaño por plantilla y la pausa con reanudación automática más
    tarde. Los censos anteriores no tienen la columna: hay que **re-rastrear**.
 
+<a id="d109"></a>
+109. **El tiempo del servidor y la compresión se miden en el handler, y un
+   aviso de servidor va por host o por plantilla** (B3 de #150) —
+   `response_time_ms` **no es TTFB**: sin render es `download_latency` de
+   scrapy-impersonate, que abre una `AsyncSession` nueva por petición y mide
+   DNS, TCP, TLS, el servidor y el cuerpo entero; con render, desde `goto`
+   hasta el último `PageMethod`, espera de render incluida. Y
+   `Content-Encoding` lo quitaban los dos handlers al descomprimir: con lo
+   guardado, `transfer_size == content_length` no demostraba «sin comprimir»
+   (sin `Content-Length`, `transfer_size` es el cuerpo). Ahora
+   `handlers.ImpersonateConMedidas` sobrescribe el `_download_request` de
+   scrapy-impersonate (privado: versión **fijada a 1.10.0**, la instalada; la
+   guía hablaba de 1.9.0) con `curl_infos` en la sesión y deja en `meta`
+   `ttfb_s = STARTTRANSFER − PRETRANSFER` (el servidor sin DNS, TCP ni TLS),
+   la cabecera servida (`identity` si no venía), los bytes del cable y la
+   versión HTTP — que **cierra la limitación de `http_version` sin render**
+   (`CURLINFO_HTTP_VERSION`: 1→1.0, 2→1.1, 3→2, 30→3). Las borra al empezar
+   cada descarga: `RetryMiddleware` copia la `meta` y el reintento de un 503
+   heredaría su TTFB. Con render, un `PageMethod` de Navigation Timing:
+   `responseStart − requestStart` y `encodedBodySize` frente a
+   `decodedBodySize` (`comprimido` sin el nombre: scrapy-playwright quita la
+   cabecera aunque Chromium la tiene). Comprobado con un servidor local con
+   300 ms de espera: curl da 302 ms y Chromium, con la interceptación de
+   scrapy-playwright, 301 ms; gzip 157 frente a 34.026 bytes. Una página
+   `_sin_render` de un job con render no da TTFB (mezclaría dos fuentes), y
+   una sonda de soft 404 no da nada (no es URL del censo). Columnas
+   `urls.ttfb_ms` y `urls.content_encoding`; `response_time_ms` se queda como
+   está (CSV, filtros, Explorador).
+   Avisos (`analysis/avisos_de_servidor.py`), solo sobre HTML interno 200 que
+   es la respuesta del sitio (103): `respuesta_lenta` por **(host,
+   plantilla)** —`config.templates` y si no, `firma_de_ruta`, ahora
+   `shared.plantillas.plantilla_de`, que usa también `check_js_templates.py`—
+   con 20 páginas o más, la **mediana** y el p90, `info` por encima de 1.000 ms
+   y `warning` por encima de 3.000 ms (`AnalysisThresholdsConfig`; **valores a
+   medir en censos antes de darlos por buenos**, 13), con la fuente y la
+   concurrencia del job en el detalle: con 32 peticiones a la vez un origen
+   lento sale más lento que con 2. Nada de FreeCrawl: ni por página (en un
+   sitio lento sale en todas) ni los 600 ms como Core Web Vitals (CrUX mide a
+   usuarios). Un censo sin `ttfb_ms` no avisa: caer a `response_time_ms` sería
+   afirmar lo que no se midió (67). `html_sin_comprimir`, `info`, por **host**
+   (53): solo con la cabecera medida, cuerpos de 1 KB o más, `por_plantilla`
+   cuando el host mezcla; `zstd` cuenta como comprimido, y si el job pisa
+   `Accept-Encoding` en sus cabeceras no se dice nada. Anclados en la raíz
+   del host (o la HTML 200 a la que redirige) y en la URL menor del grupo,
+   nunca en el primer id (88). La ficha cita lo que dice Google: un servidor
+   lento o sin comprimir se rastrea menos; no habla de posicionamiento.
+   **Sin medir todavía en un censo real** (no había rastreos en esta sesión):
+   la estabilidad de la mediana entre dos canarios del mismo día (±30%) es la
+   condición para fijar los umbrales. Con proxy (`PROXY_LIST`) el TTFB incluye
+   el salto al proxy y el detalle no lo distingue.
+
+<a id="d110"></a>
+110. **Un certificado inválido se dice, una vez por host, y con el umbral de
+   7 días, no 30** (B6 de #150) — curl_cffi rechaza un certificado caducado
+   con `CertificateVerifyError` (código 60) y `handle_error` solo conocía las
+   excepciones de Twisted: la página quedaba `status_group='error'` con el
+   motivo solo en el log. Ahora `tls_error` (curl 35, 51, 58, 59, 60, 83, 90 y
+   91, o `net::ERR_CERT_*`/`ERR_SSL_*` de Chromium) con el motivo en
+   `status_text` («TLS: curl 60: SSL certificate OpenSSL verify result: self
+   signed certificate (18)» es lo que dice curl-impersonate). Y una **sonda
+   por host** (`seo_crawler/sonda_tls.py`, el patrón de la 105: sin item, sin
+   gastar `max_urls`, a `jobs.tls`): la primera vez que un host https interno
+   responde o falla, dos conexiones con `ssl` en un hilo —una verificada con
+   el almacén del sistema y el nombre del host, que da el motivo por el
+   `verify_code` de OpenSSL (caducado, nombre, autofirmado, cadena
+   incompleta…), y si falla, otra sin verificar y admitiendo TLS 1.0 para leer
+   el certificado (`binary_form=True` + `cryptography`; sin verificar,
+   `getpeercert()` da `{}`) y la versión—. Con render se usa
+   `playwright_security_details`, que nadie leía; con proxy se omite (un
+   socket directo sale por otra IP). `spider_idle` espera a la sonda en vuelo.
+   Tres avisos por host, anclados en la raíz: `tls_certificado_invalido`
+   (`error`), `tls_caduca_pronto` (`warning`, **7 días** o menos,
+   `tls_dias_aviso`): Let's Encrypt renueva a 30 días y con certificados de 45
+   o 47 días un sitio sano estaría siempre por debajo de 30, que es el umbral
+   de FreeCrawl; y `tls_version_antigua` (`error`, TLS 1.0/1.1: Chrome no
+   conecta desde 2020). Lo negociado es el **máximo** que admite el servidor:
+   que además acepte 1.0 no se mide y no se afirma. La firma SHA-1 no tiene
+   consecuencia SEO y no se mira. Si el host respondió 2xx por https en el
+   rastreo, curl o Chromium sí validaron el certificado: un fallo de la sonda
+   es del almacén de CA o de un WAF que corta el handshake, y no se afirma.
+   Las páginas `tls_error` de un host con el certificado confirmado inválido
+   no repiten `connection_error` (36). Los días son los **del día del
+   rastreo** (`dias_restantes` en el JSON): re-analizar no los recalcula.
+   Probado con servidores locales: caducado (con una CA propia →
+   `caducado`; con el almacén del sistema → `autofirmado`), a 3 días, de otro
+   nombre y uno que solo habla TLS 1.0 → `TLSv1`.
+
+<a id="d111"></a>
+111. **El `Retry-After` de un 429 o un 503 se respeta en todos los modos, con
+   tope y sin que AUTOTHROTTLE lo deshaga** (B5 de #150) — `RetryMiddleware`
+   repetía el 429 al instante y AUTOTHROTTLE no frena con un 429 rápido (no
+   sube el retraso con respuestas que no son 200 salvo que tarden), así que
+   una ráfaga de 429 seguía al mismo ritmo. `RetryAfterMiddleware` generaliza
+   la 81 con caducidad y **sin depender de `ROBOTSTXT_OBEY`**: con un
+   `Retry-After` de N s (segundos o fecha HTTP, `shared.respuestas.
+   retry_after_segundos`, la misma función que usa ya `shared/llm.py`; una
+   fecha pasada es 0 y lo ilegible no es espera), el slot del host pasa a N s
+   de retraso sin jitter durante N s, acotado a `retry_after_max_s` (60 por
+   defecto, máximo 600). Se fija en `response_downloaded`, que llega **antes**
+   de que el slot saque la siguiente petición y después de AutoThrottle; se
+   reaplica con cada respuesta de la ventana (las 200 que siguen en vuelo lo
+   bajarían) y en `process_request`. El reintento sale del mismo slot, así que
+   espera. Caducada la ventana, el slot vuelve a `piso_de_slot`: el
+   `Crawl-delay` de la 81 o el `DOWNLOAD_DELAY` del job, nunca a 0 (el
+   Crawl-delay solo sube un retraso, así que no deshace la pausa). Cada pausa
+   estampa el **latido** del spider: con un host en pausa los reintentos no
+   pasan por `parse`, el latido va cada 50 URLs y el vigilante de
+   estancamiento daba por muerto un rastreo que esperaba a propósito (600 s
+   × 3 intentos eran justo los 30 minutos). Lo respetado va a
+   `jobs.health["retry_after"]` (`veces`, `max_pedido_s`, `max_aplicado_s`,
+   `truncados`, `tope_s`), por Redis y acumulado entre reanudaciones: no es
+   una incidencia SEO, es cortesía y confianza del dato. La ventana de salud
+   de la 103 no se toca: respetar la pausa baja los 429. Google dice que un
+   429 o un 503 le hacen bajar el ritmo; **no** está comprobado que honre
+   `Retry-After`, así que esto no se vende como paridad con Googlebot.
+   Probado con el spider real contra un servidor local: un 429 con
+   `Retry-After: 1` dos veces y un 503 con fecha a 2 s acaban en 200, con los
+   huecos medidos en el servidor (≥ 0,9 s y ≥ 1 s) y `veces = 3`.
+
+   **Revisión (2026-10-18): una pausa no puede esconder un muro.** La frase
+   «la ventana de salud de la 103 no se toca: respetar la pausa baja los 429»
+   era falsa con un host que responde 429 a TODO. Con la frontera llena, el
+   reintento va con menos prioridad que los primeros intentos, así que cada
+   primer intento salía espaciado por la pausa y el primer 429 definitivo no
+   llegaba a `parse` —ni a la ventana— hasta haber pedido toda la frontera.
+   Reproducido con el arnés de la 103 (300 URLs en 429): **5,4 s** y
+   `rate_limited` sin el middleware; **más de 10 minutos sin cerrar** con él y
+   una pausa de solo 2 s. Con el `Retry-After: 30` real y 300 URLs son horas, y
+   con 20.000 en la frontera el rastreo moría por `max_runtime_hours` ocupando
+   el hueco del worker: el latido de cada pausa impedía además que el
+   vigilante lo cortara. Ahora, si un host devuelve `RETRY_AFTER_MAX_SEGUIDAS`
+   (5) respuestas 429/503 a peticiones que salieron **con la pausa ya
+   abierta** y sin ninguna de otra clase entre medias, deja de pausarse hasta
+   que responda otra cosa; la ventana de la 103 lo cierra como antes. Las que
+   estaban en vuelo al llegar el primer 429 no cuentan (salieron antes de la
+   pausa: con 8-16 por host, un límite pasajero las devuelve todas a la vez),
+   y se distinguen por `download_latency`. Como mucho son 5 pausas (5 minutos
+   con el tope de 60 s); queda en `jobs.health["retry_after"]["abandonos"]`.
+   Test: `test_un_429_masivo_para_tambien_respetando_el_retry_after` (el arnés
+   con el middleware, < 60 s; sin el arreglo agota los 180 s) y tres unitarios.
+   De paso, `crawl_behavior.retry_after_max_s` pasa a `None` por defecto: los
+   defaults del schema se copian en `jobs.config`, así que con un 60 el worker
+   pasaba siempre `-s RETRY_AFTER_MAX=60` y la variable de entorno no hacía
+   nada.
+
+<a id="d112"></a>
+112. **Un robots.txt que responde 5xx, 429 o no responde se guarda y se avisa
+   por host, y el rastreo sigue** (sección 6 de #149, primer paso de la Ola
+   7.3). Scrapy monta el parser con el cuerpo sea cual sea el código —Protego,
+   sobre el HTML de un 503, lo permite todo— y si la descarga lanza una
+   excepción deja el parser a `None` y deja pasar todo; nada llegaba a la base
+   de datos ni al informe (solo `robotstxt/response_status_count/<código>` en
+   las stats y un ERROR en el log). Google, en cambio, con un 5xx o un 429 da
+   el **sitio entero por bloqueado** mientras dure (los errores de red y los
+   timeouts cuentan como 5xx; pasados 30 días usa la última copia en caché), y
+   con un 4xx —401 y 403 incluidos— lo da todo por permitido.
+   - **Se guarda por host y job**, en la tabla `robots_txt` (la que #36 espera
+     para el historial): código, error, `response_class`, intentos (con los
+     reintentos de Scrapy), bytes, SHA-256 y, solo de un 2xx, el cuerpo
+     recortado a los 500 KiB que lee Google (`recortado`). Lo anota
+     `RobotsTxtRegistroMiddleware` (prioridad 90, por debajo de Retry y
+     Redirect, así que ve la respuesta FINAL) reconociendo la descarga por la
+     URL original `/robots.txt`: la de `RobotsTxtMiddleware` en `respect` y
+     `audit` y la del spider para los sitemaps, que es la única en `ignore`. No
+     se tocan `_parse_robots` ni `_robots_error`, privados de Scrapy (la
+     decisión 48 ya pagó replicar su middleware). Solo hosts internos y como
+     mucho 200 por job (`ROBOTS_TXT_MAX_HOSTS`): un multisite con
+     `crawl_subdomains` no llena la tabla, y lo que pase del tope queda «no
+     evaluado». La primera descarga de cada ejecución es la que cuenta
+     (con la que Scrapy decidió); reanudar sustituye la fila, no la duplica.
+   - **Se pide otra vez al cerrar**: si falló, cuando el spider se queda sin
+     trabajo (`spider_idle`) se repite UNA vez sin reintentos y se anota en
+     `comprobacion`. Nuestra IP no es la de Google, y un 503 puntual a mitad
+     de rastreo no es lo mismo que uno que dura. Si a la segunda respondió, su
+     cuerpo es el que se evalúa (decisión 113): es lo más parecido a la copia
+     que Google guarda de un robots.txt que va y viene. La espera tiene tope
+     (`DOWNLOAD_TIMEOUT` + 15 s): no puede dejar un rastreo sin cerrar.
+   - **`robots_txt_inaccesible`, una por host**, anclada en la raíz si se
+     rastreó y si no en la URL de id más bajo del host (no depende del orden de
+     las filas, lección de la 99). `error` si falló también al cerrar o no se
+     llegó a repetir (un rastreo cortado por `max_urls` no pasa por
+     `spider_idle`); `warning` si a la segunda respondió (`intermitente`) o si
+     es un **429**: para Google es un 5xx, pero un 429 a nuestra IP suele ser
+     un límite para el rastreador (es `rate_limited`, decisión 103) y Googlebot
+     puede no recibirlo. Un 4xx no avisa (es «sin robots.txt», también para
+     Google); un **muro** delante (403 de Cloudflare, captcha) tampoco: es «no
+     evaluado», no el 4xx del sitio que Google leería como «todo permitido»
+     (103). Un `IgnoreRequest` (tope de redirecciones) tampoco dice nada del
+     sitio.
+   - **El rastreo sigue pidiendo las URLs del host**, como hasta ahora (todo
+     permitido), y **no queda `failed`**. Seguir a Google al pie de la letra
+     sería tratarlo como `Disallow: /`: cero páginas con respuesta y un job
+     `failed` (48), cuando es un hallazgo del SITIO y no un fallo del dato
+     (28, 32), y desde una IP que no es la de Google. No es tampoco un muro
+     (103): no cuenta para la salud del job. La cortesía la siguen poniendo los
+     reintentos, AUTOTHROTTLE y el `Crawl-delay` de cuando sí responde (81).
+   - **La indexabilidad no cambia por el 5xx**: no sabemos si Google tiene
+     copia en caché ni si el fallo es pasajero. Se avisa; no se afirma (67).
+     `urls.bloqueada_googlebot` queda NULL en ese host.
+   Los censos anteriores no tienen filas: no se avisa nada ni se cambia nada,
+   y para tenerlo hay que **re-rastrear**. Tests: arnés real con 503, 500,
+   429, timeout, 404, el desafío real de Cloudflare y 200
+   (`tests/test_spider_robots_txt.py`, uno contra Postgres que comprueba la
+   fila y que reanudar la sustituye) y el analizador contra SQLite
+   (`tests/test_analyzer_robots_db.py`: un aviso por host aunque haya 500
+   URLs, dos hosts dos avisos, ancla estable con las filas desordenadas,
+   `indexable` sin cambios). Pendiente de medir en producción: cuántos hosts
+   de la cartera responden hoy 5xx/429 en `/robots.txt` (decisión 13: es hoy,
+   no el día del rastreo).
+
 <a id="d114"></a>
 114. **Las credenciales del job solo van al sitio, y el rastreo no guarda
    cookies** — `HttpConfigMiddleware` ponía las cabeceras propias, las cookies
@@ -417,3 +627,129 @@
    middlewares y la descarga de producción (curl_cffi y Playwright), y el
    servidor anotando lo que le llega. Contra `6126fd5`, 10 de los 16 que
    había entonces fallan.
+   **Revisión (2026-10-17).** El host no basta: un enlace `http://` al host
+   de una semilla `https` (los viejos, que luego redirigen con un 301) llevaba
+   el Basic, las cabeceras y las cookies **en claro**, antes del salto. Un
+   navegador ata la autenticación al origen. Ahora `_lleva_credenciales` exige
+   además el esquema de alguna semilla, y con render las cookies se ponen con
+   `secure` si ninguna semilla es `http`. Comprobado sin reproducir fallo: con
+   `add_cookies` y un dominio sin punto, Chromium la trata como cookie de host
+   (medido: `sso.a.test` no la recibe), así que el SSO de un subdominio no la
+   ve; y un puerto distinto del mismo host sigue recibiéndolas, que se deja
+   así. Tests: `test_con_semillas_https_no_van_en_claro_por_http` y
+   `test_render_cookies_con_secure_si_solo_hay_semillas_https`, que fallan
+   sin el arreglo.
+
+
+<a id="d119"></a>
+119. **La paridad móvil se mide con una muestra por plantilla, en la misma
+   ventana y con el dispositivo entero; lo que cambia solo no se afirma**
+   (#150, Ola 7.4 de `docs/PLAN_MEJOR_CRAWLER.md`). Google indexa lo que
+   recibe su UA de smartphone, y el censo se rastrea de escritorio: un sitio
+   con servido dinámico o con m-dot podía servir a un móvil otro canonical,
+   un `noindex` o un menú sin enlaces y no lo veía nada. Con
+   `crawl_behavior.paridad_movil_muestra` (0 de serie, apagado; hasta 500) el
+   spider vuelve a pedir, como mucho `paridad_movil_por_plantilla` (3) por
+   plantilla, las páginas internas HTML 2xx que no son un muro, con el **otro
+   perfil**: móvil si el UA del job es de escritorio, escritorio si ya es de
+   móvil (`shared/perfiles.py`, `es_ua_movil`). La plantilla es la de
+   `config.templates` del job o, sin ellas, `shared.plantillas.firma_de_ruta`
+   (la `plantilla_de` de la rama de #158 no está en esta base).
+   - **Un perfil es el dispositivo entero, no la cabecera.** Sin render, el UA
+     de móvil y la huella TLS `chrome131_android` de curl_cffi (si la versión
+     instalada no la tiene, se dice en el log y sale con la del job:
+     `scrapy-impersonate` no está fijado). Con render, un contexto de
+     Playwright con nombre por perfil (`perfil_movil`, creado con
+     `playwright_context_kwargs`: 412×915, `device_scale_factor` 2,625,
+     `is_mobile`, `has_touch` y el UA) y `PLAYWRIGHT_MAX_CONTEXTS` de 3 a 4.
+     Y de paso el contexto `custom` del censo lleva el UA del job: se
+     construía al importar `settings.py` con el del ENTORNO, así que el `-s
+     USER_AGENT` del worker cambiaba la cabecera pero no `navigator.userAgent`
+     ni la ventana (leído; `SeoSpider.update_settings` lo corrige cuando el UA
+     llega por `-s`, y con un UA de móvil el contexto pasa a ser de móvil).
+     Por defecto el móvil es un Chrome de Android y no Googlebot smartphone
+     (`paridad_movil_ua`): con el token de Googlebot desde nuestra IP, un WAF
+     que verifica bots lo bloquea o le sirve otra cosa (decisión 98) y se
+     mediría el WAF. La cadena de Googlebot smartphone vive ahora también en
+     `shared/perfiles.py`, y un test comprueba que es la del preset del
+     formulario.
+   - **Lo que se compara** (`shared/paridad.py`, con las mismas funciones de
+     extracción que el censo): title, primer H1 que se pinta, description,
+     canonical efectivo (`misma_url`; relativo frente a absoluto y «sin
+     canonical» frente a autocanónico son lo mismo), `noindex` y `nofollow`
+     por directiva (no la cadena de robots), palabras del contenido
+     PRINCIPAL (diferencia desde un 30 % con la mayor por encima de 50; el
+     30 % es el punto de partida de FreeCrawl, sin medir aún aquí) y destinos
+     internos seguibles (faltan al menos 5 y al menos el 20 % de los de la
+     base, con 10 ejemplos). Las dos capturas van en el **mismo modo**
+     (render las dos o ninguna): si no, se mediría 7.1 y no el dispositivo.
+   - **Lo que no se copia de FreeCrawl.** No sigue redirecciones: si la
+     versión móvil redirige (a `m.` o a otra ruta), es un hallazgo propio
+     (`estado='redirige'`), se pide el destino UNA vez con el mismo perfil y
+     se mira la anotación bidireccional (`rel=alternate media` en escritorio
+     hacia el destino y canonical del destino a la de escritorio). No compara
+     contra lo guardado horas antes: la línea base viaja en `meta` y la sonda
+     sale en segundos (prioridad 10). La muestra es por plantilla y no por
+     entrantes, que se lleva la home y el menú. Un muro en la sonda es «no
+     evaluada», no una diferencia.
+   - **Volatilidad (decisión 13).** Si algo difiere, se pide la página otra
+     vez con el perfil del censo; lo que también cambia entre las dos de
+     escritorio (un banner rotativo, «relacionados» al azar) va a `volatiles`
+     y no se afirma. Si ese control falla, la fila queda `no_evaluada`: sin
+     control no se sabe qué es del sitio. Lo mismo con otro CÓDIGO: si la
+     versión móvil responde un 500 o un 403 sin firma de muro, se pide otra
+     vez con el perfil del censo y, si también falla, queda `no_evaluada`
+     (lo que se ha caído es el sitio, no el dispositivo). Coste: como mucho
+     2× la muestra (3× con un m-dot), fuera de `max_urls`.
+   - **Sonda, no URL del censo** (patrón de la decisión 105): callback y
+     errback propios, sin `PageItem`, `dont_filter`, robots.txt respetado (lo
+     prohibido queda `no_evaluada` con el motivo), sin tocar la salud del
+     rastreo, jar de cookies propio si el job lo enciende (decisión 114) y
+     latido por tiempo cada 60 s. Al reanudar, lo ya muestreado cuenta.
+   - **Almacenamiento: `capturas_alternativas`**, pensada también para 7.1
+     (`perfil='crudo'`). Una fila por URL y perfil AUNQUE no difiera: «no
+     difiere» es un dato y sin fila es «no evaluada» (como la decisión 104).
+     Con `job_id` (decisión 37), en `TABLAS_POR_JOB`, `borrar_job` (96) y el
+     backup. La ficha de la URL (`GET /urls/{id}`) la trae en
+     `capturas_alternativas`.
+   - **Avisos agrupados por plantilla** (36, 53, 64, 88): una fila por
+     (perfil, plantilla, campo) con `paginas_afectadas` sobre
+     `paginas_muestreadas`, ejemplos y cuántas no llevan `Vary: User-Agent`
+     (servido dinámico sin `Vary`: una caché o CDN puede dar la versión
+     equivocada; va en los detalles, no como tipo), anclada en la URL menor.
+     Severidad por consecuencia: `paridad_movil_indexacion` es **error** con
+     `noindex` o canonical distintos y aviso con `nofollow`;
+     `paridad_movil_contenido` es aviso con title, H1, palabras o enlaces e
+     informativa con la description; `paridad_movil_respuesta` es aviso con
+     otro código o una redirección, e informativa si es un m-dot con la
+     anotación completa, que es una configuración válida.
+   - **Entre censos.** La paridad no se compara entre censos rastreados con UA
+     distinto: el perfil de base es otro (decisión 70). Y la comparación avisa
+     cuando un censo es de perfil móvil y el otro de escritorio
+     (`resumen_de_job` lleva `perfil`): en un sitio con servido dinámico, la
+     diferencia puede ser del perfil. Los tipos nuevos cambian
+     `analisis_version` y la comparación por incidencias se niega a cruzar
+     censos analizados con código distinto (decisión 91).
+   - **Lo que cambia en los censos.** Nada si no se enciende: re-analizar no
+     da avisos nuevos sin la tabla llena. Hay que **re-rastrear** con la clave
+     puesta. Pendiente de medir en un sitio con servido dinámico conocido y en
+     uno responsive como control (que debe dar 0 diferencias no volátiles), y
+     repetirlo al día siguiente (13). El viewport no se compara todavía: la
+     extracción del `<meta viewport>` va en otra rama (#155). Medido de paso
+     con Chromium 1194: un móvil sin `<meta viewport>` maqueta a 980 px de
+     ancho (`innerWidth`), así que una regla de CSS por ancho no ve el móvil.
+   Tests: `tests/test_paridad_movil.py` (el SeoSpider real con curl_cffi y,
+   si arranca el Chromium instalado, Playwright, contra un sitio que sirve
+   otro HTML a un UA de móvil; y la tubería real contra Postgres) y
+   `tests/test_paridad_movil_analisis.py` (la comparación, los perfiles, el
+   contexto `custom` y los avisos contra SQLite).
+   **Revisión** (antes de fusionar #161), tres fallos reproducidos con test:
+   (a) el destino del m-dot pasaba por `_should_follow`, así que con un
+   `include_patterns` acotado al host de escritorio —lo normal en un cliente—
+   no se pedía nunca y un m-dot BIEN anotado salía como aviso «redirige sin
+   anotar»; ahora el destino es una sonda y solo se exige http(s) (robots.txt
+   se sigue respetando); (b) otro código en móvil se afirmaba sin control, y
+   un sitio que se cae a media faena daba `paridad_movil_respuesta`; ahora
+   lleva la petición de control de arriba; (c) si el destino del m-dot es un
+   muro (decisión 103) o no se pudo pedir (error, robots), la anotación no se
+   sabe y el analizador ya no lo cuenta como m-dot sin anotar.

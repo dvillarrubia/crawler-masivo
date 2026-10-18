@@ -249,6 +249,14 @@ class Job(Base):
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.
     # Las sondas NO son URLs del censo: no estan en `urls` ni cuentan en nada.
     soft404 = Column(JSON, nullable=True)
+    # Certificado TLS por host (decision 110): `{"hosts": {host: {...}}}`
+    # con la caducidad, los dias que le quedaban EL DIA DEL RASTREO, la
+    # version negociada y si la verificacion fallo y por que. Lo escribe la
+    # sonda del spider, una vez por host https interno; no son URLs del censo.
+    tls = Column(JSON, nullable=True)
+    # Con que reglas y cuando se materializo `urls.segmento`, y cuantas URLs
+    # casaron con cada regla o no se pudieron juzgar (decision 125).
+    segmentacion = Column(JSON, nullable=True)
     # Sondas de respuesta (decisiones 123 y 124), lo escribe el analisis:
     # cuantos destinos externos y recursos distintos habia, cuantos se
     # comprobaron, rotos y dominios muertos. NULL = analisis anterior o sin
@@ -295,6 +303,18 @@ class Url(Base):
     status_code = Column(Integer, nullable=True)
     status_group = Column(String(10))  # 2xx, 3xx, 4xx, 5xx, timeout, dns_error
     response_time_ms = Column(Float, nullable=True)
+    # Tiempo del servidor hasta el primer byte, en ms (decision 109): sin
+    # DNS, TCP ni TLS. `response_time_ms` NO es esto: es la peticion entera
+    # (y con render, la espera del navegador). Sin render lo mide curl
+    # (STARTTRANSFER - PRETRANSFER); con render, Navigation Timing
+    # (responseStart - requestStart). NULL en los censos anteriores, en las
+    # paginas sin respuesta y cuando no se pudo medir.
+    ttfb_ms = Column(Float, nullable=True)
+    # `Content-Encoding` que sirvio el servidor (decision 109): gzip, br,
+    # zstd, deflate... Los handlers lo quitan al descomprimir, asi que antes
+    # se perdia. `identity` = se midio y llego sin comprimir; NULL = no se
+    # sabe (censo anterior, error, o con render sin el dato).
+    content_encoding = Column(String(32), nullable=True)
 
     is_html = Column(Boolean, default=False)
     resource_type = Column(String(20))  # html, image, css, js, pdf, other
@@ -345,6 +365,11 @@ class Url(Base):
     # login_requerido, desconocido. NULL = sin respuesta, salto de una
     # redireccion o rastreo anterior a la columna (decision 103).
     response_class = Column(String(32), nullable=True)
+    # Si Googlebot puede pedirla segun el robots.txt guardado del host
+    # (`robots_txt`, decision 113). NULL = no evaluado: censo anterior, host sin
+    # robots.txt guardado, robots.txt inaccesible o con un muro delante. Lo
+    # escribe el analisis; `blocked_by_robots` es lo que hizo el rastreo.
+    bloqueada_googlebot = Column(Boolean, nullable=True)
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
     outlinks_count = Column(Integer, default=0)              # outlinks INTERNOS (los externos, aparte)
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
@@ -373,6 +398,11 @@ class Url(Base):
     closest_similarity = Column(Float, nullable=True, default=None)
     # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
     in_sitemap = Column(Boolean, nullable=True, default=None)
+    # Segmento de negocio (decision 125, `shared/segmentos.py`): el nombre de la
+    # primera regla de `config.segmentos` que casa o, si ninguna, la forma de la
+    # ruta (empieza por `/`). Lo escribe el analisis y el re-segmentado; NULL =
+    # censo anterior a la columna o aun sin analizar.
+    segmento = Column(Text, nullable=True)
 
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")
@@ -424,6 +454,11 @@ class HtmlMeta(Base):
     # a una URL que Google no usa.
     canonical_count = Column(Integer, nullable=True)
     canonical_in_body = Column(Boolean, nullable=True)
+    # Cuantos DESTINOS distintos declaran los canonicals del head (con la clave
+    # de `misma_url`): `/a` y `https://x.com/a` son uno. Con mas de uno Google
+    # los ignora todos y la pagina no esta canonicalizada (decision 115). NULL =
+    # rastreo anterior a la columna: se cae a `canonical_count`.
+    canonical_distintos = Column(Integer, nullable=True)
     canonical_header = Column(Text, nullable=True)
 
     og_title = Column(Text, nullable=True)
@@ -457,6 +492,37 @@ class HtmlMeta(Base):
     # canonical, description, googlebot, hreflang, robots y title. Cadena
     # vacia = medido y no hay ninguno; NULL = no medido (censo anterior).
     fuera_del_head = Column(String(128), nullable=True)
+
+    # --- Lo que el HTML declara de si mismo (decision 108) ---
+    # `content` del ULTIMO `<meta name=viewport>`, el que aplica el navegador
+    # ("" si lo tiene vacio), y
+    # cuantos hay. `viewport_count` es la marca de «medido» de todo el bloque:
+    # 0 = no hay viewport; NULL = rastreo anterior a la columna, y entonces el
+    # analizador no afirma que falte nada (decisiones 67 y 89).
+    viewport = Column(Text, nullable=True)
+    viewport_count = Column(Integer, nullable=True)
+    # `<html lang>` (o `xml:lang`): "" = atributo vacio, NULL = no esta.
+    html_lang = Column(String(35), nullable=True)
+    # Cabecera `Content-Language`, tal cual.
+    content_language = Column(String(64), nullable=True)
+    # El href del canonical tal como se escribio: `canonical_href` va resuelto
+    # y la forma (relativa, con fragmento) se perdia al extraer.
+    canonical_crudo = Column(Text, nullable=True)
+    # Forma de la og:image (`shared.metadatos_html.forma_de_href`).
+    og_image_forma = Column(String(24), nullable=True)
+    twitter_image = Column(Text, nullable=True)
+    # Destino de un `location = "..."` a nivel superior de un script (la
+    # pagina puente), absoluto y normalizado, sin render. Lo condicional no se
+    # guarda.
+    redireccion_js = Column(Text, nullable=True)
+    # Charset del meta en los 1.024 primeros bytes ("" = no hay) y del BOM,
+    # normalizados; si el cuerpo es solo ASCII, y si el titulo o el texto
+    # llevan U+FFFD (bytes que no casan con la codificacion). Solo sin
+    # render: con render los bytes originales se pierden, todo NULL.
+    charset_meta = Column(String(40), nullable=True)
+    charset_bom = Column(String(40), nullable=True)
+    cuerpo_solo_ascii = Column(Boolean, nullable=True)
+    texto_mal_codificado = Column(Boolean, nullable=True)
 
     url_rel = relationship("Url", back_populates="html_meta")
 
@@ -533,6 +599,10 @@ class Hreflang(Base):
     # retorno de nadie y se avisa con `hreflang_in_body`. NULL = rastreo
     # anterior a la columna (no se sabe; se trata como del head).
     en_body = Column(Boolean, nullable=True)
+    # `html` (el `<head>` o el body) o `cabecera` (HTTP `Link`, la unica fuente
+    # de un PDF). Preparado para `sitemap` (#107). NULL = rastreo anterior, del
+    # HTML.
+    origen = Column(String(16), nullable=True)
 
     url_rel = relationship("Url", back_populates="hreflangs")
 
@@ -769,6 +839,105 @@ class EnlaceNoRastreable(Base):
     __table_args__ = (
         Index("ix_enr_job", "job_id"),
         Index("ix_enr_from", "from_url_id"),
+    )
+
+
+class CapturaAlternativa(Base):
+    """La misma URL pedida con otro perfil, comparada con la del censo (decision 119).
+
+    Hoy, el perfil movil (Ola 7.4): una muestra por plantilla pedida con el UA
+    y el dispositivo de un movil durante el rastreo, como sonda fuera de
+    `max_urls` (patron de la decision 105). Pensada tambien para la Ola 7.1
+    (`perfil='crudo'`, la respuesta sin render frente al render).
+
+    Una fila por URL muestreada y perfil AUNQUE no haya diferencias: «no
+    difiere» es un dato y «sin fila» es «no evaluada» (como la decision 104).
+    `estado` dice que se pudo comparar: `comparada`, `redirige` (la otra
+    version manda a otra URL: m-dot o servido distinto, sin comparar campos),
+    `respuesta_distinta` (otro codigo) o `no_evaluada` (un muro, un error,
+    robots). `diferencias` son las de `shared.paridad.diferencias` sin los
+    campos `volatiles`: los que tambien cambian entre dos peticiones con el
+    perfil del censo (decision 13), que no se afirman.
+
+    `job_id` en la fila para filtrar y borrar por censo sin unir con `urls`
+    (decision 37).
+    """
+
+    __tablename__ = "capturas_alternativas"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
+    # movil | escritorio (la alternativa de un censo rastreado con UA movil);
+    # mas adelante, crudo (7.1)
+    perfil = Column(String(20), nullable=False)
+    # render | sin_render: las dos capturas van SIEMPRE en el mismo modo
+    modo = Column(String(12), nullable=True)
+    estado = Column(String(24), nullable=False)
+    # Con que se agrupo la muestra: `config.templates` o `firma_de_ruta`
+    plantilla = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    status_code = Column(Integer, nullable=True)
+    response_class = Column(String(32), nullable=True)
+    redirige_a = Column(Text, nullable=True)
+    # Cabecera `Vary` de la respuesta del censo y de la alternativa
+    vary_base = Column(Text, nullable=True)
+    vary = Column(Text, nullable=True)
+    medidas = Column(JSON, nullable=True)
+    diferencias = Column(JSON, nullable=True)
+    volatiles = Column(JSON, nullable=True)
+    # Lo que no es un campo: el destino de un m-dot y su anotacion, el error...
+    detalle = Column(JSON, nullable=True)
+    capturada_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_capalt_job_perfil", "job_id", "perfil"),
+        Index("ix_capalt_url", "url_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# robots.txt de cada host del censo (decisiones 112 y 113)
+# ---------------------------------------------------------------------------
+class RobotsTxt(Base):
+    """Lo que respondio el robots.txt de un host durante el rastreo.
+
+    Una fila por (job, URL del robots.txt): Google trata aparte cada esquema,
+    host y puerto. La escribe `RobotsTxtRegistroMiddleware` con la respuesta
+    FINAL (tras reintentos y redirecciones) de la misma descarga con la que
+    Scrapy decide que se pide, y el analisis la evalua para Googlebot (y para
+    los bots de la Ola 7.3). Sin fila = «no evaluado», nunca «sin robots.txt».
+
+    El cuerpo solo se guarda de un 2xx, recortado a los 500 KiB que lee Google
+    (`recortado`); `bytes` y `sha256` son del cuerpo entero, para ver si cambio
+    entre censos (#36). `comprobacion` es la segunda peticion al acabar el
+    rastreo cuando la primera fallo: separa un fallo pasajero de uno que dura.
+    """
+
+    __tablename__ = "robots_txt"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    host = Column(String(512), nullable=False)
+    url = Column(Text, nullable=False)                  # https://host/robots.txt pedido
+    url_final = Column(Text, nullable=True)             # si redirigio, a donde
+    status_code = Column(Integer, nullable=True)        # NULL = no hubo respuesta
+    error = Column(String(200), nullable=True)          # tipo de excepcion: timeout, DNS...
+    response_class = Column(String(32), nullable=True)  # shared/respuestas.py (decision 103)
+    intentos = Column(Integer, nullable=True)           # con los reintentos de Scrapy
+    bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+    cuerpo = Column(Text, nullable=True)
+    recortado = Column(Boolean, nullable=True)
+    # {status_code, error, response_class, fecha} de la comprobacion al cerrar.
+    comprobacion = Column(JSON, nullable=True)
+    # Lo que escribe el analisis: por bot, URLs evaluadas y bloqueadas.
+    evaluacion = Column(JSON, nullable=True)
+    fecha = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "url", name="uq_robots_txt_job_url"),
+        Index("ix_robots_txt_job_host", "job_id", "host"),
     )
 
 

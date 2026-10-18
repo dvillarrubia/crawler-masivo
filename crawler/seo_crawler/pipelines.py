@@ -16,6 +16,7 @@ from scrapy import Spider
 
 from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
+    CapturaAlternativaItem,
     ContentItem,
     CustomExtractionItem,
     EnlacesNoRastreablesItem,
@@ -162,6 +163,8 @@ class PostgresPipeline:
             self._handle_custom(item, spider)
         elif isinstance(item, EnlacesNoRastreablesItem):
             self._handle_no_rastreables(item)
+        elif isinstance(item, CapturaAlternativaItem):
+            self._handle_captura(item)
         elif isinstance(item, RespuestaSondeadaItem):
             self._handle_sondeada(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
@@ -191,7 +194,8 @@ class PostgresPipeline:
                 # Update mutable fields
                 for field in (
                     "status_code", "status_group", "content_type",
-                    "content_length", "response_time_ms", "is_html",
+                    "content_length", "response_time_ms", "ttfb_ms",
+                    "content_encoding", "is_html",
                     "resource_type", "redirect_url", "body_hash",
                     # New Screaming Frog fields
                     "url_length", "folder_depth", "word_count",
@@ -244,6 +248,8 @@ class PostgresPipeline:
                     status_code=data.get("status_code"),
                     status_group=data.get("status_group"),
                     response_time_ms=data.get("response_time_ms"),
+                    ttfb_ms=data.get("ttfb_ms"),
+                    content_encoding=data.get("content_encoding"),
                     is_html=data.get("is_html", False),
                     resource_type=data.get("resource_type"),
                     redirect_url=data.get("redirect_url"),
@@ -475,6 +481,41 @@ class PostgresPipeline:
             self._rollback()
             logger.exception("Fallo al confirmar los enlaces no rastreables de %d paginas",
                              len(lote))
+
+    # ------------------------------------------------------------------
+    # CapturaAlternativaItem (decision 119)
+    # ------------------------------------------------------------------
+    def _handle_captura(self, item: CapturaAlternativaItem) -> None:
+        """Reemplaza la captura de la URL con ese perfil, en un SAVEPOINT.
+
+        Son pocas (una muestra por plantilla) y llegan sueltas: se escriben al
+        momento. Sin tabla (la crea la API al arrancar, como la de la decision
+        106) o si falla, se pierde ESTA fila y no las paginas sin confirmar
+        que comparten la transaccion.
+        """
+        url_id = self._resolve_url_id(item.get("url_hash"), item.get("job_id"))
+        if url_id is None:
+            logger.debug("Captura alternativa sin url_id, se descarta")
+            return
+        from shared.models import CapturaAlternativa
+
+        datos = {k: item.get(k) for k in (
+            "perfil", "modo", "estado", "plantilla", "user_agent", "status_code",
+            "response_class", "redirige_a", "vary_base", "vary", "medidas",
+            "diferencias", "volatiles", "detalle")}
+        try:
+            with self.session.begin_nested():
+                self.session.query(CapturaAlternativa).filter(
+                    CapturaAlternativa.url_id == url_id,
+                    CapturaAlternativa.perfil == datos["perfil"],
+                ).delete(synchronize_session=False)
+                self.session.add(CapturaAlternativa(
+                    job_id=item.get("job_id"), url_id=url_id, **datos))
+        except Exception:
+            logger.warning("No se pudo guardar la captura %s de url_id=%s",
+                           datos.get("perfil"), url_id, exc_info=True)
+            return
+        self._maybe_commit()
 
     # ------------------------------------------------------------------
     # RespuestaSondeadaItem (decisiones 123 y 124)
@@ -734,6 +775,7 @@ class PostgresPipeline:
             lang=data.get("lang"),
             href=data.get("href"),
             en_body=data.get("en_body"),
+            origen=data.get("origen"),
         )
 
     def _make_structured_data(self, data: dict):

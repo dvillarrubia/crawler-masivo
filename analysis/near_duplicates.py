@@ -24,11 +24,12 @@ el sitio saldria duplicado de todo.
 from __future__ import annotations
 
 import hashlib
-import re
+import unicodedata
 from collections import defaultdict
 from typing import Iterable, Sequence
 
 import numpy as np
+import regex
 
 # Tamano de la firma. La similitud estimada tiene un error tipico de
 # sqrt(s(1-s)/FIRMA): con 64 muestras son ~4 puntos de desviacion y hasta 7 de
@@ -39,12 +40,22 @@ FIRMA = 256
 
 # Un shingle es una ventana de K palabras consecutivas. Con palabras sueltas,
 # dos paginas con el mismo vocabulario y distinto discurso salen identicas;
-# con K=3 hace falta que compartan la redaccion.
+# con K=3 hace falta que compartan la redaccion. En las escrituras sin espacios
+# son K caracteres (ver `_SIN_ESPACIOS`).
 K_SHINGLE = 3
 
 # Por debajo de esto la firma es ruido: dos fichas de 12 palabras coinciden
 # por casualidad. Se dejan fuera en vez de inventar duplicados.
 MIN_PALABRAS = 30
+
+# En las escrituras sin espacios (ver `_SIN_ESPACIOS`) cada caracter es un
+# token, y un caracter dice menos que una palabra: una palabra china tiene de
+# media entre 1,5 y 2 caracteres, una japonesa algo mas. Para el minimo se
+# cuentan por eso como media palabra: un texto CJK necesita 60 caracteres (dos
+# o tres frases) para tener firma, y 25 no la tienen. Sin calibrar contra un
+# censo real --no hay ninguno CJK en la BD--; el tailandes o el jemer, que
+# cuentan tambien sus marcas vocalicas, llegan al minimo con menos palabras.
+CARACTERES_POR_PALABRA = 2
 
 # Similitud a partir de la cual dos paginas se consideran casi duplicadas.
 # 0,9 es tambien el valor por defecto de Screaming Frog.
@@ -103,7 +114,43 @@ def reparto_bandas(umbral: float = UMBRAL_SIMILITUD) -> tuple[int, int]:
 _PRIMO = (1 << 61) - 1  # primo de Mersenne: aritmetica modular barata
 _MAX32 = np.uint64(0xFFFFFFFF)
 
-_NO_PALABRA = re.compile(r"[^\w]+", re.UNICODE)
+# Escrituras que no separan las palabras con espacios. Partir por no-palabra
+# dejaba una frase entera por token (`中文没有空格` era UNA palabra), asi que
+# dos textos japoneses casi iguales no compartian casi ningun trigrama y uno de
+# nueve frases no llegaba al minimo. Sin diccionario no se puede segmentar en
+# palabras, asi que se parte en caracteres: los shingles pasan a ser trigramas
+# de caracteres, que es lo habitual para medir parecido en CJK. `ー` (la marca
+# de vocal larga del katakana) es de escritura comun y se anade a mano.
+_SIN_ESPACIOS = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}ー"
+
+# Un token es un caracter de esas escrituras (grupo 1) o una racha de letras,
+# numeros, `_` y marcas combinantes (grupo 2). Las marcas (\p{M}) van DENTRO de
+# la palabra: el `\w` de `re` no las casa, y el hindi se rompia en trozos sin
+# vocales (`हिन्दी` daba `ह, न, द`), igual que cualquier escritura con matras o
+# un texto latino en NFD. Sin marcas ni esas escrituras, `[\p{L}\p{N}_]` es
+# exactamente el `\w` de `re` (comprobado sobre todos los puntos de codigo
+# asignados): el texto latino da los mismos tokens que antes, y la misma firma.
+# Una marca CONTINUA una palabra pero no la empieza: suelta, detras de un emoji
+# o de un signo, no es texto, y como token propio cambiaba los shingles de
+# cualquier texto latino con emojis (revision de #153, medido en blogs.uoc.edu).
+# Y solo las que escriben (Mn, Mc): las envolventes (Me, el `⃣` de `1️⃣`) son
+# adorno.
+_EMPIEZA = rf"\p{{L}}\p{{N}}_--[{_SIN_ESPACIOS}]"
+_SIGUE = rf"\p{{L}}\p{{N}}\p{{Mn}}\p{{Mc}}_--[{_SIN_ESPACIOS}]"
+_TOKEN = regex.compile(
+    rf"([{_SIN_ESPACIOS}])|([{_EMPIEZA}][{_SIGUE}]*)", regex.V1
+)
+
+# Selectores de variacion (`❤️` es `❤` + U+FE0F; los de ideogramas, U+E0100 en
+# adelante): eligen como se PINTA un caracter, no cual es. Fuera antes de
+# tokenizar, para que `A️B` siga siendo una palabra y `❤` y `❤️` no difieran.
+_SELECTORES = regex.compile(r"\p{Variation_Selector}+")
+
+# Formas de ancho completo y medio ancho (`１２３`, `ＡＢＣ`, `ｶﾀｶﾅ`), que el
+# japones usa mezcladas con las normales. Solo ese bloque pasa por NFKC: NFKC
+# entero cambiaria tambien `1º` por `1o` o `m²` por `m2`, y eso es la firma de
+# todo texto en castellano.
+_ANCHO = regex.compile(r"[\uFF00-\uFFEF]+")
 
 
 def _coeficientes(n: int = FIRMA) -> tuple[np.ndarray, np.ndarray]:
@@ -121,9 +168,38 @@ def _coeficientes(n: int = FIRMA) -> tuple[np.ndarray, np.ndarray]:
 _A, _B = _coeficientes()
 
 
+def _tokens(texto: str) -> tuple[list[str], int]:
+    """Tokens en minusculas y cuantos son caracteres de escrituras sin espacios."""
+    texto = unicodedata.normalize("NFC", texto)
+    texto = _SELECTORES.sub("", texto)
+    texto = _ANCHO.sub(lambda m: unicodedata.normalize("NFKC", m.group()), texto)
+    tokens: list[str] = []
+    caracteres = 0
+    for caracter, palabra in _TOKEN.findall(texto.lower()):
+        if caracter:
+            caracteres += 1
+            tokens.append(caracter)
+        else:
+            tokens.append(palabra)
+    return tokens, caracteres
+
+
 def tokenizar(texto: str) -> list[str]:
-    """Partir en palabras en minusculas, sin puntuacion."""
-    return [t for t in _NO_PALABRA.split(texto.lower()) if t]
+    """Partir en palabras en minusculas, sin puntuacion.
+
+    En las escrituras sin espacios (chino, japones, tailandes...) cada caracter
+    es un token; las marcas combinantes no parten la palabra.
+    """
+    return _tokens(texto)[0]
+
+
+def longitud_suficiente(tokens: int, caracteres: int) -> bool:
+    """Si un texto de ``tokens`` tokens (``caracteres`` de ellos sin espacios) da firma.
+
+    Las palabras cuentan una; los caracteres sin espacios, 1/CARACTERES_POR_PALABRA.
+    """
+    palabras = tokens - caracteres
+    return palabras * CARACTERES_POR_PALABRA + caracteres >= MIN_PALABRAS * CARACTERES_POR_PALABRA
 
 
 def shingles(palabras: Sequence[str], k: int = K_SHINGLE) -> list[str]:
@@ -147,8 +223,8 @@ def firma(texto: str | None) -> np.ndarray | None:
     """
     if not texto:
         return None
-    palabras = tokenizar(texto)
-    if len(palabras) < MIN_PALABRAS:
+    palabras, caracteres = _tokens(texto)
+    if not longitud_suficiente(len(palabras), caracteres):
         return None
 
     unicos = {_hash32(s) for s in shingles(palabras)}

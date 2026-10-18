@@ -26,18 +26,21 @@ _NO_LITERALES = {
                                     "structured_data_warning"},
     "tipo": {"missing_hsts", "missing_csp", "missing_x_content_type_options",
              "missing_x_frame_options"},
+    "tipo_de_serie": {"paginacion_canonical_a_la_primera", "paginacion_noindex",
+                      "solo_enlazada_desde_paginacion_profunda", "paginacion_sin_enlace",
+                      "paginacion_siguiente_rota", "paginacion_rel_incorrecto"},
 }
 
-
-# Los modulos que emiten incidencias con `_add_issue`. Uno nuevo se anade aqui:
-# los tipos de `avisos_de_enlaces.py` se le escapaban a este test (#150).
-MODULOS = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_sondas.py")
+# Los modulos que emiten con `az._add_issue` ademas del analizador. Estaban
+# fuera y sus tipos se escapaban del test (decisiones 106 y 122).
+FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
+           "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py")
 
 
 def _llamadas() -> list[ast.expr]:
     tipos = []
-    for modulo in MODULOS:
-        tipos += _llamadas_de(RAIZ / "analysis" / modulo)
+    for fuente in FUENTES:
+        tipos.extend(_llamadas_de(RAIZ / "analysis" / fuente))
     return tipos
 
 

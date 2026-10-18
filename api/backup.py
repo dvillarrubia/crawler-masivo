@@ -34,6 +34,8 @@ from shared.models import (
     Issue,
     CustomExtraction,
     EnlaceNoRastreable,
+    RobotsTxt,
+    CapturaAlternativa,
     RespuestaSondeada,
 )
 
@@ -73,11 +75,15 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     # Enlaces no rastreables (decision 106). Lo mismo: un backup anterior no
     # la trae y se salta.
     ("enlaces_no_rastreables", EnlaceNoRastreable, "from_url_id"),
+    # Capturas con otro perfil (decision 119). Igual: opcional al importar.
+    ("capturas_alternativas", CapturaAlternativa, "url_id"),
 ]
 
-# Con job_id y SIN url FK: no cuelgan de una pagina del censo. Un backup
+# Con job_id y SIN url FK: no hay nada que remapear salvo el job. Un backup
 # anterior no las trae y la importacion se las salta.
 _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
+    # El robots.txt de cada host (decisiones 112 y 113).
+    ("robots_txt", RobotsTxt),
     # Sondas de respuesta: enlaces externos y recursos (decisiones 123 y 124).
     ("respuestas_sondeadas", RespuestaSondeada),
 ]
@@ -692,6 +698,7 @@ def _insert_url_batch(
             unique_inlinks_count=d.get("unique_inlinks_count", 0),
             pagerank=d.get("pagerank"),
             in_sitemap=d.get("in_sitemap"),
+            bloqueada_googlebot=d.get("bloqueada_googlebot"),
         )
         db.add(url)
         db.flush()
@@ -711,7 +718,8 @@ def _import_child_table(
 ) -> tuple[int, int]:
     """Import rows from a child NDJSON file. Returns (imported, skipped).
 
-    `url_fk_field` None: la tabla no cuelga de una URL (solo se remapea el job).
+    `url_fk_field=None`: la tabla no cuelga de una URL (`robots_txt`) y solo se
+    remapea el job.
     """
     imported = 0
     skipped = 0

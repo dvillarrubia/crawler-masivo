@@ -181,6 +181,97 @@
    contenedor elegido; y `role="dialog"` sobre un `<div>` sigue siendo
    plantilla, porque ahí no hay forma de saber si está abierto.
 
+<a id="d121"></a>
+121. **Un titular vacio no es un titular, un titulo de relleno se dice una
+   vez, y un enlace sin nombre sale de la temporal de aristas** (#150, parte B,
+   puntos 1-3). Re-analizar, sin re-rastrear.
+   - **`h1_vacio`** (warning, la consecuencia de `h1_missing`): la pagina tiene
+     h1 visibles (`oculto IS NOT TRUE`) y ninguno con texto. El extractor ya
+     guardaba `text=NULL` (`<h1></h1>`, `<h1><img src=logo></h1>` sin alt), y el
+     analizador lo contaba como h1 presente. Mismo ambito que `h1_missing`
+     (HTML 2xx, sin muros). **`h1_multiple` cuenta solo los que tienen texto**:
+     uno bueno y uno vacio es un titular, y solo vacios es `h1_vacio` (36).
+     **Guardia de epoca**: la regla del alt y `headings.oculto` entraron juntas
+     (46); si ningun titular del job tiene `oculto` escrito, el censo es
+     anterior y `h1_vacio` no se emite (un logo CON alt se guardo vacio). Los
+     **saltos de nivel no son incidencia**: Google no documenta el orden como
+     senal (sin verificar la cita); es accesibilidad, y va con axe en la Ola 8.
+   - **`title_generico`** (warning): el titulo, o lo que queda al quitarle la
+     marca, es un placeholder de una lista cerrada en es/en/ca/eu/fr/de/pt/it
+     (`shared/titulos.py`: «Sin título», «Untitled document», «Nueva página»,
+     la pagina por defecto de nginx o Apache...). La marca es el segmento
+     (separador del soft 404) que aparece en mas de la mitad de los titulos
+     indexables del host; con un solo titulo no se sabe cual es y el titulo
+     tiene que ser el placeholder entero. «Inicio | Marca» y «Home» no estan en
+     la lista. Se compara sin caja, acentos ni puntuacion en los extremos
+     («Título» = «título.»). Solo indexables, una fila por valor con
+     `paginas_afectadas`, y **tapa** el `title_duplicate` de ese grupo y el
+     `title_too_short` de esas paginas: el arreglo es el mismo (36). **El
+     titulo de una palabra se descarta**: lo que no caza `title_too_short`
+     («Electrodomésticos») no es un error demostrable, y la regla del espacio
+     da una palabra en cualquier titulo chino. El juicio semantico es de #16.
+   - **`description_igual_title`** (info): la description, normalizada igual,
+     es el titulo. Una que solo empieza por el no. Solo indexables y con
+     description (sin ella ya es `description_missing`); una fila por (host,
+     `firma_de_ruta`) porque suele ser el valor por defecto del CMS (64).
+   - **`enlace_sin_ancla`** (info): enlace interno sin texto, sin
+     `aria-label`/`title`/svg (que el extractor ya pone en el ancla, 46) y sin
+     alt (61). Sale de tres columnas nuevas de `aristas_tmp`, rellenas solo en
+     esas filas (el patron de `utm_hash`), en la unica lectura de `links` de
+     `compute_link_counts` (37, 41); un test lo cuenta. Solo desde un origen
+     que cuenta (200 y no noindex, 38 y 57). El mismo componente (posicion,
+     destino) en `enlaces_plantilla_min_paginas` paginas o mas es una fila
+     `alcance: plantilla` en la de URL menor (88); el resto, una por origen con
+     `SUM(veces)` (94). `tipo: imagen` cuando es un `<a><img></a>`: puede salir
+     tambien `image_missing_alt`, y el arreglo es el mismo. Misma guardia de
+     epoca que `h1_vacio`: antes de la 46 el ancla no leia `aria-label` ni
+     `title` y habria falsos positivos. Las anclas genericas («leer más») son
+     de la Ola 8 y #13.
+
+   Cambian cifras al re-analizar (72, 91): `h1_multiple` baja y salen tipos
+   nuevos. **Sin medir en censos reales** (no habia ninguno en esta rama): la
+   decision 46 cita 208 enlaces sin ancla en 58 paginas de control, 39
+   internos, casi todos iconos de redes sociales. Tests:
+   `tests/test_titulares_titulos_anclas_db.py`.
+
+   **Revision (#159).** Dos fallos reproducidos, arreglados con su test:
+   - **La nota de contenido de `/insights` SUBIA con `title_generico`.**
+     Es una fila por valor y tapa el `title_duplicate` y el `title_too_short`
+     de sus paginas, y la nota cuenta `url_id` distintos: tres paginas
+     «Sin título | Marca» pasaban de restar tres a restar cero (el tipo no
+     estaba en la lista) o una. Es el caso de la soft 404 de la decision 105.
+     Ahora la nota y «Optimizar titulos» cuentan `title_generico` con sus
+     `paginas_afectadas` (`_paginas_de_mas_en_grupos`); una de esas paginas
+     con ademas `title_too_long` contaria dos veces, acotado por `max(0, …)`.
+     `test_un_titulo_de_relleno_no_mejora_la_nota_de_contenido`.
+   - **Una soft 404 seguia llevando su `h1_vacio`.** `h1_missing` esta en
+     `TAPADAS` (105) y `h1_vacio` dice lo mismo: entra.
+     `test_la_soft_404_tampoco_lleva_su_h1_vacio`.
+
+   **Medido** re-analizando con `ROLLBACK`, base (#154) contra esta rama, en
+   copias de cuatro censos locales (incidencias totales y lo que cambia):
+
+   | censo | base | rama | cambia |
+   |---|---|---|---|
+   | progym 12-oct (4.319 URLs) | 4.946 | 4.947 | +1 `description_igual_title` (24 fichas), +1 `enlace_sin_ancla`, −1 `h1_multiple` |
+   | progym 7-oct nofollow (15.026) | 15.817 | 15.812 | +1 `description_igual_title` (16), +1 `noindex_y_canonical_a_otra` (6 paginas), −6 `noindex_page`, −1 `h1_multiple` |
+   | Lopesan (5.751) | 28.742 | 28.735 | −16 `h1_multiple`, +9 `noindex_y_canonical_a_otra` (−11 `noindex_page`), +14 `redireccion_a_noindex` (−3 `redirect_chain`) |
+   | blogs.uoc.edu (34.704) | 93.615 | 93.575 | −47 `h1_multiple`, +4 `description_igual_title`, +3 `redireccion_a_noindex` |
+
+   Ningun tipo nuevo sale en todas las paginas (64): el mayor son 14 filas.
+   `title_generico`, `meta_refresh_redireccion` y
+   `canonical_html_y_cabecera_distintos` no salen en ninguno (no hay
+   placeholders, meta refresh ni canonical en cabecera en esos censos), y
+   `h1_vacio` / `enlace_sin_ancla` solo se evaluan en los dos de progym: los
+   otros son anteriores a la decision 46 y la guardia los salta. Los
+   `h1_multiple` que caen en Lopesan son un segundo `<h1><div></div></h1>`
+   vacio de verdad (comprobado en la pagina servida hoy), no un logo con alt.
+   Tiempo de `run_all`: sin cambio apreciable (51/64 s Lopesan, 171/163 s
+   blogs, con ruido de una maquina compartida).
+   **Sin reproducir**: en un censo anterior a la 46, `h1_multiple` deja de
+   contar un h1 guardado vacio que pudo ser un logo con alt (la guardia solo
+   cubre `h1_vacio`); en Lopesan los 16 casos son vacios reales.
+
 <a id="d124"></a>
 124. **Los recursos embebidos se comprueban con la misma sonda que los
    enlaces externos, por recurso y fuera de `max_urls`** (#101). Las imagenes,

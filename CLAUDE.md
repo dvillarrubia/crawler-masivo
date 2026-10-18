@@ -115,6 +115,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
 - **Nada de un cliente en codigo**: va en `projects/<cliente>/config.json`.
 - **Las cabeceras, cookies y Basic del job solo van a los hosts de las semillas**,
   tambien con render y tras una redireccion; sin jar de cookies por defecto. 114.
+- **Un segmento es `urls.segmento`, materializado** (analisis o `POST /segmentos`); la
+  primera regla VERDADERA gana y un dato desconocido no casa ni negado. Decision 125.
 - **Una sonda no es una URL del censo** (soft 404, enlace externo, recurso): su
   propio callback, sin `PageItem`, sin gastar `max_urls` ni contar para la salud;
   vive en `jobs.soft404` o `respuestas_sondeadas`. Decisiones 105, 123 y 124.

@@ -25,6 +25,26 @@
       "patron": "^/?$|^/[a-z]{2}/?$"
     }
   ],
+  "segmentos": [
+    {
+      "nombre": "rotas",
+      "si": {
+        "campo": "status_group",
+        "en": [
+          "4xx",
+          "5xx"
+        ]
+      }
+    },
+    {
+      "nombre": "blog",
+      "patron": "^/blog/"
+    },
+    {
+      "nombre": "legal",
+      "patron": "(aviso-legal|privacidad|privacy|cookies)"
+    }
+  ],
   "resource_types": {
     "crawl_images": false,
     "crawl_css": false,
@@ -45,6 +65,11 @@
     "crawl_subdomains": false,
     "max_runtime_hours": 48,
     "stall_timeout_minutes": 30,
+    "respetar_retry_after": true,
+    "sonda_tls": true,
+    "paridad_movil_muestra": 0,
+    "paridad_movil_por_plantilla": 3,
+    "paridad_movil_ua": "chrome_android",
     "comprobar_enlaces_externos": false,
     "enlaces_externos_max": 5000,
     "comprobar_recursos": false,

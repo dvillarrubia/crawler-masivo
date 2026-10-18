@@ -23,6 +23,8 @@ class PageItem(scrapy.Item):
     status_code = scrapy.Field()
     status_group = scrapy.Field()
     response_time_ms = scrapy.Field()
+    ttfb_ms = scrapy.Field()  # decision 109
+    content_encoding = scrapy.Field()  # decision 109
     is_html = scrapy.Field()
     resource_type = scrapy.Field()
     redirect_url = scrapy.Field()
@@ -67,6 +69,7 @@ class HtmlMetaItem(scrapy.Item):
     canonical_href = scrapy.Field()
     canonical_count = scrapy.Field()
     canonical_in_body = scrapy.Field()
+    canonical_distintos = scrapy.Field()
     canonical_header = scrapy.Field()
 
     og_title = scrapy.Field()
@@ -89,6 +92,20 @@ class HtmlMetaItem(scrapy.Item):
     has_meta_outside_head = scrapy.Field()
     head_cortado_por = scrapy.Field()
     fuera_del_head = scrapy.Field()
+
+    # Lo que el HTML declara de si mismo (decision 108)
+    viewport = scrapy.Field()
+    viewport_count = scrapy.Field()
+    html_lang = scrapy.Field()
+    content_language = scrapy.Field()
+    canonical_crudo = scrapy.Field()
+    og_image_forma = scrapy.Field()
+    twitter_image = scrapy.Field()
+    redireccion_js = scrapy.Field()
+    charset_meta = scrapy.Field()
+    charset_bom = scrapy.Field()
+    cuerpo_solo_ascii = scrapy.Field()
+    texto_mal_codificado = scrapy.Field()
 
 
 class HeadingItem(scrapy.Item):
@@ -131,6 +148,7 @@ class HreflangItem(scrapy.Item):
     lang = scrapy.Field()
     href = scrapy.Field()
     en_body = scrapy.Field()  # fuera del <head>: Google lo ignora
+    origen = scrapy.Field()   # html | cabecera
 
 
 class StructuredDataItem(scrapy.Item):
@@ -236,3 +254,29 @@ class SecurityItem(scrapy.Item):
     has_x_frame_options = scrapy.Field()
     referrer_policy = scrapy.Field()
     has_unsafe_crossorigin = scrapy.Field()
+
+
+class CapturaAlternativaItem(scrapy.Item):
+    """Una URL del censo pedida con otro perfil y comparada (decision 119).
+
+    No es una URL del censo: la emite la sonda de paridad, que no pasa por
+    `parse`, y el pipeline la cuelga de la `Url` que ya existe (por
+    `url_hash`). Una por URL y perfil: el pipeline reemplaza la anterior.
+    """
+
+    url_hash = scrapy.Field()
+    job_id = scrapy.Field()
+    perfil = scrapy.Field()
+    modo = scrapy.Field()
+    estado = scrapy.Field()
+    plantilla = scrapy.Field()
+    user_agent = scrapy.Field()
+    status_code = scrapy.Field()
+    response_class = scrapy.Field()
+    redirige_a = scrapy.Field()
+    vary_base = scrapy.Field()
+    vary = scrapy.Field()
+    medidas = scrapy.Field()
+    diferencias = scrapy.Field()
+    volatiles = scrapy.Field()
+    detalle = scrapy.Field()

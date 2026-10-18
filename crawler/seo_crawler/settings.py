@@ -98,6 +98,14 @@ DOWNLOADER_MIDDLEWARES = {
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,
+    # Guarda lo que respondio el robots.txt de cada host (decision 112). Por
+    # debajo de Retry (550) y Redirect (600): ve la respuesta FINAL.
+    "seo_crawler.middlewares.RobotsTxtRegistroMiddleware": 90,
+    # Retry-After de un 429/503 (decision 111), en todos los robots_mode. La
+    # pausa se fija en `response_downloaded`, antes de que el slot saque la
+    # siguiente peticion; por encima de RetryMiddleware (550) para ver la
+    # respuesta antes de que la reprograme.
+    "seo_crawler.middlewares.RetryAfterMiddleware": 560,
 }
 # Sin jar de cookies, como Googlebot, que no guarda las que pone el sitio: una
 # cookie de idioma, geo o consentimiento cambiaba lo que se media frente a lo
@@ -107,6 +115,14 @@ COOKIES_ENABLED = False
 
 # Tope del Crawl-delay que se respeta, en segundos.
 ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
+# Retry-After: si se respeta y el tope de la pausa, en segundos. El job los
+# cambia con crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED = os.getenv("RETRY_AFTER_ENABLED", "1") != "0"
+RETRY_AFTER_MAX = float(os.getenv("RETRY_AFTER_MAX", "60"))
+# 429/503 seguidos a peticiones que ya respetaron la pausa, tras los que el
+# host deja de pausarse: es un muro y la ventana de salud (decision 103) tiene
+# que poder verlo. Con el tope de 60 s, 5 minutos como mucho.
+RETRY_AFTER_MAX_SEGUIDAS = int(os.getenv("RETRY_AFTER_MAX_SEGUIDAS", "5"))
 
 # ---------------------------------------------------------------------------
 # Database / Redis — fuente unica: shared.config (importados arriba).
@@ -159,8 +175,11 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
 PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = int(
     os.getenv("PLAYWRIGHT_MAX_PAGES", "4")
 )
-# Safety cap on total browser contexts (default + custom + margin)
-PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "3"))
+# Safety cap on total browser contexts: default + custom + el del perfil de
+# la paridad (`perfil_movil` o `perfil_escritorio`, decision 119) + margen.
+# Con 3 la paridad se quedaba justa y una pestaña de mas esperaba a que se
+# cerrase un contexto.
+PLAYWRIGHT_MAX_CONTEXTS = int(os.getenv("PLAYWRIGHT_MAX_CONTEXTS", "4"))
 # Named browser contexts — reused across requests to avoid creating a new
 # context per page.  The "custom" context carries the configured user-agent
 # and is referenced by the spider's _playwright_meta().

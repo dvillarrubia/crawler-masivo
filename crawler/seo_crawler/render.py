@@ -113,7 +113,8 @@ async def preparar_http(page, request) -> None:
                 await contexto.clear_cookies(name=c["name"], domain=c["domain"])
         if cookies and dominios:
             await contexto.add_cookies([
-                {"name": nombre, "value": valor, "domain": dominio, "path": "/"}
+                {"name": nombre, "value": valor, "domain": dominio, "path": "/",
+                 "secure": bool(datos.get("solo_https"))}
                 for nombre, valor in cookies.items() for dominio in dominios
             ])
         if datos.get("cabeceras"):
