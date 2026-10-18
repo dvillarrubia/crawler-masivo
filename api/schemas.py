@@ -866,6 +866,10 @@ class UrlDetailResponse(UrlResponse):
     outlinks: list[LinkResponse] = []
     # La misma URL pedida con otro perfil (decision 119): una por perfil
     capturas_alternativas: list[dict[str, Any]] = []
+    # De que ficheros de sitemap viene y con que lastmod (decision 126): uno
+    # por fichero. Vacio = no esta en ningun fichero guardado (o el censo es
+    # anterior a la tabla; `in_sitemap` dice si estaba).
+    sitemaps: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

@@ -428,6 +428,21 @@ const ISSUE_INFO = {
     google: 'El sitemap es para las URLs que quieres ver en los resultados, y es una de las señales que usa para elegir la canónica. Una entrada que redirige, falla o lleva noindex pide indexar algo que la página niega; con un canonical a otra URL, son dos señales de canónica que no coinciden.',
     arreglo: 'Decidir cuál de las dos está mal: si la página no debe indexarse, quitarla del sitemap (suele ser una regla del generador, no URL a URL); si debe, quitar el noindex o el canonical. Un salto se cambia por la URL final.',
   },
+  'sitemap_supera_limite': {
+    que: 'Un fichero de sitemap pasa de 50.000 entradas o de 50 MB sin comprimir. Sale una vez por fichero, con cuántas entradas declara y cuánto pesa.',
+    google: 'Son los límites que documenta para un sitemap (y para un índice de sitemaps). Un fichero que los pasa no se procesa entero: Search Console lo marca como error y las URLs de más pueden no llegarle por el sitemap.',
+    arreglo: 'Partir el fichero en varios de menos de 50.000 URLs y declararlos en un índice de sitemaps. Suele ser un ajuste del generador, no del contenido.',
+  },
+  'lastmod_futuro': {
+    que: 'Entradas de un fichero de sitemap con un lastmod posterior al día en que se leyó (con un día de margen por las zonas horarias). Sale una vez por fichero, con cuántas son y ejemplos.',
+    google: 'Usa el lastmod solo si es coherente y comprobable. Una fecha futura no puede ser cierta, y con ella deja de fiarse del lastmod de ese sitemap para decidir qué volver a rastrear.',
+    arreglo: 'Corregir el generador del sitemap para que escriba la fecha de la última modificación real del contenido (no una fecha de publicación programada ni la de caducidad).',
+  },
+  'en_varios_sitemaps': {
+    que: 'URLs declaradas en más de un fichero de sitemap. Sale una vez por combinación de ficheros, con cuántas páginas comparten y ejemplos; el detalle dice cuántas llevan un lastmod distinto en cada fichero.',
+    google: 'No es un error: las procesa igual. Pero si el lastmod no coincide entre ficheros, el sitio se contradice sobre cuándo cambió la página.',
+    arreglo: 'Que cada URL esté en un solo fichero (por sección o por tipo). Si es un sitemap «completo» que repite los de sección, quitar uno de los dos.',
+  },
   'solo_enlazada_por_redireccion': {
     que: 'Solo se llega a la página a través de una redirección: los enlaces internos apuntan a la URL vieja.',
     google: 'Acaba dejando de rastrear la URL vieja, y con ella el camino a esta.',

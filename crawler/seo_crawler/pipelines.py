@@ -27,6 +27,7 @@ from seo_crawler.items import (
     PageItem,
     ResourceItem,
     RespuestaSondeadaItem,
+    SitemapEntradasItem,
     SecurityItem,
     StructuredDataItem,
 )
@@ -167,6 +168,8 @@ class PostgresPipeline:
             self._handle_captura(item)
         elif isinstance(item, RespuestaSondeadaItem):
             self._handle_sondeada(item)
+        elif isinstance(item, SitemapEntradasItem):
+            self._handle_sitemap(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -604,6 +607,58 @@ class PostgresPipeline:
         except Exception:
             self._rollback()
             logger.exception("Fallo al confirmar %d respuestas sondeadas", len(lote))
+
+    # ------------------------------------------------------------------
+    # SitemapEntradasItem (decision 126)
+    # ------------------------------------------------------------------
+    def _handle_sitemap(self, item: SitemapEntradasItem) -> None:
+        """Inserta las entradas de un fichero de sitemap en `sitemap_entries`.
+
+        Cada proceso de Scrapy vuelve a leer TODOS los sitemaps (tambien al
+        reanudar), asi que la primera vez que llega un fichero en este proceso
+        se borran las entradas que el job tuviera: si no, una reanudacion las
+        duplicaria y `en_varios_sitemaps` veria dos veces el mismo fichero. Sin
+        la tabla (base sin migrar) el rastreo sigue igual y no se guardan.
+        """
+        import uuid
+
+        from shared.models import SitemapEntry
+
+        job_id = item.get("job_id")
+        try:
+            job_id = uuid.UUID(str(job_id))
+        except ValueError:
+            pass
+        fichero = (item.get("fichero") or "").replace("\x00", "")
+        filas = [{"job_id": job_id, "url_hash": e["url_hash"],
+                  "url": (e["url"] or "").replace("\x00", ""), "fichero": fichero,
+                  "lastmod": (e.get("lastmod") or None) and e["lastmod"][:64].replace("\x00", "")}
+                 for e in (item.get("entradas") or [])]
+        try:
+            # En un SAVEPOINT: si falla (base sin la tabla) se deshace solo esto
+            # y no las paginas pendientes de confirmar.
+            with self.session.begin_nested():
+                if not getattr(self, "_sitemap_limpio", False):
+                    self.session.query(SitemapEntry).filter(
+                        SitemapEntry.job_id == job_id).delete(synchronize_session=False)
+                for inicio in range(0, len(filas), 5000):
+                    self.session.execute(SitemapEntry.__table__.insert(),
+                                         filas[inicio:inicio + 5000])
+        except Exception:
+            if not getattr(self, "_sitemap_aviso", False):
+                self._sitemap_aviso = True
+                logger.warning("No se pudieron guardar las entradas del sitemap %s "
+                               "(decision 126); el rastreo sigue", fichero, exc_info=True)
+            return
+        try:
+            self.session.commit()
+            self._uncommitted = 0
+            # Despues de confirmar: si el borrado no llego a la base, el
+            # siguiente fichero lo vuelve a intentar.
+            self._sitemap_limpio = True
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al confirmar las entradas del sitemap %s", fichero)
 
     # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)

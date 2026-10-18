@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Generator
 from urllib.parse import parse_qsl, urljoin, urlparse
 
@@ -73,8 +74,8 @@ from seo_crawler.extractors import (
 from seo_crawler.head_html import leer_head
 from seo_crawler.sitemaps import (
     MAX_SITEMAP_FILES,
+    leer_sitemap,
     parse_robots_sitemaps,
-    parse_sitemap,
 )
 from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
 from shared.respuestas import (
@@ -96,10 +97,18 @@ from seo_crawler.items import (
     PageItem,
     ResourceItem,
     SecurityItem,
+    SitemapEntradasItem,
     StructuredDataItem,
 )
 
 logger = logging.getLogger(__name__)
+
+# Tope de filas de `sitemap_entries` por proceso de rastreo (decision 126). Una
+# fila por (fichero, URL interna). Pasado el tope se sigue leyendo el sitemap
+# (membresia, semillas, `jobs.sitemaps`) pero no se guardan mas entradas, y
+# `jobs.sitemaps.entradas_recortadas` lo dice: los avisos que salen de las
+# entradas no pueden afirmar nada de las que faltan.
+SITEMAP_ENTRIES_MAX = int(os.getenv("SITEMAP_ENTRIES_MAX", "250000"))
 
 # Redirecciones seguidas que se siguen en una cadena, como Chromium y Firefox
 # (20, `ERR_TOO_MANY_REDIRECTS`). Google deja de seguir a las 10, pero cortar
@@ -547,6 +556,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
         # True si se alcanzo MAX_SITEMAP_FILES: la vista del sitemap es
         # parcial y no se puede afirmar que nada mas este fuera de el.
         self._sitemap_truncated: bool = False
+        # Lo leido de cada fichero (decision 126): va a `jobs.sitemaps` al cerrar.
+        self._sitemaps_leidos: dict[str, dict] = {}
+        self._sitemap_entradas_guardadas: int = 0
+        self._sitemap_entradas_recortadas: bool = False
         # Extraccion y busqueda a medida (decision 104). None = el job no tiene
         # reglas. `_config_invalida` = las tiene y no compilan: el job no se
         # rastrea (sale `failed` con finish_reason=config_invalida), nunca se
@@ -859,6 +872,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
     def spider_closed(self, spider, reason):
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
+        self._persist_sitemaps_leidos()
         if self._sondas_activas():
             self._sr_al_cerrar(reason)
         if getattr(self, "_presupuesto_a_medida", None) is not None:
@@ -1125,6 +1139,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
         """Parse a sitemap (urlset or index): record membership, seed
         uncrawled URLs, and recurse into child sitemaps under a hard cap."""
         if response.status != 200:
+            self._anotar_sitemap(response.url, {"status": response.status})
             return
         if self._sitemap_files_fetched >= MAX_SITEMAP_FILES:
             # Marcar que la ingesta quedo incompleta: sin esto, las URLs no
@@ -1136,21 +1151,30 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             return
         self._sitemap_files_fetched += 1
 
-        page_urls, child_sitemaps = parse_sitemap(response.body, response.url)
+        lectura = leer_sitemap(response.body, response.url)
         logger.info("Sitemap %s: %d URLs, %d child sitemaps",
-                    response.url, len(page_urls), len(child_sitemaps))
+                    response.url, len(lectura.entradas), len(lectura.hijos))
 
-        for child in child_sitemaps:
+        for child in lectura.hijos:
             yield from self._sitemap_request(child)
 
-        for url in page_urls:
-            normalized = normalize_url(url)
+        # Entradas internas de ESTE fichero para `sitemap_entries` (decision
+        # 126): una por URL normalizada, aunque el sitemap la escriba de dos
+        # formas que normalizan igual.
+        entradas: list[dict] = []
+        vistas: set[str] = set()
+        for entrada in lectura.entradas:
+            normalized = normalize_url(entrada.url)
             if not self._is_internal(normalized):
                 continue  # sitemaps must not seed foreign hosts
             url_hash = compute_url_hash(normalized)
             # El sha256 completo va al set de membresia (se escribe en BD);
             # para el set de resume hay que usar la clave compacta.
             self._sitemap_url_hashes.add(url_hash)
+            if url_hash not in vistas:
+                vistas.add(url_hash)
+                entradas.append({"url": normalized, "url_hash": url_hash,
+                                 "lastmod": entrada.lastmod})
             if _hash_key(url_hash) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
@@ -1159,6 +1183,66 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             # queued the same URL. La profundidad 1 se respeta gracias a
             # middlewares.DepthMiddleware (la de Scrapy la pisaba).
             yield self._page_request(normalized, 1)
+
+        hueco = max(0, SITEMAP_ENTRIES_MAX - self._sitemap_entradas_guardadas)
+        if len(entradas) > hueco:
+            if not self._sitemap_entradas_recortadas:
+                logger.warning(
+                    "Sitemap: tope de %d entradas guardadas alcanzado en %s; el resto "
+                    "de ficheros cuenta para la membresia pero sus entradas no se "
+                    "guardan (SITEMAP_ENTRIES_MAX)", SITEMAP_ENTRIES_MAX, response.url)
+            self._sitemap_entradas_recortadas = True
+            entradas = entradas[:hueco]
+        self._sitemap_entradas_guardadas += len(entradas)
+        self._anotar_sitemap(response.url, {
+            "status": response.status,
+            "formato": lectura.formato,
+            "declaradas": lectura.declaradas,
+            "devueltas": len(lectura.entradas),
+            "hijos": len(lectura.hijos),
+            "internas": len(vistas),
+            "bytes": lectura.bytes,
+            "cortado": lectura.cortado,
+            "entradas_guardadas": len(entradas),
+        })
+        if entradas:
+            yield SitemapEntradasItem(job_id=self.job_id, fichero=response.url,
+                                      entradas=entradas)
+
+    def _anotar_sitemap(self, url: str, datos: dict) -> None:
+        self._sitemaps_leidos[url] = {
+            "url": url, **datos,
+            "leido_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _persist_sitemaps_leidos(self) -> None:
+        """Escribe `jobs.sitemaps` (decision 126): que ficheros se leyeron y
+        que se sabe de cada uno. Sin sitemaps pedidos no se toca la columna."""
+        if not self._use_sitemap or not self._sitemap_requested:
+            return
+        resumen = {
+            "ficheros": sorted(self._sitemaps_leidos.values(), key=lambda f: f["url"]),
+            "pedidos": self._sitemap_requested,
+            "leidos": self._sitemap_files_fetched,
+            "parcial": bool(self._sitemap_truncated
+                            or self._sitemap_files_fetched < self._sitemap_requested),
+            "tope_entradas": SITEMAP_ENTRIES_MAX,
+            "entradas_guardadas": self._sitemap_entradas_guardadas,
+            "entradas_recortadas": self._sitemap_entradas_recortadas,
+        }
+        try:
+            from shared.database import SessionLocal
+            from shared.models import Job
+
+            sesion = SessionLocal()
+            try:
+                sesion.query(Job).filter(Job.id == self.job_id).update(
+                    {"sitemaps": resumen}, synchronize_session=False)
+                sesion.commit()
+            finally:
+                sesion.close()
+        except Exception as exc:  # noqa: BLE001 -- no tumba el cierre del rastreo
+            logger.warning("No se pudo guardar el resumen de sitemaps: %s", exc)
 
     def handle_sitemap_error(self, failure) -> None:
         logger.debug("Sitemap fetch failed: %s", failure.request.url)

@@ -50,7 +50,7 @@ from typing import Any, Iterable
 # unir con nada (decision 37).
 TABLAS_POR_JOB = ("urls", "links", "issues", "custom_extraction",
                   "enlaces_no_rastreables", "capturas_alternativas",
-                  "respuestas_sondeadas")
+                  "respuestas_sondeadas", "sitemap_entries")
 
 # Tablas que cuelgan de `urls.url_id`. No se cuentan por job: se reparten por
 # URL con la proporcion global (ver el docstring). Las cuatro ultimas son de
@@ -196,7 +196,7 @@ def filas_por_job(db, job_ids: Iterable[Any], *, presupuesto_s: float = 20.0,
     from sqlalchemy import func, select
 
     from shared.models import (CapturaAlternativa, CustomExtraction, EnlaceNoRastreable,
-                               Issue, Link, RespuestaSondeada, Url)
+                               Issue, Link, RespuestaSondeada, SitemapEntry, Url)
 
     ids = list(job_ids)
     salida: dict[Any, dict[str, int]] = {i: {} for i in ids}
@@ -214,7 +214,8 @@ def filas_por_job(db, job_ids: Iterable[Any], *, presupuesto_s: float = 20.0,
                           ("enlaces_no_rastreables", EnlaceNoRastreable),
                           ("capturas_alternativas", CapturaAlternativa),
 
-                          ("respuestas_sondeadas", RespuestaSondeada)):
+                          ("respuestas_sondeadas", RespuestaSondeada),
+                          ("sitemap_entries", SitemapEntry)):
         try:
             if pg:
                 _tope_de_consulta(db, max(1.0, fin - time.monotonic()))

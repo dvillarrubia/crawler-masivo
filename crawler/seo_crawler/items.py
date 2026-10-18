@@ -201,6 +201,19 @@ class EnlacesNoRastreablesItem(scrapy.Item):
     filas = scrapy.Field()
 
 
+class SitemapEntradasItem(scrapy.Item):
+    """Las entradas internas de UN fichero de sitemap (decision 126).
+
+    Un item por fichero, con `entradas` = [{url, url_hash, lastmod}]: el
+    pipeline las inserta en `sitemap_entries` por lotes. NO es una pagina y no
+    cuenta en el progreso del job.
+    """
+
+    job_id = scrapy.Field()
+    fichero = scrapy.Field()
+    entradas = scrapy.Field()
+
+
 class RespuestaSondeadaItem(scrapy.Item):
     """Lo que respondio una URL sondeada: un enlace externo o un recurso
     embebido que no es del censo (decisiones 123 y 124).

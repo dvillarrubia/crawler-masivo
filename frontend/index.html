@@ -2879,6 +2879,11 @@
                   <div class="text-sm text-dim truncate" :title="urlDetail.redirect_url" x-text="'Redirige a ' + urlDetail.redirect_url"></div>
                 </template>
                 <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
+                <!-- De qué fichero(s) de sitemap viene y con qué lastmod (decisión 126) -->
+                <template x-for="(sm, n) in (urlDetail.sitemaps || [])" :key="'sm' + n">
+                  <div class="text-sm text-dim truncate" :title="sm.fichero"
+                       x-text="'Sitemap: ' + sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod')"></div>
+                </template>
               </div>
               <div class="card">
                 <div class="veredicto-titulo">
@@ -3956,6 +3961,17 @@
                         <dd x-text="[expUrlDetail.html_meta?.meta_robots, expUrlDetail.html_meta?.x_robots_tag && ('X-Robots-Tag: ' + expUrlDetail.html_meta.x_robots_tag)].filter(Boolean).join(' · ') || '—'"></dd>
                         <dt>Enlazado</dt>
                         <dd x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(expUrlDetail.unique_inlinks_count ?? expUrlDetail.inlinks_count ?? 0) + (expUrlDetail.click_depth != null ? expUrlDetail.click_depth + ' clics desde la home' : 'sin profundidad calculada') + (expUrlDetail.pagerank_score != null ? ' · PageRank ' + expUrlDetail.pagerank_score : '') + (expUrlDetail.in_sitemap ? ' · en el sitemap' : ' · fuera del sitemap')"></dd>
+                        <template x-if="(expUrlDetail.sitemaps || []).length">
+                          <dt>Sitemap</dt>
+                        </template>
+                        <template x-if="(expUrlDetail.sitemaps || []).length">
+                          <dd>
+                            <template x-for="(sm, n) in expUrlDetail.sitemaps" :key="'esm' + n">
+                              <div class="truncate" :title="sm.fichero"
+                                   x-text="sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod')"></div>
+                            </template>
+                          </dd>
+                        </template>
                         <dt>Problemas</dt>
                         <dd>
                           <template x-if="!(expUrlDetail.issues || []).length"><span class="green">Ninguno</span></template>

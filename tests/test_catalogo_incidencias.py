@@ -34,7 +34,8 @@ _NO_LITERALES = {
 # Los modulos que emiten con `az._add_issue` ademas del analizador. Estaban
 # fuera y sus tipos se escapaban del test (decisiones 106 y 122).
 FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
-           "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py")
+           "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py",
+           "avisos_de_sitemaps.py")
 
 
 def _llamadas() -> list[ast.expr]:

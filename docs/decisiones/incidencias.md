@@ -269,7 +269,7 @@
      sus versiones `/en/` y `/de/` canonicalizadas a ella: **cierto** en el
      censo; cadena de contradicciones dentro del propio sitemap.
 
-   Fuera de esta decisión (parte B de 1.3): la tabla `sitemap_entries`
+   Fuera de esta decisión (parte B de 1.3, hecha en la decisión 126): la tabla `sitemap_entries`
    (`url_hash`, fichero, `lastmod`), conectar `parse_sitemap_entradas`, y con
    ella `en_varios_sitemaps`, `sitemap_supera_limite` y `lastmod_futuro`, más
    el fichero de origen en la ficha de cada URL. Exige re-rastrear y entra en
@@ -878,3 +878,121 @@
      ese hallazgo ya es un `canonical_cross_domain` de gravedad `error`, y un
      aviso por hallazgo (36). Al escribir, las URLs con recuento y no
      indexables pasan de 1.852 a 0, que es la limpieza a NULL funcionando.
+
+<a id="d126"></a>
+126. **De qué fichero viene cada URL del sitemap, y los avisos son del
+   fichero, no de la URL** (PR 1.3B de `docs/PLAN_MEJOR_CRAWLER.md`). La
+   membresía era un conjunto de hashes sin procedencia: `parse_sitemap` tiraba
+   el `lastmod` y el fichero, así que ningún aviso podía decir «arregla el
+   sitemap de autores» (decisión 100). Ahora el spider lee cada fichero con
+   `leer_sitemap` (el `parse_sitemap_entradas` de siempre más el formato, las
+   entradas declaradas contadas ENTERAS y el tamaño descomprimido) y guarda:
+   - **`sitemap_entries`**: una fila por (fichero, URL interna) con su
+     `lastmod` tal cual, por `SitemapEntradasItem` y la tubería. Las mismas
+     URLs que marcan `in_sitemap`; las de otro host no entran. Lleva la `url`
+     además del `url_hash` porque una URL del sitemap que no se llegó a rastrear
+     tiene fila aquí y no en `urls`. Cada proceso de Scrapy vuelve a leer todos
+     los sitemaps, también al reanudar, así que la tubería borra las del job la
+     primera vez que llega un fichero: reanudar no duplica (test).
+   - **`jobs.sitemaps`**: por fichero, código, formato, `declaradas`, `bytes`,
+     si se cortó el gzip, hijos, internas, entradas guardadas y `leido_at`; y si
+     la vista quedó parcial o recortada por el tope.
+
+   Tres incidencias nuevas (`analysis/avisos_de_sitemaps.py`), las tres con la
+   unidad en la que se arreglan, ancladas como las de robots.txt (decisión
+   112: la raíz del host del fichero, o la URL de id más bajo) y con
+   `group_key` del fichero o de la combinación (88):
+   - **`sitemap_supera_limite`** (warning, uno por FICHERO): más de 50.000
+     entradas o más de 50 MB sin comprimir, los límites de Google para un
+     sitemap y para un índice. Los límites son los de Google
+     (`shared/sitemaps.py`), no `MAX_URLS_PER_SITEMAP` ni `MAX_SITEMAP_BYTES`,
+     que protegen al worker y se tocan por entorno. Para poder afirmarlo el
+     parser ya no corta el bucle en el tope: cuenta lo que pasa de él aunque no
+     lo devuelva (antes un fichero de 80.000 se leía como uno de 50.000). Un
+     gzip que pasa del tope se sigue sin leer, pero ahora se sabe que pasaba.
+     `warning` y no `error`: no saca del índice ninguna página (64, 92).
+   - **`lastmod_futuro`** (warning, uno por FICHERO, con cuántas, el máximo y
+     cinco ejemplos): `lastmod` posterior a la hora a la que se LEYÓ ese
+     fichero más **un día** de margen. El margen es por las zonas horarias: un
+     sitio en UTC+14 puede escribir «mañana» sin mentir, y una fecha sin hora se
+     lee como las 00:00 UTC. Se compara contra `leido_at` y no contra «hoy»:
+     re-analizar un censo de hace un año no puede volver futuras fechas que ya
+     habían pasado. El `lastmod` se guarda crudo y se juzga en el análisis, así
+     que el criterio cambia re-analizando. Lo que no es W3C Datetime
+     («18/10/2026») no se juzga: se cuenta en `lastmod_ilegibles`. Es el único
+     de los tres cuyo efecto Google documenta: usa el lastmod «si es coherente y
+     comprobable», y una fecha futura no lo es.
+   - **`en_varios_sitemaps`** (info, uno por COMBINACIÓN de ficheros, con
+     `paginas_afectadas`, cuántas de ellas están en el censo, ejemplos y cuántas
+     llevan un `lastmod` distinto en cada fichero): Google no lo documenta como
+     error y las procesa igual, de ahí `info`. Lo que sí es un hallazgo es el
+     `lastmod_distinto`: el sitio se contradice sobre cuándo cambió la página.
+     Por combinación y no por URL por lo mismo que las imágenes (64b) y los
+     datos estructurados (73): que el sitemap de páginas y el de entradas de un
+     WordPress repitan 63 URLs es UN ajuste del generador. Se ancla en la URL
+     afectada de id más bajo que esté en el censo; si ninguna lo está, en el
+     host del primer fichero. Con más de 200 combinaciones se avisan las 200
+     mayores y el resto va al log.
+
+   Sin `jobs.sitemaps` (censo anterior) no se emite nada, y sin la tabla
+   tampoco: «no se sabe» no es «sitemap limpio». Una URL repetida dentro del
+   MISMO fichero no cuenta (el parser ya las deduplica), y dos formas que
+   normalizan igual son una sola entrada.
+
+   **Tope de filas**: `SITEMAP_ENTRIES_MAX` = 250.000 por proceso de rastreo.
+   Pasado el tope se sigue leyendo el sitemap (membresía, semillas,
+   `jobs.sitemaps`) pero no se guardan más entradas, y
+   `jobs.sitemaps.entradas_recortadas` lo dice; `en_varios_sitemaps` lo lleva en
+   el detalle porque su cuenta pasa a ser un mínimo. Medido: **464 bytes por
+   fila** (127.006 filas sintéticas con la forma de las de penguin en un
+   Postgres 16 de pruebas: 59 MB, de ellos 21,7 MB del índice `(job_id,
+   url_hash)`), así que el tope son ~116 MB por censo, frente a los 49 GB de
+   `links`. El mayor sitemap medido tiene 127.006 entradas (penguin): el tope es
+   el doble. El análisis de los tres avisos sobre esas 130.000 filas tarda
+   **0,8 s**. La tabla entra en `TABLAS_POR_JOB`, en el borrado en masa (94) y en
+   el backup (con `jobs.sitemaps`, que la importación no copiaba).
+
+   La ficha de una URL (`GET /urls/{id}`) lleva `sitemaps`: `[{fichero,
+   lastmod}]`, por el índice `(job_id, url_hash)`, y la interfaz lo pinta en las
+   dos fichas («Sitemap: … · lastmod …»).
+
+   **Medido el 2026-10-18** leyendo con el parser nuevo el árbol de sitemaps
+   actual de siete sitios de la BD local (GET secuenciales con la huella del
+   rastreo, sin rastrear nada; `progym` respondió 403 al sitemap y no cuenta):
+
+   | sitio | ficheros | entradas internas | mayor fichero | `supera_limite` | `lastmod_futuro` | `en_varios_sitemaps` |
+   |---|---|---|---|---|---|---|
+   | penguin | 22 | 127.006 | 39.986 URLs · 10,2 MB | 0 | 0 | 0 |
+   | Druni | 18 | 45.968 | 5.000 · 1,0 MB | 0 | 0 | **3** (3 URLs, 2 con lastmod distinto) |
+   | www.uoc.edu | 14 | 15.636 | 10.766 · 4,1 MB | 0 | 0 | 0 |
+   | blogs.uoc.edu | 399 | 20.915 | 1.003 · 0,5 MB | 0 | 0 | **42** (109 URLs, las 109 con lastmod distinto) |
+   | Saunier Duval | 4 | 1.496 | 1.134 · 0,2 MB | 0 | 0 | **1** (la home) |
+   | Lopesan | 396 | 64 | 395 hijos · 66 kB | 0 | 0 | **1** (`/es/`) |
+
+   Ningún sitio pasa de los límites ni tiene lastmod futuro: son avisos que en
+   un sitio sano no salen, y salen las cifras que había que comprobar (que no
+   hay falsos positivos por zona horaria ni por formato: 0 ilegibles en
+   211.085 entradas). En blogs.uoc.edu la agrupación es la que se buscaba: 109
+   URLs son **42 avisos**, el mayor de 63 páginas (`extreballadors`, el
+   `page-sitemap` y el `post-sitemap` de Yoast declarando las mismas).
+
+   Lo que salió por el camino y queda **fuera** (no hay aviso todavía, pero el
+   dato ya se guarda en `jobs.sitemaps`):
+   - **La pista de la decisión 100, resuelta**: Lopesan tiene un índice de
+     Liferay con 395 hijos y **370 responden 200 con el cuerpo VACÍO** (0
+     bytes). La membresía estaba bien: el sitemap de verdad son 64 URLs. Es un
+     hallazgo del sitio («sitemap vacío»), no un fallo nuestro.
+   - **Hijos que no son un sitemap**: el índice de www.uoc.edu declara
+     `https://www.uoc.edu/en` (una página HTML), y en dos lecturas del mismo
+     día el de penguin declaraba hijos en `url.us.m.mimecastprotect.com`
+     (enlaces reescritos por el antivirus de un correo, que devuelven HTML); a
+     la tercera lectura ya no (decisión 13). Los dos salen en `jobs.sitemaps`
+     con `formato: desconocido`.
+   - `changefreq` y `priority` no se guardan: Google los ignora.
+   - El hreflang de los sitemaps (`<xhtml:link>`) se parsea pero sigue sin
+     llegar a la tabla `hreflang`.
+
+   Hace falta **re-rastrear**: los censos anteriores no tienen ni la tabla ni
+   `jobs.sitemaps`. No se pudo medir sobre un rastreo nuevo de Lopesan (no se
+   lanzan rastreos en producción desde aquí): es el canario de después del
+   merge.
