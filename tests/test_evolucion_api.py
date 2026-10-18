@@ -181,3 +181,35 @@ def test_el_backup_lleva_la_fila_y_la_cuelga_del_job_nuevo(entorno, monkeypatch)
     with Sesion() as s:
         fila = s.query(ProfileRun).filter(ProfileRun.job_id == nuevo).one()
     assert fila.errores == 2 and fila.urls == 4
+
+
+def test_un_censo_importado_es_un_punto_comparable_de_su_serie(entorno, monkeypatch):
+    """La fila viaja en el backup para que el censo importado salga en la
+    evolucion sin pasos aparte. Si el job importado pierde su
+    `analisis_version`, la fila (que la lleva) no casa con la del job y el
+    punto sale `desfasado`; y el relleno sin `--todos` no lo arregla, porque
+    la fila ya existe. Lo mismo con `finish_reason`: un censo truncado
+    importado sin el se leeria como completo y entraria en la linea."""
+    import io
+
+    import shared.database
+    from api import backup
+
+    cliente, Sesion, acme, sitio, ids = entorno
+    monkeypatch.setattr(shared.database, "SessionLocal", Sesion)
+    monkeypatch.setattr(backup, "SessionLocal", Sesion)
+    with Sesion() as s:
+        s.get(Job, ids["s3"]).finish_reason = "max_urls_reached"
+        s.commit()
+    nuevos = {}
+    for k in ("s2", "s3"):
+        datos = b"".join(backup.stream_backup_zip(ids[k]))
+        with Sesion() as s:
+            nuevos[k] = str(backup.import_backup_zip(io.BytesIO(datos), False, s)["new_job_id"])
+    with Sesion() as s:
+        j = s.get(Job, uuid.UUID(nuevos["s2"]))
+        assert (j.analisis_version, j.crawler_version) == ("v1", "c1")
+    puntos = {p["job_id"]: p for serie in cliente.get(f"/api/clients/{acme}/evolucion").json()["series"]
+              for p in serie["puntos"]}
+    assert puntos[nuevos["s2"]]["motivo"] is None and puntos[nuevos["s2"]]["comparable"]
+    assert puntos[nuevos["s3"]]["motivo"] == "truncado"
