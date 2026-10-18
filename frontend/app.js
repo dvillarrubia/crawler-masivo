@@ -2,6 +2,31 @@
 
 const API = '/api';
 
+// Autenticacion (decision 134): un 401 de la API es que la sesion no existe o
+// ha caducado. Se envuelve `fetch` y no solo `api()` porque hay descargas y
+// subidas que lo llaman directamente; sin esto la pagina se quedaba en blanco
+// con errores en la consola. `/api/sesion` no cuenta: es por donde se entra.
+const _fetchSinSesion = window.fetch.bind(window);
+window.fetch = async function (recurso, opciones) {
+  const res = await _fetchSinSesion(recurso, opciones);
+  const url = typeof recurso === 'string' ? recurso : (recurso && recurso.url) || '';
+  if (res.status === 401 && /^(\/|https?:\/\/[^/]+\/)api\//.test(url)
+      && !/\/api\/sesion/.test(url)) {
+    irAEntrar();
+  }
+  return res;
+};
+
+function irAEntrar() {
+  const volver = location.hash && location.hash.startsWith('#/') ? location.hash : '';
+  location.replace('/entrar' + (volver ? '?volver=' + encodeURIComponent(volver) : ''));
+}
+
+async function salirDeLaSesion() {
+  try { await _fetchSinSesion(API + '/sesion', { method: 'DELETE' }); } catch (_) { /* se sale igual */ }
+  location.replace('/entrar');
+}
+
 /* ===== User-Agent presets ===== */
 // Las cadenas de los bots son las que publica cada proveedor (comprobadas el
 // 2026-10-16; decision 98). Google y Bing escriben `Chrome/W.X.Y.Z` y lo
