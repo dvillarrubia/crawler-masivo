@@ -351,6 +351,15 @@ def comparar_censos(
         a.pop(k, None)
         b.pop(k, None)
     comunes = a.keys() & b.keys()
+    # Las alertas se reparten por el segmento de ANTES (`_grupo`): si solo el
+    # nuevo esta segmentado, se dice, para que «sin segmentos» no se lea como
+    # «ningun segmento ha cambiado».
+    if (any(_segmento_propio(p.get("segmento")) for p in b.values())
+            and not any(_segmento_propio(p.get("segmento")) for p in a.values())):
+        avisos.append(
+            "El censo anterior no tiene segmentos: las alertas se reparten por "
+            "plantilla y no por segmento. Re-segmentarlo con las reglas de hoy "
+            "(POST /api/jobs/<id>/segmentos) para verlas por segmento.")
 
     cambios: dict[str, list[dict[str, Any]]] = {
         "status_code": [], "indexability_status": [], "canonical_href": [],
@@ -765,13 +774,20 @@ def _segmento_propio(seg: str | None) -> bool:
     return bool(seg) and not seg.startswith("/") and not seg.startswith("(")
 
 
-def _grupo(pagina: dict[str, Any], otra: dict[str, Any] | None = None) -> tuple[str, str | None]:
+def _grupo(pagina: dict[str, Any], antes: dict[str, Any] | None = None) -> tuple[str, str | None]:
     """(forma de ruta, segmento) de una pagina, para repartir las alertas.
 
-    El segmento es el del censo NUEVO (`pagina`) y, si alli no esta, el del
-    anterior (`otra`): las reglas que mandan son las de hoy.
+    La forma sale de la URL de `pagina`; el segmento, SIEMPRE del censo
+    ANTERIOR (`antes`, o la propia `pagina` cuando es del anterior). Un
+    segmento puede depender de `indexable`, del codigo o de un valor extraido
+    (decision 125), y el del censo nuevo puede estar definido por el propio
+    cambio: «no indexables» contiene justo las paginas que salieron del indice
+    y la alerta saldria al 100% con 25 de 1.000 fichas. El porcentaje se cuenta
+    sobre la poblacion de ANTES del cambio. Si el anterior no tiene segmento
+    (censo previo a la columna o sin re-segmentar) no se usa el del nuevo, por
+    el mismo motivo: queda solo la plantilla.
     """
-    seg = pagina.get("segmento") or (otra or {}).get("segmento")
+    seg = (antes if antes is not None else pagina).get("segmento")
     return _firma(pagina.get("url")), seg
 
 

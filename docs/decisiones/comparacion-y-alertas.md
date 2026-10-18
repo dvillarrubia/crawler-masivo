@@ -327,8 +327,15 @@
      las páginas de un segmento son exactamente las de una plantilla (la regla
      `^/blog/` y la forma `/blog/:slug`), sale una vez, como segmento y con la
      plantilla al lado (`plantilla`), y la plantilla no se repite en su lista.
-     El segmento es el del censo nuevo (las reglas de hoy) y, si falta, el del
-     anterior. El caso que lo justifica, en test: 40 fichas repartidas en 40
+     El segmento es el del censo **anterior**, nunca el del nuevo: una regla
+     de segmento puede leer `indexable`, el código o un valor extraído (125), y
+     en el censo nuevo «no indexables» o «agotados» son justo las páginas que
+     cambiaron, así que 25 de 1.000 fichas fuera del índice salían como
+     «no indexables 25/25 = 100 %». El porcentaje se cuenta sobre la población
+     de antes del cambio. Si el anterior no tiene segmento (previo a la
+     columna, sin re-segmentar) no se usa el del nuevo: queda la plantilla y un
+     aviso que dice cómo re-segmentarlo. (Lo encontró la revisión de la PR,
+     con dos tests que fallaban: el segmento sacado del resultado.) El caso que lo justifica, en test: 40 fichas repartidas en 40
      formas de ruta en un sitio de 1.000 páginas cambian todas de título; sin
      segmentos no salta nada (ninguna plantilla llega al piso de 20 y el sitio
      se queda en el 4 %), con ellos salta «fichas 40/40 = 100 %».

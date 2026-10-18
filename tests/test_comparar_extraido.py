@@ -357,3 +357,47 @@ def test_un_valor_renderizado_y_otro_crudo_no_se_comparan():
     precio = next(x for x in r["extraido"]["reglas"] if x["nombre"] == "precio")
     assert precio["render_distinto"] == 30 and precio["comparadas"] == 0
     assert _alerta(r, "extraido_aparece") is None
+
+
+# --- el segmento que define el resultado no puede ser el denominador ----------
+
+def test_un_segmento_definido_por_el_resultado_no_infla_la_alerta():
+    """Los segmentos pueden depender de `indexable`, `status_code` o de un
+    valor extraido (decision 125). Si las paginas se reparten por el segmento
+    del censo NUEVO, uno definido por el propio resultado («no indexables»)
+    contiene justo las que cambiaron y la alerta sale al 100%: 25 de 1.000
+    fichas que salen del indice no son un cambio masivo. El reparto va por el
+    segmento de ANTES, que es la poblacion de la que se cuenta el porcentaje."""
+    a = [_pag(f"/p/{i}", segmento="fichas") for i in range(1000)]
+    b = ([_pag(f"/p/{i}", segmento="no indexables", indexability_status="Noindex")
+          for i in range(25)]
+         + [_pag(f"/p/{i}", segmento="fichas") for i in range(25, 1000)])
+    r = comparar_censos(a, b, job_a=JOB_A, job_b=JOB_B)
+    assert _alerta(r, "salen_del_indice") is None, r["alertas"]
+
+
+def test_un_segmento_definido_por_el_valor_extraido_no_infla_la_alerta():
+    """Lo mismo con la extraccion: el segmento «agotados» (`x.stock` igual
+    OutOfStock) del censo nuevo es exactamente las fichas que se agotaron."""
+    a = [_pag(f"/p/{i}", {"stock": _x(valor="InStock")}, segmento="disponibles")
+         for i in range(2000)]
+    b = ([_pag(f"/p/{i}", {"stock": _x(valor="OutOfStock")}, segmento="agotados")
+          for i in range(30)]
+         + [_pag(f"/p/{i}", {"stock": _x(valor="InStock")}, segmento="disponibles")
+            for i in range(30, 2000)])
+    r = comparar_censos(a, b, job_a=JOB_A, job_b=JOB_B)
+    assert _alerta(r, "extraido_cambia", "stock") is None, r["alertas"]
+
+
+def test_sin_segmentos_en_el_anterior_no_se_usan_los_del_nuevo_y_se_dice():
+    """El mismo caso que las 40 fichas repartidas, pero el censo anterior es
+    previo a la columna: sin segmento de antes no hay poblacion de la que
+    contar el porcentaje, y el aviso dice como recuperarla."""
+    a = [_pag(f"/c{i}/x{'/z' * (i % 6)}" + ("-a" * (i // 6))) for i in range(40)]
+    b = [_pag(f"/c{i}/x{'/z' * (i % 6)}" + ("-a" * (i // 6)), segmento="fichas",
+              title="Otro") for i in range(40)]
+    a += [_pag(f"/blog/{i}") for i in range(960)]
+    b += [_pag(f"/blog/{i}", segmento="blog") for i in range(960)]
+    r = comparar_censos(a, b, job_a=JOB_A, job_b=JOB_B)
+    assert _alerta(r, "cambia_el_titulo") is None
+    assert any("no tiene segmentos" in av for av in r["avisos"])
