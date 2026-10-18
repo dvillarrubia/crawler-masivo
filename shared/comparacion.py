@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any
+from urllib.parse import urlsplit
 
 import logging
 import os
@@ -599,6 +600,25 @@ def _alertas(afectadas, bases) -> list[dict[str, Any]]:
     return sorted(salida, key=lambda d: (orden[d["severidad"]], -d["paginas"]))
 
 
+# Tipos que van UNO POR PLANTILLA anclados en una URL elegida entre las del
+# grupo (decision 122: la de URL menor). Entre dos censos el ancla se mueve en
+# cuanto se rastrea otra pagina de la serie sin que el hallazgo cambie, asi que
+# se casan por (tipo, host, group_key) y no por la URL; sin esto la misma serie
+# salia «resuelta» en /cat/page/3/ y «nueva» en /cat/page/2/. Repite
+# `analysis.avisos_de_paginacion.TIPOS_DE_PLANTILLA` (la imagen de la API no
+# lleva `analysis/`; un test comprueba que coinciden). Otros avisos por grupo
+# (imagenes, cabeceras por host) tienen el mismo riesgo y no se tocan aqui:
+# cambiar como casan es otra decision, con su propia medida.
+ANCLADOS_POR_GRUPO = frozenset({
+    "paginacion_canonical_a_la_primera",
+    "paginacion_noindex",
+    "solo_enlazada_desde_paginacion_profunda",
+    "paginacion_sin_enlace",
+    "paginacion_siguiente_rota",
+    "paginacion_rel_incorrecto",
+})
+
+
 def incidencias_de_censo(db, job_id) -> list[dict[str, Any]]:
     """Las incidencias de un censo con lo que las identifica entre censos.
 
@@ -679,10 +699,15 @@ def comparar_incidencias(
 
     mapa_hosts = mapa_hosts or {}
 
+    def url_de(i):
+        return _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts))
+
     def clave(i):
-        return (i["issue_type"],
-                _norm(_aplicar_mapa(i.get("url") or "", mapa_hosts)),
-                i.get("group_key"))
+        if i["issue_type"] in ANCLADOS_POR_GRUPO and i.get("group_key"):
+            # El hallazgo es la plantilla del listado en ese host, y la URL
+            # donde se ancla puede cambiar entre censos (decision 122).
+            return (i["issue_type"], urlsplit(url_de(i)).hostname or "", i["group_key"])
+        return (i["issue_type"], url_de(i), i.get("group_key"))
 
     a = {clave(i): i for i in incidencias_a}
     b = {clave(i): i for i in incidencias_b}
@@ -692,7 +717,7 @@ def comparar_incidencias(
 
     idas, sin_pagina = [], []
     for k in a.keys() - b.keys():
-        if urls_del_nuevo is not None and k[1] not in urls_del_nuevo:
+        if urls_del_nuevo is not None and url_de(a[k]) not in urls_del_nuevo:
             sin_pagina.append(a[k])      # su pagina no se volvio a visitar
         else:
             idas.append(a[k])

@@ -41,6 +41,7 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
+from analysis import avisos_de_paginacion
 from analysis import avisos_de_servidor
 from analysis import avisos_de_html
 from shared.indexabilidad import (
@@ -352,6 +353,10 @@ class SEOAnalyzer:
         self.analyze_content()
         self.analyze_soft_404()
         self.analyze_url_issues()
+        # Despues de la indexabilidad (necesita `Url.noindex`) y antes de los
+        # conteos: deja marcadas las paginas que la lectura de `links` de
+        # `compute_link_counts` tiene que distinguir (decision 122).
+        avisos_de_paginacion.analizar_paginacion(self)
         self.compute_link_counts()
         self.compute_pagerank()
         self.analyze_links()
@@ -3454,7 +3459,7 @@ class SEOAnalyzer:
         # motores, asi que la primera version de esto no actualizaba ni una
         # fila en los tests contra SQLite.
         from sqlalchemy import (BigInteger, Boolean, Column, Integer, MetaData, String,
-                                Table, Text, case, insert)
+                                Table, Text, case, insert, null)
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         aristas = Table(
@@ -3479,35 +3484,55 @@ class SEOAnalyzer:
             Column("sin_ancla_destino", Text),
             Column("sin_ancla_posicion", String(20)),
             Column("sin_ancla_imagen", Boolean),
+            # Paginacion (decision 122), de la MISMA lectura: el origen es una
+            # pagina 2+ en noindex o canonicalizada a la 1, y, solo para las
+            # paginas con `rel=next` y los destinos SIN rastrear, la URL (para
+            # ver si hay un `<a>` a la siguiente, que el spider no sigue por
+            # el rel). NULL en el resto: no engorda la temporal.
+            # No cambian `origen_cuenta`: es otra pregunta (decision 38).
+            Column("origen_pag_excluida", Boolean),
+            Column("origen_pag_profunda", Boolean),
+            Column("rel_destino_url", Text),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
 
         origen = aliased(Url)
         destino = aliased(Url)
+        pag = avisos_de_paginacion.preparar_temporal(self)
         sin_ancla = and_(
             Link.is_internal.is_(True),
             or_(Link.anchor_text.is_(None), func.trim(Link.anchor_text) == ""),
             or_(Link.alt_text.is_(None), func.trim(Link.alt_text) == ""),
         )
+        consulta = select(
+            destino.id, Link.from_url_id, Link.is_internal,
+            and_(origen.noindex.isnot(True), origen.status_code == 200),
+            Link.follow.isnot(False),
+            Link.repeticiones,
+            case((or_(func.lower(Link.to_url).like("%?utm\\_%", escape="\\"),
+                      func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
+                  Link.to_url_hash), else_=None),
+            case((sin_ancla, Link.to_url), else_=None),
+            case((sin_ancla, func.coalesce(Link.link_position, "")), else_=None),
+            case((sin_ancla, Link.link_type == "image"), else_=None),
+            pag.c.excluida if pag is not None else null(),
+            pag.c.profunda if pag is not None else null(),
+            case((and_(pag.c.con_rel.is_(True), destino.id.is_(None)), Link.to_url),
+                 else_=None)
+            if pag is not None else null(),
+        ).join(origen, origen.id == Link.from_url_id)
+        if pag is not None:
+            # Una temporal de las paginas de paginacion, por clave primaria:
+            # no es otra lectura de `links`, y sin paginacion ni se une.
+            consulta = consulta.outerjoin(pag, pag.c.url_id == Link.from_url_id)
         self.session.execute(
             insert(aristas).from_select(
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
                  "veces", "utm_hash", "sin_ancla_destino", "sin_ancla_posicion",
-                 "sin_ancla_imagen"],
-                select(
-                    destino.id, Link.from_url_id, Link.is_internal,
-                    and_(origen.noindex.isnot(True), origen.status_code == 200),
-                    Link.follow.isnot(False),
-                    Link.repeticiones,
-                    case((or_(func.lower(Link.to_url).like("%?utm\\_%", escape="\\"),
-                              func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
-                          Link.to_url_hash), else_=None),
-                    case((sin_ancla, Link.to_url), else_=None),
-                    case((sin_ancla, func.coalesce(Link.link_position, "")), else_=None),
-                    case((sin_ancla, Link.link_type == "image"), else_=None),
-                )
-                .join(origen, origen.id == Link.from_url_id)
+                 "sin_ancla_imagen", "origen_pag_excluida", "origen_pag_profunda",
+                 "rel_destino_url"],
+                consulta
                 .outerjoin(destino, and_(
                     destino.url_hash == Link.to_url_hash,
                     destino.job_id == Link.job_id,
@@ -3568,12 +3593,16 @@ class SEOAnalyzer:
         )
 
         # Sobre las mismas aristas: una segunda lectura de `links` costaria lo
-        # mismo que todo lo anterior (decision 41).
+        # mismo que todo lo anterior (decision 41). La paginacion va antes que
+        # la profundidad: lo que solo cuelga de una serie excluida no lleva
+        # ademas `not_reachable_from_home` (36).
+        avisos_de_paginacion.desde_aristas(self, aristas)  # decision 122
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
         avisos_de_enlaces.avisar_enlaces_sin_ancla(self, aristas)  # decision 121
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
+        avisos_de_paginacion.borrar_temporal(self)
         self.session.flush()
 
     # -- Profundidad de clic -------------------------------------------------
@@ -3745,7 +3774,10 @@ class SEOAnalyzer:
                 Url.inlinks_count > 0,
             )
         ).all()
+        de_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
         for url_id, entrantes, en_sitemap in sin_camino:
+            if url_id in de_paginacion:
+                continue
             self._add_issue(
                 url_id, "not_reachable_from_home", "warning",
                 {"inlinks": entrantes, "in_sitemap": en_sitemap},
@@ -4201,8 +4233,12 @@ class SEOAnalyzer:
         # La canonica que nadie enlaza ya tiene su aviso, que dice que hay que
         # hacer (decision 101): un aviso por hallazgo.
         sin_enlazar = self._avisar_canonical_sin_enlazar()
+        # La que solo cuelga de paginas 2+ en noindex o canonicalizadas a la 1
+        # tiene su aviso, que dice de donde cuelga (decision 122).
+        desde_paginacion = avisos_de_paginacion.avisar_solo_desde_paginacion(
+            self, excluir=sin_enlazar)
         for (url_id,) in rows:
-            if url_id not in sin_enlazar:
+            if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "orphan_page", "warning")
 
         self._avisar_solo_por_redireccion()
@@ -4502,8 +4538,9 @@ class SEOAnalyzer:
             )
         ).all()
         sin_enlazar = self._ids_canonical_sin_enlazar()
+        desde_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
         for (url_id,) in rows:
-            if url_id not in sin_enlazar:
+            if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "sitemap_orphan", "warning")
 
         self._sitemap_no_indexable()

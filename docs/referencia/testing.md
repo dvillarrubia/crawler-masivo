@@ -209,6 +209,21 @@ excepcion real de curl_cffi), `test_retry_after.py` (el parser y el
 middleware con un slot simulado: sube, no lo baja AUTOTHROTTLE, vuelve al
 Crawl-delay, tope, latido) y `test_avisos_de_servidor_db.py` (los cinco
 avisos contra SQLite, con su ficha y su ambito en el frontend).
+Paginacion (decision 122): `test_paginacion.py` (las formas de `shared/paginacion.py`,
+`?p=123` sin evidencia, otros parametros, barra final, mayusculas),
+`test_analyzer_paginacion_db.py` (SQLite: canonical a la 1 agrupado por plantilla,
+autocanonica y «ver todo» sin aviso, serie por `rel=prev`, noindex agrupado, lo que
+solo cuelga de una paginacion noindex o canonicalizada sin `orphan_page` ni
+`sitemap_orphan`, `rel=next` sin `<a>` rastreada o no, `rel` a un 404 y a un 429; y,
+con SQLite y con Postgres —`run_all` entero—, que el paso no anade ninguna sentencia
+que lea `links`; y los `test_r*`/`test_e*` de la revision: muro en el destino del
+`rel`, cadena de entradas de WordPress, boton «cargar mas» con y sin pagina 2, noindex
+de fuera y `nofollow` que no son camino, el `warning` en la serie, la pagina 3 contada
+en su serie, comparacion por `group_key` aunque se mueva el ancla, profundas, `rel`
+que no coincide con el `<a>`, Elementor, variantes canonicalizadas a otra serie y que
+cada clave de los detalles tenga nombre) y `test_incidencias_paginacion_frontend.py`
+(ficha, nombre, ambito y columnas). `test_insights.py` comprueba que la nota de
+Enlazado cuenta tambien `solo_enlazada_desde_paginacion_excluida`.
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

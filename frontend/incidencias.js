@@ -469,6 +469,43 @@ const ISSUE_INFO = {
     arreglo: 'Quitar los utm de los enlaces internos. Para medir clics internos, usar eventos, no parámetros de campaña.',
   },
 
+  // ----- Paginación (decisión 122) -----
+  'paginacion_canonical_a_la_primera': {
+    que: 'Las páginas 2, 3… de un listado declaran como canonical la página 1 de su serie. Es de plantilla: una fila por forma de listado, con cuántas series y páginas.',
+    google: 'Pide que cada página de la serie sea su propia canónica. Con el canonical a la 1 puede dejar de indexar las 2+ y dejar de seguir lo que solo enlazan ellas (productos o artículos antiguos). rel=next/prev no influye: Google no lo usa desde 2019.',
+    arreglo: 'Que cada página paginada sea autocanónica (la 2 a la 2). Si existe una «ver todo» que carga rápido, el canonical a ella es otra opción válida, y no sale aquí.',
+  },
+  'paginacion_noindex': {
+    que: 'Las páginas 2, 3… de un listado llevan noindex. Es de plantilla: una fila por forma de listado, con cuántas páginas indexables solo cuelgan de ella. Es aviso (y no información) cuando deja alguna colgando.',
+    google: 'Es una práctica corriente y no es un error en sí: la página 1 sigue indexada. Pero con el tiempo trata sus enlaces como nofollow, así que lo que solo se enlaza desde ahí deja de estar enlazado.',
+    arreglo: 'Nada si todo lo que listan se enlaza también desde otro sitio. Si deja páginas colgando, quitar el noindex de la paginación (un cambio de plantilla) en vez de enlazarlas una a una.',
+  },
+  'solo_enlazada_desde_paginacion_excluida': {
+    que: 'Página indexable a la que solo llegan enlaces seguibles desde páginas 2+ de un listado que están en noindex o canonicalizadas a la página 1. Sustituye a «Página huérfana», «Huérfana del sitemap» y «Sin camino desde la home» en esa página. Es información cuando la serie ya lleva el aviso (se arregla allí) y aviso cuando no.',
+    google: 'Va dejando de rastrear las páginas 2+ excluidas y no cuenta sus enlaces: para Google esta página acaba sin enlaces internos, aunque en el sitio se pueda llegar a ella. Un enlace nofollow tampoco es un camino.',
+    arreglo: 'Si la serie lleva el aviso, arreglar la paginación (ver «Paginación en noindex»). Si no, enlazarla desde una página que cuente: la 1 del listado, la navegación, un artículo relacionado.',
+  },
+  'solo_enlazada_desde_paginacion_profunda': {
+    que: 'Páginas indexables a las que solo enlazan las páginas 2, 3… de un listado (indexables). Es de plantilla: una fila por forma de listado.',
+    google: 'Las encuentra, pero por la cola del listado: cada elemento nuevo las empuja una página más lejos, y lo que queda muy hondo se rastrea menos.',
+    arreglo: 'Enlazar lo importante desde fuera de la paginación (categorías, relacionados, la navegación), o mostrar más elementos por página.',
+  },
+  'paginacion_sin_enlace': {
+    que: 'La página anuncia la siguiente (rel=next, o un botón «cargar más» que la carga con JavaScript) y no tiene NINGÚN <a href> a ella. Si enlaza la página siguiente con otra URL, no sale aquí sino en «rel=next/prev incorrecto». No dice que la siguiente sea inalcanzable: puede estar enlazada desde otra página.',
+    google: 'Solo sigue los <a href>. No pulsa botones ni usa rel=next para descubrir, así que las páginas 2+ (y lo que solo enlazan ellas) pueden no descubrirse nunca.',
+    arreglo: 'Poner enlaces <a href="…/page/2/"> a las páginas siguientes en el HTML, aunque el «cargar más» siga funcionando con JavaScript encima.',
+  },
+  'paginacion_siguiente_rota': {
+    que: 'rel=next o rel=prev apunta a una URL rastreada que responde 4xx o 5xx (el 429 no cuenta: es el sitio frenando al rastreador).',
+    google: 'No usa rel=next/prev, así que no afecta al índice; pero suele delatar que la plantilla calcula mal la última página, y el mismo error puede estar en los <a>.',
+    arreglo: 'Corregir la plantilla para que la última página no declare siguiente y los enlaces de paginación apunten a páginas que existen.',
+  },
+  'paginacion_rel_incorrecto': {
+    que: 'rel=next o rel=prev apunta a una redirección, fuera de la serie (otro host u otra ruta), o a una URL distinta de la que enlaza la paginación (el rel dice /page/2/ y el enlace es ?e-page-1f=2). Es de plantilla, con el reparto de motivos.',
+    google: 'No usa rel=next/prev desde 2019, así que no afecta al índice. Es un fallo de plantilla, y otros buscadores sí los leen.',
+    arreglo: 'Que el rel apunte a la misma URL que el enlace de la página siguiente, o quitarlo.',
+  },
+
   // ----- Imágenes -----
   'image_missing_alt': {
     que: 'Imagen sin texto alternativo. Se cuenta una vez por imagen, no por página.',
@@ -639,6 +676,13 @@ const ISSUE_LABEL_EXTRA = {
   h1_vacio: 'H1 vacío',
   title_generico: 'Título de relleno',
   description_igual_title: 'Description igual al título',
+  paginacion_canonical_a_la_primera: 'Paginación con canonical a la página 1',
+  paginacion_noindex: 'Paginación en noindex',
+  solo_enlazada_desde_paginacion_excluida: 'Solo enlazada desde paginación excluida',
+  paginacion_sin_enlace: 'Paginación sin <a> a la siguiente',
+  paginacion_siguiente_rota: 'rel=next/prev a un error',
+  paginacion_rel_incorrecto: 'rel=next/prev incorrecto',
+  solo_enlazada_desde_paginacion_profunda: 'Solo enlazada desde páginas 2+',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -766,4 +810,17 @@ const DETALLE_LABEL = {
   retardo_s: 'retardo (s)',
   h1_vacios: 'h1 vacíos',
   alcance: 'alcance',
+  // Paginación (decision 122)
+  series: 'series',
+  motivos: 'por qué no cuentan',
+  ejemplos_origen: 'enlazada desde',
+  en_sitemap: 'en el sitemap',
+  con_parametros: 'URL con parámetros',
+  siguiente: 'siguiente',
+  rel: 'rel',
+  indexables_que_solo_cuelgan_de_ella: 'indexables que solo cuelgan de ella',
+  ejemplos_indexables: 'ejemplos de esas indexables',
+  solo_enlazadas_por_la_serie: 'páginas 2+ que solo enlaza la propia serie',
+  con_boton_js: 'con botón por JavaScript',
+  otros_entrantes: 'otros entrantes (nofollow o que no son camino)',
 };

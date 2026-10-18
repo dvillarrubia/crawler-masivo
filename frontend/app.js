@@ -3431,6 +3431,8 @@ const EXP_COLUMN_DEFS = {
   meta_robots:          { label: 'Meta robots',     type: 'string',  sortable: false, filterKey: 'meta_robots_contains', vacio: 'meta_robots',    width: 180, fmt: r => r.html_meta?.meta_robots ?? '' },
   x_robots_tag:         { label: 'X-Robots-Tag',    type: 'string',  sortable: false, filterKey: 'x_robots_tag_contains', vacio: 'x_robots_tag',   width: 180, fmt: r => (r.html_meta?.x_robots_tag ?? '').replace(/\n/g, ' | ') },
   canonical_header:     { label: 'Canonical (cabecera)', type: 'string', sortable: false, filterKey: 'canonical_header_contains', width: 240, fmt: r => r.html_meta?.canonical_header ?? '' },
+  rel_next:             { label: 'rel=next',        type: 'string',  sortable: false, width: 240, fmt: r => r.html_meta?.rel_next ?? '' },
+  rel_prev:             { label: 'rel=prev',        type: 'string',  sortable: false, width: 240, fmt: r => r.html_meta?.rel_prev ?? '' },
   meta_refresh:         { label: 'Meta refresh',    type: 'string',  sortable: false, filterKey: 'meta_refresh_contains',   width: 200, fmt: r => r.html_meta?.meta_refresh ?? '' },
   // Segun el robots.txt guardado del host (decision 113); vacio = no evaluado.
   bloqueada_googlebot:  { label: 'Bloqueada Googlebot', type: 'boolean', sortable: false, filterKey: 'bloqueada_googlebot', width: 170, fmt: r => r.bloqueada_googlebot === true ? 'Sí' : r.bloqueada_googlebot === false ? 'No' : '' },
@@ -3465,7 +3467,7 @@ const EXP_COLUMN_DEFS = {
 // (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
 const EXP_GRUPOS_COLUMNAS = [
   ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','ttfb_ms','content_length','transfer_size','content_encoding','http_version','last_modified','host','is_internal']],
-  ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap']],
+  ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap','rel_next','rel_prev']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
@@ -3590,8 +3592,11 @@ const EXP_TABS = [
     columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','solo_enlazada_desde_paginacion_excluida'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
+  // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
+  { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
+    columns: ['url','status_code','rel_next','rel_prev','canonical_href','indexable','inlinks_count'] },
   // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
   // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
