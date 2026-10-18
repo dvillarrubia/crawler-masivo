@@ -554,13 +554,15 @@ def comparar_censos(
     }
     # Que se puede comparar de lo de la 131. El grafo solo con los dos censos
     # enteros y del mismo alcance; cada medida, solo si los DOS la tienen.
+    motivo_grafo = _motivo_sin_grafo(job_a, job_b, concluyente)
+    grafo = motivo_grafo is None
     medidas = {
-        "grafo": concluyente,
-        "click_depth": concluyente and _con_dato(a.values(), "click_depth")
+        "grafo": grafo,
+        "click_depth": grafo and _con_dato(a.values(), "click_depth")
                        and _con_dato(b.values(), "click_depth"),
-        "pagerank_score": concluyente and _con_dato(a.values(), "pagerank_score")
+        "pagerank_score": grafo and _con_dato(a.values(), "pagerank_score")
                           and _con_dato(b.values(), "pagerank_score"),
-        "inlinks": concluyente and _con_dato(a.values(), "inlinks")
+        "inlinks": grafo and _con_dato(a.values(), "inlinks")
                    and _con_dato(b.values(), "inlinks"),
         "sd_tipos": _con_dato(a.values(), "sd_tipos") and _con_dato(b.values(), "sd_tipos"),
         "hreflang": _con_dato(a.values(), "hreflang") and _con_dato(b.values(), "hreflang"),
@@ -642,7 +644,7 @@ def comparar_censos(
             campo: ({"total": len(filas), "ejemplos": filas[:MUESTRA]}
                     if medidas.get(campo, True) else
                     {"total": None, "ejemplos": [],
-                     "motivo": _MOTIVO_SIN_MEDIDA[campo] if campo in ("click_depth", "pagerank_score", "inlinks") and not concluyente
+                     "motivo": motivo_grafo if campo in CAMPOS_DE_GRAFO and motivo_grafo
                      else "uno de los dos censos no tiene este dato (anterior a la columna)"})
             for campo, filas in cambios.items()
         },
@@ -1027,12 +1029,40 @@ def _grupo(pagina: dict[str, Any], antes: dict[str, Any] | None = None) -> tuple
     return _firma(pagina.get("url")), seg
 
 
-_MOTIVO_SIN_MEDIDA = {
-    c: ("el grafo de enlaces no se compara: uno de los dos censos esta "
-        "truncado, bloqueado o tiene otro alcance, y las paginas que enlazaban "
-        "pueden no haberse rastreado (decisiones 67 y 70)")
-    for c in ("click_depth", "pagerank_score", "inlinks")
-}
+CAMPOS_DE_GRAFO = ("click_depth", "pagerank_score", "inlinks")
+
+
+def _motivo_sin_grafo(job_a, job_b, concluyente) -> str | None:
+    """Por que no se puede comparar el grafo de enlaces, o None si se puede.
+
+    Tres cosas, y cualquiera basta:
+    - un censo truncado, bloqueado o con otro alcance: las paginas que
+      enlazaban pueden no haberse rastreado (decisiones 67 y 70);
+    - una lista (`max_depth` 0, decision 128) o dos profundidades distintas:
+      lo que no se rastreo no enlaza, y frente al censo completo TODAS las
+      URLs de la lista «perderian» sus entrantes;
+    - dos versiones del ANALIZADOR, o una desconocida: entrantes, profundidad
+      y PageRank los calcula el analisis, no el rastreo, y un re-analisis los
+      mueve sin que cambie el sitio (decisiones 38 y 57; la misma regla que la
+      91 aplica a las incidencias).
+    """
+    if not concluyente:
+        return ("el grafo de enlaces no se compara: uno de los dos censos esta "
+                "truncado, bloqueado o tiene otro alcance, y las paginas que "
+                "enlazaban pueden no haberse rastreado (decisiones 67 y 70)")
+    pa, pb = job_a.get("max_depth"), job_b.get("max_depth")
+    if pa == 0 or pb == 0 or (pa is not None and pb is not None and pa != pb):
+        return (f"el grafo de enlaces no se compara: los censos tienen otra "
+                f"profundidad maxima ({pa} y {pb}; 0 es una lista, que no sigue "
+                f"enlaces), y lo que uno no rastreo no enlaza (decision 128)")
+    ana_a, ana_b = job_a.get("analisis_version"), job_b.get("analisis_version")
+    if not (ana_a and ana_b and ana_a == ana_b):
+        return (f"el grafo de enlaces no se compara: los censos se analizaron "
+                f"con versiones distintas del codigo ({ana_a or 'desconocida'} y "
+                f"{ana_b or 'desconocida'}), y los entrantes, la profundidad y "
+                f"el PageRank los calcula el analisis (decision 91). Vuelve a "
+                f"analizar el mas antiguo con el codigo de hoy.")
+    return None
 
 
 def _tipos(pagina) -> frozenset:
@@ -1563,7 +1593,8 @@ def _tipos_e_idiomas_de_censo(db, job_id) -> tuple[dict[int, list], dict[int, li
     Las dos tablas cuelgan de `url_id` y no llevan `job_id`, asi que se une con
     `urls`: son decenas de filas por pagina, no los cientos de millones de
     `links` que prohiben unir (decision 37). Los tipos sin nombre (un nodo
-    que solo es una referencia, decision 51) no cuentan, y el hreflang del
+    que solo es una referencia, decision 51) no cuentan, ni los de un JSON-LD
+    que Google descarta por no ser JSON estricto (80), y el hreflang del
     `<body>` tampoco, porque Google no lo lee (decision 56).
     """
     from sqlalchemy import or_
@@ -1573,7 +1604,11 @@ def _tipos_e_idiomas_de_censo(db, job_id) -> tuple[dict[int, list], dict[int, li
     tipos: dict[int, set] = defaultdict(set)
     for url_id, tipo in (db.query(StructuredData.url_id, StructuredData.schema_type)
                          .join(Url, Url.id == StructuredData.url_id)
-                         .filter(Url.job_id == job_id, StructuredData.schema_type.isnot(None))
+                         # Un JSON-LD que no es JSON estricto Google lo tira
+                         # entero (decision 80): aunque el lector permisivo
+                         # saque su tipo, para el resultado enriquecido no esta.
+                         .filter(Url.job_id == job_id, StructuredData.schema_type.isnot(None),
+                                 StructuredData.json_invalido.is_(None))
                          .distinct()):
         tipos[url_id].add(tipo)
     idiomas: dict[int, set] = defaultdict(set)
@@ -1617,6 +1652,9 @@ def resumen_de_job(job) -> dict[str, Any]:
         # no haber estado nunca en el alcance (decisión 70).
         "semillas": list(job.seeds or []),
         "render_js": (job.config or {}).get("render_js"),
+        # 0 es una lista (decision 128): no sigue enlaces, y su grafo no se
+        # compara con el de un censo (decision 131).
+        "max_depth": (job.config or {}).get("max_depth"),
         # movil o escritorio, por el UA del job (decision 119)
         "perfil": perfil_de_ua((job.config or {}).get("user_agent")),
         "status": job.status,

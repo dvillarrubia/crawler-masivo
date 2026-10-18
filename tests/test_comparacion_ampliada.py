@@ -21,7 +21,7 @@ from shared.comparacion import (
 
 ANTES = {"semilla": "https://x.com/", "status": "completed",
          "finish_reason": "finished", "crawler_version": "abc1234",
-         "fecha": "2026-01-01T00:00:00"}
+         "analisis_version": "abc1234", "fecha": "2026-01-01T00:00:00"}
 LUEGO = {**ANTES, "fecha": "2026-02-01T00:00:00"}
 
 
@@ -164,6 +164,57 @@ def test_con_alcances_distintos_tampoco():
     r = comparar_censos(_sitio(), _sitio(inlinks=1), job_a=a, job_b=b)
     assert "pierden_enlaces_internos" not in _reglas(r)
     assert r["cambios"]["inlinks"]["total"] is None
+
+
+def test_con_el_analisis_distinto_el_grafo_no_se_compara():
+    """Entrantes, profundidad y PageRank los calcula el ANALISIS, no el
+    rastreo: con dos versiones del analizador una caida puede ser nuestra (la
+    decision 38 movio el PageRank de un censo entero al re-analizarlo). Es la
+    regla de la 91 para las incidencias, y desconocido tampoco vale."""
+    for va, vb in (("a1", "a2"), (None, "a2"), ("a1", None)):
+        a = {**ANTES, "analisis_version": va}
+        b = {**LUEGO, "analisis_version": vb}
+        r = comparar_censos(_sitio(), _sitio(click_depth=6, inlinks=1, pagerank_score=5),
+                            job_a=a, job_b=b)
+        reglas = _reglas(r)
+        for regla in ("se_alejan_de_la_home", "pierden_enlaces_internos", "pierden_pagerank"):
+            assert regla not in reglas, (va, vb, regla)
+        for campo in ("inlinks", "click_depth", "pagerank_score"):
+            assert r["cambios"][campo]["total"] is None
+            assert "analiz" in r["cambios"][campo]["motivo"]
+        # Lo que sale del rastreo se sigue comparando.
+        assert r["cambios"]["sd_tipos"]["total"] == 0
+
+
+def test_una_lista_no_compara_el_grafo_con_un_censo_completo():
+    """Una lista (`max_depth` 0, decision 128) no sigue enlaces: sus entrantes
+    solo cuentan los de las otras URLs de la lista, y frente al censo completo
+    TODAS «perderian» sus enlaces. Ni con dos profundidades distintas: lo que
+    no se rastreo no enlaza."""
+    for pa, pb in ((3, 0), (0, 0), (3, 5)):
+        a = {**ANTES, "max_depth": pa}
+        b = {**LUEGO, "max_depth": pb}
+        r = comparar_censos(_sitio(), _sitio(inlinks=1, pagerank_score=5),
+                            job_a=a, job_b=b)
+        assert "pierden_enlaces_internos" not in _reglas(r), (pa, pb)
+        assert r["cambios"]["inlinks"]["total"] is None
+        assert "profundidad" in r["cambios"]["inlinks"]["motivo"]
+    # La misma profundidad, o una sin dato, si se compara.
+    for pa, pb in ((3, 3), (None, 3)):
+        r = comparar_censos(_sitio(), _sitio(inlinks=1),
+                            job_a={**ANTES, "max_depth": pa}, job_b={**LUEGO, "max_depth": pb})
+        assert "pierden_enlaces_internos" in _reglas(r)
+
+
+def test_resumen_de_job_lleva_la_profundidad():
+    from types import SimpleNamespace
+
+    from shared.comparacion import resumen_de_job
+    job = SimpleNamespace(seeds=["https://x.com/"], config={"max_depth": 0},
+                          status="completed", finish_reason="finished",
+                          crawler_version="v", analisis_version="v", health=None,
+                          name="lista", started_at=None)
+    assert resumen_de_job(job)["max_depth"] == 0
 
 
 def test_un_censo_sin_profundidad_no_esta_a_profundidad_desconocida():

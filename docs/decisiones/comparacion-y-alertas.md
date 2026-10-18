@@ -497,7 +497,16 @@
      sería falso: la tabla dice `total: null` con el motivo, no «0». Igual con
      una medida que uno de los dos censos no tiene (anterior a la columna:
      NULL en todas es «no se sabe»), y solo entre páginas 200 en los dos: si
-     pasa a 404 ya es `rotas`.
+     pasa a 404 ya es `rotas`. Tampoco con una **lista** (`max_depth` 0,
+     decisión 128) ni con dos profundidades máximas distintas —lo que uno no
+     rastreó no enlaza, y frente al censo completo todas las URLs de la lista
+     «perderían» sus entrantes—, ni con dos **versiones del analizador** o
+     una desconocida: entrantes, profundidad y PageRank los calcula el
+     análisis, no el rastreo, y un re-análisis los mueve sin que cambie el
+     sitio (38, 57). Es la regla de la 91 llevada al grafo; lo que sale del
+     rastreo (description, marcado, hreflang) sí se sigue comparando. Un
+     JSON-LD con `json_invalido` (80) no cuenta como tipo: Google tira el
+     bloque entero, así que perderlo así es perder el resultado enriquecido.
    - **(b) Las incidencias nuevas se separan** en `en_url_existente` (la URL
      estaba y ahora tiene el problema: una regresión) y `en_url_nueva` (se ha
      publicado así). Mezcladas, «300 nuevas» no dice si alguien estropeó lo que

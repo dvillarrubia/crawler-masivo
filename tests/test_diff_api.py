@@ -38,7 +38,7 @@ N = 40
 MIGRACION = [[r"^/hoteles/(h\d+)\.html$", r"/hotel/\1/"]]
 
 
-def _censo(s, dia, ruta_de, *, sin_producto=False, con_regresion=False):
+def _censo(s, dia, ruta_de, *, sin_producto=False, con_regresion=False, producto_roto=False):
     """N fichas de hotel. `ruta_de(i)` da la ruta de la ficha i."""
     j = Job(id=uuid.uuid4(), name=f"censo {dia}", status="completed",
             finish_reason="finished", seeds=["https://x.com/"], config={},
@@ -57,7 +57,12 @@ def _censo(s, dia, ruta_de, *, sin_producto=False, con_regresion=False):
         s.flush()
         s.add(HtmlMeta(url_id=u.id, title=f"Hotel {i}", meta_description=f"Hotel {i} junto al mar"))
         s.add(StructuredData(url_id=u.id, format="jsonld", schema_type="BreadcrumbList"))
-        if not sin_producto:
+        if producto_roto:
+            # Se lee con el lector permisivo y tiene tipo, pero Google lo
+            # descarta entero (decision 80).
+            s.add(StructuredData(url_id=u.id, format="jsonld", schema_type="Hotel",
+                                 json_invalido="coma final antes de '}'"))
+        elif not sin_producto:
             s.add(StructuredData(url_id=u.id, format="jsonld", schema_type="Hotel"))
         s.add(Hreflang(url_id=u.id, lang="es", href=f"https://x.com{ruta}", en_body=False))
         s.add(Hreflang(url_id=u.id, lang="EN", href=f"https://x.com/en{ruta}"))
@@ -167,3 +172,18 @@ def test_las_incidencias_nuevas_se_separan_por_url(entorno):
     assert inc["nuevas"]["en_url_existente"]["total"] == 1
     assert inc["nuevas"]["en_url_existente"]["ejemplos"] == ["https://x.com/h0"]
     assert inc["nuevas"]["en_url_nueva"]["ejemplos"] == ["https://x.com/nueva"]
+
+
+def test_un_json_ld_que_google_descarta_es_un_tipo_perdido(entorno):
+    """Una coma final hace que Google tire el bloque entero (decision 80):
+    para el resultado enriquecido es como si el marcado no estuviera, aunque
+    el lector permisivo saque su tipo."""
+    api, Sesion = entorno
+    s = Sesion()
+    viejo = _censo(s, 1, lambda i: f"/h{i}")
+    nuevo = _censo(s, 2, lambda i: f"/h{i}", producto_roto=True)
+    r = _diff(api, viejo, nuevo).json()
+    assert r["cambios"]["sd_tipos"]["total"] == N
+    assert r["cambios"]["sd_tipos"]["ejemplos"][0]["pierde"] == ["Hotel"]
+    al = {a["regla"]: a for a in r["alertas"]}
+    assert al["pierden_datos_estructurados"]["paginas"] == N
