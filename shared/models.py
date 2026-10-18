@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, Float, Text, DateTime,
+    Column, String, Integer, BigInteger, Boolean, Float, Text, DateTime, Date,
     ForeignKey, Index, JSON, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -63,6 +63,10 @@ class Client(Base):
     # asi que una vista vale para cualquier censo del cliente: es como se repite
     # el mismo analisis cada mes.
     vistas_explorador = Column(JSON, nullable=True)
+    # Reglas de alerta del cliente (decision 135, `shared/reglas.py`): PARCIAL
+    # sobre las de serie. NULL = las de serie, que son el comportamiento de
+    # antes: no configurar nada no cambia lo que se avisa.
+    reglas_alerta = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -120,6 +124,35 @@ class CrawlProfile(Base):
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+class ResumenSemanal(Base):
+    """El resumen de la semana de un cliente (decision 135).
+
+    Lo escribe el worker el dia y la hora que diga `reglas_alerta.resumen_semanal`
+    (de serie, lunes a las 8:00 en la zona del cliente), y se lee en su panel.
+    Una fila por (cliente, semana) con restriccion unica: con dos replicas del
+    worker, la segunda que llega choca y no manda otro aviso.
+    """
+
+    __tablename__ = "resumenes_semanales"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "semana", name="uq_resumen_cliente_semana"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cliente_id = Column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # El dia en que se cierra la semana (el del envio), en la zona del cliente.
+    semana = Column(Date, nullable=False)
+    desde = Column(DateTime(timezone=True), nullable=False)
+    hasta = Column(DateTime(timezone=True), nullable=False)
+    contenido = Column(JSON, nullable=False)
+    texto = Column(Text, nullable=False)
+    enviado = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 class Programacion(Base):
     """Un rastreo que se repite: cuando toca y que lanzar.
 
@@ -223,6 +256,9 @@ class Job(Base):
     # Que cambio respecto al censo anterior del mismo sitio, calculado al
     # cerrar el rastreo. Es la alerta que nadie tiene que ir a buscar.
     comparacion = Column(JSON, nullable=True)
+    # Las reglas propias del cliente evaluadas al cerrar el rastreo (decision
+    # 135): `{evaluadas, disparadas, sin_evaluar, motivo, comparado_con}`.
+    alertas_cliente = Column(JSON, nullable=True)
     # Con que version se ANALIZO, que no es lo mismo que con cual se rastreo:
     # un re-analisis cambia las cifras sin que cambie el sitio (decision 66).
     analisis_version = Column(String(64), nullable=True)

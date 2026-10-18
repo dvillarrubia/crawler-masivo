@@ -391,6 +391,10 @@
                style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="radar" style="width:14px;height:14px"></i> Rastreos
           </button>
+          <button type="button" class="tab" :class="clienteTab === 'alertas' && 'active'" @click="clienteTab = 'alertas'; cargarReglas()"
+               style="display:flex;align-items:center;gap:.35rem" data-testid="tab-alertas">
+            <i data-lucide="bell" style="width:14px;height:14px"></i> Alertas
+          </button>
           <button type="button" class="tab" :class="clienteTab === 'config' && 'active'" @click="clienteTab = 'config'"
                style="display:flex;align-items:center;gap:.35rem">
             <i data-lucide="settings" style="width:14px;height:14px"></i> Configuración
@@ -570,6 +574,180 @@
                 </div>
               </template>
             </div>
+          </div>
+        </template>
+
+        <!-- --- Pestana: reglas de alerta y resumen semanal (decision 135) ---
+             Lo que se ve aqui son las reglas EFECTIVAS: las de serie con lo que
+             el cliente haya cambiado encima. Guardar solo manda las diferencias. -->
+        <template x-if="cliente && clienteTab === 'alertas'">
+          <div data-testid="reglas-cliente">
+            <template x-if="reglasError">
+              <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="reglasError"></div>
+            </template>
+            <template x-if="!reglasForm && !reglasError"><div class="card text-dim text-sm">Cargando reglas…</div></template>
+            <template x-if="reglasForm">
+              <div>
+                <div class="card mb-2 text-sm">
+                  <span x-show="!reglasCliente.guardadas">Este cliente usa las <strong>reglas de serie</strong>. Cualquier cambio que guardes vale para los rastreos que terminen desde ese momento.</span>
+                  <span x-show="reglasCliente.guardadas">Este cliente tiene <strong>reglas propias</strong> sobre las de serie.</span>
+                  Las alertas salen arriba en la ficha de cada rastreo; las marcadas «avisar» se mandan además por el webhook de avisos.
+                </div>
+
+                <!-- Reglas propias -->
+                <div class="card mb-2">
+                  <div class="card-header">
+                    <h2>Reglas del cliente</h2>
+                    <button class="btn btn-sm" @click="reglaNueva()" data-testid="regla-nueva">
+                      <i data-lucide="plus" style="width:14px;height:14px"></i> Nueva regla</button>
+                  </div>
+                  <div class="text-dim text-sm mb-2">Una cifra del rastreo, opcionalmente en un segmento, contra un umbral. Por ejemplo: «URLs 4xx en fichas: el valor &gt; 20». Las de cambio comparan con el censo anterior y no se evalúan si no es comparable (truncado, otro alcance o detrás de un muro).</div>
+                  <template x-if="!reglasForm.propias.length"><div class="text-dim text-sm">Sin reglas propias.</div></template>
+                  <template x-for="(r, i) in reglasForm.propias" :key="i">
+                    <div class="regla-propia">
+                      <div class="regla-campos">
+                        <label class="regla-ancho">Nombre
+                          <input type="text" x-model="r.nombre" placeholder="Fichas rotas"></label>
+                        <label class="regla-ancho">Qué se mide
+                          <select x-model="r.medida">
+                            <template x-for="[k, m] in Object.entries(reglasCliente.catalogo.medidas)" :key="k">
+                              <option :value="k" x-text="m.etiqueta" :selected="r.medida === k"></option>
+                            </template>
+                            <template x-for="t in Object.keys(ISSUE_INFO)" :key="t">
+                              <option :value="'incidencia:' + t" x-text="'Páginas con: ' + fmt.issue(t)" :selected="r.medida === 'incidencia:' + t"></option>
+                            </template>
+                          </select></label>
+                        <label>Segmento
+                          <input type="text" x-model="r.segmento" placeholder="todo el sitio" :list="'segs-' + i">
+                          <datalist :id="'segs-' + i">
+                            <template x-for="sg in reglasCliente.catalogo.segmentos" :key="sg"><option :value="sg"></option></template>
+                          </datalist></label>
+                        <label>Sobre
+                          <select x-model="r.modo">
+                            <template x-for="[k, t] in Object.entries(reglasCliente.catalogo.modos)" :key="k">
+                              <option :value="k" x-text="t" :selected="r.modo === k"></option>
+                            </template>
+                          </select></label>
+                        <label>Si es
+                          <select x-model="r.operador">
+                            <template x-for="o in reglasCliente.catalogo.operadores" :key="o"><option :value="o" x-text="o" :selected="r.operador === o"></option></template>
+                          </select></label>
+                        <label><span x-text="r.modo === 'cambio_pct' ? 'Umbral (%)' : 'Umbral'"></span>
+                          <input type="number" x-model="r.umbral" step="any"></label>
+                        <label>Gravedad
+                          <select x-model="r.severidad">
+                            <option value="critical" :selected="r.severidad === 'critical'">crítica</option>
+                            <option value="warning" :selected="r.severidad === 'warning'">aviso</option>
+                            <option value="info" :selected="r.severidad === 'info'">informativa</option>
+                          </select></label>
+                      </div>
+                      <div class="regla-pie">
+                        <span class="text-dim" x-text="fraseRegla(r)"></span>
+                        <label><input type="checkbox" x-model="r.activa"> activa</label>
+                        <label><input type="checkbox" x-model="r.avisar"> avisar</label>
+                        <button class="btn btn-sm btn-danger" @click="reglasForm.propias.splice(i, 1)">Quitar</button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Reglas de la comparacion -->
+                <div class="card mb-2">
+                  <div class="card-header"><h2>Cambios frente al rastreo anterior</h2></div>
+                  <div class="text-dim text-sm mb-2">Las reglas que comparan página a página con el censo anterior. Saltan si afectan al % indicado del sitio (con un mínimo de páginas) o a ese % de una plantilla o segmento.</div>
+                  <div style="overflow-x:auto">
+                    <table style="width:100%;font-size:.82rem">
+                      <thead><tr><th style="text-align:left">Regla</th><th>Activa</th><th>Avisar</th><th>% del sitio</th><th>Mín. páginas</th><th>% plantilla</th></tr></thead>
+                      <tbody>
+                        <template x-for="c in reglasCliente.catalogo.comparacion" :key="c.regla">
+                          <tr>
+                            <td :title="c.que_decide_google">
+                              <span x-text="c.regla.replaceAll('_', ' ')"></span>
+                              <span class="text-dim" style="font-size:.75rem" x-text="c.severidad === 'critical' ? ' · crítica' : (c.severidad === 'warning' ? ' · aviso' : ' · info')"></span>
+                            </td>
+                            <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].activa" :aria-label="'Activa: ' + c.regla"></td>
+                            <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].avisar" :aria-label="'Avisar: ' + c.regla"></td>
+                            <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_sitio"></td>
+                            <td><input type="number" min="1" style="width:5rem" x-model="reglasForm.comparacion[c.regla].min_paginas"></td>
+                            <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_plantilla"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Silencio y resumen -->
+                <div class="card mb-2">
+                  <div class="regla-campos" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                      <label>Silenciar avisos hasta</label>
+                      <input type="date" x-model="reglasForm.silenciado_hasta">
+                      <div class="form-hint">Hasta ese día no sale nada por el webhook. En la ficha se siguen viendo.</div>
+                    </div>
+                    <label class="text-sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" x-model="reglasForm.resumen_semanal.activo"> Resumen semanal</label>
+                    <div class="form-group" style="margin:0">
+                      <label>Día</label>
+                      <select x-model.number="reglasForm.resumen_semanal.dia">
+                        <template x-for="d in [1,2,3,4,5,6,7]" :key="d"><option :value="d" x-text="DIAS_SEMANA[d]" :selected="reglasForm.resumen_semanal.dia === d"></option></template>
+                      </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label>Hora</label>
+                      <input type="number" min="0" max="23" style="width:4.5rem" x-model.number="reglasForm.resumen_semanal.hora">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
+                  <button class="btn btn-primary" @click="guardarReglas()" data-testid="guardar-reglas">Guardar reglas</button>
+                  <button class="btn" @click="probarReglas()" data-tip="Evalúa las reglas del cliente, tal como están en pantalla, contra su último rastreo completado. No guarda nada">Probar contra el último rastreo</button>
+                  <button class="btn" @click="cargarReglas()">Descartar cambios</button>
+                  <button class="btn btn-danger" style="margin-left:auto" @click="restablecerReglas()" x-show="reglasCliente.guardadas">Volver a las de serie</button>
+                </div>
+
+                <template x-if="reglasPrueba">
+                  <div class="card mb-2 text-sm" data-testid="reglas-prueba">
+                    <div><strong>Prueba contra</strong> <a :href="'#/rastreos/' + reglasPrueba.job_id" x-text="reglasPrueba.nombre"></a></div>
+                    <template x-if="reglasPrueba.motivo"><div class="orange" x-text="'No se evaluó: ' + reglasPrueba.motivo"></div></template>
+                    <div x-show="!reglasPrueba.motivo" x-text="reglasPrueba.evaluadas + ' regla(s) evaluadas, ' + reglasPrueba.disparadas.length + ' saltarían'"></div>
+                    <template x-for="a in reglasPrueba.disparadas" :key="a.id">
+                      <div :class="a.severidad === 'critical' ? 'red' : 'orange'" x-text="'• ' + a.texto"></div>
+                    </template>
+                    <template x-for="x in reglasPrueba.sin_evaluar" :key="x.id">
+                      <div class="text-dim" x-text="'• ' + x.id + ': sin evaluar (' + x.motivo + ')'"></div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- Resumenes semanales -->
+                <div class="card mb-2">
+                  <div class="card-header">
+                    <h2>Resumen semanal</h2>
+                    <button class="btn btn-sm" @click="verResumenPrevio()">Ver cómo sería ahora</button>
+                  </div>
+                  <div class="text-dim text-sm mb-2" x-text="reglasForm.resumen_semanal.activo
+                       ? 'Se genera cada ' + DIAS_SEMANA[reglasForm.resumen_semanal.dia] + ' a las ' + reglasForm.resumen_semanal.hora + ':00 (' + (cliente.zona_horaria || 'Europe/Madrid') + ') con los últimos 7 días, y se manda por el webhook de avisos si hay uno configurado.'
+                       : 'Desactivado para este cliente.'"></div>
+                  <template x-if="resumenPrevia">
+                    <div class="mb-2">
+                      <div class="text-sm"><strong>Vista previa</strong> (sin guardar)</div>
+                      <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="resumenPrevia.texto"></pre>
+                    </div>
+                  </template>
+                  <template x-if="!resumenes.length && !resumenPrevia"><div class="text-dim text-sm">Todavía no se ha generado ninguno.</div></template>
+                  <template x-for="r in resumenes" :key="r.id">
+                    <details style="border-top:1px solid var(--border);padding:.4rem 0">
+                      <summary class="text-sm" style="cursor:pointer">
+                        <span x-text="'Semana hasta el ' + r.semana"></span>
+                        <span class="text-dim" x-text="r.enviado ? ' · enviado' : ' · no enviado'"></span>
+                      </summary>
+                      <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="r.texto"></pre>
+                    </details>
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
         </template>
 
@@ -1084,6 +1262,22 @@
              alerta a la que hay que ir no es una alerta. En Lopesan, media
              seccion canonicalizada a un servidor de pruebas se entrego como
              un aviso `info` entre 315.119 incidencias. -->
+        <!-- Reglas propias del cliente que han saltado al cerrar el rastreo
+             (decision 135). Se editan en la ficha del cliente, pestaña Alertas. -->
+        <template x-if="job.alertas_cliente && (job.alertas_cliente.disparadas || []).length">
+          <div class="card mb-2" data-testid="alertas-cliente"
+               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.alertas_cliente.disparadas[0].severidad)">
+            <div class="text-sm" style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+              <strong>Han saltado reglas del cliente.</strong>
+              <a x-show="job.cliente_id" :href="'#/clientes/' + job.cliente_id" class="text-sm">Editar las reglas</a>
+            </div>
+            <template x-for="a in job.alertas_cliente.disparadas" :key="a.id">
+              <div class="text-sm" :style="'margin-top:.4rem;padding-left:.6rem;border-left:2px solid ' + fmt.colorSeveridad(a.severidad)"
+                   x-text="a.texto"></div>
+            </template>
+          </div>
+        </template>
+
         <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
           <div class="card mb-2"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">

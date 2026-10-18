@@ -105,17 +105,14 @@ def test_hay_un_tope_de_espera(capturado):
 
 def test_el_worker_solo_avisa_de_las_CRITICAS():
     """Un aviso que llega cada semana con cosas que no hay que mirar se deja
-    de leer, y entonces no avisa de nada. El worker filtra antes de llamar.
-    """
-    import inspect
+    de leer, y entonces no avisa de nada. Sin reglas del cliente, el filtro es
+    el de siempre; con reglas, lo que el cliente marque (decision 135). Lo
+    ejecuta `tests/test_reglas.py::test_el_worker_*` contra SQLite; aqui, la
+    funcion que decide."""
+    from shared.reglas import a_avisar
 
-    import worker
-
-    fuente = inspect.getsource(worker._comparar_con_el_censo_anterior)
-    pos_filtro = fuente.index('severidad") == "critical"')
-    pos_aviso = fuente.index("avisar_de_alertas(")
-    assert pos_filtro < pos_aviso
-    assert "avisar_de_alertas(job_id, job.name, criticas)" in fuente
+    aviso = {**CRITICA, "regla": "pierden_contenido", "severidad": "warning"}
+    assert a_avisar(None, [CRITICA, aviso], []) == [CRITICA]
 
 
 # ---------------------------------------------------------------------------

@@ -121,6 +121,12 @@ def main() -> None:
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS decisiones_resumen JSON"))
         conn.execute(text(
             "ALTER TABLE clients ADD COLUMN IF NOT EXISTS decisiones JSON"))
+        # Reglas de alerta por cliente (decision 135). La tabla
+        # `resumenes_semanales` la crea create_all.
+        conn.execute(text(
+            "ALTER TABLE clients ADD COLUMN IF NOT EXISTS reglas_alerta JSON"))
+        conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS alertas_cliente JSON"))
         # Enlaces identicos de una pagina agrupados en una fila (decision 94).
         # Con DEFAULT constante, Postgres 11+ no reescribe la tabla: es solo
         # catalogo, instantaneo aunque `links` tenga 180 M filas.

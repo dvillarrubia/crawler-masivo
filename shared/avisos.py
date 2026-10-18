@@ -53,6 +53,10 @@ def _texto_de_alertas(nombre_job: str, alertas: list[dict]) -> str:
     """
     lineas = [f"*{nombre_job}*: algo ha cambiado respecto al rastreo anterior."]
     for a in alertas:
+        if a.get("texto"):
+            # Regla propia del cliente (decision 135): ya trae su frase.
+            lineas.append(f"• {a['texto']}")
+            continue
         lineas.append(
             f"• *{a.get('paginas')}* de {a.get('de')} páginas "
             f"({a.get('pct')}%) — {a.get('que_decide_google', '')}"
@@ -80,7 +84,7 @@ def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
             "alertas": [
                 {k: a.get(k) for k in
                  ("regla", "severidad", "paginas", "de", "pct",
-                  "que_decide_google")}
+                  "que_decide_google", "texto")}
                 for a in alertas
             ],
         }
@@ -97,4 +101,29 @@ def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
         return True
     except Exception:
         logger.exception("No se pudo enviar el aviso del job %s", job_id)
+        return False
+
+
+def avisar_de_resumen(nombre_cliente: str, texto: str, contenido: dict) -> bool:
+    """El resumen semanal por el mismo webhook (decision 135). Nunca lanza.
+
+    Va con `tipo: resumen_semanal` para que quien lo recibe (n8n) lo pueda
+    enrutar aparte de las alertas: un resumen se lee el lunes, una alerta en el
+    momento.
+    """
+    try:
+        if not WEBHOOK_URL:
+            return False
+        cuerpo = {"tipo": "resumen_semanal", "text": texto, "cliente": nombre_cliente,
+                  "url": (f"{BASE_PUBLICA}/#/clientes/{contenido['cliente']['id']}"
+                          if BASE_PUBLICA else None),
+                  "resumen": contenido}
+        datos = json.dumps(cuerpo, ensure_ascii=False, default=str).encode("utf-8")
+        peticion = urllib.request.Request(
+            WEBHOOK_URL, data=datos,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(peticion, timeout=TIMEOUT) as resp:
+            return resp.status < 300
+    except Exception:
+        logger.exception("No se pudo enviar el resumen semanal de %s", nombre_cliente)
         return False

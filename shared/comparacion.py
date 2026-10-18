@@ -325,6 +325,7 @@ def comparar_censos(
     mapa_rutas=None,
     umbral_palabras: float = UMBRAL_PALABRAS,
     umbral_absoluto: int | None = None,
+    umbrales: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compara dos listas de páginas ya cargadas. Función pura, sin BD.
 
@@ -671,7 +672,7 @@ def comparar_censos(
         resultado["bloqueado"] = bloqueo_b or bloqueo_a
     elif direccion_sabida:
         resultado["alertas"] = _ordenar_alertas(
-            _alertas(afectadas, bases, umbral_absoluto)
+            _alertas(afectadas, bases, umbral_absoluto, umbrales)
             + _alertas_extraido(entradas_extraido, umbral_absoluto))
     else:
         resultado["alertas"] = []
@@ -1220,7 +1221,9 @@ def _sin_grupo(fila: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in fila.items() if k != "_g"}
 
 
-def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None) -> dict[str, Any] | None:
+def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None,
+            pct_sitio=PCT_ALERTA, min_paginas=MINIMO_PAGINAS,
+            pct_plantilla=PCT_ALERTA_PLANTILLA) -> dict[str, Any] | None:
     """Una regla contra su umbral: en el sitio, en un segmento o en una plantilla.
 
     Tres disparadores, porque una plantilla entera rota se diluye en el total:
@@ -1282,8 +1285,8 @@ def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None) -> 
         key=lambda d: (-d["pct"], -d["paginas"]))
 
     def salta(grupos):
-        return any(p["paginas"] >= MINIMO_PAGINAS
-                   and p["pct"] >= PCT_ALERTA_PLANTILLA * 100 for p in grupos)
+        return any(p["paginas"] >= min_paginas
+                   and p["pct"] >= pct_plantilla * 100 for p in grupos)
 
     pct = len(filas) / de
     if umbral_absoluto is not None:
@@ -1292,7 +1295,7 @@ def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None) -> 
         salta_sitio = len(filas) >= umbral_absoluto
         salta_segmento = salta_plantilla = False
     else:
-        salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
+        salta_sitio = len(filas) >= min_paginas and pct >= pct_sitio
         salta_segmento = salta(segmentos)
         salta_plantilla = salta(plantillas)
     if not (salta_sitio or salta_segmento or salta_plantilla):
@@ -1320,12 +1323,22 @@ def _ordenar_alertas(alertas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(alertas, key=lambda d: (_ORDEN_SEVERIDAD[d["severidad"]], -d["paginas"]))
 
 
-def _alertas(afectadas, bases, umbral_absoluto=None) -> list[dict[str, Any]]:
-    """Las reglas de página que superan el umbral (ver `_alerta`)."""
+def _alertas(afectadas, bases, umbral_absoluto=None, umbrales=None) -> list[dict[str, Any]]:
+    """Las reglas de página que superan el umbral (ver `_alerta`).
+
+    `umbrales` son los de un cliente (decision 135, `shared.reglas`): por regla,
+    `activa` y los tres umbrales. Lo que no trae se queda con lo de serie.
+    """
     salida = []
     for regla, (severidad, que_decide) in REGLAS.items():
+        u = (umbrales or {}).get(regla) or {}
+        if u.get("activa") is False:
+            continue
         al = _alerta(regla, severidad, que_decide, afectadas[regla],
-                     bases[BASE_DE_LA_REGLA[regla]], umbral_absoluto)
+                     bases[BASE_DE_LA_REGLA[regla]], umbral_absoluto,
+                     pct_sitio=u.get("pct_sitio", PCT_ALERTA),
+                     min_paginas=u.get("min_paginas", MINIMO_PAGINAS),
+                     pct_plantilla=u.get("pct_plantilla", PCT_ALERTA_PLANTILLA))
         if al is not None:
             salida.append(al)
     return _ordenar_alertas(salida)
@@ -1876,12 +1889,18 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     # Una sola lectura del censo nuevo: con los tipos de datos estructurados y
     # el hreflang (decision 131) ya no es una consulta barata para repetirla.
     paginas_nuevas = paginas_de_censo(db, job.id)
+    # Las reglas del cliente (decision 135): apagar una regla o mover sus
+    # umbrales. Sin cliente, las de serie.
+    from shared.reglas import reglas_de_job, umbrales_de_comparacion
+
+    reglas = reglas_de_job(db, job)
     r = comparar_censos(
         paginas_ant,
         paginas_nuevas,
         job_a=resumen_ant_cmp,
         job_b=resumen_de_job(job),
         umbral_absoluto=umbral_absoluto(job.config),
+        umbrales=umbrales_de_comparacion(reglas) if reglas else None,
     )
     incidencias = None
     if r.get("comparable"):

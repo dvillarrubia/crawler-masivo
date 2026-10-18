@@ -392,8 +392,18 @@ def stream_backup_zip(
 # gana una columna con algo sensible (los canales de alerta de F2 llevan
 # tokens), no se cuela en los backups por defecto.
 _CAMPOS_CLIENTE = ("id", "nombre", "slug", "dominios", "zona_horaria",
-                   "config_defecto", "integraciones", "decisiones", "notas")
+                   "config_defecto", "integraciones", "decisiones", "notas",
+                   "reglas_alerta")
 _CAMPOS_PERFIL = ("id", "nombre", "rol", "seeds", "config", "notas")
+
+
+def _reglas_importables(raw):
+    from shared.reglas import ReglaInvalida, validar
+
+    try:
+        return validar(raw) if isinstance(raw, dict) and raw else None
+    except ReglaInvalida:
+        return None
 
 
 def _cliente_y_perfil_de(session, job) -> tuple[dict | None, dict | None]:
@@ -453,6 +463,10 @@ def _casar_cliente_y_perfil(zf, job_data: dict, db: Session, warnings: list[str]
                 decisiones=(datos_cliente.get("decisiones")
                             if isinstance(datos_cliente.get("decisiones"), dict) else None),
                 notas=datos_cliente.get("notas"),
+                # Las reglas de alerta (decision 135) son configuracion, no
+                # secretos. Lo que no valide se descarta: el cliente queda con
+                # las de serie en vez de con un JSON que nadie puede editar.
+                reglas_alerta=_reglas_importables(datos_cliente.get("reglas_alerta")),
             )
             db.add(cliente)
             db.flush()

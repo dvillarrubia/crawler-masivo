@@ -654,3 +654,60 @@
    Precedencia: `falla` > `no_concluyente` > `aviso` > `pasa`. La regla
    `redirigidas` de la comparación es `warning`, así que nunca fue motivo de
    `falla` en el veredicto y no cambia.
+
+<a id="d135"></a>
+135. **Las reglas de alerta son del cliente, con valores de serie que
+   reproducen lo de antes, y una regla de cambio no se evalúa contra lo que no
+   es comparable** (Ola 5.2; criterio del usuario: se editan en el panel del
+   cliente y arrancan con algo por defecto).
+   - **Dónde viven.** En `clients.reglas_alerta`, que es PARCIAL sobre
+     `shared.reglas.de_serie()`. Un cliente sin nada guardado tiene exactamente
+     el comportamiento anterior: las 15 reglas de la comparación con sus
+     umbrales de la decisión 68, y avisan solo las críticas (decisión 77). A
+     eso se suman dos reglas propias de serie. Se guardan solo las
+     diferencias, así que una regla de serie nueva llega también a quien ya
+     tocó las suyas. Lo que no valida en la BD (editada a mano) se ignora sin
+     tumbar las demás.
+   - **Reglas de comparación.** Por regla se pueden cambiar `activa`, `avisar`
+     y los tres umbrales: el % del sitio, el piso de páginas y el % de una
+     plantilla o segmento. Se pasan a `comparar_censos(umbrales=...)`, así que
+     los guardias de la comparación (truncado, alcance, muro, versión) siguen
+     igual. Medido con el censo sintético de los tests: 25 rotas de 100 saltan
+     con lo de serie, 10 no; con `min_paginas=5` saltan las 10.
+   - **Reglas propias.** Llevan una medida, un segmento opcional, un modo
+     (`valor`, `cambio`, `cambio_pct`), un operador y un umbral. Las medidas
+     salen de `urls` e `issues` filtrando por `job_id` (decisión 37), sin
+     `links`; las de incidencias cuentan PÁGINAS distintas. El criterio de
+     hecho de 5.2, «4xx > 20 en fichas», dispara en el caso (25 fichas en
+     404) y no en el control (3 en fichas y 30 en el blog).
+   - **Lo que no se evalúa, con su motivo.** Un censo detrás de un muro (103),
+     un perfil de la competencia (#36 F2) y, en las de cambio: sin referencia
+     comparable, comparación no concluyente (truncado o alcance distinto,
+     decisiones 67 y 70), o, si la medida depende del análisis, dos versiones
+     de análisis distintas o sin sello (decisión 91). Los códigos de estado
+     salen del rastreo y se comparan igual. De 0 a algo no es un porcentaje.
+   - **Se evalúan aunque no haya censo anterior**: las de `valor` no lo
+     necesitan. Antes el worker salía en cuanto no había referencia. El
+     resultado va a `jobs.alertas_cliente`, con su propio `try`, y una regla
+     rota no se lleva la comparación ya guardada.
+   - **Avisar.** El webhook recibe lo que el cliente marque, salvo que esté
+     silenciado hasta una fecha. La interfaz lo sigue mostrando: silenciar es
+     no molestar, no dejar de mirar. Los perfiles de la competencia no avisan.
+   - **Resumen semanal** (`shared/resumen_semanal.py`). Lo genera el worker en
+     la misma pasada que el planificador, el día y la hora del cliente (de
+     serie, el lunes a las 8:00 en su zona), con la gracia de 12 h de la
+     decisión 75. Va a `resumenes_semanales`, con una restricción única por
+     (cliente, semana) para que dos réplicas no manden dos. Contenido:
+     - por perfil propio activo, el último rastreo de la semana con sus
+       alertas, las incidencias nuevas y resueltas y cuatro cifras con su
+       cambio (el de errores solo con la misma versión de análisis);
+     - los perfiles que **no** se rastrearon;
+     - las alertas de los rastreos sin perfil.
+     Sale por el mismo webhook con `tipo: resumen_semanal`, para que n8n lo
+     enrute aparte.
+   - **Probar antes de fiarse.** `POST /api/clients/{id}/reglas/probar` evalúa
+     lo que hay en pantalla contra el último rastreo completado, sin guardar.
+   Queda de 5.1: incidentes con estado (abierto/visto/cerrado, «solo el job
+   más reciente abre o cierra») y canales por cliente. Y una regla nueva solo
+   vale para los rastreos que terminen después: no se re-evalúan los viejos.
+

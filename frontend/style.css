@@ -1374,3 +1374,13 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .evo-spark{display:block}
 .delta.neutra{color:var(--text-dim)}
 .panel-cartera td{vertical-align:top}
+
+/* Reglas de alerta del cliente (decision 135) */
+.regla-propia{border-top:1px solid var(--border);padding:.6rem 0}
+.regla-campos{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:.5rem}
+.regla-campos label{display:flex;flex-direction:column;gap:.2rem;font-size:.75rem;font-weight:600;color:var(--text-dim)}
+.regla-campos .regla-ancho{grid-column:span 2}
+.regla-pie{display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:center;margin-top:.4rem;font-size:.8rem}
+.regla-pie>span{flex:1 1 16rem}
+.regla-pie label{display:flex;gap:.3rem;align-items:center}
+@media (max-width:480px){.regla-campos .regla-ancho{grid-column:1/-1}}
