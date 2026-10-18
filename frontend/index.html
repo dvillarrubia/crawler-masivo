@@ -1063,8 +1063,10 @@
             <template x-if="veredicto.veredicto === 'pasa'">
               <div class="text-sm text-dim">Todas las URLs de la lista responden 200, siguen indexables y con el mismo canonical que en el censo de referencia.</div>
             </template>
-            <template x-for="(m, i) in (veredicto.motivos || []).concat(veredicto.no_concluyente_por || [])" :key="m.tipo + (m.regla || '') + i">
-              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid var(--' + (i < (veredicto.motivos || []).length ? 'red' : 'orange') + ')'">
+            <!-- Rojo los fallos, naranja las dudas y azul los avisos: una URL de
+                 la lista que redirige a una pagina sana (decision 133). -->
+            <template x-for="(m, i) in (veredicto.motivos || []).concat(veredicto.no_concluyente_por || [], veredicto.avisos || [])" :key="m.tipo + (m.regla || '') + i">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid var(--' + (i < (veredicto.motivos || []).length ? 'red' : (i < (veredicto.motivos || []).length + (veredicto.no_concluyente_por || []).length ? 'orange' : 'blue')) + ')'">
                 <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
                   <span class="text-sm" x-text="m.mensaje.charAt(0).toUpperCase() + m.mensaje.slice(1) + (m.causa ? ' (' + m.causa + ')' : '')"></span>
                   <strong x-show="m.paginas" style="white-space:nowrap" x-text="fmt.num(m.paginas)"></strong>
@@ -1072,7 +1074,7 @@
                 <!-- Por posicion: las semillas pueden repetirse y un :key repetido deja el x-for sin pintar -->
                 <template x-for="(e, j) in (m.ejemplos || []).slice(0, 5)" :key="j">
                   <div class="text-dim" style="font-size:.78rem;word-break:break-all"
-                       x-text="e.url + (e.antes !== undefined ? '  ·  ' + (e.antes ?? '—') + ' → ' + (e.ahora ?? '—') : (e.ahora !== undefined && e.ahora !== null ? '  ·  ' + e.ahora : '')) + (e.destino ? '  → ' + e.destino : '')"></div>
+                       x-text="e.url + (e.antes !== undefined ? '  ·  ' + (e.antes ?? '—') + ' → ' + (e.ahora ?? '—') : (e.ahora !== undefined && e.ahora !== null ? '  ·  ' + e.ahora : '')) + (e.destino ? '  → ' + e.destino : '') + (e.saltos ? ' (' + e.saltos + ' saltos)' : '') + (e.estado_destino ? '  ·  destino: ' + e.estado_destino : '')"></div>
                 </template>
               </div>
             </template>
