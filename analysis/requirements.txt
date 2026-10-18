@@ -19,3 +19,7 @@ httpx>=0.28
 # segmentos de negocio (decision 125, shared/segmentos.py): con `timeout`, como
 # las de la extraccion a medida; sin el, `segmentar` no importa.
 regex>=2024.11.6
+# El robots.txt guardado se evalua como Googlebot (`shared/robots_txt.py`,
+# decision 113). Hoy llega con Scrapy en la imagen del crawler, pero la del
+# analisis no lo trae: se declara aqui (decision 69).
+protego>=0.3

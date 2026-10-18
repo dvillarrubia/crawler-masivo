@@ -757,6 +757,9 @@ class UrlResponse(BaseModel):
     transfer_size: int | None = None
     indexability_status: str | None = None
     blocked_by_robots: bool | None = None
+    # Si Googlebot puede pedirla segun el robots.txt guardado (decision 113).
+    # NULL = no evaluado.
+    bloqueada_googlebot: bool | None = None
     # La respuesta era la pagina o un muro delante (decision 103).
     response_class: str | None = None
     inlinks_count: int | None = None

@@ -98,6 +98,9 @@ DOWNLOADER_MIDDLEWARES = {
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,
+    # Guarda lo que respondio el robots.txt de cada host (decision 112). Por
+    # debajo de Retry (550) y Redirect (600): ve la respuesta FINAL.
+    "seo_crawler.middlewares.RobotsTxtRegistroMiddleware": 90,
 }
 # Sin jar de cookies, como Googlebot, que no guarda las que pone el sitio: una
 # cookie de idioma, geo o consentimiento cambiaba lo que se media frente a lo

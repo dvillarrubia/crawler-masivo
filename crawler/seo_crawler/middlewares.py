@@ -5,6 +5,8 @@ Custom Scrapy downloader middlewares for the SEO crawler.
 * **ProxyMiddleware**     -- optional proxy rotation.
 * **JobConfigMiddleware** -- attaches job config to every request's meta.
 * **RobotsCrawlDelayMiddleware** -- respeta el `Crawl-delay` de robots.txt.
+* **RobotsTxtRegistroMiddleware** -- guarda lo que respondio el robots.txt de
+  cada host (decisiones 112 y 113).
 """
 
 from __future__ import annotations
@@ -12,11 +14,13 @@ from __future__ import annotations
 import itertools
 import logging
 import math
+import time
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from scrapy import Request, signals
 from scrapy.downloadermiddlewares.robotstxt import RobotsTxtMiddleware
-from scrapy.exceptions import NotConfigured
+from scrapy.exceptions import DontCloseSpider, NotConfigured
 from scrapy.http import Response
 from scrapy.utils.misc import load_object
 
@@ -320,6 +324,202 @@ class RobotsCrawlDelayMiddleware:
         # extension, un slot recreado), la siguiente peticion lo restablece.
         if self._retrasos:
             self._aplicar(self.crawler.engine.downloader.get_slot_key(request))
+        return None
+
+
+class RobotsTxtRegistroMiddleware:
+    """Guarda en `robots_txt` lo que respondio el robots.txt de cada host.
+
+    Scrapy monta el parser con el cuerpo sea cual sea el codigo y, si la
+    descarga lanza una excepcion, deja pasar todo: un robots.txt que responde
+    503, 429 o no responde se rastreaba como «todo permitido» sin que llegara a
+    ningun informe, y Google, con eso, deja de rastrear el sitio (decision 112).
+    Aqui solo se ANOTA: lo que se pide no cambia.
+
+    Prioridad 90, por debajo del RetryMiddleware (550) y del RedirectMiddleware
+    (600): `process_response` y `process_exception` corren de la prioridad mas
+    alta a la mas baja, asi que aqui llega el resultado FINAL, tras reintentos y
+    redirecciones. Se reconoce la descarga por la URL ORIGINAL (`/robots.txt`
+    de raiz), no por la meta: es la que pide `RobotsTxtMiddleware` en `respect`
+    y en `audit` y la del spider para los sitemaps (la unica en `ignore`). No se
+    toca `_parse_robots` ni `_robots_error`: son privados de Scrapy, y la
+    decision 48 ya pago replicar a ojo su middleware.
+
+    Una fila por URL de robots.txt y ejecucion: la primera descarga, que es con
+    la que Scrapy decidio. Solo de hosts internos y con tope
+    (`ROBOTS_TXT_MAX_HOSTS`): lo que pase de ahi queda «no evaluado». Si fallo
+    (5xx, 429, red), al quedarse el spider sin trabajo se pide UNA vez mas
+    (`comprobacion`): nuestra IP no es la de Google, y un fallo pasajero no es
+    lo mismo que uno que dura todo el rastreo. Todo best-effort, con el `try`
+    cubriendo cada entrada: guardar esto no puede tumbar un rastreo.
+    """
+
+    PRIORIDAD_DESCARGA = 1000
+
+    def __init__(self, crawler: Crawler):
+        from shared.robots_txt import MAX_HOSTS_POR_JOB
+
+        self.crawler = crawler
+        self.filas: dict[str, dict] = {}
+        self._tope = crawler.settings.getint("ROBOTS_TXT_MAX_HOSTS", MAX_HOSTS_POR_JOB)
+        self._comprobar = crawler.settings.getbool("ROBOTS_TXT_COMPROBAR", True)
+        self._espera = crawler.settings.getfloat("DOWNLOAD_TIMEOUT", 30.0) + 15.0
+        self._avisado_tope = False
+        self._comprobado = False
+        self._pendientes = 0
+        self._limite = 0.0
+        crawler.signals.connect(self._spider_idle, signal=signals.spider_idle)
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler):
+        return cls(crawler)
+
+    # -- descargas ---------------------------------------------------------
+    @staticmethod
+    def _url_de_robots(request: Request) -> str | None:
+        from shared.robots_txt import es_url_de_robots
+
+        original = (request.meta.get("redirect_urls") or [request.url])[0]
+        return original if es_url_de_robots(original) else None
+
+    def process_response(self, request: Request, response: Response, spider=None):
+        try:
+            url = self._url_de_robots(request)
+            if url is not None:
+                cabeceras = {
+                    k.decode("latin-1").lower(): ", ".join(
+                        v.decode("latin-1", "replace") for v in (vs or []))
+                    for k, vs in response.headers.items()
+                }
+                self._registrar(request, url, status_code=response.status,
+                                cabeceras=cabeceras, cuerpo=response.body,
+                                url_final=response.url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo registrar el robots.txt de %s: %s", request.url, exc)
+        return response
+
+    def process_exception(self, request: Request, exception, spider=None):
+        try:
+            url = self._url_de_robots(request)
+            if url is not None:
+                self._registrar(request, url,
+                                error=f"{type(exception).__name__}: {exception}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo registrar el robots.txt de %s: %s", request.url, exc)
+        return None
+
+    def _registrar(self, request: Request, url: str, **datos) -> None:
+        from shared.robots_txt import fila_de_respuesta
+
+        clave = url.lower()
+        intentos = int(request.meta.get("retry_times") or 0) + 1
+        if request.meta.get("robots_txt_comprobacion"):
+            fila = self.filas.get(clave)
+            if fila is None:
+                return
+            nueva = fila_de_respuesta(url, intentos=intentos, **datos)
+            fila["comprobacion"] = {
+                "status_code": nueva["status_code"], "error": nueva["error"],
+                "response_class": nueva["response_class"],
+                "fecha": nueva["fecha"].isoformat(timespec="seconds"),
+            }
+            # Si a la segunda respondio, ese es el robots.txt que se evalua:
+            # la primera no dejo cuerpo.
+            if nueva["cuerpo"] is not None and fila.get("cuerpo") is None:
+                for k in ("bytes", "sha256", "cuerpo", "recortado"):
+                    fila[k] = nueva[k]
+            logger.info("robots.txt %s comprobado al cerrar: %s", url,
+                        nueva["status_code"] or nueva["error"])
+            self._guardar(fila)
+            return
+        if clave in self.filas:
+            return  # la primera de esta ejecucion es con la que decidio Scrapy
+        spider = getattr(self.crawler, "spider", None)
+        interno = getattr(spider, "_is_internal", None)
+        if callable(interno) and not interno(url):
+            return
+        if len(self.filas) >= self._tope:
+            if not self._avisado_tope:
+                self._avisado_tope = True
+                logger.warning("robots.txt: tope de %d hosts guardados; los demas quedan "
+                               "sin evaluar", self._tope)
+            return
+        fila = fila_de_respuesta(url, intentos=intentos, **datos)
+        self.filas[clave] = fila
+        if fila["status_code"] is None or fila["status_code"] >= 400:
+            logger.warning("robots.txt %s: %s tras %d intento(s)", url,
+                           fila["status_code"] or fila["error"], intentos)
+        self._guardar(fila)
+
+    def _guardar(self, fila: dict) -> None:
+        """Una fila por (job, URL): la de una ejecucion anterior se sustituye."""
+        try:
+            from shared.database import SessionLocal
+            from shared.models import RobotsTxt
+
+            spider = getattr(self.crawler, "spider", None)
+            job_id = getattr(spider, "job_id", None)
+            if not job_id:
+                return
+            sesion = SessionLocal()
+            try:
+                datos = {k: v for k, v in fila.items() if not k.startswith("_")}
+                existente = (sesion.query(RobotsTxt)
+                             .filter(RobotsTxt.job_id == job_id, RobotsTxt.url == fila["url"])
+                             .one_or_none())
+                if existente is None:
+                    sesion.add(RobotsTxt(job_id=job_id, **datos))
+                else:
+                    for k, v in datos.items():
+                        setattr(existente, k, v)
+                    existente.evaluacion = None
+                sesion.commit()
+            finally:
+                sesion.close()
+        except Exception as exc:  # noqa: BLE001 -- el registro no tumba un rastreo
+            logger.warning("No se pudo guardar el robots.txt de %s: %s", fila.get("url"), exc)
+
+    # -- comprobacion al cerrar --------------------------------------------
+    def _spider_idle(self, spider=None) -> None:
+        if self._pendientes > 0 and time.monotonic() < self._limite:
+            raise DontCloseSpider
+        if self._comprobado or not self._comprobar:
+            return
+        self._comprobado = True
+        try:
+            lanzadas = self._lanzar_comprobaciones()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo comprobar de nuevo robots.txt: %s", exc)
+            return
+        if lanzadas:
+            raise DontCloseSpider
+
+    def _lanzar_comprobaciones(self) -> int:
+        from scrapy.http.request import NO_CALLBACK
+        from scrapy.utils.defer import deferred_from_coro
+
+        from shared.robots_txt import INACCESIBLE, estado
+
+        engine = self.crawler.engine
+        lanzadas = 0
+        for fila in list(self.filas.values()):
+            if estado(fila["status_code"], fila["error"], fila["response_class"]) != INACCESIBLE:
+                continue
+            req = Request(fila["url"], priority=self.PRIORIDAD_DESCARGA, callback=NO_CALLBACK,
+                          dont_filter=True,
+                          meta={"dont_obey_robotstxt": True, "dont_retry": True,
+                                "robots_txt_comprobacion": True})
+            descarga = getattr(engine, "download_async", None)
+            d = deferred_from_coro(descarga(req)) if descarga else engine.download(req)
+            d.addBoth(self._fin_comprobacion)
+            self._pendientes += 1
+            lanzadas += 1
+        self._limite = time.monotonic() + self._espera
+        return lanzadas
+
+    def _fin_comprobacion(self, _resultado) -> None:
+        # La respuesta o el error ya los anoto process_response/process_exception.
+        self._pendientes -= 1
         return None
 
 

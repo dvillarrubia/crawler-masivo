@@ -99,7 +99,7 @@
 | GET | `/api/jobs/{id}/links` | Link graph |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/urls/{url_id}/raw-html` | HTML guardado de una URL (solo con `extraction.store_raw_html`). Endpoint aparte y no un campo del detalle: 170 kB de media por pagina |
-| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **84 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio), `response_class` (decision 103) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
+| GET | `/api/jobs/{id}/export` | CSV export (streaming, 1000-row windows) — **85 columnas**: URL + metadatos + `click_depth` (clics desde la home, decision 90) + **h1/h2** (solo los que se pintan), og/twitter, hreflang, tipos de datos estructurados, imagenes sin alt y cabeceras de seguridad. Las de M1: `content_word_count`, `content_hash`, `pagerank_score` y `pagerank_raw` (la 0-100 es la que hay que leer y ordenar, decision 34), `pagerank_fiable` (decision 35), `blocked_by_robots` (decision 48, con `status_code` VACIO porque la URL no se pidio), `response_class` (decision 103), `bloqueada_googlebot` (decision 113, vacio = no evaluado) y los dos `*_pixel_width` (decision 54), agregados por lote (4 consultas por ventana, no 4 por URL). `content_text_first_500` dice en el nombre que va recortado; el texto entero es `/content/export`. Con reglas a medida, columnas `x_<nombre>` AL FINAL (decision 104) |
 
 
 ## Extraction Functions (`extractors.py`)
@@ -138,7 +138,8 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas HTML indexables; las anotaciones repetidas cuentan una vez (decision 116) |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
-| `analyze_indexability()` | indexability status |
+| `analyze_robots_txt()` | **robots_txt_inaccesible** por host: robots.txt con 5xx, 429 o sin respuesta (`error`; `warning` si a la segunda respondio o si es un 429). Carga `robots_txt` para la indexabilidad (decision 112, logica en `analysis/robots_txt.py` y `shared/robots_txt.py`) |
+| `analyze_indexability()` | indexability status; con `robots_txt` guardado, `urls.bloqueada_googlebot` (Protego con el token `Googlebot`) y **robots_difiere_para_googlebot** por host (decision 113) |
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
 | `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
@@ -180,6 +181,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `HttpConfigMiddleware` | 420 | Bloque `http` del job. Cabeceras propias, cookies y Basic **solo** a los hosts de las semillas (con y sin www, subdominios con `crawl_subdomains`; no el host al que salta una semilla) y se quitan de las demas; `Accept-Language` a todas. Sin jar, las cookies van como cabecera `Cookie`; con render, en `meta["_http_render"]` para `render.preparar_pagina` (decision 114) |
 | `CookiesTrasElJarMiddleware` | 705 | Solo con `COOKIES_ENABLED` (`http.conservar_cookies`): tras el `CookiesMiddleware` de Scrapy vacia `request.cookies` para que curl_cffi mande la cabecera del jar (decision 114) |
 | `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
+| `RobotsTxtRegistroMiddleware` | 90 | Guarda en `robots_txt` la respuesta FINAL del robots.txt de cada host interno (por debajo de Retry y Redirect), y si fallo lo pide otra vez al quedarse el spider sin trabajo. Solo anota: lo que se pide no cambia (decision 112). Ajustes: `ROBOTS_TXT_MAX_HOSTS` (200), `ROBOTS_TXT_COMPROBAR` (True) |
 
 ## Scrapy Settings
 

@@ -168,8 +168,11 @@ def servir(robots_prohibe_todo: bool = False,
            robots_crawl_delay: float | None = None,
            rutas_extra: dict | None = None,
            puerto: int = 0,
-           muro: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
+           muro: dict | None = None,
+           lentas: dict | None = None) -> tuple[ThreadingHTTPServer, int]:
     rutas: dict = {}
+    # {ruta: segundos} que el servidor tarda en contestar: para un timeout.
+    lentas = lentas or {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
@@ -178,6 +181,8 @@ def servir(robots_prohibe_todo: bool = False,
                                self.path))
             CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
                               self.path, {k.lower(): v for k, v in self.headers.items()}))
+            if self.path in lentas:
+                time.sleep(lentas[self.path])
             status, headers, body = rutas.get(self.path.split("?")[0], (404, {}, b"no"))
             self.send_response(status)
             headers = {"Content-Type": "text/html; charset=utf-8", **headers}
@@ -303,7 +308,8 @@ def main() -> None:
                        entrada.get("robots_crawl_delay"),
                        entrada.get("rutas"),
                        entrada.get("puerto", 0),
-                       entrada.get("muro"))
+                       entrada.get("muro"),
+                       entrada.get("lentas"))
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -387,6 +393,9 @@ def main() -> None:
         # Condicional para que el test del Crawl-delay falle contra el codigo
         # anterior por lo que mide (el ritmo), no por un ImportError.
         middlewares["seo_crawler.middlewares.RobotsCrawlDelayMiddleware"] = 110
+    if hasattr(mw, "RobotsTxtRegistroMiddleware"):
+        # Como en settings.py (decision 112). Condicional por lo mismo.
+        middlewares["seo_crawler.middlewares.RobotsTxtRegistroMiddleware"] = 90
     con_crawl_delay = entrada.get("robots_crawl_delay") is not None
 
     ajustes_reales: dict = {}
@@ -425,7 +434,7 @@ def main() -> None:
         # el escenario de `Disallow: /` lo enciende (ver robots_prohibe_todo).
         "ROBOTSTXT_OBEY": bool(
             entrada.get("robots_prohibe_todo") or entrada.get("robots_bloquea_privado")
-            or con_crawl_delay
+            or con_crawl_delay or entrada.get("robots_obey")
         ) and entrada.get("robots_mode") not in ("audit", "ignore"),
         "ROBOTS_MODE": entrada.get("robots_mode", "respect"),
         "DOWNLOADER_MIDDLEWARES": middlewares,
@@ -445,12 +454,21 @@ def main() -> None:
         },
         "ITEM_PIPELINES": pipelines,
         **ajustes_reales,
+        # Ajustes propios de un test (DOWNLOAD_TIMEOUT, RETRY_HTTP_CODES...).
+        **(entrada.get("settings") or {}),
     })
     cierre: dict = {}
     original_closed = SeoSpider.spider_closed
 
     def _spider_closed(self, spider, reason):
         cierre["reason"] = reason
+        # Lo que anoto el registro de robots.txt (decision 112).
+        try:
+            for m in self.crawler.engine.downloader.middleware.middlewares:
+                if type(m).__name__ == "RobotsTxtRegistroMiddleware":
+                    cierre["robots_txt"] = list(m.filas.values())
+        except Exception:  # noqa: BLE001
+            pass
         return original_closed(self, spider, reason)
 
     SeoSpider.spider_closed = _spider_closed
@@ -474,7 +492,7 @@ def main() -> None:
         salida.append(fila)
     if entrada.get("ver_cabeceras"):
         print("@@CABECERAS@@" + json.dumps(CABECERAS))
-    print("@@CIERRE@@" + json.dumps(cierre))
+    print("@@CIERRE@@" + json.dumps(cierre, default=str))
     if trampa is not None:
         print("@@LLM@@" + json.dumps(trampa))
     if redis_falso is not None:

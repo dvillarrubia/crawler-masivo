@@ -343,6 +343,11 @@ class Url(Base):
     # login_requerido, desconocido. NULL = sin respuesta, salto de una
     # redireccion o rastreo anterior a la columna (decision 103).
     response_class = Column(String(32), nullable=True)
+    # Si Googlebot puede pedirla segun el robots.txt guardado del host
+    # (`robots_txt`, decision 113). NULL = no evaluado: censo anterior, host sin
+    # robots.txt guardado, robots.txt inaccesible o con un muro delante. Lo
+    # escribe el analisis; `blocked_by_robots` es lo que hizo el rastreo.
+    bloqueada_googlebot = Column(Boolean, nullable=True)
     inlinks_count = Column(Integer, default=0)               # total inlinks to this URL
     outlinks_count = Column(Integer, default=0)              # outlinks INTERNOS (los externos, aparte)
     external_outlinks_count = Column(Integer, default=0)     # external outlinks count
@@ -812,6 +817,51 @@ class EnlaceNoRastreable(Base):
     __table_args__ = (
         Index("ix_enr_job", "job_id"),
         Index("ix_enr_from", "from_url_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# robots.txt de cada host del censo (decisiones 112 y 113)
+# ---------------------------------------------------------------------------
+class RobotsTxt(Base):
+    """Lo que respondio el robots.txt de un host durante el rastreo.
+
+    Una fila por (job, URL del robots.txt): Google trata aparte cada esquema,
+    host y puerto. La escribe `RobotsTxtRegistroMiddleware` con la respuesta
+    FINAL (tras reintentos y redirecciones) de la misma descarga con la que
+    Scrapy decide que se pide, y el analisis la evalua para Googlebot (y para
+    los bots de la Ola 7.3). Sin fila = «no evaluado», nunca «sin robots.txt».
+
+    El cuerpo solo se guarda de un 2xx, recortado a los 500 KiB que lee Google
+    (`recortado`); `bytes` y `sha256` son del cuerpo entero, para ver si cambio
+    entre censos (#36). `comprobacion` es la segunda peticion al acabar el
+    rastreo cuando la primera fallo: separa un fallo pasajero de uno que dura.
+    """
+
+    __tablename__ = "robots_txt"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    host = Column(String(512), nullable=False)
+    url = Column(Text, nullable=False)                  # https://host/robots.txt pedido
+    url_final = Column(Text, nullable=True)             # si redirigio, a donde
+    status_code = Column(Integer, nullable=True)        # NULL = no hubo respuesta
+    error = Column(String(200), nullable=True)          # tipo de excepcion: timeout, DNS...
+    response_class = Column(String(32), nullable=True)  # shared/respuestas.py (decision 103)
+    intentos = Column(Integer, nullable=True)           # con los reintentos de Scrapy
+    bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+    cuerpo = Column(Text, nullable=True)
+    recortado = Column(Boolean, nullable=True)
+    # {status_code, error, response_class, fecha} de la comprobacion al cerrar.
+    comprobacion = Column(JSON, nullable=True)
+    # Lo que escribe el analisis: por bot, URLs evaluadas y bloqueadas.
+    evaluacion = Column(JSON, nullable=True)
+    fecha = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "url", name="uq_robots_txt_job_url"),
+        Index("ix_robots_txt_job_host", "job_id", "host"),
     )
 
 
