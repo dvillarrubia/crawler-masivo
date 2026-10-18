@@ -2328,6 +2328,28 @@ def _paginas_con(job_id: uuid.UUID, db: Session, tipos: list[str]) -> int:
     ).scalar() or 0
 
 
+def _paginas_de_mas_en_grupos(job_id: uuid.UUID, db: Session, tipo: str) -> int:
+    """Paginas que cubre una incidencia agrupada ADEMAS de la suya.
+
+    `title_generico` (decision 121) es una fila por valor, en la pagina de URL
+    menor, con `paginas_afectadas`, y les quita a las demas su
+    `title_duplicate` y su `title_too_short` (36). `_paginas_con` cuenta
+    `url_id` distintos, asi que sin esto tres paginas «Sin título | Marca»
+    restaban una y la nota SUBIA por un hallazgo mas preciso (revision de
+    #159, el mismo caso que la soft 404 de la decision 105). Puede contar dos
+    veces una de esas paginas si ademas tiene `title_too_long`: el resultado
+    se acota abajo con `max(0, ...)` y la pagina sigue teniendo un problema.
+    """
+    extra = 0
+    for (detalles,) in db.query(Issue.details).filter(
+        Issue.job_id == job_id, Issue.issue_type == tipo,
+    ):
+        n = detalles.get("paginas_afectadas") if isinstance(detalles, dict) else None
+        if isinstance(n, int) and n > 1:
+            extra += n - 1
+    return extra
+
+
 def _calc_crawlability(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     """Crawlability: status codes, indexability, redirects."""
     total = db.query(func.count(Url.id)).filter(
@@ -2430,7 +2452,8 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     issue_map: dict[str, int] = {it: c for it, c in issue_rows}
 
     title_missing = issue_map.get("title_missing", 0)
-    title_problems = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate"])
+    title_relleno_extra = _paginas_de_mas_en_grupos(job_id, db, "title_generico")
+    title_problems = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "title_generico"]) + title_relleno_extra
     desc_missing = issue_map.get("description_missing", 0)
     desc_problems = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate"])
     h1_problems = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate"])
@@ -2446,7 +2469,7 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Issue.severity.in_(("error", "warning")),
     ).scalar() or 0
     soft404_candidatos = _paginas_con(job_id, db, ["soft_404_candidato"])
-    title_nota = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "soft_404"])
+    title_nota = _paginas_con(job_id, db, ["title_missing", "title_too_short", "title_too_long", "title_duplicate", "title_generico", "soft_404"]) + title_relleno_extra
     desc_nota = _paginas_con(job_id, db, ["description_missing", "description_too_short", "description_too_long", "description_duplicate", "soft_404"])
     h1_nota = _paginas_con(job_id, db, ["h1_missing", "h1_multiple", "h1_duplicate", "soft_404"])
     thin_nota = _paginas_con(job_id, db, ["low_word_count", "very_low_text_ratio", "low_text_ratio", "soft_404"])
@@ -2495,9 +2518,9 @@ def _calc_content(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     if title_problems - title_missing > 0:
         recs.append(Recommendation(
             priority="media", title="Optimizar titulos",
-            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico, tenga al menos 10 caracteres y no pase de 580 pixeles de ancho (que es por donde Google lo corta).",
+            description=f"Hay {title_problems - title_missing} paginas con titulos problematicos (de relleno, demasiado cortos, largos o duplicados). Optimiza cada titulo para que sea unico, tenga al menos 10 caracteres y no pase de 580 pixeles de ancho (que es por donde Google lo corta).",
             affected_count=title_problems - title_missing,
-            issue_types=["title_too_short", "title_too_long", "title_duplicate"],
+            issue_types=["title_too_short", "title_too_long", "title_duplicate", "title_generico"],
         ))
     if desc_missing > 0:
         recs.append(Recommendation(

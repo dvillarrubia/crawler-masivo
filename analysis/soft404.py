@@ -68,7 +68,8 @@ TAPADAS = (
     "title_missing", "title_too_short", "title_too_long", "title_duplicate", "title_multiple",
     "description_missing", "description_too_short", "description_too_long",
     "description_duplicate", "description_multiple",
-    "h1_missing", "h1_multiple", "h1_duplicate",
+    # `h1_vacio` (decision 121) dice lo mismo que `h1_missing`: sin titular.
+    "h1_missing", "h1_vacio", "h1_multiple", "h1_duplicate",
     "duplicate_content", "near_duplicate_content",
 )
 # Las que agrupan paginas por `group_key`: si al quitar las soft 404 un grupo se

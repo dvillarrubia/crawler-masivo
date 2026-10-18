@@ -127,10 +127,10 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | Method | Issue Types Detected |
 |--------|---------------------|
 | `analyze_status_codes()` | status_4xx, status_5xx (sin los muros), **respuesta_no_valida** por host y clase (decision 103) |
-| `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title |
-| `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description |
-| `analyze_headings()` | missing_h1, multiple_h1 |
-| `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101) |
+| `analyze_titles()` | missing_title, title_too_short, title_too_long, duplicate_title, **title_generico** (placeholder del CMS por valor, `shared/titulos.py`; tapa su `title_too_short` y su `title_duplicate`: decision 121) |
+| `analyze_descriptions()` | missing_description, description_too_short, description_too_long, duplicate_description, **description_igual_title** (por host y plantilla, decision 121) |
+| `analyze_headings()` | missing_h1, multiple_h1 (solo los h1 con texto), **h1_vacio** (no en censos anteriores a la decision 46; decision 121) |
+| `analyze_canonicals()` | canonical_missing, canonical_multiple, canonical_in_body, canonical_cross_domain, canonical_a_http y lo que hay en el destino: **canonical_a_error, canonical_a_redireccion, canonical_a_no_indexable, canonical_encadenado** (decision 101). El canonical es el del HTML o, si no hay, el de la cabecera `Link` (`fuente: cabecera`); **canonical_html_y_cabecera_distintos** y **noindex_y_canonical_a_otra** (por plantilla, sustituye al `noindex_page`), sin evaluar las meta refresh (decision 120) |
 | `analyze_hreflang()` | hreflang_missing_return, hreflang_invalid_lang, hreflang_broken_target, hreflang_in_body, y los de la decision 99: hreflang_sin_autorreferencia, hreflang_sin_x_default (por host), hreflang_idioma_repetido, hreflang_destino_no_indexable, hreflang_retorno_incoherente. Solo sobre paginas HTML indexables; las anotaciones repetidas cuentan una vez (decision 116) |
 | `analyze_structured_data()` | structured data validation |
 | `analyze_html_ignorado()` | html_supera_2mb (por pagina, indexables), head_cortado y meta_fuera_del_head (agrupados) — decision 102 |
@@ -138,7 +138,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
 | `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
-| `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101) |
+| `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101), **redireccion_a_noindex** y **meta_refresh_redireccion** (retardo con `shared/meta_refresh.py`; decision 120) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |
@@ -146,7 +146,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_url_issues()` | url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted |
 | `analyze_links()` | orphan_page, **solo_enlazada_por_redireccion** (decision 63), **canonical_sin_enlazar** (decision 101), **not_reachable_from_home** y `click_depth` (decision 90, en `compute_link_counts`), high_outlink_count, y las metricas del grafo (inlinks, outlinks, pagerank) |
 | `analyze_sitemap()` | sitemap_orphan (solo indexables), not_in_sitemap, **sitemap_no_indexable** (decision 100, con el motivo en `details`) |
-| `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
+| `avisos_de_enlaces.py` | **enlace_interno_a_error**, **enlace_interno_a_redireccion** y **utm_en_enlace_interno** y **enlace_sin_ancla** (decision 121) (sobre la temporal de aristas de `compute_link_counts`) y **enlace_no_rastreable** (sobre `enlaces_no_rastreables`). Por pagina de origen salvo lo de plantilla (`enlaces_plantilla_min_paginas`, 10), que se avisa una vez; `utm` por destino. Decision 106 |
 
 Configurable thresholds via `job.config.analysis_thresholds` JSON or module-level constants.
 

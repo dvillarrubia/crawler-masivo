@@ -661,3 +661,89 @@
    `tests/test_hreflang_repetido_y_cabecera.py` (extractor y analisis contra
    SQLite) y `tests/test_spider_cabeceras_y_saltos.py` (spider real: un PDF con
    hreflang en la cabecera guarda sus dos filas con `origen='cabecera'`).
+
+<a id="d120"></a>
+120. **Senales que se contradicen, y una meta refresh es una redireccion,
+   no la pagina** (#150, parte A, PR de re-analisis). Todo sale de datos ya
+   guardados: re-analizar un censo lo aplica sin re-rastrear.
+   - **El canonical que vale es el del HTML y, si no hay, el de la cabecera
+     `Link`** tambien en `analyze_canonicals`, como ya hacian la indexabilidad
+     y `_Fichas`. Solo se leia `canonical_href`: una pagina «Canonicalised» por
+     cabecera salia a la vez con `canonical_missing`, y su destino no se
+     comprobaba (B1). Ahora `canonical_missing` solo sale sin ninguno de los
+     dos, y lo que sale del de la cabecera (`canonical_cross_domain`,
+     `canonical_a_http`, los avisos del destino de la 101) lleva
+     `fuente: cabecera`.
+   - **`canonical_html_y_cabecera_distintos`** (warning): los dos existen y no
+     son `misma_url` (la barra final cuenta, el orden de los parametros no;
+     decision 39), en paginas 200 y sin `canonical_multiple` (115: si Google ya
+     ignora los del HTML, el hallazgo es ese). Manda el del HTML, como hasta
+     ahora; que Google ignore los dos es la lectura de la documentacion de
+     consolidacion, sin verificar la cita exacta. Con
+     `enlaces_plantilla_min_paginas` paginas o mas en un host (un CDN o un
+     plugin que mete la cabecera en todo el sitio) es una fila por host con
+     `paginas_afectadas` (53). El umbral es el de la 106, sin medir.
+   - **`noindex_y_canonical_a_otra`** (info): pagina 200 con `Url.noindex` y un
+     canonical efectivo a otra URL. `estado_indexabilidad` devuelve «Noindex»
+     antes de mirar el canonical, asi que la contradiccion no se veia: solo
+     `noindex_page`. **Sustituye al `noindex_page`** de esas paginas (36, como
+     `canonical_sin_enlazar` a `orphan_page`); con un destino 200 que tambien es
+     noindex no hay contradiccion util (101) y la pagina se queda con su
+     `noindex_page`. Una fila por (host, `firma_de_ruta`) con
+     `paginas_afectadas`: «faceta en noindex con canonical a la categoria» es
+     deliberado y masivo (38). `destino_indexable` es None si el destino no se
+     rastreo: no se afirma. Las reglas `config.templates` del job no se usan
+     todavia (`plantilla_de` llega con la rama de tiempos, #158).
+   - **`redireccion_a_noindex`** (warning), al lado de `redireccion_a_error`, con
+     el mismo recorrido y los mismos filtros: origen interno, sin bucle, sin
+     pasar de 10 saltos (117) y `not _solo_normaliza` (un http → https de una
+     noindex esta bien hecho; el noindex es de la pagina). El final es una
+     pagina 200 con `Url.noindex`, que `analyze_indexability` acaba de
+     escribir; un muro, un destino sin rastrear o un 429 no dicen nada.
+     Sustituye a `redirect_chain` en ese origen. Con
+     `enlaces_plantilla_min_paginas` redirecciones o mas al mismo destino
+     (`/mi-cuenta/*` → `/login`) es UNA fila en el destino con
+     `redirecciones_que_llegan`.
+   - **`meta_refresh_redireccion`**: la fuente de verdad es
+     `indexability_status = 'Redirect (meta refresh)'` con `redirect_url`, que
+     el spider solo pone con un destino fuera de `<noscript>` y distinto de la
+     propia URL. `html_meta.meta_refresh` no nulo no basta (B5: una refresh en
+     `<noscript>` o una recarga `content="300"` no redirigen). El retardo se lee
+     del `content` con `shared/meta_refresh.py`: 0 = `info` (Google la trata
+     como permanente), mas de 0 = `warning` (como temporal; el usuario ve la
+     pagina N segundos; `0.5` cuenta como mas de 0). Con render el salto va sin
+     `html_meta`: `retardo_s` None e `info`, no 0. Y con render una refresh
+     inmediata puede registrarse como «Redirect (JS)» (sin verificar con
+     Chromium), asi que en esos censos puede faltar. Si la URL ya tiene
+     `redireccion_a_error`, `redireccion_a_noindex` o `redirect_loop`, ese es el
+     aviso (36); con `redirect_chain` convive. Una plantilla entera (umbral de
+     la 106) es una fila por (host, plantilla, tipo de retardo).
+   - **Una meta refresh no es indexable** (B2): `analyze_indexability` la deja
+     `indexable=false` como un 3xx, y `analyze_canonicals` no evalua sus
+     senales (ni las de un muro, 103). Antes entraba en los grupos de titulos y
+     descriptions duplicados y salia `canonical_missing` en el puente.
+   - **`_Fichas.seguir_redirecciones` sigue la meta refresh** (B6), como ya hacia
+     `analyze_redirect_chains`: un canonical a una pagina con meta refresh es
+     `canonical_a_redireccion` con su destino final, no un destino 200.
+
+   **Cambia cifras de censos entregados**: menos `canonical_missing` (B1),
+   menos `noindex_page` y paginas indexables (B2), tipos nuevos. Lo registra
+   `analisis_version` (72) y la comparacion por incidencias no cruza versiones
+   (91). **Sin medir en censos reales**: en esta rama no habia ninguno, y la
+   medicion `READ ONLY` en los seis censos de la 101 queda pendiente (cuantos
+   `canonical_missing` quita B1, cuantas meta refresh y con que retardos).
+   Depende de que `Url.noindex` lea bien el `X-Robots-Tag` con directivas con
+   valor (#152): sin ese arreglo `noindex_y_canonical_a_otra` y
+   `redireccion_a_noindex` miden de menos. Tests:
+   `tests/test_senales_contradictorias_db.py` (incluido `run_all` dos veces con
+   el mismo resultado, en SQLite y en Postgres).
+
+   **Medido en la revision (#159)**, re-analizando con `ROLLBACK` copias de
+   cuatro censos locales (progym x2, Lopesan, blogs.uoc.edu; cifras en la
+   decision 121): B1 no quita ningun `canonical_missing` (ninguno de los
+   cuatro declara canonical en la cabecera `Link`), no hay meta refresh ni
+   `canonical_html_y_cabecera_distintos`, `noindex_y_canonical_a_otra` sale
+   9 veces en Lopesan (11 paginas, todas con el canonical a `*.lfr.cloud`) y 1
+   en progym (6 paginas) y `redireccion_a_noindex` 14 en Lopesan y 3 en blogs.uoc.edu. Volumen bajo: nada
+   de ruido. Las cifras de B1 y de las meta refresh siguen pendientes de un
+   censo que las tenga.
