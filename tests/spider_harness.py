@@ -267,38 +267,28 @@ def servir(robots_prohibe_todo: bool = False,
     # Lo que se sirve a un UA de movil, si la ruta esta aqui (decision 119)
     movil: dict = {}
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            PETICIONES.append((time.monotonic(),
-                               (self.headers.get("Host") or "").split(":")[0],
-                               self.path))
-            CABECERAS.append(((self.headers.get("Host") or "").split(":")[0],
-                              self.path, {k.lower(): v for k, v in self.headers.items()}))
+    class Handler(_Manejador):
+        def _ruta(self):
             if self.path in lentas:
                 time.sleep(lentas[self.path])
             ruta = self.path.split("?")[0]
             ua = self.headers.get("User-Agent") or ""
             vistas[ruta] = vistas.get(ruta, 0) + 1
             if ruta in caidas and vistas[ruta] > 1:
-                status, headers, body = 500, {}, b"<html><body>Error</body></html>"
-            elif ruta in movil and ("Mobile" in ua or "iPhone" in ua):
+                return 500, {}, b"<html><body>Error</body></html>"
+            if ruta in movil and ("Mobile" in ua or "iPhone" in ua):
                 status, headers, body = movil[ruta]
             else:
-                status, headers, body = rutas.get(ruta, (404, {}, b"no"))
+                spec = rutas.get(ruta, (404, {}, b"no"))
+                if isinstance(spec, dict):
+                    # Una respuesta por metodo (decisiones 123 y 124): sin las
+                    # pseudo-cabeceras de `_cabeceras_especiales`.
+                    return spec
+                status, headers, body = spec
             if b"{aleatorio}" in body:
                 # Contenido que cambia en CADA peticion: un campo volatil
                 body = body.replace(b"{aleatorio}", os.urandom(6).hex().encode())
-            status, headers, body = _cabeceras_especiales(ruta, status, headers, body)
-            self.send_response(status)
-            headers = {"Content-Type": "text/html; charset=utf-8", **headers}
-            for k, v in headers.items():
-                self.send_header(k, v)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
+            return _cabeceras_especiales(ruta, status, headers, body)
 
     # Puerto fijo para reanudar el MISMO job en dos ejecuciones: con uno
     # aleatorio las URLs cambian y la reanudacion las veria como nuevas.
@@ -308,9 +298,8 @@ def servir(robots_prohibe_todo: bool = False,
                                  con_recursos=con_recursos))
     # Rutas propias de un test: {ruta: [codigo, cabeceras, cuerpo]}. El cuerpo
     # y los valores de las cabeceras admiten {port}.
-    for ruta, (codigo, cabeceras, cuerpo) in (rutas_extra or {}).items():
-        cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
-        rutas[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
+    for ruta, spec in (rutas_extra or {}).items():
+        rutas[ruta] = _preparar_ruta(spec, port)
     for ruta, (codigo, cabeceras, cuerpo) in (rutas_movil or {}).items():
         cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
         movil[ruta] = (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
@@ -337,6 +326,85 @@ def servir(robots_prohibe_todo: bool = False,
         )
     Thread(target=srv.serve_forever, daemon=True).start()
     return srv, port
+
+
+# (ip del servidor, metodo, ruta, cabeceras) de cada peticion a un servidor de
+# «tercero» (decision 123): que llega, con que metodo y sin que credenciales.
+EXTERNAS: list[tuple[str, str, str, dict]] = []
+
+
+class _Manejador(BaseHTTPRequestHandler):
+    """GET y HEAD. Una ruta es (codigo, cabeceras, cuerpo), o un dict por
+    metodo {"HEAD": (...), "GET": (...)} para los servidores que responden
+    distinto a cada uno. Un HEAD responde las cabeceras del GET sin cuerpo."""
+
+    externo = False
+
+    def _ruta(self):  # pragma: no cover - lo define cada servidor
+        raise NotImplementedError
+
+    def _responder(self, metodo: str):
+        host = (self.headers.get("Host") or "").split(":")[0]
+        PETICIONES.append((time.monotonic(), host, self.path))
+        CABECERAS.append((host, self.path, {k.lower(): v for k, v in self.headers.items()}))
+        if self.externo:
+            EXTERNAS.append((self.server.server_address[0], metodo, self.path,
+                             {k.lower(): v for k, v in self.headers.items()}))
+        ruta = self._ruta()
+        if isinstance(ruta, dict):
+            ruta = ruta.get(metodo) or ruta.get("GET") or (404, {}, b"no")
+        status, headers, body = ruta
+        if status == "cortar":
+            # Cierra la conexion sin responder (un servidor que no sabe de HEAD).
+            self.close_connection = True
+            return
+        self.send_response(status)
+        headers = {"Content-Type": "text/html; charset=utf-8", **headers}
+        for k, v in headers.items():
+            self.send_header(k, v)
+        if "Content-Length" not in headers:
+            self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if metodo != "HEAD":
+            self.wfile.write(body)
+
+    def do_GET(self):  # noqa: N802
+        self._responder("GET")
+
+    def do_HEAD(self):  # noqa: N802
+        self._responder("HEAD")
+
+    def log_message(self, *a):
+        pass
+
+
+def _preparar_ruta(spec, port: int):
+    """{port} en cabeceras y cuerpo; listas de JSON a tuplas con bytes."""
+    if isinstance(spec, dict):
+        return {m: _preparar_ruta(v, port) for m, v in spec.items()}
+    codigo, cabeceras, cuerpo = spec
+    cabeceras = {k: v.replace("{port}", str(port)) for k, v in cabeceras.items()}
+    return (codigo, cabeceras, cuerpo.replace("{port}", str(port)).encode("utf-8"))
+
+
+def servir_externos(externos: dict, port: int) -> list[ThreadingHTTPServer]:
+    """Un servidor por IP de «tercero» (127.0.0.2, 127.0.0.3...) en el MISMO
+    puerto que el sitio, para que `{port}` valga en sus URLs."""
+    servidores = []
+    for ip, rutas_ip in (externos or {}).items():
+        preparadas = {r: _preparar_ruta(v, port) for r, v in rutas_ip.items()}
+
+        class Externo(_Manejador):
+            externo = True
+            _rutas = preparadas
+
+            def _ruta(self):
+                return self._rutas.get(self.path.split("?")[0], (404, {}, b"no"))
+
+        srv = ThreadingHTTPServer((ip, port), Externo)
+        Thread(target=srv.serve_forever, daemon=True).start()
+        servidores.append(srv)
+    return servidores
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +498,8 @@ def main() -> None:
     tls_port = None
     if entrada.get("tls_caducado"):
         _srv_tls, tls_port = servir_tls_caducado()
+
+    externos = servir_externos(entrada.get("externos"), port)
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -581,7 +651,7 @@ def main() -> None:
         "DOWNLOADER_MIDDLEWARES": middlewares,
         # Como en produccion (settings.py): AUTOTHROTTLE encendido, que es lo
         # que bajaba el retraso del slot tras cada respuesta.
-        "AUTOTHROTTLE_ENABLED": con_crawl_delay,
+        "AUTOTHROTTLE_ENABLED": con_crawl_delay or bool(entrada.get("autothrottle")),
         "AUTOTHROTTLE_START_DELAY": 0,
         "AUTOTHROTTLE_MAX_DELAY": 10,
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,
@@ -594,6 +664,8 @@ def main() -> None:
             "seo_crawler.middlewares.DepthMiddleware": 900,
         },
         "ITEM_PIPELINES": pipelines,
+        # Los «terceros» del arnes viven en 127.0.0.x (decision 123).
+        "SONDAS_RED_PRIVADA": bool(entrada.get("externos")),
         **ajustes_reales,
         **extra_settings,
     })
@@ -615,6 +687,8 @@ def main() -> None:
     proceso.crawl(SeoSpider, job_id=job_id)
     proceso.start()
     srv.shutdown()
+    for externo in externos:
+        externo.shutdown()
 
     base = f"127.0.0.1:{port}"
     salida = []
@@ -629,6 +703,9 @@ def main() -> None:
             # CapturaAlternativaItem (decision 119)
             "perfil", "modo", "estado", "plantilla", "user_agent", "redirige_a",
             "medidas", "diferencias", "volatiles", "detalle",
+            # RespuestaSondeadaItem (decisiones 123 y 124)
+            "veredicto", "metodo", "uso", "host", "final_url", "final_status", "saltos",
+            "host_caido", "content_length", "interno", "error",
         )}
         for k in ("url", "redirect_url", "to_url", "redirige_a"):
             if fila.get(k):
@@ -645,6 +722,8 @@ def main() -> None:
         # Solo si se pide: los tests que parten la salida entre marcas no
         # esperan esta linea.
         print("@@JOB@@" + json.dumps(ACTUALIZACIONES_JOB, default=str))
+    if entrada.get("externos"):
+        print("@@EXTERNAS@@" + json.dumps(EXTERNAS))
     print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 

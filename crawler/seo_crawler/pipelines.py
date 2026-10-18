@@ -26,6 +26,7 @@ from seo_crawler.items import (
     LinkItem,
     PageItem,
     ResourceItem,
+    RespuestaSondeadaItem,
     SecurityItem,
     StructuredDataItem,
 )
@@ -72,6 +73,12 @@ class PostgresPipeline:
         # arranca DESPUES de que el worker pueda estar rastreando).
         self._enr_tabla: bool | None = None
         self._enr_mirada: float = 0.0
+        # Sondas de respuesta (decisiones 123 y 124): url_hash -> fila. No
+        # cuelgan de una pagina: se insertan por (job_id, url_hash) y gana la
+        # ultima. Misma comprobacion de que la tabla existe.
+        self._rs_buffer: dict[tuple[str, str], dict] = {}
+        self._rs_tabla: bool | None = None
+        self._rs_mirada: float = 0.0
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -158,6 +165,8 @@ class PostgresPipeline:
             self._handle_no_rastreables(item)
         elif isinstance(item, CapturaAlternativaItem):
             self._handle_captura(item)
+        elif isinstance(item, RespuestaSondeadaItem):
+            self._handle_sondeada(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -509,6 +518,94 @@ class PostgresPipeline:
         self._maybe_commit()
 
     # ------------------------------------------------------------------
+    # RespuestaSondeadaItem (decisiones 123 y 124)
+    # ------------------------------------------------------------------
+    def _tabla_sondeadas(self) -> bool:
+        """Si existe `respuestas_sondeadas` (la crea la API al arrancar). Sin
+        ella las sondas se pierden, pero el rastreo sigue igual: mismo motivo
+        que `_tabla_no_rastreables`."""
+        ahora = time.monotonic()
+        if self._rs_tabla is None or (not self._rs_tabla and ahora - self._rs_mirada > 60):
+            self._rs_mirada = ahora
+            antes = self._rs_tabla
+            try:
+                from sqlalchemy import inspect
+
+                from shared.models import RespuestaSondeada
+
+                self._rs_tabla = inspect(self.session.get_bind()).has_table(
+                    RespuestaSondeada.__tablename__)
+            except Exception:
+                self._rs_tabla = False
+            if not self._rs_tabla and antes is None:
+                logger.warning(
+                    "Sin tabla respuestas_sondeadas: no se guardan las sondas de enlaces "
+                    "externos ni de recursos hasta que exista (decision 123).")
+        return bool(self._rs_tabla)
+
+    _RS_COLUMNAS = ("url", "host", "uso", "interno", "metodo", "status_code", "final_url",
+                    "final_status", "saltos", "veredicto", "response_class", "host_caido",
+                    "content_type", "content_length", "error")
+
+    def _handle_sondeada(self, item: RespuestaSondeadaItem):
+        fila = {c: item.get(c) for c in self._RS_COLUMNAS}
+        for c in ("url", "final_url", "error", "content_type", "host"):
+            if isinstance(fila.get(c), str):
+                fila[c] = fila[c].replace("\x00", "")
+        if fila.get("content_type"):
+            fila["content_type"] = fila["content_type"][:255]
+        if fila.get("host"):
+            fila["host"] = fila["host"][:255]
+        import uuid
+
+        job_id = item.get("job_id")
+        try:
+            job_id = uuid.UUID(str(job_id))
+        except ValueError:
+            pass
+        clave = (str(job_id), item.get("url_hash"))
+        self._rs_buffer[clave] = {"job_id": job_id, "url_hash": item.get("url_hash"),
+                                  "fecha": datetime.now(timezone.utc), **fila}
+        if len(self._rs_buffer) >= self.batch_size:
+            self._flush_sondeadas()
+
+    def _flush_sondeadas(self) -> None:
+        if not self._rs_buffer or not self._tabla_sondeadas():
+            return
+        from shared.models import RespuestaSondeada
+
+        lote = list(self._rs_buffer.values())
+        self._rs_buffer = {}
+        tabla = RespuestaSondeada.__table__
+        try:
+            with self.session.begin_nested():
+                if self.session.get_bind().dialect.name == "postgresql":
+                    from sqlalchemy.dialects.postgresql import insert
+
+                    sentencia = insert(tabla).values(lote)
+                    sentencia = sentencia.on_conflict_do_update(
+                        index_elements=["job_id", "url_hash"],
+                        set_={c: sentencia.excluded[c] for c in self._RS_COLUMNAS + ("fecha",)})
+                    self.session.execute(sentencia)
+                else:
+                    for job_id in {f["job_id"] for f in lote}:
+                        self.session.query(RespuestaSondeada).filter(
+                            RespuestaSondeada.job_id == job_id,
+                            RespuestaSondeada.url_hash.in_(
+                                [f["url_hash"] for f in lote if f["job_id"] == job_id]),
+                        ).delete(synchronize_session=False)
+                    self.session.execute(tabla.insert(), lote)
+        except Exception:
+            logger.exception("Fallo al guardar %d respuestas sondeadas", len(lote))
+            return
+        try:
+            self.session.commit()
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al confirmar %d respuestas sondeadas", len(lote))
+
+    # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)
     # ------------------------------------------------------------------
     def _handle_security(self, item: SecurityItem, spider: Spider):
@@ -546,6 +643,7 @@ class PostgresPipeline:
     def _flush(self, spider: Spider):
         self._flush_custom()
         self._flush_no_rastreables()
+        self._flush_sondeadas()
         if not self._buffer:
             return
 

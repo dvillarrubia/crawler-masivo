@@ -168,7 +168,8 @@ def test_en_sqlite_se_cuentan_las_filas_aunque_no_haya_bytes(sqlite):
     # `custom_extraction` (decision 104), `enlaces_no_rastreables` (106) y
     # `capturas_alternativas` (119) llevan job_id y se cuentan como las demas.
     assert d["filas"] == {"urls": 4, "links": 4, "issues": 0, "custom_extraction": 0,
-                          "enlaces_no_rastreables": 0, "capturas_alternativas": 0}
+                          "enlaces_no_rastreables": 0, "capturas_alternativas": 0,
+                          "respuestas_sondeadas": 0}
     assert d["bytes"] is None
 
 

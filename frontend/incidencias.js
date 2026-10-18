@@ -505,6 +505,21 @@ const ISSUE_INFO = {
     google: 'No usa rel=next/prev desde 2019, así que no afecta al índice. Es un fallo de plantilla, y otros buscadores sí los leen.',
     arreglo: 'Que el rel apunte a la misma URL que el enlace de la página siguiente, o quitarlo.',
   },
+  'enlace_externo_roto': {
+    que: 'El sitio enlaza una URL de otro sitio que responde 404, 410 u otro 4xx (o que redirige a uno), comprobado con GET. Un aviso por URL rota, con cuántas páginas la enlazan. Solo con «Comprobar enlaces externos» activado; un 403, un 429 o un 5xx no se avisan (es lo que responde un WAF o una caída puntual).',
+    google: 'No penaliza el sitio por un enlace roto a otro, pero es una mala experiencia, y un sitio con muchos enlaces muertos da señal de descuido y deja de pasar el valor de la cita.',
+    arreglo: 'Cambiar el enlace por la URL nueva del recurso o quitarlo. Si sale en muchas páginas, está en la plantilla: se arregla una vez.',
+  },
+  'dominio_externo_muerto': {
+    que: 'El sitio enlaza a un dominio que no existe (el DNS no lo encuentra, comprobado con el resolver) o que no acepta conexiones (dos intentos). Una incidencia por dominio, con sus URLs enlazadas y las páginas desde las que se enlaza.',
+    google: 'Un dominio caducado lo puede comprar cualquiera: el sitio acabaría enlazando a lo que publique el nuevo dueño. Para quien pulsa, el enlace no lleva a ningún sitio.',
+    arreglo: 'Quitar o sustituir todos los enlaces a ese dominio. Un dominio aparcado que responde 200 con una página de parking no se detecta: revisar los enlaces a dominios desconocidos de vez en cuando.',
+  },
+  'broken_resource': {
+    que: 'Una imagen, hoja de estilos o script que cargan las páginas responde 404/410 u otro 4xx (o su dominio no existe). Un aviso por recurso, con cuántas páginas lo cargan. Solo con «Comprobar recursos embebidos» (o «de otros hosts») activado.',
+    google: 'Una imagen rota no se indexa y deja un hueco; un CSS o un JS roto puede romper el render que ve Google.',
+    arreglo: 'Restaurar el fichero o cambiar la referencia en la plantilla o el contenido. Si lo cargan muchas páginas, está en la plantilla.',
+  },
 
   // ----- Imágenes -----
   'image_missing_alt': {
@@ -702,6 +717,9 @@ const ISSUE_LABEL_EXTRA = {
   paridad_movil_indexacion: 'Móvil: otro canonical o noindex',
   paridad_movil_contenido: 'Móvil: otro contenido',
   paridad_movil_respuesta: 'Móvil: otra respuesta',
+  enlace_externo_roto: 'Enlace externo roto',
+  dominio_externo_muerto: 'Dominio externo muerto',
+  broken_resource: 'Recurso roto',
 };
 
 // Los tipos de `enlaces_no_rastreables.crawlability` (decision 106).
@@ -847,4 +865,16 @@ const DETALLE_LABEL = {
   perfil: 'perfil',
   paginas_muestreadas: 'muestreadas de la plantilla',
   sin_vary_user_agent: 'sin «Vary: User-Agent»',
+  // Sondas de respuesta (decisiones 123 y 124)
+  veredicto: 'veredicto',
+  final_url: 'acaba en',
+  urls_distintas: 'URLs distintas',
+  misma_casa: 'del mismo dominio',
+  recurso: 'recurso',
+  resource_type: 'tipo',
+  interno: 'del sitio',
+  host: 'host',
+  comprobadas: 'comprobadas',
+  distintas: 'distintas',
+  error: 'error',
 };

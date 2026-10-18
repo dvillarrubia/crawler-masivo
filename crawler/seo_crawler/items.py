@@ -201,6 +201,33 @@ class EnlacesNoRastreablesItem(scrapy.Item):
     filas = scrapy.Field()
 
 
+class RespuestaSondeadaItem(scrapy.Item):
+    """Lo que respondio una URL sondeada: un enlace externo o un recurso
+    embebido que no es del censo (decisiones 123 y 124).
+
+    Mapea 1:1 a `RespuestaSondeada`. NO es una pagina: no tiene `url_id`, no
+    va a `urls` y el pipeline no la cuenta en el progreso del job.
+    """
+
+    job_id = scrapy.Field()
+    url_hash = scrapy.Field()
+    url = scrapy.Field()
+    host = scrapy.Field()
+    uso = scrapy.Field()
+    interno = scrapy.Field()
+    metodo = scrapy.Field()
+    status_code = scrapy.Field()
+    final_url = scrapy.Field()
+    final_status = scrapy.Field()
+    saltos = scrapy.Field()
+    veredicto = scrapy.Field()
+    response_class = scrapy.Field()
+    host_caido = scrapy.Field()
+    content_type = scrapy.Field()
+    content_length = scrapy.Field()
+    error = scrapy.Field()
+
+
 class CustomExtractionItem(scrapy.Item):
     """Lo que dieron las reglas a medida en una pagina (decision 104).
 

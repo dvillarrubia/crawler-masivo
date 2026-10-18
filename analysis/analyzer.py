@@ -40,7 +40,7 @@ from shared.config import (
 from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
-from analysis import avisos_de_enlaces
+from analysis import avisos_de_enlaces, avisos_de_sondas
 from analysis import avisos_de_paginacion
 from analysis import avisos_de_servidor
 from analysis import avisos_de_html
@@ -274,6 +274,12 @@ class SEOAnalyzer:
         self.session = session
         self.job_id = job_id
         self._pending_issues: list[dict[str, Any]] = []
+        # Sondas de respuesta (decisiones 123 y 124): lo ya avisado como enlace
+        # externo o dominio muerto (para no repetirlo como recurso) y el resumen
+        # que va a `jobs.sondas_resumen`.
+        self.sondas_avisadas: set[str] = set()
+        self.sondas_resumen: dict[str, Any] = {}
+        self._con_sondas: bool | None = None
 
         # Per-job thresholds (fallback to module-level constants)
         from shared.models import Job
@@ -362,6 +368,7 @@ class SEOAnalyzer:
         self.compute_pagerank()
         self.analyze_links()
         avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
+        avisos_de_sondas.avisar_recursos_rotos(self)  # decision 124
         self.analyze_sitemap()
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
@@ -401,7 +408,11 @@ class SEOAnalyzer:
         from shared.version import VERSION
 
         self.session.execute(
-            update(Job).where(Job.id == self.job_id).values(analisis_version=VERSION)
+            update(Job).where(Job.id == self.job_id).values(
+                analisis_version=VERSION,
+                # NULL si el censo no tiene sondas: no un resumen de ceros.
+                sondas_resumen=self.sondas_resumen or None,
+            )
         )
 
     # -- helpers ------------------------------------------------------------
@@ -3575,8 +3586,9 @@ class SEOAnalyzer:
         # motores, asi que la primera version de esto no actualizaba ni una
         # fila en los tests contra SQLite.
         from sqlalchemy import (BigInteger, Boolean, Column, Integer, MetaData, String,
-                                Table, Text, case, insert, null)
+                                Table, Text, case, insert, literal, null)
 
+        con_sondas = self._con_sondas = avisos_de_sondas.hay_sondas(self)
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         aristas = Table(
             "aristas_tmp", MetaData(),
@@ -3609,6 +3621,9 @@ class SEOAnalyzer:
             Column("origen_pag_excluida", Boolean),
             Column("origen_pag_profunda", Boolean),
             Column("rel_destino_url", Text),
+            # El del destino EXTERNO, para cruzarlo con `respuestas_sondeadas`
+            # (decision 123). Solo si el censo tiene sondas; si no, NULL.
+            Column("externo_hash", String(64)),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -3637,6 +3652,8 @@ class SEOAnalyzer:
             case((and_(pag.c.con_rel.is_(True), destino.id.is_(None)), Link.to_url),
                  else_=None)
             if pag is not None else null(),
+            (case((Link.is_internal.is_(False), Link.to_url_hash), else_=None)
+             if con_sondas else literal(None, String(64))),
         ).join(origen, origen.id == Link.from_url_id)
         if pag is not None:
             # Una temporal de las paginas de paginacion, por clave primaria:
@@ -3647,7 +3664,7 @@ class SEOAnalyzer:
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
                  "veces", "utm_hash", "sin_ancla_destino", "sin_ancla_posicion",
                  "sin_ancla_imagen", "origen_pag_excluida", "origen_pag_profunda",
-                 "rel_destino_url"],
+                 "rel_destino_url", "externo_hash"],
                 consulta
                 .outerjoin(destino, and_(
                     destino.url_hash == Link.to_url_hash,
@@ -3716,6 +3733,8 @@ class SEOAnalyzer:
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
         avisos_de_enlaces.avisar_enlaces_sin_ancla(self, aristas)  # decision 121
+        if con_sondas:
+            avisos_de_sondas.avisar_enlaces_externos(self, aristas)  # decision 123
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         avisos_de_paginacion.borrar_temporal(self)

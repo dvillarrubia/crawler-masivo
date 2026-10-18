@@ -3592,7 +3592,7 @@ const EXP_TABS = [
     columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','solo_enlazada_desde_paginacion_excluida'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
@@ -3602,7 +3602,7 @@ const EXP_TABS = [
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
   { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
-  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato'],
+  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   // Paridad movil/escritorio (decision 119): solo hay chips si el censo se
   // rastreo con `crawl_behavior.paridad_movil_muestra`.
@@ -3648,6 +3648,9 @@ function _freshForm() {
     // Spider — behavior
     crawl_subdomains: false,
     follow_nofollow: false,
+    // Sondas de respuesta (decisiones 123 y 124): fuera del censo y de max_urls
+    comprobar_enlaces_externos: false,
+    comprobar_recursos: false,
     exclude_patterns: '',
     include_patterns: '',
     max_url_length: 0,
@@ -3743,6 +3746,8 @@ function _configDesdeForm(f) {
       paridad_movil_muestra: parseInt(f.paridad_movil_muestra) || 0,
       paridad_movil_por_plantilla: parseInt(f.paridad_movil_por_plantilla) || 3,
       paridad_movil_ua: f.paridad_movil_ua || 'chrome_android',
+      comprobar_enlaces_externos: !!f.comprobar_enlaces_externos,
+      comprobar_recursos: !!f.comprobar_recursos,
     },
     url_filters: {
       max_url_length: parseInt(f.max_url_length) || 0,
@@ -3795,7 +3800,8 @@ function _formDesdeConfig(f, cfg) {
     'crawl_svg', 'crawl_other', 'check_external_resources']);
   sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
     'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
-    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua']);
+    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua',
+    'comprobar_enlaces_externos', 'comprobar_recursos']);
   sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
   sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
     'extract_page_content', 'store_raw_html']);

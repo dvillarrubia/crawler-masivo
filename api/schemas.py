@@ -75,6 +75,10 @@ class ResourceTypeConfig(BaseModel):
     crawl_fonts: bool = False
     crawl_svg: bool = True
     crawl_other: bool = True
+    # Comprobar tambien los recursos embebidos de OTROS hosts (imagenes de un
+    # CDN, scripts de terceros) con la sonda de respuesta (decision 124). No
+    # hacia nada hasta esa decision. Sin credenciales del job (114) y con el
+    # robots.txt del tercero. Usa el presupuesto `crawl_behavior.recursos_max`.
     check_external_resources: bool = False
 
 
@@ -141,6 +145,19 @@ class CrawlBehaviorConfig(BaseModel):
     # chrome_android por defecto: con Googlebot desde nuestra IP un WAF que
     # verifica bots lo bloquea o sirve otra cosa (decision 98)
     paridad_movil_ua: Literal["chrome_android", "googlebot_smartphone"] = "chrome_android"
+    # Sondas de respuesta (decisiones 123 y 124): piden con HEAD (GET de
+    # repuesto) lo que el sitio enlaza a otros sitios y lo que embebe, sin que
+    # sea del censo: no gastan max_urls, no se guardan en `urls` y no cuentan
+    # para la salud del rastreo. Apagadas: multiplican las peticiones.
+    comprobar_enlaces_externos: bool = False
+    # URLs externas distintas que se comprueban como mucho.
+    enlaces_externos_max: int = Field(default=5000, ge=0, le=100000)
+    # Recursos embebidos del sitio (imagenes, CSS, JS) que el censo no pide.
+    comprobar_recursos: bool = False
+    # Recursos distintos que se comprueban como mucho (internos y externos).
+    recursos_max: int = Field(default=20000, ge=0, le=500000)
+    # Tope de URLs por host externo (enlaces y recursos juntos). 0 = sin tope.
+    sondas_por_host: int = Field(default=50, ge=0, le=10000)
 
 
 class UrlFilterConfig(BaseModel):
@@ -881,6 +898,10 @@ class LinkResponse(BaseModel):
     link_type: str | None = None
     # Apariciones identicas en la pagina de origen (decision 94)
     repeticiones: int = 1
+    # Lo que respondio el destino a la sonda de enlaces externos (decision
+    # 123): veredicto de `shared/sondas.py` y codigo. NULL = no se sondeo.
+    estado_externo: str | None = None
+    status_externo: int | None = None
 
 
 # ---------------------------------------------------------------------------

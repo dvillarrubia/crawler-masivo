@@ -257,6 +257,11 @@ class Job(Base):
     # Con que reglas y cuando se materializo `urls.segmento`, y cuantas URLs
     # casaron con cada regla o no se pudieron juzgar (decision 125).
     segmentacion = Column(JSON, nullable=True)
+    # Sondas de respuesta (decisiones 123 y 124), lo escribe el analisis:
+    # cuantos destinos externos y recursos distintos habia, cuantos se
+    # comprobaron, rotos y dominios muertos. NULL = analisis anterior o sin
+    # sondas. Con «comprobados < distintos» que no haya aviso no dice nada.
+    sondas_resumen = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -933,6 +938,55 @@ class RobotsTxt(Base):
     __table_args__ = (
         UniqueConstraint("job_id", "url", name="uq_robots_txt_job_url"),
         Index("ix_robots_txt_job_host", "job_id", "host"),
+    )
+
+
+class RespuestaSondeada(Base):
+    """Lo que respondio una URL que el rastreo pidio SIN que sea del censo.
+
+    Enlaces externos (decision 123) y recursos embebidos (decision 124): se
+    piden con una sonda (`crawler/seo_crawler/sonda_respuestas.py`) que no
+    gasta `max_urls`, no escribe en `urls` y no cuenta para la salud del
+    rastreo. Una fila por URL distinta del job, con `job_id` para filtrar y
+    borrar por censo sin unir con nada (decision 37). Sin fila = no se
+    comprobo (sondas apagadas, tope alcanzado, host con su tope), que no es lo
+    mismo que «responde bien» (decision 104).
+
+    `veredicto` y sus valores viven en `shared/sondas.py`. `status_code` es lo
+    que respondio la URL enlazada; `final_url`/`final_status`, a donde llevo
+    si redirigia. `host_caido`: el spider dio el origen por inalcanzable
+    (DNS que no existe, confirmado con el resolver, o dos fallos de conexion
+    seguidos) y las demas URLs suyas ya no se pidieron (`metodo` NULL).
+    """
+
+    __tablename__ = "respuestas_sondeadas"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    # El de `links.to_url_hash` (compute_url_hash de la URL normalizada).
+    url_hash = Column(String(64), nullable=False)
+    url = Column(Text, nullable=False)
+    host = Column(String(255), nullable=True)
+    # enlace | recurso: por que se pidio (la primera vez que se vio).
+    uso = Column(String(10), nullable=False)
+    interno = Column(Boolean, nullable=False, default=False)
+    # HEAD | GET (el ultimo usado); NULL = no se pidio (robots, host caido).
+    metodo = Column(String(8), nullable=True)
+    status_code = Column(Integer, nullable=True)
+    final_url = Column(Text, nullable=True)
+    final_status = Column(Integer, nullable=True)
+    saltos = Column(Integer, nullable=True)
+    veredicto = Column(String(32), nullable=False)
+    response_class = Column(String(32), nullable=True)
+    host_caido = Column(Boolean, nullable=True)
+    content_type = Column(String(255), nullable=True)
+    # Bytes del recurso por el cable (`Content-Range` o `Content-Length`).
+    content_length = Column(BigInteger, nullable=True)
+    error = Column(Text, nullable=True)
+    fecha = Column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "url_hash", name="uq_rsond_job_hash"),
     )
 
 

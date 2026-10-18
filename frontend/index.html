@@ -4407,7 +4407,7 @@
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_fonts"> Fuentes</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_svg"> SVG</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_other"> Otros</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.check_external_resources"> Verificar recursos ext.</label>
+            <label class="checkbox-label" title="Comprueba con una petición HEAD las imágenes, CSS y JS que la página carga de OTROS hosts (un CDN, un script de terceros). No entran en el censo ni gastan el máximo de URLs; respetan el robots.txt de ese host y no llevan cabeceras, cookies ni credenciales del rastreo."><input type="checkbox" x-model="createForm.check_external_resources"> Comprobar recursos de otros hosts</label>
           </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
@@ -4416,6 +4416,8 @@
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_subdomains"> Rastrear subdominios</label>
             <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_nofollow"> Seguir nofollow</label>
+            <label class="checkbox-label" title="Pide con HEAD (y GET si hace falta) cada URL de otro sitio que enlaza el sitio, para avisar de enlaces externos rotos y dominios muertos. No entran en el censo ni gastan el máximo de URLs (tope propio: 5.000, y 50 por host); respetan el robots.txt del tercero y no llevan cabeceras, cookies ni credenciales del rastreo. A diferencia de «Seguir externos», que mete las páginas externas en el censo."><input type="checkbox" x-model="createForm.comprobar_enlaces_externos"> Comprobar enlaces externos</label>
+            <label class="checkbox-label" title="Pide con HEAD las imágenes, CSS y JS del propio sitio que la página carga y el censo no rastrea, para avisar de recursos rotos y anotar su peso. Fuera del máximo de URLs (tope propio: 20.000)."><input type="checkbox" x-model="createForm.comprobar_recursos"> Comprobar recursos embebidos</label>
           </div>
           <!-- Paridad movil/escritorio (decision 119): sondas fuera de max_urls -->
           <div class="form-row-3">

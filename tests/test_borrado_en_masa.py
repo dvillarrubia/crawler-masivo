@@ -34,6 +34,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from shared.database import get_session  # noqa: E402
 from shared.models import (  # noqa: E402
     Base, CapturaAlternativa, CustomExtraction, Decision, EnlaceNoRastreable, HtmlMeta, Issue, Job, Link, PageContent, Programacion, Url,
+    RespuestaSondeada,
 )
 
 
@@ -72,6 +73,10 @@ def _job(s, nombre, dias, *, status="completed", paginas=3, enlaces=2, **kw):
             # cuenta y se borra son FILAS, no apariciones.
             s.add(Link(job_id=j.id, from_url_id=u.id, to_url=f"https://x.com/{k}",
                        to_url_hash=f"h{k}", repeticiones=3))
+    # Sondas de respuesta (decisiones 123 y 124): job_id y ninguna URL.
+    for k in range(2):
+        s.add(RespuestaSondeada(job_id=j.id, url_hash=f"{j.id}-e{k}", url=f"https://e.com/{k}",
+                                uso="enlace", interno=False, veredicto="ok"))
     s.flush()
     return j
 
@@ -142,6 +147,8 @@ def _filas(Sesion, job_id):
                 EnlaceNoRastreable.job_id == job_id).count(),
             "capturas_alternativas": s.query(CapturaAlternativa).filter(
                 CapturaAlternativa.job_id == job_id).count(),
+            "respuestas_sondeadas": s.query(RespuestaSondeada).filter(
+                RespuestaSondeada.job_id == job_id).count(),
         }
     finally:
         s.close()
@@ -162,7 +169,7 @@ def test_borra_varios_y_no_deja_nada_detras(entorno):
     for clave in ("prueba", "canario"):
         assert _filas(Sesion, ids[clave]) == {"jobs": 0, "urls": 0, "links": 0, "issues": 0,
                                                 "custom_extraction": 0,
-            "enlaces_no_rastreables": 0, "capturas_alternativas": 0}
+            "enlaces_no_rastreables": 0, "capturas_alternativas": 0, "respuestas_sondeadas": 0}
     # Las hijas que cuelgan de url_id se van con la URL (ON DELETE CASCADE).
     s = Sesion()
     assert s.query(HtmlMeta).count() == s.query(PageContent).count() == 4 * 3
@@ -175,6 +182,7 @@ def test_borra_varios_y_no_deja_nada_detras(entorno):
     assert d["filas"]["custom_extraction"] == 6
     assert d["filas"]["enlaces_no_rastreables"] == 6
     assert d["filas"]["capturas_alternativas"] == 6
+    assert d["filas"]["respuestas_sondeadas"] == 4
 
 
 @pytest.mark.parametrize("estado", ["pending", "running", "analyzing"])
@@ -244,7 +252,7 @@ def test_simular_no_borra_nada_y_pasa_por_los_mismos_guardias(entorno):
     # pista de cuanto pesa cada uno antes de darle.
     assert d["eliminados"][0]["filas"] == {"urls": 3, "links": 6, "issues": 3,
                                                        "custom_extraction": 3,
-            "enlaces_no_rastreables": 3, "capturas_alternativas": 3}
+            "enlaces_no_rastreables": 3, "capturas_alternativas": 3, "respuestas_sondeadas": 2}
     # Fuera de Postgres no hay bytes por fila de donde sacar un tamano, y eso
     # se dice en vez de inventar un cero (shared/almacenamiento.py).
     assert d["eliminados"][0]["bytes"] is None
@@ -341,12 +349,12 @@ def test_el_presupuesto_de_tiempo_devuelve_pendientes_y_repetir_termina(entorno,
     assert por_id[str(ids["prueba"])]["status"] == "deleting"
     assert por_id[str(ids["canario"])]["filas"] == {"urls": 3, "links": 6, "issues": 3,
                                                        "custom_extraction": 3,
-            "enlaces_no_rastreables": 3, "capturas_alternativas": 3}
+            "enlaces_no_rastreables": 3, "capturas_alternativas": 3, "respuestas_sondeadas": 2}
     assert medidos == [ids["prueba"], ids["canario"]]
     for clave in ("prueba", "canario"):
         assert _filas(Sesion, ids[clave]) == {"jobs": 0, "urls": 0, "links": 0, "issues": 0,
                                                 "custom_extraction": 0,
-            "enlaces_no_rastreables": 0, "capturas_alternativas": 0}
+            "enlaces_no_rastreables": 0, "capturas_alternativas": 0, "respuestas_sondeadas": 0}
 
 
 def test_se_rechaza_un_lote_desmedido_y_uno_vacio(entorno):
@@ -427,7 +435,7 @@ def test_un_censo_archivado_se_mide_por_su_parquet_y_se_borra_con_el(entorno):
     assert not fichero.exists()
     assert _filas(Sesion, ids["prueba"]) == {"jobs": 0, "urls": 0, "links": 0, "issues": 0,
                                                 "custom_extraction": 0,
-            "enlaces_no_rastreables": 0, "capturas_alternativas": 0}
+            "enlaces_no_rastreables": 0, "capturas_alternativas": 0, "respuestas_sondeadas": 0}
 
 
 def test_borrar_uno_a_uno_y_en_masa_quitan_el_parquet_igual(entorno):

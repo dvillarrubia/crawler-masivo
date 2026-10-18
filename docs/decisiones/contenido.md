@@ -271,3 +271,43 @@
    **Sin reproducir**: en un censo anterior a la 46, `h1_multiple` deja de
    contar un h1 guardado vacio que pudo ser un logo con alt (la guardia solo
    cubre `h1_vacio`); en Lopesan los 16 casos son vacios reales.
+
+<a id="d124"></a>
+124. **Los recursos embebidos se comprueban con la misma sonda que los
+   enlaces externos, por recurso y fuera de `max_urls`** (#101). Las imagenes,
+   hojas de estilo y scripts se guardaban en `resources` y no se pedian salvo
+   que alguien los enlazara con un `<a>`: una imagen rota en una ficha no
+   salia en ningun informe.
+   - **El mismo mecanismo que la 123**, disenado una vez para los dos usos
+     (`SondaRespuestasMixin`, fila en `respuestas_sondeadas` con
+     `uso='recurso'`): `HEAD` con `GET`+`Range` de repuesto, sin `PageItem`,
+     sin gastar `max_urls`, sin contar para la salud del rastreo y con latido.
+   - **Dos interruptores, los dos apagados**: `crawl_behavior.comprobar_recursos`
+     para los del sitio (multiplica las peticiones: en un e-commerce cada pagina
+     arrastra decenas de imagenes) y `resource_types.check_external_resources`
+     —la casilla que existia y no hacia nada— para los de otro host (un CDN, un
+     script de terceros), que van como los enlaces externos: robots.txt del
+     tercero, sin credenciales del job (114), tope por host y origen caido.
+     Presupuesto aparte: `crawl_behavior.recursos_max` (20.000 recursos
+     distintos). Los internos pasan por el robots del sitio como cualquier
+     peticion del rastreo (con `robots_mode=respect`, prohibido =
+     `prohibido_por_robots`). Las casillas de tipo (`crawl_images`…) deciden
+     que entra en el CENSO, no que se comprueba: el `_ejemplo` las tiene todas
+     apagadas y la sonda tiene que seguir sirviendo ahi. Los
+     `exclude_patterns` si valen: «esto no se toca» vale tambien para la sonda.
+   - **`broken_resource` por recurso, no por aparicion** (53, 64b): uno por URL
+     con `paginas_afectadas`, el tipo (`image`, `css`, `js`…) y ejemplos,
+     anclado en la pagina de URL menor que lo carga (88). Avisa `roto`,
+     `redirige_a_error` y un recurso de un host caido (DNS o conexion); no
+     avisa 403/429/5xx (123). Un recurso que esta en el censo (rastreado por un
+     `<a>`) ya tiene su `4xx_error` y no se repite, y uno que ya salio como
+     `enlace_externo_roto` tampoco (36).
+   - **`resources.size_bytes`, de paso.** La columna existia vacia. El analisis
+     la rellena con lo que dijo la sonda: el total de `Content-Range` (respuesta
+     a un `Range`) o el `Content-Length` (bytes por el cable: comprimidos si el
+     servidor comprime). Un recurso sin sondear sigue en NULL, que es «no se
+     sabe»; los que el censo rastreo como URL tienen su peso en
+     `urls.transfer_size`.
+   - **En la interfaz**: ficha y nombre («Recurso roto»), ambito «Contenido».
+     Pendiente de medir en un canario cuantas peticiones anade en un
+     e-commerce y si 20.000 es el tope adecuado (13).

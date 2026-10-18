@@ -36,6 +36,7 @@ from shared.models import (
     EnlaceNoRastreable,
     RobotsTxt,
     CapturaAlternativa,
+    RespuestaSondeada,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,10 +79,13 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     ("capturas_alternativas", CapturaAlternativa, "url_id"),
 ]
 
-# Con job_id y SIN url: no hay nada que remapear salvo el job. El robots.txt de
-# cada host (decisiones 112 y 113); un backup anterior no lo trae y se salta.
+# Con job_id y SIN url FK: no hay nada que remapear salvo el job. Un backup
+# anterior no las trae y la importacion se las salta.
 _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
+    # El robots.txt de cada host (decisiones 112 y 113).
     ("robots_txt", RobotsTxt),
+    # Sondas de respuesta: enlaces externos y recursos (decisiones 123 y 124).
+    ("respuestas_sondeadas", RespuestaSondeada),
 ]
 
 

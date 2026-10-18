@@ -34,7 +34,7 @@ _NO_LITERALES = {
 # Los modulos que emiten con `az._add_issue` ademas del analizador. Estaban
 # fuera y sus tipos se escapaban del test (decisiones 106 y 122).
 FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
-           "avisos_de_html.py", "avisos_de_servidor.py")
+           "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py")
 
 
 def _llamadas() -> list[ast.expr]:
@@ -80,7 +80,8 @@ def test_el_patron_encuentra_los_tipos():
             "hreflang_destino_no_indexable", "hreflang_idioma_repetido",
             "hreflang_sin_x_default", "hreflang_sin_autorreferencia",
             "hreflang_retorno_incoherente", "structured_data_error",
-            "missing_csp"} <= tipos
+            "missing_csp", "enlace_interno_a_error", "enlace_externo_roto",
+            "dominio_externo_muerto", "broken_resource"} <= tipos
     assert len(tipos) > 40
 
 

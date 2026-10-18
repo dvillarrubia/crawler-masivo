@@ -10,9 +10,9 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119 |
-| [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121 |
+| [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93 |
@@ -149,6 +149,8 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 120 | Señales que se contradicen, y una meta refresh es una redirección, no la página | [`indexabilidad`](indexabilidad.md#d120) |
 | 121 | Un titular vacío no es un titular, un título de relleno se dice una vez, y un enlace sin nombre sale de la temporal de aristas | [`contenido`](contenido.md#d121) |
 | 122 | Paginacion: lo que importa es la pagina 2+ que no cuenta y la siguiente a la que no se llega por un `<a>` | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d122) |
+| 123 | Los enlaces externos se comprueban con una sonda, no con `follow_external`, y lo que no se puede afirmar no se avisa | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d123) |
+| 124 | Los recursos embebidos se comprueban con la misma sonda, por recurso y fuera de `max_urls` | [`contenido`](contenido.md#d124) |
 | 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
 
 ## Anadir una decision
