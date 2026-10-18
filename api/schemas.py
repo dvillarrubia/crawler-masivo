@@ -232,6 +232,11 @@ class AnalysisThresholdsConfig(BaseModel):
     # Certificado que caduca en estos dias o menos (decision 110). No 30: con
     # renovaciones a 30 dias y certificados de 45, uno sano estaria siempre.
     tls_dias_aviso: int = Field(default=7, ge=1, le=90)
+    # Umbral ABSOLUTO de las alertas de la comparacion cuando el censo es una
+    # lista (`max_depth=0`, decision 128): con este numero de paginas afectadas
+    # salta, sin porcentaje ni el piso de 20 de la decision 68. En una lista
+    # cada URL la ha elegido alguien, asi que por defecto basta una.
+    alerta_lista_min_paginas: int = Field(default=1, ge=1, le=100000)
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +320,11 @@ class JobConfig(BaseModel):
     # siguiente, asi que /page/120/ esta a profundidad 120 de la home. Con 50
     # se cortaba la cadena y los posts de las paginas profundas salian como
     # huerfanos aunque estuvieran enlazados.
-    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=1, le=1000)
+    #
+    # `0` es el MODO LISTA (decision 128): solo las semillas, sin seguir un
+    # enlace. Para QA de despliegues: «estas 50 URLs clave siguen bien». Sin
+    # pedirlo, una lista tampoco lee el sitemap (ver `_lista_sin_sitemap`).
+    max_depth: int = Field(default=DEFAULT_MAX_DEPTH, ge=0, le=1000)
     # None = rastrear hasta agotar la frontera (comportamiento de Screaming
     # Frog). Antes era obligatorio con default 50.000, asi que habia que
     # adivinar el tamano del sitio ANTES de rastrearlo: quedarse corto truncaba
@@ -359,6 +368,24 @@ class JobConfig(BaseModel):
     # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
     # precedencia es el orden, y sumar listas la haria imposible de leer.
     segmentos: list[ReglaSegmento] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _lista_sin_sitemap(self):
+        """Modo lista (decision 128): sin sitemap salvo que se pida.
+
+        Con `use_sitemap` por defecto, una lista de 50 URLs clave sembraba
+        ademas TODO el sitemap (a profundidad 1, que no sigue enlaces pero se
+        rastrea): un censo de miles de paginas donde se pidieron 50. Solo si la
+        clave no viene: quien escribe `use_sitemap: true` lo quiere.
+
+        Por `__dict__` y no con asignacion: asignar la marcaria como fijada y,
+        con `exclude_unset`, el override de un job (`max_depth: 0` a secas)
+        pisaria el `use_sitemap: true` que fijase su perfil. Asi se decide otra
+        vez sobre la config FUSIONADA (`resolver_config`).
+        """
+        if self.max_depth == 0 and "use_sitemap" not in self.model_fields_set:
+            self.__dict__["use_sitemap"] = False
+        return self
 
     @model_validator(mode="after")
     def _reglas_de_segmento(self):

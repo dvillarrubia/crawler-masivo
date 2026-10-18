@@ -69,8 +69,8 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 |---|---|---|---|
 | 3.1 | #34 | Extractores CSS, XPath o regex por job: función pura en `extractors.py`, tabla `custom_extraction` por url_id, validación con 422, herencia cliente → perfil → job (83) | Precio, SKU y disponibilidad extraídos de un e-commerce real; columnas dinámicas en el Explorador y en el CSV de la vista |
 | 3.2 | #34 (ampliar) | Búsqueda «contiene / no contiene» (texto o regex) sobre el HTML crudo o renderizado: presencia del tag de analítica, «sin stock» | Encuentra en un censo real las páginas sin el tag de GTM |
-| 3.3 | **Nueva:** «Segmentos de negocio definidos por el usuario, retroactivos y aplicados a todo» | Reglas por cliente (patrón Y/O/NO, valor extraído, campo) con precedencia; se materializa un `segmento` por URL en el re-análisis (filtrar en Python no escala); `firma_de_ruta` como segmento por defecto; reutiliza el formato de `config.templates` | % de incidencias por segmento en `/issues/resumen` y filtro en el Explorador. Las alertas por plantilla de la decisión 68 pasan a ser alertas por segmento. **Hecho (decisión 125):** reglas `{nombre, patron, si}` con Y/O/NO, campo y valor a medida, lógica de tres valores (lo desconocido no casa y se cuenta), `urls.segmento` materializado en el análisis y re-segmentable por la API en 2,3 s sobre las 60.399 URLs de Druni; filtro en Explorador, CSV, `/issues` y `/issues/resumen` con su denominador. Pendiente: las alertas de 68 por segmento |
-| 3.4 | #34 + #32 | Campo extraído como campo comparable en `shared/comparacion.py` | La comparación de dos censos detecta un cambio masivo de precio o disponibilidad |
+| 3.3 | **Nueva:** «Segmentos de negocio definidos por el usuario, retroactivos y aplicados a todo» | Reglas por cliente (patrón Y/O/NO, valor extraído, campo) con precedencia; se materializa un `segmento` por URL en el re-análisis (filtrar en Python no escala); `firma_de_ruta` como segmento por defecto; reutiliza el formato de `config.templates` | % de incidencias por segmento en `/issues/resumen` y filtro en el Explorador. Las alertas por plantilla de la decisión 68 pasan a ser alertas por segmento. **Hecho (decisión 125):** reglas `{nombre, patron, si}` con Y/O/NO, campo y valor a medida, lógica de tres valores (lo desconocido no casa y se cuenta), `urls.segmento` materializado en el análisis y re-segmentable por la API en 2,3 s sobre las 60.399 URLs de Druni; filtro en Explorador, CSV, `/issues` y `/issues/resumen` con su denominador. Las alertas de 68 por segmento, hechas en la decisión 127 |
+| 3.4 | #34 + #32 | Campo extraído como campo comparable en `shared/comparacion.py` | La comparación de dos censos detecta un cambio masivo de precio o disponibilidad. **Hecho (decisión 127):** cambio de valor, desaparición y aparición por regla (y «deja de contener» en búsquedas) con su denominador y el umbral de la 68; solo reglas con el mismo nombre y la misma definición en los dos censos, sin fila = sin dato, render distinto no se compara; alertas también por segmento sin repetir el aviso si segmento y plantilla coinciden. Medido sin falsos positivos en cuatro parejas reales con extracciones simuladas (no hay censos con `custom_extraction` en local) |
 
 **Dependencia:** 3.3 desbloquea #36 F3 («las fichas perdieron 40 indexables») sin esperar a #12.
 
@@ -91,7 +91,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 | 5.2 | #36 F2 | Reglas configurables (incidencia o métrica + operador + umbral o delta) y resumen semanal | Una regla de cliente («4xx > 20 en fichas») dispara en un caso de prueba y no en el control |
 | 5.3 | #36 F3 | `profile_runs` con agregados por ejecución (4xx, 5xx, indexables, incidencias por severidad, PageRank desperdiciado de `pagerank_resumen`), gráficas SVG en la ficha del cliente y panel de cartera con tendencia | Ficha de cliente con 4 o más ejecuciones graficadas sin leer `links` (37) |
 | 5.4 | #32 | Comparación ampliada: inlinks, click_depth, pagerank_score, description, tipos de SD y hreflang; incidencias nuevas separadas entre URL existente y URL nueva; mapeo de rutas por regex (migraciones) | Migración simulada (regex vieja → nueva) empareja más del 95% de URLs; mismos guardias (67, 70, 91) |
-| 5.5 | **Nueva:** «Modo lista y veredicto pasa/falla para QA de despliegues» | `max_depth=0` (solo semillas); umbral de alerta absoluto para listas pequeñas (hoy el piso de 20 de la decisión 68 lo impide); `GET /api/jobs/{id}/veredicto` | Una lista de 50 URLs clave con 10 que pasan a noindex alerta y el veredicto devuelve `falla` |
+| 5.5 | **Nueva:** «Modo lista y veredicto pasa/falla para QA de despliegues» | `max_depth=0` (solo semillas); umbral de alerta absoluto para listas pequeñas (hoy el piso de 20 de la decisión 68 lo impide); `GET /api/jobs/{id}/veredicto` | Una lista de 50 URLs clave con 10 que pasan a noindex alerta y el veredicto devuelve `falla`. **Hecho (decisión 128)**: en revisión |
 
 ### Ola 6. Entregables y acceso del cliente
 
@@ -184,7 +184,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 8. Enlaces que Google no puede seguir: javascript:, onclick, span/div con href, utm internos
 9. Segmentos de negocio definidos por el usuario, retroactivos y aplicados a todo
 10. Search Console en el worker: clics, impresiones y posición por URL, cruzados con el censo
-11. Modo lista y veredicto pasa/falla para QA de despliegues
+11. Modo lista y veredicto pasa/falla para QA de despliegues. **Hecho (decisión 128).**
 12. Autenticación mínima: tokens por rol y enlaces firmados de solo lectura por cliente
 13. Informe exportable HTML/PDF del censo
 14. XLSX multihoja y Google Sheets para Looker Studio
