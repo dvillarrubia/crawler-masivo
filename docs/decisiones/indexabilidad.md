@@ -662,3 +662,13 @@
    `redireccion_a_noindex` miden de menos. Tests:
    `tests/test_senales_contradictorias_db.py` (incluido `run_all` dos veces con
    el mismo resultado, en SQLite y en Postgres).
+
+   **Medido en la revision (#159)**, re-analizando con `ROLLBACK` copias de
+   cuatro censos locales (progym x2, Lopesan, blogs.uoc.edu; cifras en la
+   decision 121): B1 no quita ningun `canonical_missing` (ninguno de los
+   cuatro declara canonical en la cabecera `Link`), no hay meta refresh ni
+   `canonical_html_y_cabecera_distintos`, `noindex_y_canonical_a_otra` sale
+   9 veces en Lopesan (11 paginas, todas con el canonical a `*.lfr.cloud`) y 1
+   en progym (6 paginas) y `redireccion_a_noindex` 14 en Lopesan y 3 en blogs.uoc.edu. Volumen bajo: nada
+   de ruido. Las cifras de B1 y de las meta refresh siguen pendientes de un
+   censo que las tenga.

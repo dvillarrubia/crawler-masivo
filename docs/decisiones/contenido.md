@@ -233,3 +233,41 @@
    decision 46 cita 208 enlaces sin ancla en 58 paginas de control, 39
    internos, casi todos iconos de redes sociales. Tests:
    `tests/test_titulares_titulos_anclas_db.py`.
+
+   **Revision (#159).** Dos fallos reproducidos, arreglados con su test:
+   - **La nota de contenido de `/insights` SUBIA con `title_generico`.**
+     Es una fila por valor y tapa el `title_duplicate` y el `title_too_short`
+     de sus paginas, y la nota cuenta `url_id` distintos: tres paginas
+     «Sin título | Marca» pasaban de restar tres a restar cero (el tipo no
+     estaba en la lista) o una. Es el caso de la soft 404 de la decision 105.
+     Ahora la nota y «Optimizar titulos» cuentan `title_generico` con sus
+     `paginas_afectadas` (`_paginas_de_mas_en_grupos`); una de esas paginas
+     con ademas `title_too_long` contaria dos veces, acotado por `max(0, …)`.
+     `test_un_titulo_de_relleno_no_mejora_la_nota_de_contenido`.
+   - **Una soft 404 seguia llevando su `h1_vacio`.** `h1_missing` esta en
+     `TAPADAS` (105) y `h1_vacio` dice lo mismo: entra.
+     `test_la_soft_404_tampoco_lleva_su_h1_vacio`.
+
+   **Medido** re-analizando con `ROLLBACK`, base (#154) contra esta rama, en
+   copias de cuatro censos locales (incidencias totales y lo que cambia):
+
+   | censo | base | rama | cambia |
+   |---|---|---|---|
+   | progym 12-oct (4.319 URLs) | 4.946 | 4.947 | +1 `description_igual_title` (24 fichas), +1 `enlace_sin_ancla`, −1 `h1_multiple` |
+   | progym 7-oct nofollow (15.026) | 15.817 | 15.812 | +1 `description_igual_title` (16), +1 `noindex_y_canonical_a_otra` (6 paginas), −6 `noindex_page`, −1 `h1_multiple` |
+   | Lopesan (5.751) | 28.742 | 28.735 | −16 `h1_multiple`, +9 `noindex_y_canonical_a_otra` (−11 `noindex_page`), +14 `redireccion_a_noindex` (−3 `redirect_chain`) |
+   | blogs.uoc.edu (34.704) | 93.615 | 93.575 | −47 `h1_multiple`, +4 `description_igual_title`, +3 `redireccion_a_noindex` |
+
+   Ningun tipo nuevo sale en todas las paginas (64): el mayor son 14 filas.
+   `title_generico`, `meta_refresh_redireccion` y
+   `canonical_html_y_cabecera_distintos` no salen en ninguno (no hay
+   placeholders, meta refresh ni canonical en cabecera en esos censos), y
+   `h1_vacio` / `enlace_sin_ancla` solo se evaluan en los dos de progym: los
+   otros son anteriores a la decision 46 y la guardia los salta. Los
+   `h1_multiple` que caen en Lopesan son un segundo `<h1><div></div></h1>`
+   vacio de verdad (comprobado en la pagina servida hoy), no un logo con alt.
+   Tiempo de `run_all`: sin cambio apreciable (51/64 s Lopesan, 171/163 s
+   blogs, con ruido de una maquina compartida).
+   **Sin reproducir**: en un censo anterior a la 46, `h1_multiple` deja de
+   contar un h1 guardado vacio que pudo ser un logo con alt (la guardia solo
+   cubre `h1_vacio`); en Lopesan los 16 casos son vacios reales.
