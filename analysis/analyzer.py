@@ -2572,6 +2572,9 @@ class SEOAnalyzer:
                 self._add_issue(
                     ancla, "bot_busqueda_ia_bloqueado", "info",
                     {"host": fila.host, "url": fila.url, "bots": cerrados,
+                     # Con `*` cerrado tambien esta fuera Google, y eso cambia
+                     # lo que hay que leer del aviso.
+                     "googlebot_alcance": bots.get(BOT_POR_DEFECTO, {}).get("alcance"),
                      "evaluadas": bots[cerrados[0]["bot"]]["evaluadas"],
                      "plantillas": bots[cerrados[0]["bot"]]["plantillas"]},
                     group_key=_clave_de_grupo(f"{o}|busqueda_ia"),

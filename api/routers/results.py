@@ -1207,16 +1207,28 @@ def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls/{url_id}  -- full detail for a single URL
 # ---------------------------------------------------------------------------
-def _filas_robots(db: Session, job_id: uuid.UUID) -> dict[str, Any]:
-    """Las filas de `robots_txt` del job por origen; la primera de cada uno."""
+def _filas_robots(db: Session, job_id: uuid.UUID, host: str | None = None,
+                  con_cuerpo: bool = True) -> dict[str, Any]:
+    """Las filas de `robots_txt` del job por origen; la primera de cada uno.
+
+    `host` limita a las de ese host: la ficha de una URL solo necesita la suya,
+    y cada fila lleva hasta 500 KiB de cuerpo (hasta 200 hosts por job). Sin
+    `con_cuerpo` el cuerpo no se lee (`GET /robots` no lo devuelve).
+    """
+    from sqlalchemy.orm import defer
+
     from shared.models import RobotsTxt
     from shared.robots_txt import origen
 
     filas: dict[str, Any] = {}
     try:
         with db.begin_nested():
-            for fila in (db.query(RobotsTxt).filter(RobotsTxt.job_id == job_id)
-                         .order_by(RobotsTxt.id)):
+            q = db.query(RobotsTxt).filter(RobotsTxt.job_id == job_id)
+            if host is not None:
+                q = q.filter(RobotsTxt.host == host)
+            if not con_cuerpo:
+                q = q.options(defer(RobotsTxt.cuerpo))
+            for fila in q.order_by(RobotsTxt.id):
                 o = origen(fila.url)
                 if o is not None and o not in filas:
                     filas[o] = fila
@@ -1238,7 +1250,12 @@ def _robots_regla(db: Session, job_id: uuid.UUID, url_obj: Url) -> dict[str, Any
         and (url_obj.indexability_status or "").startswith("Blocked by robots"))
     if not (url_obj.bloqueada_googlebot or bloqueada_rastreo):
         return None
-    fila = _filas_robots(db, job_id).get(origen(url_obj.url) or "")
+    o = origen(url_obj.url)
+    if o is None:
+        return None
+    from urllib.parse import urlsplit
+
+    fila = _filas_robots(db, job_id, host=(urlsplit(o).hostname or "")).get(o)
     if fila is None:
         return None
     job = db.get(Job, job_id)
@@ -1267,7 +1284,7 @@ def get_robots(job_id: uuid.UUID, db: Session = Depends(get_session)):
 
     _get_job_or_404(job_id, db)
     hosts = []
-    for o, fila in sorted(_filas_robots(db, job_id).items()):
+    for o, fila in sorted(_filas_robots(db, job_id, con_cuerpo=False).items()):
         ev = fila.evaluacion if isinstance(fila.evaluacion, dict) else {}
         hosts.append({
             "origen": o, "host": fila.host, "url": fila.url, "url_final": fila.url_final,

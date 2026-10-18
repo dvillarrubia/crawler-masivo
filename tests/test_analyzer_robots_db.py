@@ -411,3 +411,34 @@ def test_la_variante_con_parametros_es_otra_plantilla_de_la_muestra():
     assert (g["plantillas"], g["bloqueadas"], g["plantillas_bloqueadas"]) == (
         3, 1, ["/tienda/:slug (2n) ?cat"])
     assert g["ejemplos"][0]["regla"]["texto"] == "Disallow: /*?cat="
+
+
+def test_el_propio_robots_txt_en_el_censo_no_abre_el_sitio():
+    """`/robots.txt` siempre se puede pedir (Protego y Google), asi que si el
+    sitio lo enlaza y entra en el censo no puede contar en la muestra: con el
+    dentro, un `Disallow: /` a OAI-SearchBot salia «parte» y no avisaba."""
+    s, j = _montar()
+    _sitio(s, j)
+    _url(s, j, "/robots.txt")
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    assert _bots(s)["oai-searchbot"]["alcance"] == "todo"
+    assert len(_issues(s, "bot_busqueda_ia_bloqueado")) == 1
+
+
+def test_el_aviso_dice_si_googlebot_tambien_esta_fuera():
+    """Con `User-agent: *` / `Disallow: /` el buscador de IA esta fuera, pero
+    tambien Google: el aviso lo tiene que decir, o la ficha («a Google no le
+    afecta») se lee al reves de lo que pasa."""
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=b"User-agent: *\nDisallow: /\n")
+    _analizar(s, j)
+    [fila] = _issues(s, "bot_busqueda_ia_bloqueado")
+    assert fila.details["googlebot_alcance"] == "todo"
+    s, j = _montar()
+    _sitio(s, j)
+    _robots(s, j, cuerpo=IA_EN_UN_BLOQUE)
+    _analizar(s, j)
+    [fila] = _issues(s, "bot_busqueda_ia_bloqueado")
+    assert fila.details["googlebot_alcance"] == "nada"

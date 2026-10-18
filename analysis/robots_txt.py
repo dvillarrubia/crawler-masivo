@@ -145,7 +145,12 @@ class MuestraPorPlantilla:
         from urllib.parse import parse_qsl, urlsplit
 
         from shared.plantillas import plantilla_de
+        from shared.robots_txt import es_url_de_robots
 
+        # `/robots.txt` siempre se puede pedir: en la muestra, un sitio
+        # cerrado entero a un bot saldria «parte» solo por enlazarlo.
+        if es_url_de_robots(url):
+            return
         try:
             partes = urlsplit(url)
         except ValueError:

@@ -118,3 +118,44 @@ def test_sin_bloqueo_o_sin_robots_guardado_no_hay_linea(api):
     c, ids = api
     assert c.get(f"/api/jobs/{J}/urls/{ids['/libre']}").json()["robots_regla"] is None
     assert c.get(f"/api/jobs/{VIEJO}/urls/{ids['viejo']}").json()["robots_regla"] is None
+
+
+def test_con_varios_hosts_la_ficha_usa_el_robots_de_su_host(tmp_path):
+    """La ficha lee solo la fila de su host (cada una lleva hasta 500 KiB de
+    cuerpo); con dos hosts, la linea es la del robots.txt del suyo."""
+    from api.routers import results
+
+    engine = create_engine(f"sqlite:///{tmp_path}/h.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    jid = uuid.uuid4()
+    with Sesion() as s:
+        s.add(Job(id=jid, name="t", status="completed", seeds=["https://x.com/"],
+                  config={"robots_mode": "respect"}))
+        s.flush()
+        for host, cuerpo in (("x.com", b"User-agent: *\nDisallow: /a/\n"),
+                             ("blog.x.com", b"# blog\n\nUser-agent: *\nDisallow: /a/\n")):
+            fila = fila_de_respuesta(f"https://{host}/robots.txt", status_code=200,
+                                     cabeceras={"content-type": "text/plain"}, cuerpo=cuerpo)
+            s.add(RobotsTxt(job_id=jid, evaluacion={"googlebot": {"estado": "procesado"}}, **fila))
+        u = Url(job_id=jid, url="https://blog.x.com/a/1", url_hash="b", host="blog.x.com",
+                scheme="https", path="/a/1", is_internal=True, status_code=None,
+                blocked_by_robots=True, bloqueada_googlebot=True,
+                indexability_status="Blocked by robots.txt")
+        s.add(u)
+        s.commit()
+        uid = u.id
+    app = FastAPI()
+    app.include_router(results.router)
+
+    def _sesion():
+        with Sesion() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _sesion
+    c = TestClient(app)
+    r = c.get(f"/api/jobs/{jid}/urls/{uid}").json()["robots_regla"]
+    assert r["robots_url"] == "https://blog.x.com/robots.txt"
+    assert r["googlebot"]["linea"] == 4
+    hosts = c.get(f"/api/jobs/{jid}/robots").json()["hosts"]
+    assert [h["origen"] for h in hosts] == ["https://blog.x.com", "https://x.com"]

@@ -914,3 +914,9 @@
      dice lo que el fichero pide, no lo que el bot hace. Los censos analizados
      antes de esta decisión traen `bots` a None hasta re-analizarlos; la
      línea de la ficha sale ya en cualquier censo con `robots_txt`.
+   - **Dos cosas de la revisión.** El propio `/robots.txt` no entra en la
+     muestra: siempre se puede pedir, así que si el sitio lo enlaza un
+     `Disallow: /` a OAI-SearchBot salía «parte» y el aviso no saltaba. Y el
+     aviso lleva `googlebot_alcance`: si el cierre viene del grupo `*`, Google
+     también está fuera, y la ficha ya no puede decir sin más que «a Google
+     no le afecta».
