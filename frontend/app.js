@@ -1373,6 +1373,7 @@ function app() {
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
+      this.veredicto = null;
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
       try {
@@ -1382,6 +1383,7 @@ function app() {
         this._startProgress();
         this.cargarEjecuciones();
         this.cargarResumenAMedida();
+        this.cargarVeredicto();
       } catch (e) { this.error = e.message; }
       this.loading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1422,6 +1424,7 @@ function app() {
               this._stopProgress();
               this.job = await api(`/jobs/${this.job.id}`);
               await this.loadStats();
+              this.cargarVeredicto();
               // Analysis just finished: drop cached tab data so the active
               // tab refetches fresh issues/insights instead of the empty/
               // partial snapshot loaded mid-analysis.
@@ -2701,6 +2704,7 @@ function app() {
     expAMedida: [],             // reglas a medida del censo (decision 104): [{key, nombre, clase, etiqueta}]
     expAvisoRegla: '',          // 422 de una regla que este censo no tiene (vista guardada de otro)
     resumenAMedida: null,       // GET /jobs/{id}/extraccion
+    veredicto: null,            // GET /jobs/{id}/veredicto, solo en modo lista (decision 128)
     EXP_GRUPOS_COLUMNAS,
     _expSearchTimer: null,
     _expFilterTimer: null,
@@ -2721,6 +2725,19 @@ function app() {
       else grupos.push(["A medida", Object.keys(defs)]);
       const tab = EXP_TABS.find(t => t.key === 'a_medida');
       if (tab) tab.columns = ['url', 'status_code', ...Object.keys(defs)];
+    },
+
+    // Modo lista (decision 128): pasa / falla / no_concluyente, arriba en la
+    // ficha como las alertas de la comparacion. Solo para listas: en un censo
+    // normal el veredicto existe, pero lo que se mira son las alertas.
+    async cargarVeredicto() {
+      this.veredicto = null;
+      if (!this.job || !esModoLista(this.job)) return;
+      const id = this.job.id;
+      try {
+        const v = await api(`/jobs/${id}/veredicto`);
+        if (this.job && this.job.id === id) this.veredicto = v;
+      } catch (_) { /* sin veredicto: la ficha sale igual */ }
     },
 
     async cargarResumenAMedida() {
@@ -3648,6 +3665,163 @@ const EXP_TABS = [
     columns: ['url','status_code','status_text','ttfb_ms','response_time_ms','content_encoding','http_version'] },
 ];
 
+// Un rastreo en modo lista: no sigue enlaces (decision 128, `es_lista`).
+function esModoLista(job) {
+  const p = (job && job.config || {}).max_depth;
+  return p === 0 || p === '0';
+}
+
+// Las tarjetas de comprobaciones de la ficha (TLS, soft 404, sondas,
+// sitemaps). Funciones puras sobre `job` para poder probarlas en Chromium sin
+// montar Alpine (tests/test_resumenes_frontend.py). Cada una devuelve null si
+// el job no trae ese dato: un rastreo anterior o con la sonda apagada no es
+// «0 problemas».
+
+// `jobs.tls` (decision 110): {hosts: {host: ficha de sonda_tls}}.
+function filasTls(job) {
+  const hosts = ((job && job.tls) || {}).hosts;
+  if (!hosts || typeof hosts !== 'object') return null;
+  const aviso = Number((((job.config || {}).analysis_thresholds) || {}).tls_dias_aviso) || 7;
+  const filas = Object.entries(hosts).map(([host, t]) => {
+    t = t || {};
+    const dias = typeof t.dias_restantes === 'number' ? t.dias_restantes : null;
+    let estado, nivel;
+    if (t.omitida) { estado = 'Sin comprobar (' + t.omitida + ')'; nivel = 'dim'; }
+    else if (t.verificado === false) { estado = 'No válido: ' + (t.motivo || 'otro'); nivel = 'red'; }
+    else if (dias !== null && dias < 0) { estado = 'Caducado'; nivel = 'red'; }
+    else if (dias !== null && dias <= aviso) { estado = 'Caduca pronto'; nivel = 'orange'; }
+    else if (t.version_antigua) { estado = 'TLS antiguo'; nivel = 'orange'; }
+    else if (t.verificado === true) { estado = 'Válido'; nivel = 'green'; }
+    else if (t.error) { estado = 'Sin respuesta'; nivel = 'dim'; }
+    else { estado = 'Sin verificar'; nivel = 'orange'; }
+    return {
+      host, estado, nivel,
+      emisor: t.emisor || null,
+      caduca: t.not_after || null,
+      dias: dias === null ? null : Math.floor(dias),
+      version: t.version || null,
+      detalle: t.detalle || t.error || t.error_certificado || null,
+    };
+  });
+  filas.sort((a, b) => a.host.localeCompare(b.host));
+  return filas.length ? filas : null;
+}
+
+// `jobs.soft404` (decision 105): `sondas` las escribe el spider (lista, una
+// por host y por plantilla) y `resumen` el analisis.
+function resumenSoft404(job) {
+  const s = job && job.soft404;
+  if (!s || typeof s !== 'object') return null;
+  const sondas = Array.isArray(s.sondas) ? s.sondas : [];
+  const r = (s.resumen && typeof s.resumen === 'object') ? s.resumen : null;
+  if (!sondas.length && !r) return null;
+  const detalle = {};
+  for (const d of ((r || {}).detalle_sondas || [])) if (d && d.url) detalle[d.url] = d;
+  const filas = sondas.map(x => {
+    x = x || {};
+    const d = detalle[x.url] || null;
+    const st = x.status;
+    let lectura, nivel;
+    if (x.error) { lectura = x.error === 'bloqueada_por_robots' ? 'Bloqueada por robots.txt' : 'Error: ' + x.error; nivel = 'dim'; }
+    else if (st === 404 || st === 410) { lectura = 'Responde ' + st + ', como debe'; nivel = 'green'; }
+    else if (x.redirige_a) { lectura = 'Redirige'; nivel = 'orange'; }
+    else if (st >= 200 && st < 300) { lectura = 'Responde ' + st + ' a una URL que no existe'; nivel = 'red'; }
+    else { lectura = 'Responde ' + (st == null ? '—' : st); nivel = 'orange'; }
+    return {
+      clave: x.clave || x.url, host: x.host || '', plantilla: x.plantilla || null,
+      url: x.url, status: st == null ? null : st, redirige_a: x.redirige_a || null,
+      lectura, nivel,
+      coincidencias: d ? d.coincidencias : null, alcance: d ? d.alcance : null,
+      ambigua: d ? !!d.ambigua : false, devuelve_portada: d ? !!d.devuelve_portada : false,
+    };
+  });
+  return {
+    filas,
+    sondas: r && r.sondas != null ? r.sondas : filas.length,
+    con_huella: r ? r.sondas_con_huella : null,
+    soft_404: r ? r.soft_404 : null,
+    indexables: r ? r.soft_404_indexables : null,
+    candidatos: r ? r.candidatos : null,
+    analizado: !!r,
+  };
+}
+
+// `jobs.sondas_resumen` (decisiones 123 y 124). «comprobados < distintos» se
+// dice: que no haya aviso no significa que no haya nada roto.
+function resumenSondas(job) {
+  const s = job && job.sondas_resumen;
+  if (!s || typeof s !== 'object') return null;
+  const bloque = (b, etiqueta) => {
+    if (!b || typeof b !== 'object' || !Object.keys(b).length) return null;
+    const distintos = b.distintos == null ? null : b.distintos;
+    return {
+      etiqueta,
+      distintos, comprobados: b.comprobados == null ? null : b.comprobados,
+      rotos: b.rotos || 0, dominios_muertos: b.dominios_muertos == null ? null : b.dominios_muertos,
+      parcial: distintos != null && b.comprobados != null && b.comprobados < distintos,
+      por_veredicto: Object.entries(b.por_veredicto || {}).sort((a, c) => c[1] - a[1]),
+    };
+  };
+  const filas = [bloque(s.enlaces_externos, 'Enlaces externos'), bloque(s.recursos, 'Recursos embebidos')]
+    .filter(Boolean);
+  return filas.length ? filas : null;
+}
+
+// `jobs.sitemaps` (decision 126), solo en la ficha del job.
+function resumenSitemaps(job) {
+  const s = job && job.sitemaps;
+  if (!s || typeof s !== 'object') return null;
+  const ficheros = Array.isArray(s.ficheros) ? s.ficheros : [];
+  const formatos = {};
+  let declaradas = 0, devueltas = 0, cortados = 0, fallidos = 0;
+  for (const f of ficheros) {
+    if (!f) continue;
+    if (f.formato) formatos[f.formato] = (formatos[f.formato] || 0) + 1;
+    declaradas += Number(f.declaradas) || 0;
+    devueltas += Number(f.devueltas) || 0;
+    if (f.cortado) cortados++;
+    if (f.status != null && f.status !== 200) fallidos++;
+  }
+  return {
+    ficheros, pedidos: s.pedidos == null ? ficheros.length : s.pedidos,
+    leidos: s.leidos == null ? ficheros.length : s.leidos,
+    parcial: !!s.parcial, recortadas: !!s.entradas_recortadas,
+    tope: s.tope_entradas || null, guardadas: s.entradas_guardadas,
+    formatos: Object.entries(formatos), declaradas, devueltas, cortados, fallidos,
+  };
+}
+
+// El veredicto del modo lista con sus textos (decision 128).
+const VEREDICTO_TEXTO = {
+  pasa: ['La lista pasa', 'green'],
+  falla: ['La lista falla', 'red'],
+  no_concluyente: ['No concluyente', 'orange'],
+};
+
+// Sondas de respuesta (decisiones 123 y 124): campo -> [seccion de JobConfig,
+// valor de serie, tipo]. Los de serie son los de `api/schemas.py`. Estas
+// claves solo se mandan si quien lanza las CAMBIA respecto a lo que el modal
+// cargo (lo de serie o lo heredado del cliente/perfil): sin tocarlas, el job
+// hereda lo que diga el perfil, y si el perfil cambia mañana, tambien.
+const SONDAS_CAMPOS = {
+  check_external_resources:   ['resource_types', false, 'bool'],
+  comprobar_enlaces_externos: ['crawl_behavior', false, 'bool'],
+  comprobar_recursos:         ['crawl_behavior', false, 'bool'],
+  enlaces_externos_max:       ['crawl_behavior', 5000,  'int'],
+  recursos_max:               ['crawl_behavior', 20000, 'int'],
+  sondas_por_host:            ['crawl_behavior', 50,    'int'],
+};
+
+function _valorSonda(campo, v) {
+  if (SONDAS_CAMPOS[campo][2] === 'bool') return !!v;
+  const n = parseInt(v);
+  return Number.isInteger(n) ? n : null;
+}
+
+function _sondasDeSerie() {
+  return Object.fromEntries(Object.entries(SONDAS_CAMPOS).map(([k, [, v]]) => [k, v]));
+}
+
 function _freshForm() {
   return {
     name: '',
@@ -3679,9 +3853,15 @@ function _freshForm() {
     // Spider — behavior
     crawl_subdomains: false,
     follow_nofollow: false,
-    // Sondas de respuesta (decisiones 123 y 124): fuera del censo y de max_urls
+    // Sondas de respuesta (decisiones 123 y 124): fuera del censo y de
+    // max_urls. Valores de serie de `JobConfig`; solo se mandan si se tocan
+    // (`SONDAS_CAMPOS`, `_sondasBase`).
     comprobar_enlaces_externos: false,
     comprobar_recursos: false,
+    enlaces_externos_max: 5000,
+    recursos_max: 20000,
+    sondas_por_host: 50,
+    _sondasBase: _sondasDeSerie(),
     exclude_patterns: '',
     include_patterns: '',
     max_url_length: 0,
@@ -3742,7 +3922,7 @@ function _parseKV(text, separator) {
 // enviaba siempre; con cliente, el formulario llega precargado con lo heredado
 // (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
 function _configDesdeForm(f) {
-  return {
+  const cfg = {
     // `|| 3` convertia el 0 del modo lista (decision 128) en 3.
     max_depth:     Number.isInteger(parseInt(f.max_depth)) ? parseInt(f.max_depth) : 3,
     max_urls:      parseInt(f.max_urls)      || 50000,
@@ -3764,7 +3944,6 @@ function _configDesdeForm(f) {
       crawl_fonts: f.crawl_fonts,
       crawl_svg: f.crawl_svg,
       crawl_other: f.crawl_other,
-      check_external_resources: f.check_external_resources,
     },
     crawl_behavior: {
       download_timeout: parseInt(f.download_timeout) || 30,
@@ -3778,8 +3957,6 @@ function _configDesdeForm(f) {
       paridad_movil_muestra: parseInt(f.paridad_movil_muestra) || 0,
       paridad_movil_por_plantilla: parseInt(f.paridad_movil_por_plantilla) || 3,
       paridad_movil_ua: f.paridad_movil_ua || 'chrome_android',
-      comprobar_enlaces_externos: !!f.comprobar_enlaces_externos,
-      comprobar_recursos: !!f.comprobar_recursos,
     },
     url_filters: {
       max_url_length: parseInt(f.max_url_length) || 0,
@@ -3810,6 +3987,17 @@ function _configDesdeForm(f) {
       max_outlinks: parseInt(f.max_outlinks) || 100,
     },
   };
+  // Las sondas, solo si se han tocado (ver SONDAS_CAMPOS). La base heredada
+  // solo vale con cliente: al volver a «Sin cliente» el modal no rehace el
+  // formulario, y sin cliente el servidor no hereda nada; lo que se ve tiene
+  // que mandarse contra lo de serie.
+  const base = (f.cliente_id && f._sondasBase) || _sondasDeSerie();
+  for (const [campo, [seccion]] of Object.entries(SONDAS_CAMPOS)) {
+    const v = _valorSonda(campo, f[campo]);
+    if (v === null || v === _valorSonda(campo, base[campo])) continue;
+    cfg[seccion][campo] = v;
+  }
+  return cfg;
 }
 
 // Lo contrario: vuelca en el formulario una configuracion PARCIAL (la que
@@ -3835,11 +4023,19 @@ function _formDesdeConfig(f, cfg) {
   if (Array.isArray(cfg.include_patterns)) f.include_patterns = cfg.include_patterns.join('\n');
   const sub = (obj, campos) => campos.forEach(k => poner(k, (obj || {})[k]));
   sub(cfg.resource_types, ['crawl_images', 'crawl_css', 'crawl_js', 'crawl_pdfs', 'crawl_fonts',
-    'crawl_svg', 'crawl_other', 'check_external_resources']);
+    'crawl_svg', 'crawl_other']);
   sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
     'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
-    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua',
-    'comprobar_enlaces_externos', 'comprobar_recursos']);
+    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua']);
+  // Las sondas (decisiones 123 y 124): lo heredado se pinta Y pasa a ser la
+  // base, para que lanzar sin tocarlas no lo repita en el job.
+  f._sondasBase = { ...(f._sondasBase || _sondasDeSerie()) };
+  for (const [campo, [seccion]] of Object.entries(SONDAS_CAMPOS)) {
+    const v = (cfg[seccion] || {})[campo];
+    if (v === undefined || v === null) continue;
+    f[campo] = v;
+    f._sondasBase[campo] = v;
+  }
   sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
   sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
     'extract_page_content', 'store_raw_html']);

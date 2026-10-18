@@ -23,6 +23,7 @@ from api.schemas import (
     JobUpdate,
     ImportResponse,
     JobCreate,
+    JobDetailResponse,
     JobResponse,
     PaginatedResponse,
 )
@@ -192,8 +193,11 @@ def create_job(
     return _con_cliente(db, [job])[0]
 
 
-def _con_cliente(db: Session, jobs: list[Job]) -> list[JobResponse]:
-    """JobResponse con el nombre del cliente, en UNA consulta para la pagina."""
+def _con_cliente(db: Session, jobs: list[Job], clase=JobResponse) -> list[JobResponse]:
+    """JobResponse con el nombre del cliente, en UNA consulta para la pagina.
+
+    `clase=JobDetailResponse` para la ficha de un job: lleva ademas lo que la
+    lista no necesita (`sitemaps`)."""
     from api.routers.clientes import nombres_de_clientes
 
     from shared.clientes import tipo_de_rastreo
@@ -201,7 +205,7 @@ def _con_cliente(db: Session, jobs: list[Job]) -> list[JobResponse]:
     nombres = nombres_de_clientes(db, (j.cliente_id for j in jobs))
     salida = []
     for j in jobs:
-        r = JobResponse.model_validate(j)
+        r = clase.model_validate(j)
         r.cliente_nombre = nombres.get(j.cliente_id)
         r.tipo_efectivo = tipo_de_rastreo(j.name, j.tipo)
         salida.append(r)
@@ -305,7 +309,7 @@ def _filtro_cliente(db: Session, valor: str):
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}  --  single job detail
 # ---------------------------------------------------------------------------
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", response_model=JobDetailResponse)
 def get_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_session),
@@ -313,13 +317,13 @@ def get_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return _con_cliente(db, [job])[0]
+    return _con_cliente(db, [job], JobDetailResponse)[0]
 
 
 # ---------------------------------------------------------------------------
 # PATCH /api/jobs/{job_id}  --  nombre, tipo y cliente (UX-07/08)
 # ---------------------------------------------------------------------------
-@router.patch("/{job_id}", response_model=JobResponse)
+@router.patch("/{job_id}", response_model=JobDetailResponse)
 def update_job(
     job_id: uuid.UUID,
     cuerpo: JobUpdate,
@@ -357,13 +361,13 @@ def update_job(
                 job.client_id = cliente.slug
     db.commit()
     db.refresh(job)
-    return _con_cliente(db, [job])[0]
+    return _con_cliente(db, [job], JobDetailResponse)[0]
 
 
 # ---------------------------------------------------------------------------
 # PATCH /api/jobs/{job_id}/cancel  --  cancel a running / pending job
 # ---------------------------------------------------------------------------
-@router.patch("/{job_id}/cancel", response_model=JobResponse)
+@router.patch("/{job_id}/cancel", response_model=JobDetailResponse)
 def cancel_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_session),
@@ -393,7 +397,7 @@ def cancel_job(
 # ---------------------------------------------------------------------------
 # POST /api/jobs/{job_id}/resume  --  re-queue a failed/cancelled job
 # ---------------------------------------------------------------------------
-@router.post("/{job_id}/resume", response_model=JobResponse)
+@router.post("/{job_id}/resume", response_model=JobDetailResponse)
 def resume_job(
     job_id: uuid.UUID,
     overrides: dict[str, Any] | None = Body(default=None),

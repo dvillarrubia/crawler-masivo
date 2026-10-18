@@ -163,6 +163,25 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   rastreos: 2 min la primera página en local, 3,1 s en producción tras el
   arreglo (#125).
 
+### Lo que la API ya devolvía y la interfaz no enseñaba (2026-10-18)
+
+- **Sondas de enlaces externos y recursos** (decisiones 123 y 124) en el
+  formulario, en una sección «Sondas fuera del censo» junto a la paridad móvil,
+  con sus topes (`enlaces_externos_max`, `recursos_max`, `sondas_por_host`).
+  Antes las dos casillas se mandaban SIEMPRE (`false` explícito); ahora solo se
+  mandan si se tocan respecto a lo que cargó el modal, así que un job lanzado
+  desde un perfil sigue heredando del perfil.
+- **Tarjetas en el Resumen de la ficha**: certificado TLS por host (110), soft
+  404 por sonda (105), enlaces externos y recursos comprobados (123/124, con el
+  aviso de «comprobados < distintos») y sitemaps leídos (126). Cada una solo si
+  el job trae el dato. `jobs.sitemaps` va en la ficha (`JobDetailResponse`) y no
+  en la lista de rastreos.
+- **Veredicto del modo lista** (128) arriba de la ficha, antes de las alertas.
+- Lo abierto: la lista de rastreos (`GET /api/jobs`) sigue llevando `soft404`
+  (con `detalle_sondas` y el texto de cada sonda), `tls` y `sondas_resumen` en
+  cada fila sin pintarlos; pasarlos a la ficha como `sitemaps` aligeraría la
+  lista.
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v
