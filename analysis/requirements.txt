@@ -13,3 +13,7 @@ tldextract>=5.1
 # desde el spider sin bloquear el reactor. Ninguna llamada sale sola: hace
 # falta DECISIONS_ENABLED=1, OPENROUTER_API_KEY y que alguien la dispare (#40).
 httpx>=0.28
+# Tokenizador de los casi duplicados (`analysis/near_duplicates.py`, decision
+# 118): `\p{M}` y las escrituras (`\p{Han}`, `\p{Thai}`...) que `re` no sabe
+# nombrar. El crawler y la API ya la traian (decision 104).
+regex>=2024.11.6

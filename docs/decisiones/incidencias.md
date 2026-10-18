@@ -95,6 +95,8 @@
    `body_hash` se conserva: responde a otra pregunta (si la página cambió entre
    dos rastreos). Los rastreos anteriores a la columna caen a `body_hash` con un
    aviso en el log.
+   El casi duplicado (`near_duplicate_content`) sigue el mismo alcance desde la
+   decisión 118: medía también noindex, canonicalizadas y externas.
 
 <a id="d53"></a>
 53. **Las cabeceras de seguridad son del servidor, no de la página** — HSTS,
@@ -608,3 +610,123 @@
      sondas (`JobResponse` no lleva `soft404`: cada sonda guarda hasta 4.000
      caracteres de texto) y todo lo que necesita leer la página con un modelo
      (#11).
+
+<a id="d118"></a>
+118. **Un casi duplicado se mide entre las mismas páginas que el duplicado
+   exacto, y una escritura sin espacios se parte en caracteres**
+   ([#149](https://github.com/dvillarrubia/crawler-masivo/issues/149)). Dos
+   fallos de `near_duplicate_content`, que la ficha de `incidencias.js` ya
+   describía bien («Páginas indexables…») y el código no cumplía.
+   - **El alcance.** `analyze_near_duplicates` solo pedía 200 y HTML: entraban
+     las noindex, las canonicalizadas y **las externas**. Con cuatro URLs del
+     mismo texto —`/p`, `/p?orden=precio` (canonicalizada), `/p?page=2`
+     (noindex) y `https://otro.com/p`— salían **4 avisos**, y el de `/p` citaba
+     como casi duplicadas a su propia variante, a su paginación y a la otra web.
+     Ahora pide lo mismo que `analyze_duplicates` (decisión 47): `is_internal`,
+     `indexable` (que ya excluye canonicalizadas, noindex, bloqueadas y muros,
+     decisión 103) con `is_(True)` en las dos, para que no discrepen. Con eso
+     una variante canonicalizada no puede salir como casi duplicada de su
+     canónica: ni se firma. En el caso de arriba, **0 avisos** y `/p` medida
+     con 0. Se filtra, no se descartan «parejas variante → canónica»: la
+     misma regla quita de una vez todo lo que Google no va a posicionar.
+   - **Lo que no se mide queda en NULL.** `_bulk_update_near_duplicates` solo
+     escribía las páginas con firma, así que al re-analizar una página que
+     ahora es noindex (o cuyo texto ya no llega al mínimo) conservaba el
+     `near_duplicate_count` del análisis anterior. Antes de escribir se ponen a
+     NULL («no medido», `init_db.py`) las del job que tenían valor y no se han
+     firmado esta vez. Y con una sola página medible se escribe su 0: antes,
+     con menos de dos firmas, no se escribía nada.
+   - **El `--dry-run` de `scripts/near_duplicates.py`** tenía su propia copia
+     de la consulta —sin el alcance— y llamaba a `Select.yield_per`, que en
+     SQLAlchemy 2.x no existe: fallaba siempre. Ahora usa
+     `SEOAnalyzer.firmas_casi_duplicados()`, la misma que el análisis.
+   - **Las escrituras sin espacios.** `tokenizar` partía por `[^\w]+` de `re`.
+     En chino y japonés eso deja **una frase por token**; en tailandés, trozos
+     de sílaba cortados en cada marca vocálica, y en hindi —y en cualquier
+     escritura con matras o virama— la palabra se rompe porque `\w` no casa las
+     marcas combinantes:
+
+     | Texto | Antes | Ahora |
+     |---|---|---|
+     | `東京は日本` | `東京は日本` | `東, 京, は, 日, 本` |
+     | `हिन्दी भाषा` | `ह, न, द, भ, ष` | `हिन्दी, भाषा` |
+     | `ภาษาไทยเป็น` | `ภาษาไทยเป, น` | un token por carácter, marcas incluidas |
+     | `한국어는 띄어쓰기` | igual | igual (lleva espacios) |
+     | `１２３ＡＢＣ` | `１２３ａｂｃ` | `123abc` |
+
+     El tokenizador (librería `regex`, que ya traían el crawler y la API y se
+     declara ahora en `analysis/requirements.txt`) toma como token un carácter
+     de Han, hiragana, katakana (con `ー`), tailandés, lao, jemer o birmano, o
+     una racha de `[\p{L}\p{N}\p{M}_]`: las marcas van dentro de la palabra.
+     Los shingles no cambian (`K_SHINGLE = 3`): en esas escrituras son
+     trigramas de caracteres, lo habitual para medir parecido en CJK. Medido
+     con dos textos japoneses de 40 frases con una palabra cambiada en 3: la
+     Jaccard pasa de **0,617 a 0,970** (firma: 0,617 → 0,977) y dos textos
+     distintos siguen en 0. Nueve frases japonesas eran nueve «palabras» y no
+     tenían firma (quedaban «no medidas», no «sin duplicados»); ahora sí.
+   - **El mínimo.** Un carácter dice menos que una palabra (una palabra china
+     tiene entre 1,5 y 2 caracteres de media), así que cuenta como media
+     (`CARACTERES_POR_PALABRA = 2`): un texto CJK necesita 60 caracteres para
+     tener firma, 25 no la tienen, y un texto mixto suma las dos cosas.
+     `MIN_PALABRAS` sigue en 30 —`soft404.py` lo usa como recuento de
+     palabras propias (`MAX_PALABRAS_SOLO_TITULO`)—. Sin calibrar: no hay
+     ningún censo CJK, tailandés ni hindi en la BD. El tailandés y el jemer
+     cuentan también sus marcas como caracteres, así que llegan al mínimo con
+     menos palabras que el chino.
+   - **El texto latino no cambia de firma.** Sin marcas ni esas escrituras,
+     `[\p{L}\p{N}_]` es exactamente el `\w` de `re` (comprobado sobre todos
+     los puntos de código asignados), así que da los mismos tokens; un test
+     fija el sha256 de la firma de un texto en castellano con la del código
+     anterior. Se normaliza a NFC (un texto en NFD, el de macOS, se partía en
+     cada tilde) y a NFKC **solo el bloque de ancho completo y medio ancho**:
+     NFKC entero cambiaría `1º` por `1o` y `m²` por `m2`, y con eso la firma de
+     casi todo texto en castellano. Lo que cambia en latino es lo que estaba
+     roto: texto en NFD y la `İ` turca (`lower()` le añade un punto combinante).
+   - **Coste**: firmar una página de 400 palabras pasa de 1,0 a 1,37 ms (el
+     tokenizador de `regex` es más lento que `re.split`): unos 7 s más en un
+     censo de 20.000 páginas.
+   - **Al re-analizar un censo ya hecho** (no hace falta re-rastrear: todo sale
+     de `page_content`) desaparecen los `near_duplicate_content` de las
+     páginas no indexables y externas, sus `near_duplicate_count` y
+     `closest_similarity` pasan a NULL (columnas del CSV), y salen de los
+     `matches` de las indexables, cuyos recuentos bajan. En un censo latino
+     indexable no cambia nada más; en uno CJK, tailandés o hindi aparecen
+     firmas y parejas que antes no había. Es exactamente el caso de las
+     decisiones 70 y 91: un censo analizado antes de esto no se compara por
+     incidencias con uno analizado después, y la referencia de una serie se
+     re-analiza sola (93). Ojo con `scripts/near_duplicates.py`: reescribe las
+     incidencias de casi duplicados **sin** tocar `jobs.analisis_version`, así
+     que un censo pasado por el script sigue diciendo que se analizó con el
+     código viejo; si se va a comparar, re-análisis completo
+     (`python -m analysis.analyzer <job>`). La firma de la huella del soft 404
+     (decisión 105) es la misma función: en textos no latinos su huella ahora
+     tiene firma con 60 caracteres.
+   - **Fuera**: dos indexables con el mismo texto siguen sacando
+     `duplicate_content` y `near_duplicate_content` (similitud 1,0), dos avisos
+     por un hallazgo (decisión 36); va aparte, con su medida. Y `word_count`,
+     `content_word_count` y `low_word_count` cuentan por espacios: en CJK dan
+     cifras absurdas.
+   - **Revisión (2026-10-18).** La promesa «el latino no cambia» no se cumplía
+     con emojis: una marca `\p{M}` podía EMPEZAR un token, así que el selector
+     de variación de `❤️` (U+FE0F) o el keycap de `1️⃣` salían como palabra
+     propia y movían los shingles. Ahora una marca solo continúa una palabra,
+     solo cuentan las que escriben (Mn y Mc; las envolventes no) y los
+     selectores de variación se quitan antes de tokenizar. Lo que sigue
+     cambiando en latino es lo que estaba roto: NFD, letras matemáticas con
+     tilde combinante y los trozos en japonés o chino dentro de un post.
+     Medido con el código de `master` y el de esta rama sobre los mismos datos
+     guardados (transacción de solo lectura; la escritura, con ROLLBACK):
+
+     | censo | firmas | avisos | se van por |
+     |---|---|---|---|
+     | Lopesan | 4.298 → 1.818 | **1.940 → 4** | 1.848 canonicalizadas, 84 indexables cuyas parejas no lo eran, 4 noindex |
+     | blogs.uoc.edu | 25.244 → 21.830 | **3.545 → 1.835** | 1.018 canonicalizadas, 474 indexables, 218 noindex |
+     | progym | 3.574 → 3.533 | 1.578 → 1.559 | 10 canonicalizadas, 5 indexables, 4 noindex (medido antes de la revisión) |
+
+     Ninguna pareja nueva en los tres (son latinos). Firmas latinas distintas
+     de las de `master`: 0 en Lopesan y 93 de 25.151 en blogs.uoc.edu (169 con
+     la versión sin revisar). En Lopesan casi todas las canonicalizadas son las
+     2.367 que apuntan a `*.lfr.cloud` (decisión 64): no son variantes, pero
+     ese hallazgo ya es un `canonical_cross_domain` de gravedad `error`, y un
+     aviso por hallazgo (36). Al escribir, las URLs con recuento y no
+     indexables pasan de 1.852 a 0, que es la limpieza a NULL funcionando.
