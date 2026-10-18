@@ -892,3 +892,54 @@
    contra un servidor que anota lo que LLEGA: UA, `sec-ch-ua` y plataforma; y
    `descargar_crudo`) y `tests/test_huella_y_ua.py` (la lista contra curl_cffi,
    la validacion, la deduccion y la herencia, en las dos imagenes).
+
+<a id="d140"></a>
+140. **El HTML del servidor frente al render, por muestra de plantilla** (Ola
+   7.1 de `docs/PLAN_MEJOR_CRAWLER.md`). Google lee una página dos veces —el
+   HTML que responde el servidor y, después, lo que deja el JavaScript— y lo
+   que solo está en una de las dos se lee distinto. El rastreo guarda una sola
+   (la del modo del job), así que nada de esto se veía: un `noindex` en el HTML
+   inicial que el JavaScript quita (Google no renderiza esa página y la saca
+   del índice), un canonical que el JavaScript cambia, o un menú y un texto que
+   solo existen tras el render y que **ningún rastreador de IA ve** (GPTBot,
+   ClaudeBot y PerplexityBot no ejecutan JavaScript).
+   - **Sonda** `crawler/seo_crawler/sonda_render.py` (`RenderCrudoMixin`), con
+     el patrón de la paridad móvil (decisión 119), de la que reutiliza la
+     medición (`huella_paridad`) y la comparación (`shared.paridad.diferencias`):
+     una muestra por plantilla pedida en el OTRO modo, fuera de `max_urls`, sin
+     seguir redirecciones, y si algo difiere se repite en el modo del censo
+     para quitar lo que también cambia entre dos peticiones iguales (decisión
+     13). Va a `capturas_alternativas` con `perfil` `crudo` (censo con render)
+     o `render` (censo sin render), que el modelo ya preveía.
+   - **Por defecto solo con `render_js`**: ahí la otra versión es una petición
+     sin render, barata. `crawl_behavior.render_crudo_muestra` (None = 30 con
+     render, 0 sin él) y `render_crudo_por_plantilla` (3). Sin render, la otra
+     versión es un render por página y hay que pedirla; `js_check` (decisión
+     35) ya cubre los enlaces de esos rastreos.
+   - **Las diferencias se guardan orientadas** (`render`, `crudo`) sea cual sea
+     el modo del censo: en los enlaces, `faltan` son los que solo aparecen al
+     renderizar. Y los volátiles se miran en las dos direcciones
+     (`campos_que_cambian`): `diferencias` solo cuenta los enlaces que faltan
+     en el segundo argumento.
+   - **Análisis** `analysis/avisos_de_render.py`, una fila por (plantilla, tipo)
+     con `paginas_afectadas` sobre `paginas_muestreadas`:
+     `noindex_solo_en_crudo` (error), `noindex_solo_al_renderizar`,
+     `canonical_cambia_al_renderizar`, `nofollow_cambia_al_renderizar`,
+     `contenido_solo_con_js` y `respuesta_cambia_al_renderizar` (warning), y
+     `cambia_al_renderizar` (info: title, H1, description, o un render con
+     MENOS texto). `analyze_paridad_movil` filtra ahora sus perfiles: sin eso
+     habría leído estas capturas como diferencias de dispositivo. Vista
+     **JavaScript** en el Explorador, y `contenido_solo_con_js` también en la
+     vista IA (decisión 137).
+   Medido en local con el spider real contra **www.uoc.edu** (render, 40 URLs,
+   2 por plantilla): 19 páginas muestreadas, todas comparadas, **14 con unos
+   480 enlaces internos que solo aparecen al renderizar** (530 en el render
+   frente a 40-60 en el HTML del servidor: el megamenú), y en una ficha de
+   diplomas el render con menos texto que el servidor (460 frente a 742
+   palabras); 0 volátiles. Coste: **74 s frente a 53 s** del mismo rastreo sin
+   la sonda; casi todo son los renders de control de las páginas que difieren,
+   y con el tope de 30 por censo el extra queda acotado a unos 30 renders.
+   Tests: `tests/test_render_crudo.py` (spider real con y sin render contra un
+   sitio cuyo JavaScript quita un noindex, cambia el canonical o monta el
+   menú; los de render necesitan Chromium y en CI se saltan) y
+   `tests/test_render_crudo_analisis.py`.

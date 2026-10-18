@@ -86,6 +86,7 @@ from seo_crawler.sonda_respuestas import SondaRespuestasMixin
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
 from seo_crawler.sonda_paridad import ParidadMovilMixin, contextos_del_perfil
+from seo_crawler.sonda_render import RenderCrudoMixin
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -509,7 +510,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespuestasMixin,
+class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudoMixin, SondaRespuestasMixin,
                 scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
@@ -728,6 +729,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             self._iniciar_sonda_tls(job)
             # -- Paridad movil/escritorio (decision 119) --
             self._iniciar_paridad(session)
+            # -- Respuesta frente a render (decision 140) --
+            self._iniciar_render_crudo(session)
 
             # -- Sondas de respuesta: enlaces externos y recursos (123, 124) --
             # Despues de los patrones: los de exclusion valen tambien para ellas.
@@ -2093,6 +2096,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, SondaRespue
             yield from self._sonda_de_plantilla(final_url)  # decision 105
             if not muro:
                 yield from self._paridad_de_pagina(response, final_url)  # decision 119
+                yield from self._render_crudo_de_pagina(response, final_url)  # decision 140
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces

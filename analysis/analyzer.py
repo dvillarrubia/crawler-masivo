@@ -43,7 +43,7 @@ from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces, avisos_de_sondas
 from analysis import avisos_de_paginacion
-from analysis import avisos_de_servidor
+from analysis import avisos_de_render, avisos_de_servidor
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from shared.indexabilidad import (
@@ -381,6 +381,7 @@ class SEOAnalyzer:
         self.analyze_content()
         self.analyze_soft_404()
         self.analyze_paridad_movil()
+        avisos_de_render.avisar(self)  # decision 140
         self.analyze_url_issues()
         # Despues de la indexabilidad (necesita `Url.noindex`) y antes de los
         # conteos: deja marcadas las paginas que la lectura de `links` de
@@ -3501,7 +3502,10 @@ class SEOAnalyzer:
                    C.redirige_a, C.vary_base, C.vary, C.diferencias, C.detalle,
                    Url.status_code, Url.response_class)
             .join(Url, Url.id == C.url_id)
-            .where(C.job_id == self.job_id, Url.job_id == self.job_id)
+            # La tabla guarda tambien la respuesta frente al render (decision
+            # 140), que no es un dispositivo y tiene su propio analisis.
+            .where(C.job_id == self.job_id, Url.job_id == self.job_id,
+                   C.perfil.in_(("movil", "escritorio")))
         ).all()
         muestreadas: dict[tuple[str, str], int] = defaultdict(int)
         grupos: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)

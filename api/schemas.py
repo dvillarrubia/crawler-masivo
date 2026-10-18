@@ -148,6 +148,12 @@ class CrawlBehaviorConfig(BaseModel):
     # (la de control, solo si algo difiere). 0 = apagado, que es lo de serie.
     paridad_movil_muestra: int = Field(default=0, ge=0, le=500)
     paridad_movil_por_plantilla: int = Field(default=3, ge=1, le=50)
+    # Respuesta frente a render (decision 140, Ola 7.1): una muestra por
+    # plantilla pedida en el OTRO modo (sin render si el job renderiza). None =
+    # 30 con `render_js` y 0 sin el: sin render, la otra version es un render
+    # por pagina y hay que pedirlo.
+    render_crudo_muestra: int | None = Field(default=None, ge=0, le=500)
+    render_crudo_por_plantilla: int = Field(default=3, ge=1, le=50)
     # chrome_android por defecto: con Googlebot desde nuestra IP un WAF que
     # verifica bots lo bloquea o sirve otra cosa (decision 98)
     paridad_movil_ua: Literal["chrome_android", "googlebot_smartphone"] = "chrome_android"

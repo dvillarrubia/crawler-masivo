@@ -105,6 +105,42 @@ const ISSUE_INFO = {
     google: 'Respeta el límite: el fragmento del resultado se corta ahí, y las funciones de IA de la Búsqueda solo pueden citar ese trozo. Con varias directivas, aplica la más restrictiva; «max-snippet:-1» es sin límite.',
     arreglo: 'Subir el límite o poner «max-snippet:-1» si no hay una razón para recortar. Es informativo: a veces es una decisión de negocio.',
   },
+  // Decision 140: lo que cambia entre el HTML que responde el servidor y el render.
+  'noindex_solo_en_crudo': {
+    que: 'El HTML que responde el servidor lleva «noindex» y la versión renderizada no: el JavaScript quita la directiva. Va una fila por plantilla con las páginas de la muestra afectadas.',
+    google: 'Google lee primero el HTML inicial. Si ahí hay un noindex, no renderiza la página: la saca del índice aunque el JavaScript luego quite la directiva. Lo dice su documentación de JavaScript SEO. Un rastreo con render no lo ve, porque solo guarda la versión renderizada.',
+    arreglo: 'Quitar el noindex del HTML que sirve el servidor (de la plantilla o del SSR) en las páginas que deben indexarse. Si se quiere noindex, que esté en las dos versiones.',
+  },
+  'noindex_solo_al_renderizar': {
+    que: 'El JavaScript añade un «noindex» que no está en el HTML que responde el servidor.',
+    google: 'Lo aplica cuando renderiza, pero hasta entonces trata la página como indexable, y los rastreadores que no ejecutan JavaScript (los de IA, entre otros) la indexan sin más. Google desaconseja cambiar la directiva robots con JavaScript.',
+    arreglo: 'Poner el noindex en el HTML del servidor si la página no debe indexarse, o quitar el script que lo añade si es un error.',
+  },
+  'canonical_cambia_al_renderizar': {
+    que: 'El canonical del HTML del servidor y el de la versión renderizada apuntan a URLs distintas.',
+    google: 'Recibe dos señales contradictorias y puede quedarse con cualquiera de las dos, o con ninguna. Google pide que el canonical no cambie con JavaScript.',
+    arreglo: 'Que el servidor sirva ya el canonical correcto y que el JavaScript no lo toque (es típico de las SPA y de los plugins de SEO que corren en el navegador).',
+  },
+  'nofollow_cambia_al_renderizar': {
+    que: 'El «nofollow» de página está en una versión (servidor o render) y no en la otra.',
+    google: 'Los enlaces de la página se siguen o no según qué versión lea: una señal contradictoria.',
+    arreglo: 'Dejar la directiva igual en el HTML del servidor y en el render.',
+  },
+  'contenido_solo_con_js': {
+    que: 'El texto principal o los enlaces internos de la plantilla solo aparecen al renderizar: en el HTML que responde el servidor falta una parte grande (en los detalles, palabras o enlaces de cada versión).',
+    google: 'Google lo ve cuando renderiza, que llega después del primer rastreo y a veces mucho después. Los rastreadores de IA (GPTBot, ClaudeBot, PerplexityBot) no ejecutan JavaScript: para ellos ese contenido no existe.',
+    arreglo: 'Servir el contenido y los enlaces en el HTML (renderizado en servidor o prerender) en las plantillas que tienen que posicionar.',
+  },
+  'cambia_al_renderizar': {
+    que: 'El title, el H1 o la description cambian entre el HTML del servidor y el render, o el render tiene bastante menos texto que la respuesta.',
+    google: 'Usa normalmente lo renderizado, pero mientras no renderiza indexa lo del servidor, y otros buscadores y rastreadores de IA se quedan con esa versión.',
+    arreglo: 'Que el servidor sirva ya los metadatos definitivos. Es informativo: a veces el cambio es intencionado.',
+  },
+  'respuesta_cambia_al_renderizar': {
+    que: 'La misma URL responde otro código o redirige según se pida con navegador o sin él (comprobado dos veces).',
+    google: 'Googlebot pide primero sin renderizar: lo que recibe ahí decide si la página entra en la cola de render.',
+    arreglo: 'Revisar las reglas del servidor o del CDN que distinguen por navegador (detección de bots, redirecciones por JavaScript).',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -722,6 +758,13 @@ const ISSUE_LABEL_EXTRA = {
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
+  noindex_solo_en_crudo: 'Noindex solo en el HTML del servidor',
+  noindex_solo_al_renderizar: 'Noindex que añade el JavaScript',
+  canonical_cambia_al_renderizar: 'El canonical cambia al renderizar',
+  nofollow_cambia_al_renderizar: 'El nofollow cambia al renderizar',
+  contenido_solo_con_js: 'Contenido o enlaces solo con JavaScript',
+  cambia_al_renderizar: 'Metadatos que cambian al renderizar',
+  respuesta_cambia_al_renderizar: 'Respuesta distinta con y sin navegador',
   max_snippet_restrictivo: 'Fragmento limitado (max-snippet)',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
   enlace_interno_a_error: 'Enlace interno a un error',
@@ -801,6 +844,8 @@ const DETALLE_LABEL = {
   motivo: 'motivo',
   directiva: 'directiva',
   max_snippet: 'máx. caracteres del fragmento',
+  version: 'versión comparada',
+  campos: 'campos',
 
   ejemplos: 'ejemplos',
   similarity: 'similitud',
