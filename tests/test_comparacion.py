@@ -873,3 +873,23 @@ def test_las_paginas_de_muro_no_se_comparan_ni_desaparecen():
     assert r["urls"]["desaparecidas"] == 0
     assert r["urls"]["sin_comparar_por_muro"] == 30
     assert r["cambios"]["status_code"]["total"] == 0
+
+
+def test_dos_canonicals_distintos_no_disparan_la_alerta_de_otro_host():
+    """Con dos canonicals de destino distinto Google los ignora todos
+    (decision 115): la pagina sigue «Indexable» y no se va a ningun sitio.
+    `canonical_href` guarda el primero, y leerlo a secas disparaba la alerta
+    critica (y su webhook) por un canonical que Google descarta."""
+    antes = [_pag(f"/hotel{i}") for i in range(40)]
+    despues = [_pag(f"/hotel{i}", canonical_href=f"https://origen.lfr.cloud/hotel{i}",
+                    canonical_distintos=2) for i in range(40)]
+    r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_LUEGO)
+    assert _alertas_de(r, "canonical_a_otro_host") is None
+    assert _alertas_de(r, "canonical_a_otra_url") is None
+    # Con uno solo, la de siempre; y sin la columna (censo anterior), tambien.
+    for distintos in (1, None):
+        despues = [_pag(f"/hotel{i}", canonical_href=f"https://origen.lfr.cloud/hotel{i}",
+                        indexability_status="Canonicalised",
+                        canonical_distintos=distintos) for i in range(40)]
+        r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_LUEGO)
+        assert _alertas_de(r, "canonical_a_otro_host") is not None

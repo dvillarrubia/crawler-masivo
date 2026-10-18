@@ -373,8 +373,8 @@ def main() -> None:
         # meta["playwright"].
         original = SeoSpider._page_request
 
-        def _page_request(self, url, depth):
-            req = original(self, url, depth)
+        def _page_request(self, url, depth, *a, **k):
+            req = original(self, url, depth, *a, **k)
             req.meta.pop("dont_redirect", None)
             req.meta["playwright"] = True
             return req
@@ -466,7 +466,7 @@ def main() -> None:
             "_tipo", "url", "status_code", "redirect_url", "crawl_depth",
             "indexability_status", "is_internal", "to_url", "follow", "resource_type",
             "blocked_by_robots", "status_group", "response_class", "url_hash",
-            "from_url_hash", "filas",
+            "from_url_hash", "filas", "lang", "href", "origen", "en_body",
         )}
         for k in ("url", "redirect_url", "to_url"):
             if fila.get(k):

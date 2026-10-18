@@ -67,6 +67,7 @@ class HtmlMetaItem(scrapy.Item):
     canonical_href = scrapy.Field()
     canonical_count = scrapy.Field()
     canonical_in_body = scrapy.Field()
+    canonical_distintos = scrapy.Field()
     canonical_header = scrapy.Field()
 
     og_title = scrapy.Field()
@@ -131,6 +132,7 @@ class HreflangItem(scrapy.Item):
     lang = scrapy.Field()
     href = scrapy.Field()
     en_body = scrapy.Field()  # fuera del <head>: Google lo ignora
+    origen = scrapy.Field()   # html | cabecera
 
 
 class StructuredDataItem(scrapy.Item):

@@ -636,6 +636,7 @@ class PostgresPipeline:
             lang=data.get("lang"),
             href=data.get("href"),
             en_body=data.get("en_body"),
+            origen=data.get("origen"),
         )
 
     def _make_structured_data(self, data: dict):

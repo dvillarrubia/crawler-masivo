@@ -195,6 +195,7 @@ def estado_indexabilidad(
     bloqueada_por_robots: bool = False,
     bot: str = BOT_POR_DEFECTO,
     response_class: str | None = None,
+    canonicals_distintos: int | None = None,
 ) -> tuple[bool, str]:
     """``(es_indexable, motivo)``. El motivo describe por que NO lo es.
 
@@ -207,6 +208,13 @@ def estado_indexabilidad(
     cuerpo binario— no es indexable ni deja de serlo por lo que diga: no se ha
     visto la pagina. Va antes que el codigo porque un 403 de Cloudflare no es
     un «Client Error (403)» del sitio (decision 103).
+
+    `canonicals_distintos` es cuantos destinos distintos declaran los
+    canonicals del head. Con mas de uno Google los ignora TODOS y elige por su
+    cuenta (decision 115): la pagina no esta canonicalizada a ninguno, y
+    tampoco se usa el de la cabecera `Link`, que es otra senal mas del mismo
+    conflicto. None = no se sabe (rastreo anterior): manda el primero, como
+    antes.
     """
     if bloqueada_por_robots:
         return (False, "Blocked by robots.txt")
@@ -228,6 +236,9 @@ def estado_indexabilidad(
     tokens = _directivas(meta_robots, x_robots, bot)
     if "noindex" in tokens or "none" in tokens:
         return (False, "Noindex")
+
+    if canonicals_distintos is not None and canonicals_distintos > 1:
+        return (True, "Indexable")
 
     # El del HTML manda; si no hay, vale el de la cabecera Link.
     canonical = (canonical_href or "").strip() or (canonical_header or "").strip()

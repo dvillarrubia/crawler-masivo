@@ -33,8 +33,8 @@ const ISSUE_INFO = {
     arreglo: 'Comprobar con Search Console (inspección de URL) que Google sí ve la página. Para auditarla: lista blanca de la IP del rastreador en el WAF, menos concurrencia o render de JavaScript, y reanudar el rastreo (las páginas de muro se repiten al reanudar).',
   },
   'redirect_chain': {
-    que: 'Para llegar a la URL final hay dos saltos o más (A → B → C).',
-    google: 'Sigue la cadena, pero cada salto gasta rastreo y Google pide evitarlas.',
+    que: 'Para llegar a la URL final hay dos saltos o más (A → B → C). Con más de 10 es un error: Google deja de seguirla.',
+    google: 'Sigue hasta 10 saltos, y cada uno gasta rastreo; pasados 10 no llega al destino y Search Console da un error de redirección.',
     arreglo: 'Que la primera URL redirija directamente a la final, y actualizar los enlaces internos.',
   },
   'redireccion_a_error': {
@@ -100,8 +100,8 @@ const ISSUE_INFO = {
     arreglo: 'Ya no se emite: desde la decisión 101 es canonical_a_error o canonical_a_redireccion. Sale solo en censos analizados antes.',
   },
   'canonical_multiple': {
-    que: 'La página declara más de un canonical.',
-    google: 'Si no coinciden, los ignora todos y elige por su cuenta.',
+    que: 'La página declara en el <head> varios canonicals con destinos distintos. El mismo destino escrito dos veces no sale aquí.',
+    google: 'Los ignora todos, también el de la cabecera Link, y elige por su cuenta: la página cuenta como indexable, no como canonicalizada.',
     arreglo: 'Dejar uno solo; suele ser un plugin y la plantilla escribiendo los dos.',
   },
   'canonical_in_body': {

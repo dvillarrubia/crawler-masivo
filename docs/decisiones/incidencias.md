@@ -611,6 +611,49 @@
      caracteres de texto) y todo lo que necesita leer la página con un modelo
      (#11).
 
+<a id="d117"></a>
+117. **Una cadena de redirecciones es un aviso, y pasados 10 saltos es un
+   error** (#149, duplicado en #150). Dos cosas de `redirect_chain` (decision 43):
+   - **Una fila por cadena.** Cada origen intermedio de A → B → … → M es
+     tambien una cadena, y salia una fila por cada uno: una cadena de 12 saltos
+     daba **11 `redirect_chain`** (hops 12, 11, …, 2), todas `warning`. El
+     arreglo es una regla del servidor —que todas salten directas a la final—,
+     asi que el aviso va en el primer origen de la cadena (el interno al que no
+     redirige ningun otro origen con cadena), con `paginas_afectadas` (los
+     origenes de la cadena que lo son, el primero incluido) y hasta 20
+     `intermedias`, como lo agrupado de las decisiones 36 y 64. Dos cadenas que
+     se juntan son dos avisos: tienen dos primeros saltos distintos. Los bucles
+     y `redireccion_a_error` siguen por origen (decision 101): un salto a un 404
+     se arregla en su propia regla.
+   - **`LIMITE_SALTOS_GOOGLE = 10`.** Google sigue hasta 10 redirecciones; si no
+     llega a contenido, Search Console da un error de redireccion. Leido de su
+     documentacion y sin verificar contra Google: 10 saltos seguidos de
+     contenido llegan, 11 no. Con `hops > 10` es `redirect_chain` con severidad
+     **`error`** y `supera_limite_google: true` —el mismo tipo con la severidad
+     por la consecuencia, decision 64—, sea cual sea el umbral del job
+     (`max_redirect_chain_length`). Si ademas acaba en un 4xx/5xx manda el
+     limite: Google ni llega al error. Va en el mismo aviso con `final_status`,
+     no tambien como `redireccion_a_error` de ese origen. Los origenes
+     intermedios que quedan a 10 saltos o menos de ese error siguen siendo cada
+     uno su `redireccion_a_error`.
+   - **El spider tiene tope**: sin render, cada salto es una peticion nueva y
+     solo el dupefilter y `max_urls` paraban una cadena de URLs siempre
+     distintas. `MAX_SALTOS_SEGUIDOS = 20` (el de Chromium y Firefox; con render
+     ya cortaba Chromium): el salto 21 queda registrado con su destino, pero no
+     se sigue. Cortar en 10, como FreeCrawl, deja sin saber donde acaba. Una
+     cadena cortada acaba en una URL sin rastrear: `final_status` None, y no se
+     afirma ningun error.
+
+   **Que pide cada cosa**: el aviso agrupado y el error se aplican re-analizando
+   (cambian cifras ya entregadas: un censo con cadenas largas pierde las filas
+   de sus intermedias); el tope, re-rastrear. Sin medir en censos reales; la
+   consulta para hacerlo, con el analisis en ROLLBACK, es
+   `count(*) FROM issues WHERE job_id = :j AND issue_type = 'redirect_chain'`
+   antes y despues, y `AND (details->>'hops')::int > 10`. Tests:
+   `tests/test_cadenas_largas_db.py` (contra SQLite) y
+   `tests/test_spider_cabeceras_y_saltos.py` (una cadena de 25 URLs guarda 21
+   filas).
+
 <a id="d118"></a>
 118. **Un casi duplicado se mide entre las mismas páginas que el duplicado
    exacto, y una escritura sin espacios se parte en caracteres**
