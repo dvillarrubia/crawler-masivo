@@ -42,7 +42,15 @@ from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
 from analysis import avisos_de_paginacion
-from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
+from analysis import avisos_de_servidor
+from analysis import avisos_de_html
+from shared.indexabilidad import (
+    BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, misma_url,
+    x_robots_para_bot,
+)
+from shared.meta_refresh import retardo_meta_refresh
+from shared.plantillas import firma_de_ruta
+from shared.titulos import description_igual_title, es_title_generico, marcas_del_host
 from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
@@ -288,6 +296,13 @@ class SEOAnalyzer:
         self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
         self.enlaces_plantilla_min_paginas = t.get("enlaces_plantilla_min_paginas", 10)  # d106
+        # Avisos del servidor (decisiones 109 y 110, `avisos_de_servidor.py`).
+        self.respuesta_lenta_ms = t.get("respuesta_lenta_ms", 1000)
+        self.respuesta_lenta_grave_ms = t.get("respuesta_lenta_grave_ms", 3000)
+        self.respuesta_lenta_min_paginas = t.get("respuesta_lenta_min_paginas", 20)
+        self.tls_dias_aviso = t.get("tls_dias_aviso", 7)
+        self._job_config = (job.config or {}) if job else {}
+        self._job_tls = getattr(job, "tls", None) if job else None
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
         )
@@ -312,6 +327,9 @@ class SEOAnalyzer:
         self.clear_existing_issues()
 
         self.analyze_status_codes()
+        # robots.txt de cada host (decisiones 112 y 113): antes de la
+        # indexabilidad, que lo usa para saber que puede pedir Googlebot.
+        self.analyze_robots_txt()
         # La indexabilidad va ANTES que los titulos, las descripciones y los
         # duplicados: los tres agrupan solo paginas indexables y necesitan
         # `Url.indexable` escrito. Estaba despues, asi que la columna era NULL y
@@ -324,12 +342,14 @@ class SEOAnalyzer:
         self.analyze_hreflang()
         self.analyze_structured_data()
         self.analyze_html_ignorado()
+        avisos_de_html.avisar_declaraciones_html(self)  # decision 108
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()
         self.analyze_redirect_chains()
         self.analyze_images()
         self.analyze_security()
+        avisos_de_servidor.avisar(self)  # decisiones 109 y 110
         self.analyze_content()
         self.analyze_soft_404()
         self.analyze_url_issues()
@@ -342,6 +362,9 @@ class SEOAnalyzer:
         self.analyze_links()
         avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
         self.analyze_sitemap()
+        # Al final: sus condiciones pueden leer lo que acaba de escribir el
+        # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
+        self.segmentar()
 
         # Flush any remaining buffered issues.
         self._flush_issues()
@@ -349,6 +372,19 @@ class SEOAnalyzer:
         self.session.commit()
 
         logger.info("SEO analysis completed for job %s", self.job_id)
+
+    def segmentar(self) -> dict:
+        """Materializa `urls.segmento` con las reglas de `config.segmentos`
+        (decision 125). Es lo mismo que hace `POST /segmentos` sin el analisis
+        entero: re-analizar un censo viejo con reglas nuevas lo segmenta sin
+        re-rastrear."""
+        from shared.segmentos import segmentar
+
+        resumen = segmentar(self.session, self.job_id)
+        logger.info("Segmentos: %d URLs en %d segmentos (%d por regla) en %.1f s",
+                    resumen["urls"], resumen["segmentos_distintos"],
+                    sum(r["urls"] for r in resumen["por_regla"]), resumen["segundos"])
+        return resumen
 
     def _sellar_version(self) -> None:
         """Con que version del codigo se calcularon estas cifras.
@@ -565,10 +601,17 @@ class SEOAnalyzer:
         rows = self.session.execute(
             select(Url.id, Url.status_group).where(
                 Url.job_id == self.job_id,
-                Url.status_group.in_(["timeout", "dns_error", "conn_refused", "error", "unknown"]),
+                Url.status_group.in_(["timeout", "dns_error", "conn_refused", "tls_error",
+                                      "error", "unknown"]),
             )
         ).all()
+        # Una pagina que falla por el certificado de su host no lleva ademas
+        # su `connection_error` cuando la sonda lo confirma: lo dice una vez
+        # `tls_certificado_invalido`, con las paginas afectadas (36, 110).
+        ya_contadas = avisos_de_servidor.ids_tls_de_hosts_invalidos(self)
         for url_id, status_group in rows:
+            if url_id in ya_contadas:
+                continue
             self._add_issue(
                 url_id,
                 "connection_error",
@@ -624,7 +667,8 @@ class SEOAnalyzer:
         stmt = (
             select(Url.id, HtmlMeta.title, HtmlMeta.title_len,
                    HtmlMeta.title_pixel_width, Url.status_code,
-                   Url.is_internal, Url.indexable, HtmlMeta.title_count)
+                   Url.is_internal, Url.indexable, HtmlMeta.title_count,
+                   Url.host, Url.url)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
@@ -632,9 +676,10 @@ class SEOAnalyzer:
 
         # Track titles for duplicate detection.
         title_to_url_ids: dict[str, list[int]] = defaultdict(list)
+        genericos = self._titulos_genericos(rows)
 
         for (url_id, title, title_len, title_px, status_code, is_internal,
-             indexable, title_count) in rows:
+             indexable, title_count, _host, _url) in rows:
             # Con dos `<title>` no se sabe cual usa Google, y el caso tipico es
             # uno VACIO delante del bueno (dos plugins escribiendo la cabecera):
             # se cogia el vacio y salia `title_missing` sin decir que habia otro.
@@ -652,7 +697,11 @@ class SEOAnalyzer:
             clean_title = title.strip()
             effective_len = title_len if title_len is not None else len(clean_title)
 
-            if effective_len < self.title_min_len:
+            # Un placeholder corto («Página») ya lo dice `title_generico`, con
+            # el mismo arreglo: rellenar el titulo (36).
+            if url_id in genericos:
+                pass
+            elif effective_len < self.title_min_len:
                 self._add_issue(
                     url_id,
                     "title_too_short",
@@ -698,6 +747,10 @@ class SEOAnalyzer:
 
         # Duplicate titles: only flag groups with 2+ pages sharing the same title.
         for title_text, url_ids in title_to_url_ids.items():
+            # «Sin título | Marca» en 12 paginas son 12 duplicados de un
+            # placeholder: el hallazgo es el placeholder, y lo dice
+            # `title_generico` en una fila (36, como las TAPADAS del soft 404).
+            url_ids = [u for u in url_ids if u not in genericos]
             if len(url_ids) < 2:
                 continue
             for uid in url_ids:
@@ -712,6 +765,38 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def _titulos_genericos(self, rows) -> set[int]:
+        """`title_generico` (decision 121): una fila por valor, y los ids que
+        tapa (su `title_too_short` y su `title_duplicate`).
+
+        Solo indexables, como los duplicados: un placeholder en una pagina en
+        noindex o canonicalizada no compite en el indice. La marca de cada host
+        sale de los titulos de sus indexables (`shared/titulos.py`).
+        """
+        por_host: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+        for (url_id, title, _l, _px, status_code, is_internal, indexable,
+             _c, host, url) in rows:
+            if status_code == 200 and is_internal and indexable and (title or "").strip():
+                por_host[host or ""].append((url_id, title.strip(), url))
+        grupos: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
+        for host, filas in por_host.items():
+            marcas = marcas_del_host(t for _, t, _ in filas)
+            for url_id, title, url in filas:
+                if es_title_generico(title, marcas):
+                    grupos[title.lower()].append((url, url_id, title))
+        tapados: set[int] = set()
+        for valor, miembros in grupos.items():
+            # Anclada en la URL menor: el id depende del orden de rastreo (88).
+            miembros.sort()
+            self._add_issue(
+                miembros[0][1], "title_generico", "warning",
+                {"title": miembros[0][2], "paginas_afectadas": len(miembros),
+                 "paginas_ejemplo": [m[0] for m in miembros[: self._MUESTRA_EJEMPLOS]]},
+                group_key=_clave_de_grupo(valor),
+            )
+            tapados.update(m[1] for m in miembros)
+        return tapados
+
     # -- Descriptions -------------------------------------------------------
 
     def analyze_descriptions(self) -> None:
@@ -722,16 +807,19 @@ class SEOAnalyzer:
             select(Url.id, HtmlMeta.meta_description, HtmlMeta.meta_description_len,
                    HtmlMeta.meta_description_pixel_width,
                    Url.status_code, Url.is_internal, Url.indexable,
-                   HtmlMeta.meta_description_count)
+                   HtmlMeta.meta_description_count, HtmlMeta.title, Url.host,
+                   Url.path, Url.url)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id, Url.is_html.is_(True))
         )
         rows = self.session.execute(stmt).all()
 
         desc_to_url_ids: dict[str, list[int]] = defaultdict(list)
+        # (host, plantilla) -> [(url, url_id)] de las que repiten el titulo.
+        igual_title: dict[tuple[str, str], list[tuple[str, int]]] = defaultdict(list)
 
         for (url_id, description, desc_len, desc_px, status_code, is_internal,
-             indexable, desc_count) in rows:
+             indexable, desc_count, title, host, path, url) in rows:
             # Igual que el titulo: con dos descriptions no se sabe cual usa
             # Google. La vacia se salta al coger el valor, pero sigue ahi.
             if (desc_count or 0) > 1:
@@ -776,6 +864,19 @@ class SEOAnalyzer:
             # and solo indexables: ver la nota en `analyze_titles`.
             if status_code == 200 and is_internal and indexable:
                 desc_to_url_ids[clean_desc.lower()].append(url_id)
+                if description_igual_title(clean_desc, title):
+                    igual_title[(host or "", firma_de_ruta(path or "/"))].append((url, url_id))
+
+        # La description que repite el titulo es el valor por defecto del CMS
+        # o del plugin: una fila por (host, plantilla) (decision 121, 64).
+        for (host, plantilla), miembros in igual_title.items():
+            miembros.sort()
+            self._add_issue(
+                miembros[0][1], "description_igual_title", "info",
+                {"host": host, "plantilla": plantilla, "paginas_afectadas": len(miembros),
+                 "paginas_ejemplo": [u for u, _ in miembros[: self._MUESTRA_EJEMPLOS]]},
+                group_key=_clave_de_grupo(f"{host}|{plantilla}"),
+            )
 
         for desc_text, url_ids in desc_to_url_ids.items():
             if len(url_ids) < 2:
@@ -839,14 +940,31 @@ class SEOAnalyzer:
             if url_id not in h1_by_url:
                 self._add_issue(url_id, "h1_missing", "warning")
 
-        # Multiple H1s
+        # H1 presente pero vacio (decision 121): un `<h1><img src=logo></h1>`
+        # sin alt deja la pagina sin titular igual que no tenerlo, y contaba
+        # como h1 presente. En un censo anterior a la decision 46 el alt no se
+        # leia y el logo CON alt tambien se guardo vacio: ahi no se afirma.
+        evaluar_vacios = not self._censo_anterior_a_d46()
+        if not evaluar_vacios:
+            logger.warning(
+                "Job %s: headings.oculto NULL en todo el censo (anterior a la "
+                "decision 46); h1_vacio no se evalua", self.job_id)
         for url_id, h1_texts in h1_by_url.items():
-            if len(h1_texts) > 1:
+            con_texto = [t for t in h1_texts if t.strip()]
+            if not con_texto and evaluar_vacios and url_id in all_html_url_ids:
+                self._add_issue(url_id, "h1_vacio", "warning",
+                                {"h1_vacios": len(h1_texts)})
+
+        # Multiple H1s. Solo los que tienen texto: uno bueno y uno vacio es UN
+        # titular, y solo vacios ya es `h1_vacio` (36).
+        for url_id, h1_texts in h1_by_url.items():
+            con_texto = [t for t in h1_texts if t.strip()]
+            if len(con_texto) > 1:
                 self._add_issue(
                     url_id,
                     "h1_multiple",
                     "warning",
-                    {"count": len(h1_texts)},
+                    {"count": len(con_texto)},
                 )
 
         # Duplicate H1 text across different URLs.
@@ -877,6 +995,30 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def _censo_anterior_a_d46(self) -> bool:
+        """¿Ningun titular del job tiene `oculto` escrito? Entonces el censo es
+        anterior a la decision 46 (alt de la imagen y `aria-label` como texto,
+        y la columna `oculto`, en el mismo commit): lo que entonces se guardo
+        vacio puede no estarlo. Un job sin titulares no es «anterior»."""
+        if getattr(self, "_anterior_d46", None) is None:
+            from sqlalchemy import inspect
+
+            # Los tests de enlaces montan SQLite sin `headings`: sin tabla no
+            # hay titulares que digan de que epoca es el censo.
+            if not inspect(self.session.connection()).has_table(Heading.__tablename__):
+                self._anterior_d46 = False
+                return False
+            hay = self.session.execute(
+                select(Heading.id).join(Url, Url.id == Heading.url_id)
+                .where(Url.job_id == self.job_id).limit(1)
+            ).first()
+            medido = self.session.execute(
+                select(Heading.id).join(Url, Url.id == Heading.url_id)
+                .where(Url.job_id == self.job_id, Heading.oculto.isnot(None)).limit(1)
+            ).first()
+            self._anterior_d46 = hay is not None and medido is None
+        return self._anterior_d46
+
     # -- Canonicals ---------------------------------------------------------
 
     def analyze_canonicals(self) -> None:
@@ -891,25 +1033,48 @@ class SEOAnalyzer:
         fichas = _Fichas(self.session, self.job_id)
 
         # Iterate HTML pages with their canonical information.
+        # Una meta refresh no es la pagina: es un salto (decision 120). Sus
+        # senales no se evaluan como las de la pagina final —salia
+        # `canonical_missing` en el puente—; lo que tiene de malo lo dice
+        # `meta_refresh_redireccion`. Un muro tampoco (103).
         stmt = (
             select(Url.id, Url.url, Url.host, Url.status_code, HtmlMeta.canonical_href,
                    HtmlMeta.canonical_count, HtmlMeta.canonical_in_body,
-                   HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head)
+                   HtmlMeta.head_cortado_por, HtmlMeta.fuera_del_head,
+                   HtmlMeta.canonical_distintos, HtmlMeta.canonical_header,
+                   Url.noindex, Url.path)
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
-            .where(Url.job_id == self.job_id, Url.is_html.is_(True))
+            .where(Url.job_id == self.job_id, Url.is_html.is_(True),
+                   _respuesta_valida(),
+                   or_(Url.indexability_status.is_(None),
+                       Url.indexability_status != ESTADO_META_REFRESH))
         )
         rows = self.session.execute(stmt).all()
 
+        # (host, plantilla) -> paginas con `noindex` y canonical a otra (4b).
+        noindex_y_canonical: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        # host -> paginas con el canonical del HTML distinto del de la cabecera.
+        html_y_cabecera: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
         for (url_id, page_url, page_host, page_status, canonical_href,
              canonical_count, canonical_in_body, head_cortado_por,
-             fuera_del_head) in rows:
-            # Con VARIOS canonicals Google los ignora todos y elige el por su
-            # cuenta: la pagina esta sin canonicalizar, aunque el informe
-            # mostrara el primero como si valiera.
-            if (canonical_count or 0) > 1:
+             fuera_del_head, canonical_distintos, canonical_header,
+             page_noindex, page_path) in rows:
+            # Con VARIOS canonicals DISTINTOS Google los ignora todos y elige el
+            # por su cuenta: la pagina esta sin canonicalizar (decision 115).
+            # El mismo destino escrito dos veces —relativo y absoluto, dos
+            # plugins— es un canonical, y uno en el head mas el mismo en el
+            # body ya es `canonical_in_body`. Un censo anterior a la columna
+            # (NULL) sigue con el conteo de etiquetas, con `distintos` a None:
+            # lo que no se sabe no se calla ni se inventa.
+            if canonical_distintos is None:
+                multiple = (canonical_count or 0) > 1
+            else:
+                multiple = canonical_distintos > 1
+            if multiple:
                 self._add_issue(
                     url_id, "canonical_multiple", "warning",
-                    {"cuantos": canonical_count},
+                    {"cuantos": canonical_count, "distintos": canonical_distintos},
                 )
             # Un canonical en el `<body>` Google lo ignora SIEMPRE: solo cuenta
             # en el `<head>`.
@@ -920,7 +1085,14 @@ class SEOAnalyzer:
             if canonical_in_body and not cortado:
                 self._add_issue(url_id, "canonical_in_body", "warning")
 
-            if not canonical_href or not canonical_href.strip():
+            # El canonical que vale es el del HTML y, si no hay, el de la
+            # cabecera `Link`: el mismo criterio que la indexabilidad y que
+            # `_Fichas`. Solo se leia el del HTML, asi que una pagina
+            # «Canonicalised» por cabecera salia ademas con `canonical_missing`
+            # y su destino no se comprobaba (B1 de #150, decision 120).
+            del_html = (canonical_href or "").strip()
+            de_cabecera = (canonical_header or "").strip()
+            if not del_html and not de_cabecera:
                 # El extractor solo toma el canonical del head tal como lo
                 # parsea lxml, asi que con el head cortado antes del canonical
                 # `canonical_href` llega vacio: la pagina SI lo declara, y el
@@ -930,7 +1102,33 @@ class SEOAnalyzer:
                     self._add_issue(url_id, "canonical_missing", "info")
                 continue
 
-            canonical = canonical_href.strip()
+            canonical = del_html or de_cabecera
+            fuente = {} if del_html else {"fuente": "cabecera"}
+
+            # Google ignora ese canonical: avisar de a donde va (otro dominio,
+            # http, un destino roto) seria tratarlo como si valiera. El aviso
+            # es `canonical_multiple`, uno por hallazgo (36).
+            if canonical_distintos is not None and canonical_distintos > 1:
+                continue
+
+            # Dos canonicals que se contradicen, uno en el HTML y otro en la
+            # cabecera (4a): manda el del HTML para la indexabilidad, pero
+            # Google recibe dos senales y puede no fiarse de ninguna. Con la
+            # regla de `misma_url`: la barra final SI cuenta, el orden de los
+            # parametros no. Solo en paginas que responden 200, como el destino.
+            if (page_status == 200 and del_html and de_cabecera
+                    and not misma_url(del_html, de_cabecera)):
+                html_y_cabecera[page_host or ""].append({
+                    "url_id": url_id, "url": page_url,
+                    "canonical_html": del_html, "canonical_cabecera": de_cabecera,
+                })
+
+            # `noindex` con un canonical a otra URL (4b): dos senales que piden
+            # cosas distintas. Se decide abajo, con el destino a la vista.
+            if (page_status == 200 and page_noindex
+                    and not misma_url(canonical, page_url)):
+                noindex_y_canonical[(page_host or "", firma_de_ruta(page_path or "/"))].append(
+                    {"url_id": url_id, "url": page_url, "canonical": canonical})
 
             # Autocanonico: nada que avisar. Con la MISMA regla que la
             # indexabilidad (`misma_url`): el puerto por defecto, la caja del
@@ -985,6 +1183,7 @@ class SEOAnalyzer:
                         "canonical": canonical,
                         "canonical_host": canonical_host,
                         "otro_dominio_registrable": fuera,
+                        **fuente,
                     },
                     group_key=_clave_de_grupo(canonical_host),
                 )
@@ -1000,7 +1199,8 @@ class SEOAnalyzer:
             )
             if a_http:
                 self._add_issue(
-                    url_id, "canonical_a_http", "warning", {"canonical": canonical},
+                    url_id, "canonical_a_http", "warning",
+                    {"canonical": canonical, **fuente},
                 )
 
             # Lo que encuentra Google al llegar al destino (decision 101).
@@ -1010,13 +1210,92 @@ class SEOAnalyzer:
             if page_status == 200:
                 self._avisar_destino_del_canonical(
                     url_id, page_url, canonical, fichas, a_http=a_http,
+                    extra=fuente,
                 )
 
+        self._avisar_html_y_cabecera(html_y_cabecera)
+        self._avisar_noindex_y_canonical(noindex_y_canonical, fichas)
         self._flush_issues()
+
+    def _avisar_html_y_cabecera(self, por_host: dict[str, list[dict[str, Any]]]) -> None:
+        """`canonical_html_y_cabecera_distintos` (decision 120): por pagina, o
+        una fila por host si son `enlaces_plantilla_min_paginas` o mas —un CDN
+        o un plugin que pone la cabecera en todo el sitio es UN arreglo (53)—.
+        """
+        for host, paginas in por_host.items():
+            paginas.sort(key=lambda p: p["url"])
+            if len(paginas) >= self.enlaces_plantilla_min_paginas:
+                p = paginas[0]
+                self._add_issue(
+                    p["url_id"], "canonical_html_y_cabecera_distintos", "warning",
+                    {"alcance": "host", "host": host, "paginas_afectadas": len(paginas),
+                     "canonical_html": p["canonical_html"],
+                     "canonical_cabecera": p["canonical_cabecera"],
+                     "paginas_ejemplo": [x["url"] for x in paginas[: self._MUESTRA_EJEMPLOS]]},
+                    group_key=_clave_de_grupo(host),
+                )
+                continue
+            for p in paginas:
+                self._add_issue(
+                    p["url_id"], "canonical_html_y_cabecera_distintos", "warning",
+                    {"alcance": "pagina", "canonical_html": p["canonical_html"],
+                     "canonical_cabecera": p["canonical_cabecera"]},
+                )
+
+    def _avisar_noindex_y_canonical(
+        self, grupos: dict[tuple[str, str], list[dict[str, Any]]], fichas: "_Fichas",
+    ) -> None:
+        """`noindex_y_canonical_a_otra` (decision 120), una fila por (host,
+        plantilla), y fuera el `noindex_page` de esas paginas: es el mismo
+        hallazgo dicho con mas (36), como `canonical_sin_enlazar` con
+        `orphan_page`.
+
+        Google suele obedecer el `noindex` y la consolidacion no se produce;
+        quitar una de las dos senales da claridad, no indice. Por eso `info` y
+        agrupado: «faceta en noindex con canonical a la categoria» es deliberado
+        y masivo (decision 38: 9.771 noindex en Druni). Con un destino que es a
+        su vez noindex no hay contradiccion util (101): la pagina se queda con
+        su `noindex_page` y nada mas.
+        """
+        sustituidas: list[int] = []
+        for (host, plantilla), paginas in grupos.items():
+            validas = []
+            for p in paginas:
+                destino = fichas.buscar(p["canonical"])
+                if destino is not None and destino.status_code == 200 and destino.noindex:
+                    continue
+                # Lo que no se ha visto no se afirma: sin rastrear, None.
+                p["destino_indexable"] = (
+                    None if destino is None
+                    else bool(destino.status_code == 200 and not destino.noindex))
+                validas.append(p)
+            if not validas:
+                continue
+            validas.sort(key=lambda p: p["url"])
+            p = validas[0]
+            self._add_issue(
+                p["url_id"], "noindex_y_canonical_a_otra", "info",
+                {"host": host, "plantilla": plantilla, "paginas_afectadas": len(validas),
+                 "canonical": p["canonical"], "destino_indexable": p["destino_indexable"],
+                 "paginas_ejemplo": [x["url"] for x in validas[: self._MUESTRA_EJEMPLOS]]},
+                group_key=_clave_de_grupo(f"{host}|{plantilla}"),
+            )
+            sustituidas.extend(x["url_id"] for x in validas)
+        if not sustituidas:
+            return
+        self._flush_issues()
+        for i in range(0, len(sustituidas), BATCH_SIZE):
+            self.session.execute(
+                delete(Issue).where(
+                    Issue.job_id == self.job_id,
+                    Issue.issue_type == "noindex_page",
+                    Issue.url_id.in_(sustituidas[i:i + BATCH_SIZE]),
+                ).execution_options(synchronize_session=False)
+            )
 
     def _avisar_destino_del_canonical(
         self, url_id: int, page_url: str, canonical: str, fichas: "_Fichas",
-        *, a_http: bool,
+        *, a_http: bool, extra: dict[str, Any] | None = None,
     ) -> None:
         """Que encuentra Google en el destino del canonical (decision 101).
 
@@ -1049,9 +1328,10 @@ class SEOAnalyzer:
         destino = fichas.buscar(canonical)
         if destino is None:
             return
-        base = {"canonical": canonical, "target_status": destino.status_code}
+        base = {"canonical": canonical, "target_status": destino.status_code,
+                **(extra or {})}
 
-        if destino.redirect_url and _es_redireccion(destino.status_code):
+        if destino.redirige:
             final, cadena, bucle = fichas.seguir_redirecciones(destino)
             if final is not None and _es_error(final.status_code):
                 self._add_issue(url_id, "canonical_a_error", "error", {
@@ -1160,6 +1440,11 @@ class SEOAnalyzer:
         # no la ensena), y el x-default se ancla en una pagina HTML interna.
         internas: set[int] = set()
         html_200: set[int] = set()
+        # Lo que se sabe que no es HTML (un PDF con hreflang en la cabecera
+        # `Link`): sus anotaciones cuentan como destino y como retorno, pero no
+        # es fuente de avisos, porque la pestana Hreflang filtra por HTML
+        # interno y el chip diria N con la lista en N-k (decision 116).
+        no_html: set[int] = set()
         # URL -> a donde salta, SOLO por redireccion (para anclar el x-default
         # en la pagina a la que lleva la raiz, no en el 301).
         salta_a: dict[tuple, tuple] = {}
@@ -1191,6 +1476,8 @@ class SEOAnalyzer:
                 internas.add(uid)
                 if sc == 200 and tipo_recurso == "html":
                     html_200.add(uid)
+            if tipo_recurso is not None and tipo_recurso != "html":
+                no_html.add(uid)
             norm = _clave(row_url)
             if norm:
                 if redirige and _clave(redirige):
@@ -1222,7 +1509,7 @@ class SEOAnalyzer:
             (otro subdominio fuera del alcance) no es lo que se audita, y sus
             avisos no se verian en la pestana Hreflang, que filtra por HTML
             interno."""
-            return indexable(uid) and uid in internas
+            return indexable(uid) and uid in internas and uid not in no_html
 
         stmt = (
             select(Hreflang.id, Hreflang.url_id, Hreflang.lang, Hreflang.href,
@@ -1230,7 +1517,29 @@ class SEOAnalyzer:
             .join(Url, Url.id == Hreflang.url_id)
             .where(Url.job_id == self.job_id)
         )
-        rows = self.session.execute(stmt).all()
+        # La misma anotacion repetida —dos plugins escribiendo el mismo
+        # `en-GB`, el head y la cabecera `Link`, `/en/` y `/en/#top`— es UNA
+        # (decision 116): salian dos `hreflang_broken_target` identicos. Se analiza la
+        # primera, o la primera del head si la otra esta en el body (Google lee
+        # esa), y las repetidas reciben su mismo veredicto al final, para que
+        # no queden a NULL en la nota de /insights. Asi re-analizar arregla los
+        # censos ya guardados, que el extractor no deduplicaba.
+        rows = []
+        representante: dict[tuple, int] = {}
+        repetidas: dict[int, list[int]] = defaultdict(list)
+        for fila in sorted(self.session.execute(stmt).all(), key=lambda f: f[0]):
+            hid, uid, lang, href, en_body = fila
+            clave = (uid, (lang or "").casefold(), _clave(href) or href)
+            i = representante.get(clave)
+            if i is None:
+                representante[clave] = len(rows)
+                rows.append(fila)
+            elif rows[i][4] and not en_body:
+                repetidas[hid].append(rows[i][0])
+                repetidas[hid].extend(repetidas.pop(rows[i][0], []))
+                rows[i] = fila
+            else:
+                repetidas[rows[i][0]].append(hid)
 
         # Map each crawled page to the set of hreflang targets it declares,
         # so we can check whether a target links back (reciprocal return tag).
@@ -1419,6 +1728,7 @@ class SEOAnalyzer:
             )
 
         for (lang_valid, return_ok), ids in por_veredicto.items():
+            ids = ids + [r for hid in ids for r in repetidas.get(hid, ())]
             for i in range(0, len(ids), 5000):
                 self.session.execute(
                     update(Hreflang)
@@ -1939,6 +2249,7 @@ class SEOAnalyzer:
                 HtmlMeta.x_robots_tag,
                 HtmlMeta.canonical_href,
                 HtmlMeta.canonical_header,
+                HtmlMeta.canonical_distintos,
             )
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == self.job_id)
@@ -1960,6 +2271,7 @@ class SEOAnalyzer:
         _MOTIVOS_PROPIOS = {"Indexable", "Canonicalised", "Noindex"}
         estados_por_motivo: dict[str, list[int]] = {}
 
+        robots = getattr(self, "_robots", None)
         for (
             url_id,
             page_url,
@@ -1972,7 +2284,19 @@ class SEOAnalyzer:
             x_robots,
             canonical_href,
             canonical_header,
+            canonical_distintos,
         ) in rows:
+            # Lo que hizo el rastreo, y lo que puede pedir Googlebot segun el
+            # robots.txt guardado (decision 113). Si se sabe, manda Googlebot:
+            # una pagina que rastreamos y Google no puede pedir no es indexable.
+            bloqueada_rastreo = bool(bloqueada_robots) or (estado_actual or "").startswith("Blocked")
+            # Para comparar, solo lo que decidio el RASTREO: el «Blocked» que
+            # escribe este mismo paso en una pagina que si se pidio no cuenta,
+            # o re-analizar se compararia consigo mismo.
+            bloqueada_g = (self._veredicto_googlebot(
+                url_id, page_url,
+                bool(bloqueada_robots) or (status_code is None and bloqueada_rastreo))
+                if robots else None)
             # Una sola funcion, la misma que usa el spider
             # (shared/indexabilidad.py). Antes aqui se repetian las reglas con
             # otro normalizador de URLs —w3lib, que no quita el puerto por
@@ -1995,9 +2319,10 @@ class SEOAnalyzer:
                 canonical_href=canonical_href,
                 canonical_header=canonical_header,
                 page_url=page_url,
-                bloqueada_por_robots=bool(bloqueada_robots)
-                or (estado_actual or "").startswith("Blocked"),
+                bloqueada_por_robots=(bloqueada_rastreo if bloqueada_g is None
+                                      else bloqueada_g),
                 response_class=clase_respuesta,
+                canonicals_distintos=canonical_distintos,
             )
             has_noindex = es_noindex(meta_robots=meta_robots, x_robots=x_robots)
             canonical_ok = motivo_calc != "Canonicalised"
@@ -2007,6 +2332,12 @@ class SEOAnalyzer:
             # SSO marcadas indexables con el motivo "Blocked by robots.txt" al
             # lado, las dos columnas diciendo lo contrario.
             is_indexable = es_indexable_calc
+            # Una meta refresh es una redireccion, aunque responda 200: el
+            # estado decia «Redirect (meta refresh)» y la columna `indexable`
+            # true, y asi entraba en los titulos duplicados y en
+            # `canonical_missing` (B2 de #150, decision 120). Como un 3xx.
+            if estado_actual == ESTADO_META_REFRESH:
+                is_indexable = False
 
             if is_indexable:
                 indexable_ids.append(url_id)
@@ -2026,7 +2357,12 @@ class SEOAnalyzer:
             # spider, pero los rastreos ya guardados solo se reparan desde
             # aqui: re-analizar un job corrige el dato. Ademas evita que las
             # dos columnas del mismo CSV se contradigan.
-            if estado_actual is None or estado_actual in _MOTIVOS_PROPIOS:
+            # El «Blocked by robots.txt» del rastreo de una pagina que SI se
+            # pidio (modo audit) se recalcula si Googlebot puede pedirla.
+            recalcular = (estado_actual is None or estado_actual in _MOTIVOS_PROPIOS
+                          or (bloqueada_g is not None and status_code is not None
+                              and estado_actual == "Blocked by robots.txt"))
+            if recalcular:
                 if motivo_calc and motivo_calc != estado_actual:
                     estados_por_motivo.setdefault(motivo_calc, []).append(url_id)
 
@@ -2038,8 +2374,151 @@ class SEOAnalyzer:
         for motivo, ids in estados_por_motivo.items():
             self._bulk_update_estado(ids, motivo)
             logger.info("indexability_status corregido a %r en %d URLs", motivo, len(ids))
+        if robots:
+            self._cerrar_robots_googlebot()
 
         self._flush_issues()
+
+    # -- robots.txt (decisiones 112 y 113) -----------------------------------
+
+    def analyze_robots_txt(self) -> None:
+        """Un aviso por host cuyo robots.txt respondio 5xx, 429 o no respondio.
+
+        Para Google eso es el sitio entero bloqueado mientras dure (y los
+        errores de red cuentan como 5xx); Scrapy lo trataba como «todo
+        permitido» sin que quedara rastro. El rastreo sigue pidiendo las URLs
+        del host (decision 112): el aviso es un hallazgo del sitio, no un fallo
+        del dato, y la indexabilidad no cambia por el (no sabemos si Google
+        tiene copia en cache ni si el fallo fue pasajero).
+
+        - `error` si fallo tambien la comprobacion al cerrar, o no la hubo;
+          `warning` si a la segunda respondio (intermitente) o si es un 429,
+          que suele ser un limite para nuestra IP y no para Googlebot.
+        - 4xx (salvo 429): nada, es «todo permitido» tambien para Google. Un
+          muro delante (403 de Cloudflare): nada, no se ha visto el robots.txt.
+        - Una fila por host, anclada en la raiz si se rastreo y si no en la URL
+          de id mas bajo de ese host (no depende del orden de las filas).
+        """
+        from analysis.robots_txt import RobotsDelJob, estado_de_comprobacion, estado_de_fila
+        from shared.models import Job
+        from shared.robots_txt import INACCESIBLE, PROCESADO, SIN_RESTRICCIONES, limitado
+
+        self._robots = None
+        try:
+            # En un SAVEPOINT: sin la tabla (una base sin migrar) el analisis
+            # sigue como antes, sin robots.txt, y no se pierde lo ya escrito.
+            with self.session.begin_nested():
+                self._robots = RobotsDelJob(self.session, self.job_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("No se pudo leer robots_txt del job %s; se analiza sin el",
+                           self.job_id, exc_info=True)
+            return
+        self._robots_conteo: dict[str, dict[str, Any]] = {}
+        self._robots_googlebot: dict[bool, list[int]] = {True: [], False: []}
+        self._robots_anclas: dict[str, int | None] = {}
+        job = self.session.query(Job).filter(Job.id == self.job_id).one_or_none()
+        config = (job.config or {}) if job else {}
+        self._robots_mode = config.get("robots_mode", "respect")
+        self._robots_ua = config.get("user_agent") or None
+        for o, fila in self._robots.filas.items():
+            if estado_de_fila(fila) != INACCESIBLE:
+                continue
+            ancla = self._ancla_de_origen(o)
+            if ancla is None:
+                continue
+            segundo = estado_de_comprobacion(fila)
+            intermitente = segundo in (PROCESADO, SIN_RESTRICCIONES)
+            lim = limitado(fila.status_code, fila.response_class)
+            self._add_issue(
+                ancla, "robots_txt_inaccesible",
+                "warning" if intermitente or lim else "error",
+                {"host": fila.host, "url": fila.url, "status_code": fila.status_code,
+                 "error": fila.error, "intentos": fila.intentos,
+                 "response_class": fila.response_class,
+                 "comprobacion": fila.comprobacion,
+                 "intermitente": intermitente, "limitado": lim},
+                group_key=_clave_de_grupo(o),
+            )
+        self._flush_issues()
+
+    def _ancla_de_origen(self, o: str) -> int | None:
+        """La URL del censo en la que se cuelga un aviso de un host."""
+        if o in self._robots_anclas:
+            return self._robots_anclas[o]
+        partes = urlparse(o)
+        filtro = (Url.job_id == self.job_id, Url.host == (partes.hostname or ""),
+                  Url.scheme == partes.scheme)
+        ancla = self.session.execute(
+            select(Url.id).where(*filtro, Url.path.in_(["/", ""]))
+            .order_by(Url.id).limit(1)).scalar()
+        if ancla is None:
+            ancla = self.session.execute(select(func.min(Url.id)).where(*filtro)).scalar()
+        self._robots_anclas[o] = ancla
+        return ancla
+
+    def _veredicto_googlebot(self, url_id: int, url: str, bloqueada_rastreo: bool) -> bool | None:
+        """Si Googlebot tiene prohibida la URL; None = no evaluado."""
+        o, permitida = self._robots.veredicto(url, BOT_POR_DEFECTO)
+        if permitida is None:
+            return None
+        bloqueada = not permitida
+        self._robots_googlebot[bloqueada].append(url_id)
+        c = self._robots_conteo.setdefault(o, {
+            "evaluadas": 0, "bloqueadas": 0, "solo_rastreador": 0, "solo_googlebot": 0,
+            "ejemplos_solo_rastreador": [], "ejemplos_solo_googlebot": []})
+        c["evaluadas"] += 1
+        c["bloqueadas"] += bloqueada
+        # En `ignore` el rastreo no obedecio nada: no hay veredicto propio que
+        # comparar. En `respect` lo bloqueado no se pidio; en `audit` se pidio
+        # y quedo marcado. En los dos, `blocked_by_robots` es lo que decidio.
+        if self._robots_mode in ("respect", "audit") and bloqueada != bloqueada_rastreo:
+            clave = "solo_googlebot" if bloqueada else "solo_rastreador"
+            c[clave] += 1
+            if len(c["ejemplos_" + clave]) < self._MUESTRA_EJEMPLOS:
+                c["ejemplos_" + clave].append(url)
+        return bloqueada
+
+    def _cerrar_robots_googlebot(self) -> None:
+        """Escribe `urls.bloqueada_googlebot`, el resumen por host y el aviso.
+
+        `robots_difiere_para_googlebot`: una fila por host donde el veredicto
+        como Googlebot no es el de nuestro rastreo, con los dos contadores y
+        ejemplos; nunca una por URL (decision 36).
+        """
+        from analysis.robots_txt import estado_evaluable
+        from shared.models import RobotsTxt
+
+        # Lo que dijera un analisis anterior se borra antes: con otro codigo
+        # una URL puede pasar a «no evaluada».
+        self.session.execute(
+            update(Url).where(Url.job_id == self.job_id, Url.bloqueada_googlebot.isnot(None))
+            .values(bloqueada_googlebot=None))
+        for valor, ids in self._robots_googlebot.items():
+            self._bulk_update_campo(ids, Url.bloqueada_googlebot, valor)
+        for o, fila in self._robots.filas.items():
+            c = self._robots_conteo.get(o)
+            self.session.execute(
+                update(RobotsTxt).where(RobotsTxt.id == fila.id).values(evaluacion={
+                    BOT_POR_DEFECTO: {"estado": estado_evaluable(fila),
+                                      "evaluadas": c["evaluadas"] if c else 0,
+                                      "bloqueadas": c["bloqueadas"] if c else 0}}))
+            if not c or not (c["solo_rastreador"] or c["solo_googlebot"]):
+                continue
+            ancla = self._ancla_de_origen(o)
+            if ancla is None:
+                continue
+            self._add_issue(
+                ancla, "robots_difiere_para_googlebot", "warning",
+                {"host": fila.host, "url": fila.url, "bot": BOT_POR_DEFECTO,
+                 "user_agent": self._robots_ua, "robots_mode": self._robots_mode,
+                 "evaluadas": c["evaluadas"],
+                 "solo_rastreador": c["solo_rastreador"],
+                 "solo_googlebot": c["solo_googlebot"],
+                 "ejemplos_solo_rastreador": c["ejemplos_solo_rastreador"],
+                 "ejemplos_solo_googlebot": c["ejemplos_solo_googlebot"]},
+                group_key=_clave_de_grupo(f"{o}|{BOT_POR_DEFECTO}"),
+            )
+        self.session.flush()
 
     def _bulk_update_campo(self, url_ids: list[int], columna, valor) -> None:
         """Escribe una columna de `urls` por lotes."""
@@ -2098,7 +2577,12 @@ class SEOAnalyzer:
                 ("meta_robots_googlebot", meta_googlebot),
                 ("x_robots_tag", x_robots),
             ):
-                problemas = robots_bad_separators(valor)
+                # De las `X-Robots-Tag` solo se lee lo que va a Google, con el
+                # mismo criterio que la indexabilidad (decision 107): una
+                # `bingbot: noindex/nofollow` no le quita nada, y el prefijo
+                # pegado (`googlebot:noindex/nofollow`) escondia el `noindex`.
+                leido = x_robots_para_bot(valor) if fuente == "x_robots_tag" else valor
+                problemas = robots_bad_separators(leido)
                 if not problemas:
                     continue
 
@@ -2228,8 +2712,12 @@ class SEOAnalyzer:
 
         Se mide sobre `page_content.content_text` --el contenido sin plantilla--
         y no sobre el body: con cabecera y pie dentro, todo el sitio saldria
-        duplicado de todo. Solo se miran las 200 HTML: un 404 o un redirect no
-        canibaliza a nadie.
+        duplicado de todo. Y entre las mismas paginas que el duplicado exacto
+        (`analyze_duplicates`, decision 47): internas, 200 HTML e indexables.
+        Una variante canonicalizada comparte el texto con su canonica a
+        proposito, una noindex o una externa no compite con nadie en el indice
+        del cliente; medirlas daba la variante como casi duplicada de su propia
+        canonica (decision 118).
         """
         logger.debug("Analyzing near-duplicate content ...")
 
@@ -2243,30 +2731,26 @@ class SEOAnalyzer:
                 self.near_duplicate_similarity,
             )
 
-        stmt = (
-            select(Url.id, Url.url, PageContent.content_text)
-            .join(PageContent, PageContent.url_id == Url.id)
-            .where(
+        firmas, urls = self.firmas_casi_duplicados()
+
+        # Lo que no se mide en ESTE analisis queda en NULL ("no medido"), no con
+        # el recuento de un analisis anterior: al re-analizar un censo, una
+        # pagina que ahora es noindex, o cuyo texto ya no llega al minimo,
+        # conservaba su `near_duplicate_count` viejo.
+        medidas_antes = self.session.execute(
+            select(Url.id).where(
                 Url.job_id == self.job_id,
-                Url.is_html.is_(True),
-                Url.status_code == 200,
+                or_(
+                    Url.near_duplicate_count.isnot(None),
+                    Url.closest_similarity.isnot(None),
+                ),
             )
+        ).scalars()
+        self._bulk_update_near_duplicates(
+            {uid: (None, None) for uid in medidas_antes if uid not in firmas}
         )
 
-        firmas: dict[int, Any] = {}
-        urls: dict[int, str] = {}
-        # `yield_per` importa: el texto de un censo grande no cabe en memoria de
-        # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
-        for url_id, url, texto in self.session.execute(
-            stmt.execution_options(yield_per=BATCH_SIZE)
-        ):
-            f = nd.firma(texto)
-            if f is None:
-                continue
-            firmas[url_id] = f
-            urls[url_id] = url
-
-        if len(firmas) < 2:
+        if not firmas:
             return
 
         resultado = nd.analizar(firmas, self.near_duplicate_similarity)
@@ -2304,8 +2788,41 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def firmas_casi_duplicados(self) -> tuple[dict[int, Any], dict[int, str]]:
+        """Firma MinHash y URL de cada pagina que entra en los casi duplicados.
+
+        Las mismas condiciones que `analyze_duplicates`. La usa tambien el
+        `--dry-run` de `scripts/near_duplicates.py`, para que la prevision y el
+        analisis no midan conjuntos distintos.
+        """
+        stmt = (
+            select(Url.id, Url.url, PageContent.content_text)
+            .join(PageContent, PageContent.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id,
+                Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code == 200,
+                Url.indexable.is_(True),
+            )
+        )
+
+        firmas: dict[int, Any] = {}
+        urls: dict[int, str] = {}
+        # `yield_per` importa: el texto de un censo grande no cabe en memoria de
+        # golpe. De cada fila solo se queda la firma (256 bytes) y la URL.
+        for url_id, url, texto in self.session.execute(
+            stmt.execution_options(yield_per=BATCH_SIZE)
+        ):
+            f = nd.firma(texto)
+            if f is None:
+                continue
+            firmas[url_id] = f
+            urls[url_id] = url
+        return firmas, urls
+
     def _bulk_update_near_duplicates(
-        self, valores: dict[int, tuple[int, float | None]]
+        self, valores: dict[int, tuple[int | None, float | None]]
     ) -> None:
         """Guardar recuento y mejor similitud por URL, en lotes."""
         if not valores:
@@ -2361,8 +2878,19 @@ class SEOAnalyzer:
 
         # Donde acaba cada cadena: el codigo de la ultima URL (decision 101).
         estado_final = _estado_por_url(self.session, self.job_id)
+        # Y si es una pagina 200 en `noindex` (decision 120). `Url.noindex` lo
+        # acaba de escribir `analyze_indexability`, que va antes en `run_all`.
+        finales_noindex = self._finales_noindex()
+        # Destino noindex -> origenes que acaban en el.
+        a_noindex: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        # Los origenes cuyo aviso ya es el destino: su meta refresh no se avisa.
+        con_aviso_de_destino: set[int] = set()
 
-        # Walk each redirect origin and trace the chain.
+        # Walk each redirect origin and trace the chain. Primero el veredicto
+        # de cada origen y luego los avisos: `redirect_chain` es UNO por cadena
+        # (decision 117), y para saber si un origen es el primero de la suya
+        # hay que conocer el de quien redirige a el.
+        cadenas: dict[str, dict[str, Any]] = {}
         for origin_url in list(redirect_map.keys()):
             visited: list[str] = [origin_url]
             current = origin_url
@@ -2395,6 +2923,7 @@ class SEOAnalyzer:
                     "error",
                     {"chain": visited + [redirect_map[current]]},
                 )
+                con_aviso_de_destino.add(origin_id)
                 continue
 
             # Una redireccion (o una cadena) que acaba en un 4xx o un 5xx: el
@@ -2407,12 +2936,18 @@ class SEOAnalyzer:
             final_status = estado_final.get(current)
             if final_status is None:
                 final_status = estado_final.get(_clave(current))
+            # Mas de 10 saltos: Google no llega al final (decision 117), asi
+            # que manda el limite aunque la cadena acabe en error —Google ni
+            # llega a verlo—, en el mismo aviso con `final_status`. Una cadena
+            # que el rastreo corto en MAX_SALTOS_SEGUIDOS acaba en una URL sin
+            # rastrear: `final_status` None, y no se afirma ningun error.
+            supera = hops > LIMITE_SALTOS_GOOGLE
             # Si el salto solo normaliza (http → https, www, barra final) la
             # redireccion esta bien hecha: el error es el destino, que ya
             # tiene su `4xx_error` / `5xx_error`. Medido en www.uoc.edu: 383 de
             # las 473 redirecciones de un salto que acababan en error eran
             # esto, casi todas el 307 de Chromium hacia https.
-            if (_es_error(final_status)
+            if (not supera and _es_error(final_status)
                     and not _solo_normaliza(origin_url, current)):
                 self._add_issue(
                     origin_id,
@@ -2420,15 +2955,153 @@ class SEOAnalyzer:
                     "error",
                     {"chain": visited, "hops": hops, "final_status": final_status},
                 )
-            elif hops > self.max_redirect_chain:
+                con_aviso_de_destino.add(origin_id)
+            elif (not supera and final_status == 200
+                    and (destino_noindex := _buscar_en(finales_noindex, current)) is not None
+                    and not _solo_normaliza(origin_url, current)):
+                # Acaba en una pagina que pide no estar en el indice: lo que la
+                # URL vieja tenia de senal no llega a ninguna parte indexable.
+                # Como `redireccion_a_error`, sustituye a `redirect_chain` (36),
+                # y un http → https de una noindex es una normalizacion bien
+                # hecha: el noindex es de la pagina y ya avisa en su URL.
+                a_noindex[destino_noindex].append(
+                    {"id": origin_id, "url": origin_url, "chain": visited, "hops": hops,
+                     "final": current})
+                con_aviso_de_destino.add(origin_id)
+            elif supera or hops > self.max_redirect_chain:
+                detalle: dict[str, Any] = {"chain": visited, "hops": hops}
+                if supera:
+                    detalle["supera_limite_google"] = True
+                    detalle["final_status"] = final_status
+                cadenas[origin_url] = {"id": origin_id, "detalle": detalle,
+                                       "severidad": "error" if supera else "warning"}
+
+        # Un aviso por cadena, en su primer origen. Cada origen intermedio de
+        # A → B → C → D tambien es una cadena (B → C → D), y salia una fila por
+        # cada uno: 11 avisos para una cadena de 12 saltos. El arreglo es una
+        # regla del servidor —que todas salten directas a la final—, asi que
+        # va en una fila, con las intermedias en `paginas_afectadas` (36, 64).
+        # El primero es el origen al que no redirige ningun otro origen con
+        # cadena: el anterior de una cadena siempre tiene mas saltos, asi que
+        # si tambien la tiene, este va dentro de la suya.
+        anterior_con_cadena = {
+            destino for origen, destino in redirect_map.items() if origen in cadenas
+        }
+        intermedias: dict[str, list[str]] = defaultdict(list)
+        primeros = [u for u in cadenas if u not in anterior_con_cadena]
+        for primero in primeros:
+            for url in cadenas[primero]["detalle"]["chain"][1:]:
+                if url in cadenas:
+                    intermedias[primero].append(url)
+        for primero in primeros:
+            c = cadenas[primero]
+            otras = intermedias.get(primero, [])
+            self._add_issue(
+                c["id"], "redirect_chain", c["severidad"],
+                {**c["detalle"], "paginas_afectadas": 1 + len(otras),
+                 "intermedias": otras[:20]},
+            )
+
+        self._avisar_redireccion_a_noindex(a_noindex)
+        self._avisar_meta_refresh(con_aviso_de_destino)
+        self._flush_issues()
+
+    def _finales_noindex(self) -> dict[Any, int]:
+        """Las paginas 200 en `noindex` del job, por URL y por clave -> id.
+        Sin los muros: no dicen que hay detras (103)."""
+        finales: dict[Any, int] = {}
+        for uid, url in self.session.execute(
+            select(Url.id, Url.url).where(
+                Url.job_id == self.job_id, Url.status_code == 200,
+                Url.noindex.is_(True), _respuesta_valida())
+        ).all():
+            finales[url] = uid
+            k = _clave(url)
+            if k is not None:
+                finales.setdefault(k, uid)
+        return finales
+
+    def _avisar_redireccion_a_noindex(self, a_noindex: dict[int, list[dict[str, Any]]]) -> None:
+        """`redireccion_a_noindex` (decision 120): por origen, o UNA fila en el
+        destino cuando le llegan `enlaces_plantilla_min_paginas` redirecciones
+        o mas —todo `/mi-cuenta/*` a `/login`—, que es una regla del servidor y
+        casi siempre deliberada."""
+        for destino_id, origenes in a_noindex.items():
+            origenes.sort(key=lambda o: o["url"])
+            if len(origenes) >= self.enlaces_plantilla_min_paginas:
                 self._add_issue(
-                    origin_id,
-                    "redirect_chain",
-                    "warning",
-                    {"chain": visited, "hops": hops},
+                    destino_id, "redireccion_a_noindex", "warning",
+                    {"alcance": "destino", "final": origenes[0]["final"],
+                     "redirecciones_que_llegan": len(origenes),
+                     "ejemplos": [o["url"] for o in origenes[: self._MUESTRA_EJEMPLOS]]},
+                    group_key=_clave_de_grupo(origenes[0]["final"]),
+                )
+                continue
+            for o in origenes:
+                self._add_issue(
+                    o["id"], "redireccion_a_noindex", "warning",
+                    {"alcance": "origen", "chain": o["chain"], "hops": o["hops"],
+                     "final": o["final"]},
                 )
 
-        self._flush_issues()
+    def _avisar_meta_refresh(self, con_aviso_de_destino: set[int]) -> None:
+        """`meta_refresh_redireccion` (decision 120).
+
+        La fuente es el estado «Redirect (meta refresh)» con `redirect_url`,
+        que el spider solo pone con un destino fuera de `<noscript>` y distinto
+        de la propia URL: `html_meta.meta_refresh` no nulo no basta (una
+        recarga `content="300"` o una refresh en `<noscript>` no redirigen,
+        B5). Inmediata = `info` (Google la trata como permanente, pero pide la
+        del servidor); con retardo = `warning` (la trata como temporal y puede
+        quedarse con la de origen; el usuario ve la pagina N segundos). Sin
+        `html_meta` —el salto que registra el render— el retardo no se sabe:
+        `retardo_s` None, e `info`.
+
+        Si la URL ya avisa de a donde acaba (error, noindex, bucle), ese es el
+        aviso: redirigir bien desde el servidor arregla los dos (36). Con
+        `redirect_chain` conviven: piden cosas distintas. Lo que lleva una
+        plantilla entera va en una fila por (host, plantilla, tipo de retardo).
+        """
+        filas = self.session.execute(
+            select(Url.id, Url.url, Url.host, Url.path, Url.redirect_url,
+                   HtmlMeta.meta_refresh)
+            .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
+            .where(Url.job_id == self.job_id, Url.is_internal.is_(True),
+                   Url.indexability_status == ESTADO_META_REFRESH,
+                   Url.redirect_url.isnot(None), Url.redirect_url != "",
+                   _respuesta_valida())
+        ).all()
+        grupos: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for uid, url, host, path, destino, content in filas:
+            if uid in con_aviso_de_destino:
+                continue
+            retardo = retardo_meta_refresh(content)
+            clase = ("desconocido" if retardo is None
+                     else "inmediata" if retardo == 0 else "con_retardo")
+            grupos[(host or "", firma_de_ruta(path or "/"), clase)].append(
+                {"id": uid, "url": url, "destino": destino,
+                 "retardo_s": None if retardo is None else (
+                     int(retardo) if retardo == int(retardo) else retardo)})
+        for (host, plantilla, clase), paginas in grupos.items():
+            severidad = "warning" if clase == "con_retardo" else "info"
+            paginas.sort(key=lambda p: p["url"])
+            if len(paginas) >= self.enlaces_plantilla_min_paginas:
+                p = paginas[0]
+                self._add_issue(
+                    p["id"], "meta_refresh_redireccion", severidad,
+                    {"alcance": "plantilla", "host": host, "plantilla": plantilla,
+                     "retardo_s": p["retardo_s"], "destino": p["destino"],
+                     "paginas_afectadas": len(paginas),
+                     "paginas_ejemplo": [x["url"] for x in paginas[: self._MUESTRA_EJEMPLOS]]},
+                    group_key=_clave_de_grupo(f"{host}|{plantilla}|{clase}"),
+                )
+                continue
+            for p in paginas:
+                self._add_issue(
+                    p["id"], "meta_refresh_redireccion", severidad,
+                    {"alcance": "pagina", "retardo_s": p["retardo_s"],
+                     "destino": p["destino"]},
+                )
 
     # -- Images -------------------------------------------------------------
 
@@ -2804,6 +3477,13 @@ class SEOAnalyzer:
             # El hash del destino solo si lleva `utm_*` (decision 106). NULL en
             # el resto: no engorda la temporal de un censo de millones.
             Column("utm_hash", String(64)),
+            # Enlace interno sin nombre (decision 121): ni texto, ni
+            # `aria-label`/`title`/svg (que el extractor ya pone en el ancla),
+            # ni alt. Solo en esas filas, como `utm_hash`: el destino tal cual,
+            # donde esta el enlace y si es una imagen.
+            Column("sin_ancla_destino", Text),
+            Column("sin_ancla_posicion", String(20)),
+            Column("sin_ancla_imagen", Boolean),
             # Paginacion (decision 122), de la MISMA lectura: el origen es una
             # pagina 2+ en noindex o canonicalizada a la 1, y, solo para las
             # paginas con `rel=next` y los destinos SIN rastrear, la URL (para
@@ -2820,6 +3500,11 @@ class SEOAnalyzer:
         origen = aliased(Url)
         destino = aliased(Url)
         pag = avisos_de_paginacion.preparar_temporal(self)
+        sin_ancla = and_(
+            Link.is_internal.is_(True),
+            or_(Link.anchor_text.is_(None), func.trim(Link.anchor_text) == ""),
+            or_(Link.alt_text.is_(None), func.trim(Link.alt_text) == ""),
+        )
         consulta = select(
             destino.id, Link.from_url_id, Link.is_internal,
             and_(origen.noindex.isnot(True), origen.status_code == 200),
@@ -2828,6 +3513,9 @@ class SEOAnalyzer:
             case((or_(func.lower(Link.to_url).like("%?utm\\_%", escape="\\"),
                       func.lower(Link.to_url).like("%&utm\\_%", escape="\\")),
                   Link.to_url_hash), else_=None),
+            case((sin_ancla, Link.to_url), else_=None),
+            case((sin_ancla, func.coalesce(Link.link_position, "")), else_=None),
+            case((sin_ancla, Link.link_type == "image"), else_=None),
             pag.c.excluida if pag is not None else null(),
             pag.c.profunda if pag is not None else null(),
             case((and_(pag.c.con_rel.is_(True), destino.id.is_(None)), Link.to_url),
@@ -2841,7 +3529,8 @@ class SEOAnalyzer:
         self.session.execute(
             insert(aristas).from_select(
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
-                 "veces", "utm_hash", "origen_pag_excluida", "origen_pag_profunda",
+                 "veces", "utm_hash", "sin_ancla_destino", "sin_ancla_posicion",
+                 "sin_ancla_imagen", "origen_pag_excluida", "origen_pag_profunda",
                  "rel_destino_url"],
                 consulta
                 .outerjoin(destino, and_(
@@ -2910,6 +3599,7 @@ class SEOAnalyzer:
         avisos_de_paginacion.desde_aristas(self, aristas)  # decision 122
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
+        avisos_de_enlaces.avisar_enlaces_sin_ancla(self, aristas)  # decision 121
 
         self.session.execute(text("DROP TABLE IF EXISTS aristas_tmp"))
         avisos_de_paginacion.borrar_temporal(self)
@@ -3974,6 +4664,18 @@ def _solo_normaliza(a: str | None, b: str | None) -> bool:
     return _host(ha) == _host(hb) and _ruta(ra) == _ruta(rb) and qa == qb
 
 
+def _buscar_en(por_url: dict[Any, Any], url: str | None):
+    """Busca *url* tal cual y, si no esta, por su clave de `misma_url`."""
+    if not url:
+        return None
+    v = por_url.get(url)
+    if v is None:
+        k = _clave(url)
+        if k is not None:
+            v = por_url.get(k)
+    return v
+
+
 def _a_https(url: str) -> str:
     return "https://" + url.split("://", 1)[1] if "://" in url else url
 
@@ -3997,16 +4699,40 @@ def _estado_por_url(session: Session, job_id) -> dict[Any, int | None]:
     return estado
 
 
-class _Ficha:
-    __slots__ = ("id", "url", "status_code", "redirect_url", "noindex", "canonical")
+# Google sigue hasta 10 redirecciones; pasadas esas no llega al contenido y
+# Search Console da un error de redireccion. Se lee asi la documentacion: 10
+# saltos seguidos de contenido llegan, 11 no (sin medir contra Google). El
+# umbral del job (`max_redirect_chain_length`) no lo mueve (decision 117).
+LIMITE_SALTOS_GOOGLE = 10
 
-    def __init__(self, id, url, status_code, redirect_url, noindex, canonical):
+
+# El estado que el spider pone a una pagina 200 que redirige con meta refresh
+# (y a su salto, con render). No es la pagina: es una redireccion (120).
+ESTADO_META_REFRESH = "Redirect (meta refresh)"
+
+
+class _Ficha:
+    __slots__ = ("id", "url", "status_code", "redirect_url", "noindex", "canonical",
+                 "meta_refresh")
+
+    def __init__(self, id, url, status_code, redirect_url, noindex, canonical,
+                 meta_refresh=False):
         self.id = id
         self.url = url
         self.status_code = status_code
         self.redirect_url = (redirect_url or "").strip() or None
         self.noindex = noindex
         self.canonical = (canonical or "").strip() or None
+        self.meta_refresh = bool(meta_refresh)
+
+    @property
+    def redirige(self) -> bool:
+        """Un 3xx (o un salto sin codigo, con render) con destino, o una meta
+        refresh: un 200 con `redirect_url`. `analyze_redirect_chains` ya seguia
+        las dos y aqui solo la primera, asi que la misma cadena tenia dos
+        recorridos (B6 de #150, decision 120)."""
+        return bool(self.redirect_url) and (
+            _es_redireccion(self.status_code) or self.meta_refresh)
 
 
 class _Fichas:
@@ -4027,18 +4753,24 @@ class _Fichas:
             select(
                 Url.id, Url.url, Url.status_code, Url.redirect_url, Url.noindex,
                 HtmlMeta.canonical_href, HtmlMeta.canonical_header,
-                Url.response_class,
+                Url.response_class, HtmlMeta.canonical_distintos,
+                Url.indexability_status,
             )
             .outerjoin(HtmlMeta, HtmlMeta.url_id == Url.id)
             .where(Url.job_id == job_id)
         ).all()
-        for uid, url, sc, red, noindex, c_href, c_cab, clase in filas:
+        for uid, url, sc, red, noindex, c_href, c_cab, clase, distintos, estado in filas:
             # Un muro delante del destino no dice que responde: como si no se
             # hubiera rastreado (decision 103).
             if clase in NO_VALIDAS:
                 continue
             canonical = (c_href or "").strip() or (c_cab or "").strip()
-            f = _Ficha(uid, url, sc, red, noindex, canonical)
+            # Con varios canonicals distintos Google no usa ninguno: el destino
+            # es autocanonico de hecho, no el eslabon de una cadena (115).
+            if distintos is not None and distintos > 1:
+                canonical = None
+            f = _Ficha(uid, url, sc, red, noindex, canonical,
+                       meta_refresh=estado == ESTADO_META_REFRESH)
             self._por_url[url] = f
             k = _clave(url)
             if k is not None:
@@ -4061,7 +4793,7 @@ class _Fichas:
         vistos = {inicio.id}
         actual = inicio
         for _ in range(self.MAX_SALTOS):
-            if not (actual.redirect_url and _es_redireccion(actual.status_code)):
+            if not actual.redirige:
                 return actual, cadena, False
             sig = self.buscar(actual.redirect_url)
             cadena.append(actual.redirect_url)
@@ -4095,7 +4827,7 @@ class _Fichas:
             sig = self.buscar(actual.canonical)
             if sig is None:
                 return cadena, None, False
-            if sig.redirect_url and _es_redireccion(sig.status_code):
+            if sig.redirige:
                 sig, _, _ = self.seguir_redirecciones(sig)
                 if sig is None:
                     return cadena, None, False

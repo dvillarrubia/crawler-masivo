@@ -562,6 +562,24 @@
        sus detalles se leen («de plantilla», «páginas que la enlazan», el
        reparto por tipo, un ejemplo).
 
+   - **Esquemas que no son web (#149).** El filtro de `extract_links` distinguia
+     mayusculas: `href="JavaScript:void(0)"` entraba en `links` y ADEMAS en
+     `enlaces_no_rastreables`, que es justo la disyuncion que promete esta
+     decision, y `Mailto:`/`TEL:` salian como enlaces externos. Ahora el atajo
+     compara en minusculas y detras hay una **lista blanca** (`es_url_web`,
+     `http`/`https`): `sms:`, `whatsapp:`, `intent:`, `skype:`, `file:`,
+     `itms-apps:`, `ftp://` y `ws://` no son aristas. `is_internal_url` tampoco
+     da por interna una URL que no es web: `ftp://x.com/f.zip` y `ws://x.com/s`
+     salian internas, el BFS las pedia y acababan como una peticion FTP o un
+     error de esquema. Un `Location:` (o meta refresh) a `intent://…` queda
+     como destino del salto, pero no se sigue. Como `mailto:` y `tel:`, los
+     esquemas nuevos **no** van a `enlaces_no_rastreables`: no son paginas.
+     **No se arregla re-analizando** (los enlaces ya estan en `links`), y en un
+     censo nuevo bajan los externos y, si habia `ftp://` internos, las URLs: la
+     comparacion con el anterior (68) puede sacar «desaparecidas» que eran
+     nuestras. Tests: `tests/test_esquemas_y_credenciales.py` y
+     `tests/test_spider_cabeceras_y_saltos.py`.
+
 <a id="d122"></a>
 122. **Paginacion: lo que importa es la pagina 2+ que no cuenta y la siguiente a
    la que no se llega por un `<a>`** (ola 1.4 del plan, #150). `rel_next` y

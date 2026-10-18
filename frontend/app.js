@@ -493,6 +493,7 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
     ISSUE_INFO,
@@ -749,8 +750,9 @@ function app() {
       if (this.expGravedad) q.set('gravedad', this.expGravedad);
       if (this.expSort) { q.set('orden', this.expSort); q.set('dir', this.expSortDir); }
       if (this.expPage > 1) q.set('pagina', this.expPage);
-      if (this.expAgrupar) q.set('agrupar', 'plantilla');
+      if (this.expAgrupar) q.set('agrupar', this.expAgruparPor);
       if (this.expPlantilla) q.set('plantilla', this.expPlantilla);
+      if (this.expSegmento) q.set('segmento', this.expSegmento);
       const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
         v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
       if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
@@ -765,7 +767,9 @@ function app() {
         problema: q.get('problema') || '', gravedad: q.get('gravedad') || '',
         orden: q.get('orden') || null, dir: q.get('dir') === 'desc' ? 'desc' : 'asc',
         pagina: +(q.get('pagina') || 1), filtros,
-        agrupar: q.get('agrupar') === 'plantilla', plantilla: q.get('plantilla') || '',
+        agrupar: ['plantilla', 'segmento'].includes(q.get('agrupar')),
+        agruparPor: q.get('agrupar') === 'segmento' ? 'segmento' : 'plantilla',
+        plantilla: q.get('plantilla') || '', segmento: q.get('segmento') || '',
       };
     },
 
@@ -1340,6 +1344,7 @@ function app() {
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
+      this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
@@ -2076,6 +2081,9 @@ function app() {
         let f = '';
         if (this.issueFilters.severity)   f += `&severity=${this.issueFilters.severity}`;
         if (this.issueFilters.issue_type) f += `&issue_type=${this.issueFilters.issue_type}`;
+        // El segmento elegido en la vista por tipos sigue mandando en la lista:
+        // si no, el recuento de la tarjeta y la lista hablarian de cosas distintas.
+        if (this.issuesSegmento) f += `&segmento=${encodeURIComponent(this.issuesSegmento)}`;
         const data = await api(`/jobs/${this.job.id}/issues?page=${this.issuesPage}&page_size=50${f}`);
         this.issues = data.items;
         this.issuesPages = data.pages;
@@ -2087,7 +2095,12 @@ function app() {
     async loadIssuesResumen() {
       if (!this.job) return;
       try {
-        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen`);
+        // El % por segmento (decision 125) va siempre: son tres consultas
+        // agrupadas. Con un segmento elegido, solo las paginas de ese segmento.
+        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: '8' });
+        if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
+        if (!this.segmentosJob) this.cargarSegmentos();
+        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen?${q}`);
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
     },
 
@@ -2651,6 +2664,9 @@ function app() {
     expVistas: [],              // vistas guardadas del cliente del rastreo
     expPlantillas: null,        // respuesta de /urls/plantillas
     expPlantilla: '',           // plantilla elegida: filtra la tabla
+    expAgruparPor: 'plantilla', // 'plantilla' (forma de ruta) o 'segmento' (decision 125)
+    expSegmento: '',            // segmento elegido: filtra la tabla (?segmento=)
+    segmentosJob: null,         // GET /jobs/{id}/segmentos
     expAMedida: [],             // reglas a medida del censo (decision 104): [{key, nombre, clase, etiqueta}]
     expAvisoRegla: '',          // 422 de una regla que este censo no tiene (vista guardada de otro)
     resumenAMedida: null,       // GET /jobs/{id}/extraccion
@@ -2746,7 +2762,10 @@ function app() {
       this.expProblema = preajuste.problema || '';
       this.expGravedad = preajuste.gravedad || '';
       this.expAgrupar = !!preajuste.agrupar;
+      this.expAgruparPor = preajuste.agruparPor || 'plantilla';
       this.expPlantilla = preajuste.plantilla || '';
+      this.expSegmento = preajuste.segmento || '';
+      if (!this.segmentosJob) this.cargarSegmentos();
       this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
@@ -2856,24 +2875,62 @@ function app() {
       try {
         const q = new URLSearchParams(this._buildExplorerParams());
         q.delete('page'); q.delete('page_size'); q.delete('ligero'); q.delete('plantilla');
+        // Siempre con `agrupar`: el uso (api/uso.py) cuenta las dos agrupaciones,
+        // y sin el valor por defecto en la URL no se podrian comparar.
+        q.set('agrupar', this.expAgruparPor === 'segmento' ? 'segmento' : 'plantilla');
+        if (this.expAgruparPor === 'segmento') q.delete('segmento');
         this.expPlantillas = await api(`/jobs/${this.job.id}/urls/plantillas?${q}`);
         this.expTotal = this.expPlantillas.urls;
       } catch (e) { this.error = e.message; }
       this.expLoading = false;
     },
 
-    alternarAgrupar() {
-      this.expAgrupar = !this.expAgrupar;
+    alternarAgrupar(por = 'plantilla') {
+      // El mismo boton apaga; el otro cambia de agrupacion sin apagar.
+      this.expAgrupar = !(this.expAgrupar && this.expAgruparPor === por);
+      this.expAgruparPor = por;
+      this.expPlantillas = null;
       this.expDetailOpen = false;
       this.expPage = 1;
       this.loadExplorerUrls();
     },
 
     entrarEnPlantilla(forma) {
-      this.expPlantilla = forma;
+      if (this.expAgruparPor === 'segmento') {
+        this.expSegmento = forma === '(sin segmentar)' ? '' : forma;
+      } else this.expPlantilla = forma;
       this.expAgrupar = false;
       this.expPage = 1;
       this.loadExplorerUrls();
+    },
+
+    // ---- Segmentos de negocio (decision 125) ----
+    // `urls.segmento` lo materializa el analisis con `config.segmentos`; sin
+    // reglas, cada URL lleva la forma de su ruta (empieza por «/»).
+    async cargarSegmentos() {
+      if (!this.job) return;
+      try { this.segmentosJob = await api(`/jobs/${this.job.id}/segmentos`); }
+      catch (_) { this.segmentosJob = { segmentos: [], reglas: [] }; }
+    },
+
+    // Los de regla primero (en su orden) y luego las formas de ruta con mas URLs.
+    segmentosParaElegir() {
+      const lista = (this.segmentosJob && this.segmentosJob.segmentos) || [];
+      return { regla: lista.filter(x => x.de_regla), forma: lista.filter(x => !x.de_regla).slice(0, 60) };
+    },
+
+    elegirSegmento(valor) {
+      this.expSegmento = valor;
+      this.expPage = 1;
+      this.loadExplorerUrls();
+    },
+
+    async elegirSegmentoProblemas(valor) {
+      this.issuesSegmento = valor;
+      this.issuesResumen = null;
+      if (this.issuesVista === 'lista' || this.issueFilters.issue_type) this.applyIssueFilters();
+      await this.loadIssuesResumen();
+      this.$nextTick(() => lucide.createIcons());
     },
 
     quitarPlantilla() {
@@ -2928,7 +2985,7 @@ function app() {
 
     // Desde un tipo de Problemas: esas URLs, con las columnas que lo explican.
     verProblemaEnExplorador(tipo) {
-      this.openExplorer({ problema: tipo });
+      this.openExplorer({ problema: tipo, segmento: this.issuesSegmento || '' });
     },
 
     // El CSV de LO QUE SE VE: mismos filtros, mismo orden, columnas visibles
@@ -2994,6 +3051,7 @@ function app() {
       params.set('pestana', this.expTab);
       if (this.expProblema) params.set('issue_type', this.expProblema);
       if (this.expPlantilla) params.set('plantilla', this.expPlantilla);
+      if (this.expSegmento) params.set('segmento', this.expSegmento);
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'origenes')) params.set('origenes', 'true');
       if (this.getExpColumns().some(c => EXP_COLUMN_DEFS[c]?.calculada === 'h1')) params.set('h1', 'true');
       if (this.getExpColumns().includes('cambio')) params.set('cambios', 'true');
@@ -3328,6 +3386,9 @@ const EXP_COLUMN_DEFS = {
   content_length:       { label: 'Tamaño',           type: 'numeric', sortable: true,  filterKey: 'content_length',          width: 140, fmt: r => r.content_length != null ? fmt.bytes(r.content_length) : '' },
   transfer_size:        { label: 'Transferido',      type: 'numeric', sortable: true,  filterKey: 'transfer_size',           width: 140, fmt: r => r.transfer_size != null ? fmt.bytes(r.transfer_size) : '' },
   response_time_ms:     { label: 'Tiempo (ms)',      type: 'numeric', sortable: true,  filterKey: 'response_time_ms',        width: 140, fmt: r => r.response_time_ms != null ? Math.round(r.response_time_ms) + 'ms' : '' },
+  // Tiempo del servidor hasta el primer byte y compresion servida (decision 109).
+  ttfb_ms:              { label: 'TTFB (ms)',        type: 'numeric', sortable: true,  filterKey: 'ttfb_ms',                 width: 130, fmt: r => r.ttfb_ms != null ? Math.round(r.ttfb_ms) + 'ms' : '' },
+  content_encoding:     { label: 'Compresión',       type: 'string',  sortable: false, filterKey: 'content_encoding_contains', width: 130, fmt: r => r.content_encoding ?? '' },
   click_depth:          { label: 'Clics desde home', type: 'numeric', sortable: true,  filterKey: 'click_depth',             width: 160, fmt: r => r.click_depth ?? '' },
   crawl_depth:          { label: 'Prof. rastreo',    type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 140, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
@@ -3353,6 +3414,9 @@ const EXP_COLUMN_DEFS = {
   indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },
   indexability_status:  { label: 'Razón noindex',   type: 'string',  sortable: false, filterKey: 'indexability_status_contains', width: 200, fmt: r => r.indexability_status ?? '' },
   is_internal:          { label: 'Interna',          type: 'boolean', sortable: false, filterKey: 'is_internal',             width: 130, fmt: r => r.is_internal === true ? 'Sí' : r.is_internal === false ? 'No' : '' },
+  segmento:             { label: 'Segmento',         type: 'string',  sortable: true,  width: 200, fmt: r => r.segmento ?? '',
+                          tip: r => r.segmento == null ? 'Sin segmentar: el censo se analizó antes de los segmentos (decisión 125)'
+                            : r.segmento.startsWith('/') ? 'Ninguna regla casa: es la forma de la ruta' : 'Segmento de negocio: ' + r.segmento },
   host:                 { label: 'Host',             type: 'string',  sortable: true,  filterKey: 'host_contains',           width: 200, fmt: r => r.host ?? '' },
   // html_meta fields
   title:                { label: 'Título',          type: 'string',  sortable: true,  filterKey: 'title_contains', vacio: 'title',          width: 260, fmt: r => r.html_meta?.title ?? '' },
@@ -3370,6 +3434,13 @@ const EXP_COLUMN_DEFS = {
   rel_next:             { label: 'rel=next',        type: 'string',  sortable: false, width: 240, fmt: r => r.html_meta?.rel_next ?? '' },
   rel_prev:             { label: 'rel=prev',        type: 'string',  sortable: false, width: 240, fmt: r => r.html_meta?.rel_prev ?? '' },
   meta_refresh:         { label: 'Meta refresh',    type: 'string',  sortable: false, filterKey: 'meta_refresh_contains',   width: 200, fmt: r => r.html_meta?.meta_refresh ?? '' },
+  // Segun el robots.txt guardado del host (decision 113); vacio = no evaluado.
+  bloqueada_googlebot:  { label: 'Bloqueada Googlebot', type: 'boolean', sortable: false, filterKey: 'bloqueada_googlebot', width: 170, fmt: r => r.bloqueada_googlebot === true ? 'Sí' : r.bloqueada_googlebot === false ? 'No' : '' },
+  // Decision 108: lo que el HTML declara de si mismo. La redireccion JS solo
+  // se mide sin render y solo la incondicional (la pagina puente).
+  redireccion_js:       { label: 'Redirección JS',  type: 'string',  sortable: false, filterKey: 'redireccion_js_contains', width: 240, fmt: r => r.html_meta?.redireccion_js ?? '' },
+  viewport:             { label: 'Viewport',        type: 'string',  sortable: false, filterKey: 'viewport_contains',       width: 240, fmt: r => r.html_meta?.viewport ?? '' },
+  html_lang:            { label: 'html lang',       type: 'string',  sortable: false, filterKey: 'html_lang_contains',      width: 110, fmt: r => r.html_meta?.html_lang ?? '' },
   in_sitemap:           { label: 'En el sitemap',   type: 'boolean', sortable: false, filterKey: 'in_sitemap',              width: 140, fmt: r => r.in_sitemap === true ? 'Sí' : r.in_sitemap === false ? 'No' : '' },
   og_title:             { label: 'OG title',        type: 'string',  sortable: false, filterKey: 'og_title_contains', vacio: 'og_title',       width: 220, fmt: r => r.html_meta?.og_title ?? '' },
   og_image:             { label: 'OG image',        type: 'string',  sortable: false, filterKey: 'og_image_contains', vacio: 'og_image',       width: 240, fmt: r => r.html_meta?.og_image ?? '' },
@@ -3395,12 +3466,13 @@ const EXP_COLUMN_DEFS = {
 // lleva lo que no conviene usar para decidir: la escala 0-10 del PageRank
 // (decision 34) y el ratio de texto, que no es una señal de Google (decision 44).
 const EXP_GRUPOS_COLUMNAS = [
-  ['Respuesta',   ['url','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','content_length','transfer_size','http_version','last_modified','host','is_internal']],
-  ['Indexación',  ['indexable','indexability_status','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','in_sitemap','rel_next','rel_prev']],
+  ['Respuesta',   ['url','segmento','status_code','status_text','content_type','redirect_url','redirect_type','response_time_ms','ttfb_ms','content_length','transfer_size','content_encoding','http_version','last_modified','host','is_internal']],
+  ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap','rel_next','rel_prev']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
+  ['Móvil e idioma', ['viewport','html_lang']],
   ['Frente al censo anterior', ['cambio']],
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
@@ -3497,26 +3569,30 @@ const EXP_TABS = [
   // HTML internas, sus columnas y, encima de la tabla, un chip por tipo de
   // incidencia de su ambito con cuantas paginas lo tienen.
   { key: '_h1', header: 'Por ámbito SEO' },
-  { key: 'a_titulos',  label: 'Títulos',       icon: 'heading',      filter: HTML_INTERNO, ambito: ['title_missing','title_too_short','title_too_long','title_duplicate','title_multiple'],
+  { key: 'a_titulos',  label: 'Títulos',       icon: 'heading',      filter: HTML_INTERNO, ambito: ['title_missing','title_too_short','title_too_long','title_duplicate','title_multiple','title_generico'],
     columns: ['url','status_code','title','title_len','title_pixel_width','indexable','inlinks_count'] },
-  { key: 'a_desc',     label: 'Descripciones', icon: 'align-left',   filter: HTML_INTERNO, ambito: ['description_missing','description_too_short','description_too_long','description_duplicate','description_multiple'],
+  { key: 'a_desc',     label: 'Descripciones', icon: 'align-left',   filter: HTML_INTERNO, ambito: ['description_missing','description_too_short','description_too_long','description_duplicate','description_multiple','description_igual_title'],
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
-  { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_multiple','h1_duplicate'],
+  { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_vacio','h1_multiple','h1_duplicate'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
-  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http'],
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
   // Las redirecciones no son HTML: el ambito va sobre las internas.
-  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redirect_chain','redirect_loop'],
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
-  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','robots_invalid_syntax'],
-    columns: ['url','status_code','indexable','indexability_status','meta_robots','x_robots_tag','in_sitemap'] },
+  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot'],
+    columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
-  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente'],
+  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','html_lang_no_coincide_hreflang'],
     columns: ['url','status_code','title','indexable','inlinks_count'] },
+  // Decision 108: lo que el HTML declara de si mismo. Casi todo de plantilla
+  // o de servidor (una fila por grupo), y nada saca una pagina del indice.
+  { key: 'a_declara',  label: 'Móvil, charset y OG', icon: 'smartphone', filter: HTML_INTERNO, ambito: ['viewport_ausente','viewport_incorrecto','html_lang_ausente','texto_mal_codificado','charset_incoherente','charset_ausente','og_ausente','og_image_relativa'],
+    columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','solo_enlazada_desde_paginacion_excluida'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','solo_enlazada_desde_paginacion_excluida'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
@@ -3530,6 +3606,11 @@ const EXP_TABS = [
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },
+  // Lo del servidor (decisiones 109 y 110): tiempo hasta el primer byte,
+  // compresion y certificado. Sobre las internas: un host con el certificado
+  // roto no tiene ni una HTML 200.
+  { key: 'a_servidor', label: 'Servidor',      icon: 'server',       filter: { is_internal: true }, ambito: ['respuesta_lenta','html_sin_comprimir','tls_certificado_invalido','tls_caduca_pronto','tls_version_antigua'],
+    columns: ['url','status_code','status_text','ttfb_ms','response_time_ms','content_encoding','http_version'] },
 ];
 
 function _freshForm() {
@@ -3584,6 +3665,7 @@ function _freshForm() {
     custom_headers: '',
     accept_language: '',
     cookies: '',
+    conservar_cookies: false,
     basic_auth_user: '',
     basic_auth_password: '',
     // Analisis
@@ -3666,6 +3748,7 @@ function _configDesdeForm(f) {
       custom_headers: _parseKV(f.custom_headers, ':'),
       accept_language: f.accept_language,
       cookies: _parseKV(f.cookies, '='),
+      conservar_cookies: !!f.conservar_cookies,
       basic_auth_user: f.basic_auth_user,
       basic_auth_password: f.basic_auth_password,
     },
@@ -3708,6 +3791,7 @@ function _formDesdeConfig(f, cfg) {
   if (http.custom_headers) f.custom_headers = _kvTexto(http.custom_headers, ': ');
   if (http.cookies) f.cookies = _kvTexto(http.cookies, '=');
   poner('accept_language', http.accept_language);
+  poner('conservar_cookies', http.conservar_cookies);
   poner('basic_auth_user', http.basic_auth_user);
   sub(cfg.analysis_thresholds, ['title_min_length', 'title_max_length', 'description_min_length',
     'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);

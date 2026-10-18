@@ -54,12 +54,38 @@ def main() -> None:
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS title_count INTEGER"))
         conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS meta_description_count INTEGER"))
         conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS en_body BOOLEAN"))
+        # De donde sale la anotacion: `html` o `cabecera` (Link). NULL = rastreo
+        # anterior, del HTML (decision 116).
+        conn.execute(text("ALTER TABLE hreflang ADD COLUMN IF NOT EXISTS origen VARCHAR(16)"))
+        # Canonicals del head con DESTINO distinto: con dos, Google los ignora
+        # todos. NULL = rastreo anterior; se mira `canonical_count` (decision 115).
+        conn.execute(text("ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS canonical_distintos INTEGER"))
+        # Lo que el HTML declara de si mismo (decision 108). Nullable y sin
+        # DEFAULT: solo catalogo.
+        for columna, tipo in (
+            ("viewport", "TEXT"), ("viewport_count", "INTEGER"),
+            ("html_lang", "VARCHAR(35)"), ("content_language", "VARCHAR(64)"),
+            ("canonical_crudo", "TEXT"), ("og_image_forma", "VARCHAR(24)"),
+            ("twitter_image", "TEXT"), ("redireccion_js", "TEXT"),
+            ("charset_meta", "VARCHAR(40)"), ("charset_bom", "VARCHAR(40)"),
+            ("cuerpo_solo_ascii", "BOOLEAN"), ("texto_mal_codificado", "BOOLEAN"),
+        ):
+            conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # La respuesta era la pagina o un muro delante, y la salud del job
         # (decision 103). Sin DEFAULT: solo catalogo, instantaneo.
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS response_class VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS health JSON"))
+        # Segmentos de negocio (decision 125). Sin DEFAULT: solo catalogo. Sin
+        # indice a proposito: todo filtro por segmento va con `job_id`, que ya
+        # tiene los suyos, y crear uno sobre `urls` bloquearia las escrituras
+        # de un rastreo en marcha mientras se construye.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS segmento TEXT"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS segmentacion JSON"))
+        # Si Googlebot puede pedir la URL segun el robots.txt guardado
+        # (decision 113). Sin DEFAULT: NULL = no evaluado, solo catalogo.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS bloqueada_googlebot BOOLEAN"))
         # Motivo de finalizacion: distingue un crawl completo de uno truncado
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(32)"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS crawler_version VARCHAR(64)"))
@@ -68,6 +94,11 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS comparacion JSON"))
         # Sondas y resumen de soft 404 (decision 105)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS soft404 JSON"))
+        # TTFB y compresion servida (decision 109) y la sonda TLS (110).
+        # Nullables y sin DEFAULT: solo catalogo.
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS ttfb_ms FLOAT"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_encoding VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tls JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).
@@ -123,6 +154,7 @@ def main() -> None:
     migrar_enriquecido()
     migrar_custom_extraction()
     migrar_enlaces_no_rastreables()
+    migrar_robots_txt()
 
     print("Done.")
 
@@ -258,6 +290,21 @@ def migrar_enlaces_no_rastreables() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_enr_from ON enlaces_no_rastreables (from_url_id)"))
     print("Enlaces no rastreables: tabla enlaces_no_rastreables e indices al dia.")
+
+
+def migrar_robots_txt() -> None:
+    """robots.txt de cada host del censo (decisiones 112 y 113). Idempotente.
+
+    Tabla NUEVA, que crea create_all con sus indices; unas pocas filas por
+    censo. Aqui solo se aseguran los indices por si la tabla se creo antes que
+    ellos. Bajo el `lock_timeout` de `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_robots_txt_job_url ON robots_txt (job_id, url)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_robots_txt_job_host ON robots_txt (job_id, host)"))
+    print("robots.txt: tabla robots_txt e indices al dia.")
 
 
 if __name__ == "__main__":

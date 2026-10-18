@@ -44,8 +44,9 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from email.utils import parsedate_to_datetime
 from typing import Any, Awaitable, Callable
+
+from shared.respuestas import retry_after_segundos
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,8 @@ class _Ritmo:
 
 def _retry_after_s(cabeceras) -> float | None:
     """`retry-after-ms` manda sobre `retry-after` (mismo orden que el SDK de
-    TypeSafe, `_core/errors.parse_retry_after`). Admite segundos o fecha HTTP."""
+    TypeSafe, `_core/errors.parse_retry_after`). Admite segundos o fecha HTTP;
+    el `retry-after` lo lee la misma funcion que el rastreo (decision 111)."""
     bruto = cabeceras.get("retry-after-ms")
     if bruto is not None:
         try:
@@ -164,17 +166,7 @@ def _retry_after_s(cabeceras) -> float | None:
                 return v / 1000.0
         except ValueError:
             pass
-    bruto = cabeceras.get("retry-after")
-    if bruto is not None:
-        try:
-            v = float(bruto)
-            return v if v >= 0 else None
-        except ValueError:
-            try:
-                return max(0.0, parsedate_to_datetime(bruto).timestamp() - time.time())
-            except (TypeError, ValueError, OverflowError):
-                return None
-    return None
+    return retry_after_segundos(cabeceras.get("retry-after"))
 
 
 def _backoff(intento: int, inicial: float, maximo: float) -> float:

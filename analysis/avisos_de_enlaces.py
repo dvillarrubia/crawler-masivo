@@ -1,6 +1,6 @@
 """Avisos sobre los enlaces internos (decision 106).
 
-Cuatro incidencias:
+Cinco incidencias:
 
 - ``enlace_no_rastreable``: enlaces que una persona puede pulsar y Google no
   puede seguir (``javascript:``, ``<a onclick>`` sin href, ``<span href>``...).
@@ -8,6 +8,7 @@ Cuatro incidencias:
 - ``enlace_interno_a_error`` / ``enlace_interno_a_redireccion``: enlaces
   internos a una URL que responde 4xx/5xx o 3xx.
 - ``utm_en_enlace_interno``: enlaces internos con parametros ``utm_*``.
+- ``enlace_sin_ancla``: enlaces internos sin ningun nombre (decision 121).
 
 **Por pagina de origen, salvo lo que es de plantilla.** La unidad de trabajo es
 la pagina donde hay que editar el enlace, y por eso se agrega por origen (una
@@ -75,6 +76,7 @@ TIPOS = (
     "enlace_interno_a_error",
     "enlace_interno_a_redireccion",
     "utm_en_enlace_interno",
+    "enlace_sin_ancla",
 )
 
 
@@ -314,6 +316,112 @@ def _avisar_utm(az, aristas, o, base_sin_destino) -> None:
                     Issue.url_id.in_(sustituidas[i:i + 5000]),
                 ).execution_options(synchronize_session=False)
             )
+
+
+# ---------------------------------------------------------------------------
+# Enlaces internos sin texto ancla (decision 121)
+# ---------------------------------------------------------------------------
+def avisar_enlaces_sin_ancla(az, aristas) -> None:
+    """``enlace_sin_ancla``: enlaces internos sin ningun nombre.
+
+    El texto ancla le dice a Google de que va el destino; sin el, el enlace
+    cuenta, pero no dice nada. No es un error de indexacion: ``info``. Sale de
+    las columnas ``sin_ancla_*`` de la temporal, rellenas en la UNICA lectura de
+    ``links`` (decisiones 37 y 41): ni texto visible, ni ``aria-label``,
+    ``title`` o svg (el extractor ya los pone en el ancla, decision 46), ni alt
+    (61). ``alt=""`` y un alt que falta no se distinguen desde ``links``, y no
+    importa: los dos dejan el enlace sin nombre.
+
+    Solo desde un origen que cuenta (``origen_cuenta``: responde 200 y no es
+    ``noindex``, decisiones 38 y 57): un enlace desde un 404 no enlaza nada.
+
+    Agrupado como la 106: el mismo COMPONENTE —(posicion, destino), el icono de
+    Instagram del pie— en ``enlaces_plantilla_min_paginas`` paginas o mas es una
+    fila (``alcance: plantilla``) en la pagina de URL menor (88). El resto, una
+    por pagina de origen con la suma de apariciones (``SUM(veces)``, 94).
+
+    Un ``<a><img></a>`` sin alt puede salir ademas como ``image_missing_alt``
+    (una vez por imagen, 64b): ``tipo: imagen`` dice que el arreglo es el
+    mismo, poner el alt.
+
+    En un censo anterior a la decision 46 el ancla no tomaba ``aria-label`` ni
+    ``title``: saldrian enlaces sin ancla que si lo tienen. No se evalua.
+    """
+    from shared.models import Url
+
+    if az._censo_anterior_a_d46():
+        logger.warning("Job %s anterior a la decision 46: enlace_sin_ancla no se "
+                       "evalua (el ancla no leia aria-label ni title)", az.job_id)
+        return
+
+    umbral = az.enlaces_plantilla_min_paginas
+    o = aliased(Url)
+    filas = az.session.execute(
+        select(
+            aristas.c.origen_id, o.url.label("origen_url"),
+            aristas.c.sin_ancla_destino, aristas.c.sin_ancla_posicion,
+            func.max(case((aristas.c.sin_ancla_imagen.is_(True), 1), else_=0)).label("imagen"),
+            func.sum(aristas.c.veces).label("veces"),
+        )
+        .select_from(aristas)
+        .join(o, o.id == aristas.c.origen_id)
+        .where(aristas.c.es_interno.is_(True),
+               aristas.c.sin_ancla_destino.isnot(None),
+               aristas.c.origen_cuenta.is_(True),
+               o.is_html.is_(True))
+        .group_by(aristas.c.origen_id, o.url, aristas.c.sin_ancla_destino,
+                  aristas.c.sin_ancla_posicion)
+    ).all()
+    if not filas:
+        return
+
+    paginas_por_componente: dict[tuple, set[int]] = defaultdict(set)
+    for f in filas:
+        paginas_por_componente[(f.sin_ancla_posicion, f.sin_ancla_destino)].add(f.origen_id)
+    de_plantilla = {k for k, v in paginas_por_componente.items() if len(v) >= umbral}
+    url_de = {f.origen_id: f.origen_url for f in filas}
+
+    def _tipo(imagen: bool) -> str:
+        return "imagen" if imagen else "texto_vacio"
+
+    plantillas: dict[tuple, dict[str, Any]] = {}
+    porigen: dict[int, dict[str, Any]] = {}
+    for f in sorted(filas, key=lambda f: (f.origen_url or "", f.sin_ancla_destino)):
+        k = (f.sin_ancla_posicion, f.sin_ancla_destino)
+        veces = int(f.veces or 0)
+        if k in de_plantilla:
+            acc = plantillas.setdefault(k, {"apariciones": 0, "imagen": False})
+            acc["apariciones"] += veces
+            acc["imagen"] = acc["imagen"] or bool(f.imagen)
+            continue
+        acc = porigen.setdefault(f.origen_id, {"enlaces": 0, "destinos": [], "imagen": 0})
+        acc["enlaces"] += veces
+        acc["imagen"] += veces if f.imagen else 0
+        if len(acc["destinos"]) < MUESTRA_DESTINOS:
+            acc["destinos"].append({"url": f.sin_ancla_destino,
+                                    "posicion": f.sin_ancla_posicion or None,
+                                    "tipo": _tipo(bool(f.imagen))})
+
+    for k, acc in plantillas.items():
+        paginas = sorted(paginas_por_componente[k], key=lambda i: url_de[i])
+        posicion, destino = k
+        az._add_issue(
+            paginas[0], "enlace_sin_ancla", "info",
+            {"alcance": "plantilla", "posicion": posicion or None, "destino": destino,
+             "tipo": _tipo(acc["imagen"]), "paginas_afectadas": len(paginas),
+             "apariciones": acc["apariciones"],
+             "paginas_ejemplo": [url_de[i] for i in paginas[:MUESTRA]]},
+            group_key=_clave(posicion, destino),
+        )
+    for origen_id, acc in porigen.items():
+        tipo = ("imagen" if acc["imagen"] == acc["enlaces"]
+                else "texto_vacio" if not acc["imagen"] else "mixto")
+        az._add_issue(
+            origen_id, "enlace_sin_ancla", "info",
+            {"alcance": "pagina", "enlaces": acc["enlaces"], "tipo": tipo,
+             "destinos": acc["destinos"]},
+        )
+    az._flush_issues()
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | total_urls_crawled | int | URLs crawleadas |
 | decisiones_resumen | JSON | Capa de decisiones (#7): `llamadas`, `tokens_entrada`, `coste_usd` (real, de `usage.cost`), `aciertos_cache`, `n_429`, `latencia_p50_ms`/`p95`, `por_pregunta` con la distribucion de respuestas, `avisos` y `estado` (ok, degradado, desactivado, sin_credito, presupuesto_agotado). NULL = nunca se pregunto nada a un modelo |
 | enlaces_archivados | JSON | Enlaces archivados en Parquet (decision 95): `filas`, `apariciones`, `internos`, `nofollow_internos`, `fichero`, `bytes`, `fecha`. Con valor, `links` NO tiene filas de este job: se leen de `$ARCHIVO_DIR/enlaces/<job_id>.parquet`. NULL = en `links` |
+| tls | JSON | Sonda del certificado TLS (decision 110): `{"hosts": {host: {verificado, motivo, detalle, version, not_after, dias_restantes (del dia del rastreo), emisor, fuente: socket\|navegador, fecha}}}`; `omitida: proxy` o `error` si no se pudo medir. No son URLs del censo |
+| health | JSON | Salud del rastreo (decision 103) y, si hubo, `retry_after`: `veces`, `max_pedido_s`, `max_aplicado_s`, `truncados`, `tope_s` (decision 111) |
 | pagerank_resumen | JSON | Reparto del PageRank por tipo de URL (`reparto`: indexable, no_indexable, redireccion, error, recurso, sin_respuesta; fracciones que suman 1), `desperdiciado` (lo que acaba en errores), modo de `peso` y aristas de redireccion/canonical. NULL = analizado antes de este modelo |
 | created_at / started_at / completed_at | timestamptz | Timestamps |
 
@@ -94,10 +96,12 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | is_internal | bool | Si pertenece al dominio semilla |
 | crawl_depth | int | Profundidad BFS desde la seed |
 | status_code | int | Codigo HTTP (200, 301, 404...) |
-| status_group | varchar(10) | 2xx, 3xx, 4xx, 5xx, timeout, dns_error |
+| status_group | varchar(10) | 2xx, 3xx, 4xx, 5xx, timeout, dns_error, conn_refused, tls_error (certificado o handshake; el motivo en `status_text`, decision 110), error |
 | content_type | varchar(256) | Content-Type header |
 | content_length | bigint | Tamano del recurso en bytes, ya descomprimido |
-| response_time_ms | float | Tiempo de respuesta |
+| response_time_ms | float | Tiempo de la peticion entera (con render, incluida la espera del navegador). NO es TTFB |
+| ttfb_ms | float | Tiempo del servidor hasta el primer byte, sin DNS, TCP ni TLS (decision 109): curl `STARTTRANSFER - PRETRANSFER` sin render, Navigation Timing `responseStart - requestStart` con render. NULL = censo anterior, sin respuesta o no medido |
+| content_encoding | varchar(32) | `Content-Encoding` servido (gzip, br, zstd, deflate...), `identity` si llego sin comprimir, `comprimido` con render (Chromium no da el nombre); NULL = no se sabe (decision 109) |
 | is_html | bool | Si es pagina HTML |
 | resource_type | varchar(20) | html, image, css, js, pdf, redirect, other |
 | redirect_url | text | Destino si es redireccion |
@@ -107,6 +111,7 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 | content_word_count | int | palabras del contenido principal, sin menu ni pie |
 | content_hash | varchar(64) | SHA-256 del contenido principal normalizado (caja y espacios). Es el que detecta duplicados exactos; `body_hash` cambia con cualquier token de la pagina |
 | indexability_status | varchar(64) | Indexable, Noindex, Canonicalised, Redirect... |
+| bloqueada_googlebot | bool | Si Googlebot tiene prohibida la URL segun el robots.txt guardado (`robots_txt`). La escribe el analisis; NULL = no evaluado. Si se conoce, manda en la indexabilidad (decision 113) |
 | inlinks_count | int | Total inlinks recibidos |
 | outlinks_count | int | Total outlinks internos |
 | external_outlinks_count | int | Outlinks externos |
@@ -144,12 +149,25 @@ filtrar por `urls.is_html`.
 | canonical_href | text | `<link rel="canonical">` href |
 | canonical_count | int | Cuantos `rel=canonical` lleva la pagina. Con mas de uno Google los ignora todos |
 | canonical_in_body | bool | Hay algun canonical fuera del `<head>`: Google lo ignora siempre |
+| canonical_distintos | int | Destinos distintos de los canonicals del `<head>` (clave de `misma_url`). Con mas de uno Google los ignora todos: `canonical_multiple` y la pagina Indexable (decision 115). NULL = rastreo anterior |
 | canonical_header | text | Canonical via Link header HTTP |
 | og_title / og_description / og_image / og_url / og_type | text | Open Graph |
 | twitter_card / twitter_title / twitter_description | text | Twitter Cards |
 | rel_next / rel_prev | text | Paginacion |
 | meta_refresh | text | Meta refresh si existe |
 | has_meta_outside_head | bool | Meta tags fuera de `<head>` |
+| viewport | text | `content` del primer `<meta name="viewport">` (`""` si va vacio). Decision 108 |
+| viewport_count | int | Cuantos viewports hay. 0 = ninguno; NULL = rastreo anterior (marca de «medido» de viewport y lang) |
+| html_lang | varchar(35) | `lang` (o `xml:lang`) del `<html>`. `""` = atributo vacio, NULL = no esta |
+| content_language | varchar(64) | Cabecera `Content-Language` |
+| canonical_crudo | text | El href del canonical tal como se escribio (`canonical_href` va resuelto) |
+| og_image_forma | varchar(24) | absoluta, relativa_a_raiz, relativa, relativa_al_protocolo, con_fragmento |
+| twitter_image | text | `twitter:image`, resuelta |
+| redireccion_js | text | Destino de un `location = "..."` a nivel superior de un script (pagina puente). Solo sin render |
+| charset_meta | varchar(40) | Charset del `<meta>` en los 1.024 primeros bytes, normalizado (`""` = no hay). Solo sin render; NULL = no medido |
+| charset_bom | varchar(40) | Charset del BOM, si lo hay. Solo sin render |
+| cuerpo_solo_ascii | bool | Sin bytes por encima de 127. Solo sin render |
+| texto_mal_codificado | bool | El titulo o el texto llevan U+FFFD. Solo sin render |
 
 ### `headings` — Encabezados H1-H6
 | Columna | Tipo | Descripcion |
@@ -207,6 +225,7 @@ filtrar por `urls.is_html`.
 | return_tag_ok | bool | La pagina destino devuelve el enlace (NULL = no se sabe: sin rastrear, autorreferencia, x-default, destino roto o en el body) |
 | lang_valid | bool | Idioma ISO 639-1 y region existente |
 | en_body | bool | Anotacion fuera del `<head>`: Google la ignora (`hreflang_in_body`). NULL = rastreo anterior a la columna |
+| origen | varchar(16) | `html` o `cabecera` (HTTP `Link`, la unica fuente de un PDF). NULL = rastreo anterior, del HTML (decision 116) |
 
 ### `resources` — Recursos referenciados (img, css, js)
 | Columna | Tipo | Descripcion |
@@ -270,6 +289,40 @@ Indices: `uq_cext_url_nombre (url_id, nombre)`, `ix_cext_job_nombre_estado`,
 -- Paginas SIN el tag de GTM (solo las evaluadas: ni PDFs ni bloqueadas)
 SELECT u.url FROM custom_extraction c JOIN urls u ON u.id = c.url_id
 WHERE c.job_id = 'UUID-AQUI' AND c.nombre = 'gtm' AND c.estado = 'sin_coincidencia';
+```
+
+### `robots_txt` — robots.txt de cada host del censo (decisiones 112 y 113)
+Lo que respondio el robots.txt de cada host durante el rastreo, con la respuesta
+FINAL (tras reintentos y redirecciones). Una fila por (job, URL del robots.txt):
+Google trata aparte cada esquema, host y puerto. Solo hosts internos y como
+mucho 200 por job. Sin fila = no evaluado, nunca «sin robots.txt».
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| job_id | UUID (FK → jobs, CASCADE) | |
+| host | varchar(512) | Hostname |
+| url | text | `https://host/robots.txt` pedido |
+| url_final | text | Si redirigio, a donde |
+| status_code | int | NULL = no hubo respuesta |
+| error | varchar(200) | Excepcion de la descarga (timeout, DNS, conexion) |
+| response_class | varchar(32) | `shared/respuestas.py`: un 429 es `rate_limited`, un desafio de Cloudflare `challenge_waf` (decision 103) |
+| intentos | int | Con los reintentos de Scrapy (503 y 429 se reintentan dos veces; 500 no) |
+| bytes | int | Tamano del cuerpo entero (solo 2xx) |
+| sha256 | varchar(64) | Del cuerpo entero (solo 2xx): para ver si cambio entre censos (#36) |
+| cuerpo | text | Solo de un 2xx, recortado a los 500 KiB que lee Google |
+| recortado | bool | Pasaba de 500 KiB |
+| comprobacion | JSON | `{status_code, error, response_class, fecha}` de la segunda peticion al cerrar, si la primera fallo |
+| evaluacion | JSON | La escribe el analisis: `{"googlebot": {estado, evaluadas, bloqueadas}}` |
+| fecha | timestamptz | |
+
+Indices: `uq_robots_txt_job_url (job_id, url)` y `ix_robots_txt_job_host (job_id, host)`.
+
+```sql
+-- Hosts cuyo robots.txt fallo (5xx, 429 o sin respuesta) en un censo
+SELECT host, status_code, error, intentos, comprobacion
+FROM robots_txt WHERE job_id = 'UUID-AQUI'
+  AND (status_code >= 500 OR status_code = 429 OR error IS NOT NULL);
 ```
 
 ### `decisions` — Respuestas de un modelo (#7, decision 84 de CLAUDE.md)

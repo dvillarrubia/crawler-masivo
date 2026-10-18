@@ -533,3 +533,33 @@ def test_umbrales_declarados_en_el_schema():
     assert {"soft404_similitud", "soft404_min_palabras_igualdad",
             "soft404_max_proporcion_huella"} <= campos["AnalysisThresholdsConfig"]
     assert "soft404_sondas" in campos["CrawlBehaviorConfig"]
+
+
+def test_la_soft_404_tampoco_lleva_su_h1_vacio(sesion):
+    """Revision de #159: `h1_vacio` (decision 121) dice lo mismo de la pagina
+    que `h1_missing` —no tiene titular— y `h1_missing` ya esta en `TAPADAS`.
+    Una pagina de error con `<h1><img src=logo></h1>` salia con su `soft_404`
+    y ademas con `h1_vacio`: dos avisos para un hallazgo que se arregla
+    respondiendo 404 (decision 36)."""
+    from analysis.analyzer import SEOAnalyzer
+
+    job_id = uuid.uuid4()
+    sesion.add(Job(id=job_id, name="t", seeds=[], config={},
+                   soft404={"sondas": [_sonda()]}))
+    _pagina(sesion, job_id, 1, "/hoteles/viejo", ERROR)
+    sesion.add(Heading(url_id=1, tag="h1", position=0, text=None, oculto=False))
+    for uid, path in ((3, "/hoteles/bueno"), (4, "/hoteles/otro"), (5, "/hoteles/mas")):
+        _pagina(sesion, job_id, uid, path, NORMAL + f" {path}", h1=f"Hotel {uid}")
+    sesion.flush()
+    for h in sesion.query(Heading).filter(Heading.url_id != 1):
+        h.oculto = False
+    sesion.commit()
+
+    an = SEOAnalyzer(sesion, job_id)
+    an.analyze_headings()
+    an.analyze_content()
+    an.analyze_soft_404()
+    sesion.commit()
+    issues = {(i.url_id, i.issue_type) for i in sesion.query(Issue).all()}
+    assert (1, "soft_404") in issues
+    assert (1, "h1_vacio") not in issues

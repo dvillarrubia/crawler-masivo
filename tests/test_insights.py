@@ -280,3 +280,37 @@ def test_lo_que_solo_cuelga_de_una_paginacion_excluida_resta_como_una_huerfana(d
     rec = next(r for r in ahora.recommendations if r.title == "Enlazar paginas huerfanas")
     assert rec.affected_count == 4
     assert "solo_enlazada_desde_paginacion_excluida" in rec.issue_types
+
+
+def test_un_titulo_de_relleno_no_mejora_la_nota_de_contenido(db, job):
+    """Revision de #159: `title_generico` (decision 121) es UNA fila por valor
+    —en la pagina de URL menor, con `paginas_afectadas`— y el analisis les
+    quita a esas paginas su `title_duplicate` y su `title_too_short` (decision
+    36). La nota cuenta paginas DISTINTAS con incidencia, asi que tres paginas
+    «Sin título | Marca» pasaban de restar tres a restar una: la nota SUBIA por
+    un hallazgo mas preciso, lo mismo que la decision 105 arreglo con la soft
+    404. Las filas son las que escribe `analyze_titles` (lo comprueba
+    `test_titulares_titulos_anclas_db.py`; este trabajo no lleva `analysis/`)."""
+    paginas = [_url(db, job, f"/p{i}") for i in range(10)]
+    # Antes de la 121: las tres de relleno con `title_duplicate` cada una.
+    for p in paginas[7:]:
+        _issue(db, job, p, "title_duplicate")
+    db.commit()
+    antes = results._calc_content(job.id, db)
+
+    db.query(Issue).filter(Issue.job_id == job.id).delete()
+    db.add(Issue(job_id=job.id, url_id=paginas[7].id, issue_type="title_generico",
+                 severity="warning",
+                 details={"title": "Sin título | Marca", "paginas_afectadas": 3,
+                          "paginas_ejemplo": [f"https://x.com/p{i}" for i in (7, 8, 9)]}))
+    _issue(db, job, paginas[0], "title_too_long")
+    db.commit()
+    ahora = results._calc_content(job.id, db)
+
+    assert antes.metrics["pct_title_ok"] == 70.0
+    assert ahora.metrics["title_problems"] == 4   # tres de relleno + una larga
+    assert ahora.metrics["pct_title_ok"] == 60.0
+    assert ahora.score <= antes.score
+    recs = {r.title: r for r in ahora.recommendations}
+    assert recs["Optimizar titulos"].affected_count == 4
+    assert "title_generico" in recs["Optimizar titulos"].issue_types

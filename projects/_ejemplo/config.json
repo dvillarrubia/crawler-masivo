@@ -25,6 +25,26 @@
       "patron": "^/?$|^/[a-z]{2}/?$"
     }
   ],
+  "segmentos": [
+    {
+      "nombre": "rotas",
+      "si": {
+        "campo": "status_group",
+        "en": [
+          "4xx",
+          "5xx"
+        ]
+      }
+    },
+    {
+      "nombre": "blog",
+      "patron": "^/blog/"
+    },
+    {
+      "nombre": "legal",
+      "patron": "(aviso-legal|privacidad|privacy|cookies)"
+    }
+  ],
   "resource_types": {
     "crawl_images": false,
     "crawl_css": false,
@@ -44,7 +64,9 @@
     "follow_nofollow": false,
     "crawl_subdomains": false,
     "max_runtime_hours": 48,
-    "stall_timeout_minutes": 30
+    "stall_timeout_minutes": 30,
+    "respetar_retry_after": true,
+    "sonda_tls": true
   },
   "extraction": {
     "extract_structured_data": true,
@@ -56,6 +78,7 @@
     "store_raw_html": false
   },
   "http": {
-    "accept_language": "es,en;q=0.8"
+    "accept_language": "es,en;q=0.8",
+    "conservar_cookies": false
   }
 }

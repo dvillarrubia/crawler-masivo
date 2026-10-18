@@ -89,6 +89,8 @@ DOWNLOADER_MIDDLEWARES = {
     "seo_crawler.middlewares.ProxyMiddleware": 410,
     "seo_crawler.middlewares.JobConfigMiddleware": 100,
     "seo_crawler.middlewares.HttpConfigMiddleware": 420,
+    # Detras del CookiesMiddleware de Scrapy (700); solo con COOKIES_ENABLED.
+    "seo_crawler.middlewares.CookiesTrasElJarMiddleware": 705,
     # Audit-only robots.txt middleware. Self-disables unless ROBOTS_MODE='audit'.
     # Same priority as Scrapy's built-in (100); the two are mutually exclusive
     # via from_crawler -> NotConfigured.
@@ -96,9 +98,31 @@ DOWNLOADER_MIDDLEWARES = {
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,
+    # Guarda lo que respondio el robots.txt de cada host (decision 112). Por
+    # debajo de Retry (550) y Redirect (600): ve la respuesta FINAL.
+    "seo_crawler.middlewares.RobotsTxtRegistroMiddleware": 90,
+    # Retry-After de un 429/503 (decision 111), en todos los robots_mode. La
+    # pausa se fija en `response_downloaded`, antes de que el slot saque la
+    # siguiente peticion; por encima de RetryMiddleware (550) para ver la
+    # respuesta antes de que la reprograme.
+    "seo_crawler.middlewares.RetryAfterMiddleware": 560,
 }
+# Sin jar de cookies, como Googlebot, que no guarda las que pone el sitio: una
+# cookie de idioma, geo o consentimiento cambiaba lo que se media frente a lo
+# que ve Google. Las configuradas por job (`http.cookies`) se siguen mandando,
+# y `http.conservar_cookies` lo enciende (worker.py). Decision 114.
+COOKIES_ENABLED = False
+
 # Tope del Crawl-delay que se respeta, en segundos.
 ROBOTS_CRAWL_DELAY_MAX = float(os.getenv("ROBOTS_CRAWL_DELAY_MAX", "10"))
+# Retry-After: si se respeta y el tope de la pausa, en segundos. El job los
+# cambia con crawl_behavior.respetar_retry_after / retry_after_max_s.
+RETRY_AFTER_ENABLED = os.getenv("RETRY_AFTER_ENABLED", "1") != "0"
+RETRY_AFTER_MAX = float(os.getenv("RETRY_AFTER_MAX", "60"))
+# 429/503 seguidos a peticiones que ya respetaron la pausa, tras los que el
+# host deja de pausarse: es un muro y la ventana de salud (decision 103) tiene
+# que poder verlo. Con el tope de 60 s, 5 minutos como mucho.
+RETRY_AFTER_MAX_SEGUIDAS = int(os.getenv("RETRY_AFTER_MAX_SEGUIDAS", "5"))
 
 # ---------------------------------------------------------------------------
 # Database / Redis — fuente unica: shared.config (importados arriba).
@@ -193,9 +217,11 @@ PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = int(
     os.getenv("PLAYWRIGHT_NAV_TIMEOUT", "30000")
 )
 
-# Se ejecuta al crear cada pestaña, ANTES de navegar: instala el contador de
-# peticiones en vuelo que usa la espera de render (ver seo_crawler/render.py).
-PLAYWRIGHT_PAGE_INIT_CALLBACK = "seo_crawler.render.preparar_pagina"
+# La preparacion de cada pestaña (contador de peticiones en vuelo, cookies y
+# credenciales del job: seo_crawler/render.py) NO es un setting: aqui habia un
+# PLAYWRIGHT_PAGE_INIT_CALLBACK que scrapy-playwright no lee (0.0.48 solo mira
+# meta["playwright_page_init_callback"]), asi que no corria nunca. Va en
+# SeoSpider._playwright_meta (decision 114).
 
 # ---------------------------------------------------------------------------
 # Misc
