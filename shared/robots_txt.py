@@ -48,9 +48,48 @@ MAX_HOSTS_POR_JOB = 200
 # `User-agent`. El TOKEN, no una cadena de UA completa: Protego busca el token
 # del grupo dentro de lo que se le pasa, y con `Mozilla/5.0 (compatible;
 # Googlebot/2.1...)` casaria el grupo `Mozilla` (decision 98). La clave es la de
-# `shared/indexabilidad.BOT_POR_DEFECTO`. Los de IA (GPTBot, ClaudeBot...) son
-# la Ola 7.3: entran aqui y en `robots_txt.evaluacion`, sin columna por URL.
-BOTS = {"googlebot": "Googlebot"}
+# `shared/indexabilidad.BOT_POR_DEFECTO`. Los demas (decision 129) solo se
+# evaluan para la home y una muestra por plantilla, y van a
+# `robots_txt.evaluacion["bots"]`, sin columna por URL.
+#
+# Tipos, porque bloquear uno no significa lo mismo que bloquear otro:
+# - `buscador`: el indice de un buscador clasico.
+# - `busqueda_ia`: el indice del que sale una respuesta con enlaces de un
+#   buscador de IA. Bloquearlo en todo el sitio saca al sitio de esas respuestas.
+# - `usuario_ia`: la descarga que pide una persona en un chat. No decide si el
+#   sitio aparece en la busqueda (OpenAI lo dice de ChatGPT-User, y que
+#   robots.txt «puede no aplicarse» porque la pide el usuario).
+# - `entrenamiento`: datos para entrenar modelos. Bloquearlo es una decision
+#   legitima del cliente y no saca de ninguna busqueda. Google-Extended y
+#   Applebot-Extended ni siquiera rastrean: son tokens de control sobre lo que
+#   ya rastrean Googlebot y Applebot.
+# Tokens y efectos comprobados el 2026-10-18 en la documentacion de cada
+# proveedor (fuentes en la decision 129).
+BUSCADOR = "buscador"
+BUSQUEDA_IA = "busqueda_ia"
+USUARIO_IA = "usuario_ia"
+ENTRENAMIENTO = "entrenamiento"
+
+BOTS_INFO: list[dict[str, str]] = [
+    {"bot": "googlebot", "token": "Googlebot", "proveedor": "Google", "tipo": BUSCADOR},
+    {"bot": "bingbot", "token": "bingbot", "proveedor": "Microsoft", "tipo": BUSCADOR},
+    {"bot": "oai-searchbot", "token": "OAI-SearchBot", "proveedor": "OpenAI", "tipo": BUSQUEDA_IA},
+    {"bot": "claude-searchbot", "token": "Claude-SearchBot", "proveedor": "Anthropic",
+     "tipo": BUSQUEDA_IA},
+    {"bot": "perplexitybot", "token": "PerplexityBot", "proveedor": "Perplexity",
+     "tipo": BUSQUEDA_IA},
+    {"bot": "chatgpt-user", "token": "ChatGPT-User", "proveedor": "OpenAI", "tipo": USUARIO_IA},
+    {"bot": "claude-user", "token": "Claude-User", "proveedor": "Anthropic", "tipo": USUARIO_IA},
+    {"bot": "gptbot", "token": "GPTBot", "proveedor": "OpenAI", "tipo": ENTRENAMIENTO},
+    {"bot": "claudebot", "token": "ClaudeBot", "proveedor": "Anthropic", "tipo": ENTRENAMIENTO},
+    {"bot": "google-extended", "token": "Google-Extended", "proveedor": "Google",
+     "tipo": ENTRENAMIENTO},
+    {"bot": "applebot-extended", "token": "Applebot-Extended", "proveedor": "Apple",
+     "tipo": ENTRENAMIENTO},
+    {"bot": "ccbot", "token": "CCBot", "proveedor": "Common Crawl", "tipo": ENTRENAMIENTO},
+]
+BOTS = {b["bot"]: b["token"] for b in BOTS_INFO}
+TIPO_DE_BOT = {b["bot"]: b["tipo"] for b in BOTS_INFO}
 
 # Estados de un robots.txt, con el criterio de Google.
 PROCESADO = "procesado"                # 2xx: se aplican sus reglas
@@ -263,7 +302,8 @@ class EvaluadorRobots:
 
 
 __all__ = [
-    "BOTS", "EvaluadorRobots", "INACCESIBLE", "LIMITE_BYTES", "MAX_HOSTS_POR_JOB",
+    "BOTS", "BOTS_INFO", "BUSCADOR", "BUSQUEDA_IA", "ENTRENAMIENTO", "TIPO_DE_BOT", "USUARIO_IA",
+    "EvaluadorRobots", "INACCESIBLE", "LIMITE_BYTES", "MAX_HOSTS_POR_JOB",
     "NO_EVALUADO", "PROCESADO", "SIN_RESTRICCIONES", "es_url_de_robots", "estado",
     "fila_de_respuesta", "grupos_como_google", "limitado", "origen", "recortar",
 ]

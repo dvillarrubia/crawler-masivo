@@ -2,7 +2,8 @@
 
 > Lo que el consultor pide a cada página con sus propias reglas (#34, Ola 3 de
 > `docs/PLAN_MEJOR_CRAWLER.md`), los segmentos de negocio (3.3, decisión 125)
-> y, cuando llegue, la comparación de valores extraídos (3.4). Índice de todas las
+> y su comparación entre censos (3.4, decisión 127, en
+> [`comparacion-y-alertas.md`](comparacion-y-alertas.md#d127)). Índice de todas las
 > decisiones en [`README.md`](README.md).
 
 <a id="d104"></a>

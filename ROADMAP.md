@@ -37,6 +37,14 @@ milestone.
   versiones; solo sobre páginas indexables, que son las que Google lee.
 - Indexabilidad calculada sobre la URL final tras redirecciones; las páginas
   bloqueadas por robots.txt no cuentan como indexables.
+- **robots.txt por bot** (18 de octubre, decisión 129): qué bloquea el
+  robots.txt de cada sitio a Googlebot, Bing y diez bots de IA, separando los
+  de entrenamiento (GPTBot, ClaudeBot, Google-Extended…: bloquearlos es una
+  decisión legítima) de los de búsqueda (OAI-SearchBot, Claude-SearchBot,
+  PerplexityBot: bloquearlos saca al sitio de esas respuestas). Se avisa solo si
+  un buscador de IA tiene cerrado el sitio entero. Y la ficha de una URL
+  bloqueada dice **la línea de robots.txt** que la bloquea. Sale re-analizando
+  los censos que ya guardan su robots.txt.
 - Duplicados exactos y casi duplicados (páginas que comparten el 90 % del texto
   o más).
 - Cadenas de redirección, imágenes sin alt, seguridad, contenido escaso, URLs
@@ -184,6 +192,30 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Modo lista y veredicto pasa/falla para QA de despliegues (18 de octubre)
+
+Ola 5.5 del plan (decisión 128). Para la pregunta de después de cada
+despliegue: **«¿estas 50 URLs clave siguen bien?»**.
+
+- **Rastreo en modo lista**: profundidad máxima 0 = solo las URLs de la lista
+  (y el destino si alguna redirige), sin seguir enlaces y sin leer el sitemap
+  salvo que se pida. Antes la API no aceptaba el 0 y el formulario lo convertía
+  en 3.
+- **Alertas en listas pequeñas**: en una lista basta **una** URL afectada
+  (configurable por cliente, perfil o rastreo); antes hacían falta 20, así que
+  10 de 50 URLs clave en noindex no avisaban.
+- **`GET /api/jobs/{id}/veredicto`** devuelve `pasa`, `falla` o
+  `no_concluyente` con los motivos, pensado para que un CI de despliegue lo
+  lea: falla si una URL de la lista no responde 200, pasa a noindex o cambia de
+  canonical, o si hay una alerta crítica. Lo que no se puede saber (sin censo
+  anterior, rastreo cortado o detrás de un muro) es «no concluyente», **nunca**
+  «pasa».
+
+Probado sobre dos censos reales de progym con un día de diferencia: una lista de
+las 50 páginas con más PageRank da `pasa`, y con 10 de ellas puestas en noindex,
+`falla`. Falta la pantalla: hoy se lanza con profundidad 0 desde el formulario
+o la API y el veredicto se lee por la API.
+
 ### Enlaces que Google no puede seguir, enlaces a errores y utm internos (16 de octubre)
 
 Ola 2.3 del plan (decisión 106). Cuatro avisos nuevos sobre el enlazado interno:
@@ -209,6 +241,19 @@ grafo. Los no rastreables piden volver a rastrear; los otros dos salen al
 volver a analizar. Queda para después enseñarlos en la ficha de la URL y en el
 CSV.
 
+### Comparar lo extraído entre rastreos, y alertas por segmento (18 de octubre)
+
+Lo que se saca a medida de cada página —el precio, la disponibilidad, el SKU, si
+lleva el tag de GTM— se compara ahora entre un rastreo y el anterior. Si cambia
+de golpe en una parte grande de las páginas (el precio de todas las fichas, la
+disponibilidad que pasa a «sin stock», el tag de analítica que desaparece de una
+plantilla) sale una alerta en la ficha del rastreo, con cuántas páginas de
+cuántas, cuánto suben o bajan los precios y qué valores pasan a cuáles. Solo se
+compara una regla que exista igual en los dos rastreos, y una página que en uno
+de los dos no se pudo evaluar no cuenta como cambio. Además, las alertas de la
+comparación se reparten ya por segmento de negocio: el fallo de Lopesan se lee
+como «hoteles: 2.151 de 2.167» en vez de por la forma de la URL.
+
 ### Segmentos de negocio: «¿qué le pasa a las fichas?» (16 de octubre)
 
 Cada cliente puede definir sus segmentos —«fichas de producto», «blog»,
@@ -224,7 +269,7 @@ a rastrear. En Druni: el 56 % de las fichas tiene el título demasiado largo y e
 (bloqueada, sin extracción) no se mete en un segmento por descarte: se cuenta
 aparte. Los enlaces a otros sitios y las imágenes o CSS no entran en ningún
 segmento aunque su ruta case: no son páginas del cliente y falsearían los
-porcentajes. Queda la pantalla para editar las reglas y las alertas por segmento.
+porcentajes. Queda la pantalla para editar las reglas (las alertas por segmento ya están, arriba).
 
 ### Extracción a medida: precio, SKU, disponibilidad y «¿tiene el tag de GTM?» (16 de octubre)
 
@@ -557,13 +602,12 @@ es cada plantilla— y va con
 - [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34) **Extracción
   personalizada**: hecha la base (arriba). Falta la pantalla para editar las
   reglas, probarlas contra una URL en vivo, buscar en el HTML de origen cuando
-  el rastreo renderiza, avisar como incidencia y comparar valores entre censos.
+  el rastreo renderiza y avisar como incidencia (comparar valores entre censos ya está).
 - **Segmentos de negocio** (ola 3.3, decisión 125, en revisión en
   [#172](https://github.com/dvillarrubia/crawler-masivo/pull/172)): «fichas»,
   «blog», «categorías» definidos por cliente, con el porcentaje de cada
-  incidencia por segmento. Después de esa PR quedan la pantalla para editar las
-  reglas y que las alertas por plantilla de la comparación pasen a ser por
-  segmento.
+  incidencia por segmento. Queda la pantalla para editar las reglas; las
+  alertas de la comparación por segmento ya están (decisión 127).
 - [#35](https://github.com/dvillarrubia/crawler-masivo/issues/35) **Logs del
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)

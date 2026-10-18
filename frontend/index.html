@@ -991,17 +991,22 @@
               Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
               (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
             </div>
-            <template x-for="al in job.comparacion.alertas" :key="al.regla">
+            <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
               <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
                             + fmt.colorSeveridad(al.severidad)">
                 <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
-                  <strong x-text="fmt.reglaDiff(al.regla)"></strong>
+                  <strong x-text="fmt.tituloAlerta(al)"></strong>
                   <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
                     <strong x-text="fmt.num(al.paginas)"></strong>
                     <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
                   </span>
                 </div>
                 <div class="text-sm" x-text="al.que_decide_google"></div>
+                <div class="text-dim" style="font-size:.78rem" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
+                <!-- Por segmento de negocio (decision 127): «el 100 % de las
+                     fichas» dice que mirar; la forma de la ruta, no. -->
+                <div class="text-dim" style="font-size:.78rem" x-show="(al.segmentos || []).length"
+                     x-text="(al.segmentos || []).slice(0,3).map(sg => sg.segmento + ' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + sg.pct + '%').join(' · ')"></div>
               </div>
             </template>
             <div class="text-dim" style="font-size:.78rem;margin-top:.5rem">
@@ -1348,22 +1353,33 @@
 
                 <!-- Las alertas primero: un cambio que afecta a una parte
                      grande de las indexables no es trabajo editorial. -->
-                <template x-for="al in (diff.alertas || [])" :key="al.regla">
+                <template x-for="al in (diff.alertas || [])" :key="al.regla + (al.extraccion || '')">
                   <div class="card"
                        :style="'margin-bottom:.75rem;border-left:3px solid ' + fmt.colorSeveridad(al.severidad)">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
-                      <strong x-text="fmt.reglaDiff(al.regla)"></strong>
+                      <strong x-text="fmt.tituloAlerta(al)"></strong>
                       <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
                         <strong x-text="fmt.num(al.paginas)"></strong>
                         <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
                       </span>
                     </div>
                     <div style="font-size:.85rem;margin-top:.35rem" x-text="al.que_decide_google"></div>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.35rem"
+                         x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
                     <div class="text-dim" style="font-size:.78rem;margin-top:.4rem"
-                         x-show="al.por === 'plantilla'">
-                      Diluido en el total del sitio: salta por plantilla.
-                    </div>
-                    <template x-for="pl in al.plantillas.slice(0,4)" :key="pl.plantilla">
+                         x-show="al.por === 'plantilla' || al.por === 'segmento'"
+                         x-text="'Diluido en el total del sitio: salta por ' + al.por + '.'"></div>
+                    <!-- Segmentos de negocio primero (decision 127). Si un
+                         segmento son exactamente las paginas de una plantilla,
+                         sale una vez, aqui, con la plantilla al lado. -->
+                    <template x-for="sg in (al.segmentos || []).slice(0,4)" :key="'s' + sg.segmento">
+                      <div class="text-dim" style="font-size:.78rem;margin-left:.6rem">
+                        <strong x-text="sg.segmento"></strong>
+                        <span x-text="' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + sg.pct + '%'"></span>
+                        <span x-show="sg.plantilla"> · plantilla <code x-text="sg.plantilla"></code></span>
+                      </div>
+                    </template>
+                    <template x-for="pl in (al.plantillas || []).slice(0,4)" :key="pl.plantilla">
                       <div class="text-dim" style="font-size:.78rem;margin-left:.6rem">
                         <code x-text="pl.plantilla"></code>
                         <span x-text="' ' + fmt.num(pl.paginas) + '/' + fmt.num(pl.de) + ' = ' + pl.pct + '%'"></span>
@@ -1393,6 +1409,29 @@
                     <div class="stat-label" x-text="diff.urls.desaparecidas === null ? 'desaparecidas (no afirmable)' : 'desaparecidas'"></div>
                   </div>
                 </div>
+
+                <!-- Extraccion a medida (decision 127): regla a regla, lo
+                     comparado y lo que no se pudo comparar. Sin fila en uno
+                     de los dos censos no es un cambio (decision 104). -->
+                <template x-if="diff.extraido && ((diff.extraido.reglas || []).length || (diff.extraido.no_comparadas || []).length)">
+                  <div class="card mb-2">
+                    <div class="text-sm"><strong>Extracción a medida</strong></div>
+                    <template x-for="rg in diff.extraido.reglas" :key="rg.nombre">
+                      <div class="text-sm" style="margin-top:.35rem">
+                        <strong x-text="'«' + rg.nombre + '»'"></strong>
+                        <span x-text="' ' + fmt.num(rg.comparadas) + ' páginas comparadas · '
+                          + Object.entries(rg.cambios).map(([k, v]) => fmt.reglaDiff(k).toLowerCase() + ': ' + fmt.num(v.total)).join(' · ')"></span>
+                        <span class="text-dim" x-show="rg.sin_dato || rg.sin_saber || rg.render_distinto"
+                              x-text="' · sin dato en uno de los dos: ' + fmt.num(rg.sin_dato) + ' · no se pudo evaluar: ' + fmt.num(rg.sin_saber)
+                                + (rg.render_distinto ? ' · uno con render y otro sin: ' + fmt.num(rg.render_distinto) : '')"></span>
+                      </div>
+                    </template>
+                    <template x-for="nc in (diff.extraido.no_comparadas || [])" :key="'nc' + nc.nombre">
+                      <div class="text-dim" style="font-size:.78rem;margin-top:.25rem"
+                           x-text="'«' + nc.nombre + '» no se compara: ' + nc.motivo"></div>
+                    </template>
+                  </div>
+                </template>
 
                 <!-- Que se arreglo, que aparecio y que sigue (#32). Comparar
                      paginas no contesta "que arreglo el cliente desde la
@@ -1571,6 +1610,44 @@
                 </template>
               </div>
             </div>
+
+            <!-- Que bloquea cada bot por host (decision 129): la home y una
+                 muestra por plantilla, con el robots.txt guardado. -->
+            <template x-if="robotsBots && robotsBots.hosts.length">
+              <div class="card" style="grid-column:1/-1">
+                <div class="card-header"><h2>robots.txt por bot</h2>
+                  <span class="text-sm text-dim">Home y una muestra por plantilla, sin pedir nada al sitio</span></div>
+                <p class="text-sm text-dim">Bloquear un bot de <b>entrenamiento</b> (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot) es una decisión legítima y no saca de ninguna búsqueda. Bloquear uno de <b>búsqueda de IA</b> (OAI-SearchBot, Claude-SearchBot, PerplexityBot) saca al sitio de esas respuestas. Los de <b>usuario</b> (ChatGPT-User, Claude-User) son descargas que pide una persona en el chat.</p>
+                <template x-for="h in robotsBots.hosts" :key="h.origen">
+                  <div class="mb-2">
+                    <div class="text-sm"><a :href="h.url" target="_blank" rel="noopener" x-text="h.origen"></a>
+                      <span class="text-dim" x-text="' · ' + (h.status_code || h.error || '—') + ' · ' + h.estado"></span></div>
+                    <template x-if="!h.bots">
+                      <div class="text-sm text-dim">Sin evaluar por bot: censo analizado antes de la decisión 129 o robots.txt no procesado. Re-analizar lo rellena.</div>
+                    </template>
+                    <template x-if="h.bots">
+                      <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
+                        <thead><tr><th>Bot</th><th>Tipo</th><th>Home</th><th>Muestra bloqueada</th><th>Alcance</th><th>Regla de la home</th></tr></thead>
+                        <tbody>
+                          <template x-for="b in robotsBots.bots" :key="b.bot">
+                            <tr x-data="{ r: h.bots[b.bot] || {} }">
+                              <td x-text="b.token + ' (' + b.proveedor + ')'"></td>
+                              <td x-text="({buscador:'Buscador', busqueda_ia:'Búsqueda IA', usuario_ia:'Usuario IA', entrenamiento:'Entrenamiento'})[b.tipo]"></td>
+                              <td :class="r.home_bloqueada ? 'orange' : ''" x-text="r.alcance == null ? '—' : (r.home_bloqueada ? 'Bloqueada' : 'Permitida')"></td>
+                              <td x-text="r.alcance == null ? '—' : (fmt.num(r.bloqueadas) + ' de ' + fmt.num(r.evaluadas) + (r.n_plantillas_bloqueadas ? ' · ' + r.n_plantillas_bloqueadas + ' plantillas enteras' : ''))"
+                                  :title="(r.plantillas_bloqueadas || []).join(', ')"></td>
+                              <td :class="r.alcance === 'todo' && b.tipo === 'busqueda_ia' ? 'red' : (r.alcance === 'todo' || r.alcance === 'parte' ? 'orange' : '')"
+                                  x-text="({todo:'Todo el sitio', parte:'Una parte', nada:'Nada'})[r.alcance] || 'No evaluado'"></td>
+                              <td><code x-show="r.regla_home" x-text="r.regla_home ? ('l.' + r.regla_home.linea + ' ' + r.regla_home.texto) : ''"></code></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table></div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
 
             <div class="card" style="grid-column:1/-1">
               <div class="card-header"><h2>Configuración</h2></div>
@@ -2877,6 +2954,23 @@
                 </template>
                 <template x-if="urlDetail.redirect_url">
                   <div class="text-sm text-dim truncate" :title="urlDetail.redirect_url" x-text="'Redirige a ' + urlDetail.redirect_url"></div>
+                </template>
+                <!-- La linea de robots.txt que la bloquea (decision 129): es lo
+                     que hay que tocar, y sin ella habia que abrir el fichero y
+                     repetir a mano la regla mas larga. -->
+                <template x-if="urlDetail.robots_regla">
+                  <div class="text-sm robots-regla">
+                    <template x-for="lado in [['googlebot','Googlebot'],['rastreador','Nuestro rastreo']]" :key="lado[0]">
+                      <template x-if="urlDetail.robots_regla[lado[0]]">
+                        <div>
+                          <span class="text-dim" x-text="lado[1] + ': línea ' + urlDetail.robots_regla[lado[0]].linea + ' de '"></span>
+                          <a :href="urlDetail.robots_regla.robots_url" target="_blank" rel="noopener">robots.txt</a>
+                          <code x-text="urlDetail.robots_regla[lado[0]].texto"></code>
+                          <span class="text-dim" x-text="'(grupo «' + (urlDetail.robots_regla[lado[0]].grupo || '*') + '», línea ' + (urlDetail.robots_regla[lado[0]].linea_grupo ?? '—') + ')'"></span>
+                        </div>
+                      </template>
+                    </template>
+                  </div>
                 </template>
                 <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
                 <!-- De qué fichero(s) de sitemap viene y con qué lastmod (decisión 126) -->
@@ -4327,8 +4421,9 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Profundidad máxima</label>
-              <input type="number" x-model="createForm.max_depth" min="1" max="50">
+              <label data-tip="0 = modo lista: solo las semillas, sin seguir enlaces ni leer el sitemap (QA de despliegues; veredicto en /api/jobs/{id}/veredicto)">Profundidad máxima</label>
+              <input type="number" x-model="createForm.max_depth" min="0" max="1000"
+                     @change="if (parseInt(createForm.max_depth) === 0) createForm.use_sitemap = false">
             </div>
             <div class="form-group">
               <label>Máximo de URLs</label>

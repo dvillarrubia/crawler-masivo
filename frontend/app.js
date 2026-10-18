@@ -354,7 +354,29 @@ const fmt = {
     cambia_el_titulo: 'Páginas que han cambiado de título',
     desaparecen: 'Páginas que ya no se encuentran en el sitio',
     entran_en_el_indice: 'Páginas que han entrado en el índice',
+    // Extraccion a medida (decision 127): el nombre de la regla va al lado
+    extraido_cambia: 'Cambia el valor extraído',
+    extraido_desaparece: 'El valor extraído ya no aparece',
+    extraido_aparece: 'Aparece un valor extraído que antes no estaba',
+    busqueda_deja_de_contener: 'Páginas que ya no contienen lo buscado',
+    busqueda_pasa_a_contener: 'Páginas que ahora contienen lo buscado',
   }[r] || r),
+  // Titulo de una alerta de la comparacion: la regla y, si es de la
+  // extraccion a medida, sobre que regla del consultor (decision 127).
+  tituloAlerta: al => fmt.reglaDiff(al.regla) + (al.extraccion ? ' · «' + al.extraccion + '»' : ''),
+  // Lo que resume una alerta de extraccion en una linea: la variacion de un
+  // numero o las transiciones de un texto («InStock → OutOfStock: 2.300»).
+  detalleAlerta: al => {
+    if (al.variacion) {
+      const v = al.variacion;
+      return 'Suben ' + fmt.num(v.suben) + ', bajan ' + fmt.num(v.bajan)
+        + (v.mediana_pct !== null && v.mediana_pct !== undefined ? ' · variación mediana ' + (v.mediana_pct > 0 ? '+' : '') + v.mediana_pct + '%' : '');
+    }
+    if (al.transiciones && al.transiciones.length) {
+      return al.transiciones.slice(0, 3).map(t => (t.antes || '—') + ' → ' + (t.ahora || '—') + ': ' + fmt.num(t.paginas)).join(' · ');
+    }
+    return '';
+  },
   // El color de una alerta sale de SU severidad. La tarjeta de la ficha
   // llevaba el rojo fijo, asi que un aviso se pintaba como una critica: si
   // todo es rojo, el rojo no significa nada.
@@ -564,6 +586,7 @@ function app() {
 
     // Vista detalle de URL
     urlDetail: null,
+    robotsBots: null,
     urlDetailTab: 'general',
     urlDetailLoading: false,
     contentViewMode: 'markdown',
@@ -1377,6 +1400,11 @@ function app() {
       try {
         this.stats = await api(`/jobs/${this.job.id}/stats`);
       } catch { this.stats = null; }
+      // Que bloquea cada bot por host (decision 129). Aparte: sin la tabla
+      // robots_txt (un censo viejo) la ficha sale igual.
+      try {
+        this.robotsBots = await api(`/jobs/${this.job.id}/robots`);
+      } catch { this.robotsBots = null; }
     },
 
     // ------- Polling de progreso -------
@@ -3583,7 +3611,7 @@ const EXP_TABS = [
   // Las redirecciones no son HTML: el ambito va sobre las internas.
   { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
-  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot'],
+  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
@@ -3715,7 +3743,8 @@ function _parseKV(text, separator) {
 // (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
 function _configDesdeForm(f) {
   return {
-    max_depth:     parseInt(f.max_depth)     || 3,
+    // `|| 3` convertia el 0 del modo lista (decision 128) en 3.
+    max_depth:     Number.isInteger(parseInt(f.max_depth)) ? parseInt(f.max_depth) : 3,
     max_urls:      parseInt(f.max_urls)      || 50000,
     concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
     concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
@@ -3791,6 +3820,12 @@ function _formDesdeConfig(f, cfg) {
   ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
    'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
     .forEach(k => poner(k, cfg[k]));
+  // Modo lista (decision 128): un perfil con `max_depth: 0` y sin
+  // `use_sitemap` hereda «sin sitemap» en la API. La casilla marcada por
+  // defecto lo mandaba como `true` explicito y la lista sembraba el sitemap.
+  if (Number(cfg.max_depth) === 0 && (cfg.use_sitemap === undefined || cfg.use_sitemap === null)) {
+    f.use_sitemap = false;
+  }
   if (cfg.user_agent) {
     const preset = presetDeUserAgent(cfg.user_agent);
     f.user_agent_preset = preset || 'custom';

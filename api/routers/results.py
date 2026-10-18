@@ -1223,6 +1223,95 @@ def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls/{url_id}  -- full detail for a single URL
 # ---------------------------------------------------------------------------
+def _filas_robots(db: Session, job_id: uuid.UUID, host: str | None = None,
+                  con_cuerpo: bool = True) -> dict[str, Any]:
+    """Las filas de `robots_txt` del job por origen; la primera de cada uno.
+
+    `host` limita a las de ese host: la ficha de una URL solo necesita la suya,
+    y cada fila lleva hasta 500 KiB de cuerpo (hasta 200 hosts por job). Sin
+    `con_cuerpo` el cuerpo no se lee (`GET /robots` no lo devuelve).
+    """
+    from sqlalchemy.orm import defer
+
+    from shared.models import RobotsTxt
+    from shared.robots_txt import origen
+
+    filas: dict[str, Any] = {}
+    try:
+        with db.begin_nested():
+            q = db.query(RobotsTxt).filter(RobotsTxt.job_id == job_id)
+            if host is not None:
+                q = q.filter(RobotsTxt.host == host)
+            if not con_cuerpo:
+                q = q.options(defer(RobotsTxt.cuerpo))
+            for fila in q.order_by(RobotsTxt.id):
+                o = origen(fila.url)
+                if o is not None and o not in filas:
+                    filas[o] = fila
+    except Exception:  # noqa: BLE001 -- una base sin la tabla: sin robots.txt
+        return {}
+    return filas
+
+
+def _robots_regla(db: Session, job_id: uuid.UUID, url_obj: Url) -> dict[str, Any] | None:
+    """La linea que bloquea la URL (decision 129). Se calcula al pedir la
+    ficha con el cuerpo guardado: vale para cualquier censo con `robots_txt`,
+    sin re-rastrear ni re-analizar."""
+    from shared.config import DEFAULT_USER_AGENT
+    from shared.robots_regla import reglas_de_url
+    from shared.robots_txt import origen
+
+    bloqueada_rastreo = bool(url_obj.blocked_by_robots) or (
+        url_obj.status_code is None
+        and (url_obj.indexability_status or "").startswith("Blocked by robots"))
+    if not (url_obj.bloqueada_googlebot or bloqueada_rastreo):
+        return None
+    o = origen(url_obj.url)
+    if o is None:
+        return None
+    from urllib.parse import urlsplit
+
+    fila = _filas_robots(db, job_id, host=(urlsplit(o).hostname or "")).get(o)
+    if fila is None:
+        return None
+    job = db.get(Job, job_id)
+    config = (job.config or {}) if job else {}
+    try:
+        return reglas_de_url(
+            fila, url_obj.url, bloqueada_googlebot=url_obj.bloqueada_googlebot,
+            blocked_by_robots=bloqueada_rastreo,
+            user_agent=config.get("user_agent") or DEFAULT_USER_AGENT,
+            robots_mode=config.get("robots_mode"))
+    except Exception:  # noqa: BLE001 -- la linea es un extra de la ficha
+        return None
+
+
+@router.get("/robots")
+def get_robots(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """robots.txt de cada host del censo y que bloquea cada bot (decision 129).
+
+    `bots` es el catalogo (token, proveedor y tipo: buscador, busqueda_ia,
+    usuario_ia o entrenamiento); `hosts[].bots` lo que escribio el analisis
+    para la home y la muestra por plantilla. Un censo analizado antes de la
+    decision 129 trae `hosts[].bots` a None: hay que re-analizarlo.
+    """
+    from shared.robots_regla import estado_guardado
+    from shared.robots_txt import BOTS_INFO
+
+    _get_job_or_404(job_id, db)
+    hosts = []
+    for o, fila in sorted(_filas_robots(db, job_id, con_cuerpo=False).items()):
+        ev = fila.evaluacion if isinstance(fila.evaluacion, dict) else {}
+        hosts.append({
+            "origen": o, "host": fila.host, "url": fila.url, "url_final": fila.url_final,
+            "status_code": fila.status_code, "error": fila.error,
+            "estado": estado_guardado(fila), "bytes": fila.bytes, "sha256": fila.sha256,
+            "recortado": fila.recortado, "fecha": fila.fecha,
+            "googlebot": ev.get("googlebot"), "bots": ev.get("bots"),
+        })
+    return {"bots": BOTS_INFO, "hosts": hosts}
+
+
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)
 def get_url_detail(
     job_id: uuid.UUID,
@@ -1294,6 +1383,7 @@ def get_url_detail(
     # La ficha lleva todas las reglas a medida evaluadas en la URL (decision 104)
     resp.a_medida = _a_medida(db, job_id, [url_obj.id]).get(url_obj.id, {})
     resp.capturas_alternativas = _capturas_alternativas(db, job_id, url_obj.id)
+    resp.robots_regla = _robots_regla(db, job_id, url_obj)
     resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
 
     out_items = []
@@ -1705,6 +1795,24 @@ def get_diff(
     # por el orden de los parametros, asi que elegir el censo viejo en el
     # desplegable daba la vuelta al informe entero.
     return resultado
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/veredicto  --  pasa / falla / no_concluyente (128)
+# ---------------------------------------------------------------------------
+@router.get("/veredicto")
+def get_veredicto(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Veredicto para un CI de despliegue: `pasa`, `falla` o `no_concluyente`.
+
+    **Siempre 200** (para un job que existe) y el veredicto en el cuerpo: un CI
+    no puede confundir «el despliegue esta roto» con «la API ha fallado». Lo
+    no concluyente —sin referencia, truncado, bloqueado, sin terminar— no es
+    `pasa`: quien lo lea como verde despliega a ciegas. Ver
+    `shared.modo_lista.veredicto` y la decision 128.
+    """
+    from shared.modo_lista import veredicto
+
+    return veredicto(db, _get_job_or_404(job_id, db))
 
 
 def _resumen_fecha(job) -> str | None:
