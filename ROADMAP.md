@@ -37,6 +37,14 @@ milestone.
   versiones; solo sobre páginas indexables, que son las que Google lee.
 - Indexabilidad calculada sobre la URL final tras redirecciones; las páginas
   bloqueadas por robots.txt no cuentan como indexables.
+- **robots.txt por bot** (18 de octubre, decisión 129): qué bloquea el
+  robots.txt de cada sitio a Googlebot, Bing y diez bots de IA, separando los
+  de entrenamiento (GPTBot, ClaudeBot, Google-Extended…: bloquearlos es una
+  decisión legítima) de los de búsqueda (OAI-SearchBot, Claude-SearchBot,
+  PerplexityBot: bloquearlos saca al sitio de esas respuestas). Se avisa solo si
+  un buscador de IA tiene cerrado el sitio entero. Y la ficha de una URL
+  bloqueada dice **la línea de robots.txt** que la bloquea. Sale re-analizando
+  los censos que ya guardan su robots.txt.
 - Duplicados exactos y casi duplicados (páginas que comparten el 90 % del texto
   o más).
 - Cadenas de redirección, imágenes sin alt, seguridad, contenido escaso, URLs

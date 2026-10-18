@@ -561,6 +561,7 @@ function app() {
 
     // Vista detalle de URL
     urlDetail: null,
+    robotsBots: null,
     urlDetailTab: 'general',
     urlDetailLoading: false,
     contentViewMode: 'markdown',
@@ -1374,6 +1375,11 @@ function app() {
       try {
         this.stats = await api(`/jobs/${this.job.id}/stats`);
       } catch { this.stats = null; }
+      // Que bloquea cada bot por host (decision 129). Aparte: sin la tabla
+      // robots_txt (un censo viejo) la ficha sale igual.
+      try {
+        this.robotsBots = await api(`/jobs/${this.job.id}/robots`);
+      } catch { this.robotsBots = null; }
     },
 
     // ------- Polling de progreso -------
@@ -3580,7 +3586,7 @@ const EXP_TABS = [
   // Las redirecciones no son HTML: el ambito va sobre las internas.
   { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
-  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot'],
+  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },

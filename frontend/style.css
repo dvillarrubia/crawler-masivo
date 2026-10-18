@@ -1342,3 +1342,7 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .issue-segmentos ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.35rem .9rem}
 .issue-segmentos li{display:flex;align-items:center;gap:.35rem;font-size:.8rem}
 .exp-segmento{max-width:14rem}
+
+/* La linea de robots.txt que bloquea una URL (decision 129) */
+.robots-regla{margin:.25rem 0;word-break:break-all}
+.robots-regla code{font-size:.75rem;background:var(--orange-bg);padding:0 .3rem;border-radius:3px;margin:0 .25rem}
