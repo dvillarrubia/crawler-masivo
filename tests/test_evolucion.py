@@ -355,3 +355,57 @@ def test_el_relleno_escribe_lo_que_falta_y_simulado_no_deja_nada(base):
         r = mod.rellenar(s, ids=mios, todos=True, salida=lambda *_: None)
         assert r["escritos"] == 2
         assert s.query(ProfileRun).filter(ProfileRun.job_id.in_(mios)).count() == 2
+
+
+# ----------------------------------------------------- lectura de la serie ---
+def test_leer_la_evolucion_no_carga_las_semillas_de_cada_job(base):
+    """La ficha y el panel leen TODOS los rastreos terminados del cliente, y
+    `jobs.seeds` de un censo sembrado desde el sitemap pesa cientos de kB
+    (Lopesan semanal: 3.040 semillas, 233 kB por job). Para nombrar la serie
+    por host basta el host, que se guarda en la fila al agregar: leer las
+    semillas haria crecer la portada con cada semana de cada cliente."""
+    from shared.evolucion import leer, registrar, tendencias_de_clientes
+    from shared.models import Client
+
+    Sesion, creados, engine = base
+    with Sesion() as s:
+        c = Client(nombre="Acme", slug=f"acme-{uuid.uuid4().hex[:8]}")
+        s.add(c)
+        s.flush()
+        ids = [_censo(s, creados, dias=d, errores=e) for d, e in ((0, 1), (7, 3))]
+        sin_fila = _censo(s, creados, dias=14)
+        for jid in ids + [sin_fila]:
+            j = s.get(Job, jid)
+            j.cliente_id = c.id
+            j.seeds = ["https://x.com/"] + [f"https://x.com/p/{n}" for n in range(500)]
+        s.commit()
+        for jid in ids:
+            registrar(s, jid)
+        s.commit()
+        cid = c.id
+
+    sentencias: list[str] = []
+
+    def anotar(conn, cursor, sql, params, context, executemany):
+        sentencias.append(sql.lower())
+
+    try:
+        with Sesion() as s:
+            event.listen(engine, "before_cursor_execute", anotar)
+            r = leer(s, cid)
+            t = tendencias_de_clientes(s, [cid])
+    finally:
+        event.remove(engine, "before_cursor_execute", anotar)
+        with Sesion() as s:
+            for jid in ids + [sin_fila]:
+                s.get(Job, jid).cliente_id = None
+            s.query(Client).filter(Client.id == cid).delete()
+            s.commit()
+
+    # Una sola serie por host, con los dos agregados y el que no lo tiene.
+    assert [x["clave"] for x in r["series"]] == ["host:x.com"]
+    assert len(r["series"][0]["puntos"]) == 3 and r["sin_agregado"] == 1
+    assert t[cid]["clave"] == "host:x.com"
+    con_semillas = [q for q in sentencias if "jobs.seeds" in q]
+    # Solo se piden las del job SIN fila, y solo las de ese.
+    assert len(con_semillas) <= 1, con_semillas

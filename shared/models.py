@@ -1013,6 +1013,11 @@ class ProfileRun(Base):
     # Foto del estado al calcular (informativo; el que manda es el de `jobs`).
     status = Column(String(20), nullable=True)
     finish_reason = Column(String(32), nullable=True)
+    # Host de la primera semilla, para la serie de los rastreos sin perfil ni
+    # programacion. Copiado aqui porque las semillas no cambian y leerlas al
+    # pedir la evolucion cuesta cientos de kB por job (un censo sembrado desde
+    # el sitemap: 3.040 semillas, 233 kB).
+    host = Column(String(255), nullable=True)
 
     # URLs internas del censo, por grupo de estado.
     urls = Column(Integer, nullable=False, default=0)

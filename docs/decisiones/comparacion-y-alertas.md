@@ -490,7 +490,13 @@
      reasignar o re-etiquetar después (`PATCH /api/jobs/{id}`), y una copia
      aquí se quedaría desfasada. `analisis_version` sí se copia: es la versión
      con la que se contaron ESTAS incidencias, y si ya no coincide con la del
-     job el punto sale `desfasado` hasta que se rehaga.
+     job el punto sale `desfasado` hasta que se rehaga. El host de la primera
+     semilla también se copia (`profile_runs.host`), porque las semillas no
+     cambian y es lo único que hace falta de ellas: leer `jobs.seeds` de cada
+     ejecución para nombrar la serie por host costaba **233 kB por job** en el
+     censo de Lopesan sembrado desde el sitemap (3.040 semillas), y la portada
+     lee todos los terminados de todos los clientes. Solo los rastreos sin
+     agregar y sin perfil ni programación leen sus semillas.
    - **Quién la escribe.** `run_analysis` al terminar —cubre el análisis
      automático, el re-análisis a mano y el de la referencia (93), que cambia
      las cifras de un censo viejo— y el worker al cerrar el rastreo, para lo

@@ -100,7 +100,7 @@ def agregar(session, job_id) -> dict[str, Any] | None:
     job_id = _como_uuid(job_id)
     job = session.execute(
         select(Job.status, Job.finish_reason, Job.analisis_version,
-               Job.crawler_version, Job.pagerank_resumen).where(Job.id == job_id)
+               Job.crawler_version, Job.pagerank_resumen, Job.seeds).where(Job.id == job_id)
     ).first()
     if job is None:
         return None
@@ -146,6 +146,7 @@ def agregar(session, job_id) -> dict[str, Any] | None:
         "finish_reason": job.finish_reason,
         "analisis_version": job.analisis_version,
         "crawler_version": job.crawler_version,
+        "host": _host(job.seeds),
         "urls": int(urls or 0), "urls_2xx": int(u2 or 0), "urls_3xx": int(u3 or 0),
         "urls_4xx": int(u4 or 0), "urls_5xx": int(u5 or 0), "urls_bloqueadas": int(bloq or 0),
         "paginas_html": int(html or 0), "indexables": int(idx or 0),
@@ -302,7 +303,7 @@ def clave_de_serie(job: dict[str, Any]) -> tuple[str, str]:
         return "perfil", str(job["profile_id"])
     if job.get("programacion_id"):
         return "programacion", str(job["programacion_id"])
-    return "host", _host(job.get("seeds"))
+    return "host", job.get("host") or _host(job.get("seeds"))
 
 
 def _cambio(antes: dict[str, Any], despues: dict[str, Any]) -> dict[str, Any] | None:
@@ -434,7 +435,7 @@ def leer(db, cliente_id, *, profile_id=None, limite: int = 26) -> dict[str, Any]
 
     consulta = (
         select(Job.id, Job.name, Job.tipo, Job.status, Job.finish_reason, Job.config,
-               Job.seeds, Job.created_at, Job.profile_id, Job.programacion_id,
+               Job.created_at, Job.profile_id, Job.programacion_id,
                Job.analisis_version, Job.crawler_version, ProfileRun)
         .outerjoin(ProfileRun, ProfileRun.job_id == Job.id)
         .where(Job.cliente_id == cliente_id, Job.status.in_(TERMINADOS))
@@ -448,7 +449,9 @@ def leer(db, cliente_id, *, profile_id=None, limite: int = 26) -> dict[str, Any]
         run = job.pop("ProfileRun")
         if run is None:
             sin_agregado += 1
+        job["host"] = getattr(run, "host", None)
         filas.append((job, _fila(run)))
+    _hosts_que_faltan(db, [j for j, _ in filas])
 
     nombres = _nombres(db, [cliente_id], filas)
     return {
@@ -459,6 +462,23 @@ def leer(db, cliente_id, *, profile_id=None, limite: int = 26) -> dict[str, Any]
         "metricas": METRICAS,
         "criterio": CRITERIO,
     }
+
+
+def _hosts_que_faltan(db, jobs: list[dict[str, Any]]) -> None:
+    """El host de los jobs que lo necesitan para su serie (sin perfil ni
+    programacion) y no lo traen en su fila: los que aun no tienen agregado.
+    Solo esos leen `jobs.seeds`, que en un censo sembrado desde el sitemap
+    pesa cientos de kB; los demas lo llevan copiado en `profile_runs.host`."""
+    from sqlalchemy import select
+
+    from shared.models import Job
+
+    faltan = {j["id"]: j for j in jobs
+              if not j.get("host") and not j.get("profile_id") and not j.get("programacion_id")}
+    if not faltan:
+        return
+    for jid, seeds in db.execute(select(Job.id, Job.seeds).where(Job.id.in_(list(faltan)))).all():
+        faltan[jid]["host"] = _host(seeds)
 
 
 def _nombres(db, cliente_ids, filas) -> dict[tuple[str, str], str]:
@@ -502,14 +522,16 @@ def tendencias_de_clientes(db, cliente_ids) -> dict[Any, dict[str, Any]]:
     por_cliente: dict[Any, list] = {i: [] for i in ids}
     for r in db.execute(
         select(Job.cliente_id, Job.id, Job.name, Job.tipo, Job.status, Job.finish_reason,
-               Job.config, Job.seeds, Job.created_at, Job.profile_id, Job.programacion_id,
+               Job.config, Job.created_at, Job.profile_id, Job.programacion_id,
                Job.analisis_version, Job.crawler_version, ProfileRun)
         .join(ProfileRun, ProfileRun.job_id == Job.id)
         .where(Job.cliente_id.in_(ids), Job.status.in_(TERMINADOS))
     ).all():
         job = dict(r._mapping)
         run = job.pop("ProfileRun")
+        job["host"] = run.host
         por_cliente[job.pop("cliente_id")].append((job, _fila(run)))
+    _hosts_que_faltan(db, [j for filas in por_cliente.values() for j, _ in filas])
     nombres = _nombres(db, ids, [f for filas in por_cliente.values() for f in filas])
     salida = {}
     for cid, filas in por_cliente.items():
