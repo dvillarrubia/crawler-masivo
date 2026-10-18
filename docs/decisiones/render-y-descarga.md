@@ -868,6 +868,19 @@
    de 200 con contenido (`response_class`) no puede ser peor que la del ultimo
    censo de cada uno. Si lo es en alguno, `impersonate: chrome124` en su
    `projects/<cliente>/config.json` lo devuelve a lo de antes sin desplegar.
+   **Ojo, que el cambio de serie no llega a todo**: los `projects/*/config.json`
+   de UOC, blogs-uoc, progym y workoholics fijan YA los dos (`chrome124` y el UA
+   de 124), y una programacion guarda su config entera al crearse
+   (`model_dump`), asi que la serie semanal de Lopesan sigue con `chrome124`.
+   Un canario lanzado con `lanzar_job.py <cliente> --canary` sin mas mide lo de
+   antes; para medir lo nuevo hay que pasar los DOS con `--set impersonate=chrome150
+   --set "user_agent=<UA_POR_DEFECTO>"` (solo la huella da un descasado, que
+   se respeta), o quitar las dos claves del config del cliente.
+   Y dos presets del formulario: el de Firefox pasa a la 147 (con la 124 la
+   huella automatica salia de la 133); el de **Edge** queda descasado —el ultimo
+   perfil de Edge de curl_cffi es `edge101`, de 2022, y con el UA de Edge 124 el
+   spider avisa—. No se sube ni se baja el UA: un Edge 101 es un navegador
+   viejo que un WAF puntua peor que el descasado; queda abierto.
    Tests: `tests/test_huella_en_la_peticion.py` (el SeoSpider real con curl_cffi
    contra un servidor que anota lo que LLEGA: UA, `sec-ch-ua` y plataforma; y
    `descargar_crudo`) y `tests/test_huella_y_ua.py` (la lista contra curl_cffi,

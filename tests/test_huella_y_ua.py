@@ -142,3 +142,35 @@ def test_el_preset_chrome_del_formulario_es_el_ua_de_serie():
                             .read_text(encoding="utf-8").split('x-model="createForm.impersonate"')[1]
                             .split("</select>")[0]):
         assert valor == "" or valor in perfiles.PERFILES_IMPERSONATE, valor
+
+
+def _presets_del_formulario() -> dict[str, str]:
+    app = (RAIZ / "frontend" / "app.js").read_text(encoding="utf-8")
+    bloque = app[app.index("const UA_PRESETS = {"):]
+    bloque = bloque[:bloque.index("\n};")]
+    return dict(re.findall(r"^\s*([a-z_]+):\s*'([^']+)'", bloque, re.M))
+
+
+# Edge no tiene un perfil de curl_cffi moderno (el ultimo es `edge101`, de 2022):
+# con su preset de Edge 124 la huella automatica sale de la 101 y el spider lo
+# avisa. Queda abierto en la decision 132; no se arregla subiendo el UA a 101.
+_SIN_HUELLA_DE_SU_VERSION = {"edge_win"}
+
+
+@pytest.mark.parametrize("preset", ["chrome_win", "chrome_mac", "safari_mac", "firefox_win"])
+def test_cada_preset_de_navegador_con_huella_automatica_es_un_navegador_que_existe(preset):
+    """Con «Automatica» (el valor de serie del formulario) la API deduce la huella
+    del UA del preset. Si el preset lleva una version sin perfil (Firefox 124: el
+    mas cercano es `firefox133`), el rastreo sale con un UA y una huella de
+    versiones distintas, que es justo lo que la decision 132 quiere evitar."""
+    ua = _presets_del_formulario()[preset]
+    huella = perfiles.huella_para_ua(ua)
+    assert huella in perfiles.PERFILES_IMPERSONATE, (preset, ua)
+    assert perfiles.incoherencia_ua_huella(ua, huella) is None, (preset, ua, huella)
+
+
+def test_los_presets_sin_huella_de_su_version_estan_contados():
+    presets = _presets_del_formulario()
+    navegadores = {k for k, ua in presets.items() if perfiles.navegador_de_ua(ua)}
+    assert navegadores == {"chrome_win", "chrome_mac", "safari_mac", "firefox_win"} \
+        | _SIN_HUELLA_DE_SU_VERSION
