@@ -15,7 +15,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
@@ -159,6 +159,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 130 | La evolución de un perfil se agrega por ejecución, sin leer `links`, y un punto que no es un censo entero no hace línea | [`comparacion-y-alertas`](comparacion-y-alertas.md#d130) |
 | 131 | Comparar también el enlazado, el marcado y el hreflang; separar lo roto de lo publicado mal; y una migración se empareja con reglas | [`comparacion-y-alertas`](comparacion-y-alertas.md#d131) |
 | 132 | La huella TLS de serie es `chrome150`, y el UA va con ella: lo que delata no es la version de la huella sino un UA que no casa | [`render-y-descarga`](render-y-descarga.md#d132) |
+| 133 | Una URL de la lista que redirige a una página sana es un aviso, no un fallo | [`comparacion-y-alertas`](comparacion-y-alertas.md#d133) |
 
 ## Anadir una decision
 
