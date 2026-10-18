@@ -263,3 +263,15 @@ Sitemap (decision 100): `test_analyzer_sitemap_db.py` ejecuta `analyze_sitemap`
 contra SQLite: cada motivo de `sitemap_no_indexable` con su detalle, que un 429 o un 503
 o una URL sin respuesta no se afirman, que una no indexable del sitemap no sale
 ademas como `sitemap_orphan`, y que vale con los enlaces archivados.
+Modo lista y veredicto (decision 128): `test_modo_lista.py` (JobConfig con
+`max_depth=0`, el umbral absoluto en `comparar_censos` y, contra SQLite, la
+comparacion automatica y el veredicto: 10 de 50 URLs clave a noindex es `falla`,
+el control `pasa`, y sin referencia, truncado, bloqueado o sin terminar es
+`no_concluyente`), `test_veredicto_api.py` (el endpoint con TestClient: 200
+siempre) —los dos tambien en el trabajo de la API— y `test_modo_lista_spider.py`
+(spider real: solo semillas y sus saltos, sitemap solo si se pide, y al
+reanudar una lista no se rastrea la frontera). `test_modo_lista.py` cubre
+tambien que relanzar la lista no pone en verde lo que sigue roto, que un
+hallazgo es un motivo aunque lo diga tambien la alerta y que un rastreo
+completo no toma una lista como referencia; `test_modo_lista_frontend.py`
+(Chromium) que un perfil en modo lista se lanza sin sitemap desde el modal.

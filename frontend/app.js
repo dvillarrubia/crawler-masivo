@@ -3734,7 +3734,8 @@ function _parseKV(text, separator) {
 // (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
 function _configDesdeForm(f) {
   return {
-    max_depth:     parseInt(f.max_depth)     || 3,
+    // `|| 3` convertia el 0 del modo lista (decision 128) en 3.
+    max_depth:     Number.isInteger(parseInt(f.max_depth)) ? parseInt(f.max_depth) : 3,
     max_urls:      parseInt(f.max_urls)      || 50000,
     concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
     concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
@@ -3810,6 +3811,12 @@ function _formDesdeConfig(f, cfg) {
   ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
    'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
     .forEach(k => poner(k, cfg[k]));
+  // Modo lista (decision 128): un perfil con `max_depth: 0` y sin
+  // `use_sitemap` hereda «sin sitemap» en la API. La casilla marcada por
+  // defecto lo mandaba como `true` explicito y la lista sembraba el sitemap.
+  if (Number(cfg.max_depth) === 0 && (cfg.use_sitemap === undefined || cfg.use_sitemap === null)) {
+    f.use_sitemap = false;
+  }
   if (cfg.user_agent) {
     const preset = presetDeUserAgent(cfg.user_agent);
     f.user_agent_preset = preset || 'custom';

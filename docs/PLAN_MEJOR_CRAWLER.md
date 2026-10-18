@@ -91,7 +91,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 | 5.2 | #36 F2 | Reglas configurables (incidencia o métrica + operador + umbral o delta) y resumen semanal | Una regla de cliente («4xx > 20 en fichas») dispara en un caso de prueba y no en el control |
 | 5.3 | #36 F3 | `profile_runs` con agregados por ejecución (4xx, 5xx, indexables, incidencias por severidad, PageRank desperdiciado de `pagerank_resumen`), gráficas SVG en la ficha del cliente y panel de cartera con tendencia | Ficha de cliente con 4 o más ejecuciones graficadas sin leer `links` (37) |
 | 5.4 | #32 | Comparación ampliada: inlinks, click_depth, pagerank_score, description, tipos de SD y hreflang; incidencias nuevas separadas entre URL existente y URL nueva; mapeo de rutas por regex (migraciones) | Migración simulada (regex vieja → nueva) empareja más del 95% de URLs; mismos guardias (67, 70, 91) |
-| 5.5 | **Nueva:** «Modo lista y veredicto pasa/falla para QA de despliegues» | `max_depth=0` (solo semillas); umbral de alerta absoluto para listas pequeñas (hoy el piso de 20 de la decisión 68 lo impide); `GET /api/jobs/{id}/veredicto` | Una lista de 50 URLs clave con 10 que pasan a noindex alerta y el veredicto devuelve `falla` |
+| 5.5 | **Nueva:** «Modo lista y veredicto pasa/falla para QA de despliegues» | `max_depth=0` (solo semillas); umbral de alerta absoluto para listas pequeñas (hoy el piso de 20 de la decisión 68 lo impide); `GET /api/jobs/{id}/veredicto` | Una lista de 50 URLs clave con 10 que pasan a noindex alerta y el veredicto devuelve `falla`. **Hecho (decisión 128)**: en revisión |
 
 ### Ola 6. Entregables y acceso del cliente
 
@@ -184,7 +184,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 8. Enlaces que Google no puede seguir: javascript:, onclick, span/div con href, utm internos
 9. Segmentos de negocio definidos por el usuario, retroactivos y aplicados a todo
 10. Search Console en el worker: clics, impresiones y posición por URL, cruzados con el censo
-11. Modo lista y veredicto pasa/falla para QA de despliegues
+11. Modo lista y veredicto pasa/falla para QA de despliegues. **Hecho (decisión 128).**
 12. Autenticación mínima: tokens por rol y enlaces firmados de solo lectura por cliente
 13. Informe exportable HTML/PDF del censo
 14. XLSX multihoja y Google Sheets para Looker Studio

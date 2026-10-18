@@ -194,7 +194,8 @@ def test_una_clave_de_config_desconocida_se_nombra(entorno):
 
 def test_un_valor_invalido_en_la_config_del_cliente_es_422(entorno):
     api, _ = entorno
-    r = api.post("/api/clients", json={"nombre": "X", "config_defecto": {"max_depth": 0}})
+    # -1 y no 0: el 0 es el modo lista (decision 128)
+    r = api.post("/api/clients", json={"nombre": "X", "config_defecto": {"max_depth": -1}})
     assert r.status_code == 422
 
 

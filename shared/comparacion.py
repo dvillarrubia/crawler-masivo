@@ -184,11 +184,16 @@ def comparar_censos(
     job_b: dict[str, Any],
     mapa_hosts: dict[str, str] | None = None,
     umbral_palabras: float = UMBRAL_PALABRAS,
+    umbral_absoluto: int | None = None,
 ) -> dict[str, Any]:
     """Compara dos listas de páginas ya cargadas. Función pura, sin BD.
 
     Cada página es un dict con: `url`, `status_code`, `indexability_status`,
     `canonical_href`, `title`, `h1`, `word_count`.
+
+    `umbral_absoluto` (decisión 128, modo lista): una alerta salta con ese
+    número de páginas, sin porcentaje ni el piso de `MINIMO_PAGINAS`. Lo
+    calcula `shared.modo_lista.umbral_absoluto`; None = el criterio de la 68.
     """
     mapa_hosts = mapa_hosts or {}
 
@@ -440,7 +445,8 @@ def comparar_censos(
         resultado["bloqueado"] = bloqueo_b or bloqueo_a
     elif direccion_sabida:
         resultado["alertas"] = _ordenar_alertas(
-            _alertas(afectadas, bases) + _alertas_extraido(entradas_extraido))
+            _alertas(afectadas, bases, umbral_absoluto)
+            + _alertas_extraido(entradas_extraido, umbral_absoluto))
     else:
         resultado["alertas"] = []
         avisos.append(
@@ -753,11 +759,11 @@ def _comparar_extraido(a, b, comunes, job_a, job_b) -> tuple[dict[str, Any], lis
     return {"reglas": resumen, "no_comparadas": no_comparadas}, entradas
 
 
-def _alertas_extraido(entradas) -> list[dict[str, Any]]:
+def _alertas_extraido(entradas, umbral_absoluto=None) -> list[dict[str, Any]]:
     salida = []
     for regla, filas, base, extra in entradas:
         severidad, _clase, que_decide = REGLAS_EXTRAIDO[regla]
-        al = _alerta(regla, severidad, que_decide, filas, base)
+        al = _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto)
         if al is not None:
             al.update(extra)
             salida.append(al)
@@ -850,7 +856,7 @@ def _sin_grupo(fila: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in fila.items() if k != "_g"}
 
 
-def _alerta(regla, severidad, que_decide, filas, base) -> dict[str, Any] | None:
+def _alerta(regla, severidad, que_decide, filas, base, umbral_absoluto=None) -> dict[str, Any] | None:
     """Una regla contra su umbral: en el sitio, en un segmento o en una plantilla.
 
     Tres disparadores, porque una plantilla entera rota se diluye en el total:
@@ -916,9 +922,15 @@ def _alerta(regla, severidad, que_decide, filas, base) -> dict[str, Any] | None:
                    and p["pct"] >= PCT_ALERTA_PLANTILLA * 100 for p in grupos)
 
     pct = len(filas) / de
-    salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
-    salta_segmento = salta(segmentos)
-    salta_plantilla = salta(plantillas)
+    if umbral_absoluto is not None:
+        # Una lista (decision 128): cada URL la eligio alguien, y el piso
+        # de 20 impedia alertar en una lista de 50 aunque fallaran 10.
+        salta_sitio = len(filas) >= umbral_absoluto
+        salta_segmento = salta_plantilla = False
+    else:
+        salta_sitio = len(filas) >= MINIMO_PAGINAS and pct >= PCT_ALERTA
+        salta_segmento = salta(segmentos)
+        salta_plantilla = salta(plantillas)
     if not (salta_sitio or salta_segmento or salta_plantilla):
         return None
     return {
@@ -928,7 +940,8 @@ def _alerta(regla, severidad, que_decide, filas, base) -> dict[str, Any] | None:
         "paginas": len(filas),
         "de": de,
         "pct": round(pct * 100, 1),
-        "por": ("sitio" if salta_sitio
+        "por": ("lista" if umbral_absoluto is not None
+                else "sitio" if salta_sitio
                 else "segmento" if salta_segmento else "plantilla"),
         "segmentos": segmentos[:5],
         "plantillas": plantillas[:5],
@@ -943,12 +956,12 @@ def _ordenar_alertas(alertas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(alertas, key=lambda d: (_ORDEN_SEVERIDAD[d["severidad"]], -d["paginas"]))
 
 
-def _alertas(afectadas, bases) -> list[dict[str, Any]]:
+def _alertas(afectadas, bases, umbral_absoluto=None) -> list[dict[str, Any]]:
     """Las reglas de página que superan el umbral (ver `_alerta`)."""
     salida = []
     for regla, (severidad, que_decide) in REGLAS.items():
         al = _alerta(regla, severidad, que_decide, afectadas[regla],
-                     bases[BASE_DE_LA_REGLA[regla]])
+                     bases[BASE_DE_LA_REGLA[regla]], umbral_absoluto)
         if al is not None:
             salida.append(al)
     return _ordenar_alertas(salida)
@@ -1284,9 +1297,17 @@ def censo_anterior(db, job):
         .order_by(Job.started_at.desc())
     )
     mias = {_norm(u) for u in (job.seeds or [])}
+    from shared.modo_lista import es_lista
+
+    yo_lista = es_lista(job.config)
     mas_reciente = None
     for c in consulta.yield_per(200):
         if not c.seeds or _host(c.seeds[0]) != host:
+            continue
+        # Una lista (decision 128) no es referencia de un rastreo que sigue
+        # enlaces: la de QA suele llevar la home, asi que «abarca» a un censo
+        # sembrado en la home y, siendo la mas reciente, ganaba.
+        if es_lista(c.config) and not yo_lista:
             continue
         if mas_reciente is None:
             mas_reciente = c
@@ -1400,11 +1421,19 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     reanalizado, sin_reanalizar = _poner_al_dia_el_anterior(
         db, anterior, job, reanalizar)
     resumen_anterior = resumen_de_job(anterior)
+    from shared.modo_lista import acotar_a_la_lista, umbral_absoluto
+
+    # Una lista (decision 128) se compara SOLO en sus URLs: del anterior —que
+    # puede ser un censo completo— lo que no esta en la lista no ha
+    # «desaparecido», es que no se pidio.
+    paginas_ant, resumen_ant_cmp = acotar_a_la_lista(
+        paginas_de_censo(db, anterior.id), resumen_anterior, job)
     r = comparar_censos(
-        paginas_de_censo(db, anterior.id),
+        paginas_ant,
         paginas_de_censo(db, job.id),
-        job_a=resumen_anterior,
+        job_a=resumen_ant_cmp,
         job_b=resumen_de_job(job),
+        umbral_absoluto=umbral_absoluto(job.config),
     )
     incidencias = None
     if r.get("comparable"):
