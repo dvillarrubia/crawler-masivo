@@ -91,7 +91,8 @@ def test_la_tendencia_del_panel_no_cruza_un_cambio_de_version():
     r = _evaluar("""() => [
       textoTendencia({direccion: 'no_comparable', motivo: 'Cambió la versión del análisis'}),
       textoTendencia({direccion: 'sube', delta: 28, mejora: false, antes: 12,
-                      fecha_antes: '2026-09-02T00:00:00Z'}),
+                      fecha_antes: '2026-09-02T00:00:00Z', ahora: 40,
+                      fecha_ahora: '2026-09-09T00:00:00Z'}),
       textoTendencia({direccion: 'baja', delta: -3, mejora: true, antes: 12,
                       fecha_antes: '2026-09-02T00:00:00Z', cambio_version: {rastreo: true}}),
       textoTendencia(null), sparkline([5]), sparkline([1, 3, 2]).startsWith('<svg'),
@@ -99,6 +100,9 @@ def test_la_tendencia_del_panel_no_cruza_un_cambio_de_version():
     no_comp, sube, baja, nada, corta, larga, partida = r
     assert no_comp["texto"] == "≠ versión" and no_comp["clase"] == "neutra"
     assert sube["texto"] == "▲ 28" and sube["clase"] == "peor"
+    # El censo del que sale «ahora» va en el titulo: en el panel no tiene por
+    # que ser el de la columna «último censo».
+    assert "→" in sube["titulo"] and "40" in sube["titulo"]
     assert baja["texto"] == "▼ 3" and baja["clase"] == "mejor" and "otra versión del crawler" in baja["titulo"]
     assert nada is None and corta == "" and larga is True
     # Cortada en el cambio de version: dos tramos y un enlace gris discontinuo.

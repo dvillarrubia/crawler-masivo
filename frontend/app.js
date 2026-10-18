@@ -4268,9 +4268,13 @@ function textoTendencia(t) {
     return { texto: '≠ versión', clase: 'neutra', titulo: t.motivo || 'Cambió la versión del análisis' };
   if (t.direccion == null) return null;
   const desde = fmt.dia(t.fecha_antes) + ': ' + fmt.num(t.antes);
-  if (t.direccion === 'igual') return { texto: '=', clase: '', titulo: 'Igual que el ' + desde };
+  // En el panel, el censo de la tendencia no tiene por que ser el de la
+  // columna «último censo» (ese puede estar truncado o ser de otro perfil):
+  // el titulo dice de que censo sale la cifra de ahora.
+  const hasta = t.fecha_ahora ? ' → ' + fmt.dia(t.fecha_ahora) + ': ' + fmt.num(t.ahora) : '';
+  if (t.direccion === 'igual') return { texto: '=', clase: '', titulo: 'Igual que el ' + desde + hasta };
   return { texto: (t.direccion === 'sube' ? '▲ ' : '▼ ') + fmt.num(Math.abs(t.delta)),
            clase: t.mejora ? 'mejor' : 'peor',
-           titulo: 'Frente al censo comparable anterior (' + desde + ')'
+           titulo: 'Frente al censo comparable anterior (' + desde + hasta + ')'
              + (t.cambio_version && t.cambio_version.rastreo ? '. Ojo: rastreado con otra versión del crawler' : '') };
 }

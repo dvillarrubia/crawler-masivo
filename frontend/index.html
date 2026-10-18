@@ -346,7 +346,7 @@
                     <td style="white-space:nowrap">
                       <template x-if="!p.evolucion || !p.evolucion.tendencia"><span class="text-dim text-sm">—</span></template>
                       <template x-if="p.evolucion && p.evolucion.tendencia">
-                        <span class="evo-tendencia" :title="(textoTendencia(p.evolucion.tendencia) || {}).titulo">
+                        <span class="evo-tendencia" :title="'Serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
                           <span x-html="sparkline(p.evolucion.valores, p.evolucion.cortes)"></span>
                           <span class="delta" :class="(textoTendencia(p.evolucion.tendencia) || {}).clase"
                                 x-text="(textoTendencia(p.evolucion.tendencia) || {}).texto"></span>
