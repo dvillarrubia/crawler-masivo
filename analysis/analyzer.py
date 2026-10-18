@@ -41,7 +41,9 @@ from analysis.sd_validation import problemas_structured_data
 from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces
-from shared.indexabilidad import clave_url, es_noindex, estado_indexabilidad, misma_url
+from shared.indexabilidad import (
+    clave_url, es_noindex, estado_indexabilidad, misma_url, x_robots_para_bot,
+)
 from shared.respuestas import NO_VALIDAS
 from shared.robots import robots_bad_separators
 from shared.database import SessionLocal
@@ -2093,7 +2095,12 @@ class SEOAnalyzer:
                 ("meta_robots_googlebot", meta_googlebot),
                 ("x_robots_tag", x_robots),
             ):
-                problemas = robots_bad_separators(valor)
+                # De las `X-Robots-Tag` solo se lee lo que va a Google, con el
+                # mismo criterio que la indexabilidad (decision 107): una
+                # `bingbot: noindex/nofollow` no le quita nada, y el prefijo
+                # pegado (`googlebot:noindex/nofollow`) escondia el `noindex`.
+                leido = x_robots_para_bot(valor) if fuente == "x_robots_tag" else valor
+                problemas = robots_bad_separators(leido)
                 if not problemas:
                     continue
 

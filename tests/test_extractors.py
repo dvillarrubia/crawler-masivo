@@ -11,6 +11,7 @@ import pytest
 from parsel import Selector
 
 from seo_crawler import extractors as ex
+from shared.indexabilidad import estado_indexabilidad
 
 
 def sel(html: str) -> Selector:
@@ -340,17 +341,22 @@ def test_extract_security_headers_case_insensitive():
     assert out["has_x_frame_options"] is False
 
 
+# La indexabilidad la decide `shared.indexabilidad` (decision 39). El extractor
+# tenia su propia `compute_indexability_status`, que solo usaban estos tests y
+# aplicaba otro criterio (`bingbot: noindex` sacaba la pagina, un 204 era
+# indexable): se borro y los casos pasan a la funcion real (decision 107).
 @pytest.mark.parametrize("status,robots,xrobots,canonical,page,expected_indexable,reason", [
-    (200, None, None, None, "https://e.com/p", True, None),
-    (404, None, None, None, "https://e.com/p", False, "4xx Client Error"),
-    (500, None, None, None, "https://e.com/p", False, "5xx Server Error"),
+    (200, None, None, None, "https://e.com/p", True, "Indexable"),
+    (404, None, None, None, "https://e.com/p", False, "Client Error (404)"),
+    (500, None, None, None, "https://e.com/p", False, "Server Error (500)"),
     (200, "noindex", None, None, "https://e.com/p", False, "Noindex"),
     (200, None, "noindex", None, "https://e.com/p", False, "Noindex"),
-    (200, None, None, "https://e.com/p", "https://e.com/p", True, None),          # self canonical
+    (200, None, None, "https://e.com/p", "https://e.com/p", True, "Indexable"),  # self canonical
     (200, None, None, "https://e.com/other", "https://e.com/p", False, "Canonicalised"),
 ])
-def test_compute_indexability_status(status, robots, xrobots, canonical, page, expected_indexable, reason):
-    ok, why = ex.compute_indexability_status(status, robots, xrobots, canonical, page)
+def test_estado_indexabilidad_basico(status, robots, xrobots, canonical, page, expected_indexable, reason):
+    ok, why = estado_indexabilidad(
+        status, meta_robots=robots, x_robots=xrobots, canonical_href=canonical, page_url=page)
     assert ok is expected_indexable
     assert why == reason
 
@@ -392,8 +398,8 @@ def test_extract_meta_combines_multiple_robots_tags():
     )
     meta = ex.extract_meta(s)
     assert "noindex" in meta["meta_robots"].lower()
-    ok, reason = ex.compute_indexability_status(
-        200, meta["meta_robots"], None, None, "https://e.com/p")
+    ok, reason = estado_indexabilidad(
+        200, meta_robots=meta["meta_robots"], page_url="https://e.com/p")
     assert ok is False and reason == "Noindex"
 
 
@@ -417,7 +423,7 @@ def test_title_from_svg_not_used_when_no_head_title():
     ("max-snippet:-1, index", True), # unrelated directives stay indexable
 ])
 def test_indexability_robots_token_parsing(robots, expected):
-    ok, _ = ex.compute_indexability_status(200, robots, None, None, "https://e.com/p")
+    ok, _ = estado_indexabilidad(200, meta_robots=robots, page_url="https://e.com/p")
     assert ok is expected
 
 
@@ -433,7 +439,7 @@ def test_robots_tokens_helper():
 
 @pytest.mark.parametrize("robots", ["noindex/nofollow", "noindex|nofollow", "NOINDEX/NOFOLLOW"])
 def test_robots_con_barra_no_saca_del_indice(robots):
-    ok, _ = ex.compute_indexability_status(200, robots, None, None, "https://e.com/p")
+    ok, _ = estado_indexabilidad(200, meta_robots=robots, page_url="https://e.com/p")
     assert ok is True
 
 

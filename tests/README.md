@@ -18,7 +18,7 @@ those are imported lazily by the modules under test.
 
 | File | Covers |
 |------|--------|
-| `test_extractors.py` | URL utilities, `extract_meta` (canonical/og resolution to absolute), `effective_base_url` (`<base href>`), `extract_links` (no per-page dedup, follow/nofollow, link-type, internal), `_detect_link_position` (nearest-ancestor wins), `extract_headings` (skips template/noscript/svg), `extract_hreflang`, `extract_resources` (mixed content, srcset), meta-refresh, security headers, `compute_indexability_status`, text ratio, pixel widths |
+| `test_extractors.py` | URL utilities, `extract_meta` (canonical/og resolution to absolute), `effective_base_url` (`<base href>`), `extract_links` (no per-page dedup, follow/nofollow, link-type, internal), `_detect_link_position` (nearest-ancestor wins), `extract_headings` (skips template/noscript/svg), `extract_hreflang`, `extract_resources` (mixed content, srcset), meta-refresh, security headers, text ratio, pixel widths |
 | `test_sd_validation.py` | Structured-data validation: missing `@type` (error), missing required property for known rich-result types (warning), unknown types / odd shapes (ok, no false positives), `@graph` and bare-list handling |
 
 The `test_*.png` / `*.mjs` files in this directory are older Playwright UI
