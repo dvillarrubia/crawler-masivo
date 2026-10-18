@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122 |
@@ -145,6 +145,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 116 | Hreflang: una anotacion repetida es una, y la cabecera `Link` tambien es fuente | [`indexabilidad`](indexabilidad.md#d116) |
 | 117 | Una cadena de redirecciones es un aviso, y pasados 10 saltos es un error | [`incidencias`](incidencias.md#d117) |
 | 118 | Un casi duplicado se mide entre las mismas páginas que el duplicado exacto, y una escritura sin espacios se parte en caracteres | [`incidencias`](incidencias.md#d118) |
+| 119 | La paridad móvil se mide con una muestra por plantilla, en la misma ventana y con el dispositivo entero; lo que cambia solo no se afirma | [`render-y-descarga`](render-y-descarga.md#d119) |
 | 120 | Señales que se contradicen, y una meta refresh es una redirección, no la página | [`indexabilidad`](indexabilidad.md#d120) |
 | 121 | Un titular vacío no es un titular, un título de relleno se dice una vez, y un enlace sin nombre sale de la temporal de aristas | [`contenido`](contenido.md#d121) |
 | 122 | Paginacion: lo que importa es la pagina 2+ que no cuenta y la siguiente a la que no se llega por un `<a>` | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d122) |

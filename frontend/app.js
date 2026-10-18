@@ -3604,6 +3604,10 @@ const EXP_TABS = [
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
+  // Paridad movil/escritorio (decision 119): solo hay chips si el censo se
+  // rastreo con `crawl_behavior.paridad_movil_muestra`.
+  { key: 'a_movil',    label: 'Móvil',         icon: 'smartphone',   filter: HTML_INTERNO, ambito: ['paridad_movil_indexacion','paridad_movil_contenido','paridad_movil_respuesta'],
+    columns: ['url','status_code','title','canonical_href','meta_robots','content_word_count','indexable'] },
   { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },
   // Lo del servidor (decisiones 109 y 110): tiempo hasta el primer byte,
@@ -3661,6 +3665,10 @@ function _freshForm() {
     autothrottle_enabled: true,
     autothrottle_target_concurrency: 8,
     max_runtime_hours: 6,
+    // Paridad movil (decision 119): 0 = apagada
+    paridad_movil_muestra: 0,
+    paridad_movil_por_plantilla: 3,
+    paridad_movil_ua: 'chrome_android',
     // HTTP
     custom_headers: '',
     accept_language: '',
@@ -3732,6 +3740,9 @@ function _configDesdeForm(f) {
       follow_nofollow: f.follow_nofollow,
       crawl_subdomains: f.crawl_subdomains,
       max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
+      paridad_movil_muestra: parseInt(f.paridad_movil_muestra) || 0,
+      paridad_movil_por_plantilla: parseInt(f.paridad_movil_por_plantilla) || 3,
+      paridad_movil_ua: f.paridad_movil_ua || 'chrome_android',
     },
     url_filters: {
       max_url_length: parseInt(f.max_url_length) || 0,
@@ -3783,7 +3794,8 @@ function _formDesdeConfig(f, cfg) {
   sub(cfg.resource_types, ['crawl_images', 'crawl_css', 'crawl_js', 'crawl_pdfs', 'crawl_fonts',
     'crawl_svg', 'crawl_other', 'check_external_resources']);
   sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
-    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours']);
+    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
+    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua']);
   sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
   sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
     'extract_page_content', 'store_raw_html']);

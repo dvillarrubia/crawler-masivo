@@ -352,6 +352,7 @@ class SEOAnalyzer:
         avisos_de_servidor.avisar(self)  # decisiones 109 y 110
         self.analyze_content()
         self.analyze_soft_404()
+        self.analyze_paridad_movil()
         self.analyze_url_issues()
         # Despues de la indexabilidad (necesita `Url.noindex`) y antes de los
         # conteos: deja marcadas las paginas que la lectura de `links` de
@@ -3324,6 +3325,121 @@ class SEOAnalyzer:
 
         self._flush_issues()
         soft404.analizar(self)
+
+    # -- Paridad movil/escritorio (decision 119) ------------------------------
+
+    _CAMPOS_INDEXACION = ("noindex", "canonical", "nofollow")
+    _CAMPOS_RESPUESTA = ("status", "redireccion", "urls_separadas")
+
+    def analyze_paridad_movil(self) -> None:
+        """Lo que cambia con el otro perfil, una fila por (plantilla, campo).
+
+        Lee `capturas_alternativas`, que el spider llena con una muestra por
+        plantilla pedida con el perfil movil (o con el de escritorio, si el
+        censo ya se rastreo con UA de movil). Es la PLANTILLA la que sirve otra
+        cosa a un movil, asi que va agrupado (decisiones 36, 64): una fila por
+        (perfil, plantilla, campo) con `paginas_afectadas` sobre las
+        `paginas_muestreadas` de esa plantilla y unos ejemplos, anclada en la
+        URL menor (decision 88).
+
+        Severidad por consecuencia (64): Google indexa la version movil, asi
+        que un `noindex` o un canonical distintos son error; title y H1,
+        aviso; la description, informativa; el contenido principal o los
+        enlaces internos, aviso a partir del umbral de `shared/paridad.py`.
+        Una redireccion a otra URL es aviso salvo un m-dot con la anotacion
+        bidireccional completa, que es una configuracion valida (info).
+
+        No se afirma lo que no se pudo medir: los campos volatiles (cambian
+        tambien entre dos peticiones de escritorio) ya vienen quitados, y una
+        captura `no_evaluada` (muro, error, robots, control fallido) no avisa.
+        Sin tabla (base anterior a la migracion), no se evalua.
+        """
+        from sqlalchemy import inspect
+
+        from shared.models import CapturaAlternativa as C
+        from shared.paridad import vary_por_user_agent
+
+        try:
+            # Con la conexion de la sesion, no con el engine: en SQLite el
+            # inspector devolveria al pool la conexion de la transaccion en
+            # curso y se llevaria por delante lo no confirmado.
+            if not inspect(self.session.connection()).has_table(C.__tablename__):
+                return
+        except Exception:  # noqa: BLE001
+            return
+        filas = self.session.execute(
+            select(C.url_id, Url.url, C.perfil, C.estado, C.plantilla, C.status_code,
+                   C.redirige_a, C.vary_base, C.vary, C.diferencias, C.detalle,
+                   Url.status_code, Url.response_class)
+            .join(Url, Url.id == C.url_id)
+            .where(C.job_id == self.job_id, Url.job_id == self.job_id)
+        ).all()
+        muestreadas: dict[tuple[str, str], int] = defaultdict(int)
+        grupos: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for (url_id, url, perfil, estado, plantilla, status, redirige_a, vary_base, vary,
+             difs, detalle, status_base, clase_base) in filas:
+            # La pagina del censo tiene que seguir siendo una pagina 2xx: si se
+            # re-rastreo y ahora es un 404 o un muro, la comparacion no vale.
+            if not (status_base and 200 <= status_base < 300) or clase_base in NO_VALIDAS:
+                continue
+            if estado not in ("comparada", "redirige", "respuesta_distinta"):
+                continue
+            destino = (detalle or {}).get("destino") or {}
+            if estado == "redirige" and (destino.get("error")
+                                         or destino.get("clase") in NO_VALIDAS):
+                # El destino del m-dot es un muro o no se pudo pedir: la
+                # anotacion no se sabe, y no se afirma que falte (decision 103,
+                # revision de #161).
+                continue
+            plantilla = plantilla or "?"
+            muestreadas[(perfil, plantilla)] += 1
+            sin_vary = not (vary_por_user_agent(vary_base) or vary_por_user_agent(vary))
+            base = {"url_id": url_id, "url": url, "sin_vary": sin_vary}
+            if estado == "comparada":
+                for d in difs or []:
+                    grupos[(perfil, plantilla, d["campo"])].append({**base, **d})
+            elif estado == "respuesta_distinta":
+                grupos[(perfil, plantilla, "status")].append(
+                    {**base, "base": status_base, "alternativa": status})
+            else:
+                anotada = ((detalle or {}).get("tipo") == "otro_host"
+                           and destino.get("canonical_a_base") is True
+                           and destino.get("alternate_al_destino") is True)
+                grupos[(perfil, plantilla, "urls_separadas" if anotada else "redireccion")].append({
+                    **base, "base": url, "alternativa": redirige_a, "status": status,
+                    "tipo": (detalle or {}).get("tipo"),
+                    "canonical_a_base": destino.get("canonical_a_base"),
+                    "alternate_al_destino": destino.get("alternate_al_destino"),
+                })
+
+        for (perfil, plantilla, campo), miembros in sorted(grupos.items()):
+            miembros.sort(key=lambda m: m["url"])
+            ancla = miembros[0]["url_id"]
+            ejemplos = [{k: v for k, v in m.items() if k not in ("url_id", "campo", "sin_vary")}
+                        for m in miembros[: self._MUESTRA_EJEMPLOS]]
+            detalles = {
+                "campo": campo, "perfil": perfil, "plantilla": plantilla,
+                "paginas_afectadas": len(miembros),
+                "paginas_muestreadas": muestreadas[(perfil, plantilla)],
+                "ejemplos": ejemplos,
+                # Servido dinamico sin `Vary: User-Agent`: una cache o CDN puede
+                # dar la version equivocada a quien no es (Google lo pide).
+                "sin_vary_user_agent": sum(1 for m in miembros if m["sin_vary"]),
+            }
+            clave = _clave_de_grupo(f"{perfil}|{plantilla}|{campo}")
+            if campo in self._CAMPOS_INDEXACION:
+                self._add_issue(ancla, "paridad_movil_indexacion",
+                                "warning" if campo == "nofollow" else "error",
+                                detalles, group_key=clave)
+            elif campo in self._CAMPOS_RESPUESTA:
+                self._add_issue(ancla, "paridad_movil_respuesta",
+                                "info" if campo == "urls_separadas" else "warning",
+                                detalles, group_key=clave)
+            else:
+                self._add_issue(ancla, "paridad_movil_contenido",
+                                "info" if campo == "description" else "warning",
+                                detalles, group_key=clave)
+        self._flush_issues()
 
     # -- URL Issues ---------------------------------------------------------
 

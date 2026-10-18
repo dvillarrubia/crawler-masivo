@@ -227,3 +227,29 @@ class SecurityItem(scrapy.Item):
     has_x_frame_options = scrapy.Field()
     referrer_policy = scrapy.Field()
     has_unsafe_crossorigin = scrapy.Field()
+
+
+class CapturaAlternativaItem(scrapy.Item):
+    """Una URL del censo pedida con otro perfil y comparada (decision 119).
+
+    No es una URL del censo: la emite la sonda de paridad, que no pasa por
+    `parse`, y el pipeline la cuelga de la `Url` que ya existe (por
+    `url_hash`). Una por URL y perfil: el pipeline reemplaza la anterior.
+    """
+
+    url_hash = scrapy.Field()
+    job_id = scrapy.Field()
+    perfil = scrapy.Field()
+    modo = scrapy.Field()
+    estado = scrapy.Field()
+    plantilla = scrapy.Field()
+    user_agent = scrapy.Field()
+    status_code = scrapy.Field()
+    response_class = scrapy.Field()
+    redirige_a = scrapy.Field()
+    vary_base = scrapy.Field()
+    vary = scrapy.Field()
+    medidas = scrapy.Field()
+    diferencias = scrapy.Field()
+    volatiles = scrapy.Field()
+    detalle = scrapy.Field()

@@ -83,6 +83,7 @@ from shared.respuestas import (
 )
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
+from seo_crawler.sonda_paridad import ParidadMovilMixin, contextos_del_perfil
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -498,7 +499,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -560,6 +561,23 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, scrapy.Spider):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+    @classmethod
+    def update_settings(cls, settings):
+        """El contexto de render `custom` con el UA del job (decision 119).
+
+        Solo si el UA llego por `-s` (lo que hace el worker): con mas prioridad
+        que la de `settings.py`. Sin eso se queda el de `settings.py`.
+        """
+        super().update_settings(settings)
+        try:
+            if settings.getpriority("USER_AGENT") > (settings.getpriority("PLAYWRIGHT_CONTEXTS") or 0):
+                settings.set("PLAYWRIGHT_CONTEXTS", contextos_del_perfil(
+                    settings.getdict("PLAYWRIGHT_CONTEXTS"), settings.get("USER_AGENT")),
+                    priority="spider")
+        except Exception:  # noqa: BLE001 -- sin el ajuste se rastrea como antes
+            logger.warning("No se pudo ajustar el contexto de render al UA del job",
+                           exc_info=True)
+
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super().from_crawler(crawler, *args, **kwargs)
@@ -681,6 +699,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, scrapy.Spider):
             # -- Sondas de soft 404 (decision 105) y TLS por host (110) --
             self._iniciar_sondas(job)
             self._iniciar_sonda_tls(job)
+            # -- Paridad movil/escritorio (decision 119) --
+            self._iniciar_paridad(session)
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
@@ -1932,6 +1952,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, scrapy.Spider):
 
         if is_html and is_success and internal and not refresh_target:
             yield from self._sonda_de_plantilla(final_url)  # decision 105
+            if not muro:
+                yield from self._paridad_de_pagina(response, final_url)  # decision 119
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces

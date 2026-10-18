@@ -224,6 +224,15 @@ que no coincide con el `<a>`, Elementor, variantes canonicalizadas a otra serie 
 cada clave de los detalles tenga nombre) y `test_incidencias_paginacion_frontend.py`
 (ficha, nombre, ambito y columnas). `test_insights.py` comprueba que la nota de
 Enlazado cuenta tambien `solo_enlazada_desde_paginacion_excluida`.
+Paridad movil/escritorio (decision 119): `test_paridad_movil.py` (el
+`SeoSpider` real con la descarga de produccion contra un sitio que sirve otro
+HTML a un UA de movil —`rutas_movil` y `{aleatorio}` del arnes—: noindex,
+canonical, menu, texto, m-dot con su anotacion, campo volatil, cupo por
+plantilla, sin gastar `max_urls`, nada con la muestra a 0; con Chromium, el
+contexto movil de verdad; y con Postgres, la tuberia, el analisis y que
+reanudar no repite) y `test_paridad_movil_analisis.py` (la comparacion, los
+perfiles, el preset del formulario, el contexto `custom` con el UA del job,
+los avisos contra SQLite y el aviso de perfil distinto entre censos).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

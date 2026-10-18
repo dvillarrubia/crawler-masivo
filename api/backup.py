@@ -35,6 +35,7 @@ from shared.models import (
     CustomExtraction,
     EnlaceNoRastreable,
     RobotsTxt,
+    CapturaAlternativa,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,8 @@ _CHILD_TABLES_JOB: list[tuple[str, type, str]] = [
     # Enlaces no rastreables (decision 106). Lo mismo: un backup anterior no
     # la trae y se salta.
     ("enlaces_no_rastreables", EnlaceNoRastreable, "from_url_id"),
+    # Capturas con otro perfil (decision 119). Igual: opcional al importar.
+    ("capturas_alternativas", CapturaAlternativa, "url_id"),
 ]
 
 # Con job_id y SIN url: no hay nada que remapear salvo el job. El robots.txt de

@@ -155,6 +155,7 @@ def main() -> None:
     migrar_custom_extraction()
     migrar_enlaces_no_rastreables()
     migrar_robots_txt()
+    migrar_capturas_alternativas()
 
     print("Done.")
 
@@ -305,6 +306,22 @@ def migrar_robots_txt() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_robots_txt_job_host ON robots_txt (job_id, host)"))
     print("robots.txt: tabla robots_txt e indices al dia.")
+
+
+def migrar_capturas_alternativas() -> None:
+    """Capturas de una URL con otro perfil (decision 119). Idempotente.
+
+    Tabla NUEVA: la crea create_all con sus indices, sin tocar `urls` ni
+    `links`. Aqui solo se aseguran los indices por si la tabla se creo antes
+    que ellos. Bajo el `lock_timeout` de `main()`.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_capalt_job_perfil "
+            "ON capturas_alternativas (job_id, perfil)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_capalt_url ON capturas_alternativas (url_id)"))
+    print("Capturas alternativas: tabla capturas_alternativas e indices al dia.")
 
 
 if __name__ == "__main__":

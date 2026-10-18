@@ -66,7 +66,10 @@
     "max_runtime_hours": 48,
     "stall_timeout_minutes": 30,
     "respetar_retry_after": true,
-    "sonda_tls": true
+    "sonda_tls": true,
+    "paridad_movil_muestra": 0,
+    "paridad_movil_por_plantilla": 3,
+    "paridad_movil_ua": "chrome_android"
   },
   "extraction": {
     "extract_structured_data": true,

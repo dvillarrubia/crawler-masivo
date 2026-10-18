@@ -1156,6 +1156,31 @@ def export_enlaces_entrantes(
                              headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
+def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[dict]:
+    """Las capturas de la URL con otro perfil (decision 119), una por perfil.
+
+    Sin tabla (una base que aun no paso `init_db`) la ficha sale sin ellas en
+    vez de dar un 500: es un dato opcional del censo.
+    """
+    from shared.models import CapturaAlternativa as C
+
+    try:
+        with db.begin_nested():
+            filas = (db.query(C).filter(C.job_id == job_id, C.url_id == url_id)
+                     .order_by(C.perfil).all())
+    except Exception:  # noqa: BLE001
+        return []
+    return [{
+        "perfil": c.perfil, "modo": c.modo, "estado": c.estado, "plantilla": c.plantilla,
+        "user_agent": c.user_agent, "status_code": c.status_code,
+        "response_class": c.response_class, "redirige_a": c.redirige_a,
+        "vary_base": c.vary_base, "vary": c.vary, "medidas": c.medidas,
+        "diferencias": c.diferencias or [], "volatiles": c.volatiles or [],
+        "detalle": c.detalle,
+        "capturada_at": c.capturada_at.isoformat() if c.capturada_at else None,
+    } for c in filas]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls/{url_id}  -- full detail for a single URL
 # ---------------------------------------------------------------------------
@@ -1229,6 +1254,7 @@ def get_url_detail(
     resp.issues = [IssueResponse.model_validate(i) for i in url_obj.issues]
     # La ficha lleva todas las reglas a medida evaluadas en la URL (decision 104)
     resp.a_medida = _a_medida(db, job_id, [url_obj.id]).get(url_obj.id, {})
+    resp.capturas_alternativas = _capturas_alternativas(db, job_id, url_obj.id)
 
     out_items = []
     for link_obj, src_url in outlink_rows:
