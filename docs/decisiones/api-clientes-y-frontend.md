@@ -239,3 +239,40 @@
    `create_all` de `test_pagerank_db.py` contra el `postgres:16-alpine` de CI.
    Por eso el test que comprueba que ninguna tabla del censo se queda fuera
    pregunta a los modelos **en otro proceso**.
+
+<a id="d134"></a>
+134. **La API pide un token, y sin él está cerrada, no abierta** (6.1, criterio
+   del usuario, 2026-10-18). Hasta hoy, quien llegara a la dirección pública
+   podía leer los censos de todos los clientes, lanzar rastreos y borrarlos. Y
+   el CORS era peor de lo que parecía: `allow_origins=["*"]` con
+   `allow_credentials=True` hace que Starlette devuelva el origen de quien
+   pregunta, así que cualquier web podía leer la API desde el navegador de
+   quien la visitara.
+   - **Quién la usaba**, comprobado en producción antes de cerrarla: la
+     interfaz (por traefik), las comprobaciones de `ocupado-prod.sh` desde el
+     propio servidor y `lanzar_job.py`. n8n no la llama (de sus 21 flujos,
+     ninguno apunta al crawler) y motor-de-contenido lee la base de datos con
+     su usuario de solo lectura, no la API. El puerto 8000 solo escucha en
+     `127.0.0.1`.
+   - **Un token, `API_TOKEN`, en el entorno** (decisión 83), de 24 caracteres
+     como mínimo. Los scripts lo mandan como `Authorization: Bearer`; el
+     navegador lo escribe una vez en `/entrar` y recibe una cookie
+     `HttpOnly`, `SameSite=Strict` y `Secure` por https, que **no lleva el
+     token**: lleva una caducidad (30 días) firmada con una clave derivada de
+     él. Cambiar el token cierra todas las sesiones.
+   - **Middleware y no dependencia por router**: un router nuevo nace
+     protegido. Es ASGI puro porque por ahí pasan el CSV en streaming y el
+     backup. Públicos: `/health`, los estáticos, el esqueleto de la página y
+     `/api/sesion`. `/docs` y `/openapi.json` no, porque enumeran cada
+     endpoint.
+   - **Sin `API_TOKEN` es 503**, con el motivo: el fallo seguro de un
+     despliegue que se olvida de configurarlo es no poder entrar.
+     `API_AUTH_DESACTIVADA=1` la abre a propósito (local y tests), nunca por
+     omisión. El CORS queda cerrado salvo los orígenes de `CORS_ORIGINS`.
+   - El token del enriquecido (decisión 85) se mantiene aparte: lanzar algo de
+     pago sigue pidiendo el suyo aunque se haya entrado.
+   - En la interfaz, cualquier 401 de `/api` lleva a `/entrar` y vuelve después
+     a la misma ruta (solo rutas `#/...`, para que el parámetro no sea una
+     redirección abierta). «Cerrar sesión» está en el menú de la barra.
+   Queda para después: tokens por rol y enlaces de solo lectura por cliente
+   (el resto de 6.1), que necesitan acotar cada router por `cliente_id`.

@@ -133,7 +133,7 @@ jobs:
           tests/test_backup_no_rastreables.py tests/test_backup_sondas.py
           tests/test_segmentos.py tests/test_segmentos_api.py
           tests/test_job_resumenes_api.py tests/test_comparar_extraido.py
-          tests/test_modo_lista.py tests/test_veredicto_api.py tests/test_robots_api.py
+          tests/test_modo_lista.py tests/test_veredicto_api.py tests/test_robots_api.py tests/test_autenticacion.py
           tests/test_sitemaps_api.py tests/test_evolucion.py tests/test_evolucion_api.py
           tests/test_comparacion_ampliada.py tests/test_diff_api.py tests/test_backup_comparacion.py
           tests/test_reglas_api.py
