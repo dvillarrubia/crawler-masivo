@@ -276,3 +276,40 @@
      redirección abierta). «Cerrar sesión» está en el menú de la barra.
    Queda para después: tokens por rol y enlaces de solo lectura por cliente
    (el resto de 6.1), que necesitan acotar cada router por `cliente_id`.
+
+<a id="d138"></a>
+138. **El informe para el cliente junta lo que ya se calcula, y la
+   fiabilidad va dentro, no en una nota aparte** (Ola 6.2 de
+   `docs/PLAN_MEJOR_CRAWLER.md`, primera parte). Hasta ahora el informe
+   mensual se montaba a mano a partir de la interfaz (`docs/PARA_CLIENTES.md`).
+   `GET /api/jobs/{id}/informe` devuelve, de un censo: cliente y sitio (la raíz
+   del host, no la primera semilla, que en Lopesan es `/blog/`), la nota con su
+   tope y las categorías (decisión 92), las cifras de la ficha, lo que ha
+   cambiado frente al anterior (`_resumen_de_rastreo`, lo mismo que el resumen
+   semanal de la decisión 135: alertas, reglas del cliente, incidencias nuevas,
+   resueltas o el motivo de no compararlas), las **diez primeras por
+   prioridad** (decisión 136) con tres ejemplos cada una, y `fiabilidad`.
+   No mide nada nuevo: llama a las funciones de `/insights`, `/stats` y
+   `/issues/resumen`, para que el informe no pueda contradecir a la interfaz.
+   - **La fiabilidad, en el informe.** Un censo cortado (por máximo de URLs,
+     tiempo, estancado o cancelado, salvo en modo lista, donde el tope es lo
+     esperado), un muro de WAF (`bloqueado_por_waf`) o un grafo sin los
+     enlaces que monta el JavaScript (`_pagerank_fiable`, decisión 35) salen
+     en un recuadro «Antes de leer las cifras», arriba. Un informe que parece
+     completo y no lo es hace más daño que no entregarlo (decisiones 67 y 103).
+   - **La página**: `#/rastreos/<id>/informe-cliente`, desde Exportar →
+     «Informe para el cliente». Las fichas (qué es, qué decide Google, cómo se
+     arregla) salen de `incidencias.js`, que vive en el frontend; por eso el
+     endpoint devuelve datos y la interfaz pinta. Se imprime o se guarda como
+     PDF desde el navegador (`@media print` quita la barra y los botones), y
+     el título de la pestaña es el nombre del PDF. Un hallazgo de plantilla
+     (una fila con `paginas_afectadas`) dice cuántos hallazgos son y que se
+     arregla una vez, no «1 página».
+   Probado contra el censo semanal de Lopesan (14-oct) con la función ejecutada
+   contra producción en una conexión de solo lectura: nota 79 (la media sería
+   90, y 115 URLs con error la recortan), 44 tipos de incidencia, la
+   comparación dice por qué las incidencias no se comparan (dos versiones del
+   análisis, decisión 91). PDF A4 de 3 páginas sin retoques.
+   **Pendiente** de la 6.2: generarlo en el worker al terminar un programado y
+   mandarlo (6.4), la evolución del perfil en gráfica (decisión 130), y que el
+   equipo lo revise como entregable.

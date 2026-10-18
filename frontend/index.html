@@ -1136,6 +1136,12 @@
                   <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
                 </button>
                 <div class="menu" x-show="menuAbierto === 'exportar'" x-transition.opacity role="menu" style="min-width:19rem">
+                  <!-- Decision 138: el informe para el cliente, imprimible a PDF. -->
+                  <button role="menuitem" data-testid="abrir-informe" @click="menuAbierto = ''; location.hash = '#/rastreos/' + job.id + '/informe-cliente'"
+                          :disabled="job.status !== 'completed'">
+                    <i data-lucide="file-check-2" style="width:14px;height:14px"></i>
+                    <span>Informe para el cliente<span class="menu-sub">Nota, qué arreglar primero y qué ha cambiado; se guarda como PDF</span></span></button>
+                  <hr>
                   <button role="menuitem" @click="menuAbierto = ''; exportCSV()">
                     <i data-lucide="table" style="width:14px;height:14px"></i>
                     <span>URLs con sus metadatos (CSV)<span class="menu-sub">Una fila por URL, compatible con Excel</span></span></button>
@@ -3382,6 +3388,132 @@
     <!-- ============================================================ -->
     <!--            VISTA: DETALLE COMPLETO DE UNA URL                -->
     <!-- ============================================================ -->
+    <!-- ============================================================ -->
+    <!--      VISTA: INFORME PARA EL CLIENTE (decision 138)            -->
+    <!-- ============================================================ -->
+    <template x-if="view === 'informe'">
+      <div class="informe" data-testid="informe">
+        <div class="informe-acciones no-print">
+          <a class="btn btn-sm" :href="'#/rastreos/' + (job && job.id)">
+            <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Volver al rastreo</a>
+          <button class="btn btn-sm btn-primary" @click="window.print()" :disabled="!informe">
+            <i data-lucide="printer" style="width:13px;height:13px"></i> Imprimir o guardar como PDF</button>
+        </div>
+        <template x-if="informeCargando">
+          <div class="loading-overlay"><div class="spinner"></div> Preparando el informe…</div>
+        </template>
+        <template x-if="!informeCargando && informe">
+          <article>
+            <header class="informe-cabecera">
+              <div class="text-dim text-sm" x-text="informe.cliente ? informe.cliente.nombre : 'Auditoría SEO técnica'"></div>
+              <h1 x-text="informe.job.sitio"></h1>
+              <div class="text-dim text-sm">
+                Rastreo del <span x-text="fmt.date(informe.job.fecha)"></span>
+                · <span x-text="fmt.num(informe.cifras.urls)"></span> URLs
+                <span x-show="informe.job.modo_lista" x-text="'· lista de ' + fmt.num(informe.job.semillas) + ' URLs'"></span>
+              </div>
+            </header>
+
+            <template x-if="informe.fiabilidad.length">
+              <section class="informe-aviso" data-testid="informe-fiabilidad">
+                <strong>Antes de leer las cifras</strong>
+                <ul><template x-for="(t, i) in informe.fiabilidad" :key="i"><li x-text="t"></li></template></ul>
+              </section>
+            </template>
+
+            <section class="informe-nota">
+              <div class="informe-nota-global" :class="'nota-' + (informe.nota.global >= 80 ? 'buena' : informe.nota.global >= 50 ? 'media' : 'mala')">
+                <div class="informe-nota-num" x-text="informe.nota.global"></div>
+                <div class="text-sm">de 100</div>
+              </div>
+              <div>
+                <h2>Estado del sitio</h2>
+                <p x-show="informe.nota.tope" class="text-sm"
+                   x-text="informe.nota.tope ? 'La media de las categorías sería ' + informe.nota.sin_tope + ', pero con ' + fmt.num(informe.nota.tope.paginas_con_error) + ' URLs con errores la nota no puede pasar de ' + informe.nota.tope.tope + '.' : ''"></p>
+                <div class="informe-categorias">
+                  <template x-for="c in informe.nota.categorias" :key="c.key">
+                    <div><span x-text="c.nombre"></span> <strong x-text="c.nota"></strong></div>
+                  </template>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>Cifras</h2>
+              <div class="informe-cifras">
+                <div><strong x-text="fmt.num(informe.cifras.paginas_html)"></strong><span>páginas HTML</span></div>
+                <div><strong x-text="fmt.num(informe.cifras.indexables)"></strong><span>indexables</span></div>
+                <div><strong x-text="fmt.num(informe.cifras.no_indexables)"></strong><span>no indexables</span></div>
+                <div><strong x-text="fmt.num((informe.cifras.por_estado['4xx'] || 0) + (informe.cifras.por_estado['5xx'] || 0))"></strong><span>URLs rotas (4xx y 5xx)</span></div>
+                <div><strong x-text="fmt.num(informe.cifras.por_estado['3xx'] || 0)"></strong><span>redirecciones</span></div>
+              </div>
+            </section>
+
+            <template x-if="informe.comparacion && informe.comparacion.comparado_con">
+              <section data-testid="informe-cambios">
+                <h2>Qué ha cambiado desde el rastreo anterior</h2>
+                <template x-if="informe.comparacion.alertas.length">
+                  <ul class="informe-alertas">
+                    <template x-for="(a, i) in informe.comparacion.alertas" :key="i">
+                      <li :class="'sev-' + a.severidad">
+                        <strong x-text="fmt.num(a.paginas) + ' de ' + fmt.num(a.de) + ' páginas (' + fmt.num(a.pct) + ' %)'"></strong>
+                        — <span x-text="a.que_decide_google"></span>
+                      </li>
+                    </template>
+                  </ul>
+                </template>
+                <template x-for="(t, i) in informe.comparacion.reglas_cliente || []" :key="'r' + i">
+                  <p class="text-sm" x-text="t"></p>
+                </template>
+                <p x-show="!informe.comparacion.alertas.length && !(informe.comparacion.reglas_cliente || []).length">
+                  Ningún cambio grave frente al rastreo anterior.</p>
+                <p x-show="informe.comparacion.incidencias" class="text-sm"
+                   x-text="informe.comparacion.incidencias ? fmt.num(informe.comparacion.incidencias.nuevas) + ' incidencias nuevas' + (informe.comparacion.incidencias.resueltas != null ? ', ' + fmt.num(informe.comparacion.incidencias.resueltas) + ' resueltas' : '') + ' y ' + fmt.num(informe.comparacion.incidencias.siguen) + ' que siguen.' : ''"></p>
+                <p x-show="informe.comparacion.incidencias_motivo" class="text-sm text-dim"
+                   x-text="'Las incidencias no se comparan: ' + (informe.comparacion.incidencias_motivo || '')"></p>
+              </section>
+            </template>
+
+            <section data-testid="informe-prioridades">
+              <h2>Qué arreglar primero</h2>
+              <p class="text-sm text-dim">Ordenado por la gravedad y por lo importantes que son las páginas afectadas
+                (su autoridad interna, a cuántos clics de la portada están y si el sitemap las declara).
+                <span x-text="'Son los ' + informe.prioridades.length + ' primeros de ' + informe.tipos_de_incidencia + ' tipos de incidencia.'"></span></p>
+              <ol class="informe-prioridades">
+                <template x-for="r in informe.prioridades" :key="r.issue_type + r.severity">
+                  <li>
+                    <div class="informe-prio-cabecera">
+                      <span class="sev-chip" :class="'sev-' + r.severity" x-text="fmt.severity(r.severity)"></span>
+                      <strong x-text="fmt.issue(r.issue_type)"></strong>
+                      <span class="text-dim text-sm" x-text="textoAlcanceInforme(r)"></span>
+                    </div>
+                    <template x-if="ISSUE_INFO[r.issue_type]">
+                      <dl class="issue-explica">
+                        <dt>Qué es</dt><dd x-text="ISSUE_INFO[r.issue_type].que"></dd>
+                        <dt>Qué decide Google</dt><dd x-text="ISSUE_INFO[r.issue_type].google"></dd>
+                        <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[r.issue_type].arreglo"></dd>
+                      </dl>
+                    </template>
+                    <div class="text-sm" x-show="r.ejemplos.length">
+                      <span class="text-dim">Ejemplos:</span>
+                      <template x-for="(e, n) in r.ejemplos" :key="n"><div class="informe-url" x-text="e.url"></div></template>
+                    </div>
+                  </li>
+                </template>
+              </ol>
+            </section>
+
+            <footer class="informe-pie text-sm text-dim">
+              Generado el <span x-text="fmt.date(informe.generado)"></span>
+              <span x-show="informe.job.crawler_version" x-text="'· rastreo ' + informe.job.crawler_version"></span>
+              <span x-show="informe.job.analisis_version" x-text="'· análisis ' + informe.job.analisis_version"></span>
+              <span x-show="informe.job.render_js">· con JavaScript renderizado</span>
+            </footer>
+          </article>
+        </template>
+      </div>
+    </template>
+
     <template x-if="view === 'url-detail'">
       <div>
         <!-- Cargando -->

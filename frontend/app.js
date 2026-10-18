@@ -572,6 +572,8 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    informe: null,            // GET /jobs/{id}/informe (decision 138)
+    informeCargando: false,
     issuesOrden: 'gravedad',  // o 'prioridad': gravedad x importancia de las paginas (decision 136)
     issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
@@ -754,6 +756,9 @@ function app() {
       const p = ruta.split('/').filter(Boolean);
       this._aplicandoRuta = true;
       try {
+        // El titulo del informe es el nombre del PDF al guardarlo (decision
+        // 138); fuera de el, el de siempre.
+        if (p[2] !== 'informe-cliente' && document.title.startsWith('Informe SEO')) document.title = 'SEO Crawler';
         if (!p.length) {
           p.push('clientes');
           history.replaceState(null, '', '#/clientes');
@@ -785,6 +790,8 @@ function app() {
             if (this.view !== 'explorer' || this._estadoExplorador() !== new URLSearchParams(qs || '').toString()) {
               this.openExplorer(pre);
             }
+          } else if (sub === 'informe-cliente') {
+            if (this.view !== 'informe' || !this.informe || this.informe.job.id !== this.job.id) await this.abrirInforme();
           } else if (sub === 'url' && p[3]) {
             if (this.view !== 'url-detail' || String(this.urlDetailId) !== p[3]) await this.openUrlDetail(+p[3]);
           } else {
@@ -2328,6 +2335,32 @@ function app() {
     setUrlsPage(p) { if (p >= 1 && p <= this.urlsPages) { this.urlsPage = p; this.loadUrls(); } },
 
     // ------- Detalle de URL individual -------
+    // Cuantas paginas, y si son hallazgos de plantilla (una fila por hallazgo
+    // con `paginas_afectadas`, decisiones 53, 64 y 73): esos cuelgan de una
+    // pagina de ejemplo, asi que «1 pagina» seria falso.
+    textoAlcanceInforme(r) {
+      const hallazgos = n => fmt.num(n) + (n === 1 ? ' hallazgo de plantilla' : ' hallazgos de plantilla')
+        + ' (cada uno se repite en muchas páginas y se arregla una vez)';
+      if (r.agregadas && r.agregadas >= r.incidencias) return hallazgos(r.agregadas);
+      const pags = fmt.num(r.paginas) + (r.paginas === 1 ? ' página' : ' páginas');
+      return r.agregadas ? pags + ' · ' + hallazgos(r.agregadas) : pags;
+    },
+
+    // Decision 138: el informe para el cliente, en una pagina imprimible.
+    async abrirInforme() {
+      if (this.view === 'explorer') this._unbindExplorerKeyNav();
+      this.view = 'informe';
+      this.informe = null;
+      this.informeCargando = true;
+      try {
+        this.informe = await api(`/jobs/${this.job.id}/informe`);
+        document.title = `Informe SEO · ${this.informe.job.sitio}`;
+      } catch (e) { this.error = e.message; }
+      this.informeCargando = false;
+      window.scrollTo({ top: 0 });
+      this.$nextTick(() => window.lucide && lucide.createIcons());
+    },
+
     async openUrlDetail(urlId) {
       this.urlDetailLoading = true;
       this.urlDetailTab = 'seo';

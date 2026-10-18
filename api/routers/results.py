@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import math
 import uuid
 from datetime import datetime, timezone
@@ -52,6 +53,9 @@ router = APIRouter(prefix="/api/jobs/{job_id}", tags=["results"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
+
 def _get_job_or_404(job_id: uuid.UUID, db: Session) -> Job:
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
@@ -3470,3 +3474,109 @@ def _tope_por_errores(job_id: uuid.UUID, db: Session) -> TopeDeNota | None:
         tope=TOPE_CON_ERRORES, paginas_con_error=paginas, de=internas, pct=pct,
         motivo=f"Hay {paginas} URLs con algun error: la nota no puede pasar de {TOPE_CON_ERRORES} mientras sigan abiertos.",
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/informe — el informe para el cliente (Ola 6.2,
+# decision 138). Junta lo que ya calculan los demas endpoints; no mide nada
+# nuevo. La interfaz lo pinta en una pagina imprimible (`#/rastreos/<id>/informe`)
+# con las fichas de `incidencias.js`, que viven en el frontend.
+# ---------------------------------------------------------------------------
+_TEXTO_TRUNCADO = {
+    "max_urls_reached": "se detuvo al llegar al máximo de URLs",
+    "max_runtime_reached": "se detuvo al agotar el tiempo máximo",
+    "stalled": "se quedó parado y se cerró",
+    "cancelled": "se canceló a medias",
+}
+
+
+def _raiz_del_sitio(semilla: str | None) -> str | None:
+    """`https://host`: la primera semilla de una lista puede ser `/blog/`, y la
+    cabecera de un informe del sitio entero no puede decir eso."""
+    from urllib.parse import urlsplit
+
+    if not semilla:
+        return None
+    p = urlsplit(semilla)
+    return f"{p.scheme}://{p.netloc}" if p.scheme and p.netloc else semilla
+
+
+@router.get("/informe")
+def get_informe(
+    job_id: uuid.UUID,
+    prioridades: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_session),
+):
+    """Lo que se le entrega al cliente de UN censo, en este orden: la nota y por
+    que, las cifras, lo que ha cambiado frente al anterior, que arreglar primero
+    y con que fiabilidad se puede leer todo lo anterior.
+
+    La fiabilidad va en el informe y no en una nota aparte: un informe que
+    parece completo y no lo es (un censo truncado, un grafo sin los enlaces de
+    JavaScript, un muro) es peor que no entregarlo (decisiones 35, 67 y 103)."""
+    from shared.comparacion import MOTIVOS_TRUNCADO
+    from shared.models import Client
+    from shared.resumen_semanal import _resumen_de_rastreo
+
+    job = _get_job_or_404(job_id, db)
+    insights = get_insights(job_id, db)
+    stats = get_stats(job_id, db)
+    # `por_segmento` para tener `agregadas`: un hallazgo de plantilla dice
+    # «1 pagina» y afecta a todo el sitio; el informe lo tiene que decir.
+    filas = resumen_issues(job_id, ejemplos=3, segmento=None, por_segmento=True,
+                           segmentos_max=1, orden="prioridad", db=db)
+    for r in filas:
+        r.por_segmento = None
+    cliente = (db.query(Client).filter(Client.id == job.cliente_id).one_or_none()
+               if getattr(job, "cliente_id", None) else None)
+    config = job.config if isinstance(job.config, dict) else {}
+    lista = config.get("max_depth") in (0, "0")
+
+    fiabilidad: list[str] = []
+    motivo = job.finish_reason or ""
+    if job.status != "completed":
+        fiabilidad.append(f"El rastreo no terminó bien (estado «{job.status}»): las cifras son parciales.")
+    elif motivo in MOTIVOS_TRUNCADO and not lista:
+        fiabilidad.append(f"El rastreo {_TEXTO_TRUNCADO.get(motivo, motivo)}: el informe no cubre el "
+                          "sitio entero, y lo que no se rastreó no se puede dar por bueno ni por malo.")
+    if motivo == "bloqueado_por_waf":
+        fiabilidad.append("Un cortafuegos (WAF) bloqueó parte del rastreo: las páginas detrás del muro "
+                          "no se han auditado.")
+    if _pagerank_fiable(db, job_id) is False:
+        fiabilidad.append("Algunas plantillas montan sus enlaces con JavaScript y el rastreo no los ve: "
+                          "las cifras de enlazado interno y PageRank están incompletas.")
+
+    comparacion = None
+    try:
+        comparacion = _resumen_de_rastreo(db, job)
+    except Exception:  # noqa: BLE001 — el informe sale sin la comparacion
+        logger.warning("Informe del job %s sin comparacion", job_id, exc_info=True)
+
+    return {
+        "job": {
+            "id": str(job.id), "nombre": job.name, "estado": job.status, "motivo": job.finish_reason,
+            "sitio": _raiz_del_sitio((job.seeds or [None])[0]), "semillas": len(job.seeds or []),
+            "fecha": (job.completed_at or job.started_at or job.created_at),
+            "modo_lista": lista, "render_js": bool(config.get("render_js")),
+            "crawler_version": getattr(job, "crawler_version", None),
+            "analisis_version": getattr(job, "analisis_version", None),
+        },
+        "cliente": {"id": str(cliente.id), "nombre": cliente.nombre, "slug": cliente.slug} if cliente else None,
+        "nota": {
+            "global": insights.overall_score,
+            "sin_tope": insights.overall_score_sin_tope,
+            "tope": insights.tope.model_dump() if insights.tope else None,
+            "categorias": [{"key": c.key, "nombre": c.name, "nota": c.score} for c in insights.categories],
+        },
+        "cifras": {
+            "urls": stats.total_urls, "paginas_html": stats.paginas_html,
+            "indexables": stats.indexables, "no_indexables": stats.no_indexables,
+            "por_estado": {g.status_group: g.count for g in stats.urls_by_status_group},
+            "incidencias": sum(t.count for t in stats.issues_by_type),
+        },
+        "prioridades": [r.model_dump() for r in filas[:prioridades]],
+        "tipos_de_incidencia": len(filas),
+        "comparacion": comparacion,
+        "fiabilidad": fiabilidad,
+        "generado": datetime.now(timezone.utc),
+    }
