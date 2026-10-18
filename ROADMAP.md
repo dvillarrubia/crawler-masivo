@@ -192,6 +192,16 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Informe para el cliente en PDF (18 de octubre)
+
+En la ficha de un rastreo, Exportar → **Informe para el cliente** abre una
+página lista para imprimir o guardar como PDF. Lleva la nota del sitio y por
+qué, las cifras, lo que ha cambiado desde el rastreo anterior, las diez cosas
+que hay que arreglar primero (cada una con qué es, qué decide Google y cómo se
+arregla, y ejemplos) y, arriba, un aviso si el rastreo no cubre el sitio
+entero. El de Lopesan sale en tres páginas A4 sin tocar nada.
+[Decisión 138](docs/decisiones/api-clientes-y-frontend.md#d138).
+
 ### Qué arreglar primero (18 de octubre)
 
 En Problemas, «Ordenar: Prioridad» pone arriba lo que hay que arreglar

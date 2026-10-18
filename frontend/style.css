@@ -1384,3 +1384,37 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .regla-pie>span{flex:1 1 16rem}
 .regla-pie label{display:flex;gap:.3rem;align-items:center}
 @media (max-width:480px){.regla-campos .regla-ancho{grid-column:1/-1}}
+
+/* Informe para el cliente (decision 138): una pagina que se lee y se imprime. */
+.informe{max-width:52rem;margin:0 auto;padding:1rem 1rem 3rem}
+.informe-acciones{display:flex;gap:.5rem;justify-content:space-between;margin-bottom:1rem}
+.informe article>section{margin:1.5rem 0}
+.informe h1{font-size:1.6rem;margin:.2rem 0;word-break:break-all}
+.informe h2{font-size:1.1rem;margin:0 0 .5rem}
+.informe-cabecera{border-bottom:2px solid #5BAE23;padding-bottom:.75rem}
+.informe-aviso{border:1px solid var(--orange,#d97706);border-radius:6px;padding:.75rem 1rem;background:rgba(217,119,6,.07)}
+.informe-aviso ul{margin:.4rem 0 0;padding-left:1.2rem}
+.informe-nota{display:flex;gap:1.25rem;align-items:flex-start}
+.informe-nota-global{min-width:6rem;text-align:center;border-radius:8px;padding:.75rem;border:2px solid currentColor}
+.informe-nota-num{font-size:2.4rem;font-weight:700;line-height:1}
+.nota-buena{color:#2e7d32}.nota-media{color:#b26a00}.nota-mala{color:#c62828}
+.informe-categorias{display:grid;grid-template-columns:repeat(auto-fill,minmax(12rem,1fr));gap:.25rem .75rem;font-size:.9rem}
+.informe-categorias>div{display:flex;justify-content:space-between;border-bottom:1px dotted var(--border)}
+.informe-cifras{display:grid;grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr));gap:.5rem}
+.informe-cifras>div{border:1px solid var(--border);border-radius:6px;padding:.5rem .6rem;display:flex;flex-direction:column}
+.informe-cifras strong{font-size:1.3rem}
+.informe-cifras span{font-size:.8rem;color:var(--text-dim)}
+.informe-alertas{padding-left:1.2rem}
+.informe-prioridades{padding-left:1.4rem}
+.informe-prioridades>li{margin:0 0 1.1rem;break-inside:avoid}
+.informe-prio-cabecera{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;margin-bottom:.35rem}
+.informe-url{font-family:var(--font-mono,monospace);font-size:.78rem;word-break:break-all}
+.informe-pie{border-top:1px solid var(--border);padding-top:.5rem;margin-top:2rem}
+@media (max-width:600px){.informe-nota{flex-direction:column}.issue-explica{grid-template-columns:1fr}}
+@media print{
+  .topbar,.no-print,.breadcrumbs,.toast,.error-banner{display:none!important}
+  body{background:#fff!important;color:#000!important}
+  .informe{max-width:none;padding:0}
+  .informe h2{break-after:avoid}
+  a{color:inherit;text-decoration:none}
+}
