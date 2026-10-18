@@ -249,6 +249,9 @@ class Job(Base):
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.
     # Las sondas NO son URLs del censo: no estan en `urls` ni cuentan en nada.
     soft404 = Column(JSON, nullable=True)
+    # Con que reglas y cuando se materializo `urls.segmento`, y cuantas URLs
+    # casaron con cada regla o no se pudieron juzgar (decision 125).
+    segmentacion = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -368,6 +371,11 @@ class Url(Base):
     closest_similarity = Column(Float, nullable=True, default=None)
     # True/False once a sitemap was ingested for the job; NULL = no sitemap data.
     in_sitemap = Column(Boolean, nullable=True, default=None)
+    # Segmento de negocio (decision 125, `shared/segmentos.py`): el nombre de la
+    # primera regla de `config.segmentos` que casa o, si ninguna, la forma de la
+    # ruta (empieza por `/`). Lo escribe el analisis y el re-segmentado; NULL =
+    # censo anterior a la columna o aun sin analizar.
+    segmento = Column(Text, nullable=True)
 
     job = relationship("Job", back_populates="urls")
     html_meta = relationship("HtmlMeta", back_populates="url_rel", uselist=False, cascade="all, delete-orphan")

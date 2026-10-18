@@ -1,8 +1,8 @@
 # Decisiones: extracción y búsqueda a medida
 
 > Lo que el consultor pide a cada página con sus propias reglas (#34, Ola 3 de
-> `docs/PLAN_MEJOR_CRAWLER.md`). Aquí irán también los segmentos de negocio
-> (3.3) y la comparación de valores extraídos (3.4). Índice de todas las
+> `docs/PLAN_MEJOR_CRAWLER.md`), los segmentos de negocio (3.3, decisión 125)
+> y, cuando llegue, la comparación de valores extraídos (3.4). Índice de todas las
 > decisiones en [`README.md`](README.md).
 
 <a id="d104"></a>
@@ -173,3 +173,160 @@
    (PR 2), `fuente=html_crudo` con render y la incidencia agrupada opcional
    (PR 3), la comparación de valores entre censos (PR 4, 3.4) y re-extraer sobre
    `raw_html` sin re-rastrear. Esta PR no emite incidencias.
+
+<a id="d125"></a>
+125. **Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe
+   no casa, y se materializan en `urls.segmento`** (Ola 3.3). Reglas del
+   consultor que ponen a cada URL un nombre de negocio —«fichas de producto»,
+   «blog», «categorías»— para que el resto de la herramienta pueda contestar
+   «¿qué le pasa a las fichas?». Viven en `config.segmentos`, heredadas
+   cliente → perfil → job como el resto (83), y la lógica en
+   `shared/segmentos.py`, porque la usan el analizador y la API. Lo que no es
+   obvio:
+
+   - **El formato de `templates`, ampliado.** Una regla es `{nombre, patron,
+     si}`: `patron` es exactamente el de `TemplateRule` (regex sobre el path,
+     sin distinguir mayúsculas), así que la lista de plantillas de un cliente se
+     pega tal cual; `si` es un árbol con `todas` (Y), `alguna` (O), `no`, y
+     hojas `ruta`/`url` (regex), `campo` (una lista cerrada de columnas de
+     `urls`, `CAMPOS`, cada una con sus operadores) y `x` (el valor de una regla
+     a medida del mismo config, 104). La **primera** regla verdadera gana. Es una
+     LISTA, así que en la herencia se sustituye entera: la precedencia es el
+     orden y sumar listas la haría imposible de leer. `templates` NO se usa
+     como segmentos implícitos: sirve para muestrear, y que cambiar el muestreo
+     cambiara el informe sería una sorpresa. **Que una `x` exista se comprueba
+     sobre la configuración FUSIONADA** (`resolver_config`, y `create_job` sin
+     cliente), no capa a capa: `JobConfig` solo valida la forma, porque un
+     perfil o el override de un job pueden segmentar por una extracción que fija
+     el cliente (83), y validar cada capa con sus propias reglas a medida daba
+     un 422 a una herencia válida. Lo que ninguna capa define sigue siendo un
+     422 que lo nombra, también al dar de alta un cliente.
+   - **Tres valores, no dos.** Una condición sobre un dato que no existe —sin
+     fila en `custom_extraction`, una página bloqueada por el WAF, un
+     `indexable` o un `in_sitemap` a NULL— es **desconocida**, no falsa, y
+     `no desconocido` sigue siendo desconocido (lógica de Kleene). Una regla
+     solo asigna su segmento si es verdadera, y el resumen
+     (`jobs.segmentacion.por_regla[].sin_saber`) cuenta cuántas URLs no se
+     pudieron juzgar: «0 fichas» no puede leerse como «no hay fichas» cuando
+     es «este censo no tiene la extracción» (67, 89, 104). Con un muro (103) lo
+     único que se sabe es la dirección y la propia clase de respuesta; cualquier
+     condición sobre el código, las palabras o la indexabilidad es del muro, y es
+     desconocida. `vacio` y `estado` (con `no_evaluada`) permiten preguntar por
+     lo desconocido a propósito. **Una excepción, porque ahí NULL es un dato:**
+     `redirect_type`, que el spider deja a None en toda respuesta que no es un
+     salto. Con una respuesta que no es 3xx, NULL es «no redirige», conocido
+     —si no, `no {redirect_type igual 301}` no casaba con ninguna 200 y el
+     segmento salía vacío con todo el censo «sin saber»—; sin respuesta
+     (bloqueada, error de red) sigue sin saberse.
+   - **Las reglas solo juzgan páginas del sitio.** Antes de mirar ninguna, las
+     URLs externas van a `(externa)` y los recursos internos que no son un
+     documento (imagen, SVG, CSS, JS, fuente) a `(recurso)`; los saltos, lo
+     bloqueado por robots, lo que falló sin respuesta y los PDF sí son páginas
+     (42). La primera versión miraba las reglas antes que `is_internal`, así que
+     un enlace saliente a `otro.com/blog/` casaba con `^/blog/` y entraba en el
+     blog del cliente, en su filtro y en el denominador de cada porcentaje (con
+     cuatro externas en las pruebas, el % de títulos cortos del blog bajaba de
+     50 % a 16,67 %). En los censos locales: **215 URLs externas en www.uoc.edu**
+     (196 HTML) que cualquier regla por ruta podía recoger; recursos internos,
+     solo 3 imágenes en Lopesan y ninguno en los demás, así que esa mitad del
+     arreglo es de criterio y no de cifra.
+   - **Sin regla que case, la forma de la ruta.** El segmento por defecto es
+     `firma_de_ruta`. No un cubo
+     «(sin segmento)»: lo que las reglas no cubren sale repartido por plantilla,
+     que es justo lo que hace falta ver para escribir la regla que falta. Por eso
+     un nombre de regla no puede empezar por `/` ni por `(`: se distingue a la
+     vista qué viene de una regla y qué es el repuesto. NULL = censo anterior a
+     la columna, y se dice («sin segmentar»), no se inventa.
+   - **Materializado, no calculado al consultar.** `urls.segmento` lo escribe el
+     analizador al final de `run_all` (sus condiciones pueden leer lo que el
+     análisis acaba de escribir: `indexable`, `click_depth`, `in_sitemap`) en
+     Python, por tramos de 5.000 URLs y un UPDATE por (tramo, segmento): regex
+     con el módulo `regex` y `timeout`, como en 104, y sin atarse a Postgres. Y
+     sin el análisis entero: `POST /api/jobs/{id}/segmentos` re-segmenta con
+     reglas nuevas, con las del cliente de hoy (`desde_cliente`) o con las del
+     censo, las guarda en `jobs.config.segmentos` (para que un re-análisis las
+     respete y el censo diga con qué se segmentó) y toma el candado del job. Es
+     lo que lo hace **retroactivo**: medido sobre la copia del censo de Druni
+     (60.399 URLs, el mayor local), **2,2-2,4 s** con cinco reglas (tres
+     corridas) y 2,3 s sin reglas (1.968 formas de ruta). **El tramo va por
+     `(job_id, url_hash)`, el índice único `uq_job_url`, no por `id`**: no hay
+     índice `(job_id, id)`, y `id > :ultimo ORDER BY id` hacía que Postgres
+     recorriese `urls_pkey` —la clave de TODOS los censos— filtrando por job.
+     En la copia de Druni no se veía porque la tabla solo tenía ese censo; en
+     una base sintética de **6 M de filas** (100 censos de 60.000), el último
+     tramo del censo más antiguo pasa de **4,5 s** (`urls_pkey`, 1.980.000 filas
+     descartadas por hilo) a **75 ms** (`uq_job_url`), y `segmentar` entero de
+     **3,7-8,0 s a 1,6-3,1 s** (dos corridas por censo, el más nuevo y el más
+     antiguo). En producción la tabla guarda todos los rastreos; su tamaño no
+     está medido aquí. No lee `links`, así que
+     funciona también en un censo con los enlaces archivados (95), que el
+     análisis entero rechaza. `jobs.segmentacion.huella` dice con qué reglas se
+     materializó, y `GET /segmentos` avisa (`al_dia: false`) si cambiaron.
+   - **Sin índice nuevo sobre `urls`.** Todo filtro por segmento va con
+     `job_id`, que ya tiene los suyos; crear `(job_id, segmento)` en una tabla
+     de millones de filas bloquea las escrituras de un rastreo en marcha
+     mientras se construye. Medido sin él en la copia de Druni:
+     `/issues/resumen?por_segmento=true` 0,78 s, `?segmento=` 0,42-0,48 s,
+     `GET /segmentos` 0,20 s.
+   - **El denominador va con el porcentaje.** `/issues/resumen?por_segmento=true`
+     da, por tipo, los segmentos con más páginas afectadas con
+     `{paginas, urls, pct}`, y con `?segmento=` cada fila lleva `pct_paginas` y
+     `urls_denominador`: el 12 % sin «de 7.234 URLs del segmento» no dice nada
+     (68). El denominador son TODAS las URLs del segmento —con sus 404 y sus
+     saltos—, que es lo que una regla dice que es el segmento.
+   - **Lo que es de un hallazgo y no de una página no se reparte.** Las
+     incidencias que se emiten una vez por imagen, por host, por bloque de
+     plantilla o por enlace de plantilla (53, 64, 73, 106) llevan
+     `paginas_afectadas` y cuelgan de una página de anclaje; repartirlas por el
+     segmento de esa página afirmaría que el hallazgo es de ese segmento. Quedan
+     fuera del filtro y del reparto, y cada fila dice cuántas (`agregadas`).
+     Tres cosas que la primera versión hacía mal: (a) con `paginas_afectadas`
+     **= 1** el hallazgo sí es de una sola página —la foto propia de un
+     producto— y es la de anclaje, así que se reparte; son la mayoría de las
+     imágenes sin alt en algunos censos (**310 de 354 en progym**, 243 de 19.287
+     en Lopesan); (b) con `?segmento=`, un tipo que solo tiene hallazgos de
+     varias páginas **desaparecía** del resumen —con él, el aviso de
+     `agregadas`—, y Problemas se leía como «las fichas no tienen errores de
+     datos estructurados» cuando era «no se pueden repartir» (67, 89): ahora
+     sale con 0 páginas y sus `agregadas`; (c) el Explorador, al que lleva
+     «Ver en el Explorador», contaba también la página de anclaje: con
+     `?segmento=` y `?issue_type=` aplica la misma exclusión, para que la tabla
+     y la tarjeta digan lo mismo. Y la lista de Problemas («Ver las N
+     incidencias», «Ver todas como lista») conserva el segmento elegido y lo
+     dice en su barra.
+
+   Aplicado a todo: `?segmento=` (repetible: O) en `/urls`, su CSV y la vista
+   agrupada (vía `_urls_filtradas`), en `/issues` y `/issues/resumen`; columna
+   «Segmento» ordenable en el Explorador y en el CSV de la vista;
+   `/urls/plantillas?agrupar=segmento`; selector en el Explorador y en
+   Problemas (y «Ver en el Explorador» conserva el segmento). `api/uso.py`
+   cuenta `filtro:segmento` y `agrupar:<plantilla|segmento>`, nunca el nombre
+   del segmento, que lo pone el consultor; la vista agrupada manda `agrupar`
+   también por plantilla, que es el valor por defecto y sin él no se contaba. `/stats` no se filtra: su desglose
+   por segmento es `GET /segmentos`.
+
+   Medido sobre Druni con cinco reglas escritas para él (`blog` y `tiendas` y
+   `marcas` por ruta; `fichas de producto` = `og_type` igual a `product` y
+   `categorias` = `og_type` igual a `website` con 2xx). La base local no tiene
+   la tabla de 104, así que la extracción `og_type` se simuló a partir de
+   `html_meta.og_type` de las HTML 2xx (lo que habría dado
+   `meta[property=og:type]@content`), en una copia del censo en una base de
+   pruebas; las incidencias son las del análisis guardado del censo, no
+   re-analizadas. Resultado: 35.862 fichas, 8.518 marcas, 7.234 categorías,
+   5.291 blog, 277 tiendas y 3.217 al repuesto; las fichas tienen **2.116 URLs
+   sin saber** (saltos, 404 y no HTML: sin fila de extracción), que es la regla de los tres
+   valores trabajando. Lo que se lee de un vistazo y no se veía antes: el
+   **56 %** de las fichas tiene el título demasiado largo frente al 0,9 % de
+   las categorías; de las categorías, el **82 %** es casi duplicada, el
+   **84 %** no tiene meta description, el **71 %** tiene hreflang sin retorno y
+   el **60 %** es huérfana; y los 404 están en `marcas` (16 % de sus URLs) y en
+   el repuesto (249 en `/:slug (1n)`), no en las fichas — porque una ficha rota no da
+   `og_type` y una regla por extracción no puede reconocerla: para eso, una
+   regla por ruta.
+
+   **Fuera de esta PR**: que las alertas de la comparación (68) se midan por
+   segmento en vez de por forma de ruta, y la evolución por segmento entre
+   censos (5.3); la pantalla para editar las reglas (hoy van en la
+   configuración del cliente, del perfil o del rastreo, o por la API); la
+   columna en el CSV completo de 83 columnas, y que la importación de un backup
+   la conserve (se recupera re-segmentando: 2 s).

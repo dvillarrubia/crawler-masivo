@@ -19,7 +19,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
-| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) | 104 |
+| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 125 |
 
 ## Por numero
 
@@ -141,6 +141,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 118 | Un casi duplicado se mide entre las mismas páginas que el duplicado exacto, y una escritura sin espacios se parte en caracteres | [`incidencias`](incidencias.md#d118) |
 | 120 | Señales que se contradicen, y una meta refresh es una redirección, no la página | [`indexabilidad`](indexabilidad.md#d120) |
 | 121 | Un titular vacío no es un titular, un título de relleno se dice una vez, y un enlace sin nombre sale de la temporal de aristas | [`contenido`](contenido.md#d121) |
+| 125 | Segmentos de negocio: la primera regla verdadera gana, lo que no se sabe no casa, y se materializan en `urls.segmento` | [`extraccion-a-medida`](extraccion-a-medida.md#d125) |
 
 ## Anadir una decision
 

@@ -203,6 +203,23 @@ grafo. Los no rastreables piden volver a rastrear; los otros dos salen al
 volver a analizar. Queda para después enseñarlos en la ficha de la URL y en el
 CSV.
 
+### Segmentos de negocio: «¿qué le pasa a las fichas?» (16 de octubre)
+
+Cada cliente puede definir sus segmentos —«fichas de producto», «blog»,
+«categorías»— con reglas sobre la ruta, sobre cualquier dato de la URL (código,
+indexable, tipo…) o sobre un dato extraído a medida (el `og:type`, el precio), y
+combinarlas con Y / O / NO; la primera regla que casa manda. Lo que no casa con
+ninguna se agrupa por la forma de su ruta, así se ve qué falta por cubrir. Con
+eso, Problemas dice qué porcentaje de cada segmento tiene cada incidencia, y el
+Explorador y su CSV se pueden filtrar y agrupar por segmento. Es retroactivo:
+cambiar las reglas re-segmenta un censo viejo en un par de segundos, sin volver
+a rastrear. En Druni: el 56 % de las fichas tiene el título demasiado largo y el
+82 % de las categorías es casi duplicada. Una página de la que no se sabe el dato
+(bloqueada, sin extracción) no se mete en un segmento por descarte: se cuenta
+aparte. Los enlaces a otros sitios y las imágenes o CSS no entran en ningún
+segmento aunque su ruta case: no son páginas del cliente y falsearían los
+porcentajes. Queda la pantalla para editar las reglas y las alertas por segmento.
+
 ### Extracción a medida: precio, SKU, disponibilidad y «¿tiene el tag de GTM?» (16 de octubre)
 
 [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34). Cada rastreo

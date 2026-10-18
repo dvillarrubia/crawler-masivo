@@ -99,6 +99,7 @@ SORT_COLUMNS = {
     "folder_depth": Url.folder_depth,
     "text_ratio": Url.text_ratio,
     "host": Url.host,
+    "segmento": Url.segmento,
     "last_crawled_at": Url.last_crawled_at,
     "title": HtmlMeta.title,
     "title_len": HtmlMeta.title_len,
@@ -558,6 +559,42 @@ def valor_csv_a_medida(fila: dict | None, clase: str, regla: dict, posicion: int
     return celda_segura(fila.get("valor"))
 
 
+# ---------------------------------------------------------------------------
+# Segmentos de negocio (decision 125): `urls.segmento`, materializado al analizar
+# ---------------------------------------------------------------------------
+def segmentos_pedidos(qp) -> list[str]:
+    """`?segmento=a&segmento=b` (O). Repetido y no separado por comas: la forma
+    de la ruta, que es el segmento por defecto, puede llevar una coma."""
+    valores = qp.getlist("segmento") if hasattr(qp, "getlist") else [qp.get("segmento")]
+    return [v for v in valores if v not in (None, "")]
+
+
+def urls_de_segmentos(db: Session, job_id: uuid.UUID, segmentos: list[str]):
+    """Subconsulta de los ids de URL de esos segmentos, con el `job_id` delante
+    (lo que usa el indice; `segmento` no tiene uno propio, decision 125)."""
+    return db.query(Url.id).filter(Url.job_id == job_id, Url.segmento.in_(segmentos))
+
+
+def incidencia_por_pagina():
+    """Las incidencias que son de SU pagina. Las que se emiten una vez por
+    hallazgo (una imagen sin alt en mil paginas, una cabecera por host, un
+    bloque de datos estructurados de plantilla, un enlace de plantilla:
+    decisiones 53, 64, 73 y 106) llevan `paginas_afectadas` y cuelgan de una
+    pagina de anclaje: repartirlas por el segmento de esa pagina afirmaria algo
+    que no se sabe.
+
+    Con `paginas_afectadas` = 1 el hallazgo SI es de una sola pagina —la foto
+    propia de un producto—, y es la de anclaje: esa se reparte. Son la mayoria
+    de las imagenes sin alt (310 de 354 en progym)."""
+    pa = Issue.details["paginas_afectadas"].as_integer()
+    return or_(pa.is_(None), pa <= 1)
+
+
+def incidencia_agregada():
+    """El complemento de `incidencia_por_pagina`: un hallazgo de varias paginas."""
+    return Issue.details["paginas_afectadas"].as_integer() > 1
+
+
 def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = False) -> Any:
     """Las URLs de un job con los filtros del Explorador aplicados.
 
@@ -645,13 +682,22 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
     # vistas por ambito piden varios a la vez) y/o de esa gravedad.
     tipos = [t.strip() for t in (qp.get("issue_type") or "").split(",") if t.strip()]
     severidad = qp.get("severity")
+    segmentos = segmentos_pedidos(qp)
     if tipos or severidad:
         sub = db.query(Issue.url_id).filter(Issue.job_id == job_id)
         if tipos:
             sub = sub.filter(Issue.issue_type.in_(tipos))
         if severidad:
             sub = sub.filter(Issue.severity == severidad)
+        if segmentos:
+            # Lo mismo que cuenta Problemas con ese segmento: la pagina de
+            # anclaje de un hallazgo de muchas paginas no es «la» pagina del
+            # segmento con ese problema (decision 125).
+            sub = sub.filter(incidencia_por_pagina())
         q = q.filter(Url.id.in_(sub))
+
+    if segmentos:
+        q = q.filter(Url.segmento.in_(segmentos))
 
     # Una plantilla (forma de ruta, `shared.plantillas.firma_de_ruta`). La
     # forma se calcula en Python —no hay forma de escribirla en SQL sin atarse a
@@ -781,9 +827,11 @@ def urls_por_plantilla(
     job_id: uuid.UUID,
     request: Request,
     limite: int = Query(300, ge=1, le=2000),
+    agrupar: str = Query("plantilla", pattern="^(plantilla|segmento)$",
+                         description="Por la forma de la ruta o por `urls.segmento` (decision 125)"),
     db: Session = Depends(get_session),
 ):
-    """Las URLs de la vista agrupadas por la forma de su ruta.
+    """Las URLs de la vista agrupadas por la forma de su ruta (o por segmento).
 
     En SEO tecnico casi nada se arregla URL a URL: se arregla una plantilla. En
     Lopesan, `/de/null`, `/en/null`, `/es/null`… salian como doce 404 sueltos
@@ -800,7 +848,7 @@ def urls_por_plantilla(
     q = _urls_filtradas(db, job_id, request.query_params)
     filas = q.with_entities(
         Url.id, Url.url, Url.path, Url.status_group, Url.indexable, Url.content_word_count,
-        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count,
+        Url.word_count, Url.pagerank_score, Url.click_depth, Url.inlinks_count, Url.segmento,
     ).all()
     con_error = {
         uid for (uid,) in db.query(Issue.url_id)
@@ -817,7 +865,12 @@ def urls_por_plantilla(
 
     grupos: dict[str, list] = defaultdict(list)
     for f in filas:
-        grupos[firma_de_ruta(f.path or "/")].append(f)
+        if agrupar == "segmento":
+            # Sin segmentar = censo analizado antes de la columna: se dice, no se
+            # inventa la forma de la ruta como si fuera su segmento.
+            grupos[f.segmento if f.segmento is not None else "(sin segmentar)"].append(f)
+        else:
+            grupos[firma_de_ruta(f.path or "/")].append(f)
 
     salida = []
     for forma, fs in grupos.items():
@@ -885,6 +938,7 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "is_internal": ("Interna", lambda u: _si_no(u.is_internal)),
     "in_sitemap": ("En el sitemap", lambda u: _si_no(u.in_sitemap)),
     "host": ("Host", lambda u: u.host),
+    "segmento": ("Segmento", lambda u: u.segmento),
     "title": ("Título", _m("title")),
     "title_len": ("Long. título", _m("title_len")),
     "title_pixel_width": ("Título (px)", _m("title_pixel_width")),
@@ -1187,11 +1241,15 @@ def list_issues(
     page_size: int = Query(50, ge=1, le=200),
     severity: str | None = Query(None),
     issue_type: str | None = Query(None),
+    segmento: list[str] | None = Query(None, description="Solo las de paginas de esos segmentos (decision 125)"),
     db: Session = Depends(get_session),
 ):
     _get_job_or_404(job_id, db)
 
     q = db.query(Issue).filter(Issue.job_id == job_id)
+    segs = [x for x in (segmento or []) if x]
+    if segs:
+        q = q.filter(Issue.url_id.in_(urls_de_segmentos(db, job_id, segs)), incidencia_por_pagina())
 
     if severity is not None:
         q = q.filter(Issue.severity == severity)
@@ -1240,18 +1298,36 @@ class _EjemploIssue(BaseModel):
     url: str | None = None
 
 
+class _PorSegmento(BaseModel):
+    segmento: str | None
+    paginas: int          # paginas del segmento con esta incidencia
+    urls: int             # URLs del segmento: el denominador
+    pct: float            # paginas / urls, en %
+
+
 class _ResumenIssue(BaseModel):
     issue_type: str
     severity: str
     incidencias: int
     paginas: int
     ejemplos: list[_EjemploIssue] = []
+    # Decision 125. Con `?segmento=`: sobre las URLs de esos segmentos.
+    urls_denominador: int | None = None
+    pct_paginas: float | None = None
+    # Con `?por_segmento=true`: los segmentos con mas paginas afectadas, y
+    # cuantas incidencias de este tipo NO se pueden repartir (una por
+    # hallazgo, ver `incidencia_por_pagina`).
+    por_segmento: list[_PorSegmento] | None = None
+    agregadas: int | None = None
 
 
 @router.get("/issues/resumen", response_model=list[_ResumenIssue])
 def resumen_issues(
     job_id: uuid.UUID,
     ejemplos: int = Query(3, ge=0, le=10),
+    segmento: list[str] | None = Query(None, description="Solo paginas de esos segmentos (decision 125)"),
+    por_segmento: bool = Query(False, description="Anade el % de paginas afectadas por segmento"),
+    segmentos_max: int = Query(10, ge=1, le=200),
     db: Session = Depends(get_session),
 ):
     """Lo que enseña la vista agrupada de Problemas (UX-04): cuántas
@@ -1269,12 +1345,16 @@ def resumen_issues(
         (Issue.severity == "info", 2),
         else_=3,
     )
+    segs = [x for x in (segmento or []) if x]
+    filtro_seg: list = []
+    if segs:
+        filtro_seg = [Issue.url_id.in_(urls_de_segmentos(db, job_id, segs)), incidencia_por_pagina()]
     filas = (
         db.query(
             Issue.issue_type, Issue.severity,
             func.count(Issue.id), func.count(func.distinct(Issue.url_id)),
         )
-        .filter(Issue.job_id == job_id)
+        .filter(Issue.job_id == job_id, *filtro_seg)
         .group_by(Issue.issue_type, Issue.severity)
         .order_by(gravedad, func.count(func.distinct(Issue.url_id)).desc(), Issue.issue_type)
         .all()
@@ -1294,7 +1374,8 @@ def resumen_issues(
             for uid, u in (
                 db.query(Issue.url_id, Url.url)
                 .join(Url, Url.id == Issue.url_id)
-                .filter(Issue.job_id == job_id, Issue.issue_type == tipo, Issue.severity == sev)
+                .filter(Issue.job_id == job_id, Issue.issue_type == tipo, Issue.severity == sev,
+                        *filtro_seg)
                 .order_by(Issue.id)
                 .limit(ejemplos * 5)
                 .all()
@@ -1308,7 +1389,63 @@ def resumen_issues(
         resultado.append(_ResumenIssue(
             issue_type=tipo, severity=sev, incidencias=n, paginas=paginas, ejemplos=muestra,
         ))
+    if segs or por_segmento:
+        _anadir_segmentos(db, job_id, resultado, segs, por_segmento, segmentos_max)
     return resultado
+
+
+_ORDEN_GRAVEDAD = {"error": 0, "warning": 1, "info": 2}
+
+
+def _anadir_segmentos(db: Session, job_id: uuid.UUID, resultado: list, segs: list[str],
+                      por_segmento: bool, maximo: int) -> None:
+    """El denominador es el numero de URLs del segmento, TODAS (con sus 404 y
+    sus saltos): «el 12 % de las fichas» tiene que poder leerse sin preguntar
+    sobre que. Tres consultas agrupadas, no una por tipo."""
+    urls_por_seg = dict(
+        db.query(Url.segmento, func.count(Url.id)).filter(Url.job_id == job_id)
+        .group_by(Url.segmento).all())
+    agregadas = dict(
+        ((t, sv), n) for t, sv, n in
+        db.query(Issue.issue_type, Issue.severity, func.count(Issue.id))
+        .filter(Issue.job_id == job_id, incidencia_agregada())
+        .group_by(Issue.issue_type, Issue.severity))
+    if segs:
+        # Un tipo que solo tiene hallazgos de muchas paginas no puede
+        # desaparecer del filtro: se leeria «este segmento no tiene ninguno»
+        # cuando es «no se puede repartir» (decisiones 67 y 89). Sale con 0
+        # paginas y sus `agregadas`.
+        vistos = {(r.issue_type, r.severity) for r in resultado}
+        for (t, sv), n in agregadas.items():
+            if (t, sv) not in vistos:
+                resultado.append(_ResumenIssue(issue_type=t, severity=sv, incidencias=0, paginas=0))
+        resultado.sort(key=lambda r: (_ORDEN_GRAVEDAD.get(r.severity, 3), -r.paginas, r.issue_type))
+        den = sum(urls_por_seg.get(x, 0) for x in segs)
+        for r in resultado:
+            r.urls_denominador = den
+            r.pct_paginas = round(100.0 * r.paginas / den, 2) if den else None
+    for r in resultado:
+        r.agregadas = agregadas.get((r.issue_type, r.severity), 0)
+    if not por_segmento:
+        return
+    cond = [Issue.job_id == job_id, incidencia_por_pagina()]
+    if segs:
+        cond.append(Url.segmento.in_(segs))
+    reparto: dict[tuple[str, str], list] = {}
+    for tipo, sev, seg, paginas in (
+        db.query(Issue.issue_type, Issue.severity, Url.segmento, func.count(func.distinct(Issue.url_id)))
+        .join(Url, Url.id == Issue.url_id)
+        .filter(*cond)
+        .group_by(Issue.issue_type, Issue.severity, Url.segmento)
+    ):
+        total = urls_por_seg.get(seg, 0)
+        reparto.setdefault((tipo, sev), []).append(_PorSegmento(
+            segmento=seg, paginas=paginas, urls=total,
+            pct=round(100.0 * paginas / total, 2) if total else 0.0))
+    for r in resultado:
+        filas = sorted(reparto.get((r.issue_type, r.severity), []),
+                       key=lambda p: (-p.paginas, -p.pct, p.segmento or ""))
+        r.por_segmento = filas[:maximo]
 
 
 # ---------------------------------------------------------------------------

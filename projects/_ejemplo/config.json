@@ -25,6 +25,26 @@
       "patron": "^/?$|^/[a-z]{2}/?$"
     }
   ],
+  "segmentos": [
+    {
+      "nombre": "rotas",
+      "si": {
+        "campo": "status_group",
+        "en": [
+          "4xx",
+          "5xx"
+        ]
+      }
+    },
+    {
+      "nombre": "blog",
+      "patron": "^/blog/"
+    },
+    {
+      "nombre": "legal",
+      "patron": "(aviso-legal|privacidad|privacy|cookies)"
+    }
+  ],
   "resource_types": {
     "crawl_images": false,
     "crawl_css": false,

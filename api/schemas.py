@@ -244,6 +244,23 @@ class TemplateRule(BaseModel):
     patron: str = Field(..., min_length=1, max_length=500)
 
 
+class ReglaSegmento(BaseModel):
+    """Una regla de segmento de negocio (decision 125, `shared/segmentos.py`).
+
+    `patron` es el mismo de `TemplateRule` (regex sobre el path, sin distinguir
+    mayusculas), asi que una lista de `templates` vale como lista de segmentos.
+    `si` es el arbol de condiciones (Y/O/NO, campo, regla a medida); con los dos
+    tienen que casar los dos. La valida `shared.segmentos.validar`, que conoce
+    las reglas a medida del config entero, desde `JobConfig`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(..., min_length=1, max_length=80)
+    etiqueta: str | None = Field(None, max_length=120)
+    patron: str | None = Field(None, max_length=500)
+    si: dict[str, Any] | None = None
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -290,6 +307,26 @@ class JobConfig(BaseModel):
     # `fusionar_config`, asi que en `jobs.config` no llega a guardarse.
     custom_extraction: dict[str, ExtractorAMedida | None] = Field(default_factory=dict)
     custom_search: dict[str, BusquedaAMedida | None] = Field(default_factory=dict)
+    # Segmentos de negocio (decision 125): la PRIMERA regla que casa da el
+    # segmento de la URL; si ninguna, la forma de la ruta. Es una lista, asi
+    # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
+    # precedencia es el orden, y sumar listas la haria imposible de leer.
+    segmentos: list[ReglaSegmento] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reglas_de_segmento(self):
+        if not self.segmentos:
+            return self
+        from shared.segmentos import validar
+
+        # Solo la forma. Que cada `x` exista se comprueba sobre la config
+        # FUSIONADA (`resolver_config`, y `create_job` sin cliente): aqui puede
+        # llegar una capa suelta —el perfil, el override de un job— cuyos
+        # segmentos usan una extraccion que fija el cliente.
+        errores = validar([r.model_dump(exclude_none=True) for r in self.segmentos], None)
+        if errores:
+            raise ValueError("; ".join(errores))
+        return self
 
     @model_validator(mode="after")
     def _reglas_a_medida(self):
@@ -545,6 +582,8 @@ class JobResponse(BaseModel):
     # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
     # causa si el rastreo se dio por bloqueado (decision 103).
     health: dict[str, Any] | None = None
+    # Con que reglas se materializo `urls.segmento` y cuantas casaron (125).
+    segmentacion: dict[str, Any] | None = None
     # Capa de decisiones (#7): llamadas, tokens, coste real, aciertos de
     # cache, 429, latencia y distribucion de respuestas. NULL = nunca se le
     # pregunto nada a un modelo sobre este job.
@@ -687,6 +726,7 @@ class UrlResponse(BaseModel):
     resource_type: str | None = None
     redirect_url: str | None = None
     indexable: bool | None = None
+    segmento: str | None = None  # decision 125
     first_seen_at: datetime | None = None
     last_crawled_at: datetime | None = None
     # Screaming Frog parity
