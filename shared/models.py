@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, Float, Text, DateTime, Date,
-    ForeignKey, Index, JSON, UniqueConstraint,
+    ForeignKey, Index, JSON, UniqueConstraint, text as sql_text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -151,6 +151,57 @@ class ResumenSemanal(Base):
     texto = Column(Text, nullable=False)
     enviado = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class Incidente(Base):
+    """Una alerta con estado (Ola 5.1, decision 139).
+
+    Sin estado, el mismo fallo avisaba cada semana mientras durase, y un aviso
+    que llega cada lunes con lo mismo se deja de leer (decision 77). Un
+    incidente es (serie, clave): la serie es el perfil o la programacion que
+    repite el rastreo, la clave la regla que salto. Lo abre el primer rastreo
+    de la serie que la dispara, lo mantienen los siguientes y lo CIERRA solo el
+    primero que, pudiendo afirmarlo, ya no la ve. Solo el rastreo mas reciente
+    de la serie abre o cierra: re-analizar uno viejo no toca nada.
+
+    `visto` lo pone una persona y no cierra nada: dice que alguien lo esta
+    mirando. Un unico incidente vivo por (serie, clave), con indice unico
+    parcial: con dos replicas del worker, la segunda choca.
+    """
+
+    __tablename__ = "incidentes"
+    __table_args__ = (
+        Index("uq_incidente_vivo", "serie", "clave", unique=True,
+              postgresql_where=sql_text("estado <> 'cerrado'"),
+              sqlite_where=sql_text("estado <> 'cerrado'")),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cliente_id = Column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
+    # «perfil:<uuid>» o «programacion:<uuid>»: lo que se repite.
+    serie = Column(String(128), nullable=False, index=True)
+    nombre_serie = Column(String(512), nullable=True)
+    # La regla, y en las de un campo extraido tambien su nombre.
+    clave = Column(String(256), nullable=False)
+    regla = Column(String(128), nullable=False)
+    severidad = Column(String(16), nullable=False)
+    titulo = Column(Text, nullable=False)
+    estado = Column(String(16), nullable=False, default="abierto")  # abierto | visto | cerrado
+    # La alerta tal como la vio el ultimo rastreo que la disparo.
+    detalle = Column(JSON, nullable=True)
+    veces = Column(Integer, nullable=False, default=1)
+    abierto_job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    ultimo_job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    cerrado_job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    abierto_en = Column(DateTime(timezone=True), default=_utcnow)
+    visto_en = Column(DateTime(timezone=True), nullable=True)
+    cerrado_en = Column(DateTime(timezone=True), nullable=True)
+    actualizado_en = Column(DateTime(timezone=True), default=_utcnow)
+    # Sin aviso hasta ese dia (incluido); el incidente se sigue llevando.
+    silenciado_hasta = Column(Date, nullable=True)
 
 
 class Programacion(Base):

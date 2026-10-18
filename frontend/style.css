@@ -1418,3 +1418,10 @@ tr.fila-marcada td{background:var(--accent-subtle)}
   .informe h2{break-after:avoid}
   a{color:inherit;text-decoration:none}
 }
+
+/* Incidentes (decision 139) */
+.incidentes{list-style:none;margin:0;padding:0}
+.incidentes>li{border-left:3px solid var(--border);padding:.45rem .6rem;margin:.4rem 0}
+.incidentes>li.sev-critical{border-left-color:var(--red,#c62828)}
+.incidentes>li.sev-warning{border-left-color:var(--orange,#d97706)}
+.incidente-cabecera{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}

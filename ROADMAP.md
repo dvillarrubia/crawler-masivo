@@ -192,6 +192,16 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Las alertas tienen estado: no repiten y se cierran solas (18 de octubre)
+
+Una alerta de un rastreo programado ya no avisa cada semana mientras dure el
+fallo: avisa la primera vez, se queda **abierta** y se **cierra sola** cuando un
+rastreo posterior —que pueda comprobarlo de verdad: completo, comparable, sin
+muro— ya no la ve. En la pestaña **Alertas** del cliente se puede marcar como
+vista o silenciar hasta una fecha; el panel de cartera dice cuántas hay abiertas
+por cliente y el resumen semanal dice desde cuándo sigue abierta cada una.
+[Decisión 139](docs/decisiones/comparacion-y-alertas.md#d139).
+
 ### Informe para el cliente en PDF (18 de octubre)
 
 En la ficha de un rastreo, Exportar → **Informe para el cliente** abre una

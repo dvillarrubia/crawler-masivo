@@ -731,3 +731,50 @@
    más reciente abre o cierra») y canales por cliente. Y una regla nueva solo
    vale para los rastreos que terminen después: no se re-evalúan los viejos.
 
+
+<a id="d139"></a>
+139. **Una alerta con estado: se avisa al abrirse, se cierra sola y solo la
+   cierra quien puede afirmarlo** (Ola 5.1 de `docs/PLAN_MEJOR_CRAWLER.md`, sin
+   los canales). Sin estado, el mismo fallo avisaba en cada rastreo mientras
+   durase: el canonical de Lopesan a `*.lfr.cloud` habría avisado cada lunes
+   durante meses, y un aviso que llega cada semana con lo mismo se deja de leer
+   (decisión 77). Tabla `incidentes` y `shared/incidentes.py`:
+   - **Un incidente es (serie, clave).** La serie es el perfil (o, si no hay,
+     la programación) que repite el rastreo; la clave, la regla que saltó, y en
+     las de un campo extraído también su nombre (`extraido_cambia:precio` y
+     `extraido_cambia:sku` son dos fallos, decisión 127). Las reglas del cliente
+     son `cliente:<id>` (decisión 135). Un solo incidente vivo por (serie,
+     clave), con índice único parcial (`estado <> 'cerrado'`), igual en
+     Postgres y en SQLite.
+   - **Abre, sigue, cierra.** El primer rastreo que dispara la alerta lo abre y
+     es el único que avisa; los siguientes suman `veces` y guardan el último
+     detalle sin avisar; lo **cierra solo** el primer rastreo que, pudiendo
+     afirmarlo, ya no la ve. Si vuelve, es otro incidente y se avisa otra vez.
+   - **No ver una alerta no es verla resuelta** (decisiones 67 y 89). Una de la
+     comparación solo se cierra si la de este rastreo es comparable y
+     concluyente: sin censo anterior, con otro alcance, truncado o detrás de un
+     muro, sigue abierta. Una regla del cliente, solo si esa regla se evaluó
+     (no en `sin_evaluar` y sin `motivo` global).
+   - **Solo el rastreo más reciente de la serie abre o cierra.** Uno que
+     termina tarde, o que se re-analiza, con otro posterior ya creado, no toca
+     nada ni avisa: si no, cerraría lo que sigue roto o reabriría lo cerrado.
+   - **Un rastreo sin serie no abre incidentes** y avisa como siempre: uno
+     lanzado a mano no tiene «la semana que viene» con la que cerrarse. Y si la
+     actualización falla, el worker avisa como antes: repetir un aviso es mejor
+     que callarse uno.
+   - **Una persona marca «visto» o silencia; cerrar no.** `PATCH
+     /api/clients/{id}/incidentes/{iid}` admite `estado` (abierto o visto) y
+     `silenciado_hasta`; cerrar es un 422 y tocar uno cerrado un 409. El
+     silencio es de (serie, clave) y no de la fila: un fallo silenciado hasta
+     el 31 que se cierra el 10 y vuelve el 17 tampoco avisa.
+   - Dónde se ve: la pestaña **Alertas** del cliente (abiertos y cerrados, con
+     el rastreo que lo abrió, el último que lo vio y el que lo cerró), el panel
+     de cartera («N incidentes abiertos», enlace a `#/clientes/<id>/alertas`) y
+     el **resumen semanal**, que dice lo que sigue abierto y desde cuándo: es
+     donde se ve que un fallo lleva tres semanas sin arreglarse, ya que el
+     aviso solo salió la primera.
+   La competencia no abre incidentes (sale antes, como en la 135). **Pendiente**
+   de la 5.1: los canales por cliente (Apprise con el destino en el entorno,
+   decisión 83), que esperan a que se decida a dónde van los avisos; y el
+   criterio de #36, dos semanas de perfil semanal real sin alertas falsas, que
+   empieza a contar con este despliegue.

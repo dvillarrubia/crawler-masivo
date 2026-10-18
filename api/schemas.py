@@ -618,6 +618,8 @@ class PanelCliente(BaseModel):
     # ni baja si entre los dos cambio la version del analisis). None = sin
     # ninguna ejecucion comparable agregada.
     evolucion: dict | None = None
+    # Alertas abiertas o vistas de sus series (decision 139).
+    incidentes_vivos: int = 0
 
 
 class PanelResponse(BaseModel):
