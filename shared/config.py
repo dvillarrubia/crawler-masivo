@@ -11,7 +11,8 @@ DEFAULT_MAX_DEPTH = 3
 DEFAULT_MAX_URLS = 50000
 DEFAULT_CONCURRENT_REQUESTS = 32
 DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN = 8
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+# El UA de serie sale de la huella TLS de serie (decision 132): van juntos.
+from shared.perfiles import UA_POR_DEFECTO as DEFAULT_USER_AGENT  # noqa: E402
 
 # SEO thresholds
 TITLE_MIN_LEN = 10

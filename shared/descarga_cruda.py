@@ -37,7 +37,24 @@ class NoEsLaPagina(RuntimeError):
     """
 
 
-def descargar_crudo(url: str, timeout: int = 40) -> str:
+def huella_y_cabeceras(impersonate: str | None = None,
+                       user_agent: str | None = None) -> tuple[str, dict[str, str]]:
+    """El perfil TLS y las cabeceras con las que bajan las herramientas.
+
+    Sin UA, curl_cffi manda el SUYO, que para Chrome es el de macOS, y con ese
+    el Cloudflare de progym responde 403 a cualquier version de la huella: el
+    comprobador veia el muro y el rastreo (UA de Windows) la pagina (decision
+    132). Por eso va siempre el UA, y el que casa con la huella.
+    """
+    from shared.perfiles import IMPERSONATE_POR_DEFECTO, cabeceras_de_huella, ua_para_huella
+
+    perfil = impersonate or os.getenv("IMPERSONATE") or IMPERSONATE_POR_DEFECTO
+    ua = user_agent or os.getenv("USER_AGENT") or ua_para_huella(perfil)
+    return perfil, cabeceras_de_huella(perfil, ua)
+
+
+def descargar_crudo(url: str, timeout: int = 40, *, impersonate: str | None = None,
+                    user_agent: str | None = None) -> str:
     """HTML crudo de `url` con curl_cffi y la huella TLS de Chrome.
 
     Lanza `NoEsLaPagina` si el codigo no es 200 o si `clasificar_respuesta`
@@ -46,7 +63,8 @@ def descargar_crudo(url: str, timeout: int = 40) -> str:
     articulo y pasa, y una pagina sin `<title>` no se tira por eso.
     """
     from curl_cffi import requests as cr
-    r = cr.get(url, impersonate=os.getenv("IMPERSONATE", "chrome124"), timeout=timeout)
+    perfil, cabeceras = huella_y_cabeceras(impersonate, user_agent)
+    r = cr.get(url, impersonate=perfil, headers=cabeceras, timeout=timeout)
     if r.status_code != 200:
         raise NoEsLaPagina(f"HTTP {r.status_code}")
     cuerpo = getattr(r, "content", None)

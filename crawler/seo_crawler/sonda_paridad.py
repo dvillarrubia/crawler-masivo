@@ -46,7 +46,7 @@ from scrapy.http import HtmlResponse, Response
 from shared.indexabilidad import es_nofollow, es_noindex, misma_url
 from shared.paridad import canonical_efectivo, diferencias, resumen
 from shared.perfiles import (
-    IMPERSONATE_MOVIL, UA_CHROME_ESCRITORIO, UA_MOVIL_POR_NOMBRE, contexto_playwright,
+    IMPERSONATE_MOVIL, IMPERSONATE_POR_DEFECTO, UA_CHROME_ESCRITORIO, UA_MOVIL_POR_NOMBRE, contexto_playwright,
     es_ua_movil,
 )
 from shared.plantillas import firma_de_ruta
@@ -189,7 +189,7 @@ class ParidadMovilMixin:
                     "sale con la huella TLS del job y el UA de movil", IMPERSONATE_MOVIL)
         elif "android" in str(self.settings.get("IMPERSONATE") or "") \
                 or "ios" in str(self.settings.get("IMPERSONATE") or ""):
-            self._paridad_impersonate = "chrome124"
+            self._paridad_impersonate = IMPERSONATE_POR_DEFECTO
         self._paridad_reglas: list[tuple[str, re.Pattern]] = []
         for regla in self.job_config.get("templates") or []:
             if not isinstance(regla, dict):

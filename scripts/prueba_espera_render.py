@@ -44,10 +44,8 @@ from seo_crawler.spiders.seo_spider import (  # noqa: E402
     _JS_ESPERAR_DOM_QUIETO as ESPERA_ACTUAL,
 )
 
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+# El UA de serie del rastreo (decision 132), no una copia que se quede atras.
+from shared.perfiles import UA_POR_DEFECTO as UA  # noqa: E402
 
 # La de antes de septiembre de 2026: solo miraba mutaciones del DOM, asi que
 # resolvia mientras la peticion seguia en vuelo (el DOM esta quieto justo

@@ -35,7 +35,7 @@ Están ordenadas por valor/esfuerzo. Las olas 1 y 2 se pueden llevar en paralelo
 | 0.1 | Bug: `shared/avisos.py:68` enlaza a `#/jobs/{id}` y debe ser `#/rastreos/{id}` | Un test comprueba que la ruta del aviso la resuelve `_irARuta` |
 | 0.2 | `sd_validation`: FAQ y HowTo marcados como «resultado retirado o restringido» (aviso informativo, no error) | `REQUISITOS_ESPERADOS` actualizado, con la fuente de Google citada |
 | 0.3 | Presets de UA: Googlebot smartphone, Bingbot, GPTBot, ClaudeBot y OAI-SearchBot, con un aviso de que un UA de bot sobre huella Chrome puede delatarse | Están en `UA_PRESETS` y en `test_jobconfig_claves` |
-| 0.4 | Revisar el perfil de impersonación por defecto (`chrome124`) frente a una versión actual | Canario de 3 sitios con WAF (UOC, progym, Lopesan) sin peor tasa de 200 |
+| 0.4 | Revisar el perfil de impersonación por defecto (`chrome124`) frente a una versión actual | Canario de 3 sitios con WAF (UOC, progym, Lopesan) sin peor tasa de 200. **PR abierta** (decisión 132): `chrome150` + UA de Chrome 150, uno deducido del otro y validados en `JobConfig`; medido desde fuera de producción igual en los tres (la versión no separa nada; el UA de Chrome de macOS sí, en progym). Falta el canario en producción |
 
 ### Ola 1. Diagnóstico técnico completo sobre datos que ya guardamos (re-analizar, sin re-rastrear)
 

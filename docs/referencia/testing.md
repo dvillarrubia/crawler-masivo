@@ -233,6 +233,13 @@ contexto movil de verdad; y con Postgres, la tuberia, el analisis y que
 reanudar no repite) y `test_paridad_movil_analisis.py` (la comparacion, los
 perfiles, el preset del formulario, el contexto `custom` con el UA del job,
 los avisos contra SQLite y el aviso de perfil distinto entre censos).
+Huella TLS y UA (decision 132): `test_huella_en_la_peticion.py` (el
+`SeoSpider` real con curl_cffi contra un servidor que anota lo que llega: UA,
+`sec-ch-ua` y `sec-ch-ua-platform` de serie, de un config viejo con el UA de
+124 y de una mezcla fijada a mano, que se avisa; y `descargar_crudo`) y
+`test_huella_y_ua.py` (la lista de perfiles contra el curl_cffi instalado, la
+validacion de `JobConfig.impersonate`, la deduccion de uno a partir del otro y
+la herencia; tambien en el trabajo de la API).
 Sondas de respuesta (decisiones 123 y 124): `test_sondas.py` (veredictos, cuando
 un HEAD no basta, tamano, SSRF, el mixin sin red: un robots por origen, tope por
 host, recursos internos y externos por separado, latido y cancelacion),

@@ -15,7 +15,25 @@ import time
 from scrapy import Request
 from scrapy.crawler import Crawler
 
+from shared.perfiles import IMPERSONATE_POR_DEFECTO, cabeceras_de_huella
+
 logger = logging.getLogger(__name__)
+
+
+def _casar_client_hints(request: Request) -> None:
+    """`sec-ch-ua-platform` del sistema que dice el UA (decision 132).
+
+    curl_cffi manda las Client Hints de su perfil, y las de Chrome de escritorio
+    dicen `"macOS"`; el UA de serie es de Windows. Si la peticion ya trae la
+    cabecera (la puso alguien a proposito), no se toca.
+    """
+    if request.headers.get(b"Sec-Ch-Ua-Platform"):
+        return
+    ua = request.headers.get(b"User-Agent")
+    ua = ua.decode("latin-1") if isinstance(ua, bytes) else ua
+    plataforma = cabeceras_de_huella(request.meta.get("impersonate"), ua).get("Sec-Ch-Ua-Platform")
+    if plataforma:
+        request.headers[b"Sec-Ch-Ua-Platform"] = plataforma
 
 # CURLINFO_HTTP_VERSION de libcurl -> lo que se guarda en `urls.http_version`.
 _VERSION_HTTP_CURL = {1: "HTTP/1.0", 2: "HTTP/1.1", 3: "HTTP/2", 30: "HTTP/3"}
@@ -145,7 +163,7 @@ class CompositeDownloadHandler:
         imp = _clase_con_medidas().from_crawler(crawler)
         logger.info(
             "CompositeDownloadHandler ready: Playwright + curl_cffi (%s)",
-            crawler.settings.get("IMPERSONATE", "chrome124"),
+            crawler.settings.get("IMPERSONATE", IMPERSONATE_POR_DEFECTO),
         )
         return cls(crawler, pw, imp)
 
@@ -157,8 +175,10 @@ class CompositeDownloadHandler:
             # fingerprint de Chrome no se aplicaba nunca (un F5 que responde
             # basura a la TLS de Twisted tumbaba el rastreo entero).
             request.meta["impersonate"] = self._crawler.settings.get(
-                "IMPERSONATE", "chrome124"
+                "IMPERSONATE", IMPERSONATE_POR_DEFECTO
             )
+        if not es_playwright:
+            _casar_client_hints(request)
         handler = self._playwright if es_playwright else self._impersonate
         # Sub-handlers may use old signature (request, spider) or new (request).
         # Always pass spider when we have it; fall back to crawler.spider.

@@ -108,6 +108,8 @@ Una linea por regla; el porque y la medida, en la decision citada.
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en
   silencio. Decision 33.
+- **El UA y la huella TLS son el mismo navegador**: salen de `shared/perfiles.py`
+  (`IMPERSONATE_POR_DEFECTO` -> `UA_POR_DEFECTO`), nunca un `chrome124` literal. 132.
 - **`links` solo guarda aristas del grafo**: lo que Google no puede seguir
   (`javascript:`, `onclick`, `<span href>`) va en `enlaces_no_rastreables`. 106.
 - **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no
