@@ -1067,3 +1067,53 @@
    el top 10, el campo `tipo` (problema, oportunidad o aviso) de
    `incidencias.js` y, cuando exista Search Console (4.1), los clics en la
    importancia.
+
+<a id="d142"></a>
+142. **Search Console cruzado con el rastreo: ventana de 90 días, lo que se
+   pierde primero y nada afirmado sin cubrir la ventana** (Ola 4.2 de
+   `docs/PLAN_MEJOR_CRAWLER.md`). Con los datos diarios que baja el worker
+   (decisión 141), el análisis (`analysis/avisos_de_gsc.py`, después de la
+   indexabilidad y de los entrantes) lee los **90 días que acaban el día del
+   rastreo**, no «los últimos 90»: re-analizar un censo viejo da las mismas
+   cifras que el día que se hizo.
+   - **Columnas** `urls.gsc_clics`, `gsc_impresiones` y `gsc_posicion` (media
+     ponderada por impresiones), emparejadas con `clave_url` (decisión 39). Una
+     URL del censo sin fila en Search Console es **0** si los datos cubren la
+     ventana entera y **NULL** si no: «0 clics» y «no se sabe» no son lo mismo.
+     En el Explorador, grupo «Search Console (90 días)» y vista «Tráfico de
+     Google»; en el CSV de la vista.
+   - **Cinco incidencias**, por consecuencia: `trafico_en_pagina_perdida`
+     (error: clics y hoy 4xx, 5xx, noindex o bloqueada), `trafico_en_redireccion`
+     (info: normal tras una migración, señal si dura), `huerfana_con_trafico`
+     (warning: una página que el análisis ya marcó como huérfana —`orphan_page`
+     o `sitemap_orphan`, con sus exclusiones— y que recibe clics; sustituye a
+     aquel aviso, decisión 36. Con reglas propias salían 739 en Lopesan: 828 de
+     sus 953 indexables sin entrantes son semillas de un censo sembrado con
+     3.040 URLs, y el resto destinos de 301), `indexable_sin_impresiones`
+     (info) y `trafico_en_variante_con_parametros` (warning: Google muestra la
+     URL con `?partner=` o `?utm_` y el tráfico se reparte entre duplicados; a
+     partir de 10 clics y el 20 % del de la página). **«Sin impresiones» solo se
+     afirma si los datos empiezan al principio de la ventana y Google no
+     recortó ningún día en el tope de filas** (decisiones 67 y 141).
+   - **`jobs.gsc_resumen`**: ventana, clics e impresiones, cuántos caen en URLs
+     del censo y en variantes, y las URLs con clics que el rastreo **no
+     encontró** (las 25 primeras): huérfanas de verdad o fuera del alcance; no
+     se afirma cuál. Tarjeta en la ficha del rastreo.
+   - **Prioridad** (decisión 136): los clics multiplican la importancia por
+     tramos (1, 10, 100 y 1.000 clics: ×1,1, ×1,3, ×1,6 y ×2). Por tramos y no
+     con un logaritmo para que la misma regla valga en SQLite; sin datos, nada
+     cambia.
+   - **Informe** (decisión 138): sección «Tráfico de Google» con los clics de
+     la ventana, las páginas con tráfico que se pierde (y cuántos clics), las
+     huérfanas con tráfico, las variantes y lo que el rastreo no encontró.
+   Medido en el censo semanal de Lopesan del 14-oct con los 90 días reales de
+   su Search Console (293.327 filas, copiados en solo lectura a una base local;
+   el paso tarda 0,5 s): **583.680 clics** en la ventana, 411.667 en URLs del
+   censo y **164.593 —el 28 %— en variantes con `?partner=` de 18 fichas de
+   hotel** (la de Costa Bávaro: 37.776 clics en variantes); **952 URLs con
+   clics que el rastreo no encontró** (7.420 clics: un `?utm_` de Google
+   Business Profile, `/en/login`, PDFs de menús); **231 páginas canonicalizadas
+   o que redirigen y que Google sigue mostrando** (una oferta canonicalizada con
+   1.649 clics: Google no está aceptando ese canonical); 47 indexables sin
+   impresiones; 1 página con tráfico que hoy da 404; y 0 huérfanas con tráfico,
+   porque el análisis no marca ninguna huérfana en ese censo.

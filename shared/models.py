@@ -371,6 +371,9 @@ class Job(Base):
     # Las reglas propias del cliente evaluadas al cerrar el rastreo (decision
     # 135): `{evaluadas, disparadas, sin_evaluar, motivo, comparado_con}`.
     alertas_cliente = Column(JSON, nullable=True)
+    # Search Console en la ventana del rastreo (decision 142): totales, cuanto
+    # cae en el censo y las URLs con clics que el rastreo no encontro.
+    gsc_resumen = Column(JSON, nullable=True)
     # Con que version se ANALIZO, que no es lo mismo que con cual se rastreo:
     # un re-analisis cambia las cifras sin que cambie el sitio (decision 66).
     analisis_version = Column(String(64), nullable=True)
@@ -452,6 +455,11 @@ class Url(Base):
     # el analisis. NULL = sin camino desde la home. crawl_depth es otra cosa:
     # saltos del rastreador desde las semillas, la que aplica max_depth.
     click_depth = Column(Integer, nullable=True)
+    # Search Console en los 90 dias que acaban el dia del rastreo (decision
+    # 142). NULL = sin datos del cliente o ventana sin cubrir; 0 = medido.
+    gsc_clics = Column(Integer, nullable=True)
+    gsc_impresiones = Column(Integer, nullable=True)
+    gsc_posicion = Column(Float, nullable=True)
 
     content_type = Column(String(256))
     content_length = Column(BigInteger, nullable=True)

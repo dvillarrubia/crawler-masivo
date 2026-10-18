@@ -1413,6 +1413,35 @@
           </div>
         </template>
 
+        <!-- Search Console en la ventana del rastreo (decision 142). -->
+        <template x-if="job.gsc_resumen">
+          <div class="card mb-2 text-sm" data-testid="gsc-resumen">
+            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+              <strong>Tráfico de Google (Search Console)</strong>
+              <span class="text-dim" x-text="'del ' + fmt.dia(job.gsc_resumen.desde) + ' al ' + fmt.dia(job.gsc_resumen.hasta)"></span>
+            </div>
+            <div style="margin-top:.3rem">
+              <strong x-text="fmt.num(job.gsc_resumen.clics)"></strong> clics y
+              <strong x-text="fmt.num(job.gsc_resumen.impresiones)"></strong> impresiones;
+              <span x-text="job.gsc_resumen.clics ? Math.round(100 * job.gsc_resumen.clics_en_urls_del_censo / job.gsc_resumen.clics) + ' % de los clics en URLs de este rastreo' : ''"></span>
+              <span x-show="job.gsc_resumen.clics_en_variantes" x-text="'· ' + fmt.num(job.gsc_resumen.clics_en_variantes) + ' en variantes con parámetros'"></span>
+            </div>
+            <div x-show="job.gsc_resumen.urls_fuera_del_censo" style="margin-top:.3rem">
+              <span x-text="fmt.num(job.gsc_resumen.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(job.gsc_resumen.clics_fuera_del_censo) + ' clics): huérfanas o fuera del alcance.'"></span>
+              <details><summary class="text-dim" style="cursor:pointer">Ver las que más reciben</summary>
+                <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+                  <template x-for="u in job.gsc_resumen.fuera_del_censo" :key="u.url">
+                    <li><span x-text="fmt.num(u.clics)"></span> · <span class="informe-url" x-text="u.url"></span></li>
+                  </template>
+                </ul>
+              </details>
+            </div>
+            <div x-show="!job.gsc_resumen.cubre_la_ventana" class="text-dim" style="margin-top:.3rem">
+              Los datos no cubren los 90 días enteros (o Google recortó algún día): no se afirma que una página no tuvo impresiones.
+            </div>
+          </div>
+        </template>
+
         <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
           <div class="card mb-2"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
@@ -3598,6 +3627,27 @@
                    x-text="informe.comparacion.incidencias ? fmt.num(informe.comparacion.incidencias.nuevas) + ' incidencias nuevas' + (informe.comparacion.incidencias.resueltas != null ? ', ' + fmt.num(informe.comparacion.incidencias.resueltas) + ' resueltas' : '') + ' y ' + fmt.num(informe.comparacion.incidencias.siguen) + ' que siguen.' : ''"></p>
                 <p x-show="informe.comparacion.incidencias_motivo" class="text-sm text-dim"
                    x-text="'Las incidencias no se comparan: ' + (informe.comparacion.incidencias_motivo || '')"></p>
+              </section>
+            </template>
+
+            <!-- Search Console (decision 142) -->
+            <template x-if="informe.trafico">
+              <section data-testid="informe-trafico">
+                <h2>Tráfico de Google</h2>
+                <p>Entre el <span x-text="fmt.dia(informe.trafico.desde)"></span> y el <span x-text="fmt.dia(informe.trafico.hasta)"></span>,
+                  <strong x-text="fmt.num(informe.trafico.clics)"></strong> clics y
+                  <strong x-text="fmt.num(informe.trafico.impresiones)"></strong> impresiones en Google.</p>
+                <ul class="informe-alertas">
+                  <li x-show="informe.trafico.trafico_en_pagina_perdida.paginas" class="sev-error">
+                    <strong x-text="fmt.num(informe.trafico.trafico_en_pagina_perdida.paginas) + ' páginas con tráfico que hoy dan error, tienen noindex o están bloqueadas'"></strong>
+                    <span x-text="'(' + fmt.num(informe.trafico.trafico_en_pagina_perdida.clics) + ' clics en riesgo)'"></span></li>
+                  <li x-show="informe.trafico.huerfana_con_trafico.paginas">
+                    <span x-text="fmt.num(informe.trafico.huerfana_con_trafico.paginas) + ' páginas con tráfico que ninguna otra página del sitio enlaza (' + fmt.num(informe.trafico.huerfana_con_trafico.clics) + ' clics)'"></span></li>
+                  <li x-show="informe.trafico.trafico_en_variante_con_parametros.paginas">
+                    <span x-text="fmt.num(informe.trafico.trafico_en_variante_con_parametros.paginas) + ' páginas cuyo tráfico se reparte con variantes con parámetros (' + fmt.num(informe.trafico.trafico_en_variante_con_parametros.clics) + ' clics en las variantes)'"></span></li>
+                  <li x-show="informe.trafico.urls_fuera_del_censo">
+                    <span x-text="fmt.num(informe.trafico.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(informe.trafico.clics_fuera_del_censo) + ' clics)'"></span></li>
+                </ul>
               </section>
             </template>
 

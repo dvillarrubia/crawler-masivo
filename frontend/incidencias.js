@@ -141,6 +141,32 @@ const ISSUE_INFO = {
     google: 'Googlebot pide primero sin renderizar: lo que recibe ahí decide si la página entra en la cola de render.',
     arreglo: 'Revisar las reglas del servidor o del CDN que distinguen por navegador (detección de bots, redirecciones por JavaScript).',
   },
+  // Decision 142: Search Console cruzado con el rastreo (90 días hasta el día del rastreo).
+  'trafico_en_pagina_perdida': {
+    que: 'La página ha recibido clics desde Google en los 90 días anteriores al rastreo y hoy da error (4xx o 5xx), tiene noindex o está bloqueada por robots.txt. En los detalles, los clics.',
+    google: 'Va a dejar de mostrarla (o ya la está quitando): ese tráfico se pierde. Es lo primero que hay que mirar del informe.',
+    arreglo: 'Si el cambio no era intencionado, revertirlo. Si la página tenía que desaparecer, redirigirla con 301 a la más parecida para conservar el tráfico.',
+  },
+  'trafico_en_redireccion': {
+    que: 'Una URL que redirige o está canonicalizada a otra sigue recibiendo clics de Google.',
+    google: 'Aún la muestra en los resultados: todavía no ha consolidado la señal en la nueva. Es normal justo después de una migración; si dura meses, algo (enlaces internos, sitemap, hreflang) sigue apuntando a la vieja.',
+    arreglo: 'Que los enlaces internos, el sitemap y el hreflang apunten a la URL final. Informativo.',
+  },
+  'huerfana_con_trafico': {
+    que: 'Página indexable que recibe clics de Google y que ninguna otra página del sitio enlaza.',
+    google: 'La conoce por el sitemap o por enlaces externos, pero el sitio no le pasa autoridad ni contexto: posiciona a pesar de la arquitectura, no gracias a ella.',
+    arreglo: 'Enlazarla desde las páginas relacionadas y desde la navegación que corresponda. Suele ser una oportunidad rápida.',
+  },
+  'indexable_sin_impresiones': {
+    que: 'Página indexable con respuesta 200 que no ha tenido ni una impresión en Google en los 90 días anteriores al rastreo. Solo se afirma si los datos cubren la ventana entera y Google no recortó ningún día.',
+    google: 'O no la tiene indexada, o no la considera relevante para ninguna búsqueda. Muchas así son peso muerto que diluye la calidad percibida del sitio.',
+    arreglo: 'Revisar si aporta algo: mejorarla, fusionarla con otra que sí posicione, o sacarla del índice. Informativo.',
+  },
+  'trafico_en_variante_con_parametros': {
+    que: 'Parte del tráfico de esta página se lo llevan URLs con parámetros (?partner=, ?utm_…) que Google muestra en los resultados. En los detalles, cuántos clics van a las variantes y algunos ejemplos.',
+    google: 'Está indexando la variante con parámetros como una URL aparte: el tráfico y las señales se reparten entre duplicados en vez de sumarse en la página.',
+    arreglo: 'Que la variante lleve canonical a la URL limpia (o redirija), y que los enlaces que generan el parámetro no sean rastreables o usen la URL limpia.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -758,6 +784,11 @@ const ISSUE_LABEL_EXTRA = {
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
+  trafico_en_pagina_perdida: 'Página con tráfico de Google que se pierde',
+  trafico_en_redireccion: 'Tráfico en una URL que redirige',
+  huerfana_con_trafico: 'Huérfana con tráfico de Google',
+  indexable_sin_impresiones: 'Indexable sin impresiones (90 días)',
+  trafico_en_variante_con_parametros: 'Tráfico en variantes con parámetros',
   noindex_solo_en_crudo: 'Noindex solo en el HTML del servidor',
   noindex_solo_al_renderizar: 'Noindex que añade el JavaScript',
   canonical_cambia_al_renderizar: 'El canonical cambia al renderizar',
@@ -845,6 +876,7 @@ const DETALLE_LABEL = {
   directiva: 'directiva',
   max_snippet: 'máx. caracteres del fragmento',
   version: 'versión comparada',
+  clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
 
   ejemplos: 'ejemplos',

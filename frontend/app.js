@@ -3838,6 +3838,10 @@ const EXP_COLUMN_DEFS = {
   // Tiempo del servidor hasta el primer byte y compresion servida (decision 109).
   ttfb_ms:              { label: 'TTFB (ms)',        type: 'numeric', sortable: true,  filterKey: 'ttfb_ms',                 width: 130, fmt: r => r.ttfb_ms != null ? Math.round(r.ttfb_ms) + 'ms' : '' },
   content_encoding:     { label: 'Compresión',       type: 'string',  sortable: false, filterKey: 'content_encoding_contains', width: 130, fmt: r => r.content_encoding ?? '' },
+  // Search Console en los 90 dias del rastreo (decision 142)
+  gsc_clics:            { label: 'Clics Google',     type: 'numeric', sortable: true,  filterKey: 'gsc_clics',               width: 140, fmt: r => r.gsc_clics != null ? fmt.num(r.gsc_clics) : '' },
+  gsc_impresiones:      { label: 'Impresiones Google', type: 'numeric', sortable: true, filterKey: 'gsc_impresiones',       width: 170, fmt: r => r.gsc_impresiones != null ? fmt.num(r.gsc_impresiones) : '' },
+  gsc_posicion:         { label: 'Posición Google',  type: 'numeric', sortable: true,  filterKey: 'gsc_posicion',            width: 150, fmt: r => r.gsc_posicion != null ? r.gsc_posicion.toLocaleString('es-ES') : '' },
   click_depth:          { label: 'Clics desde home', type: 'numeric', sortable: true,  filterKey: 'click_depth',             width: 160, fmt: r => r.click_depth ?? '' },
   crawl_depth:          { label: 'Prof. rastreo',    type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 140, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
@@ -3922,6 +3926,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
   ['Móvil e idioma', ['viewport','html_lang']],
+  ['Search Console (90 días)', ['gsc_clics','gsc_impresiones','gsc_posicion']],
   ['Frente al censo anterior', ['cambio']],
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
@@ -4035,6 +4040,9 @@ const EXP_TABS = [
   // funciones de IA de la Busqueda, y si los buscadores de IA pueden entrar.
   { key: 'a_ia',       label: 'IA',            icon: 'sparkles',     filter: HTML_INTERNO, ambito: ['nosnippet_en_indexable','max_snippet_restrictivo','bot_busqueda_ia_bloqueado','contenido_solo_con_js'],
     columns: ['url','status_code','indexable','meta_robots','x_robots_tag','pagerank_score'] },
+  // Decision 142: Search Console cruzado con el rastreo.
+  { key: 'a_trafico',  label: 'Tráfico de Google', icon: 'trending-up', filter: { is_internal: true }, ambito: ['trafico_en_pagina_perdida','trafico_en_redireccion','huerfana_con_trafico','indexable_sin_impresiones','trafico_en_variante_con_parametros'],
+    columns: ['url','status_code','indexable','indexability_status','gsc_clics','gsc_impresiones','gsc_posicion','inlinks_count'] },
   // Decision 140: el HTML del servidor frente al render, por muestra de plantilla.
   { key: 'a_js',       label: 'JavaScript',    icon: 'code',         filter: HTML_INTERNO, ambito: ['noindex_solo_en_crudo','noindex_solo_al_renderizar','canonical_cambia_al_renderizar','nofollow_cambia_al_renderizar','contenido_solo_con_js','cambia_al_renderizar','respuesta_cambia_al_renderizar','redireccion_por_javascript'],
     columns: ['url','status_code','indexable','canonical_href','meta_robots','content_word_count'] },
