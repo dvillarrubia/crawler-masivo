@@ -172,7 +172,8 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `JobConfigMiddleware` | 100 | Injects per-job settings from Redis/DB |
 | `UserAgentMiddleware` | 400 | UA rotation (replaces Scrapy default) |
 | `ProxyMiddleware` | 410 | Optional proxy rotation from `PROXY_LIST` |
-| `HttpConfigMiddleware` | 420 | Per-job HTTP overrides |
+| `HttpConfigMiddleware` | 420 | Bloque `http` del job. Cabeceras propias, cookies y Basic **solo** a los hosts de las semillas (con y sin www, subdominios con `crawl_subdomains`; no el host al que salta una semilla) y se quitan de las demas; `Accept-Language` a todas. Sin jar, las cookies van como cabecera `Cookie`; con render, en `meta["_http_render"]` para `render.preparar_pagina` (decision 114) |
+| `CookiesTrasElJarMiddleware` | 705 | Solo con `COOKIES_ENABLED` (`http.conservar_cookies`): tras el `CookiesMiddleware` de Scrapy vacia `request.cookies` para que curl_cffi mande la cabecera del jar (decision 114) |
 | `RobotsCrawlDelayMiddleware` | 110 | `Crawl-delay` de robots.txt como retraso del slot, solo en `respect` (decision 81) |
 
 ## Scrapy Settings
@@ -184,6 +185,7 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | `DOWNLOAD_TIMEOUT` | 30s | |
 | `RETRY_TIMES` | 2 | Only for 502, 503, 504, 408, 429 |
 | `ROBOTSTXT_OBEY` | True | Overridable per-job |
+| `COOKIES_ENABLED` | False | Sin jar, como Googlebot; `http.conservar_cookies` lo enciende (worker, `-s`). Las de `http.cookies` se mandan igual (decision 114) |
 | `AUTOTHROTTLE_ENABLED` | True | Target concurrency: 8.0 |
 | `HTTPERROR_ALLOW_ALL` | True | All status codes reach spider (Screaming Frog parity) |
 | `DEPTH_PRIORITY` | 1 | BFS scheduling |
@@ -191,4 +193,5 @@ Configurable thresholds via `job.config.analysis_thresholds` JSON or module-leve
 | Playwright | chromium, headless | JS rendering via `scrapy-playwright` |
 | `PLAYWRIGHT_MAX_PAGES_PER_CONTEXT` | 8 | Env-overridable (`PLAYWRIGHT_MAX_PAGES`) |
 | `PLAYWRIGHT_MAX_CONTEXTS` | 3 | Safety cap on browser contexts (env-overridable) |
+| `playwright_page_init_callback` | `seo_crawler.render.preparar_pagina` | Es **meta** por peticion (`_playwright_meta`), no setting: el `PLAYWRIGHT_PAGE_INIT_CALLBACK` de settings.py no lo leia scrapy-playwright. Instala el contador de peticiones en vuelo (12b) y las cookies y credenciales del job (114) |
 | JS auto-cap | 8 / 4 | When `render_js=true`, worker auto-caps concurrency (env-overridable) |
