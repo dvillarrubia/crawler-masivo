@@ -27,10 +27,11 @@ Casos que las dos versiones anteriores fallaban, cada uno con su criterio SEO:
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 from shared.respuestas import ESTADO_INDEXABILIDAD, NO_VALIDAS
-from shared.robots import hay_noindex, robots_tokens
+from shared.robots import DIRECTIVAS, hay_noindex, robots_tokens
 
 # Bot cuyas directivas especificas manda. Configurable por si algun dia se
 # audita para otro buscador.
@@ -90,12 +91,79 @@ def clave_url(url: str) -> tuple[str, str, str, str]:
     return (partes.scheme.lower(), host, ruta, partes.query)
 
 
+# Forma de un nombre de bot en `X-Robots-Tag: <bot>: <directivas>`: un token
+# sin espacios. Lo que lleva espacios antes de los dos puntos es el trozo de
+# una fecha (`25-Jun-2010 15:00:00 GMT`), no un bot.
+_NOMBRE_DE_BOT = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def x_robots_por_bot(cabecera: str | None) -> list[tuple[str | None, str]]:
+    """Partir UNA cabecera `X-Robots-Tag` en ``(bot, directivas)``.
+
+    ``bot`` es ``None`` para lo que no va dirigido a nadie (vale para todos).
+    Un ``nombre:`` abre el ambito de ese bot y dura hasta el siguiente, asi que
+    `bingbot: noindex, nofollow` es todo de Bing y en
+    `bingbot: noindex, googlebot: noindex` el segundo `noindex` es de Google.
+
+    Solo es bot un prefijo que NO es una directiva y tiene forma de token. Las
+    directivas con valor llevan dos puntos (`max-snippet:-1`,
+    `unavailable_after: 2020-01-01`) y las fechas tambien (`15:00:00`), y antes
+    cualquiera de ellas se tomaba por bot y se perdia la cabecera entera: el
+    `noindex` de `max-snippet:-1, noindex` no contaba (decision 107).
+    """
+    trozos: list[tuple[str | None, str]] = []
+    ambito: str | None = None
+    for trozo in (cabecera or "").split(","):
+        cabeza, dos_puntos, resto = trozo.partition(":")
+        nombre = cabeza.strip().lower()
+        if dos_puntos and nombre not in DIRECTIVAS and _NOMBRE_DE_BOT.match(nombre):
+            ambito = nombre
+            trozo = resto
+        trozos.append((ambito, trozo))
+    return trozos
+
+
+def directivas_x_robots(cabecera: str | None, bot: str = BOT_POR_DEFECTO) -> set[str]:
+    """Directivas de UNA cabecera `X-Robots-Tag` que aplican a *bot*.
+
+    Cuentan las que no van dirigidas a nadie, las de `robots:` y las de *bot*
+    (sin mirar la caja: `GoogleBot:` es Googlebot). `googlebot-news:` es otro
+    bot. Con varias cabeceras, se llama una vez por cada una.
+    """
+    tokens: set[str] = set()
+    for ambito, trozo in x_robots_por_bot(cabecera):
+        if ambito in (None, "robots", bot):
+            tokens |= robots_tokens(trozo)
+    return tokens
+
+
+def x_robots_para_bot(x_robots, bot: str = BOT_POR_DEFECTO) -> str:
+    """El texto de las `X-Robots-Tag` que aplica a *bot*, sin los prefijos.
+
+    Para quien tiene que leer la sintaxis con el mismo criterio que la
+    indexabilidad (`robots_invalid_syntax`): un `noindex/nofollow` dirigido a
+    otro bot no le quita nada a Google. Acepta lo mismo que `_directivas`: una
+    lista de cabeceras o lo guardado en BD, una por linea.
+    """
+    if isinstance(x_robots, (list, tuple)):
+        cabeceras = list(x_robots)
+    else:
+        cabeceras = (x_robots or "").split(SEPARADOR_CABECERAS)
+    return ", ".join(
+        trozo.strip()
+        for cabecera in cabeceras
+        for ambito, trozo in x_robots_por_bot(cabecera)
+        if ambito in (None, "robots", bot) and trozo.strip()
+    )
+
+
 def _directivas(meta_robots, x_robots, bot: str) -> set[str]:
     """Directivas que aplican a *bot*, combinando todas las fuentes.
 
     `meta_robots` puede ser una cadena (el `robots` generico) o un mapa
     nombre -> contenido con las metas por bot. `x_robots` puede ser una cadena
-    o una lista de cabeceras; cada una admite el prefijo `googlebot:`.
+    o una lista de cabeceras; cada una admite prefijos de bot
+    (:func:`directivas_x_robots`).
     """
     tokens: set[str] = set()
 
@@ -112,18 +180,7 @@ def _directivas(meta_robots, x_robots, bot: str) -> set[str]:
         # Lo guardado en BD: una cadena con una cabecera por linea.
         cabeceras = (x_robots or "").split(SEPARADOR_CABECERAS)
     for cabecera in cabeceras:
-        if not cabecera:
-            continue
-        # "googlebot: noindex" aplica solo a ese bot; sin prefijo, a todos.
-        if ":" in cabecera:
-            posible_bot, resto = cabecera.split(":", 1)
-            posible_bot = posible_bot.strip().lower()
-            # Ojo: `max-snippet:-1` tambien lleva dos puntos y NO es un bot.
-            if posible_bot and posible_bot not in robots_tokens(cabecera) and " " not in posible_bot:
-                if posible_bot in ("robots", bot):
-                    tokens |= robots_tokens(resto)
-                continue
-        tokens |= robots_tokens(cabecera)
+        tokens |= directivas_x_robots(cabecera, bot)
 
     return tokens
 
@@ -214,6 +271,6 @@ def es_nofollow(meta_robots=None, x_robots=None, bot: str = BOT_POR_DEFECTO) -> 
 
 __all__ = [
     "estado_indexabilidad", "es_noindex", "es_nofollow", "misma_url", "clave_url",
-    "hay_noindex",
+    "hay_noindex", "directivas_x_robots", "x_robots_por_bot", "x_robots_para_bot",
     "SEPARADOR_CABECERAS",
 ]

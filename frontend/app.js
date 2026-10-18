@@ -3579,6 +3579,7 @@ function _freshForm() {
     custom_headers: '',
     accept_language: '',
     cookies: '',
+    conservar_cookies: false,
     basic_auth_user: '',
     basic_auth_password: '',
     // Analisis
@@ -3661,6 +3662,7 @@ function _configDesdeForm(f) {
       custom_headers: _parseKV(f.custom_headers, ':'),
       accept_language: f.accept_language,
       cookies: _parseKV(f.cookies, '='),
+      conservar_cookies: !!f.conservar_cookies,
       basic_auth_user: f.basic_auth_user,
       basic_auth_password: f.basic_auth_password,
     },
@@ -3703,6 +3705,7 @@ function _formDesdeConfig(f, cfg) {
   if (http.custom_headers) f.custom_headers = _kvTexto(http.custom_headers, ': ');
   if (http.cookies) f.cookies = _kvTexto(http.cookies, '=');
   poner('accept_language', http.accept_language);
+  poner('conservar_cookies', http.conservar_cookies);
   poner('basic_auth_user', http.basic_auth_user);
   sub(cfg.analysis_thresholds, ['title_min_length', 'title_max_length', 'description_min_length',
     'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);
