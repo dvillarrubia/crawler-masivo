@@ -565,6 +565,81 @@
    fecha que no es de ningun formato (`Wednesday, 2010-06-25T15:00:00Z`): su
    segundo trozo no lleva espacios y se toma por bot. No se toca.
 
+<a id="d113"></a>
+113. **El robots.txt guardado se evalúa también como Googlebot, y si se sabe,
+   manda Googlebot** (sección 7 de #149, Ola 7.3). El rastreo obedece
+   robots.txt con el user-agent de descarga (`USER_AGENT`, Chrome por
+   defecto: decisión 98), así que se aplica el grupo `*` —o uno como
+   `User-agent: Mozilla`, que casa con la cadena de Chrome— y no el de
+   `Googlebot`. Reproducido con Protego: `User-agent: Googlebot` /
+   `Disallow: /solo-google/` deja pasar a Chrome; `User-agent: *` /
+   `Disallow: /` + `User-agent: Googlebot` / `Allow: /` bloquea a Chrome y no a
+   Google. Una página que rastreamos y Googlebot no puede pedir salía
+   indexable: el caso grave, indexable para nosotros e invisible para Google.
+   - **El rastreo no cambia**: sigue obedeciendo con el UA de descarga en
+     `respect`, que es cortesía, y el `Crawl-delay` sale del mismo grupo (81).
+     Evaluar como Googlebot es un DATO del análisis, sobre el cuerpo guardado
+     en `robots_txt` (decisión 112): re-analizable, y sin pedir nada al sitio.
+   - **Con el token, no con un UA**: `can_fetch(url, "Googlebot")`. Con una
+     cadena `Mozilla/5.0 (compatible; Googlebot/2.1…)` Protego casaría el grupo
+     `Mozilla`. Un grupo `Googlebot-News` no aplica a Googlebot (como en
+     Google). Los ejemplos de precedencia de la documentación de Google
+     —gana la regla más larga; con la misma longitud, `Allow`; `$` y `*`—
+     dan lo mismo con Protego (`tests/test_robots_txt.py`). Lo que pasa de
+     500 KiB no cuenta, como en Google: se evalúa el cuerpo recortado.
+   - **`urls.bloqueada_googlebot`** (NULL = no evaluado: censo anterior, host
+     sin fila o por encima del tope, robots.txt inaccesible, muro delante, otro
+     esquema o puerto —Google trata aparte `http` y `https`—). Un 4xx es
+     `False` (todo permitido). Se escribe como `urls.noindex`, por lotes, y se
+     pone a NULL antes de cada análisis: con otro código una URL puede dejar
+     de estar evaluada.
+   - **`estado_indexabilidad` recibe el veredicto de Googlebot si se conoce**;
+     si no, lo de siempre (`blocked_by_robots` o el motivo `Blocked…`). Una
+     página pedida que Googlebot no puede pedir pasa a `Blocked by robots.txt`
+     y deja de ser indexable —y con ella sus entrantes y su PageRank
+     (decisión 38)—; en `audit`, una pedida y marcada que Googlebot SÍ puede
+     pedir pasa a indexable. Una que no se pidió (bloqueada para nuestro UA)
+     sigue sin ser indexable aunque Google pueda: no la hemos visto.
+   - **`robots_difiere_para_googlebot`, `warning`, una por host** (nunca una
+     por URL, decisión 36): `solo_googlebot` (las rastreamos y Google no puede
+     pedirlas) y `solo_rastreador` (no las pedimos y Google sí puede: hay que
+     re-rastrear con el preset de Googlebot de la 98), con cinco ejemplos de
+     cada. Lo que decidió el rastreo es `blocked_by_robots`, no el motivo que
+     escribe este mismo paso: si no, re-analizar se compararía consigo mismo
+     (lo cazó el test de re-análisis). En `ignore` no hay veredicto propio y
+     no se compara, pero la columna y la indexabilidad sí salen.
+   - **Preparado para N bots** (Ola 7.3): `shared/robots_txt.BOTS` (clave →
+     token del grupo) y `EvaluadorRobots.permitido(url, bot)`; el resumen por
+     host y bot va en `robots_txt.evaluacion` (`{"googlebot": {estado,
+     evaluadas, bloqueadas}}`), que es donde irá la tabla de qué bloquea cada
+     bot de IA sin una columna por URL y bot. Lo que falta de la 7.3: los bots
+     de IA y la línea concreta que bloquea.
+   - **Lo que no se puede ver**: el robots.txt guardado es el que nos sirvió a
+     NUESTRO UA desde nuestra IP; un sitio que sirve otro a Googlebot no se
+     detecta sin la IP de Google (lo dice la ficha).
+   - **Dependencia**: `protego` en `analysis/requirements.txt` (decisión 69:
+     hoy llegaba solo con Scrapy). Se importa solo al evaluar: sin él no se
+     afirma nada (NULL) y el análisis sigue.
+   Cambia `indexable` en los censos **nuevos** (con filas en `robots_txt`); los
+   anteriores, re-analizados, salen exactamente igual (test). Pendiente de
+   medir: en cuántas URLs de la cartera difiere el veredicto entre Chrome y
+   Googlebot (robots.txt de hoy contra las URLs del último censo, script de
+   solo lectura) y el canario con `count(*) FILTER (WHERE bloqueada_googlebot)`.
+   **Revisión (2026-10-18): el grupo se elige por token ENTERO, como Google.**
+   Pasarle a Protego el token en vez del UA (decisión 98) no basta: Protego
+   busca el nombre del grupo *dentro* del del bot, así que `User-agent:
+   Google` se le aplicaba a Googlebot (Google no: compara el token entero) y
+   `User-agent: Googlebot/2.1` no se le aplicaba (Google sí: saca el token
+   hasta el primer carácter que no es letra, `_` o `-`, `ExtractUserAgent` de
+   robots.cc). Con `Disallow: /` en ese grupo, el veredicto salía al revés en
+   los dos casos. Ahora `grupos_como_google` reescribe cada línea
+   `User-agent` antes de parsear —el grupo del bot con su token exacto, los
+   demás con un nombre que no casa con nada, `*` intacto— y el evaluador
+   guarda un parser por bot. Coste medido: 6,3 µs por URL (500.000 en 3,1 s).
+   Tests: `test_el_grupo_se_elige_por_token_entero_como_google` y
+   `test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva`, que
+   fallan sin el arreglo.
+
 <a id="d115"></a>
 115. **Varios canonicals son varios DESTINOS, y con dos Google no usa ninguno**
    (#149). `canonical_multiple` contaba etiquetas (`html_meta.canonical_count`,
@@ -747,78 +822,3 @@
    en progym (6 paginas) y `redireccion_a_noindex` 14 en Lopesan y 3 en blogs.uoc.edu. Volumen bajo: nada
    de ruido. Las cifras de B1 y de las meta refresh siguen pendientes de un
    censo que las tenga.
-
-<a id="d113"></a>
-113. **El robots.txt guardado se evalúa también como Googlebot, y si se sabe,
-   manda Googlebot** (sección 7 de #149, Ola 7.3). El rastreo obedece
-   robots.txt con el user-agent de descarga (`USER_AGENT`, Chrome por
-   defecto: decisión 98), así que se aplica el grupo `*` —o uno como
-   `User-agent: Mozilla`, que casa con la cadena de Chrome— y no el de
-   `Googlebot`. Reproducido con Protego: `User-agent: Googlebot` /
-   `Disallow: /solo-google/` deja pasar a Chrome; `User-agent: *` /
-   `Disallow: /` + `User-agent: Googlebot` / `Allow: /` bloquea a Chrome y no a
-   Google. Una página que rastreamos y Googlebot no puede pedir salía
-   indexable: el caso grave, indexable para nosotros e invisible para Google.
-   - **El rastreo no cambia**: sigue obedeciendo con el UA de descarga en
-     `respect`, que es cortesía, y el `Crawl-delay` sale del mismo grupo (81).
-     Evaluar como Googlebot es un DATO del análisis, sobre el cuerpo guardado
-     en `robots_txt` (decisión 112): re-analizable, y sin pedir nada al sitio.
-   - **Con el token, no con un UA**: `can_fetch(url, "Googlebot")`. Con una
-     cadena `Mozilla/5.0 (compatible; Googlebot/2.1…)` Protego casaría el grupo
-     `Mozilla`. Un grupo `Googlebot-News` no aplica a Googlebot (como en
-     Google). Los ejemplos de precedencia de la documentación de Google
-     —gana la regla más larga; con la misma longitud, `Allow`; `$` y `*`—
-     dan lo mismo con Protego (`tests/test_robots_txt.py`). Lo que pasa de
-     500 KiB no cuenta, como en Google: se evalúa el cuerpo recortado.
-   - **`urls.bloqueada_googlebot`** (NULL = no evaluado: censo anterior, host
-     sin fila o por encima del tope, robots.txt inaccesible, muro delante, otro
-     esquema o puerto —Google trata aparte `http` y `https`—). Un 4xx es
-     `False` (todo permitido). Se escribe como `urls.noindex`, por lotes, y se
-     pone a NULL antes de cada análisis: con otro código una URL puede dejar
-     de estar evaluada.
-   - **`estado_indexabilidad` recibe el veredicto de Googlebot si se conoce**;
-     si no, lo de siempre (`blocked_by_robots` o el motivo `Blocked…`). Una
-     página pedida que Googlebot no puede pedir pasa a `Blocked by robots.txt`
-     y deja de ser indexable —y con ella sus entrantes y su PageRank
-     (decisión 38)—; en `audit`, una pedida y marcada que Googlebot SÍ puede
-     pedir pasa a indexable. Una que no se pidió (bloqueada para nuestro UA)
-     sigue sin ser indexable aunque Google pueda: no la hemos visto.
-   - **`robots_difiere_para_googlebot`, `warning`, una por host** (nunca una
-     por URL, decisión 36): `solo_googlebot` (las rastreamos y Google no puede
-     pedirlas) y `solo_rastreador` (no las pedimos y Google sí puede: hay que
-     re-rastrear con el preset de Googlebot de la 98), con cinco ejemplos de
-     cada. Lo que decidió el rastreo es `blocked_by_robots`, no el motivo que
-     escribe este mismo paso: si no, re-analizar se compararía consigo mismo
-     (lo cazó el test de re-análisis). En `ignore` no hay veredicto propio y
-     no se compara, pero la columna y la indexabilidad sí salen.
-   - **Preparado para N bots** (Ola 7.3): `shared/robots_txt.BOTS` (clave →
-     token del grupo) y `EvaluadorRobots.permitido(url, bot)`; el resumen por
-     host y bot va en `robots_txt.evaluacion` (`{"googlebot": {estado,
-     evaluadas, bloqueadas}}`), que es donde irá la tabla de qué bloquea cada
-     bot de IA sin una columna por URL y bot. Lo que falta de la 7.3: los bots
-     de IA y la línea concreta que bloquea.
-   - **Lo que no se puede ver**: el robots.txt guardado es el que nos sirvió a
-     NUESTRO UA desde nuestra IP; un sitio que sirve otro a Googlebot no se
-     detecta sin la IP de Google (lo dice la ficha).
-   - **Dependencia**: `protego` en `analysis/requirements.txt` (decisión 69:
-     hoy llegaba solo con Scrapy). Se importa solo al evaluar: sin él no se
-     afirma nada (NULL) y el análisis sigue.
-   Cambia `indexable` en los censos **nuevos** (con filas en `robots_txt`); los
-   anteriores, re-analizados, salen exactamente igual (test). Pendiente de
-   medir: en cuántas URLs de la cartera difiere el veredicto entre Chrome y
-   Googlebot (robots.txt de hoy contra las URLs del último censo, script de
-   solo lectura) y el canario con `count(*) FILTER (WHERE bloqueada_googlebot)`.
-   **Revisión (2026-10-18): el grupo se elige por token ENTERO, como Google.**
-   Pasarle a Protego el token en vez del UA (decisión 98) no basta: Protego
-   busca el nombre del grupo *dentro* del del bot, así que `User-agent:
-   Google` se le aplicaba a Googlebot (Google no: compara el token entero) y
-   `User-agent: Googlebot/2.1` no se le aplicaba (Google sí: saca el token
-   hasta el primer carácter que no es letra, `_` o `-`, `ExtractUserAgent` de
-   robots.cc). Con `Disallow: /` en ese grupo, el veredicto salía al revés en
-   los dos casos. Ahora `grupos_como_google` reescribe cada línea
-   `User-agent` antes de parsear —el grupo del bot con su token exacto, los
-   demás con un nombre que no casa con nada, `*` intacto— y el evaluador
-   guarda un parser por bot. Coste medido: 6,3 µs por URL (500.000 en 3,1 s).
-   Tests: `test_el_grupo_se_elige_por_token_entero_como_google` y
-   `test_varios_tokens_del_mismo_grupo_y_variantes_de_la_directiva`, que
-   fallan sin el arreglo.
