@@ -203,6 +203,15 @@ quedan el error de datos estructurados de la plantilla y los 51 canonicals a
 otro dominio. El equipo SEO tiene que validar ese orden antes de ponerlo por
 defecto. [Decisión 136](docs/decisiones/incidencias.md#d136).
 
+### Páginas que se niegan a la IA de Google sin querer (18 de octubre)
+
+Google usa las mismas directivas para el fragmento del resultado y para AI
+Overviews / AI Mode. Ahora avisa una página indexable con `nosnippet` (sale sin
+texto y fuera de las respuestas de IA) o con un `max-snippet` corto, y el
+Explorador tiene una vista **IA** con eso y con los buscadores de IA bloqueados
+en robots.txt. En Salle salieron tres páginas con todo bloqueado menos el
+`noindex`, que era lo que querían. [Decisión 137](docs/decisiones/indexabilidad.md#d137).
+
 ### Alertas a medida de cada cliente y resumen semanal (18 de octubre)
 
 Ola 5.2 del plan (decisión 135). En la ficha del cliente hay una pestaña

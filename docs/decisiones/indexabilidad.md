@@ -933,3 +933,33 @@
      aviso lleva `googlebot_alcance`: si el cierre viene del grupo `*`, Google
      también está fuera, y la ficha ya no puede decir sin más que «a Google
      no le afecta».
+
+<a id="d137"></a>
+137. **Una página indexable que niega el fragmento también se niega a la IA de
+   Google** (Ola 7.2 de `docs/PLAN_MEJOR_CRAWLER.md`). Google documenta que las
+   funciones de IA de la Búsqueda (AI Overviews, AI Mode) se controlan con las
+   MISMAS directivas que el fragmento: `nosnippet`, `max-snippet`,
+   `data-nosnippet` y `noindex`. Con `nosnippet` la página sigue indexada pero
+   sale sin texto en el resultado y su contenido no se usa como entrada directa
+   de esas respuestas. Nadie lo avisaba: `nosnippet` estaba en la lista de
+   directivas reconocidas (decisión 22) y nada más.
+   - `limite_de_fragmento()` en `shared/indexabilidad.py`, con las mismas
+     fuentes y ámbitos que el `noindex` (meta `robots` y `googlebot`, todas las
+     `X-Robots-Tag`, con prefijo de bot; decisiones 39 y 107). `max-snippet:0`
+     equivale a `nosnippet`; con varias `max-snippet` manda la más restrictiva;
+     `-1` es sin límite y no avisa. El valor se lee con o sin espacio tras los
+     dos puntos, que la tokenización por espacios partiría.
+   - `nosnippet_en_indexable` (warning) y `max_snippet_restrictivo` (info, por
+     debajo de 160 caracteres, el fragmento habitual de Google: un juicio), solo
+     en páginas **indexables con 200**. En una `noindex` no hay resultado que
+     recortar y ya avisa `noindex_page`.
+   - Vista **IA** en el Explorador (#135): estos dos tipos y el de buscadores de
+     IA bloqueados en robots.txt (decisión 129).
+   Medido en el último censo completo de cada cliente en producción: **Salle, 3
+   páginas** (`/ca`, `/es` y `/en` de `sistemas-digitales-y-microprocesadores-8`)
+   con `noarchive, nofollow, noimageindex, noodp, nosnippet, notranslate, noydir`
+   **y sin `noindex`**: la firma de quien quería sacarlas del índice y se dejó
+   la única directiva que lo hace. Lopesan lleva `max-snippet:-1` en 1.804
+   indexables (sin aviso, es lo correcto); penguin, CST y Saunier, nada. Basta
+   con **re-analizar**. Queda de la 7.2: `data-nosnippet` (exige guardarlo al
+   rastrear) y el contenido visible sin JavaScript, que sale de la 7.1.

@@ -94,6 +94,17 @@ const ISSUE_INFO = {
     google: 'Por sí mismo no toca a Google: Googlebot se decide aparte y Google-Extended no cambia nada en la Búsqueda. Pero si el bloqueo viene del grupo «*» (en los detalles, Googlebot con alcance «todo»), el sitio está cerrado también para Google, y eso es lo primero que hay que mirar. Lo que pierde el sitio es la otra búsqueda: según OpenAI, un sitio que bloquea OAI-SearchBot no sale en las respuestas de ChatGPT search (solo como enlace de navegación), y bloquear GPTBot NO saca de ahí; lo mismo dicen Anthropic de Claude-SearchBot y Perplexity de PerplexityBot. ChatGPT-User y Claude-User son descargas que pide una persona y no deciden si el sitio aparece.',
     arreglo: 'Si el cliente quiere aparecer en esas búsquedas, abrir el grupo de ese bot (o quitarlo de una lista «User-agent» compartida con los de entrenamiento: es el error típico, bloquear GPTBot y OAI-SearchBot en el mismo bloque). Si quiere no entrenar modelos, basta con bloquear los de entrenamiento. Es informativo: puede ser deliberado.',
   },
+  // Decision 137: lo que una indexable le niega al fragmento y a la IA de Google.
+  'nosnippet_en_indexable': {
+    que: 'Una página indexable lleva «nosnippet» (o «max-snippet:0») en su meta robots o en la cabecera X-Robots-Tag para Googlebot.',
+    google: 'La indexa, pero la enseña sin fragmento de texto en los resultados. Según la documentación de Google sobre las funciones de IA de la Búsqueda, esas mismas directivas son las que controlan qué se usa en AI Overviews y AI Mode: con «nosnippet», el contenido de la página no se usa como entrada directa ahí. Un resultado sin descripción convierte peor y la página desaparece de las respuestas de IA de Google.',
+    arreglo: 'Quitar «nosnippet» de las plantillas indexables. Si hay un trozo concreto que no se quiere citar (un precio, un aviso legal), marcarlo con el atributo data-nosnippet en vez de cerrar la página entera. Puede ser deliberado (contenido de pago, por ejemplo): confirmarlo antes de tocarlo.',
+  },
+  'max_snippet_restrictivo': {
+    que: 'Una página indexable limita su fragmento con «max-snippet» a menos de 160 caracteres (en los detalles, el límite).',
+    google: 'Respeta el límite: el fragmento del resultado se corta ahí, y las funciones de IA de la Búsqueda solo pueden citar ese trozo. Con varias directivas, aplica la más restrictiva; «max-snippet:-1» es sin límite.',
+    arreglo: 'Subir el límite o poner «max-snippet:-1» si no hay una razón para recortar. Es informativo: a veces es una decisión de negocio.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -710,6 +721,8 @@ const ISSUE_LABEL_EXTRA = {
   robots_txt_inaccesible: 'robots.txt con error o sin respuesta',
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
+  nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
+  max_snippet_restrictivo: 'Fragmento limitado (max-snippet)',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
   enlace_interno_a_error: 'Enlace interno a un error',
   enlace_interno_a_redireccion: 'Enlace interno a una redirección',
@@ -786,6 +799,8 @@ const DETALLE_LABEL = {
   cuantas_urls: 'URLs con ese código',
   lang_del_destino: 'código del destino',
   motivo: 'motivo',
+  directiva: 'directiva',
+  max_snippet: 'máx. caracteres del fragmento',
 
   ejemplos: 'ejemplos',
   similarity: 'similitud',

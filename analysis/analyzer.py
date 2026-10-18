@@ -47,7 +47,7 @@ from analysis import avisos_de_servidor
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from shared.indexabilidad import (
-    BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, misma_url,
+    BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
     x_robots_para_bot,
 )
 from shared.meta_refresh import retardo_meta_refresh
@@ -69,6 +69,11 @@ from shared.models import (
     StructuredData,
     Url,
 )
+
+# Decision 137: por debajo de esto el fragmento queda mas corto que el que
+# Google suele ensenar (unos 150-160 caracteres) y las funciones de IA solo
+# pueden citar ese trozo. Un juicio, como el resto de umbrales de longitud.
+MAX_SNIPPET_CORTO = 160
 
 logger = logging.getLogger(__name__)
 
@@ -2378,6 +2383,8 @@ class SEOAnalyzer:
             (noindex_ids if has_noindex else con_indice_ids).append(url_id)
             if has_noindex:
                 self._add_issue(url_id, "noindex_page", "info")
+            elif is_indexable and status_code == 200:
+                self._avisar_fragmento(url_id, meta_robots, x_robots)
 
             # El motivo tambien se recalcula aqui, y no solo en el rastreo.
             # El spider lo computaba contra la URL de PARTIDA de una cadena de
@@ -2409,6 +2416,18 @@ class SEOAnalyzer:
             self._cerrar_robots_googlebot()
 
         self._flush_issues()
+
+    def _avisar_fragmento(self, url_id: int, meta_robots, x_robots) -> None:
+        """Decision 137: lo que una pagina indexable le niega al fragmento y,
+        con el, a las funciones de IA de la busqueda (AI Overviews, AI Mode),
+        que segun Google se controlan con las MISMAS directivas. Solo en
+        indexables: en una noindex no hay resultado que recortar."""
+        sin_fragmento, maximo = limite_de_fragmento(meta_robots=meta_robots, x_robots=x_robots)
+        if sin_fragmento:
+            self._add_issue(url_id, "nosnippet_en_indexable", "warning",
+                            {"directiva": "max-snippet:0" if maximo == 0 else "nosnippet"})
+        elif maximo is not None and maximo < MAX_SNIPPET_CORTO:
+            self._add_issue(url_id, "max_snippet_restrictivo", "info", {"max_snippet": maximo})
 
     # -- robots.txt (decisiones 112 y 113) -----------------------------------
 
