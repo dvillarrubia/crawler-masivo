@@ -442,6 +442,114 @@ def borrar_vista(client_id: uuid.UUID, vista_id: str, db: Session = Depends(get_
 
 
 # ---------------------------------------------------------------------------
+# Reglas de alerta y resumen semanal (decision 135)
+# ---------------------------------------------------------------------------
+def _ultimo_completado(db: Session, cliente_id) -> Job | None:
+    return (db.query(Job)
+            .filter(Job.cliente_id == cliente_id, Job.status == "completed")
+            .order_by(Job.completed_at.desc().nullslast(), Job.created_at.desc())
+            .first())
+
+
+@router.get("/{client_id}/reglas")
+def leer_reglas(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Las reglas del cliente: lo guardado (parcial), lo que aplica y el
+    catalogo para el editor. Los segmentos son los del ultimo censo completo."""
+    from shared.comparacion import REGLAS
+    from shared.reglas import MEDIDAS, MODOS, OPERADORES, SEVERIDADES, de_serie, efectivas
+
+    cliente = _buscar(db, client_id)
+    ultimo = _ultimo_completado(db, cliente.id)
+    # Los nombres salen del resumen de la segmentacion (decision 125), no de un
+    # DISTINCT sobre las URLs del censo: eso son millones de filas cada vez
+    # que se abre la pestaña.
+    segmentos: list[str] = []
+    seg = (ultimo.segmentacion if ultimo is not None
+           and isinstance(ultimo.segmentacion, dict) else {})
+    nombres = {r.get("nombre") for r in seg.get("por_regla") or [] if isinstance(r, dict)}
+    if isinstance(seg.get("por_defecto"), str):
+        nombres.add(seg["por_defecto"])
+    segmentos = sorted(n for n in nombres if n)
+    return {
+        "guardadas": cliente.reglas_alerta,
+        "efectivas": efectivas(cliente.reglas_alerta),
+        "de_serie": de_serie(),
+        "catalogo": {
+            "comparacion": [{"regla": r, "severidad": sev, "que_decide_google": q}
+                            for r, (sev, q) in REGLAS.items()],
+            "medidas": MEDIDAS, "modos": MODOS, "operadores": list(OPERADORES),
+            "severidades": list(SEVERIDADES), "segmentos": segmentos,
+            "ultimo_job_id": str(ultimo.id) if ultimo else None,
+        },
+    }
+
+
+@router.put("/{client_id}/reglas")
+def guardar_reglas(client_id: uuid.UUID, cuerpo: dict | None = None,
+                   db: Session = Depends(get_session)):
+    """Guarda las reglas (parcial sobre las de serie). `null` o `{}` vuelven a
+    las de serie. Solo afecta a los rastreos que terminen a partir de ahora."""
+    from shared.reglas import ReglaInvalida, validar
+
+    cliente = _buscar(db, client_id)
+    try:
+        guardadas = validar(cuerpo) if cuerpo else None
+    except ReglaInvalida as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    cliente.reglas_alerta = guardadas or None
+    _commit(db)
+    return leer_reglas(client_id, db)
+
+
+@router.post("/{client_id}/reglas/probar")
+def probar_reglas(client_id: uuid.UUID, cuerpo: dict | None = None,
+                  job_id: uuid.UUID | None = Query(None),
+                  db: Session = Depends(get_session)):
+    """Evalua las reglas propias (las del cuerpo, o las guardadas) contra un
+    rastreo terminado del cliente —el ultimo completado si no se dice— sin
+    guardar nada. Es como se comprueba una regla antes de fiarse de ella."""
+    from shared.reglas import ReglaInvalida, contexto_de_job, efectivas, evaluar_propias, validar
+
+    cliente = _buscar(db, client_id)
+    try:
+        # Un cuerpo `{}` es «lo de serie» —lo que hay en pantalla—, no «lo
+        # guardado»: solo sin cuerpo se prueba lo guardado.
+        reglas = efectivas(validar(cuerpo) if cuerpo is not None else cliente.reglas_alerta)
+    except ReglaInvalida as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    job = db.get(Job, job_id) if job_id else _ultimo_completado(db, cliente.id)
+    if job is None or job.cliente_id != cliente.id:
+        raise HTTPException(status_code=404, detail="No hay un rastreo terminado de este cliente")
+    _c, perfil = contexto_de_job(db, job)
+    r = evaluar_propias(db, job, reglas, job.comparacion, perfil)
+    return {"job_id": str(job.id), "nombre": job.name} | r
+
+
+@router.get("/{client_id}/resumenes")
+def listar_resumenes(client_id: uuid.UUID, limite: int = Query(12, ge=1, le=52),
+                     db: Session = Depends(get_session)):
+    from shared.models import ResumenSemanal
+
+    cliente = _buscar(db, client_id)
+    filas = (db.query(ResumenSemanal).filter(ResumenSemanal.cliente_id == cliente.id)
+             .order_by(ResumenSemanal.semana.desc()).limit(limite).all())
+    return [{"id": str(f.id), "semana": f.semana.isoformat(), "desde": f.desde.isoformat(),
+             "hasta": f.hasta.isoformat(), "enviado": f.enviado, "texto": f.texto,
+             "contenido": f.contenido} for f in filas]
+
+
+@router.get("/{client_id}/resumenes/vista-previa")
+def vista_previa_resumen(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    """El resumen de los ultimos 7 dias, ahora, sin guardar ni enviar."""
+    from shared.resumen_semanal import generar
+
+    cliente = _buscar(db, client_id)
+    r = generar(db, cliente, datetime.now(timezone.utc))
+    return {"semana": r["semana"].isoformat(), "desde": r["desde"].isoformat(),
+            "hasta": r["hasta"].isoformat(), "texto": r["texto"], "contenido": r["contenido"]}
+
+
+# ---------------------------------------------------------------------------
 # Clientes
 # ---------------------------------------------------------------------------
 @router.get("", response_model=list[ClientResponse])

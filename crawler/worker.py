@@ -899,11 +899,34 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
         resultado = comparar_con_el_anterior(session, job, reanalizar=run_analysis)
         if resultado is None:
             logger.info("Job %s: no hay censo anterior del mismo sitio", job_id)
-            return
-        job.comparacion = resultado
-        session.commit()
-        criticas = [a for a in resultado.get("alertas", [])
-                    if a.get("severidad") == "critical"]
+        else:
+            job.comparacion = resultado
+            session.commit()
+
+        # Las reglas propias del cliente (decision 135). Aparte y con su
+        # propio try: una regla mal escrita a mano en la BD no puede llevarse
+        # por delante la comparacion, que ya esta guardada. Se evaluan aunque
+        # no haya censo anterior: las de «valor» no lo necesitan.
+        from shared.reglas import a_avisar, contexto_de_job, efectivas, evaluar_propias
+
+        cliente, perfil = contexto_de_job(session, job)
+        reglas = efectivas(cliente.reglas_alerta) if cliente is not None else None
+        propias: dict = {}
+        if reglas is not None:
+            try:
+                propias = evaluar_propias(session, job, reglas, resultado, perfil)
+                job.alertas_cliente = propias
+                session.commit()
+                if propias.get("disparadas"):
+                    logger.warning("Job %s: %d regla(s) del cliente: %s", job_id,
+                                   len(propias["disparadas"]),
+                                   "; ".join(a["texto"] for a in propias["disparadas"]))
+            except Exception:
+                session.rollback()
+                logger.exception("Job %s: fallo al evaluar las reglas del cliente", job_id)
+
+        alertas = (resultado or {}).get("alertas", [])
+        criticas = [a for a in alertas if a.get("severidad") == "critical"]
         if criticas:
             logger.warning(
                 "Job %s: %d ALERTA(S) CRITICA(S) respecto al censo anterior (%s): %s",
@@ -911,17 +934,20 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
                 "; ".join(f"{a['regla']} {a['paginas']}/{a['de']} ({a['pct']}%)"
                           for a in criticas),
             )
-            # Y fuera, si hay a donde. Una alerta que espera en la interfaz
-            # solo sirve si alguien entra: el fallo de Lopesan lo pillamos
-            # porque re-rastreamos ese dia por otro motivo.
-            #
-            # SOLO las criticas. Un aviso que llega cada semana con cosas que
-            # no hay que mirar se deja de leer, y entonces no avisa de nada.
-            avisar_de_alertas(job_id, job.name, criticas)
-        else:
+        elif resultado is not None:
             logger.info("Job %s: comparado con %s, %d alerta(s)", job_id,
-                        resultado.get("comparado_con"),
-                        len(resultado.get("alertas", [])))
+                        resultado.get("comparado_con"), len(alertas))
+        # Y fuera, si hay a donde. Una alerta que espera en la interfaz solo
+        # sirve si alguien entra: el fallo de Lopesan lo pillamos porque
+        # re-rastreamos ese dia por otro motivo. Sin reglas del cliente, SOLO
+        # las criticas (decision 77): un aviso que llega cada semana con cosas
+        # que no hay que mirar se deja de leer. Con reglas, lo que el cliente
+        # marque como «avisar», salvo silenciado. La competencia no avisa.
+        if perfil is not None and getattr(perfil, "rol", None) == "competidor":
+            return
+        enviar = a_avisar(reglas, alertas, propias.get("disparadas") or [])
+        if enviar:
+            avisar_de_alertas(job_id, job.name, enviar)
     except Exception:
         if session is not None:
             session.rollback()
@@ -1322,7 +1348,44 @@ def _quizas_programar(rconn, ultima_vez: float, ahora: float) -> float:
         # Que el planificador reviente no puede tumbar el worker: dejaria de
         # atender la cola, que es lo que de verdad hace.
         logger.exception("Fallo la pasada del planificador")
+    try:
+        _generar_resumenes()
+    except Exception:
+        logger.exception("Fallo la pasada de los resumenes semanales")
     return ahora
+
+
+def _generar_resumenes() -> None:
+    """El resumen semanal de cada cliente al que le toque (decision 135).
+
+    Con la misma cadencia que el planificador y la misma gracia que un disparo
+    perdido. Que no se repita lo garantiza la restriccion unica de
+    `resumenes_semanales`, no esta funcion: con dos replicas, la segunda choca.
+    """
+    from datetime import datetime, timezone
+
+    from shared.avisos import avisar_de_resumen
+    from shared.database import SessionLocal
+    from shared.models import Client
+    from shared.resumen_semanal import guardar_y_enviar, toca
+
+    ahora = datetime.now(timezone.utc)
+    session = SessionLocal()
+    try:
+        for cliente in session.query(Client).all():
+            corte = toca(cliente, ahora)
+            if corte is None:
+                continue
+            try:
+                if guardar_y_enviar(session, cliente, corte,
+                                    enviar=lambda t, c, n=cliente.nombre: avisar_de_resumen(n, t, c)):
+                    logger.info("Resumen semanal de %s (semana del %s)",
+                                cliente.slug, corte.date())
+            except Exception:
+                session.rollback()
+                logger.exception("Fallo el resumen semanal de %s", cliente.slug)
+    finally:
+        session.close()
 
 
 def _lanzar_programados(rconn) -> None:

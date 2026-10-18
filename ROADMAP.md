@@ -192,6 +192,39 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Alertas a medida de cada cliente y resumen semanal (18 de octubre)
+
+Ola 5.2 del plan (decisión 135). En la ficha del cliente hay una pestaña
+**Alertas**:
+
+- **Reglas del cliente.** Una cifra del rastreo, opcionalmente dentro de un
+  segmento, comparada con un umbral. Por ejemplo: «URLs 4xx en fichas: el
+  valor > 20» o «Páginas indexables: el cambio en % frente al anterior ≤
+  −10». Se puede medir:
+  - URLs por código: 3xx, 4xx, 5xx y bloqueadas.
+  - Indexables, e indexables sin camino desde la home.
+  - Páginas con errores o avisos.
+  - Las páginas con una incidencia concreta.
+- **Las reglas de la comparación** de siempre, por cliente: se pueden apagar,
+  cambiar sus umbrales y decidir cuáles avisan.
+- **Valores de serie.** Todo cliente arranca con ellos, que reproducen lo de
+  antes, más dos reglas propias: «caen las indexables un 10 %» y «suben las
+  URLs con error».
+- **«Probar contra el último rastreo»** dice qué reglas saltarían, sin guardar
+  nada.
+- **Silenciar hasta una fecha** para los avisos fuera de la interfaz.
+- **Resumen semanal.** Por defecto, cada lunes a las 8:00, con lo que hay que
+  mirar de la semana, las cifras y su cambio, y los perfiles que no se han
+  rastreado. Queda guardado en la ficha y sale por el webhook de avisos si
+  hay uno configurado.
+
+Las reglas que han saltado salen arriba en la ficha del rastreo. Las de
+cambio no se evalúan contra un censo truncado, detrás de un muro o analizado
+con otra versión: lo dicen, con el motivo, en vez de afirmar un cambio falso.
+
+Pendiente de 5.1: incidentes con estado (abierto, visto, cerrado) y canales
+de aviso por cliente.
+
 ### Evolución de cada cliente y panel de cartera (18 de octubre)
 
 Ola 5.3 del plan (decisión 130), en revisión. Para la pregunta del seguimiento

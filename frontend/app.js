@@ -530,6 +530,13 @@ function app() {
     evolucionClave: null,
     cliente: null,
     clienteTab: 'rastreos',
+    // Reglas de alerta y resumen semanal del cliente (decision 135)
+    reglasCliente: null,      // GET /clients/{id}/reglas
+    reglasForm: null,         // copia editable de `efectivas`
+    reglasError: '',
+    reglasPrueba: null,       // POST /clients/{id}/reglas/probar
+    resumenes: [],
+    resumenPrevia: null,
     clienteForm: _formCliente(null),
     clienteError: '',
     clientePerfiles: [],
@@ -1248,6 +1255,115 @@ function app() {
           this.evolucionClave = (s.find(x => x.comparables >= 2) || s[0] || {}).clave || null;
       } catch (e) { this.clienteEvolucion = null; }
     },
+
+    // --- Reglas de alerta (decision 135) -------------------------------------
+    async cargarReglas() {
+      if (!this.cliente) return;
+      // Sin esto, el formulario del cliente anterior seguia en pantalla (y se
+      // podia guardar sobre este) mientras llegaban las reglas nuevas.
+      this.reglasCliente = null; this.reglasForm = null; this.resumenes = [];
+      this.reglasError = ''; this.reglasPrueba = null; this.resumenPrevia = null;
+      try {
+        const [r, res] = await Promise.all([
+          api(`/clients/${this.cliente.id}/reglas`),
+          api(`/clients/${this.cliente.id}/resumenes`).catch(() => []),
+        ]);
+        this.reglasCliente = r;
+        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
+        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.resumenes = res || [];
+      } catch (e) { this.reglasError = e.message; }
+    },
+
+    reglaNueva() {
+      const ids = new Set(this.reglasForm.propias.map(r => r.id));
+      let n = this.reglasForm.propias.length + 1;
+      while (ids.has('regla-' + n)) n++;
+      this.reglasForm.propias.push({
+        id: 'regla-' + n, nombre: '', medida: 'urls_4xx', segmento: '', modo: 'valor',
+        operador: '>', umbral: 20, severidad: 'warning', avisar: false, activa: true,
+      });
+    },
+
+    // Lo que se guarda es PARCIAL sobre lo de serie: solo lo que cambia, para
+    // que una regla nueva de serie llegue tambien a este cliente.
+    _cuerpoReglas() {
+      const f = this.reglasForm, serie = this.reglasCliente.de_serie;
+      const comparacion = {};
+      const numero = (v, que) => {
+        // `Number('')` es 0: un campo vaciado se guardaba como umbral 0.
+        if (v === '' || v === null || v === undefined || Number.isNaN(Number(v)))
+          throw new Error(que + ': falta el número');
+        return Number(v);
+      };
+      for (const [regla, c] of Object.entries(f.comparacion)) {
+        const d = serie.comparacion[regla] || {}, cambios = {};
+        for (const k of ['activa', 'avisar', 'pct_sitio', 'min_paginas', 'pct_plantilla']) {
+          const v = ['activa', 'avisar'].includes(k) ? !!c[k] : numero(c[k], regla.replaceAll('_', ' '));
+          if (v !== d[k]) cambios[k] = v;
+        }
+        if (Object.keys(cambios).length) comparacion[regla] = cambios;
+      }
+      const propias = f.propias.map(r => ({
+        ...r, umbral: numero(r.umbral, r.nombre || r.id), segmento: (r.segmento || '').trim() || null,
+        nombre: (r.nombre || '').trim(),
+      }));
+      const cuerpo = {};
+      if (Object.keys(comparacion).length) cuerpo.comparacion = comparacion;
+      if (JSON.stringify(propias) !== JSON.stringify(serie.propias)) cuerpo.propias = propias;
+      if (f.silenciado_hasta) cuerpo.silenciado_hasta = f.silenciado_hasta;
+      const rs = {}, drs = serie.resumen_semanal;
+      for (const k of ['activo', 'dia', 'hora']) {
+        const v = k === 'activo' ? !!f.resumen_semanal[k] : Number(f.resumen_semanal[k]);
+        if (v !== drs[k]) rs[k] = v;
+      }
+      if (Object.keys(rs).length) cuerpo.resumen_semanal = rs;
+      return cuerpo;
+    },
+
+    async guardarReglas() {
+      this.reglasError = '';
+      try {
+        const r = await api(`/clients/${this.cliente.id}/reglas`,
+                            { method: 'PUT', body: JSON.stringify(this._cuerpoReglas()) });
+        this.reglasCliente = r;
+        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
+        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.showToast('Reglas guardadas: valen para los rastreos que terminen desde ahora');
+      } catch (e) { this.reglasError = e.message; }
+    },
+
+    async restablecerReglas() {
+      const ok = await this.preguntar({
+        titulo: 'Volver a las reglas de serie',
+        mensaje: 'Se borran los cambios de este cliente (umbrales, reglas propias, silencio y resumen) y vuelven las de serie.',
+        aceptar: 'Restablecer', peligro: true,
+      });
+      if (!ok) return;
+      try {
+        const r = await api(`/clients/${this.cliente.id}/reglas`, { method: 'PUT', body: 'null' });
+        this.reglasCliente = r;
+        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
+        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.showToast('Reglas de serie restablecidas');
+      } catch (e) { this.reglasError = e.message; }
+    },
+
+    async probarReglas() {
+      this.reglasError = ''; this.reglasPrueba = null;
+      try {
+        this.reglasPrueba = await api(`/clients/${this.cliente.id}/reglas/probar`,
+                                      { method: 'POST', body: JSON.stringify(this._cuerpoReglas()) });
+      } catch (e) { this.reglasError = e.message; }
+    },
+
+    async verResumenPrevio() {
+      this.reglasError = '';
+      try { this.resumenPrevia = await api(`/clients/${this.cliente.id}/resumenes/vista-previa`); }
+      catch (e) { this.reglasError = e.message; }
+    },
+
+    fraseRegla(r) { return fraseReglaPropia(r, this.reglasCliente && this.reglasCliente.catalogo); },
 
     serieEvolucion() {
       const s = (this.clienteEvolucion && this.clienteEvolucion.series) || [];
@@ -4358,3 +4474,21 @@ function textoTendencia(t) {
            titulo: 'Frente al censo comparable anterior (' + desde + hasta + ')'
              + (t.cambio_version && t.cambio_version.rastreo ? '. Ojo: rastreado con otra versión del crawler' : '') };
 }
+
+
+// La regla propia en castellano, igual que `shared.reglas.frase` (decision 135).
+const MODOS_REGLA = { valor: 'el valor del rastreo', cambio: 'el cambio frente al anterior',
+                      cambio_pct: 'el cambio en % frente al anterior' };
+function etiquetaMedida(medida, catalogo) {
+  const m = catalogo && catalogo.medidas && catalogo.medidas[medida];
+  if (m) return m.etiqueta;
+  if ((medida || '').startsWith('incidencia:')) return 'Páginas con «' + medida.slice(11) + '»';
+  return medida;
+}
+function fraseReglaPropia(r, catalogo) {
+  let que = etiquetaMedida(r.medida, catalogo);
+  if (r.segmento) que += ' en «' + r.segmento + '»';
+  return que + ': ' + (MODOS_REGLA[r.modo] || r.modo) + ' ' + r.operador + ' '
+       + r.umbral + (r.modo === 'cambio_pct' ? '%' : '');
+}
+const DIAS_SEMANA = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
