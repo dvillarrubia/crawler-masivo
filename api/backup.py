@@ -37,6 +37,7 @@ from shared.models import (
     RobotsTxt,
     CapturaAlternativa,
     RespuestaSondeada,
+    ProfileRun,
     SitemapEntry,
 )
 
@@ -89,6 +90,10 @@ _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
     ("respuestas_sondeadas", RespuestaSondeada),
     # Entradas de cada fichero de sitemap (decision 126).
     ("sitemap_entries", SitemapEntry),
+    # La fila de la evolucion del job (decision 130). Se podria rehacer con
+    # `rellenar_evolucion.py`, pero viaja: un censo importado tiene que salir
+    # en la evolucion de su cliente sin pasos aparte.
+    ("profile_runs", ProfileRun),
 ]
 
 
@@ -561,6 +566,14 @@ def import_backup_zip(
             # Lo leido de cada fichero de sitemap (decision 126): sin el, los
             # avisos de sitemaps no salen al re-analizar el censo importado.
             sitemaps=job_data.get("sitemaps"),
+            # Como acabo y con que codigo se rastreo y se analizo (decisiones
+            # 66, 67 y 72). Sin ellos un censo truncado importado se leia como
+            # completo, y su fila de `profile_runs` (decision 130), que lleva
+            # la version del analisis, no casaba con la del job y el punto
+            # salia `desfasado` para siempre.
+            finish_reason=job_data.get("finish_reason"),
+            crawler_version=job_data.get("crawler_version"),
+            analisis_version=job_data.get("analisis_version"),
         )
         db.add(job)
         db.flush()

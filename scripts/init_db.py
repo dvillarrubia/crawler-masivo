@@ -162,6 +162,7 @@ def main() -> None:
     migrar_capturas_alternativas()
     migrar_respuestas_sondeadas()
     migrar_sitemap_entries()
+    migrar_profile_runs()
 
     print("Done.")
 
@@ -357,6 +358,23 @@ def migrar_sitemap_entries() -> None:
             "CREATE INDEX IF NOT EXISTS ix_sment_job_hash "
             "ON sitemap_entries (job_id, url_hash)"))
     print("Sitemaps: tabla sitemap_entries e indice al dia.")
+
+
+
+def migrar_profile_runs() -> None:
+    """La evolucion de cada job (decision 130).
+
+    Tabla NUEVA, que crea create_all con su restriccion unica sobre `job_id`:
+    ningun ALTER sobre `jobs`, `urls` ni `issues`, asi que no espera el candado
+    de un analisis en marcha (que tiene `jobs` con FOR UPDATE). Aqui solo se
+    asegura que existe, bajo el `lock_timeout` de `main()`. Las filas de los
+    censos ya hechos las pone `scripts/rellenar_evolucion.py`, que no va en el
+    despliegue: se lanza a mano y de uno en uno.
+    """
+    from shared.models import ProfileRun
+
+    ProfileRun.__table__.create(bind=engine, checkfirst=True)
+    print("Evolucion: tabla profile_runs al dia.")
 
 
 if __name__ == "__main__":

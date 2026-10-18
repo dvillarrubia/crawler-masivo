@@ -391,6 +391,25 @@ def test_las_decisiones_del_enriquecido_se_van_con_el_job(entorno):
     s.close()
 
 
+def test_la_fila_de_su_evolucion_se_va_con_el_job(entorno):
+    """`profile_runs` (decision 130) lleva `job_id`: en SQLite no hay CASCADE,
+    y sin borrarla a mano la FK impide borrar el job."""
+    from shared.evolucion import registrar
+    from shared.models import ProfileRun
+
+    api, Sesion, ids = entorno
+    s = Sesion()
+    registrar(s, ids["prueba"])
+    s.commit()
+    assert s.query(ProfileRun).filter(ProfileRun.job_id == ids["prueba"]).count() == 1
+    s.close()
+    _borrar(api, [ids["prueba"]])
+    s = Sesion()
+    assert s.query(ProfileRun).filter(ProfileRun.job_id == ids["prueba"]).count() == 0
+    assert s.query(Job).filter(Job.id == ids["prueba"]).count() == 0
+    s.close()
+
+
 def test_el_historial_de_limpiezas_tambien(entorno):
     """`cleaning_rulesets` lleva `job_id` y no se borraba: quedaba huerfano."""
     from shared.models import CleaningRuleset

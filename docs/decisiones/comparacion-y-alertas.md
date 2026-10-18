@@ -467,3 +467,79 @@
    modo lista; y con umbral 1 los avisos `warning` (título, contenido) de una
    lista saltan con una página: no van al veredicto ni al webhook, pero sí a la
    ficha.
+
+<a id="d130"></a>
+130. **La evolución de un perfil se agrega por ejecución, sin leer `links`, y
+   un punto que no es un censo entero no hace línea** (Ola 5.3, #36 F3). La
+   comparación de #32 contesta «qué cambió entre estos dos»; la pregunta del
+   seguimiento mensual es otra: ¿cómo va este sitio desde que lo llevamos?
+   Contestarla leyendo cada censo cada vez que alguien abre la ficha del
+   cliente es leer `urls`, `issues` —y, para la profundidad o el PageRank,
+   `links`— de 20 o 50 censos.
+   - **Una fila por ejecución en `profile_runs`** (`shared/evolucion.py`):
+     URLs internas por grupo de estado (2xx, 3xx, 4xx, 5xx, bloqueadas),
+     páginas HTML 2xx e indexables (el criterio de `/stats` y de la serie),
+     clics medios desde la home de las indexables con camino y cuántas no lo
+     tienen (90), incidencias por severidad, URLs con error y los 10 tipos más
+     frecuentes, el PageRank desperdiciado e indexable de
+     `jobs.pagerank_resumen` y las dos versiones. Tres consultas por `job_id`
+     —una sobre `urls`, dos sobre `issues`— y **ninguna sobre `links`** (37):
+     el test captura el SQL que se ejecuta y falla si aparece la tabla.
+   - **Solo cifras.** De quién es (cliente, perfil, programación), su tipo y
+     su estado se leen de `jobs` al pedir la evolución: un job se puede
+     reasignar o re-etiquetar después (`PATCH /api/jobs/{id}`), y una copia
+     aquí se quedaría desfasada. `analisis_version` sí se copia: es la versión
+     con la que se contaron ESTAS incidencias, y si ya no coincide con la del
+     job el punto sale `desfasado` hasta que se rehaga. El host de la primera
+     semilla también se copia (`profile_runs.host`), porque las semillas no
+     cambian y es lo único que hace falta de ellas: leer `jobs.seeds` de cada
+     ejecución para nombrar la serie por host costaba **233 kB por job** en el
+     censo de Lopesan sembrado desde el sitemap (3.040 semillas), y la portada
+     lee todos los terminados de todos los clientes. Solo los rastreos sin
+     agregar y sin perfil ni programación leen sus semillas.
+   - **Quién la escribe.** `run_analysis` al terminar —cubre el análisis
+     automático, el re-análisis a mano y el de la referencia (93), que cambia
+     las cifras de un censo viejo— y el worker al cerrar el rastreo, para lo
+     que no se analiza (un rastreo bloqueado o sin URLs, 28, 32, 103) o cuyo
+     análisis reventó: también son un punto de la serie, pintado aparte. El
+     worker no recuenta si la fila ya es de la versión del análisis actual;
+     solo pone al día la foto del estado. Las dos llamadas son best-effort con
+     el `try` cubriendo la función entera, import incluido (74, 77): un fallo
+     no deja `failed` un censo correcto (test que hace reventar el registro y
+     comprueba que el análisis se sella igual).
+   - **Lo que no es un punto comparable no hace línea ni escala**: fallido,
+     estancado, truncado (los motivos de la decisión 67), canario o prueba,
+     lista (128), sin agregar o desfasado. Se devuelven con `comparable=false`
+     y su motivo, y la gráfica los pone abajo con una ×. Un rastreo bloqueado
+     de 3 URLs en mitad de una serie de 5.000 hundiría la escala y se leería
+     como «el sitio se ha caído».
+   - **Un corte donde cambió la versión del análisis** (72), en el punto
+     posterior (`cambio_version`): el tramo sale discontinuo con una «v» que
+     dice de qué versión a cuál, y la tendencia del panel no dice «sube» ni
+     «baja» a través de él (`no_comparable`, como la 91). Desconocida cuenta
+     como cambio. El cambio de versión del RASTREO se marca también (una línea
+     tenue) pero no corta la tendencia, igual que en la 91: con un despliegue
+     por semana cortaría todas.
+   - **Una serie por perfil**; sin perfil, por programación, y si no, por host.
+     Dos perfiles del mismo cliente (el sitio y el blog, o un competidor)
+     mezclados en una línea serían censos de sitios distintos.
+   - **Panel de cartera**: la portada pasa de tarjetas a una tabla con el
+     último censo de cada cliente y la tendencia de errores de su serie con el
+     censo comparable más reciente (línea pequeña de los últimos 8, partida
+     donde cambió la versión). Una consulta para todos los clientes, y si la
+     tabla no existe todavía el panel sale sin tendencia en vez de fallar.
+
+   Relleno hacia atrás: `scripts/rellenar_evolucion.py`, de uno en uno, con
+   `statement_timeout` por job y un SAVEPOINT cada uno; `--simular` lo hace
+   todo en una transacción que se deshace (creando la tabla dentro). Medido
+   sobre `crawler_db` local el 2026-10-18 con `--simular`: **46 jobs
+   terminados en 4,6 s**, el más lento 1,32 s (el censo de Lopesan de julio,
+   8.764 URLs y **841.901 incidencias**), Druni (60.399 URLs) 0,90 s, y 0
+   fallos; tras el ROLLBACK, `profile_runs` no existe. La migración solo crea
+   la tabla (`migrar_profile_runs`), sin ALTER sobre `jobs` ni `urls`; su FK a
+   `jobs` pide un candado compatible con lecturas, y bajo el `lock_timeout` de
+   15 s falla en vez de esperar a un análisis en marcha.
+
+   Queda abierto: la evolución por segmento de negocio (125), que necesitaría
+   el agregado por `urls.segmento`; reglas y umbrales sobre estas métricas
+   (5.2); y el informe exportable (6.2), que leerá de aquí.

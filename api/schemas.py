@@ -572,6 +572,11 @@ class PanelCliente(BaseModel):
     n_rastreos: int = 0
     ultimo: CensoDeSerie | None = None
     anterior: CensoDeSerie | None = None
+    # De `profile_runs` (decision 130): la serie mas reciente con puntos
+    # comparables, su ultimo punto y la tendencia de errores (que no dice sube
+    # ni baja si entre los dos cambio la version del analisis). None = sin
+    # ninguna ejecucion comparable agregada.
+    evolucion: dict | None = None
 
 
 class PanelResponse(BaseModel):

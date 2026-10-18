@@ -80,6 +80,8 @@
 | GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
 | GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`), para precargar el modal |
+| GET | `/api/clients/{id}/evolucion` | Evolucion del cliente (decision 130): una serie por perfil (o programacion, o host) con los puntos de `profile_runs`, `comparable`/`motivo`, `cambio_version` y `tendencia_errores`; `?profile_id=`, `?limite=` (26). `sin_agregado` = terminados sin fila |
+| GET | `/api/clients/{id}/profiles/{pid}/evolucion` | Lo mismo, solo el perfil |
 | GET | `/api/enrichment/modulos` | Modulos del analisis enriquecido y si lanzar esta activado (decision 85) |
 | POST | `/api/jobs/{id}/enrichment/estimate` | Llamadas tras la cache, tokens, coste, tiempo y gasto del mes del cliente. No gasta nada |
 | POST | `/api/jobs/{id}/enrichment` | Crea y encola una ejecucion. **Exige `X-Enrichment-Token`**; sin `ENRICHMENT_TOKEN` en el entorno, 403 |
