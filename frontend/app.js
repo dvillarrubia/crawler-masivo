@@ -3987,8 +3987,11 @@ function _configDesdeForm(f) {
       max_outlinks: parseInt(f.max_outlinks) || 100,
     },
   };
-  // Las sondas, solo si se han tocado (ver SONDAS_CAMPOS).
-  const base = f._sondasBase || _sondasDeSerie();
+  // Las sondas, solo si se han tocado (ver SONDAS_CAMPOS). La base heredada
+  // solo vale con cliente: al volver a «Sin cliente» el modal no rehace el
+  // formulario, y sin cliente el servidor no hereda nada; lo que se ve tiene
+  // que mandarse contra lo de serie.
+  const base = (f.cliente_id && f._sondasBase) || _sondasDeSerie();
   for (const [campo, [seccion]] of Object.entries(SONDAS_CAMPOS)) {
     const v = _valorSonda(campo, f[campo]);
     if (v === null || v === _valorSonda(campo, base[campo])) continue;

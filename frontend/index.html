@@ -1000,7 +1000,8 @@
                   <span class="text-sm" x-text="m.mensaje.charAt(0).toUpperCase() + m.mensaje.slice(1) + (m.causa ? ' (' + m.causa + ')' : '')"></span>
                   <strong x-show="m.paginas" style="white-space:nowrap" x-text="fmt.num(m.paginas)"></strong>
                 </div>
-                <template x-for="e in (m.ejemplos || []).slice(0, 5)" :key="e.url">
+                <!-- Por posicion: las semillas pueden repetirse y un :key repetido deja el x-for sin pintar -->
+                <template x-for="(e, j) in (m.ejemplos || []).slice(0, 5)" :key="j">
                   <div class="text-dim" style="font-size:.78rem;word-break:break-all"
                        x-text="e.url + (e.antes !== undefined ? '  ·  ' + (e.antes ?? '—') + ' → ' + (e.ahora ?? '—') : (e.ahora !== undefined && e.ahora !== null ? '  ·  ' + e.ahora : '')) + (e.destino ? '  → ' + e.destino : '')"></div>
                 </template>
@@ -1726,7 +1727,9 @@
                 <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
                   <thead><tr><th>Host</th><th>Plantilla</th><th>Respuesta</th><th title="Páginas del censo con la huella de esta sonda, sobre las de su host o su plantilla">Con su huella</th></tr></thead>
                   <tbody>
-                    <template x-for="f in s4.filas" :key="f.clave">
+                    <!-- Por posicion: una sonda que redirige se repite en el destino con la
+                         MISMA clave (http -> https del mismo host) -->
+                    <template x-for="(f, i) in s4.filas" :key="i">
                       <tr :title="f.url + (f.redirige_a ? ' → ' + f.redirige_a : '')">
                         <td x-text="f.host"></td>
                         <td x-text="f.plantilla || 'raíz'"></td>

@@ -190,7 +190,7 @@ def test_lo_que_se_toca_se_manda():
 
 def test_lo_heredado_del_perfil_se_precarga_y_no_se_repite():
     r = _evaluar(
-        "() => { const f = _freshForm(); _formDesdeConfig(f, {crawl_behavior: "
+        "() => { const f = _freshForm(); f.cliente_id = 'c1'; _formDesdeConfig(f, {crawl_behavior: "
         "{comprobar_recursos: true, recursos_max: 900}, resource_types: {check_external_resources: true}});"
         " const sin = _configDesdeForm(f); f.comprobar_recursos = false;"
         " return [f.recursos_max, f.check_external_resources, sin, _configDesdeForm(f)]; }")
@@ -205,3 +205,117 @@ def test_lo_heredado_del_perfil_se_precarga_y_no_se_repite():
 def test_lo_tocado_antes_de_elegir_perfil_se_mantiene():
     c = _lanzado("f.comprobar_enlaces_externos = true; _formDesdeConfig(f, {max_depth: 2});")
     assert c["crawl_behavior"]["comprobar_enlaces_externos"] is True
+
+
+def test_al_quitar_el_cliente_lo_que_se_ve_es_lo_que_se_lanza():
+    """Con cliente, lo heredado se pinta y no se manda (el servidor lo hereda).
+    Si despues se vuelve a «Sin cliente», el modal no rehace el formulario:
+    las casillas siguen marcadas y, sin cliente, nadie hereda nada en el
+    servidor. Sin mandarlas, el job salia SIN la sonda que la pantalla decia."""
+    c = _evaluar(
+        "() => { const f = _freshForm(); f.cliente_id = 'c1';"
+        " _formDesdeConfig(f, {crawl_behavior: {comprobar_recursos: true, recursos_max: 900}});"
+        " f.cliente_id = ''; f.profile_id = ''; return _configDesdeForm(f); }")
+    assert c["crawl_behavior"]["comprobar_recursos"] is True
+    assert c["crawl_behavior"]["recursos_max"] == 900
+
+
+# ---------------------------------------------------- ficha en la pagina ----
+# Las funciones puras no ven las plantillas: un `:key` repetido en un x-for
+# hace que Alpine no pinte NINGUNA fila y lance un error. Se monta la pagina
+# de verdad (index.html + Alpine) con la API simulada.
+JID = "11111111-1111-1111-1111-111111111111"
+STATS = {"issues_by_type": [], "urls_by_status_group": [], "top_hosts": [],
+         "urls_by_resource_type": [], "total_urls": 3, "paginas_html": 3, "indexables": 3,
+         "no_indexables": 0, "internal_count": 3, "external_count": 0,
+         "click_depth_calculada": False}
+
+
+def _ficha(job: dict, veredicto: dict | None = None):
+    from playwright.async_api import async_playwright
+
+    fe = RAIZ / "frontend"
+    base = {"id": JID, "name": "t", "status": "completed", "seeds": ["https://sitio/"],
+            "config": {}, "client_id": None, "owner_id": None, "total_urls_crawled": 3,
+            "created_at": "2026-10-18T10:00:00", "started_at": None, "completed_at": None}
+    base.update(job)
+
+    async def run():
+        async with async_playwright() as p:
+            try:
+                nav = await p.chromium.launch(args=["--no-sandbox"])
+            except Exception as exc:  # pragma: no cover
+                pytest.skip(f"sin Chromium: {exc}")
+            pagina = await nav.new_page()
+            avisos = []
+            pagina.on("console", lambda m: avisos.append(m.text) if m.type in ("warning", "error")
+                      and "Failed to load resource" not in m.text else None)
+            pagina.on("pageerror", lambda e: avisos.append(f"pageerror: {e}"))
+
+            async def servir(route):
+                ruta = route.request.url.replace("http://t.local", "").split("?")[0]
+                if ruta.startswith("/static/"):
+                    f = fe / ruta[len("/static/"):]
+                    tipo = "text/css" if f.suffix == ".css" else "application/javascript"
+                    return await route.fulfill(body=f.read_text(encoding="utf-8"), content_type=tipo)
+                if ruta == f"/api/jobs/{JID}":
+                    return await route.fulfill(json=base)
+                if ruta == f"/api/jobs/{JID}/stats":
+                    return await route.fulfill(json=STATS)
+                if ruta == f"/api/jobs/{JID}/veredicto" and veredicto:
+                    return await route.fulfill(json=veredicto)
+                if ruta.startswith("/api/"):
+                    return await route.fulfill(status=404, json={"detail": "no"})
+                return await route.fulfill(body=(fe / "index.html").read_text(encoding="utf-8"),
+                                           content_type="text/html")
+
+            async def vacio(route):
+                await route.fulfill(body="", content_type="application/javascript")
+
+            await pagina.route("http://t.local/**", servir)
+            await pagina.route("https://cdn.plot.ly/**", vacio)
+            await pagina.route("https://fonts.googleapis.com/**", vacio)
+            try:
+                await pagina.goto(f"http://t.local/#/rastreos/{JID}")
+                await pagina.wait_for_function("window.Alpine !== undefined", timeout=15000)
+            except Exception as exc:  # pragma: no cover
+                pytest.skip(f"sin Alpine (CDN): {exc}")
+            await pagina.wait_for_selector('[data-testid="tarjeta-soft404"], [data-testid="veredicto-lista"]',
+                                           timeout=10000)
+            await pagina.wait_for_timeout(300)
+            filas = {
+                "soft404": await pagina.locator('[data-testid="tarjeta-soft404"] tbody tr').count(),
+                "ejemplos": await pagina.locator('[data-testid="veredicto-lista"] .text-dim[style*="word-break"]').count(),
+            }
+            await nav.close()
+            return filas, avisos
+
+    return asyncio.run(run())
+
+
+def test_una_sonda_que_redirige_en_el_mismo_host_pinta_sus_dos_filas():
+    """http -> https en el mismo host: el spider repite la sonda en el destino
+    con la MISMA clave (`sonda_soft404._repetir_sonda_en_destino`). Con la
+    clave como `:key`, Alpine no pintaba la tabla."""
+    sondas = [
+        {"clave": "sitio|raiz", "host": "sitio", "plantilla": None,
+         "url": "http://sitio/zz1", "status": 301, "redirige_a": "https://sitio/zz1"},
+        {"clave": "sitio|raiz", "host": "sitio", "plantilla": None,
+         "url": "https://sitio/zz1", "status": 404, "redirige_a": None},
+        {"clave": "sitio|/p/:s", "host": "sitio", "plantilla": "/p/:s",
+         "url": "https://sitio/p/zz", "status": 200, "redirige_a": None},
+    ]
+    filas, avisos = _ficha({"soft404": {"sondas": sondas}})
+    assert filas["soft404"] == 3
+    assert not avisos, avisos
+
+
+def test_el_veredicto_pinta_ejemplos_repetidos():
+    """`rastreo_bloqueado_por_robots` lista las semillas tal cual, y la API no
+    quita repetidas: dos ejemplos con la misma URL."""
+    v = {"veredicto": "falla", "urls_de_la_lista": 2, "no_concluyente_por": [],
+         "motivos": [{"tipo": "rastreo_bloqueado_por_robots", "mensaje": "robots.txt bloquea",
+                      "paginas": 2, "ejemplos": [{"url": "https://sitio/a"}, {"url": "https://sitio/a"}]}]}
+    filas, avisos = _ficha({"config": {"max_depth": 0}}, v)
+    assert filas["ejemplos"] == 2
+    assert not avisos, avisos
