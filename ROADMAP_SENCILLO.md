@@ -272,6 +272,13 @@ antes de lanzarlo, con un tope de gasto. Nada de pago se lanza solo.
   ([#13](https://github.com/dvillarrubia/crawler-masivo/issues/13)): que en el
   PageRank pese distinto un enlace del menú que uno dentro del texto, y detectar
   anchors genéricos tipo «leer más».
+- ⏳ **Poda de contenido** ([#198](https://github.com/dvillarrubia/crawler-masivo/issues/198)): qué páginas mantener,
+  reescribir o fusionar con otra, cruzado con clics y PageRank. La herramienta
+  propone y una persona decide; nunca propone quitar páginas largas, con
+  tráfico o con enlaces externos.
+- ⏳ **Preparación para buscadores de IA** ([#199](https://github.com/dvillarrubia/crawler-masivo/issues/199)): si las páginas
+  tienen datos que se puedan citar, si van al grano y si la portada dice con
+  claridad quién es la empresa. Mide preparación, no si te citan.
 - ⏳ **Scraping con control**
   ([#20](https://github.com/dvillarrubia/crawler-masivo/issues/20)): comprobar
   que los datos extraídos tienen sentido y parar el rastreo si dejan de tenerlo.
