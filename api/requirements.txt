@@ -43,3 +43,5 @@ httpx>=0.28
 # Enlaces de los censos superados en Parquet (`shared/archivo_enlaces.py`,
 # decision 95): 68 MB donde Postgres necesita 9-30 GB.
 pyarrow>=15.0
+# Exportacion a Excel con varias hojas (decision 145), en modo solo escritura.
+openpyxl>=3.1

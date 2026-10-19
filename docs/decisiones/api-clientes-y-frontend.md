@@ -414,3 +414,29 @@
    **Pendiente** de la 6.1: tokens por rol para la API (lectura frente a
    escritura) y acotar el resto de routers por cliente, que es lo que haría
    falta para darle al cliente el Explorador.
+
+<a id="d145"></a>
+145. **El censo en Excel con varias hojas, legible sin la herramienta** (Ola
+   6.3 de `docs/PLAN_MEJOR_CRAWLER.md`, sin Google Sheets). El CSV sirve para
+   cruzar datos; lo que se manda a un cliente o a desarrollo tiene que abrirse
+   y entenderse. `GET /api/jobs/{id}/export.xlsx` (Exportar → «Excel (varias
+   hojas)»), en `api/excel.py`:
+   - **Resumen** (cliente, sitio, cifras, nota y categorías, Search Console y
+     los avisos de fiabilidad del informe, decisión 138), **Qué arreglar**
+     (todas las incidencias por prioridad, decisión 136, con su ficha: qué es,
+     qué decide Google y cómo se arregla, y un ejemplo), **URLs** (las columnas
+     útiles del Explorador, las de Search Console incluidas), **Incidencias**
+     (hasta 500.000; el formato admite 1.048.576 filas y penguin tiene 959.633)
+     y **Google sin rastrear** (las URLs con clics que el rastreo no encontró).
+   - **Los nombres y las fichas se leen del frontend** (`incidencias.js` y
+     `app.js`), no se copian: dos catálogos acabarían diciendo cosas distintas.
+     El formato no lleva comillas escapadas y se lee con una expresión regular;
+     si cambiara, la hoja sale con el nombre técnico en vez de romperse (hay un
+     test que exige más de 100 fichas leídas).
+   - **Memoria plana**: `openpyxl` en solo escritura y las URLs por tramos de
+     1.000 con su sesión (decisiones 5 y 65); se escribe en un temporal que se
+     borra al servirlo. Medido con el censo de Lopesan contra producción en
+     solo lectura: 5.281 URLs, **26 s** (10 son `/insights`), **1,2 MB** y un
+     pico de **121 MB**.
+   Queda de la 6.3: Google Sheets para Looker Studio (la cuenta de servicio de
+   Search Console necesitaría además el alcance de Sheets y Drive).
