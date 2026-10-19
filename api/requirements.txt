@@ -45,3 +45,6 @@ httpx>=0.28
 pyarrow>=15.0
 # Exportacion a Excel con varias hojas (decision 145), en modo solo escritura.
 openpyxl>=3.1
+# Servidor MCP remoto en /mcp con OAuth (decision 151): fijado como en
+# mcp_servidor/requirements.txt (decision 148), la 2.x cambia de API sin avisar.
+mcp==2.3.0

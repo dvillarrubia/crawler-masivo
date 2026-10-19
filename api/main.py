@@ -1,5 +1,6 @@
 """FastAPI application entry point for the SEO crawler API."""
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,13 +16,34 @@ from shared.config import REDIS_URL
 from shared.database import init_db
 
 from api import dependencies
-from api.auth import AutenticacionMiddleware
+from api.auth import AutenticacionMiddleware, desactivada, token_configurado
+from api.mcp_despacho import DespachoMcp, EstadoMcp
 from api.routers import (
     almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
     results, segmentos, semantic, sesion, uso,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+estado_mcp = EstadoMcp()
+log = logging.getLogger(__name__)
+
+
+def _remoto_mcp():
+    """El servidor MCP remoto (decision 151), o None si no toca: lo apaga
+    `MCP_REMOTO=0`, y sin `API_TOKEN` no arranca (no habria con que autorizar
+    ni con que llamar a la API), salvo con la autenticacion desactivada."""
+    if (os.getenv("MCP_REMOTO") or "1").strip() == "0":
+        return None
+    token = token_configurado()
+    if token is None and not desactivada():
+        return None
+    try:
+        from mcp_servidor.herramientas import URL_POR_DEFECTO
+        from mcp_servidor.remoto import AlmacenRedis, Remoto
+    except ImportError as e:  # imagen sin el SDK de MCP
+        log.warning("Servidor MCP remoto apagado: %s", e)
+        return None
+    return Remoto(os.getenv("MCP_URL_PUBLICA") or URL_POR_DEFECTO, token or "", AlmacenRedis(REDIS_URL))
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +56,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     dependencies.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     dependencies.redis_client.ping()
 
-    yield
+    remoto = _remoto_mcp()
+    if remoto is None:
+        yield
+    else:
+        async with remoto.correr():
+            estado_mcp.remoto = remoto
+            try:
+                yield
+            finally:
+                estado_mcp.remoto = None
+                await remoto.almacen.cerrar()
 
     # Shutdown ---------------------------------------------------------
     if dependencies.redis_client is not None:
@@ -70,6 +102,10 @@ if _ORIGENES:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# El servidor MCP remoto (decision 151) por fuera de todo: `/mcp` y las rutas
+# de OAuth llevan su propia autenticacion (token del conector), no la de `/api`.
+app.add_middleware(DespachoMcp, estado=estado_mcp)
 
 # Routers
 app.include_router(jobs.router)

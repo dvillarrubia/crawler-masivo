@@ -464,3 +464,52 @@
    Probado de punta a punta: el servidor arrancado por stdio con el cliente del
    SDK, las ocho herramientas listadas y `clientes` y `problemas` respondiendo
    con los datos de producción.
+
+<a id="d151"></a>
+151. **El servidor MCP en remoto, en `/mcp` de producción, con OAuth; y con
+   escritura: lanzar, cancelar y programar rastreos** (amplía la 148).
+   claude.ai, Cowork, Claude Desktop y la app del móvil solo conectan con un
+   servidor MCP remoto (un «conector personalizado»: URL https + OAuth); el de
+   stdio de la 148 solo valía para Claude Code en un ordenador con el repo.
+   Ahora la API sirve el mismo servidor en `https://<produccion>/mcp`, y basta
+   esa URL en cualquier cliente y en cualquier dispositivo.
+   - **Dentro de la API y no como servicio aparte**: mismo contenedor, mismo
+     dominio y mismo Traefik, sin tocar `docker-compose.vps.yml`. Un ASGI por
+     fuera de todo (`api/mcp_despacho.py`) manda `/mcp`, `/authorize`,
+     `/token`, `/register`, `/revoke`, `/oauth/entrar` y
+     `/.well-known/oauth-*` al servidor MCP; el resto sigue a FastAPI. Sin
+     sesiones (`stateless_http`) ni SSE: cada llamada es una petición, y un
+     reinicio de la API no deja a nadie con una sesión colgada.
+   - **Las herramientas llaman a la API por dentro** (`127.0.0.1:8000`) con
+     `API_TOKEN`: lo que ve el asistente es lo que ve la interfaz, con las
+     mismas validaciones, sin una segunda copia de las consultas.
+   - **OAuth 2.1 con registro dinámico y PKCE** (el servidor de autorización
+     del SDK, con `mcp_servidor/remoto.py` de proveedor). Autorizar es escribir
+     la clave de acceso de la interfaz (decisión 134), o un clic si el navegador
+     ya tiene la sesión de `/entrar`. No hay usuarios ni roles nuevos.
+   - **Solo se registran redirecciones de Claude**: `claude.ai`/`claude.com`
+     (`/api/mcp/auth_callback`) y `localhost` (Claude Code). Otra aplicación no
+     puede conseguir un token aunque alguien pique en un enlace suyo;
+     `MCP_REDIRECCIONES_EXTRA` añade URIs exactas.
+   - **Tokens en Redis, guardados por su hash**, con la huella de `API_TOKEN`:
+     cambiar la clave cierra también todos los conectores. Acceso 8 h, refresco
+     90 días y rotado en cada uso. Cada dispositivo o aplicación autoriza el
+     suyo y conviven sin límite; un conector de claude.ai vale ya para la web,
+     el escritorio, el móvil y Cowork de esa cuenta.
+   - **Escritura en dos pasos** (`mcp_servidor/acciones.py`), como pedía la
+     148: `lanzar_rastreo` (también canario, el de `lanzar_job.py`: lo comprueba
+     un test), `cancelar_rastreo`, `programar_rastreo` y `editar_programacion`
+     (pausar, reanudar, cambiar el cuándo). Sin `confirmar` no escriben nada y
+     devuelven lo que harían: cliente, perfil, semillas, configuración efectiva
+     y **lo que ya está rastreando producción**; con `confirmar=true` lo hacen
+     por los mismos endpoints que la interfaz. Las de escritura no llevan
+     `read_only_hint` (cancelar va como destructiva), así que Claude pide
+     permiso además. Avisa de las claves de config que la API tira (33).
+     **Borrar no está**: ni rastreos ni programaciones (se pausan).
+   - **Toda la data**: `endpoints` lista los GET de la API (de su OpenAPI) y
+     `consultar` hace cualquiera de ellos, menos las descargas (CSV, Excel,
+     backup, HTML) y con un tope de 60.000 caracteres que dice cómo pedir menos.
+   - Se apaga con `MCP_REMOTO=0`, y sin `API_TOKEN` no arranca.
+   Probado de punta a punta con el cliente oficial del SDK contra uvicorn: 401,
+   descubrimiento, registro, autorizar con la clave, token, las 17
+   herramientas, y un lanzamiento simulado que no escribe nada.

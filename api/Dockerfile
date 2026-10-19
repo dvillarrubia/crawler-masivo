@@ -21,6 +21,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY shared/ /app/shared/
 COPY api/ /app/api/
+# El servidor MCP remoto (decision 151) lo sirve la API en /mcp.
+COPY mcp_servidor/ /app/mcp_servidor/
 COPY POC_centro_semantico/ /app/POC_centro_semantico/
 COPY frontend/ /app/frontend/
 COPY scripts/ /app/scripts/
