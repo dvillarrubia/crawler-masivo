@@ -1117,3 +1117,43 @@
    1.649 clics: Google no está aceptando ese canonical); 47 indexables sin
    impresiones; 1 página con tráfico que hoy da 404; y 0 huérfanas con tráfico,
    porque el análisis no marca ninguna huérfana en ese censo.
+
+<a id="d144"></a>
+144. **La inspección de URLs de Google, por muestra diaria: lo que el rastreo
+   no puede saber, y sin confundir lo que Google vio con lo que hay hoy** (Ola
+   4.4 y combinaciones 12-14 de `docs/INVESTIGACION_SEARCH_CONSOLE.md`). La
+   API de inspección dice, de una URL, si Google la tiene indexada (y por qué
+   no) y qué canonical ha elegido. Da 2.000 al día por propiedad y cada una
+   tarda unos 7 s (medido con Lopesan), así que es una **muestra rotatoria**
+   (`shared/gsc_inspeccion.py`): primero las URLs del último censo con clics
+   que no son indexables, después las indexables por impresiones, las
+   indexables sin impresiones y el resto; nada inspeccionado hace menos de 7
+   días. `SEARCH_CONSOLE_INSPECCIONES_DIA` (500; 0 la apaga), en 6 hilos: 30
+   URLs reales en 34 s, unos 10 minutos al día. Va en el mismo hilo del
+   worker, después de la descarga diaria; un 401/403/429 corta la tanda y
+   queda en `gsc_estado.inspeccion_motivo`. Tabla `gsc_inspecciones`, la
+   última por URL, con la cobertura en castellano (`languageCode: es`).
+   - **`indexable_no_indexada_por_google`** (warning): el rastreo la da por
+     indexable y Google no la tiene, con su motivo («Rastreada: actualmente sin
+     indexar», «Google no reconoce esta URL»...).
+   - **Lo que Google vio frente a lo que hay hoy.** `userCanonical` es el
+     canonical que Google vio en SU última visita, no el de hoy. Si difiere del
+     que capturó el rastreo, es **`google_tiene_canonical_antiguo`** (info: se
+     arregla con su siguiente visita o pidiendo la reindexación); solo si
+     coincide y aun así Google eligió otra URL es
+     **`google_elige_otro_canonical`** (warning: Google ignora la señal).
+     Medido en Lopesan: fichas de habitación en alemán que Google vio
+     canonicalizadas a la versión en castellano, y una a
+     `webserver-lopesan-prd.lfr.cloud` —el fallo de octubre ya arreglado—, que
+     hoy son autocanónicas. Con una sola regla, el informe habría dicho que
+     Google ignora un canonical que la página ya no tiene.
+   - El análisis usa las inspecciones de 30 días antes a 14 después del
+     rastreo; `jobs.gsc_resumen.inspeccion` cuenta inspeccionadas, indexadas,
+     no indexadas y los dos casos de canonical, y el informe lo dice en una
+     línea. La tarjeta de Search Console del cliente enseña la última tanda.
+   Muestra real de Lopesan (30 URLs): las 10 indexables con más impresiones,
+   indexadas; de 10 indexables **sin** impresiones, solo 4 indexadas (3 como
+   alternativa de otra, 2 duplicadas con otro canonical elegido por Google, 1
+   que Google no conoce); de 10 con clics y no indexables, 9 alternativas bien
+   resueltas y la oferta canonicalizada a `lfr.cloud` indexada igualmente con
+   la URL de Lopesan.

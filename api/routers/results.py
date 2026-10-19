@@ -3513,6 +3513,7 @@ def _trafico_del_informe(db: Session, job: Job) -> dict | None:
                                      "clics_en_variantes", "urls_fuera_del_censo", "clics_fuera_del_censo",
                                      "cubre_la_ventana")}
     salida["fuera_del_censo"] = (r.get("fuera_del_censo") or [])[:5]
+    salida["inspeccion"] = r.get("inspeccion")
     for tipo in ("trafico_en_pagina_perdida", "huerfana_con_trafico", "trafico_en_variante_con_parametros"):
         filas = (db.query(Url.url, Issue.details).join(Url, Url.id == Issue.url_id)
                  .filter(Issue.job_id == job.id, Issue.issue_type == tipo).all())

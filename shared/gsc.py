@@ -281,6 +281,9 @@ def pendientes(db, ahora: datetime) -> list[tuple[Any, dict]]:
                 continue
             e = (db.query(GscEstado).filter(GscEstado.cliente_id == cliente.id,
                                             GscEstado.propiedad == propiedad).one_or_none())
-            if toca(e, ahora):
+            from shared.gsc_inspeccion import toca as toca_inspeccion
+
+            # Tambien si solo falta la inspeccion del dia (decision 144).
+            if toca(e, ahora) or toca_inspeccion(e, ahora):
                 salida.append((cliente, integ))
     return salida

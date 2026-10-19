@@ -263,6 +263,44 @@ class GscEstado(Base):
     # Dias en los que Google corto en el tope de filas (50.000/dia): ahi no se
     # puede afirmar que una URL no tuvo impresiones.
     dias_truncados = Column(JSON, nullable=True)
+    # Inspeccion de URLs (decision 144): la ultima tanda del dia.
+    inspeccion_ultima = Column(DateTime(timezone=True), nullable=True)
+    inspeccion_hechas = Column(Integer, nullable=True)
+    inspeccion_motivo = Column(Text, nullable=True)
+
+
+class GscInspeccion(Base):
+    """Lo que Google dice de una URL concreta (URL Inspection API, decision 144).
+
+    Una fila por (cliente, propiedad, URL): la ultima inspeccion. Google da
+    2.000 al dia por propiedad, asi que es una MUESTRA rotatoria, no un censo:
+    primero las URLs con trafico en riesgo, despues las que mas impresiones
+    tienen y las que no tienen ninguna, y las demas por antiguedad. Lo que
+    importa: si Google la tiene indexada (`verdict`, `cobertura` en castellano)
+    y que canonical ha elegido Google frente al que declara la pagina.
+    """
+
+    __tablename__ = "gsc_inspecciones"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "propiedad", "url_clave", name="uq_gsc_inspeccion"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True)
+    propiedad = Column(String(512), nullable=False)
+    url = Column(Text, nullable=False)
+    url_clave = Column(String(64), nullable=False)
+    fecha = Column(DateTime(timezone=True), nullable=False)
+    verdict = Column(String(24), nullable=True)            # PASS | NEUTRAL | FAIL | PARTIAL
+    cobertura = Column(Text, nullable=True)                # coverageState, en castellano
+    indexacion = Column(String(64), nullable=True)         # indexingState
+    robots = Column(String(32), nullable=True)             # robotsTxtState
+    descarga = Column(String(48), nullable=True)           # pageFetchState
+    canonical_google = Column(Text, nullable=True)
+    canonical_usuario = Column(Text, nullable=True)
+    ultimo_rastreo = Column(DateTime(timezone=True), nullable=True)
+    rastreada_como = Column(String(16), nullable=True)
+    error = Column(Text, nullable=True)
 
 
 class EnlaceCliente(Base):

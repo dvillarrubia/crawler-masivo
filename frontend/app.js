@@ -4099,7 +4099,7 @@ const EXP_TABS = [
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
   { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_vacio','h1_multiple','h1_duplicate'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
-  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento'],
+  { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento','google_elige_otro_canonical','google_tiene_canonical_antiguo'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
   // Las redirecciones no son HTML: el ambito va sobre las internas.
   { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
@@ -4111,7 +4111,7 @@ const EXP_TABS = [
   { key: 'a_ia',       label: 'IA',            icon: 'sparkles',     filter: HTML_INTERNO, ambito: ['nosnippet_en_indexable','max_snippet_restrictivo','bot_busqueda_ia_bloqueado','contenido_solo_con_js'],
     columns: ['url','status_code','indexable','meta_robots','x_robots_tag','pagerank_score'] },
   // Decision 142: Search Console cruzado con el rastreo.
-  { key: 'a_trafico',  label: 'Tráfico de Google', icon: 'trending-up', filter: { is_internal: true }, ambito: ['trafico_en_pagina_perdida','trafico_en_redireccion','huerfana_con_trafico','indexable_sin_impresiones','trafico_en_variante_con_parametros'],
+  { key: 'a_trafico',  label: 'Tráfico de Google', icon: 'trending-up', filter: { is_internal: true }, ambito: ['trafico_en_pagina_perdida','trafico_en_redireccion','huerfana_con_trafico','indexable_sin_impresiones','trafico_en_variante_con_parametros','indexable_no_indexada_por_google','google_elige_otro_canonical','google_tiene_canonical_antiguo'],
     columns: ['url','status_code','indexable','indexability_status','gsc_clics','gsc_impresiones','gsc_posicion','inlinks_count'] },
   // Decision 140: el HTML del servidor frente al render, por muestra de plantilla.
   { key: 'a_js',       label: 'JavaScript',    icon: 'code',         filter: HTML_INTERNO, ambito: ['noindex_solo_en_crudo','noindex_solo_al_renderizar','canonical_cambia_al_renderizar','nofollow_cambia_al_renderizar','contenido_solo_con_js','cambia_al_renderizar','respuesta_cambia_al_renderizar','redireccion_por_javascript'],

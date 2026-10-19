@@ -225,6 +225,8 @@ def avisar(an) -> None:
                      Issue.issue_type.in_(("orphan_page", "sitemap_orphan")))
              .delete(synchronize_session=False))
 
+    inspeccion = _avisar_inspeccion(an, job, del_censo, hasta)
+
     total_clics = sum(d["clics"] for d in por_clave.values())
     job.gsc_resumen = {
         "desde": desde.isoformat(), "hasta": hasta.isoformat(),
@@ -236,7 +238,87 @@ def avisar(an) -> None:
         "clics_en_variantes": sum(v["clics"] for v in variantes.values()),
         "urls_fuera_del_censo": len(fuera), "clics_fuera_del_censo": sum(c for c, _, _ in fuera),
         "fuera_del_censo": [{"url": url, "clics": c, "impresiones": i} for c, i, url in fuera[:MAX_FUERA]],
+        "inspeccion": inspeccion,
     }
     an._flush_issues()
     logger.info("Search Console del job %s: %d clics en la ventana, %d en URLs del censo, %d URLs fuera",
                 an.job_id, total_clics, clics_en_censo, len(fuera))
+
+
+INSPECCION_ANTES_DIAS = 30
+INSPECCION_DESPUES_DIAS = 14
+
+
+def _avisar_inspeccion(an, job, del_censo: dict, dia) -> dict | None:
+    """Lo que dice la inspeccion de URLs de Google de las paginas del censo
+    (decision 144), con las inspecciones de 30 dias antes a 14 despues del
+    rastreo: es una muestra diaria y rotatoria.
+
+    - ``indexable_no_indexada_por_google`` (warning): el rastreo la da por
+      indexable (200, sin noindex, autocanonica) y Google dice que no la tiene
+      en el indice; en los detalles, el motivo de Google («Rastreada:
+      actualmente sin indexar», «Descubierta: actualmente sin indexar»...).
+    - ``google_elige_otro_canonical`` (warning): lo que Google vio declarado es
+      lo mismo que la pagina declara hoy, y aun asi ha elegido otra URL. Es la
+      prueba de que Google ignora la senal.
+    - ``google_tiene_canonical_antiguo`` (info): en su ultima visita Google vio
+      un canonical distinto del que la pagina declara hoy. Medido en Lopesan:
+      fichas en aleman que Google vio canonicalizadas a la version en
+      castellano o a `webserver-lopesan-prd.lfr.cloud` (el fallo de
+      octubre, ya arreglado) y que hoy son autocanonicas. Decir «Google
+      ignora tu canonical» ahi seria falso: se arregla con la siguiente
+      visita, o pidiendo la reindexacion.
+    """
+    from shared.indexabilidad import misma_url
+    from shared.models import GscInspeccion
+
+    desde = datetime.combine(dia - timedelta(days=INSPECCION_ANTES_DIAS), datetime.min.time(), timezone.utc)
+    hasta = datetime.combine(dia + timedelta(days=INSPECCION_DESPUES_DIAS), datetime.max.time(), timezone.utc)
+    try:
+        filas = (an.session.query(GscInspeccion)
+                 .filter(GscInspeccion.cliente_id == job.cliente_id, GscInspeccion.fecha >= desde,
+                         GscInspeccion.fecha <= hasta, GscInspeccion.error.is_(None)).all())
+    except Exception:  # noqa: BLE001 — sin la tabla
+        an.session.rollback()
+        return None
+    if not filas:
+        return None
+    from shared.models import HtmlMeta
+
+    cuenta = {"inspeccionadas": 0, "indexadas": 0, "no_indexadas": 0, "canonical_distinto": 0,
+              "canonical_antiguo": 0}
+    ids = [del_censo[i.url_clave].id for i in filas if i.url_clave in del_censo]
+    canonical_hoy: dict[int, str] = {}
+    for k in range(0, len(ids), 1000):
+        for uid, href, cab in an.session.execute(
+                select(HtmlMeta.url_id, HtmlMeta.canonical_href, HtmlMeta.canonical_header)
+                .where(HtmlMeta.url_id.in_(ids[k:k + 1000]))):
+            if href or cab:
+                canonical_hoy[uid] = href or cab
+    for i in filas:
+        u = del_censo.get(i.url_clave)
+        if u is None or not u.is_internal or u.status_code != 200:
+            continue
+        cuenta["inspeccionadas"] += 1
+        if i.verdict == "PASS":
+            cuenta["indexadas"] += 1
+        detalles = {"cobertura": i.cobertura, "verdict": i.verdict,
+                    "inspeccionada": i.fecha.isoformat() if i.fecha else None,
+                    "ultimo_rastreo_google": i.ultimo_rastreo.isoformat() if i.ultimo_rastreo else None}
+        if u.indexable and i.verdict != "PASS":
+            cuenta["no_indexadas"] += 1
+            an._add_issue(u.id, "indexable_no_indexada_por_google", "warning", detalles)
+        hoy = canonical_hoy.get(u.id) or u.url
+        if i.canonical_usuario and not misma_url(hoy, i.canonical_usuario):
+            cuenta["canonical_antiguo"] += 1
+            an._add_issue(u.id, "google_tiene_canonical_antiguo", "info",
+                          dict(detalles, canonical_hoy=hoy, canonical_visto_por_google=i.canonical_usuario,
+                               canonical_de_google=i.canonical_google))
+        elif (i.canonical_usuario and i.canonical_google
+                and not misma_url(i.canonical_usuario, i.canonical_google)):
+            cuenta["canonical_distinto"] += 1
+            an._add_issue(u.id, "google_elige_otro_canonical", "warning",
+                          dict(detalles, canonical_declarado=i.canonical_usuario,
+                               canonical_de_google=i.canonical_google))
+    an._flush_issues()
+    return cuenta

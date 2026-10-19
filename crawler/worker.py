@@ -1541,10 +1541,20 @@ def _sincronizar_gsc(cliente_id: str, propiedad: str) -> None:
                          None) if cliente else None
             if integ is None:
                 return
-            e = sincronizar(s, cliente, integ, ahora=datetime.now(timezone.utc))
-            if e is not None:
-                logger.info("Search Console de %s (%s): %s %s", cliente.slug, propiedad, e.estado,
-                            e.motivo or f"{e.primer_dia} a {e.ultimo_dia}, {e.filas} filas")
+            from shared.gsc import _estado, toca
+            from shared.gsc_inspeccion import inspeccionar, toca as toca_inspeccion
+
+            ahora = datetime.now(timezone.utc)
+            e = _estado(s, cliente.id, propiedad)
+            if toca(e, ahora):
+                e = sincronizar(s, cliente, integ, ahora=ahora)
+                if e is not None:
+                    logger.info("Search Console de %s (%s): %s %s", cliente.slug, propiedad, e.estado,
+                                e.motivo or f"{e.primer_dia} a {e.ultimo_dia}, {e.filas} filas")
+            # Despues de la descarga, la muestra diaria de inspeccion (decision 144).
+            if e is not None and toca_inspeccion(e, datetime.now(timezone.utc)):
+                n = inspeccionar(s, cliente, integ)
+                logger.info("Search Console de %s (%s): %d URLs inspeccionadas", cliente.slug, propiedad, n)
         finally:
             s.close()
     except Exception:

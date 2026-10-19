@@ -37,6 +37,10 @@ def main() -> None:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS click_depth INTEGER"))
         # Search Console en la ventana del rastreo (decision 142).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_clics INTEGER"))
+        # Inspeccion de URLs de Search Console (decision 144).
+        conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_ultima TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_hechas INTEGER"))
+        conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_motivo TEXT"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_impresiones INTEGER"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_posicion DOUBLE PRECISION"))
         # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.

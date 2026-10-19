@@ -867,6 +867,8 @@
                     <div class="text-sm" x-show="e.motivo" :class="e.estado === 'error' ? 'text-red' : 'text-dim'" x-text="e.motivo" style="margin-top:.3rem"></div>
                     <div class="text-sm text-dim" x-show="e.ultimo_dia" style="margin-top:.3rem"
                          x-text="'Datos del ' + fmt.dia(e.primer_dia) + ' al ' + fmt.dia(e.ultimo_dia) + ' · última descarga ' + fmt.date(e.ultimo_ok) + (e.dias_truncados ? ' · ' + e.dias_truncados + ' días cortados en el tope de Google' : '')"></div>
+                    <div class="text-sm text-dim" x-show="e.inspeccion_ultima" style="margin-top:.3rem"
+                         x-text="'Inspección de URLs: ' + fmt.num(e.inspeccion_hechas || 0) + ' comprobadas el ' + fmt.date(e.inspeccion_ultima) + (e.inspeccion_motivo ? ' · ' + e.inspeccion_motivo : '')"></div>
                     <template x-if="e.ultimos_28_dias">
                       <div class="text-sm" style="margin-top:.3rem">
                         Últimos 28 días: <strong x-text="fmt.num(e.ultimos_28_dias.clics)"></strong> clics ·
@@ -3691,6 +3693,9 @@
                     <span x-text="fmt.num(informe.trafico.huerfana_con_trafico.paginas) + (informe.trafico.huerfana_con_trafico.paginas === 1 ? ' página' : ' páginas') + ' con tráfico que ninguna otra página del sitio enlaza (' + fmt.num(informe.trafico.huerfana_con_trafico.clics) + ' clics)'"></span></li>
                   <li x-show="informe.trafico.trafico_en_variante_con_parametros.paginas">
                     <span x-text="fmt.num(informe.trafico.trafico_en_variante_con_parametros.paginas) + (informe.trafico.trafico_en_variante_con_parametros.paginas === 1 ? ' página cuyo tráfico se reparte' : ' páginas cuyo tráfico se reparte') + ' con variantes con parámetros (' + fmt.num(informe.trafico.trafico_en_variante_con_parametros.clics) + ' clics en las variantes)'"></span></li>
+                  <template x-if="informe.trafico.inspeccion && informe.trafico.inspeccion.inspeccionadas">
+                    <li x-text="'Google confirma indexadas ' + fmt.num(informe.trafico.inspeccion.indexadas) + ' de ' + fmt.num(informe.trafico.inspeccion.inspeccionadas) + ' páginas comprobadas una a una' + (informe.trafico.inspeccion.no_indexadas ? '; ' + fmt.num(informe.trafico.inspeccion.no_indexadas) + ' que deberían estarlo no lo están' : '') + (informe.trafico.inspeccion.canonical_distinto ? '; en ' + fmt.num(informe.trafico.inspeccion.canonical_distinto) + ' ha elegido otro canonical' : '') + (informe.trafico.inspeccion.canonical_antiguo ? '; en ' + fmt.num(informe.trafico.inspeccion.canonical_antiguo) + ' aún tiene un canonical que la página ya no declara' : '') + '.'"></li>
+                  </template>
                   <li x-show="informe.trafico.urls_fuera_del_censo">
                     <span x-text="fmt.num(informe.trafico.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(informe.trafico.clics_fuera_del_censo) + ' clics)'"></span></li>
                 </ul>

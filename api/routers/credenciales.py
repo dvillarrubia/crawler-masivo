@@ -161,7 +161,9 @@ def estado_gsc(client_id: uuid.UUID, db: Session = Depends(get_session)):
             fila.update(estado=e.estado, motivo=e.motivo or fila["motivo"], cuenta=e.cuenta or fila["cuenta"],
                         ultimo_intento=e.ultimo_intento, ultimo_ok=e.ultimo_ok, pedida_en=e.pedida_en,
                         primer_dia=e.primer_dia, ultimo_dia=e.ultimo_dia, filas=e.filas,
-                        dias_truncados=len(e.dias_truncados or []))
+                        dias_truncados=len(e.dias_truncados or []),
+                        inspeccion_ultima=e.inspeccion_ultima, inspeccion_hechas=e.inspeccion_hechas,
+                        inspeccion_motivo=e.inspeccion_motivo)
             if e.ultimo_dia:
                 desde = e.ultimo_dia.fromordinal(e.ultimo_dia.toordinal() - 27)
                 clics, imp, urls = (db.query(func.sum(GscPagina.clics), func.sum(GscPagina.impresiones),
