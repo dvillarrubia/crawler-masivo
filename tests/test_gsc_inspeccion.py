@@ -172,3 +172,12 @@ def test_los_avisos_del_analisis(s):
     assert not any(u in (ok.id, vieja.id) for u, _ in vistos)
     assert s.get(Job, j.id).gsc_resumen["inspeccion"] == {
         "inspeccionadas": 4, "indexadas": 3, "no_indexadas": 1, "canonical_distinto": 1, "canonical_antiguo": 1}
+
+
+
+def test_una_tanda_fallida_se_reintenta_a_la_hora():
+    e = GscEstado(estado="ok", inspeccion_ultima=AHORA, inspeccion_hechas=None, inspeccion_motivo="sin tabla")
+    assert not GI.toca(e, AHORA + timedelta(minutes=30))
+    assert GI.toca(e, AHORA + timedelta(hours=1))
+    e.inspeccion_hechas = 0      # termino, aunque sin nada que inspeccionar
+    assert not GI.toca(e, AHORA + timedelta(hours=2))
