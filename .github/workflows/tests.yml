@@ -95,7 +95,7 @@ jobs:
           python -m pip install -q --upgrade pip
           pip install -q fastapi 'sqlalchemy>=2.0,<3.0' 'pydantic>=2.9' psycopg2-binary \
             'w3lib>=2.1.2' tldextract 'apscheduler>=3.10' redis httpx python-multipart pgvector 'pyarrow>=15.0' \
-            'parsel>=1.9' 'regex>=2024.11.6'
+            'parsel>=1.9' 'regex>=2024.11.6' 'openpyxl>=3.1'
           pip install -q -r tests/requirements.txt
       - name: pytest
         env:
@@ -136,7 +136,7 @@ jobs:
           tests/test_modo_lista.py tests/test_veredicto_api.py tests/test_robots_api.py tests/test_autenticacion.py
           tests/test_sitemaps_api.py tests/test_evolucion.py tests/test_evolucion_api.py
           tests/test_comparacion_ampliada.py tests/test_diff_api.py tests/test_backup_comparacion.py
-          tests/test_reglas_api.py tests/test_prioridad.py tests/test_informe_api.py tests/test_incidentes_api.py tests/test_gsc.py tests/test_credenciales_api.py tests/test_compartido_api.py tests/test_insights_cache.py
+          tests/test_reglas_api.py tests/test_prioridad.py tests/test_informe_api.py tests/test_incidentes_api.py tests/test_gsc.py tests/test_credenciales_api.py tests/test_compartido_api.py tests/test_insights_cache.py tests/test_excel_api.py
 
   contrato:
     name: Contrato de /systemone contra los SDK oficiales

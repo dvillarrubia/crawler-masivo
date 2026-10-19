@@ -1306,6 +1306,11 @@
                     <i data-lucide="file-check-2" style="width:14px;height:14px"></i>
                     <span>Informe para el cliente<span class="menu-sub">Nota, qué arreglar primero y qué ha cambiado; se guarda como PDF</span></span></button>
                   <hr>
+                  <!-- Decision 145: el censo en Excel, con varias hojas. -->
+                  <button role="menuitem" @click="menuAbierto = ''; window.location.href = API + '/jobs/' + job.id + '/export.xlsx'"
+                          :disabled="!['completed','failed','cancelled'].includes(job.status)" data-testid="exportar-excel">
+                    <i data-lucide="sheet" style="width:14px;height:14px"></i>
+                    <span>Excel (varias hojas)<span class="menu-sub">Resumen, qué arreglar con su ficha, URLs, incidencias y Search Console</span></span></button>
                   <button role="menuitem" @click="menuAbierto = ''; exportCSV()">
                     <i data-lucide="table" style="width:14px;height:14px"></i>
                     <span>URLs con sus metadatos (CSV)<span class="menu-sub">Una fila por URL, compatible con Excel</span></span></button>

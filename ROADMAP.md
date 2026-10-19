@@ -203,6 +203,15 @@ reindexación). En Lopesan aparecen fichas en alemán que Google aún ve
 canonicalizadas a la versión en castellano o al servidor de pruebas.
 [Decisión 144](docs/decisiones/incidencias.md#d144).
 
+### El rastreo en Excel (19 de octubre)
+
+En la ficha de un rastreo, Exportar → **Excel (varias hojas)**: un fichero que
+se puede mandar tal cual, con el resumen, qué arreglar primero (cada
+incidencia con qué es, qué decide Google y cómo se arregla), todas las URLs con
+sus columnas útiles —también clics e impresiones de Google—, las incidencias y
+las URLs con tráfico que el rastreo no encontró.
+[Decisión 145](docs/decisiones/api-clientes-y-frontend.md#d145).
+
 ### Search Console cruzado con el rastreo (19 de octubre)
 
 Con Search Console conectado, cada rastreo se cruza con los 90 días de datos

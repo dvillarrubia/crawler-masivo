@@ -3697,3 +3697,37 @@ def get_informe(
         "ia": _ia_del_informe(db, job),
         "generado": datetime.now(timezone.utc),
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/export.xlsx — el censo en Excel con varias hojas
+# (Ola 6.3, decision 145)
+# ---------------------------------------------------------------------------
+@router.get("/export.xlsx")
+def export_excel(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Resumen, que arreglar (con la ficha de cada incidencia), URLs,
+    incidencias y lo de Google que el rastreo no encontro (`api/excel.py`).
+    Se escribe en un temporal con openpyxl en solo escritura y se borra al
+    terminar de servirlo."""
+    import os
+    import tempfile
+
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    from api.excel import escribir
+
+    job = _get_job_or_404(job_id, db)
+    fd, ruta = tempfile.mkstemp(suffix=".xlsx", prefix="censo-")
+    os.close(fd)
+    try:
+        escribir(ruta, db, job_id)
+    except Exception:
+        os.unlink(ruta)
+        raise
+    host = (_raiz_del_sitio((job.seeds or [None])[0]) or "censo").split("//")[-1]
+    fecha = (job.completed_at or job.created_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return FileResponse(
+        ruta, filename=f"{host}-{fecha}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        background=BackgroundTask(os.unlink, ruta))
