@@ -117,7 +117,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 - **#101 Recursos embebidos**: rotos y peso, por recurso y no por aparición (64b), con un presupuesto separado de `max_urls`. Activar el `check_external_resources` que hoy nadie lee.
 - **#35 Logs**: verificación de Googlebot y bots de IA por DNS inverso, en Parquet (95) y asociados al cliente. Valor alto, pero es L, así que va cuando haya un cliente que dé los logs.
 - **Nueva:** «Core Web Vitals por plantilla (PSI/CrUX)», con `credencial('PAGESPEED_*')` y muestreo por `firma_de_ruta`.
-- **Nueva:** «Anclas: agregado por destino y lista determinista de anclas genéricas por idioma» (separar de #13). Los n-gramas con sugerencias de enlazado, después.
+- **Nueva:** «Anclas: agregado por destino y lista determinista de anclas genéricas por idioma» (separar de #13). Los n-gramas con sugerencias de enlazado, después. **Hecho (decisión 147)**: `ancla_generica` por destino; Lopesan 126 (el widget «see more» del blog), Saunier 21.
 - **Nueva:** «Datos estructurados: formato de valores (ISO 8601, URL absoluta, moneda, availability)». **Hecho (decisión 146)**, salvo la URL absoluta (Google resuelve las relativas): fechas, precio, moneda, valoración, disponibilidad y recuentos; en penguin, 55 reseñas con la fecha en dd/mm/aaaa.
 - **Nueva:** «Accesibilidad con axe en modo muestra». Se vende a la UOC y al sector público (EAA); solo con render.
 - **Nueva:** «Tope de URLs por subdominio o carpeta y proxy por cliente» (multisites como blogs.uoc.edu; el proxy en variable de entorno).

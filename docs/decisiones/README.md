@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139 |
@@ -173,6 +173,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 144 | La inspección de URLs de Google, por muestra diaria: lo que el rastreo no puede saber, y sin confundir lo que Google vio con lo que hay hoy | [`incidencias`](incidencias.md#d144) |
 | 145 | El censo en Excel con varias hojas, legible sin la herramienta | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d145) |
 | 146 | Que una propiedad esté no basta: también se mira que Google pueda leer su valor | [`datos-estructurados`](datos-estructurados.md#d146) |
+| 147 | Una página que el sitio enlaza casi siempre con «leer más» no recibe contexto de su propio sitio | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d147) |
 
 ## Anadir una decision
 

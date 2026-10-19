@@ -322,3 +322,43 @@ def test_sin_ancla_no_lee_links_otra_vez(monkeypatch):
     assert len(_issues(s, j, "enlace_sin_ancla")) == 1
     assert len([x for x in sentencias if "from links" in x.lower()
                 or "join links" in x.lower()]) == 1, sentencias
+
+
+# -- Anclas genericas por destino (decision 147) ---------------------------------
+
+def test_destino_enlazado_sobre_todo_con_leer_mas():
+    s, j = _montar()
+    ficha = _url(s, j, "/ficha")
+    otra = _url(s, j, "/otra")
+    tarjetas = [_url(s, j, f"/listado-{i}") for i in range(4)]
+    for t in tarjetas[:3]:
+        _enlace(s, j, t, "/ficha", ancla="Leer más »")
+    _enlace(s, j, tarjetas[3], "/ficha", ancla="Hotel Costa Meloneras")
+    for t in tarjetas[:2]:                       # solo dos origenes genericos: no llega
+        _enlace(s, j, t, "/otra", ancla="Read more")
+    _contar(s, j)
+    [fila] = _issues(s, j, "ancla_generica")
+    assert fila.url_id == ficha.id and fila.severity == "info"
+    assert (fila.details["origenes"], fila.details["con_ancla_generica"]) == (4, 3)
+    assert fila.details["anclas"] == [{"ancla": "leer más »", "paginas": 3}]
+    assert otra.id != fila.url_id
+
+
+def test_si_la_mayoria_lleva_ancla_buena_no_avisa():
+    s, j = _montar()
+    _url(s, j, "/ficha")
+    origenes = [_url(s, j, f"/p{i}") for i in range(8)]
+    for o in origenes[:3]:
+        _enlace(s, j, o, "/ficha", ancla="aquí")
+    for o in origenes[3:]:
+        _enlace(s, j, o, "/ficha", ancla="Ficha del hotel")
+    _contar(s, j)
+    assert _issues(s, j, "ancla_generica") == []
+
+
+def test_las_anclas_genericas_cubren_idiomas_y_puntuacion():
+    from analysis.avisos_de_enlaces import ANCLAS_GENERICAS
+
+    for a in ("leer más", "read more…", "mehr erfahren →", "llegir més", "en savoir plus", "aquí"):
+        assert a in ANCLAS_GENERICAS
+    assert "hotel costa meloneras" not in ANCLAS_GENERICAS

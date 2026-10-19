@@ -192,6 +192,18 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Más comprobaciones: valores de datos estructurados y anclas genéricas (19 de octubre)
+
+Dos avisos nuevos. Los datos estructurados ya no solo tienen que estar: Google
+tiene que poder leer el valor (fechas en formato estándar, precio con punto y
+sin símbolo, moneda de tres letras, disponibilidad y valoraciones válidas); en
+penguin, 55 reseñas tienen la fecha como «28/08/2020». Y se avisa de las
+páginas a las que el propio sitio enlaza casi siempre con «leer más», «ver más»
+o «see more», que no les dice nada a Google de qué tratan: en Lopesan, 126
+entradas del blog en inglés solo reciben «see more».
+[Decisión 146](docs/decisiones/datos-estructurados.md#d146) y
+[decisión 147](docs/decisiones/enlazado-y-pagerank.md#d147).
+
 ### Google dice qué tiene indexado y qué canonical ha elegido (19 de octubre)
 
 Con Search Console conectado, cada día se comprueban unas 500 URLs una a una

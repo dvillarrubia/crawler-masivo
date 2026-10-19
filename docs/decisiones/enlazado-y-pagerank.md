@@ -899,3 +899,28 @@
      sinteticos (10 M aristas, 30% externas, 5.000 sondas): 5,2 s el recuento
      de destinos distintos y ~1 s cada lote de 2.000, sin indice (crearlo
      costaria 7,7 s y ahorraria medio segundo por lote).
+
+<a id="d147"></a>
+147. **Una página que el sitio enlaza casi siempre con «leer más» no recibe
+   contexto de su propio sitio** (Ola 8, «anclas: agregado por destino y
+   lista determinista de anclas genéricas por idioma»). El texto del enlace es
+   una de las pistas con las que Google entiende el destino (decisión 61), y un
+   listado de tarjetas con «Leer más» o un widget con «See more» se la quita a
+   todas las páginas que enlaza. `ancla_generica` (info), **por destino**: al
+   menos 3 páginas de origen distintas con ancla genérica y que sean la mitad o
+   más de las que la enlazan; solo destinos HTML 200 indexables y orígenes que
+   pasan la señal (200, no noindex: decisiones 38 y 57). En los detalles,
+   cuántas y qué anclas.
+   - La lista (`ANCLAS_GENERICAS`) es determinista: frases de «leer más»,
+     «aquí», «ver más», «más información», «read more», «see more», «mehr»,
+     «llegir més», «en savoir plus»... en los idiomas de los clientes, con las
+     variantes de puntuación habituales al final (« »», «…», «→»). Se compara
+     en minúsculas y sin espacios a los lados. No es un clasificador: lo que no
+     está en la lista no avisa.
+   - **Sin otra lectura de `links`** (decisión 41): una columna más en la
+     temporal de aristas de `compute_link_counts`, solo con valor cuando el
+     ancla es genérica.
+   Medido con una consulta equivalente sobre producción en solo lectura:
+   **Lopesan, 126 destinos**: las entradas del blog en inglés, enlazadas desde
+   563 páginas siempre con «see more» (el widget de destacadas), 4,5 s;
+   **Saunier, 21** («más información», «ver más» en las fichas de producto).

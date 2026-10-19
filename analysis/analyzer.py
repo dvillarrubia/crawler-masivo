@@ -3749,6 +3749,9 @@ class SEOAnalyzer:
             # El del destino EXTERNO, para cruzarlo con `respuestas_sondeadas`
             # (decision 123). Solo si el censo tiene sondas; si no, NULL.
             Column("externo_hash", String(64)),
+            # El ancla, solo si es generica («leer mas», «aqui», «read more»;
+            # decision 147). NULL en el resto: no engorda la temporal.
+            Column("ancla_generica", Text),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -3779,6 +3782,9 @@ class SEOAnalyzer:
             if pag is not None else null(),
             (case((Link.is_internal.is_(False), Link.to_url_hash), else_=None)
              if con_sondas else literal(None, String(64))),
+            case((and_(Link.is_internal.is_(True),
+                       func.lower(func.trim(Link.anchor_text)).in_(avisos_de_enlaces.ANCLAS_GENERICAS)),
+                  func.lower(func.trim(Link.anchor_text))), else_=None),
         ).join(origen, origen.id == Link.from_url_id)
         if pag is not None:
             # Una temporal de las paginas de paginacion, por clave primaria:
@@ -3789,7 +3795,7 @@ class SEOAnalyzer:
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
                  "veces", "utm_hash", "sin_ancla_destino", "sin_ancla_posicion",
                  "sin_ancla_imagen", "origen_pag_excluida", "origen_pag_profunda",
-                 "rel_destino_url", "externo_hash"],
+                 "rel_destino_url", "externo_hash", "ancla_generica"],
                 consulta
                 .outerjoin(destino, and_(
                     destino.url_hash == Link.to_url_hash,
@@ -3858,6 +3864,7 @@ class SEOAnalyzer:
         self.compute_click_depth(aristas)
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
         avisos_de_enlaces.avisar_enlaces_sin_ancla(self, aristas)  # decision 121
+        avisos_de_enlaces.avisar_anclas_genericas(self, aristas)  # decision 147
         if con_sondas:
             avisos_de_sondas.avisar_enlaces_externos(self, aristas)  # decision 123
 

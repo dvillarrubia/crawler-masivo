@@ -77,7 +77,33 @@ TIPOS = (
     "enlace_interno_a_redireccion",
     "utm_en_enlace_interno",
     "enlace_sin_ancla",
+    "ancla_generica",
 )
+
+# Anclas que no dicen nada del destino (decision 147), en los idiomas de los
+# clientes. Se comparan en minusculas y sin espacios a los lados, con las
+# variantes de puntuacion habituales al final («Leer mas »», «Read more…»).
+_BASES_GENERICAS = (
+    # es
+    "leer más", "leer mas", "seguir leyendo", "continuar leyendo", "ver más", "ver mas", "más información",
+    "mas informacion", "más info", "saber más", "descubre más", "ver detalles", "ver todo", "pincha aquí",
+    "haz clic aquí", "clic aquí", "click aquí", "aquí", "aqui", "más", "leer", "ver",
+    # ca
+    "llegir més", "més informació", "veure més", "clica aquí",
+    # en
+    "read more", "learn more", "click here", "here", "more", "more info", "see more", "view more",
+    "continue reading", "find out more", "details",
+    # de
+    "mehr", "weiterlesen", "hier", "mehr erfahren", "mehr lesen", "hier klicken", "mehr infos",
+    # fr / it / pt
+    "lire la suite", "en savoir plus", "cliquez ici", "ici", "voir plus",
+    "leggi di più", "scopri di più", "clicca qui", "qui",
+    "leia mais", "saiba mais", "clique aqui", "ver mais",
+)
+_SUFIJOS = ("", " »", "»", "...", "…", " ›", "›", " →", "→", " >", ">", " +", "+")
+ANCLAS_GENERICAS = tuple(sorted({b + s for b in _BASES_GENERICAS for s in _SUFIJOS}))
+GENERICAS_MIN_ORIGENES = 3
+GENERICAS_MIN_PARTE = 0.5
 
 
 def _clave(*partes: Any) -> str | None:
@@ -567,3 +593,62 @@ def avisar_enlaces_no_rastreables(az) -> None:
              "ejemplos": acc["ejemplos"]},
         )
     az._flush_issues()
+
+
+
+def avisar_anclas_genericas(az, aristas) -> None:
+    """``ancla_generica`` (info), por DESTINO (decision 147).
+
+    El texto del enlace es lo que le dice a Google de que trata la pagina a la
+    que apunta (decision 61). Si la mayoria de las paginas que enlazan una URL
+    lo hacen con «leer mas», «aqui» o «read more», el destino no recibe ese
+    contexto de su propio sitio. Va por destino porque es ahi donde se pierde
+    la senal, y la correccion suele ser una: la tarjeta del listado o el
+    componente que pinta ese enlace.
+
+    Cuenta paginas de ORIGEN distintas (no apariciones) que pasan la senal
+    (200, no noindex: decisiones 38 y 57), y solo sobre destinos HTML 200
+    indexables: al menos ``GENERICAS_MIN_ORIGENES`` origenes con ancla generica
+    y que sean al menos la mitad de los que la enlazan.
+    """
+    from shared.models import Url
+
+    d = aliased(Url)
+    filas = az.session.execute(
+        select(
+            aristas.c.destino_id, d.url,
+            func.count(func.distinct(aristas.c.origen_id)).label("origenes"),
+            func.count(func.distinct(case((aristas.c.ancla_generica.isnot(None), aristas.c.origen_id),
+                                          else_=None))).label("genericos"),
+        )
+        .join(d, d.id == aristas.c.destino_id)
+        .where(aristas.c.es_interno.is_(True), aristas.c.origen_cuenta.is_(True),
+               aristas.c.origen_id != aristas.c.destino_id,
+               d.status_code == 200, d.is_html.is_(True), d.indexable.is_(True))
+        .group_by(aristas.c.destino_id, d.url)
+        .having(func.count(func.distinct(case((aristas.c.ancla_generica.isnot(None), aristas.c.origen_id),
+                                                else_=None))) >= GENERICAS_MIN_ORIGENES)
+    ).all()
+    destinos = [(f.destino_id, f.url, f.origenes, f.genericos) for f in filas
+                if f.origenes and f.genericos / f.origenes >= GENERICAS_MIN_PARTE]
+    if not destinos:
+        return
+    ids = [x[0] for x in destinos]
+    anclas: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for k in range(0, len(ids), 1000):
+        for did, ancla, n in az.session.execute(
+                select(aristas.c.destino_id, aristas.c.ancla_generica,
+                       func.count(func.distinct(aristas.c.origen_id)))
+                .where(aristas.c.destino_id.in_(ids[k:k + 1000]), aristas.c.ancla_generica.isnot(None),
+                       aristas.c.origen_cuenta.is_(True))
+                .group_by(aristas.c.destino_id, aristas.c.ancla_generica)):
+            anclas[did][ancla] += n
+    for did, url, origenes, genericos in destinos:
+        comunes = sorted(anclas[did].items(), key=lambda x: (-x[1], x[0]))[:3]
+        az._add_issue(did, "ancla_generica", "info", {
+            "origenes": origenes, "con_ancla_generica": genericos,
+            "pct": round(100 * genericos / origenes, 1),
+            "anclas": [{"ancla": a, "paginas": n} for a, n in comunes],
+        })
+    az._flush_issues()
+    logger.info("Job %s: %d destinos enlazados sobre todo con anclas genericas", az.job_id, len(destinos))
