@@ -167,9 +167,14 @@ def test_la_clave_mala_no_autoriza(entorno):
     # La peticion sigue viva para reintentar con la buena.
     r = c.post("/oauth/entrar", data={"pendiente": pendiente, "token": TOKEN, "accion": "autorizar"})
     assert r.status_code == 302 and "code=" in r.headers["location"]
-    # Y no se puede canjear dos veces.
+    # Mandarlo otra vez (doble clic) no da otro codigo, y dice que ya esta
+    # conectado, no «caducada» (asi lo vio el usuario en produccion).
     r = c.post("/oauth/entrar", data={"pendiente": pendiente, "token": TOKEN, "accion": "autorizar"})
-    assert r.status_code == 400
+    assert r.status_code == 200 and "ya está conectado" in r.text and "location" not in r.headers
+    assert "ya está conectado" in c.get("/oauth/entrar", params={"pendiente": pendiente}).text
+    # Una que no existe si esta caducada.
+    r = c.get("/oauth/entrar", params={"pendiente": "inventada"})
+    assert r.status_code == 400 and "caducado" in r.text
 
 
 def test_con_la_sesion_del_navegador_basta_un_clic(entorno):
