@@ -319,9 +319,14 @@
    entrenamiento de IA bloquea el robots.txt del sitio (decisión 129), las
    indexables con `nosnippet` o `max-snippet` corto (137) y las plantillas con
    texto o enlaces que solo existen con JavaScript (140). Y el informe tardaba
-   **17 s** en Lopesan: 12,5 eran `_calc_links` de `/insights` recorriendo dos
-   veces los 1,43 M enlaces del censo (total y `nofollow`); con una suma
-   condicional en un solo recorrido baja a 5-6 s con las mismas cifras.
+   **17 s** en Lopesan, casi todo `/insights`: `_calc_links` recorria dos veces
+   los 1,43 M enlaces del censo (total y `nofollow`). Con una suma condicional
+   en un solo recorrido, medido a traves del tunel, 12,5 s -> 5-6 s; en
+   produccion `/insights` quedo en 10,7 s y el informe en 11,7. Como la nota
+   solo cambia al re-analizar, **se cachea en Redis** por (job, version del
+   analisis, numero de incidencias), siete dias: la primera apertura tras un
+   analisis la calcula y las demas —tambien el enlace del cliente, decision
+   143— salen de la cache. Sin Redis, se calcula como siempre.
 
 <a id="d141"></a>
 141. **Search Console por cliente: la llave se sube, va a un fichero del

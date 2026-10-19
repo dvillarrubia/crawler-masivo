@@ -3426,12 +3426,49 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     )
 
 
+_INSIGHTS_TTL_S = 7 * 24 * 3600
+
+
+def _clave_insights(db: Session, job: Job) -> str:
+    """Lo que hace cambiar la nota: un re-analisis (otra version del codigo, u
+    otras incidencias con la misma). Contar las incidencias es un indice, no un
+    recorrido."""
+    n = db.query(func.count(Issue.id)).filter(Issue.job_id == job.id).scalar() or 0
+    return f"insights:{job.id}:{job.analisis_version or '-'}:{n}"
+
+
 @router.get("/insights", response_model=InsightsResponse)
 def get_insights(
     job_id: uuid.UUID,
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    """La nota del censo. Cacheada en Redis por (job, version del analisis,
+    numero de incidencias): solo cambia al re-analizar, y calcularla son 10 s
+    en un censo como el de Lopesan (1,4 M enlaces), lo que tardaba en abrirse
+    el informe —tambien el enlace del cliente, decision 143—."""
+    from api import dependencies
+
+    job = _get_job_or_404(job_id, db)
+    r = dependencies.redis_client
+    clave = None
+    if r is not None and job.status == "completed":
+        try:
+            clave = _clave_insights(db, job)
+            guardado = r.get(clave)
+            if guardado:
+                return InsightsResponse.model_validate_json(guardado)
+        except Exception:  # noqa: BLE001 — sin Redis, se calcula
+            clave = None
+    resultado = _calcular_insights(job_id, db)
+    if clave is not None:
+        try:
+            r.set(clave, resultado.model_dump_json(), ex=_INSIGHTS_TTL_S)
+        except Exception:  # noqa: BLE001
+            pass
+    return resultado
+
+
+def _calcular_insights(job_id: uuid.UUID, db: Session) -> InsightsResponse:
 
     categories = [
         _calc_crawlability(job_id, db),
