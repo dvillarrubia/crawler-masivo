@@ -440,3 +440,23 @@
      pico de **121 MB**.
    Queda de la 6.3: Google Sheets para Looker Studio (la cuenta de servicio de
    Search Console necesitaría además el alcance de Sheets y Drive).
+
+<a id="d148"></a>
+148. **Un servidor MCP de solo lectura para preguntarle al crawler desde
+   Claude Code o Cowork** (Ola 6.5 de `docs/PLAN_MEJOR_CRAWLER.md`).
+   `mcp_servidor/` corre en el ordenador de quien lo usa (stdio), con el token
+   de la API (decisión 134), y expone ocho herramientas marcadas como de solo
+   lectura (`read_only_hint`): clientes, rastreos, informe, problemas por
+   prioridad, URLs con los filtros del Explorador, comparar dos censos, alertas
+   con estado y Search Console. Nada que lance, borre o cambie: la escritura,
+   si llega, irá con un `simular` o `estimate` previo como dice el plan.
+   - **La lógica son funciones normales** (`herramientas.py`) con el cliente
+     HTTP inyectado, que se prueban con `httpx.MockTransport` sin red ni SDK;
+     `servidor.py` solo las registra. Un cliente se nombra por id, slug o
+     nombre, y si no existe la respuesta dice cuáles hay.
+   - **SDK fijado** (`mcp==2.3.0`): en la 2.x `FastMCP` pasó a `MCPServer` y las
+     anotaciones van en snake_case; con la versión abierta, el próximo cambio de
+     API rompería el servidor sin avisar. No trae `httpx`, que se declara aparte.
+   Probado de punta a punta: el servidor arrancado por stdio con el cliente del
+   SDK, las ocho herramientas listadas y `clientes` y `problemas` respondiendo
+   con los datos de producción.
