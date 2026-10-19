@@ -223,6 +223,14 @@ error, qué cambió entre dos rastreos. Se instala en el ordenador de quien lo
 usa con el mismo token que la interfaz.
 [Decisión 148](docs/decisiones/api-clientes-y-frontend.md#d148).
 
+Y desde el mismo día, sin instalar nada: el servidor vive en producción
+(`https://crawler-masivo.srv817047.hstgr.cloud/mcp`) y se añade como conector
+en claude.ai, Cowork, Claude Desktop o el móvil, o con una línea en Claude
+Code; se autoriza con la clave de la interfaz. Además de consultar cualquier
+dato, lanza rastreos y canarios, los cancela y los programa o pausa, siempre
+enseñando antes qué va a hacer y qué está rastreando ya producción.
+[Decisión 151](docs/decisiones/api-clientes-y-frontend.md#d151).
+
 ### Google dice qué tiene indexado y qué canonical ha elegido (19 de octubre)
 
 Con Search Console conectado, cada día se comprueban unas 500 URLs una a una

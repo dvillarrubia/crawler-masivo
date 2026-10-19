@@ -25,7 +25,7 @@
 | **Analysis** | `analysis/` | SQLAlchemy 2.0 | Post-crawl SEO analysis. Triggered automatically by worker |
 | **Shared** | `shared/` | SQLAlchemy | Models, DB config, constants. Shared across all components |
 | **Frontend** | `frontend/` | Alpine.js | Lightweight static SPA (vanilla JS), served by FastAPI. Ver abajo |
-| **MCP** | `mcp_servidor/` | MCP | Servidor de solo lectura sobre la API (decision 148) |
+| **MCP** | `mcp_servidor/` | MCP | Servidor MCP sobre la API: por stdio (148) y en remoto en `/mcp` de la API, con OAuth y escritura en dos pasos (151) |
 | **Scripts** | `scripts/` | Python | DB init (`init_db.py`), verificacion (`check_content_quality.py`, `check_js_templates.py`) y reparaciones sobre censos ya hechos (`fix_h1_en_contenido.py`, `near_duplicates.py`) |
 
 ## Frontend

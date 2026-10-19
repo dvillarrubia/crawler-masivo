@@ -7,7 +7,8 @@
 ### API (`api/`)
 | File | Description |
 |------|-------------|
-| `main.py` | FastAPI app, lifespan, CORS, static files, SPA fallback |
+| `main.py` | FastAPI app, lifespan, CORS, static files, SPA fallback. Arranca el servidor MCP remoto (decision 151) |
+| `mcp_despacho.py` | ASGI por fuera de todo: `/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/entrar` y `/.well-known/oauth-*` van al servidor MCP (`mcp_servidor/remoto.py`), con su propio OAuth; 503 si no esta arrancado |
 | `schemas.py` | Pydantic v2 request/response models |
 | `dependencies.py` | Shared Redis client + DB session dependency |
 | `routers/jobs.py` | Job CRUD endpoints (POST, GET, PATCH cancel, DELETE) |
@@ -109,6 +110,7 @@
 | GET | `/api/jobs/{id}/segmentos` | Segmentos materializados con URLs, indexables, 2xx y páginas con error/aviso; las reglas, `segmentacion` (resumen de la última) y `al_dia` (si `urls.segmento` corresponde a las reglas del censo) (decision 125) |
 | POST | `/api/jobs/{id}/segmentos` | Re-segmenta SIN el análisis entero: `{segmentos: [...]}` (reglas nuevas), `{desde_cliente: true}` (las del cliente/perfil de hoy) o vacío (las del censo). Guarda las reglas en `jobs.config.segmentos`. 422 si una condición usa una regla a medida que el censo no tiene; 409 si el censo está en marcha o se está analizando. Vale con los enlaces archivados |
 | GET | `/api/jobs/{id}/links` | Link graph |
+| POST | `/mcp` | Servidor MCP remoto (decision 151), Streamable HTTP sin sesiones. Pide `Bearer` de OAuth (no `API_TOKEN`); sin el, 401 con `resource_metadata`. Descubrimiento en `/.well-known/oauth-protected-resource/mcp` y `/.well-known/oauth-authorization-server`; autorizar en `/oauth/entrar` con la clave de la interfaz |
 | GET | `/api/jobs/{id}/stats` | Aggregated stats |
 | GET | `/api/jobs/{id}/veredicto` | QA de despliegues (decision 128): `{veredicto: pasa\|falla\|no_concluyente, motivos, no_concluyente_por, es_lista, comparado_con, urls_de_la_lista}`. **200 siempre** (404 solo si el job no existe). `falla`: alerta critica de `jobs.comparacion` o una URL de las semillas que no da 200, que robots.txt prohibe, que deja de ser indexable o cambia de canonical (y `robots_bloquea_todo`). Sin terminar, fallido, sin referencia, truncado o bloqueado es `no_concluyente`, nunca `pasa`. El modo lista es `max_depth=0` (solo semillas, sin sitemap salvo que se pida) y su umbral de alerta `analysis_thresholds.alerta_lista_min_paginas` (def. 1) |
 | GET | `/api/jobs/{id}/urls/{url_id}` (campo `capturas_alternativas`) | La ficha de la URL lleva sus capturas con otro perfil: estado, diferencias, volatiles, Vary y el destino de un m-dot (decision 119). Sin tabla, lista vacia |

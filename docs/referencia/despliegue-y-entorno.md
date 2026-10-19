@@ -149,6 +149,11 @@ CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ=2      # API: POST /api/extraccion/probar sim
 ARCHIVO_DIR=/data/archivo        # volumen `archivo`, compartido por worker y API
 ARCHIVAR_ENLACES=1               # 0 = el worker no archiva tras cada rastreo
 ARCHIVAR_DIAS_MINIMOS=14         # no se archiva nada que termino hace menos
+
+# Servidor MCP remoto en /mcp (decision 151)
+MCP_REMOTO=1                     # 0 = apagado (/mcp da 503)
+MCP_URL_PUBLICA=                 # emisor de OAuth; vacio = https://crawler-masivo.srv817047.hstgr.cloud
+MCP_REDIRECCIONES_EXTRA=         # URIs de vuelta exactas, por comas, ademas de claude.ai/claude.com y localhost
 ```
 
 ## SEO Config Thresholds (`shared/config.py`)

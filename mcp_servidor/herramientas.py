@@ -1,9 +1,10 @@
-"""Herramientas de solo lectura sobre la API del crawler (Ola 6.5, decision 148).
+"""Herramientas de lectura sobre la API del crawler (Ola 6.5, decisiones 148 y 151).
 
 Funciones normales que llaman a la API con el token (decision 134) y devuelven
 lo justo para que un asistente (Claude Code, Cowork) conteste preguntas como
 «¿que ha cambiado en Lopesan?» o «¿que arreglo primero?» sin abrir la
-interfaz. Ninguna escribe nada: lanzar, borrar o cambiar no esta aqui.
+interfaz. Ninguna escribe nada: lanzar, cancelar y programar estan en
+`acciones.py`, con un paso de simulacion antes (decision 151).
 
 El cliente HTTP se inyecta (`Api`), asi que se prueban sin red. El servidor
 MCP (`servidor.py`) solo las registra.
@@ -11,7 +12,9 @@ MCP (`servidor.py`) solo las registra.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -30,17 +33,31 @@ def _token() -> str:
 
 class Api:
     def __init__(self, base: str | None = None, token: str | None = None,
-                 transporte: httpx.BaseTransport | None = None):
+                 transporte: httpx.BaseTransport | None = None, publica: str | None = None):
         self.base = (base or os.getenv("CRAWLER_API_URL") or URL_POR_DEFECTO).rstrip("/")
+        # Para los enlaces que se devuelven: en remoto `base` es la interna.
+        self.publica = (publica or self.base).rstrip("/")
         self._c = httpx.Client(base_url=self.base, transport=transporte, timeout=120,
                                headers={"Authorization": f"Bearer {token or _token()}"})
 
-    def get(self, ruta: str, **params) -> Any:
-        r = self._c.get("/api" + ruta, params={k: v for k, v in params.items() if v not in (None, "")})
+    def _respuesta(self, r: httpx.Response, ruta: str) -> Any:
         if r.status_code == 404:
             raise ValueError(f"No existe: {ruta}")
+        if r.status_code in (400, 409, 422):
+            raise ValueError(f"La API no lo acepta ({r.status_code}): {r.text[:800]}")
         r.raise_for_status()
-        return r.json()
+        return r.json() if r.content else None
+
+    def get(self, ruta: str, **params) -> Any:
+        r = self._c.get("/api" + ruta, params={k: v for k, v in params.items() if v not in (None, "")})
+        return self._respuesta(r, ruta)
+
+    def enviar(self, metodo: str, ruta: str, cuerpo: dict | None = None) -> Any:
+        """Lo unico que escribe, y solo desde las herramientas de escritura."""
+        return self._respuesta(self._c.request(metodo, "/api" + ruta, json=cuerpo), ruta)
+
+    def openapi(self) -> dict:
+        return self._respuesta(self._c.get("/openapi.json"), "/openapi.json")
 
 
 def _cliente_id(api: Api, cliente: str) -> str:
@@ -144,3 +161,51 @@ def search_console(api: Api, cliente: str) -> list[dict]:
     """Estado de Search Console del cliente: propiedad, días guardados, últimos
     28 días e inspección de URLs."""
     return api.get(f"/clients/{_cliente_id(api, cliente)}/gsc")
+
+
+# --- consulta libre (decision 151) ---------------------------------------
+# Lo que no cubre una herramienta con nombre: cualquier GET de `/api`. Las
+# descargas (CSV, Excel, backup, HTML crudo) no caben en una respuesta de
+# herramienta y se dejan para la interfaz.
+_DESCARGAS = re.compile(r"(csv|export|excel|xlsx|backup|raw|descarg|/html\b)", re.I)
+MAX_CARACTERES = 60_000
+
+
+def endpoints(api: Api, filtro: str | None = None) -> list[dict]:
+    """Los GET de la API, con su descripcion y parametros, para `consultar`."""
+    salida = []
+    for ruta, ops in (api.openapi().get("paths") or {}).items():
+        op = ops.get("get")
+        if not op or not ruta.startswith("/api/") or _DESCARGAS.search(ruta):
+            continue
+        texto = f"{ruta} {op.get('summary', '')} {op.get('description', '')}"
+        if filtro and filtro.lower() not in texto.lower():
+            continue
+        salida.append({"ruta": ruta[4:], "que": op.get("summary"),
+                       "parametros": [p["name"] for p in op.get("parameters") or [] if p.get("in") == "query"]})
+    return salida
+
+
+def consultar(api: Api, ruta: str, parametros: dict | None = None) -> Any:
+    """GET libre sobre `/api` (sin el prefijo): `/jobs/<id>/urls/detalle`..."""
+    ruta = "/" + ruta.strip().lstrip("/")
+    if ruta.startswith("/api/"):
+        ruta = ruta[4:]
+    if ".." in ruta or "?" in ruta:
+        raise ValueError("La ruta va sin `..` ni `?`: los filtros, en `parametros`")
+    if _DESCARGAS.search(ruta):
+        raise ValueError("Eso es una descarga (CSV, Excel, backup, HTML): bájala desde la interfaz")
+    datos = api.get(ruta, **(parametros or {}))
+    texto = json.dumps(datos, ensure_ascii=False, default=str)
+    if len(texto) > MAX_CARACTERES:
+        return {"truncado": True, "caracteres": len(texto),
+                "aviso": "Respuesta demasiado grande: pide menos con page_size, limite o filtros",
+                "principio": texto[:MAX_CARACTERES]}
+    return datos
+
+
+def perfiles(api: Api, cliente: str) -> list[dict]:
+    """Los perfiles de rastreo del cliente: propio o competidor, semillas y config."""
+    return [{"id": p["id"], "nombre": p["nombre"], "rol": p.get("rol"), "activo": p.get("activo"),
+             "semillas": p.get("seeds"), "config": p.get("config"), "ultimo_rastreo": p.get("last_job_id")}
+            for p in api.get(f"/clients/{_cliente_id(api, cliente)}/profiles")]

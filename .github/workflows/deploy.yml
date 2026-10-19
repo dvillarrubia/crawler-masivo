@@ -10,6 +10,7 @@ on:
       - 'shared/**'
       - 'frontend/**'
       - 'scripts/**'
+      - 'mcp_servidor/**'
       - 'docker-compose.yml'
       - 'docker-compose.vps.yml'
       - '.github/workflows/deploy.yml'
