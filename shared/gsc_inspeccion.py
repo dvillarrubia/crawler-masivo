@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 URL_API = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect"
 REPETIR_DIAS = 7
+REINTENTO_FALLIDA = timedelta(hours=1)
 HILOS = 6
 
 
@@ -43,7 +44,13 @@ def toca(estado, ahora: datetime) -> bool:
     if por_dia() <= 0 or estado is None or estado.estado != "ok":
         return False
     ult = estado.inspeccion_ultima
-    return ult is None or ult.date() < ahora.date()
+    if ult is None or ult.date() < ahora.date():
+        return True
+    # Una tanda que fallo antes de terminar (`inspeccion_hechas` None) se
+    # reintenta a la hora, no al dia siguiente. Visto en produccion: la
+    # primera corrio a los pocos segundos del despliegue, con el worker ya
+    # nuevo y la tabla aun sin crear, y quedaba «hecha» hasta el dia despues.
+    return estado.inspeccion_hechas is None and ahora - ult >= REINTENTO_FALLIDA
 
 
 def _ultimo_censo(db, cliente_id):
@@ -158,7 +165,8 @@ def inspeccionar(db, cliente, integracion: dict, *, ahora: datetime | None = Non
         return hechas
     except Exception as exc:  # noqa: BLE001 — la descarga diaria ya quedo hecha
         db.rollback()
-        e.inspeccion_ultima, e.inspeccion_motivo = ahora, f"{type(exc).__name__}: {exc}"[:500]
+        e.inspeccion_ultima, e.inspeccion_hechas = ahora, None
+        e.inspeccion_motivo = f"{type(exc).__name__}: {exc}"[:500]
         db.commit()
         logger.warning("Inspeccion de %s (%s): %s", getattr(cliente, "slug", "?"), propiedad, exc)
         return 0

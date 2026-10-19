@@ -245,13 +245,17 @@ def list_gsc_accounts(db: Session = Depends(get_session)):
     ]
 
 
-@router.post("/semantic/gsc-accounts", response_model=GscAccountResponse)
+@router.post("/semantic/gsc-accounts", status_code=410)
 def create_gsc_account(body: GscAccountCreate, db: Session = Depends(get_session)):
-    account = GscAccount(name=body.name, credentials_json=body.credentials_json)
-    db.add(account)
-    db.commit()
-    db.refresh(account)
-    return GscAccountResponse(id=account.id, name=account.name, created_at=account.created_at)
+    """Cerrada (decision 141): guardaba la llave de Google en la base de datos,
+    que es justo lo que la decision 83 prohibe —viaja en cada backup y la lee
+    quien lea la tabla—. Las llaves se suben en la ficha del cliente y van a
+    un fichero del servidor. Las cuentas ya guardadas se siguen leyendo (en
+    produccion, el 19-oct-2026, no habia ninguna)."""
+    raise HTTPException(
+        status_code=410,
+        detail="Esta forma de subir la llave de Search Console ya no existe: la guardaba en la base "
+               "de datos. Súbela en la ficha del cliente → Configuración → Search Console.")
 
 
 @router.delete("/semantic/gsc-accounts/{account_id}")
