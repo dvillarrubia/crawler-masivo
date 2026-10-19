@@ -183,4 +183,4 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
    `tests/test_numeracion_decisiones.py` falla si dos chocan o si falta la fila del indice.
 2. Escribela en el fichero del tema, en su orden, con el ancla `<a id="dNN"></a>` encima.
 3. Anade su fila en las dos tablas de este indice.
-4. Si cambia una regla que cualquier sesion tiene que conocer sin abrir nada, anade UNA linea a «Lo que no se puede romper» en `CLAUDE.md`. Solo una linea: el detalle vive aqui.
+4. Si cambia una regla que hay que conocer antes de tocar su area, anade UNA linea en su seccion de `docs/referencia/reglas.md`. Solo si se rompe sin tocar esa area va en «Lo que no se puede romper» de `CLAUDE.md`, y alli sin hacerlo crecer (ver «Como se documenta»). El detalle vive aqui.
