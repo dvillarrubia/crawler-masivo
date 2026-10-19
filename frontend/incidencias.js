@@ -183,6 +183,12 @@ const ISSUE_INFO = {
     google: 'Decide con lo que vio entonces. Si el canonical de entonces era un error que ya se corrigió, se arreglará solo cuando vuelva a rastrearla; hasta entonces puede seguir indexando otra URL.',
     arreglo: 'Si la página es importante, pedir la indexación de nuevo desde la inspección de URLs de Search Console para que Google la vuelva a visitar antes. Informativo.',
   },
+  // Decision 147
+  'ancla_generica': {
+    que: 'La mayoría de las páginas del sitio que enlazan esta URL lo hacen con un texto genérico («leer más», «aquí», «ver más», «read more»). En los detalles, cuántas y qué textos.',
+    google: 'El texto del enlace es una de las pistas con las que entiende de qué trata la página de destino. Con «leer más» no recibe ninguna de su propio sitio, y entre varias páginas enlazadas igual no hay nada que las distinga.',
+    arreglo: 'Cambiar el componente que pinta el enlace (la tarjeta del listado, el botón del bloque) para que el texto diga de qué es el destino, o que el enlace sea el propio título. Informativo.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -800,6 +806,7 @@ const ISSUE_LABEL_EXTRA = {
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
+  ancla_generica: 'Enlazada con anclas genéricas',
   trafico_en_pagina_perdida: 'Página con tráfico de Google que se pierde',
   indexable_no_indexada_por_google: 'Indexable que Google no tiene indexada',
   google_elige_otro_canonical: 'Google elige otro canonical',
@@ -895,6 +902,7 @@ const DETALLE_LABEL = {
   directiva: 'directiva',
   max_snippet: 'máx. caracteres del fragmento',
   version: 'versión comparada',
+  origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
   cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'comprobada',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
