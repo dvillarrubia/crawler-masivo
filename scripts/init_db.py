@@ -35,6 +35,10 @@ def main() -> None:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS content_word_count INTEGER"))
         # Clics desde la home, no saltos desde las semillas (decision 90).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS click_depth INTEGER"))
+        # Search Console en la ventana del rastreo (decision 142).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_clics INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_impresiones INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_posicion DOUBLE PRECISION"))
         # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.
         conn.execute(text("ALTER TABLE headings ADD COLUMN IF NOT EXISTS oculto BOOLEAN"))
         # Hash del contenido normalizado: el de los bytes no detecta duplicados
@@ -127,6 +131,9 @@ def main() -> None:
             "ALTER TABLE clients ADD COLUMN IF NOT EXISTS reglas_alerta JSON"))
         conn.execute(text(
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS alertas_cliente JSON"))
+        # Search Console en la ventana del rastreo (decision 142).
+        conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gsc_resumen JSON"))
         # Enlaces identicos de una pagina agrupados en una fila (decision 94).
         # Con DEFAULT constante, Postgres 11+ no reescribe la tabla: es solo
         # catalogo, instantaneo aunque `links` tenga 180 M filas.

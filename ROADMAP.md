@@ -192,6 +192,19 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Search Console cruzado con el rastreo (19 de octubre)
+
+Con Search Console conectado, cada rastreo se cruza con los 90 días de datos
+de Google anteriores a él. Cada URL tiene sus clics, impresiones y posición
+(columnas en el Explorador y vista «Tráfico de Google»), y salen avisos nuevos:
+páginas con tráfico que hoy dan error o tienen noindex, URLs que redirigen o
+están canonicalizadas y Google sigue mostrando, huérfanas con tráfico,
+indexables sin impresiones y tráfico que se llevan variantes con parámetros.
+La prioridad tiene en cuenta los clics, y el informe para el cliente tiene una
+sección de tráfico. En Lopesan: el 28 % de los clics de Google van a URLs con
+`?partner=` de 18 fichas de hotel, y 952 URLs con tráfico no las encontró el
+rastreo. [Decisión 142](docs/decisiones/incidencias.md#d142).
+
 ### Search Console por cliente (19 de octubre)
 
 En la ficha del cliente, Configuración → **Search Console**: se sube la llave

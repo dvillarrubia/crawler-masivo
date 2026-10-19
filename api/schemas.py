@@ -706,6 +706,7 @@ class JobResponse(BaseModel):
     comparacion: dict[str, Any] | None = None
     # Reglas propias del cliente evaluadas al cerrar el rastreo (decision 135)
     alertas_cliente: dict[str, Any] | None = None
+    gsc_resumen: dict[str, Any] | None = None
     analisis_version: str | None = None
     # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
     pagerank_resumen: dict[str, Any] | None = None
@@ -885,6 +886,10 @@ class UrlResponse(BaseModel):
     is_internal: bool | None = None
     crawl_depth: int | None = None
     click_depth: int | None = None
+    # Search Console, decision 142
+    gsc_clics: int | None = None
+    gsc_impresiones: int | None = None
+    gsc_posicion: float | None = None
     content_type: str | None = None
     content_length: int | None = None
     status_code: int | None = None

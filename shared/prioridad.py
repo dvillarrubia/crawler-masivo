@@ -17,6 +17,8 @@ guarda el analisis:
 - `click_depth` (decision 90): a cuantos clics de la home esta. Sin camino
   (NULL) cuenta como la mas lejana: una isla.
 - `in_sitemap`: el sitio la declara para indexar.
+- `gsc_clics` (decision 142): si el cliente tiene Search Console, los clics de
+  los 90 dias del rastreo multiplican la importancia por tramos (hasta x2).
 
 `indexable` NO entra a proposito: muchas incidencias graves son justo la
 causa de que una pagina deje de ser indexable (un canonical a otro dominio,
@@ -50,9 +52,13 @@ FACTOR_PROFUNDIDAD = ((2, 1.0), (3, 0.85), (4, 0.7))
 FACTOR_LEJOS = 0.55
 FACTOR_FUERA_SITEMAP = 0.85
 IMPORTANCIA_MINIMA = 0.1
+# Search Console (decision 142): los clics de los 90 dias del rastreo. Por
+# tramos y no con un logaritmo para que la misma regla valga en SQLite. Una
+# pagina con 1.000 clics pesa el doble; sin datos (NULL), nada cambia.
+FACTOR_TRAFICO = ((1000, 2.0), (100, 1.6), (10, 1.3), (1, 1.1))
 
 
-def importancia(pagerank_score, click_depth, in_sitemap) -> float:
+def importancia(pagerank_score, click_depth, in_sitemap, gsc_clics=None) -> float:
     """Importancia de UNA pagina, entre 0,1 y 1. Funcion pura: la misma regla
     que `expresion_importancia` escribe en SQL (un test compara las dos)."""
     pr = max(0.0, min(100.0, float(pagerank_score or 0)))
@@ -62,7 +68,8 @@ def importancia(pagerank_score, click_depth, in_sitemap) -> float:
     else:
         prof = next((f for tope, f in FACTOR_PROFUNDIDAD if click_depth <= tope), FACTOR_LEJOS)
     sitemap = 1.0 if in_sitemap else FACTOR_FUERA_SITEMAP
-    return max(IMPORTANCIA_MINIMA, base * prof * sitemap)
+    trafico = next((f for minimo, f in FACTOR_TRAFICO if (gsc_clics or 0) >= minimo), 1.0)
+    return max(IMPORTANCIA_MINIMA, base * prof * sitemap) * trafico
 
 
 def expresion_importancia(url_cls):
@@ -79,7 +86,9 @@ def expresion_importancia(url_cls):
     )
     sitemap = case((url_cls.in_sitemap.is_(True), 1.0), else_=FACTOR_FUERA_SITEMAP)
     valor = base * prof * sitemap
-    return case((valor < IMPORTANCIA_MINIMA, IMPORTANCIA_MINIMA), else_=valor)
+    clics = func.coalesce(url_cls.gsc_clics, 0)
+    trafico = case(*[(clics >= minimo, f) for minimo, f in FACTOR_TRAFICO], else_=1.0)
+    return case((valor < IMPORTANCIA_MINIMA, IMPORTANCIA_MINIMA), else_=valor) * trafico
 
 
 def prioridad(severidad: str, importancia_total: float) -> float:

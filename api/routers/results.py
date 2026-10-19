@@ -92,6 +92,10 @@ SORT_COLUMNS = {
     "transfer_size": Url.transfer_size,
     "crawl_depth": Url.crawl_depth,
     "click_depth": Url.click_depth,
+    # Search Console, decision 142
+    "gsc_clics": Url.gsc_clics,
+    "gsc_impresiones": Url.gsc_impresiones,
+    "gsc_posicion": Url.gsc_posicion,
     "inlinks_count": Url.inlinks_count,
     "outlinks_count": Url.outlinks_count,
     "external_outlinks_count": Url.external_outlinks_count,
@@ -142,6 +146,9 @@ _RANGE_FILTERS: dict[str, tuple[Any, bool]] = {
     "text_ratio": (Url.text_ratio, False),
     "crawl_depth": (Url.crawl_depth, False),
     "click_depth": (Url.click_depth, False),
+    "gsc_clics": (Url.gsc_clics, False),
+    "gsc_impresiones": (Url.gsc_impresiones, False),
+    "gsc_posicion": (Url.gsc_posicion, False),
     "status_code": (Url.status_code, False),
     "redirect_type": (Url.redirect_type, False),
     "title_len": (HtmlMeta.title_len, True),
@@ -952,6 +959,9 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "ttfb_ms": ("TTFB (ms)", lambda u: u.ttfb_ms),
     "content_encoding": ("Compresión", lambda u: u.content_encoding),
     "click_depth": ("Clics desde home", lambda u: u.click_depth),
+    "gsc_clics": ("Clics Google (90 d)", lambda u: u.gsc_clics),
+    "gsc_impresiones": ("Impresiones Google (90 d)", lambda u: u.gsc_impresiones),
+    "gsc_posicion": ("Posición media Google", lambda u: u.gsc_posicion),
     "crawl_depth": ("Prof. rastreo", lambda u: u.crawl_depth),
     "folder_depth": ("Niveles", lambda u: u.folder_depth),
     "word_count": ("Palabras", lambda u: u.word_count),
@@ -3490,6 +3500,26 @@ _TEXTO_TRUNCADO = {
 }
 
 
+def _trafico_del_informe(db: Session, job: Job) -> dict | None:
+    """Search Console en el informe (decision 142): lo que el cliente entiende
+    sin explicacion, el trafico que se pierde y el que nadie enlaza."""
+    r = job.gsc_resumen if isinstance(getattr(job, "gsc_resumen", None), dict) else None
+    if not r:
+        return None
+    salida = {k: r.get(k) for k in ("desde", "hasta", "clics", "impresiones", "clics_en_urls_del_censo",
+                                     "clics_en_variantes", "urls_fuera_del_censo", "clics_fuera_del_censo",
+                                     "cubre_la_ventana")}
+    salida["fuera_del_censo"] = (r.get("fuera_del_censo") or [])[:5]
+    for tipo in ("trafico_en_pagina_perdida", "huerfana_con_trafico", "trafico_en_variante_con_parametros"):
+        filas = (db.query(Url.url, Issue.details).join(Url, Url.id == Issue.url_id)
+                 .filter(Issue.job_id == job.id, Issue.issue_type == tipo).all())
+        clave = "clics_variantes" if tipo == "trafico_en_variante_con_parametros" else "clics"
+        filas = sorted(((int((d or {}).get(clave) or 0), u) for u, d in filas), reverse=True)
+        salida[tipo] = {"paginas": len(filas), "clics": sum(c for c, _ in filas),
+                        "ejemplos": [{"url": u, "clics": c} for c, u in filas[:5]]}
+    return salida
+
+
 def _raiz_del_sitio(semilla: str | None) -> str | None:
     """`https://host`: la primera semilla de una lista puede ser `/blog/`, y la
     cabecera de un informe del sitio entero no puede decir eso."""
@@ -3578,5 +3608,6 @@ def get_informe(
         "tipos_de_incidencia": len(filas),
         "comparacion": comparacion,
         "fiabilidad": fiabilidad,
+        "trafico": _trafico_del_informe(db, job),
         "generado": datetime.now(timezone.utc),
     }
