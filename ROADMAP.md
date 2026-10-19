@@ -204,6 +204,15 @@ entradas del blog en inglés solo reciben «see more».
 [Decisión 146](docs/decisiones/datos-estructurados.md#d146) y
 [decisión 147](docs/decisiones/enlazado-y-pagerank.md#d147).
 
+### Preguntarle al crawler desde Claude (19 de octubre)
+
+Un servidor MCP de solo lectura (`mcp_servidor/`) para que Claude Code o Cowork
+contesten con los datos del crawler: qué clientes tienen alertas abiertas, qué
+arreglar primero en el último censo, qué páginas con tráfico de Google dan
+error, qué cambió entre dos rastreos. Se instala en el ordenador de quien lo
+usa con el mismo token que la interfaz.
+[Decisión 148](docs/decisiones/api-clientes-y-frontend.md#d148).
+
 ### Google dice qué tiene indexado y qué canonical ha elegido (19 de octubre)
 
 Con Search Console conectado, cada día se comprueban unas 500 URLs una a una

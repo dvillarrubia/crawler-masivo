@@ -1,0 +1,4 @@
+# Servidor MCP de solo lectura (decision 148). Se instala donde se use (el
+# ordenador de quien trabaja con Claude Code o Cowork), no en el servidor.
+mcp==2.3.0
+httpx>=0.27
