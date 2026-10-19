@@ -499,7 +499,7 @@ def test_el_analisis_automatico_ya_sabe_que_el_censo_esta_truncado(monkeypatch, 
     monkeypatch.setattr(worker, "_config_invalida", lambda j: None)
     monkeypatch.setattr(worker, "_reencolar_si_pedido", lambda j: False)
     monkeypatch.setattr(worker, "_comparar_con_el_censo_anterior", lambda j: None)
-    monkeypatch.setattr(worker, "_archivar_enlaces_superados", lambda j: None)
+    monkeypatch.setattr(worker, "_archivar_enlaces", lambda j: None)
     visto = {}
 
     def _analisis(job_id):

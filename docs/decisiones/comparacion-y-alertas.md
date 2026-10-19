@@ -256,7 +256,8 @@
      tiene el candado del job se retira sin hacer nada. Manda el sello
      `analisis_version` que deja `run_all` al terminar, releído de la BD.
    - **Un censo con los enlaces archivados (decisión 95) no se re-analiza
-     nunca desde aquí.** La referencia es por definición un censo superado,
+     nunca desde aquí** (cambiado en la decisión 150: ahora se re-analiza y
+     `run_analysis` restaura y vuelve a archivar). La referencia es por definición un censo superado,
      que es justo lo que se archiva, y sin filas en `links` el análisis
      pondría a cero entrantes, PageRank y profundidad y llenaría el censo de
      huérfanas. Tampoco se restaura: devolver a `links` lo que el archivo

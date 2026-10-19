@@ -64,7 +64,7 @@ analisis y borrado estan en [`docs/referencia/reglas.md`](docs/referencia/reglas
 - **La tabla `links`** (181 M filas): filtra el job en `links`, nunca uniendo con
   `urls` (37, 41); un conteo por aparicion es `SUM(links.repeticiones)`, no
   `COUNT(*)` (94); un censo con `jobs.enlaces_archivados` no tiene filas ahi, se
-  lee del Parquet y no se re-analiza sin `archivar_enlaces.py --restaurar` (95).
+  lee del Parquet y `run_analysis` lo restaura, analiza y re-archiva (95, 150).
 - **Reglas que comparten spider y analizador viven en `shared/`** (robots,
   indexabilidad, dominios, plantillas): dos copias acaban discrepando. 23, 39, 64.
 - **Una clave nueva de config se declara en `JobConfig`**: Pydantic v2 la tira en

@@ -742,16 +742,10 @@ def test_si_ya_estan_al_dia_no_se_reanaliza_nada(tmp_path):
     s.close()
 
 
-def test_una_referencia_archivada_no_se_reanaliza_y_se_dice_por_que(tmp_path):
-    """Decision 95: un censo con los enlaces en Parquet no tiene filas en `links`.
-
-    Re-analizarlo asi pondria a cero los entrantes, el PageRank y la
-    profundidad del censo de referencia, y lo dejaria entero de huerfanas: el
-    diff de incidencias saldria lleno de `orphan_page` "nuevas" en el censo
-    viejo. No se le pide al analizador, no se restaura (devolveria a `links`
-    lo que el archivo saco, para una cifra de un informe) y se vuelve a la 91
-    con el motivo concreto y como arreglarlo.
-    """
+def test_una_referencia_archivada_se_reanaliza_igual(tmp_path):
+    """Decision 150: la referencia SIEMPRE esta archivada (cada censo se archiva
+    al acabar su analisis). La comparacion se lo pide al analizador igual que a
+    uno sin archivar; `run_analysis` restaura, analiza y vuelve a archivar."""
     import shared.comparacion as comp
 
     s, viejo, nuevo = _dos_censos(tmp_path, "arch", "version-vieja", "version-nueva",
@@ -759,15 +753,10 @@ def test_una_referencia_archivada_no_se_reanaliza_y_se_dice_por_que(tmp_path):
     reanalizar, analizados = _reanalizador(s, "version-nueva")
     r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=reanalizar)
 
-    assert analizados == [], "NUNCA se re-analiza un censo archivado"
-    assert r["anterior_reanalizado"] is False
-    assert "archivados" in r["anterior_sin_reanalizar"]
-    assert f"--restaurar {viejo.id}" in r["anterior_sin_reanalizar"]
-    assert r["incidencias"]["comparable"] is False, "comportamiento de la 91"
-    assert "--restaurar" in r["incidencias"]["motivo"], (
-        "el motivo que se pinta dice como arreglarlo de verdad, no el generico "
-        "«vuelve a analizar el mas antiguo», que fallaria tal cual")
-    assert r["comparable"] is True, "las alertas de pagina siguen"
+    assert analizados == [str(viejo.id)]
+    assert r["anterior_reanalizado"] is True
+    assert r["anterior_sin_reanalizar"] is None
+    assert r["incidencias"]["comparable"] is not False
     s.close()
 
 

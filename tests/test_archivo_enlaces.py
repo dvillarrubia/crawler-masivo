@@ -237,39 +237,40 @@ def sesion(tmp_path):
     s.close()
 
 
-def test_solo_se_archiva_lo_que_otro_censo_mas_nuevo_abarca(sesion):
-    viejo = _job(sesion, ["/", "/blog"], 60)
-    canario = _job(sesion, ["/"], 40)           # abarca menos que `viejo`
-    completo = _job(sesion, ["/", "/blog", "/tienda"], 30)
-    reciente = _job(sesion, ["/", "/blog", "/tienda"], 3)
-    otro_host = _job(sesion, ["/"], 90, host="y.com")
-    sesion.commit()
-
-    elegidos = {j.id for j in archivo_enlaces.candidatos(sesion)}
-    # `viejo` y `canario` los abarca `completo`; `completo` lo abarca
-    # `reciente`; `reciente` es el ultimo; `otro_host` no tiene a nadie.
-    assert elegidos == {viejo.id, canario.id, completo.id}
-    assert reciente.id not in elegidos and otro_host.id not in elegidos
-
-
-def test_un_censo_que_nadie_abarca_se_queda(sesion):
-    completo = _job(sesion, ["/", "/blog"], 60)
-    _job(sesion, ["/"], 30)                      # mas nuevo pero con menos alcance
-    sesion.commit()
-    assert completo.id not in {j.id for j in archivo_enlaces.candidatos(sesion)}
-
-
-def test_nada_de_los_ultimos_dias_ni_el_ultimo_de_una_programacion(sesion, monkeypatch):
+def test_un_censo_completado_se_archiva_siempre(sesion):
+    """Decision 150: en cuanto termina su analisis, sea cual sea su alcance,
+    su edad o su programacion. Re-analizarlo despues restaura y re-archiva."""
     serie = uuid.uuid4()
-    de_serie = _job(sesion, ["/"], 60, programacion=serie)
-    reciente = _job(sesion, ["/"], 10)           # menos de 14 dias
+    viejo = _job(sesion, ["/", "/blog"], 60)
+    canario = _job(sesion, ["/"], 40)
+    de_serie = _job(sesion, ["/"], 7, programacion=serie)   # ultimo de su serie
+    recien = _job(sesion, ["/", "/blog", "/tienda"], 0)     # el que acaba de cerrar
+    otro_host = _job(sesion, ["/"], 90, host="y.com")       # nadie lo abarca
+    en_marcha = _job(sesion, ["/"], 0, estado="running")
+    sesion.commit()
+
+    elegidos = [j.id for j in archivo_enlaces.candidatos(sesion)]
+    assert set(elegidos) == {viejo.id, canario.id, de_serie.id, recien.id, otro_host.id}
+    assert en_marcha.id not in elegidos
+    assert elegidos.index(otro_host.id) < elegidos.index(recien.id), (
+        "del mas antiguo al mas nuevo")
+
+
+def test_lo_archivado_no_se_vuelve_a_elegir(sesion):
+    j = _job(sesion, ["/"], 3)
+    j.enlaces_archivados = {"filas": 1, "fichero": "x.parquet"}
+    sesion.commit()
+    assert archivo_enlaces.candidatos(sesion) == []
+
+
+def test_un_fallido_reciente_se_queda_por_si_se_reanuda(sesion, monkeypatch):
+    """La reanudacion lee su frontera de `links`: la regla de la 95 sigue."""
+    fallido = _job(sesion, ["/"], 3, estado="stalled")
     _job(sesion, ["/"], 1)
     sesion.commit()
-    elegidos = {j.id for j in archivo_enlaces.candidatos(sesion)}
-    assert de_serie.id not in elegidos           # ultimo de su programacion
-    assert reciente.id not in elegidos
-    monkeypatch.setenv("ARCHIVAR_DIAS_MINIMOS", "5")
-    assert reciente.id in {j.id for j in archivo_enlaces.candidatos(sesion)}
+    assert fallido.id not in {j.id for j in archivo_enlaces.candidatos(sesion)}
+    monkeypatch.setenv("ARCHIVAR_DIAS_MINIMOS", "2")
+    assert fallido.id in {j.id for j in archivo_enlaces.candidatos(sesion)}
 
 
 def test_un_rastreo_fallido_se_archiva_si_hay_un_completado_mas_nuevo(sesion):

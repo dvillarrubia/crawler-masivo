@@ -1,6 +1,7 @@
-"""El analisis se niega a correr sobre un censo con los enlaces archivados
-(decision 95): sin filas en `links` pondria a cero los entrantes, el PageRank y
-la profundidad, y el censo entero saldria huerfano. Aparte del resto de
+"""El analisis y los enlaces archivados (decisiones 95 y 150): `run_all` se
+niega sobre un censo archivado —sin filas en `links` pondria a cero los
+entrantes, el PageRank y la profundidad—, y `run_analysis` lo restaura, lo
+analiza y lo vuelve a archivar. Aparte del resto de
 test_archivo_enlaces.py porque necesita las dependencias del analisis, que la
 imagen de la API no tiene.
 """
@@ -127,6 +128,86 @@ def test_no_se_archiva_un_censo_que_se_esta_analizando(tmp_path, monkeypatch):
     finally:
         s.rollback()
         for t in ("links", "urls"):
+            s.execute(text(f"DELETE FROM {t} WHERE job_id = :j"), {"j": job.id})
+        s.execute(text("DELETE FROM jobs WHERE id = :j"), {"j": job.id})
+        s.commit()
+        s.close()
+        engine.dispose()
+
+
+@pytest.mark.skipif(not URL_BD, reason="sin PAGERANK_TEST_DATABASE_URL (COPY y candados)")
+def test_reanalizar_un_censo_archivado_da_lo_mismo_y_lo_deja_archivado(tmp_path, monkeypatch):
+    """Decision 150: cada censo se archiva al acabar su analisis, asi que todo
+    re-analisis (a mano o el de la referencia, decision 93) cae sobre uno
+    archivado. `run_analysis` restaura con COPY, analiza y vuelve a archivar:
+    las cifras del grafo salen identicas a las del analisis con los enlaces en
+    `links`, el texto raro de las anclas vuelve tal cual y `links` se queda
+    vacia para el job."""
+    import analysis.analyzer as az
+    from sqlalchemy import func, select, text
+
+    monkeypatch.setenv("ARCHIVO_DIR", str(tmp_path / "archivo"))
+    engine = create_engine(URL_BD)
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr("shared.database.engine", engine, raising=False)
+    Sesion = sessionmaker(bind=engine)
+    monkeypatch.setattr(az, "SessionLocal", Sesion)
+    s = Sesion()
+    hace = datetime.now(timezone.utc) - timedelta(days=30)
+    job = Job(id=uuid.uuid4(), name="archivado", status="completed",
+              seeds=["https://x.com/"], config={}, started_at=hace, completed_at=hace)
+    s.add(job)
+    s.flush()
+    urls = {}
+    for ruta_ in ("/", "/a", "/b", "/c"):
+        u = Url(job_id=job.id, url=f"https://x.com{ruta_}", url_hash=f"h{ruta_}",
+                is_internal=True, is_html=True, status_code=200, crawl_depth=0)
+        s.add(u)
+        s.flush()
+        urls[ruta_] = u
+    raras = ["tab\taqui", "salto\nde linea", "barra \\N y \\t", None, "ñandú «comillas» \"x\""]
+    aristas = [("/", "/a"), ("/", "/b"), ("/a", "/b"), ("/b", "/"), ("/b", "/c")]
+    for i, (de, a) in enumerate(aristas):
+        s.add(Link(job_id=job.id, from_url_id=urls[de].id, to_url=urls[a].url,
+                   to_url_hash=urls[a].url_hash, is_internal=True, follow=True,
+                   anchor_text=raras[i], link_position="content",
+                   repeticiones=2 if i == 0 else 1))
+    s.commit()
+
+    def foto():
+        s.expire_all()
+        return {u.url: (u.inlinks_count, u.unique_inlinks_count, u.outlinks_count,
+                        u.click_depth, u.pagerank_score)
+                for u in s.query(Url).filter(Url.job_id == job.id)}
+
+    def filas_en_links():
+        return s.execute(select(func.count()).select_from(Link)
+                         .where(Link.job_id == job.id)).scalar()
+
+    try:
+        az.run_analysis(str(job.id))
+        antes = foto()
+        assert antes["https://x.com/b"][0] == 2, "el analisis de verdad ha corrido"
+        anclas = sorted(map(repr, (r.anchor_text for r in s.query(Link)
+                                   .filter(Link.job_id == job.id))))
+
+        archivo_enlaces.archivar(s, job.id)
+        assert filas_en_links() == 0
+        s.query(Url).filter(Url.job_id == job.id).update(
+            {"inlinks_count": None, "pagerank_score": None, "click_depth": None})
+        s.commit()
+
+        az.run_analysis(str(job.id))
+
+        assert foto() == antes
+        s.refresh(job)
+        assert job.enlaces_archivados, "vuelve a quedar archivado"
+        assert filas_en_links() == 0, "y `links` vacia para el job"
+        assert sorted(map(repr, (r["anchor_text"] for r in archivo_enlaces.recorrer(job.id)))) == anclas
+        assert sum(r["repeticiones"] for r in archivo_enlaces.recorrer(job.id)) == 6
+    finally:
+        s.rollback()
+        for t in ("issues", "links", "urls"):
             s.execute(text(f"DELETE FROM {t} WHERE job_id = :j"), {"j": job.id})
         s.execute(text("DELETE FROM jobs WHERE id = :j"), {"j": job.id})
         s.commit()

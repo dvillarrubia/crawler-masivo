@@ -70,7 +70,7 @@ def entorno(monkeypatch, tmp_path):
     monkeypatch.setattr(worker, "_comprobar_render_js", lambda jid: None)
     monkeypatch.setattr(worker, "_comparar_con_el_censo_anterior",
                         lambda jid: llamadas.__setitem__("comparar", llamadas["comparar"] + 1))
-    monkeypatch.setattr(worker, "_archivar_enlaces_superados", lambda jid: None)
+    monkeypatch.setattr(worker, "_archivar_enlaces", lambda jid: None)
 
     def _reencolar(jid, motivo):
         llamadas["reencolar"] += 1

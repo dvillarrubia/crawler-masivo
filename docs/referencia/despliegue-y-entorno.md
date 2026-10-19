@@ -148,7 +148,7 @@ CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ=2      # API: POST /api/extraccion/probar sim
 # Enlaces archivados en Parquet (decision 95)
 ARCHIVO_DIR=/data/archivo        # volumen `archivo`, compartido por worker y API
 ARCHIVAR_ENLACES=1               # 0 = el worker no archiva tras cada rastreo
-ARCHIVAR_DIAS_MINIMOS=14         # no se archiva nada que termino hace menos
+ARCHIVAR_DIAS_MINIMOS=14         # solo fallidos/estancados: un completado se archiva al acabar (decision 150); no se archiva nada que termino hace menos
 
 # Servidor MCP remoto en /mcp (decision 151)
 MCP_REMOTO=1                     # 0 = apagado (/mcp da 503)

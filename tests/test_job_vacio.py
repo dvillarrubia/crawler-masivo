@@ -146,7 +146,7 @@ def test_reglas_invalidas_en_una_reanudacion_dejan_el_job_fallido(monkeypatch, m
     monkeypatch.setattr(worker, "_reencolar_si_pedido", lambda j: False)
     monkeypatch.setattr(worker, "_trigger_analysis", lambda j: True)
     monkeypatch.setattr(worker, "_comparar_con_el_censo_anterior", lambda j: None)
-    monkeypatch.setattr(worker, "_archivar_enlaces_superados", lambda j: None)
+    monkeypatch.setattr(worker, "_archivar_enlaces", lambda j: None)
 
     try:
         worker._run_job(str(jid))

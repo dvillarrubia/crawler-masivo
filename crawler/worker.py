@@ -793,14 +793,12 @@ def _run_job(job_id: str) -> None:
     # luego.
     if final_status == "completed":
         _comparar_con_el_censo_anterior(job_id)
-        # Despues de comparar, y el orden importa: la comparacion puede
-        # RE-ANALIZAR la referencia (decision 93), y la referencia es justo un
-        # censo que este rastreo acaba de dejar superado. Archivandola antes,
-        # el re-analisis no tendria enlaces. Contra el cierre de OTRO rastreo
-        # del mismo sitio a la vez protegen el candado del job, que comparten
-        # el analisis y el archivado, y que la comparacion no re-analiza un
-        # censo ya archivado.
-        _archivar_enlaces_superados(job_id)
+        # Despues de comparar: este censo y cualquier otro completado pasan a
+        # Parquet (decision 150), y `links` se queda con los rastreos en curso.
+        # La comparacion puede re-analizar la referencia (decision 93), que ya
+        # esta archivada: `run_analysis` la restaura y la vuelve a archivar
+        # bajo el candado del job, el mismo que toma el archivado.
+        _archivar_enlaces(job_id)
 
 
 def _registrar_evolucion(job_id: str) -> None:
@@ -815,11 +813,12 @@ def _registrar_evolucion(job_id: str) -> None:
         logger.exception("Job %s: no se pudo registrar su evolucion", job_id)
 
 
-def _archivar_enlaces_superados(job_id: str) -> None:
-    """Pasa a Parquet los enlaces de los censos que ya han quedado superados.
+def _archivar_enlaces(job_id: str) -> None:
+    """Pasa a Parquet los enlaces de los censos completados (este incluido) y
+    de los fallidos que ya tienen un completado mas nuevo.
 
-    Es lo que mantiene `links` acotada a los censos vivos en vez de crecer con
-    cada rastreo semanal (decision 95). Best-effort, con el `try` cubriendo la
+    Es lo que mantiene `links` acotada a los rastreos en curso en vez de
+    crecer con cada censo (decisiones 95 y 150). Best-effort, con el `try` cubriendo la
     funcion ENTERA (decision 74): un fallo deja los enlaces donde estaban, que
     es un estado valido, y no puede tocar el job que acaba de terminar.
     `ARCHIVAR_ENLACES=0` lo apaga.
@@ -835,7 +834,7 @@ def _archivar_enlaces_superados(job_id: str) -> None:
         for job in archivo_enlaces.candidatos(session):
             try:
                 r = archivo_enlaces.archivar(session, job.id)
-                logger.info("Job %s: enlaces del censo superado %s archivados "
+                logger.info("Job %s: enlaces del censo %s archivados "
                             "(%d filas, %d bytes)", job_id, job.id, r["filas"], r["bytes"])
             except archivo_enlaces.SeEstaAnalizando:
                 # Lo esta analizando otro proceso (p. ej. el re-analisis de la

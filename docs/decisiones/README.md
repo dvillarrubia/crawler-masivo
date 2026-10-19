@@ -176,6 +176,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 147 | Una página que el sitio enlaza casi siempre con «leer más» no recibe contexto de su propio sitio | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d147) |
 | 148 | Un servidor MCP de solo lectura para preguntarle al crawler desde Claude Code o Cowork | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d148) |
 | 149 | Los avisos van a Slack por su API, un canal por cliente | [`comparacion-y-alertas`](comparacion-y-alertas.md#d149) |
+| 150 | Un censo completado archiva sus enlaces al acabar su analisis, y re-analizarlo los restaura y los vuelve a archivar | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d150) |
 | 151 | El servidor MCP en remoto (`/mcp` con OAuth) y con escritura: lanzar, cancelar y programar rastreos | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d151) |
 
 ## Anadir una decision

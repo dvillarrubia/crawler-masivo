@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from contextlib import contextmanager
 import re
 from collections import defaultdict
@@ -343,12 +344,14 @@ class SEOAnalyzer:
 
         # Sin sus enlaces, el analisis pondria a cero los entrantes, el
         # PageRank y la profundidad, y llenaria el censo de huerfanas falsas
-        # (decision 95). Se restaura y despues se analiza.
+        # (decision 95). `run_analysis` restaura, analiza y vuelve a archivar
+        # (decision 150); quien llama a `run_all` directamente, restaura antes.
         if self._enlaces_archivados:
             raise EnlacesArchivados(
                 f"los enlaces del job {self.job_id} estan archivados en Parquet; "
-                f"restauralos antes de analizar: python scripts/archivar_enlaces.py "
-                f"--restaurar {self.job_id}"
+                f"analizalo con `python -m analysis.analyzer {self.job_id}`, que "
+                f"los restaura y los vuelve a archivar, o restauralos antes: "
+                f"python scripts/archivar_enlaces.py --restaurar {self.job_id}"
             )
 
         self.actualizar_estadisticas()
@@ -5296,7 +5299,14 @@ def run_analysis(job_id: str) -> None:
         if not puedo:
             return
         session = SessionLocal()
+        restaurado = False
         try:
+            # Un censo completado tiene sus enlaces en Parquet desde que acabo
+            # su analisis (decision 150). Re-analizarlo —a mano, o la
+            # referencia de la comparacion (decision 93)— los devuelve a
+            # `links`, analiza y los vuelve a archivar, todo bajo este candado:
+            # el archivado de otro proceso no puede colarse en medio.
+            restaurado = _restaurar_si_archivado(session, job_id)
             analyzer = SEOAnalyzer(session, job_id)
             analyzer.run_all()
             # La fila de la evolucion del perfil (decision 130), con las
@@ -5306,7 +5316,38 @@ def run_analysis(job_id: str) -> None:
             # Best-effort: nunca lanza.
             _registrar_evolucion(session, job_id)
         finally:
+            if restaurado:
+                _volver_a_archivar(session, job_id)
             session.close()
+
+
+def _restaurar_si_archivado(session, job_id) -> bool:
+    from shared import archivo_enlaces
+    from shared.models import Job
+
+    job = session.get(Job, uuid.UUID(str(job_id)))
+    if job is None or not archivo_enlaces.esta_archivado(job):
+        return False
+    inicio = time.time()
+    n = archivo_enlaces.restaurar(session, job.id)
+    logger.info("Job %s: %d enlaces restaurados del Parquet para analizar (%.0f s)",
+                job_id, n, time.time() - inicio)
+    return True
+
+
+def _volver_a_archivar(session, job_id) -> None:
+    """Best-effort con el `try` entero (decision 74): si falla, los enlaces se
+    quedan en `links`, que es un estado valido, y el cierre del siguiente
+    rastreo lo archivara."""
+    try:
+        from shared import archivo_enlaces
+
+        session.rollback()
+        archivo_enlaces.archivar(session, job_id, candado_tomado=True)
+    except Exception:
+        session.rollback()
+        logger.exception("Job %s: no se pudieron volver a archivar los enlaces; "
+                         "siguen en `links`", job_id)
 
 
 if __name__ == "__main__":
