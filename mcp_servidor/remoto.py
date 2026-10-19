@@ -163,6 +163,10 @@ class ProveedorOAuth:
         if p is None:
             return None
         await self.almacen.borrar("pendiente:" + _hash(pendiente))
+        # El navegador a veces manda el formulario dos veces (doble clic, Intro
+        # mas clic): la segunda ya no encuentra la peticion y decia «caducada»
+        # con Claude ya conectado. Se recuerda para contestar «ya esta».
+        await self.almacen.guardar("concedida:" + _hash(pendiente), "1", DURACION_PENDIENTE_S)
         params = AuthorizationParams.model_validate(p["params"])
         codigo = secrets.token_urlsafe(32)
         await self.almacen.guardar("codigo:" + _hash(codigo), AuthorizationCode(
@@ -171,6 +175,9 @@ class ProveedorOAuth:
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
             resource=params.resource).model_dump_json(), DURACION_CODIGO_S)
         return construct_redirect_uri(str(params.redirect_uri), code=codigo, state=params.state)
+
+    async def ya_concedida(self, pendiente: str) -> bool:
+        return bool(pendiente) and bool(await self.almacen.leer("concedida:" + _hash(pendiente)))
 
     async def denegar(self, pendiente: str) -> str | None:
         p = await self.leer_pendiente(pendiente)
@@ -264,8 +271,14 @@ main{{background:#161b22}}input,button{{background:#0d1117;color:#e6edf3;border-
 
 
 def _caducada() -> HTMLResponse:
-    return _pagina("Autorización caducada", "<h1>Esta autorización ha caducado</h1><p>Vuelve a conectar "
-                   "el crawler desde Claude.</p>", 400)
+    return _pagina("Autorización caducada", "<h1>Esta autorización ha caducado</h1><p>Si acabas de "
+                   "autorizar, mira en Claude: seguramente ya está conectado. Si no, vuelve a conectar "
+                   "el crawler desde Claude (la página vale 10 minutos).</p>", 400)
+
+
+def _conectada() -> HTMLResponse:
+    return _pagina("Claude conectado", "<h1>Claude ya está conectado al crawler</h1><p>Puedes cerrar "
+                   "esta ventana y volver a Claude.</p>")
 
 
 def _formulario(pendiente: str, p: dict, con_sesion: bool, error: str = "") -> HTMLResponse:
@@ -293,13 +306,13 @@ def rutas_de_entrar(proveedor: ProveedorOAuth, sesion_valida, token_correcto) ->
             pendiente = request.query_params.get("pendiente", "")
             p = await proveedor.leer_pendiente(pendiente)
             if p is None:
-                return _caducada()
+                return _conectada() if await proveedor.ya_concedida(pendiente) else _caducada()
             return _formulario(pendiente, p, sesion_valida(request))
         form = await request.form()
         pendiente = str(form.get("pendiente") or "")
         p = await proveedor.leer_pendiente(pendiente)
         if p is None:
-            return _caducada()
+            return _conectada() if await proveedor.ya_concedida(pendiente) else _caducada()
         if form.get("accion") == "cancelar":
             return RedirectResponse(await proveedor.denegar(pendiente), status_code=302)
         if not (sesion_valida(request) or token_correcto(str(form.get("token") or ""))):
