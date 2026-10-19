@@ -1437,3 +1437,6 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 body.modo-compartido .topbar, body.modo-compartido .breadcrumbs { display: none !important; }
 .enlaces-cliente{list-style:none;margin:0 0 .6rem;padding:0}
 .enlaces-cliente>li{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;padding:.3rem 0;border-bottom:1px dotted var(--border)}
+.informe-bots{display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:.25rem .75rem;font-size:.9rem;margin-bottom:.4rem}
+.informe-bots>div{display:flex;gap:.4rem;align-items:baseline;border-bottom:1px dotted var(--border)}
+.informe-bots strong{margin-left:auto}

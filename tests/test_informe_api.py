@@ -18,7 +18,7 @@ from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared.database import get_session  # noqa: E402
-from shared.models import Base, Client, Issue, Job, Url  # noqa: E402
+from shared.models import Base, Client, Issue, Job, RobotsTxt, Url  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -62,6 +62,15 @@ def entorno(tmp_path):
         return j
 
     entero = censo("entero")
+    s.add(RobotsTxt(job_id=entero.id, host="www.x.com", url="https://www.x.com/robots.txt", status_code=200,
+                    evaluacion={"bots": {"oai-searchbot": {"alcance": "todo"}, "gptbot": {"alcance": "nada"},
+                                         "claude-searchbot": {"alcance": "parte"}}}))
+    tag = s.query(Url).filter(Url.job_id == entero.id, Url.url.endswith("/tag/a")).one()
+    s.add_all([
+        Issue(job_id=entero.id, url_id=tag.id, issue_type="nosnippet_en_indexable", severity="warning", details={}),
+        Issue(job_id=entero.id, url_id=tag.id, issue_type="contenido_solo_con_js", severity="warning",
+              details={"paginas_afectadas": 3, "paginas_muestreadas": 3, "plantilla": "/tag/:slug"}),
+    ])
     cortado = censo("cortado", motivo="max_urls_reached",
                     js_check={"grafo_fiable": False})
     s.commit()
@@ -89,7 +98,8 @@ def test_el_informe_junta_nota_cifras_y_prioridades(entorno):
     assert 0 <= d["nota"]["global"] <= 100 and d["nota"]["categorias"]
     assert d["cifras"]["paginas_html"] == 2 and d["cifras"]["indexables"] == 2
     tipos = [r["issue_type"] for r in d["prioridades"]]
-    assert set(tipos) == {"title_too_long", "missing_h1", "missing_csp"}
+    assert set(tipos) == {"title_too_long", "missing_h1", "missing_csp", "nosnippet_en_indexable",
+                          "contenido_solo_con_js"}
     assert [r["prioridad"] for r in d["prioridades"]] == sorted(
         (r["prioridad"] for r in d["prioridades"]), reverse=True)
     csp = next(r for r in d["prioridades"] if r["issue_type"] == "missing_csp")
@@ -109,3 +119,14 @@ def test_un_censo_cortado_o_sin_los_enlaces_de_js_lo_dice(entorno):
 def test_un_job_que_no_existe_es_404(entorno):
     api, *_ = entorno
     assert api.get(f"/api/jobs/{uuid.uuid4()}/informe").status_code == 404
+
+
+def test_la_seccion_de_ia_dice_que_bots_entran_y_que_no_ven(entorno):
+    api, entero, cortado = entorno
+    ia = api.get(f"/api/jobs/{entero}/informe").json()["ia"]
+    assert {b["token"]: b["alcance"] for b in ia["bots"]} == {
+        "OAI-SearchBot": "todo", "Claude-SearchBot": "parte", "GPTBot": "nada"}
+    assert ia["nosnippet"] == 1
+    assert ia["solo_con_js"] == {"paginas": 3, "plantillas": 1, "muestreadas": 3}
+    # Sin nada medido no se afirma «todo bien»: la seccion no sale.
+    assert api.get(f"/api/jobs/{cortado}/informe").json()["ia"] is None

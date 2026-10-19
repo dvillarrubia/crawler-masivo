@@ -313,6 +313,15 @@
    **Pendiente** de la 6.2: generarlo en el worker al terminar un programado y
    mandarlo (6.4), la evolución del perfil en gráfica (decisión 130), y que el
    equipo lo revise como entregable.
+   **Ampliado el 19-oct-2026** con dos secciones que salen solo si hay algo
+   medido (no se afirma «todo bien» sin mirar): **«Tráfico de Google»**
+   (decisión 142) y **«Buscadores de IA»**: qué bots de búsqueda y de
+   entrenamiento de IA bloquea el robots.txt del sitio (decisión 129), las
+   indexables con `nosnippet` o `max-snippet` corto (137) y las plantillas con
+   texto o enlaces que solo existen con JavaScript (140). Y el informe tardaba
+   **17 s** en Lopesan: 12,5 eran `_calc_links` de `/insights` recorriendo dos
+   veces los 1,43 M enlaces del censo (total y `nofollow`); con una suma
+   condicional en un solo recorrido baja a 5-6 s con las mismas cifras.
 
 <a id="d141"></a>
 141. **Search Console por cliente: la llave se sube, va a un fichero del
