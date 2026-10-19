@@ -964,7 +964,14 @@ def _comparar_con_el_censo_anterior(job_id: str) -> None:
             abren = {clave_de_alerta(a) for a in nuevas}
             enviar = [a for a in enviar if clave_de_alerta(a) in abren]
         if enviar:
-            avisar_de_alertas(job_id, job.name, enviar)
+            avisar_de_alertas(job_id, job.name, enviar, cliente=cliente)
+        # El informe de un rastreo programado al Slack del cliente (decision
+        # 149), DESPUES de las alertas: si algo salto, el canal lo lee primero.
+        if cliente is not None and job.programacion_id is not None:
+            from shared.avisos import avisar_de_informe
+            from shared.resumen_semanal import _resumen_de_rastreo
+
+            avisar_de_informe(cliente, job, _resumen_de_rastreo(session, job))
     except Exception:
         if session is not None:
             session.rollback()
@@ -1395,7 +1402,8 @@ def _generar_resumenes() -> None:
                 continue
             try:
                 if guardar_y_enviar(session, cliente, corte,
-                                    enviar=lambda t, c, n=cliente.nombre: avisar_de_resumen(n, t, c)):
+                                    enviar=lambda t, c, n=cliente.nombre, cl=cliente:
+                                    avisar_de_resumen(n, t, c, cliente=cl)):
                     logger.info("Resumen semanal de %s (semana del %s)",
                                 cliente.slug, corte.date())
             except Exception:

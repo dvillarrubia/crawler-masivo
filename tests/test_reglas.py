@@ -321,7 +321,7 @@ def test_el_worker_evalua_las_reglas_y_avisa_aunque_no_haya_censo_anterior(s, mo
     monkeypatch.setattr(shared.database, "SessionLocal", lambda: s)
     monkeypatch.setattr(shared.comparacion, "comparar_con_el_anterior", lambda *a, **k: None)
     monkeypatch.setattr(shared.avisos, "avisar_de_alertas",
-                        lambda jid, nombre, alertas: enviados.append(alertas))
+                        lambda jid, nombre, alertas, **k: enviados.append(alertas))
     monkeypatch.setattr(s, "close", lambda: None)
     worker._comparar_con_el_censo_anterior(job.id)  # Postgres acepta el texto; SQLite no
     s.refresh(job)
@@ -348,7 +348,7 @@ def test_el_worker_sin_reglas_del_cliente_solo_avisa_de_las_criticas(s, monkeypa
                         lambda *a, **k: {"comparable": True, "alertas": [
                             {**CRIT, "paginas": 30, "de": 100, "pct": 30.0}, WARN]})
     monkeypatch.setattr(shared.avisos, "avisar_de_alertas",
-                        lambda jid, nombre, alertas: enviados.append(alertas))
+                        lambda jid, nombre, alertas, **k: enviados.append(alertas))
     monkeypatch.setattr(s, "close", lambda: None)
     worker._comparar_con_el_censo_anterior(job.id)  # Postgres acepta el texto; SQLite no
     assert [[a["regla"] for a in lote] for lote in enviados] == [["rotas"]]

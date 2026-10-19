@@ -11,6 +11,9 @@ cuerpo es JSON con la forma que Slack entiende (`text` + `blocks` no, solo
 `text` y los datos aparte), de modo que apuntarlo directo a un *incoming
 webhook* de Slack también funciona.
 
+Y ademas, desde la decision 149, al canal de Slack de cada cliente por la API
+de Slack (`shared/slack.py`): el webhook sigue para quien enrute por n8n.
+
 Se manda con `urllib`, no con `requests`: la imagen del worker lleva Scrapy,
 pero una dependencia menos en el camino que corre después de CADA rastreo es
 una cosa menos que pueda romperlo.
@@ -64,17 +67,28 @@ def _texto_de_alertas(nombre_job: str, alertas: list[dict]) -> str:
     return "\n".join(lineas)
 
 
-def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
-    """Manda el aviso. Devuelve si se envió; nunca lanza.
+def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict], cliente=None) -> bool:
+    """Manda el aviso al webhook y al Slack del cliente. Devuelve si salio por
+    alguno; nunca lanza.
 
     Best-effort de verdad y con el `try` cubriendo la función entera: esto
     corre al cerrar un rastreo, y que un webhook caído deje un censo en
     `failed` sería cambiar un problema por otro peor.
     """
+    if not alertas:
+        return False
+    por_slack = False
+    if cliente is not None:
+        from shared.slack import enviar_a_cliente
+
+        por_slack = enviar_a_cliente(cliente, "alertas", _texto_de_alertas(nombre_job, alertas),
+                                     enlace_al_rastreo(job_id), "Ver el rastreo") > 0
+    return _webhook_de_alertas(job_id, nombre_job, alertas) or por_slack
+
+
+def _webhook_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
     try:
         if not WEBHOOK_URL:
-            return False
-        if not alertas:
             return False
         cuerpo = {
             "text": _texto_de_alertas(nombre_job, alertas),
@@ -104,13 +118,25 @@ def avisar_de_alertas(job_id, nombre_job: str, alertas: list[dict]) -> bool:
         return False
 
 
-def avisar_de_resumen(nombre_cliente: str, texto: str, contenido: dict) -> bool:
-    """El resumen semanal por el mismo webhook (decision 135). Nunca lanza.
+def avisar_de_resumen(nombre_cliente: str, texto: str, contenido: dict, cliente=None) -> bool:
+    """El resumen semanal por el mismo webhook (decision 135) y por el Slack
+    del cliente (decision 149). Nunca lanza.
 
     Va con `tipo: resumen_semanal` para que quien lo recibe (n8n) lo pueda
     enrutar aparte de las alertas: un resumen se lee el lunes, una alerta en el
     momento.
     """
+    por_slack = False
+    if cliente is not None:
+        from shared.slack import enviar_a_cliente
+
+        enlace = (f"{BASE_PUBLICA}/#/clientes/{contenido['cliente']['id']}"
+                  if BASE_PUBLICA and contenido.get("cliente") else None)
+        por_slack = enviar_a_cliente(cliente, "resumen", texto, enlace, "Abrir el cliente") > 0
+    return _webhook_de_resumen(nombre_cliente, texto, contenido) or por_slack
+
+
+def _webhook_de_resumen(nombre_cliente: str, texto: str, contenido: dict) -> bool:
     try:
         if not WEBHOOK_URL:
             return False
@@ -126,4 +152,52 @@ def avisar_de_resumen(nombre_cliente: str, texto: str, contenido: dict) -> bool:
             return resp.status < 300
     except Exception:
         logger.exception("No se pudo enviar el resumen semanal de %s", nombre_cliente)
+        return False
+
+
+def texto_de_informe(nombre_job: str, r: dict) -> str:
+    """El aviso de «rastreo terminado» de un rastreo programado, a partir de
+    `shared.resumen_semanal._resumen_de_rastreo`: lo mismo que ese rastreo
+    aporta al resumen, para no tener dos cifras de lo mismo."""
+    from shared.resumen_semanal import ETIQUETAS, _num
+
+    lineas = [f"*{nombre_job}* ha terminado."]
+    partes = []
+    for k, v in (r.get("cifras") or {}).items():
+        cambio = v.get("cambio")
+        partes.append(f"{_num(v.get('valor'))} {ETIQUETAS[k]}"
+                      + (f" ({'+' if cambio > 0 else ''}{_num(cambio)})" if cambio else ""))
+    if partes:
+        lineas.append("; ".join(partes) + ".")
+    inc = r.get("incidencias")
+    if inc:
+        lineas.append(f"Frente al anterior: {_num(inc.get('nuevas'))} incidencias nuevas"
+                      + (f" y {_num(inc['resueltas'])} resueltas" if inc.get("resueltas") is not None else "")
+                      + ".")
+    elif r.get("incidencias_motivo"):
+        lineas.append(f"Sin comparar incidencias: {r['incidencias_motivo']}")
+    criticas = [a for a in r.get("alertas") or [] if a.get("severidad") == "critical"]
+    if criticas or r.get("reglas_cliente"):
+        lineas.append(f"Con {len(criticas) + len(r.get('reglas_cliente') or [])} alerta(s): "
+                      "ya se avisaron aparte.")
+    elif r.get("comparable"):
+        lineas.append("Sin alertas.")
+    return "\n".join(lineas)
+
+
+def avisar_de_informe(cliente, job, resumen: dict) -> bool:
+    """El informe de un rastreo PROGRAMADO, al Slack del cliente que lo tenga
+    activado. Los lanzados a mano no: un canario o una prueba no son algo que
+    el cliente espere leer. Nunca lanza."""
+    try:
+        if cliente is None or getattr(job, "programacion_id", None) is None:
+            return False
+        from shared.slack import enviar_a_cliente
+
+        enlace = (f"{BASE_PUBLICA}/" + RUTA_FICHA_RASTREO.format(job_id=job.id) + "/informe-cliente"
+                  if BASE_PUBLICA else None)
+        return enviar_a_cliente(cliente, "informe", texto_de_informe(job.name, resumen),
+                                enlace, "Ver el informe") > 0
+    except Exception:
+        logger.exception("No se pudo avisar del informe del job %s", getattr(job, "id", "?"))
         return False

@@ -536,6 +536,9 @@ function app() {
     incidentes: null,         // GET /clients/{id}/incidentes (decision 139)
     // Search Console del cliente (decision 141)
     gsc: { estado: null, llaves: [], llave: '', nombreNueva: '', propiedades: null, propiedad: '', error: '', ocupado: false },
+    // Slack del cliente (decision 149)
+    slack: { estado: null, tokens: [], token: '', nombreNuevo: '', tokenTexto: '', canales: null, canal: '', canalNombre: '',
+             alertas: true, resumen: true, informe: true, error: '', ocupado: false, prueba: null },
     incidentesVer: 'vivos',
     reglasError: '',
     reglasPrueba: null,       // POST /clients/{id}/reglas/probar
@@ -1552,6 +1555,108 @@ function app() {
       } catch (e) { this.gsc.error = e.message; }
     },
 
+    // --- Slack (decision 149) ----------------------------------------------
+    async cargarSlack() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      this.slack = { estado: null, tokens: [], token: '', nombreNuevo: 'SLACK_BOT',
+                     tokenTexto: '', canales: null, canal: '', canalNombre: '', alertas: true, resumen: true, informe: true,
+                     error: '', ocupado: false, prueba: null };
+      try {
+        const [estado, tokens] = await Promise.all([api(`/clients/${id}/slack`), api('/credenciales?tipo=slack')]);
+        if (!this.cliente || this.cliente.id !== id) return;
+        this.slack.estado = estado;
+        this.slack.tokens = tokens;
+        const actual = (estado.canales || [])[0];
+        if (actual) {
+          Object.assign(this.slack, { token: actual.credencial || '', canal: actual.canal || '', canalNombre: actual.canal_nombre || '',
+                                      alertas: actual.alertas, resumen: actual.resumen, informe: actual.informe });
+        } else if (tokens.length) {
+          // Un token suele servir a todos los clientes: el de la agencia.
+          this.slack.token = (tokens.find(t => t.valida) || tokens[0]).nombre;
+        }
+      } catch (e) { this.slack.error = e.message; }
+    },
+
+    async subirTokenSlack() {
+      const contenido = (this.slack.tokenTexto || '').trim();
+      if (!contenido) return;
+      this.slack.error = ''; this.slack.ocupado = true;
+      try {
+        const r = await api('/credenciales', { method: 'POST',
+          body: JSON.stringify({ tipo: 'slack', nombre: this.slack.nombreNuevo, contenido }) });
+        this.slack.tokenTexto = '';
+        this.slack.tokens = await api('/credenciales?tipo=slack');
+        this.slack.token = r.nombre;
+        this.showToast('Token guardado: bot ' + (r.bot || '') + ' en ' + (r.equipo || 'Slack'));
+        await this.verCanalesSlack();
+      } catch (e) { this.slack.error = e.message; }
+      this.slack.ocupado = false;
+    },
+
+    async verCanalesSlack() {
+      if (!this.slack.token) return;
+      this.slack.error = ''; this.slack.canales = null; this.slack.ocupado = true;
+      try {
+        this.slack.canales = await api(`/credenciales/${this.slack.token}/canales`);
+      } catch (e) { this.slack.error = e.message; this.slack.canales = []; }
+      this.slack.ocupado = false;
+    },
+
+    elegirCanalSlack(id) {
+      const c = (this.slack.canales || []).find(x => x.id === id);
+      this.slack.canal = id;
+      this.slack.canalNombre = c ? '#' + c.nombre : '';
+    },
+
+    botSlack() {
+      const t = (this.slack.tokens || []).find(x => x.nombre === this.slack.token);
+      return t && t.bot ? t.bot : 'el bot';
+    },
+
+    async guardarSlack() {
+      if (!this.slack.token || !this.slack.canal) return;
+      this.slack.error = ''; this.slack.ocupado = true; this.slack.prueba = null;
+      try {
+        await api(`/clients/${this.cliente.id}/slack`, { method: 'PUT', body: JSON.stringify({
+          credencial: this.slack.token, canal: this.slack.canal.trim(), canal_nombre: this.slack.canalNombre || null,
+          alertas: this.slack.alertas, resumen: this.slack.resumen, informe: this.slack.informe }) });
+        // La integracion vive en el cliente: que el formulario generico no la
+        // pise con la copia de antes al guardar otra cosa.
+        this.cliente = await api(`/clients/${this.cliente.id}`);
+        this.clienteForm = _formCliente(this.cliente);
+        this.showToast('Slack guardado');
+        await this.probarSlack();
+        const prueba = this.slack.prueba;
+        await this.cargarSlack();
+        this.slack.prueba = prueba;
+      } catch (e) { this.slack.error = e.message; }
+      this.slack.ocupado = false;
+    },
+
+    async probarSlack() {
+      this.slack.error = '';
+      try {
+        this.slack.prueba = await api(`/clients/${this.cliente.id}/slack/probar`, { method: 'POST' });
+      } catch (e) { this.slack.error = e.message; }
+    },
+
+    async quitarSlack() {
+      const ok = await this.preguntar({ titulo: 'Quitar Slack', mensaje: 'Las alertas, el resumen y los informes de este cliente dejarán de llegar a su canal.', aceptar: 'Quitar', peligro: true });
+      if (!ok) return;
+      try {
+        await api(`/clients/${this.cliente.id}/slack`, { method: 'DELETE' });
+        this.cliente = await api(`/clients/${this.cliente.id}`);
+        this.clienteForm = _formCliente(this.cliente);
+        await this.cargarSlack();
+      } catch (e) { this.slack.error = e.message; }
+    },
+
+    textoEnviosSlack(c) {
+      const e = [c.alertas && 'alertas', c.resumen && 'resumen semanal', c.informe && 'informe de cada rastreo programado'].filter(Boolean);
+      return e.length ? e.join(', ') : 'nada (todo desactivado)';
+    },
+
     textoEstadoGsc(e) {
       return ({ ok: 'Sincronizado', error: 'Error', en_curso: 'Descargando…', pendiente: 'Pendiente de la primera descarga',
                 sin_configurar: 'Sin configurar' })[e.estado] || e.estado;
@@ -1571,7 +1676,7 @@ function app() {
     // muestra como pista, la validacion de verdad es la de la API.
     prefijoIntegracion(tipo) {
       return ({ gsc: 'GSC_', dataforseo: 'DATAFORSEO_', ahrefs: 'AHREFS_', semrush: 'SEMRUSH_',
-                majestic: 'MAJESTIC_', pagespeed: 'PAGESPEED_' })[tipo] || '';
+                majestic: 'MAJESTIC_', pagespeed: 'PAGESPEED_', slack: 'SLACK_' })[tipo] || '';
     },
 
     async guardarCliente() {

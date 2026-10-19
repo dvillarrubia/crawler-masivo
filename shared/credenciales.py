@@ -39,6 +39,8 @@ PREFIJOS: dict[str, str] = {
     "semrush": "SEMRUSH_",
     "majestic": "MAJESTIC_",
     "pagespeed": "PAGESPEED_",
+    # El token del bot de Slack (decision 149): xoxb-...
+    "slack": "SLACK_",
 }
 TIPOS = tuple(PREFIJOS)
 
