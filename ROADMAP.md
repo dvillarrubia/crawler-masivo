@@ -192,6 +192,17 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Google dice qué tiene indexado y qué canonical ha elegido (19 de octubre)
+
+Con Search Console conectado, cada día se comprueban unas 500 URLs una a una
+con la inspección de URLs de Google: si las tiene indexadas (y si no, por qué)
+y qué canonical ha elegido. Avisa de páginas que el rastreo da por indexables y
+Google no tiene, de canonicals que Google ignora, y de páginas de las que
+Google aún guarda un canonical que ya no declaran (se arregla pidiendo la
+reindexación). En Lopesan aparecen fichas en alemán que Google aún ve
+canonicalizadas a la versión en castellano o al servidor de pruebas.
+[Decisión 144](docs/decisiones/incidencias.md#d144).
+
 ### Search Console cruzado con el rastreo (19 de octubre)
 
 Con Search Console conectado, cada rastreo se cruza con los 90 días de datos

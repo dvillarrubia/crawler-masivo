@@ -167,6 +167,22 @@ const ISSUE_INFO = {
     google: 'Está indexando la variante con parámetros como una URL aparte: el tráfico y las señales se reparten entre duplicados en vez de sumarse en la página.',
     arreglo: 'Que la variante lleve canonical a la URL limpia (o redirija), y que los enlaces que generan el parámetro no sean rastreables o usen la URL limpia.',
   },
+  // Decision 144: lo que dice la inspeccion de URLs de Search Console.
+  'indexable_no_indexada_por_google': {
+    que: 'El rastreo la da por indexable (responde 200, sin noindex y autocanónica), pero la inspección de URLs de Search Console dice que Google no la tiene en el índice. En los detalles, el motivo que da Google y cuándo se comprobó.',
+    google: 'Es su veredicto, no una estimación: «Rastreada: actualmente sin indexar» suele ser calidad o duplicado; «Descubierta: actualmente sin indexar», que no le ha dado prioridad para rastrearla (enlazado o presupuesto de rastreo); «Google no reconoce esta URL», que no la conoce.',
+    arreglo: 'Según el motivo: mejorar o fusionar el contenido, enlazarla desde páginas fuertes, incluirla en el sitemap, o sacarla si no aporta. Se comprueba en una muestra diaria, no en todas las páginas.',
+  },
+  'google_elige_otro_canonical': {
+    que: 'La página declara un canonical y Google, según la inspección de URLs de Search Console, ha elegido otro. En los detalles, el declarado y el de Google.',
+    google: 'Ha decidido ignorar la señal: indexa y posiciona la URL que eligió él. Pasa cuando el canonical apunta a algo que no le convence (otro dominio, una URL que redirige, contenido distinto) o cuando las señales se contradicen (enlaces internos, sitemap y hreflang apuntan a otra).',
+    arreglo: 'Alinear todas las señales con la URL que se quiere: canonical, enlaces internos, sitemap y hreflang. Si el declarado es un error (un dominio de pruebas, por ejemplo), corregirlo.',
+  },
+  'google_tiene_canonical_antiguo': {
+    que: 'En su última visita, Google vio en esta página un canonical distinto del que declara hoy (en los detalles: el de hoy, el que vio Google, el que eligió Google y la fecha de su última visita).',
+    google: 'Decide con lo que vio entonces. Si el canonical de entonces era un error que ya se corrigió, se arreglará solo cuando vuelva a rastrearla; hasta entonces puede seguir indexando otra URL.',
+    arreglo: 'Si la página es importante, pedir la indexación de nuevo desde la inspección de URLs de Search Console para que Google la vuelva a visitar antes. Informativo.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',
@@ -785,6 +801,9 @@ const ISSUE_LABEL_EXTRA = {
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
   trafico_en_pagina_perdida: 'Página con tráfico de Google que se pierde',
+  indexable_no_indexada_por_google: 'Indexable que Google no tiene indexada',
+  google_elige_otro_canonical: 'Google elige otro canonical',
+  google_tiene_canonical_antiguo: 'Google tiene un canonical antiguo',
   trafico_en_redireccion: 'Tráfico en una URL que redirige',
   huerfana_con_trafico: 'Huérfana con tráfico de Google',
   indexable_sin_impresiones: 'Indexable sin impresiones (90 días)',
@@ -876,6 +895,7 @@ const DETALLE_LABEL = {
   directiva: 'directiva',
   max_snippet: 'máx. caracteres del fragmento',
   version: 'versión comparada',
+  cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'comprobada',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
 
