@@ -367,3 +367,36 @@
    Google conoce y el rastreo no encontró, prioridad por clics) y la columna en
    el Explorador. Ojo para ella: las URLs con más clics de Lopesan llevan
    `?partner=` y no casarán con la del censo sin tratar ese parámetro.
+
+<a id="d143"></a>
+143. **El cliente tiene un enlace propio de solo lectura, y solo ve sus
+   informes** (Ola 6.1 de `docs/PLAN_MEJOR_CRAWLER.md`, primera parte). La API
+   tiene un único token (decisión 134), que lo abre todo: no se le puede dar a
+   un cliente. Acotar TODOS los routers por cliente es la 6.1 entera y mucha
+   superficie; lo que un cliente pide de verdad es su informe, así que eso es
+   lo primero:
+   - `/c/<token>` es la misma aplicación en **modo compartido**: sin barra ni
+     datos de la agencia, el informe de la decisión 138 (y con él la prioridad,
+     la comparación y el tráfico de Google) con un selector entre sus censos.
+     No pide nada protegido: se comprobó que no hace ni una petición fuera de
+     `/api/publico`.
+   - **El token autoriza, no la sesión.** `api/auth.py` deja pasar
+     `/api/publico` (y nada que solo empiece por esas letras: `/api/publicos`
+     sigue protegido). 32 caracteres aleatorios (`secrets.token_urlsafe(24)`);
+     en `enlaces_cliente` va su SHA-256 y seis caracteres para reconocerlo, y el
+     token se enseña **una vez**, al crearlo: ni la base de datos ni un backup
+     permiten entrar.
+   - **Cada endpoint público comprueba que lo pedido es de ese cliente**: solo
+     censos completados (no canarios ni pruebas, `tipo_de_rastreo`) de su
+     `cliente_id`. Un id de otro cliente, un enlace revocado, uno caducado y
+     uno inventado dan el mismo 404: a quien prueba tokens no se le dice cuál
+     existió.
+   - Se gestiona en la ficha del cliente, Configuración → «Enlace para el
+     cliente»: crear (con nombre y caducidad, 365 días por defecto), copiar,
+     revocar, y cuándo y cuántas veces se abrió.
+   - En modo compartido el informe no enseña la jerga interna: el motivo de
+     no comparar incidencias («dos versiones del análisis…») se cambia por una
+     frase neutra.
+   **Pendiente** de la 6.1: tokens por rol para la API (lectura frente a
+   escritura) y acotar el resto de routers por cliente, que es lo que haría
+   falta para darle al cliente el Explorador.

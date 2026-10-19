@@ -43,7 +43,10 @@ DURACION_SESION_S = 30 * 24 * 3600
 # Prefijos que exigen sesion o token. Todo lo de `/api` salvo `/api/sesion`, y
 # la documentacion de FastAPI, que enumera cada endpoint con sus parametros.
 _PROTEGIDOS = ("/api/", "/docs", "/redoc", "/openapi.json")
-_PUBLICOS_API = ("/api/sesion",)
+# `/api/publico`: el enlace de solo lectura de un cliente (decision 143). No
+# pide sesion: la autoriza el token de la ruta, y solo da el informe de ese
+# cliente.
+_PUBLICOS_API = ("/api/sesion", "/api/publico")
 
 
 def desactivada() -> bool:

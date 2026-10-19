@@ -577,6 +577,9 @@ function app() {
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
     informe: null,            // GET /jobs/{id}/informe (decision 138)
+    compartido: null,         // modo /c/<token> (decision 143): {token, cliente, censos, elegido}
+    enlaces: null,            // enlaces de solo lectura del cliente (decision 143)
+    enlaceNuevo: null,        // el que se acaba de crear: el unico momento en que se ve el token
     informeCargando: false,
     issuesOrden: 'gravedad',  // o 'prioridad': gravedad x importancia de las paginas (decision 136)
     issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
@@ -654,6 +657,15 @@ function app() {
 
     // ------- Init -------
     init() {
+      // Enlace de solo lectura de un cliente (decision 143): `/c/<token>` es
+      // la misma aplicacion, sin barra ni datos de la agencia, solo su informe.
+      const compartido = location.pathname.match(/^\/c\/([A-Za-z0-9_-]{20,64})\/?$/);
+      if (compartido) {
+        this.iniciarCompartido(compartido[1]);
+        this.$nextTick(() => lucide.createIcons());
+        this._vigilarIconos();
+        return;
+      }
       // La ruta manda (UX-03): un enlace pegado, una recarga o el boton atras
       // llevan a la misma vista. Sin hash, la lista de rastreos.
       // Sin hash, el panel de clientes (UX-07): la pregunta del dia a dia es
@@ -2463,6 +2475,64 @@ function app() {
       if (r.agregadas && r.agregadas >= r.incidencias) return hallazgos(r.agregadas);
       const pags = fmt.num(r.paginas) + (r.paginas === 1 ? ' página' : ' páginas');
       return r.agregadas ? pags + ' · ' + hallazgos(r.agregadas) : pags;
+    },
+
+    // --- Enlace de solo lectura (decision 143) ---------------------------
+    async iniciarCompartido(token) {
+      document.body.classList.add('modo-compartido');
+      this.compartido = { token, cliente: null, censos: [], elegido: '', error: '' };
+      this.view = 'informe';
+      this.informeCargando = true;
+      try {
+        const r = await api(`/publico/${token}`);
+        this.compartido.cliente = r.cliente;
+        this.compartido.censos = r.censos;
+        if (!r.censos.length) { this.compartido.error = 'Todavía no hay ningún informe.'; this.informeCargando = false; return; }
+        await this.verInformeCompartido(r.censos[0].id);
+      } catch (e) {
+        this.compartido.error = e.message;
+        this.informeCargando = false;
+      }
+    },
+
+    async verInformeCompartido(jobId) {
+      this.compartido.elegido = jobId;
+      this.informe = null;
+      this.informeCargando = true;
+      try {
+        this.informe = await api(`/publico/${this.compartido.token}/informe/${jobId}`);
+        document.title = `Informe SEO · ${this.informe.job.sitio}`;
+      } catch (e) { this.compartido.error = e.message; }
+      this.informeCargando = false;
+    },
+
+    async cargarEnlaces() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      this.enlaceNuevo = null;
+      try {
+        const r = await api(`/clients/${id}/enlaces`);
+        if (this.cliente && this.cliente.id === id) this.enlaces = r;
+      } catch (e) { this.enlaces = []; this.clienteError = e.message; }
+    },
+
+    async crearEnlace(nombre, dias) {
+      try {
+        this.enlaceNuevo = await api(`/clients/${this.cliente.id}/enlaces`, {
+          method: 'POST', body: JSON.stringify({ nombre: nombre || null, dias: dias ? Number(dias) : null }) });
+        this.enlaceNuevo.url = location.origin + this.enlaceNuevo.ruta;
+        const r = await api(`/clients/${this.cliente.id}/enlaces`);
+        this.enlaces = r;
+      } catch (e) { this.clienteError = e.message; }
+    },
+
+    async revocarEnlace(e) {
+      const ok = await this.preguntar({ titulo: 'Revocar el enlace', mensaje: `Quien tenga el enlace «${e.nombre || e.prefijo + '…'}» dejará de ver los informes. No se puede deshacer.`, aceptar: 'Revocar', peligro: true });
+      if (!ok) return;
+      try {
+        await api(`/clients/${this.cliente.id}/enlaces/${e.id}`, { method: 'DELETE' });
+        await this.cargarEnlaces();
+      } catch (err) { this.clienteError = err.message; }
     },
 
     // Decision 138: el informe para el cliente, en una pagina imprimible.

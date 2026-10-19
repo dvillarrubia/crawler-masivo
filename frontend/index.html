@@ -919,6 +919,41 @@
               </div>
             </template>
 
+            <!-- Enlaces de solo lectura (decision 143): el cliente ve el
+                 informe de sus censos en /c/<token>, sin la sesion de la agencia. -->
+            <template x-if="cliente">
+              <div x-init="cargarEnlaces()" data-testid="enlaces" x-data="{ nombre: '', dias: 365 }"
+                   style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+                <h3 style="font-size:1rem;margin-bottom:.3rem">Enlace para el cliente</h3>
+                <p class="text-dim text-sm mb-1">Una dirección que puedes mandarle: ve el informe de cada censo (nota, cambios, qué arreglar primero y tráfico de Google) y nada más de la herramienta. Se puede revocar cuando quieras.</p>
+                <template x-if="enlaceNuevo">
+                  <div class="card mb-1" style="border-color:var(--green,#2e7d32)" data-testid="enlace-nuevo">
+                    <div class="text-sm"><strong>Cópialo ahora:</strong> no se volverá a enseñar.</div>
+                    <div class="flex gap-1 items-center mt-1" style="flex-wrap:wrap">
+                      <code style="word-break:break-all" x-text="enlaceNuevo.url"></code>
+                      <button class="btn btn-sm" @click="navigator.clipboard && navigator.clipboard.writeText(enlaceNuevo.url); showToast('Enlace copiado')">Copiar</button>
+                    </div>
+                  </div>
+                </template>
+                <ul class="enlaces-cliente" x-show="enlaces && enlaces.length">
+                  <template x-for="e in enlaces || []" :key="e.id">
+                    <li :class="e.revocado_en && 'text-dim'">
+                      <strong x-text="e.nombre || 'sin nombre'"></strong>
+                      <code x-text="e.prefijo + '…'"></code>
+                      <span class="text-sm text-dim" x-text="'creado ' + fmt.dia(e.creado_en) + (e.caduca_en ? ' · caduca ' + fmt.dia(e.caduca_en) : ' · no caduca') + (e.ultimo_uso ? ' · visto ' + fmt.date(e.ultimo_uso) + ' (' + e.usos + ')' : ' · sin abrir')"></span>
+                      <span class="badge badge-failed" x-show="e.revocado_en">revocado</span>
+                      <button class="btn btn-sm" x-show="!e.revocado_en" @click="revocarEnlace(e)">Revocar</button>
+                    </li>
+                  </template>
+                </ul>
+                <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                  <input type="text" x-model="nombre" placeholder="Para quién (opcional)" style="width:14rem">
+                  <label class="text-sm">Caduca en <input type="number" x-model="dias" min="1" max="3650" style="width:5rem"> días</label>
+                  <button class="btn btn-sm btn-primary" @click="crearEnlace(nombre, dias); nombre = ''" data-testid="crear-enlace">Crear enlace</button>
+                </div>
+              </div>
+            </template>
+
             <!-- Integraciones: NUNCA el secreto. Se guarda el nombre de la
                  variable de entorno; la API solo dice si esta puesta. -->
             <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
@@ -3550,13 +3585,24 @@
     <template x-if="view === 'informe'">
       <div class="informe" data-testid="informe">
         <div class="informe-acciones no-print">
-          <a class="btn btn-sm" :href="'#/rastreos/' + (job && job.id)">
+          <a class="btn btn-sm" x-show="!compartido" :href="'#/rastreos/' + (job && job.id)">
             <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Volver al rastreo</a>
+          <!-- Modo compartido (decision 143): elegir entre los censos del cliente. -->
+          <template x-if="compartido && compartido.censos.length">
+            <select @change="verInformeCompartido($event.target.value)" aria-label="Informe" style="width:auto;max-width:22rem" data-testid="informe-censos">
+              <template x-for="c in compartido.censos" :key="c.id">
+                <option :value="c.id" :selected="c.id === compartido.elegido" x-text="fmt.dia(c.fecha) + ' · ' + c.nombre"></option>
+              </template>
+            </select>
+          </template>
           <button class="btn btn-sm btn-primary" @click="window.print()" :disabled="!informe">
             <i data-lucide="printer" style="width:13px;height:13px"></i> Imprimir o guardar como PDF</button>
         </div>
         <template x-if="informeCargando">
           <div class="loading-overlay"><div class="spinner"></div> Preparando el informe…</div>
+        </template>
+        <template x-if="compartido && compartido.error && !informe">
+          <div class="card" style="margin-top:2rem" x-text="compartido.error"></div>
         </template>
         <template x-if="!informeCargando && informe">
           <article>
@@ -3626,7 +3672,7 @@
                 <p x-show="informe.comparacion.incidencias" class="text-sm"
                    x-text="informe.comparacion.incidencias ? fmt.num(informe.comparacion.incidencias.nuevas) + ' incidencias nuevas' + (informe.comparacion.incidencias.resueltas != null ? ', ' + fmt.num(informe.comparacion.incidencias.resueltas) + ' resueltas' : '') + ' y ' + fmt.num(informe.comparacion.incidencias.siguen) + ' que siguen.' : ''"></p>
                 <p x-show="informe.comparacion.incidencias_motivo" class="text-sm text-dim"
-                   x-text="'Las incidencias no se comparan: ' + (informe.comparacion.incidencias_motivo || '')"></p>
+                   x-text="compartido ? 'En este informe las incidencias no se comparan una a una con el anterior.' : 'Las incidencias no se comparan: ' + (informe.comparacion.incidencias_motivo || '')"></p>
               </section>
             </template>
 

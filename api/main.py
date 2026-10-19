@@ -17,7 +17,7 @@ from shared.database import init_db
 from api import dependencies
 from api.auth import AutenticacionMiddleware
 from api.routers import (
-    almacenamiento, cleaning, clientes, credenciales, enriquecido, extraccion, jobs, programaciones,
+    almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
     results, segmentos, semantic, sesion, uso,
 )
 
@@ -85,6 +85,7 @@ app.include_router(extraccion.router)
 app.include_router(segmentos.router)
 app.include_router(sesion.router)
 app.include_router(credenciales.router)
+app.include_router(compartido.router)
 
 
 @app.get("/health", tags=["system"])
