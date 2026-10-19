@@ -1432,3 +1432,8 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .gsc-estado.gsc-error{border-left-color:var(--red,#c62828)}
 .gsc-pasos{padding:.5rem 0 0 .25rem}
 .gsc-pasos .form-group{margin-bottom:.6rem}
+
+/* Enlace de solo lectura del cliente (decision 143) */
+body.modo-compartido .topbar, body.modo-compartido .breadcrumbs { display: none !important; }
+.enlaces-cliente{list-style:none;margin:0 0 .6rem;padding:0}
+.enlaces-cliente>li{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;padding:.3rem 0;border-bottom:1px dotted var(--border)}

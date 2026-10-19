@@ -205,6 +205,15 @@ sección de tráfico. En Lopesan: el 28 % de los clics de Google van a URLs con
 `?partner=` de 18 fichas de hotel, y 952 URLs con tráfico no las encontró el
 rastreo. [Decisión 142](docs/decisiones/incidencias.md#d142).
 
+### Un enlace para que el cliente vea sus informes (19 de octubre)
+
+En la ficha del cliente, Configuración → **Enlace para el cliente**: crea una
+dirección que se le puede mandar. Con ella ve el informe de cada uno de sus
+censos —nota, cambios, qué arreglar primero, tráfico de Google— y nada más de
+la herramienta, sin usuario ni contraseña. Caduca cuando se elija (un año por
+defecto), se puede revocar y se ve cuándo lo ha abierto.
+[Decisión 143](docs/decisiones/api-clientes-y-frontend.md#d143).
+
 ### Search Console por cliente (19 de octubre)
 
 En la ficha del cliente, Configuración → **Search Console**: se sube la llave

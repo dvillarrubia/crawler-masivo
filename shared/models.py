@@ -265,6 +265,31 @@ class GscEstado(Base):
     dias_truncados = Column(JSON, nullable=True)
 
 
+class EnlaceCliente(Base):
+    """Un enlace de solo lectura para un cliente (decision 143, Ola 6.1).
+
+    `/c/<token>` ensena el informe de sus censos y nada mas, sin la sesion de
+    la agencia. Se guarda el SHA-256 del token, nunca el token: se ensena una
+    vez al crearlo, y quien lea la base de datos (o un backup) no puede entrar.
+    Se revoca y puede caducar.
+    """
+
+    __tablename__ = "enlaces_cliente"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    # Los primeros caracteres, para reconocerlo en la lista sin ensenarlo.
+    prefijo = Column(String(8), nullable=False)
+    nombre = Column(String(256), nullable=True)
+    creado_en = Column(DateTime(timezone=True), default=_utcnow)
+    caduca_en = Column(DateTime(timezone=True), nullable=True)
+    revocado_en = Column(DateTime(timezone=True), nullable=True)
+    ultimo_uso = Column(DateTime(timezone=True), nullable=True)
+    usos = Column(Integer, nullable=False, default=0)
+
+
 class Programacion(Base):
     """Un rastreo que se repite: cuando toca y que lanzar.
 
