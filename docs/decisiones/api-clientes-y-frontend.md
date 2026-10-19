@@ -350,6 +350,10 @@
      varios clientes; no se borra si alguno la usa (409 con sus nombres).
      `GET /api/credenciales/{nombre}/propiedades` lista lo que ve la cuenta,
      para elegir la propiedad sin escribirla y saber si el cliente ya dio acceso.
+     Y la ruta del prototipo semántico que guardaba la llave **en la base de
+     datos** (`POST /api/semantic/gsc-accounts`, `gsc_accounts.credentials_json`)
+     responde ahora 410 diciendo dónde se sube; en producción no había ninguna
+     guardada (19-oct-2026).
    - **Por cliente y día, no por job** (`docs/INVESTIGACION_SEARCH_CONSOLE.md`):
      tabla `gsc_paginas` (cliente, propiedad, fecha, URL, `url_clave`, clics,
      impresiones, posición), con **todas** las URLs que da Google, también las
