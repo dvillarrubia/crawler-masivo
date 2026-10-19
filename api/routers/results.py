@@ -3072,12 +3072,15 @@ def _calc_links(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         total_internal_links = job.enlaces_archivados.get("internos", 0)
         nofollow_links = job.enlaces_archivados.get("nofollow_internos", 0)
     else:
-        total_internal_links = db.query(func.sum(Link.repeticiones)).filter(
-            Link.job_id == job_id, Link.is_internal == True,
-        ).scalar() or 0
-        nofollow_links = db.query(func.sum(Link.repeticiones)).filter(
-            Link.job_id == job_id, Link.is_internal == True, Link.follow == False,
-        ).scalar() or 0
+        # Un solo recorrido de `links` del job, no dos (decision 41): en el
+        # censo de Lopesan (1,43 M filas) eran 12,5 s de los 11-17 que
+        # tardaban /insights y el informe.
+        total_internal_links, nofollow_links = db.query(
+            func.sum(Link.repeticiones),
+            func.sum(case((Link.follow == False, Link.repeticiones), else_=0)),  # noqa: E712
+        ).filter(Link.job_id == job_id, Link.is_internal == True).one()  # noqa: E712
+        total_internal_links = total_internal_links or 0
+        nofollow_links = nofollow_links or 0
 
     # Broken links (4xx/5xx issue counts)
     broken_link_issues = db.query(func.count(Issue.id)).filter(
@@ -3520,6 +3523,50 @@ def _trafico_del_informe(db: Session, job: Job) -> dict | None:
     return salida
 
 
+def _ia_del_informe(db: Session, job: Job) -> dict | None:
+    """Buscadores de IA en el informe (decisiones 129, 137 y 140): si pueden
+    entrar segun el robots.txt, que paginas se les niegan con `nosnippet` y
+    que contenido solo existe con JavaScript (no lo ejecutan). None si el
+    censo no tiene nada de eso medido: no se afirma «todo bien» sin mirar."""
+    from urllib.parse import urlsplit
+
+    from shared.robots_txt import BOTS_INFO
+
+    salida: dict[str, Any] = {"bots": [], "nosnippet": 0, "max_snippet": 0,
+                              "solo_con_js": {"paginas": 0, "plantillas": 0, "muestreadas": 0}}
+    sitio = urlsplit(_raiz_del_sitio((job.seeds or [None])[0]) or "").hostname or ""
+    try:
+        filas = _filas_robots(db, job.id, con_cuerpo=False)
+    except Exception:  # noqa: BLE001 — sin tabla, sin la parte de robots
+        db.rollback()
+        filas = {}
+    ev = None
+    for _o, fila in sorted(filas.items()):
+        e = fila.evaluacion if isinstance(fila.evaluacion, dict) else {}
+        if e.get("bots") and (ev is None or (fila.host or "") == sitio):
+            ev = e["bots"]
+    if ev:
+        for b in BOTS_INFO:
+            if b["tipo"] in ("busqueda_ia", "entrenamiento") and b["bot"] in ev:
+                salida["bots"].append({"token": b["token"], "proveedor": b["proveedor"], "tipo": b["tipo"],
+                                       "alcance": (ev.get(b["bot"]) or {}).get("alcance")})
+    cuentas = dict(db.query(Issue.issue_type, func.count(func.distinct(Issue.url_id)))
+                   .filter(Issue.job_id == job.id,
+                           Issue.issue_type.in_(("nosnippet_en_indexable", "max_snippet_restrictivo")))
+                   .group_by(Issue.issue_type).all())
+    salida["nosnippet"] = int(cuentas.get("nosnippet_en_indexable", 0))
+    salida["max_snippet"] = int(cuentas.get("max_snippet_restrictivo", 0))
+    for (d,) in db.query(Issue.details).filter(Issue.job_id == job.id,
+                                               Issue.issue_type == "contenido_solo_con_js"):
+        d = d or {}
+        salida["solo_con_js"]["paginas"] += int(d.get("paginas_afectadas") or 0)
+        salida["solo_con_js"]["muestreadas"] += int(d.get("paginas_muestreadas") or 0)
+        salida["solo_con_js"]["plantillas"] += 1
+    if not (salida["bots"] or salida["nosnippet"] or salida["max_snippet"] or salida["solo_con_js"]["plantillas"]):
+        return None
+    return salida
+
+
 def _raiz_del_sitio(semilla: str | None) -> str | None:
     """`https://host`: la primera semilla de una lista puede ser `/blog/`, y la
     cabecera de un informe del sitio entero no puede decir eso."""
@@ -3609,5 +3656,6 @@ def get_informe(
         "comparacion": comparacion,
         "fiabilidad": fiabilidad,
         "trafico": _trafico_del_informe(db, job),
+        "ia": _ia_del_informe(db, job),
         "generado": datetime.now(timezone.utc),
     }

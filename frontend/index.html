@@ -3685,14 +3685,42 @@
                   <strong x-text="fmt.num(informe.trafico.impresiones)"></strong> impresiones en Google.</p>
                 <ul class="informe-alertas">
                   <li x-show="informe.trafico.trafico_en_pagina_perdida.paginas" class="sev-error">
-                    <strong x-text="fmt.num(informe.trafico.trafico_en_pagina_perdida.paginas) + ' páginas con tráfico que hoy dan error, tienen noindex o están bloqueadas'"></strong>
+                    <strong x-text="(n => fmt.num(n) + (n === 1 ? ' página con tráfico que hoy da error, tiene noindex o está bloqueada' : ' páginas con tráfico que hoy dan error, tienen noindex o están bloqueadas'))(informe.trafico.trafico_en_pagina_perdida.paginas)"></strong>
                     <span x-text="'(' + fmt.num(informe.trafico.trafico_en_pagina_perdida.clics) + ' clics en riesgo)'"></span></li>
                   <li x-show="informe.trafico.huerfana_con_trafico.paginas">
-                    <span x-text="fmt.num(informe.trafico.huerfana_con_trafico.paginas) + ' páginas con tráfico que ninguna otra página del sitio enlaza (' + fmt.num(informe.trafico.huerfana_con_trafico.clics) + ' clics)'"></span></li>
+                    <span x-text="fmt.num(informe.trafico.huerfana_con_trafico.paginas) + (informe.trafico.huerfana_con_trafico.paginas === 1 ? ' página' : ' páginas') + ' con tráfico que ninguna otra página del sitio enlaza (' + fmt.num(informe.trafico.huerfana_con_trafico.clics) + ' clics)'"></span></li>
                   <li x-show="informe.trafico.trafico_en_variante_con_parametros.paginas">
-                    <span x-text="fmt.num(informe.trafico.trafico_en_variante_con_parametros.paginas) + ' páginas cuyo tráfico se reparte con variantes con parámetros (' + fmt.num(informe.trafico.trafico_en_variante_con_parametros.clics) + ' clics en las variantes)'"></span></li>
+                    <span x-text="fmt.num(informe.trafico.trafico_en_variante_con_parametros.paginas) + (informe.trafico.trafico_en_variante_con_parametros.paginas === 1 ? ' página cuyo tráfico se reparte' : ' páginas cuyo tráfico se reparte') + ' con variantes con parámetros (' + fmt.num(informe.trafico.trafico_en_variante_con_parametros.clics) + ' clics en las variantes)'"></span></li>
                   <li x-show="informe.trafico.urls_fuera_del_censo">
                     <span x-text="fmt.num(informe.trafico.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(informe.trafico.clics_fuera_del_censo) + ' clics)'"></span></li>
+                </ul>
+              </section>
+            </template>
+
+            <!-- Buscadores de IA (decisiones 129, 137 y 140) -->
+            <template x-if="informe.ia">
+              <section data-testid="informe-ia">
+                <h2>Buscadores de IA</h2>
+                <template x-if="informe.ia.bots.length">
+                  <div class="informe-bots">
+                    <template x-for="b in informe.ia.bots" :key="b.token">
+                      <div>
+                        <span x-text="b.proveedor + ' · ' + b.token"></span>
+                        <span class="text-dim text-sm" x-text="b.tipo === 'busqueda_ia' ? '(búsqueda)' : '(entrenamiento)'"></span>
+                        <strong :class="b.alcance === 'todo' ? (b.tipo === 'busqueda_ia' ? 'text-red' : '') : b.alcance === 'parte' ? 'text-orange' : ''"
+                                x-text="({todo: 'bloqueado', parte: 'bloqueado en parte', nada: 'permitido'})[b.alcance] || 'sin evaluar'"></strong>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <p class="text-sm text-dim" x-show="informe.ia.bots.length">Los de búsqueda deciden si el sitio puede salir en las respuestas de ChatGPT, Claude o Perplexity; bloquear los de entrenamiento no quita de ninguna búsqueda.</p>
+                <ul class="informe-alertas">
+                  <li x-show="informe.ia.nosnippet" class="sev-warning"
+                      x-text="(n => fmt.num(n) + (n === 1 ? ' página indexable lleva' : ' páginas indexables llevan'))(informe.ia.nosnippet) + ' «nosnippet»: Google no las usa en AI Overviews ni enseña su texto en el resultado.'"></li>
+                  <li x-show="informe.ia.max_snippet"
+                      x-text="fmt.num(informe.ia.max_snippet) + (informe.ia.max_snippet === 1 ? ' página limita' : ' páginas limitan') + ' su fragmento con «max-snippet»: la IA de Google solo puede citar ese trozo.'"></li>
+                  <li x-show="informe.ia.solo_con_js.plantillas" class="sev-warning"
+                      x-text="'En ' + informe.ia.solo_con_js.plantillas + (informe.ia.solo_con_js.plantillas === 1 ? ' plantilla' : ' plantillas') + ' (' + fmt.num(informe.ia.solo_con_js.paginas) + ' de ' + fmt.num(informe.ia.solo_con_js.muestreadas) + ' páginas comprobadas), parte del texto o de los enlaces solo aparece con JavaScript: los rastreadores de IA no lo ven.'"></li>
                 </ul>
               </section>
             </template>
@@ -3700,7 +3728,7 @@
             <section data-testid="informe-prioridades">
               <h2>Qué arreglar primero</h2>
               <p class="text-sm text-dim">Ordenado por la gravedad y por lo importantes que son las páginas afectadas
-                (su autoridad interna, a cuántos clics de la portada están y si el sitemap las declara).
+                (su autoridad interna, a cuántos clics de la portada están, si el sitemap las declara y, con Search Console, los clics que reciben de Google).
                 <span x-text="'Son los ' + informe.prioridades.length + ' primeros de ' + informe.tipos_de_incidencia + ' tipos de incidencia.'"></span></p>
               <ol class="informe-prioridades">
                 <template x-for="r in informe.prioridades" :key="r.issue_type + r.severity">
