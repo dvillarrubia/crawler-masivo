@@ -778,3 +778,42 @@
    decisión 83), que esperan a que se decida a dónde van los avisos; y el
    criterio de #36, dos semanas de perfil semanal real sin alertas falsas, que
    empieza a contar con este despliegue.
+
+<a id="d149"></a>
+149. **Los avisos van a Slack por su API, un canal por cliente** (Ola 5.1 y
+   6.4). Decidido el 19-oct-2026: alertas, resumen semanal e informes, a
+   Slack. `shared/slack.py` publica con un **bot** (`chat.postMessage`) y no
+   con *incoming webhooks*: un webhook de Slack queda atado a un canal al
+   crearlo, así que serían N URLs secretas que alguien tiene que ir creando en
+   la consola de Slack, una por cliente. Con el bot es **un token para toda la
+   agencia** y el canal es un parámetro público de la integración `slack` del
+   cliente (`canal`, `canal_nombre` y qué se manda: `alertas`, `resumen`,
+   `informe`).
+   - **El token es un secreto y vive donde la llave de Search Console**
+     (decisión 141): en el entorno o subido a `SECRETOS_DIR`, con prefijo
+     `SLACK_`. Al subirlo se comprueba con `auth.test`: uno pegado mal
+     fallaría el lunes con el primer resumen, no ahora que hay alguien
+     mirando. Del token solo se enseña el espacio de trabajo y el nombre del
+     bot, que es lo que hace falta para invitarlo a un canal.
+   - **Qué sale y cuándo**: las alertas con el mismo criterio que el webhook
+     (críticas o las reglas del cliente marcadas para avisar, y en una serie
+     solo lo que abre incidente, decisiones 77, 135 y 139); el resumen
+     semanal, con su silencio; y el **informe de cada rastreo programado** al
+     terminar, con las cifras y su cambio, las incidencias nuevas y resueltas
+     y el enlace al informe — después de las alertas, para que el canal lea
+     primero lo urgente. Los rastreos lanzados a mano no mandan informe: un
+     canario o una prueba no son algo que el cliente espere leer. El texto del
+     informe sale de `_resumen_de_rastreo`, lo mismo que ese rastreo aporta al
+     resumen semanal, para no tener dos cifras de lo mismo.
+   - **Un fallo de Slack no se pierde en el log.** Los errores se traducen a
+     algo que se pueda hacer («El bot no está en el canal: escribe /invite
+     @crawler en el canal»), el último envío de cada cliente queda en Redis y
+     se ve en la ficha, y «Mandar una prueba» lo dice canal por canal. Es como
+     se descubre lo más común: que nadie invitó al bot.
+   - Best-effort como el webhook: nunca lanza, y un 429 se reintenta una sola
+     vez si Slack pide esperar 5 s o menos, para no retrasar el cierre de un
+     rastreo. El webhook genérico sigue: quien enrute por n8n no pierde nada.
+   Permisos del bot: `chat:write`, y `channels:read` (y `groups:read` para los
+   privados) para elegir el canal de una lista; sin ellos el canal se escribe
+   a mano.
+

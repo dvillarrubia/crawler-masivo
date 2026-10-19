@@ -921,6 +921,86 @@
               </div>
             </template>
 
+            <!-- Slack (decision 149): un canal por cliente. El token del bot
+                 va a un fichero del servidor, como la llave de Search Console. -->
+            <template x-if="cliente">
+              <div x-init="cargarSlack()" data-testid="slack" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+                <h3 style="font-size:1rem;margin-bottom:.3rem">Slack</h3>
+                <p class="text-dim text-sm mb-1">El canal donde llegan las alertas de este cliente en cuanto termina un rastreo, el resumen semanal y el informe de cada rastreo programado.</p>
+                <template x-if="slack.error">
+                  <div class="card mb-1" style="border-color:var(--red);color:var(--red);padding:.4rem .6rem;font-size:.85rem" x-text="slack.error"></div>
+                </template>
+                <template x-for="c in ((slack.estado && slack.estado.canales) || [])" :key="c.canal">
+                  <div class="card mb-1" data-testid="slack-estado">
+                    <div class="flex items-center gap-1" style="flex-wrap:wrap">
+                      <span class="badge" :class="c.configurada && c.activa ? 'badge-completed' : 'badge-pending'"
+                            x-text="!c.configurada ? 'Falta el token' : c.activa ? 'Conectado' : 'Pausado'"></span>
+                      <strong x-text="c.canal_nombre || c.canal"></strong>
+                      <span class="text-sm text-dim" x-text="'· ' + textoEnviosSlack(c)"></span>
+                      <span style="margin-left:auto" class="flex gap-1">
+                        <button class="btn btn-sm" @click="probarSlack()" data-testid="slack-probar">Mandar una prueba</button>
+                        <button class="btn btn-sm" @click="quitarSlack()">Quitar</button>
+                      </span>
+                    </div>
+                    <template x-if="slack.estado.ultimo_envio">
+                      <div class="text-sm" style="margin-top:.3rem" :class="slack.estado.ultimo_envio.ok ? 'text-dim' : 'text-red'"
+                           x-text="'Último envío (' + slack.estado.ultimo_envio.envio + '): ' + fmt.date(slack.estado.ultimo_envio.en) + (slack.estado.ultimo_envio.ok ? ' · bien' : ' · falló: ' + slack.estado.ultimo_envio.motivo)"></div>
+                    </template>
+                  </div>
+                </template>
+                <template x-for="p in (slack.prueba || [])" :key="p.canal">
+                  <div class="text-sm mb-1" :class="p.ok ? 'text-green' : 'text-red'" data-testid="slack-prueba"
+                       x-text="p.ok ? 'Prueba enviada a ' + p.canal + ': mira el canal.' : 'No llegó a ' + p.canal + ': ' + p.motivo"></div>
+                </template>
+                <details class="mb-1" :open="!((slack.estado && slack.estado.canales) || []).length">
+                  <summary class="text-sm" style="cursor:pointer" x-text="((slack.estado && slack.estado.canales) || []).length ? 'Cambiar el canal o qué se manda' : 'Conectar Slack'"></summary>
+                  <div class="gsc-pasos">
+                    <div class="form-group">
+                      <label>1. Token del bot</label>
+                      <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                        <select x-model="slack.token" @change="slack.canales = null" style="width:auto;min-width:16rem">
+                          <option value="">— elige un token ya guardado —</option>
+                          <template x-for="t in slack.tokens" :key="t.nombre">
+                            <option :value="t.nombre" x-text="t.nombre + ' · ' + (t.valida ? t.bot + ' en ' + t.equipo : 'no válido')"></option>
+                          </template>
+                        </select>
+                      </div>
+                      <div class="flex gap-1 items-center" style="flex-wrap:wrap;margin-top:.35rem">
+                        <span class="text-sm text-dim">o pega uno nuevo como</span>
+                        <input type="text" x-model="slack.nombreNuevo" style="width:12rem;font-family:monospace">
+                        <input type="password" x-model="slack.tokenTexto" placeholder="xoxb-…" autocomplete="off" style="width:16rem;font-family:monospace" data-testid="slack-token">
+                        <button class="btn btn-sm" @click="subirTokenSlack()" :disabled="!slack.tokenTexto || slack.ocupado">Guardar token</button>
+                      </div>
+                      <div class="form-hint">Es el «Bot User OAuth Token» de la app de Slack (OAuth &amp; Permissions), con el permiso <code>chat:write</code> (y <code>channels:read</code> para elegir el canal de una lista). Un token sirve para todos los clientes. Se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar.</div>
+                    </div>
+                    <div class="form-group">
+                      <label>2. Canal</label>
+                      <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                        <button class="btn btn-sm" @click="verCanalesSlack()" :disabled="!slack.token || slack.ocupado">Ver los canales</button>
+                        <template x-if="slack.canales && slack.canales.length">
+                          <select @change="elegirCanalSlack($event.target.value)" style="width:auto;min-width:16rem">
+                            <option value="">— elige —</option>
+                            <template x-for="c in slack.canales" :key="c.id">
+                              <option :value="c.id" :selected="c.id === slack.canal" x-text="'#' + c.nombre + (c.privado ? ' (privado)' : '') + (c.miembro ? '' : ' — sin el bot')"></option>
+                            </template>
+                          </select>
+                        </template>
+                      </div>
+                      <input type="text" x-model="slack.canal" @input="slack.canalNombre = ''" placeholder="o escríbelo: C0123ABCD o #seo-cliente" style="margin-top:.35rem;font-family:monospace" data-testid="slack-canal">
+                      <div class="form-hint" x-show="slack.canal" x-text="'Antes de guardar, invita al bot al canal: escribe /invite @' + botSlack() + ' en él.'"></div>
+                    </div>
+                    <div class="form-group">
+                      <label>3. Qué se manda</label>
+                      <label class="checkbox-label"><input type="checkbox" x-model="slack.alertas"> Alertas (en cuanto termina un rastreo que las tiene)</label>
+                      <label class="checkbox-label"><input type="checkbox" x-model="slack.resumen"> Resumen semanal</label>
+                      <label class="checkbox-label"><input type="checkbox" x-model="slack.informe"> Informe de cada rastreo programado</label>
+                    </div>
+                    <button class="btn btn-primary btn-sm" @click="guardarSlack()" :disabled="!slack.token || !slack.canal || slack.ocupado" data-testid="slack-guardar">4. Guardar y mandar una prueba</button>
+                  </div>
+                </details>
+              </div>
+            </template>
+
             <!-- Enlaces de solo lectura (decision 143): el cliente ve el
                  informe de sus censos en /c/<token>, sin la sesion de la agencia. -->
             <template x-if="cliente">
@@ -981,6 +1061,7 @@
                         <option value="semrush">Semrush</option>
                         <option value="majestic">Majestic</option>
                         <option value="pagespeed">PageSpeed</option>
+                        <option value="slack">Slack</option>
                       </select>
                     </div>
                     <div class="form-group">

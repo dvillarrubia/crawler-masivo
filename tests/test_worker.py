@@ -341,7 +341,7 @@ def test_el_worker_avisa_fuera_de_las_alertas_criticas(monkeypatch, tmp_path):
     avisos = []
     monkeypatch.setattr(
         "shared.avisos.avisar_de_alertas",
-        lambda job_id, nombre, alertas: avisos.append((nombre, alertas)))
+        lambda job_id, nombre, alertas, **k: avisos.append((nombre, alertas)))
 
     s = Sesion()
 
@@ -399,7 +399,7 @@ def test_sin_alertas_criticas_no_se_avisa_fuera(monkeypatch, tmp_path):
     monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
     avisos = []
     monkeypatch.setattr("shared.avisos.avisar_de_alertas",
-                        lambda *a: avisos.append(a))
+                        lambda *a, **k: avisos.append(a))
 
     s = Sesion()
     ids = []

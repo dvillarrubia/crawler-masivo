@@ -192,6 +192,16 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Alertas, resumen e informes en el Slack de cada cliente (19 de octubre)
+
+Cada cliente tiene su canal de Slack (ficha del cliente → Configuración →
+Slack). Llegan ahí las alertas en cuanto termina un rastreo que las tiene, el
+resumen semanal y, al terminar cada rastreo programado, un mensaje con sus
+cifras, lo nuevo y lo resuelto y el enlace al informe. Un solo bot sirve para
+todos los clientes; se pega su token una vez y se elige el canal de una lista.
+Si el bot no está invitado al canal, la ficha lo dice y cómo arreglarlo.
+[Decisión 149](docs/decisiones/comparacion-y-alertas.md#d149).
+
 ### Más comprobaciones: valores de datos estructurados y anclas genéricas (19 de octubre)
 
 Dos avisos nuevos. Los datos estructurados ya no solo tienen que estar: Google
@@ -348,8 +358,8 @@ Las reglas que han saltado salen arriba en la ficha del rastreo. Las de
 cambio no se evalúan contra un censo truncado, detrás de un muro o analizado
 con otra versión: lo dicen, con el motivo, en vez de afirmar un cambio falso.
 
-Pendiente de 5.1: incidentes con estado (abierto, visto, cerrado) y canales
-de aviso por cliente.
+Los incidentes con estado y los canales por cliente (Slack) ya están: ver
+arriba.
 
 ### Evolución de cada cliente y panel de cartera (18 de octubre)
 

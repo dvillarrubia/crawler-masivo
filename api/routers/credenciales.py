@@ -29,10 +29,11 @@ router = APIRouter(tags=["credenciales"])
 class LlaveSubida(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tipo: Literal["gsc"] = "gsc"
-    # El nombre con el que la usan las integraciones: GSC_LIN3S, GSC_LOPESAN...
+    tipo: Literal["gsc", "slack"] = "gsc"
+    # El nombre con el que la usan las integraciones: GSC_LIN3S, SLACK_LIN3S...
     nombre: str = Field(..., min_length=5, max_length=128)
-    # El JSON de la llave, tal cual se descarga de Google Cloud.
+    # El JSON de la llave, tal cual se descarga de Google Cloud; o el token
+    # del bot de Slack (xoxb-...).
     contenido: str = Field(..., min_length=2, max_length=64 * 1024)
 
 
@@ -45,12 +46,25 @@ def _publico(nombre: str) -> dict:
 
     texto = os.environ.get(nombre) or secretos.leer(nombre)
     salida = {"nombre": nombre, "origen": "entorno" if os.environ.get(nombre) else "subida"}
+    if nombre.startswith("SLACK_"):
+        return salida | _publico_slack(texto or "")
     try:
         salida.update(publico(leer_llave(texto or "")))
         salida["valida"] = True
     except LlaveNoValida as exc:
         salida.update(valida=False, motivo=str(exc))
     return salida
+
+
+def _publico_slack(token: str) -> dict:
+    """De un token de Slack se ensena el espacio de trabajo y el nombre del
+    bot (`auth.test`), que es lo que hace falta para invitarlo a un canal."""
+    from shared.slack import SlackError, identidad, traducir
+
+    try:
+        return identidad(token.strip()) | {"valida": True}
+    except SlackError as exc:
+        return {"valida": False, "motivo": traducir(exc.codigo) if exc.codigo != "sin_conexion" else str(exc)}
 
 
 def _en_uso(db: Session, nombre: str) -> list[str]:
@@ -60,7 +74,7 @@ def _en_uso(db: Session, nombre: str) -> list[str]:
 
 
 @router.get("/api/credenciales")
-def listar_llaves(tipo: Literal["gsc"] = Query("gsc"), db: Session = Depends(get_session)):
+def listar_llaves(tipo: Literal["gsc", "slack"] = Query("gsc"), db: Session = Depends(get_session)):
     import os
 
     from shared import secretos
@@ -82,6 +96,8 @@ def subir_llave(cuerpo: LlaveSubida, db: Session = Depends(get_session)):
     error = error_en_variable(cuerpo.tipo, nombre)
     if error:
         raise HTTPException(422, f"Nombre no válido: {error}")
+    if cuerpo.tipo == "slack":
+        return _subir_token_slack(nombre, cuerpo.contenido, db)
     try:
         info = leer_llave(cuerpo.contenido)
     except LlaveNoValida as exc:
@@ -90,6 +106,28 @@ def subir_llave(cuerpo: LlaveSubida, db: Session = Depends(get_session)):
     secretos.guardar(nombre, json.dumps(info))
     return dict(publico(info), nombre=nombre, origen="subida", valida=True,
                 en_uso_por=_en_uso(db, nombre))
+
+
+def _subir_token_slack(nombre: str, contenido: str, db: Session) -> dict:
+    """Solo se guarda un token que Slack acepta: uno pegado mal fallaria el
+    lunes, con el primer resumen, y no ahora que hay alguien mirando."""
+    import re
+
+    from shared import secretos
+    from shared.slack import SlackError, identidad, traducir
+
+    token = contenido.strip()
+    if not re.fullmatch(r"xox[bp]-[A-Za-z0-9-]{10,250}", token):
+        raise HTTPException(422, "Eso no parece un token de bot de Slack: empieza por xoxb- "
+                                 "(Slack → tu app → OAuth & Permissions → Bot User OAuth Token).")
+    try:
+        quien = identidad(token)
+    except SlackError as exc:
+        if exc.codigo == "sin_conexion":
+            raise HTTPException(502, str(exc))
+        raise HTTPException(422, traducir(exc.codigo))
+    secretos.guardar(nombre, token)
+    return dict(quien, nombre=nombre, origen="subida", valida=True, en_uso_por=_en_uso(db, nombre))
 
 
 @router.delete("/api/credenciales/{nombre}", status_code=204)
@@ -195,3 +233,123 @@ def pedir_sincronizacion(client_id: uuid.UUID, db: Session = Depends(get_session
         raise HTTPException(409, "Este cliente no tiene Search Console configurado (falta la propiedad).")
     db.commit()
     return {"pedidas": pedidas}
+
+
+# ---------------------------------------------------------------------------
+# Slack de un cliente (decision 149)
+# ---------------------------------------------------------------------------
+@router.get("/api/credenciales/{nombre}/canales")
+def canales_de_token(nombre: str):
+    """Los canales que ve el bot. Sin `channels:read` es un 409 que lo dice: el
+    canal se puede escribir a mano igual."""
+    from shared.credenciales import CredencialNoDisponible, credencial
+    from shared.slack import SlackError, canales, traducir
+
+    try:
+        token = credencial({"tipo": "slack", "credencial_env": nombre}).strip()
+        return canales(token)
+    except CredencialNoDisponible as exc:
+        raise HTTPException(404, str(exc))
+    except SlackError as exc:
+        if exc.codigo == "missing_scope":
+            raise HTTPException(409, "El bot no puede listar canales (le falta channels:read). "
+                                     "Escribe el canal a mano: su id (C0123…) o #nombre.")
+        raise HTTPException(502, traducir(exc.codigo, needed=getattr(exc, "needed", None)))
+
+
+class SlackCliente(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    credencial: str = Field(..., min_length=7, max_length=128)
+    # El id (C0123ABC) o el nombre (#seo-cliente). Con el id no se rompe si
+    # alguien renombra el canal.
+    canal: str = Field(..., min_length=2, max_length=128)
+    canal_nombre: str | None = Field(default=None, max_length=128)
+    alertas: bool = True
+    resumen: bool = True
+    informe: bool = True
+    activa: bool = True
+
+
+def _estado_slack(c: Client) -> dict:
+    from shared.credenciales import esta_configurada
+    from shared.slack import ENVIOS, _activo, integraciones, ultimo_envio
+
+    filas = []
+    for integ in integraciones(c):
+        p = integ.get("parametros") or {}
+        fila = {"credencial": integ.get("credencial_env"), "canal": p.get("canal"),
+                "canal_nombre": p.get("canal_nombre"), "activa": integ.get("activa", True),
+                "configurada": esta_configurada(integ)}
+        for e in ENVIOS:
+            fila[e] = _activo(p.get(e))
+        filas.append(fila)
+    return {"canales": filas, "ultimo_envio": ultimo_envio(c.id)}
+
+
+@router.get("/api/clients/{client_id}/slack")
+def estado_slack(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    return _estado_slack(_cliente(db, client_id))
+
+
+@router.put("/api/clients/{client_id}/slack")
+def guardar_slack(client_id: uuid.UUID, cuerpo: SlackCliente, db: Session = Depends(get_session)):
+    """Pone (o sustituye) EL canal de Slack del cliente. Uno por cliente: si
+    hacen falta dos, el formulario generico de integraciones admite varias."""
+    from shared.credenciales import error_en_variable
+
+    c = _cliente(db, client_id)
+    nombre = cuerpo.credencial.strip().upper()
+    error = error_en_variable("slack", nombre)
+    if error:
+        raise HTTPException(422, f"Token no válido: {error}")
+    canal = cuerpo.canal.strip()
+    integ = {"tipo": "slack", "etiqueta": None, "credencial_env": nombre, "activa": cuerpo.activa,
+             "parametros": {"canal": canal, "alertas": cuerpo.alertas, "resumen": cuerpo.resumen,
+                            "informe": cuerpo.informe}}
+    # Sin None: el formulario generico de integraciones lo pasa a texto y
+    # volveria como «null».
+    if (cuerpo.canal_nombre or "").strip():
+        integ["parametros"]["canal_nombre"] = cuerpo.canal_nombre.strip()
+    otras = [i for i in (c.integraciones or []) if not (isinstance(i, dict) and i.get("tipo") == "slack")]
+    c.integraciones = otras + [integ]
+    db.commit()
+    return _estado_slack(c)
+
+
+@router.delete("/api/clients/{client_id}/slack", status_code=204)
+def quitar_slack(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    c = _cliente(db, client_id)
+    c.integraciones = [i for i in (c.integraciones or [])
+                       if not (isinstance(i, dict) and i.get("tipo") == "slack")]
+    db.commit()
+
+
+@router.post("/api/clients/{client_id}/slack/probar")
+def probar_slack(client_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Manda un mensaje de prueba a cada canal del cliente y dice que paso en
+    cada uno: es como se descubre que falta invitar al bot."""
+    from shared.credenciales import CredencialNoDisponible, credencial
+    from shared.slack import SlackError, identidad, integraciones, publicar, traducir
+
+    c = _cliente(db, client_id)
+    filas = [i for i in integraciones(c) if str((i.get("parametros") or {}).get("canal") or "").strip()]
+    if not filas:
+        raise HTTPException(409, "Este cliente no tiene canal de Slack.")
+    salida = []
+    for integ in filas:
+        canal = str(integ["parametros"]["canal"]).strip()
+        bot = None
+        try:
+            token = credencial(integ).strip()
+            bot = identidad(token).get("bot")
+            publicar(token, canal, f"Prueba del crawler: aquí llegarán las alertas, el resumen "
+                                   f"semanal y los informes de *{c.nombre}*.")
+            salida.append({"canal": canal, "ok": True})
+        except CredencialNoDisponible as exc:
+            salida.append({"canal": canal, "ok": False, "motivo": str(exc)})
+        except SlackError as exc:
+            salida.append({"canal": canal, "ok": False,
+                           "motivo": traducir(exc.codigo, bot, getattr(exc, "needed", None))
+                           if exc.codigo != "sin_conexion" else str(exc)})
+    return salida

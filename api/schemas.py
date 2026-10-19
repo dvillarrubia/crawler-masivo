@@ -1275,7 +1275,7 @@ class Integracion(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tipo: Literal["gsc", "dataforseo", "ahrefs", "semrush", "majestic", "pagespeed"]
+    tipo: Literal["gsc", "dataforseo", "ahrefs", "semrush", "majestic", "pagespeed", "slack"]
     etiqueta: str | None = Field(default=None, max_length=128)
     # Parametros publicos: propiedad de GSC, ubicacion e idioma de DataForSEO...
     parametros: dict[str, str | int | float | bool | None] = Field(default_factory=dict)

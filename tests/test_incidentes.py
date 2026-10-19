@@ -169,7 +169,7 @@ def test_el_worker_solo_avisa_de_lo_que_abre(s, serie, monkeypatch):
     monkeypatch.setattr(shared.database, "SessionLocal", lambda: s)
     monkeypatch.setattr(shared.comparacion, "comparar_con_el_anterior", lambda *a, **k: _comp(ROTAS))
     monkeypatch.setattr(shared.avisos, "avisar_de_alertas",
-                        lambda jid, nombre, alertas: enviados.append([a["regla"] for a in alertas]))
+                        lambda jid, nombre, alertas, **k: enviados.append([a["regla"] for a in alertas]))
     monkeypatch.setattr(s, "close", lambda: None)
     for dia in (1, 8):
         j = _job(s, serie, dia)
@@ -194,3 +194,32 @@ def test_el_resumen_dice_lo_que_sigue_abierto_y_desde_cuando(s, serie):
     assert len(r["contenido"]["incidentes_vivos"]) == 1
     assert "Siguen abiertos (1)" in r["texto"]
     assert "30 de 100 páginas (30.0%) — Sale del índice. — desde el 02/10, 2 rastreos" in r["texto"]
+
+
+def test_el_worker_manda_el_informe_solo_de_lo_programado(s, serie, monkeypatch):
+    """Decision 149: el informe de un rastreo programado va al Slack del
+    cliente, con el cliente de verdad, y DESPUES de sus alertas."""
+    import worker
+
+    import shared.avisos
+    import shared.comparacion
+    import shared.database
+
+    orden = []
+    monkeypatch.setattr(shared.database, "SessionLocal", lambda: s)
+    monkeypatch.setattr(shared.comparacion, "comparar_con_el_anterior", lambda *a, **k: _comp(ROTAS))
+    monkeypatch.setattr(shared.avisos, "avisar_de_alertas",
+                        lambda jid, nombre, alertas, cliente=None: orden.append(("alertas", cliente.slug)))
+    monkeypatch.setattr(shared.avisos, "avisar_de_informe",
+                        lambda cliente, job, r: orden.append(("informe", cliente.slug, r["job_id"])))
+    monkeypatch.setattr(s, "close", lambda: None)
+    a_mano = _job(s, serie, 1)
+    s.commit()
+    worker._comparar_con_el_censo_anterior(a_mano.id)
+    assert orden == [("alertas", "acme")]
+    orden.clear()
+    programado = _job(s, serie, 8, programacion_id=uuid.uuid4())
+    s.commit()
+    worker._comparar_con_el_censo_anterior(programado.id)
+    # La alerta ya estaba abierta: no se repite, pero el informe sale.
+    assert orden == [("informe", "acme", str(programado.id))]
