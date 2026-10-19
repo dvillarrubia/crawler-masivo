@@ -255,6 +255,88 @@ def _entidades_anidadas(item: dict, profundidad: int = 0):
             yield from _entidades_anidadas(candidato, profundidad + 1)
 
 
+# -- Formato de los valores (decision 146) -------------------------------------
+#
+# Que la propiedad este no basta: un `startDate` «19/10/2026», un `price`
+# «19,99 €» o un `priceCurrency` «€» son marcado presente que Google no puede
+# leer, y el Rich Results Test los da por invalidos. Solo formatos que Google
+# documenta, y con mensajes SIN el valor concreto: el analisis agrupa por
+# mensaje (decision 73), y con el valor dentro cada pagina seria un hallazgo.
+import re as _re
+
+_FECHA = _re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
+_NUMERO = _re.compile(r"^-?\d+(\.\d+)?$")
+_ENTERO = _re.compile(r"^\d+$")
+_MONEDA = _re.compile(r"^[A-Z]{3}$")
+FECHAS = frozenset({"datepublished", "datemodified", "uploaddate", "startdate", "enddate",
+                    "dateposted", "validthrough", "pricevaliduntil", "validfrom", "datecreated"})
+# Las URLs NO se validan: Google resuelve las relativas contra la de la pagina,
+# y avisar de ellas seria inventarse un problema. Solo se evita bajar a los
+# objetos de imagen buscando otros campos.
+IMAGENES = frozenset({"image", "logo", "thumbnailurl"})
+PRECIOS = frozenset({"price", "lowprice", "highprice"})
+RECUENTOS = frozenset({"ratingcount", "reviewcount"})
+DISPONIBILIDAD = frozenset(x.lower() for x in (
+    "InStock", "OutOfStock", "PreOrder", "BackOrder", "Discontinued", "InStoreOnly",
+    "LimitedAvailability", "OnlineOnly", "PreSale", "SoldOut", "MadeToOrder", "Reserved"))
+
+
+def _textos(valor) -> list:
+    """Los valores sueltos de una propiedad: una lista se abre, y de un objeto
+    (un ImageObject en `image`) se toma su `url` o `contentUrl`."""
+    salida = []
+    for v in valor if isinstance(valor, list) else [valor]:
+        if isinstance(v, dict):
+            v = v.get("url") or v.get("contentUrl") or v.get("@id")
+        if v is not None and not isinstance(v, (dict, list)):
+            salida.append(v)
+    return salida
+
+
+def _problemas_de_valores(item: dict, tipo: str, obligatorias: set[str], ruta: str = "",
+                          profundidad: int = 0) -> list[tuple[str, str]]:
+    problemas: list[tuple[str, str]] = []
+    if profundidad > 3:
+        return problemas
+    for clave, valor in item.items():
+        if clave.startswith("@"):
+            continue
+        prop = clave.lower()
+        nombre = f"{ruta}{clave}"
+        if isinstance(valor, (dict, list)) and prop not in IMAGENES:
+            for hijo in valor if isinstance(valor, list) else [valor]:
+                # Una entidad de resultado enriquecido anidada se valida aparte
+                # (`_entidades_anidadas`): aqui se repetiria con otro tipo delante.
+                if isinstance(hijo, dict) and not (sd_item_types(hijo) and requisitos_de(sd_item_types(hijo)[0])):
+                    problemas += _problemas_de_valores(hijo, tipo, obligatorias, f"{nombre}.", profundidad + 1)
+            continue
+        for v in _textos(valor):
+            texto = str(v).strip()
+            if not texto:
+                continue
+            if prop in FECHAS and not _FECHA.match(texto):
+                nivel = "error" if (not ruta and prop in obligatorias) else "warning"
+                problemas.append((nivel, f"{tipo}: '{nombre}' no es una fecha ISO 8601 "
+                                         f"(AAAA-MM-DD, con hora AAAA-MM-DDThh:mm y zona)"))
+            elif prop in PRECIOS and not (isinstance(v, (int, float)) and not isinstance(v, bool)) \
+                    and not _NUMERO.match(texto):
+                problemas.append(("error", f"{tipo}: '{nombre}' no es un número (sin símbolo de "
+                                           f"moneda y con punto decimal: 19.99)"))
+            elif prop == "pricecurrency" and not _MONEDA.match(texto):
+                problemas.append(("error", f"{tipo}: '{nombre}' no es un código de moneda ISO 4217 "
+                                           f"de tres letras (EUR, USD)"))
+            elif prop == "ratingvalue" and not (isinstance(v, (int, float)) and not isinstance(v, bool)) \
+                    and not _NUMERO.match(texto):
+                problemas.append(("error", f"{tipo}: '{nombre}' no es un número"))
+            elif prop in RECUENTOS and not (isinstance(v, int) and not isinstance(v, bool)) \
+                    and not _ENTERO.match(texto):
+                problemas.append(("warning", f"{tipo}: '{nombre}' no es un número entero"))
+            elif prop == "availability" and texto.rstrip("/").rsplit("/", 1)[-1].lower() not in DISPONIBILIDAD:
+                problemas.append(("warning", f"{tipo}: '{nombre}' no es un valor de "
+                                             f"schema.org/ItemAvailability (InStock, OutOfStock...)"))
+    return problemas
+
+
 def validate_sd_item(
     item: dict, incluir_anidadas: bool = True, anidada: bool = False
 ) -> list[tuple[str, str]]:
@@ -307,6 +389,7 @@ def validate_sd_item(
             continue
         clave = (tipo or "").rsplit("/", 1)[-1].lstrip("@").lower()
         implicitas = IMPLICITAS_AL_ANIDAR.get(clave, set()) if anidada else set()
+        problemas += _problemas_de_valores(item, tipo, set(reqs.get("obligatorias", [])))
         for prop in reqs.get("obligatorias", []):
             if prop in implicitas:
                 continue

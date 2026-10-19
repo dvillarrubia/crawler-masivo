@@ -14,7 +14,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144 |
-| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97 |
+| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
@@ -172,6 +172,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 143 | El cliente tiene un enlace propio de solo lectura, y solo ve sus informes | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d143) |
 | 144 | La inspección de URLs de Google, por muestra diaria: lo que el rastreo no puede saber, y sin confundir lo que Google vio con lo que hay hoy | [`incidencias`](incidencias.md#d144) |
 | 145 | El censo en Excel con varias hojas, legible sin la herramienta | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d145) |
+| 146 | Que una propiedad esté no basta: también se mira que Google pueda leer su valor | [`datos-estructurados`](datos-estructurados.md#d146) |
 
 ## Anadir una decision
 

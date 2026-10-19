@@ -131,3 +131,30 @@
    puede subir la nota global. No es un fallo: esos «errores» eran de un
    resultado que Google ya no muestra. Si las cifras no cuadran con el informe
    entregado, la explicación es esta (como en la decisión 38).
+
+<a id="d146"></a>
+146. **Que una propiedad esté no basta: también se mira que Google pueda leer
+   su valor** (Ola 8, «formato de valores»). La validación (decisiones 51, 73,
+   80 y 97) miraba solo presencia: un `startDate` «19 de octubre», un `price`
+   «19,99 €» o un `priceCurrency` «€» pasaban por buenos, y el Rich Results
+   Test los da por inválidos. Ahora `_problemas_de_valores`, en las entidades
+   de resultado enriquecido (`REQUISITOS`) y bajando a sus objetos (`offers`,
+   `aggregateRating`, `reviewRating`...) sin repetir las entidades que se
+   validan aparte:
+   - **fechas** ISO 8601 (`AAAA-MM-DD`, con hora y zona opcionales): error si
+     la propiedad es obligatoria del tipo (el `startDate` de un Event, el
+     `uploadDate` de un vídeo), aviso si no;
+   - **precio** numérico con punto decimal y sin símbolo, **moneda** ISO 4217
+     de tres letras y **`ratingValue`** numérico: error, porque invalidan la
+     oferta o la valoración;
+   - **disponibilidad** del vocabulario `schema.org/ItemAvailability` (con o sin
+     la URL delante) y **recuentos** enteros: aviso.
+   **No se validan las URLs**: Google resuelve las relativas contra la de la
+   página, y avisar de ellas sería inventarse un problema (la primera versión lo
+   hacía y saltaba en las fichas de los propios tests con `"image": "a.png"`).
+   Los mensajes **no llevan el valor**, para que el análisis los siga agrupando
+   por hallazgo (decisión 73): con el valor dentro, cada página sería uno.
+   Medido sobre los últimos censos de producción (hasta 80.000 bloques cada
+   uno): **0** en CST, Saunier, Lopesan y Salle; en penguin, **55 reseñas con
+   `datePublished` «28/08/2020»**, que Google no puede leer (¿día/mes o
+   mes/día?). Basta con re-analizar.

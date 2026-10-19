@@ -13,7 +13,10 @@ Sigue siendo conservadora: tipo desconocido o forma rara, nunca se marca.
 
 from __future__ import annotations
 
+import pytest
+
 from analysis.sd_validation import (
+    problemas_structured_data,
     requisitos_de,
     sd_item_types,
     validate_sd_item,
@@ -476,3 +479,62 @@ def test_un_faq_anidado_avisa_igual():
 def test_qapage_sigue_exigiendo_su_pregunta():
     estado, _ = validate_structured_data({"@type": "QAPage"})
     assert estado == "error"
+
+
+# -- Formato de los valores (decision 146) ---------------------------------------
+
+def _producto(**oferta):
+    return {"@type": "Product", "name": "W", "image": "i.png", "brand": "b", "description": "d",
+            "offers": {"@type": "Offer", **oferta}}
+
+
+@pytest.mark.parametrize("oferta, nivel, trozo", [
+    ({"price": "19,99", "priceCurrency": "EUR"}, "error", "'offers.price' no es un número"),
+    ({"price": "19.99 €", "priceCurrency": "EUR"}, "error", "'offers.price' no es un número"),
+    ({"price": "19.99", "priceCurrency": "€"}, "error", "ISO 4217"),
+    ({"price": 19.99, "priceCurrency": "EUR", "availability": "En stock"}, "warning", "ItemAvailability"),
+    ({"price": "19.99", "priceCurrency": "EUR", "priceValidUntil": "31/12/2026"}, "warning", "ISO 8601"),
+])
+def test_valores_mal_escritos_en_una_oferta(oferta, nivel, trozo):
+    problemas = problemas_structured_data(_producto(**oferta))
+    assert any(n == nivel and trozo in m for n, m in problemas), problemas
+
+
+@pytest.mark.parametrize("oferta", [
+    {"price": "19.99", "priceCurrency": "EUR", "availability": "https://schema.org/InStock"},
+    {"price": 0, "priceCurrency": "USD", "availability": "InStock", "priceValidUntil": "2026-12-31"},
+    {"price": "1299", "priceCurrency": "EUR", "availability": "http://schema.org/PreOrder"},
+])
+def test_valores_bien_escritos_no_avisan(oferta):
+    assert problemas_structured_data(_producto(**oferta)) == []
+
+
+def test_una_fecha_obligatoria_mal_escrita_es_error_y_una_recomendada_aviso():
+    ev = problemas_structured_data({"@type": "Event", "name": "E", "startDate": "19 de octubre",
+                                    "location": "Bilbao", "endDate": "mañana"})
+    assert ("error", "Event: 'startDate' no es una fecha ISO 8601 (AAAA-MM-DD, con hora AAAA-MM-DDThh:mm y zona)") in ev
+    assert any(n == "warning" and "'endDate'" in m for n, m in ev)
+    assert not any("'startDate'" in m for n, m in problemas_structured_data(
+        {"@type": "Event", "name": "E", "startDate": "2026-10-19T20:00+02:00", "location": "Bilbao"}))
+
+
+def test_una_valoracion_que_no_es_numero_es_error_y_un_recuento_decimal_aviso():
+    p = problemas_structured_data({"@type": "Product", "name": "W", "image": "i", "brand": "b",
+                                   "description": "d",
+                                   "aggregateRating": {"ratingValue": "cuatro", "reviewCount": "12.5"}})
+    assert any(n == "error" and "'aggregateRating.ratingValue'" in m for n, m in p)
+    assert any(n == "warning" and "'aggregateRating.reviewCount'" in m for n, m in p)
+
+
+def test_los_mensajes_no_llevan_el_valor_para_que_agrupen():
+    a = problemas_structured_data(_producto(price="19,99", priceCurrency="EUR"))
+    b = problemas_structured_data(_producto(price="7,50", priceCurrency="EUR"))
+    assert a == b
+
+
+def test_una_entidad_anidada_no_se_repite_con_el_tipo_de_fuera():
+    p = problemas_structured_data({"@type": "Product", "name": "W", "image": "i", "brand": "b",
+                                   "description": "d", "offers": {"price": "9.99", "priceCurrency": "EUR"},
+                                   "review": {"@type": "Review", "reviewRating": {"ratingValue": "x"},
+                                              "author": "a", "datePublished": "2026-01-01"}})
+    assert [m for _, m in p if "ratingValue" in m] == ["Review: 'reviewRating.ratingValue' no es un número"]
