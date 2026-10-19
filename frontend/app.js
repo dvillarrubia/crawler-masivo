@@ -1609,6 +1609,34 @@ function app() {
       this.slack.canalNombre = c ? '#' + c.nombre : '';
     },
 
+    // El manifiesto de la app de Slack (decision 149): pegarlo en «Create New
+    // App → From an app manifest» deja los permisos bien sin tocar nada mas.
+    // Sin rotacion de token: con ella el token caduca a las 12 horas.
+    manifiestoSlack() {
+      return ['display_information:',
+              '  name: Crawler SEO',
+              '  description: Alertas, resumen semanal e informes del crawler SEO',
+              'features:',
+              '  bot_user:',
+              '    display_name: Crawler SEO',
+              '    always_online: false',
+              'oauth_config:',
+              '  scopes:',
+              '    bot:',
+              '      - chat:write',
+              '      - channels:read',
+              '      - groups:read',
+              'settings:',
+              '  org_deploy_enabled: false',
+              '  socket_mode_enabled: false',
+              '  token_rotation_enabled: false'].join('\n');
+    },
+
+    copiarManifiestoSlack() {
+      if (navigator.clipboard) navigator.clipboard.writeText(this.manifiestoSlack());
+      this.showToast('Manifiesto copiado');
+    },
+
     botSlack() {
       const t = (this.slack.tokens || []).find(x => x.nombre === this.slack.token);
       return t && t.bot ? t.bot : 'el bot';

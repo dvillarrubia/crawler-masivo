@@ -952,6 +952,33 @@
                   <div class="text-sm mb-1" :class="p.ok ? 'text-green' : 'text-red'" data-testid="slack-prueba"
                        x-text="p.ok ? 'Prueba enviada a ' + p.canal + ': mira el canal.' : 'No llegó a ' + p.canal + ': ' + p.motivo"></div>
                 </template>
+                <!-- Guia para quien no lo ha hecho nunca: abierta mientras no
+                     haya ningun token guardado. -->
+                <details class="mb-1 slack-guia" :open="!(slack.tokens || []).length" data-testid="slack-guia">
+                  <summary class="text-sm" style="cursor:pointer">Cómo se configura (paso a paso)</summary>
+                  <div class="text-sm" style="margin:.5rem 0 .25rem">
+                    <p><strong>A. Una sola vez para toda la agencia: crear el bot.</strong> Si en «1. Token del bot» ya aparece uno, sáltate esta parte.</p>
+                    <ol style="margin:.35rem 0 .6rem 1.2rem;line-height:1.55">
+                      <li>Abre <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a> con tu cuenta de Slack y pulsa <em>Create New App</em> → <em>From a manifest</em>.</li>
+                      <li>Elige el espacio de trabajo de la agencia, cambia a la pestaña <em>YAML</em>, borra lo que haya y pega este manifiesto:
+                        <pre style="margin:.35rem 0;padding:.5rem;background:var(--bg-alt,rgba(0,0,0,.04));border:1px solid var(--border);border-radius:4px;font-size:.78rem;overflow-x:auto;max-width:100%" x-text="manifiestoSlack()"></pre>
+                        <button class="btn btn-sm" type="button" @click="copiarManifiestoSlack()" data-testid="slack-copiar-manifiesto">Copiar manifiesto</button>
+                        <span class="text-dim">Da al bot permiso para escribir y para ver la lista de canales. Nada más: no lee mensajes.</span>
+                      </li>
+                      <li>Pulsa <em>Next</em> → <em>Create</em> y luego <em>Install to Workspace</em> → <em>Allow</em>. Si tu espacio exige aprobación, un administrador de Slack tendrá que aprobarla.</li>
+                      <li>En el menú de la izquierda, <em>OAuth &amp; Permissions</em>: copia el <em>Bot User OAuth Token</em>, el que empieza por <code>xoxb-</code>.</li>
+                      <li>Pégalo abajo en «1. Token del bot» y pulsa <em>Guardar token</em>. Se comprueba con Slack en ese momento y desde entonces sirve para todos los clientes: no hay que repetirlo.</li>
+                    </ol>
+                    <p><strong>B. Para cada cliente: elegir su canal.</strong></p>
+                    <ol style="margin:.35rem 0 .6rem 1.2rem;line-height:1.55">
+                      <li>En Slack, crea el canal del cliente si no existe (por ejemplo <code>#seo-cliente</code>) y escribe en él <code>/invite @Crawler SEO</code>. Sin esto el bot no puede escribir ahí; en un canal privado, ni siquiera lo ve.</li>
+                      <li>Aquí, en «2. Canal», pulsa <em>Ver los canales</em> y elígelo (los que dicen «sin el bot» aún no tienen la invitación).</li>
+                      <li>En «3. Qué se manda» marca lo que quieras: las alertas llegan en cuanto termina un rastreo que las tiene; el resumen, el día de la semana que diga la pestaña Alertas; el informe, al terminar cada rastreo programado (los lanzados a mano no lo mandan).</li>
+                      <li>Pulsa <em>Guardar y mandar una prueba</em> y mira el canal. Si no llega, aquí mismo sale por qué.</li>
+                    </ol>
+                    <p class="text-dim">El token se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar. Para quitarlo de todos los clientes a la vez, en Slack: tu app → <em>Install App</em> → <em>Revoke</em>.</p>
+                  </div>
+                </details>
                 <details class="mb-1" :open="!((slack.estado && slack.estado.canales) || []).length">
                   <summary class="text-sm" style="cursor:pointer" x-text="((slack.estado && slack.estado.canales) || []).length ? 'Cambiar el canal o qué se manda' : 'Conectar Slack'"></summary>
                   <div class="gsc-pasos">

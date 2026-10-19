@@ -304,3 +304,18 @@ def test_el_token_de_otro_tipo_no_vale_para_slack(api):
     http, cid, _ = api
     r = http.put(f"/api/clients/{cid}/slack", json={"credencial": "GSC_X", "canal": "C1"})
     assert r.status_code == 422
+
+
+def test_el_manifiesto_de_la_guia_pide_lo_que_usa_el_codigo():
+    """La guia de la ficha (decision 149) da un manifiesto para crear la app.
+    Tiene que pedir chat:write (publicar) y channels:read/groups:read (la
+    lista de canales), y SIN rotacion de token: con ella caduca a las 12 h y
+    los avisos dejarian de llegar sin que nadie toque nada."""
+    import pathlib
+    import re
+
+    js = (pathlib.Path(__file__).parent.parent / "frontend" / "app.js").read_text()
+    bloque = js[js.index("manifiestoSlack() {"):js.index("copiarManifiestoSlack()")]
+    lineas = re.findall(r"'([^']*)'", bloque)
+    assert {"      - chat:write", "      - channels:read", "      - groups:read"} <= set(lineas)
+    assert "  token_rotation_enabled: false" in lineas
