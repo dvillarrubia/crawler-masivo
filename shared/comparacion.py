@@ -1800,12 +1800,11 @@ def _poner_al_dia_el_anterior(db, anterior, job, reanalizar) -> tuple[bool, str 
     QUIEN LLAMA. Este módulo no importa `analysis/`: lo carga también la API,
     cuya imagen no lo lleva (decisiones 69 y 71). Sin ella no se re-analiza.
 
-    Un censo con los enlaces **archivados** (decisión 95) no se re-analiza
-    nunca desde aquí: sin filas en `links` el análisis pondría a cero los
-    entrantes, el PageRank y la profundidad. El analizador ya se niega, pero no
-    se le llega a pedir: restaurar para comparar devolvería a `links` lo que el
-    archivo sacó de ahí (horas y gigas en un censo como Druni) solo para una
-    cifra del informe. Se vuelve a la 91 con el motivo dicho.
+    Un censo con los enlaces **archivados** (decisión 95) se re-analiza
+    igual: `run_analysis` los devuelve a `links`, analiza y los vuelve a
+    archivar bajo el candado del job (decisión 150). Desde la 150 la
+    referencia siempre está archivada, y restaurar cuesta una fracción del
+    propio análisis.
 
     Devuelve `(se re-analizó, por qué no)`. El motivo solo va cuando hacía
     falta re-analizar y no se hizo: es lo que el diff de incidencias dirá en
@@ -1820,22 +1819,6 @@ def _poner_al_dia_el_anterior(db, anterior, job, reanalizar) -> tuple[bool, str 
                        "apagado (REANALIZAR_LA_REFERENCIA=0).")
     if reanalizar is None:
         return False, None
-    # Lo que diga la fila AHORA, no lo que se cargo al elegir la referencia:
-    # el archivado lo hace otro proceso (el cierre de otro rastreo).
-    db.refresh(anterior)
-    from shared.archivo_enlaces import esta_archivado
-
-    if esta_archivado(anterior):
-        logger.warning(
-            "El censo de referencia %s tiene los enlaces archivados: no se "
-            "re-analiza y las incidencias no se comparan", anterior.id)
-        return False, (
-            f"El censo anterior tiene sus enlaces archivados en Parquet "
-            f"(decision 95) y re-analizarlo sin ellos pondria a cero los "
-            f"enlaces entrantes y el PageRank, asi que no se ha re-analizado. "
-            f"Para compararlo: python scripts/archivar_enlaces.py --restaurar "
-            f"{anterior.id} y despues python -m analysis.analyzer {anterior.id}."
-        )
     inicio = time.time()
     logger.info(
         "El censo de referencia %s se analizo con %s y este con %s: se vuelve "

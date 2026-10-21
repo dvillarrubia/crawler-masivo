@@ -31,8 +31,8 @@
 ## Analisis, incidencias y estado del job
 
 - **Lo que analiza o archiva un censo entero toma el candado del job**
-  (`shared/candados.py`): el re-analisis de la referencia (93) cae justo sobre
-  censos superados, que es lo que se archiva (95).
+  (`shared/candados.py`): el re-analisis (93) restaura, analiza y re-archiva
+  los enlaces del censo dentro del mismo candado (95, 150).
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un
   sitio limpio. 28, 32.
 - **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no

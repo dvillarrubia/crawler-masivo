@@ -8,18 +8,18 @@ censo de Druni (60.399 URLs, 139 M enlaces): ~30 GB en `links`, 9 GB agrupados
 escriben una vez y no se vuelven a tocar, que es justo para lo que esta hecho
 un formato columnar.
 
-Lo que se archiva es lo que ya no hace falta caliente: un censo **superado**,
-es decir, para el que hay otro mas nuevo y completado del mismo host cuyas
-semillas cubren las suyas. Es la misma contencion con la que se elige el censo
-de referencia de una comparacion (decision 70 y `comparacion.censo_anterior`),
-asi que un censo que todavia pueda ser la referencia de alguien no se archiva
-nunca. Y nada que haya terminado hace menos de `ARCHIVAR_DIAS_MINIMOS`.
+Lo que se archiva es todo censo **completado**, en cuanto acaba su analisis
+(decision 150): `links` se queda con los rastreos en curso. Uno fallido,
+cancelado o estancado se puede reanudar, y la reanudacion lee su frontera de
+`links`, asi que ese sigue la regla de la decision 95: solo cuando hay un
+completado mas nuevo del mismo host y termino hace `ARCHIVAR_DIAS_MINIMOS`.
 
 Lo archivado se sigue pudiendo LEER: la API sirve la ficha de URL, la lista de
-enlaces, sus CSV, los origenes del explorador y el backup desde el fichero. Lo
-que no se puede es **re-analizarlo** sin restaurarlo antes: el analisis calcula
-los enlaces entrantes y el PageRank con SQL sobre `links`, y sin filas los
-pondria a cero. `analysis.analyzer` se niega y dice como restaurarlo.
+enlaces, sus CSV, los origenes del explorador y el backup desde el fichero. El
+analisis calcula los enlaces entrantes y el PageRank con SQL sobre `links`, asi
+que **re-analizarlo** exige las filas: `analysis.analyzer.run_analysis` las
+restaura con COPY, analiza y las vuelve a archivar bajo el candado del job.
+`SEOAnalyzer.run_all` a secas se niega y dice como hacerlo.
 
 El fichero va ordenado por (`to_url_hash`, `id`), que es el orden de
 `GET /links` y el de las consultas por destino. pyarrow se importa dentro de
@@ -89,13 +89,15 @@ def _esquema():
 def candidatos(db, ahora: datetime | None = None) -> list:
     """Jobs cuyos enlaces se pueden archivar, del mas antiguo al mas nuevo.
 
-    Un censo completado se archiva si otro completado, mas nuevo y del mismo
-    host abarca sus semillas, y ademas no es el ultimo de su programacion. Uno
-    que no termino bien (fallido, cancelado, estancado) no puede ser referencia
-    de nada: basta con que haya un completado mas nuevo del mismo host. En los
-    dos casos, solo si termino hace al menos `dias_minimos()` dias.
+    Un censo completado se archiva en cuanto termina su analisis (decision
+    150): `links` solo guarda los rastreos en curso. Re-analizarlo despues
+    ya no lo impide —`run_analysis` restaura, analiza y vuelve a archivar—,
+    asi que da igual que sea la referencia de la siguiente comparacion.
+    Uno que no termino bien (fallido, cancelado, estancado) puede reanudarse,
+    y la reanudacion lee su frontera de `links`: ese sigue la regla de la
+    decision 95, un completado mas nuevo del mismo host y `dias_minimos()`.
     """
-    from shared.comparacion import _host, _norm
+    from shared.comparacion import _host
     from shared.models import Job
 
     ahora = ahora or datetime.now(timezone.utc)
@@ -107,38 +109,21 @@ def candidatos(db, ahora: datetime | None = None) -> list:
         .order_by(Job.started_at.desc())
         .all()
     )
-    completados_por_host: dict[str, list] = {}
-    ultimo_de_programacion: set = set()
-    vistos_programacion: set = set()
-    for j in jobs:  # de mas nuevo a mas antiguo
-        if j.status == "completed" and j.programacion_id and j.programacion_id not in vistos_programacion:
-            vistos_programacion.add(j.programacion_id)
-            ultimo_de_programacion.add(j.id)
-
+    hosts_con_completado: set = set()
     salida = []
-    for j in jobs:
+    for j in jobs:  # de mas nuevo a mas antiguo
         host = _host(j.seeds[0]) if j.seeds else None
-        if not host:
-            continue
-        mas_nuevos = completados_por_host.setdefault(host, [])
-        fin = j.completed_at or j.started_at
-        if fin.tzinfo is None:
-            fin = fin.replace(tzinfo=timezone.utc)
-        archivable = (
-            not esta_archivado(j)
-            and fin <= limite
-            and j.id not in ultimo_de_programacion
-        )
-        if archivable:
-            if j.status == "completed":
-                mias = {_norm(u) for u in j.seeds}
-                archivable = any(mias <= semillas for _, semillas in mas_nuevos)
-            else:
-                archivable = bool(mas_nuevos)
-        if archivable:
-            salida.append(j)
         if j.status == "completed":
-            mas_nuevos.append((j.id, {_norm(u) for u in j.seeds}))
+            archivable = True
+        else:
+            fin = j.completed_at or j.started_at
+            if fin.tzinfo is None:
+                fin = fin.replace(tzinfo=timezone.utc)
+            archivable = bool(host) and host in hosts_con_completado and fin <= limite
+        if archivable and not esta_archivado(j):
+            salida.append(j)
+        if j.status == "completed" and host:
+            hosts_con_completado.add(host)
     salida.reverse()
     return salida
 
@@ -178,7 +163,7 @@ def _tomar_candado_del_job(db, job_id) -> None:
             f"el job {job_id} se esta analizando: no se archiva ahora")
 
 
-def archivar(db, job_id) -> dict:
+def archivar(db, job_id, *, candado_tomado: bool = False) -> dict:
     """Escribe los enlaces del job en Parquet, lo comprueba y los borra de BD.
 
     El orden es lo que lo hace seguro: primero el fichero (a uno temporal, y
@@ -186,6 +171,9 @@ def archivar(db, job_id) -> dict:
     repeticiones que la BD), despues, en UNA transaccion, la marca en el job y
     el borrado. Si algo falla antes del commit los enlaces siguen en la BD y
     volver a pasarlo reescribe el fichero.
+
+    `candado_tomado`: quien llama ya tiene el candado del job (el re-analisis
+    de un censo archivado, que lo vuelve a archivar al acabar; decision 150).
     """
     import pyarrow as pa
     import pyarrow.compute as pc
@@ -201,7 +189,8 @@ def archivar(db, job_id) -> dict:
         return job.enlaces_archivados
     if job.status not in _TERMINADOS:
         raise RuntimeError(f"el job {job_id} esta en '{job.status}': no se archiva")
-    _tomar_candado_del_job(db, job.id)
+    if not candado_tomado:
+        _tomar_candado_del_job(db, job.id)
 
     destino = ruta(job.id)
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -284,17 +273,54 @@ def restaurar(db, job_id) -> int:
         return 0
     fichero = pq.ParquetFile(ruta(job.id))
     n = 0
-    for lote in fichero.iter_batches(batch_size=_LOTE):
-        filas = lote.to_pylist()
-        for f in filas:
-            f["job_id"] = job.id
-        db.execute(insert(Link), filas)
-        n += len(filas)
+    if db.get_bind().dialect.name.startswith("postgres"):
+        # COPY y no INSERT: el re-analisis de un censo archivado restaura
+        # antes de analizar (decision 150), y con INSERT un censo grande
+        # tardaba mas en volver que en analizarse.
+        cursor = db.connection().connection.cursor()
+        sentencia = f"COPY links (job_id, {', '.join(COLUMNAS)}) FROM STDIN"
+        for lote in fichero.iter_batches(batch_size=_LOTE, columns=list(COLUMNAS)):
+            cursor.copy_expert(sentencia, _texto_para_copy(job.id, lote))
+            n += lote.num_rows
+    else:
+        for lote in fichero.iter_batches(batch_size=_LOTE):
+            filas = lote.to_pylist()
+            for f in filas:
+                f["job_id"] = job.id
+            db.execute(insert(Link), filas)
+            n += len(filas)
     job.enlaces_archivados = None
     db.commit()
     ruta(job.id).unlink(missing_ok=True)
     logger.info("Job %s: %d enlaces restaurados", job_id, n)
     return n
+
+
+def _valor_copy(v) -> str:
+    """Un campo en el formato de texto de COPY: `\\N` es NULL, y la barra, el
+    tabulador y los saltos de linea van escapados."""
+    if v is None:
+        return "\\N"
+    if isinstance(v, bool):
+        return "t" if v else "f"
+    return (str(v).replace("\\", "\\\\").replace("\t", "\\t")
+            .replace("\n", "\\n").replace("\r", "\\r"))
+
+
+def _texto_para_copy(job_id, lote):
+    import io
+
+    columnas = [lote.column(c).to_pylist() for c in COLUMNAS]
+    jid = str(job_id)
+    buf = io.StringIO()
+    for fila in zip(*columnas):
+        buf.write(jid)
+        for v in fila:
+            buf.write("\t")
+            buf.write(_valor_copy(v))
+        buf.write("\n")
+    buf.seek(0)
+    return buf
 
 
 def bytes_en_disco(job_id, resumen: dict | None = None) -> int | None:
