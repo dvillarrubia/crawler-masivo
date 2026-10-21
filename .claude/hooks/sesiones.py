@@ -12,8 +12,8 @@ Este script es a la vez la herramienta de linea de comandos y los hooks:
   UserPromptSubmit  hook-latido   marca que la sesion sigue viva
   PreToolUse(Bash)  hook-bash     bloquea checkout en el directorio principal,
                                   merge con produccion ocupada o con otro
-                                  despliegue en vuelo, y rastreos durante un
-                                  despliegue
+                                  despliegue en vuelo, rastreos durante un
+                                  despliegue y `docker rm -f` sin `-v`
   SessionEnd        hook-fin      da de baja la sesion y suelta sus candados
 
   tablero                         quien hay, en que worktree y haciendo que
@@ -315,6 +315,26 @@ def _dir_efectivo(cmd: str, cwd: str) -> str:
     return ruta if os.path.isabs(ruta) else os.path.normpath(os.path.join(cwd, ruta))
 
 
+# `docker rm` / `docker container rm` hasta el final de esa orden (`;`, `&&`, `|`, salto, comilla).
+_DOCKER_RM = re.compile(r"\bdocker\s+(?:container\s+)?rm\b([^;&|\n'\"]*)")
+
+
+def rm_sin_volumenes(cmd: str) -> bool:
+    """¿Hay un `docker rm -f` que no lleve `-v`?
+
+    El `--rm` de `docker run` borra el volumen anonimo del contenedor al pararse,
+    pero un `docker rm -f` explicito se lo salta y el volumen se queda huerfano:
+    77 datadirs de Postgres (53 GB) de pruebas con pgvector efimero en el Mac
+    (2026-10-21). `-v` solo borra los anonimos, nunca uno con nombre, asi que
+    pedirlo siempre no pone en riesgo ningun dato."""
+    for m in _DOCKER_RM.finditer(cmd):
+        cortas = "".join(t[1:] for t in m.group(1).split() if re.fullmatch(r"-[a-zA-Z]+", t))
+        largas = set(re.findall(r"--[\w-]+", m.group(1)))
+        if ("f" in cortas or "--force" in largas) and not ("v" in cortas or "--volumes" in largas):
+            return True
+    return False
+
+
 def hook_bash() -> None:
     e = _stdin()
     cmd = (e.get("tool_input") or {}).get("command", "")
@@ -363,6 +383,12 @@ def hook_bash() -> None:
         if vuelo:
             _denegar(f"Bloqueado: hay un despliegue en vuelo ({det}); recrearia el worker a mitad "
                      "del rastreo. Espera a que termine.")
+
+    # 4. Un contenedor borrado a la fuerza sin -v deja su volumen anonimo (Postgres: >1 GB).
+    if rm_sin_volumenes(cmd) and not forzado:
+        _denegar("Bloqueado por .claude/hooks/sesiones.py: `docker rm -f` sin `-v` deja huerfano "
+                 "el volumen anonimo del contenedor (un Postgres efimero, mas de 1 GB cada vez). "
+                 "Usa `docker rm -fv`: `-v` solo borra los volumenes anonimos, nunca uno con nombre.")
 
 
 # -------------------------------------------------------------------------- cli

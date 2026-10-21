@@ -68,6 +68,12 @@ docker run --rm --network host -v "$PWD":/repo -w /repo \
   crawler-masivo-crawler bash -lc "pip install -q pytest; python -m pytest /repo/tests -q"
 ```
 
+Si el efimero es un Postgres o un Redis levantado con `-d --rm` para quitarlo
+luego a mano, se quita con `docker rm -fv`: sin `-v` su volumen anonimo se queda
+(el hook de sesiones lo bloquea). Para revisar lo que ya haya: `docker volume ls
+-f dangling=true`, y `docker volume prune -f` borra solo los anonimos sin
+contenedor, nunca `crawler-masivo_pgdata` ni otro con nombre.
+
 ## Configuración por cliente (`projects/`)
 
 Todo lo específico de un cliente (filtros, selectores de plantilla, `templates`
