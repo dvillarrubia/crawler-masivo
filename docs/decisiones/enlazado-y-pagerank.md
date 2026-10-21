@@ -969,3 +969,13 @@
      esta ordenado por destino, asi que filtrar por `from_url_id` recorre la
      columna entera (pyarrow lee solo esa columna); y `compactar_enlaces.py` y
      `check_content_quality.py` siguen negandose sobre un censo archivado.
+   - **Medido** (2026-10-21, BD local con `links` de 187 M filas y 49 GB, censo
+     de penguin `ad5c837b`, 10.352.878 enlaces, 30.287 URLs): analizar con los
+     enlaces en `links`, 5:43; restaurar por COPY, 3:27 (unas 50.000 filas/s,
+     con los tres indices); volver a archivar, 2:20 a 2:55 (87 MB). El
+     re-analisis completo de un censo archivado, 11:11, el doble que sin
+     archivar. Entrantes, entrantes unicos, salientes, profundidad y PageRank
+     de las 30.287 URLs **identicos** (mismo md5) y el Parquet final del mismo
+     tamano que el primero. A esa velocidad un censo como Druni (139 M) tardaria
+     unos 45 min en volver: solo pasa cuando cambia el analizador y su censo es
+     la referencia de una comparacion (93), y lo paga el worker, no el usuario.

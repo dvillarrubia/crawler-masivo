@@ -8,18 +8,18 @@ censo de Druni (60.399 URLs, 139 M enlaces): ~30 GB en `links`, 9 GB agrupados
 escriben una vez y no se vuelven a tocar, que es justo para lo que esta hecho
 un formato columnar.
 
-Lo que se archiva es lo que ya no hace falta caliente: un censo **superado**,
-es decir, para el que hay otro mas nuevo y completado del mismo host cuyas
-semillas cubren las suyas. Es la misma contencion con la que se elige el censo
-de referencia de una comparacion (decision 70 y `comparacion.censo_anterior`),
-asi que un censo que todavia pueda ser la referencia de alguien no se archiva
-nunca. Y nada que haya terminado hace menos de `ARCHIVAR_DIAS_MINIMOS`.
+Lo que se archiva es todo censo **completado**, en cuanto acaba su analisis
+(decision 150): `links` se queda con los rastreos en curso. Uno fallido,
+cancelado o estancado se puede reanudar, y la reanudacion lee su frontera de
+`links`, asi que ese sigue la regla de la decision 95: solo cuando hay un
+completado mas nuevo del mismo host y termino hace `ARCHIVAR_DIAS_MINIMOS`.
 
 Lo archivado se sigue pudiendo LEER: la API sirve la ficha de URL, la lista de
-enlaces, sus CSV, los origenes del explorador y el backup desde el fichero. Lo
-que no se puede es **re-analizarlo** sin restaurarlo antes: el analisis calcula
-los enlaces entrantes y el PageRank con SQL sobre `links`, y sin filas los
-pondria a cero. `analysis.analyzer` se niega y dice como restaurarlo.
+enlaces, sus CSV, los origenes del explorador y el backup desde el fichero. El
+analisis calcula los enlaces entrantes y el PageRank con SQL sobre `links`, asi
+que **re-analizarlo** exige las filas: `analysis.analyzer.run_analysis` las
+restaura con COPY, analiza y las vuelve a archivar bajo el candado del job.
+`SEOAnalyzer.run_all` a secas se niega y dice como hacerlo.
 
 El fichero va ordenado por (`to_url_hash`, `id`), que es el orden de
 `GET /links` y el de las consultas por destino. pyarrow se importa dentro de
