@@ -881,6 +881,11 @@ que les copiamos, la idea, no su definición. Por olas de
 - **Móvil frente a escritorio** (ola 7.4): pedir una muestra con el
   user-agent de smartphone y comparar lo que cambia
   ([#161](https://github.com/dvillarrubia/crawler-masivo/pull/161)).
+- **Los restos** ([#184](https://github.com/dvillarrubia/crawler-masivo/issues/184),
+  decisiones 153-156): titulares que saltan de nivel (basta re-analizar); y con
+  un rastreo nuevo, el tamaño real de la `og:image` (una muestra acotada,
+  encendida de serie) y la tarjeta de X, los vídeos de cada página frente al
+  sitemap de vídeo, y las versiones AMP y móvil que anuncia la página.
 - **Descartado**: legibilidad y palabras más frecuentes, accesibilidad sin
   navegador (va con axe por muestra, ola 8), validador de AMP y «hreflang que
   nadie enlaza» (excluido a propósito en la decisión 99).

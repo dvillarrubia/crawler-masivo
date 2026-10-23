@@ -81,6 +81,11 @@ def main() -> None:
             ("cuerpo_solo_ascii", "BOOLEAN"), ("texto_mal_codificado", "BOOLEAN"),
         ):
             conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
+        # Videos de la pagina y versiones AMP y movil anunciadas (decisiones
+        # 155 y 156). Nullables y sin DEFAULT: solo catalogo.
+        for columna, tipo in (("videos", "JSON"), ("amphtml", "TEXT"),
+                              ("alternate_movil", "TEXT")):
+            conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))
         # La respuesta era la pagina o un muro delante, y la salud del job
@@ -362,6 +367,9 @@ def migrar_respuestas_sondeadas() -> None:
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_rsond_job_hash "
             "ON respuestas_sondeadas (job_id, url_hash)"))
+        # Dimensiones de la og:image (decision 154). Sin DEFAULT: solo catalogo.
+        conn.execute(text("ALTER TABLE respuestas_sondeadas ADD COLUMN IF NOT EXISTS ancho INTEGER"))
+        conn.execute(text("ALTER TABLE respuestas_sondeadas ADD COLUMN IF NOT EXISTS alto INTEGER"))
     print("Respuestas sondeadas: tabla respuestas_sondeadas e indice al dia.")
 
 
@@ -376,6 +384,8 @@ def migrar_sitemap_entries() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_sment_job_hash "
             "ON sitemap_entries (job_id, url_hash)"))
+        # `<video:video>` de cada entrada (decision 155). Sin DEFAULT: solo catalogo.
+        conn.execute(text("ALTER TABLE sitemap_entries ADD COLUMN IF NOT EXISTS videos INTEGER"))
     print("Sitemaps: tabla sitemap_entries e indice al dia.")
 
 

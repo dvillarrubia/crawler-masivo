@@ -311,3 +311,104 @@
    - **En la interfaz**: ficha y nombre («Recurso roto»), ambito «Contenido».
      Pendiente de medir en un canario cuantas peticiones anade en un
      e-commerce y si 20.000 es el tope adecuado (13).
+
+<a id="d153"></a>
+153. **Un titular que salta de nivel es un aviso de plantilla, y solo cuentan
+   los titulares que se oyen** (#184, resto de #150). `encabezado_salta_nivel`
+   (`info`) cuando un titular baja más de un nivel respecto al anterior (H2 →
+   H4). Google no lo penaliza; Screaming Frog y Sitebulb lo marcan y es un
+   fallo de accesibilidad (WCAG 1.3.1).
+   - **Una fila por (host, `firma_de_ruta`)** con `paginas_afectadas`, el salto
+     más frecuente (`salto`, el primero de cada página) y `saltos_distintos`,
+     anclada en la URL menor (36, 64, 88): el salto lo pone casi siempre el
+     tema (el H5 de «compartir» de blogs.uoc.edu, el H4 antes del H1 de Lopesan).
+   - **Solo titulares visibles y con texto** (46, 121): un H3 oculto entre un
+     H2 y un H4 no tapa el salto, porque quien navega por titulares no lo oye;
+     y un H4 oculto entre un H1 y un H2 no lo crea. Subir de nivel no es un
+     salto, y el primer titular no se compara con nada (que falte el H1 ya es
+     `h1_missing`).
+   - **Re-analizar basta**: sale de `headings`, que se guarda desde siempre.
+     En un censo anterior a la decisión 46 (`oculto` NULL en todo el censo) no
+     se sabe qué se pintaba y no se evalúa, como `h1_vacio`. Solo HTML interno
+     2xx, respuesta válida e indexable (47). Lee `headings` por lotes en orden
+     de documento, sin `links`.
+   - **Medido** (2026-10-23, 22 páginas públicas descargadas con curl y pasadas
+     por `extract_headings`, sin render): 5 con salto. blogs.uoc.edu H1 → H5 en
+     las dos entradas (el bloque de compartir), www.uoc.edu H1 → H3 y H2 → H4,
+     Lopesan H1 → H3. Ninguno en las portadas de prensa (de 55 a 245
+     titulares). No se midió en un censo entero (13).
+
+<a id="d154"></a>
+154. **La og:image se mide con la sonda de recursos, encendida de serie y
+   acotada, y lo que no se mide no se afirma** (#184, resto de #150 y de la
+   108). Que la og:image exista no basta: Facebook descarta una de menos de
+   200×200 y X no pinta la tarjeta grande por debajo de 300×157.
+   - **La misma sonda que la 124** (`uso='og_image'` en
+     `respuestas_sondeadas`, con `ancho` y `alto`): fuera de `max_urls`, sin
+     `PageItem`, sin contar para la salud, robots.txt del tercero y sin
+     credenciales del job (114). Diferencias: se pide con **GET y `Range` de
+     64 KB**, sin HEAD delante (hay que leer los bytes), y sin el tope por host
+     de los terceros (la og:image vive en un CDN y ya tiene su presupuesto).
+   - **Encendida de serie porque está acotada**: `crawl_behavior.og_image_muestra`
+     (200 imágenes distintas) y `og_image_por_plantilla` (5 nuevas por forma de
+     ruta de la PÁGINA, para que la muestra no se la coman la portada y el
+     menú). La og:image por defecto del sitio se pide una vez. 0 = apagada. Lo
+     peor son 200 GET de 64 KB (12,8 MB) por rastreo.
+   - **Las dimensiones salen de la cabecera del fichero**
+     (`shared/dimensiones_imagen.py`, sin Pillow): PNG, GIF, JPEG (recorriendo
+     los segmentos hasta el SOF), WebP (VP8, VP8L, VP8X), AVIF/HEIF (`ispe`) y
+     BMP. SVG, un formato que no se reconoce o un JPEG cuyo SOF cae fuera de
+     lo descargado dan NULL: «no medida», nunca «pequeña» (67).
+   - **Medido** (2026-10-23): las 12 og:image distintas de las 22 páginas
+     (blogs.uoc.edu, www.uoc.edu, Lopesan, El País, Marca, 20minutos, RTVE)
+     pedidas con `Range: bytes=0-65535`: las 12 dan el mismo tamaño que Pillow
+     con el fichero entero. 11 lo dicen antes de 1,2 KB; un JPEG de WordPress
+     con EXIF y miniatura, a los **52.700 bytes**: con el KB de la sonda de
+     recursos se habría quedado sin medir, y por eso son 64. Ninguna era
+     pequeña (la menor, 400×400, el logo de El País).
+   - **Avisos, `info` y por plantilla** (108: redes sociales, no
+     posicionamiento): `og_image_pequena` (motivo `menor_de_200x200` o
+     `menor_de_300x157_con_tarjeta_grande`, con la imagen de ejemplo y su
+     tamaño), `og_image_rota` (404/410 o redirige a un error; no un 403 ni un
+     5xx, 123) y `twitter_card_invalida` (un valor fuera de `summary`,
+     `summary_large_image`, `app` y `player`; que falte no es aviso porque X usa
+     OG, 108). Una og:image rota que también es URL del censo o la carga un
+     `<img>` ya tiene su aviso (`4xx_error`, `broken_resource`) y no se repite
+     (36). Solo indexables (47). Resumen en `jobs.sondas_resumen.og_image`.
+   - **Una fila por URL**: si la misma imagen se pidió antes como recurso
+     embebido (HEAD), vale su veredicto pero queda sin medir. En la misma
+     página se pide primero la og:image para que gane ella; entre páginas
+     distintas puede perderse alguna medida con `comprobar_recursos` encendido.
+     `twitter_card_invalida` sale al re-analizar; lo demás pide re-rastrear.
+
+<a id="d155"></a>
+155. **Los vídeos de la página se guardan, y su sitemap solo se audita en el
+   sitio que lo tiene** (#184, resto de #150). `html_meta.videos` (JSON, como
+   mucho 20): `{tipo, id, src, decorativo}` de cada `<video>` (con `src` o
+   `<source>`; sin ninguno cuenta igual, los reproductores por MSE), cada
+   reproductor de YouTube o Vimeo en `<iframe>`, `<embed>` u `<object>`
+   (también con `data-src`/`data-lazy-src` de carga diferida) y los
+   `<lite-youtube>`/`<lite-vimeo>`. Sin repetidos; el `<noscript>` cuenta (es el
+   único `<iframe>` que se ve sin JavaScript con los plugins de carga diferida)
+   y `<template>` no. `[]` = medido y sin vídeos; NULL = rastreo anterior.
+   - **El fondo animado no es un vídeo**: `autoplay` + `muted` sin `controls`
+     es `decorativo` y no cuenta para el aviso (www.uoc.edu lleva dos así en la
+     cabecera de su portada).
+   - **`sitemap_entries.videos`**: cuántos `<video:video>` declara cada
+     entrada (0 en un sitemap de texto o un feed, que no pueden). NULL = leída
+     antes de la columna.
+   - **`video_sin_sitemap_de_video`** (`info`, por plantilla): páginas
+     indexables con un vídeo no decorativo que no están en ninguna entrada con
+     vídeo, **solo si el sitio tiene alguna**. Sin sitemap de vídeo no falta
+     nada: Google descubre el vídeo en la página. El detalle lleva cuántos de
+     cada tipo.
+   - **Fuera, a propósito**: «el sitemap declara un vídeo y la página no lo
+     tiene» (sin render, el reproductor que monta el JavaScript no se ve, y eso
+     no se puede afirmar), la validez de `player_loc`/`content_loc` y el
+     VideoObject (es de datos estructurados).
+   - **Medido** (22 páginas, sin render): RTVE Play da 20 `<video>` sin `src`
+     (el tope; son las vistas previas del carrusel, con la URL en
+     `data-mix-video-src` y el `autoplay` puesto por JavaScript: cuentan como
+     no decorativos), El País 1 sin `src`, www.uoc.edu 2 decorativos y ninguna
+     página de prensa con `<iframe>` de YouTube o Vimeo en el HTML servido. Pide
+     re-rastrear.

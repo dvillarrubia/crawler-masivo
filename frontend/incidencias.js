@@ -349,6 +349,39 @@ const ISSUE_INFO = {
     google: 'No afecta al posicionamiento. El protocolo Open Graph pide una URL absoluta, y hay redes que no resuelven la relativa: la vista previa sale sin imagen.',
     arreglo: 'Escribir la og:image como URL absoluta, con esquema y host.',
   },
+  // Decision 154: la og:image medida con una sonda y la tarjeta de X.
+  'og_image_pequena': {
+    que: 'La og:image, descargada y medida, es más pequeña de lo que piden las redes: menos de 200×200 px, o menos de 300×157 px con twitter:card=summary_large_image. Una fila por plantilla y motivo. Solo se miden las de la muestra del rastreo (crawl_behavior.og_image_muestra); de las demás no se dice nada.',
+    google: 'No afecta al posicionamiento. Facebook descarta una og:image de menos de 200×200 y la vista previa sale sin imagen; X, por debajo de 300×157, no pinta la tarjeta grande.',
+    arreglo: 'Servir en la plantilla una og:image de al menos 1200×630 px (la proporción 1,91:1 que usan Facebook, LinkedIn y X).',
+  },
+  'og_image_rota': {
+    que: 'La og:image no existe: responde 404/410 (o redirige a un error). Una fila por plantilla. Si la misma imagen está en el censo o la carga un <img>, ya tiene su propio aviso y aquí no sale.',
+    google: 'No afecta al posicionamiento. Al compartir la página, la vista previa sale sin imagen.',
+    arreglo: 'Apuntar la og:image a una imagen que exista, con URL absoluta.',
+  },
+  'twitter_card_invalida': {
+    que: 'La etiqueta twitter:card lleva un valor que X no reconoce (los válidos son summary, summary_large_image, app y player). Una fila por plantilla y valor. Que no esté no es un aviso: X usa Open Graph de respaldo.',
+    google: 'No afecta al posicionamiento. Con un valor que no conoce, X no pinta la tarjeta que se pretendía.',
+    arreglo: 'Escribir summary_large_image (o summary) en la plantilla.',
+  },
+  // Decision 155: videos y sitemap de video.
+  'video_sin_sitemap_de_video': {
+    que: 'Páginas indexables con un vídeo (un <video> que no es el fondo animado, o un reproductor de YouTube o Vimeo) que no están en el sitemap de vídeo del sitio. Solo sale si el sitio TIENE sitemap de vídeo: sin él, Google descubre los vídeos en la página. Una fila por plantilla.',
+    google: 'El sitemap de vídeo es opcional, pero cuando un sitio lo usa es para que Google encuentre e indexe sus vídeos con su miniatura y su título. Una plantilla de páginas con vídeo que falta en él se queda en lo que Google descubra por su cuenta.',
+    arreglo: 'Añadir esas páginas al sitemap de vídeo con su <video:video> (miniatura, título, descripción y content_loc o player_loc), o marcar el vídeo con VideoObject.',
+  },
+  // Decision 156: versiones AMP y movil anunciadas.
+  'amphtml_incorrecto': {
+    que: 'La página anuncia una versión AMP (<link rel="amphtml">) que el rastreo encontró y está mal: responde con error, redirige, o no declara como canonical a la página que la anuncia. Una fila por plantilla y motivo. La AMP que no está en el censo no se juzga: no se sigue, porque no es un enlace.',
+    google: 'La pareja tiene que apuntarse en los dos sentidos: amphtml desde la página y canonical desde la AMP. Si la AMP no responde, Google la deja de usar y sirve la canónica (informativo); si no apunta de vuelta, compite con ella como otra página (aviso).',
+    arreglo: 'Que la AMP responda 200 y lleve <link rel="canonical"> a la página. Si ya no se usa AMP, quitar el <link rel="amphtml"> de la plantilla.',
+  },
+  'alternate_movil_incorrecto': {
+    que: 'La página anuncia una versión móvil en otra URL (<link rel="alternate" media="only screen and (max-width: …)">, el m-dot) que el rastreo encontró y está mal: responde con error, redirige, o no declara como canonical a la página de escritorio. Una fila por plantilla y motivo. La versión móvil que no está en el censo no se juzga.',
+    google: 'Con URLs separadas, Google indexa la versión móvil (indexación mobile-first): si no responde, la página puede salir del índice; si no lleva el canonical a la de escritorio, son dos páginas que compiten. Que redirija suele ser una anotación vieja de un sitio que ya es adaptable (informativo).',
+    arreglo: 'Que la versión móvil responda 200 con <link rel="canonical"> a la de escritorio. Si el sitio ya es adaptable, quitar el <link rel="alternate" media> de la plantilla.',
+  },
   'redireccion_por_javascript': {
     que: 'La página redirige con JavaScript (location = "…", location.replace("…")) en cuanto carga, sin condición: una página puente. Se detecta en el HTML servido, sin render, y solo con un destino literal a nivel superior del script; lo que va dentro de una función, de un if o de un temporizador no se afirma.',
     google: 'Google ejecuta el JavaScript al renderizar y suele seguir la redirección, pero más tarde y con menos garantías que una del servidor, y quien no ejecuta JavaScript se queda en la página puente. El destino no se ha seguido en este rastreo: si aparece su código, es porque se llegó a él por otro camino.',
@@ -425,6 +458,11 @@ const ISSUE_INFO = {
     que: 'La página tiene <h1>, pero vacío: sin texto, o con un logo sin alt dentro. Un logo sin alt dentro del <h1> deja la página sin titular.',
     google: 'Es como no tenerlo: no hay titular que leer.',
     arreglo: 'Poner el titular como texto, o el nombre en el alt de la imagen.',
+  },
+  'encabezado_salta_nivel': {
+    que: 'Un titular baja más de un nivel respecto al anterior: un H2 seguido de un H4, sin H3 en medio. Solo titulares visibles y con texto, en páginas indexables. Una fila por plantilla con el salto más frecuente.',
+    google: 'No lo penaliza: Google no exige un orden de titulares. Screaming Frog y Sitebulb lo marcan, y es un fallo de accesibilidad (WCAG 1.3.1): quien navega con lector de pantalla salta de nivel en nivel y cree que falta una sección. Es informativo.',
+    arreglo: 'Usar el nivel que corresponde por estructura y dar el tamaño con CSS. Casi siempre es la plantilla: el H4 del pie o el H5 de la barra lateral.',
   },
   'h1_multiple': {
     que: 'La página tiene varios <h1> visibles.',
@@ -830,6 +868,13 @@ const ISSUE_LABEL_EXTRA = {
   canonical_con_fragmento: 'Canonical con fragmento',
   og_ausente: 'Sin Open Graph',
   og_image_relativa: 'og:image relativa',
+  og_image_pequena: 'og:image demasiado pequeña',
+  og_image_rota: 'og:image rota',
+  twitter_card_invalida: 'twitter:card no válida',
+  video_sin_sitemap_de_video: 'Vídeo fuera del sitemap de vídeo',
+  amphtml_incorrecto: 'Versión AMP incorrecta',
+  alternate_movil_incorrecto: 'Versión móvil incorrecta',
+  encabezado_salta_nivel: 'Titulares que saltan de nivel',
   redireccion_por_javascript: 'Redirección por JavaScript',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',
@@ -1022,6 +1067,15 @@ const DETALLE_LABEL = {
   final: 'URL final',
   retardo_s: 'retardo (s)',
   h1_vacios: 'h1 vacíos',
+  // Decisiones 153 a 156
+  salto: 'salto',
+  saltos_distintos: 'saltos distintos',
+  imagen: 'imagen',
+  ancho: 'ancho (px)',
+  alto: 'alto (px)',
+  valor: 'valor',
+  videos: 'vídeos',
+  destino_canonical: 'canonical del destino',
   alcance: 'alcance',
   // Paginación (decision 122)
   series: 'series',

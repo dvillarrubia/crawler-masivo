@@ -4230,7 +4230,7 @@ const EXP_TABS = [
     columns: ['url','status_code','title','title_len','title_pixel_width','indexable','inlinks_count'] },
   { key: 'a_desc',     label: 'Descripciones', icon: 'align-left',   filter: HTML_INTERNO, ambito: ['description_missing','description_too_short','description_too_long','description_duplicate','description_multiple','description_igual_title'],
     columns: ['url','status_code','meta_description','meta_description_len','meta_description_pixel_width','indexable'] },
-  { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_vacio','h1_multiple','h1_duplicate'],
+  { key: 'a_h1',       label: 'Encabezados',   icon: 'type',         filter: HTML_INTERNO, ambito: ['h1_missing','h1_vacio','h1_multiple','h1_duplicate','encabezado_salta_nivel'],
     columns: ['url','status_code','h1','h1_count','title','indexable'] },
   { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento','google_elige_otro_canonical','google_tiene_canonical_antiguo'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
@@ -4255,7 +4255,7 @@ const EXP_TABS = [
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   // Decision 108: lo que el HTML declara de si mismo. Casi todo de plantilla
   // o de servidor (una fila por grupo), y nada saca una pagina del indice.
-  { key: 'a_declara',  label: 'Móvil, charset y OG', icon: 'smartphone', filter: HTML_INTERNO, ambito: ['viewport_ausente','viewport_incorrecto','html_lang_ausente','texto_mal_codificado','charset_incoherente','charset_ausente','og_ausente','og_image_relativa'],
+  { key: 'a_declara',  label: 'Móvil, charset y OG', icon: 'smartphone', filter: HTML_INTERNO, ambito: ['viewport_ausente','viewport_incorrecto','html_lang_ausente','texto_mal_codificado','charset_incoherente','charset_ausente','og_ausente','og_image_relativa','og_image_pequena','og_image_rota','twitter_card_invalida','amphtml_incorrecto','alternate_movil_incorrecto'],
     columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
@@ -4267,7 +4267,7 @@ const EXP_TABS = [
   // Sin HTML_INTERNO: lo que el sitemap declara y no se puede indexar son
   // sobre todo saltos (resource_type 'redirect') y errores (decision 100). Y
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
-  { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap','sitemap_supera_limite','lastmod_futuro','en_varios_sitemaps'],
+  { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap','sitemap_supera_limite','lastmod_futuro','en_varios_sitemaps','video_sin_sitemap_de_video'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
@@ -4430,6 +4430,8 @@ const SONDAS_CAMPOS = {
   enlaces_externos_max:       ['crawl_behavior', 5000,  'int'],
   recursos_max:               ['crawl_behavior', 20000, 'int'],
   sondas_por_host:            ['crawl_behavior', 50,    'int'],
+  // Decision 154: medir la og:image, encendida de serie (0 = apagada).
+  og_image_muestra:           ['crawl_behavior', 200,   'int'],
 };
 
 function _valorSonda(campo, v) {
@@ -4483,6 +4485,7 @@ function _freshForm() {
     enlaces_externos_max: 5000,
     recursos_max: 20000,
     sondas_por_host: 50,
+    og_image_muestra: 200,
     _sondasBase: _sondasDeSerie(),
     exclude_patterns: '',
     include_patterns: '',

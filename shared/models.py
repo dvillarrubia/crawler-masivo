@@ -805,6 +805,17 @@ class HtmlMeta(Base):
     charset_bom = Column(String(40), nullable=True)
     cuerpo_solo_ascii = Column(Boolean, nullable=True)
     texto_mal_codificado = Column(Boolean, nullable=True)
+    # Decision 155: los videos de la pagina (`extract_videos`: tipo, id, src,
+    # decorativo), como mucho 20. `[]` = medido y sin videos; NULL = rastreo
+    # anterior. Es tambien la marca de «medido» de `amphtml` y
+    # `alternate_movil` (decision 156): con `videos` NULL, que esas dos esten
+    # a NULL no dice que la pagina no las anuncie.
+    videos = Column(JSON, nullable=True)
+    # Decision 156: la version AMP (`<link rel="amphtml">`) y la movil
+    # (`<link rel="alternate" media="...max-width...">`) que la pagina
+    # anuncia en su head, resueltas.
+    amphtml = Column(Text, nullable=True)
+    alternate_movil = Column(Text, nullable=True)
 
     url_rel = relationship("Url", back_populates="html_meta")
 
@@ -1251,6 +1262,9 @@ class SitemapEntry(Base):
     url = Column(Text, nullable=False)
     fichero = Column(Text, nullable=False)
     lastmod = Column(String(64), nullable=True)
+    # Cuantos `<video:video>` declara la entrada (decision 155). 0 = ninguno;
+    # NULL = leida antes de la columna, que no es «sin video».
+    videos = Column(Integer, nullable=True)
 
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),
@@ -1353,7 +1367,7 @@ class RespuestaSondeada(Base):
     url_hash = Column(String(64), nullable=False)
     url = Column(Text, nullable=False)
     host = Column(String(255), nullable=True)
-    # enlace | recurso: por que se pidio (la primera vez que se vio).
+    # enlace | recurso | og_image: por que se pidio (la primera vez que se vio).
     uso = Column(String(10), nullable=False)
     interno = Column(Boolean, nullable=False, default=False)
     # HEAD | GET (el ultimo usado); NULL = no se pidio (robots, host caido).
@@ -1369,6 +1383,11 @@ class RespuestaSondeada(Base):
     # Bytes del recurso por el cable (`Content-Range` o `Content-Length`).
     content_length = Column(BigInteger, nullable=True)
     error = Column(Text, nullable=True)
+    # Dimensiones de la imagen, solo en `uso='og_image'` (decision 154): las
+    # de la cabecera del fichero (`shared/dimensiones_imagen.py`). NULL = no
+    # se pudo leer (formato raro, respuesta que no es una imagen), nunca 0.
+    ancho = Column(Integer, nullable=True)
+    alto = Column(Integer, nullable=True)
     fecha = Column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (

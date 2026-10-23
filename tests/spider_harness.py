@@ -713,6 +713,8 @@ def main() -> None:
             # RespuestaSondeadaItem (decisiones 123 y 124)
             "veredicto", "metodo", "uso", "host", "final_url", "final_status", "saltos",
             "host_caido", "content_length", "interno", "error",
+            # og:image medida (decision 154)
+            "ancho", "alto",
             # SitemapEntradasItem (decision 126)
             "fichero", "entradas",
         )}

@@ -45,6 +45,8 @@ def bd(monkeypatch):
     with engine.begin() as c:
         c.execute(text("DELETE FROM resources WHERE url_id IN (SELECT id FROM urls WHERE job_id = :j)"),
                   {"j": str(jid)})
+        c.execute(text("DELETE FROM html_meta WHERE url_id IN (SELECT id FROM urls WHERE job_id = :j)"),
+                  {"j": str(jid)})
         for tabla in ("respuestas_sondeadas", "issues", "links", "urls", "jobs"):
             col = "id" if tabla == "jobs" else "job_id"
             c.execute(text(f"DELETE FROM {tabla} WHERE {col} = :j"), {"j": str(jid)})
@@ -155,3 +157,40 @@ def test_el_analisis_entero_con_postgres(bd):
         resumen = s.get(Job, jid).sondas_resumen
         assert resumen["enlaces_externos"]["distintos"] == 2
         assert resumen["enlaces_externos"]["comprobados"] == 2
+
+
+def test_la_og_image_medida_se_guarda_y_se_avisa_con_postgres(bd):
+    """Decision 154: `ancho`/`alto` pasan por la tuberia real (upsert) y el
+    analisis entero los cruza con `html_meta.og_image`."""
+    pytest.importorskip("numpy")
+    from sqlalchemy import select
+
+    from analysis.analyzer import SEOAnalyzer
+    from seo_crawler.pipelines import PostgresPipeline
+    from shared.models import HtmlMeta, Issue, Job, RespuestaSondeada, Url
+
+    _, Sesion, jid = bd
+    spider = types.SimpleNamespace(job_id=str(jid))
+    tub = PostgresPipeline(batch_size=5, commit_every=50)
+    tub.open_spider(spider)
+    tub.process_item(_item(jid, "https://cdn.otro.com/og.png", "ok", uso="og_image",
+                           status_code=206, content_type="image/png", ancho=120, alto=60),
+                     spider)
+    tub.close_spider(spider)
+    with Sesion() as s:
+        fila = s.query(RespuestaSondeada).filter(RespuestaSondeada.job_id == jid).one()
+        assert (fila.uso, fila.ancho, fila.alto) == ("og_image", 120, 60)
+        p = Url(job_id=jid, url="https://x.com/", url_hash=_h("https://x.com/"), host="x.com",
+                is_internal=True, is_html=True, status_code=200, status_group="2xx",
+                crawl_depth=0)
+        s.add(p)
+        s.flush()
+        s.add(HtmlMeta(url_id=p.id, title="Portada", og_image="https://cdn.otro.com/og.png",
+                       videos=[], twitter_card="summary"))
+        s.commit()
+        SEOAnalyzer(s, jid).run_all()
+        filas = s.execute(select(Issue.details).where(
+            Issue.job_id == jid, Issue.issue_type == "og_image_pequena")).scalars().all()
+        assert len(filas) == 1 and (filas[0]["ancho"], filas[0]["alto"]) == (120, 60)
+        s.expire_all()
+        assert s.get(Job, jid).sondas_resumen["og_image"]["medidas"] == 1

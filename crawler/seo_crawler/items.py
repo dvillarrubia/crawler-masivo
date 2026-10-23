@@ -107,6 +107,11 @@ class HtmlMetaItem(scrapy.Item):
     cuerpo_solo_ascii = scrapy.Field()
     texto_mal_codificado = scrapy.Field()
 
+    # Videos, AMP y version movil (decisiones 155 y 156)
+    videos = scrapy.Field()
+    amphtml = scrapy.Field()
+    alternate_movil = scrapy.Field()
+
 
 class HeadingItem(scrapy.Item):
     """A single heading element (h1-h6)."""
@@ -204,7 +209,7 @@ class EnlacesNoRastreablesItem(scrapy.Item):
 class SitemapEntradasItem(scrapy.Item):
     """Las entradas internas de UN fichero de sitemap (decision 126).
 
-    Un item por fichero, con `entradas` = [{url, url_hash, lastmod}]: el
+    Un item por fichero, con `entradas` = [{url, url_hash, lastmod, videos}]: el
     pipeline las inserta en `sitemap_entries` por lotes. NO es una pagina y no
     cuenta en el progreso del job.
     """
@@ -239,6 +244,8 @@ class RespuestaSondeadaItem(scrapy.Item):
     content_type = scrapy.Field()
     content_length = scrapy.Field()
     error = scrapy.Field()
+    ancho = scrapy.Field()
+    alto = scrapy.Field()
 
 
 class CustomExtractionItem(scrapy.Item):

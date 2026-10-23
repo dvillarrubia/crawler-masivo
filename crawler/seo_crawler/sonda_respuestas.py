@@ -29,6 +29,14 @@ cada salto a otro host pasa por su robots.txt. Un salto a la red interna no se
 sigue (`no_verificable`): el filtro SSRF vale para cada salto, no solo para la
 URL enlazada, y por eso el robots.txt del tercero tampoco lo redirige Scrapy.
 
+**La og:image se mide** (decision 154, `uso='og_image'`): se pide con `GET` y
+un `Range` de 64 KB, que es donde cualquier formato de la web lleva el ancho y
+el alto (`shared/dimensiones_imagen.py`), y van a `ancho`/`alto`. Encendida de
+serie y acotada: `crawl_behavior.og_image_muestra` imagenes distintas como
+mucho (200) y `og_image_por_plantilla` por forma de ruta de la pagina (5), para
+que la muestra no se la coman la portada y el menu. Sin el tope por host de los
+terceros: la og:image vive casi siempre en un CDN y ya tiene su presupuesto.
+
 **robots.txt del tercero, siempre.** El `robots_mode` del job es la decision
 del cliente sobre SU sitio; la de otro sitio no es suya. Cada origen externo se
 pide su robots.txt una vez (la peticion del middleware de Scrapy se salta con
@@ -57,6 +65,7 @@ from urllib.parse import urlsplit
 import scrapy
 
 from shared import sondas as S
+from shared.dimensiones_imagen import BYTES_NECESARIOS, dimensiones
 from shared.red import es_host_privado
 
 logger = logging.getLogger(__name__)
@@ -73,8 +82,13 @@ MAX_SALTOS_ROBOTS = 5
 TOPE_ENLACES = 5000
 TOPE_RECURSOS = 20000
 POR_HOST = 50
+TOPE_OG_IMAGE = 200
+OG_IMAGE_POR_PLANTILLA = 5
 
 RANGO = "bytes=0-1023"
+# La og:image se pide para medirla: el ancho y el alto van en la cabecera del
+# fichero, dentro de los primeros 64 KB aun con EXIF (decision 154).
+RANGO_IMAGEN = f"bytes=0-{BYTES_NECESARIOS - 1}"
 # Muchos servidores ignoran el `Range` y mandan el cuerpo entero, y curl_cffi lo
 # baja a memoria. Por encima de esto curl corta (codigo 63) en cuanto ve el
 # `Content-Length`: un recurso que anuncia 10 MB existe, no es una pagina de error.
@@ -133,6 +147,11 @@ def _cabeceras(response) -> dict[str, str]:
     }
 
 
+def _metodo(ctx: dict) -> str:
+    """`GET` para la og:image, que se pide para medirla; `HEAD` para lo demas."""
+    return "GET" if ctx.get("uso") == "og_image" else "HEAD"
+
+
 def _origen(url: str) -> str:
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}".lower()
@@ -155,13 +174,19 @@ class SondaRespuestasMixin:
         self._sr_tope = {
             "enlace": int(cb.get("enlaces_externos_max", TOPE_ENLACES) or 0),
             "recurso": int(cb.get("recursos_max", TOPE_RECURSOS) or 0),
+            # Decision 154: encendida de serie, porque esta acotada. 0 = apagada.
+            "og_image": int(cb.get("og_image_muestra", TOPE_OG_IMAGE) or 0),
         }
+        self._sr_activa["og_image"] = self._sr_tope["og_image"] > 0
+        self._sr_og_por_plantilla_max = int(
+            cb.get("og_image_por_plantilla", OG_IMAGE_POR_PLANTILLA) or 0)
+        self._sr_og_plantillas: dict[tuple[str, str], int] = {}
         self._sr_por_host_max = int(cb.get("sondas_por_host", POR_HOST) or 0)
         ajustes = getattr(self, "settings", None)
         # Solo para los tests: el arnes sirve los «terceros» en 127.0.0.x.
         self._sr_red_privada = bool(ajustes.getbool("SONDAS_RED_PRIVADA")) if ajustes else False
         self._sr_vistas: set[int] = set()
-        self._sr_usadas = {"enlace": 0, "recurso": 0}
+        self._sr_usadas = {"enlace": 0, "recurso": 0, "og_image": 0}
         # De esta sesion: URLs distintas encoladas y filas emitidas. La
         # diferencia al cerrar es lo que se quedo en la cola (max_urls, cancelar).
         self._sr_encoladas = 0
@@ -171,7 +196,8 @@ class SondaRespuestasMixin:
         # fallos, veredicto, error}
         self._sr_origenes: dict[str, dict[str, Any]] = {}
         self._sr_resolucion: dict[str, str] = {}
-        self._sr_sin_comprobar = {"tope": 0, "por_host": 0, "red_privada": 0}
+        self._sr_sin_comprobar = {"tope": 0, "por_host": 0, "red_privada": 0,
+                                  "og_por_plantilla": 0}
         self._sr_tope_avisado: set[str] = set()
         self._sr_ultimo_latido = time.monotonic()
         # Crawl-delay de cada tercero: slot -> segundos.
@@ -245,6 +271,39 @@ class SondaRespuestasMixin:
                 if act["recurso_interno"] if interno else act["recurso_externo"]:
                     yield from self._sondear(url, "recurso", interno=interno)
 
+    def _sonda_og_image(self, url: str | None, pagina: str) -> Generator:
+        """La sonda que mide la og:image de una pagina interna (decision 154).
+
+        Una por imagen distinta (la og:image por defecto del sitio se pide una
+        vez) y como mucho `og_image_por_plantilla` imagenes NUEVAS por forma de
+        ruta de la pagina: los avisos van por plantilla, y sin este tope las
+        200 de la muestra serian las de las primeras paginas del rastreo.
+
+        Best-effort con el `try` cubriendo la funcion ENTERA (40, 74): va en
+        mitad de `parse`, y un fallo aqui se llevaria los items que quedan de
+        la pagina (cabeceras de seguridad, contenido).
+        """
+        try:
+            act = getattr(self, "_sr_activa", None)
+            if not url or not act or not act.get("og_image"):
+                return
+            from shared.plantillas import firma_de_ruta
+
+            partes = urlsplit(pagina)
+            plantilla = ((partes.hostname or "").lower(), firma_de_ruta(partes.path or "/"))
+            maximo = self._sr_og_por_plantilla_max
+            if maximo and self._sr_og_plantillas.get(plantilla, 0) >= maximo:
+                self._sr_sin_comprobar["og_por_plantilla"] += 1
+                return
+            antes = self._sr_encoladas
+            peticiones = list(self._sondear(url, "og_image", interno=self._is_internal(url)))
+            if self._sr_encoladas > antes:
+                self._sr_og_plantillas[plantilla] = self._sr_og_plantillas.get(plantilla, 0) + 1
+        except Exception:  # noqa: BLE001 -- una sonda no tumba la pagina
+            logger.warning("Sonda de og:image: no se pudo encolar %s", url, exc_info=True)
+            return
+        yield from peticiones
+
     def _sondear(self, url: str, uso: str, *, interno: bool) -> Generator:
         partes = urlsplit(url)
         # Lista blanca de esquemas: `whatsapp://` o `intent://` salen como
@@ -276,7 +335,8 @@ class SondaRespuestasMixin:
                 logger.warning("Sondas de %s: tope de %d alcanzado; el resto queda sin "
                                "comprobar (y sin fila)", uso, self._sr_tope[uso])
             return
-        if not interno and self._sr_por_host_max:
+        # La og:image no lleva tope por host: vive en un CDN y ya tiene el suyo.
+        if not interno and self._sr_por_host_max and uso != "og_image":
             if self._sr_por_host.get(host, 0) >= self._sr_por_host_max:
                 self._sr_sin_comprobar["por_host"] += 1
                 return
@@ -298,7 +358,7 @@ class SondaRespuestasMixin:
         """La peticion de *url* (la enlazada o un salto), o la espera por el
         robots.txt de su origen, o la fila si el origen ya esta caido."""
         if self._is_internal(url):
-            yield self._peticion(url, ctx, "HEAD", origen=None)
+            yield self._peticion(url, ctx, _metodo(ctx), origen=None)
             return
         origen = _origen(url)
         est = self._sr_origenes.get(origen)
@@ -327,7 +387,7 @@ class SondaRespuestasMixin:
                 yield self._fila(ctx, url, metodo=None, veredicto=S.PROHIBIDO_POR_ROBOTS,
                                  error=f"robots.txt de {origen}")
                 return
-        yield self._peticion(url, ctx, "HEAD", origen=origen)
+        yield self._peticion(url, ctx, _metodo(ctx), origen=origen)
 
     def _peticion(self, url: str, ctx: dict, metodo: str, *, origen: str | None) -> scrapy.Request:
         meta: dict[str, Any] = {
@@ -341,7 +401,7 @@ class SondaRespuestasMixin:
             meta["dont_obey_robotstxt"] = True  # su robots ya lo miro la sonda
         cabeceras = None
         if metodo == "GET":
-            cabeceras = {"Range": RANGO}
+            cabeceras = {"Range": RANGO_IMAGEN if ctx.get("uso") == "og_image" else RANGO}
             meta["impersonate_curl_options"] = {"MAXFILESIZE_LARGE": MAX_BYTES_GET}
             meta["download_maxsize"] = MAX_BYTES_GET
         return scrapy.Request(url, method=metodo, headers=cabeceras,
@@ -376,6 +436,7 @@ class SondaRespuestasMixin:
             "final_url": url_actual if saltos else None,
             "final_status": None, "metodo": None, "response_class": None,
             "host_caido": None, "content_type": None, "content_length": None, "error": None,
+            "ancho": None, "alto": None,
         }
         fila.update(campos)
         if isinstance(fila.get("error"), str):
@@ -566,7 +627,7 @@ class SondaRespuestasMixin:
         est.update(estado="probando", fallos=1, veredicto=veredicto, error=texto)
         if est["espera"]:
             url, ctx = est["espera"].pop(0)
-            yield self._peticion(url, ctx, "HEAD", origen=origen)
+            yield self._peticion(url, ctx, _metodo(ctx), origen=origen)
         else:
             est["estado"] = "abierto"
 
@@ -633,11 +694,16 @@ class SondaRespuestasMixin:
         tamano = S.tamano_de_cabeceras(cab, status, len(response.body) if metodo == "GET" else None)
         if veredicto != S.OK:
             logger.info("Sonda %s %s -> %s (%s)", ctx["uso"], ctx["url"], status, veredicto)
+        medida = None
+        if ctx["uso"] == "og_image" and metodo == "GET" and veredicto == S.OK:
+            medida = dimensiones(response.body)  # None si no se puede leer; no lanza
         yield self._fila(ctx, url_actual, metodo=metodo,
                          final_status=status if ctx["saltos"] else None,
                          veredicto=veredicto, response_class=clase,
                          content_type=(cab.get("content-type") or None),
-                         content_length=tamano)
+                         content_length=tamano,
+                         ancho=medida[0] if medida else None,
+                         alto=medida[1] if medida else None)
 
     async def _sonda_respuesta_error(self, failure) -> AsyncGenerator:
         self._sr_latir()

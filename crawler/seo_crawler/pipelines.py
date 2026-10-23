@@ -548,7 +548,7 @@ class PostgresPipeline:
 
     _RS_COLUMNAS = ("url", "host", "uso", "interno", "metodo", "status_code", "final_url",
                     "final_status", "saltos", "veredicto", "response_class", "host_caido",
-                    "content_type", "content_length", "error")
+                    "content_type", "content_length", "error", "ancho", "alto")
 
     def _handle_sondeada(self, item: RespuestaSondeadaItem):
         fila = {c: item.get(c) for c in self._RS_COLUMNAS}
@@ -632,7 +632,8 @@ class PostgresPipeline:
         fichero = (item.get("fichero") or "").replace("\x00", "")
         filas = [{"job_id": job_id, "url_hash": e["url_hash"],
                   "url": (e["url"] or "").replace("\x00", ""), "fichero": fichero,
-                  "lastmod": (e.get("lastmod") or None) and e["lastmod"][:64].replace("\x00", "")}
+                  "lastmod": (e.get("lastmod") or None) and e["lastmod"][:64].replace("\x00", ""),
+                  "videos": e.get("videos")}
                  for e in (item.get("entradas") or [])]
         try:
             # En un SAVEPOINT: si falla (base sin la tabla) se deshace solo esto
