@@ -197,7 +197,7 @@ class SondaRespuestasMixin:
         self._sr_origenes: dict[str, dict[str, Any]] = {}
         self._sr_resolucion: dict[str, str] = {}
         self._sr_sin_comprobar = {"tope": 0, "por_host": 0, "red_privada": 0,
-                                  "og_por_plantilla": 0}
+                                  "og_por_plantilla": 0, "excluida": 0}
         self._sr_tope_avisado: set[str] = set()
         self._sr_ultimo_latido = time.monotonic()
         # Crawl-delay de cada tercero: slot -> segundos.
@@ -240,6 +240,12 @@ class SondaRespuestasMixin:
         """
         logger.info("Sondas de respuesta: %s pedidas; sin comprobar %s",
                     self._sr_usadas, self._sr_sin_comprobar)
+        if self._sr_sin_comprobar.get("excluida") and not any(self._sr_usadas.values()):
+            logger.warning(
+                "Sondas de respuesta: %d sin pedir porque `exclude_patterns` las excluye y ninguna "
+                "pedida. Si se excluyen las imagenes por extension para no rastrearlas, para eso "
+                "estan las casillas de `resource_types`: asi la sonda puede medirlas.",
+                self._sr_sin_comprobar["excluida"])
         en_cola = self._sr_encoladas - self._sr_filas
         if en_cola > 0:
             logger.warning(
@@ -311,6 +317,11 @@ class SondaRespuestasMixin:
         if partes.scheme not in ("http", "https") or not partes.hostname:
             return
         if any(casa(url) for casa in (getattr(self, "_exclude_patterns", None) or [])):
+            # «Esto no se toca» vale tambien para la sonda (124), pero se cuenta:
+            # una config que excluye las imagenes por extension (UOC,
+            # Workoholics) dejaba la og:image sin medir y el log decia «0
+            # pedidas, 0 sin comprobar», como si no hubiera nada que medir.
+            self._sr_sin_comprobar["excluida"] = self._sr_sin_comprobar.get("excluida", 0) + 1
             return
         from seo_crawler.extractors import compute_url_hash
 
