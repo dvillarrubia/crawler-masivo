@@ -35,6 +35,14 @@ PERMITIDOS = {
     "api/routers/enriquecido.py": None,
     "crawler/worker.py": {"_ejecutar_enriquecido", "_recuperar_enriquecidos"},
 }
+# La UNICA excepcion directa a la capa (decision 159): pasar el juego de
+# evaluacion de #8 por Jev, a mano, con --confirmar, clave y ENRICHMENT_TOKEN.
+# Por fichero y funcion: cualquier otro import del mismo script sigue fallando.
+PERMITIDOS_DIRECTOS = {
+    ("scripts/evaluar_decisiones.py", "responder"): {"shared.decisiones"},
+    # El registro de modulos, para construir los estados del juego: no llama a nadie.
+    ("scripts/evaluar_decisiones.py", "modulo_de"): {"shared.enriquecido"},
+}
 
 
 def _imports_de_la_capa(fichero: Path) -> list[tuple[str, str | None]]:
@@ -66,8 +74,9 @@ def test_ni_el_crawler_ni_el_analisis_ni_los_scripts_importan_la_capa():
         for f in (RAIZ / carpeta).rglob("*.py"):
             ruta = str(f.relative_to(RAIZ))
             for modulo, funcion in _imports_de_la_capa(f):
-                permitido = ruta in PERMITIDOS and modulo == "shared.enriquecido" and (
-                    PERMITIDOS[ruta] is None or funcion in PERMITIDOS[ruta])
+                permitido = (ruta in PERMITIDOS and modulo == "shared.enriquecido" and (
+                    PERMITIDOS[ruta] is None or funcion in PERMITIDOS[ruta])) or (
+                    modulo in PERMITIDOS_DIRECTOS.get((ruta, funcion), ()))
                 if not permitido:
                     culpables.append(f"{ruta}:{funcion or '<modulo>'} -> {modulo}")
     assert culpables == [], (
