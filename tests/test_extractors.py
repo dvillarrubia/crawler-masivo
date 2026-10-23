@@ -1132,3 +1132,21 @@ def test_agrupar_enlaces_no_junta_un_follow_con_un_nofollow():
     s = sel('<a href="/x">a</a><a href="/x" rel="nofollow">a</a>')
     agrupados = ex.agrupar_enlaces(ex.extract_links(s, "https://e.com/", {"e.com"}))
     assert sorted(l["follow"] for l in agrupados) == [False, True]
+
+
+@pytest.mark.parametrize("valor, redirige", [
+    ("refresh", True), ("REFRESH", True), ("refresh ", False), (" refresh", False), ("refresh\t", False),
+])
+def test_un_http_equiv_con_espacios_no_es_un_refresh(valor, redirige):
+    """Comprobado con Chromium (#107): con espacios o tabulador no redirige, en
+    mayusculas si. Las dos funciones dicen lo mismo."""
+    html = f'<html><head><meta http-equiv="{valor}" content="0; url=/dest"></head><body></body></html>'
+    assert (ex.extract_meta_refresh(sel(html)) is not None) is redirige
+    assert (ex.extract_meta_refresh_target(sel(html), "https://x.com/p") is not None) is redirige
+
+
+def test_un_refresh_dentro_de_noscript_no_cuenta_en_ninguna_de_las_dos():
+    html = ('<html><head><noscript><meta http-equiv="refresh" content="0; url=/sinjs"></noscript>'
+            '</head><body></body></html>')
+    assert ex.extract_meta_refresh(sel(html)) is None
+    assert ex.extract_meta_refresh_target(sel(html), "https://x.com/p") is None

@@ -184,3 +184,29 @@ def test_un_alt_vacio_no_es_una_imagen_sin_alt():
     SEOAnalyzer(s, j.id).analyze_images()
     s.commit()
     assert _issues(s, j, "image_missing_alt") == []
+
+
+def test_la_misma_imagen_con_otro_parametro_de_version_es_el_mismo_hallazgo():
+    """#32: Liferay cambia el `?t=` de una imagen sin cambiarla. Entre dos
+    censos de Lopesan, 10 de 242 imagenes sin alt «resueltas» seguian igual y
+    salian a la vez como nuevas. El hallazgo es la imagen, no su `?t=`."""
+    from analysis.analyzer import _clave_de_grupo, _url_sin_version
+    from shared.models import Issue, Resource
+
+    s, j = _montar()
+    Base.metadata.create_all(s.get_bind(), tables=[Resource.__table__])
+    a, b = _url(s, j, "/a"), _url(s, j, "/b")
+    s.add(Resource(url_id=a.id, resource_url="https://x.com/pool.jpg?t=1778841841031&version=3.3",
+                   resource_type="image", alt_text=None))
+    s.add(Resource(url_id=b.id, resource_url="https://x.com/pool.jpg?t=1792139308319&version=3.3",
+                   resource_type="image", alt_text=None))
+    s.add(Resource(url_id=b.id, resource_url="https://x.com/foto.jpg?id=7", resource_type="image",
+                   alt_text=None))
+    s.commit()
+    SEOAnalyzer(s, j.id).analyze_images()
+    s.commit()
+    avisos = _issues(s, j, "image_missing_alt")
+    assert len(avisos) == 2
+    claves = {i.group_key for i in s.query(Issue).filter(Issue.issue_type == "image_missing_alt")}
+    assert _clave_de_grupo("https://x.com/pool.jpg") in claves
+    assert _url_sin_version("https://x.com/foto.jpg?id=7&t=1") == "https://x.com/foto.jpg?id=7"

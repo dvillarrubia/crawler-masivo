@@ -11,7 +11,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
-| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156 |
+| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
@@ -186,6 +186,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 157 | Search Console: lo que puede traer tráfico, con la curva del propio sitio y sin contar como competencia lo que es la misma página | [`incidencias`](incidencias.md#d157) |
 | 158 | El tráfico de Google entre dos censos, agrupado por lo que cambió en esas páginas, y nunca «por» | [`comparacion-y-alertas`](comparacion-y-alertas.md#d158) |
 | 159 | Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara sin gastar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d159) |
+| 160 | Lo que Google y Chromium hacen de verdad: meta refresh con espacios, región ISO 3166-1, X-Robots-Tag en no HTML, LocalBusiness, y una imagen es su URL sin `?t=` | [`indexabilidad`](indexabilidad.md#d160) |
 
 ## Anadir una decision
 
