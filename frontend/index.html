@@ -1645,6 +1645,34 @@
           </div>
         </template>
 
+        <!-- Trafico de Google entre los dos rastreos, por lo que cambio (decision 158). -->
+        <template x-if="job.comparacion && job.comparacion.trafico">
+          <div class="card mb-2 text-sm" data-testid="trafico-entre-censos">
+            <strong>Tráfico de Google frente al rastreo anterior</strong>
+            <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+              <template x-for="t in job.comparacion.trafico.textos || [job.comparacion.trafico.motivo]" :key="t">
+                <li x-text="t"></li>
+              </template>
+            </ul>
+            <template x-for="sentido in [['Caídas', job.comparacion.trafico.caidas], ['Subidas', job.comparacion.trafico.subidas]].filter(s => (s[1] || []).length)" :key="sentido[0]">
+              <details>
+                <summary class="text-dim" style="cursor:pointer" x-text="sentido[0] + ' por lo que cambió (una página puede estar en dos grupos)'"></summary>
+                <template x-for="g in sentido[1]" :key="g.cambio">
+                  <div style="margin-top:.4rem">
+                    <span x-text="fmt.num(g.paginas) + ' páginas · ' + (g.diferencia > 0 ? '+' : '') + fmt.num(g.diferencia) + ' clics · ' + g.texto"></span>
+                    <span class="text-dim" x-show="(g.plantillas || []).length" x-text="' (' + (g.plantillas || []).join(', ') + ')'"></span>
+                    <ul style="margin:.2rem 0 0;padding-left:1.1rem">
+                      <template x-for="e in g.ejemplos" :key="e.url">
+                        <li><span x-text="fmt.num(e.clics_antes) + ' → ' + fmt.num(e.clics_despues)"></span> · <span class="informe-url" x-text="e.url"></span></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </details>
+            </template>
+          </div>
+        </template>
+
         <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
           <div class="card mb-2"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">

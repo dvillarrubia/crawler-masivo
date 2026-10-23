@@ -176,6 +176,9 @@ def texto_de_informe(nombre_job: str, r: dict) -> str:
                       + ".")
     elif r.get("incidencias_motivo"):
         lineas.append(f"Sin comparar incidencias: {r['incidencias_motivo']}")
+    # Tráfico de Google entre los dos rastreos (decision 158), tal cual lo
+    # redacta `trafico_entre_censos.textos`.
+    lineas.extend(r.get("trafico") or [])
     criticas = [a for a in r.get("alertas") or [] if a.get("severidad") == "critical"]
     if criticas or r.get("reglas_cliente"):
         lineas.append(f"Con {len(criticas) + len(r.get('reglas_cliente') or [])} alerta(s): "

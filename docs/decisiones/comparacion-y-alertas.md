@@ -818,3 +818,43 @@
    privados) para elegir el canal de una lista; sin ellos el canal se escribe
    a mano.
 
+
+<a id="d158"></a>
+158. **El tráfico de Google entre dos censos, agrupado por lo que cambió en esas
+   páginas, y nunca «por»** (#167; combinación 10 de
+   `docs/INVESTIGACION_SEARCH_CONSOLE.md`). La comparación ya decía qué cambió en
+   cada página; con Search Console (141) dice además qué pasó con su tráfico
+   (`shared/trafico_entre_censos.py`, en `comparacion.trafico`).
+   - **Dos ventanas iguales** que acaban en la fecha de cada censo menos 2 días,
+     tan largas como los días entre los dos censos en semanas enteras, **de 7 a
+     28**. Con 28 fijos, como pedía la issue, dos censos semanales compartían 21
+     días de ventana y la caída se diluía. Con menos de 7 días entre medias no
+     se compara. Si los datos no llegan al final de la ventana del nuevo, queda
+     `pendiente` y el worker la completa tras la siguiente descarga
+     (`completar_pendientes`); con un día recortado en el tope de filas, no se
+     compara.
+   - **Caída o subida** de una página: el 50 % y 20 clics o más. Se agrupan por
+     el cambio entre censos (status, redirección o error nuevos, indexabilidad,
+     canonical a otra URL, title, H1, contenido, sale del sitemap, pierde
+     enlaces o PageRank, desaparece); una página con dos cambios está en los dos
+     grupos, y sin ninguno va a «sin cambio técnico en el rastreo: puede ser
+     demanda, competencia o la página de resultados».
+   - **El tráfico que se mueve no se pierde** (trasvase): si la que cae está
+     canonicalizada a otra URL, o es la misma con o sin barra final, y esa otra
+     sube. Medido en Lopesan entre el 14 y el 21-oct: las fichas con barra
+     final, canonicalizadas a la de sin barra desde antes, bajaron (92 a 4
+     clics) mientras subía la buena (38 a 121); sin esto, «8 páginas perdieron
+     290 clics sin cambio técnico», cuando era Google haciendo caso al
+     canonical. Con ello: 6 páginas que trasvasan 287 clics y 4 que pierden 88
+     sin cambio técnico, y la home `/es` sube 109 a la vez que cambia su
+     indexabilidad y su canonical. En el sitio, −2 % (42.443 a 41.481 clics en
+     semanas que no se pisan).
+   - **General y estacional**: si el sitio entero cae un 30 % o más, se dice que
+     es general; con datos de hace un año, si el mismo periodo varió lo mismo
+     (±15 puntos), que parece estacional. **Rupturas de serie** conocidas
+     (num=100 en septiembre de 2025, la corrección de impresiones del
+     28-04-2026): si las ventanas las cruzan, se avisa; afectan a impresiones y
+     lo que se compara son clics.
+   - **Un solo redactor**: `textos()` escribe las frases («coincide con», nunca
+     «por») y las usan la tarjeta de la ficha del rastreo y el aviso de Slack
+     del rastreo programado (`resumen_semanal` → `avisos.texto_de_informe`).

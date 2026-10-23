@@ -1573,6 +1573,15 @@ def _sincronizar_gsc(cliente_id: str, propiedad: str) -> None:
             except Exception:
                 s.rollback()
                 logger.exception("Search Console de %s: fallo en las busquedas; sigue la inspeccion", cliente.slug)
+            # Con los datos nuevos, la comparacion de trafico que esperaba
+            # (decision 158).
+            if e is not None and e.estado == "ok":
+                from shared.trafico_entre_censos import completar_pendientes
+
+                n = completar_pendientes(s, cliente.id)
+                if n:
+                    logger.info("Search Console de %s: trafico comparado en %d rastreo(s) que esperaban",
+                                cliente.slug, n)
             # Despues de la descarga, la muestra diaria de inspeccion (decision 144).
             if e is not None and toca_inspeccion(e, datetime.now(timezone.utc)):
                 n = inspeccionar(s, cliente, integ)

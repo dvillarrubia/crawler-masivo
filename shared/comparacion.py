@@ -1570,7 +1570,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.id, Url.segmento,
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
-            Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score,
+            Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score, Url.in_sitemap,
             HtmlMeta.canonical_href, HtmlMeta.title,
             HtmlMeta.canonical_distintos, HtmlMeta.meta_description,
         )
@@ -1607,6 +1607,8 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "click_depth": f.click_depth,
             "pagerank_score": f.pagerank_score,
             "meta_description": f.meta_description,
+            # El trafico entre censos (decision 158) agrupa por «sale del sitemap».
+            "in_sitemap": f.in_sitemap,
             "sd_tipos": tipos.get(f.id, []),
             "hreflang": idiomas.get(f.id, []),
         }
@@ -1945,6 +1947,17 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         if (sin_reanalizar and incidencias is not None
                 and incidencias.get("comparable") is False):
             incidencias["motivo"] = f"{incidencias['motivo']} {sin_reanalizar}"
+    # El trafico de Google entre los dos censos, agrupado por lo que cambio en
+    # esas paginas (decision 158). Aparte y con su try, como las incidencias:
+    # no puede llevarse por delante las alertas de pagina.
+    trafico = None
+    if r.get("comparable"):
+        try:
+            from shared.trafico_entre_censos import comparar_trafico
+
+            trafico = comparar_trafico(db, anterior, job, paginas_ant, paginas_nuevas)
+        except Exception:
+            logger.exception("No se pudo comparar el trafico de %s con %s", job.id, anterior.id)
     # Lo que se guarda es el veredicto, no el censo entero: los ejemplos y las
     # plantillas ya van dentro de cada alerta.
     return {
@@ -1966,4 +1979,5 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         "alertas": r.get("alertas", []),
         # Lo que cambio en la extraccion a medida, regla a regla (decision 127).
         "extraido": r.get("extraido"),
+        "trafico": trafico,
     }
