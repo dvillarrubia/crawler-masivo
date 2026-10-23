@@ -113,14 +113,21 @@ def _sql_posicion(col_posicion: str) -> str:
     return f"(CASE {col_posicion} {casos} ELSE {PESO_POSICION[None]} END)"
 
 
-def sql_peso_arista(col_repeticion: str, col_posicion: str) -> str:
-    """`peso_arista` en SQL. Sale de las mismas constantes, asi que el SQL y
-    los tests no pueden divergir."""
-    techo = (
+def sql_techo_por_repeticion(col_repeticion: str) -> str:
+    """`techo_por_repeticion` en SQL."""
+    return (
         f"LEAST(1.0, GREATEST({REP_EDITORIAL} / GREATEST({col_repeticion}, 1e-9), "
         f"{TECHO_PLANTILLA}))"
     )
-    return f"LEAST({_sql_posicion(col_posicion)}, {techo})"
+
+
+def sql_peso_arista(col_repeticion: str, col_posicion: str) -> str:
+    """`peso_arista` en SQL. Sale de las mismas constantes, asi que el SQL y
+    los tests no pueden divergir."""
+    return (
+        f"LEAST({_sql_posicion(col_posicion)}, "
+        f"{sql_techo_por_repeticion(col_repeticion)})"
+    )
 
 
 def sql_peso_posicion(col_posicion: str) -> str:
