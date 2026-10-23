@@ -1244,3 +1244,8 @@
    análisis completo, 18-24 s. Revisado por un agente aparte: nueve hallazgos,
    todos arreglados con su test. Lopesan no tiene `marcas` declaradas: conviene
    ponérselas.
+
+<a id="d161"></a>
+161. **WordPress por su REST API pública: lo que el sitio publica frente a lo
+   que el rastreo encontró** (#33). En curso en la rama `wordpress-33`; el
+   detalle y la medida se completan en la PR.
