@@ -1008,6 +1008,11 @@
      enlaces, la escala de Druni): **152,7 s -> 67,3 s**. Las aristas
      (4.551.434 y 18.205.736) y el `pagerank_raw` y `pagerank_score` de las
      87.570 URLs salen **identicos byte a byte**.
+   - El cruce con `urls` y el md5 van ahora sobre cada fila de `links`, antes de
+     agrupar. Con los duplicados de antes de la decision 94 (Druni: 3,4 filas por
+     cada distinta) eso pesaria; desde la 94 el spider guarda una fila por
+     aparicion identica y `compactar_enlaces.py` dejo asi los censos viejos, y en
+     penguin-libros cada fila es ya un par origen-destino distinto.
    - Lo que queda caro es montar `pr_lk_tmp` (44 s de los 67): el md5 por fila y
      la agregacion, que con 4 MB se parte en 256 lotes a disco. Ya no es el
      cuello de botella del analisis.

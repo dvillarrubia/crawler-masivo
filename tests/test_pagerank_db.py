@@ -498,3 +498,36 @@ def test_el_mismo_enlace_en_dos_posiciones_es_un_origen(sesion, grafo):
     assert w("/a/p9", "/x") == pytest.approx(1.0)
     for p in paginas:
         assert w(p, "/legal") == pytest.approx(0.15), p
+
+
+def test_destinos_fuera_del_censo_o_externos_no_dan_arista(sesion, grafo):
+    """Un enlace interno a una URL que el censo tiene como externa, o que no
+    esta en el censo, no da arista ni cambia la repeticion de los demas.
+
+    `pr_lk_tmp` los quita al montarse (#52): su repeticion es por destino, asi
+    que no deberia mover la de ningun otro. Sin el filtro, saldria una arista
+    hacia la URL marcada como externa.
+    """
+    from analysis.analyzer import SEOAnalyzer
+
+    paginas = [f"/a/p{i}" for i in range(25)]
+    enlaces = [(p, "/legal", "Legal", "footer", True) for p in paginas]
+    enlaces += [(p, "/fuera", "Legal", "footer", True) for p in paginas]
+    enlaces += [(p, "/no-rastreada", "Legal", "content", True) for p in paginas[:3]]
+
+    j, filas = grafo(paginas + ["/legal", "/fuera"], enlaces)
+    filas["/fuera"].is_internal = False
+    sesion.commit()
+    analizador = SEOAnalyzer(sesion, str(j.id))
+    try:
+        assert analizador._aristas_de_enlaces() == "repeticion"
+        aristas = sesion.execute(text("SELECT src, dst, w FROM pr_edges_tmp")).all()
+    finally:
+        sesion.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
+        sesion.commit()
+
+    destinos = {d for _, d, _ in aristas}
+    assert destinos == {filas["/legal"].id}
+    assert len(aristas) == 25
+    for _, _, w in aristas:
+        assert w == pytest.approx(0.15)
