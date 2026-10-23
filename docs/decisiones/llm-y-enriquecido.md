@@ -200,21 +200,33 @@
      plantilla, después la segunda…, para que 20.000 fichas no se coman el
      juego y una plantilla de 12 páginas legales también salga), con la
      etiqueta vacía, a `tests/decisiones/<pregunta>/v<version>.jsonl`.
-     Determinista con la semilla. En Lopesan: 150 ejemplos de 87 plantillas.
+     Determinista con la semilla (consulta ordenada; el orden de plantillas se
+     baraja en cada vuelta para que un cliente o las rutas «/z» no se queden
+     fuera); la misma URL en dos censos es un ejemplo. En Lopesan: 150
+     ejemplos de 87 plantillas.
    - `evaluar` mide contra la **etiqueta humana** (nunca la de Jev):
      acierto, precisión y recall por clase, matriz, **ECE** con su curva de
      fiabilidad y la **curva de cobertura frente a precisión**, de la que sale
      el umbral: el más bajo con el que lo decidido llega a la precisión
-     objetivo (0,95) cubriendo al menos 30 ejemplos, y sigue llegando con
-     cualquier umbral más alto (un pico suelto no es un umbral). Sin eso, la
-     pregunta se queda sin umbral y nada sale `decidido` (84).
+     objetivo **con margen** —la cota inferior de Wilson al 95 % ≥ 0,9, no la
+     precisión observada: 29 de 30 es «0,97» y su cota, 0,83— cubriendo al
+     menos 30 ejemplos, y sigue llegando con cualquier umbral más alto (un pico
+     suelto no es un umbral). Sin eso, la pregunta se queda sin umbral y nada
+     sale `decidido` (84). La etiqueta humana se normaliza («sí», `True`) y la
+     que no está en el vocabulario de la pregunta se cuenta como inválida.
    - `repetir` da la **repetibilidad** (la misma pregunta dos veces, casi
      gratis: descarta preguntas inestables antes de etiquetar) y, con
      `--acuerdo`, el acuerdo y la kappa entre dos jueces o dos redacciones, que
-     no es acierto (comentario de #8 tras revisar jev-seo).
+     no es acierto (comentario de #8 tras revisar jev-seo). En el vocabulario
+     de la etiqueta (en un score, 2,6 y 2,61 son el mismo nivel); la kappa de
+     dos jueces que dicen siempre lo mismo no se sabe (0/0), no es 1.
    - `responder` es la **única vía directa a la capa fuera del botón de #40**:
-     pide lo mismo que él (clave, `DECISIONS_ENABLED=1`, `ENRICHMENT_TOKEN`) y
-     además `--confirmar`; sin confirmar solo enseña la estimación. El test de
+     pide clave, `DECISIONS_ENABLED=1`, que exista `ENRICHMENT_TOKEN` y
+     `--confirmar`; sin confirmar solo enseña la estimación. Dentro del
+     contenedor el token está en el entorno, así que la barrera real es
+     `--confirmar`. Gasta con los mismos presupuestos que el botón (mensual del
+     cliente y global, desde `decisions` y en Redis; sin Redis no gasta), un
+     tope de la estimación × 1,5, y deja las decisiones en `decisions`. El test de
      «nada se dispara solo» la permite por fichero y función, y cualquier otro
      import del script sigue fallando. Estimado para el juego de Lopesan: 138
      llamadas, 0,002 $.

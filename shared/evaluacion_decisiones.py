@@ -13,9 +13,11 @@ Las usa `scripts/evaluar_decisiones.py`. Tres medidas, en este orden de coste
    la de Jev.
 
 De `metricas` sale el **umbral por pregunta**: la confianza minima con la que
-lo decidido alcanza la precision objetivo cubriendo al menos `MIN_CUBIERTAS`
-ejemplos. Con menos ejemplos no hay umbral: una pregunta sin evaluar no puede
-firmar respuestas (`decisiones.estado_por_confianza`).
+lo decidido alcanza la precision objetivo **con margen estadistico** (la cota
+inferior de Wilson al 95 %, no la precision a secas: 29 de 30 es «0,97» y su
+cota es 0,83) cubriendo al menos `MIN_CUBIERTAS` ejemplos. Sin eso no hay
+umbral: una pregunta sin evaluar no puede firmar respuestas
+(`decisiones.estado_por_confianza`).
 """
 
 from __future__ import annotations
@@ -24,7 +26,10 @@ import math
 from collections import Counter, defaultdict
 from typing import Any, Iterable
 
-PRECISION_OBJETIVO = 0.95
+# Sobre la cota inferior de Wilson, no sobre la precision observada: con 0,9 y
+# todo acertado hacen falta ~35 ejemplos por encima del umbral; con 0,95, ~75.
+PRECISION_OBJETIVO = 0.9
+Z_WILSON = 1.96
 # Ejemplos que tienen que quedar por encima del umbral para poder elegirlo: con
 # 5 aciertos de 5 la precision es 1,0 y no dice nada.
 MIN_CUBIERTAS = 30
@@ -49,9 +54,50 @@ def etiqueta_de_respuesta(tipo: str, respuesta: str | None, niveles: int | None 
         return None
     if math.isnan(v):
         return None
-    nivel = int(round(v))
+    # Redondeo hacia arriba en el empate (2,5 es el nivel 3), no el bancario.
+    nivel = int(math.floor(v + 0.5))
     if niveles is not None:
         nivel = max(0, min(niveles - 1, nivel))
+    return str(nivel)
+
+
+def wilson_inferior(aciertos: int, n: int, z: float = Z_WILSON) -> float | None:
+    """Cota inferior del intervalo de Wilson de una proporcion."""
+    if not n:
+        return None
+    p = aciertos / n
+    centro = p + z * z / (2 * n)
+    margen = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return (centro - margen) / (1 + z * z / n)
+
+
+_SINONIMOS_NOUL = {"true": "true", "si": "true", "sí": "true", "yes": "true", "1": "true",
+                   "false": "false", "no": "false", "0": "false"}
+
+
+def normalizar_etiqueta(tipo: str, etiqueta, opciones=None) -> str | None:
+    """La etiqueta humana en el vocabulario de la pregunta, o None si no es
+    valida. `True`, «sí» o «Si» son «true» en un noul; un choice casa sin
+    mayusculas con sus opciones; un score es el indice del nivel."""
+    if etiqueta is None or isinstance(etiqueta, float) and math.isnan(etiqueta):
+        return None
+    if isinstance(etiqueta, bool):
+        texto = "true" if etiqueta else "false"
+    else:
+        texto = str(etiqueta).strip()
+    if not texto:
+        return None
+    if tipo == "noul":
+        return _SINONIMOS_NOUL.get(texto.lower())
+    if tipo == "choice":
+        validas = {str(o).lower(): str(o) for o in (opciones or {})}
+        return validas.get(texto.lower()) if validas else texto
+    try:
+        nivel = int(texto)
+    except ValueError:
+        return None
+    if opciones is not None and not 0 <= nivel < len(opciones):
+        return None
     return str(nivel)
 
 
@@ -97,7 +143,8 @@ def metricas(filas: Iterable[dict], *, objetivo: float = PRECISION_OBJETIVO,
                         for e in sorted({f["etiqueta"] for f in validas})}
 
     con_conf = [(float(f["confianza"]), ok) for f, ok in zip(validas, aciertos)
-                if isinstance(f.get("confianza"), (int, float))]
+                if isinstance(f.get("confianza"), (int, float)) and not isinstance(f.get("confianza"), bool)
+                and 0.0 <= float(f["confianza"]) <= 1.0]
     salida["ece"], salida["fiabilidad"] = _ece(con_conf)
     salida["curva"] = curva_cobertura(con_conf, n)
     salida["umbral"] = elegir_umbral(salida["curva"], objetivo=objetivo, min_cubiertas=min_cubiertas)
@@ -140,27 +187,31 @@ def curva_cobertura(con_conf: list[tuple[float, bool]], total: int) -> list[dict
     curva = []
     for umbral in sorted({c for c, _ in con_conf}):
         encima = [ok for c, ok in con_conf if c >= umbral]
+        inferior = wilson_inferior(sum(encima), len(encima))
         curva.append({"umbral": round(umbral, 4), "cubiertas": len(encima),
                       "cobertura": round(len(encima) / total, 4) if total else 0.0,
-                      "precision": round(sum(encima) / len(encima), 4) if encima else None})
+                      "precision": round(sum(encima) / len(encima), 4) if encima else None,
+                      "precision_minima": round(inferior, 4) if inferior is not None else None})
     return curva
 
 
 def elegir_umbral(curva: list[dict], *, objetivo: float = PRECISION_OBJETIVO,
                   min_cubiertas: int = MIN_CUBIERTAS) -> float | None:
     """El umbral MAS BAJO (mas cobertura) con el que lo que queda encima llega a
-    la precision objetivo y cubre al menos `min_cubiertas` ejemplos. Y que
-    siga llegando con cualquier umbral mas alto: un pico suelto de precision
-    con un umbral intermedio no es un umbral, es suerte."""
-    validos = [p for p in curva if p["cubiertas"] >= min_cubiertas and p["precision"] is not None]
+    la precision objetivo —su cota inferior de Wilson— y cubre al menos
+    `min_cubiertas` ejemplos. Y que siga llegando con cualquier umbral mas
+    alto que cubra el minimo: un pico suelto no es un umbral, es suerte."""
+    validos = [p for p in curva if p["cubiertas"] >= min_cubiertas and p.get("precision_minima") is not None]
     for i, p in enumerate(validos):
-        if all(q["precision"] >= objetivo for q in validos[i:]):
+        if all(q["precision_minima"] >= objetivo for q in validos[i:]):
             return p["umbral"]
     return None
 
 
 def repetibilidad(primera: dict[str, str | None], segunda: dict[str, str | None]) -> dict[str, Any]:
-    """La misma pagina (misma clave) juzgada dos veces: que parte coincide."""
+    """La misma pagina (misma clave) juzgada dos veces: que parte coincide.
+    Las respuestas tienen que llegar ya en el vocabulario de la etiqueta
+    (`etiqueta_de_respuesta`): en un score, 2,6 y 2,61 son el mismo nivel."""
     comunes = [k for k in primera if k in segunda and primera[k] is not None and segunda[k] is not None]
     iguales = sum(1 for k in comunes if primera[k] == segunda[k])
     return {"comparadas": len(comunes), "iguales": iguales,
@@ -179,8 +230,10 @@ def acuerdo(juez_a: dict[str, str | None], juez_b: dict[str, str | None]) -> dic
     ca = Counter(juez_a[k] for k in comunes)
     cb = Counter(juez_b[k] for k in comunes)
     esperado = sum(ca[c] * cb[c] for c in set(ca) | set(cb)) / (n * n)
-    kappa = (obs - esperado) / (1 - esperado) if esperado < 1 else 1.0
-    return {"comparadas": n, "acuerdo": round(obs, 4), "kappa": round(kappa, 4)}
+    # Si los dos dan siempre lo mismo, la kappa es 0/0: no se sabe. Un juez que
+    # dice siempre «false» no es perfecto.
+    kappa = (obs - esperado) / (1 - esperado) if esperado < 1 else None
+    return {"comparadas": n, "acuerdo": round(obs, 4), "kappa": round(kappa, 4) if kappa is not None else None}
 
 
 def muestra_estratificada(por_plantilla: dict[str, list[Any]], n: int, *, semilla: int = 0) -> list[Any]:
@@ -198,7 +251,13 @@ def muestra_estratificada(por_plantilla: dict[str, list[Any]], n: int, *, semill
         colas[plantilla] = elementos
     salida: list[Any] = []
     while len(salida) < n and any(colas.values()):
-        for plantilla in sorted(colas):
-            if colas[plantilla] and len(salida) < n:
-                salida.append(colas[plantilla].pop())
+        # El orden de las plantillas se baraja en cada vuelta: con mas plantillas
+        # que `n`, una vuelta a medias por orden alfabetico dejaba fuera a todo
+        # un cliente (o a las rutas que empiezan por «/z»).
+        orden = sorted(p for p in colas if colas[p])
+        azar.shuffle(orden)
+        for plantilla in orden:
+            if len(salida) >= n:
+                break
+            salida.append(colas[plantilla].pop())
     return salida

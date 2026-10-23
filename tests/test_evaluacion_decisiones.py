@@ -40,26 +40,49 @@ def test_ece_de_un_modelo_bien_y_mal_calibrado():
     assert E._ece(mal)[0] == pytest.approx(0.49)
 
 
-def test_el_umbral_es_el_mas_bajo_que_aguanta_la_precision():
-    # 60 aciertos con confianza alta, 20 fallos y 20 aciertos con baja
-    con_conf = ([(0.95, True)] * 60 + [(0.6, False)] * 20 + [(0.6, True)] * 20)
+def test_el_umbral_es_el_mas_bajo_que_aguanta_la_precision_con_margen():
+    # 80 aciertos con confianza alta, y 20 fallos con baja
+    con_conf = [(0.95, True)] * 80 + [(0.6, False)] * 20
     curva = E.curva_cobertura(con_conf, 100)
-    assert E.elegir_umbral(curva, objetivo=0.95, min_cubiertas=30) == 0.95
-    assert E.elegir_umbral(curva, objetivo=0.95, min_cubiertas=61) is None    # pocas cubiertas
-    assert E.elegir_umbral(curva, objetivo=0.81, min_cubiertas=30) == 0.95     # con 0,6 la precision es 0,80
-    assert E.elegir_umbral(curva, objetivo=0.8, min_cubiertas=30) == 0.6
+    assert curva[-1]["precision"] == 1.0 and curva[-1]["precision_minima"] == pytest.approx(0.954, abs=1e-3)
+    assert E.elegir_umbral(curva, objetivo=0.9, min_cubiertas=30) == 0.95
+    assert E.elegir_umbral(curva, objetivo=0.9, min_cubiertas=81) is None       # pocas cubiertas
+    assert E.elegir_umbral(curva, objetivo=0.7, min_cubiertas=30) == 0.6        # 0,8 con cota ~0,71
+
+
+def test_29_de_30_no_basta_para_un_95():
+    curva = E.curva_cobertura([(0.9, True)] * 29 + [(0.9, False)], 30)
+    assert curva[0]["precision"] == pytest.approx(0.9667, abs=1e-4)
+    assert E.elegir_umbral(curva, objetivo=0.95, min_cubiertas=30) is None
+    assert E.wilson_inferior(29, 30) == pytest.approx(0.833, abs=1e-3)
 
 
 def test_un_pico_suelto_no_es_umbral():
-    curva = [{"umbral": 0.5, "cubiertas": 100, "precision": 0.7},
-             {"umbral": 0.7, "cubiertas": 60, "precision": 0.97},
-             {"umbral": 0.9, "cubiertas": 40, "precision": 0.9}]
+    curva = [{"umbral": 0.5, "cubiertas": 100, "precision_minima": 0.7},
+             {"umbral": 0.7, "cubiertas": 60, "precision_minima": 0.97},
+             {"umbral": 0.9, "cubiertas": 40, "precision_minima": 0.85}]
     assert E.elegir_umbral(curva, objetivo=0.95, min_cubiertas=30) is None
+
+
+def test_confianzas_raras_no_entran_en_la_calibracion():
+    m = E.metricas([_fila("true", "true", -0.3), _fila("true", "true", True), _fila("true", "true", 0.9)])
+    assert m["ece"] == pytest.approx(0.1) and len(m["fiabilidad"]) == 1
+
+
+@pytest.mark.parametrize("tipo, etiqueta, opciones, esperado", [
+    ("noul", "True", None, "true"), ("noul", "sí", None, "true"), ("noul", True, None, "true"),
+    ("noul", " no ", None, "false"), ("noul", "quizas", None, None), ("noul", "", None, None),
+    ("choice", "Legal", {"legal": None, "otra": None}, "legal"), ("choice", "x", {"legal": None, "otra": None}, None),
+    ("score", 2, ["a", "b", "c"], "2"), ("score", "5", ["a", "b", "c"], None),
+])
+def test_la_etiqueta_humana_se_normaliza(tipo, etiqueta, opciones, esperado):
+    assert E.normalizar_etiqueta(tipo, etiqueta, opciones) == esperado
 
 
 @pytest.mark.parametrize("tipo, respuesta, niveles, esperado", [
     ("noul", "true", None, "true"), ("choice", "ficha", None, "ficha"),
     ("score", "2.6", 4, "3"), ("score", "7.0", 4, "3"), ("score", "-1.0", 4, "0"),
+    ("score", "2.5", 4, "3"), ("score", "1.5", 4, "2"),
     ("score", "nan", 4, None), ("score", None, 4, None),
 ])
 def test_respuesta_en_el_vocabulario_de_la_etiqueta(tipo, respuesta, niveles, esperado):
@@ -73,8 +96,15 @@ def test_repetibilidad_y_acuerdo():
     assert (r["comparadas"], r["iguales"], r["distintas"]) == (3, 2, ["u2"])
     k = E.acuerdo({"a": "x", "b": "x", "c": "y", "d": "y"}, {"a": "x", "b": "x", "c": "y", "d": "y"})
     assert (k["acuerdo"], k["kappa"]) == (1.0, 1.0)
-    azar = E.acuerdo({str(i): "x" for i in range(10)}, {str(i): "x" for i in range(10)})
-    assert azar["kappa"] == 1.0                     # sin variedad no hay azar que descontar
+    siempre = E.acuerdo({str(i): "x" for i in range(10)}, {str(i): "x" for i in range(10)})
+    assert siempre["acuerdo"] == 1.0 and siempre["kappa"] is None     # 0/0: no se sabe
+
+
+def test_con_mas_plantillas_que_ejemplos_no_se_queda_fuera_un_cliente():
+    por = {f"a|/p{i}": [f"a{i}"] for i in range(150)} | {f"b|/p{i}": [f"b{i}"] for i in range(150)}
+    m = E.muestra_estratificada(por, 200, semilla=3)
+    de_b = sum(1 for x in m if x.startswith("b"))
+    assert 70 <= de_b <= 130
 
 
 def test_la_muestra_reparte_entre_plantillas_y_es_determinista():
@@ -159,6 +189,16 @@ def test_responder_y_evaluar(tmp_path, monkeypatch, fake_llm):
     _, juego = _juego(tmp_path)
     _, respuestas = S.responder(juego, confirmar=True, capa=dec.capa_desde_entorno(transport=fake.transport))
     assert fake.llamadas == 6 and {r["respuesta"] for r in respuestas} == {"true"}
-    informe = S.evaluar(juego, respuestas, objetivo=0.95)
+    informe = S.evaluar(juego, respuestas, objetivo=0.9)
     assert informe["acierto"] == 0.5 and informe["clases"]["true"]["precision"] == 0.5
     assert informe["umbral"] is None and informe["pregunta"] == "es_pagina_legal"
+    assert informe["etiquetas_invalidas"] == 0 and informe["respuestas_fuera_del_juego"] == 0
+
+
+def test_evaluar_rechaza_un_juego_de_otra_version(tmp_path):
+    S = _script()
+    _, juego = _juego(tmp_path)
+    for f in juego:
+        f["version"] = 99
+    with pytest.raises(SystemExit, match="version"):
+        S.evaluar(juego, [], objetivo=0.9)
