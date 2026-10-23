@@ -1173,6 +1173,9 @@ class SEOAnalyzer:
         # Con lo que hace falta para seguir el destino (decision 101): su
         # codigo, a donde redirige, si es noindex y su propio canonical.
         fichas = _Fichas(self.session, self.job_id)
+        # Lo reutiliza `avisos_de_medios` (decision 156), que lo suelta al
+        # empezar: entre los dos no cambia nada de lo que lleva una ficha.
+        self._fichas_canonicals = fichas
 
         # Iterate HTML pages with their canonical information.
         # Una meta refresh no es la pagina: es un salto (decision 120). Sus

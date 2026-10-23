@@ -352,8 +352,9 @@
    - **Encendida de serie porque está acotada**: `crawl_behavior.og_image_muestra`
      (200 imágenes distintas) y `og_image_por_plantilla` (5 nuevas por forma de
      ruta de la PÁGINA, para que la muestra no se la coman la portada y el
-     menú). La og:image por defecto del sitio se pide una vez. 0 = apagada. Lo
-     peor son 200 GET de 64 KB (12,8 MB) por rastreo.
+     menú). La og:image por defecto del sitio se pide una vez.
+     `og_image_muestra` 0 = apagada; `og_image_por_plantilla` 0 = sin tope por
+     plantilla. Lo peor son 200 GET de 64 KB (12,8 MB) por rastreo.
    - **Las dimensiones salen de la cabecera del fichero**
      (`shared/dimensiones_imagen.py`, sin Pillow): PNG, GIF, JPEG (recorriendo
      los segmentos hasta el SOF), WebP (VP8, VP8L, VP8X), AVIF/HEIF (`ispe`) y
@@ -380,6 +381,28 @@
      página se pide primero la og:image para que gane ella; entre páginas
      distintas puede perderse alguna medida con `comprobar_recursos` encendido.
      `twitter_card_invalida` sale al re-analizar; lo demás pide re-rastrear.
+   - **Revisión** (2026-10-24, la PR #218), tres fallos reproducidos con su
+     test:
+     - **SSRF con la sonda encendida de serie.** `shared/red.py` dejaba pasar
+       los hosts de una sola etiqueta (`postgres`, `redis`, `api`: los
+       servicios de docker-compose, que resuelve el DNS de Docker) y los IPv4
+       en forma numérica, hexadecimal, octal o abreviada (`2130706433`,
+       `0x7f000001`, `0177.0.0.1`, `127.1`, `2852039166` =
+       169.254.169.254), que curl convierte. Con una sonda que hace GET en
+       cada rastreo, una `og:image` así leía la red interna del VPS. Ahora un
+       host sin punto es local, la forma laxa se normaliza como `inet_aton`
+       antes de evaluarla, el IPv6 con un IPv4 dentro se evalúa por el IPv4 y
+       todo lo que no es `is_global` (CGNAT incluido) se queda fuera; vale
+       también para cada salto de una redirección (123).
+     - **Una URL que no se puede normalizar tumbaba `run_all`.** `misma_url`
+       lanza `ValueError` con un puerto fuera de rango o un IPv6 sin cerrar
+       (`<link rel="amphtml" href="https://e.com:99999/amp">`). Las
+       comparaciones van protegidas y `avisos_de_medios.avisar` entero va en
+       un `try` con SAVEPOINT (74): si falla, se descartan sus avisos y el
+       análisis sigue.
+     - **Rendimiento**: la lectura va por lotes y sin el JSON de los vídeos,
+       que se lee solo de las páginas que tienen alguno y solo si el sitio tiene
+       sitemap de vídeo; y se reutiliza el `_Fichas` de `analyze_canonicals`.
 
 <a id="d155"></a>
 155. **Los vídeos de la página se guardan, y su sitemap solo se audita en el
@@ -412,3 +435,10 @@
      no decorativos), El País 1 sin `src`, www.uoc.edu 2 decorativos y ninguna
      página de prensa con `<iframe>` de YouTube o Vimeo en el HTML servido. Pide
      re-rastrear.
+   - **Revisión** (2026-10-24): en un censo cuya lectura de sitemaps no es
+     completa (`jobs.sitemaps` con `entradas_recortadas` o `parcial`, un
+     fichero que falló o con el gzip cortado, o uno del que se devolvieron
+     menos URLs de las que declara) no se puede afirmar que una página NO esté
+     en el sitemap de vídeo (67, 89): no se emite, y
+     `jobs.sondas_resumen.sitemap_de_video` dice `evaluado: false` y el
+     motivo.

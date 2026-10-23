@@ -33,7 +33,9 @@ def _censo():
         RespuestaSondeada.__table__, SitemapEntry.__table__, Resource.__table__,
     ])
     s = sessionmaker(bind=engine)()
-    j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"], config={})
+    # Una lectura de sitemaps completa: sin ella, el aviso de video no se afirma.
+    j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"], config={},
+            sitemaps={"ficheros": [], "parcial": False, "entradas_recortadas": False})
     s.add(j)
     s.flush()
     return s, j
@@ -214,3 +216,74 @@ def test_movil_que_redirige_es_info():
     movil = _analizar(s, j)[0]["alternate_movil_incorrecto"]
     assert len(movil) == 1
     assert movil[0].severity == "info" and movil[0].details["motivo"] == "destino_redirige"
+
+
+# -- Revision de la PR #218 ----------------------------------------------------------
+
+def test_una_url_que_no_se_puede_normalizar_no_tumba_nada():
+    """`misma_url` lanza ValueError con un puerto imposible o un IPv6 sin
+    cerrar; antes eso tumbaba `run_all` entero."""
+    s, j = _censo()
+    _url(s, j, "/n/1", meta={"amphtml": "https://e.com:99999/amp",
+                             "alternate_movil": "http://[::1"})
+    pag = _url(s, j, "/n/2", meta={"amphtml": "https://x.com/amp/n/2"})
+    # El destino existe y su canonical es una URL rota: no apunta de vuelta.
+    _url(s, j, "/amp/n/2", meta={"canonical_href": "https://x.com:99999/n/2"})
+    filas = _analizar(s, j)[0]
+    amp = filas["amphtml_incorrecto"]
+    assert len(amp) == 1 and amp[0].url_id == pag.id
+    assert amp[0].details["motivo"] == "destino_sin_canonical_de_vuelta"
+
+
+def test_un_fallo_dentro_no_para_el_analisis_ni_deja_avisos_a_medias(monkeypatch):
+    import analysis.avisos_de_medios as m
+
+    s, j = _censo()
+    _url(s, j, "/p/1", meta={"twitter_card": "large"})
+
+    def _revienta(*a, **k):
+        raise RuntimeError("dato imposible")
+
+    monkeypatch.setattr(m, "_videos", _revienta)
+    filas, az = _analizar(s, j)  # no lanza
+    assert not any(filas.values())  # la twitter_card ya anotada se descarta
+    assert az._pending_issues == []
+
+
+def test_video_en_un_censo_con_sitemaps_incompletos_no_se_afirma():
+    for resumen, motivo in (
+        ({"entradas_recortadas": True, "ficheros": []}, "entradas_recortadas"),
+        ({"parcial": True, "ficheros": []}, "sitemaps_sin_leer"),
+        ({"ficheros": [{"url": "a", "status": 500}]}, "sitemap_fallido"),
+        ({"ficheros": [{"url": "a", "status": 200, "cortado": True}]}, "sitemap_cortado"),
+        ({"ficheros": [{"url": "a", "status": 200, "formato": "urlset",
+                        "declaradas": 60000, "devueltas": 50000}]}, "sitemap_recortado"),
+        (None, "sin_resumen_de_sitemaps"),
+    ):
+        s, j = _censo()
+        j.sitemaps = resumen
+        _url(s, j, "/v/fuera", meta={"videos": YT})
+        _url(s, j, "/v/dentro", meta={"videos": YT})
+        s.add(SitemapEntry(job_id=j.id, url_hash="h:x.com/v/dentro", url="https://x.com/v/dentro",
+                           fichero="https://x.com/video-sitemap.xml", videos=1))
+        s.flush()
+        filas, az = _analizar(s, j)
+        assert filas["video_sin_sitemap_de_video"] == [], motivo
+        assert az.sondas_resumen["sitemap_de_video"] == {"evaluado": False, "motivo": motivo}
+
+
+def test_reutiliza_las_fichas_de_los_canonicals_y_las_suelta():
+    from analysis.analyzer import _Fichas
+
+    s, j = _censo()
+    _url(s, j, "/n/1", meta={"amphtml": "https://x.com/amp/n/1"})
+    _url(s, j, "/amp/n/1", status=404, meta=False)
+    az = SEOAnalyzer(s, j.id)
+    fichas = _Fichas(s, j.id)
+    usadas = []
+    original = fichas.buscar
+    fichas.buscar = lambda u: usadas.append(u) or original(u)
+    az._fichas_canonicals = fichas
+    avisar(az)
+    assert usadas == ["https://x.com/amp/n/1"]
+    assert not hasattr(az, "_fichas_canonicals")

@@ -810,7 +810,9 @@ class HtmlMeta(Base):
     # anterior. Es tambien la marca de «medido» de `amphtml` y
     # `alternate_movil` (decision 156): con `videos` NULL, que esas dos esten
     # a NULL no dice que la pagina no las anuncie.
-    videos = Column(JSON, nullable=True)
+    # `none_as_null`: un None es NULL de SQL, no el JSON `null`, para que el
+    # analisis pueda filtrar «no medido» en la consulta.
+    videos = Column(JSON(none_as_null=True), nullable=True)
     # Decision 156: la version AMP (`<link rel="amphtml">`) y la movil
     # (`<link rel="alternate" media="...max-width...">`) que la pagina
     # anuncia en su head, resueltas.

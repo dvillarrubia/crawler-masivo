@@ -173,9 +173,10 @@ class CrawlBehaviorConfig(BaseModel):
     # Dimensiones de la og:image (decision 154): cuantas imagenes distintas se
     # piden (GET de 64 KB, fuera de max_urls) para medirlas, y cuantas nuevas
     # por forma de ruta de la pagina. Encendida de serie porque esta acotada;
-    # 0 = apagada.
+    # `og_image_muestra` 0 = apagada; `og_image_por_plantilla` 0 = sin tope
+    # por plantilla (solo el global).
     og_image_muestra: int = Field(default=200, ge=0, le=5000)
-    og_image_por_plantilla: int = Field(default=5, ge=1, le=100)
+    og_image_por_plantilla: int = Field(default=5, ge=0, le=100)
 
 
 class UrlFilterConfig(BaseModel):

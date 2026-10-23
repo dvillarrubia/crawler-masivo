@@ -780,7 +780,9 @@
      propia, sin la cookie). La sonda no anade nada suyo. Y no pide a la red
      interna: un enlace a `10.x`, `169.254.169.254`, `localhost` o `.local` no
      se pide (`shared/red.py`, SSRF; solo por la forma del host, sin cubrir un
-     nombre publico que resuelva a una IP privada).
+     nombre publico que resuelva a una IP privada). Desde la revision de la
+     154 tambien un host de una sola etiqueta (los servicios de Docker) y los
+     IPv4 en forma numerica, hexadecimal, octal o abreviada que curl convierte.
    - **El robots.txt del tercero, siempre.** El `robots_mode` del job es lo que
      el cliente decide sobre SU sitio. Cada origen externo pide su robots.txt
      una vez (con `dont_obey_robotstxt` en la sonda, para que el middleware de
