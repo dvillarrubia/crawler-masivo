@@ -1017,6 +1017,15 @@
      (solo la pide el carrusel de restaurantes), y con `url`,
      `aggregateRating` y `review`. `department`, `menu` y `servesCuisine` se
      quedan fuera: son de tipos concretos.
+   - **Una imagen es su URL sin los parámetros de versión del CMS** (`?t=`,
+     `version`, `v`, `cb`…) al agrupar `image_missing_alt` y en su `group_key`
+     (#32). Revisión manual de 20 «resueltas» entre los censos de Lopesan del 14
+     y el 21-oct (misma versión de análisis, 432 resueltas): 19 son de verdad
+     (canonical a `lfr.cloud` arreglado, H1 vacío con texto, H1 duplicado cuyo
+     gemelo dejó de ser indexable, una página que empezó a tener impresiones,
+     imágenes sustituidas por otras con `alt`) y **una no**: la misma imagen sin
+     `alt`, con el `?t=` cambiado. Medido en las 242 de imágenes: 10 eran eso, y
+     salían a la vez como nuevas.
    Quedan en #107: si Google rechaza caracteres de control dentro de una cadena
    JSON-LD (no se puede comprobar sin su herramienta, que solo va en el
    navegador), el hreflang del sitemap, el `Crawl-delay` en un sitio real, el

@@ -186,7 +186,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 157 | Search Console: lo que puede traer tráfico, con la curva del propio sitio y sin contar como competencia lo que es la misma página | [`incidencias`](incidencias.md#d157) |
 | 158 | El tráfico de Google entre dos censos, agrupado por lo que cambió en esas páginas, y nunca «por» | [`comparacion-y-alertas`](comparacion-y-alertas.md#d158) |
 | 159 | Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara sin gastar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d159) |
-| 160 | Lo que Google y Chromium hacen de verdad: meta refresh con espacios, región ISO 3166-1, X-Robots-Tag en no HTML y LocalBusiness | [`indexabilidad`](indexabilidad.md#d160) |
+| 160 | Lo que Google y Chromium hacen de verdad: meta refresh con espacios, región ISO 3166-1, X-Robots-Tag en no HTML, LocalBusiness, y una imagen es su URL sin `?t=` | [`indexabilidad`](indexabilidad.md#d160) |
 
 ## Anadir una decision
 

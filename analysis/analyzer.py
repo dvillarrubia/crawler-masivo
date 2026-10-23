@@ -24,7 +24,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlsplit
 
 from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.orm import aliased
@@ -93,6 +93,22 @@ def _ejemplos_por_url(paginas: list[tuple[str, int]], n: int = 5) -> list[str]:
             if len(vistas) >= n:
                 break
     return vistas
+
+
+# Parametros de version que un CMS anade a la URL de un recurso y cambian sin
+# que cambie el recurso (Liferay: `?t=<marca de tiempo>&version=3.3`).
+_PARAMS_DE_VERSION = frozenset({"t", "v", "ver", "version", "cb", "_", "ts", "timestamp"})
+
+
+def _url_sin_version(url: str) -> str:
+    """La URL de un recurso sin sus parametros de version, para que la misma
+    imagen sea el mismo hallazgo aunque el CMS cambie el `?t=`."""
+    p = urlsplit(url or "")
+    if not p.query:
+        return url
+    resto = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+             if k.lower() not in _PARAMS_DE_VERSION]
+    return p._replace(query=urlencode(resto)).geturl()
 
 
 def _clave_de_grupo(valor: str | None) -> str | None:
@@ -3384,24 +3400,30 @@ class SEOAnalyzer:
         # Anclada en la pagina de URL menor que la lleva, no en la de id menor:
         # el id depende del orden de rastreo y la comparacion entre censos casa
         # por (tipo, url, group_key) (decision 88).
+        #
+        # La imagen es su URL SIN los parametros de version que pone el CMS
+        # (`?t=1778841841031`, `&version=3.3`): en Lopesan, 10 de las 242
+        # imagenes sin alt «resueltas» entre dos censos seguian igual y solo
+        # habia cambiado el `t`, y salian a la vez como nuevas (#32).
         por_imagen: dict[str, list[int]] = {}
-        ancla_de_imagen: dict[str, tuple[str, int]] = {}
+        ancla_de_imagen: dict[str, tuple[str, int, str]] = {}
         for url_id, resource_url, page_url in rows:
-            por_imagen.setdefault(resource_url, []).append(url_id)
-            actual = ancla_de_imagen.get(resource_url)
-            if actual is None or (page_url, url_id) < actual:
-                ancla_de_imagen[resource_url] = (page_url, url_id)
+            imagen = _url_sin_version(resource_url)
+            por_imagen.setdefault(imagen, []).append(url_id)
+            actual = ancla_de_imagen.get(imagen)
+            if actual is None or (page_url, url_id) < actual[:2]:
+                ancla_de_imagen[imagen] = (page_url, url_id, resource_url)
 
-        for resource_url, paginas in por_imagen.items():
+        for imagen, paginas in por_imagen.items():
             self._add_issue(
-                ancla_de_imagen[resource_url][1],
+                ancla_de_imagen[imagen][1],
                 "image_missing_alt",
                 "warning",
                 {
-                    "image_url": resource_url,
-                    "paginas_afectadas": len(paginas),
+                    "image_url": ancla_de_imagen[imagen][2],
+                    "paginas_afectadas": len(set(paginas)),
                 },
-                group_key=_clave_de_grupo(resource_url),
+                group_key=_clave_de_grupo(imagen),
             )
 
         self._flush_issues()
