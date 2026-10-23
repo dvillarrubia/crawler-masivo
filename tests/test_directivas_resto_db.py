@@ -251,3 +251,16 @@ def test_la_sintaxis_de_x_robots_mira_solo_lo_que_va_a_google():
     # Antes el prefijo pegado escondia el noindex: solo se veia el nofollow.
     assert aviso.details["ignored_directives"] == ["nofollow", "noindex"]
     assert aviso.details["raw"] == "googlebot:noindex/nofollow"
+
+
+def test_la_sintaxis_de_x_robots_tambien_en_un_pdf():
+    """#107: un PDF solo lleva sus directivas en la cabecera; mal escrita, se
+    avisa igual que en un HTML. Sus meta robots no existen y no se miran."""
+    s, j = _montar()
+    pdf = _url(s, j, "https://x.com/doc.pdf", is_html=False, x_robots_tag="noindex/nofollow")
+    sano = _url(s, j, "https://x.com/ok.pdf", is_html=False, x_robots_tag="noindex, nofollow")
+    SEOAnalyzer(s, j.id).analyze_robots_syntax()
+    s.flush()
+    [aviso] = [i for i in s.query(Issue).all() if i.url_id == pdf.id]
+    assert aviso.issue_type == "robots_invalid_syntax" and aviso.details["source"] == "x_robots_tag"
+    assert _tipos(s, j, sano.id) == []

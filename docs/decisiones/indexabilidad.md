@@ -993,3 +993,31 @@
      Ninguna de las páginas de clientes (Lopesan, UOC) anuncia ni AMP ni m-dot,
      que es lo que esperaba la issue: «solo en los sitios que todavía los
      usan». Pide re-rastrear. Sin validador de AMP (descartado en #184).
+
+<a id="d160"></a>
+160. **Lo que Google y Chromium hacen de verdad, en cuatro restos de la auditoría**
+   (#107):
+   - **Un `meta refresh` con espacios en `http-equiv` no redirige.**
+     Comprobado con el Chromium de Playwright: `"refresh "`, `" refresh"` o con
+     tabulador no navegan; `"REFRESH"` sí. `extract_meta_refresh` usaba
+     `normalize-space` y veía una redirección que ningún navegador hace, mientras
+     `extract_meta_refresh_target` no la veía: la misma página decía dos cosas.
+     Las dos comparan ahora sin mayúsculas, sin recortar y sin las de dentro de
+     `<noscript>`.
+   - **La región del hreflang, contra ISO 3166-1 completa** (los 249 códigos
+     asignados), no contra la lista corta de errores conocidos: `es-XX` o
+     `fr-ZZ` pasaban por válidos y Google ignora esas anotaciones. La lista
+     corta sigue para sugerir el bueno (`en-UK` → GB). No se juzgan `es-419`
+     (UN M.49) ni `zh-Hant` (escritura): no se puede afirmar que Google los ignore.
+   - **La sintaxis de `X-Robots-Tag` también en los no HTML**: un PDF solo lleva
+     sus directivas en la cabecera, y `noindex/nofollow` en él se ignoraba igual
+     que en un HTML sin que nadie avisara. Se mira solo la cabecera.
+   - **LocalBusiness con las recomendadas de Google** (comprobado el
+     24-oct-2026): `openingHoursSpecification` y no `openingHours`, sin `image`
+     (solo la pide el carrusel de restaurantes), y con `url`,
+     `aggregateRating` y `review`. `department`, `menu` y `servesCuisine` se
+     quedan fuera: son de tipos concretos.
+   Quedan en #107: si Google rechaza caracteres de control dentro de una cadena
+   JSON-LD (no se puede comprobar sin su herramienta, que solo va en el
+   navegador), el hreflang del sitemap, el `Crawl-delay` en un sitio real, el
+   `<dialog>` medido en páginas reales y el A9 del PageRank.

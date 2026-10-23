@@ -350,12 +350,14 @@ REQUISITOS_ESPERADOS = {
         "obligatorias": [],
         "recomendadas": ["name", "url", "logo", "sameas", "contactpoint"],
     },
-    # local-business: obligatorias address y name. `openinghours` e `image`
-    # no estan en la lista de Google (que dice openingHoursSpecification y no
-    # pide imagen); se dejan como estaban porque son avisos, no errores.
+    # local-business: obligatorias address y name. Recomendadas, las de Google
+    # (comprobado el 24-10-2026): openingHoursSpecification y no openingHours,
+    # y sin image, que solo pide el carrusel de restaurantes (#107). De su lista
+    # se quedan las que aplican a cualquier negocio: department, menu y
+    # servesCuisine son de tipos concretos.
     "localbusiness": {
         "obligatorias": ["name", "address"],
-        "recomendadas": ["telephone", "openinghours", "geo", "pricerange", "image"],
+        "recomendadas": ["telephone", "url", "openinghoursspecification", "geo", "pricerange", "aggregaterating", "review"],
     },
     # event: obligatorias location, name, startDate.
     "event": {

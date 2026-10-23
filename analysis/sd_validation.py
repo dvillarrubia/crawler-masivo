@@ -61,9 +61,13 @@ REQUISITOS: dict[str, dict[str, list]] = {
         "obligatorias": [],
         "recomendadas": ["name", "url", "logo", "sameas", "contactpoint"],
     },
+    # Las recomendadas, las de Google (comprobado el 24-10-2026, #107):
+    # openingHoursSpecification y no openingHours, y sin image, que solo la
+    # pide el carrusel de restaurantes. department, menu y servesCuisine se
+    # quedan fuera: son de tipos concretos y avisarian a cualquier negocio.
     "localbusiness": {
         "obligatorias": ["name", "address"],
-        "recomendadas": ["telephone", "openinghours", "geo", "pricerange", "image"],
+        "recomendadas": ["telephone", "url", "openinghoursspecification", "geo", "pricerange", "aggregaterating", "review"],
     },
     "event": {
         "obligatorias": ["name", "startdate", "location"],

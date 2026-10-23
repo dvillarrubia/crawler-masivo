@@ -231,6 +231,20 @@ _REGIONES_INVENTADAS: dict[str, str] = {
     "po": "PT",
 }
 
+# ISO 3166-1 alfa-2, los 249 codigos ASIGNADOS: es lo que Google acepta como
+# region («the region, in ISO 3166-1 Alpha 2 format»). Con solo la lista de
+# errores conocidos de arriba, `es-XX` o `fr-ZZ` pasaban por validos (#107).
+# Los reservados (`UK`, `EU`) no estan: Google no los acepta como region.
+_ISO_3166_1 = frozenset("""
+AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ
+CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR
+GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO
+JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR
+MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO
+RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV
+TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
+""".lower().split())
+
 def _lang_hreflang_valido(lang: str | None) -> tuple[bool, str | None, str | None]:
     """(valido, idioma que no es ISO 639-1, region inventada) de un codigo.
 
@@ -247,7 +261,10 @@ def _lang_hreflang_valido(lang: str | None) -> tuple[bool, str | None, str | Non
             valido = False
     if valido and "-" in lang:
         region = lang.split("-")[-1].lower()
-        if region in _REGIONES_INVENTADAS and len(region) == 2:
+        # Solo regiones de dos letras: un `es-419` (UN M.49) o un `zh-Hant`
+        # (escritura) no se juzgan aqui, no se puede afirmar que Google los
+        # ignore.
+        if len(region) == 2 and region.isalpha() and region not in _ISO_3166_1:
             region_mala = region
             valido = False
     return valido, idioma_malo, region_mala
@@ -2778,23 +2795,27 @@ class SEOAnalyzer:
         """
         logger.debug("Analyzing robots directive syntax ...")
 
+        # Tambien los no HTML con `X-Robots-Tag`: un PDF solo puede llevar sus
+        # directivas en la cabecera, y la fila de `html_meta` que guarda el
+        # spider para ellos tiene solo eso (#107). De un no HTML se mira solo la
+        # cabecera: sus meta robots no existen.
         stmt = (
             select(
                 Url.id,
+                Url.is_html,
                 HtmlMeta.meta_robots,
                 HtmlMeta.meta_robots_googlebot,
                 HtmlMeta.x_robots_tag,
             )
             .join(HtmlMeta, HtmlMeta.url_id == Url.id)
-            .where(Url.job_id == self.job_id, Url.is_html.is_(True))
+            .where(Url.job_id == self.job_id,
+                   (Url.is_html.is_(True)) | (HtmlMeta.x_robots_tag.isnot(None)))
         )
 
-        for url_id, meta_robots, meta_googlebot, x_robots in self.session.execute(stmt):
-            for fuente, valor in (
-                ("meta_robots", meta_robots),
-                ("meta_robots_googlebot", meta_googlebot),
-                ("x_robots_tag", x_robots),
-            ):
+        for url_id, es_html, meta_robots, meta_googlebot, x_robots in self.session.execute(stmt):
+            fuentes = (("meta_robots", meta_robots), ("meta_robots_googlebot", meta_googlebot),
+                       ("x_robots_tag", x_robots)) if es_html else (("x_robots_tag", x_robots),)
+            for fuente, valor in fuentes:
                 # De las `X-Robots-Tag` solo se lee lo que va a Google, con el
                 # mismo criterio que la indexabilidad (decision 107): una
                 # `bingbot: noindex/nofollow` no le quita nada, y el prefijo

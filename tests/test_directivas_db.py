@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -244,3 +246,19 @@ def test_los_veredictos_de_hreflang_se_guardan_en_TODAS_las_filas():
     assert filas[(es.id, "en-UK")].lang_valid is False
     assert all(filas[k].lang_valid is True
                for k in filas if k != (es.id, "en-UK"))
+
+
+@pytest.mark.parametrize("lang, invalido", [
+    ("es-XX", True), ("fr-ZZ", True), ("en-EU", True), ("de-EN", True),
+    ("es-MX", False), ("pt-BR", False), ("en-GB", False), ("es-419", False), ("zh-Hant", False),
+])
+def test_la_region_se_valida_contra_iso_3166_completa(lang, invalido):
+    """#107: antes solo se cazaban los errores conocidos (`en-UK`); `es-XX`
+    pasaba por valido y Google ignora esa anotacion."""
+    s, j = _montar()
+    a = _url(s, j, "https://x.com/", canonical="https://x.com/", cuantos=1)
+    s.add(Hreflang(url_id=a.id, lang=lang, href="https://x.com/otro/"))
+    s.flush()
+    SEOAnalyzer(s, j.id).analyze_hreflang()
+    s.flush()
+    assert ("hreflang_invalid_lang" in _tipos(s, j, a.id)) is invalido

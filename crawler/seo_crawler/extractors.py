@@ -2097,9 +2097,15 @@ def extract_meta_refresh(selector) -> str | None:
     # plantillas antiguas; la pagina salia sin meta refresh y su destino no se
     # seguia. El extractor del DESTINO ya lo hacia bien con translate(), asi que
     # las dos funciones se contradecian sobre la misma pagina.
+    #
+    # Pero los espacios SI cuentan: comprobado con Chromium (#107), un
+    # `http-equiv="refresh "`, `" refresh"` o con tabulador no redirige. Con
+    # `normalize-space` esta funcion veia una redireccion que ningun navegador
+    # hace, mientras la del destino (sin normalizar) no la veia. Y como esa, sin
+    # las de dentro de `<noscript>`.
     content = selector.xpath(
-        f"//meta[normalize-space(translate(@http-equiv, '{_XP_UPPER}', '{_XP_LOWER}'))"
-        " = 'refresh']/@content"
+        f"//meta[translate(@http-equiv, '{_XP_UPPER}', '{_XP_LOWER}') = 'refresh']"
+        "[not(ancestor::noscript)]/@content"
     ).get()
     return _clean(content)
 
