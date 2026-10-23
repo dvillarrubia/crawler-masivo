@@ -46,3 +46,6 @@
   quita tambien el Parquet de sus enlaces archivados. Decision 96.
 - Una tabla nueva del censo entra en `shared/almacenamiento.py` y en el borrado
   en masa en el mismo PR: lo exige el test de tablas del censo.
+- **Un contenedor efimero se borra con `docker rm -fv`**, no `-f`: el `--rm` no
+  cubre el borrado forzado y cada Postgres deja un volumen anonimo de mas de 1 GB
+  (53 GB huerfanos en el Mac el 2026-10-21). Lo bloquea el hook de sesiones.
