@@ -46,3 +46,10 @@
   quita tambien el Parquet de sus enlaces archivados. Decision 96.
 - Una tabla nueva del censo entra en `shared/almacenamiento.py` y en el borrado
   en masa en el mismo PR: lo exige el test de tablas del censo.
+
+## Interfaz
+
+- **Un color en `frontend/style.css` va con variable** (`var(--bg-card)`, `var(--text)`...),
+  no escrito a mano: `style.css` es el tema claro y `theme-terminal.css` solo cambia las
+  variables y unas reglas sueltas, asi que un `background:#fff` sale como un recuadro
+  blanco con la letra clara del tema encima. Lo vigila `test_tema_oscuro_frontend.py`.

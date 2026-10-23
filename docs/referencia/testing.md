@@ -135,6 +135,10 @@ job con condiciones `x`, agrupar, `POST /segmentos`, 422/409 y `api/uso.py`) y
 `test_segmentos_frontend.py` (ejecuta `app.js` en Chromium y mira lo que pide:
 la lista de Problemas conserva el segmento y la vista agrupada manda siempre
 `agrupar`).
+Tema oscuro: `test_tema_oscuro_frontend.py` (carga `style.css` y
+`theme-terminal.css` en Chromium y, por cada fondo claro escrito a mano, mide el
+contraste del elemento con su letra: minimo 3:1; los de `:hover` y similares
+necesitan su regla en el tema oscuro).
 Extraccion y busqueda a medida (decision 104): `test_extraccion_a_medida.py`
 (la funcion pura: CSS, XPath, regex, `a_numero`, muro, tiempo y
 cortacircuitos, validacion, firma; y el esquema y la herencia, que necesitan
