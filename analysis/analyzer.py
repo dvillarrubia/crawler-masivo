@@ -21,7 +21,7 @@ import time
 import uuid
 from contextlib import contextmanager
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import unquote, urlparse
@@ -47,6 +47,7 @@ from analysis import avisos_de_paginacion
 from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor, oportunidades_gsc
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
+from analysis import avisos_de_medios
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
     x_robots_para_bot,
@@ -135,6 +136,14 @@ def _fuera_del_head(valor: str | None) -> list[str]:
 def _lo_saca_el_corte(cortado_por: str | None, fuera: str | None, nombre: str) -> bool:
     """Si *nombre* esta fuera del head porque algo corto el head antes."""
     return bool(cortado_por) and nombre in _fuera_del_head(fuera)
+
+
+def _nivel_de_encabezado(tag: str | None) -> int | None:
+    """1-6 para `h1`...`h6`; None para lo demas."""
+    t = (tag or "").strip().lower()
+    if len(t) == 2 and t[0] == "h" and t[1] in "123456":
+        return int(t[1])
+    return None
 
 
 def _respuesta_valida():
@@ -369,11 +378,13 @@ class SEOAnalyzer:
         self.analyze_titles()
         self.analyze_descriptions()
         self.analyze_headings()
+        self.analyze_saltos_de_encabezado()  # decision 153
         self.analyze_canonicals()
         self.analyze_hreflang()
         self.analyze_structured_data()
         self.analyze_html_ignorado()
         avisos_de_html.avisar_declaraciones_html(self)  # decision 108
+        avisos_de_medios.avisar(self)  # decisiones 154, 155 y 156
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()
@@ -1040,6 +1051,92 @@ class SEOAnalyzer:
 
         self._flush_issues()
 
+    def analyze_saltos_de_encabezado(self) -> None:
+        """``encabezado_salta_nivel`` (decision 153): un titular baja mas de un
+        nivel respecto al anterior (un H2 seguido de un H4).
+
+        Google no lo penaliza; Screaming Frog y Sitebulb lo marcan y es un fallo
+        de accesibilidad (WCAG 1.3.1: el lector de pantalla navega por niveles).
+        Por eso es ``info`` y va **por plantilla** (36, 53, 64, 73): el salto lo
+        pone casi siempre el tema (el H4 del pie, el H5 de la barra lateral), y
+        una fila por (host, forma de la ruta) con `paginas_afectadas` dice lo
+        mismo que 3.000 filas.
+
+        - Solo titulares que se pintan y tienen texto: el oculto y el vacio no
+          los oye nadie (46, 121). En un censo anterior a la decision 46 no se
+          sabe cuales se pintaban y no se afirma, como ``h1_vacio``.
+        - Subir de nivel (H4 -> H2) no es un salto, y el primer titular no se
+          compara con nada: que falte el H1 ya es ``h1_missing``.
+        - Solo HTML interno 2xx, respuesta valida e indexable (47).
+
+        Lee `headings` de las paginas del job por `url_id` (sin `links`), en
+        orden de documento y por lotes.
+        """
+        if self._censo_anterior_a_d46():
+            logger.warning("Job %s: headings.oculto NULL en todo el censo; "
+                           "encabezado_salta_nivel no se evalua", self.job_id)
+            return
+        stmt = (
+            select(Url.id, Url.url, Url.host, Heading.tag)
+            .join(Heading, Heading.url_id == Url.id)
+            .where(
+                Url.job_id == self.job_id, Url.is_html.is_(True),
+                Url.is_internal.is_(True),
+                Url.status_code >= 200, Url.status_code < 300,
+                _respuesta_valida(), Url.indexable.is_(True),
+                Heading.oculto.isnot(True),
+                func.length(func.trim(func.coalesce(Heading.text, ""))) > 0,
+            )
+            .order_by(Url.id, Heading.position)
+        )
+        # (host, plantilla) -> {"paginas": [(url, id)], "saltos": Counter del
+        # primer salto de cada pagina}
+        grupos: dict[tuple, dict[str, Any]] = {}
+        actual: int | None = None
+        anterior = 0
+        primero: str | None = None
+        datos_pagina: tuple | None = None
+
+        def _cerrar() -> None:
+            if datos_pagina is None or not primero:
+                return
+            url, url_id, host = datos_pagina
+            try:
+                plantilla = firma_de_ruta(urlparse(url).path)
+            except ValueError:
+                plantilla = firma_de_ruta("")
+            g = grupos.setdefault(((host or "").lower(), plantilla),
+                                  {"paginas": [], "saltos": Counter()})
+            g["paginas"].append((url, url_id))
+            g["saltos"][primero] += 1
+
+        for url_id, url, host, tag in self.session.execute(
+                stmt.execution_options(yield_per=BATCH_SIZE)):
+            if url_id != actual:
+                _cerrar()
+                actual, anterior, primero = url_id, 0, None
+                datos_pagina = (url, url_id, host)
+            nivel = _nivel_de_encabezado(tag)
+            if nivel is None:
+                continue
+            if anterior and nivel > anterior + 1 and primero is None:
+                primero = f"h{anterior}>h{nivel}"
+            anterior = nivel
+        _cerrar()
+
+        for (host, plantilla), g in grupos.items():
+            paginas = sorted(g["paginas"])
+            salto, _ = g["saltos"].most_common(1)[0]
+            self._add_issue(
+                paginas[0][1], "encabezado_salta_nivel", "info",
+                {"plantilla": plantilla, "salto": salto,
+                 "saltos_distintos": sorted(g["saltos"]),
+                 "paginas_afectadas": len(paginas),
+                 "paginas_ejemplo": [u for u, _ in paginas[:5]]},
+                group_key=_clave_de_grupo(f"{host}|{plantilla}"),
+            )
+        self._flush_issues()
+
     def _censo_anterior_a_d46(self) -> bool:
         """¿Ningun titular del job tiene `oculto` escrito? Entonces el censo es
         anterior a la decision 46 (alt de la imagen y `aria-label` como texto,
@@ -1076,6 +1173,9 @@ class SEOAnalyzer:
         # Con lo que hace falta para seguir el destino (decision 101): su
         # codigo, a donde redirige, si es noindex y su propio canonical.
         fichas = _Fichas(self.session, self.job_id)
+        # Lo reutiliza `avisos_de_medios` (decision 156), que lo suelta al
+        # empezar: entre los dos no cambia nada de lo que lleva una ficha.
+        self._fichas_canonicals = fichas
 
         # Iterate HTML pages with their canonical information.
         # Una meta refresh no es la pagina: es un salto (decision 120). Sus

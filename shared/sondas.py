@@ -1,9 +1,10 @@
 """Que dice una sonda de respuesta: una URL que el rastreo pide sin que sea del
 censo, para saber si responde (decisiones 123 y 124).
 
-Dos usos con el mismo mecanismo: los enlaces EXTERNOS (`<a href>` a otro
-sitio) y los recursos EMBEBIDOS (imagenes, CSS, JS) que el censo no pide. La
-fila va a `respuestas_sondeadas`, nunca a `urls`.
+Tres usos con el mismo mecanismo: los enlaces EXTERNOS (`<a href>` a otro
+sitio), los recursos EMBEBIDOS (imagenes, CSS, JS) que el censo no pide y la
+`og:image`, que ademas se mide (decision 154). La fila va a
+`respuestas_sondeadas`, nunca a `urls`.
 
 Vive en `shared/` porque el veredicto lo escribe el spider y lo leen el
 analizador y la API: que es «roto» y que es «no se sabe» tiene que ser lo mismo
@@ -43,7 +44,7 @@ ROTOS = frozenset({ROTO, REDIRIGE_A_ERROR})
 # spider dio el host por caido (`host_caido`): un fallo suelto no lo es.
 MUERTOS = frozenset({DOMINIO_INEXISTENTE, SIN_CONEXION})
 
-USOS = ("enlace", "recurso")
+USOS = ("enlace", "recurso", "og_image")
 
 # A un HEAD con estos codigos no se le cree: hay servidores que solo enrutan GET
 # (405, 501), WAF que tratan distinto un HEAD (403, 429) y CMS que dan 404 o 400

@@ -255,6 +255,20 @@ resolver caido, origen 404, recursos y `size_bytes`), `test_sondas_db.py`
 `run_all` entero) y `test_backup_sondas.py` (trabajo de la API). El arnes
 (`tests/spider_harness.py`) sirve ahora `HEAD` y, con `externos`, un servidor por
 IP de tercero en el mismo puerto (`@@EXTERNAS@@`: metodo, ruta y cabeceras).
+Restos de #150 (decisiones 153-156): `test_dimensiones_imagen.py` (cabeceras
+hechas a mano de PNG, GIF, BMP, JPEG base y progresivo con 40 KB de EXIF, WebP
+VP8/VP8L/VP8X y AVIF; un JPEG cortado antes del SOF y un SVG dan None),
+`test_extractors_medios.py` (videos propios, incrustados, diferidos, en
+`noscript`, el fondo animado, el tope; `amphtml` y la alternativa movil solo
+del head y sin hreflang; las reglas de la og:image y la twitter:card; los
+`<video:video>` de un sitemap), `test_sonda_og_image_spider.py` (el `SeoSpider`
+real: la og:image del tercero llega como GET con `Range: bytes=0-65535` sin
+HEAD, se mide, la rota queda rota, el tope por plantilla y la muestra a 0),
+`test_saltos_encabezado_db.py` y `test_avisos_de_medios_db.py` (SQLite: por
+plantilla y URL menor, lo oculto y lo vacio, lo no medido sin aviso, sin
+sitemap de video no falta nada, AMP y movil solo con el destino en el censo),
+el de `test_sondas_db.py` con Postgres (`ancho`/`alto` por la tuberia y el
+`run_all`) y `test_incidencias_medios_frontend.py` (ficha, nombre y ambito).
 Sitemaps por fichero (decision 126): `test_sitemaps.py` (`leer_sitemap` cuenta
 lo que pasa del tope, mide el XML descomprimido y sabe que un gzip cortado lo
 pasaba), `test_sitemaps_criterio.py` (lastmod W3C, el dia de margen y los

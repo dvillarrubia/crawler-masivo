@@ -135,11 +135,14 @@ class EntradaSitemap:
       tercera forma de declarar hreflang que acepta Google, junto al ``<link>``
       del HTML y la cabecera HTTP, y la unica que usan muchos sitios grandes:
       sin leerla, su hreflang no existe para el informe.
+    - ``videos``: cuantos ``<video:video>`` declara la entrada (decision
+      155). Un sitemap de texto o un feed no pueden declarar ninguno: 0.
     """
 
     url: str
     lastmod: str | None = None
     hreflang: list[tuple[str, str]] = field(default_factory=list)
+    videos: int = 0
 
 
 @dataclass
@@ -256,9 +259,12 @@ def leer_sitemap(body: bytes | str, base_url: str = "") -> LecturaSitemap:
         loc_text = None
         lastmod = None
         hreflang: list[tuple[str, str]] = []
+        videos = 0
         for child in entry:
             nombre = _localname(child.tag)
-            if nombre == "loc" and loc_text is None:
+            if nombre == "video":
+                videos += 1
+            elif nombre == "loc" and loc_text is None:
                 loc_text = (child.text or "").strip()
             elif nombre == "lastmod" and lastmod is None:
                 lastmod = (child.text or "").strip() or None
@@ -275,7 +281,8 @@ def leer_sitemap(body: bytes | str, base_url: str = "") -> LecturaSitemap:
         if entry_kind == "sitemap" or root_kind == "sitemapindex":
             child_sitemaps.append(url)
         elif len(paginas) < MAX_URLS_PER_SITEMAP:
-            paginas.append(EntradaSitemap(url=url, lastmod=lastmod, hreflang=hreflang))
+            paginas.append(EntradaSitemap(url=url, lastmod=lastmod, hreflang=hreflang,
+                                          videos=videos))
 
     return LecturaSitemap(entradas=paginas, hijos=child_sitemaps, formato=root_kind,
                           declaradas=len(seen), bytes=tamano)

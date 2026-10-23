@@ -5623,6 +5623,12 @@
           </div>
           <div class="form-row-3">
             <div class="form-group">
+              <label title="Imágenes de og:image distintas que se descargan (los primeros 64 KB) para medir su ancho y alto, como mucho 5 nuevas por plantilla. 0 = apagado">og:image a medir (0 = no)</label>
+              <input type="number" x-model="createForm.og_image_muestra" min="0" max="5000" data-testid="sonda-og-image">
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
               <label title="Páginas que se vuelven a pedir con el perfil móvil (o escritorio, si el UA ya es de móvil) para compararlas. 0 = apagado">Paridad móvil: páginas (0 = no)</label>
               <input type="number" x-model="createForm.paridad_movil_muestra" min="0" max="500">
             </div>

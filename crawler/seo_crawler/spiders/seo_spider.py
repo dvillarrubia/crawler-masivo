@@ -59,6 +59,7 @@ from seo_crawler.extractors import (
     charset_declarado,
     extract_resources,
     extract_security_headers,
+    extract_videos,
     extract_structured_data,
     extract_visible_text,
     extract_word_count,
@@ -1196,7 +1197,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if url_hash not in vistas:
                 vistas.add(url_hash)
                 entradas.append({"url": normalized, "url_hash": url_hash,
-                                 "lastmod": entrada.lastmod})
+                                 "lastmod": entrada.lastmod,
+                                 "videos": entrada.videos})
             if _hash_key(url_hash) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
@@ -2165,6 +2167,13 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 selector, base_url, page_url=final_url)
         content_language = (response.headers.get(b"Content-Language") or b"").decode(
             "latin-1", errors="ignore").strip() or None
+        # Decision 155. Un fallo aqui no puede llevarse la fila de html_meta:
+        # sin videos queda NULL, que es «no medido».
+        try:
+            videos = extract_videos(selector, base_url)
+        except Exception:  # noqa: BLE001
+            logger.warning("No se pudieron leer los videos de %s", final_url, exc_info=True)
+            videos = None
 
         yield HtmlMetaItem(
             url_hash=final_hash,
@@ -2220,6 +2229,11 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             charset_bom=(servido or {}).get("charset_bom"),
             cuerpo_solo_ascii=(servido or {}).get("cuerpo_solo_ascii"),
             texto_mal_codificado=(servido or {}).get("texto_mal_codificado"),
+            # Decisiones 155 y 156. Con render tambien: un video o un
+            # reproductor que mete el JavaScript es lo que ve Google.
+            videos=videos,
+            amphtml=meta.get("amphtml"),
+            alternate_movil=meta.get("alternate_movil"),
         )
 
         # Headings
@@ -2323,6 +2337,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # Solo desde paginas del sitio: con follow_external, lo que enlaza un
         # tercero no es del informe del cliente.
         if internal:
+            # La og:image antes que los recursos: si la misma imagen esta
+            # tambien en un `<img>`, la fila (una por URL) es la que la mide
+            # (decision 154).
+            yield from self._sonda_og_image(meta.get("og_image"), final_url)
             yield from self._sondas_de_pagina(links, resources)
 
         # -- SecurityItem -------------------------------------------------

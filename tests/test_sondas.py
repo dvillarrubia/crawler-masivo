@@ -58,6 +58,52 @@ def test_host_privado(host, privado):
     assert es_host_privado(host) is privado
 
 
+# Revision de #184: lo que curl convierte en una IP de la red interna y
+# `ipaddress` no reconocia, y los nombres de una sola etiqueta que resuelve el
+# DNS de Docker. Con la sonda de og:image encendida de serie y con GET, cada
+# uno era un SSRF en cada rastreo.
+@pytest.mark.parametrize("host", [
+    "api", "postgres", "redis", "crawler",                  # servicios de docker-compose
+    "2130706433", "0x7f000001", "0X7F000001", "127.1", "0177.0.0.1", "0x7f.0.0.1",
+    "2852039166",                                             # 169.254.169.254
+    "0xa9fea9fe", "169.254.43518",                            # tambien 169.254.169.254
+    "012.0.0.1",                                              # 10.0.0.1 en octal
+    "::ffff:127.0.0.1", "[::ffff:169.254.169.254]",
+    "100.64.0.1",                                             # CGNAT, no global
+    "999.1.1.1", "99999999999",                               # forma de IP que no cabe
+])
+def test_host_privado_en_las_formas_que_lee_curl(host):
+    assert es_host_privado(host) is True
+
+
+@pytest.mark.parametrize("host", ["8.8.8.8", "134744072", "0x08080808", "123.com",
+                                  "1x.example.org", "cdn.otro.es"])
+def test_lo_publico_sigue_siendo_publico(host):
+    assert es_host_privado(host) is False
+
+
+def test_la_sonda_no_pide_ni_redirige_a_un_host_de_docker():
+    pytest.importorskip("scrapy")
+    from seo_crawler.sonda_respuestas import SondaRespuestasMixin
+
+    class Spider(SondaRespuestasMixin):
+        job_id = "j"
+        job_config = {"crawl_behavior": {"og_image_muestra": 10}}
+        settings = None
+        _exclude_patterns: list = []
+
+        def _is_internal(self, url):
+            return "x.com" in url
+
+    sp = Spider()
+    sp._iniciar_sondas_respuesta()
+    for url in ("http://postgres:5432/x.png", "http://2130706433/x.png",
+                "http://169.254.43518/latest/meta-data/"):
+        assert not list(sp._sondear(url, "og_image", interno=False)), url
+        assert sp._es_red_interna(url), url
+    assert sp._sr_sin_comprobar["red_privada"] == 3
+
+
 # ---------------------------------------------------------------------------
 # El mixin, con lo minimo del spider
 # ---------------------------------------------------------------------------
@@ -180,3 +226,30 @@ def test_late_por_tiempo_y_atiende_a_cancelar(monkeypatch):
     reloj[0] += m.LATIDO_S + 1
     sp._sr_latir()
     assert sp.cerrado == "cancelled"
+
+
+def test_og_image_por_plantilla_a_cero_es_sin_tope_en_el_esquema_y_en_la_sonda():
+    """Revision de #218: el esquema pedia >= 1 y la sonda trataba 0 como «sin
+    tope». Ahora 0 vale en los dos sitios y significa lo mismo."""
+    pytest.importorskip("pydantic")
+    pytest.importorskip("scrapy")
+    from api.schemas import CrawlBehaviorConfig
+    from seo_crawler.sonda_respuestas import SondaRespuestasMixin
+
+    assert CrawlBehaviorConfig(og_image_por_plantilla=0).og_image_por_plantilla == 0
+
+    class Spider(SondaRespuestasMixin):
+        job_id = "j"
+        job_config = {"crawl_behavior": {"og_image_muestra": 10, "og_image_por_plantilla": 0}}
+        settings = None
+        _exclude_patterns: list = []
+
+        def _is_internal(self, url):
+            return "x.com" in url
+
+    sp = Spider()
+    sp._iniciar_sondas_respuesta()
+    pedidas = [r for i in range(4)
+               for r in sp._sonda_og_image(f"https://x.com/og{i}.png", f"https://x.com/p/{i}")]
+    assert len(pedidas) == 4
+    assert sp._sr_sin_comprobar["og_por_plantilla"] == 0

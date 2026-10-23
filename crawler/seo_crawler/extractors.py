@@ -34,7 +34,7 @@ from shared.texto_visible import (  # noqa: F401
     _nodo_oculto,
     _segmentos_visibles,
 )
-from shared.metadatos_html import forma_de_href, normalizar_charset
+from shared.metadatos_html import es_media_movil, forma_de_href, normalizar_charset
 from shared.robots import (  # noqa: F401
     robots_bad_separators,
     robots_tokens,
@@ -585,7 +585,31 @@ def extract_meta(selector, base_url: str | None = None) -> dict[str, Any]:
         # analizador decide con `shared/metadatos_html.py`.
         **_declaraciones_de_pagina(selector, canonicals_head, og_image_crudo),
         "twitter_image": _resolve(base_url, _meta("twitter:image", con_property=True)),
+        # Decision 156: la version AMP y la movil que la pagina anuncia. Solo
+        # las del head, que son las que Google lee.
+        "amphtml": _primero_resuelto(base_url, _links_por_rel(selector, "amphtml",
+                                                               solo_head=True)),
+        "alternate_movil": _alternate_movil(selector, base_url),
     }
+
+
+def _alternate_movil(selector, base_url: str | None) -> str | None:
+    """El ``href`` del ``<link rel="alternate" media="...">`` que anuncia la
+    version movil (las URLs separadas, el m-dot), resuelto; None si no hay.
+
+    Con ``hreflang`` es una anotacion de idioma, no la version movil, aunque
+    lleve ``media``. Solo en el head (decision 156).
+    """
+    minuscula = f"translate(@rel, '{_XP_UPPER}', '{_XP_LOWER}')"
+    for nodo in selector.xpath(
+        f"//head//link[@href and @media and not(@hreflang) and contains("
+        f"concat(' ', normalize-space({minuscula}), ' '), ' alternate ')]"
+    ):
+        if es_media_movil(nodo.xpath("@media").get()):
+            resuelto = _resolve(base_url, _clean(nodo.xpath("@href").get()))
+            if resuelto:
+                return resuelto
+    return None
 
 
 def _declaraciones_de_pagina(selector, canonicals_head: list[str],
@@ -1680,6 +1704,91 @@ def extract_resources(selector, base_url: str) -> list[dict[str, Any]]:
         _add(candidatos[0], "image", alt, nodo.get("width"), nodo.get("height"))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Videos (decision 155)
+# ---------------------------------------------------------------------------
+
+_RE_YOUTUBE = re.compile(
+    r"(?:youtube(?:-nocookie)?\.com/(?:embed|v|shorts|live)/|youtu\.be/)([A-Za-z0-9_-]{6,20})",
+    re.I)
+_RE_VIMEO = re.compile(r"player\.vimeo\.com/video/(\d+)", re.I)
+# Una pagina con mas videos que esto es un listado o un reproductor de
+# miniaturas; para auditar un sitemap de video basta con saber que los hay.
+MAX_VIDEOS = 20
+
+
+def video_de_url(src: str | None) -> tuple[str, str] | None:
+    """``("youtube", id)`` o ``("vimeo", id)`` si *src* es un reproductor
+    incrustado de uno de los dos; None si no."""
+    if not src:
+        return None
+    m = _RE_YOUTUBE.search(src)
+    if m:
+        return "youtube", m.group(1)
+    m = _RE_VIMEO.search(src)
+    if m:
+        return "vimeo", m.group(1)
+    return None
+
+
+def extract_videos(selector, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Los videos de la pagina: ``{tipo, id, src, decorativo}``.
+
+    - ``tipo``: ``video`` (un ``<video>`` propio), ``youtube`` o ``vimeo``
+      (un ``<iframe>``, ``<embed>`` u ``<object>`` del reproductor, tambien con
+      ``data-src`` de carga diferida, y los ``<lite-youtube>``/``<lite-vimeo>``).
+    - ``id``: el del proveedor; None en un ``<video>``.
+    - ``src``: la URL del video o del reproductor, resuelta. Un ``<video>`` sin
+      ``src`` (los reproductores por MSE) cuenta igual, con ``src`` None.
+    - ``decorativo``: un ``<video>`` con ``autoplay`` y ``muted`` y sin
+      ``controls`` es el fondo animado de una cabecera, no un video que Google
+      vaya a indexar como tal (no hay forma de verlo ni de pararlo).
+
+    El ``<noscript>`` SI cuenta: la carga diferida de los plugins deja ahi el
+    unico ``<iframe>`` que se ve sin JavaScript (el mismo video dos veces es
+    uno). Lo de ``<template>`` no, porque no esta en el DOM. Sin repetidos y
+    como mucho ``MAX_VIDEOS``.
+    """
+    videos: list[dict[str, Any]] = []
+    vistos: set[tuple] = set()
+
+    def _anadir(tipo: str, vid: str | None, src: str | None, decorativo: bool = False) -> None:
+        clave = (tipo, vid or src or f"#{len(videos)}")
+        if clave in vistos or len(videos) >= MAX_VIDEOS:
+            return
+        vistos.add(clave)
+        videos.append({"tipo": tipo, "id": vid, "src": src, "decorativo": decorativo})
+
+    def _absoluta(href: str | None) -> str | None:
+        limpio = _clean(href)
+        if not limpio or limpio[:5].lower() in ("data:", "blob:"):
+            return None
+        return _resolve(base_url, limpio) if base_url else limpio
+
+    fuera = "[not(ancestor::template)]"
+    for nodo in selector.xpath(f"//*[self::video or self::iframe or self::embed or self::object"
+                               f" or self::lite-youtube or self::lite-vimeo]{fuera}"):
+        raiz = nodo.root
+        etiqueta = (raiz.tag or "").lower() if isinstance(raiz.tag, str) else ""
+        if etiqueta == "video":
+            src = raiz.get("src") or nodo.xpath("./source/@src").get()
+            decorativo = (raiz.get("autoplay") is not None and raiz.get("muted") is not None
+                          and raiz.get("controls") is None)
+            _anadir("video", None, _absoluta(src), decorativo)
+            continue
+        if etiqueta in ("lite-youtube", "lite-vimeo"):
+            vid = _clean(raiz.get("videoid"))
+            if vid:
+                _anadir(etiqueta.split("-", 1)[1], vid, None)
+            continue
+        for atributo in ("src", "data-src", "data-lazy-src", "data"):
+            proveedor = video_de_url(raiz.get(atributo))
+            if proveedor:
+                _anadir(proveedor[0], proveedor[1], _absoluta(raiz.get(atributo)))
+                break
+    return videos
 
 
 # ---------------------------------------------------------------------------

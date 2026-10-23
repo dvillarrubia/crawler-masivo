@@ -169,6 +169,9 @@ filtrar por `urls.is_html`.
 | charset_bom | varchar(40) | Charset del BOM, si lo hay. Solo sin render |
 | cuerpo_solo_ascii | bool | Sin bytes por encima de 127. Solo sin render |
 | texto_mal_codificado | bool | El titulo o el texto llevan U+FFFD. Solo sin render |
+| videos | json | Videos de la pagina (`extract_videos`): `[{tipo: video\|youtube\|vimeo, id, src, decorativo}]`, como mucho 20. `[]` = ninguno; NULL = rastreo anterior, y marca de «medido» de `amphtml` y `alternate_movil`. Decision 155 |
+| amphtml | text | `<link rel="amphtml">` del head, resuelto. Decision 156 |
+| alternate_movil | text | `<link rel="alternate" media="...max-width...">` del head (sin hreflang), resuelto: la version movil en otra URL. Decision 156 |
 
 ### `headings` — Encabezados H1-H6
 | Columna | Tipo | Descripcion |
@@ -371,7 +374,7 @@ job; sin fila = no se comprobo (sondas apagadas, tope, tope por host, red intern
 | job_id | UUID (FK → jobs, CASCADE) | Sin url FK: el destino no es del censo |
 | url_hash | varchar(64) | El de `links.to_url_hash` |
 | url / host | text / varchar(255) | |
-| uso | varchar(10) | enlace, recurso (por que se pidio la primera vez) |
+| uso | varchar(10) | enlace, recurso, og_image (por que se pidio la primera vez) |
 | interno | bool | Recurso del propio sitio |
 | metodo | varchar(8) | HEAD o GET (el ultimo); NULL = no se pidio (robots, origen caido) |
 | status_code | int | Lo que respondio la URL enlazada |
@@ -381,6 +384,7 @@ job; sin fila = no se comprobo (sondas apagadas, tope, tope por host, red intern
 | host_caido | bool | El spider dio el origen por inalcanzable y dejo de pedirle |
 | content_type / content_length | varchar(255) / bigint | Bytes por el cable (`Content-Range` o `Content-Length`) |
 | error | text | El fallo de red, recortado |
+| ancho / alto | int / int | Solo `uso='og_image'`: dimensiones leidas de la cabecera del fichero (`shared/dimensiones_imagen.py`). NULL = no se pudo leer. Decision 154 |
 | fecha | timestamptz | |
 
 Indice: `uq_rsond_job_hash (job_id, url_hash)`.

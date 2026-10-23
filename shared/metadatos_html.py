@@ -189,3 +189,63 @@ def diagnostico_charset(
     if len(set(declarados.values())) > 1:
         return "incoherente", manda
     return None, manda
+
+
+# ---------------------------------------------------------------------------
+# Tarjetas para redes sociales: og:image y twitter:card (decision 154)
+# ---------------------------------------------------------------------------
+
+# Los cuatro tipos de tarjeta que X documenta. Cualquier otro valor (`large`,
+# `summary-large-image`, el nombre del sitio) no pinta tarjeta: X cae a
+# `summary` o a nada.
+TWITTER_CARDS = frozenset({"summary", "summary_large_image", "app", "player"})
+
+# Minimos documentados. Facebook descarta una og:image por debajo de 200x200;
+# la tarjeta grande de X pide 300x157 (y cae a la pequena por debajo).
+OG_IMAGE_MIN = (200, 200)
+TWITTER_GRANDE_MIN = (300, 157)
+
+OG_PEQUENA = "menor_de_200x200"
+TWITTER_GRANDE_PEQUENA = "menor_de_300x157_con_tarjeta_grande"
+
+
+def twitter_card_invalida(valor: str | None) -> bool:
+    """Si ``twitter:card`` lleva un valor que X no reconoce. Sin la etiqueta no
+    es invalida: X usa Open Graph de respaldo (decision 108)."""
+    if valor is None:
+        return False
+    return valor.strip().lower() not in TWITTER_CARDS
+
+
+def motivo_og_image_pequena(ancho: int | None, alto: int | None,
+                            twitter_card: str | None = None) -> str | None:
+    """Por que la og:image medida es demasiado pequena, o None.
+
+    Sin medida no se afirma nada (67): `None` en cualquiera de los dos lados es
+    «no medida», no «pequena».
+    """
+    if not ancho or not alto:
+        return None
+    if ancho < OG_IMAGE_MIN[0] or alto < OG_IMAGE_MIN[1]:
+        return OG_PEQUENA
+    if ((twitter_card or "").strip().lower() == "summary_large_image"
+            and (ancho < TWITTER_GRANDE_MIN[0] or alto < TWITTER_GRANDE_MIN[1])):
+        return TWITTER_GRANDE_PEQUENA
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Alternativa movil (decision 156)
+# ---------------------------------------------------------------------------
+
+_RE_MEDIA_MOVIL = re.compile(r"max-(device-)?width|handheld", re.I)
+
+
+def es_media_movil(media: str | None) -> bool:
+    """Si el ``media`` de un ``<link rel="alternate">`` anuncia la version movil.
+
+    Google documenta ``only screen and (max-width: 640px)``; los sitios viejos
+    escriben ``handheld`` (YouTube lo sigue sirviendo). Un ``media="print"`` o
+    uno vacio no es una alternativa movil.
+    """
+    return bool(media and _RE_MEDIA_MOVIL.search(media))

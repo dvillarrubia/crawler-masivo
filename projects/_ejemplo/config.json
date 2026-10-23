@@ -72,7 +72,9 @@
     "enlaces_externos_max": 5000,
     "comprobar_recursos": false,
     "recursos_max": 20000,
-    "sondas_por_host": 50
+    "sondas_por_host": 50,
+    "og_image_muestra": 200,
+    "og_image_por_plantilla": 5
   },
   "extraction": {
     "extract_structured_data": true,

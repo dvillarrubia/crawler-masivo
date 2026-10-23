@@ -170,6 +170,13 @@ class CrawlBehaviorConfig(BaseModel):
     recursos_max: int = Field(default=20000, ge=0, le=500000)
     # Tope de URLs por host externo (enlaces y recursos juntos). 0 = sin tope.
     sondas_por_host: int = Field(default=50, ge=0, le=10000)
+    # Dimensiones de la og:image (decision 154): cuantas imagenes distintas se
+    # piden (GET de 64 KB, fuera de max_urls) para medirlas, y cuantas nuevas
+    # por forma de ruta de la pagina. Encendida de serie porque esta acotada;
+    # `og_image_muestra` 0 = apagada; `og_image_por_plantilla` 0 = sin tope
+    # por plantilla (solo el global).
+    og_image_muestra: int = Field(default=200, ge=0, le=5000)
+    og_image_por_plantilla: int = Field(default=5, ge=0, le=100)
 
 
 class UrlFilterConfig(BaseModel):
@@ -833,6 +840,10 @@ class HtmlMetaResponse(BaseModel):
     charset_bom: str | None = None
     cuerpo_solo_ascii: bool | None = None
     texto_mal_codificado: bool | None = None
+    # Decisiones 155 y 156: videos de la pagina y versiones AMP y movil.
+    videos: list[dict[str, Any]] | None = None
+    amphtml: str | None = None
+    alternate_movil: str | None = None
 
 
 class PageContentResponse(BaseModel):

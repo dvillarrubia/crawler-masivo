@@ -963,3 +963,33 @@
    indexables (sin aviso, es lo correcto); penguin, CST y Saunier, nada. Basta
    con **re-analizar**. Queda de la 7.2: `data-nosnippet` (exige guardarlo al
    rastrear) y el contenido visible sin JavaScript, que sale de la 7.1.
+
+<a id="d156"></a>
+156. **La versión AMP y la móvil que la página anuncia se guardan, y solo se
+   juzgan si el rastreo las encontró** (#184, resto de #150).
+   `html_meta.amphtml` (el `<link rel="amphtml">` del head) y
+   `html_meta.alternate_movil` (el `<link rel="alternate">` del head con un
+   `media` de móvil —`max-width`, `max-device-width` o `handheld`— y sin
+   `hreflang`, que sería una anotación de idioma), resueltos. `html_meta.videos`
+   no NULL es su marca de «medido» (155).
+   - **No se siguen**: no son enlaces, y meterlos en la frontera gastaría
+     `max_urls` en copias. Por eso solo se juzga el destino que el censo tiene
+     por otro camino (con `_Fichas`, por la URL o la clave de `misma_url`). Lo
+     que no está en el censo no se afirma (67).
+   - **`amphtml_incorrecto` y `alternate_movil_incorrecto`**, por (host,
+     plantilla, motivo): `destino_error` (4xx/5xx), `destino_redirige` y
+     `destino_sin_canonical_de_vuelta` (2xx cuyo canonical no es la página que
+     la anuncia). Severidad por consecuencia (64): la móvil que no responde o
+     no apunta de vuelta es lo que Google indexa con mobile-first (`warning`);
+     la AMP rota la deja de usar y sirve la canónica (`info`), pero la que no
+     apunta de vuelta compite con ella (`warning`); la móvil que redirige suele
+     ser una anotación vieja de un sitio ya adaptable (`info`). Solo
+     indexables (47). La paridad de la 119 sigue anotando `redirige_a` en los
+     m-dot muestreados; esto no la sustituye.
+   - **Medido** (22 páginas): El País y Marca anuncian AMP en sus noticias
+     (`?outputType=amp` y `amp.marca.com`), y las dos AMP, descargadas, llevan
+     el canonical de vuelta: no habría aviso. YouTube sirve todavía
+     `<link rel="alternate" media="handheld" href="https://m.youtube.com/">`.
+     Ninguna de las páginas de clientes (Lopesan, UOC) anuncia ni AMP ni m-dot,
+     que es lo que esperaba la issue: «solo en los sitios que todavía los
+     usan». Pide re-rastrear. Sin validador de AMP (descartado en #184).
