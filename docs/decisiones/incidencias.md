@@ -1175,9 +1175,10 @@
      mediano del 0,1 % en posición 2 en escritorio en Lopesan) y sin la búsqueda
      no se pueden quitar las de marca.
    - **`oportunidad_posicion`** (info): indexable en 4-20 con impresiones de
-     sobra y poco enlazada, **relativo al sitio**: PageRank por debajo de su
-     cuartil bajo, o más lejos de la home que su cuartil alto (y al menos 4
-     clics). Con valores fijos salían 1.503 en Lopesan: el 59 % de sus
+     sobra y poco enlazada, **relativo al sitio**: PageRank en su cuartil bajo
+     (incluido el empate en el cuartil, salvo que meta a más de la mitad: es un
+     entero 0-100 con muchos empates), o más lejos de la home que su cuartil
+     alto (y al menos 4 clics). Con valores fijos salían 1.503 en Lopesan: el 59 % de sus
      indexables está en 4-20 con más de 500 impresiones y la mitad a 5 clics o
      más. Se avisan las **100 con más clics por ganar** si llegaran al CTR
      mediano de las páginas del sitio en el top 3. Propone hasta cinco fuentes:
@@ -1192,8 +1193,12 @@
      `trafico_en_variante_con_parametros`) y las alternativas de hreflang
      (Google enseña a cada usuario la suya). Sin esto, las 15 búsquedas con más
      clics de Lopesan eran la ficha de un hotel con `?partner=` frente a la
-     limpia, o en /es/ frente a /en/. La home en búsquedas de marca (`marcas` en
-     la configuración) no cuenta. Gravedad por consecuencia (92): warning desde
+     limpia, o en /es/ frente a /en/. Solo compiten URLs **del censo con 200**:
+     una que solo está en Search Console puede ser la vieja de un cambio de slug
+     con 301 a mitad de ventana, que precede a la nueva y no compite con ella. La
+     home en búsquedas de marca (`marcas` en la configuración) no cuenta. Se
+     ancla en la URL menor del grupo, no en la de más clics, que es justo lo que
+     se invierte en una canibalización. Gravedad por consecuencia (92): warning desde
      100 clics, info por debajo. No decide fusionar o diferenciar (#18).
    - **`ctr_bajo_para_posicion`** (info): la curva de CTR por tramo de posición
      sale de las filas búsqueda × página con 50 impresiones o más, sin las de
@@ -1212,6 +1217,17 @@
      `sitemap_con_errores_en_google`. Solo los índices que leyó el rastreo (o
      todos si no leyó ninguno): los hijos de un índice no salen en la lista de
      Google. Sin la lista de Google, nada.
+   - **Fuera de la comparación de incidencias** (`comparacion.NO_COMPARABLES`):
+     oportunidades, CTR bajo y canibalización dependen del tráfico de la ventana
+     y de un ranking con tope; que una pase del puesto 100 al 101 no es «resuelta».
+   - **Que no tumbe nada**: el paso va en un savepoint con su try entero (74); un
+     `rollback()` a mitad de `run_all` deshacía las incidencias y el PageRank ya
+     escritos. Los href del HTML se convierten en clave sin lanzar
+     (`https://[lang].x.com/`, puertos imposibles). La descarga guarda el motivo
+     de cualquier error para no reintentar cada minuto, y no impide la
+     inspección del día. Solo las propiedades activas del cliente: una vieja que
+     sigue en la base contaría los clics dos veces. «No leído» exige además que
+     se enviara hace más de 30 días.
    - **Rendimiento por plantilla y por profundidad**, y la curva, en
      `jobs.gsc_resumen.oportunidades` y en la tarjeta de Search Console del
      rastreo.
@@ -1219,11 +1235,12 @@
    local, con sus 90 días reales de búsquedas bajados de Google en solo
    lectura): 100 oportunidades, de las que se revisaron las 10 primeras con sus
    fuentes (todas existen, indexables con 200, y ninguna enlaza ya a la
-   página); 478 canibalizaciones (62 warning), las 10 primeras sin pares
+   página; 74 por PageRank bajo); 459 canibalizaciones (62 warning), las 10 primeras sin pares
    canonical ni hreflang: la ficha de un hotel frente a su galería en
    «… fotos», la de spa frente a la del hotel; 30 páginas con CTR bajo con
    `marcas: ["lopesan"]` (un artículo del blog con 60.422 impresiones y 208
    clics) y 4 sin marcas, todas de búsquedas de marca. Ningún aviso de
    sitemaps: el índice que leyó el rastreo Google lo descargó el 20-oct. El
-   análisis completo, 24 s. Lopesan no tiene `marcas` declaradas: conviene
+   análisis completo, 18-24 s. Revisado por un agente aparte: nueve hallazgos,
+   todos arreglados con su test. Lopesan no tiene `marcas` declaradas: conviene
    ponérselas.

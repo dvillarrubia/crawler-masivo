@@ -1561,12 +1561,18 @@ def _sincronizar_gsc(cliente_id: str, propiedad: str) -> None:
             # Busquedas y sitemaps (decision 157), una vez al dia.
             from shared.gsc_detalle import sincronizar as sincronizar_detalle, toca as toca_detalle
 
-            if e is not None and toca_detalle(e, datetime.now(timezone.utc)):
-                e = sincronizar_detalle(s, cliente, integ) or e
-                d = e.detalle or {}
-                logger.info("Search Console de %s (%s): consultas hasta %s, %s sitemaps%s", cliente.slug,
-                            propiedad, (d.get("consultas") or {}).get("ultimo_dia"), d.get("sitemaps"),
-                            f" ({d['motivo']})" if d.get("motivo") else "")
+            # Con su try: lo de las busquedas no puede dejar sin la inspeccion
+            # del dia.
+            try:
+                if e is not None and toca_detalle(e, datetime.now(timezone.utc)):
+                    e = sincronizar_detalle(s, cliente, integ) or e
+                    d = e.detalle or {}
+                    logger.info("Search Console de %s (%s): consultas hasta %s, %s sitemaps%s", cliente.slug,
+                                propiedad, (d.get("consultas") or {}).get("ultimo_dia"), d.get("sitemaps"),
+                                f" ({d['motivo']})" if d.get("motivo") else "")
+            except Exception:
+                s.rollback()
+                logger.exception("Search Console de %s: fallo en las busquedas; sigue la inspeccion", cliente.slug)
             # Despues de la descarga, la muestra diaria de inspeccion (decision 144).
             if e is not None and toca_inspeccion(e, datetime.now(timezone.utc)):
                 n = inspeccionar(s, cliente, integ)

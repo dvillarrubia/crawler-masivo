@@ -138,6 +138,35 @@ def cubre(propiedad: str, url: str) -> bool:
     return url.lower().startswith(propiedad.lower())
 
 
+def avisar_sin_tumbar(an) -> dict[str, Any] | None:
+    """`avisar` en un savepoint y con el try cubriendolo entero (decision 74):
+    un dato raro de Search Console no puede llevarse por delante el analisis
+    ni deshacer lo que ya lleva hecho (un rollback a mitad de `run_all` borraba
+    las incidencias y el PageRank escritos antes)."""
+    an._flush_issues()
+    pendientes = list(an._pending_issues)
+    try:
+        with an.session.begin_nested():
+            return avisar(an)
+    except Exception:
+        an._pending_issues = pendientes
+        logger.exception("Oportunidades de Search Console del job %s: fallo; el analisis sigue", an.job_id)
+        return None
+
+
+def _clave_segura(url: str | None) -> str | None:
+    """`clave_de_url` sin lanzar: un href del HTML puede ser cualquier cosa
+    (`https://[lang].x.com/`, un puerto imposible) y `clave_url` lo rechaza."""
+    from shared.gsc import clave_de_url
+
+    if not url:
+        return None
+    try:
+        return clave_de_url(url)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def avisar(an) -> dict[str, Any] | None:
     from analysis.avisos_de_gsc import VENTANA_DIAS, _dia_del_censo
     from shared.models import Job
@@ -186,12 +215,24 @@ class _Contexto:
         self.canibal_clics_grave = int(t.get("gsc_canibalizacion_clics_grave", 100))
         self.marcas = list((job.config or {}).get("marcas") or [])
         reglas = reglas_de_plantilla((job.config or {}).get("templates"))
-        self.estados = an.session.query(GscEstado).filter(GscEstado.cliente_id == job.cliente_id).all()
+        # Solo las propiedades que el cliente tiene activas: si paso de una de
+        # prefijo a `sc-domain:`, la vieja sigue en la base y sus filas se
+        # contarian dos veces.
+        from shared.models import Client
+
+        cliente = an.session.get(Client, job.cliente_id)
+        activas = {str((i.get("parametros") or {}).get("propiedad") or "").strip()
+                   for i in (getattr(cliente, "integraciones", None) or [])
+                   if isinstance(i, dict) and i.get("tipo") == "gsc" and i.get("activa", True)}
+        self.estados = [e for e in an.session.query(GscEstado).filter(GscEstado.cliente_id == job.cliente_id)
+                        if not activas or e.propiedad in activas]
+        self.propiedades = sorted({e.propiedad for e in self.estados})
         self.urls = [u for u in an.session.execute(
             select(Url.id, Url.url, Url.url_hash, Url.path, Url.is_internal, Url.is_html, Url.status_code,
                    Url.indexable, Url.noindex, Url.indexability_status, Url.pagerank_score,
                    Url.click_depth, Url.redirect_url, Url.gsc_clics, Url.gsc_impresiones, Url.gsc_posicion)
             .where(Url.job_id == an.job_id)).all()]
+        self.urls = [u for u in self.urls if _clave_segura(u.url)]
         self.por_clave = {clave_de_url(u.url): u for u in self.urls}
         self.clave_de_id = {u.id: k for k, u in self.por_clave.items()}
         self.plantilla = {u.id: plantilla_de(u.path or urlsplit(u.url).path, reglas) for u in self.urls}
@@ -210,17 +251,20 @@ class _Contexto:
             if st.get("primer_dia"):
                 self.consultas_desde = st["primer_dia"]
         salida: dict[str, dict[str, list]] = defaultdict(dict)
+        if not self.propiedades:
+            return salida
         try:
-            filas = self.an.session.execute(
-                select(C.url_clave, C.consulta, func.sum(C.clics), func.sum(C.impresiones),
-                       func.sum(C.posicion * C.impresiones))
-                .where(C.cliente_id == self.job.cliente_id, C.fecha >= self.desde, C.fecha <= self.hasta)
-                .group_by(C.url_clave, C.consulta))
-            for clave, consulta, clics, imp, pos_x in filas:
-                salida[clave][consulta] = [int(clics or 0), int(imp or 0), float(pos_x or 0)]
-        except Exception:  # noqa: BLE001 -- base sin migrar
-            self.an.session.rollback()
+            with self.an.session.begin_nested():
+                filas = self.an.session.execute(
+                    select(C.url_clave, C.consulta, func.sum(C.clics), func.sum(C.impresiones),
+                           func.sum(C.posicion * C.impresiones))
+                    .where(C.cliente_id == self.job.cliente_id, C.propiedad.in_(self.propiedades),
+                           C.fecha >= self.desde, C.fecha <= self.hasta)
+                    .group_by(C.url_clave, C.consulta)).all()
+        except Exception:  # noqa: BLE001 -- base sin migrar: un savepoint, no un rollback
             return {}
+        for clave, consulta, clics, imp, pos_x in filas:
+            salida[clave][consulta] = [int(clics or 0), int(imp or 0), float(pos_x or 0)]
         return salida
 
 
@@ -233,6 +277,10 @@ def _oportunidades(ctx: _Contexto, consultas: dict) -> int:
     scores = [float(u.pagerank_score) for u in indexables if u.pagerank_score is not None]
     profundidades = [u.click_depth for u in indexables if u.click_depth is not None]
     p25 = _cuantil(scores, 0.25) if scores else None
+    # `pagerank_score` es entero de 0 a 100, con muchos empates: el cuartil
+    # bajo incluye a los que estan justo en el, salvo que eso meta a mas de la
+    # mitad de las indexables (en Lopesan, p25 46 y mediana 48).
+    p25_incluye = p25 is not None and sum(1 for x in scores if x <= p25) <= len(scores) / 2
     # «Lejos» es relativo al sitio: en Lopesan la mitad de las indexables estan
     # a 5 clics o mas de la home, y con un 4 fijo todo era lejos.
     lejos = max(ctx.profundidad, _cuantil(profundidades, 0.75)) if profundidades else ctx.profundidad
@@ -247,7 +295,8 @@ def _oportunidades(ctx: _Contexto, consultas: dict) -> int:
                 or (u.gsc_impresiones or 0) < ctx.min_imp):
             continue
         motivos = []
-        if p25 is not None and u.pagerank_score is not None and u.pagerank_score < p25:
+        if p25 is not None and u.pagerank_score is not None and (
+                u.pagerank_score < p25 or (u.pagerank_score == p25 and p25_incluye)):
             motivos.append("pagerank_bajo")
         if u.click_depth is not None and u.click_depth > lejos:
             motivos.append("profundidad")
@@ -361,13 +410,13 @@ class _Grupos:
 
 def _grupos(ctx: _Contexto, url_de: dict[str, str]) -> _Grupos:
     from analysis.avisos_de_gsc import _sin_query
-    from shared.gsc import clave_de_url
     from shared.models import Hreflang, HtmlMeta
 
     g = _Grupos()
     for u in ctx.urls:
-        if u.redirect_url:
-            g.unir(ctx.clave_de_id[u.id], clave_de_url(u.redirect_url))
+        destino = _clave_segura(u.redirect_url)
+        if destino:
+            g.unir(ctx.clave_de_id[u.id], destino)
     limpias = {_sin_query(u.url): ctx.clave_de_id[u.id] for u in ctx.urls
                if u.is_internal and not urlsplit(u.url).query}
     for clave, url in url_de.items():
@@ -379,13 +428,14 @@ def _grupos(ctx: _Contexto, url_de: dict[str, str]) -> _Grupos:
         for uid, href, cab in ctx.an.session.execute(
                 select(HtmlMeta.url_id, HtmlMeta.canonical_href, HtmlMeta.canonical_header)
                 .where(HtmlMeta.url_id.in_(lote))):
-            canon = (href or "").strip() or cab
-            if canon:
-                g.unir(ctx.clave_de_id[uid], clave_de_url(canon))
+            destino = _clave_segura((href or "").strip() or cab)
+            if destino:
+                g.unir(ctx.clave_de_id[uid], destino)
         for uid, href, en_body in ctx.an.session.execute(
                 select(Hreflang.url_id, Hreflang.href, Hreflang.en_body).where(Hreflang.url_id.in_(lote))):
-            if href and not en_body:
-                g.unir(ctx.clave_de_id[uid], clave_de_url(href))
+            destino = _clave_segura(href)
+            if destino and not en_body:
+                g.unir(ctx.clave_de_id[uid], destino)
     return g
 
 
@@ -435,25 +485,30 @@ def _canibalizacion(ctx: _Contexto, consultas: dict) -> int:
         total = clics if clics > 0 else imp
         repartidas = []
         for k, acc in juntas.items():
-            del_censo = [c for c in acc[3] if c in ctx.por_clave]
-            k = max(del_censo, key=lambda c: (por_url[c][base], c)) if del_censo else k
-            url = url_de.get(k) or url_de.get(acc[3][0])
-            if not url or (marca and _es_home(url)):
+            # Solo compite lo que el censo tiene y responde 200: una URL que
+            # solo esta en Search Console puede ser la vieja de un cambio de
+            # slug con 301 a mitad de ventana, que no compite con la nueva sino
+            # que la precede.
+            del_censo = [c for c in acc[3] if c in ctx.por_clave and ctx.por_clave[c].status_code == 200]
+            if not del_censo:
+                continue
+            k = max(del_censo, key=lambda c: (por_url[c][base], c))
+            url = ctx.por_clave[k].url
+            if marca and _es_home(url):
                 continue
             if acc[base] / total >= ctx.canibal_parte:
                 repartidas.append((k, url, acc))
         if len(repartidas) < 2:
             continue
-        en_censo = [(k, url, acc) for k, url, acc in repartidas if k in ctx.por_clave]
-        if not en_censo:
-            continue
-        hallazgos.append((clics, imp, consulta, repartidas, en_censo, base, total))
+        hallazgos.append((clics, imp, consulta, repartidas, repartidas, base, total))
     hallazgos.sort(key=lambda h: (-h[0], -h[1], h[2]))
     if len(hallazgos) > MAX_CANIBALIZACIONES:
         logger.info("Canibalizacion: %d busquedas, se avisan las %d con mas clics",
                     len(hallazgos), MAX_CANIBALIZACIONES)
     for clics, imp, consulta, repartidas, en_censo, base, total in hallazgos[:MAX_CANIBALIZACIONES]:
-        ancla = max(en_censo, key=lambda r: (r[2][base], r[1]))
+        # Ancla estable: la URL menor del grupo, no la de mas clics, que es
+        # justo lo que se invierte en una canibalizacion.
+        ancla = min(en_censo, key=lambda r: r[1])
         urls = []
         for k, url, acc in sorted(repartidas, key=lambda r: (-r[2][base], r[1])):
             u = ctx.por_clave.get(k)
@@ -567,10 +622,10 @@ def _sitemaps(ctx: _Contexto) -> dict[str, int] | None:
     if not ficheros or not sabidos:
         return None
     try:
-        de_google = {(s.propiedad, s.path): s for s in ctx.an.session.query(GscSitemap)
-                     .filter(GscSitemap.cliente_id == ctx.job.cliente_id).all()}
-    except Exception:  # noqa: BLE001
-        ctx.an.session.rollback()
+        with ctx.an.session.begin_nested():
+            de_google = {(s.propiedad, s.path): s for s in ctx.an.session.query(GscSitemap)
+                         .filter(GscSitemap.cliente_id == ctx.job.cliente_id).all()}
+    except Exception:  # noqa: BLE001 -- base sin migrar: un savepoint, no un rollback
         return None
     # Los hijos de un indice no salen en la lista de Google: solo se miran los
     # indices, o todos si el rastreo no leyo ningun indice.
@@ -580,39 +635,43 @@ def _sitemaps(ctx: _Contexto) -> dict[str, int] | None:
     limite = datetime.combine(ctx.hasta, datetime.min.time(), timezone.utc) - timedelta(
         days=SITEMAP_DIAS_SIN_LEER)
     cuenta = {"no_enviados": 0, "no_leidos": 0, "con_errores": 0}
+    def aware(t):
+        return t.replace(tzinfo=t.tzinfo or timezone.utc) if t else None
+
     for f in mirar:
         url = f["url"]
-        for e in sabidos:
-            if not cubre(e.propiedad, url):
-                continue
-            ancla = anclas.de_fichero(url)
-            if ancla is None:
-                continue
-            g = de_google.get((e.propiedad, url))
-            if g is None:
-                cuenta["no_enviados"] += 1
-                ctx.an._add_issue(ancla, "sitemap_no_enviado_a_google", "info", {
-                    "fichero": url, "propiedad": e.propiedad,
-                    "enviados": sorted(p for (prop, p) in de_google if prop == e.propiedad)[:10],
-                }, group_key=_clave_de_grupo(url))
-                continue
-            descargado = g.descargado.replace(tzinfo=g.descargado.tzinfo or timezone.utc) if g.descargado else None
-            if descargado is None or descargado < limite:
-                cuenta["no_leidos"] += 1
-                ctx.an._add_issue(ancla, "sitemap_no_leido_por_google", "warning", {
-                    "fichero": url, "propiedad": e.propiedad,
-                    "descargado": descargado.isoformat() if descargado else None,
-                    "enviado": g.enviado.isoformat() if g.enviado else None,
-                    "pendiente": g.pendiente, "dias": SITEMAP_DIAS_SIN_LEER,
-                }, group_key=_clave_de_grupo(url))
-            if (g.errores or 0) > 0:
-                cuenta["con_errores"] += 1
-                ctx.an._add_issue(ancla, "sitemap_con_errores_en_google", "warning", {
-                    "fichero": url, "propiedad": e.propiedad, "errores": g.errores,
-                    "avisos": g.avisos,
-                    "descargado": descargado.isoformat() if descargado else None,
-                }, group_key=_clave_de_grupo(url))
-            break
+        props = sorted(e.propiedad for e in sabidos if cubre(e.propiedad, url))
+        ancla = anclas.de_fichero(url) if props else None
+        if ancla is None:
+            continue
+        # En CUALQUIERA de las propiedades que cubren la URL: con una de prefijo
+        # y otra de dominio, el sitemap puede estar enviado solo en una.
+        enviados = [de_google[(p, url)] for p in props if (p, url) in de_google]
+        if not enviados:
+            cuenta["no_enviados"] += 1
+            ctx.an._add_issue(ancla, "sitemap_no_enviado_a_google", "info", {
+                "fichero": url, "propiedades": props,
+                "enviados": sorted(p for (prop, p) in de_google if prop in props)[:10],
+            }, group_key=_clave_de_grupo(url))
+            continue
+        g = max(enviados, key=lambda x: (aware(x.descargado) or datetime.min.replace(tzinfo=timezone.utc)))
+        descargado, enviado = aware(g.descargado), aware(g.enviado)
+        # Un sitemap enviado hace menos de 30 dias puede no haberse bajado aun:
+        # eso no es «no lo lee».
+        if (descargado is None or descargado < limite) and (enviado is None or enviado < limite):
+            cuenta["no_leidos"] += 1
+            ctx.an._add_issue(ancla, "sitemap_no_leido_por_google", "warning", {
+                "fichero": url, "propiedad": g.propiedad,
+                "descargado": descargado.isoformat() if descargado else None,
+                "enviado": enviado.isoformat() if enviado else None,
+                "pendiente": g.pendiente, "dias": SITEMAP_DIAS_SIN_LEER,
+            }, group_key=_clave_de_grupo(url))
+        if (g.errores or 0) > 0:
+            cuenta["con_errores"] += 1
+            ctx.an._add_issue(ancla, "sitemap_con_errores_en_google", "warning", {
+                "fichero": url, "propiedad": g.propiedad, "errores": g.errores, "avisos": g.avisos,
+                "descargado": descargado.isoformat() if descargado else None,
+            }, group_key=_clave_de_grupo(url))
     return cuenta
 
 

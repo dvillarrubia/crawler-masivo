@@ -215,6 +215,10 @@ def sincronizar(db, cliente, integracion: dict, *, hoy: date | None = None,
         detalle["motivo"] = G.traducir(exc.status, str(exc), cuenta, propiedad)
         logger.warning("Search Console (detalle) de %s (%s): %s", getattr(cliente, "slug", "?"),
                        propiedad, detalle["motivo"])
+    except Exception as exc:  # noqa: BLE001 -- la base, un dato raro: que no vuelva a pedirlo cada minuto
+        db.rollback()
+        detalle["motivo"] = f"Error al guardar las búsquedas: {type(exc).__name__}: {str(exc)[:200]}"
+        logger.exception("Search Console (detalle) de %s (%s): fallo", getattr(cliente, "slug", "?"), propiedad)
     e = G._estado(db, cliente.id, propiedad)
     e.detalle = dict(detalle)
     db.commit()

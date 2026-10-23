@@ -260,3 +260,83 @@ def test_idiomas_por_hreflang_y_variantes_no_son_canibalizacion(s):
     _consulta(s, c, "/es/spa", "spa x", 30, 500)
     _, issues = _analizar(s, j)
     assert not [t for (_, t) in issues if t == "canibalizacion_por_consulta"]
+
+
+def test_un_href_imposible_no_tumba_el_analisis_ni_borra_lo_hecho(s):
+    from shared.models import Hreflang
+
+    c, j = _montar(s)
+    a, b = _url(s, j, "/a"), _url(s, j, "/b")
+    s.add(Hreflang(url_id=a.id, lang="en", href="https://[lang].x.com/page", en_body=False))
+    s.add(HtmlMeta(url_id=b.id, canonical_href="https://x.com:99999/b"))
+    _consulta(s, c, "/a", "q", 60, 500)
+    _consulta(s, c, "/b", "q", 40, 500)
+    previa = Issue(job_id=j.id, url_id=a.id, issue_type="title_missing", severity="error", details={})
+    s.add(previa)
+    s.commit()
+    an = SEOAnalyzer(s, j.id)
+    O.avisar_sin_tumbar(an)
+    s.commit()
+    tipos = {t for (t,) in s.execute(select(Issue.issue_type).where(Issue.job_id == j.id))}
+    assert "title_missing" in tipos and "canibalizacion_por_consulta" in tipos
+
+
+def test_si_algo_revienta_se_deshace_solo_lo_suyo(s, monkeypatch):
+    c, j = _montar(s)
+    a = _url(s, j, "/a")
+    s.add(Issue(job_id=j.id, url_id=a.id, issue_type="title_missing", severity="error", details={}))
+    s.commit()
+
+    def revienta(ctx, consultas):
+        ctx.an._add_issue(a.id, "oportunidad_posicion", "info", {})
+        ctx.an._flush_issues()
+        raise RuntimeError("dato raro")
+
+    monkeypatch.setattr(O, "_oportunidades", revienta)
+    an = SEOAnalyzer(s, j.id)
+    assert O.avisar_sin_tumbar(an) is None
+    s.commit()
+    tipos = [t for (t,) in s.execute(select(Issue.issue_type).where(Issue.job_id == j.id))]
+    assert tipos == ["title_missing"]
+
+
+def test_sitemap_enviado_hace_poco_no_es_no_leido(s):
+    ficheros = [{"url": "https://x.com/sitemap.xml", "status": 200, "hijos": 3}]
+    c, j = _montar(s, sitemaps={"ficheros": ficheros}, detalle={"sitemaps": 1})
+    _url(s, j, "/")
+    s.add(GscSitemap(cliente_id=c.id, propiedad="sc-domain:x.com", path="https://x.com/sitemap.xml",
+                     enviado=datetime(2026, 10, 13, tzinfo=timezone.utc), descargado=None, pendiente=True,
+                     errores=0, visto_en=datetime(2026, 10, 14, tzinfo=timezone.utc)))
+    resumen, issues = _analizar(s, j)
+    assert resumen["sitemaps"] == {"no_enviados": 0, "no_leidos": 0, "con_errores": 0}
+
+
+def test_una_url_que_solo_esta_en_search_console_no_canibaliza(s):
+    c, j = _montar(s)
+    nueva = _url(s, j, "/slug-nuevo")
+    _consulta(s, c, "/slug-viejo", "zapatos", 50, 500)     # 301 a mitad de ventana, fuera del censo
+    _consulta(s, c, "/slug-nuevo", "zapatos", 50, 500)
+    _, issues = _analizar(s, j)
+    assert not [t for (_, t) in issues if t == "canibalizacion_por_consulta"]
+
+
+def test_el_cuartil_bajo_del_pagerank_con_empates(s):
+    c, j = _montar(s)
+    obj = _url(s, j, "/obj", pr=10, clics=20, imp=1000, pos=7.0)
+    for i in range(3):
+        _url(s, j, f"/e{i}", pr=10)                        # 4 de 12 empatadas en el minimo
+    for i in range(8):
+        _url(s, j, f"/f{i}", pr=60 + i)
+    _, issues = _analizar(s, j)
+    assert issues[(obj.id, "oportunidad_posicion")][1]["motivos"] == ["pagerank_bajo"]
+
+
+def test_la_comparacion_no_afirma_nada_de_los_avisos_de_trafico():
+    from shared.comparacion import comparar_incidencias
+
+    a = [{"issue_type": "oportunidad_posicion", "url": "https://x.com/a", "group_key": None, "severity": "info"},
+         {"issue_type": "title_missing", "url": "https://x.com/a", "group_key": None, "severity": "error"}]
+    b = [{"issue_type": "canibalizacion_por_consulta", "url": "https://x.com/b", "group_key": "k", "severity": "warning"}]
+    r = comparar_incidencias(a, b, analisis_a="v", analisis_b="v")
+    assert r["nuevas"]["total"] == 0
+    assert [f["tipo"] for f in r["resueltas"]["por_tipo"]] == ["title_missing"]

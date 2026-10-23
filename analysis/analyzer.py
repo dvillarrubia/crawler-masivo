@@ -400,7 +400,7 @@ class SEOAnalyzer:
         # Search Console (decision 142): despues de la indexabilidad y de los
         # entrantes, que es con lo que se cruza.
         avisos_de_gsc.avisar(self)
-        oportunidades_gsc.avisar(self)  # decision 157
+        oportunidades_gsc.avisar_sin_tumbar(self)  # decision 157
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()

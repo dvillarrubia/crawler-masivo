@@ -178,3 +178,11 @@ def test_lo_que_pasa_de_los_dias_guardados_se_borra(s, cliente, monkeypatch):
     e = D.sincronizar(s, cliente, _integ(cliente), hoy=HOY + timedelta(days=1), consultor=GoogleFalso())
     assert not s.query(GscConsulta).filter(GscConsulta.consulta == "vieja").count()
     assert e.detalle["consultas"]["primer_dia"] == "2026-10-14"
+
+
+def test_cualquier_otro_error_deja_motivo_y_no_reintenta_cada_minuto(s, cliente, monkeypatch):
+    ahora = datetime(2026, 10, 19, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr(D, "_agrupar", lambda filas: (_ for _ in ()).throw(ValueError("NUL en la busqueda")))
+    e = D.sincronizar(s, cliente, _integ(cliente), hoy=HOY, ahora=ahora, consultor=GoogleFalso())
+    assert "NUL en la busqueda" in e.detalle["motivo"]
+    assert not D.toca(e, ahora + timedelta(minutes=1))
