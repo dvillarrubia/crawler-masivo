@@ -4365,16 +4365,19 @@ class SEOAnalyzer:
         self.session.execute(text(
             r"""
             CREATE TEMP TABLE pr_fuentes_tmp AS
-            SELECT u.id,
-                   COALESCE(substring(u.url FROM '^https?://[^/?#]+(?:/[^/?#]*)?'), '')
-                       AS sec
-            FROM urls u
-            WHERE u.job_id = :jid AND u.status_code = 200
-              AND u.noindex IS NOT TRUE AND EXISTS (
-                SELECT 1 FROM links l
-                WHERE l.from_url_id = u.id AND l.job_id = :jid
-                  AND l.is_internal AND l.follow
-            )
+            SELECT id, dense_rank() OVER (ORDER BY sec)::int AS sec
+            FROM (
+                SELECT u.id,
+                       COALESCE(substring(u.url FROM '^https?://[^/?#]+(?:/[^/?#]*)?'), '')
+                           AS sec
+                FROM urls u
+                WHERE u.job_id = :jid AND u.status_code = 200
+                  AND u.noindex IS NOT TRUE AND EXISTS (
+                    SELECT 1 FROM links l
+                    WHERE l.from_url_id = u.id AND l.job_id = :jid
+                      AND l.is_internal AND l.follow
+                )
+            ) x
             """
         ), jid)
         self.session.execute(text("ANALYZE pr_fuentes_tmp"))
@@ -4401,25 +4404,34 @@ class SEOAnalyzer:
             self.session.execute(text("DROP TABLE IF EXISTS pr_fuentes_tmp"))
             return "posicion"
 
-        # Los enlaces, UNA vez, con el anchor y la seccion ya calculados. Unir
-        # por expresiones (`lower(btrim(anchor))`) dejaba al planificador sin
-        # estimacion: suponia 1 fila, elegia bucles anidados y recorria la
-        # tabla de fuentes 462.452 veces -- 116 s en Lopesan (150 k enlaces).
-        # DISTINCT, y no es un detalle: `links` guarda una fila por INSTANCIA
-        # de enlace, y los dos pasos caros que vienen detras no miran las
-        # repeticiones. `pr_rep_tmp` cuenta origenes DISTINTOS y `pr_edges_tmp`
-        # se queda con el MAXIMO del peso por (origen, destino), asi que dos
-        # filas con el mismo (origen, destino, ancla, posicion) dan exactamente
-        # el mismo resultado que una. Medido en Druni: **115.821.074 instancias
-        # -> 34.344.051 distintas**, 3,4 veces menos, sobre los dos pasos que se
-        # llevan el 93% del tiempo de esta funcion.
+        # Los enlaces, UNA vez, con todo lo que piden los dos pasos caros ya
+        # resuelto, y UNA fila por (origen, destino, ancla).
+        #
+        # Claves enteras y no texto (#52): el destino es su id, la seccion un
+        # entero (`pr_fuentes_tmp`) y el ancla su md5 como uuid. Con el hash de
+        # la URL, el ancla y la seccion en texto, cada fila arrastraba ~140
+        # bytes de claves que se ordenaban con la collation del idioma: 710 MB
+        # a disco solo en `pr_rep_tmp` de penguin-libros (5,1 M de filas).
+        #
+        # Una fila por (origen, destino, ancla) con el MAYOR peso de posicion:
+        # la repeticion cuenta ORIGENES distintos, que con esta tabla es un
+        # COUNT(*) sin DISTINCT, y el peso de la arista es
+        # max(min(posicion, techo)), que es min(max(posicion), techo) porque el
+        # techo no depende de la posicion. Mismo resultado que guardar cada
+        # posicion por separado.
+        #
+        # Solo destinos internos que estan en el censo: los demas no dan arista,
+        # y su repeticion es por destino, asi que no cambia la de ningun otro.
         self.session.execute(text(
             f"""
             CREATE TEMP TABLE pr_lk_tmp AS
-            SELECT DISTINCT l.from_url_id AS src, l.to_url_hash AS h, {anchor} AS anc,
-                   l.link_position AS pos, f.sec
-            FROM links l JOIN pr_fuentes_tmp f ON f.id = l.from_url_id
-            WHERE l.job_id = :jid AND l.is_internal AND l.follow
+            SELECT l.from_url_id AS src, u.id AS dst, md5({anchor})::uuid AS anc,
+                   f.sec, MAX({prk.sql_peso_posicion('l.link_position')}) AS pw
+            FROM links l
+            JOIN pr_fuentes_tmp f ON f.id = l.from_url_id
+            JOIN urls u ON u.job_id = :jid AND u.url_hash = l.to_url_hash
+            WHERE l.job_id = :jid AND l.is_internal AND l.follow AND u.is_internal
+            GROUP BY 1, 2, 3, 4
             """
         ), jid)
         self.session.execute(text("ANALYZE pr_lk_tmp"))
@@ -4429,9 +4441,9 @@ class SEOAnalyzer:
         self.session.execute(text(
             """
             CREATE TEMP TABLE pr_rep_tmp AS
-            SELECT h, anc, sec, c, SUM(c) OVER (PARTITION BY h, anc) AS cg
+            SELECT dst, anc, sec, c, SUM(c) OVER (PARTITION BY dst, anc) AS cg
             FROM (
-                SELECT h, anc, sec, COUNT(DISTINCT src) AS c
+                SELECT dst, anc, sec, COUNT(*) AS c
                 FROM pr_lk_tmp GROUP BY 1, 2, 3
             ) x
             """
@@ -4447,16 +4459,15 @@ class SEOAnalyzer:
             "GREATEST(r.cg::float8 / :n_fuentes, "
             "CASE WHEN sn.n >= :min_sec THEN r.c::float8 / sn.n ELSE 0.0 END)"
         )
+        techo = prk.sql_techo_por_repeticion(repeticion)
         self.session.execute(text(
             f"""
             CREATE TEMP TABLE pr_edges_tmp AS
-            SELECT lk.src, u.id AS dst,
-                   MAX({prk.sql_peso_arista(repeticion, 'lk.pos')})::real AS w
+            SELECT lk.src, lk.dst, MAX(LEAST(lk.pw, {techo}))::real AS w
             FROM pr_lk_tmp lk
-            JOIN pr_rep_tmp r ON r.h = lk.h AND r.anc = lk.anc AND r.sec = lk.sec
+            JOIN pr_rep_tmp r ON r.dst = lk.dst AND r.anc = lk.anc AND r.sec = lk.sec
             JOIN pr_sec_tmp sn ON sn.sec = lk.sec
-            JOIN urls u ON u.job_id = :jid AND u.url_hash = lk.h
-            WHERE u.is_internal AND lk.src <> u.id
+            WHERE lk.src <> lk.dst
             GROUP BY 1, 2
             """
         ), {**jid, "n_fuentes": n_fuentes, "min_sec": prk.MIN_FUENTES_SECCION})

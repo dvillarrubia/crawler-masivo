@@ -979,3 +979,38 @@
      tamano que el primero. A esa velocidad un censo como Druni (139 M) tardaria
      unos 45 min en volver: solo pasa cuando cambia el analizador y su censo es
      la referencia de una comparacion (93), y lo paga el worker, no el usuario.
+
+<a id="d152"></a>
+152. **Las aristas del PageRank se agregan con claves enteras y una fila por
+   (origen, destino, ancla)** (#52) — tras la 41 y el DISTINCT de d527af7, el
+   coste de `_aristas_de_enlaces` seguia en ordenar texto: cada fila de
+   `pr_lk_tmp` arrastraba el hash de la URL de destino, el ancla y la seccion
+   (~140 bytes) y la collation `en_US` los comparaba letra a letra. En
+   penguin-libros `pr_rep_tmp` volcaba **710 MB a disco** para 5,1 M de filas
+   con el `work_mem` de 4 MB de produccion.
+   - **Claves enteras**: el destino se resuelve a su `urls.id` al montar
+     `pr_lk_tmp`, la seccion es un entero (`dense_rank` en `pr_fuentes_tmp`) y el
+     ancla su `md5` como `uuid` (16 bytes; una colision es 2^-128, a diferencia
+     de `hashtext`, de 32 bits).
+   - **Una fila por (origen, destino, ancla) con el MAYOR peso de posicion**. Es
+     exacto, no una aproximacion: la repeticion cuenta origenes distintos, que
+     sobre esa tabla es un `COUNT(*)` sin `DISTINCT`, y el peso de la arista es
+     `max(min(posicion, techo))`, que es `min(max(posicion), techo)` porque el
+     techo no depende de la posicion. `pagerank.sql_techo_por_repeticion` sale
+     de las mismas constantes que `peso_arista`.
+   - **Solo destinos internos que estan en el censo**: los demas no dan arista,
+     y su repeticion es por destino, asi que quitarlos antes no mueve la de
+     ningun otro.
+   - **Medido** (2026-10-23, copia local de penguin-libros `d3fda8a5`, 87.570
+     URLs y 7,8 M de enlaces, `work_mem` 4 MB): `_aristas_de_enlaces`
+     **25,5 s -> 12,3 s** y `compute_pagerank` 50,9 s -> 38,1 s. En un censo
+     sintetico de cuatro copias de penguin-libros con hosts distintos (31,2 M de
+     enlaces, la escala de Druni): **152,7 s -> 67,3 s**. Las aristas
+     (4.551.434 y 18.205.736) y el `pagerank_raw` y `pagerank_score` de las
+     87.570 URLs salen **identicos byte a byte**.
+   - Lo que queda caro es montar `pr_lk_tmp` (44 s de los 67): el md5 por fila y
+     la agregacion, que con 4 MB se parte en 256 lotes a disco. Ya no es el
+     cuello de botella del analisis.
+   - `test_el_mismo_enlace_en_dos_posiciones_es_un_origen` fija que la tabla no
+     se vuelva a partir por posicion: con la pagina contada dos veces, el techo
+     baja de 0,333 a 0,3 y el test falla (comprobado con el mutante).

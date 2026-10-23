@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149 |
@@ -178,6 +178,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 149 | Los avisos van a Slack por su API, un canal por cliente | [`comparacion-y-alertas`](comparacion-y-alertas.md#d149) |
 | 150 | Un censo completado archiva sus enlaces al acabar su analisis, y re-analizarlo los restaura y los vuelve a archivar | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d150) |
 | 151 | El servidor MCP en remoto (`/mcp` con OAuth) y con escritura: lanzar, cancelar y programar rastreos | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d151) |
+| 152 | Las aristas del PageRank se agregan con claves enteras y una fila por (origen, destino, ancla): mismo resultado, la mitad de tiempo | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d152) |
 
 ## Anadir una decision
 

@@ -454,3 +454,47 @@ def test_peso_por_repeticion_medida_en_sql(sesion, grafo):
     assert w("/blog/b0", "/servicio") / total_b0 == pytest.approx(1 / 1.15)
     total_t0 = w("/tienda/t0", "/oferta") + w("/tienda/t0", "/legal")
     assert w("/tienda/t0", "/oferta") / total_t0 == pytest.approx(0.25 / 0.40)
+
+
+def test_el_mismo_enlace_en_dos_posiciones_es_un_origen(sesion, grafo):
+    """Una pagina que enlaza el mismo destino con la misma ancla desde dos
+    posiciones cuenta UNA vez en la repeticion, y su arista pesa lo de la
+    posicion mayor.
+
+    `pr_lk_tmp` guarda una fila por (origen, destino, ancla) con el mayor peso
+    de posicion (#52), y la repeticion es un COUNT(*) sobre esa tabla. Si
+    alguien la vuelve a partir por posicion, la pagina con el enlace en el
+    contenido y en el pie contaria dos veces: 10/30 en vez de 9/30, y el techo
+    bajaria de 0,333 a 0,3.
+    """
+    from analysis.analyzer import SEOAnalyzer
+
+    paginas = [f"/a/p{i}" for i in range(30)]
+    enlaces = [(p, "/legal", "Legal", "footer", True) for p in paginas]
+    enlaces += [(p, "/x", "X", "content", True) for p in paginas[:9]]
+    enlaces.append(("/a/p0", "/x", "X", "footer", True))
+    enlaces.append(("/a/p9", "/x", "Otro", "content", True))
+
+    j, filas = grafo(paginas + ["/x", "/legal"], enlaces)
+    analizador = SEOAnalyzer(sesion, str(j.id))
+    try:
+        assert analizador._aristas_de_enlaces() == "repeticion"
+        peso = {
+            (a, b): w for a, b, w in sesion.execute(
+                text("SELECT src, dst, w FROM pr_edges_tmp")).all()
+        }
+    finally:
+        sesion.execute(text("DROP TABLE IF EXISTS pr_edges_tmp"))
+        sesion.commit()
+
+    def w(desde, hacia):
+        return peso[(filas[desde].id, filas[hacia].id)]
+
+    assert len(peso) == 30 + 10
+    for p in paginas[:9]:
+        # 9 de 30 paginas: techo 0,1 / 0,3
+        assert w(p, "/x") == pytest.approx(1 / 3, rel=1e-6), p
+    # La otra ancla es otro enlace: 1 de 30, sin techo
+    assert w("/a/p9", "/x") == pytest.approx(1.0)
+    for p in paginas:
+        assert w(p, "/legal") == pytest.approx(0.15), p
