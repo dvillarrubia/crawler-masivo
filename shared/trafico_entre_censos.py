@@ -63,6 +63,9 @@ MAX_EJEMPLOS = 5
 CONTENIDO_PARTE = 0.3
 CONTENIDO_MIN_PALABRAS = 50
 PAGERANK_MIN_PUNTOS = 10
+# El destino de un trasvase tiene que ganar al menos esta parte de lo que pierde
+# la pagina que cae.
+TRASVASE_MIN_PARTE = 0.5
 
 # Rupturas de serie de Search Console (docs/INVESTIGACION_SEARCH_CONSOLE.md).
 RUPTURAS = (
@@ -89,6 +92,7 @@ CAMBIOS = {
     "pierde_pagerank": "pierde PageRank interno",
     "trasvase": "el tráfico pasa a su canonical o a la misma URL con o sin barra final, que sube",
     "recibe_trasvase": "recibe el tráfico de su variante canonicalizada o con o sin barra final",
+    "sin_dato_anterior": "no estaban en el rastreo anterior, así que no hay con qué comparar",
     "sin_cambio": "sin cambio técnico en el rastreo",
 }
 
@@ -114,15 +118,39 @@ def ventana(job, dias: int = VENTANA_DIAS, retraso: int | None = None) -> tuple[
     return fin - timedelta(days=dias - 1), fin
 
 
-def _clics(db, cliente_id, desde: date, hasta: date) -> dict[str, int]:
+def propiedades_activas(db, cliente_id) -> list[str]:
+    """Las propiedades de Search Console que el cliente tiene ACTIVAS: si paso de
+    una de prefijo a `sc-domain:`, la vieja sigue en la base y contaria doble."""
+    from shared.models import Client, GscEstado
+
+    cliente = db.get(Client, cliente_id)
+    activas = {str((i.get("parametros") or {}).get("propiedad") or "").strip()
+               for i in (getattr(cliente, "integraciones", None) or [])
+               if isinstance(i, dict) and i.get("tipo") == "gsc" and i.get("activa", True)}
+    guardadas = {e.propiedad for e in db.query(GscEstado).filter(GscEstado.cliente_id == cliente_id)}
+    return sorted(guardadas & activas if activas else guardadas)
+
+
+def _clics(db, cliente_id, props: list[str], desde: date, hasta: date) -> dict[str, tuple[str, int]]:
+    """{clave: (una URL, clics)} en la ventana."""
     from sqlalchemy import func, select
 
     from shared.models import GscPagina as P
 
-    return {k: int(c or 0) for k, c in db.execute(
-        select(P.url_clave, func.sum(P.clics))
-        .where(P.cliente_id == cliente_id, P.fecha >= desde, P.fecha <= hasta)
+    return {k: (u, int(c or 0)) for k, u, c in db.execute(
+        select(P.url_clave, func.min(P.url), func.sum(P.clics))
+        .where(P.cliente_id == cliente_id, P.propiedad.in_(props), P.fecha >= desde, P.fecha <= hasta)
         .group_by(P.url_clave))}
+
+
+def _dias_con_datos(db, cliente_id, propiedad: str, desde: date, hasta: date) -> set[date]:
+    from sqlalchemy import select
+
+    from shared.models import GscPagina as P
+
+    return {d for (d,) in db.execute(
+        select(P.fecha).where(P.cliente_id == cliente_id, P.propiedad == propiedad,
+                              P.fecha >= desde, P.fecha <= hasta).distinct())}
 
 
 def _norm_texto(v) -> str:
@@ -134,7 +162,7 @@ def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
     from shared.comparacion import _canonical_a_otra, _norm, _pierde_inlinks
 
     if pa is None:
-        return []
+        return ["sin_dato_anterior"]
     if pb is None:
         return ["desaparece"]
     salida = []
@@ -191,59 +219,97 @@ def _destinos(pagina: dict | None) -> list[str]:
     return salida
 
 
-def _cubre(db, cliente_id, desde: date, hasta: date) -> tuple[bool, str | None, bool]:
-    """(cubre, motivo si no, falta solo el final -> pendiente)."""
+def _cubre(db, cliente_id, props: list[str], desde: date, hasta: date) -> tuple[bool, str | None, bool]:
+    """(cubre, motivo si no, falta solo el final -> pendiente).
+
+    Por DIAS CON FILAS de cada propiedad activa, no por `gsc_estado.ultimo_dia`:
+    la descarga avanza ese dia aunque Google lo devuelva vacio (hoy menos 2 casi
+    nunca esta cerrado a las 4 UTC), y un dia vacio contado como 0 clics es una
+    caida falsa del 14 % en una ventana de 7 dias.
+    """
     from shared.models import GscEstado
 
-    estados = db.query(GscEstado).filter(GscEstado.cliente_id == cliente_id).all()
-    if not estados:
+    if not props:
         return False, None, False
-    primero = min((e.primer_dia for e in estados if e.primer_dia), default=None)
-    ultimo = max((e.ultimo_dia for e in estados if e.ultimo_dia), default=None)
-    if ultimo is None or ultimo < hasta:
-        return False, (f"Search Console aún no tiene datos hasta el {hasta.isoformat()}: el tráfico se "
-                       "compara cuando lleguen."), True
-    if primero is None or primero > desde:
-        return False, (f"Los datos de Search Console empiezan el {primero.isoformat() if primero else '—'}, "
-                       f"después del principio de la ventana del rastreo anterior ({desde.isoformat()})."), False
+    estados = [e for e in db.query(GscEstado).filter(GscEstado.cliente_id == cliente_id)
+               if e.propiedad in props]
+    total = (hasta - desde).days + 1
+    for prop in props:
+        dias = _dias_con_datos(db, cliente_id, prop, desde, hasta)
+        if len(dias) == total:
+            continue
+        ultimo = max(dias, default=None)
+        faltan = sorted({desde + timedelta(days=i) for i in range(total)} - dias)
+        if ultimo is None or all(d > ultimo for d in faltan):
+            return False, (f"Search Console aún no tiene datos hasta el {hasta.isoformat()}: el tráfico se "
+                           "compara cuando lleguen."), True
+        return False, (f"A los datos de Search Console de {prop} les faltan {_cuantos(len(faltan), 'día', 'días')} "
+                       f"dentro de las ventanas (el primero, {faltan[0].isoformat()}): no se compara con días "
+                       "incompletos."), False
     recortados = sorted(d for e in estados for d in (e.dias_truncados or [])
                         if desde.isoformat() <= d <= hasta.isoformat())
     if recortados:
-        return False, (f"Google recortó {len(recortados)} día(s) en el tope de filas dentro de las "
-                       "ventanas: sin todas las páginas no se compara el tráfico."), False
+        return False, (f"Google recortó {_cuantos(len(recortados), 'día', 'días')} en el tope de filas dentro de "
+                       "las ventanas: sin todas las páginas no se compara el tráfico."), False
     return True, None, False
 
 
-def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[dict]) -> dict[str, Any] | None:
+def _cuantos(n: int, uno: str, varios: str) -> str:
+    return f"{_num(n)} {uno if n == 1 else varios}"
+
+
+def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[dict],
+                     concluyente: bool = True, motivo_no_concluyente: str | None = None) -> dict[str, Any] | None:
     """El trafico de las paginas entre dos censos. None si el cliente no tiene
-    Search Console; con `pendiente` si los datos aun no llegan."""
+    Search Console; con `pendiente` si los datos aun no llegan.
+
+    Con una comparacion de paginas NO concluyente (censo truncado, detras de un
+    muro, alcances distintos: decisiones 67, 70 y 103) no se afirma nada: una
+    pagina que no se alcanzo «desaparece» y una que da 403 por el WAF «ahora da
+    error».
+    """
     from shared.gsc import clave_de_url
     from shared.plantillas import firma_de_ruta
 
     cliente_id = getattr(job_b, "cliente_id", None)
     if not cliente_id:
         return None
+    props = propiedades_activas(db, cliente_id)
+    if not props:
+        return None
+    if not concluyente:
+        return {"comparable": False, "pendiente": False,
+                "motivo": ("La comparación de páginas no es concluyente"
+                           + (f" ({motivo_no_concluyente})" if motivo_no_concluyente else "")
+                           + ": no se afirma nada del tráfico de Google.")}
     dias = dias_de_ventana(job_a, job_b)
     if not dias:
         entre = (dia_del_censo(job_b) - dia_del_censo(job_a)).days
         return {"comparable": False, "pendiente": False,
-                "motivo": (f"Los dos rastreos están a {entre} día(s): el tráfico de Google se compara con "
-                           f"al menos {VENTANA_MIN_DIAS} días entre medias.")}
+                "motivo": (f"Los dos rastreos están a {_cuantos(entre, 'día', 'días')}: el tráfico de Google se "
+                           f"compara con al menos {VENTANA_MIN_DIAS} días entre medias.")}
     ini_a, fin_a = ventana(job_a, dias)
     ini_b, fin_b = ventana(job_b, dias)
     base = {"dias": dias, "ventana_anterior": [ini_a.isoformat(), fin_a.isoformat()],
-            "ventana_nueva": [ini_b.isoformat(), fin_b.isoformat()]}
-    cubre, motivo, pendiente = _cubre(db, cliente_id, ini_a, fin_b)
+            "ventana_nueva": [ini_b.isoformat(), fin_b.isoformat()], "propiedades": props}
+    cubre, motivo, pendiente = _cubre(db, cliente_id, props, ini_a, fin_b)
     if not cubre:
-        if motivo is None:
-            return None
         return {**base, "comparable": False, "pendiente": pendiente, "motivo": motivo}
 
-    clics_a = _clics(db, cliente_id, ini_a, fin_a)
-    clics_b = _clics(db, cliente_id, ini_b, fin_b)
-    total_a, total_b = sum(clics_a.values()), sum(clics_b.values())
+    datos_a = _clics(db, cliente_id, props, ini_a, fin_a)
+    datos_b = _clics(db, cliente_id, props, ini_b, fin_b)
+    clics_a = {k: c for k, (_, c) in datos_a.items()}
+    clics_b = {k: c for k, (_, c) in datos_b.items()}
     por_clave_a = {clave_de_url(p["url"]): p for p in paginas_a if p.get("url")}
     por_clave_b = {clave_de_url(p["url"]): p for p in paginas_b if p.get("url")}
+    # El total, de los hosts que se rastrearon: una propiedad `sc-domain:` cubre
+    # tambien el blog o otro subdominio que este censo no mira.
+    hosts = {(urlsplit(p["url"]).hostname or "").lower() for p in paginas_a + paginas_b if p.get("url")}
+
+    def del_alcance(datos):
+        return sum(c for _, (u, c) in datos.items() if (urlsplit(u).hostname or "").lower() in hosts)
+
+    total_a, total_b = del_alcance(datos_a), del_alcance(datos_b)
 
     grupos: dict[str, dict[str, dict[str, Any]]] = {"caidas": {}, "subidas": {}}
     n = {"caidas": 0, "subidas": 0}
@@ -255,13 +321,16 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
             sentidos[clave] = "caidas"
         elif dif >= CAIDA_MIN_CLICS and (ca == 0 or dif / ca >= CAIDA_MIN_PARTE):
             sentidos[clave] = "subidas"
-    # Trasvases: la que cae y la URL a la que se consolida, si esa sube.
+    # Trasvases: la que cae y la URL a la que se consolida, si esa GANA al menos
+    # la mitad de lo que la otra pierde. Con «sube un clic» bastaba para decir
+    # que 300 clics perdidos en un 404 «se mueven».
     trasvase, recibe = set(), set()
     for clave, sentido in sentidos.items():
         if sentido != "caidas":
             continue
+        perdidos = clics_a.get(clave, 0) - clics_b.get(clave, 0)
         for destino in _destinos(por_clave_b.get(clave) or por_clave_a.get(clave)):
-            if clics_b.get(destino, 0) > clics_a.get(destino, 0):
+            if clics_b.get(destino, 0) - clics_a.get(destino, 0) >= TRASVASE_MIN_PARTE * perdidos:
                 trasvase.add(clave)
                 recibe.add(destino)
                 break
@@ -271,10 +340,13 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
         n[sentido] += 1
         pa, pb = por_clave_a.get(clave), por_clave_b.get(clave)
         url = (pb or pa)["url"]
+        cambios = cambios_de_pagina(pa, pb)
         if clave in trasvase:
-            cambios = ["trasvase"]
-        else:
-            cambios = cambios_de_pagina(pa, pb) or (["recibe_trasvase"] if clave in recibe else ["sin_cambio"])
+            # Lo que la saca del indice se sigue diciendo: un trasvase hacia la
+            # buena con la vieja dando error es un dato, no un consuelo.
+            cambios = ["trasvase"] + [c for c in cambios if c in ("error_nuevo", "desaparece", "noindex")]
+        elif not cambios:
+            cambios = ["recibe_trasvase"] if clave in recibe else ["sin_cambio"]
         for cambio in cambios:
             g = grupos[sentido].setdefault(cambio, {"paginas": 0, "clics_antes": 0, "clics_despues": 0,
                                                     "ejemplos": [], "plantillas": defaultdict(int)})
@@ -295,8 +367,9 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
                 "ejemplos": [{"url": u, "clics_antes": a, "clics_despues": b} for _, u, a, b in g["ejemplos"][:MAX_EJEMPLOS]],
                 "plantillas": [p for p, _ in sorted(g["plantillas"].items(), key=lambda kv: (-kv[1], kv[0]))[:3]],
             })
-        # Lo que tiene causa tecnica primero; «sin cambio» al final.
-        filas.sort(key=lambda f: (f["cambio"] == "sin_cambio", f["diferencia"] if f["diferencia"] < 0 else -f["diferencia"]))
+        # Lo que tiene causa tecnica primero; lo que no se puede atribuir al final.
+        filas.sort(key=lambda f: (f["cambio"] in ("sin_cambio", "sin_dato_anterior"),
+                                  f["diferencia"] if f["diferencia"] < 0 else -f["diferencia"]))
         return filas
 
     variacion = (total_b - total_a) / total_a if total_a else None
@@ -310,24 +383,27 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
         "rupturas": [x for x in RUPTURAS if ini_a.isoformat() <= x["fecha"] <= fin_b.isoformat()],
         "umbral": {"parte": CAIDA_MIN_PARTE, "clics": CAIDA_MIN_CLICS},
     }
-    r["estacional"] = _estacional(db, cliente_id, ini_a, fin_a, ini_b, fin_b, variacion)
+    r["estacional"] = _estacional(db, cliente_id, props, hosts, ini_a, fin_a, ini_b, fin_b, variacion)
     r["textos"] = textos(r)
     return r
 
 
-def _estacional(db, cliente_id, ini_a, fin_a, ini_b, fin_b, variacion) -> dict | None:
-    """Lo mismo un ano antes, si hay datos. None si no se puede saber."""
-    from shared.models import GscEstado
-
+def _estacional(db, cliente_id, props, hosts, ini_a, fin_a, ini_b, fin_b, variacion) -> dict | None:
+    """Lo mismo un ano antes, si hay datos de TODOS esos dias. None si no se
+    puede saber."""
     if variacion is None:
         return None
     hace_un_ano = timedelta(days=364)  # mismo dia de la semana
-    primero = min((e.primer_dia for e in db.query(GscEstado).filter(GscEstado.cliente_id == cliente_id)
-                   if e.primer_dia), default=None)
-    if primero is None or primero > ini_a - hace_un_ano:
+    cubre, _, _ = _cubre(db, cliente_id, props, ini_a - hace_un_ano, fin_b - hace_un_ano)
+    if not cubre:
         return None
-    a = sum(_clics(db, cliente_id, ini_a - hace_un_ano, fin_a - hace_un_ano).values())
-    b = sum(_clics(db, cliente_id, ini_b - hace_un_ano, fin_b - hace_un_ano).values())
+
+    def total(desde, hasta):
+        return sum(c for _, (u, c) in _clics(db, cliente_id, props, desde, hasta).items()
+                   if (urlsplit(u).hostname or "").lower() in hosts)
+
+    a = total(ini_a - hace_un_ano, fin_a - hace_un_ano)
+    b = total(ini_b - hace_un_ano, fin_b - hace_un_ano)
     if not a:
         return None
     antes = (b - a) / a
@@ -339,8 +415,8 @@ def _num(n) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
-def _fecha(iso: str) -> str:
-    return datetime.fromisoformat(iso).strftime("%d/%m")
+def _fecha(iso: str, con_ano: bool = False) -> str:
+    return datetime.fromisoformat(iso).strftime("%d/%m/%Y" if con_ano else "%d/%m")
 
 
 def textos(r: dict[str, Any]) -> list[str]:
@@ -349,11 +425,13 @@ def textos(r: dict[str, Any]) -> list[str]:
     if not r.get("comparable"):
         return [r["motivo"]] if r.get("motivo") else []
     va, vn = r["ventana_anterior"], r["ventana_nueva"]
+    ano = va[0][:4] != vn[1][:4]
     lineas = []
     var = r.get("variacion")
-    total = (f"Clics de Google: {_num(r['clics_anterior'])} del {_fecha(va[0])} al {_fecha(va[1])} y "
-             f"{_num(r['clics_nuevo'])} del {_fecha(vn[0])} al {_fecha(vn[1])}"
-             + (f" ({'+' if var > 0 else ''}{round(100 * var)} %)." if var is not None else "."))
+    pct = round(100 * var) if var is not None else None
+    total = (f"Clics de Google: {_num(r['clics_anterior'])} del {_fecha(va[0], ano)} al {_fecha(va[1], ano)} y "
+             f"{_num(r['clics_nuevo'])} del {_fecha(vn[0], ano)} al {_fecha(vn[1], ano)}"
+             + (f" ({'+' if pct > 0 else ''}{pct} %)." if pct is not None else "."))
     lineas.append(total)
     est = r.get("estacional") or {}
     if r.get("general"):
@@ -363,22 +441,34 @@ def textos(r: dict[str, Any]) -> list[str]:
                          ": puede ser demanda, competencia, la página de resultados o un cambio de Google."))
     elif est.get("igual") and var is not None and var < 0:
         lineas.append("El mismo periodo del año anterior varió lo mismo: parece estacional.")
+    def paginas(g):
+        return _cuantos(g["paginas"], "página", "páginas")
+
+    def verbo(g, uno, varios):
+        return uno if g["paginas"] == 1 else varios
+
+    def clics(n):
+        return _cuantos(n, "clic", "clics")
+
     for g in r.get("caidas") or []:
         if g["cambio"] == "trasvase":
-            lineas.append(f"{_num(g['paginas'])} páginas bajaron {_num(-g['diferencia'])} clics que pasan a su "
-                          "canonical o a la misma URL con o sin barra final, que sube: el tráfico se mueve, no "
-                          "se pierde.")
+            lineas.append(f"{paginas(g)} {verbo(g, 'bajó', 'bajaron')} {clics(-g['diferencia'])} que pasan a su "
+                          "canonical o a la misma URL con o sin barra final, que gana al menos la mitad: el "
+                          "tráfico se mueve, no se pierde.")
         elif g["cambio"] == "sin_cambio":
-            lineas.append(f"{_num(g['paginas'])} páginas perdieron {_num(-g['diferencia'])} clics sin cambio "
+            lineas.append(f"{paginas(g)} {verbo(g, 'perdió', 'perdieron')} {clics(-g['diferencia'])} sin cambio "
                           "técnico en el rastreo: puede ser demanda, competencia o la página de resultados.")
+        elif g["cambio"] == "sin_dato_anterior":
+            lineas.append(f"{paginas(g)} {verbo(g, 'perdió', 'perdieron')} {clics(-g['diferencia'])} y no "
+                          f"{verbo(g, 'estaba', 'estaban')} en el rastreo anterior: no hay con qué comparar.")
         else:
-            lineas.append(f"{_num(g['paginas'])} páginas perdieron {_num(-g['diferencia'])} clics; coincide con "
-                          f"que en ellas {g['texto']} entre los dos rastreos.")
+            lineas.append(f"{paginas(g)} {verbo(g, 'perdió', 'perdieron')} {clics(-g['diferencia'])}; coincide "
+                          f"con que en {verbo(g, 'ella', 'ellas')} {g['texto']} entre los dos rastreos.")
     for g in r.get("subidas") or []:
-        if g["cambio"] in ("sin_cambio", "recibe_trasvase"):
+        if g["cambio"] in ("sin_cambio", "recibe_trasvase", "sin_dato_anterior"):
             continue
-        lineas.append(f"{_num(g['paginas'])} páginas ganaron {_num(g['diferencia'])} clics; coincide con que en "
-                      f"ellas {g['texto']}.")
+        lineas.append(f"{paginas(g)} {verbo(g, 'ganó', 'ganaron')} {clics(g['diferencia'])}; coincide con que "
+                      f"en {verbo(g, 'ella', 'ellas')} {g['texto']}.")
     for x in r.get("rupturas") or []:
         dia = datetime.fromisoformat(x["fecha"]).strftime("%d/%m/%Y")
         lineas.append(f"Ojo, las ventanas cruzan una ruptura de Search Console ({dia}): {x['texto']}")
@@ -388,36 +478,49 @@ def textos(r: dict[str, Any]) -> list[str]:
 def completar_pendientes(db, cliente_id, limite: int = 10) -> int:
     """Rehace la comparacion de trafico de los censos que la dejaron
     `pendiente` porque los datos aun no habian llegado. La llama el worker
-    despues de cada descarga de Search Console. Nunca lanza."""
+    despues de cada descarga de Search Console. Nunca lanza, y un job raro no
+    corta los demas."""
+    import uuid
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from shared.comparacion import paginas_para_comparar
+    from shared.models import Job
+
+    hechos = 0
     try:
-        from sqlalchemy.orm.attributes import flag_modified
-
-        from shared.comparacion import paginas_de_censo
-        from shared.models import Job
-
-        hechos = 0
         jobs = (db.query(Job).filter(Job.cliente_id == cliente_id, Job.comparacion.isnot(None))
                 .order_by(Job.created_at.desc()).limit(limite).all())
-        for job in jobs:
+    except Exception:
+        db.rollback()
+        logger.exception("No se pudo leer el trafico pendiente del cliente %s", cliente_id)
+        return 0
+    props = None
+    for job in jobs:
+        try:
             comp = job.comparacion if isinstance(job.comparacion, dict) else {}
             t = comp.get("trafico")
             if not (isinstance(t, dict) and t.get("pendiente")) or not comp.get("comparado_con"):
                 continue
-            import uuid
-
             anterior = db.get(Job, uuid.UUID(str(comp["comparado_con"])))
             if anterior is None:
                 continue
-            nuevo = comparar_trafico(db, anterior, job, paginas_de_censo(db, anterior.id),
-                                     paginas_de_censo(db, job.id))
+            # Antes de leer dos censos enteros, si los datos siguen sin llegar.
+            dias = dias_de_ventana(anterior, job)
+            if props is None:
+                props = propiedades_activas(db, cliente_id)
+            if dias and not _cubre(db, cliente_id, props, ventana(anterior, dias)[0], ventana(job, dias)[1])[0]:
+                continue
+            paginas_a, paginas_b = paginas_para_comparar(db, anterior, job)
+            nuevo = comparar_trafico(db, anterior, job, paginas_a, paginas_b,
+                                     concluyente=comp.get("concluyente") is not False)
             if nuevo is None or nuevo.get("pendiente"):
                 continue
             job.comparacion = {**comp, "trafico": nuevo}
             flag_modified(job, "comparacion")
             db.commit()
             hechos += 1
-        return hechos
-    except Exception:
-        db.rollback()
-        logger.exception("No se pudo completar el trafico pendiente del cliente %s", cliente_id)
-        return 0
+        except Exception:
+            db.rollback()
+            logger.exception("No se pudo completar el trafico pendiente del job %s", getattr(job, "id", "?"))
+    return hechos

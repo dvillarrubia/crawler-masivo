@@ -855,6 +855,19 @@
      (num=100 en septiembre de 2025, la corrección de impresiones del
      28-04-2026): si las ventanas las cruzan, se avisa; afectan a impresiones y
      lo que se compara son clics.
+   - **Lo que no se puede afirmar** (revisión independiente, 13 hallazgos
+     arreglados): una ventana se da por cubierta por **días con filas** de cada
+     propiedad activa, no por `gsc_estado.ultimo_dia`, que avanza aunque Google
+     devuelva el día vacío (hoy menos 2 casi nunca está cerrado a las 4 UTC: un
+     día a 0 era un −14 % falso en 7 días); con una comparación de páginas no
+     concluyente (truncado, muro, alcance) no se dice nada del tráfico; una
+     página que no estaba en el censo anterior va a «no hay con qué comparar»,
+     no a «sin cambio técnico»; un trasvase exige que el destino gane al menos
+     la mitad de lo que pierde la otra, y lo que la saca del índice se sigue
+     diciendo; el total y «general» cuentan solo los hosts rastreados y las
+     propiedades activas; la lista (128) se acota igual al completar un
+     pendiente; el cálculo va en un savepoint para que un error SQL no se lleve
+     las alertas críticas.
    - **Un solo redactor**: `textos()` escribe las frases («coincide con», nunca
      «por») y las usan la tarjeta de la ficha del rastreo y el aviso de Slack
      del rastreo programado (`resumen_semanal` → `avisos.texto_de_informe`).

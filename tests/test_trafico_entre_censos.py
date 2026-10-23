@@ -34,7 +34,9 @@ def s():
 
 
 def _montar(s, *, primer=date(2026, 7, 1), ultimo=date(2026, 10, 20), truncados=()):
-    c = Client(id=uuid.uuid4(), nombre="Acme", slug="acme", dominios=[], config_defecto={}, integraciones=[])
+    c = Client(id=uuid.uuid4(), nombre="Acme", slug="acme", dominios=[], config_defecto={},
+               integraciones=[{"tipo": "gsc", "activa": True, "credencial_env": "GSC_X",
+                               "parametros": {"propiedad": "sc-domain:x.com"}}])
     s.add(c)
     s.flush()
     ja = Job(id=uuid.uuid4(), name="a", status="completed", seeds=["https://x.com/"], config={},
@@ -44,6 +46,12 @@ def _montar(s, *, primer=date(2026, 7, 1), ultimo=date(2026, 10, 20), truncados=
     s.add_all([ja, jb])
     s.add(GscEstado(cliente_id=c.id, propiedad="sc-domain:x.com", estado="ok", primer_dia=primer,
                     ultimo_dia=ultimo, dias_truncados=list(truncados)))
+    # Un dia con datos es un dia con filas: uno de relleno por dia guardado.
+    d = primer
+    while d <= ultimo:
+        s.add(GscPagina(cliente_id=c.id, propiedad="sc-domain:x.com", fecha=d, url="https://x.com/__dia",
+                        url_clave="__dia", clics=0, impresiones=1))
+        d += timedelta(days=1)
     s.commit()
     return c, ja, jb
 
@@ -100,6 +108,7 @@ def test_caida_con_cambio_y_sin_cambio_y_subida(s):
     texto = " ".join(r["textos"])
     assert "coincide con que en ellas cambia el canonical" in texto
     assert "sin cambio técnico" in texto and " por " not in texto.replace("por página", "")
+    assert "1 página perdió" in texto and "1 página ganó" in texto
 
 
 def test_caida_general(s):
@@ -119,14 +128,20 @@ def test_ventana_incompleta_espera_y_se_completa(s):
     c, ja, jb = _montar(s, ultimo=date(2026, 9, 25))
     _clics(s, c, "/a", 100, 10)
     s.commit()
+    # gsc_estado dice que hay datos hasta el 20-oct, pero sin filas: no cuenta
+    s.query(GscEstado).one().ultimo_dia = date(2026, 10, 20)
+    s.commit()
     r = T.comparar_trafico(s, ja, jb, [_p("/a")], [_p("/a")])
     assert r["comparable"] is False and r["pendiente"] is True and "aún no tiene datos" in r["motivo"]
     # El worker la completa cuando llegan los datos (sin paginas: censos vacios)
     jb.comparacion = {"comparado_con": str(ja.id), "trafico": r}
     s.commit()
     assert T.completar_pendientes(s, c.id) == 0                 # siguen sin llegar
-    e = s.query(GscEstado).one()
-    e.ultimo_dia = date(2026, 10, 20)
+    d = date(2026, 9, 26)
+    while d <= date(2026, 9, 29):
+        s.add(GscPagina(cliente_id=c.id, propiedad="sc-domain:x.com", fecha=d, url="https://x.com/__dia",
+                        url_clave="__dia", clics=0, impresiones=1))
+        d += timedelta(days=1)
     s.commit()
     assert T.completar_pendientes(s, c.id) == 1
     assert s.get(JobM, jb.id).comparacion["trafico"]["comparable"] is True
@@ -141,7 +156,7 @@ def test_un_dia_recortado_no_se_compara(s):
 def test_sin_datos_al_principio_no_se_compara(s):
     c, ja, jb = _montar(s, primer=date(2026, 9, 1))
     r = T.comparar_trafico(s, ja, jb, [], [])
-    assert r["comparable"] is False and "empiezan" in r["motivo"]
+    assert r["comparable"] is False and r["pendiente"] is False and "les faltan" in r["motivo"]
 
 
 def test_la_ventana_son_los_dias_entre_censos(s):
@@ -152,7 +167,7 @@ def test_la_ventana_son_los_dias_entre_censos(s):
     assert r["ventana_nueva"] == ["2026-09-02", "2026-09-08"]                    # sin pisarse
     jb.started_at = A + timedelta(days=3)
     r = T.comparar_trafico(s, ja, jb, [], [])
-    assert r["comparable"] is False and "3 día(s)" in r["motivo"]
+    assert r["comparable"] is False and "a 3 días:" in r["motivo"]
     assert T.dias_de_ventana(_J(A), _J(B)) == 28                                 # 30 dias: tope
 
 
@@ -215,3 +230,47 @@ def test_el_trafico_que_pasa_a_su_canonical_es_trasvase(s):
     assert [g["cambio"] for g in r["subidas"]] == ["recibe_trasvase"]
     assert any("se mueve, no se pierde" in t for t in r["textos"])
     assert not any("sin cambio técnico" in t for t in r["textos"])
+
+
+def test_un_clic_de_subida_no_es_trasvase(s):
+    c, ja, jb = _montar(s)
+    _clics(s, c, "/producto/", 300, 0)
+    _clics(s, c, "/producto", 2, 3)
+    for i in range(20):
+        _clics(s, c, f"/e{i}", 100, 100)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [_p("/producto/"), _p("/producto")],
+                           [_p("/producto/", status_code=404, indexability_status="Client Error"), _p("/producto")])
+    assert [g["cambio"] for g in r["caidas"]] == ["error_nuevo"]
+
+
+def test_un_censo_no_concluyente_no_afirma_nada(s):
+    c, ja, jb = _montar(s)
+    r = T.comparar_trafico(s, ja, jb, [], [], concluyente=False, motivo_no_concluyente="el censo nuevo paró en max_urls")
+    assert r["comparable"] is False and "no es concluyente (el censo nuevo paró en max_urls)" in r["motivo"]
+
+
+def test_una_pagina_que_no_estaba_antes_no_es_sin_cambio(s):
+    c, ja, jb = _montar(s)
+    _clics(s, c, "/nueva", 100, 10)
+    for i in range(20):
+        _clics(s, c, f"/e{i}", 100, 100)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [], [_p("/nueva")])
+    assert [g["cambio"] for g in r["caidas"]] == ["sin_dato_anterior"]
+    assert any("no hay con qué comparar" in t for t in r["textos"])
+
+
+def test_solo_las_propiedades_activas_y_los_hosts_del_censo(s):
+    c, ja, jb = _montar(s)
+    paginas = [_p(f"/p{i}") for i in range(5)]
+    for i in range(5):
+        _clics(s, c, f"/p{i}", 100, 100)
+    vieja = T.ventana(_J(A), 28)[0]
+    s.add(GscPagina(cliente_id=c.id, propiedad="https://x.com/", fecha=vieja, url="https://x.com/p0",
+                    url_clave=clave_de_url("https://x.com/p0"), clics=5000, impresiones=1))   # propiedad vieja
+    s.add(GscPagina(cliente_id=c.id, propiedad="sc-domain:x.com", fecha=vieja, url="https://blog.x.com/a",
+                    url_clave=clave_de_url("https://blog.x.com/a"), clics=5000, impresiones=1))  # otro host
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, paginas, paginas)
+    assert (r["clics_anterior"], r["clics_nuevo"], r["general"]) == (500, 500, False)
