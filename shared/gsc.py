@@ -139,6 +139,12 @@ class Consultor:
     def propiedades(self) -> list[dict]:
         return (self._peticion("GET", f"{API}/sites") or {}).get("siteEntry") or []
 
+    def sitemaps(self, propiedad: str) -> list[dict]:
+        from urllib.parse import quote
+
+        return (self._peticion("GET", f"{API}/sites/{quote(propiedad, safe='')}/sitemaps")
+                or {}).get("sitemap") or []
+
 
 def descargar_dia(consultar: Callable[[str, dict], dict], propiedad: str,
                   dia: date) -> tuple[list[dict], bool]:
@@ -281,9 +287,11 @@ def pendientes(db, ahora: datetime) -> list[tuple[Any, dict]]:
                 continue
             e = (db.query(GscEstado).filter(GscEstado.cliente_id == cliente.id,
                                             GscEstado.propiedad == propiedad).one_or_none())
+            from shared.gsc_detalle import toca as toca_detalle
             from shared.gsc_inspeccion import toca as toca_inspeccion
 
-            # Tambien si solo falta la inspeccion del dia (decision 144).
-            if toca(e, ahora) or toca_inspeccion(e, ahora):
+            # Tambien si solo falta la inspeccion del dia (decision 144) o las
+            # busquedas y sitemaps (decision 157).
+            if toca(e, ahora) or toca_inspeccion(e, ahora) or toca_detalle(e, ahora):
                 salida.append((cliente, integ))
     return salida

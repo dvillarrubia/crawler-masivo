@@ -250,6 +250,30 @@ class AnalysisThresholdsConfig(BaseModel):
     # cada URL la ha elegido alguien, asi que por defecto basta una.
     alerta_lista_min_paginas: int = Field(default=1, ge=1, le=100000)
 
+    # Oportunidades de Search Console (decision 157). Valores de partida, a
+    # medir en censos reales antes de fijarlos (13).
+    # Posicion 4-20 con poco enlazado, con estas impresiones en la ventana.
+    gsc_oportunidad_min_impresiones: int = Field(default=500, ge=1, le=100_000_000)
+    gsc_oportunidad_posicion_min: float = Field(default=4.0, ge=1.0, le=100.0)
+    gsc_oportunidad_posicion_max: float = Field(default=20.0, ge=1.0, le=100.0)
+    # Profundidad minima desde la que una pagina esta «lejos»; si el sitio es
+    # mas profundo, manda su cuartil alto.
+    gsc_oportunidad_profundidad: int = Field(default=4, ge=1, le=1000)
+    # CTR bajo para su posicion: impresiones minimas de la pagina (sumando sus
+    # busquedas que entran en la curva).
+    gsc_ctr_min_impresiones: int = Field(default=200, ge=1, le=100_000_000)
+    # ...y que le falten al menos estos clics frente a la mediana de su tramo:
+    # el cuartil bajo, por definicion, es una de cada cuatro paginas.
+    gsc_ctr_min_clics_que_faltan: int = Field(default=20, ge=0, le=100_000_000)
+    # Canibalizacion: parte minima de los clics (o de las impresiones si la
+    # busqueda no tiene clics) que se lleva cada URL; clics minimos de la
+    # busqueda (o impresiones, si no tiene ninguno), y desde cuantos clics es
+    # warning y no info.
+    gsc_canibalizacion_min_parte: float = Field(default=0.2, gt=0.0, lt=1.0)
+    gsc_canibalizacion_min_clics: int = Field(default=10, ge=1, le=100_000_000)
+    gsc_canibalizacion_min_impresiones: int = Field(default=1000, ge=1, le=100_000_000)
+    gsc_canibalizacion_clics_grave: int = Field(default=100, ge=1, le=100_000_000)
+
 
 # ---------------------------------------------------------------------------
 # Job configuration
@@ -382,6 +406,10 @@ class JobConfig(BaseModel):
     # que en la herencia cliente -> perfil -> job se SUSTITUYE entera: la
     # precedencia es el orden, y sumar listas la haria imposible de leer.
     segmentos: list[ReglaSegmento] = Field(default_factory=list)
+    # Nombres de marca del cliente (decision 157): las busquedas que los
+    # contienen no cuentan como canibalizacion de la home. Coincidencia simple,
+    # sin mayusculas ni acentos; lo ambiguo es trabajo de #169.
+    marcas: list[str] = Field(default_factory=list, max_length=50)
 
     @field_validator("impersonate")
     @classmethod

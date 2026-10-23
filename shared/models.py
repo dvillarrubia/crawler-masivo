@@ -267,6 +267,62 @@ class GscEstado(Base):
     inspeccion_ultima = Column(DateTime(timezone=True), nullable=True)
     inspeccion_hechas = Column(Integer, nullable=True)
     inspeccion_motivo = Column(Text, nullable=True)
+    # Busquedas y sitemaps (decision 157): su propia serie, con su primer y
+    # ultimo dia y sus dias truncados, porque se rellena hacia atras aparte de
+    # la de paginas. {"consultas": {...}, "sitemaps": n, "ultimo": iso,
+    # "motivo": texto}.
+    detalle = Column(JSON, nullable=True)
+
+
+class GscConsulta(Base):
+    """Search Console por URL, busqueda y dia, de un cliente (decision 157).
+
+    Lo que piden la canibalizacion por busqueda y las oportunidades: que
+    busquedas trae cada pagina y cuantas URLs del sitio comparten una. Sin la
+    URL en texto (esta en `gsc_paginas` con la misma `url_clave`) ni indice
+    unico: un dia se reescribe entero, y son ~29.000 filas al dia en Lopesan.
+    Las busquedas anonimizadas no las da Google: la suma por busqueda nunca
+    cuadra con el total de la pagina.
+    """
+
+    __tablename__ = "gsc_consultas"
+    __table_args__ = (
+        Index("ix_gsc_consultas_cliente_fecha", "cliente_id", "fecha"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    propiedad = Column(String(512), nullable=False)
+    fecha = Column(Date, nullable=False)
+    url_clave = Column(String(64), nullable=False)
+    consulta = Column(Text, nullable=False)
+    clics = Column(Integer, nullable=False, default=0)
+    impresiones = Column(Integer, nullable=False, default=0)
+    posicion = Column(Float, nullable=True)
+
+
+class GscSitemap(Base):
+    """Un sitemap segun Google (Sitemaps API, decision 157): cuando se envio,
+    cuando lo descargo Google y si tiene errores. `contents[].indexed` esta
+    obsoleto desde 2019 y no se guarda."""
+
+    __tablename__ = "gsc_sitemaps"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "propiedad", "path", name="uq_gsc_sitemap"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True)
+    propiedad = Column(String(512), nullable=False)
+    path = Column(Text, nullable=False)
+    enviado = Column(DateTime(timezone=True), nullable=True)       # lastSubmitted
+    descargado = Column(DateTime(timezone=True), nullable=True)    # lastDownloaded
+    pendiente = Column(Boolean, nullable=True)                     # isPending
+    es_indice = Column(Boolean, nullable=True)                     # isSitemapsIndex
+    avisos = Column(Integer, nullable=True)                        # warnings
+    errores = Column(Integer, nullable=True)                       # errors
+    enviadas = Column(JSON, nullable=True)                         # [{type, submitted}]
+    visto_en = Column(DateTime(timezone=True), nullable=False)
 
 
 class GscInspeccion(Base):

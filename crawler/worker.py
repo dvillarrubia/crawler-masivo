@@ -1558,6 +1558,15 @@ def _sincronizar_gsc(cliente_id: str, propiedad: str) -> None:
                 if e is not None:
                     logger.info("Search Console de %s (%s): %s %s", cliente.slug, propiedad, e.estado,
                                 e.motivo or f"{e.primer_dia} a {e.ultimo_dia}, {e.filas} filas")
+            # Busquedas y sitemaps (decision 157), una vez al dia.
+            from shared.gsc_detalle import sincronizar as sincronizar_detalle, toca as toca_detalle
+
+            if e is not None and toca_detalle(e, datetime.now(timezone.utc)):
+                e = sincronizar_detalle(s, cliente, integ) or e
+                d = e.detalle or {}
+                logger.info("Search Console de %s (%s): consultas hasta %s, %s sitemaps%s", cliente.slug,
+                            propiedad, (d.get("consultas") or {}).get("ultimo_dia"), d.get("sitemaps"),
+                            f" ({d['motivo']})" if d.get("motivo") else "")
             # Despues de la descarga, la muestra diaria de inspeccion (decision 144).
             if e is not None and toca_inspeccion(e, datetime.now(timezone.utc)):
                 n = inspeccionar(s, cliente, integ)

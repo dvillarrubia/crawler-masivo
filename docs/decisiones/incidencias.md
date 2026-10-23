@@ -1157,3 +1157,73 @@
    que Google no conoce); de 10 con clics y no indexables, 9 alternativas bien
    resueltas y la oferta canonicalizada a `lfr.cloud` indexada igualmente con
    la URL de Lopesan.
+
+<a id="d157"></a>
+157. **Search Console: lo que puede traer tráfico, medido contra la curva del
+   propio sitio y sin contar como competencia lo que es la misma página**
+   (#166, Ola 4 de `docs/PLAN_MEJOR_CRAWLER.md`). Tras lo que cuesta tráfico
+   (142), las oportunidades.
+   - **Datos nuevos, aparte de la serie de páginas** (`shared/gsc_detalle.py`):
+     búsqueda × página por día (`gsc_consultas`, sin la URL en texto ni índice
+     único: ~29.000 filas al día en Lopesan, **558 MB los 90 días**) y los
+     sitemaps que Google tiene enviados (`gsc_sitemaps`). Con su propia serie en
+     `gsc_estado.detalle`, de modo que se rellena hacia atrás aunque las páginas
+     ya estén bajadas; mismo solape y tope de filas que las páginas. Una vez al
+     día en el hilo de Search Console del worker; un error espera 6 h. Se borra
+     lo que pasa de `SEARCH_CONSOLE_DETALLE_DIAS` (180). Por **dispositivo no**:
+     se probó, y la curva por página la deforman los enlaces de sitio (CTR
+     mediano del 0,1 % en posición 2 en escritorio en Lopesan) y sin la búsqueda
+     no se pueden quitar las de marca.
+   - **`oportunidad_posicion`** (info): indexable en 4-20 con impresiones de
+     sobra y poco enlazada, **relativo al sitio**: PageRank por debajo de su
+     cuartil bajo, o más lejos de la home que su cuartil alto (y al menos 4
+     clics). Con valores fijos salían 1.503 en Lopesan: el 59 % de sus
+     indexables está en 4-20 con más de 500 impresiones y la mitad a 5 clics o
+     más. Se avisan las **100 con más clics por ganar** si llegaran al CTR
+     mediano de las páginas del sitio en el top 3. Propone hasta cinco fuentes:
+     indexables, con más PageRank, del **mismo idioma** (tramo de la ruta), que
+     no la enlazan ya (una lectura de `links` filtrada por job, 37 y 41), y
+     primero las que salen por sus mismas búsquedas; si no, de su plantilla.
+   - **`canibalizacion_por_consulta`** (una por búsqueda, `group_key` de la
+     búsqueda): dos o más URLs con al menos el 20 % de los clics de una búsqueda
+     con 10 o más (o de las impresiones de una sin clics con 1.000 o más).
+     **Antes se junta lo que es la misma página** (union-find): canonical y
+     redirección, la variante con parámetros y su URL limpia (eso es
+     `trafico_en_variante_con_parametros`) y las alternativas de hreflang
+     (Google enseña a cada usuario la suya). Sin esto, las 15 búsquedas con más
+     clics de Lopesan eran la ficha de un hotel con `?partner=` frente a la
+     limpia, o en /es/ frente a /en/. La home en búsquedas de marca (`marcas` en
+     la configuración) no cuenta. Gravedad por consecuencia (92): warning desde
+     100 clics, info por debajo. No decide fusionar o diferenciar (#18).
+   - **`ctr_bajo_para_posicion`** (info): la curva de CTR por tramo de posición
+     sale de las filas búsqueda × página con 50 impresiones o más, sin las de
+     marca si están declaradas. Para cada página, lo esperado es la suma de
+     impresiones × CTR mediano del tramo de **cada** búsqueda suya; salta si
+     tiene menos clics que el cuartil bajo así sumado **o que la mitad de lo
+     esperado**, y le faltan 20 o más. Solo el cuartil bajo, como pedía la
+     issue, no sirve en un sitio con mucha cola larga sin clics: en Lopesan
+     (marcas fuera) el cuartil bajo es 0 en casi todos los tramos y no salía
+     ninguna. Tope de 100. Lleva al lado las incidencias de snippet de la
+     página y no afirma la causa: puede ser la SERP, que no vemos.
+   - **Sitemaps según Google**: `sitemap_no_enviado_a_google` (info: la API solo
+     lista los enviados, así que **no se afirma que Google no lo lea**: puede
+     leerlo del robots.txt), `sitemap_no_leido_por_google` (warning: enviado y
+     sin descargar en los 30 días anteriores al censo) y
+     `sitemap_con_errores_en_google`. Solo los índices que leyó el rastreo (o
+     todos si no leyó ninguno): los hijos de un índice no salen en la lista de
+     Google. Sin la lista de Google, nada.
+   - **Rendimiento por plantilla y por profundidad**, y la curva, en
+     `jobs.gsc_resumen.oportunidades` y en la tarjeta de Search Console del
+     rastreo.
+   **Medido** (23-oct-2026, censo de Lopesan `1e7ea651` del 21-oct en una base
+   local, con sus 90 días reales de búsquedas bajados de Google en solo
+   lectura): 100 oportunidades, de las que se revisaron las 10 primeras con sus
+   fuentes (todas existen, indexables con 200, y ninguna enlaza ya a la
+   página); 478 canibalizaciones (62 warning), las 10 primeras sin pares
+   canonical ni hreflang: la ficha de un hotel frente a su galería en
+   «… fotos», la de spa frente a la del hotel; 30 páginas con CTR bajo con
+   `marcas: ["lopesan"]` (un artículo del blog con 60.422 impresiones y 208
+   clics) y 4 sin marcas, todas de búsquedas de marca. Ningún aviso de
+   sitemaps: el índice que leyó el rastreo Google lo descargó el 20-oct. El
+   análisis completo, 24 s. Lopesan no tiene `marcas` declaradas: conviene
+   ponérselas.

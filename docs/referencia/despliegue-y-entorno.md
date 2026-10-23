@@ -150,6 +150,11 @@ ARCHIVO_DIR=/data/archivo        # volumen `archivo`, compartido por worker y AP
 ARCHIVAR_ENLACES=1               # 0 = el worker no archiva tras cada rastreo
 ARCHIVAR_DIAS_MINIMOS=14         # solo fallidos/estancados: un completado se archiva al acabar (decision 150); no se archiva nada que termino hace menos
 
+# Search Console por cliente (decisiones 141, 144 y 157)
+SEARCH_CONSOLE_DIAS_INICIALES=90       # dias que se bajan la primera vez (paginas y busquedas)
+SEARCH_CONSOLE_INSPECCIONES_DIA=500    # muestra diaria de inspeccion de URLs; 0 la apaga
+SEARCH_CONSOLE_DETALLE_DIAS=180        # se borran las busquedas mas viejas (~6 MB/dia en Lopesan); minimo 90
+
 # Servidor MCP remoto en /mcp (decision 151)
 MCP_REMOTO=1                     # 0 = apagado (/mcp da 503)
 MCP_URL_PUBLICA=                 # emisor de OAuth; vacio = https://crawler-masivo.srv817047.hstgr.cloud
