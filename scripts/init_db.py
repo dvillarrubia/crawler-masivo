@@ -41,6 +41,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_ultima TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_hechas INTEGER"))
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_motivo TEXT"))
+        # Consultas, dispositivos y sitemaps de Search Console (decision 157).
+        conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS detalle JSON"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_impresiones INTEGER"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_posicion DOUBLE PRECISION"))
         # Titular que no se pinta: se guarda marcado y los checks de h1 lo ignoran.

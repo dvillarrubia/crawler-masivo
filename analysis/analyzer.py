@@ -44,7 +44,7 @@ from analysis import near_duplicates as nd
 from analysis import pagerank as prk
 from analysis import avisos_de_enlaces, avisos_de_sondas
 from analysis import avisos_de_paginacion
-from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor
+from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor, oportunidades_gsc
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from shared.indexabilidad import (
@@ -400,6 +400,7 @@ class SEOAnalyzer:
         # Search Console (decision 142): despues de la indexabilidad y de los
         # entrantes, que es con lo que se cruza.
         avisos_de_gsc.avisar(self)
+        oportunidades_gsc.avisar_sin_tumbar(self)  # decision 157
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()

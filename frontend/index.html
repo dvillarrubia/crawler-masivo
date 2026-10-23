@@ -1589,6 +1589,59 @@
             <div x-show="!job.gsc_resumen.cubre_la_ventana" class="text-dim" style="margin-top:.3rem">
               Los datos no cubren los 90 días enteros (o Google recortó algún día): no se afirma que una página no tuvo impresiones.
             </div>
+            <!-- Lo que puede traer trafico (decision 157). -->
+            <template x-if="job.gsc_resumen.oportunidades">
+              <div style="margin-top:.4rem" data-testid="gsc-oportunidades">
+                <div>
+                  <span x-text="fmt.num(job.gsc_resumen.oportunidades.oportunidad_posicion) + ' páginas en posición 4-20 con poco enlazado'"></span>
+                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.ctr_bajo_para_posicion) + ' con CTR bajo para su posición'"></span>
+                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.canibalizacion_por_consulta) + ' búsquedas repartidas entre varias URLs'"></span>
+                </div>
+                <div x-show="job.gsc_resumen.oportunidades.consultas_desde && job.gsc_resumen.oportunidades.consultas_desde > job.gsc_resumen.desde" class="text-dim">
+                  Las búsquedas solo están desde el <span x-text="fmt.dia(job.gsc_resumen.oportunidades.consultas_desde)"></span>: el reparto es de esos días.
+                </div>
+                <details x-show="(job.gsc_resumen.oportunidades.por_plantilla || []).length">
+                  <summary class="text-dim" style="cursor:pointer">Rendimiento por plantilla y por profundidad</summary>
+                  <template x-for="tabla in [['Plantilla', job.gsc_resumen.oportunidades.por_plantilla], ['Clics desde la home', job.gsc_resumen.oportunidades.por_profundidad]]" :key="tabla[0]">
+                    <table class="table text-sm" style="margin-top:.4rem">
+                      <thead><tr><th x-text="tabla[0]"></th><th>Indexables</th><th>Con impresiones</th><th>Clics</th><th>Impresiones</th><th>CTR</th><th>Posición</th></tr></thead>
+                      <tbody>
+                        <template x-for="f in tabla[1] || []" :key="f.grupo">
+                          <tr>
+                            <td x-text="f.grupo"></td>
+                            <td x-text="fmt.num(f.indexables)"></td>
+                            <td x-text="fmt.num(f.con_impresiones) + (f.indexables ? ' (' + Math.round(100 * f.con_impresiones / f.indexables) + ' %)' : '')"></td>
+                            <td x-text="fmt.num(f.clics)"></td>
+                            <td x-text="fmt.num(f.impresiones)"></td>
+                            <td x-text="f.ctr == null ? '—' : (100 * f.ctr).toFixed(1) + ' %'"></td>
+                            <td x-text="f.posicion == null ? '—' : f.posicion"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </template>
+                </details>
+                <details x-show="job.gsc_resumen.oportunidades.curva_ctr">
+                  <summary class="text-dim" style="cursor:pointer">Curva de CTR del sitio por posición</summary>
+                  <div class="text-dim" x-show="(job.gsc_resumen.oportunidades.curva_ctr || {}).sin_marcas" style="margin-top:.3rem">
+                    Sin marcas declaradas en la configuración del cliente: la curva mezcla las búsquedas de marca, que tienen otro CTR.
+                  </div>
+                  <table class="table text-sm" style="margin-top:.4rem">
+                    <thead><tr><th>Posición</th><th>Búsquedas × página</th><th>CTR mediano</th><th>Cuartil bajo</th></tr></thead>
+                    <tbody>
+                      <template x-for="tr in ['1','2','3','4-5','6-10','11-20'].filter(t => ((job.gsc_resumen.oportunidades.curva_ctr || {}).tramos || {})[t])" :key="tr">
+                        <tr :class="job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : 'text-dim'">
+                          <td x-text="tr"></td>
+                          <td x-text="fmt.num(job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].filas) + (job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : ' (pocas: no se usa)')"></td>
+                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].mediana).toFixed(1) + ' %'"></td>
+                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].p25).toFixed(1) + ' %'"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </details>
+              </div>
+            </template>
           </div>
         </template>
 

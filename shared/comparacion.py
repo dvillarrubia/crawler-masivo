@@ -1366,6 +1366,17 @@ ANCLADOS_POR_GRUPO = frozenset({
 })
 
 
+# Avisos que salen del TRAFICO de la ventana y de un ranking con tope (decision
+# 157): que una oportunidad pase del puesto 100 al 101, o que los clics de una
+# busqueda se muevan, no es que el sitio haya cambiado. No entran en «nuevas»
+# ni en «resueltas»: ninguna de las dos se puede afirmar.
+NO_COMPARABLES = frozenset({
+    "oportunidad_posicion",
+    "ctr_bajo_para_posicion",
+    "canibalizacion_por_consulta",
+})
+
+
 def incidencias_de_censo(db, job_id) -> list[dict[str, Any]]:
     """Las incidencias de un censo con lo que las identifica entre censos.
 
@@ -1475,8 +1486,8 @@ def comparar_incidencias(
             return (i["issue_type"], urlsplit(url_de(i, rutas)).hostname or "", i["group_key"])
         return (i["issue_type"], url_de(i, rutas), i.get("group_key"))
 
-    a = {clave(i, reglas_rutas): i for i in incidencias_a}
-    b = {clave(i): i for i in incidencias_b}
+    a = {clave(i, reglas_rutas): i for i in incidencias_a if i["issue_type"] not in NO_COMPARABLES}
+    b = {clave(i): i for i in incidencias_b if i["issue_type"] not in NO_COMPARABLES}
 
     nuevas = [b[k] for k in b.keys() - a.keys()]
     siguen = [b[k] for k in a.keys() & b.keys()]

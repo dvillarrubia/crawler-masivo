@@ -183,6 +183,37 @@ const ISSUE_INFO = {
     google: 'Decide con lo que vio entonces. Si el canonical de entonces era un error que ya se corrigió, se arreglará solo cuando vuelva a rastrearla; hasta entonces puede seguir indexando otra URL.',
     arreglo: 'Si la página es importante, pedir la indexación de nuevo desde la inspección de URLs de Search Console para que Google la vuelva a visitar antes. Informativo.',
   },
+  // Decision 157: lo que puede traer tráfico (Search Console por búsqueda y dispositivo).
+  'oportunidad_posicion': {
+    que: 'Página indexable que sale entre las posiciones 4 y 20 de Google con muchas impresiones y que el sitio enlaza poco: su PageRank interno está por debajo del cuartil bajo de las indexables, o está más lejos de la home que tres de cada cuatro (y al menos a 4 clics). Se avisan las 100 con más clics por ganar si llegaran al CTR que tienen las páginas del sitio en el top 3. En los detalles, sus búsquedas principales y hasta cinco páginas del mismo idioma desde las que enlazarla.',
+    google: 'Está cerca de la primera página y el enlazado interno es una de las pocas palancas que dependen solo del sitio: más enlaces desde páginas fuertes y relacionadas le dan más autoridad y contexto.',
+    arreglo: 'Enlazarla desde las páginas propuestas (indexables, con más PageRank, que no la enlazan ya y, si se puede, que salen por las mismas búsquedas), con un texto de enlace que diga de qué trata. Informativo: es una oportunidad, no un error.',
+  },
+  'ctr_bajo_para_posicion': {
+    que: 'La página recibe menos clics de los normales para las posiciones en las que sale: por debajo del cuartil bajo de la curva de CTR del propio sitio o de la mitad de su mediana, búsqueda a búsqueda (sin las de marca si están declaradas en el cliente), y le faltan al menos 20 clics frente a la mediana. En los detalles, el CTR real y el esperado, los clics que faltan, las búsquedas que más pierden y lo que ya sabemos de su snippet.',
+    google: 'Muestra la página, pero la gente elige otro resultado. Puede ser el snippet (título o descripción poco atractivos, cortados o genéricos), la propia página de resultados (AI Overviews, anuncios, otros formatos) o que salga como enlace secundario bajo otro resultado del sitio en una búsqueda por nombre: el rastreo no ve la SERP, así que no se afirma la causa.',
+    arreglo: 'Revisar título y descripción para que respondan a las búsquedas por las que sale, y mirar la página de resultados de esas búsquedas. Informativo.',
+  },
+  'canibalizacion_por_consulta': {
+    que: 'Una misma búsqueda, con al menos 10 clics en 90 días, reparte sus clics entre dos o más URLs del sitio, cada una con al menos el 20 % (sin clics, se mira el reparto de impresiones de búsquedas con 1.000 o más). No cuentan la variante con parámetros y su URL limpia, las del mismo grupo canonical o de redirección, las versiones de idioma unidas por hreflang, ni la home en búsquedas de marca. Es aviso desde 100 clics e informativo por debajo. En los detalles, el reparto, la posición, la indexabilidad y la plantilla de cada una.',
+    google: 'No tiene claro cuál de las páginas es la respuesta y va alternando: ninguna acumula todas las señales, y a menudo ninguna llega tan arriba como llegaría una sola.',
+    arreglo: 'Decidir cuál debe posicionar para esa búsqueda: fusionar las páginas (con 301 de la que sobra) o diferenciarlas para que respondan a intenciones distintas, y enlazar con ese criterio. Este aviso no decide cuál de las dos opciones toca.',
+  },
+  'sitemap_no_enviado_a_google': {
+    que: 'Un sitemap que leyó el rastreo no está enviado en Search Console. Puede que Google lo lea igualmente desde el robots.txt: la API solo lista los enviados, así que no se afirma que Google no lo lea.',
+    google: 'Enviado en Search Console, Google informa de cuándo lo descargó y de sus errores; sin enviar, no hay forma de saberlo.',
+    arreglo: 'Enviarlo en Search Console → Sitemaps (basta con el índice si lo hay). Informativo.',
+  },
+  'sitemap_no_leido_por_google': {
+    que: 'Un sitemap enviado en Search Console que Google no ha descargado en los 30 días anteriores al rastreo, o nunca. En los detalles, cuándo se envió y cuándo lo descargó por última vez.',
+    google: 'Sin descargarlo no se entera de las URLs nuevas ni de los cambios que anuncia: el sitemap no está haciendo su trabajo.',
+    arreglo: 'Comprobar que la URL del sitemap responde 200 a Googlebot (sin WAF, sin redirecciones), que está en el robots.txt y volver a enviarlo.',
+  },
+  'sitemap_con_errores_en_google': {
+    que: 'Search Console dice que este sitemap tiene errores. En los detalles, cuántos errores y avisos y cuándo lo descargó Google.',
+    google: 'Con errores puede ignorar entradas o el fichero entero.',
+    arreglo: 'Abrir el sitemap en Search Console → Sitemaps para ver qué errores son (formato, URLs de otro dominio, fechas) y corregir el generador.',
+  },
   // Decision 147
   'ancla_generica': {
     que: 'La mayoría de las páginas del sitio que enlazan esta URL lo hacen con un texto genérico («leer más», «aquí», «ver más», «read more»). En los detalles, cuántas y qué textos.',
@@ -815,6 +846,12 @@ const ISSUE_LABEL_EXTRA = {
   huerfana_con_trafico: 'Huérfana con tráfico de Google',
   indexable_sin_impresiones: 'Indexable sin impresiones (90 días)',
   trafico_en_variante_con_parametros: 'Tráfico en variantes con parámetros',
+  oportunidad_posicion: 'Oportunidad: posición 4-20 con poco enlazado',
+  ctr_bajo_para_posicion: 'CTR bajo para su posición',
+  canibalizacion_por_consulta: 'Canibalización por búsqueda',
+  sitemap_no_enviado_a_google: 'Sitemap no enviado en Search Console',
+  sitemap_no_leido_por_google: 'Sitemap que Google no descarga',
+  sitemap_con_errores_en_google: 'Sitemap con errores en Search Console',
   noindex_solo_en_crudo: 'Noindex solo en el HTML del servidor',
   noindex_solo_al_renderizar: 'Noindex que añade el JavaScript',
   canonical_cambia_al_renderizar: 'El canonical cambia al renderizar',
