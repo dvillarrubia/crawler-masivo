@@ -18,7 +18,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 125 |
 
 ## Por numero
@@ -181,6 +181,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 152 | Las aristas del PageRank se agregan con claves enteras y una fila por (origen, destino, ancla): mismo resultado, la mitad de tiempo | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d152) |
 | 157 | Search Console: lo que puede traer tráfico, con la curva del propio sitio y sin contar como competencia lo que es la misma página | [`incidencias`](incidencias.md#d157) |
 | 158 | El tráfico de Google entre dos censos, agrupado por lo que cambió en esas páginas, y nunca «por» | [`comparacion-y-alertas`](comparacion-y-alertas.md#d158) |
+| 159 | Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara sin gastar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d159) |
 
 ## Anadir una decision
 

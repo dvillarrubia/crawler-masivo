@@ -188,3 +188,37 @@
      issues y del CSV, y sustituir las issues de un módulo al relanzarlo (no
      hay módulos que emitan issues todavía). Al apagar el worker una ejecución
      en curso no se interrumpe: se queda sin latido y el vigilante la reencola.
+
+<a id="d159"></a>
+159. **Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara
+   sin gastar** (#8, parte que no necesita la clave). En producción no hay
+   `OPENROUTER_API_KEY` (comprobado el 23-oct-2026), así que nada de la capa
+   puede funcionar todavía; lo que se puede dejar listo es cómo se medirá cada
+   pregunta el día que la haya:
+   - `scripts/evaluar_decisiones.py extraer <pregunta> --job …` saca un juego
+     de censos reales **estratificado por plantilla** (por turnos: una de cada
+     plantilla, después la segunda…, para que 20.000 fichas no se coman el
+     juego y una plantilla de 12 páginas legales también salga), con la
+     etiqueta vacía, a `tests/decisiones/<pregunta>/v<version>.jsonl`.
+     Determinista con la semilla. En Lopesan: 150 ejemplos de 87 plantillas.
+   - `evaluar` mide contra la **etiqueta humana** (nunca la de Jev):
+     acierto, precisión y recall por clase, matriz, **ECE** con su curva de
+     fiabilidad y la **curva de cobertura frente a precisión**, de la que sale
+     el umbral: el más bajo con el que lo decidido llega a la precisión
+     objetivo (0,95) cubriendo al menos 30 ejemplos, y sigue llegando con
+     cualquier umbral más alto (un pico suelto no es un umbral). Sin eso, la
+     pregunta se queda sin umbral y nada sale `decidido` (84).
+   - `repetir` da la **repetibilidad** (la misma pregunta dos veces, casi
+     gratis: descarta preguntas inestables antes de etiquetar) y, con
+     `--acuerdo`, el acuerdo y la kappa entre dos jueces o dos redacciones, que
+     no es acierto (comentario de #8 tras revisar jev-seo).
+   - `responder` es la **única vía directa a la capa fuera del botón de #40**:
+     pide lo mismo que él (clave, `DECISIONS_ENABLED=1`, `ENRICHMENT_TOKEN`) y
+     además `--confirmar`; sin confirmar solo enseña la estimación. El test de
+     «nada se dispara solo» la permite por fichero y función, y cualquier otro
+     import del script sigue fallando. Estimado para el juego de Lopesan: 138
+     llamadas, 0,002 $.
+   - Las métricas son funciones puras (`shared/evaluacion_decisiones.py`)
+     probadas sin red; el script se prueba de punta a punta con `FakeLLM`.
+   Queda de #8 lo que necesita la clave y personas: etiquetar, la vista de
+   revisión en la interfaz y `decision_labels`.
