@@ -151,6 +151,10 @@ def _resumen_de_rastreo(db, job) -> dict[str, Any]:
         "comparado_con": (comp or {}).get("comparado_con"),
         "comparable": bool((comp or {}).get("comparable")),
     }
+    trafico = (comp or {}).get("trafico") if comp else None
+    if isinstance(trafico, dict) and trafico.get("textos"):
+        # Decision 158: las mismas frases que la ficha del rastreo.
+        salida["trafico"] = trafico["textos"]
     inc = (comp or {}).get("incidencias") if comp else None
     if isinstance(inc, dict) and inc.get("comparable"):
         salida["incidencias"] = {

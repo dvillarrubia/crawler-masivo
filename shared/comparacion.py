@@ -1570,7 +1570,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.id, Url.segmento,
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
-            Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score,
+            Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score, Url.in_sitemap,
             HtmlMeta.canonical_href, HtmlMeta.title,
             HtmlMeta.canonical_distintos, HtmlMeta.meta_description,
         )
@@ -1607,6 +1607,8 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "click_depth": f.click_depth,
             "pagerank_score": f.pagerank_score,
             "meta_description": f.meta_description,
+            # El trafico entre censos (decision 158) agrupa por «sale del sitemap».
+            "in_sitemap": f.in_sitemap,
             "sd_tipos": tipos.get(f.id, []),
             "hreflang": idiomas.get(f.id, []),
         }
@@ -1859,6 +1861,16 @@ def _poner_al_dia_el_anterior(db, anterior, job, reanalizar) -> tuple[bool, str 
     return True, None
 
 
+def paginas_para_comparar(db, anterior, job) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Las paginas de los dos censos tal como se comparan: una lista (decision
+    128) solo en sus URLs. Lo usan la comparacion y el trafico que se completa
+    despues (decision 158), para no acotar en un sitio y en el otro no."""
+    from shared.modo_lista import acotar_a_la_lista
+
+    paginas_ant, _ = acotar_a_la_lista(paginas_de_censo(db, anterior.id), resumen_de_job(anterior), job)
+    return paginas_ant, paginas_de_censo(db, job.id)
+
+
 def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     """Compara un rastreo recién terminado con el anterior del mismo sitio.
 
@@ -1945,6 +1957,22 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         if (sin_reanalizar and incidencias is not None
                 and incidencias.get("comparable") is False):
             incidencias["motivo"] = f"{incidencias['motivo']} {sin_reanalizar}"
+    # El trafico de Google entre los dos censos, agrupado por lo que cambio en
+    # esas paginas (decision 158). Aparte y con su try, como las incidencias:
+    # no puede llevarse por delante las alertas de pagina.
+    trafico = None
+    if r.get("comparable"):
+        try:
+            from shared.trafico_entre_censos import comparar_trafico
+
+            # En un savepoint: un error SQL dejaria la transaccion abortada y el
+            # commit de la comparacion —con sus alertas criticas— fallaria.
+            with db.begin_nested():
+                trafico = comparar_trafico(db, anterior, job, paginas_ant, paginas_nuevas,
+                                           concluyente=r.get("concluyente") is not False,
+                                           motivo_no_concluyente=r.get("motivo"))
+        except Exception:
+            logger.exception("No se pudo comparar el trafico de %s con %s", job.id, anterior.id)
     # Lo que se guarda es el veredicto, no el censo entero: los ejemplos y las
     # plantillas ya van dentro de cada alerta.
     return {
@@ -1966,4 +1994,5 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         "alertas": r.get("alertas", []),
         # Lo que cambio en la extraccion a medida, regla a regla (decision 127).
         "extraido": r.get("extraido"),
+        "trafico": trafico,
     }
