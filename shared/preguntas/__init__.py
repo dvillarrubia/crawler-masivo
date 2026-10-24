@@ -120,10 +120,12 @@ def _cargar() -> dict[str, Pregunta]:
     from shared.preguntas import ejemplo, soft404
     from shared.preguntas import canibalizacion
     from shared.preguntas import tipo_pagina
+    from shared.preguntas import intencion
 
     todas = ejemplo.PREGUNTAS + soft404.PREGUNTAS
     todas = todas + canibalizacion.PREGUNTAS
     todas = todas + tipo_pagina.PREGUNTAS
+    todas = todas + intencion.PREGUNTAS
     catalogo: dict[str, Pregunta] = {}
     for p in todas:
         if p.nombre in catalogo:

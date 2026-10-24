@@ -1979,7 +1979,7 @@
                   <div class="card" style="margin-bottom:1rem">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
                       <strong><code x-text="preg"></code></strong>
-                      <span class="text-dim" style="font-size:.8rem" x-text="fmt.num(r.total) + ' respuestas · ' + fmt.usd(r.coste_usd)"></span>
+                      <span class="text-dim" style="font-size:.8rem" x-text="fmt.num(r.total) + ' ' + fmt.unidadEnriq(r) + ' · ' + fmt.usd(r.coste_usd)"></span>
                     </div>
                     <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.5rem;font-size:.82rem">
                       <template x-for="[resp, n] in respuestasEnriq(r)" :key="resp">
@@ -2040,6 +2040,70 @@
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                </template>
+
+                <!-- Intencion de la pagina frente a sus busquedas y embudo con trafico (decision 176) -->
+                <template x-if="enriqIntencion && (enriqIntencion.resumen || enriqIntencion.embudo)">
+                  <div class="card" style="margin-bottom:1rem">
+                    <strong>Intención: página frente a búsquedas</strong>
+                    <div class="text-dim" style="font-size:.75rem;margin:.25rem 0 .5rem"
+                         x-show="(enriqIntencion.resumen && enriqIntencion.resumen.orientativo) || (enriqIntencion.embudo && enriqIntencion.embudo.orientativo)">
+                      Orientativo: las preguntas no tienen umbral calibrado (#8). Las búsquedas de marca o de otras
+                      marcas (navegacionales) y las que no están claras no cuentan para el desajuste.
+                    </div>
+                    <template x-if="enriqIntencion.resumen">
+                      <div style="font-size:.82rem">
+                        <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
+                          <span><strong x-text="fmt.num(enriqIntencion.resumen.paginas_comparadas)"></strong> páginas comparadas</span>
+                          <span><strong x-text="fmt.num(enriqIntencion.resumen.desalineadas)"></strong> desalineadas</span>
+                          <span><strong x-text="fmt.num(enriqIntencion.resumen.clics_desalineados)"></strong> de
+                            <span x-text="fmt.num(enriqIntencion.resumen.clics_que_cuentan)"></span> clics con otra intención</span>
+                          <span class="text-dim" x-show="enriqIntencion.resumen.paginas_sin_intencion"
+                                x-text="fmt.num(enriqIntencion.resumen.paginas_sin_intencion) + ' sin intención de página'"></span>
+                        </div>
+                        <div class="text-dim" style="margin-top:.3rem">
+                          Clics por intención de la búsqueda:
+                          <template x-for="[i, n] in Object.entries(enriqIntencion.resumen.clics_por_intencion).sort((a, b) => b[1] - a[1])" :key="i">
+                            <span x-text="fmt.respuestaEnriq(i) + ' ' + fmt.num(n) + ' · '"></span>
+                          </template>
+                        </div>
+                        <div style="overflow-x:auto;margin-top:.5rem" x-show="enriqIntencion.paginas.length">
+                          <table>
+                            <thead><tr><th style="text-align:left">URL</th><th>página</th><th>búsquedas (más clics)</th><th style="text-align:right">clics con otra intención</th><th style="text-align:right">alineado</th></tr></thead>
+                            <tbody>
+                              <template x-for="p in enriqIntencion.paginas" :key="p.url_id">
+                                <tr :style="p.desalineada ? 'background:var(--orange-bg, rgba(255,165,0,.08))' : ''">
+                                  <td style="max-width:24rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="p.url"></td>
+                                  <td x-text="p.intencion_pagina ? fmt.respuestaEnriq(p.intencion_pagina) : '—'"></td>
+                                  <td style="max-width:22rem;font-size:.75rem"
+                                      x-text="p.busquedas.slice(0, 3).map(b => b.busqueda + ' (' + (b.intencion ? fmt.respuestaEnriq(b.intencion) : '—') + ', ' + b.clics + ')').join(' · ')"></td>
+                                  <td style="text-align:right" x-text="fmt.num(p.clics_desalineados)"></td>
+                                  <td style="text-align:right" x-text="p.parte_alineada == null ? '—' : Math.round(100 * p.parte_alineada) + '%'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="enriqIntencion.embudo">
+                      <div style="font-size:.82rem;margin-top:.6rem">
+                        <strong style="font-size:.85rem">Embudo con tráfico real</strong>
+                        <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.3rem">
+                          <template x-for="[e, v] in Object.entries(enriqIntencion.embudo.por_etapa)" :key="e">
+                            <span><strong x-text="fmt.respuestaEnriq(e)"></strong>
+                              <span x-text="fmt.num(v.paginas) + ' páginas, ' + fmt.num(v.clics) + ' clics'"></span></span>
+                          </template>
+                        </div>
+                        <div class="text-dim" style="margin-top:.3rem;font-size:.75rem">
+                          Por plantilla (clics de la página en Search Console):
+                          <template x-for="pl in enriqIntencion.embudo.por_plantilla.slice(0, 8)" :key="pl.plantilla">
+                            <div x-text="pl.plantilla + ': ' + Object.entries(pl.clics_por_etapa).map(([e, n]) => fmt.respuestaEnriq(e) + ' ' + fmt.num(n)).join(', ')"></div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </template>
 

@@ -86,7 +86,8 @@ class Modulo:
     # del cliente pregunta por SU taxonomia (decision 178). None = las del catalogo.
     preguntas_del_job: Callable[[Any, Any], list[Pregunta]] | None = None
     # (session, job) -> por que este modulo no preguntara nada en ese job, o
-    # None. Lo ensenan la estimacion y la ejecucion (decision 178).
+    # None. Lo ensenan la estimacion y la ejecucion (decision 178; y un modulo
+    # de Search Console sin Search Console, decision 176).
     por_que_vacio: Callable[[Any, Any], str | None] | None = None
 
     def objetos_pregunta(self) -> list[Pregunta]:
@@ -226,6 +227,8 @@ def _registro_inicial() -> dict[str, Modulo]:
             ejemplo=True,
         ),
         _modulo_canibalizacion(),
+        _modulo_intencion_pagina(),
+        _modulo_intencion_busquedas(),
     ]
     modulos += _modulos_tipo_pagina()
     return {m.nombre: m for m in modulos}
@@ -248,6 +251,8 @@ def _modulo_canibalizacion() -> Modulo:
         por_grupo=True,
         ejemplo=True,
     )
+
+
 def _modulos_tipo_pagina() -> list[Modulo]:
     # Tipo de pagina y categoria del cliente (#12, decision 178): una muestra
     # por plantilla, no cada URL. Sin umbral (#8): marcados y todo incierto.
@@ -280,6 +285,50 @@ def _modulos_tipo_pagina() -> list[Modulo]:
             ejemplo=True,
         ),
     ]
+
+
+def _modulo_intencion_pagina() -> Modulo:
+    from shared import intencion
+
+    return Modulo(
+        nombre="intencion_pagina",
+        titulo="Intención y embudo de la página",
+        descripcion=("Qué intención de búsqueda resuelve cada página (informacional, comercial, "
+                     "transaccional, navegacional, local) y, como pregunta aparte, su etapa del "
+                     "embudo (TOFU, MOFU, BOFU, postventa, fuera del embudo), con la ruta, el título, "
+                     "el H1 y el principio del contenido (#39, decisión 176). Sin evaluar (#8): las "
+                     "respuestas salen inciertas y no van a ningún informe."),
+        preguntas=("intencion_pagina", "etapa_embudo"),
+        construir_estados=intencion.estados_intencion_pagina,
+        filtrar_urls=intencion.paginas_con_algo_que_juzgar,
+        ejemplo=True,
+    )
+
+
+def _modulo_intencion_busquedas() -> Modulo:
+    from shared import intencion
+
+    return Modulo(
+        nombre="intencion_busquedas",
+        titulo="Intención de las búsquedas de Search Console",
+        descripcion=("La intención de las búsquedas reales que traen clics a cada página (las "
+                     f"{intencion.MAX_BUSQUEDAS_POR_PAGINA} con más clics en los 90 días del censo), "
+                     "con caché por cliente: la misma búsqueda no se vuelve a pagar en otra página ni en "
+                     "otro rastreo. Con la intención de la página da el desajuste ponderado por clics, "
+                     "orientativo (#169, decisión 176). Solo clientes con Search Console. Sin evaluar (#8)."),
+        preguntas=("intencion_busqueda",),
+        construir_estados=intencion.estados_intencion_busquedas,
+        filtrar_urls=intencion.paginas_con_busquedas,
+        por_que_vacio=_por_que_sin_busquedas,
+        depende_de=("intencion_pagina",),
+        ejemplo=True,
+    )
+
+
+def _por_que_sin_busquedas(session, job) -> str:
+    from shared import intencion
+
+    return f"intencion_busquedas: {intencion.motivo_sin_busquedas(session, job.id)}"
 
 
 REGISTRO: dict[str, Modulo] = _registro_inicial()
@@ -609,6 +658,16 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
     progreso = dict(run.progreso or {})
     por_modulo = dict(progreso.get("por_modulo") or {})
     errores: list[str] = list(run.errores or [])
+    # Por que un modulo no preguntara nada (decisiones 176 y 178), antes de
+    # empezar: se ve en la ejecucion desde el principio.
+    for nombre, ids in ids_de.items():
+        m = REGISTRO[nombre]
+        if not ids and m.por_que_vacio is not None:
+            aviso = m.por_que_vacio(s, job)
+            if aviso and aviso not in errores:
+                errores.append(aviso)
+                run.errores = errores[:50]
+                s.commit()
     cancelada = False
     try:
         for nombre in run.modulos:
@@ -618,11 +677,6 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                 continue
             preguntas = m.preguntas_para(s, job)
             ids = ids_de[nombre]
-            if not ids and m.por_que_vacio is not None:
-                aviso = m.por_que_vacio(s, job)
-                if aviso and aviso not in errores:
-                    errores.append(aviso)
-                    run.errores = errores[:50]
             if m.por_grupo:
                 claves_hechas = _claves_hechas(s, run.id, [p.nombre for p in preguntas])
                 hechas, pendientes = set(), list(ids)
@@ -715,6 +769,15 @@ def recuperar(session, minutos: float) -> list[str]:
             reencolar.append(str(r.id))
     session.commit()
     return reencolar
+
+
+def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
+    """El desajuste pagina-busquedas y el embudo con trafico de una ejecucion
+    (decision 176). Aqui para que el router solo llegue a la capa a traves de
+    este modulo (decision 85)."""
+    from shared.intencion import intencion_frente_a_busquedas as calcular
+
+    return calcular(session, run_id, limite)
 
 
 def minutos_de_latido() -> float:

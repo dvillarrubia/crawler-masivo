@@ -47,7 +47,7 @@ from sqlalchemy import func, inspect, select
 
 logger = logging.getLogger(__name__)
 
-VENTANA_DIAS = 90
+from shared.gsc import VENTANA_DIAS  # noqa: E402  (decision 176: la comparte el enriquecido)
 MAX_FUERA = 25
 # Una variante con parametros cuenta como problema si se lleva al menos este
 # trafico de la pagina (sumando las dos): por debajo es ruido de campanas.
@@ -61,8 +61,9 @@ def _sin_query(url: str) -> str:
 
 
 def _dia_del_censo(job) -> date:
-    t = job.started_at or job.created_at or datetime.now(timezone.utc)
-    return t.date()
+    from shared.gsc import dia_del_censo
+
+    return dia_del_censo(job)
 
 
 def avisar(an) -> None:

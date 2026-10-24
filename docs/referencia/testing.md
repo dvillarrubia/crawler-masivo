@@ -129,6 +129,13 @@ cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
 cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
 medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
 corren tambien en el trabajo de la API.
+Intencion (decision 176): `test_intencion.py` (preguntas y modulos, las
+busquedas de la ventana y de la propiedad activa, sin Search Console lo dice, la
+estimacion por busqueda distinta, de punta a punta con el `FakeLLM` y relanzar a
+0 llamadas, la cache por cliente, el desajuste y la incidencia apagada, y
+`extraer` sin estados repetidos) y `test_intencion_api.py` (resultados de un
+choice, la busqueda en la tabla y el desajuste por API); los dos tambien en el
+trabajo de la API.
 Soft 404 (decision 105): `test_soft404.py` (las reglas puras —sonda, eco, titulares
 seguros y dudosos en ocho idiomas, busquedas, disponibilidad— y el analisis contra
 SQLite: huella exacta y MinHash, sonda 404, redireccion y muro de WAF sin huella,

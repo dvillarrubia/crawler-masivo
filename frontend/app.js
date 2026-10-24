@@ -205,13 +205,19 @@ const TAB_SLUG = {
 const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k]));
 
 // Helpers
-// Opciones de la pregunta `tipo_pagina` (decision 178), en castellano.
-const TIPO_PAGINA_LABEL = {
+// Respuestas de los choice del enriquecido, en castellano: el tipo de pagina
+// (decision 178) y la intencion y el embudo (decision 176), que llegan en
+// ingles como en el catalogo de preguntas.
+const RESPUESTA_ENRIQ = {
   home: 'portada', listado: 'listado o categoría', ficha_producto: 'ficha de producto o servicio',
   landing_comercial: 'landing comercial', articulo: 'artículo', perfil: 'perfil (autor, persona)',
   corporativa: 'corporativa',
   contacto_ubicacion: 'contacto o ubicación', ayuda: 'ayuda, documentación o herramienta', legal: 'legal',
   utilidad: 'utilidad', otro: 'otro', ninguna: 'ninguna',
+  informational: 'informacional', commercial: 'comercial', transactional: 'transaccional',
+  navigational: 'navegacional / marca', local: 'local', unclear: 'no está claro',
+  tofu: 'TOFU', mofu: 'MOFU', bofu: 'BOFU', post_purchase: 'postventa',
+  out_of_funnel: 'fuera del embudo', sin_respuesta: 'sin respuesta',
 };
 
 const fmt = {
@@ -369,9 +375,12 @@ const fmt = {
     else if (a.max_urls) partes.push('máx. ' + a.max_urls + ' URLs');
     return partes.join(', ') || 'todas las indexables';
   },
-  respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : (TIPO_PAGINA_LABEL[r] || r),
+  respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : (RESPUESTA_ENRIQ[r] || r),
   estadoPlantillaEnriq: e => ({ propagable: 'propagable', orientativa: 'orientativa',
     mixta: 'mixta: las muestras no coinciden', sin_respuesta: 'sin respuesta' })[e] || e,
+  // Lo que cuenta `total`: una fila de `intencion_busqueda` es una busqueda de
+  // una pagina (decision 176); el resto, respuestas (un grupo en la 175).
+  unidadEnriq: r => r.ambito === 'busqueda' ? 'búsquedas (página × búsqueda)' : 'respuestas',
   campoDiff: c => ({
     status_code: 'Código de respuesta',
     indexability_status: 'Indexabilidad',
@@ -1901,7 +1910,7 @@ function app() {
       this.cleaningError = null;
       this.cleaningMessage = null;
       this._pararEnriq();
-      this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null; this.enriqPlantillas = null;
+      this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null; this.enriqPlantillas = null; this.enriqIntencion = null;
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
@@ -3045,6 +3054,7 @@ function app() {
     enriqFiltro: { pregunta: null, respuesta: null, page: 1 },
     enriqPlantillas: null,
     enriqTimer: null,
+    enriqIntencion: null,
 
     _alcanceEnriq() {
       const f = this.enriqForm;
@@ -3147,6 +3157,7 @@ function app() {
       try {
         this.enriqRun = await api(`/jobs/${this.job.id}/enrichment/${id}`);
       } catch (e) { this.error = e.message; return; }
+      this.cargarIntencionEnriq();
       this._pararEnriq();
       if (['pendiente', 'en_curso', 'cancelando'].includes(this.enriqRun.estado)) {
         this.enriqTimer = setInterval(async () => {
@@ -3156,7 +3167,7 @@ function app() {
             this.enriqRun = r;
             const i = this.enriqRuns.findIndex(x => x.id === r.id);
             if (i >= 0) this.enriqRuns[i] = { ...this.enriqRuns[i], estado: r.estado, gastado_usd: r.gastado_usd };
-            if (!['pendiente', 'en_curso', 'cancelando'].includes(r.estado)) this._pararEnriq();
+            if (!['pendiente', 'en_curso', 'cancelando'].includes(r.estado)) { this._pararEnriq(); this.cargarIntencionEnriq(); }
           } catch {}
         }, 3000);
       }
@@ -3176,6 +3187,17 @@ function app() {
       } catch (e) { this.showToast(e.message, 'error'); }
     },
 
+    // Intencion de la pagina frente a sus busquedas y embudo con trafico
+    // (decision 176). Solo si la ejecucion hizo alguno de los dos modulos.
+    async cargarIntencionEnriq() {
+      this.enriqIntencion = null;
+      const run = this.enriqRun;
+      if (!this.job || !run || !(run.modulos || []).some(m => m.startsWith('intencion_'))) return;
+      try {
+        this.enriqIntencion = await api(`/jobs/${this.job.id}/enrichment/${run.id}/intencion?limite=50`);
+      } catch { this.enriqIntencion = null; }
+    },
+
     async cargarDecisionesEnriq(pregunta = undefined, respuesta = undefined) {
       if (!this.job || !this.enriqRun) return;
       if (pregunta !== undefined) this.enriqFiltro = { pregunta, respuesta, page: 1 };
@@ -3188,10 +3210,15 @@ function app() {
       } catch (e) { this.error = e.message; }
     },
 
-    // Respuestas de una pregunta, de la mas frecuente a la menos: un choice
-    // de 11 opciones (tipo de pagina) no se lee en el orden en que llegan.
+    // Respuestas de una pregunta. Un choice corto con sus opciones (la
+    // intencion o el embudo, decision 176) se lee en el orden del catalogo, y
+    // las que no esten en el, detras; uno largo (el tipo de pagina, decision
+    // 178) o sin opciones, de la mas frecuente a la menos.
     respuestasEnriq(r) {
-      return Object.entries(r.por_respuesta || {}).sort((a, b) => b[1] - a[1]);
+      const pares = Object.entries(r.por_respuesta || {});
+      if (!r.opciones || r.opciones.length > 7) return pares.sort((a, b) => b[1] - a[1]);
+      const pos = o => { const i = r.opciones.indexOf(o); return i < 0 ? 999 : i; };
+      return pares.sort((a, b) => pos(a[0]) - pos(b[0]) || b[1] - a[1]);
     },
 
     // Propuesta por plantilla (decision 178): que responden las muestras de

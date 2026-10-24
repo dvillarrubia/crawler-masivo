@@ -78,7 +78,7 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
     modulo = modulo_de(pregunta)
     if getattr(modulo, "por_grupo", False):
         return _extraer_grupos(session, p, modulo, jobs, n, semilla)
-    por_plantilla: dict[str, list[tuple]] = {}
+    candidatos_de: dict[str, list[tuple]] = {}
     vistas: set[str] = set()
     opciones = None
     for jid in jobs:
@@ -116,34 +116,35 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
             # La plantilla con el host delante: dos sitios con /blog/:slug son
             # dos plantillas, no una.
             plantilla = f"{urlsplit(url).hostname or ''}|{plantilla_de(path or '/', reglas)}"
-            por_plantilla.setdefault(plantilla, []).append((str(job.id), uid, url, plantilla))
-    # Todas en el orden estratificado (los `n` primeros son los de siempre) y
-    # se van cogiendo saltando los estados repetidos: la misma pagina con y sin
-    # www es el mismo ejemplo para Jev y contarlo dos veces infla el juego
-    # (decision 169). Se rellena con la siguiente hasta llegar a `n`.
-    total = sum(len(v) for v in por_plantilla.values())
-    orden = muestra_estratificada(por_plantilla, total, semilla=semilla)
-    filas: list[dict] = []
-    estados_vistos: set[str] = set()
-    for i in range(0, len(orden), 200):
-        if len(filas) >= n:
-            break
-        trozo = orden[i:i + 200]
-        for (jid, uid, url, plantilla), e in zip(
-                trozo, modulo.construir_estados(session, [uid for _, uid, _, _ in trozo])):
-            clave = json.dumps(e.datos, sort_keys=True, ensure_ascii=False, default=str)
-            if clave in estados_vistos:
-                continue
-            estados_vistos.add(clave)
-            fila = {"id": url, "job_id": jid, "url_id": uid, "plantilla": plantilla,
-                    "pregunta": p.nombre, "version": p.version, "estado": e.datos,
-                    "etiqueta": None, "etiquetado_por": None, "nota": ""}
-            if opciones is not None:
-                fila["opciones"] = opciones
-            filas.append(fila)
-            if len(filas) >= n:
-                break
-    return filas
+            candidatos_de.setdefault(str(job.id), []).append((str(job.id), uid, url, plantilla))
+    # Los estados de TODOS los candidatos y sin repetir ninguno (decision 169:
+    # la misma pagina con y sin www es la misma entrada para Jev, y contarla
+    # dos veces infla la muestra). Un modulo puede dar varios estados por URL
+    # (`intencion_busquedas`: uno por busqueda, decision 176), asi que el
+    # ejemplo es el ESTADO, no la URL. Por job: el estado de una busqueda lleva
+    # el sitio y las marcas de su censo.
+    por_plantilla: dict[str, list[tuple]] = {}
+    vistos: set[str] = set()
+    for jid in sorted(candidatos_de):
+        candidatos = candidatos_de[jid]
+        for i in range(0, len(candidatos), 500):
+            trozo = candidatos[i:i + 500]
+            por_uid = {c[1]: c for c in trozo}
+            for e in modulo.construir_estados(session, [c[1] for c in trozo]):
+                clave = _clave_del_juego(e.datos)
+                if clave in vistos:
+                    continue
+                vistos.add(clave)
+                _, uid, url, plantilla = por_uid[e.url_id]
+                por_plantilla.setdefault(plantilla, []).append((jid, uid, url, plantilla, e))
+    elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)
+    return [{"id": url if e.ambito == "url" else f"{e.ambito}|{_clave_del_juego(e.datos)}",
+             "job_id": jid, "url_id": uid, "plantilla": plantilla, "ambito": e.ambito,
+             "pregunta": p.nombre, "version": p.version, "estado": e.datos,
+             "etiqueta": None, "etiquetado_por": None, "nota": "",
+             # Las opciones del cliente, si las tiene la pregunta (decision 178).
+             **({"opciones": opciones} if opciones is not None else {})}
+            for jid, uid, url, plantilla, e in elegidas]
 
 
 def pregunta_del_juego(juego: list[dict]):
@@ -219,6 +220,24 @@ def _extraer_grupos(session, p, modulo, jobs: list[str], n: int, semilla: int) -
                       "grupo": gid, "ambito": e.ambito, "plantilla": estrato, "pregunta": p.nombre, "version": p.version,
                       "estado": e.datos, "etiqueta": None, "etiquetado_por": None, "nota": nota})
     return filas
+
+
+def _clave_del_juego(datos) -> str:
+    """El estado sin caja ni espacios repetidos: lo que la cache de la decision
+    84 considera el mismo estado (sin importar la capa, que este script solo
+    puede tocar desde `responder`)."""
+    import unicodedata
+
+    def norm(v):
+        if isinstance(v, str):
+            return " ".join(unicodedata.normalize("NFKC", v).split()).casefold()
+        if isinstance(v, dict):
+            return {str(k): norm(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [norm(x) for x in v]
+        return v
+
+    return json.dumps(norm(datos), sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def responder(juego: list[dict], confirmar: bool, capa=None) -> tuple[dict, list[dict] | None]:

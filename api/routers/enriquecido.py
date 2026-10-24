@@ -96,13 +96,14 @@ def _estimar(db, job, cuerpo):
 
 def _resultados(db: Session, run_id: uuid.UUID) -> dict:
     filas = (db.query(Decision.pregunta, Decision.estado, Decision.respuesta,
-                      func.count(Decision.id), func.coalesce(func.sum(Decision.coste_usd), 0.0))
+                      func.count(Decision.id), func.coalesce(func.sum(Decision.coste_usd), 0.0),
+                      Decision.ambito)
              .filter(Decision.run_id == run_id)
-             .group_by(Decision.pregunta, Decision.estado, Decision.respuesta).all())
+             .group_by(Decision.pregunta, Decision.estado, Decision.respuesta, Decision.ambito).all())
     from shared.preguntas import CATALOGO
 
     salida: dict[str, dict] = {}
-    for pregunta, estado, respuesta, n, coste in filas:
+    for pregunta, estado, respuesta, n, coste, ambito in filas:
         # El umbral de HOY (decision 169): sin el, la interfaz avisa de que todo
         # es orientativo aunque alguna fila vieja diga otra cosa; con el, separa
         # por respuesta lo decidido de lo incierto, que no tiene el mismo aplomo.
@@ -111,6 +112,13 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
                                          "decididas_por_respuesta": {}, "total": 0, "coste_usd": 0.0,
                                          "umbral": actual.umbral if actual else None,
                                          "tipo": actual.tipo if actual else None})
+        # Decision 176: un choice se pinta con sus opciones en orden y una fila
+        # de `intencion_busqueda` es una busqueda de una pagina, no una URL. Las
+        # de una pregunta con las opciones del cliente (178) no son las del
+        # catalogo: sin orden que dar.
+        p["opciones"] = (list(actual.opciones) if actual and actual.tipo in ("choice", "score")
+                         and actual.opciones and not actual.opciones_del_cliente else None)
+        p["ambito"] = ambito or "url"
         p["total"] += n
         p["coste_usd"] = round(p["coste_usd"] + float(coste), 8)
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
@@ -296,6 +304,19 @@ def propuesta_por_plantilla(job_id: uuid.UUID, run_id: uuid.UUID, pregunta: str 
 
     _run(db, job_id, run_id)
     return propuesta(db, run_id, pregunta)
+
+
+@router.get("/jobs/{job_id}/enrichment/{run_id}/intencion")
+def intencion_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
+                           limite: int = Query(100, ge=1, le=1000),
+                           db: Session = Depends(get_session)):
+    """Intencion de cada pagina frente a la de sus busquedas, ponderado por
+    clics, y el embudo con el trafico real (#39, #169; decision 176). Todo
+    orientativo mientras las preguntas no tengan umbral (#8)."""
+    from shared.enriquecido import intencion_frente_a_busquedas
+
+    _run(db, job_id, run_id)
+    return intencion_frente_a_busquedas(db, run_id, limite)
 
 
 @router.patch("/jobs/{job_id}/enrichment/{run_id}/cancel", response_model=EnrichmentRunResponse)

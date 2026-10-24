@@ -20,8 +20,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 178 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 178 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -205,6 +204,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 174 | Accesibilidad con axe-core por muestra de plantilla: vendorizado, apagado de serie, una fila por regla y plantilla, nunca `error`, y lo que axe no decide no se afirma | [`render-y-descarga`](render-y-descarga.md#d174) |
 | 173 | Perfil de dispositivo entero y por nombre (preset Chrome Android), la comparación automática no cruza perfiles y capturas de pantalla por muestra de plantilla en el volumen de archivo | [`render-y-descarga`](render-y-descarga.md#d173) |
 | 175 | La canibalización se juzga por pares de páginas del mismo idioma (búsqueda + dos URLs), con dos preguntas en llamadas separadas y la recomendación leída solo si son sustitutas | [`llm-y-enriquecido`](llm-y-enriquecido.md#d175) |
+| 176 | Intención de la página y de sus búsquedas de Search Console: una pregunta por criterio, la búsqueda sin nada de la página y el desajuste solo orientativo | [`llm-y-enriquecido`](llm-y-enriquecido.md#d176) |
 | 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de doce opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
 
 ## Anadir una decision
