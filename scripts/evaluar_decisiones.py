@@ -85,9 +85,15 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
         reglas = reglas_de_plantilla((job.config or {}).get("templates"))
         # Ordenado: sin ORDER BY, Postgres devuelve otro orden tras un VACUUM y
         # la misma semilla daba otra muestra.
-        for uid, url, path in session.query(Url.id, Url.url, Url.path).filter(
-                Url.job_id == job.id, Url.is_internal.is_(True), Url.is_html.is_(True),
-                Url.status_code == 200).order_by(Url.id):
+        filas = session.query(Url.id, Url.url, Url.path).filter(
+            Url.job_id == job.id, Url.is_internal.is_(True), Url.is_html.is_(True),
+            Url.status_code == 200).order_by(Url.id).all()
+        # El juego sale de lo que el modulo pregunta de verdad: soft 404, de
+        # sus candidatos (decision 163), no de todo el censo.
+        if modulo.filtrar_urls:
+            dentro = set(modulo.filtrar_urls(session, job.id, [f[0] for f in filas]))
+            filas = [f for f in filas if f[0] in dentro]
+        for uid, url, path in filas:
             # La misma URL en dos censos es UN ejemplo: el primero que la trae.
             if url in vistas:
                 continue

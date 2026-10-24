@@ -257,3 +257,24 @@
      al arrancar— lo contaba tantas veces como URLs (14 de 150 en esta prueba).
      Ahora el coste va solo en la primera copia. El gasto de la ejecución
      (`gastado_usd`) ya salía del presupuesto y estaba bien.
+
+<a id="d163"></a>
+163. **La primera pregunta de verdad: soft 404, solo sobre lo sospechoso y marcada
+   como sin evaluar** (#11). `es_soft_404` (noul) pregunta si una página que
+   responde 200 comunica en realidad un error, un producto que ya no está, una
+   búsqueda vacía o un «próximamente», con la ruta, las palabras, el título, el
+   H1 y el principio del contenido.
+   - **Solo sobre lo sospechoso**: los candidatos que dejó la versión sin
+     modelo (decisión 105) y las indexables con menos de 50 palabras propias.
+     Las que la determinista ya afirmó no se preguntan. Sin las de poco
+     contenido el módulo no tenía trabajo: en producción la determinista solo
+     dejaba un candidato; con ellas, 17 de 3.216 indexables en Lopesan y 47 de
+     1.080 en Saunier Duval.
+   - Un módulo puede ahora filtrar sus URLs (`Modulo.filtrar_urls`), y el
+     filtro se aplica **igual** en la estimación del diálogo y al ejecutar, con
+     el total del progreso fijo desde el principio. `extraer` (159) saca el
+     juego de lo mismo que pregunta el módulo.
+   - **Sin umbral, y el módulo marcado como sin evaluar**: todo sale
+     `incierto` y nada va a un informe. El test que solo dejaba existir el
+     módulo de ejemplo pasa a exigir esto de cualquier módulo: si alguna de sus
+     preguntas no tiene umbral, va marcado.

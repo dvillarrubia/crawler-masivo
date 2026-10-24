@@ -18,7 +18,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 125 |
 
 ## Por numero
@@ -188,6 +188,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 159 | Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara sin gastar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d159) |
 | 160 | Lo que Google y Chromium hacen de verdad: meta refresh con espacios, región ISO 3166-1, X-Robots-Tag en no HTML, LocalBusiness, y una imagen es su URL sin `?t=` | [`indexabilidad`](indexabilidad.md#d160) |
 | 162 | Jev en producción: la primera llamada real calibra la estimación y el gasto se cuenta una vez | [`llm-y-enriquecido`](llm-y-enriquecido.md#d162) |
+| 163 | La primera pregunta de verdad: soft 404, solo sobre lo sospechoso y marcada como sin evaluar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d163) |
 
 ## Anadir una decision
 
