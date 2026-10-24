@@ -152,7 +152,9 @@ def test_un_modulo_con_una_pregunta_sin_evaluar_va_marcado():
     for m in enr.REGISTRO.values():
         sin_umbral = [p.nombre for p in m.objetos_pregunta() if p.umbral is None]
         assert not sin_umbral or m.ejemplo, f"{m.nombre}: preguntas sin evaluar {sin_umbral}"
-    assert set(enr.REGISTRO) == {"pagina_legal", "soft_404", "pagina_de_utilidad"}
+    assert set(enr.REGISTRO) == {"pagina_legal", "soft_404", "pagina_de_utilidad",
+                                 "canibalizacion",
+                                 }
 
 
 # --- alcance y estados ---------------------------------------------------------

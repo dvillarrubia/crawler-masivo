@@ -53,6 +53,12 @@ class Pregunta:
     # Las de ejemplo no se usan en produccion: estan para fijar la forma.
     ejemplo: bool = False
     etiquetas: tuple[str, ...] = field(default_factory=tuple)
+    # (pregunta, respuesta): esta solo se LEE cuando otra pregunta del mismo
+    # estado respondio eso (decision 175: la recomendacion de una
+    # canibalizacion, solo si las paginas son sustitutas). Se pregunta en la
+    # misma llamada; la condicion la aplican la pantalla y la evaluacion. No
+    # se envia, asi que no entra en la huella.
+    solo_si: tuple[str, str] | None = None
 
     def __post_init__(self):
         if self.tipo not in TIPOS:
@@ -96,13 +102,33 @@ class Pregunta:
 
 def _cargar() -> dict[str, Pregunta]:
     from shared.preguntas import ejemplo, soft404
+    from shared.preguntas import canibalizacion
 
+    todas = ejemplo.PREGUNTAS + soft404.PREGUNTAS
+    todas = todas + canibalizacion.PREGUNTAS
     catalogo: dict[str, Pregunta] = {}
-    for p in ejemplo.PREGUNTAS + soft404.PREGUNTAS:
+    for p in todas:
         if p.nombre in catalogo:
             raise ValueError(f"pregunta duplicada: {p.nombre}")
         catalogo[p.nombre] = p
+    _comprobar_condiciones(catalogo)
     return catalogo
+
+
+def _comprobar_condiciones(catalogo: dict[str, Pregunta]) -> None:
+    """Un `solo_si` apunta a una pregunta que existe y a una respuesta que esa
+    pregunta puede dar: si no, la condicion no se cumpliria nunca en silencio."""
+    for p in catalogo.values():
+        if p.solo_si is None:
+            continue
+        nombre, respuesta = p.solo_si
+        otra = catalogo.get(nombre)
+        if otra is None or otra is p:
+            raise ValueError(f"{p.nombre}: solo_si apunta a {nombre!r}, que no existe")
+        validas = ({"true", "false"} if otra.tipo == "noul" else set(map(str, otra.opciones))
+                   if otra.tipo == "choice" else set())
+        if respuesta not in validas:
+            raise ValueError(f"{p.nombre}: {nombre!r} no puede responder {respuesta!r}")
 
 
 CATALOGO: dict[str, Pregunta] = _cargar()

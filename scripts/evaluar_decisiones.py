@@ -76,6 +76,8 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
 
     p = obtener(pregunta)
     modulo = modulo_de(pregunta)
+    if getattr(modulo, "por_grupo", False):
+        return _extraer_grupos(session, p, modulo, jobs, n, semilla)
     por_plantilla: dict[str, list[tuple]] = {}
     vistas: set[str] = set()
     for jid in jobs:
@@ -113,6 +115,63 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
             for (jid, uid, url, plantilla), e in zip(elegidas, estados)]
 
 
+def _extraer_grupos(session, p, modulo, jobs: list[str], n: int, semilla: int) -> list[dict]:
+    """El juego de un modulo por grupo (decision 175: una busqueda y las URLs
+    que se la reparten). Estratificado por host y COMBINACION de plantillas
+    del grupo (ficha + ficha no es lo mismo que listado + ficha), y sin
+    repetidos: la misma busqueda con las mismas rutas es un ejemplo aunque
+    venga de dos censos o con y sin www (la 169 vio que eso infla la muestra),
+    y dos estados identicos, tambien."""
+    import uuid
+    from urllib.parse import urlsplit
+
+    from shared.evaluacion_decisiones import muestra_estratificada
+    from shared.models import Issue, Job, Url
+    from shared.plantillas import plantilla_de, reglas_de_plantilla
+
+    por_plantilla: dict[str, list[tuple]] = {}
+    vistas: set[tuple] = set()
+    for jid in jobs:
+        job = session.get(Job, uuid.UUID(str(jid)))
+        if job is None:
+            raise SystemExit(f"No existe el job {jid}")
+        reglas = reglas_de_plantilla((job.config or {}).get("templates"))
+        alcance = [uid for (uid,) in session.query(Url.id).filter(
+            Url.job_id == job.id, Url.is_internal.is_(True), Url.is_html.is_(True),
+            Url.status_code == 200, Url.indexable.is_(True)).order_by(Url.id)]
+        grupos = modulo.filtrar_urls(session, job.id, alcance)
+        detalles = {}
+        for i in range(0, len(grupos), 500):
+            detalles.update(session.query(Issue.id, Issue.details).filter(Issue.id.in_(grupos[i:i + 500])).all())
+        for gid in grupos:
+            d = detalles.get(gid) or {}
+            urls = [u for u in (d.get("urls") or []) if isinstance(u, dict) and u.get("url")]
+            rutas = tuple(sorted(urlsplit(u["url"]).path or "/" for u in urls))
+            clave = (str(d.get("consulta") or "").casefold(), rutas)
+            if clave in vistas:
+                continue
+            vistas.add(clave)
+            host = urlsplit(urls[0]["url"]).hostname if urls else ""
+            formas = sorted({u.get("plantilla") or plantilla_de(urlsplit(u["url"]).path or "/", reglas)
+                             for u in urls})
+            estrato = f"{host or ''}|{' + '.join(formas)}"
+            por_plantilla.setdefault(estrato, []).append((str(job.id), gid, d.get("consulta"), rutas, estrato))
+    elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)
+    estados = modulo.construir_estados(session, [gid for _, gid, *_ in elegidas])
+    nota = (f"Etiquetar solo si {p.solo_si[0]} es «{p.solo_si[1]}»; si no, dejar vacia."
+            if p.solo_si else "")
+    filas, iguales = [], set()
+    for (jid, gid, consulta, rutas, estrato), e in zip(elegidas, estados):
+        crudo = json.dumps(e.datos, sort_keys=True, ensure_ascii=False)
+        if crudo in iguales:
+            continue
+        iguales.add(crudo)
+        filas.append({"id": f"{consulta} | {' + '.join(rutas)}", "job_id": jid, "url_id": e.url_id,
+                      "grupo": gid, "ambito": e.ambito, "plantilla": estrato, "pregunta": p.nombre, "version": p.version,
+                      "estado": e.datos, "etiqueta": None, "etiquetado_por": None, "nota": nota})
+    return filas
+
+
 def responder(juego: list[dict], confirmar: bool, capa=None) -> tuple[dict, list[dict] | None]:
     """(estimacion, respuestas o None si no se confirmo o la capa esta apagada).
 
@@ -130,7 +189,8 @@ def responder(juego: list[dict], confirmar: bool, capa=None) -> tuple[dict, list
     if not juego:
         raise SystemExit("El juego esta vacio")
     p = obtener(juego[0]["pregunta"])
-    estados = [Estado(datos=f["estado"], url_id=f.get("url_id")) for f in juego]
+    estados = [Estado(datos=f["estado"], url_id=f.get("url_id"), ambito=f.get("ambito") or "url")
+               for f in juego]
     if capa is None:
         # Primero una capa sin red para estimar, y la de verdad con el tope.
         estimacion = capa_desde_entorno().estimar(estados, [p])

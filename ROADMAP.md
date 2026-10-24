@@ -999,6 +999,11 @@ cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»)
 - [#169](https://github.com/dvillarrubia/crawler-masivo/issues/169) **Jev con búsquedas reales**: intención, embudo, canibalización
   juzgada, cobertura de las oportunidades y snippet. Amplía [#39](https://github.com/dvillarrubia/crawler-masivo/issues/39), [#18](https://github.com/dvillarrubia/crawler-masivo/issues/18) y
   [#22](https://github.com/dvillarrubia/crawler-masivo/issues/22).
+  *Punto 3 (canibalización juzgada), código hecho* (decisión 175): módulo
+  `canibalizacion` sobre los avisos de la 157, por grupo, con «¿sustitutas?» y
+  la recomendación en la misma llamada (0,017 $ los 300 grupos de Lopesan).
+  Falta: etiquetar y medir el juego (#8), el umbral y encender el efecto en el
+  aviso.
 - [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170) **Más adelante**: exportación a BigQuery, GA4 y DataForSEO.
 
 ### 4. Análisis enriquecido con Jev

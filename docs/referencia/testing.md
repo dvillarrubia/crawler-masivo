@@ -107,6 +107,10 @@ dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
 mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
 `test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
 respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
+`test_enriquecido_canibalizacion.py` (decision 175): el modulo por grupo de
+punta a punta con el `FakeLLM` (una llamada por grupo con las dos preguntas,
+reanudar por la clave del estado), filtro, estado, estimacion, `solo_si` en
+la pantalla, el efecto apagado y el `extraer` sin repetidos.
 Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se
 borra TODO lo del censo y nada de lo demas, los dos guardias, que `forzar`
 salta el de la serie y nunca el de en marcha, que `simular` no toca nada, el

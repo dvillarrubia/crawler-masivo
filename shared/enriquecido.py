@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from shared.decisiones import (
-    SIN_DECIDIR, CacheMemoria, CacheRedis, CapaDecisiones, Estado, capa_desde_entorno,
+    SIN_DECIDIR, CacheMemoria, CacheRedis, CapaDecisiones, Estado, capa_desde_entorno, clave_estado,
     guardar_resumen, presupuesto_global_mensual, presupuesto_mensual_de_cliente,
 )
 from shared.llm import numero_de_entorno
@@ -76,6 +76,12 @@ class Modulo:
     # El prefiltro barato: soft 404 solo sobre los candidatos de la decision
     # 105, no sobre todo el censo. None = todas las del alcance.
     filtrar_urls: Callable[[Any, Any, list[int]], list[int]] | None = None
+    # La unidad no es la URL sino un grupo (decision 175: una busqueda y las
+    # URLs que se la reparten). `filtrar_urls` devuelve entonces ids de GRUPO
+    # (los del aviso que lo origina) y `construir_estados` los recibe; cada
+    # Estado lleva en `url_id` la URL donde cuelga el grupo, que puede estar
+    # en varios. Lo hecho al reanudar se reconoce por la clave del estado.
+    por_grupo: bool = False
 
     def objetos_pregunta(self) -> list[Pregunta]:
         return [obtener(n) for n in self.preguntas]
@@ -208,8 +214,27 @@ def _registro_inicial() -> dict[str, Modulo]:
             filtrar_urls=candidatos_soft404,
             ejemplo=True,
         ),
+        _modulo_canibalizacion(),
     ]
     return {m.nombre: m for m in modulos}
+
+
+def _modulo_canibalizacion() -> Modulo:
+    from shared.enriquecido_canibalizacion import estados_canibalizacion, grupos_canibalizacion
+
+    return Modulo(
+        nombre="canibalizacion",
+        titulo="Canibalizacion por busqueda (juicio)",
+        descripcion=("Para cada busqueda que Search Console reparte entre varias URLs (aviso de la "
+                     "decision 157), si las paginas son sustitutas para quien la hace y, solo si lo "
+                     "son, que hacer: fusionar, diferenciar, canonicalizar o dejar. Las 300 de mas "
+                     "clics. Sin evaluar (#8): las respuestas salen inciertas y no van a ningun informe."),
+        preguntas=("paginas_sustitutas", "recomendacion_canibalizacion"),
+        construir_estados=estados_canibalizacion,
+        filtrar_urls=grupos_canibalizacion,
+        por_grupo=True,
+        ejemplo=True,
+    )
 
 
 REGISTRO: dict[str, Modulo] = _registro_inicial()
@@ -254,7 +279,7 @@ def describir_modulos(registro: dict[str, Modulo] | None = None) -> list[dict]:
     reg = REGISTRO if registro is None else registro
     return [{"nombre": m.nombre, "titulo": m.titulo, "descripcion": m.descripcion,
              "preguntas": list(m.preguntas), "depende_de": list(m.depende_de),
-             "ejemplo": m.ejemplo} for m in reg.values()]
+             "ejemplo": m.ejemplo, "por_grupo": m.por_grupo} for m in reg.values()]
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +407,8 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
         # Decisiones (estado distinto x pregunta) que ya estan pagadas.
         e["decisiones"] = e["estados_distintos"] * len(preguntas)
         e["urls"] = len(ids)
+        # En un modulo por grupo, `urls` cuenta grupos (decision 175).
+        e["unidad"] = "grupos" if m.por_grupo else "urls"
         por_modulo[nombre] = e
         for k in total:
             total[k] += e[k]
@@ -444,6 +471,18 @@ def _hechas(session, run_id, preguntas: list[str]) -> set[int]:
     for uid, p in filas:
         por_url.setdefault(uid, set()).add(p)
     return {u for u, ps in por_url.items() if ps >= set(preguntas)}
+
+
+def _claves_hechas(session, run_id, preguntas: list[str]) -> set[str]:
+    """Como `_hechas`, por la clave del estado: para los modulos `por_grupo`,
+    donde una URL esta en varios grupos y no dice cual esta hecho."""
+    from shared.models import Decision
+
+    por_clave: dict[str, set[str]] = {}
+    for clave, p in (session.query(Decision.clave, Decision.pregunta)
+                     .filter(Decision.run_id == _uuid(run_id), Decision.pregunta.in_(preguntas))):
+        por_clave.setdefault(clave, set()).add(p)
+    return {c for c, ps in por_clave.items() if ps >= set(preguntas)}
 
 
 def ejecutar(run_id, *, sesion_factory, redis=None, transport=None,
@@ -527,8 +566,12 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                 continue
             preguntas = m.objetos_pregunta()
             ids = ids_de[nombre]
-            hechas = _hechas(s, run.id, [p.nombre for p in preguntas])
-            pendientes = [u for u in ids if u not in hechas]
+            if m.por_grupo:
+                claves_hechas = _claves_hechas(s, run.id, [p.nombre for p in preguntas])
+                hechas, pendientes = set(), list(ids)
+            else:
+                hechas = _hechas(s, run.id, [p.nombre for p in preguntas])
+                pendientes = [u for u in ids if u not in hechas]
             pm = por_modulo.setdefault(nombre, {"total": len(ids), "procesadas": 0,
                                                 "de_cache": 0, "sin_decidir": 0})
             pm["total"] = len(ids)
@@ -541,6 +584,11 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                     cancelada = True
                     break
                 estados = m.construir_estados(s, trozo)
+                if m.por_grupo:
+                    # Varios grupos comparten URL: lo hecho va por estado.
+                    ya = [e for e in estados if clave_estado(e.datos) in claves_hechas]
+                    estados = [e for e in estados if clave_estado(e.datos) not in claves_hechas]
+                    pm["procesadas"] += len(ya)
                 resultados = await capa.preguntar(estados, preguntas)
                 filas = [f for f in capa.filas(estados, resultados) if _guardable(f)]
                 s.add_all(filas)
@@ -549,7 +597,7 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                     if a not in errores:
                         errores.append(a)
                 capa.obs = type(capa.obs)(estado=capa.obs.estado)
-                urls_con_fila = {f.url_id for f in filas}
+                urls_con_fila = {f.clave if m.por_grupo else f.url_id for f in filas}
                 pm["procesadas"] += len(urls_con_fila)
                 pm["de_cache"] += sum(1 for f in filas if f.origen == "cache")
                 pm["sin_decidir"] += sum(1 for f in filas if f.estado == SIN_DECIDIR)

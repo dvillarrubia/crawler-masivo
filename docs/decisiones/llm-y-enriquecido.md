@@ -342,3 +342,67 @@
      cuándo el umbral común casi no decide una clase con 10 o más reales
      (menos del 25 %). Fue una revisión independiente la que vio que la cifra
      global escondía esto.
+
+<a id="d175"></a>
+175. **La canibalización se juzga por grupo (búsqueda + URLs), con dos
+   preguntas en una llamada y la recomendación leída solo si son sustitutas**
+   (#18, #169 punto 3). Entrada: los avisos `canibalizacion_por_consulta` de la
+   decisión 157, que dicen QUÉ búsqueda se reparte entre varias URLs, no si
+   compiten ni qué hacer. Módulo `canibalizacion` con `paginas_sustitutas`
+   (noul: ¿quien hace esta búsqueda quedaría igual de servido con cualquiera?)
+   y `recomendacion_canibalizacion` (choice: `fusionar`, `diferenciar`,
+   `canonicalizar`, `dejar`). Dos hallazgos, dos preguntas (169): la segunda
+   da por hecho que compiten y dice qué NO es cada opción.
+   - **La unidad es el grupo, no la URL.** En Lopesan (censo `1e7ea651`) hay
+     459 avisos sobre 167 URLs ancla: una URL está en varios grupos y no puede
+     ser la clave. `Modulo.por_grupo`: su `filtrar_urls` devuelve ids de
+     INCIDENCIA y su `construir_estados` los recibe; cada `Estado` va con
+     `ambito="consulta"` y `url_id` = el ancla del aviso (la URL menor del
+     grupo, estable entre censos; la de más clics es justo la que se invierte
+     en una canibalización). El resto de URLs va en el estado. En `decisions`
+     el grupo es `url_id` + `estado_enviado.busqueda` (o la `clave`). Reanudar
+     reconoce lo hecho por la clave del estado, no por la URL; el progreso
+     cuenta grupos, y la estimación los devuelve con `unidad: "grupos"`.
+   - **Filtro**: los avisos con ALGUNA URL en el alcance (por defecto, alguna
+     indexable: el ancla puede ser una canonicalizada; con carpeta, alguna
+     dentro), por clics en juego y como mucho **300** (`MAX_GRUPOS`): en
+     Lopesan son el 93 % de los clics repartidos (26.017 de 27.993) y el
+     último tiene 16. Entran 457 de 459; dos no tienen ninguna URL indexable.
+   - **Estado mínimo**: la búsqueda y, por página, la ruta (no la URL: con y
+     sin www es el mismo estado), la parte de la búsqueda en tramos de 5 %,
+     clics e impresiones a dos cifras significativas y la posición entera —
+     como pide #169: un recrawl con un tráfico parecido sale de caché—, si es
+     indexable, título, primer H1 que se pinta y 500 caracteres del contenido
+     sin plantilla. El contenido medio de esas páginas son 4.777 caracteres:
+     sin recorte, diez veces más caro.
+   - **Las dos preguntas van en la misma llamada**, no la segunda tras la
+     primera. Medido: 1.361 tokens por llamada con las dos, 1.000 con solo la
+     primera y 1.045 con solo la segunda (el estado se paga otra vez).
+     Preguntar aparte solo ahorra si menos del 35 % de los grupos son
+     sustitutas, y como mucho medio céntimo por ejecución; a cambio la
+     estimación sería una cota y la ejecución, dos pasadas.
+   - **`Pregunta.solo_si`** (`("paginas_sustitutas", "true")`): la pantalla y
+     `GET .../decisions?pregunta=` cuentan la recomendación solo donde la otra
+     respuesta del mismo estado lo cumple; el resto sale como `no_aplica` (el
+     coste es el de todas, que se pagaron). No se envía ni entra en la
+     huella; el catálogo comprueba que apunte a una pregunta y una respuesta
+     posibles. En el juego (`extraer`), la recomendación se etiqueta solo
+     donde las páginas son sustitutas y lo demás se deja vacío.
+   - **Coste medido en Lopesan** (24-oct-2026, solo lectura, `caracteres / 4 +
+     250` de la 162): 300 llamadas, 408.258 tokens, **0,017 $** (con los 457
+     grupos, 0,026 $). En producción solo dos censos tienen avisos de
+     canibalización, los dos de Lopesan (el otro, `391b5ed6`: 442 grupos, el
+     mismo coste con el tope).
+   - **`extraer` por grupo**: estratifica por host y COMBINACIÓN de
+     plantillas del grupo, y quita los repetidos (la misma búsqueda con las
+     mismas rutas en dos censos o con y sin www, y los estados idénticos).
+   - **Sin umbral y marcado como sin evaluar**: todo sale `incierto`.
+     `efecto_en_el_aviso` (rebajar el aviso si no son sustitutas, confirmarlo
+     con la recomendación si lo son, como pide #169) está escrito y probado,
+     pero **apagado**: solo actúa con decisiones `decidido`, que sin umbral no
+     hay, y nadie lo llama hasta que un módulo pueda emitir o rebajar avisos
+     (pendiente de la 85).
+   - Queda: etiquetar el juego y medirlo (#8), el umbral, encender el efecto en
+     el aviso y los clientes sin Search Console (pares por título o MinHash,
+     #18).
+
