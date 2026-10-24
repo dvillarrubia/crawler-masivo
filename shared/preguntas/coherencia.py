@@ -18,9 +18,10 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
   marcado (precio, valoracion, fecha de un evento u oferta, disponibilidad).
   Solo la contradiccion: que un valor no aparezca en los fragmentos no prueba
   nada (se guarda el contenido principal, no la pagina entera). Ni el autor ni
-  la fecha de publicacion: la firma no esta en el contenido guardado. v2
-  (decision 184): si los fragmentos dan los precios del item y el declarado no
-  es ninguno, eso no es ausencia sino contradiccion.
+  la fecha de publicacion: la firma no esta en el contenido guardado. v3
+  (decision 184): si los fragmentos dan el precio del item y el importe exacto
+  declarado no es ninguno de sus precios, eso no es ausencia sino
+  contradiccion.
 
 Ninguna esta evaluada (#8): sin umbral, todo sale `incierto` y nada va a un
 informe. Las incidencias de #16/#17 que saldrian de ellas (`title_desalineado`,
@@ -205,11 +206,14 @@ CASOS_FRONTERA = [
 SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     nombre="schema_contradice_contenido",
     tipo="noul",
-    # v2 (decision 184): si los fragmentos dan los precios del item de la
-    # pagina y el importe declarado no es ninguno de ellos, se contradice. La
-    # v1 juntaba ese caso con «no aparece» (que no prueba nada) y se callaba
-    # 15 de 19 contradicciones reales en los censos del 24-oct.
-    version=2,
+    # v3 (decision 184): si los fragmentos dan el precio del item de la pagina
+    # y el importe exacto declarado no es ninguno de sus precios, se
+    # contradice. La v1 juntaba ese caso con «no aparece» (que no prueba nada)
+    # y se callaba 15 de 19 contradicciones reales (censos rastreados el
+    # 24-oct). La v2 fue el primer borrador, medido con un contenedor efimero
+    # y nunca desplegado: sus respuestas estan en la cache con version 2, y
+    # la clave no lleva el texto, asi que este no puede reusar ese numero.
+    version=3,
     instrucciones=(
         "A web page declares the values under 'marcado' in its structured data (schema.org markup, "
         "which visitors do not see). 'texto_visible' holds fragments of the text visitors do see on "
@@ -217,16 +221,19 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
         "product, room, course, venue or service it presents. Does the visible text clearly "
         "contradict at least one declared value for that item? "
         "Answer true when the fragments show that same item with a different value for the same "
-        "thing. For a price: the markup declares one amount (in price, lowPrice or a priceRange "
-        "written as a single amount) and the fragments show the item's own prices, but the declared "
-        "amount is none of them; markup left out of date is exactly what this question looks for, "
-        "so a declared amount that differs from every price the page gives for the item is a "
-        "contradiction even when the difference is small or the field is priceRange. Also true for "
+        "thing. For a price: the markup declares one exact amount for the item (price, or a "
+        "priceRange written as a single amount) and the fragments show the item's own basic price, "
+        "but the declared amount is none of the prices the page gives for the item; markup left out "
+        "of date is exactly what this question looks for, so that is a contradiction even when the "
+        "difference is small. A lowPrice is a minimum: it is contradicted only when it is higher "
+        "than the lowest price the page gives for the item. A priceRange written as a range or as "
+        "symbols ($$) is contradicted only by a price of the item outside it. Also true for "
         "a different currency for the same item's price, a different rating or number of reviews, "
         "a different event date or offer validity date, or a different availability (the markup "
         "says InStock and the page says sold out). "
         "Answer false when the fragments give no price, rating, date or availability for that item "
-        "at all (a declared value that is simply not mentioned proves nothing); when the declared "
+        "at all, or only prices of its parts, options or variants (a declared value that is simply "
+        "not mentioned proves nothing); when the declared "
         "amount equals any of the amounts the page gives for the item, in any role (base, per "
         "hour, per night, discounted, or a crossed-out old price); when the differing figure belongs "
         "to something else: another product, room, venue or branch listed on the same page, an "
@@ -239,7 +246,7 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
         "false": "The values match, the differing figure belongs to something else, or the item's values are not shown.",
     },
     descripcion=("Marcado que contradice lo visible: precio, valoracion, fecha de un evento u "
-                 "oferta o disponibilidad (#17, v2 decision 184). Sin evaluar (#8): todo incierto."),
+                 "oferta o disponibilidad (#17, v3 decision 184). Sin evaluar (#8): todo incierto."),
 )
 
 PREGUNTAS = [TITLE_DESCRIBE_CONTENIDO, TITLE_ES_GENERICO, SCHEMA_CONTRADICE_CONTENIDO]
