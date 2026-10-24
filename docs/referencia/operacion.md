@@ -136,7 +136,10 @@ importa sale pocas veces (9 «sí» de 200) y `avisos` dice que su cota no llega
    (`jq -c '{id, pregunta, version, estado, opciones}' juego.jsonl`), y la
    etiqueta se vuelve a pegar por `id` en el fichero del juego.
 5. `evaluar <juego_precision.jsonl> r_amplio.jsonl` (con las MISMAS respuestas
-   de las que salió: con otras se niega). Da la precisión de la respuesta, su
+   de las que salió: con otras se niega, y lo nota si a una fila le falta
+   respuesta, si un positivo ya no dice X o si una fila de control dice una X
+   que el juego habría metido como positivo). Sin ninguna «true» de Jev en el
+   conjunto, `precision` no saca juego. Da la precisión de la respuesta, su
    cota y su umbral propio sobre los positivos; el recall sale `null` y solo
    el bloque `control` lo estima, con su tamaño. El umbral común no sale de
    este juego: se pone con el aleatorio.

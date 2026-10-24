@@ -321,7 +321,8 @@ def seleccion_de_precision(respondidas: list[dict], respuesta: str, *, n_positiv
 
 def metricas_precision(filas: Iterable[dict], respuesta: str, *, objetivo: float = PRECISION_OBJETIVO,
                        min_cubiertas: int = MIN_CUBIERTAS,
-                       todos_los_positivos: bool = True) -> dict[str, Any]:
+                       todos_los_positivos: bool = True,
+                       confianza_minima: float | None = None) -> dict[str, Any]:
     """Lo que dice un juego de precision de la respuesta `respuesta`.
 
     Cada fila como en `metricas`, mas "origen" (`positivo_jev` | `control`) y
@@ -332,13 +333,30 @@ def metricas_precision(filas: Iterable[dict], respuesta: str, *, objetivo: float
     contesto con otra cosa no estan entre los positivos, y el juego tampoco
     sirve para el acierto, la ECE ni el umbral comun (los positivos estan
     sobrerrepresentados). Lo unico que los estima es el control, una muestra
-    uniforme del conjunto, y se da aparte, con su tamano."""
+    uniforme del conjunto, y se da aparte, con su tamano.
+
+    Solo vale con las respuestas de las que salio el juego, y si son otras se
+    niega (ValueError): todas sus filas salieron de filas con respuesta, asi
+    que una sin ella (otro fichero, otra version) ya lo demuestra; un positivo
+    que ya no dice X, tambien, y una fila de control que dice X cuando el
+    juego trae todas las X (o con confianza >= `confianza_minima`, el corte de
+    las de mas confianza), tambien: seria un positivo y no lo es."""
     todas = list(filas)
     positivos = [f for f in todas if f.get("origen") == ORIGEN_POSITIVO]
-    otra = sum(1 for f in positivos if f.get("respuesta") is not None and f["respuesta"] != respuesta)
+    sin_respuesta = sum(1 for f in todas if f.get("respuesta") is None)
+    if sin_respuesta:
+        raise ValueError(f"{sin_respuesta} filas del juego no tienen respuesta (de esta pregunta y version) "
+                         "en este fichero: no son las respuestas con las que se saco el juego")
+    otra = sum(1 for f in positivos if f["respuesta"] != respuesta)
     if otra:
         raise ValueError(f"{otra} positivos del juego no tienen la respuesta «{respuesta}» en estas "
                          "respuestas: no son las respuestas con las que se saco el juego")
+    nuevas = sum(1 for f in todas if f.get("origen") != ORIGEN_POSITIVO and f["respuesta"] == respuesta
+                 and (todos_los_positivos or confianza_minima is None
+                      or (_es_confianza(f.get("confianza")) and float(f["confianza"]) >= confianza_minima)))
+    if nuevas:
+        raise ValueError(f"{nuevas} filas de control dicen «{respuesta}» en estas respuestas y el juego "
+                         "las habria metido como positivos: no son las respuestas con las que se saco el juego")
     validas = _filas_validas(positivos)
     aciertos = sum(1 for f in validas if f["etiqueta"] == respuesta)
     con_conf = [(float(f["confianza"]), f["etiqueta"] == respuesta) for f in validas
@@ -347,10 +365,9 @@ def metricas_precision(filas: Iterable[dict], respuesta: str, *, objetivo: float
     umbral_propio = elegir_umbral(curva, objetivo=objetivo, min_cubiertas=min_cubiertas)
     cota = wilson_inferior(aciertos, len(validas))
     sin_etiqueta = sum(1 for f in positivos if f.get("etiqueta") in (None, ""))
-    sin_respuesta = sum(1 for f in positivos if f.get("respuesta") is None)
     salida: dict[str, Any] = {
         "respuesta": respuesta, "positivos": len(positivos), "evaluables": len(validas),
-        "sin_etiqueta": sin_etiqueta, "sin_respuesta": sin_respuesta, "aciertos": aciertos,
+        "sin_etiqueta": sin_etiqueta, "aciertos": aciertos,
         "precision": _r(aciertos / len(validas)) if validas else None,
         "precision_minima": _r(cota), "objetivo": objetivo,
         "umbral_propio": umbral_propio, "curva": curva,
@@ -379,9 +396,6 @@ def metricas_precision(filas: Iterable[dict], respuesta: str, *, objetivo: float
                  % (respuesta, len(reales))),
     }
     avisos = []
-    if sin_respuesta:
-        avisos.append(f"{sin_respuesta} positivos no tienen respuesta en este fichero: se evalua con las "
-                      "respuestas de las que salio el juego")
     if sin_etiqueta:
         avisos.append(f"faltan {sin_etiqueta} positivos por etiquetar: la precision ya no es la de todas "
                       f"las «{respuesta}» del juego, sino la de las etiquetadas")

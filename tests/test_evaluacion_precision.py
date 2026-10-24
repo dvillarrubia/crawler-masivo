@@ -154,6 +154,55 @@ def test_con_otras_respuestas_no_se_evalua():
         S.evaluar(_etiquetar(juego, verdad), otras, objetivo=0.9)
 
 
+def test_otra_pasada_donde_el_control_dice_x_no_se_evalua():
+    """Los positivos siguen diciendo «true», pero filas de control que no lo
+    decian ahora si: con todas las X en el juego, eso ya son otras respuestas
+    (la precision saldria de un subconjunto de las X)."""
+    S = _script()
+    conjunto, respuestas, verdad = _conjunto(n=2000, reales=40, vistos=30, inventados=10)
+    juego, _ = S.precision(conjunto, respuestas, "true", n_positivos=None, n_control=100, semilla=3)
+    control = {f["id"] for f in juego if f["origen"] == "control"}
+    otras = [{**r, "respuesta": "true", "confianza": 0.99} if r["id"] in control else r for r in respuestas]
+    with pytest.raises(SystemExit, match="filas de control"):
+        S.evaluar(_etiquetar(juego, verdad), otras, objetivo=0.9)
+
+
+def test_con_las_de_mas_confianza_el_control_puede_decir_x_por_debajo_del_corte():
+    """Con --positivos N, una X de control por debajo del corte es legitima;
+    por encima, no: el juego la habria metido como positivo."""
+    S = _script()
+    conjunto, respuestas, verdad = _conjunto(n=500, reales=20, vistos=20, inventados=10)
+    juego, resumen = S.precision(conjunto, respuestas, "true", n_positivos=5, n_control=500, semilla=0)
+    assert resumen["confianza_minima"] == 0.9
+    etiquetado = _etiquetar(juego, verdad)
+    inf = S.evaluar(etiquetado, respuestas, objetivo=0.9)  # las 10 de 0,6 estan en el control
+    assert inf["precision"] == 1.0
+    sube = next(f["id"] for f in juego if f["origen"] == "control")
+    otras = [{**r, "respuesta": "true", "confianza": 0.95} if r["id"] == sube else r for r in respuestas]
+    with pytest.raises(SystemExit, match="filas de control"):
+        S.evaluar(etiquetado, otras, objetivo=0.9)
+
+
+def test_respuestas_de_otro_conjunto_o_incompletas_no_se_evaluan():
+    S = _script()
+    conjunto, respuestas, verdad = _conjunto(n=300, reales=10, vistos=8, inventados=2)
+    juego, _ = S.precision(conjunto, respuestas, "true", n_positivos=None, n_control=20, semilla=0)
+    etiquetado = _etiquetar(juego, verdad)
+    ajenas = [{**r, "id": r["id"] + "?otro"} for r in respuestas]
+    with pytest.raises(SystemExit, match="no tienen respuesta"):
+        S.evaluar(etiquetado, ajenas, objetivo=0.9)
+    falta = next(f["id"] for f in juego if f["origen"] == "positivo_jev")
+    with pytest.raises(SystemExit, match="no tienen respuesta"):
+        S.evaluar(etiquetado, [r for r in respuestas if r["id"] != falta], objetivo=0.9)
+
+
+def test_sin_ninguna_x_no_se_saca_el_juego():
+    S = _script()
+    conjunto, respuestas, _ = _conjunto(n=200, reales=5, vistos=0, inventados=0)
+    with pytest.raises(SystemExit, match="no hay positivos"):
+        S.precision(conjunto, respuestas, "true", n_positivos=None, n_control=20, semilla=0)
+
+
 def test_de_punta_a_punta_por_la_linea_de_ordenes(tmp_path, capsys):
     S = _script()
     conjunto, respuestas, verdad = _conjunto(n=400, reales=12, vistos=9, inventados=3)

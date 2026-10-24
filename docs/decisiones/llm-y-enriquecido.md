@@ -880,7 +880,8 @@
      `en_control`). Cada fila lleva su `origen` (`positivo_jev` | `control`),
      `en_control` y el resumen (`juego_precision`: respuesta, tamaño del
      conjunto, cuántas X había, cuántas entran, corte de confianza, semilla).
-     Barajadas y sin llamar a nadie. No se saca de otro juego de precisión.
+     Barajadas y sin llamar a nadie. No se saca de otro juego de precisión, ni
+     de un conjunto donde Jev no contestó X ninguna vez (solo traería el control).
    - **`evaluar` lo reconoce por el `origen`**: la precisión de X y su cota se
      calculan **sobre los positivos**, y como todas las X de Jev del conjunto
      están en el juego (o todas las de confianza ≥ el corte), la precisión es la
@@ -894,9 +895,12 @@
      y se da aparte con su tamaño (`control.recall_x`, su cota y cuántos X
      reales trae; con menos de 10, `avisos` dice que no dice nada). Avisa
      también si faltan positivos por etiquetar (la precisión ya no es la de
-     todas), si el juego es de las N de más confianza y si los positivos no
-     tienen la respuesta X en el fichero que se le pasa (otras respuestas: no
-     evalúa).
+     todas) y si el juego es de las N de más confianza. **Con otras respuestas
+     que las de las que salió el juego no evalúa**: lo nota si a alguna fila le
+     falta respuesta (otro fichero, otra versión), si un positivo ya no dice X
+     o si una fila de control dice X y el juego la habría metido como positivo
+     (con todas las X, cualquiera; con `--positivos N`, con confianza ≥ el
+     corte). Con otra pasada la precisión saldría de un subconjunto de las X.
    - **Etiquetar a ciegas.** El `origen` delata la respuesta de Jev: quien
      etiqueta ve id y estado, no el fichero entero (el procedimiento, en
      `docs/referencia/operacion.md`).

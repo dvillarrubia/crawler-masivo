@@ -387,7 +387,8 @@ def _evaluar_precision(juego: list[dict], filas: list[dict], objetivo: float) ->
     resumen = juego[0]["juego_precision"]
     try:
         informe = metricas_precision(filas, resumen["respuesta"], objetivo=objetivo,
-                                     todos_los_positivos=bool(resumen.get("todos_los_positivos", True)))
+                                     todos_los_positivos=bool(resumen.get("todos_los_positivos", True)),
+                                     confianza_minima=resumen.get("confianza_minima"))
     except ValueError as e:
         raise SystemExit(str(e)) from None
     informe["juego_precision"] = resumen
@@ -436,6 +437,9 @@ def precision(conjunto: list[dict], respuestas: list[dict], respuesta: str, *, n
                                                     n_control=n_control, semilla=semilla)
     except ValueError as e:
         raise SystemExit(str(e)) from None
+    if not resumen["respuestas_x"]:
+        raise SystemExit(f"Jev no contesto «{x}» en ninguna de las {len(respondidas)} filas respondidas: "
+                         "no hay positivos y el juego solo traeria el control (para eso, un juego aleatorio)")
     resumen["sin_respuesta"] = sin
     filas = [{**f, "origen": seleccion[f["id"]]["origen"], "en_control": seleccion[f["id"]]["en_control"],
               "juego_precision": resumen}
