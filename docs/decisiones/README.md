@@ -211,6 +211,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 180 | `intencion_pagina` v2 (navegacional solo la portada, `existing_users` y `corporate` nuevas) y `title_describe_contenido` v2 (nombrar la página es el nivel alto aunque sea corto), con lo medido de la v1 y el juego listo para re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d180) |
 | 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
 | 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 (229/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (232/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
 
 ## Anadir una decision
 

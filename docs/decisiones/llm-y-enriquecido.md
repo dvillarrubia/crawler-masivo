@@ -1085,101 +1085,164 @@
    umbral**: todo sale `incierto` y ninguna plantilla es `propagable`.
    - **Medido el 24-oct-2026**: 300 páginas de Lopesan, Penguin, Saunier
      Duval, La Salle y Workoholics, etiquetadas a ciegas y revisadas, con las
-     respuestas de Jev a la v1: **229/300 (76 %)**. `ficha_producto` tiene
-     recall 1,0 y `articulo` 0,96; el fallo está en lo que se les cuela y en
-     las opciones que casi nunca salen:
-     1. **`ficha_producto` de más** (115 predichas para 88 reales): «por qué
-        estudiar <área> aquí», una actividad o un paquete (son
-        `landing_comercial`, 7); financiación, becas, pagos, intercambio y
-        clases de apoyo para el alumno (`ayuda`, 7); instalaciones y servicios
-        propios del campus que no se venden (`corporativa`, 6); memorias e
-        informes de acreditación de una titulación (`legal`, 4). La página
+     respuestas de Jev a la v1: 229/300 con la etiqueta tal cual.
+   - **Etiquetas que se contradecían, unificadas antes de redactar.** La
+     revisión de la PR encontró plantillas idénticas con etiquetas distintas
+     dentro del mismo juego, y la primera redacción de la v2 tomaba a veces el
+     lado minoritario: si Jev la obedecía, rompía páginas que la v1 acertaba.
+     Se unifica la etiqueta de cada plantilla (juego `juego_etiquetado_v3`, que
+     no está en el repo) y se vuelve a contar: **232/300 (77 %)**. Lo
+     unificado, y por qué:
+     - **Tablas de convenios** (5: 3 `listado`, 2 `corporativa`) → `listado`:
+       una tabla de universidades socias es una lista; la v1 las acertaba las 5
+       como `listado`. Antes la v2 las mandaba a `corporativa`: ganaba 2 y
+       perdía 3.
+     - **Hub de normativa académica** (3: 1 `listado`, 2 `legal`) → `listado`:
+       enlaza a una página por normativa, que sí es `legal`; `legal` se queda
+       la lista de documentos para descargar (la documentación oficial de un
+       programa). Aquí se elige la etiqueta minoritaria, por coherencia con el
+       resto de hubs; la v1 acertaba 2 de 3 con ella.
+     - **Grupos de investigación propios** (5: 4 `corporativa`, 1 `perfil`) →
+       `corporativa`. La página en inglés que la v1 «acertaba» como `perfil`
+       pasa a fallo: no es una pérdida de la v2, era ruido de etiqueta.
+     - **Prácticas en empresas** (2: 1 `ayuda`, 1 `corporativa`) →
+       `corporativa`, y `ayuda` deja de reclamar las prácticas.
+     - **«Por qué estudiar»** (10: 6 `landing_comercial`, 2 `corporativa`, 2
+       `ficha_producto`): el de un área entera o de la organización →
+       `landing_comercial` (las 2 `corporativa` eran la misma plantilla que
+       otras `landing`); el de UN programa (dirección de proyectos, ca y en,
+       que la v1 acertaba) sigue siendo `ficha_producto` y ahora lo dice su
+       parte afirmativa.
+     - **Un proyecto de I+D propio** (2: 1 `articulo`, 1 `corporativa`) →
+       `articulo`, como la v1 («proyecto de portfolio»); `corporativa` se queda
+       los grupos y las líneas de investigación.
+     Tres de las seis unificaciones (convenios, normativa, prácticas) van al
+     lado que respondía Jev: es una elección con riesgo de complacencia, y por
+     eso se dice. Las otras tres van contra la v1 o en la mayoría.
+   - **Lo que falla la v1 con las etiquetas unificadas.** `ficha_producto`
+     tiene recall 1,0 y `articulo` 0,96 (23/24); el fallo está en lo que se
+     les cuela y en las opciones que casi nunca salen:
+     1. **`ficha_producto` de más** (115 predichas para 88 reales):
+        «por qué estudiar <área>», un paquete, una experiencia en varios
+        hoteles o una charla de captación (`landing_comercial`, 8); financiación, becas, intercambio y
+        clases de apoyo para el alumno (`ayuda`, 7); instalaciones, servicios
+        de emprendimiento y la incubadora propios (`corporativa`, 5); memorias
+        e informes de acreditación de una titulación (`legal`, 4). La página
         **nombra** un programa y Jev la tomaba por su ficha.
-     2. **`landing_comercial` casi nunca** (5 de 22): campañas de marca,
-        captación (jornadas de puertas abiertas, sesiones informativas, charlas
-        para familias, concursos), paquetes (bodas, viajes de fin de curso),
-        «por qué estudiar aquí», la presentación comercial a un tipo de cliente.
-     3. **`legal` se escapa** (19 de 29): documentación de calidad y
-        acreditación (también como lista de documentos), el sistema de calidad
-        publicado por obligación legal, la normativa académica, el aviso de
-        cofinanciación pública al inicio de la página de un proyecto y las
-        memorias de sostenibilidad (Jev las veía como `listado`).
+     2. **`landing_comercial` casi nunca** (5 de 24): «por qué estudiar» de un
+        área (4 más como `articulo`), captación (sesiones informativas,
+        jornadas de puertas abiertas, concursos: 4 como `listado`), campañas de
+        marca y la presentación comercial a un tipo de cliente (3 como
+        `corporativa`).
+     3. **`legal` se escapa** (18 de 27): documentación de calidad y
+        acreditación, el sistema de calidad publicado por obligación legal, el
+        aviso de cofinanciación pública al inicio de la página de un proyecto y
+        las memorias de sostenibilidad.
      4. **`ayuda` frente a `listado`** (6): hubs de horarios, catálogos de
         biblioteca y portales de búsqueda, la página que reúne las herramientas
-        para profesionales; y **`corporativa` frente a `listado`** (4): la tabla
-        de convenios sin páginas propias, los departamentos.
+        para profesionales; y al revés (3): hubs casi vacíos de servicios para
+        doctorandos y el del proceso de admisión, que son `listado` y Jev dio
+        como `ayuda`. **`corporativa` frente a `listado`** (2): los
+        departamentos.
      5. Menores: la portada `/de` (Jev `listado`), una página de una sola
-        palabra (Jev `articulo`), los grupos de investigación propios (Jev
-        `perfil`) y los proyectos de I+D propios (Jev `articulo`).
+        palabra (Jev `articulo`), los grupos de investigación propios (3, Jev
+        `perfil`) y una línea de investigación (Jev `articulo`).
    - **El criterio general**, en las instrucciones: nombrar un producto, curso
      o programa no hace a la página su ficha; se pregunta qué hace por el
      visitante. Presentar UN ítem para venderlo o reservarlo es
-     `ficha_producto`; persuadir o invitar a un evento, `landing_comercial`;
-     explicar cómo pagar, inscribirse o recibir apoyo, `ayuda`; presentar lo
-     propio que no se vende (instalaciones, servicios internos, investigación),
-     `corporativa`; publicar lo que exige una norma, `legal`.
+     `ficha_producto`; persuadir o invitar a apuntarse a un evento,
+     `landing_comercial`; explicar cómo pagar, inscribirse o recibir apoyo,
+     `ayuda`; presentar instalaciones, centros o investigación propios que no
+     se venden, `corporativa` (sin «servicios»: los de apoyo al alumno son
+     `ayuda`); publicar lo que exige una norma, `legal`.
    - **Cada frontera en la parte afirmativa de UNA opción** (antes del primer
      «Not», como exige `test_tipo_pagina.py`) y excluida tras el «Not» de las
-     otras; 28 casos nuevos en `CASOS_FRONTERA`, agrupados por patrón:
+     otras; 34 casos nuevos en `CASOS_FRONTERA`, agrupados por patrón:
      - `ficha_producto` dice ahora «presentado como ese ítem: qué es, qué
-       incluye o cuesta, sus características o su temario» y excluye por
-       escrito las cuatro cosas que se quedaba (landing, ayuda, corporativa,
-       legal). La parte afirmativa no pierde nada de la v1 (producto, hotel,
-       habitación, libro, curso o grado, plan; su restaurante, spa o una
-       asignatura), para no tocar su recall.
-     - `landing_comercial`: paquete con lo que incluye (boda, viaje,
-       estancia), experiencia promocionada en varios establecimientos, campaña
-       de marca, presentación comercial a un tipo de cliente («qué te
-       ofrecemos»), «por qué estudiar aquí / por qué elegirnos» para un área
-       entera o la organización (para un programa que se presenta sigue siendo
-       su ficha, como la 180) y la captación (jornada de puertas abiertas,
-       sesión informativa, charla, concurso). Una lista de ofertas sigue
-       siendo `listado`.
-     - `ayuda`: cómo pagar, financiación, becas, inscripción; intercambio,
-       movilidad y prácticas; clases de apoyo y servicios para quien ya está
-       matriculado o es cliente; horarios, calendarios académicos, catálogos y
-       portales de biblioteca **también como hub que enlaza a ellos**, y la
-       página que reúne las herramientas para profesionales. `utilidad`
-       excluye las instrucciones de inscripción o pago.
-     - `listado` dice que lleva a páginas **del mismo tipo** (productos,
-       artículos, hoteles, ofertas, eventos, personas) y se queda el hub de
-       sección que es poco más que enlaces a sus subsecciones (lo etiquetado
-       así: el proceso de admisión que reparte a grados y másteres); excluye los
-       recursos prácticos (`ayuda`) y las tablas de departamentos o
-       instituciones socias sin página propia (`corporativa`).
-     - `corporativa`: estructura y departamentos, convenios e instituciones
-       socias, **grupos de investigación propios** (la decisión: `corporativa`,
-       no `perfil`, que se queda con personas y entidades de fuera), líneas y
-       proyectos de I+D propios, e instalaciones, laboratorios, campus,
-       incubadoras y centros propios que se presentan pero no se venden. El
-       restaurante o el spa de UN hotel siguen siendo parte de su ficha.
+       incluye o cuesta, sus características o su temario, también la página
+       de ese programa que argumenta por qué elegirlo» y excluye por escrito
+       las cuatro cosas que se quedaba (landing, ayuda, corporativa, legal). La
+       parte afirmativa no pierde nada de la v1, para no tocar su recall.
+     - `landing_comercial`: paquete con lo que incluye, experiencia
+       promocionada en varios establecimientos, **financiación promocional
+       para comprar** (la de Saunier, que la v1 acertaba), campaña de marca,
+       presentación comercial a un tipo de cliente, «por qué estudiar aquí»
+       de un área o de la organización y la página que **invita a apuntarse**
+       a una jornada, sesión, charla o concurso. Excluye cómo se paga lo ya
+       elegido (`ayuda`) y el texto informativo sobre un evento o concurso que
+       no invita a apuntarse (`articulo`, que lo dice en su parte afirmativa).
+     - `ayuda`: cómo pagar o financiar la matrícula o las tasas, becas, los
+       pasos y documentos para inscribirse; intercambio y movilidad; clases de
+       apoyo y tutorías para quien ya está matriculado; horarios, calendarios,
+       catálogos y portales de biblioteca, también la página cuyos enlaces
+       llevan **directamente** a ellos, y la que reúne las herramientas para
+       profesionales. Excluye por escrito el hub que solo reparte a otras
+       secciones (admisiones, becas, servicios), que es `listado`, y la
+       financiación promocional (`landing_comercial`). `utilidad` excluye las
+       instrucciones de inscripción o pago.
+     - `listado` lleva a páginas del mismo tipo (productos, artículos, hoteles,
+       ofertas, eventos, personas), se queda las tablas de instituciones
+       socias y el hub de sección que es poco más que enlaces, **también
+       cuando sus subsecciones son de admisiones, becas, servicios o
+       normativa** (proceso de admisión, servicios para doctorandos, precios y
+       becas, normativa); excluye la página cuyos enlaces llevan directamente
+       a recursos prácticos (`ayuda`) y la estructura y los departamentos
+       propios (`corporativa`).
+     - `corporativa`: estructura y departamentos, **grupos y líneas de
+       investigación propios** (no `perfil`, que se queda con personas y
+       entidades de fuera), e instalaciones, laboratorios, campus, incubadoras
+       y centros propios que se presentan pero no se venden. El restaurante o
+       el spa de UN hotel siguen siendo parte de su ficha.
      - `legal`: normativa académica o interna, sistema de calidad publicado por
-       obligación legal, informes de verificación, seguimiento o acreditación
-       y documentos oficiales de un programa o producto (también su lista),
+       obligación legal, informes de verificación, seguimiento o acreditación y
+       documentos oficiales de un programa o producto (también la página que
+       los lista para descargar, no el hub que enlaza a páginas de normativa),
        memorias de sostenibilidad y la página que abre con un aviso de
        cofinanciación pública antes de describir un proyecto.
      - `home` admite `/de` con o sin barra; `otro`, la página cuyo contenido
        propio son una o dos palabras (y `articulo` la excluye).
-   - **Sin sobreajustar**: criterios generales (servicio propio que no se
-     vende, página de captación, documentación por obligación) y ningún
-     nombre del juego en lo que se envía: un test vigila «La Salle», «Salle»,
-     «Lopesan», «Saunier», «Penguin», «Workoholics», «FEDER», «822/2021»,
-     «VSMA» y «Technova». Las URLs están solo en los comentarios de
-     `CASOS_FRONTERA`, que no se envían.
-   - **Riesgos que hay que mirar al medir**: `articulo` excluye ahora la
-     presentación de los proyectos de investigación propios (una noticia sobre
-     uno debería seguir siendo `articulo`), y `ayuda` crece mucho (horarios,
-     becas, prácticas): puede comerse páginas que eran `listado` o
-     `corporativa` en la v1 y acertaban.
+   - **Los solapes de significado que encontró la revisión**, quitados: el
+     test de `CASOS_FRONTERA` compara la frase literal, y la primera redacción
+     cumplía la letra pero no el sentido (el hub de admisión también cabía en
+     «how to register or apply» de `ayuda`; la instrucción mandaba a
+     `corporativa` los «servicios» propios que `ayuda` reclamaba como clases
+     de apoyo; «contest» en `landing_comercial` y en `articulo`; «financing»
+     sin matiz en `ayuda` frente a la financiación de Saunier, que es
+     `landing_comercial`; «also as a hub» en `ayuda`, que reforzaba el fallo
+     de los hubs de doctorandos y ponía en riesgo los de becas y admisiones).
+     `test_v2_sin_los_solapes_de_significado_de_la_revision` vigila cada uno,
+     pero el sentido solo lo garantiza medir.
+   - **Sin sobreajustar, hasta donde se puede decir**: lo que se envía no
+     lleva nombres del juego (un test vigila «La Salle», «Salle», «Lopesan»,
+     «Saunier», «Penguin», «Workoholics», «FEDER», «822/2021», «VSMA» y
+     «Technova»; las URLs están solo en los comentarios de `CASOS_FRONTERA`,
+     que no se envían), **pero sí sus patrones**: varias frases salen casi
+     tal cual de las notas de etiquetado de una sola universidad (la tabla de
+     instituciones, el aviso de cofinanciación al inicio del proyecto). Ese
+     test no lo detecta; solo lo detectará medir en otro juego.
+   - **Páginas que la v1 acertaba y la v2 podría hacer caer** (con las
+     etiquetas unificadas, mirado una a una): los «por qué estudiar» de UN
+     programa (2, protegidos por la parte afirmativa de `ficha_producto`); la
+     financiación de Saunier (protegida en `landing_comercial`); los hubs de
+     becas, admisiones y servicios que se acertaban como `listado` (6,
+     protegidos en `listado` y excluidos en `ayuda`); las tablas de convenios
+     (5, ahora reclamadas por `listado`); las prácticas (2, `ayuda` ya no las
+     reclama); y, sin protección por escrito, el hub de sesiones informativas
+     (`listado`, que la captación de `landing_comercial` podría comerse), la
+     oficina de calidad (`corporativa`, frente a la documentación de calidad
+     de `legal`) y las noticias sobre proyectos propios (`articulo`). El hub
+     de información académica de máster (enlaza a normativa y calendarios,
+     etiquetado `ayuda`) queda como etiqueta dudosa.
    - **Coste** (fórmula de la 162, caracteres / 4): la pregunta enviada pasa de
-     4.868 a 8.280 caracteres (instrucciones de 626 a 1.070, opciones de unos
-     4.100 a 6.955), **+3.412 caracteres, ~853 tokens por llamada**. Como se
+     4.868 a 8.993 caracteres (instrucciones de 626 a 1.093, opciones de 3.987
+     a 7.645), **+4.125 caracteres, ~1.031 tokens por llamada**. Como se
      pregunta por muestra de plantilla (178), por censo es poco: Salle (558
-     llamadas) ~0,48 M tokens, **~0,02 $** más; Penguin (405) ~0,015 $;
-     Lopesan (262) ~0,01 $; Saunier (153) ~0,006 $, a 0,042 $/Mtok.
+     llamadas) ~0,58 M tokens, **~0,024 $** más; Penguin (405) ~0,018 $;
+     Lopesan (262) ~0,011 $; Saunier (153) ~0,007 $, a 0,042 $/Mtok.
    - **La v2 se mide tras el merge en un juego nuevo, con otra semilla** y
      censos o páginas que no estén en el de 300: está redactada mirando sus
      errores, y medirla sobre él inflaría el acierto (169, 180). Las
      etiquetas de la v1 sirven de referencia, pero `evaluar` rechaza un juego
      de otra versión; el orquestador llama a Jev (`responder --confirmar`) y
-     evalúa. Solo con esa medida se podrá hablar de umbral.
+     evalúa. Solo con esa medida se podrá hablar de umbral. La v2 no se llegó a
+     enviar antes de esta revisión, así que su huella cambia sin subir a la 3.
