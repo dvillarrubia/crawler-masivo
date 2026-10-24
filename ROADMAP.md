@@ -980,6 +980,10 @@ cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»)
 - [#169](https://github.com/dvillarrubia/crawler-masivo/issues/169) **Jev con búsquedas reales**: intención, embudo, canibalización
   juzgada, cobertura de las oportunidades y snippet. Amplía [#39](https://github.com/dvillarrubia/crawler-masivo/issues/39), [#18](https://github.com/dvillarrubia/crawler-masivo/issues/18) y
   [#22](https://github.com/dvillarrubia/crawler-masivo/issues/22).
+  *Puntos 1 y 2, código hecho* (decisión 176): intención de las búsquedas con
+  caché por cliente, desajuste ponderado por clics y embudo con tráfico, todo
+  orientativo; `intencion_desalineada` preparada y apagada hasta tener umbral.
+  Falta: etiquetar el juego (#8) y los puntos 3-7.
 - [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170) **Más adelante**: exportación a BigQuery, GA4 y DataForSEO.
 
 ### 4. Análisis enriquecido con Jev
@@ -996,7 +1000,10 @@ se lanza solo.
   y soft 404 ([#11](https://github.com/dvillarrubia/crawler-masivo/issues/11)).
 - Tipo de página ([#12](https://github.com/dvillarrubia/crawler-masivo/issues/12)).
 - Intención de búsqueda y embudo TOFU/MOFU/BOFU, contrastados con las keywords
-  ([#39](https://github.com/dvillarrubia/crawler-masivo/issues/39)).
+  ([#39](https://github.com/dvillarrubia/crawler-masivo/issues/39)). *Módulos
+  hechos y sin evaluar* (decisión 176): intención y embudo de la página, y la
+  intención de sus búsquedas de Search Console. Falta el juego etiquetado y el
+  contraste con DataForSEO.
 - Checks on-page nuevos
   ([#16](https://github.com/dvillarrubia/crawler-masivo/issues/16)), coherencia
   del schema con lo visible
