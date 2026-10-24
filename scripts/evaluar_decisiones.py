@@ -194,7 +194,19 @@ def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
               if r.get("pregunta") == p.nombre and r.get("version") == p.version}
     filas = []
     invalidas = 0
+    # El mismo estado dos veces (la URL con y sin www, la misma ruta en otro
+    # host) es la misma entrada para Jev: contarla dos veces infla la muestra
+    # y puede sostener un umbral que sin ella no sale (decision 169). Cuenta
+    # una vez, con la etiqueta de la primera; si se contradicen, se dice.
+    vistos: dict[str, object] = {}
+    repetidos = contradictorios = 0
     for f in juego:
+        clave = json.dumps(f.get("estado"), sort_keys=True, ensure_ascii=False)
+        if f.get("estado") is not None and clave in vistos:
+            repetidos += 1
+            contradictorios += vistos[clave] != f.get("etiqueta")
+            continue
+        vistos[clave] = f.get("etiqueta")
         r = por_id.get(f["id"]) or {}
         etiqueta = normalizar_etiqueta(p.tipo, f.get("etiqueta"), p.opciones)
         if f.get("etiqueta") not in (None, "") and etiqueta is None:
@@ -207,6 +219,8 @@ def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
     informe["respuestas_de_otra_version"] = sum(
         1 for r in respuestas if r.get("pregunta") == p.nombre and r.get("version") != p.version)
     informe["etiquetas_invalidas"] = invalidas
+    informe["estados_repetidos_quitados"] = repetidos
+    informe["repetidos_con_otra_etiqueta"] = contradictorios
     ids = {f["id"] for f in juego}
     informe["respuestas_fuera_del_juego"] = sum(1 for r in respuestas if r.get("id") not in ids)
     return informe

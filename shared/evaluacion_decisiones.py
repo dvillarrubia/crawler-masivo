@@ -159,7 +159,12 @@ def metricas(filas: Iterable[dict], *, objetivo: float = PRECISION_OBJETIVO,
         f"de los «{c}» reales: el umbral lo sostienen las otras respuestas"
         for c, d in salida["por_respuesta"].items()
         if d.get("recuperadas") is not None and d["reales"] >= MIN_REALES_AVISO
-        and d["recuperadas"] < RECUPERADAS_MINIMAS]
+        and d["recuperadas"] < RECUPERADAS_MINIMAS] + [
+        f"con el umbral {salida['umbral']} los «{c}» decididos tienen cota {d['precision_minima']}, "
+        f"por debajo del objetivo {objetivo}: esa respuesta no llega sola"
+        for c, d in salida["por_respuesta"].items()
+        if d.get("decididas") and d.get("precision_minima") is not None
+        and d["precision_minima"] < objetivo]
     tokens = [f["tokens"] for f in validas if isinstance(f.get("tokens"), (int, float))]
     costes = [f["coste"] for f in validas if isinstance(f.get("coste"), (int, float))]
     salida["tokens_medios"] = round(sum(tokens) / len(tokens), 1) if tokens else None

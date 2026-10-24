@@ -1963,14 +1963,19 @@
                       <template x-for="[resp, n] in Object.entries(r.por_respuesta)" :key="resp">
                         <a href="#" @click.prevent="cargarDecisionesEnriq(preg, resp)">
                           <strong x-text="fmt.respuestaEnriq(resp)"></strong> <span x-text="fmt.num(n)"></span>
+                          <span class="text-dim" x-show="r.umbral != null"
+                                x-text="'(' + fmt.num((r.decididas_por_respuesta || {})[resp] || 0) + ' decididas)'"></span>
                         </a>
                       </template>
                       <template x-for="[est, n] in Object.entries(r.por_estado)" :key="est">
                         <span class="text-dim" x-text="est + ': ' + fmt.num(n)"></span>
                       </template>
                     </div>
-                    <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="!(r.por_estado || {}).decidido">
+                    <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="r.umbral == null">
                       Sin umbral calibrado (#8) ninguna respuesta sale «decidido»: son orientativas.
+                    </div>
+                    <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="r.umbral != null">
+                      Solo las «decididas» pasan el umbral de la pregunta (<span x-text="Math.round(100 * r.umbral) + ' %'"></span> de confianza, medido con su juego de evaluación); las demás son orientativas.
                     </div>
                   </div>
                 </template>
@@ -1981,12 +1986,13 @@
                          x-text="fmt.num(enriqDecisiones.total) + ' respuestas' + (enriqFiltro.respuesta ? ' «' + fmt.respuestaEnriq(enriqFiltro.respuesta) + '»' : '')"></div>
                     <div style="overflow-x:auto">
                       <table>
-                        <thead><tr><th style="text-align:left">URL</th><th>respuesta</th><th>confianza</th><th>origen</th><th style="text-align:right">coste</th></tr></thead>
+                        <thead><tr><th style="text-align:left">URL</th><th>respuesta</th><th>estado</th><th>confianza</th><th>origen</th><th style="text-align:right">coste</th></tr></thead>
                         <tbody>
                           <template x-for="d in enriqDecisiones.items" :key="d.id">
                             <tr>
                               <td style="max-width:32rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="d.url"></td>
                               <td x-text="d.respuesta === null ? (d.motivo || '—') : fmt.respuestaEnriq(d.respuesta)"></td>
+                              <td x-text="d.estado"></td>
                               <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
                               <td x-text="d.origen"></td>
                               <td style="text-align:right" x-text="fmt.usd(d.coste_usd)"></td>
