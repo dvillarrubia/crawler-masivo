@@ -1037,8 +1037,13 @@
      en `nofollow`, por el `rel` o por la directiva de la página que enlaza.
      Sale de las candidatas de `not_reachable_from_home` y lo **sustituye**
      (36): los dos dicen «no se llega» y este dice por qué. La paginación va
-     antes (122), y con un tope por carpeta que cortó no se afirma (172),
-     porque la puede enlazar una página que no se pidió.
+     antes (122; lo fija `test_la_paginacion_va_antes_que_solo_enlazada_con_nofollow`),
+     y con un tope por carpeta que cortó no se afirma (172), porque la puede
+     enlazar una página que no se pidió. Tampoco en el destino de una
+     redirección interna: los enlaces apuntan a la URL vieja y en la temporal
+     son del salto, así que la página puede recibir enlaces `follow` a través
+     de él aunque todos los directos sean `nofollow`; se queda con
+     `not_reachable_from_home` (`test_destino_de_una_redireccion_no_es_solo_nofollow`).
    - **`pagina_nofollow`** (warning, agrupada por host y plantilla): indexable
      que declara `nofollow` o `none` en el meta robots, el meta googlebot o la
      `X-Robots-Tag`. Google: «Do not follow the links on this page». Se lee
@@ -1055,11 +1060,32 @@
      `alcance: plantilla` desde `enlaces_plantilla_min_paginas` (10). Un
      `nofollow` a una no indexable (login, carrito) no avisa: ahí es lo
      correcto. El destino con `solo_enlazada_con_nofollow` no lo lleva (36).
+     La ficha no dice que la página «siga enlazada por otros caminos»: cuando
+     `solo_enlazada_con_nofollow` no se puede emitir (tope que cortó,
+     paginación, redirección, censo sin portadas) el destino puede no tener
+     más que estos enlaces. Se agrupan primero los destinos con algún
+     `nofollow_rel` y solo esos: en una temporal sintética de 10 M de aristas
+     en Postgres 16 (0,5 % `nofollow_rel` concentrado en 2.000 destinos, como
+     un menú) agrupar entera tardaba 3,5 s y con el filtro previo 0,8 s, con
+     el mismo resultado. No se midió en penguin.
    - **Sin otra lectura de `links`** (37, 41): una columna más en la temporal
      de aristas, `nofollow_rel`, True solo si el enlace es `nofollow` por su
      `rel` (NULL en el resto, no engorda la temporal). Separa el `rel` de la
      directiva de página, que dejan el mismo `follow=False` y se arreglan en
      sitios distintos. Lo fija `test_no_anade_lecturas_de_links`.
+   - **Qué `rel` quita autoridad es una sola regla, en `shared/rel_de_enlace.py`**
+     (23, 39, 64): `REL_SIN_AUTORIDAD`, `rel_tokens` (separa por espacio en
+     blanco y por coma) y `rel_sin_autoridad`, que usa el extractor para
+     `links.follow`, y `sql_rel_sin_autoridad`, la misma regla en SQL para la
+     columna `nofollow_rel`: cada separador pasa a espacio y se busca el token
+     entero, no la subcadena (`nofollowed` o `x-ugc` no son `nofollow`, como
+     no lo son para el spider). `test_la_regla_sql_del_rel_es_la_del_spider_*`
+     compara Python y SQL sobre los mismos `rel` en SQLite y Postgres. Los
+     separadores son explícitos (espacio en blanco ASCII, `\v`, espacio duro y
+     coma) en lugar de `\s`, para que el SQL pueda hacer exactamente lo mismo;
+     para el spider solo cambia un `rel` separado por un espacio Unicode raro
+     (U+2000 en adelante), que HTML tampoco trata como separador. En 10 M de
+     filas, la expresión cuesta 60 ms más que el `LIKE` por subcadena.
    - **La indexabilidad, el PageRank y la profundidad no cambian**: solo se
      dice lo que ya calculaban.
 
@@ -1071,15 +1097,17 @@
    |---|---|---|---|---|---|
    | Lopesan semanal 2026-10-21 | 5.578 | 3.115 | **9** (4 de plantilla) | 0 | 0 |
    | Lopesan entero 2026-10-19 | 5.715 | 3.095 | 9 (4 de plantilla) | 0 | 0 |
-   | Salle URL | 20.891 | 20 | 3 | 0 | **3** |
+   | Salle URL (mayo, columnas antiguas) | 20.891 | 20 | 3 | 0 | **3** |
    | penguin | 87.570 | 72.078 | 0 | 0 | 0 |
-   | Saunier + re-magazine | 2.916 | 0 | 0 | 0 | 0 |
+   | Saunier Duval + re-magazine (`40ea596f`, un censo de los dos sitios) | 2.916 | 0 | 0 | 0 | 0 |
 
    - **Lopesan** es el hallazgo: los banners del lateral del blog («Banner
      Gran Canaria», «Punta Cana Banner», «Fuerteventura Banner»...) enlazan
      las páginas de destino de hoteles (`/es/hoteles/espana/gran-canaria`,
      `/es/hoteles/republica-dominicana/punta-cana`...) con
-     `rel="nofollow sponsored"`, desde 154, 107 y 92 páginas: el propio
+     `rel="nofollow sponsored"`, desde 154, 107 y 93 páginas (la revisión de la
+     PR lo repitió en un contenedor efímero: 9 destinos, 4 de plantilla; la
+     primera medida daba 92 en el tercero): el propio
      sitio marca como publicidad pagada los enlaces a sus páginas
      comerciales.
    - **penguin** tiene 72.078 enlaces internos `nofollow` (el «Mi cuenta»,
@@ -1087,13 +1115,20 @@
      URLs no indexables o que no se rastrearon. Es el filtro del destino
      funcionando, no un hueco.
    - **Salle**: el login del observatorio de IA (3 idiomas, 6-8 páginas cada
-     uno, indexable) y tres fichas de asignatura con `noarchive, nofollow,
-     noimageindex, noodp, nosnippet, notranslate, noydir` en el meta robots.
+     uno, indexable) y una ficha de asignatura en tres idiomas
+     (`/ca|es|en/sistemas-digitales-y-microprocesadores-8`) con `noarchive,
+     nofollow, noimageindex, noodp, nosnippet, notranslate, noydir` en el meta
+     robots. **Ojo**: es un censo de mayo, sin `analisis_version`, con columnas
+     de antes de la indexabilidad actual: 702 páginas tienen `indexable=t` con
+     `indexability_status='Canonicalised'`, y esas tres están en ese estado
+     aunque su canonical apunta a sí mismas. Re-analizado puede salir
+     distinto.
    - `solo_enlazada_con_nofollow` no sale en ningún censo vigente. En
      re-magazine (`b55bb9d0`, de septiembre) la consulta daba 21, pero sus
      orígenes son `noindex, nofollow` con `urls.noindex` sin rellenar (el
-     censo es anterior a la columna): re-analizado, esas páginas no tienen
-     entrantes que cuenten y son huérfanas. Se queda porque es el caso grave
+     censo es anterior a la columna): se espera que, re-analizado, esas páginas
+     no tengan entrantes que cuenten y salgan huérfanas (no se ejecutó el
+     analizador sobre él). Se queda porque es el caso grave
      (la ficha a la que todo el sitio enlaza con `nofollow`) y cuesta una
      consulta sobre las candidatas de `not_reachable_from_home`, que suelen
      ser decenas.

@@ -54,6 +54,7 @@ from analysis import avisos_de_medios
 from analysis import avisos_de_nosnippet
 from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
+from shared.rel_de_enlace import sql_nofollow_por_rel
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
     x_robots_para_bot,
@@ -4260,7 +4261,7 @@ class SEOAnalyzer:
             case((and_(Link.is_internal.is_(True),
                        func.lower(func.trim(Link.anchor_text)).in_(avisos_de_enlaces.ANCLAS_GENERICAS)),
                   func.lower(func.trim(Link.anchor_text))), else_=None),
-            avisos_de_nofollow.condicion_nofollow_rel(Link.follow, Link.rel),
+            sql_nofollow_por_rel(Link.follow, Link.rel),  # decision 183
         ).join(origen, origen.id == Link.from_url_id)
         if pag is not None:
             # Una temporal de las paginas de paginacion, por clave primaria:

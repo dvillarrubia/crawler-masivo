@@ -235,7 +235,7 @@ guardaba y nadie decía: la página indexable a la que solo llegan enlaces
 indexables que declara `nofollow` en su meta robots, y la página indexable a la
 que el sitio enlaza con `rel="nofollow"`. En Lopesan, los banners del lateral
 del blog enlazan las páginas de destino de hoteles (Gran Canaria, Punta Cana,
-República Dominicana...) con `nofollow sponsored` desde 92 a 154 páginas.
+República Dominicana...) con `nofollow sponsored` desde 93 a 154 páginas.
 [Decisión 183](docs/decisiones/enlazado-y-pagerank.md#d183).
 
 ### Más comprobaciones: valores de datos estructurados y anclas genéricas (19 de octubre)

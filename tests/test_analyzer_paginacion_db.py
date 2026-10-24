@@ -196,6 +196,34 @@ def test_noindex_agrupado_y_lo_que_solo_cuelga_de_ahi():
     assert s.get(Url, cat3.id).inlinks_count == 1
 
 
+def test_la_paginacion_va_antes_que_solo_enlazada_con_nofollow():
+    """Decision 183: una categoria que cuelga de la paginacion noindex y que
+    ademas recibe un nofollow de una pagina con camino. Sin camino desde la
+    home, y su unico entrante que cuenta es nofollow; pero la causa que se
+    arregla es la paginacion, y ese aviso (que ya cuenta el nofollow en
+    `otros_entrantes`) es el unico (36)."""
+    s, j = _montar()
+    home = _pag(s, j, "/", depth=0)
+    blog = _pag(s, j, "/blog/", nxt="/blog/page/2/")
+    _a(s, j, home, "/blog/")
+    p2 = _pag(s, j, "/blog/page/2/", robots="noindex, follow", prv="/blog/")
+    _a(s, j, blog, "/blog/page/2/")
+    cat = _pag(s, j, "/category/cat1/")
+    _a(s, j, p2, "/category/cat1/")
+    otra = _pag(s, j, "/otra/")
+    _a(s, j, home, "/otra/")
+    _a(s, j, otra, "/category/cat1/", follow=False)
+    s.commit()
+    _analizar(s, j)
+    tipos = _tipos_en(s, j, cat.id)
+    assert "solo_enlazada_desde_paginacion_excluida" in tipos
+    assert "solo_enlazada_con_nofollow" not in tipos
+    assert "not_reachable_from_home" not in tipos
+    [f] = [f for f in _issues(s, j, "solo_enlazada_desde_paginacion_excluida")
+           if f.url_id == cat.id]
+    assert f.details.get("otros_entrantes") == 1
+
+
 def test_lo_que_cuelga_de_una_paginacion_canonicalizada_a_la_primera():
     """La canonicalizada SI cuenta como entrante (decision 38 no se toca),
     pero lo que solo cuelga de ahi tiene el mismo problema."""

@@ -27,12 +27,14 @@ Tres incidencias, de lo mas grave a lo menos:
 es indexable no avisa (un ``nofollow`` al login es lo correcto); y con un tope
 por carpeta que corto (172) no se dice que una pagina solo reciba ``nofollow``,
 porque la puede enlazar una que no se pidio. Lo mismo que ya hace
-``not_reachable_from_home``, que es de donde sale.
+``not_reachable_from_home``, que es de donde sale. Tampoco en el destino de una
+redireccion interna, que puede recibir ``follow`` a traves del salto.
 
 Todo sale de la temporal de aristas de ``compute_link_counts``: ninguna lectura
 mas de ``links`` (decisiones 37 y 41). La columna ``nofollow_rel`` de la
 temporal distingue el ``rel`` del enlace de la directiva de la pagina: las dos
-dejan ``follow=False`` y se arreglan en sitios distintos.
+dejan ``follow=False`` y se arreglan en sitios distintos. Que ``rel`` cuenta lo
+decide ``shared/rel_de_enlace.py``, el mismo modulo que usa el spider.
 """
 
 from __future__ import annotations
@@ -56,20 +58,9 @@ TIPOS = (
     "enlace_interno_nofollow",
 )
 
-# Valores de `rel` que quitan el respaldo al enlace (los mismos que
-# `_REL_SIN_AUTORIDAD` del extractor).
-REL_SIN_AUTORIDAD = ("nofollow", "ugc", "sponsored")
-
-
-def condicion_nofollow_rel(link_follow, link_rel):
-    """El enlace no pasa senales por su propio ``rel``, no por la directiva de
-    la pagina. Para la columna ``nofollow_rel`` de la temporal: True o NULL (no
-    engorda la temporal de un censo de millones)."""
-    rel = func.lower(func.coalesce(link_rel, ""))
-    return case(
-        (and_(link_follow.is_(False), or_(*[rel.like(f"%{r}%") for r in REL_SIN_AUTORIDAD])), True),
-        else_=None,
-    )
+# La columna ``nofollow_rel`` de la temporal de aristas la calcula
+# ``shared.rel_de_enlace.sql_nofollow_por_rel``: la misma regla por tokens con
+# la que el spider marca ``links.follow`` (decisiones 23 y 64).
 
 
 # ---------------------------------------------------------------------------
@@ -86,12 +77,24 @@ def solo_con_nofollow(az, aristas, candidatas: list[int]) -> set[int]:
     """
     from shared.models import Url
 
+    from analysis.analyzer import _es_destino_de_redireccion
+
     if not candidatas:
         return set()
     o = aliased(Url)
     emitidas: set[int] = set()
     for i in range(0, len(candidatas), 5000):
         lote = candidatas[i:i + 5000]
+        # El destino de una redireccion interna puede estar enlazado con
+        # `follow` a traves del salto (los enlaces apuntan a la URL vieja y en
+        # la temporal son del salto, no de ella): «solo con nofollow» no se
+        # puede afirmar y se queda con `not_reachable_from_home` (67, 70).
+        tras_salto = set(az.session.execute(
+            select(Url.id).where(Url.id.in_(lote), Url.job_id == az.job_id,
+                                 _es_destino_de_redireccion())).scalars())
+        lote = [u for u in lote if u not in tras_salto]
+        if not lote:
+            continue
         filas = az.session.execute(
             select(
                 aristas.c.destino_id,
@@ -152,6 +155,12 @@ def avisar_enlaces_nofollow(az, aristas, excluir: set[int] | None = None) -> int
                 aristas.c.origen_id != aristas.c.destino_id)
     con_rel = func.count(func.distinct(case((aristas.c.nofollow_rel.is_(True), aristas.c.origen_id),
                                             else_=None)))
+    # Primero los destinos con algun `nofollow` por `rel`, que son pocos, y
+    # solo esos se agrupan: en penguin la temporal son 10 millones de aristas
+    # y agruparla entera por destino para quedarse con un punado sobra.
+    con_algun_rel = (
+        select(aristas.c.destino_id).where(base, aristas.c.nofollow_rel.is_(True)).distinct()
+    )
     filas = az.session.execute(
         select(
             aristas.c.destino_id,
@@ -161,7 +170,8 @@ def avisar_enlaces_nofollow(az, aristas, excluir: set[int] | None = None) -> int
                                         else_=0)), 0).label("enlaces"),
         )
         .join(d, d.id == aristas.c.destino_id)
-        .where(base, d.status_code == 200, d.is_html.is_(True), d.is_internal.is_(True),
+        .where(base, aristas.c.destino_id.in_(con_algun_rel),
+               d.status_code == 200, d.is_html.is_(True), d.is_internal.is_(True),
                d.indexable.is_(True))
         .group_by(aristas.c.destino_id)
         .having(con_rel > 0)

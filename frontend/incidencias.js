@@ -253,9 +253,9 @@ const ISSUE_INFO = {
     arreglo: 'Quitar el nofollow de la directiva (suele ser una opción del CMS o de un plugin SEO aplicada a toda la plantilla). Si lo que se quería era sacarla del índice, la directiva es noindex.',
   },
   'enlace_interno_nofollow': {
-    que: 'Enlaces internos con rel="nofollow" (o "ugc"/"sponsored") a esta página, que es indexable. Una fila por página de destino, con cuántas páginas la enlazan así y cuántas en total; «plantilla» si son 10 o más (suele ser el menú, el pie o un componente). Un nofollow a una página no indexable (el login, el carrito) no sale: ahí es correcto.',
+    que: 'Enlaces internos con rel="nofollow" (o "ugc"/"sponsored") a esta página, que es indexable. Una fila por página de destino, con cuántas páginas la enlazan así y cuántas en total; «plantilla» desde el umbral de enlaces de plantilla (10 páginas por defecto; suele ser el menú, el pie o un componente). Un nofollow a una página no indexable (el login, el carrito) no sale: ahí es correcto.',
     google: 'El nofollow es para enlaces que no respaldas; para los del propio sitio Google recomienda robots.txt. Lo trata como una pista: esos enlaces pueden no rastrearse y no pasan señales a una página que el sitio sí quiere en el índice.',
-    arreglo: 'Quitar el rel="nofollow" de los enlaces internos a esta página (en el componente o la plantilla si son muchos). Informativo: la página sigue enlazada por otros caminos.',
+    arreglo: 'Quitar el rel="nofollow" de los enlaces internos a esta página (en el componente o la plantilla si son muchos). Informativo. Si además no tiene camino desde la home, mírala en «Sin camino de enlaces desde la home»: puede que solo llegue por estos enlaces.',
   },
   'canonical_missing': {
     que: 'La página no declara canonical.',

@@ -7,8 +7,10 @@ de aristas, la profundidad de clic emite `solo_enlazada_con_nofollow` en vez de
 
 from __future__ import annotations
 
+import os
 import uuid
 
+import pytest
 from sqlalchemy import BigInteger, create_engine, event, select
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,10 @@ from sqlalchemy.orm import sessionmaker
 from analysis.analyzer import SEOAnalyzer
 from analysis import avisos_de_nofollow
 from shared.models import Base, Hreflang, HtmlMeta, Issue, Job, Link, Url
+from shared.rel_de_enlace import (rel_sin_autoridad, rel_tokens, sql_nofollow_por_rel,
+                                  sql_rel_sin_autoridad)
+
+URL_PG = os.environ.get("PAGERANK_TEST_DATABASE_URL")
 
 
 @compiles(BigInteger, "sqlite")
@@ -244,15 +250,93 @@ def test_indexables_con_nofollow_de_pagina_agrupadas_por_plantilla():
     assert len(por_plantilla) == 2 and curso.group_key and blog.group_key != curso.group_key
 
 
-def test_condicion_nofollow_rel_es_true_o_null():
+def test_nofollow_por_rel_es_true_o_null():
     s, j = _montar()
     home = _url(s, j, "/")
     _url(s, j, "/a")
     _enlace(s, j, home, "/a", follow=False, rel="sponsored")
     _enlace(s, j, home, "/a", follow=True, rel="noopener")
     _enlace(s, j, home, "/a", follow=False, rel=None)
-    from sqlalchemy import select as sel
+    # follow=True manda: el `rel` solo se mira si el spider ya lo marco.
+    _enlace(s, j, home, "/a", follow=True, rel="nofollow")
     valores = [v for (v,) in s.execute(
-        sel(avisos_de_nofollow.condicion_nofollow_rel(Link.follow, Link.rel))
+        select(sql_nofollow_por_rel(Link.follow, Link.rel))
         .where(Link.job_id == j.id).order_by(Link.id))]
-    assert [bool(v) if v is not None else None for v in valores] == [True, None, None]
+    assert [bool(v) if v is not None else None for v in valores] == [True, None, None, None]
+
+
+# La regla del spider (Python) y la del analizador (SQL) son la misma: se
+# comprueba sobre los mismos `rel`, en SQLite y, si hay, en Postgres.
+RELS = [
+    None, "", "nofollow", "NoFollow", "nofollow noopener", "noopener nofollow",
+    "nofollow,noopener", "noopener ,  ugc", "nofollow\tnoopener", "x\nsponsored\r",
+    "nofollow\xa0noopener", "nofollowed", "x-ugc", "no-follow", "sponsoredby",
+    "noopener noreferrer", "external", "  ugc  ", "UGC", ",,nofollow,,", "follow",
+    "nofollow;noopener",
+]
+
+
+def _paridad(engine):
+    from sqlalchemy import Column, Integer, MetaData, Table, Text, insert
+
+    t = Table("rels_paridad", MetaData(), Column("id", Integer, primary_key=True),
+              Column("rel", Text))
+    t.create(engine)
+    try:
+        with engine.begin() as c:
+            c.execute(insert(t), [{"id": i, "rel": r} for i, r in enumerate(RELS)])
+            sql = {i: bool(v) for i, v in c.execute(
+                select(t.c.id, sql_rel_sin_autoridad(t.c.rel)))}
+        python = {i: rel_sin_autoridad(r) for i, r in enumerate(RELS)}
+        assert sql == python, [(RELS[i], python[i], sql[i]) for i in python if sql[i] != python[i]]
+        # Y no es trivial: hay de los dos.
+        assert any(python.values()) and not all(python.values())
+        assert python[RELS.index("nofollowed")] is False
+        assert python[RELS.index("x-ugc")] is False
+    finally:
+        t.drop(engine)
+
+
+def test_la_regla_sql_del_rel_es_la_del_spider_en_sqlite():
+    _paridad(create_engine("sqlite://"))
+
+
+@pytest.mark.skipif(not URL_PG, reason="sin PAGERANK_TEST_DATABASE_URL")
+def test_la_regla_sql_del_rel_es_la_del_spider_en_postgres():
+    _paridad(create_engine(URL_PG))
+
+
+def test_el_extractor_usa_la_regla_de_shared():
+    # Una sola regla (decisiones 23 y 64): el extractor no tiene la suya.
+    from parsel import Selector
+
+    from crawler.seo_crawler import extractors
+
+    assert extractors.rel_tokens is rel_tokens
+    html = ('<a href="/a" rel="nofollow,noopener">a</a><a href="/b" rel="nofollowed">b</a>'
+            '<a href="/c" rel="x-ugc ugc">c</a>')
+    enlaces = extractors.extract_links(Selector(text=html), "https://x.com/", {"x.com"})
+    assert [(e["url"].rsplit("/", 1)[1], e["follow"]) for e in enlaces] == [
+        ("a", False), ("b", True), ("c", False)]
+
+
+# -- casos limite de solo_enlazada_con_nofollow -------------------------------------
+
+def test_destino_de_una_redireccion_no_es_solo_nofollow():
+    # /oculta recibe directamente solo nofollow, pero /vieja (un 301 a ella,
+    # tambien sin camino) la enlaza con follow desde /suelta: el sitio SI la
+    # enlaza con follow, a traves del salto. No se afirma «solo nofollow».
+    s, j = _montar()
+    home = _url(s, j, "/")
+    a = _url(s, j, "/a")
+    suelta = _url(s, j, "/suelta")
+    vieja = _url(s, j, "/vieja", status=301, indexable=False)
+    vieja.redirect_url = "https://x.com/oculta"
+    destino = _url(s, j, "/oculta")
+    s.flush()
+    _enlace(s, j, home, "/a")
+    _enlace(s, j, a, "/oculta", follow=False, rel="nofollow")
+    _enlace(s, j, suelta, "/vieja")
+    _contar(s, j)
+    assert _issues(s, j, "solo_enlazada_con_nofollow") == []
+    assert destino.id in {f.url_id for f in _issues(s, j, "not_reachable_from_home")}
