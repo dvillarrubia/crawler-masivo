@@ -162,8 +162,11 @@ def _norm_texto(v) -> str:
     return " ".join(str(v or "").split()).lower()
 
 
-def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
-    """Lo que cambio en una URL entre el censo anterior (pa) y el nuevo (pb)."""
+def cambios_de_pagina(pa: dict | None, pb: dict | None, *, usar_hash: bool = False) -> list[str]:
+    """Lo que cambio en una URL entre el censo anterior (pa) y el nuevo (pb).
+
+    `usar_hash`: si el `content_hash` de los dos censos se puede comparar
+    (`hash_comparable`); por defecto no, y el contenido va por palabras."""
     from shared.comparacion import _canonical_a_otra, _norm, _pierde_inlinks
 
     if pa is None:
@@ -191,7 +194,7 @@ def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
         salida.append("title")
     if _norm_texto(pa.get("h1")) != _norm_texto(pb.get("h1")):
         salida.append("h1")
-    salida.extend(_cambio_de_contenido(pa, pb))
+    salida.extend(_cambio_de_contenido(pa, pb, usar_hash))
     if pa.get("in_sitemap") is True and pb.get("in_sitemap") is False:
         salida.append("sale_del_sitemap")
     if _pierde_inlinks(pa.get("inlinks"), pb.get("inlinks")):
@@ -202,26 +205,64 @@ def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
     return salida
 
 
-def _cambio_de_contenido(pa: dict, pb: dict) -> list[str]:
+def _cambio_de_contenido(pa: dict, pb: dict, usar_hash: bool = False) -> list[str]:
     """«contenido» (cambia mucho: al menos el 30 % y 50 palabras), «texto_contenido»
     (el mismo numero de palabras, mas o menos, pero otro texto) o nada.
 
-    Con `content_hash` en las DOS paginas manda el hash (decision 165): un texto
-    reescrito con las mismas palabras no se veia, y dos hashes iguales son el
-    mismo contenido principal aunque el recuento de palabras varie por una
-    version del extractor. Si falta en cualquiera de las dos (censo anterior a
-    la columna, pagina sin contenido principal), la regla de siempre por
-    palabras: no se compara un hash con nada.
+    El hash manda solo con `usar_hash` (los dos censos con el mismo codigo y la
+    misma config de extraccion: `hash_comparable`) y `content_hash` en las DOS
+    paginas (decision 165): un texto reescrito con las mismas palabras no se
+    veia, y dos hashes iguales son el mismo contenido principal. Si no, la regla
+    de siempre por palabras: un hash cambia entero con un caracter, y con otra
+    version del extractor cambian TODOS; atribuirlo al sitio seria afirmar lo
+    que no se sabe (66, 91).
     """
     wa, wb = pa.get("word_count"), pb.get("word_count")
     mucho = bool(wa and wb is not None and abs(wb - wa) >= CONTENIDO_MIN_PALABRAS
                  and abs(wb - wa) / wa >= CONTENIDO_PARTE)
     ha, hb = pa.get("content_hash"), pb.get("content_hash")
-    if ha and hb:
+    if usar_hash and ha and hb:
         if ha == hb:
             return []
         return ["contenido"] if mucho else ["texto_contenido"]
     return ["contenido"] if mucho else []
+
+
+def _config_de_extraccion(job) -> tuple:
+    """Lo de la config del job que cambia el contenido principal extraido, y
+    con el su hash: el render, el recorte de promos y los selectores propios."""
+    cfg = getattr(job, "config", None) or {}
+    ext = cfg.get("extraction") or {}
+    return (bool(cfg.get("render_js")), ext.get("extract_page_content", True) is not False,
+            ext.get("strip_promo_blocks", True) is not False,
+            tuple(sorted(ext.get("custom_boilerplate_selectors") or [])))
+
+
+def hash_comparable(job_a, job_b) -> bool:
+    """Si el `content_hash` de dos censos se puede comparar: la MISMA version
+    del crawler, conocida en los dos (desconocido no es igual, decision 66), y
+    la misma config de extraccion. Entre agosto y octubre hubo al menos seis
+    cambios de `extract_main_content`: con uno de por medio cambian todos los
+    hashes, y cada pagina que cae saldria con «cambia el texto» en vez de «sin
+    cambio tecnico»."""
+    va, vb = getattr(job_a, "crawler_version", None), getattr(job_b, "crawler_version", None)
+    return bool(va and vb and va == vb and _config_de_extraccion(job_a) == _config_de_extraccion(job_b))
+
+
+def es_de_competidor(db, job) -> bool:
+    """Si el rastreo es de un perfil de la competencia: su trafico no esta en
+    el Search Console del cliente, y la competencia no avisa (como en el
+    worker). Si no se puede leer el perfil, False: lo de siempre."""
+    from shared.models import CrawlProfile
+
+    pid = getattr(job, "profile_id", None)
+    if not pid:
+        return False
+    try:
+        perfil = db.get(CrawlProfile, pid)
+    except Exception:
+        return False
+    return perfil is not None and getattr(perfil, "rol", None) == "competidor"
 
 
 def _destinos(pagina: dict | None) -> list[str]:
@@ -299,6 +340,10 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
     cliente_id = getattr(job_b, "cliente_id", None)
     if not cliente_id:
         return None
+    # Un competidor no esta en el Search Console del cliente: compararlo con
+    # sus propiedades daria «0 clics» de un sitio del que no hay datos.
+    if es_de_competidor(db, job_b):
+        return None
     props = propiedades_activas(db, cliente_id)
     if not props:
         return None
@@ -335,6 +380,7 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
         return sum(c for _, (u, c) in datos.items() if (urlsplit(u).hostname or "").lower() in hosts)
 
     total_a, total_b = del_alcance(datos_a), del_alcance(datos_b)
+    por_hash = hash_comparable(job_a, job_b)
 
     grupos: dict[str, dict[str, dict[str, Any]]] = {"caidas": {}, "subidas": {}}
     n = {"caidas": 0, "subidas": 0}
@@ -365,7 +411,7 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
         n[sentido] += 1
         pa, pb = por_clave_a.get(clave), por_clave_b.get(clave)
         url = (pb or pa)["url"]
-        cambios = cambios_de_pagina(pa, pb)
+        cambios = cambios_de_pagina(pa, pb, usar_hash=por_hash)
         if clave in trasvase:
             # Lo que la saca del indice se sigue diciendo: un trasvase hacia la
             # buena con la vieja dando error es un dato, no un consuelo.
@@ -407,6 +453,8 @@ def comparar_trafico(db, job_a, job_b, paginas_a: list[dict], paginas_b: list[di
         "caidas": salida(grupos["caidas"]), "subidas": salida(grupos["subidas"]),
         "rupturas": [x for x in RUPTURAS if ini_a.isoformat() <= x["fecha"] <= fin_b.isoformat()],
         "umbral": {"parte": CAIDA_MIN_PARTE, "clics": CAIDA_MIN_CLICS},
+        # Si el contenido se comparo por su hash o por palabras (decision 165).
+        "contenido_por_hash": por_hash,
     }
     r["estacional"] = _estacional(db, cliente_id, props, hosts, ini_a, fin_a, ini_b, fin_b, variacion)
     r["textos"] = textos(r)
@@ -471,7 +519,11 @@ def textos(r: dict[str, Any]) -> list[str]:
     # una frase que lo dice. Sin ella, «40 paginas perdieron 300 clics; coincide
     # con que cambia el title» se lee como la explicacion de una caida que
     # tambien tienen las paginas que no cambiaron.
-    if r.get("general") and (r.get("caidas") or r.get("subidas")):
+    # Solo si detras va a salir al menos una linea: las subidas sin cambio, de
+    # trasvase o sin dato anterior no se escriben.
+    subidas_escritas = [g for g in r.get("subidas") or []
+                        if g["cambio"] not in ("sin_cambio", "recibe_trasvase", "sin_dato_anterior")]
+    if r.get("general") and (r.get("caidas") or subidas_escritas):
         lineas.append("Por páginas, como detalle y no como causa (la caída es de todo el sitio, también de "
                       "las que no cambiaron):")
 
@@ -498,9 +550,7 @@ def textos(r: dict[str, Any]) -> list[str]:
         else:
             lineas.append(f"{paginas(g)} {verbo(g, 'perdió', 'perdieron')} {clics(-g['diferencia'])}; coincide "
                           f"con que en {verbo(g, 'ella', 'ellas')} {g['texto']} entre los dos rastreos.")
-    for g in r.get("subidas") or []:
-        if g["cambio"] in ("sin_cambio", "recibe_trasvase", "sin_dato_anterior"):
-            continue
+    for g in subidas_escritas:
         lineas.append(f"{paginas(g)} {verbo(g, 'ganó', 'ganaron')} {clics(g['diferencia'])}; coincide con que "
                       f"en {verbo(g, 'ella', 'ellas')} {g['texto']}.")
     for x in r.get("rupturas") or []:
@@ -538,6 +588,10 @@ def completar_pendientes(db, cliente_id, limite: int = 10) -> int:
                 continue
             anterior = db.get(Job, uuid.UUID(str(comp["comparado_con"])))
             if anterior is None:
+                continue
+            # Uno de la competencia guardado antes de la decision 165: no se
+            # completa (ni se leen sus dos censos en cada descarga).
+            if es_de_competidor(db, job):
                 continue
             # Antes de leer dos censos enteros, si los datos siguen sin llegar.
             dias = dias_de_ventana(anterior, job)
@@ -580,18 +634,19 @@ def _avisar_completado(db, job) -> None:
     Al acabar el rastreo, el informe de Slack salio con «Search Console aún no
     tiene datos…»; sin esto, la caida de verdad se quedaba en la ficha y no
     llegaba a nadie. Va por el mismo sitio que ese informe (`avisar_de_trafico`:
-    rastreos programados, canal del cliente con «informe» activo) y con los
-    mismos `textos`.
+    rastreos programados, canal del cliente con «informe» activo, nunca de la
+    competencia) y con los mismos `textos`.
     """
     try:
         from sqlalchemy.orm.attributes import flag_modified
 
         from shared.avisos import avisar_de_trafico
-        from shared.models import Client
+        from shared.models import Client, CrawlProfile
 
         cliente = db.get(Client, job.cliente_id) if getattr(job, "cliente_id", None) else None
+        perfil = db.get(CrawlProfile, job.profile_id) if getattr(job, "profile_id", None) else None
         trafico = (job.comparacion or {}).get("trafico") or {}
-        enviado = avisar_de_trafico(cliente, job, trafico)
+        enviado = avisar_de_trafico(cliente, job, trafico, perfil)
         comp = dict(job.comparacion or {})
         comp["trafico"] = {**trafico, "aviso": {
             "estado": "enviado" if enviado else "no_enviado",

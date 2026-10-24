@@ -50,7 +50,8 @@ def entorno(tmp_path):
     s.flush()
     web = CrawlProfile(cliente_id=acme.id, nombre="web", seeds=["https://x.com/"])
     blog = CrawlProfile(cliente_id=acme.id, nombre="blog", seeds=["https://blog.x.com/"])
-    s.add_all([web, blog])
+    rival = CrawlProfile(cliente_id=acme.id, nombre="rival", seeds=["https://rival.com/"], rol="competidor")
+    s.add_all([web, blog, rival])
     s.flush()
 
     def job(nombre, perfil, dia, comparacion):
@@ -66,6 +67,8 @@ def entorno(tmp_path):
     job("web sin trafico", web, 22, {"comparado_con": "y"})
     job("blog", blog, 21, {"trafico": {"comparable": False, "pendiente": True,
                                        "motivo": "Search Console aún no tiene datos hasta el 2026-10-19."}})
+    # Uno de la competencia guardado antes de que se dejara de calcular: no sale.
+    job("rival", rival, 23, {"comparado_con": "z", "trafico": TRAFICO})
     s.commit()
     ids = {"acme": acme.id, "nuevo": str(nuevo.id)}
     s.close()
@@ -88,7 +91,8 @@ def test_el_ultimo_trafico_de_cada_perfil_con_las_frases_del_redactor(entorno):
     r = cliente.get(f"/api/clients/{ids['acme']}/trafico")
     assert r.status_code == 200
     filas = r.json()
-    # El mas reciente primero; «web sin trafico» no cuenta y el viejo de web tampoco.
+    # El mas reciente primero; «web sin trafico» no cuenta, el viejo de web
+    # tampoco, y la competencia no sale (no esta en el Search Console del cliente).
     assert [f["job"] for f in filas] == ["blog", "web nuevo"]
     por_perfil = {f["perfil"]: f for f in filas}
     assert set(por_perfil) == {"web", "blog"}

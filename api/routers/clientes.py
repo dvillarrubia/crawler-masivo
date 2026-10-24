@@ -411,13 +411,17 @@ def trafico_del_cliente(client_id: uuid.UUID, limite: int = Query(30, ge=1, le=2
     from shared.trafico_entre_censos import textos
 
     cliente = _buscar(db, client_id)
-    nombres = {p.id: p.nombre for p in db.query(CrawlProfile).filter(CrawlProfile.cliente_id == cliente.id)}
+    perfiles = list(db.query(CrawlProfile).filter(CrawlProfile.cliente_id == cliente.id))
+    nombres = {p.id: p.nombre for p in perfiles}
+    # La competencia no esta en el Search Console del cliente: un trafico suyo
+    # guardado antes de la decision 165 diria «0 clics» de un sitio sin datos.
+    competidores = {p.id for p in perfiles if p.rol == "competidor"}
     vistos: set = set()
     salida = []
     for j in (db.query(Job).filter(Job.cliente_id == cliente.id, Job.comparacion.isnot(None))
               .order_by(Job.created_at.desc()).limit(limite)):
         t = (j.comparacion or {}).get("trafico") if isinstance(j.comparacion, dict) else None
-        if not isinstance(t, dict) or j.profile_id in vistos:
+        if not isinstance(t, dict) or j.profile_id in vistos or j.profile_id in competidores:
             continue
         vistos.add(j.profile_id)
         salida.append({

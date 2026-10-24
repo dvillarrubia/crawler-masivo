@@ -43,8 +43,7 @@
       "patron": "(aviso-legal|privacidad|privacy|cookies)"
     }
   ],
-  "_marcas": "Nombres de marca del cliente (decision 157): sus busquedas no cuentan en la curva de CTR ni como canibalizacion de la home. Es una lista y SUSTITUYE a la del cliente: dejala vacia solo si el cliente no tiene marcas puestas en su ficha.",
-  "marcas": [],
+  "_marcas": "Clave opcional \"marcas\": lista de nombres de marca del cliente (decision 157); sus busquedas no cuentan en la curva de CTR ni como canibalizacion de la home. Va mejor en la ficha del cliente. Si la pones aqui, la lista SUSTITUYE a la del cliente: no la pongas vacia, que borra las suyas.",
   "resource_types": {
     "crawl_images": false,
     "crawl_css": false,
@@ -103,17 +102,5 @@
       "sondas_paginacion": 5
     }
   },
-  "_analysis_thresholds": "Umbrales de Search Console (decision 157), con sus valores por defecto. Se fusionan clave a clave con los del cliente: basta con poner los que cambien.",
-  "analysis_thresholds": {
-    "gsc_oportunidad_min_impresiones": 500,
-    "gsc_oportunidad_posicion_min": 4.0,
-    "gsc_oportunidad_posicion_max": 20.0,
-    "gsc_oportunidad_profundidad": 4,
-    "gsc_ctr_min_impresiones": 200,
-    "gsc_ctr_min_clics_que_faltan": 20,
-    "gsc_canibalizacion_min_parte": 0.2,
-    "gsc_canibalizacion_min_clics": 10,
-    "gsc_canibalizacion_min_impresiones": 1000,
-    "gsc_canibalizacion_clics_grave": 100
-  }
+  "_analysis_thresholds": "Clave opcional \"analysis_thresholds\" (decision 157): umbrales de Search Console, que se fusionan clave a clave con los del cliente; pon solo los que cambien, porque uno puesto aqui gana al del cliente. Por defecto: gsc_oportunidad_min_impresiones 500, gsc_oportunidad_posicion_min 4.0, gsc_oportunidad_posicion_max 20.0, gsc_oportunidad_profundidad 4, gsc_ctr_min_impresiones 200, gsc_ctr_min_clics_que_faltan 20, gsc_canibalizacion_min_parte 0.2, gsc_canibalizacion_min_clics 10, gsc_canibalizacion_min_impresiones 1000, gsc_canibalizacion_clics_grave 100."
 }

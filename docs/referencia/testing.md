@@ -313,8 +313,11 @@ completo no toma una lista como referencia; `test_modo_lista_frontend.py`
 Trafico entre censos (decisiones 158 y 165): `test_trafico_entre_censos.py`
 contra SQLite (ventanas, caidas y subidas por cambio, trasvase, general,
 estacional, rupturas; y de la 165: contenido por `content_hash` con la regla de
-palabras si falta en una, la caida general con los grupos detras de la frase
-de detalle, y el aviso al completarse un pendiente: sale una vez por Slack con
-`publicar` simulado, no sale sin Slack ni lanzado a mano, y un fallo al avisar
+palabras si falta en una o si `hash_comparable` dice que no —otra version del
+crawler o de la config de extraccion—, la caida general con los grupos detras
+de la frase de detalle y sin frase si no hay grupo que escribir, y el aviso al
+completarse un pendiente: sale una vez por Slack con `publicar` simulado, no
+sale sin Slack, lanzado a mano ni de un perfil competidor, y un fallo al avisar
 no deshace la comparacion) y `test_trafico_cliente_api.py` (el endpoint de la
-ficha del cliente con TestClient; trabajo de la API).
+ficha del cliente con TestClient, sin los perfiles de la competencia; trabajo
+de la API).

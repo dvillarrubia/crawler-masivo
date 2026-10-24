@@ -218,13 +218,16 @@ def texto_de_trafico(nombre_job: str, trafico: dict) -> str:
     return "\n".join(lineas)
 
 
-def avisar_de_trafico(cliente, job, trafico: dict) -> bool:
+def avisar_de_trafico(cliente, job, trafico: dict, perfil=None) -> bool:
     """El trafico completado de un rastreo PROGRAMADO, al canal del cliente con
     el «informe» activo: el mismo camino que `avisar_de_informe`, que fue el que
-    dijo «aún no tiene datos». Sin Slack configurado, o lanzado a mano, no hace
-    nada. Nunca lanza."""
+    dijo «aún no tiene datos». Sin Slack configurado, lanzado a mano o de un
+    perfil de la competencia (el worker tampoco manda su informe ni sus
+    alertas), no hace nada. Nunca lanza."""
     try:
         if cliente is None or getattr(job, "programacion_id", None) is None:
+            return False
+        if perfil is not None and getattr(perfil, "rol", None) == "competidor":
             return False
         if not isinstance(trafico, dict) or trafico.get("pendiente"):
             return False

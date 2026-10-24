@@ -60,4 +60,4 @@ siendo lo que hizo el rastreo. Migracion en `init_db.py`.
 
 URL dedup: SHA-256 hash per `(job_id, url_hash)` unique constraint.
 
-`jobs.comparacion.trafico` (JSON, decisiones 158 y 165): el trafico de Google entre ese censo y `comparado_con`, de `shared/trafico_entre_censos.py`. Con `pendiente` espera a los datos y lo completa el worker tras la descarga de Search Console; al completarse lleva `aviso` = `{estado: por_enviar | enviado | no_enviado, en}`, la marca de que el aviso de Slack ya se intento (una sola vez).
+`jobs.comparacion.trafico` (JSON, decisiones 158 y 165): el trafico de Google entre ese censo y `comparado_con`, de `shared/trafico_entre_censos.py`. Con `pendiente` espera a los datos y lo completa el worker tras la descarga de Search Console; al completarse lleva `aviso` = `{estado: por_enviar | enviado | no_enviado, en}`, la marca de que el aviso de Slack ya se intento (una sola vez). `contenido_por_hash` dice si el contenido se comparo por `content_hash` (misma `crawler_version` y config de extraccion en los dos censos) o por palabras. Un perfil competidor no tiene trafico.

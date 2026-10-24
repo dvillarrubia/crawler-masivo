@@ -290,7 +290,72 @@ def test_solo_las_propiedades_activas_y_los_hosts_del_censo(s):
     (_p("/a", content_hash="h1"), _p("/a", word_count=200), ["contenido"]),
 ])
 def test_contenido_por_hash_si_lo_tienen_las_dos(pa, pb, esperado):
-    assert T.cambios_de_pagina(pa, pb) == esperado
+    assert T.cambios_de_pagina(pa, pb, usar_hash=True) == esperado
+
+
+def test_sin_usar_hash_un_hash_distinto_no_es_cambio_de_texto():
+    """Sin `usar_hash` (otra version del extractor, otra config de extraccion),
+    un hash distinto con las mismas palabras no es «cambia el texto»: un caracter
+    o un extractor nuevo cambian el hash entero (revision del PR #230)."""
+    assert T.cambios_de_pagina(_p("/a", content_hash="h1"), _p("/a", content_hash="h2")) == []
+    assert T.cambios_de_pagina(_p("/a", content_hash="h1"),
+                               _p("/a", word_count=200, content_hash="h2")) == ["contenido"]
+
+
+class _JV:
+    def __init__(self, version, config=None):
+        self.crawler_version = version
+        self.config = config or {}
+
+
+@pytest.mark.parametrize("a, b, esperado", [
+    (_JV("v1"), _JV("v1"), True),
+    (_JV("v1"), _JV("v2"), False),
+    # Desconocido no es igual (decision 66).
+    (_JV(None), _JV(None), False),
+    (_JV("v1"), _JV(None), False),
+    # La misma version con otra config de extraccion tampoco.
+    (_JV("v1", {"extraction": {"custom_boilerplate_selectors": [".promo"]}}), _JV("v1"), False),
+    (_JV("v1", {"extraction": {"strip_promo_blocks": False}}), _JV("v1"), False),
+    (_JV("v1", {"render_js": True}), _JV("v1"), False),
+    # Los valores por defecto explicitos son lo mismo que no ponerlos.
+    (_JV("v1", {"extraction": {"strip_promo_blocks": True, "custom_boilerplate_selectors": []}}), _JV("v1"), True),
+])
+def test_hash_comparable(a, b, esperado):
+    assert T.hash_comparable(a, b) is esperado
+
+
+def test_con_otra_version_del_crawler_las_caidas_son_sin_cambio(s):
+    """Dos censos con versiones distintas: todos los hashes cambian, y la pagina
+    que cae sigue siendo «sin cambio tecnico», no «cambia el texto»."""
+    c, ja, jb = _montar(s)
+    ja.crawler_version, jb.crawler_version = "v1", "v2"
+    _clics(s, c, "/a", 100, 20)
+    for i in range(30):
+        _clics(s, c, f"/e{i}", 100, 100)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [_p("/a", content_hash="h1")], [_p("/a", content_hash="h2")])
+    assert r["contenido_por_hash"] is False
+    assert [g["cambio"] for g in r["caidas"]] == ["sin_cambio"]
+    # Con la misma version, el hash si cuenta.
+    jb.crawler_version = "v1"
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [_p("/a", content_hash="h1")], [_p("/a", content_hash="h2")])
+    assert r["contenido_por_hash"] is True
+    assert [g["cambio"] for g in r["caidas"]] == ["texto_contenido"]
+
+
+def test_la_frase_de_detalle_solo_si_detras_hay_alguna_linea():
+    base = {"comparable": True, "ventana_anterior": ["2026-09-01", "2026-09-28"],
+            "ventana_nueva": ["2026-09-29", "2026-10-26"], "clics_anterior": 1000, "clics_nuevo": 600,
+            "variacion": -0.4, "general": True, "caidas": [],
+            "rupturas": [{"fecha": "2026-10-01", "texto": "algo"}]}
+    t = T.textos({**base, "subidas": [{"cambio": "sin_cambio", "texto": "x", "paginas": 1, "diferencia": 30}]})
+    assert not any("como detalle" in x for x in t)
+    t = T.textos({**base, "subidas": [{"cambio": "title", "texto": "cambia el title", "paginas": 1,
+                                       "diferencia": 30}]})
+    i = next(i for i, x in enumerate(t) if "como detalle" in x)
+    assert "ganó 30 clics" in t[i + 1]
 
 
 def test_caida_general_primero_general_y_los_grupos_como_detalle(s):
@@ -396,6 +461,41 @@ def test_sin_slack_o_lanzado_a_mano_no_sale_nada(s, enviados):
 def test_lanzado_a_mano_no_avisa(s, enviados):
     c, ja, jb = _pendiente_que_se_completa(s, programado=False)
     assert T.completar_pendientes(s, c.id) == 1
+    assert enviados == []
+
+
+def test_un_competidor_no_avisa_ni_se_compara(s, enviados):
+    """Un rastreo programado de la competencia: el worker no manda su informe
+    ni sus alertas, y su trafico no esta en el Search Console del cliente. Ni
+    se compara ni se completa ni se avisa (revision del PR #230)."""
+    from shared.models import CrawlProfile
+
+    c, ja, jb = _pendiente_que_se_completa(s)
+    rival = CrawlProfile(id=uuid.uuid4(), cliente_id=c.id, nombre="rival", seeds=["https://x.com/"],
+                         rol="competidor")
+    s.add(rival)
+    s.flush()
+    ja.profile_id = jb.profile_id = rival.id
+    s.commit()
+    assert T.completar_pendientes(s, c.id) == 0
+    assert enviados == []
+    assert T.comparar_trafico(s, ja, jb, [_p("/a")], [_p("/a")]) is None
+
+
+def test_avisar_de_trafico_no_avisa_de_la_competencia(enviados):
+    import shared.avisos
+
+    class _P:
+        rol = "competidor"
+
+    class _Jb:
+        id, name, programacion_id = uuid.uuid4(), "b", uuid.uuid4()
+
+    cliente = Client(id=uuid.uuid4(), nombre="Acme", slug="acme", dominios=[], config_defecto={},
+                     integraciones=[{"tipo": "slack", "activa": True, "credencial_env": "SLACK_X",
+                                     "parametros": {"canal": "C1"}}])
+    t = {"comparable": False, "pendiente": False, "motivo": "x"}
+    assert shared.avisos.avisar_de_trafico(cliente, _Jb(), t, _P()) is False
     assert enviados == []
 
 
