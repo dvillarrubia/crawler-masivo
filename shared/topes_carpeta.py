@@ -5,10 +5,13 @@ blog por carpeta) un `max_urls` global se lo come el primer blog que el BFS
 encuentra, y los demas quedan sin ver. Con `topes_por_carpeta` cada parte tiene
 su cupo y el resto del sitio sigue rastreandose.
 
-Vive en `shared/` porque lo usan tres sitios con la MISMA regla (decisiones 23,
-39 y 64: dos copias acaban discrepando): `JobConfig` para validar, el spider
-para admitir o no cada URL, y el analizador para saber que URL cae en una parte
-cortada y no afirmar ausencias ahi (decisiones 67 y 70).
+Vive en `shared/` porque lo usan varios sitios con la MISMA regla (decisiones
+23, 39 y 64: dos copias acaban discrepando): `JobConfig` para validar,
+`fusionar_config` para heredar regla a regla aunque cada capa la escriba con
+otra grafia, el spider para admitir o no cada URL, y el worker y el analizador
+para saber si algun tope corto (`corto`): entonces el censo esta truncado en
+TODO el sitio, porque lo que no se pidio tambien enlazaba fuera de su carpeta, y
+no se afirman ausencias de entrantes ni de camino (decisiones 67 y 70).
 
 Sintaxis de las reglas (`{"regla": tope}`):
 
@@ -33,6 +36,7 @@ importan igual.
 
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
@@ -41,8 +45,7 @@ MAX_REGLAS = 200
 TOPE_MAX = 5_000_000
 # Grupos cortados que se guardan con su detalle en `jobs.topes_carpeta`. Con
 # `"*"` en un sitio de miles de carpetas la lista no cabe; pasado esto, la
-# regla entera cuenta como cortada para el analisis (no se sabe cual no lo
-# esta, y lo que no se sabe no se afirma).
+# fila de la regla lo dice (`lista_completa: false`).
 MAX_GRUPOS_GUARDADOS = 2000
 # URLs distintas que se recuerdan como dejadas sin rastrear. Pasado esto la
 # cifra sigue subiendo, pero puede contar dos veces la misma: es un minimo y
@@ -78,34 +81,36 @@ def _host_normal(host: str) -> str:
     return _sin_www(host)
 
 
-def interpretar(clave: str, tope) -> Regla:
-    """Una regla a partir de su clave. ValueError con el motivo si no vale."""
-    if isinstance(tope, bool) or not isinstance(tope, int):
-        raise ValueError(f"{clave!r}: el tope tiene que ser un entero")
-    if tope < 1 or tope > TOPE_MAX:
-        raise ValueError(f"{clave!r}: el tope va de 1 a {TOPE_MAX}")
+def _analizar(clave: str) -> tuple[str, str, str | None, str]:
+    """`(clave normalizada, tipo, host, prefijo)` de una regla, sin el tope.
+    ValueError con el motivo si no vale."""
     texto = (clave or "").strip()
     if not texto:
         raise ValueError("regla vacia")
     if "://" in texto:
         texto = texto.split("://", 1)[1]
-    if texto == "*":
-        return Regla("*", tope, "carpeta", None)
+    if texto in ("*", "/*/"):
+        # `"/*/"` sin host es lo mismo que `"*"`: misma clave, para que la
+        # deteccion de duplicados las vea (si no, una de las dos se ignoraba).
+        return "*", "carpeta", None, ""
     if texto.startswith("/"):
         host, ruta = None, texto
     else:
         host, _, resto = texto.partition("/")
         ruta = "/" + resto if resto else ""
+        if ":" in host:
+            # La URL se compara por `hostname`, que no lleva puerto: una regla
+            # con puerto no casaria nunca y el sitio se rastrearia sin tope.
+            raise ValueError(f"{clave!r}: el host va sin puerto (p. ej. blogs.uoc.edu/*)")
         host = _host_normal(host)
         # Sin punto, casi siempre es una carpeta escrita sin la barra
         # (`blog/`): se dice, en vez de tomarla por un host que no existe.
         if not host or "*" in host or " " in host or ("." not in host and host != "localhost"):
             raise ValueError(f"{clave!r}: no es un host (p. ej. blogs.uoc.edu/*)")
-    nombre = (host or "") + ruta
     if host is not None and ruta in ("", "/", "/*"):
-        return Regla(host + "/*", tope, "host", host)
+        return host + "/*", "host", host, ""
     if ruta == "/*/":
-        return Regla(nombre, tope, "carpeta", host)
+        return (host or "") + ruta, "carpeta", host, ""
     if ruta.endswith("*"):
         ruta = ruta[:-1]
     if "*" in ruta:
@@ -114,7 +119,27 @@ def interpretar(clave: str, tope) -> Regla:
     if ruta in ("", "/"):
         raise ValueError(f"{clave!r}: un prefijo de ruta necesita una carpeta (p. ej. /blog/)")
     ruta = quote(ruta, safe=_SEGURO_EN_RUTA)
-    return Regla((host or "") + ruta, tope, "prefijo", host, ruta)
+    return (host or "") + ruta, "prefijo", host, ruta
+
+
+def interpretar(clave: str, tope) -> Regla:
+    """Una regla a partir de su clave. ValueError con el motivo si no vale."""
+    if isinstance(tope, bool) or not isinstance(tope, int):
+        raise ValueError(f"{clave!r}: el tope tiene que ser un entero")
+    if tope < 1 or tope > TOPE_MAX:
+        raise ValueError(f"{clave!r}: el tope va de 1 a {TOPE_MAX}")
+    nombre, tipo, host, prefijo = _analizar(clave)
+    return Regla(nombre, tope, tipo, host, prefijo)
+
+
+def clave_normal(clave) -> str:
+    """La clave con la que se identifica una regla, la escriban como la
+    escriban (`blogs.uoc.edu` y `blogs.uoc.edu/*` son la misma). Si no se
+    entiende, la clave tal cual: ya la rechazara `compilar` al validar."""
+    try:
+        return _analizar(str(clave))[0]
+    except ValueError:
+        return str(clave)
 
 
 def compilar(reglas: dict | None) -> list[Regla]:
@@ -201,6 +226,72 @@ def grupos_de(url: str, reglas: list[Regla]) -> list[tuple[Regla, str]]:
     return salida
 
 
+class ClavesCompactas:
+    """Conjunto de claves de 64 bits en un `array('Q')` con direccionamiento
+    abierto: entre 13 y 27 bytes por clave, frente a unos 70 de un `set` de
+    ints. Con `"*"` casi cada URL admitida entra aqui, y un rastreo de 5 M URLs
+    son 350 MB por subproceso con un `set` (medido) en un VPS que comparte
+    memoria con Postgres y la API. Las claves ya son un trozo de sha256, asi
+    que se reparten solas: el hueco es la clave con la mascara."""
+
+    _CARGA = 0.6
+
+    def __init__(self, capacidad: int = 1024):
+        cap = 1024
+        while cap < capacidad:
+            cap *= 2
+        self._tabla = array("Q", bytes(8 * cap))
+        self._mascara = cap - 1
+        self._n = 0
+        self._cero = False      # el 0 marca hueco libre: va aparte
+
+    def __len__(self) -> int:
+        return self._n
+
+    def _hueco(self, clave: int) -> int:
+        tabla, mascara = self._tabla, self._mascara
+        i = clave & mascara
+        while True:
+            v = tabla[i]
+            if v == 0 or v == clave:
+                return i
+            i = (i + 1) & mascara
+
+    def __contains__(self, clave: int) -> bool:
+        clave &= 0xFFFFFFFFFFFFFFFF
+        if not clave:
+            return self._cero
+        return self._tabla[self._hueco(clave)] == clave
+
+    def add(self, clave: int) -> None:
+        clave &= 0xFFFFFFFFFFFFFFFF
+        if not clave:
+            if not self._cero:
+                self._cero = True
+                self._n += 1
+            return
+        i = self._hueco(clave)
+        if self._tabla[i] == clave:
+            return
+        self._tabla[i] = clave
+        self._n += 1
+        if self._n > self._CARGA * (self._mascara + 1):
+            self._crecer()
+
+    def _crecer(self) -> None:
+        vieja = self._tabla
+        cap = 2 * (self._mascara + 1)
+        self._tabla = array("Q", bytes(8 * cap))
+        self._mascara = cap - 1
+        tabla, mascara = self._tabla, self._mascara
+        for v in vieja:
+            if v:
+                i = v & mascara
+                while tabla[i]:
+                    i = (i + 1) & mascara
+                tabla[i] = v
+
+
 @dataclass
 class Presupuesto:
     """Lo que el spider lleva de cada cupo durante el rastreo."""
@@ -209,8 +300,8 @@ class Presupuesto:
     admitidas: dict[str, int] = field(default_factory=dict)       # grupo -> URLs
     sin_rastrear: dict[str, int] = field(default_factory=dict)    # grupo -> URLs
     regla_de: dict[str, Regla] = field(default_factory=dict)      # grupo -> regla
-    _admitidas_claves: set[int] = field(default_factory=set)
-    _dejadas_claves: set[int] = field(default_factory=set)
+    _admitidas_claves: ClavesCompactas = field(default_factory=ClavesCompactas)
+    _dejadas_claves: ClavesCompactas = field(default_factory=ClavesCompactas)
     recuento_aproximado: bool = False
 
     def contar(self, url: str, clave: int) -> None:
@@ -292,53 +383,27 @@ class Presupuesto:
         }
 
 
-class PartesCortadas:
-    """Para el analisis: si una URL cae en un cupo que se quedo corto.
+def corto(resumen) -> bool:
+    """True si algun tope dejo URLs sin pedir, segun `jobs.topes_carpeta`.
 
-    Se reconstruye desde `jobs.topes_carpeta` y `jobs.config`: el grupo de cada
-    URL sale de `grupos_de` con las mismas reglas que uso el spider. Si la
-    lista de grupos cortados de una regla se recorto al guardarla, todo lo que
-    casa con esa regla cuenta como cortado.
+    Entonces el censo esta truncado en TODO el sitio, no solo en el grupo
+    cortado: las paginas que no se pidieron tambien enlazan a otras carpetas
+    (un post de /blog/ sin pedir puede ser el unico que enlaza a /producto/x).
+    Un resumen ilegible cuenta como cortado: lo que no se sabe no se afirma.
     """
-
-    def __init__(self, resumen: dict | None, config: dict | None):
-        self.grupos: set[str] = set()
-        self.reglas_enteras: set[str] = set()
-        self.reglas: list[Regla] = []
-        if not isinstance(resumen, dict) or not resumen.get("sin_rastrear"):
-            return
-        try:
-            self.reglas = compilar((config or {}).get("topes_por_carpeta"))
-        except ValueError:
-            self.reglas = []
-        for c in resumen.get("cortados") or []:
-            if isinstance(c, dict) and c.get("grupo"):
-                self.grupos.add(c["grupo"])
-        for f in resumen.get("reglas") or []:
-            if isinstance(f, dict) and f.get("grupos_cortados") and not f.get("lista_completa", True):
-                self.reglas_enteras.add(f.get("regla"))
-        if not self.reglas:
-            # Sin las reglas no se sabe que URL cae donde: todo cuenta como
-            # cortado (lo que no se sabe no se afirma).
-            self.reglas_enteras.add("*todo*")
-
-    def __bool__(self) -> bool:
-        return bool(self.grupos or self.reglas_enteras)
-
-    def contiene(self, url: str) -> bool:
-        if not self:
-            return False
-        if "*todo*" in self.reglas_enteras:
-            return True
-        for r, g in grupos_de(url, self.reglas):
-            if g in self.grupos or r.clave in self.reglas_enteras:
-                return True
+    if not resumen:
         return False
+    if not isinstance(resumen, dict):
+        return True
+    try:
+        return int(resumen.get("sin_rastrear") or 0) > 0
+    except (TypeError, ValueError):
+        return True
 
 
 def describir(resumen: dict | None, max_grupos: int = 5) -> str | None:
     """Una frase para el informe y la ficha, o None si ningun tope corto."""
-    if not isinstance(resumen, dict) or not resumen.get("sin_rastrear"):
+    if not isinstance(resumen, dict) or not corto(resumen):
         return None
     cortados = resumen.get("cortados") or []
     n = sum(int(f.get("grupos_cortados") or 0) for f in resumen.get("reglas") or [])

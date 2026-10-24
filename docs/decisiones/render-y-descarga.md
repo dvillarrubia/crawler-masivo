@@ -975,9 +975,15 @@
      `{"/blog/": 500, "*": 300}` da 500 al blog y 300 al resto de carpetas, y
      `{"blogs.uoc.edu/*": 2000, "*": 300}` acota cada blog y el host a la vez.
    - Es un **dict**: en la herencia cliente → perfil → job se fusiona por regla y
-     `null` la quita (`shared/clientes.fusionar_config`), como cualquier dict.
+     `null` la quita (`shared/clientes.fusionar_config`). La regla se reconoce por
+     su clave **normalizada** (`topes_carpeta.clave_normal`): si el cliente pone
+     `"blogs.x.com"` y el perfil `"blogs.x.com/*"`, el perfil la sobrescribe (o la
+     quita con `null`) en vez de quedar las dos y rechazarse el job. Dos grafías de
+     la misma regla en UNA capa siguen siendo un error.
    - Una regla que no se entiende (`"blog/"` sin barra inicial, un comodín en
-     medio, un tope 0) **se rechaza** al validar el config, y si llegara al spider
+     medio, un tope 0, un host con puerto, que nunca casaría porque la URL se
+     compara por `hostname`) **se rechaza** al validar el config; `"/*/"` sin host
+     es `"*"` y con las dos juntas se rechaza por repetida. Si llegara al spider
      el job no se rastrea (`config_invalida`, como las reglas a medida): rastrear
      sin el tope pedido es justo el censo que alguien quiso evitar.
 
@@ -1001,13 +1007,27 @@
    comparación y sus alertas, la evolución, el veredicto del modo lista, los
    destinos fuera del censo de `enlace_no_rastreable`, WordPress, el informe y
    `truncated` en el progreso). Un corte por `max_urls`, por tiempo o un
-   estancamiento mandan sobre él. Además, en el **análisis**, las URLs de un grupo
-   cortado no llevan `orphan_page`, `sitemap_orphan`, `not_reachable_from_home`,
-   `canonical_sin_enlazar` ni `solo_enlazada_por_redireccion`: quien las enlaza
-   puede ser justo lo que no se pidió (`SEOAnalyzer._ids_en_parte_topada`, con
-   `PartesCortadas`; si la lista de grupos se recortó al guardarla, pasados 2.000,
-   la regla entera cuenta como cortada). `not_in_sitemap` no cambia: compara una
-   página rastreada con el sitemap leído, y eso no depende de lo que se dejó.
+   estancamiento mandan sobre él. Además, en el **análisis**, con algún tope
+   cortado (`topes_carpeta.corto`, el mismo criterio que el worker) **ninguna URL
+   del censo** lleva `orphan_page`, `sitemap_orphan`, `not_reachable_from_home`,
+   `canonical_sin_enlazar`, `solo_enlazada_por_redireccion` ni
+   `solo_enlazada_desde_paginacion_excluida` (`SEOAnalyzer._topes_cortaron`). No
+   basta con callarlos en el grupo cortado: las páginas que el tope no pidió
+   también enlazan a otras carpetas (un post de /blog/ sin pedir puede ser el único
+   que enlaza a /producto/x), así que cualquier ausencia de entrantes o de camino
+   es una ausencia en un censo truncado. La primera versión los callaba solo en el
+   grupo, y una revisión lo reprodujo: `/producto/x` salía `sitemap_orphan` en un
+   censo `tope_por_carpeta`. El informe y la ficha lo dicen. `not_in_sitemap` no
+   cambia: compara una página rastreada con el sitemap leído, y eso no depende de
+   lo que se dejó.
+
+   **Memoria.** El presupuesto recuerda cada URL admitida (para no gastar cupo dos
+   veces por la misma, enlazada desde cien páginas) y las dejadas. Con `"*"` es
+   casi todo el censo, y un `set` de ints son unos 70 bytes por URL (350 MB por
+   subproceso en un rastreo de 5 M). `ClavesCompactas` guarda las claves de 64 bits
+   en un `array('Q')` con direccionamiento abierto: medido, **36 MB por cada 2 M de
+   claves frente a 139 MB**, unas 3 veces más lento por operación (0,6 µs contra
+   0,2), nada frente a una petición.
 
    **Medida.** El spider real contra blogs.uoc.edu desde local, `max_depth` 2,
    `max_urls` 45 y solo HTML (unas 45 peticiones por pasada): con `{"*": 3}` las 45

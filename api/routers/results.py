@@ -3978,7 +3978,7 @@ def get_informe(
 
     topes = describir(getattr(job, "topes_carpeta", None))
     if topes:
-        fiabilidad.append(f"{topes}: ahí el informe no cubre todo y no se afirma que falte nada.")
+        fiabilidad.append(f"{topes}: el censo no está entero y, como lo que no se pidió también enlaza al resto del sitio, no se afirman páginas huérfanas ni sin camino desde la home.")
     if motivo == "bloqueado_por_waf":
         fiabilidad.append("Un cortafuegos (WAF) bloqueó parte del rastreo: las páginas detrás del muro "
                           "no se han auditado.")

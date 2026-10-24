@@ -1152,8 +1152,9 @@ def _con_topes(job, motivo: str) -> str:
     escribe al cerrar. Un corte por tope de URLs, por tiempo o un
     estancamiento mandan: cortan mas y ya son truncado."""
     try:
-        resumen = getattr(job, "topes_carpeta", None)
-        if motivo == "finished" and isinstance(resumen, dict) and resumen.get("sin_rastrear"):
+        from shared.topes_carpeta import corto
+
+        if motivo == "finished" and corto(getattr(job, "topes_carpeta", None)):
             return "tope_por_carpeta"
     except Exception:  # noqa: BLE001 -- sin el dato, el motivo de siempre
         pass

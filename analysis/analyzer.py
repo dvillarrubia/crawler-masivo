@@ -386,7 +386,6 @@ class SEOAnalyzer:
         self._job_tls = getattr(job, "tls", None) if job else None
         # Lo que dejaron sin rastrear los topes por carpeta (decision 172).
         self._topes_carpeta = getattr(job, "topes_carpeta", None) if job else None
-        self._cache_ids_topados: set[int] | None = None
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
         )
@@ -4509,10 +4508,11 @@ class SEOAnalyzer:
         ).all()
         de_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
         # El camino desde la home puede pasar por lo que un tope dejo sin
-        # rastrear (decision 172): ahi no se afirma que no lo haya.
-        topadas = self._ids_en_parte_topada()
+        # rastrear (decision 172): no se afirma que no lo haya.
+        if self._topes_cortaron():
+            sin_camino = []
         for url_id, entrantes, en_sitemap in sin_camino:
-            if url_id in de_paginacion or url_id in topadas:
+            if url_id in de_paginacion:
                 continue
             self._add_issue(
                 url_id, "not_reachable_from_home", "warning",
@@ -4943,34 +4943,19 @@ class SEOAnalyzer:
 
     # -- Link Analysis ------------------------------------------------------
 
-    def _ids_en_parte_topada(self) -> set[int]:
-        """URLs del censo que caen en un cupo de `topes_por_carpeta` que se
-        quedo corto (decision 172).
+    def _topes_cortaron(self) -> bool:
+        """True si algun tope de `topes_por_carpeta` dejo URLs sin pedir
+        (decision 172).
 
-        Ahi el censo esta truncado: las paginas que las enlazan pueden ser
-        justo las que el tope dejo sin pedir. Que no tengan entrantes, o que no
-        se llegue a ellas desde la home, no se puede afirmar (decisiones 67 y
-        70), igual que una ausencia en un censo cortado por `max_urls`. Vacio
-        si el job no tenia topes o ninguno corto.
+        Entonces el censo esta truncado y NO solo en el grupo cortado: las
+        paginas que el tope no pidio tambien enlazan a otras carpetas (un post
+        de /blog/ sin pedir puede ser el unico que enlaza a /producto/x). Que
+        una URL no tenga entrantes, o que no se llegue a ella desde la home, no
+        se puede afirmar en ninguna parte del censo (decisiones 67 y 70).
         """
-        if self._cache_ids_topados is not None:
-            return self._cache_ids_topados
-        from shared.topes_carpeta import PartesCortadas
+        from shared.topes_carpeta import corto
 
-        ids: set[int] = set()
-        self._cache_ids_topados = ids
-        partes = PartesCortadas(self._topes_carpeta, self._job_config)
-        if not partes:
-            return ids
-        for url_id, url in self.session.execute(
-            select(Url.id, Url.url).where(Url.job_id == self.job_id,
-                                          Url.is_internal.is_(True))
-        ).yield_per(10_000):
-            if partes.contiene(url):
-                ids.add(url_id)
-        logger.info("Topes por carpeta: %d URLs del censo en partes truncadas; "
-                    "ahi no se afirman huerfanas ni paginas sin camino", len(ids))
-        return ids
+        return corto(self._topes_carpeta)
 
     def analyze_links(self) -> None:
         """Link analysis -- flag orphan pages and pages with excessive outlinks."""
@@ -5011,12 +4996,16 @@ class SEOAnalyzer:
         sin_enlazar = self._avisar_canonical_sin_enlazar()
         # La que solo cuelga de paginas 2+ en noindex o canonicalizadas a la 1
         # tiene su aviso, que dice de donde cuelga (decision 122).
-        desde_paginacion = avisos_de_paginacion.avisar_solo_desde_paginacion(
-            self, excluir=sin_enlazar)
-        topadas = self._ids_en_parte_topada()  # decision 172
+        # Con un tope que corto, «solo la enlaza la paginacion» tampoco se
+        # afirma: la pueden enlazar paginas que no se pidieron (decision 172).
+        if self._topes_cortaron():
+            desde_paginacion = avisos_de_paginacion.sustituidas(self)
+            rows = []
+        else:
+            desde_paginacion = avisos_de_paginacion.avisar_solo_desde_paginacion(
+                self, excluir=sin_enlazar)
         for (url_id,) in rows:
-            if url_id not in sin_enlazar and url_id not in desde_paginacion \
-                    and url_id not in topadas:
+            if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "orphan_page", "warning")
 
         self._avisar_solo_por_redireccion()
@@ -5209,10 +5198,10 @@ class SEOAnalyzer:
         aviso que sustituye en esas paginas.
         """
         ids = self._ids_canonical_sin_enlazar()
-        topadas = self._ids_en_parte_topada()  # decision 172
+        if self._topes_cortaron():  # decision 172
+            return ids
         for uid, detalle in ids.items():
-            if uid not in topadas:
-                self._add_issue(uid, "canonical_sin_enlazar", "warning", dict(detalle))
+            self._add_issue(uid, "canonical_sin_enlazar", "warning", dict(detalle))
         return ids
 
     def _avisar_solo_por_redireccion(self) -> None:
@@ -5255,10 +5244,9 @@ class SEOAnalyzer:
             .group_by(Url.id, Url.in_sitemap)
         ).all()
 
-        topadas = self._ids_en_parte_topada()  # decision 172
+        if self._topes_cortaron():  # decision 172
+            filas = []
         for url_id, en_sitemap, saltos, ejemplo in filas:
-            if url_id in topadas:
-                continue
             self._add_issue(
                 url_id,
                 "solo_enlazada_por_redireccion",
@@ -5322,10 +5310,10 @@ class SEOAnalyzer:
         ).all()
         sin_enlazar = self._ids_canonical_sin_enlazar()
         desde_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
-        topadas = self._ids_en_parte_topada()  # decision 172
+        if self._topes_cortaron():  # decision 172
+            rows = []
         for (url_id,) in rows:
-            if url_id not in sin_enlazar and url_id not in desde_paginacion \
-                    and url_id not in topadas:
+            if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "sitemap_orphan", "warning")
 
         self._sitemap_no_indexable()

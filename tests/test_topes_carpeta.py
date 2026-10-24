@@ -22,9 +22,10 @@ import pytest
 
 from shared.topes_carpeta import (
     MOTIVO,
-    PartesCortadas,
+    ClavesCompactas,
     Presupuesto,
     compilar,
+    corto,
     describir,
     grupos_de,
 )
@@ -70,6 +71,16 @@ def test_una_regla_mal_escrita_se_rechaza_con_su_motivo():
     assert [r.clave for r in compilar({"/blog/": None, "*": 3})] == ["*"]
 
 
+def test_reglas_que_se_aceptaban_y_no_hacian_nada():
+    # Un host con puerto no casaba nunca (la URL se compara por `hostname`).
+    with pytest.raises(ValueError, match="sin puerto"):
+        compilar({"blogs.x.com:8080/*": 5})
+    # `"/*/"` sin host es `"*"`: con las dos, una se ignoraba en silencio.
+    with pytest.raises(ValueError, match="misma regla"):
+        compilar({"*": 300, "/*/": 2})
+    assert [r.clave for r in compilar({"/*/": 2})] == ["*"]
+
+
 def test_jobconfig_valida_los_topes_y_los_hereda_por_regla():
     pytest.importorskip("pydantic")
     from api.schemas import JobConfig
@@ -83,6 +94,41 @@ def test_jobconfig_valida_los_topes_y_los_hereda_por_regla():
     final = fusionar_config(cliente, perfil, job)
     assert final["topes_por_carpeta"] == {"/blog/": 50}
     assert JobConfig(**final).topes_por_carpeta == {"/blog/": 50}
+
+
+def test_la_herencia_reconoce_la_misma_regla_con_otra_grafia():
+    pytest.importorskip("pydantic")
+    from api.schemas import JobConfig
+    from shared.clientes import fusionar_config
+
+    cliente = {"topes_por_carpeta": {"blogs.x.com": 2000, "*": 300}}
+    # El perfil la sobrescribe aunque la escriba de otra forma.
+    final = fusionar_config(cliente, {"topes_por_carpeta": {"blogs.x.com/*": 500}})
+    assert final["topes_por_carpeta"] == {"*": 300, "blogs.x.com/*": 500}
+    assert JobConfig(**final).topes_por_carpeta["blogs.x.com/*"] == 500
+    # Y un `null` con otra grafia la quita de verdad.
+    final = fusionar_config(cliente, {"topes_por_carpeta": {"https://www.blogs.x.com/": None}})
+    assert final["topes_por_carpeta"] == {"*": 300}
+    # Dos grafias en la MISMA capa siguen siendo un error.
+    final = fusionar_config({"topes_por_carpeta": {"blogs.x.com": 1, "blogs.x.com/*": 2}})
+    with pytest.raises(Exception, match="misma regla"):
+        JobConfig(**final)
+
+
+def test_claves_compactas_es_un_conjunto_exacto():
+    import random
+
+    c = ClavesCompactas()
+    azar = random.Random(7)
+    claves = [azar.getrandbits(64) for _ in range(20_000)] + [0, 1, 2**64 - 1]
+    for k in claves:
+        c.add(k)
+        c.add(k)
+    assert len(c) == len(set(claves))
+    assert all(k in c for k in claves)
+    assert sum(azar.getrandbits(64) in c for _ in range(20_000)) == 0
+    # Mucho menos que un `set` de ints (unos 70 bytes por clave).
+    assert len(c._tabla) * 8 / len(c) < 30
 
 
 def test_el_presupuesto_cuenta_una_vez_cada_url_dejada():
@@ -101,24 +147,22 @@ def test_el_presupuesto_cuenta_una_vez_cada_url_dejada():
         "a.com/blog/": 2, "a.com/*": 1}
 
 
-def test_partes_cortadas_marca_solo_los_grupos_que_se_quedaron_cortos():
+def test_corto_y_describir():
     config = {"topes_por_carpeta": {"*": 2}}
     p = Presupuesto(compilar(config["topes_por_carpeta"]))
     for i in range(3):
         p.admitir(f"https://a.com/lleno/{i}", i)
     p.admitir("https://a.com/holgado/1", 50)
-    partes = PartesCortadas(p.resumen(), config)
-    assert partes.contiene("https://a.com/lleno/0")
-    assert not partes.contiene("https://a.com/holgado/1")
-    assert not partes.contiene("https://a.com/contacto")
+    assert corto(p.resumen())
     assert "1 parte" in describir(p.resumen())
     # Sin cortes no hay nada que callar.
-    assert not PartesCortadas({"sin_rastrear": 0, "cortados": []}, config)
-    # Sin las reglas no se sabe que cae donde: todo cuenta como cortado.
-    assert PartesCortadas(p.resumen(), {}).contiene("https://a.com/holgado/1")
+    assert not corto({"sin_rastrear": 0, "cortados": []}) and not corto(None)
+    assert describir({"sin_rastrear": 0}) is None
+    # Un resumen ilegible: no se sabe, y no se afirma.
+    assert corto({"sin_rastrear": "?"}) and corto(["raro"])
 
 
-def test_la_lista_recortada_marca_la_regla_entera(monkeypatch):
+def test_la_lista_recortada_lo_dice_en_su_regla(monkeypatch):
     import shared.topes_carpeta as tc
 
     monkeypatch.setattr(tc, "MAX_GRUPOS_GUARDADOS", 1)
@@ -128,8 +172,7 @@ def test_la_lista_recortada_marca_la_regla_entera(monkeypatch):
         p.admitir(f"https://x.com/{carpeta}/{i}", i)
     r = p.resumen()
     assert len(r["cortados"]) == 1 and r["reglas"][0]["lista_completa"] is False
-    # `c` no se corto, pero la regla entera cuenta: no se sabe cual si.
-    assert PartesCortadas(r, config).contiene("https://x.com/c/4")
+    assert r["reglas"][0]["grupos_cortados"] == 2
 
 
 def test_tope_por_carpeta_es_truncado_para_la_comparacion():

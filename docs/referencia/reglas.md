@@ -24,7 +24,8 @@
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su
   regla vive en `shared/topes_carpeta.py`; con un grupo cortado el censo es
-  `tope_por_carpeta` (truncado) y ahí no se afirman huérfanas ni ausencias. 172.
+  `tope_por_carpeta` (truncado) y en TODO el censo (no solo en el grupo: lo no
+  pedido también enlazaba fuera) no se afirman huérfanas ni páginas sin camino. 172.
 - **Una URL que escribe una persona la descarga el worker, nunca la API**, por
   `shared/prueba_en_vivo.py`: redirecciones a mano, todas las IP globales y la
   IP fijada con `CURLOPT_RESOLVE` en cada salto. 166.

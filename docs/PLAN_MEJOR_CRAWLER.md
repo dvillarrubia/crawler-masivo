@@ -120,7 +120,7 @@ Es lo que más usa una agencia en consultoría y lo que convierte el crawler en 
 - **Nueva:** «Anclas: agregado por destino y lista determinista de anclas genéricas por idioma» (separar de #13). Los n-gramas con sugerencias de enlazado, después. **Hecho (decisión 147)**: `ancla_generica` por destino; Lopesan 126 (el widget «see more» del blog), Saunier 21.
 - **Nueva:** «Datos estructurados: formato de valores (ISO 8601, URL absoluta, moneda, availability)». **Hecho (decisión 146)**, salvo la URL absoluta (Google resuelve las relativas): fechas, precio, moneda, valoración, disponibilidad y recuentos; en penguin, 55 reseñas con la fecha en dd/mm/aaaa.
 - **Nueva:** «Accesibilidad con axe en modo muestra». Se vende a la UOC y al sector público (EAA); solo con render.
-- **Nueva:** «Tope de URLs por subdominio o carpeta y proxy por cliente» (multisites como blogs.uoc.edu; el proxy en variable de entorno). **Tope hecho (decisión 172)**: `topes_por_carpeta` heredable, aplicado al encolar, recuento en `jobs.topes_carpeta`, `finish_reason=tope_por_carpeta` (truncado) y sin huérfanas en las carpetas cortadas; en blogs.uoc.edu con `{"*": 3}`, 1.248 URLs descubiertas sin pedir en 15 blogs. Quedan el proxy y la comparación por grupo.
+- **Nueva:** «Tope de URLs por subdominio o carpeta y proxy por cliente» (multisites como blogs.uoc.edu; el proxy en variable de entorno). **Tope hecho (decisión 172)**: `topes_por_carpeta` heredable, aplicado al encolar, recuento en `jobs.topes_carpeta`, `finish_reason=tope_por_carpeta` (truncado) y sin huérfanas ni páginas sin camino en todo el censo cuando algún tope corta; en blogs.uoc.edu con `{"*": 3}`, 1.248 URLs descubiertas sin pedir en 15 blogs. Quedan el proxy y la comparación por grupo.
 
 ---
 

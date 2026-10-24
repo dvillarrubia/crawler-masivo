@@ -1508,15 +1508,17 @@
         </template>
 
         <!-- Topes por carpeta (decision 172): partes del sitio con su cupo
-             agotado. Ahi el censo esta truncado y no se afirman ausencias. -->
+             agotado. El censo esta truncado y no se afirman ausencias. -->
         <template x-if="job.topes_carpeta && job.topes_carpeta.sin_rastrear > 0">
           <div class="card mb-2" style="border-left:3px solid var(--warning,#d97706)" data-testid="aviso-topes-carpeta">
             <div class="text-sm">
               <strong>Partes del sitio sin rastrear entero.</strong>
               Los topes por carpeta dejaron sin pedir al menos
               <span x-text="fmt.num(job.topes_carpeta.sin_rastrear)"></span> URLs
-              descubiertas. En esas partes no se afirma que falte nada (huérfanas,
-              enlaces a páginas fuera del censo, comparación con otro censo).
+              descubiertas. El censo no está entero: como esas páginas sin pedir
+              también enlazan al resto del sitio, en todo el censo no se afirman
+              páginas huérfanas ni sin camino desde la home, y tampoco la
+              comparación con otro censo.
               <ul style="margin:.4rem 0 0 1rem">
                 <template x-for="c in (job.topes_carpeta.cortados || []).slice(0, 8)" :key="c.grupo">
                   <li><code x-text="c.grupo"></code>: tope <span x-text="fmt.num(c.tope)"></span>,
@@ -5912,7 +5914,7 @@
           </div>
           <!-- Topes por subdominio o carpeta (decision 172): aparte de max_urls -->
           <div class="form-group">
-            <label title="Un cupo de URLs por parte del sitio, aparte del máximo de URLs. «*» = cada carpeta de primer nivel; «/blog/» = ese prefijo en cada host; «blogs.uoc.edu/*» = el host entero; «blogs.uoc.edu/*/» = cada carpeta de ese host. Lo que no cabe no se rastrea, y el informe no afirma ausencias ahí.">Topes por carpeta o subdominio (uno por línea: regla = tope)</label>
+            <label title="Un cupo de URLs por parte del sitio, aparte del máximo de URLs. «*» = cada carpeta de primer nivel; «/blog/» = ese prefijo en cada host; «blogs.uoc.edu/*» = el host entero; «blogs.uoc.edu/*/» = cada carpeta de ese host. Lo que no cabe no se rastrea; si alguno se queda corto, el censo cuenta como truncado y no se afirman huérfanas.">Topes por carpeta o subdominio (uno por línea: regla = tope)</label>
             <textarea x-model="createForm.topes_por_carpeta" rows="2" data-testid="topes-carpeta"
                       placeholder="Ej: blogs.uoc.edu/* = 2000&#10;/blog/ = 500&#10;* = 300"></textarea>
           </div>

@@ -1,10 +1,11 @@
-"""El analisis no afirma ausencias en una carpeta topada (decision 172).
+"""El analisis no afirma ausencias en un censo topado (decision 172).
 
-Con un tope por carpeta que se quedo corto, las paginas que enlazaban a una
-URL de esa carpeta pueden ser justo las que no se pidieron: que no tenga
-entrantes (`orphan_page`, `sitemap_orphan`) o que no se llegue a ella desde la
-home no se puede afirmar (decisiones 67 y 70). Fuera de esas carpetas el
-analisis dice lo de siempre.
+Con un tope por carpeta que se quedo corto, las paginas que no se pidieron
+pueden ser justo las que enlazaban a una URL, de esa carpeta o de cualquier
+otra (un post de /blog/ sin pedir puede ser el unico que enlaza a
+/producto/x): que no tenga entrantes (`orphan_page`, `sitemap_orphan`) o que no
+se llegue a ella desde la home no se puede afirmar en NINGUNA parte del censo
+(decisiones 67 y 70). Sin corte, el analisis dice lo de siempre.
 
 Estos tests EJECUTAN el analizador contra SQLite (decision 74).
 """
@@ -73,33 +74,56 @@ def _ids(s, j, tipo):
         select(Issue.url_id).where(Issue.job_id == j.id, Issue.issue_type == tipo))}
 
 
-def test_la_huerfana_de_una_carpeta_topada_no_se_afirma():
+def test_ninguna_huerfana_se_afirma_en_un_censo_topado():
     s, j = _montar(_resumen_cortado())
-    en_blog = _url(s, j, "/blog/0")
-    en_docs = _url(s, j, "/docs/0")
-    suelta = _url(s, j, "/contacto")
+    _url(s, j, "/blog/0")
+    # Fuera de la carpeta cortada tampoco: lo que no se pidio de /blog/ puede
+    # ser lo que enlazaba aqui.
+    _url(s, j, "/docs/0")
+    _url(s, j, "/contacto")
     s.commit()
     SEOAnalyzer(s, j.id).analyze_links()
     s.commit()
-    huerfanas = _ids(s, j, "orphan_page")
-    assert en_blog.id not in huerfanas
-    # Fuera de la carpeta cortada se afirma como siempre.
-    assert {en_docs.id, suelta.id} <= huerfanas
+    assert _ids(s, j, "orphan_page") == set()
 
 
-def test_sitemap_orphan_tampoco_en_la_carpeta_topada():
-    s, j = _montar(_resumen_cortado())
+def test_sitemap_orphan_tampoco_fuera_de_la_carpeta_topada():
+    """El caso de la revision: /blog/2 no se pidio y era la que enlazaba a
+    /producto/x, que esta en el sitemap sin entrantes."""
+    p = Presupuesto(compilar({"/blog/": 1}))
+    p.admitir("https://x.com/blog/1", 1)
+    assert not p.admitir("https://x.com/blog/2", 2)
+    s, j = _montar(p.resumen())
+    j.config = {"topes_por_carpeta": {"/blog/": 1}}
     en_blog = _url(s, j, "/blog/1", in_sitemap=True)
-    en_docs = _url(s, j, "/docs/0", in_sitemap=True)
+    producto = _url(s, j, "/producto/x", in_sitemap=True)
     s.commit()
-    SEOAnalyzer(s, j.id).analyze_sitemap()
+    a = SEOAnalyzer(s, j.id)
+    a.analyze_links()
+    a.analyze_sitemap()
     s.commit()
-    assert _ids(s, j, "sitemap_orphan") == {en_docs.id}
-    assert en_blog.id not in _ids(s, j, "sitemap_orphan")
+    assert not ({en_blog.id, producto.id} & (_ids(s, j, "sitemap_orphan")
+                                             | _ids(s, j, "orphan_page")))
 
 
 def test_sin_corte_la_carpeta_se_analiza_entera():
     s, j = _montar(None)
+    en_blog = _url(s, j, "/blog/0")
+    en_docs = _url(s, j, "/docs/0", in_sitemap=True)
+    s.commit()
+    a = SEOAnalyzer(s, j.id)
+    a.analyze_links()
+    a.analyze_sitemap()
+    s.commit()
+    assert _ids(s, j, "orphan_page") == {en_blog.id}
+    assert _ids(s, j, "sitemap_orphan") == {en_docs.id}
+
+
+def test_con_topes_que_no_cortan_se_afirma_como_siempre():
+    p = Presupuesto(compilar(CONFIG["topes_por_carpeta"]))
+    p.admitir("https://x.com/blog/0", 1)
+    s, j = _montar(p.resumen())
+    j.finish_reason = "finished"
     en_blog = _url(s, j, "/blog/0")
     s.commit()
     SEOAnalyzer(s, j.id).analyze_links()

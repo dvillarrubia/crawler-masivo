@@ -124,10 +124,30 @@ def fusionar_config(*capas: dict | None) -> dict:
 # el perfil ha reescrito para otra plantilla, sin que nadie lo viera.
 DICTS_DE_REGLAS = ("custom_extraction", "custom_search")
 
+# Dicts cuya clave es una regla que se puede escribir de varias formas
+# (`blogs.uoc.edu` y `blogs.uoc.edu/*` son el mismo tope, decision 172): se
+# fusionan por la clave NORMALIZADA, para que el perfil sobrescriba o quite
+# (`null`) la regla del cliente aunque la escriba con otra grafia. Gana la
+# grafia de la capa mas concreta.
+def _normalizador(ruta: str):
+    if ruta.rstrip(".") == "topes_por_carpeta":
+        from shared.topes_carpeta import clave_normal
+
+        return clave_normal
+    return None
+
 
 def _fusionar_en(destino: dict, capa: dict, ruta: str = "") -> None:
+    normal = _normalizador(ruta)
+    # Solo las claves de capas ANTERIORES: dos grafias de la misma regla en
+    # una misma capa siguen siendo un error, y lo dice `compilar` al validar.
+    previas = {normal(k): k for k in destino} if normal is not None else {}
     for clave, valor in capa.items():
         aqui = f"{ruta}{clave}"
+        if normal is not None:
+            vieja = previas.pop(normal(clave), None)
+            if vieja is not None and vieja != clave:
+                destino.pop(vieja, None)
         if valor is None:
             destino.pop(clave, None)
         elif ruta.rstrip(".") in DICTS_DE_REGLAS:

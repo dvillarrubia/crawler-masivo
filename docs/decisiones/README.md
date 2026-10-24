@@ -195,7 +195,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 167 | Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos fuentes que discrepan son un aviso por host | [`indexabilidad`](indexabilidad.md#d167) |
 | 168 | La interfaz del adaptador WordPress, y plugins y tema por la ruta de sus ficheros (el `?ver=` solo con forma de versión) | [`incidencias`](incidencias.md#d168) |
 | 166 | Las reglas a medida se editan en el modal y se prueban contra una URL en vivo que descarga el worker, con la IP comprobada y fijada en cada salto | [`extraccion-a-medida`](extraccion-a-medida.md#d166) |
-| 172 | Topes de URLs por subdominio o carpeta: un cupo aparte de `max_urls`, lo que no cabe no se pide, y ahí no se afirman ausencias | [`render-y-descarga`](render-y-descarga.md#d172) |
+| 172 | Topes de URLs por subdominio o carpeta: un cupo aparte de `max_urls`, lo que no cabe no se pide, y con un corte no se afirman huérfanas en todo el censo | [`render-y-descarga`](render-y-descarga.md#d172) |
 | 169 | Las preguntas se redactan con el criterio de la revisión humana: «legal» incluye lo normativo y el soft 404 se parte en dos (página de utilidad aparte) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d169) |
 | 170 | `data-nosnippet` se mide al rastrear, y solo se avisa cuando esconde el H1 o la mayor parte del contenido de una indexable | [`indexabilidad`](indexabilidad.md#d170) |
 | 171 | robots.txt de prueba: veredicto y línea que decide de un robots.txt pegado, con la lógica del crawler y sin descargar nada | [`indexabilidad`](indexabilidad.md#d171) |
