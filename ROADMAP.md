@@ -376,13 +376,15 @@ y la línea que decide con la misma lógica que el crawler, antes de subirlo.
 
 En el análisis enriquecido hay dos módulos nuevos. **Tipo de página** dice qué
 es cada plantilla del sitio (portada, listado, ficha de producto o servicio,
-landing comercial, artículo, corporativa, contacto, ayuda, legal, utilidad u
-otro) preguntando por unas pocas URLs de cada una, no por todas: en Lopesan,
-262 de 3.216 páginas y 1,5 céntimos; en Penguin, 405 de 78.457. En la pestaña
+landing comercial, artículo, perfil de una persona, corporativa, contacto,
+ayuda, legal, utilidad u otro) preguntando por unas pocas URLs de cada una, no
+por todas: en Lopesan, 262 de 3.216 páginas y unos 2 céntimos; en Penguin, 405
+de 78.457. En la pestaña
 «Enriquecido», «Ver la respuesta por plantilla» enseña qué responden sus
 muestras, si coinciden y a cuántas páginas se aplicaría. **Categoría del
 cliente** hace lo mismo con las categorías de negocio que se pongan en
-`taxonomia` de la configuración del cliente. Las dos están sin evaluar: las
+`taxonomia` de la configuración del cliente (vale también para los censos ya
+rastreados, y cada categoría puede llevar su descripción). Las dos están sin evaluar: las
 respuestas son orientativas y todavía no se aplican a ninguna página ni a los
 umbrales del análisis. [Decisión 178](docs/decisiones/llm-y-enriquecido.md#d178).
 

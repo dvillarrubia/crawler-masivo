@@ -204,9 +204,8 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 171 | robots.txt de prueba: veredicto y línea que decide de un robots.txt pegado, con la lógica del crawler y sin descargar nada | [`indexabilidad`](indexabilidad.md#d171) |
 | 174 | Accesibilidad con axe-core por muestra de plantilla: vendorizado, apagado de serie, una fila por regla y plantilla, nunca `error`, y lo que axe no decide no se afirma | [`render-y-descarga`](render-y-descarga.md#d174) |
 | 173 | Perfil de dispositivo entero y por nombre (preset Chrome Android), la comparación automática no cruza perfiles y capturas de pantalla por muestra de plantilla en el volumen de archivo | [`render-y-descarga`](render-y-descarga.md#d173) |
-| 175 | La canibalización se juzga por grupo (búsqueda + URLs), con dos preguntas en una llamada y la recomendación leída solo si son sustitutas | [`llm-y-enriquecido`](llm-y-enriquecido.md#d175) |
 | 175 | La canibalización se juzga por pares de páginas del mismo idioma (búsqueda + dos URLs), con dos preguntas en llamadas separadas y la recomendación leída solo si son sustitutas | [`llm-y-enriquecido`](llm-y-enriquecido.md#d175) |
-| 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de once opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
+| 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de doce opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
 
 ## Anadir una decision
 

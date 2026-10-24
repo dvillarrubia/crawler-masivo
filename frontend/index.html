@@ -6554,6 +6554,9 @@
               <strong x-text="fmt.usd(enriqEstimacion.global.gastado_mes_usd) + ' de ' + (enriqEstimacion.global.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.global.tope_mensual_usd))"></strong>
             </div>
           </template>
+          <template x-for="a in ((enriqEstimacion && !enriqEstimando && enriqEstimacion.avisos) || [])" :key="a">
+            <div class="form-hint" style="margin-top:.4rem;color:var(--orange)" x-text="a"></div>
+          </template>
           <div class="form-hint" style="margin-top:.4rem">
             Estimación por caracteres; el coste real sale de lo que cobra OpenRouter y la ejecución se para en seco al llegar al presupuesto.
           </div>

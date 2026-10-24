@@ -118,29 +118,65 @@ def muestra_por_plantilla(session, job_id, url_ids: list[int]) -> list[int]:
     return [u for u in url_ids if u in elegidas]
 
 
+def taxonomia_de(session, job) -> list:
+    """La taxonomia con la que se pregunta: la del cliente HOY
+    (`clients.config_defecto.taxonomia`, que se edita en su ficha) y, si el
+    cliente no tiene, la que viajo en la config del job.
+
+    La del cliente manda porque la taxonomia es del negocio, no del rastreo:
+    `jobs.config` se congela al lanzar y no se puede cambiar despues, y leer
+    solo de ahi obligaba a volver a rastrear el sitio entero (78.457 URLs en
+    Penguin) para preguntar por un censo ya hecho."""
+    from shared.models import Client
+
+    if job is None:
+        return []
+    cliente = session.get(Client, job.cliente_id) if getattr(job, "cliente_id", None) else None
+    propia = ((cliente.config_defecto or {}).get("taxonomia") if cliente is not None else None) or []
+    return list(propia) or list((job.config or {}).get("taxonomia") or [])
+
+
+def _job(session, job_id):
+    from shared.models import Job
+
+    return session.get(Job, _uuid(job_id))
+
+
 def muestra_si_hay_taxonomia(session, job_id, url_ids: list[int]) -> list[int]:
-    """Lo mismo, pero solo si el job trae una taxonomia de dos categorias o
-    mas (`config.taxonomia`): sin ella no hay nada que preguntar ni que pagar."""
+    """Lo mismo, pero solo si hay una taxonomia de dos categorias o mas
+    (`taxonomia_de`): sin ella no hay nada que preguntar ni que pagar."""
     from shared.preguntas.tipo_pagina import opciones_de_taxonomia
 
-    if opciones_de_taxonomia(_config(session, job_id).get("taxonomia")) is None:
+    if opciones_de_taxonomia(taxonomia_de(session, _job(session, job_id))) is None:
         return []
     return muestra_por_plantilla(session, job_id, url_ids)
 
 
+def sin_taxonomia(session, job) -> str | None:
+    """Por que `categoria_cliente` no pregunta nada, para la estimacion y la
+    ejecucion: sin esto salian 0 URLs y 0 llamadas sin decir por que."""
+    from shared.preguntas.tipo_pagina import opciones_de_taxonomia
+
+    if opciones_de_taxonomia(taxonomia_de(session, job)) is not None:
+        return None
+    return ("categoria_cliente no pregunta nada: el cliente no tiene taxonomia de dos categorias o mas. "
+            "Ponla en la configuracion por defecto del cliente (`taxonomia`) y vale tambien para los "
+            "censos ya rastreados.")
+
+
 def preguntas_de_taxonomia(session, job) -> list:
-    """`categoria_cliente` con las categorias del job como opciones."""
+    """`categoria_cliente` con las categorias del cliente como opciones."""
     from shared.preguntas.tipo_pagina import CATEGORIA_CLIENTE, opciones_de_taxonomia
 
-    opciones = opciones_de_taxonomia((job.config or {}).get("taxonomia"))
+    opciones = opciones_de_taxonomia(taxonomia_de(session, job))
     return [CATEGORIA_CLIENTE.con_opciones(opciones)] if opciones else [CATEGORIA_CLIENTE]
 
 
 def estados_tipo_pagina(session, url_ids: list[int]) -> list:
     """Titulo, h1 y el principio del contenido (como `pagina_legal`) y,
     ademas, lo que distingue un tipo de otro sin leer la pagina entera: la
-    ruta, las palabras propias, el `og:type`, si esta paginada y los tipos de
-    schema que no estan en todas las paginas. Minimo (decision 84)."""
+    ruta y, si los hay, las palabras propias, el `og:type`, si esta paginada y
+    los tipos de schema que no estan en todas las paginas. Minimo (decision 84)."""
     from shared.enriquecido import estados_titulo_h1_contenido
     from shared.models import HtmlMeta, StructuredData, Url
 
@@ -163,8 +199,14 @@ def estados_tipo_pagina(session, url_ids: list[int]) -> list:
     for e in base:
         ruta, palabras = url.get(e.url_id, ("/", None))
         og, paginada = meta.get(e.url_id, ("", False))
-        e.datos = {"ruta": ruta, "palabras": palabras, "og_type": og, "paginada": paginada,
-                   "schema": sorted(schema.get(e.url_id, ()))[:MAX_TIPOS_SCHEMA], **e.datos}
+        extra = {"palabras": palabras, "og_type": og, "paginada": paginada,
+                 "schema": sorted(schema.get(e.url_id, ()))[:MAX_TIPOS_SCHEMA]}
+        # Lo que el sitio no tiene no se manda: `content_word_count` es NULL en
+        # todo Salle y todo Penguin, Salle y Saunier no tienen schema y Salle
+        # no tiene `og:type`. Una clave vacia gasta tokens y la instruccion
+        # dice «when present». `paginada` solo cuando lo esta.
+        e.datos = {"ruta": ruta, **{k: v for k, v in extra.items() if v not in (None, "", [], False)},
+                   **e.datos}
     return base
 
 

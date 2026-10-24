@@ -208,8 +208,9 @@ const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v,
 // Opciones de la pregunta `tipo_pagina` (decision 178), en castellano.
 const TIPO_PAGINA_LABEL = {
   home: 'portada', listado: 'listado o categoría', ficha_producto: 'ficha de producto o servicio',
-  landing_comercial: 'landing comercial', articulo: 'artículo', corporativa: 'corporativa',
-  contacto_ubicacion: 'contacto o ubicación', ayuda: 'ayuda o documentación', legal: 'legal',
+  landing_comercial: 'landing comercial', articulo: 'artículo', perfil: 'perfil (autor, persona)',
+  corporativa: 'corporativa',
+  contacto_ubicacion: 'contacto o ubicación', ayuda: 'ayuda, documentación o herramienta', legal: 'legal',
   utilidad: 'utilidad', otro: 'otro', ninguna: 'ninguna',
 };
 
