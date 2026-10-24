@@ -760,9 +760,11 @@ def test_r5_una_serie_entera_en_noindex_deja_el_warning_en_la_pagina():
 def test_r9_los_tipos_de_plantilla_casan_por_grupo_en_la_comparacion():
     """`shared.comparacion` no puede importar `analysis/` (la imagen de la API
     no lo lleva): repite la lista, y esto comprueba que coinciden."""
+    from shared.accesibilidad import TIPOS as TIPOS_AXE
     from shared.comparacion import ANCLADOS_POR_GRUPO
 
-    assert ANCLADOS_POR_GRUPO == set(avisos_de_paginacion.TIPOS_DE_PLANTILLA)
+    # Mas los de axe (decision 174), que viven en `shared/`.
+    assert ANCLADOS_POR_GRUPO == set(avisos_de_paginacion.TIPOS_DE_PLANTILLA) | TIPOS_AXE
 
 
 def test_r9_un_map_host_tambien_casa_la_serie():

@@ -1425,6 +1425,71 @@ def get_robots_cuerpo(job_id: uuid.UUID, origen: str = Query(..., max_length=300
         raise HTTPException(404, "No hay robots.txt guardado de ese origen en este censo")
     return {"origen": o, "url": fila.url, "cuerpo": fila.cuerpo,
             "recortado": fila.recortado, "fecha": fila.fecha}
+@router.get("/accesibilidad")
+def get_accesibilidad(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Accesibilidad con axe-core por muestra de plantilla (decision 174).
+
+    `pedida`: si el job tenia `crawl_behavior.axe_muestra` > 0. `paginas`:
+    capturas por estado y motivo de las no evaluadas. `reglas`: las
+    violaciones por regla (WCAG 2.x A/AA), de mas a menos grave, con sus
+    plantillas (paginas afectadas sobre muestreadas); son las mismas que los
+    avisos `accesibilidad_*`. `incompletas`: lo que axe no pudo decidir, que
+    NO se afirma. `coste`: milisegundos de axe y de la descarga entera (render
+    y axe) por pagina evaluada. Sin capturas (apagado o rastreo anterior),
+    `reglas` va vacio y `paginas.evaluadas` a 0: nunca «sin problemas».
+    """
+    from shared.accesibilidad import PERFIL, agregar, filas_evaluadas, por_regla
+    from shared.models import CapturaAlternativa as C
+
+    job = _get_job_or_404(job_id, db)
+    cb = (job.config or {}).get("crawl_behavior") or {}
+    salida: dict[str, Any] = {
+        "pedida": int(cb.get("axe_muestra") or 0) > 0,
+        "muestra": int(cb.get("axe_muestra") or 0), "por_plantilla": cb.get("axe_por_plantilla"),
+        "axe": None, "paginas": {"evaluadas": 0, "no_evaluadas": 0, "motivos": {}},
+        "plantillas": 0, "reglas": [], "incompletas": [], "coste": None,
+    }
+    try:
+        with db.begin_nested():
+            capturas = (db.query(C.url_id, C.estado, C.detalle, C.medidas)
+                        .filter(C.job_id == job_id, C.perfil == PERFIL).all())
+            filas = filas_evaluadas(db, job_id)
+    except Exception:  # noqa: BLE001 -- sin tabla: un dato opcional del censo
+        return salida
+    validas = {f[0] for f in filas}
+    ms_axe, ms_total = [], []
+    for url_id, estado, detalle, medidas in capturas:
+        detalle = detalle if isinstance(detalle, dict) else {}
+        if url_id in validas:
+            salida["paginas"]["evaluadas"] += 1
+            if isinstance(detalle.get("ms_axe"), (int, float)):
+                ms_axe.append(detalle["ms_axe"])
+            if isinstance(detalle.get("ms_total"), (int, float)):
+                ms_total.append(detalle["ms_total"])
+            if isinstance(medidas, dict) and medidas.get("axe"):
+                salida["axe"] = medidas["axe"]
+            continue
+        # Evaluada, pero la pagina del censo ya no es una HTML 2xx valida: no
+        # cuenta, como en los avisos.
+        motivo = "pagina_del_censo_no_valida" if estado == "evaluada" else (detalle.get("motivo") or "?")
+        salida["paginas"]["no_evaluadas"] += 1
+        salida["paginas"]["motivos"][motivo] = salida["paginas"]["motivos"].get(motivo, 0) + 1
+    datos = agregar(filas)
+    salida["plantillas"] = len(datos["muestreadas"])
+    salida["reglas"] = por_regla(datos["violaciones"], datos["muestreadas"])
+    salida["incompletas"] = por_regla(datos["incompletas"], datos["muestreadas"])
+
+    def mediana(v: list) -> int | None:
+        v = sorted(v)
+        return round(v[len(v) // 2]) if v else None
+
+    if ms_axe or ms_total:
+        salida["coste"] = {
+            "ms_axe_mediana": mediana(ms_axe), "ms_axe_max": round(max(ms_axe)) if ms_axe else None,
+            "ms_pagina_mediana": mediana(ms_total),
+            "s_total": round(sum(ms_total) / 1000, 1) if ms_total else None,
+        }
+    return salida
 
 
 # ---------------------------------------------------------------------------
@@ -2160,6 +2225,8 @@ def get_diff(
         from shared.comparacion import _aplicar_rutas, _norm
         from shared.respuestas import NO_VALIDAS
 
+        from shared.accesibilidad import plantillas_evaluadas
+
         reglas_rutas = compilar_mapa_rutas(rutas)
         resultado["incidencias"] = comparar_incidencias(
             incidencias_de_censo(db, viejo_id),
@@ -2184,6 +2251,10 @@ def get_diff(
             # regla que lo emitia ha cambiado.
             analisis_a=antes.get("analisis_version"),
             analisis_b=ahora.get("analisis_version"),
+            # Un aviso de axe solo es «nuevo» o «resuelto» si el otro censo
+            # evaluo su plantilla (decision 174).
+            plantillas_axe_a=plantillas_evaluadas(db, viejo_id),
+            plantillas_axe_b=plantillas_evaluadas(db, nuevo_id),
         )
 
     # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban

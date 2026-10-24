@@ -203,6 +203,20 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Accesibilidad con axe, por muestra de plantilla (24 de octubre)
+
+Opcional en cada rastreo («Accesibilidad (axe): páginas» en el modal, apagado
+de serie): una página por plantilla se vuelve a abrir con el navegador y se le
+pasa axe-core, la herramienta de referencia, con las reglas WCAG 2.x A y AA.
+Sale un aviso por regla y plantilla («Accesibilidad: fallo WCAG crítico o
+grave» o «moderado o leve»), el ámbito **Accesibilidad** en el Explorador y
+una tarjeta en el resumen con las reglas más graves. No cambia la nota SEO. Lo
+que axe no puede decidir solo (un contraste sobre una imagen) se lista «a
+revisar a mano» y no se afirma, y la tarjeta recuerda que lo automático cubre
+un 30-40 % de WCAG. Probado en BOE, INE y UOC: en la UOC, atributos ARIA no
+permitidos en 5 de 6 plantillas; cuesta 1-2 s por página muestreada.
+[Decisión 174](docs/decisiones/render-y-descarga.md#d174).
+
 ### Alertas, resumen e informes en el Slack de cada cliente (19 de octubre)
 
 Cada cliente tiene su canal de Slack (ficha del cliente → Configuración →

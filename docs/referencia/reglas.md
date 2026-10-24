@@ -19,7 +19,9 @@
   para la salud; vive en `jobs.soft404`, `respuestas_sondeadas` o
   `adapter_entities`. Decisiones 105, 123, 124, 154 (la de la og:image,
   encendida de serie: acotada por `og_image_muestra` y por plantilla) y 161
-  (la REST API de WordPress: dos a la vez, en el slot del host).
+  (la REST API de WordPress: dos a la vez, en el slot del host). La de axe
+  (174) va en `capturas_alternativas` con `perfil='axe'`: quien lea esa tabla
+  filtra su perfil.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su
@@ -45,6 +47,11 @@
   los enlaces del censo dentro del mismo candado (95, 150).
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un
   sitio limpio. 28, 32.
+- **La accesibilidad nunca es `error`** (topa la nota SEO) y lo que axe deja en
+  `incomplete` no se afirma; sin paginas evaluadas no hay «sin fallos». Entre
+  censos, un aviso de axe casa por plantilla y regla, y solo es «nuevo» o
+  «resuelto» si el otro censo evaluo esa plantilla. Lo que devuelve axe lo
+  calcula la pagina auditada: se sanea (enlaces solo http(s), tope de reglas). 174.
 - **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no
   contiene» es `estado='sin_coincidencia'` y nunca incluye bloqueadas ni errores. 104.
 - **Un segmento es `urls.segmento`, materializado** (analisis o `POST /segmentos`); la

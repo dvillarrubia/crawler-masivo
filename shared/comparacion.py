@@ -53,6 +53,7 @@ import os
 import re
 import time
 
+from shared.accesibilidad import TIPOS as TIPOS_AXE
 from shared.dominios import dominio_registrable
 from shared.plantillas import firma_de_ruta
 from shared.perfiles import perfil_de_ua
@@ -1366,7 +1367,17 @@ ANCLADOS_POR_GRUPO = frozenset({
     "paginacion_sin_enlace",
     "paginacion_siguiente_rota",
     "paginacion_rel_incorrecto",
-})
+}) | TIPOS_AXE
+
+
+# Los avisos de axe (decision 174) son de una MUESTRA por plantilla: uno por
+# (regla, plantilla), anclado en la URL menor de las paginas muestreadas, y la
+# muestra cambia de un rastreo a otro con la concurrencia. Por eso casan por
+# grupo (arriba), y ademas «nueva» solo se afirma si el censo ANTERIOR evaluo
+# esa plantilla con axe, y «resuelta» si la evaluo el NUEVO: con axe apagado,
+# o sin muestra de esa plantilla, que un aviso falte no dice nada (67, 89).
+# Cuentan aparte, en `no_afirmables_por_muestra`.
+TIPOS_POR_MUESTRA = TIPOS_AXE
 
 
 # Avisos que salen del TRAFICO de la ventana y de un ranking con tope (decision
@@ -1396,11 +1407,26 @@ def incidencias_de_censo(db, job_id) -> list[dict[str, Any]]:
         .filter(Issue.job_id == job_id)
         .all()
     )
-    return [
+    salida = [
         {"issue_type": f.issue_type, "severity": f.severity,
          "group_key": f.group_key, "url": f.url}
         for f in filas
     ]
+    # Los de axe llevan su plantilla (de los detalles): la comparacion mira si
+    # el otro censo la evaluo. Pocas filas: una por regla y plantilla.
+    if any(i["issue_type"] in TIPOS_POR_MUESTRA for i in salida):
+        plantilla = {}
+        for f in (db.query(Issue.issue_type, Issue.group_key, Url.url, Issue.details)
+                  .join(Url, Url.id == Issue.url_id)
+                  .filter(Issue.job_id == job_id,
+                          Issue.issue_type.in_(sorted(TIPOS_POR_MUESTRA)))
+                  .all()):
+            if isinstance(f.details, dict):
+                plantilla[(f.issue_type, f.url, f.group_key)] = f.details.get("plantilla")
+        for i in salida:
+            if i["issue_type"] in TIPOS_POR_MUESTRA:
+                i["plantilla"] = plantilla.get((i["issue_type"], i["url"], i["group_key"]))
+    return salida
 
 
 def comparar_incidencias(
@@ -1414,6 +1440,8 @@ def comparar_incidencias(
     analisis_a: str | None = None,
     analisis_b: str | None = None,
     mapa_rutas=None,
+    plantillas_axe_a: set[str] | None = None,
+    plantillas_axe_b: set[str] | None = None,
 ) -> dict[str, Any]:
     """Qué se arregló, qué apareció y qué sigue, entre dos censos.
 
@@ -1446,6 +1474,11 @@ def comparar_incidencias(
     `mapa_rutas` reescribe las URLs de las incidencias del ANTERIOR, igual que
     en `comparar_censos`: tras una migracion, el titulo duplicado de
     `/es/hoteles/x.html` es el de `/es/hotel/x/`.
+
+    `plantillas_axe_a` y `plantillas_axe_b` (decision 174): las plantillas que
+    cada censo evaluo con axe (vacio con axe apagado; None si no se sabe). Un
+    aviso de axe solo es «nuevo» si el anterior evaluo su plantilla, y
+    «resuelto» si la evaluo el nuevo; si no, va a `no_afirmables_por_muestra`.
     """
     # Dos censos analizados con codigo distinto NO se comparan por incidencias.
     # Un aviso no basta: no impide que la cifra sea falsa ni que alguien la
@@ -1492,12 +1525,24 @@ def comparar_incidencias(
     a = {clave(i, reglas_rutas): i for i in incidencias_a if i["issue_type"] not in NO_COMPARABLES}
     b = {clave(i): i for i in incidencias_b if i["issue_type"] not in NO_COMPARABLES}
 
-    nuevas = [b[k] for k in b.keys() - a.keys()]
+    def evaluada(i, plantillas) -> bool:
+        return plantillas is not None and i.get("plantilla") in plantillas
+
+    nuevas, por_muestra = [], []
+    for k in b.keys() - a.keys():
+        if b[k]["issue_type"] in TIPOS_POR_MUESTRA and not evaluada(b[k], plantillas_axe_a):
+            por_muestra.append(b[k])     # el anterior no miro esa plantilla
+        else:
+            nuevas.append(b[k])
     siguen = [b[k] for k in a.keys() & b.keys()]
 
     idas, sin_pagina = [], []
     for k in a.keys() - b.keys():
-        if urls_del_nuevo is not None and url_de(a[k], reglas_rutas) not in urls_del_nuevo:
+        if a[k]["issue_type"] in TIPOS_POR_MUESTRA:
+            # De plantilla: si el nuevo evaluo la plantilla, aunque fuera en
+            # otra pagina, el aviso se fue; si no, no se sabe.
+            (idas if evaluada(a[k], plantillas_axe_b) else por_muestra).append(a[k])
+        elif urls_del_nuevo is not None and url_de(a[k], reglas_rutas) not in urls_del_nuevo:
             sin_pagina.append(a[k])      # su pagina no se volvio a visitar
         else:
             idas.append(a[k])
@@ -1535,6 +1580,8 @@ def comparar_incidencias(
         # tiene el problema), la novedad de la URL no (decision 67).
         resultado["nuevas"]["url_nueva_afirmable"] = puede_afirmar_resueltas
     resultado["sin_pagina_en_el_nuevo"] = len(sin_pagina)
+    resultado["no_afirmables_por_muestra"] = {
+        "total": len(por_muestra), "por_tipo": por_tipo(por_muestra)}
     if puede_afirmar_resueltas:
         resultado["resueltas"] = {
             "total": len(idas), "por_tipo": por_tipo(idas),
@@ -1939,6 +1986,8 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
             anterior_entero = not _truncado(
                 resumen_anterior.get("status"),
                 resumen_anterior.get("finish_reason"))
+            from shared.accesibilidad import plantillas_evaluadas
+
             incidencias = comparar_incidencias(
                 incidencias_de_censo(db, anterior.id),
                 incidencias_de_censo(db, job.id),
@@ -1953,6 +2002,10 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
                                    if p.get("response_class") not in NO_VALIDAS},
                 analisis_a=resumen_anterior.get("analisis_version"),
                 analisis_b=getattr(job, "analisis_version", None),
+                # Los avisos de axe solo se afirman donde los dos censos
+                # evaluaron la plantilla (decision 174).
+                plantillas_axe_a=plantillas_evaluadas(db, anterior.id),
+                plantillas_axe_b=plantillas_evaluadas(db, job.id),
             )
         except Exception:
             logger.exception(
