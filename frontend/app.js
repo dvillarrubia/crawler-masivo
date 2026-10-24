@@ -371,6 +371,13 @@ const fmt = {
     return pares.sort((a, b) => pos(a[0]) - pos(b[0]));
   },
   unidadEnriq: r => r.ambito === 'busqueda' ? 'búsquedas (página × búsqueda)' : 'URLs',
+  // Por que no se afirma el desajuste de una pagina (decision 176).
+  sinAfirmarEnriq: m => ({
+    pagina_de_marca: 'Página de marca: sus búsquedas (las de marca) no cuentan, no se puede comparar.',
+    manda_la_marca: 'La mayoría de sus clics son de marca: no se afirma desajuste.',
+    pagina_sin_intencion: 'Sin intención de página clara.',
+    sin_clics_que_cuenten: 'Ningún clic de búsquedas que cuenten.',
+  })[m] || '',
   campoDiff: c => ({
     status_code: 'Código de respuesta',
     indexability_status: 'Indexabilidad',

@@ -13,10 +13,11 @@ pregunta = un hallazgo):
   (el desajuste ponderado por clics, `shared/intencion.py`).
 
 Las opciones se redactan como «quien llegaria aqui» (la redaccion con la que
-jev-seo obtuvo 59 de 59 repeticiones iguales, comentario de #39), con un
-desempate escrito donde dos opciones se tocan (reservar un hotel es
-transaccional aunque el hotel este en un sitio; «hoteles en X» es comercial,
-no local) y con lo que NO es cada una. `unclear` es la salida obligatoria de
+jev-seo obtuvo 59 de 59 repeticiones iguales, comentario de #39), con lo que
+NO es cada una y, en la pagina y en la busqueda, con REGLAS EN ORDEN («la
+primera que encaje»): con definiciones sueltas, «day pass gran canaria» o una
+ficha de hotel sin el widget de reserva en el texto encajaban en dos opciones
+o en ninguna (revision de la decision 176). `unclear` es la salida obligatoria de
 #9: sin ella el modelo tiene que elegir aunque el estado no diga nada.
 
 Sin evaluar (#8): sin juego etiquetado no hay umbral, todo sale `incierto` y
@@ -38,40 +39,53 @@ INTENCION_PAGINA = Pregunta(
     tipo="choice",
     version=1,
     instrucciones=(
-        "Judging by this web page's address, title, main heading and the start of its main "
-        "content, which search need is the page built to satisfy? Think of the person who would "
-        "land here from a search engine and leave satisfied, and pick the page's MAIN purpose, "
-        "not everything it mentions. Classify the page itself, not the searches it might rank for."
+        "Judging by this web page's address ('ruta'), title, main heading, the start of its main "
+        "content and the schema.org types it declares ('tipos_schema', may be empty), which search "
+        "need is the page built to satisfy? Classify the page itself, not the searches it might "
+        "rank for, and pick its MAIN purpose. 'contenido' is only the first few hundred characters "
+        "of the main text: booking widgets, prices and buy buttons usually do NOT appear in it, so "
+        "their absence is not evidence. Types such as Hotel, HotelRoom, Product, Service, Event or "
+        "Offer mean the page presents something that can be booked or bought. Apply the first rule "
+        "that fits: (1) the site's home page ('/' or a language root such as '/en/') is "
+        "navigational; (2) a page about ONE specific product, service, hotel, room, treatment, "
+        "ticket or offer that the site sells or books is transactional, even if its text only "
+        "describes it; (3) a page that lists several products, services or hotels to choose from, "
+        "including the site's own range ('our hotels in <place>', 'hotels with day pass'), is "
+        "commercial; (4) a page whose main content is where a venue is or how to get there is "
+        "local; (5) any other page about the organisation itself (about us, corporate, contact, "
+        "careers, employee area, legal) is navigational; (6) guides, news, ideas and destination "
+        "information are informational."
     ),
     opciones={
         "informational": (
-            "Someone who wants to learn or find information: a guide, how-to, explanation, news, "
-            "ideas, things to do, a recipe. A blog post that mentions a product in passing is still "
-            "informational. NOT a page whose main purpose is selling or booking one specific "
-            "product or service."),
+            "Rule 6: someone who wants to learn or find information: a guide, how-to, explanation, "
+            "news, ideas, things to do, information about a destination, a blog post (also when it "
+            "mentions a product in passing). NOT a page that presents one specific thing to book or "
+            "buy, or lists several of them to choose from."),
         "commercial": (
-            "Someone comparing options before deciding: comparisons, 'best of' lists, reviews, a "
-            "listing or category page that helps choose between several products, services, "
-            "hotels or plans. NOT the page of one specific product or service with a way to buy "
-            "or book it (that is transactional)."),
+            "Rule 3: someone choosing between options: a listing or category page of several "
+            "products, services or hotels (also when they are all the site's own), comparisons, "
+            "'best of' lists, reviews. NOT the page of one specific product, service or hotel "
+            "(that is transactional), and NOT a list of places to visit or things to do "
+            "(informational)."),
         "transactional": (
-            "Someone ready to act on one specific product, service or offer: its page with price, "
-            "booking, purchase, quote request, sign-up or download. A hotel, room, ticket or "
-            "product page with a booking or buy option is transactional even if it also describes "
-            "the place. NOT a guide or a comparison of several options."),
+            "Rule 2: someone ready to act on one specific product, service, hotel, room, "
+            "treatment, ticket or offer: the page that presents it, whether or not the booking or "
+            "buy option shows in the text you get. NOT a page listing several of them, and NOT the "
+            "home page."),
         "navigational": (
-            "Someone who already wants this specific brand or organisation and is looking for it "
-            "or one of its sections: the home page, about us, corporate information, the brand's "
-            "contact details, a brand landing page. NOT the page of one specific product or "
-            "service that can be booked or bought, even if people find it by searching the brand."),
+            "Rules 1 and 5: someone who wants this brand or organisation itself: the home page, "
+            "about us, corporate information, contact, careers, an employee or customer area, legal "
+            "texts. NOT the page of one specific product, service or hotel, and NOT a page listing "
+            "several of them, even if people reach them by searching the brand."),
         "local": (
-            "Someone who wants to find or get to a physical place: the page's main content is "
-            "where a venue, shop or branch is, how to get there, opening hours, a map or a store "
-            "locator. NOT a hotel, shop or service page whose main purpose is booking or buying, "
-            "even if it names its location."),
+            "Rule 4: someone who wants to find or get to a physical place: the main content is the "
+            "address, directions, a map, opening hours or a store locator. NOT a hotel, venue or "
+            "service page that merely names its location."),
         "unclear": (
-            "The title, heading and content are too thin, generic or contradictory to tell. Do "
-            "not use it just because two options are close: pick the main purpose."),
+            "The address, title, heading, content and types are too thin, generic or contradictory "
+            "to apply any rule. Do not use it just because two options are close: apply the rules "
+            "in order."),
     },
     descripcion=("Intencion de la pagina (#39): informacional, comercial, transaccional, "
                  "navegacional, local o no esta claro. Sin evaluar (#8): todo incierto."),
@@ -82,10 +96,14 @@ ETAPA_EMBUDO = Pregunta(
     tipo="choice",
     version=1,
     instrucciones=(
-        "Judging by this web page's address, title, main heading and the start of its main "
-        "content, at which stage of a customer's journey is it most useful? Judge the stage of "
-        "the reader the page is written for, not the topic alone: a guide about hotels is for "
-        "someone who has not chosen yet, a hotel's booking page is for someone ready to book."
+        "Judging by this web page's address ('ruta'), title, main heading, the start of its main "
+        "content and the schema.org types it declares ('tipos_schema', may be empty), at which "
+        "stage of a customer's journey is it most useful? Judge the stage of the reader the page "
+        "is written for, not the topic alone: a guide about hotels is for someone who has not "
+        "chosen yet, a hotel's own page is for someone ready to book. 'contenido' is only the "
+        "first few hundred characters: booking widgets and prices usually do NOT appear in it, so "
+        "their absence is not evidence; types such as Hotel, HotelRoom, Product, Service, Event or "
+        "Offer mean the page presents something that can be booked or bought."
     ),
     opciones={
         "tofu": (
@@ -98,9 +116,10 @@ ETAPA_EMBUDO = Pregunta(
             "studies, a page presenting a brand's range. NOT the page where they book or buy one "
             "specific item."),
         "bofu": (
-            "Bottom of the funnel: a reader ready to decide on one specific product, service or "
-            "offer: its page with price, booking, purchase, quote request, pricing plans or a "
-            "special offer. NOT a general guide or a comparison."),
+            "Bottom of the funnel: a reader ready to decide on one specific product, service, "
+            "hotel, room or offer: the page that presents it (whether or not the booking or price "
+            "shows in the text you get), pricing plans, a quote request or a special offer. NOT a "
+            "general guide, a comparison or a listing of several options."),
         "post_purchase": (
             "After the purchase: existing customers or guests: manage a booking, online check-in, "
             "instructions or FAQs for guests, support, user manuals, a loyalty programme members' "
@@ -123,33 +142,47 @@ INTENCION_BUSQUEDA = Pregunta(
         "'busqueda' is a real search someone typed into a search engine before visiting the "
         "website in 'sitio'; 'marcas' are that website's own brand names (it may be empty). "
         "Judging only by the words of the search, what does the person want? Classify the "
-        "search, not the website. If the search names a specific brand, product or place AND "
-        "has an action or price word (book, buy, price, offer, tickets), it is transactional."
+        "search, not the website. The search can be in any language. Apply the FIRST rule that "
+        "fits: (1) it has an action or price word (book, booking, reserve, buy, purchase, order, "
+        "price, prices, cost, rates, cheap, offer, deal, discount, promo code, last minute, "
+        "availability, sign up, download, or the same in another language) -> transactional; "
+        "(2) it asks for the location of or access to a place (address, directions, how to get "
+        "to, map, parking, opening hours, phone, near me) -> local; (3) it names one of the "
+        "'marcas' or another specific company, hotel, venue, product or website, with or without "
+        "a product or section ('<brand>', '<brand> day pass', '<hotel name> spa', '<brand> "
+        "login') -> navigational; (4) it names a kind of product or service, with or without a "
+        "place, or compares ('hotels <island>', 'day pass <island> all inclusive', 'best spa "
+        "<town>', 'resort reviews') -> commercial; (5) it asks to learn something, or is only a "
+        "place name ('<island>', '<beach>', '<town>') -> informational. A product or service "
+        "name ('day pass', 'spa', 'all inclusive', 'tickets', 'room') is NOT an action word. If "
+        "you cannot tell whether a name is a specific business or a place, treat it as a place."
     ),
     opciones={
         "informational": (
-            "To learn or find information: how, what, why, ideas, things to do, weather, history, "
-            "news. NOT a search to compare options, or to book or buy something."),
+            "Rule 5: to learn something (how, what, why, ideas, things to do, weather, history, "
+            "meaning of a word) or a place name on its own ('<island>', '<beach>'). NOT a search "
+            "that names a kind of product or service ('hotels <island>' is commercial)."),
         "commercial": (
-            "To compare options before choosing: 'best', 'top', 'vs', reviews, opinions, "
-            "cheapest, or a kind of product or place without a specific one in mind ('family "
-            "hotels in <island>', 'all inclusive resorts'). NOT a search that names one "
-            "specific brand, product or place."),
+            "Rule 4: a kind of product or service, with or without a place, or a comparison, and "
+            "no specific business: 'hotels <island>', 'day pass <island>', 'all inclusive "
+            "resorts', 'best spa <town>', 'reviews', 'vs'. NOT a search with an action or price "
+            "word (transactional) or that names a specific brand, hotel or venue (navigational)."),
         "transactional": (
-            "To act now: book, buy, reserve, price, offer, discount, tickets, sign up, download "
-            "('book hotel <town>', 'spa day price'), also with a brand or place name. NOT a "
-            "search without any action or price word."),
+            "Rule 1: it has an action or price word ('book hotel <town>', 'day pass price', "
+            "'<brand> offers', 'reservar <hotel>'), with or without a brand or place. NOT a search "
+            "whose only product word is a product or service name such as 'day pass' or "
+            "'tickets'."),
         "navigational": (
-            "To reach a specific brand, organisation, website or a section of it: the search "
-            "names one of the 'marcas', or another specific company, hotel, product or website, "
-            "with or without a section ('<brand>', '<hotel name> contact', '<brand> login'). NOT when "
-            "it adds an action or price word (that is transactional)."),
+            "Rule 3: it names one of the 'marcas' or another specific company, hotel, venue, "
+            "product or website, alone or with a product or section ('<brand>', '<brand> day "
+            "pass', '<hotel name> spa', '<brand> login'). NOT when it also has an action or price "
+            "word (transactional) or asks how to get there (local)."),
         "local": (
-            "To find or get to a physical place: address, directions, how to get to, opening "
-            "hours, map, parking, 'near me'. NOT 'hotels in <town>' (that is choosing a place to "
-            "stay: commercial)."),
-        "unclear": ("The search is too short or ambiguous to tell: a single generic word, a code, "
-                    "a misspelling with no clear meaning."),
+            "Rule 2: to find or get to a physical place: address, directions, how to get to, map, "
+            "parking, opening hours, phone, 'near me'. NOT 'hotels <town>' (commercial) nor a "
+            "place name on its own (informational)."),
+        "unclear": ("No rule fits: a code, a string with no meaning, a single generic word that is "
+                    "not a place, product or brand. Do not use it when a rule fits."),
     },
     descripcion=("Intencion de una busqueda real de Search Console (#169 punto 1), con las mismas "
                  "opciones que la de la pagina. Sin evaluar (#8): todo incierto."),

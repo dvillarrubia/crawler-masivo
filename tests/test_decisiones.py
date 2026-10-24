@@ -469,9 +469,9 @@ HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550
            ("es_pagina_legal", 2): "dd0345f0f28408ad", ("es_soft_404", 2): "e3d75320bde45267",
            ("es_pagina_de_utilidad", 1): "3928932eba01e723", ("es_pagina_de_utilidad", 2): "43adee04faca5150",
            # Intencion y embudo (decision 176)
-           ("intencion_pagina", 1): "d7567fa4f61aacf3",
-           ("etapa_embudo", 1): "017b89d5da8a4696",
-           ("intencion_busqueda", 1): "ef6ba73c6fc8a02d",
+           ("intencion_pagina", 1): "a4589e2b81d4a4fb",
+           ("etapa_embudo", 1): "22ab1379c09d763a",
+           ("intencion_busqueda", 1): "a436ff6f5e5ff168",
            }
 
 

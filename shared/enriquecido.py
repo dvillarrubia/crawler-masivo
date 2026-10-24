@@ -227,7 +227,8 @@ def _modulo_intencion_pagina() -> Modulo:
         descripcion=("Qué intención de búsqueda resuelve cada página (informacional, comercial, "
                      "transaccional, navegacional, local) y, como pregunta aparte, su etapa del "
                      "embudo (TOFU, MOFU, BOFU, postventa, fuera del embudo), con la ruta, el título, "
-                     "el H1 y el principio del contenido (#39, decisión 176). Sin evaluar (#8): las "
+                     "el H1, el principio del contenido y los tipos de schema.org que declara "
+                     "(#39, decisión 176). Sin evaluar (#8): las "
                      "respuestas salen inciertas y no van a ningún informe."),
         preguntas=("intencion_pagina", "etapa_embudo"),
         construir_estados=intencion.estados_intencion_pagina,

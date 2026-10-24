@@ -355,7 +355,7 @@
      local, unclear) y `etapa_embudo` (tofu, mofu, bofu, post_purchase,
      out_of_funnel, unclear), aparte y no mezcladas: una comparativa es comercial
      y MOFU, una página de precios es comercial y BOFU. Estado: ruta, título, H1
-     visible y 600 caracteres de contenido; solo las páginas con algo que juzgar
+     visible, 600 caracteres de contenido y (revisión, abajo) `tipos_schema`; solo las páginas con algo que juzgar
      (título, H1 o contenido). Las opciones dicen «quién llegaría aquí», lo que
      NO son y el desempate donde se tocan (reservar un hotel es transaccional
      aunque el hotel esté en un sitio; una página de marca no lo es si se puede
@@ -413,6 +413,69 @@
      cliente tiene Search Console: la de la página costaría ~0,06 $ por cada
      1.000 páginas (Saunier Duval, 1.080; Penguin, 78.457, se pasaría del tope:
      con muestra o carpeta).
+   - **Revisión antes de mergear** (la revisión independiente del PR #243):
+     - *Una página de marca no se da por desalineada.* Las búsquedas
+       navegacionales no cuentan para la parte alineada, así que una página
+       `navigational` salía con un 0 % alineado con un solo clic de otra
+       intención, y 1.000 clics de marca con 5 informacionales ya daban una
+       página desalineada (en Lopesan, el 73 % de los clics son de marca).
+       Ahora `desajuste` no afirma nada (`sin_afirmar`) si la página es
+       `navigational` o `unclear`, ni si la intención que más clics concentra
+       **contando la marca** es la marca; `intencion_dominante` se calcula así.
+       La misma función alimenta la incidencia apagada. No se pone un mínimo de
+       clics: sería otro umbral sin calibrar, la lista se ordena por clics con
+       otra intención y cada fila lleva sus clics.
+     - *Reglas en orden en vez de definiciones sueltas.* `intencion_busqueda`
+       se contradecía en lo que más clics sin marca concentra: «day pass gran
+       canaria» o «hoteles gran canaria» (tipo de producto + lugar, sin palabra
+       de acción) no encajaba en ninguna opción, y «day pass lopesan» o un
+       lugar suelto quedaban entre dos o tres. Ahora gana la primera que
+       encaja: palabra de acción o precio (lista cerrada; «day pass», «spa» o
+       «tickets» son productos, no acciones) → transactional; acceso a un
+       sitio → local; nombra una marca u otro negocio concreto → navigational;
+       tipo de producto con o sin lugar, o comparación → commercial; aprender o
+       un lugar suelto → informational. Si no se sabe si un nombre es un
+       negocio o un lugar, se trata como lugar.
+     - *La página: la señal que el texto no da y el desempate de los
+       listados.* El widget de reserva y el precio no salen en los 600
+       caracteres, así que las fichas de hotel quedaban entre tres opciones.
+       El estado lleva ahora **`tipos_schema`**: los tipos de schema.org que
+       declara la página sin los de sitio (Organization, WebSite, WebPage,
+       BreadcrumbList, Person...); en Lopesan las fichas declaran `Hotel` y
+       `Offer`, los listados `TouristDestination`, el blog `BlogPosting`. Y
+       reglas en orden: la home es navigational; una página de UN producto,
+       servicio, hotel u oferta que el sitio vende es transactional aunque el
+       texto solo la describa; un listado de varios (también los del propio
+       sitio, «nuestros hoteles en X», «hoteles con day pass») es commercial;
+       dirección o cómo llegar, local; lo demás de la organización (quiénes
+       somos, empleo, área de empleados, legal), navigational; guías,
+       noticias y destinos, informational. `etapa_embudo` recibe la misma
+       advertencia sobre el texto y el BOFU deja de pedir la reserva visible.
+       Las tres siguen en la versión 1: no han salido de esta rama ni se ha
+       pagado ninguna respuesta (huellas nuevas en `HUELLAS`).
+     - *No se afirma una ausencia sin datos.* `motivo_sin_busquedas` decía «no
+       hay búsquedas entre X e Y» también cuando esos días no están
+       descargados (un censo de antes de conectar Search Console, o de hace
+       más de `SEARCH_CONSOLE_DETALLE_DIAS`). Ahora mira la serie `consultas`
+       de `gsc_estado.detalle` (`cobertura_de_la_ventana`): sin días de la
+       ventana dice que no hay datos; con parte, dice de qué días habla; y la
+       tarjeta avisa (`aviso_cobertura`) cuando la ventana está descargada a
+       medias (el censo `02d9278f`, ventana desde el 22-jul, con la serie
+       desde el 24-jul). Los últimos `RETRASO_DIAS` no cuentan como hueco.
+     - *La tarjeta enseña lo preguntado.* `intencion_frente_a_busquedas`
+       recalculaba el top 10 con lo que hay hoy en `gsc_consultas`; ahora lee
+       las búsquedas de `decisions.estado_enviado` de la ejecución y solo los
+       clics de `gsc_consultas` (cruzados por la clave del estado con el sitio
+       y las marcas con que se preguntó). Una búsqueda preguntada que ya no
+       tiene clics sale con `clics` None, no pesa y se cuenta en
+       `busquedas_sin_clics_hoy`.
+     - *Coste re-medido* (fórmula de la 162): las reglas alargan el texto de
+       las preguntas, +356 tokens por llamada en la de la página y +317 en la
+       de la búsqueda; `tipos_schema` suma ~21 caracteres por página (2.836
+       páginas de Lopesan declaran alguno). Lopesan: `intencion_pagina` ~5,8 M
+       tokens, **0,24 $**; `intencion_busquedas` ~7,6 M tokens, **0,32 $**; en
+       total 0,56 $, un 11 % del tope mensual. La de la página, ~0,075 $ por
+       cada 1.000 páginas.
    - Fuera: el contraste con DataForSEO (#39 punto 3), la intención de grupo
      de búsquedas y `mejor_pagina` (comentarios de #39 y #169), los informes de
      cobertura y flujo del embudo por enlaces (#39 punto 4), las columnas en el
