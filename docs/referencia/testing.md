@@ -433,3 +433,14 @@ salto—, las semillas si, y el recuento a `jobs.topes_carpeta`),
 `orphan_page` ni `sitemap_orphan` en ninguna parte del censo, tampoco en otra
 carpeta enlazada solo desde lo no pedido; sin corte, como siempre) y
 `test_topes_carpeta_api.py` (informe y ficha; tambien en el trabajo de la API).
+Nofollow interno (decision 183): `test_avisos_nofollow_db.py` (SQLite, se
+ejecuta el analizador: `solo_enlazada_con_nofollow` sustituye a
+`not_reachable_from_home` y no sale con un entrante seguible, desde una
+`noindex`, con un tope que corto ni en el destino de una redireccion;
+`enlace_interno_nofollow` por destino, de plantilla desde el umbral, sin aviso
+a no indexables y sin contar la directiva de pagina; `pagina_nofollow`
+agrupada; ninguna lectura mas de `links`; y que la regla del `rel` en SQL de
+`shared/rel_de_enlace.py` da lo mismo que la de Python, en SQLite y en Postgres
+con `PAGERANK_TEST_DATABASE_URL`, y que el extractor la usa) y, en
+`test_analyzer_paginacion_db.py`, que la paginacion va antes que
+`solo_enlazada_con_nofollow`.

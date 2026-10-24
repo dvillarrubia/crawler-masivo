@@ -40,6 +40,13 @@ from shared.robots import (  # noqa: F401
     robots_bad_separators,
     robots_tokens,
 )
+# Que `rel` quita autoridad lo decide tambien el analizador (decision 183): la
+# regla vive en `shared/` y se reexporta aqui.
+from shared.rel_de_enlace import (  # noqa: F401
+    REL_SIN_AUTORIDAD as _REL_SIN_AUTORIDAD,
+    rel_sin_autoridad,
+    rel_tokens,
+)
 
 # ---- regex helpers ---------------------------------------------------------
 
@@ -408,18 +415,6 @@ def compile_url_patterns(patterns: list[str] | None) -> tuple[list, list[str]]:
     return comprobadores, invalidos
 
 
-def rel_tokens(rel: str | None) -> set[str]:
-    """Tokens de un atributo `rel`, en minusculas.
-
-    La sintaxis es por espacios, pero hay plantillas que escriben
-    `rel="nofollow,noopener"`: separando solo por espacios salia un unico token
-    `nofollow,noopener` y el enlace contaba como follow.
-    """
-    if not rel:
-        return set()
-    return {t for t in re.split(r"[\s,]+", rel.lower()) if t}
-
-
 # ---------------------------------------------------------------------------
 # HTML extraction
 # ---------------------------------------------------------------------------
@@ -736,10 +731,6 @@ def extract_headings(selector) -> list[dict[str, Any]]:
 
 
 
-# Las tres pistas con las que Google dice "no pases autoridad por aqui". Para
-# el buscador son equivalentes; lo que cambia es lo que declaran (publicidad,
-# contenido de usuario, o simplemente nada).
-_REL_SIN_AUTORIDAD: frozenset[str] = frozenset({"nofollow", "ugc", "sponsored"})
 
 
 def _etiqueta_de_svg(nodo_lxml) -> str | None:
@@ -849,7 +840,7 @@ def extract_links(
         # PageRank del destino. Medido en cuatro censos (28,4 M enlaces): 224
         # con `ugc`, 0 con `sponsored`, y de esos solo 12 internos — es
         # correccion de criterio, no un cambio de volumen.
-        follow = not (_REL_SIN_AUTORIDAD & rel_tokens(rel)) and not page_nofollow
+        follow = not rel_sin_autoridad(rel) and not page_nofollow
 
         # Link type classification. Se decide ANTES de caer al alt: un
         # `<a><img></a>` es un enlace de imagen aunque su ancla salga del alt.
