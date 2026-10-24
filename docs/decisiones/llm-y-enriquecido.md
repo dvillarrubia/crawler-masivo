@@ -451,6 +451,146 @@
      el aviso, las homes de idioma en la regla de marca de la 157 y los
      clientes sin Search Console (pares por título o MinHash, #18).
 
+<a id="d176"></a>
+176. **Intención de la página y de sus búsquedas de Search Console: una pregunta
+   por criterio, la búsqueda sin nada de la página y el desajuste solo
+   orientativo** (#39, #169 puntos 1 y 2). Dos módulos nuevos del enriquecido,
+   los dos marcados como sin evaluar (163): todo sale `incierto` y nada va a un
+   informe.
+   - **`intencion_pagina`**: dos preguntas `choice` en la misma llamada (el
+     estado se paga una vez), cada una con UN criterio (169):
+     `intencion_pagina` (informational, commercial, transactional, navigational,
+     local, unclear) y `etapa_embudo` (tofu, mofu, bofu, post_purchase,
+     out_of_funnel, unclear), aparte y no mezcladas: una comparativa es comercial
+     y MOFU, una página de precios es comercial y BOFU. Estado: ruta, título, H1
+     visible, 600 caracteres de contenido y (revisión, abajo) `tipos_schema`; solo las páginas con algo que juzgar
+     (título, H1 o contenido). Las opciones dicen «quién llegaría aquí», lo que
+     NO son y el desempate donde se tocan (reservar un hotel es transaccional
+     aunque el hotel esté en un sitio; una página de marca no lo es si se puede
+     reservar en ella). `unclear` es la salida obligatoria de #9. `local` va
+     dentro del choice, aunque el comentario de #39 lo dejaba aparte como
+     `noul`: lleva su desempate escrito y, si al etiquetar se mezcla con la
+     transaccional, saldrá a un `noul` propio.
+   - **`intencion_busquedas`**: `intencion_busqueda`, con las MISMAS opciones
+     que la de la página, sobre las búsquedas de `gsc_consultas` (157) que traen
+     clics a cada página en la ventana del censo (90 días hasta el día en que
+     empezó, ahora en `shared/gsc.py` para que la lean igual el analizador y la
+     API) y de las propiedades activas del cliente (con integraciones declaradas
+     y todas apagadas, ninguna): las **10 con más clics por página**. El estado
+     es `{sitio, marcas, busqueda}` (el sitio sin `www.` y las `marcas` del job)
+     y **nada de la página ni cifras**: la misma búsqueda en otra página u otro
+     censo del cliente es el mismo estado, una llamada y después caché (84);
+     otro sitio es otro estado (la caché es por cliente). Los clics se vuelven a
+     leer de `gsc_consultas` al comparar. Un estado por (página, búsqueda) con
+     `ambito="busqueda"` y la fila en `decisions` con su `url_id`. Depende de
+     `intencion_pagina` (se añade sola). Sin cliente, sin Search Console o sin
+     clics en la ventana no tiene trabajo y **lo dice**: `Modulo.por_que_vacio`
+     (el mismo gancho que la categoría del cliente sin taxonomía, 178) pone el
+     motivo en la estimación (`por_modulo[...].aviso` y `avisos`, en el
+     diálogo) y en los errores de la ejecución.
+   - **Desajuste ponderado por clics, orientativo** (`shared/intencion.py`,
+     `GET /api/jobs/{id}/enrichment/{run}/intencion`): reparto de los clics de
+     cada página por la intención de sus búsquedas; **no cuentan** las
+     `navigational` (una búsqueda de marca puede caer en cualquier página de la
+     marca) ni las `unclear`. Desalineada = la intención de la página se conoce,
+     la que más clics concentra es otra y la de la página se queda con menos de
+     la mitad (la definición de #39). Con el embudo con tráfico real (#169 punto
+     2): clics de la página por etapa y por plantilla.
+   - **`intencion_desalineada` preparada y apagada**:
+     `incidencias_intencion_desalineada` devuelve una por página con las
+     búsquedas que la causan, pero nada mientras `intencion_pagina` o
+     `intencion_busqueda` no tengan umbral, y aun con umbral solo con respuestas
+     `decidido`. Nadie la llama: el enriquecido todavía no emite incidencias (85).
+   - **La pantalla**: los resultados de un choice salen con sus opciones en el
+     orden del catálogo y en castellano, la unidad («búsquedas», no «URLs») y la
+     búsqueda en la tabla de respuestas (solo la búsqueda, que es de Search
+     Console; del estado de una página no sale nada); y una tarjeta con el
+     desajuste y el embudo.
+   - **`extraer` saca el juego por estado, no por URL**: un módulo puede dar
+     varios estados por URL, y se quitan los repetidos (la misma página con y
+     sin `www.`, la misma búsqueda en dos páginas), que inflaban la muestra
+     (169). El id de un ejemplo de búsqueda es su estado.
+   - **Medido** (24-oct-2026, Lopesan `1e7ea651`, en solo lectura): de 3.216
+     indexables, todas con algo que juzgar y 1.921 con búsquedas con clics;
+     10.121 pares página × búsqueda y **7.096 búsquedas distintas**, que cubren
+     el 77,6 % de los clics con búsqueda conocida (todas serían 14.943 por el
+     22 % restante, casi todo cola larga). Estimado con la fórmula de la 162:
+     `intencion_pagina` 3.216 llamadas, 4,6 M tokens, **0,19 $**;
+     `intencion_busquedas` 7.096 llamadas, 5,3 M tokens, **0,22 $** (el texto
+     de la pregunta pesa más que la búsqueda). Un 8 % del tope mensual de 5 $;
+     el censo siguiente solo paga las búsquedas y páginas nuevas. Ningún otro
+     cliente tiene Search Console: la de la página costaría ~0,06 $ por cada
+     1.000 páginas (Saunier Duval, 1.080; Penguin, 78.457, se pasaría del tope:
+     con muestra o carpeta).
+   - **Revisión antes de mergear** (la revisión independiente del PR #243):
+     - *Una página de marca no se da por desalineada.* Las búsquedas
+       navegacionales no cuentan para la parte alineada, así que una página
+       `navigational` salía con un 0 % alineado con un solo clic de otra
+       intención, y 1.000 clics de marca con 5 informacionales ya daban una
+       página desalineada (en Lopesan, el 73 % de los clics son de marca).
+       Ahora `desajuste` no afirma nada (`sin_afirmar`) si la página es
+       `navigational` o `unclear`, ni si la intención que más clics concentra
+       **contando la marca** es la marca; `intencion_dominante` se calcula así.
+       La misma función alimenta la incidencia apagada. No se pone un mínimo de
+       clics: sería otro umbral sin calibrar, la lista se ordena por clics con
+       otra intención y cada fila lleva sus clics.
+     - *Reglas en orden en vez de definiciones sueltas.* `intencion_busqueda`
+       se contradecía en lo que más clics sin marca concentra: «day pass gran
+       canaria» o «hoteles gran canaria» (tipo de producto + lugar, sin palabra
+       de acción) no encajaba en ninguna opción, y «day pass lopesan» o un
+       lugar suelto quedaban entre dos o tres. Ahora gana la primera que
+       encaja: palabra de acción o precio (lista cerrada; «day pass», «spa» o
+       «tickets» son productos, no acciones) → transactional; acceso a un
+       sitio → local; nombra una marca u otro negocio concreto → navigational;
+       tipo de producto con o sin lugar, o comparación → commercial; aprender o
+       un lugar suelto → informational. Si no se sabe si un nombre es un
+       negocio o un lugar, se trata como lugar.
+     - *La página: la señal que el texto no da y el desempate de los
+       listados.* El widget de reserva y el precio no salen en los 600
+       caracteres, así que las fichas de hotel quedaban entre tres opciones.
+       El estado lleva ahora **`tipos_schema`**: los tipos de schema.org que
+       declara la página sin los de sitio (Organization, WebSite, WebPage,
+       BreadcrumbList, Person...); en Lopesan las fichas declaran `Hotel` y
+       `Offer`, los listados `TouristDestination`, el blog `BlogPosting`. Y
+       reglas en orden: la home es navigational; una página de UN producto,
+       servicio, hotel u oferta que el sitio vende es transactional aunque el
+       texto solo la describa; un listado de varios (también los del propio
+       sitio, «nuestros hoteles en X», «hoteles con day pass») es commercial;
+       dirección o cómo llegar, local; lo demás de la organización (quiénes
+       somos, empleo, área de empleados, legal), navigational; guías,
+       noticias y destinos, informational. `etapa_embudo` recibe la misma
+       advertencia sobre el texto y el BOFU deja de pedir la reserva visible.
+       Las tres siguen en la versión 1: no han salido de esta rama ni se ha
+       pagado ninguna respuesta (huellas nuevas en `HUELLAS`).
+     - *No se afirma una ausencia sin datos.* `motivo_sin_busquedas` decía «no
+       hay búsquedas entre X e Y» también cuando esos días no están
+       descargados (un censo de antes de conectar Search Console, o de hace
+       más de `SEARCH_CONSOLE_DETALLE_DIAS`). Ahora mira la serie `consultas`
+       de `gsc_estado.detalle` (`cobertura_de_la_ventana`): sin días de la
+       ventana dice que no hay datos; con parte, dice de qué días habla; y la
+       tarjeta avisa (`aviso_cobertura`) cuando la ventana está descargada a
+       medias (el censo `02d9278f`, ventana desde el 22-jul, con la serie
+       desde el 24-jul). Los últimos `RETRASO_DIAS` no cuentan como hueco.
+     - *La tarjeta enseña lo preguntado.* `intencion_frente_a_busquedas`
+       recalculaba el top 10 con lo que hay hoy en `gsc_consultas`; ahora lee
+       las búsquedas de `decisions.estado_enviado` de la ejecución y solo los
+       clics de `gsc_consultas` (cruzados por la clave del estado con el sitio
+       y las marcas con que se preguntó). Una búsqueda preguntada que ya no
+       tiene clics sale con `clics` None, no pesa y se cuenta en
+       `busquedas_sin_clics_hoy`.
+     - *Coste re-medido* (fórmula de la 162): las reglas alargan el texto de
+       las preguntas, +356 tokens por llamada en la de la página y +317 en la
+       de la búsqueda; `tipos_schema` suma ~21 caracteres por página (2.836
+       páginas de Lopesan declaran alguno). Lopesan: `intencion_pagina` ~5,8 M
+       tokens, **0,24 $**; `intencion_busquedas` ~7,6 M tokens, **0,32 $**; en
+       total 0,56 $, un 11 % del tope mensual. La de la página, ~0,075 $ por
+       cada 1.000 páginas.
+   - Fuera: el contraste con DataForSEO (#39 punto 3), la intención de grupo
+     de búsquedas y `mejor_pagina` (comentarios de #39 y #169), los informes de
+     cobertura y flujo del embudo por enlaces (#39 punto 4), las columnas en el
+     explorador y el CSV (85) y, sobre todo, el juego etiquetado y los umbrales
+     (#8): hasta entonces todo es orientativo.
+
 <a id="d178"></a>
 178. **El tipo de página se pregunta por plantilla, con una taxonomía general de
    doce opciones, y la categoría del cliente con su propia taxonomía** (#12;

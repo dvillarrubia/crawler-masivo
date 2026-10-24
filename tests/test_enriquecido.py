@@ -155,7 +155,8 @@ def test_un_modulo_con_una_pregunta_sin_evaluar_va_marcado():
     # Subconjunto y no igualdad: cada modulo nuevo se prueba en su fichero
     # (test_tipo_pagina.py...), y varias ramas anaden modulos a la vez.
     assert {"pagina_legal", "soft_404", "pagina_de_utilidad", "canibalizacion",
-            "tipo_pagina", "categoria_cliente"} <= set(enr.REGISTRO)
+            "tipo_pagina", "categoria_cliente",
+            "intencion_pagina", "intencion_busquedas"} <= set(enr.REGISTRO)
 
 
 # --- alcance y estados ---------------------------------------------------------

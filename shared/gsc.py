@@ -44,6 +44,44 @@ EN_CURSO_CADUCA = timedelta(hours=3)
 HORA_UTC_DIARIA = 4
 
 
+# Ventana de busquedas y paginas que se cruza con un censo: los 90 dias que
+# acaban el dia en que empezo (decision 142). Aqui y no en `analysis/` para que
+# el analizador y el enriquecido de la API (#169, decision 176), que no tiene
+# `analysis/` en su imagen, lean la MISMA ventana.
+VENTANA_DIAS = 90
+
+
+def dia_del_censo(job) -> date:
+    t = job.started_at or job.created_at or datetime.now(timezone.utc)
+    return t.date()
+
+
+def ventana_del_censo(job) -> tuple[date, date]:
+    hasta = dia_del_censo(job)
+    return hasta - timedelta(days=VENTANA_DIAS - 1), hasta
+
+
+def propiedades_activas(session, cliente_id) -> list[str]:
+    """Las propiedades de Search Console del cliente con datos (`gsc_estado`),
+    solo las de sus integraciones `gsc` activas: si paso de una de prefijo a
+    `sc-domain:`, la vieja sigue en la base y sus filas contarian dos veces.
+    Sin integraciones declaradas, todas las que tienen estado (decision 157);
+    con todas apagadas, ninguna."""
+    from shared.models import Client, GscEstado
+
+    if not cliente_id:
+        return []
+    cliente = session.get(Client, cliente_id)
+    declaradas = [i for i in (getattr(cliente, "integraciones", None) or [])
+                  if isinstance(i, dict) and i.get("tipo") == "gsc"]
+    activas = {str((i.get("parametros") or {}).get("propiedad") or "").strip()
+               for i in declaradas if i.get("activa", True)}
+    # Con integraciones declaradas y todas apagadas, ninguna: apagar Search
+    # Console es no querer sus datos.
+    return sorted({e.propiedad for e in session.query(GscEstado).filter(GscEstado.cliente_id == cliente_id)
+                   if not declaradas or e.propiedad in activas})
+
+
 def dias_iniciales() -> int:
     try:
         return max(1, min(480, int(os.getenv("SEARCH_CONSOLE_DIAS_INICIALES", "90"))))
