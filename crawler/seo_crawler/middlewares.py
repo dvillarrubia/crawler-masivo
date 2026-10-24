@@ -142,7 +142,49 @@ class JobConfigMiddleware:
         return None
 
 
-class RobotsAuditMiddleware(RobotsTxtMiddleware):
+class _EsperaPropiaDelRobots:
+    """Cada peticion que espera el robots.txt de un host, con SU espera.
+
+    El `RobotsTxtMiddleware` de Scrapy 2.19 deja un unico `Deferred` por host
+    mientras baja el robots.txt, y cada peticion que llega en ese rato hace
+    `await maybe_deferred_to_future(deferred)`. Con el arranque asincrono
+    (`async def start`, el de este spider) eso pasa por `Deferred.asFuture`, que
+    CONSUME el resultado: el primer futuro recibe el parser y el `Deferred` sigue
+    con `None`. Para el middleware `None` es «sin robots.txt», asi que de la
+    tercera peticion en adelante NADA se comprobaba contra robots.txt.
+    Reproducido sin red: `Disallow: /prohibido` y cinco peticiones desde
+    `start` -> se pedian la 3.a, la 4.a y la 5.a; con `start_requests`, ninguna.
+    Muerde con varias semillas del mismo host y, sobre todo, al REANUDAR, que
+    vuelve a lanzar la frontera entera desde `start` (decision 164).
+
+    Aqui cada una cuelga su propio `Deferred` del compartido con un callback que
+    devuelve el resultado intacto, y espera el suyo: el compartido no se consume.
+    """
+
+    async def robot_parser(self, request):
+        from scrapy.utils.defer import maybe_deferred_to_future
+        from scrapy.utils.httpobj import urlparse_cached
+        from twisted.internet.defer import Deferred
+
+        compartido = self._parsers.get(urlparse_cached(request).netloc)
+        if isinstance(compartido, Deferred):
+            propio: Deferred = Deferred()
+
+            def _pasar(resultado):
+                propio.callback(resultado)
+                return resultado
+
+            compartido.addBoth(_pasar)
+            return await maybe_deferred_to_future(propio)
+        return await super().robot_parser(request)
+
+
+class RobotsTxtEsperaPropiaMiddleware(_EsperaPropiaDelRobots, RobotsTxtMiddleware):
+    """El de Scrapy (modo `respect`), con la espera arreglada. Lo sustituye en
+    `settings.DOWNLOADER_MIDDLEWARES`."""
+
+
+class RobotsAuditMiddleware(_EsperaPropiaDelRobots, RobotsTxtMiddleware):
     """
     Robots.txt audit-only middleware. Fetches robots.txt and stamps
     ``request.meta["blocked_by_robots"]`` with True/False, but never

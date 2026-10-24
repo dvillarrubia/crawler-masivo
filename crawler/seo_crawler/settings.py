@@ -96,6 +96,10 @@ DOWNLOADER_MIDDLEWARES = {
     # Same priority as Scrapy's built-in (100); the two are mutually exclusive
     # via from_crawler -> NotConfigured.
     "seo_crawler.middlewares.RobotsAuditMiddleware": 100,
+    # El de Scrapy, con cada espera del robots.txt por separado: el suyo dejaba
+    # pasar sin comprobar de la tercera peticion en adelante (decision 164).
+    "scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware": None,
+    "seo_crawler.middlewares.RobotsTxtEsperaPropiaMiddleware": 100,
     # Crawl-delay de robots.txt (decision 81). Solo con ROBOTSTXT_OBEY, o sea
     # robots_mode=respect; despues del de robots (100), que es quien lo lee.
     "seo_crawler.middlewares.RobotsCrawlDelayMiddleware": 110,

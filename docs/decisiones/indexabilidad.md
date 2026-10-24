@@ -1030,3 +1030,28 @@
    JSON-LD (no se puede comprobar sin su herramienta, que solo va en el
    navegador), el hreflang del sitemap, el `Crawl-delay` en un sitio real, el
    `<dialog>` medido en páginas reales y el A9 del PageRank.
+
+<a id="d164"></a>
+164. **robots.txt se respeta en TODAS las peticiones que esperan su descarga, no
+   solo en las dos primeras.** El `RobotsTxtMiddleware` de Scrapy 2.19 deja un
+   único `Deferred` por host mientras baja el robots.txt, y cada petición que
+   llega en ese rato lo espera con `maybe_deferred_to_future`. Con el arranque
+   asíncrono (`async def start`, el de `SeoSpider` desde Scrapy 2.13) eso pasa
+   por `Deferred.asFuture`, que **consume** el resultado: la primera recibe el
+   parser y las demás `None`, que para el middleware es «sin robots.txt».
+   - **Reproducido sin red**: `Disallow: /prohibido` y cinco peticiones desde
+     `start`: se pedían la 3.ª, la 4.ª y la 5.ª, también con el reactor y los
+     manejadores de descarga del proyecto. Con `start_requests`, ninguna.
+     Visto primero por el agente de #33 al lanzar la lectura de WordPress desde
+     el arranque.
+   - **Dónde mordía**: varias semillas del mismo host y, sobre todo, **al
+     reanudar**, que vuelve a lanzar la frontera entera desde `start` (cientos
+     o miles de URLs esperando el robots.txt a la vez). Lopesan se siembra con
+     3.040 URLs. En modo `respect` se han podido pedir URLs que el robots.txt
+     prohíbe; los censos ya hechos no se corrigen solos (lo pedido, pedido está).
+   - **Arreglo**: `RobotsTxtEsperaPropiaMiddleware` (y el de auditoría):
+     cada petición cuelga su propio `Deferred` del compartido con un callback
+     que devuelve el resultado intacto, y espera el suyo. Sustituye al de Scrapy
+     en `DOWNLOADER_MIDDLEWARES`. `test_robots_espera.py` lo ejecuta con un
+     servidor local y fija también el fallo del de Scrapy: si una versión lo
+     arregla, ese test falla y se puede volver al suyo.
