@@ -20,7 +20,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -210,6 +210,9 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 179 | Una respuesta rara se mide con un juego de precisión (todas las veces que Jev la da en un conjunto amplio, más un control aleatorio): su precisión sí, su recall no | [`llm-y-enriquecido`](llm-y-enriquecido.md#d179) |
 | 180 | `intencion_pagina` v2 (navegacional solo la portada, `existing_users` y `corporate` nuevas) y `title_describe_contenido` v2 (nombrar la página es el nivel alto aunque sea corto), con lo medido de la v1 y el juego listo para re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d180) |
 | 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 (229/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (232/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (233/300, con un juego que empuja hacia Jev) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
 
 ## Anadir una decision
 
