@@ -107,6 +107,10 @@ dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
 mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
 `test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
 respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
+Coherencia de title y marcado (decision 177): `test_coherencia.py` (valores
+del marcado y fragmentos visibles, filtros contra SQLite, los tres modulos de
+punta a punta con el `FakeLLM`, el score agrupado por nivel en la API y
+`extraer` sin estados repetidos).
 Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se
 borra TODO lo del censo y nada de lo demas, los dos guardias, que `forzar`
 salta el de la serie y nunca el de en marcha, que `simular` no toca nada, el

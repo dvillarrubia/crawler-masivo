@@ -63,8 +63,21 @@ def modulo_de(pregunta: str):
     raise SystemExit(f"Ningun modulo de shared/enriquecido.py hace la pregunta {pregunta!r}")
 
 
-def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> list[dict]:
-    """Las filas del juego: estado, de donde sale y la etiqueta vacia."""
+def _clave_de_estado(datos) -> str:
+    """El mismo estado para Jev: sin caja ni espacios repetidos. La pagina con y
+    sin www, o la misma ruta en otro host, dan la misma clave (decision 169)."""
+    return " ".join(json.dumps(datos, sort_keys=True, ensure_ascii=False).lower().split())
+
+
+def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int,
+            informe: dict | None = None) -> list[dict]:
+    """Las filas del juego: estado, de donde sale y la etiqueta vacia.
+
+    Sin estados repetidos (decision 177): la 169 vio que la misma pagina con y
+    sin www contaba dos veces y sostenia un umbral que sin ella no salia. Se
+    recorre el orden estratificado entero y se salta el estado ya visto, asi
+    que el juego sigue repartido por plantillas y tiene `n` estados distintos si
+    los hay. En `informe["estados_repetidos"]`, cuantos se saltaron."""
     import uuid
 
     from shared.evaluacion_decisiones import muestra_estratificada
@@ -105,8 +118,31 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
             # dos plantillas, no una.
             plantilla = f"{urlsplit(url).hostname or ''}|{plantilla_de(path or '/', reglas)}"
             por_plantilla.setdefault(plantilla, []).append((str(job.id), uid, url, plantilla))
-    elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)
-    estados = modulo.construir_estados(session, [uid for _, uid, _, _ in elegidas])
+    # El orden estratificado ENTERO (sus `n` primeros son la muestra de siempre)
+    # y los estados por tandas, hasta tener `n` distintos.
+    orden = muestra_estratificada(por_plantilla, sum(len(v) for v in por_plantilla.values()),
+                                  semilla=semilla)
+    elegidas: list[tuple] = []
+    estados: list = []
+    claves: set[str] = set()
+    repetidos = 0
+    tanda = max(n, 50)
+    for i in range(0, len(orden), tanda):
+        if len(elegidas) >= n:
+            break
+        trozo = orden[i:i + tanda]
+        for fila, e in zip(trozo, modulo.construir_estados(session, [uid for _, uid, _, _ in trozo])):
+            if len(elegidas) >= n:
+                break
+            clave = _clave_de_estado(e.datos)
+            if clave in claves:
+                repetidos += 1
+                continue
+            claves.add(clave)
+            elegidas.append(fila)
+            estados.append(e)
+    if informe is not None:
+        informe["estados_repetidos"] = repetidos
     return [{"id": url, "job_id": jid, "url_id": uid, "plantilla": plantilla,
              "pregunta": p.nombre, "version": p.version, "estado": e.datos,
              "etiqueta": None, "etiquetado_por": None, "nota": ""}
@@ -255,14 +291,16 @@ def main(argv: list[str] | None = None) -> int:
         from shared.preguntas import obtener
 
         s = SessionLocal()
+        informe: dict = {}
         try:
-            filas = extraer(s, args.pregunta, args.job, args.n, args.semilla)
+            filas = extraer(s, args.pregunta, args.job, args.n, args.semilla, informe)
         finally:
             s.close()
         salida = args.salida or f"tests/decisiones/{args.pregunta}/v{obtener(args.pregunta).version}.jsonl"
         _escribir(salida, filas)
         plantillas = len({f["plantilla"] for f in filas})  # con el host: dos sitios son dos
-        print(f"{len(filas)} ejemplos de {plantillas} plantillas en {salida}. Falta etiquetarlos "
+        print(f"{len(filas)} ejemplos de {plantillas} plantillas en {salida} "
+              f"({informe.get('estados_repetidos', 0)} estados repetidos saltados). Falta etiquetarlos "
               "(campo `etiqueta` y `etiquetado_por`).")
     elif args.orden == "responder":
         estimacion, respuestas = responder(_leer(args.juego), args.confirmar)
