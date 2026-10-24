@@ -4260,7 +4260,7 @@ const EXP_TABS = [
     columns: ['url','status_code','indexable','canonical_href','meta_robots','content_word_count'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
-  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','html_lang_no_coincide_hreflang'],
+  { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','hreflang_fuentes_discrepan','html_lang_no_coincide_hreflang'],
     columns: ['url','status_code','title','indexable','inlinks_count'] },
   // Decision 108: lo que el HTML declara de si mismo. Casi todo de plantilla
   // o de servidor (una fila por grupo), y nada saca una pagina del indice.

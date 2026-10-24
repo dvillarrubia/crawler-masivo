@@ -900,8 +900,9 @@ class Hreflang(Base):
     # anterior a la columna (no se sabe; se trata como del head).
     en_body = Column(Boolean, nullable=True)
     # `html` (el `<head>` o el body) o `cabecera` (HTTP `Link`, la unica fuente
-    # de un PDF). Preparado para `sitemap` (#107). NULL = rastreo anterior, del
-    # HTML.
+    # de un PDF). El del sitemap NO va aqui: es de una URL que puede no
+    # haberse rastreado, y vive en `sitemap_entries.hreflang` (decision 167).
+    # NULL = rastreo anterior, del HTML.
     origen = Column(String(16), nullable=True)
 
     url_rel = relationship("Url", back_populates="hreflangs")
@@ -1272,6 +1273,11 @@ class SitemapEntry(Base):
     # Cuantos `<video:video>` declara la entrada (decision 155). 0 = ninguno;
     # NULL = leida antes de la columna, que no es «sin video».
     videos = Column(Integer, nullable=True)
+    # Los `<xhtml:link rel="alternate" hreflang>` de la entrada (decision 167),
+    # como [[idioma, href], ...], el href del mismo origen sin el
+    # (`shared/sitemaps.compactar_hreflang`). [] = ninguno; NULL = no se sabe
+    # (leida antes de la columna o pasado el tope `SITEMAP_HREFLANG_MAX`).
+    hreflang = Column(JSON(none_as_null=True), nullable=True)
 
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),

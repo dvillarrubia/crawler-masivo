@@ -172,6 +172,35 @@ def test_i18n_un_error_entre_miles_tampoco_deja_la_nota_en_100(db, job):
     assert ins.score == results.TOPE_CON_ERRORES
 
 
+def test_i18n_hreflang_solo_del_sitemap_con_un_error_no_es_100(db, job):
+    """Decision 167: un sitio que declara el hreflang solo en el sitemap no
+    tiene filas en `hreflang`, pero el analisis abre sus avisos. Salia
+    score 100 sin recomendaciones con un `hreflang_broken_target` abierto."""
+    u = _url(db, job, "/es/")
+    db.add(Issue(job_id=job.id, url_id=u.id, issue_type="hreflang_broken_target",
+                 severity="error", details={"origen": "sitemap"}))
+    db.add(Issue(job_id=job.id, url_id=u.id, issue_type="hreflang_missing_return",
+                 severity="warning", details={"origen": "sitemap"}))
+    db.commit()
+    ins = results._calc_i18n(job.id, db)
+    assert ins.score == results.TOPE_CON_ERRORES
+    assert ins.metrics["solo_sitemap"] is True
+    assert ins.metrics["destino_malo"] == 1
+    assert ins.metrics["return_missing"] == 1
+    assert ins.metrics["return_unknown"] == 0
+    tipos = {t for r in ins.recommendations for t in (r.issue_types or [])}
+    assert {"hreflang_broken_target", "hreflang_missing_return"} <= tipos
+    assert "Hreflang sin verificar" not in [r.title for r in ins.recommendations]
+
+
+def test_i18n_sin_hreflang_ni_avisos_sigue_en_100(db, job):
+    u = _url(db, job, "/es/")
+    _issue(db, job, u, "title_too_long")
+    db.commit()
+    ins = results._calc_i18n(job.id, db)
+    assert ins.score == 100 and ins.recommendations == []
+
+
 @pytest.fixture()
 def db_completa():
     """El informe entero lee todas las tablas (enlaces, seguridad...)."""

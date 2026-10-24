@@ -35,6 +35,12 @@ milestone.
 - Hreflang completo: retorno, autorreferencia, x-default, idioma repetido,
   versiones que apuntan a una página no indexable y códigos que no casan entre
   versiones; solo sobre páginas indexables, que son las que Google lee.
+- **Hreflang del sitemap** (24 de octubre, decisión 167): el `<xhtml:link>` de
+  cada entrada se guarda y se suma al del `<head>` y la cabecera `Link`; dos
+  fuentes que dan URLs distintas para el mismo idioma son
+  `hreflang_fuentes_discrepan`, una por host. Con el sitemap leído a medias no
+  se afirman ausencias. Medido en Typeform: 37 destinos rotos que solo declara
+  el sitemap y que el análisis no veía.
 - Indexabilidad calculada sobre la URL final tras redirecciones; las páginas
   bloqueadas por robots.txt no cuentan como indexables.
 - **robots.txt por bot** (18 de octubre, decisión 129): qué bloquea el

@@ -74,6 +74,12 @@ salen con `ast`; una llamada con tipo no literal tiene que declararse).
 Extraccion de #149: `test_esquemas_y_credenciales.py` (lista blanca de
 esquemas en `extract_links` e `is_internal_url`, credenciales fuera al
 normalizar y semillas con credenciales rechazadas; decisiones 106 y 39),
+`test_hreflang_sitemap.py` (decision 167: compactar/expandir y completitud en
+`shared/sitemaps.py`, el spider real guardando el hreflang de cada entrada y el
+tope, la tuberia real contra Postgres con el analisis encima, y la union de
+fuentes, la discrepancia agrupada, las ausencias con sitemap a medias, la
+ruta con doble barra y un fallo a medias de la lectura contra SQLite; la nota
+de /insights con hreflang solo del sitemap va en `test_insights.py`),
 `test_hreflang_repetido_y_cabecera.py` (deduplicacion y hreflang de la cabecera
 `Link`, extractor y `analyze_hreflang` contra SQLite; decision 116),
 `test_canonical_distintos.py` (destinos distintos del canonical; decision 115),

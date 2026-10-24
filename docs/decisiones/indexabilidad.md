@@ -1055,3 +1055,91 @@
      en `DOWNLOADER_MIDDLEWARES`. `test_robots_espera.py` lo ejecuta con un
      servidor local y fija también el fallo del de Scrapy: si una versión lo
      arregla, ese test falla y se puede volver al suyo.
+
+<a id="d167"></a>
+167. **Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos
+   fuentes que discrepan son un aviso por host** (#107). `leer_sitemap` ya
+   leía los `<xhtml:link rel="alternate" hreflang>` de cada entrada, pero ni
+   `sitemap_entries` ni la tubería los guardaban: un sitio que solo declara el
+   hreflang en el sitemap salía sin hreflang, y uno que lo declara en los dos
+   sitios solo se juzgaba por el HTML.
+   - **Qué dice Google**: «The three methods are equivalent from Google's
+     perspective» y «While you can use all three methods at the same time,
+     there's no benefit in Search» (Search Central, *Tell Google about
+     localized versions of your page*). No documenta qué hace si discrepan.
+     Decidido: las anotaciones de una URL son la **unión** de las tres fuentes
+     (lo mismo en dos fuentes es una anotación, decisión 116), y el retorno
+     puede venir de cualquiera. Que una fuente declare un idioma que otra no
+     declara no es un aviso: la unión es lo que Google ve.
+   - **Dónde se guarda**: columna `sitemap_entries.hreflang` (JSON
+     `[[idioma, href]]`), no la tabla `hreflang`: la entrada es de una URL que
+     puede no rastrearse nunca y llega antes que la página, sin `url_id`. El
+     href del mismo origen se guarda sin él (`/en/a`), `shared/sitemaps.py`
+     (`compactar_hreflang` / `expandir_hreflang`), porque lo usan el spider y el
+     análisis; salvo si lo que queda empieza por `//` (`https://x.com//fr/a`,
+     un fallo de CMS que existe), que se leería como URL relativa al protocolo
+     con host `fr` y se guarda entero (revisión de la PR #231). `[]` = ninguno; NULL = no se sabe. Tope
+     `SITEMAP_HREFLANG_MAX` (2 millones por proceso; pasado, la entrada va con
+     NULL y `jobs.sitemaps.hreflang_recortado`), además del de entradas.
+     **Medido** en Typeform (8.144 entradas, 21.156 anotaciones): ~60 bytes por
+     anotación compactada (85 sin compactar), 1,27 MB de columna y 4,8 MB la
+     tabla entera; con 250.000 entradas y 8 idiomas serían ~120 MB, el peor
+     caso del tope. Migración: `ADD COLUMN IF NOT EXISTS hreflang JSON` en
+     `migrar_sitemap_entries()`, sin DEFAULT (solo catálogo).
+   - **Discrepancia**: mismo código, cada fuente con UNA URL y distintas
+     (el HTML dice `fr -> /fr/a`, el sitemap `fr -> /fr/b`): para Google la
+     página declara dos URLs para el francés. Nuevo
+     `hreflang_fuentes_discrepan` (warning), **uno por host y combinación de
+     fuentes** con `paginas_afectadas`, `idiomas` y ejemplos, anclado en la
+     raíz del host como el x-default (decisiones 64 y 73): casi siempre es que
+     un plugin genera el sitemap y otro el `<head>`. Un aviso por hallazgo
+     (36): esos `(página, código)` no son además `hreflang_idioma_repetido`
+     (que queda para dos URLs dentro de UNA fuente) ni `hreflang_missing_return`;
+     y si una de las dos URLs está rota o no es indexable, el aviso es el del
+     destino (dice cuál sobra), no la discrepancia.
+   - **Lo que no se puede afirmar** (67, 89): si el sitemap se leyó a medias
+     (`parcial`, entradas o anotaciones recortadas, un fichero cortado o en el
+     tope de URLs; `estado_hreflang_sitemap`) y el sitio usa hreflang en el
+     sitemap, a una página sin entrada guardada no se le afirma que no devuelva
+     el enlace, que no se autorreferencie, que su clúster no tenga x-default ni
+     un retorno incoherente: puede estar en lo no leído. Que el sitio lo usa lo
+     dice lo que el spider GUARDÓ (`jobs.sitemaps.hreflang_guardadas` o el
+     tope), no solo las entradas de URLs rastreadas: lo leído puede declarar
+     hreflang solo de URLs que no se rastrearon. Si en lo leído ninguna
+     entrada declara hreflang, se da por que el sitio no lo usa ahí (lo pone un
+     plugin para todas o para ninguna) y todo queda como antes. Un censo
+     anterior (sin la marca `jobs.sitemaps.hreflang`) no lee la columna.
+   - **Memoria del análisis**: el tope se dimensionó por la BD, pero el
+     análisis tiene cada anotación en memoria. Con una estructura por fuente
+     (un set por anotación y un diccionario página → código → fuente → destinos)
+     eran ~2,3 KB por anotación, también solo con HTML (+875 B frente a antes):
+     4,6 GB al tope en un contenedor de 4 GB. Ahora las dos consultas se leen
+     por lotes, cada href y su clave se guardan una vez (una URL de un clúster
+     de N idiomas sale en N páginas) y las fuentes de cada anotación son bits
+     en una lista alineada con las filas; las páginas con dos fuentes o más se
+     agrupan después, una a una. **Medido** con `tracemalloc` sobre
+     `analyze_hreflang` (SQLite, clústeres perfectos de 8 y 20 idiomas): 160 k
+     anotaciones solo HTML, 223 MB en master, 363 con la primera versión, 114
+     ahora; 160 k solo del sitemap, 372 → 110 MB; 1 M solo del sitemap, 573 MB
+     (~575 B por anotación, ~1,15 GB al tope).
+   - **De dónde sale cada aviso**: el de una anotación que SOLO declara el
+     sitemap (`hreflang_broken_target`, `hreflang_missing_return`,
+     `hreflang_invalid_lang`) lleva `origen: "sitemap"` en el detalle, porque
+     el arreglo va allí. La ficha de la URL enseña el hreflang de cada fichero
+     de sitemap.
+   - **Medido** con el spider y la tubería reales contra una base efímera (41
+     semillas de Typeform + 716 URLs del sitemap; el rastreo se cortó a mano y
+     `jobs.sitemaps` se escribió a mano con el único fichero leído entero): con
+     el código anterior, **0** avisos de hreflang; con este, **37
+     `hreflang_broken_target` con `origen: sitemap`**: el sitemap anota versiones
+     `es` (`/es/plantillas-sub-category/...`) que dan 404 y que el `<head>` no
+     declara (comprobado con curl). Ninguna discrepancia en esa muestra.
+   - **Qué pide**: re-rastrear (el hreflang del sitemap no está en los censos
+     ya hechos). La nota de Internacionalización de /insights cuenta la tabla
+     `hreflang`; un sitio con el hreflang solo en el sitemap no tiene filas,
+     pero sus avisos sí: un error abierto le pone el tope de la decisión 92 y
+     cada aviso se recomienda (salía un 100 sin recomendaciones con errores en
+     Problemas; `metrics.solo_sitemap`). Queda fuera: los porcentajes de la
+     nota y el CSV cuentan solo la tabla `hreflang`, y la pestaña Hreflang del Explorador lista esas filas;
+     las del sitemap se ven en la ficha de la URL y en los avisos. Tests:
+     `tests/test_hreflang_sitemap.py`.
