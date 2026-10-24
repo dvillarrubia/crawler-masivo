@@ -32,6 +32,11 @@ Cinco ordenes, en el orden en que se usan:
               El mismo juego para la version del catalogo, sin etiquetas ni
               notas, para etiquetarlo a ciegas con el criterio nuevo
               (decision 180). No llama a nadie.
+    huellas   <juego.jsonl> [<juego.jsonl> ...] --salida <huellas.txt> [--campo titulo]
+              Huellas de los fragmentos de `estado[campo]` de los juegos, para
+              que un test vigile que ningun ejemplo de las instrucciones sale
+              de ellos sin meter los titles en el repo (decision 182). No llama
+              a nadie.
 
 Uso (dentro del contenedor del crawler):
 
@@ -485,6 +490,10 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("reetiquetar")
     f.add_argument("juego")
     f.add_argument("--salida", required=True)
+    g = sub.add_parser("huellas")
+    g.add_argument("juegos", nargs="+")
+    g.add_argument("--salida", required=True)
+    g.add_argument("--campo", default="titulo")
     args = ap.parse_args(argv)
 
     if args.orden == "extraer":
@@ -535,6 +544,19 @@ def main(argv: list[str] | None = None) -> int:
         _escribir(args.salida, para_reetiquetar(juego, p.version))
         print(f"{len(juego)} ejemplos de {p.nombre} en {args.salida}, version {p.version} y sin "
               "etiquetar: etiquetarlos a ciegas con el criterio de esa version.")
+    elif args.orden == "huellas":
+        from shared.evaluacion_decisiones import huellas_de_juego
+
+        huellas: set[str] = set()
+        for ruta in args.juegos:
+            huellas |= huellas_de_juego(_leer(ruta), args.campo)
+        nombres = ", ".join(Path(r).name for r in args.juegos)
+        Path(args.salida).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.salida).write_text(
+            f"# Huellas (sha256[:16]) de los fragmentos de estado.{args.campo} de: {nombres}\n"
+            "# Generado con `scripts/evaluar_decisiones.py huellas` (decision 182).\n"
+            + "".join(h + "\n" for h in sorted(huellas)), encoding="utf-8")
+        print(f"{len(huellas)} huellas de {len(args.juegos)} juegos en {args.salida}")
     elif args.orden == "repetir":
         from shared.evaluacion_decisiones import acuerdo, etiqueta_de_respuesta, repetibilidad
         from shared.preguntas import obtener

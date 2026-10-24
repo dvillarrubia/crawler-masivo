@@ -1119,55 +1119,105 @@
      lo añadido); **false** si lo que queda nombra algo concreto (un cliente,
      empresa, proyecto, producto, libro, curso, lugar, país, persona, evento o
      app, aunque sea una palabra, desconocida, o la siga la sección; el ítem
-     de la ruta descrito con palabras comunes; un tema concreto también con
-     ruta opaca; la sección en su propia página; el paso que acaba de pasar en
-     una confirmación); **true** solo si no nombra nada: (1) solo la marca, con
+     de la ruta descrito con palabras comunes; un tema que solo tiene esa
+     página, también con ruta opaca; la sección en su propia página; en una
+     confirmación, el title que nombra la acción hecha, «Subscription
+     confirmed»);
+     **true** solo si no nombra nada: (1) solo la marca, con
      cualquier grafía («ACME», «AcmeGroup»: «WORKOHOLICS» y «PenguinLibros»
      llegan a Jev porque `solo_marca` no las reconoce; en Workoholics muchos
      titles no llevan la marca y no sale de `marcas_del_host`, y en Penguin
      la marca es «Penguin Libros ES», con espacio y sufijo), (2)
-     texto por defecto o de error (Home, Page not found, Access denied, Thank
-     you, Search results for), (3) un nombre interno de plantilla, bloque o
+     texto por defecto o de error (Home, Page not found, Access denied,
+     Search results for), también un agradecimiento que no nombra ninguna
+     acción, aunque sea en una confirmación («Muchas gracias» es `true`,
+     «Registration sent» `false`), (3) un nombre interno de plantilla, bloque o
      fichero o un código, (4) una etiqueta vaga sin asunto, y (5) en la página
      de UN ítem o subsección (producto, gama, curso, área de estudios,
-     instituto, hotel, ciudad, año), la sección o el servicio que comparten
-     sus hermanas o una etiqueta que tiene cada uno sin decir cuál. Y una
-     regla de desempate: en la duda entre nombre y etiqueta, **nombre** (lo
-     que no se puede afirmar no se afirma, 67).
-   - **Ejemplos con marcadores** (`'<client name> | Projects'`, `'<Brand>
-     <country>'`, `'Timetable' on /courses/<course>/timetable`), ninguno de
-     los juegos: salen «SAT», «SafiraAqua» y «Culpa», que la v1 llevaba y
-     están en los dos juegos. Un test lo vigila (169, 180). Los casos reales
-     van en **`CASOS_FRONTERA`** de `shared/preguntas/coherencia.py`, como en
-     `tipo_pagina.py` (178): caso, respuesta y la frase que lo decide, que
-     tiene que estar en la parte «Answer false» o «Answer true» de su
-     respuesta y no en la otra (`tests/test_coherencia.py`). No se envían.
+     instituto, centro, revista, hotel, ciudad, año: una carpeta padre nombra
+     ese ítem) y sin nombrarlo, la sección o el servicio que comparten sus
+     hermanas o una etiqueta que tiene cada uno sin decir cuál.
+   - **La frontera de (5), con una prueba explícita** (revisión de la PR: en
+     el primer borrador «un tema concreto» y «una etiqueta que tiene cada
+     ítem» la reclamaban las dos opciones, y el desempate «en la duda,
+     nombre» empujaba hacia `false`, el lado de los 11 falsos negativos):
+     *¿valdría el mismo title, palabra por palabra, en la misma página de otro
+     curso, instituto, revista o año?* Si sí, `true`; si solo ese ítem puede
+     tenerlo (un proyecto o una línea de investigación del instituto, un libro
+     de la serie), `false`. Y «la sección en su propia página» es `false` solo
+     si la ruta no la pone bajo un ítem concreto: «Work» en /work/ sí,
+     «Redacció» en /revista-comprendre/redaccio no. El desempate «nombre»
+     (lo que no se puede afirmar no se afirma, 67) queda para la duda entre
+     nombre propio y etiqueta; bajo un ítem concreto decide la prueba.
+   - **Ejemplos inventados o con marcadores** (`'<speaker name> | Speakers'`,
+     `'<Brand> <country>'`, `'Harbour extension'`, `'Fishing licences'`,
+     `'Team' on /labs/<lab name>/team`): salen «SAT», «SafiraAqua» y «Culpa»,
+     que la v1 llevaba y están en los dos juegos. El primer borrador tenía
+     uno copiado tal cual del juego de precisión y del conjunto de 2.000
+     («Scholarships and grants») y otro de un cliente («Accessible rooms»), y
+     el test de entonces, con una lista a mano, no lo vio. Ahora
+     `test_ningun_ejemplo_del_title_generico_sale_de_los_juegos_con_que_se_mide`
+     compara cada ejemplo citado (entre comillas o en una lista entre
+     paréntesis) con las **huellas** de los titles de los tres juegos
+     (`tests/fixtures/titles_juegos_title_es_generico.txt`, sha256 de cada
+     fragmento entre separadores; sin titles de clientes en el repo), generadas
+     con la orden nueva `scripts/evaluar_decisiones.py huellas`. Solo se
+     admiten «Home», «Contact» y «Projects», palabras de la propia definición
+     que tiene cualquier sitio. También se cambiaron los ejemplos que eran
+     paráfrasis de un fallo medido («Solar plant» por «Planta Fotovoltaica»,
+     «<client name> | Projects» por «Iberdrola | Work», «News» en
+     /news/<year>/, «Downloads» en /products/<range>/downloads,
+     «promo-apr-23»); «<Brand> <country>» se queda porque es la regla misma.
+   - Los casos reales van en **`CASOS_FRONTERA`** de
+     `shared/preguntas/coherencia.py`, como en `tipo_pagina.py` (178): caso,
+     respuesta y la frase que lo decide, incluidos los pares que las
+     etiquetas separaban sin criterio («Formació» del Innova y «Training and
+     Capacity Building» del CFI; «Presentació» y «Redacció»/«Subscription» de
+     la misma revista; «Nirvana» bajo el Innova, que sí es suyo; «Muchas
+     gracias» frente a «Registration sent»). El test solo vigila que **la
+     frase que lo decide sigue en su parte** («Answer false» o «Answer true»)
+     y no en la otra; no prueba que el significado de la otra parte no lo
+     cubra también. No se envían. Llevan nombres de clientes, como los de la
+     178: no cambian ningún comportamiento ni salen hacia el modelo.
    - **El estado basta** (title, dominio y ruta): todos los fallos se
      deciden con lo que ya va; la ruta dice el padre («enginyeria»,
      «accesorios-bc», «2016») y el dominio la marca. Mandar la marca calculada
      (`marcas_del_host`) ayudaría con «<marca> <país>», pero cambia el estado:
      las filas de los juegos ya guardados no la llevan, `responder` los
      reutiliza tal cual y lo medido tras el merge no sería lo de producción.
-   - **Cambian algunas etiquetas**, así que los juegos se re-etiquetan a
-     ciegas (`evaluar_decisiones.py reetiquetar <juego> --salida <juego_v2>`,
-     180) en vez de reutilizarlos. Las que cambian, según la regla (5) y el
-     desempate: en el de 200, «Serveis per a l'estudiant» en
+   - **Cambian etiquetas**, así que los juegos se re-etiquetan a ciegas
+     (`evaluar_decisiones.py reetiquetar <juego> --salida <juego_v2>`, 180)
+     en vez de reutilizarlos. Las candidatas según la prueba de (5), al menos
+     nueve: en el de 200 pasan a `true` «Serveis per a l'estudiant» en
      /estudis/masters-i-postgraus/ y /cursos-despecialitzacio/ (eran `false`
-     con `[duda: true]`) y «Publicaciones y conferencias» en
-     /cfi-centro-de-financiacion-e-innovacion/ pasan a `true`, la misma
-     etiqueta de subsección que «Formació» del Innova Institute; en el de
-     precisión, «Ciudad Sostenible 2017» en /2017-08-21/la-conca-de-barbera
-     (era `true` con `[duda: false]`) pasa a `false`: nada en la ruta dice que
-     sea la serie. Quedan dudosas «Portal clientes» (`false` en /login, `true`
-     en /register) y «Climatización correcta» en un proyecto de viviendas.
+     con `[duda: true]`), «Publicaciones y conferencias» en /cfi-…/, «Academic
+     regulation» en /masters-postgraduates/academic-information/ y
+     «Evaluation Regulations» en /postgraduate-master-degrees/… (la misma
+     etiqueta que «Normativa» en /estudis/enginyeria/); en el de precisión
+     pasan a `true` «Training and Capacity Building» del CFI y «Redacció» y
+     «Subscription» de la revista Comprendre (eran `false`, las dos últimas
+     con `[duda: true]`), y «Ciudad Sostenible 2017» en
+     /2017-08-21/la-conca-de-barbera (era `true` con `[duda: false]`) pasa a
+     `false`: nada en la ruta dice que sea la serie. Quedan dudosas
+     «Próximos cursos»/«Upcoming Courses» en /cursos-de-especializacion/
+     (¿nombra el ítem o es la etiqueta de cada nivel?), «Portal clientes»
+     (`false` en /login, `true` en /register) y «Climatización correcta» en
+     un proyecto de viviendas. El re-etiquetado a ciegas manda sobre esta
+     lista.
    - **Se medirá tras el merge** (lo hace el orquestador, que es quien llama a
      Jev): re-etiquetar los dos juegos, `responder --confirmar` y `evaluar`,
-     y el de precisión otra vez sobre el mismo conjunto de 2.000. Como la v2 se
-     redactó mirando estos juegos, para el **umbral** hace falta además un
+     y el de precisión otra vez sobre el mismo conjunto de 2.000. **Esa
+     medida es optimista por construcción**: la v2 se redactó mirando estos
+     fallos, y aunque ningún ejemplo es un title de los juegos, las reglas y
+     varios ejemplos con marcadores siguen su forma («<Brand> <country>», el
+     nombre propio seguido de la sección, el proyecto descrito con palabras
+     comunes, la etiqueta de subsección). Sirve para ver si la v2 arregla lo
+     que quería y no rompe los verdaderos positivos, **no para darla por
+     buena**: la v2 no se valida, ni se le pone umbral, hasta medirla en un
      juego de censos no usados aquí (169).
-   - **Coste** (fórmula de la 162): 3.303 caracteres de pregunta frente a
-     1.999, ~330 tokens más por llamada: en Penguin (2.661 llamadas) ~0,04 $
-     más por censo, en La Salle (845) ~0,01 $.
+   - **Coste** (fórmula de la 162): 3.979 caracteres de pregunta frente a
+     1.999, ~490 tokens más por llamada: en Penguin (2.661 llamadas) ~0,05 $
+     más por censo, en La Salle (845) ~0,02 $.
    - Fuera: que `solo_marca` reconozca la marca sin espacios ni sufijo o la
      del dominio cuando `marcas_del_host` no da ninguna (sacaría
      «WORKOHOLICS» y «PenguinLibros» sin preguntar; cambia el filtro de la 177

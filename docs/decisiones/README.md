@@ -209,7 +209,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de doce opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
 | 179 | Una respuesta rara se mide con un juego de precisión (todas las veces que Jev la da en un conjunto amplio, más un control aleatorio): su precisión sí, su recall no | [`llm-y-enriquecido`](llm-y-enriquecido.md#d179) |
 | 180 | `intencion_pagina` v2 (navegacional solo la portada, `existing_users` y `corporate` nuevas) y `title_describe_contenido` v2 (nombrar la página es el nivel alto aunque sea corto), con lo medido de la v1 y el juego listo para re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d180) |
-| 182 | `title_es_generico` v2: un nombre propio o un tema concreto no es genérico aunque sea corto, y la etiqueta que tienen todos los ítems de una sección sin decir cuál sí; casos frontera en el código y juegos a re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d182) |
+| 182 | `title_es_generico` v2: un nombre propio o un tema concreto no es genérico aunque sea corto, y la etiqueta que tienen todos los ítems de una sección sin decir cuál sí (prueba: ¿valdría igual en otro ítem de ese tipo?); ejemplos vigilados por huella contra los juegos, casos frontera en el código y juegos a re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d182) |
 
 ## Anadir una decision
 

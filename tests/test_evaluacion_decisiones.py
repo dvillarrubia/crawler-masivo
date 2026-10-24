@@ -286,3 +286,27 @@ def test_reetiquetar_deja_el_juego_a_ciegas_para_la_version_nueva(tmp_path):
     assert S.evaluar([fila], [], objetivo=0.9)["sin_etiqueta"] == 1
     with pytest.raises(ValueError, match="ya es de la version"):
         E.para_reetiquetar([fila], p.version)
+
+
+def test_las_fugas_se_buscan_por_huella_de_cada_fragmento_del_title(tmp_path):
+    """Decision 182: los titles de un juego se guardan como huellas de sus
+    fragmentos (sin la marca hace falta saber cual es) y un ejemplo citado en
+    unas instrucciones casa con cualquiera de ellos, sin importar mayusculas ni
+    espacios. El apostrofo de «site's» no abre una cita."""
+    juego = [{"estado": {"titulo": "Becas y ayudas | Marca  Campus"}},
+             {"estado": {"titulo": "Otra cosa - Marca"}}, {"estado": {}}]
+    h = E.huellas_de_juego(juego, "titulo")
+    assert E.huella("becas y ayudas") in h and E.huella("marca campus") in h
+    assert E.fragmentos_de_title("A – B: C") >= {"a", "b: c", "a – b: c"}
+    texto = ("The site's page. Examples ('becas Y  ayudas', 'Nada') and a list "
+             "(Uno, Otra cosa).")
+    assert E.ejemplos_de_instrucciones(texto)[:2] == ["becas Y  ayudas", "Nada"]
+    assert E.fugas(texto, h) == [("becas Y  ayudas", "becas y ayudas"), ("Otra cosa", "otra cosa")]
+
+    S = _script()
+    entrada, salida = tmp_path / "juego.jsonl", tmp_path / "huellas.txt"
+    entrada.write_text("".join(json.dumps(f) + "\n" for f in juego), encoding="utf-8")
+    assert S.main(["huellas", str(entrada), "--salida", str(salida)]) == 0
+    lineas = salida.read_text(encoding="utf-8").splitlines()
+    assert lineas[0].startswith("#") and set(x for x in lineas if not x.startswith("#")) == h
+

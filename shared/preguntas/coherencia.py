@@ -85,9 +85,13 @@ TITLE_ES_GENERICO = Pregunta(
     # aunque el title sea corto o vaya seguido del nombre de la seccion, y la
     # marca se quita con cualquier grafia pero solo ella («<marca> <pais>» se
     # queda con el pais). Al otro lado, la etiqueta que tienen todos los items
-    # de una seccion sin decir cual es generica. La v1 decia «si, generico» a
-    # 17 de 51 titles con nombre propio (cota de Wilson 0,53) y «no» a 11 de 17
-    # genericos del juego de 200.
+    # de una seccion sin decir cual es generica, con una prueba explicita para
+    # la frontera (¿valdria igual en la misma pagina de otro item de ese tipo?)
+    # y el desempate «nombre» solo para la duda nombre propio o etiqueta. La v1
+    # decia «si, generico» a 17 de 51 titles con nombre propio (cota de Wilson
+    # 0,53) y «no» a 11 de 17 genericos del juego de 200. Los ejemplos son
+    # inventados o con marcadores; un test los compara con las huellas de los
+    # titles de los juegos (`tests/fixtures/titles_juegos_title_es_generico.txt`).
     version=2,
     instrucciones=(
         "You see a page title, the website's domain and the page's URL path, as a searcher would "
@@ -99,42 +103,50 @@ TITLE_ES_GENERICO = Pregunta(
         "Answer false when what remains names something specific: a proper name or a specific "
         "term that singles out one client, company, partner, project, product, book, course, "
         "place, country, city, person, event or app, even in one word, even if a stranger would "
-        "not recognise it and even when the section name follows it ('<client name> | Projects' "
-        "on /projects/<client>/, '<Brand> <country>' on the /<country code>/ version of the site, "
+        "not recognise it and even when the section name follows it ('<speaker name> | Speakers' "
+        "on /speakers/<speaker>/, '<Brand> <country>' on the /<country code>/ version of the site, "
         "'<project name>' on the page of that project, a book or product name on its page); the "
-        "one item the path points to described in common words ('Solar plant' on the page of the "
-        "company's solar plant project); a "
-        "specific topic in ordinary words ('Scholarships and grants', 'Accessible rooms'), also when "
-        "the path is opaque (only ids or parameters); the section itself when the page is that "
-        "section ('Contact' on /contact, 'Projects' on /projects/, a category on its category "
-        "page); or the step that just happened on a confirmation page ('Subscription confirmed'). "
+        "one item the path points to described in common words ('Harbour extension' on the page "
+        "of that construction project); a topic only this page has, in ordinary words ('Fishing "
+        "licences', 'Coach parking'), also when the path is opaque (only ids or parameters), and "
+        "also under a specific item when the topic is that item's own and not a label its sibling "
+        "items repeat (a project or research line under an institute); the section itself when "
+        "the page is that section and the path puts it under no specific item ('Contact' on "
+        "/contact, 'Projects' on /projects/, a category on its category page); or, on a "
+        "confirmation page, a title that names the action that was completed ('Subscription "
+        "confirmed', 'Order placed'). "
         "A title that is too long, keyword-stuffed, badly written, in another language or about a "
         "different subject than the path is also false: those are other questions. "
         "Answer true only when what remains names nothing specific: "
         "(1) nothing at all, because the title is only the brand, in any spelling, capitalisation "
         "or spacing ('ACME', 'AcmeGroup'); "
         "(2) placeholder, default or error text (Home, Untitled, New page, Welcome, Lorem ipsum, "
-        "{{title}}, Page not found, Access denied, Thank you, Search results for); "
+        "{{title}}, Page not found, Access denied, Search results for), including a thank-you "
+        "that names no action (Thank you, Thanks a lot), on a confirmation page too; "
         "(3) an internal or technical name instead of a title (a template, block or file name such "
-        "as 'menu-block' or 'promo-apr-23', a reference code such as REF-2231 or Node 45); "
-        "(4) a vague label that names no subject (Details, Information, Overview, Article, Results, "
-        "Category, Page 2); "
-        "(5) when the path shows the page belongs to ONE specific item or subsection (one product, "
-        "range, course, area of study, institute, hotel, city or year), a title that only names the "
-        "general section or service "
-        "those sibling pages share ('Hotels' on /hotels/<hotel name>, 'Technical service' on "
-        "/technical-services/<city>), or a label every such item has without naming which one "
-        "('Timetable' on /courses/<course>/timetable, 'Downloads' on /products/<range>/downloads, "
-        "'News' on /news/<year>/). "
-        "When unsure whether a word is a name or a generic label, read it as a name: answer true "
-        "only when you can tell that the title names nothing specific."
+        "as 'card-grid-tpl' or 'hero_v3_final', a reference code such as REF-2231 or Node 45); "
+        "(4) a vague label that names no subject (Details, Information, Overview, Article, "
+        "Results, Category, Page 2); "
+        "(5) when the path puts the page under ONE specific item of a kind the site has several "
+        "of (one product, range, course, study level, institute, centre, magazine, hotel, city or "
+        "year: a parent folder names that item) and the title does not name that item, a title "
+        "that only names the general section or service those sibling pages share ('Hotels' on "
+        "/hotels/<hotel name>, 'Technical service' on /technical-services/<city>), or a label the "
+        "matching page of any other item of that kind would carry word for word ('Timetable' on "
+        "/courses/<course>/timetable, 'Team' on /labs/<lab name>/team, 'Programme' on "
+        "/festival/<year>/programme). The test for (5): would the same title fit, unchanged, the "
+        "same page of another course, institute, magazine or year? If yes, true; if only this "
+        "item could have it, false. "
+        "When unsure whether an unfamiliar word is a proper name or a generic label, read it as a "
+        "name; under a specific item, decide with the test for (5) instead."
     ),
     opciones={
         "true": ("Without the brand, the title names nothing specific: brand only, placeholder or "
-                 "error text, an internal name or code, a vague label, or only the section, or a "
-                 "label every item has, on the page of one specific item."),
+                 "error text, an internal name or code, a vague label, or, on the page of one "
+                 "specific item, only the shared section or a label every such item has."),
         "false": ("The title names something specific: a client, project, product, place, "
-                  "country, person or topic, or the section when the page is that section."),
+                  "country, person, a topic only this page has, or the section when the page is "
+                  "that section."),
     },
     descripcion=("Title que no identifica la pagina, mas alla de la lista cerrada de la decision "
                  "121 (#16, v2 decision 182). Sin evaluar (#8): todo incierto."),
@@ -142,11 +154,12 @@ TITLE_ES_GENERICO = Pregunta(
 
 # Casos reales de produccion (24-oct-2026, solo lectura; juegos de la decision
 # 182) que caian entre las dos respuestas, la que les toca con la v2 y la frase
-# de las instrucciones que lo dice. La frase esta en la parte de esa respuesta
-# («Answer false ...» o «Answer true ...») y no en la otra (lo comprueba
-# `tests/test_coherencia.py`). No se envian: las instrucciones llevan ejemplos
-# con marcadores, no estos (medir sobre el juego que los contiene lo inflaria,
-# la leccion de la 169 y la 180).
+# de las instrucciones que lo decide. Esa frase esta en la parte de su
+# respuesta («Answer false ...» o «Answer true ...») y no en la otra (lo
+# comprueba `tests/test_coherencia.py`); eso vigila que nadie la mueva, no que
+# el significado de la otra parte no lo cubra tambien. No se envian: las
+# instrucciones llevan ejemplos inventados o con marcadores, no estos (medir
+# sobre el juego que los contiene lo inflaria, la leccion de la 169 y la 180).
 CASOS_FRONTERA = [
     # Falsos positivos de la v1 en el juego de precision (confianza 0,50-0,73).
     ("Workoholics «Iberdrola | Work» en /eu/work/iberdrola/ (caso de un cliente)", "false",
@@ -155,17 +168,33 @@ CASOS_FRONTERA = [
     ("Lopesan «Planta Fotovoltaica | Grupo Lopesan» en /corporativa/subvenciones/proyecto-planta-...",
      "false", "described in common words"),
     ("Salle «Servicios del Campus» en /es/grupos_campos/faq/62075", "false", "also when the path is opaque"),
-    ("Workoholics «Work» en /work/", "false", "the section itself when the page is that section"),
+    ("Workoholics «Work» en /work/", "false", "the path puts it under no specific item"),
     ("Saunier «Registration sent» en /solicitar-alta-en-area-privada/registration-sent-366273.html",
-     "false", "the step that just happened"),
+     "false", "names the action that was completed"),
     # Falsos negativos de la v1 en el juego de 200.
-    ("Salle «Normativa» en /ca/estudis/enginyeria/normativa", "true", "a label every such item has"),
-    ("Saunier «Notas de prensa» en /sobre-saunier-duval/noticias/2016/", "true", "'News' on /news/<year>/"),
-    ("Saunier «Gracias» en /buscador-textos-prescripcion/gracias", "true", "Thank you"),
+    ("Salle «Normativa» en /ca/estudis/enginyeria/normativa", "true", "would carry word for word"),
+    ("Saunier «Notas de prensa» en /sobre-saunier-duval/noticias/2016/", "true",
+     "only names the general section or service"),
+    ("Saunier «Gracias» en /buscador-textos-prescripcion/gracias", "true", "a thank-you"),
+    # Pares que la v1 (y la etiqueta de Claude) separaban sin criterio: misma
+    # etiqueta de subseccion bajo un item concreto. La prueba de (5) los junta.
+    ("Salle «Formació» en /innova-institute/formacio-innova-institute", "true",
+     "would the same title fit, unchanged"),
+    ("Salle «Training and Capacity Building» en /cfi-centre-funding-innovation/...", "true",
+     "would the same title fit, unchanged"),
+    ("Salle «Presentació» en /revista-comprendre/presentacio", "true", "magazine"),
+    ("Salle «Redacció» en /revista-comprendre/redaccio y «Subscription» en "
+     "/comprendre-magazine/subscription", "true", "would carry word for word"),
+    ("Salle «Nirvana» en /innova-institute/nirvana (un proyecto del instituto)", "false",
+     "the topic is that item's own"),
+    ("Salle «Scholarships and grants» en /schools-families/study-la-salle/...", "false",
+     "a topic only this page has"),
+    ("Saunier «Muchas gracias» en /confirmacion/ y /formulario-enviado/", "true",
+     "on a confirmation page too"),
     # Verdaderos positivos que la v2 tiene que conservar.
     ("Workoholics «WORKOHOLICS» en /legal/ y Penguin «PenguinLibros»", "true",
      "in any spelling, capitalisation"),
-    ("Saunier «SAT» en /sats/bizkaia-26/", "true", "only names the general section or service"),
+    ("Saunier «SAT» en /sats/bizkaia-26/", "true", "those sibling pages share"),
     ("Lopesan «headerpage» en /es/headerpage", "true", "an internal or technical name"),
     ("Saunier «401 – No autorizado»", "true", "Access denied"),
 ]
