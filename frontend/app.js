@@ -199,6 +199,14 @@ const TAB_SLUG = {
 const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k]));
 
 // Helpers
+// Opciones de la pregunta `tipo_pagina` (decision 178), en castellano.
+const TIPO_PAGINA_LABEL = {
+  home: 'portada', listado: 'listado o categoría', ficha_producto: 'ficha de producto o servicio',
+  landing_comercial: 'landing comercial', articulo: 'artículo', corporativa: 'corporativa',
+  contacto_ubicacion: 'contacto o ubicación', ayuda: 'ayuda o documentación', legal: 'legal',
+  utilidad: 'utilidad', otro: 'otro', ninguna: 'ninguna',
+};
+
 const fmt = {
   // `useGrouping: 'always'`: en es-ES Intl no agrupa los numeros de cuatro
   // cifras, asi que la misma columna mezclaba `4319` con `15.026` (UX-14).
@@ -352,7 +360,9 @@ const fmt = {
     else if (a.max_urls) partes.push('máx. ' + a.max_urls + ' URLs');
     return partes.join(', ') || 'todas las indexables';
   },
-  respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : r,
+  respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : (TIPO_PAGINA_LABEL[r] || r),
+  estadoPlantillaEnriq: e => ({ propagable: 'propagable', orientativa: 'orientativa',
+    mixta: 'mixta: las muestras no coinciden', sin_respuesta: 'sin respuesta' })[e] || e,
   campoDiff: c => ({
     status_code: 'Código de respuesta',
     indexability_status: 'Indexabilidad',
@@ -1879,7 +1889,7 @@ function app() {
       this.cleaningError = null;
       this.cleaningMessage = null;
       this._pararEnriq();
-      this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null;
+      this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null; this.enriqPlantillas = null;
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
@@ -3016,6 +3026,7 @@ function app() {
     enriqRun: null,
     enriqDecisiones: null,
     enriqFiltro: { pregunta: null, respuesta: null, page: 1 },
+    enriqPlantillas: null,
     enriqTimer: null,
 
     _alcanceEnriq() {
@@ -3113,6 +3124,7 @@ function app() {
       if (!this.job || !id) return;
       if (!this.enriqRun || this.enriqRun.id !== id) {
         this.enriqDecisiones = null;
+        this.enriqPlantillas = null;
         this.enriqFiltro = { pregunta: null, respuesta: null, page: 1 };
       }
       try {
@@ -3156,6 +3168,22 @@ function app() {
       if (f.respuesta) q.set('respuesta', f.respuesta);
       try {
         this.enriqDecisiones = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}/decisions?${q}`);
+      } catch (e) { this.error = e.message; }
+    },
+
+    // Respuestas de una pregunta, de la mas frecuente a la menos: un choice
+    // de 11 opciones (tipo de pagina) no se lee en el orden en que llegan.
+    respuestasEnriq(r) {
+      return Object.entries(r.por_respuesta || {}).sort((a, b) => b[1] - a[1]);
+    },
+
+    // Propuesta por plantilla (decision 178): que responden las muestras de
+    // cada plantilla. Solo lectura; sin umbral nada sale propagable.
+    async cargarPlantillasEnriq(pregunta) {
+      if (!this.job || !this.enriqRun) return;
+      try {
+        const q = new URLSearchParams({ pregunta });
+        this.enriqPlantillas = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}/plantillas?${q}`);
       } catch (e) { this.error = e.message; }
     },
 

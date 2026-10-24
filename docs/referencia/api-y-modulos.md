@@ -56,6 +56,7 @@
 | `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
 | `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
 | `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
+| `tipo_pagina.py` | Tipo de pagina por plantilla (#12, decision 178): la muestra por plantilla (`3 + log10(n)`, hasta 8, sin la misma ruta con y sin www), el estado (ruta, palabras, og:type, paginacion, schema que no esta en todas) y `propuesta_por_plantilla` (`mixta`, `orientativa`, `propagable` solo con umbral). No llama a ningun modelo |
 | `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
 | `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
 | `topes_carpeta.py` | Topes de URLs por subdominio o carpeta (decision 172): `compilar` (valida `topes_por_carpeta`), `grupos_de(url, reglas)` (el cupo de ruta y el de host), `clave_normal` (la misma regla con otra grafia, para la herencia), `Presupuesto` (lo que lleva el spider, con `ClavesCompactas`, y su `resumen` para `jobs.topes_carpeta`), `corto` (si algun tope dejo URLs sin pedir: el worker y el analizador) y `describir` (la frase del informe). La usan `JobConfig`, `fusionar_config`, el spider, el worker y el analizador |
@@ -94,6 +95,7 @@
 | POST | `/api/jobs/{id}/enrichment` | Crea y encola una ejecucion. **Exige `X-Enrichment-Token`**; sin `ENRICHMENT_TOKEN` en el entorno, 403 |
 | GET | `/api/jobs/{id}/enrichment[/{run_id}]` | Ejecuciones del job / una con su progreso, coste y resultados por pregunta |
 | GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`) |
+| GET | `/api/jobs/{id}/enrichment/{run_id}/plantillas` | Propuesta por plantilla de una pregunta (`?pregunta=tipo_pagina`): respuesta de sus muestras, acuerdo, confianza y URLs de la plantilla. Solo lee (decision 178) |
 | PATCH | `/api/jobs/{id}/enrichment/{run_id}/cancel` | Cancela (pendiente: en el acto; en curso: entre lotes, conservando lo pagado) |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |

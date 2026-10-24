@@ -108,7 +108,8 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
         actual = CATALOGO.get(pregunta)
         p = salida.setdefault(pregunta, {"por_estado": {}, "por_respuesta": {},
                                          "decididas_por_respuesta": {}, "total": 0, "coste_usd": 0.0,
-                                         "umbral": actual.umbral if actual else None})
+                                         "umbral": actual.umbral if actual else None,
+                                         "tipo": actual.tipo if actual else None})
         p["total"] += n
         p["coste_usd"] = round(p["coste_usd"] + float(coste), 8)
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
@@ -223,6 +224,18 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
             "items": [{"id": i, "url": u, "pregunta": p, "estado": e, "origen": o,
                        "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m}
                       for i, u, p, e, o, r, c, cu, m in filas]}
+
+
+@router.get("/jobs/{job_id}/enrichment/{run_id}/plantillas")
+def propuesta_por_plantilla(job_id: uuid.UUID, run_id: uuid.UUID, pregunta: str = "tipo_pagina",
+                            db: Session = Depends(get_session)):
+    """Lo que las muestras de cada plantilla responden y a cuantas URLs se
+    propondria (decision 178). Solo lee `decisions`: no propaga nada, y sin
+    umbral calibrado ninguna plantilla sale `propagable`."""
+    from shared.tipo_pagina import propuesta_por_plantilla as propuesta
+
+    _run(db, job_id, run_id)
+    return propuesta(db, run_id, pregunta)
 
 
 @router.patch("/jobs/{job_id}/enrichment/{run_id}/cancel", response_model=EnrichmentRunResponse)

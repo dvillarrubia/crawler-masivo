@@ -127,6 +127,9 @@ def clave_cache(clave_est: str, pregunta: Pregunta) -> str:
     """La version y el MODELO PEDIDO entran en la clave: cambiar el texto de
     una pregunta (que es subir su version) o el modelo invalida lo guardado."""
     crudo = f"{clave_est}|{pregunta.nombre}|{pregunta.version}|{pregunta.modelo}"
+    if pregunta.variante:
+        # Opciones de un cliente (decision 178): otras opciones, otra clave.
+        crudo += f"|{pregunta.variante}"
     return hashlib.sha256(crudo.encode("utf-8")).hexdigest()
 
 
@@ -651,6 +654,10 @@ class CapaDecisiones:
                 for f in filas:
                     p = por_nombre[f.pregunta]
                     if f.version_pregunta != p.version or f.modelo != p.modelo:
+                        continue
+                    # La fila no guarda la variante: una respuesta elegida entre
+                    # otras opciones (la taxonomia de antes) no vale (decision 178).
+                    if p.variante and set(f.probabilidades or {}) != set(p.opciones):
                         continue
                     c = clave_cache(f.clave, p)
                     if c in buscadas and c not in salida:
