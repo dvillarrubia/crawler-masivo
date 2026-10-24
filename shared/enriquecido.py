@@ -196,6 +196,18 @@ def _registro_inicial() -> dict[str, Modulo]:
             # informe. Pasa a False el dia que su pregunta tenga umbral.
             ejemplo=True,
         ),
+        Modulo(
+            nombre="pagina_de_utilidad",
+            titulo="Paginas de utilidad (candidatos)",
+            descripcion=("Si la pagina es un paso de un proceso sin valor de busqueda: login, "
+                         "registro, gracias o confirmacion, baja, check-in, carrito. Sobre los mismos "
+                         "sospechosos que el soft 404 (decision 169). Sin evaluar (#8): las respuestas "
+                         "salen inciertas y no van a ningun informe."),
+            preguntas=("es_pagina_de_utilidad",),
+            construir_estados=estados_soft404,
+            filtrar_urls=candidatos_soft404,
+            ejemplo=True,
+        ),
     ]
     return {m.nombre: m for m in modulos}
 

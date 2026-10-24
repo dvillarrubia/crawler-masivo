@@ -195,6 +195,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 167 | Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos fuentes que discrepan son un aviso por host | [`indexabilidad`](indexabilidad.md#d167) |
 | 168 | La interfaz del adaptador WordPress, y plugins y tema por la ruta de sus ficheros (el `?ver=` solo con forma de versión) | [`incidencias`](incidencias.md#d168) |
 | 166 | Las reglas a medida se editan en el modal y se prueban contra una URL en vivo que descarga el worker, con la IP comprobada y fijada en cada salto | [`extraccion-a-medida`](extraccion-a-medida.md#d166) |
+| 169 | Las preguntas se redactan con el criterio de la revisión humana: «legal» incluye lo normativo y el soft 404 se parte en dos (página de utilidad aparte) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d169) |
 
 ## Anadir una decision
 
