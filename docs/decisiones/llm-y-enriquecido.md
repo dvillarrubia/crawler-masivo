@@ -299,5 +299,19 @@
      `es_pagina_de_utilidad` v1, en su propio módulo sobre los mismos
      sospechosos (`candidatos_soft404`).
    - Subir la versión invalida la caché y obliga a re-etiquetar y medir: un
-     umbral calibrado con la redacción vieja no vale para la nueva. Las tres
-     siguen sin umbral y marcadas como sin evaluar hasta medirlas.
+     umbral calibrado con la redacción vieja no vale para la nueva.
+   - **Medido el 24-oct-2026** (juego de la 159 re-etiquetado a ciegas con las
+     definiciones nuevas, con las etiquetas de la persona donde las había; 1 céntimo
+     en Jev):
+     - `es_pagina_legal` v2: 99 % sobre 300 (las 14 legales que revisó la
+       persona coinciden). 0,55 cubriría todo con cota de Wilson 0,971, pero no
+       se pone: es la pregunta de ejemplo y no decide nada.
+     - `es_soft_404` v2: 93,6 % sobre 94. Con umbral 0,90 contesta en el 66 %
+       y acierta en todas (cota 0,94); se le escapan 6 de 29, que quedan
+       inciertas. **Es la primera pregunta con umbral**: el módulo deja de ir
+       marcado como sin evaluar.
+     - `es_pagina_de_utilidad` v1: 91,5 %, pero 7 de sus 8 fallos eran páginas
+       de error contadas como de utilidad, y ningún umbral alcanza la
+       precisión objetivo con margen (`elegir_umbral` exige que todos los de
+       encima, con 30 o más cubiertas, la cumplan). La v2 dice que una página
+       de error no lo es; sigue sin umbral hasta medirla.

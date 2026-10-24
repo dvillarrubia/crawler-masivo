@@ -187,14 +187,14 @@ def _registro_inicial() -> dict[str, Modulo]:
             descripcion=("Si la pagina comunica un error, un producto que ya no esta, una busqueda "
                          "vacia o un «proximamente» aunque responda 200. Solo sobre las sospechosas: "
                          "los candidatos de la version sin modelo (decision 105) y las de menos de "
-                         "50 palabras. Sin evaluar (#8): las respuestas salen inciertas y no van a "
-                         "ningun informe."),
+                         "50 palabras. Evaluada en la decision 169: decide cuando Jev esta seguro "
+                         "(confianza >= 0,90) y deja el resto incierto."),
             preguntas=("es_soft_404",),
             construir_estados=estados_soft404,
             filtrar_urls=candidatos_soft404,
-            # Sin umbral (#8): se ve marcado en el dialogo y nada suyo va a un
-            # informe. Pasa a False el dia que su pregunta tenga umbral.
-            ejemplo=True,
+            # Con umbral desde la decision 169: lo que Jev contesta con
+            # confianza >= 0,90 sale decidido; el resto, incierto.
+            ejemplo=False,
         ),
         Modulo(
             nombre="pagina_de_utilidad",

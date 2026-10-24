@@ -18,6 +18,9 @@ ES_PAGINA_LEGAL = Pregunta(
     # subvenciones, gobierno corporativo, alertas de producto), no solo los
     # cuatro textos legales de siempre.
     version=2,
+    # Medido el 24-oct-2026 con 300 ejemplos de Lopesan y Saunier Duval
+    # (decision 169): 99 % de acierto, y 0,55 cubriria el 100 % con cota de
+    # Wilson 0,971. No se pone: es de ejemplo y no decide nada.
     instrucciones=(
         "Is this web page a legal, regulatory or compliance page rather than "
         "regular site content? Count the classic legal texts (legal notice, "
