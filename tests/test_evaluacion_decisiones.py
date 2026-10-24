@@ -50,6 +50,33 @@ def test_el_umbral_es_el_mas_bajo_que_aguanta_la_precision_con_margen():
     assert E.elegir_umbral(curva, objetivo=0.7, min_cubiertas=30) == 0.6        # 0,8 con cota ~0,71
 
 
+def test_un_umbral_comun_que_solo_decide_los_no_se_avisa():
+    """El caso del soft 404 v2 (decision 169): 60 «no» seguros y bien, 29 «si»
+    reales que Jev contesta con poca confianza. El umbral comun sale, pero de
+    los «si» casi no decide ninguno: `por_respuesta` lo cuenta y `avisos` lo
+    dice."""
+    filas = ([{"etiqueta": "false", "respuesta": "false", "confianza": 0.95}] * 60
+             + [{"etiqueta": "true", "respuesta": "true", "confianza": 0.95}] * 2
+             + [{"etiqueta": "true", "respuesta": "true", "confianza": 0.7}] * 21
+             + [{"etiqueta": "true", "respuesta": "false", "confianza": 0.6}] * 6
+             + [{"etiqueta": "false", "respuesta": "true", "confianza": 0.72}] * 5)
+    m = E.metricas(filas, objetivo=0.9)
+    assert m["umbral"] == 0.95
+    si = m["por_respuesta"]["true"]
+    assert si["reales"] == 29 and si["decididas"] == 2 and si["umbral_propio"] is None
+    assert si["recuperadas"] == round(2 / 29, 4)
+    assert m["por_respuesta"]["false"]["decididas"] == 60
+    assert m["por_respuesta"]["false"]["reales"] == 65
+    assert len(m["avisos"]) == 1 and "«true»" in m["avisos"][0]
+
+
+def test_sin_umbral_no_hay_avisos_ni_decididas():
+    filas = [{"etiqueta": "true", "respuesta": "false", "confianza": 0.9}] * 5
+    m = E.metricas(filas, objetivo=0.9)
+    assert m["umbral"] is None and m["avisos"] == []
+    assert "decididas" not in m["por_respuesta"]["false"]
+
+
 def test_29_de_30_no_basta_para_un_95():
     curva = E.curva_cobertura([(0.9, True)] * 29 + [(0.9, False)], 30)
     assert curva[0]["precision"] == pytest.approx(0.9667, abs=1e-4)

@@ -33,6 +33,10 @@ Z_WILSON = 1.96
 # Ejemplos que tienen que quedar por encima del umbral para poder elegirlo: con
 # 5 aciertos de 5 la precision es 1,0 y no dice nada.
 MIN_CUBIERTAS = 30
+# Una respuesta con al menos estas etiquetas reales de la que el umbral comun
+# decide menos de esta parte se avisa (decision 169).
+MIN_REALES_AVISO = 10
+RECUPERADAS_MINIMAS = 0.25
 CUBOS_ECE = 10
 
 
@@ -149,10 +153,44 @@ def metricas(filas: Iterable[dict], *, objetivo: float = PRECISION_OBJETIVO,
     salida["curva"] = curva_cobertura(con_conf, n)
     salida["umbral"] = elegir_umbral(salida["curva"], objetivo=objetivo, min_cubiertas=min_cubiertas)
     salida["objetivo"] = objetivo
+    salida["por_respuesta"] = _por_respuesta(validas, clases, salida["umbral"], objetivo, min_cubiertas)
+    salida["avisos"] = [
+        f"con el umbral {salida['umbral']} solo sale decidido el {round(100 * d['recuperadas'])} % "
+        f"de los «{c}» reales: el umbral lo sostienen las otras respuestas"
+        for c, d in salida["por_respuesta"].items()
+        if d.get("recuperadas") is not None and d["reales"] >= MIN_REALES_AVISO
+        and d["recuperadas"] < RECUPERADAS_MINIMAS]
     tokens = [f["tokens"] for f in validas if isinstance(f.get("tokens"), (int, float))]
     costes = [f["coste"] for f in validas if isinstance(f.get("coste"), (int, float))]
     salida["tokens_medios"] = round(sum(tokens) / len(tokens), 1) if tokens else None
     salida["coste_medio_usd"] = round(sum(costes) / len(costes), 8) if costes else None
+    return salida
+
+
+def _por_respuesta(validas: list[dict], clases: list[str], umbral: float | None,
+                   objetivo: float, min_cubiertas: int) -> dict[str, dict]:
+    """Lo mismo, separado por lo que contesta Jev (decision 169). Un umbral
+    comun lo pueden arrastrar las respuestas de una sola clase: en el soft 404
+    v2, con 0,90 se decidian 62 paginas, 60 de ellas «no», y de los 29 soft 404
+    reales solo 2 salian decididos. Por respuesta se ve que se decide de cada
+    una con el umbral elegido (cuantas, con que cota y que parte de las reales
+    recupera) y que umbral tendria esa respuesta sola."""
+    salida = {}
+    for c in clases:
+        suyas = [f for f in validas if f["respuesta"] == c
+                 and isinstance(f.get("confianza"), (int, float)) and not isinstance(f.get("confianza"), bool)]
+        con_conf = [(float(f["confianza"]), f["etiqueta"] == c) for f in suyas]
+        reales = sum(1 for f in validas if f["etiqueta"] == c)
+        d: dict[str, Any] = {"respuestas": len(suyas), "reales": reales,
+                             "umbral_propio": elegir_umbral(curva_cobertura(con_conf, len(con_conf)),
+                                                            objetivo=objetivo, min_cubiertas=min_cubiertas)}
+        if umbral is not None:
+            encima = [ok for conf, ok in con_conf if conf >= umbral]
+            inferior = wilson_inferior(sum(encima), len(encima))
+            d.update({"decididas": len(encima), "aciertos": sum(encima),
+                      "precision_minima": _r(inferior),
+                      "recuperadas": _r(sum(encima) / reales) if reales else None})
+        salida[c] = d
     return salida
 
 

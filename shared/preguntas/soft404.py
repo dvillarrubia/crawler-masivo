@@ -6,9 +6,9 @@ error del sitio (sonda), titulo de error, busqueda vacia, OutOfStock— y lo
 dudoso lo marca `soft_404_candidato` con `candidato_llm`. Esta pregunta solo
 se hace sobre esos candidatos: es el prefiltro barato del plan.
 
-Evaluada en la decision 169 (v2, umbral 0,90): lo que Jev contesta con esa
-confianza sale decidido; el resto, `incierto`. `es_pagina_de_utilidad` sigue
-sin umbral: ninguno alcanza la precision objetivo con margen.
+Medidas en la decision 169 y todavia sin umbral, asi que todo sale
+`incierto` y nada llega a un informe: en `es_soft_404` v2 un umbral comun
+solo decidiria los «no», y `es_pagina_de_utilidad` v2 esta sin medir.
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ ES_SOFT_404 = Pregunta(
     # v2 (decision 169): las paginas de utilidad (login, gracias, baja...)
     # salen de aqui y van a `es_pagina_de_utilidad`: funcionan como deben.
     version=2,
-    # Medido el 24-oct-2026 con 94 candidatos de Lopesan y Saunier Duval
-    # (decision 169): 93,6 % de acierto. Con 0,90 contesta en el 66 % y acierta
-    # en todas (cota de Wilson 0,94); por debajo queda `incierto`.
-    umbral=0.90,
+    # Medido el 24-oct-2026 con 94 candidatos (decision 169): 93,6 % de
+    # acierto, pero sin umbral. El comun (0,90) decidiria 62 paginas, 60 de
+    # ellas «no»: de los 29 soft 404 reales solo 2 saldrian decididos, y las
+    # paginas de error evidentes las contesta «si» con 0,57-0,89.
     instrucciones=(
         "This web page answered with HTTP 200. Judging only by its title, main heading and the start "
         "of its main content, does it actually tell the visitor that what they wanted is not there: "
@@ -40,8 +40,8 @@ ES_SOFT_404 = Pregunta(
         "true": "The page communicates an error, missing item, no results or an empty placeholder.",
         "false": "The page delivers real content, even if short.",
     },
-    descripcion=("Soft 404 sobre los candidatos de la decision 105. Evaluada en la decision "
-                 "169: umbral 0,90."),
+    descripcion=("Soft 404 sobre los candidatos de la decision 105. Medida en la decision 169, "
+                 "sin umbral: todo incierto."),
 )
 
 ES_PAGINA_DE_UTILIDAD = Pregunta(
