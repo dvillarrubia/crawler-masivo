@@ -492,6 +492,8 @@ HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
 HUELLAS |= {("tipo_pagina", 2): "b8c3c045e01aea33"}
 # v2 del title generico: el nombre propio no es generico (decision 182).
 HUELLAS |= {("title_es_generico", 2): "a9817259e28e9786"}
+# v2 del marcado frente a lo visible: el importe que no es ninguno de los del item (decision 184).
+HUELLAS |= {("schema_contradice_contenido", 2): "826d86ea9a09574f"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

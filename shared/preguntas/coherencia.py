@@ -18,7 +18,9 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
   marcado (precio, valoracion, fecha de un evento u oferta, disponibilidad).
   Solo la contradiccion: que un valor no aparezca en los fragmentos no prueba
   nada (se guarda el contenido principal, no la pagina entera). Ni el autor ni
-  la fecha de publicacion: la firma no esta en el contenido guardado.
+  la fecha de publicacion: la firma no esta en el contenido guardado. v2
+  (decision 184): si los fragmentos dan los precios del item y el declarado no
+  es ninguno, eso no es ausencia sino contradiccion.
 
 Ninguna esta evaluada (#8): sin umbral, todo sale `incierto` y nada va a un
 informe. Las incidencias de #16/#17 que saldrian de ellas (`title_desalineado`,
@@ -203,27 +205,41 @@ CASOS_FRONTERA = [
 SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     nombre="schema_contradice_contenido",
     tipo="noul",
-    version=1,
+    # v2 (decision 184): si los fragmentos dan los precios del item de la
+    # pagina y el importe declarado no es ninguno de ellos, se contradice. La
+    # v1 juntaba ese caso con «no aparece» (que no prueba nada) y se callaba
+    # 15 de 19 contradicciones reales en los censos del 24-oct.
+    version=2,
     instrucciones=(
         "A web page declares the values under 'marcado' in its structured data (schema.org markup, "
         "which visitors do not see). 'texto_visible' holds fragments of the text visitors do see on "
-        "that page; they are partial. Does the visible text clearly contradict at least one declared "
-        "value? Answer true only when the fragments show a different value for the same thing: a "
-        "different price or currency for the same product, room or offer, a different rating or "
-        "number of reviews, a different event date or offer validity date, or a different "
-        "availability (the markup says InStock and the page says sold out). Answer false when the "
-        "visible values match; when a declared value is simply not mentioned in the fragments "
-        "(absence proves nothing); when the visible figure clearly refers to something else (another "
-        "room or product, a crossed-out old price, a 'from' price consistent with the declared one, "
-        "a total for several nights or people); or when only the format differs (116€ and 116,00 EUR, "
-        "2026-10-31 and 31 October 2026, 4.5 and 4,5/5)."
+        "that page; they are partial. 'titulo' and 'h1' tell which item the page is about: the one "
+        "product, room, course, venue or service it presents. Does the visible text clearly "
+        "contradict at least one declared value for that item? "
+        "Answer true when the fragments show that same item with a different value for the same "
+        "thing. For a price: the markup declares one amount (in price, lowPrice or a priceRange "
+        "written as a single amount) and the fragments show the item's own prices, but the declared "
+        "amount is none of them; markup left out of date is exactly what this question looks for, "
+        "so a declared amount that differs from every price the page gives for the item is a "
+        "contradiction even when the difference is small or the field is priceRange. Also true for "
+        "a different currency for the same item's price, a different rating or number of reviews, "
+        "a different event date or offer validity date, or a different availability (the markup "
+        "says InStock and the page says sold out). "
+        "Answer false when the fragments give no price, rating, date or availability for that item "
+        "at all (a declared value that is simply not mentioned proves nothing); when the declared "
+        "amount equals any of the amounts the page gives for the item, in any role (base, per "
+        "hour, per night, discounted, or a crossed-out old price); when the differing figure belongs "
+        "to something else: another product, room, venue or branch listed on the same page, an "
+        "add-on, a monthly instalment or deposit, a total for several items, nights or people, or "
+        "a 'from' price for a whole range that is consistent with the declared one; or when only "
+        "the format differs (116€ and 116,00 EUR, 2026-10-31 and 31 October 2026, 4.5 and 4,5/5)."
     ),
     opciones={
-        "true": "A declared value is visibly contradicted for the same thing (price, rating, date or availability).",
-        "false": "The visible values match the markup, refer to something else, or the declared values are not shown.",
+        "true": "A declared value is visibly contradicted for the page's own item (price, currency, rating, date or availability).",
+        "false": "The values match, the differing figure belongs to something else, or the item's values are not shown.",
     },
     descripcion=("Marcado que contradice lo visible: precio, valoracion, fecha de un evento u "
-                 "oferta o disponibilidad (#17). Sin evaluar (#8): todo incierto."),
+                 "oferta o disponibilidad (#17, v2 decision 184). Sin evaluar (#8): todo incierto."),
 )
 
 PREGUNTAS = [TITLE_DESCRIBE_CONTENIDO, TITLE_ES_GENERICO, SCHEMA_CONTRADICE_CONTENIDO]

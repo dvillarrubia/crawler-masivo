@@ -1460,3 +1460,63 @@
      «WORKOHOLICS» y «PenguinLibros» sin preguntar; cambia el filtro de la 177
      y la incidencia por regla aún no existe), y mandar la marca en el estado
      (arriba).
+
+<a id="d184"></a>
+184. **`schema_contradice_contenido` v2: si los fragmentos dan los precios del
+   ítem de la página y el importe declarado no es ninguno de ellos, eso es una
+   contradicción, no una ausencia** (#8, #17; mide lo que dejó la 177). La
+   pregunta sube a la v2 (huella en `HUELLAS`) y sigue **sin umbral**: todo
+   sale `incierto`. El estado no cambia.
+   - **Lo que fallaba de la v1, medido el 25-oct-2026** (producción, solo
+     lectura; censos nuevos de tres sitios con schema, 5.037 páginas:
+     Ilerna 002beac0, Telpark 6959c5bf, mytransfers e680723a; juego
+     `/data/archivo/jev/schema_censos_nuevos_etiquetado.jsonl`, 600 estados
+     etiquetados por dos agentes a ciegas y un juez en los desacuerdos, que
+     fueron 0): **97,5 %**, pero de las **19 contradicciones reales** Jev
+     solo ve 4 (confianza de los «no» fallados 0,55-0,79), y no da ningún
+     falso «sí». Las 15 que calla son el mismo caso: el marcado declara un
+     importe (un `priceRange` de un solo importe en las fichas de parking, el
+     `price` de un curso) y la página da los precios de ese mismo ítem, pero
+     ninguno es el declarado. La v1 lo juntaba con «el valor no aparece en
+     los fragmentos» (que no prueba nada) y con «un precio desde coherente».
+     En los juegos de la 177 (200 y precisión, 118) todos los «sí» eran otro
+     caso, la moneda (EUR declarado y USD visible en Lopesan), y ahí la v1
+     acertaba con confianza 0,50-0,69.
+   - **La v2**, en inglés como la v1: `titulo` y `h1` dicen cuál es el ítem;
+     **true** si los fragmentos dan los precios propios del ítem y el importe
+     declarado (`price`, `lowPrice` o un `priceRange` de un importe) no es
+     ninguno, aunque la diferencia sea pequeña o el campo sea `priceRange`
+     (un marcado desfasado es justo lo que se busca), y también moneda,
+     valoración, fecha y disponibilidad como en la v1; **false** si no hay
+     ningún valor del ítem en los fragmentos, si el declarado coincide con
+     cualquiera de los del ítem en cualquier papel (base, por hora, por noche,
+     con descuento, tachado), si la cifra distinta es de otra cosa (otro
+     producto, habitación, sede o parking listado en la misma página, un
+     extra, una cuota mensual o señal, un total de varios ítems, noches o
+     personas, un «desde» coherente) o si solo cambia el formato. Sin
+     ejemplos sacados de los juegos: los de formato son los de la v1.
+   - **Medida antes de mergear** con un contenedor efímero del worker con la
+     v2 montada (`docker run --rm`, la clave del entorno del worker; reglas de
+     operación), respuestas en `/data/archivo/jev/r_schema_v2_*.jsonl`:
+     - Juego de 600 de los censos nuevos: **99,2 %**; **17 de 19**
+       contradicciones (antes 4) y **3 falsos «sí»** (confianza 0,55-0,58),
+       los tres el mismo: el `price` de un curso de especialización de Ilerna
+       es la suma de sus asignaturas y los fragmentos solo dan las
+       asignaturas sueltas (el «total de varios ítems» de las
+       instrucciones). Los «true» decididos tienen cota 0,64.
+     - Juego de 200 de la 177: **200/200** (6 de 6 contradicciones, antes 3,
+       con confianza 0,63-0,83). Juego de precisión de la 177 (118): **118/118**;
+       el único falso «sí» de la v1 (un 4,5/5 escrito dentro de una reseña)
+       ahora es «no». `evaluar` no lo puntúa como precisión porque se sacó
+       con las respuestas de la v1.
+     - Juntos (800, sin el de precisión): «true» 23 de 26 aciertos, **cota
+       0,71**: no llega a 0,9, **sin umbral**. Con cero falsos «sí» harían
+       falta unas 35 contradicciones para llegar; hay 25.
+   - **Lo que no se puede afirmar**: el juego de 600 no es ciego para quien
+     redactó la v2 (se escribió viendo sus fallos, aunque sin copiar casos), y
+     sus 17 aciertos son pocos ítems distintos: casi todos son cinco
+     parkings de Telpark repetidos en tres idiomas. La medida limpia es un
+     censo que nadie haya mirado.
+   - Fuera: tocar el estado (mandar el precio de cada asignatura con su
+     etiqueta para que el total se pueda sumar) y bajar los falsos «sí» de
+     Ilerna con ejemplos de cursos (sería copiar el juego).
