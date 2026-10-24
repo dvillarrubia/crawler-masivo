@@ -20,7 +20,7 @@ from api.auth import AutenticacionMiddleware, desactivada, token_configurado
 from api.mcp_despacho import DespachoMcp, EstadoMcp
 from api.routers import (
     almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
-    results, segmentos, semantic, sesion, uso,
+    results, robots_prueba, segmentos, semantic, sesion, uso,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -122,6 +122,7 @@ app.include_router(segmentos.router)
 app.include_router(sesion.router)
 app.include_router(credenciales.router)
 app.include_router(compartido.router)
+app.include_router(robots_prueba.router)  # decision 171
 
 
 @app.get("/health", tags=["system"])

@@ -1143,3 +1143,84 @@
      nota y el CSV cuentan solo la tabla `hreflang`, y la pestaña Hreflang del Explorador lista esas filas;
      las del sitemap se ven en la ficha de la URL y en los avisos. Tests:
      `tests/test_hreflang_sitemap.py`.
+
+<a id="d170"></a>
+170. **`data-nosnippet` se mide al rastrear, y solo se avisa cuando esconde lo
+   principal de una indexable** (Ola 7.2 de `docs/PLAN_MEJOR_CRAWLER.md`, lo
+   que quedaba de la 137). Google documenta
+   ([robots meta tag, data-nosnippet](https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag#data-nosnippet-attr),
+   consultado el 2026-10-24) que el texto marcado con `data-nosnippet` no se usa
+   como fragmento, que el atributo **se aplica en `span`, `div` y `section`**, que
+   es booleano (cuenta su presencia, con cualquier valor) y sin caja, y que puede
+   leerse antes o después del render. Las funciones de IA de la Búsqueda se
+   controlan con las mismas directivas (137).
+   - **Se guarda en `html_meta.data_nosnippet`** (JSON, `shared/data_nosnippet.py`,
+     calculado por el spider sobre el `<body>` rastreado, servido o renderizado):
+     `elementos` (los marcados válidos que se pintan, el anidado una vez),
+     `palabras`, `h1` (cubre al menos la mitad del primer H1 que se pinta, el
+     título visible principal; None sin H1), `principal` (fracción del contenido
+     principal de `extract_main_content` dentro) e `ignorados` /
+     `etiquetas_ignoradas`. `{"elementos": 0, "ignorados": 0}` = medido y sin
+     atributo; NULL = rastreo anterior o fallo al medir (best-effort con el `try`
+     sobre la función entera: un fallo no se lleva la fila de `html_meta`).
+   - **El contenido principal se cuenta por líneas**, no por palabras sueltas:
+     una línea del contenido principal cuenta si aparece entera en el texto
+     cubierto (las de menos de cuatro palabras, solo si son una línea entera de
+     lo cubierto). Con palabras sueltas, un pie largo marcado «cubría» el
+     artículo por las palabras comunes; con líneas, una que mezcla texto
+     cubierto y no cubierto no cuenta: la medida se queda corta, nunca se pasa (67).
+   - **`data_nosnippet_contenido_principal`** (`warning`): indexable 2xx con
+     respuesta válida cuyo `data-nosnippet` cubre el H1 o al menos la mitad del
+     contenido principal. Por (host, plantilla, motivo) con `paginas_afectadas`
+     y la fracción mediana (36, 64, 88). No se suma a una página con `nosnippet`
+     o `max-snippet:0`, que ya lleva `nosnippet_en_indexable`.
+   - **`data_nosnippet_ignorado`** (`info`), por plantilla: el atributo en un
+     elemento que no es `span`, `div` ni `section`. **No se afirma que Google lo
+     ignore**: la propia página de Google que lo documenta lo lleva en
+     elementos propios (`devsite-*`) y en un `nav`. Se dice lo que se sabe: fuera
+     de lo documentado, no se puede contar con ello. Esos elementos no cuentan
+     para lo cubierto.
+   - En el informe, `ia.data_nosnippet` (páginas afectadas), y los dos tipos en
+     la vista IA del Explorador.
+   Medido el 2026-10-24 con 8 páginas descargadas desde local: la de Google
+   (3 marcados válidos en cabecera, metadatos y pie, 92 palabras; 11 en
+   elementos no documentados; ni H1 ni contenido: sin aviso) y Wikipedia (el
+   `printfooter`, 14 palabras: sin aviso). Lopesan, UOC, Xataka y BBC no lo usan.
+   Es lo esperable: el aviso es para el sitio que envuelve el artículo entero
+   por error. **Pide re-rastrear.** Tests: `tests/test_data_nosnippet.py`.
+
+<a id="d171"></a>
+171. **robots.txt de prueba: el veredicto y la línea que decide de un robots.txt
+   pegado, con la lógica del crawler y sin descargar nada** (Ola 7.3).
+   `POST /api/robots/probar` (`api/routers/robots_prueba.py`) recibe el texto,
+   hasta 500 URLs o rutas y hasta 20 agentes, y devuelve por cada par lo mismo
+   que la ficha de una URL bloqueada (129): `permitida`, `linea`, `texto`,
+   `directiva`, `grupo` y `linea_grupo`. Sirve para validar un fichero antes de
+   subirlo.
+   - **La misma lógica**: `shared/robots_regla.evaluar_lote`, que es
+     `regla_que_decide` leyendo el fichero una vez por agente (test: da lo
+     mismo una a una), y que `tests/test_robots_regla.py` contrasta con Protego.
+     Dos modos: `google` (token del bot, grupo por token entero, como el
+     análisis y como Google, 113) y `rastreador` (el User-Agent entero y el grupo
+     buscado dentro de él, como Protego en Scrapy, 98). Un User-Agent entero en
+     modo `google` es un 422 que dice que use el otro modo: con el UA de
+     Googlebot, Google no casaría ningún grupo y saldría «todo permitido».
+     Las claves del catálogo (`oai-searchbot`) valen por su token.
+   - **`diagnostico`** (`shared/robots_regla.diagnostico`): líneas que el parser
+     se salta con el mismo `_directiva` (directiva desconocida, como `Noindex:`;
+     regla antes de cualquier `User-agent`; texto que no es directiva), los
+     `Sitemap`, grupos y reglas, y si pasa de los 500 KiB que lee Google.
+   - **Tope de coste**: reglas × URLs × agentes ≤ 5 M. Medido: unos 4,5 M
+     emparejamientos por segundo; un fichero de 20.000 reglas con 500 URLs y 20
+     agentes tardaba 44 s y ocupaba un hilo de la API. Uno real (decenas de
+     reglas) queda muy por debajo. Pide token, como todo `/api`.
+   - **En la interfaz**, bajo «robots.txt por bot» del resumen del rastreo:
+     pegar el fichero o partir del guardado de un host del censo
+     (`GET /api/jobs/{id}/robots/cuerpo?origen=`), URLs y agentes, y la tabla con
+     la línea que decide y las líneas que no se leen.
+   - Lo que no hace: no descarga el robots.txt ni las URLs, ni dice qué hará un
+     bot que no obedece robots.txt (129). El historial de robots.txt sigue en #36.
+   Tests: `tests/test_robots_prueba.py` (casos límite —comodines, `$`, grupos
+   con varios `User-agent` y repetidos, `Allow` frente a `Disallow` por longitud
+   y en empate, `Googlebot-Image` y `Google` frente a `Googlebot`— y el veredicto
+   contra Protego en los dos modos) y `tests/test_robots_prueba_api.py`.

@@ -50,6 +50,7 @@ from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor, oportu
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from analysis import avisos_de_medios
+from analysis import avisos_de_nosnippet
 from analysis import avisos_de_wordpress
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
@@ -427,6 +428,7 @@ class SEOAnalyzer:
         self.analyze_html_ignorado()
         avisos_de_html.avisar_declaraciones_html(self)  # decision 108
         avisos_de_medios.avisar(self)  # decisiones 154, 155 y 156
+        avisos_de_nosnippet.avisar(self)  # decision 170
         self.analyze_robots_syntax()
         self.analyze_duplicates()
         self.analyze_near_duplicates()

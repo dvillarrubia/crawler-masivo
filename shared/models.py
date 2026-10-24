@@ -823,6 +823,11 @@ class HtmlMeta(Base):
     # anuncia en su head, resueltas.
     amphtml = Column(Text, nullable=True)
     alternate_movil = Column(Text, nullable=True)
+    # Decision 170: lo que `data-nosnippet` esconde al fragmento
+    # (`shared/data_nosnippet.medir`): `{elementos, ignorados,
+    # etiquetas_ignoradas, palabras, h1, principal}`. `{"elementos": 0, ...}` =
+    # medido y sin el atributo; NULL = rastreo anterior o fallo al medir.
+    data_nosnippet = Column(JSON(none_as_null=True), nullable=True)
 
     url_rel = relationship("Url", back_populates="html_meta")
 

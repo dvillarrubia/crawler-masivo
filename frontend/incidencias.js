@@ -100,6 +100,17 @@ const ISSUE_INFO = {
     google: 'La indexa, pero la enseña sin fragmento de texto en los resultados. Según la documentación de Google sobre las funciones de IA de la Búsqueda, esas mismas directivas son las que controlan qué se usa en AI Overviews y AI Mode: con «nosnippet», el contenido de la página no se usa como entrada directa ahí. Un resultado sin descripción convierte peor y la página desaparece de las respuestas de IA de Google.',
     arreglo: 'Quitar «nosnippet» de las plantillas indexables. Si hay un trozo concreto que no se quiere citar (un precio, un aviso legal), marcarlo con el atributo data-nosnippet en vez de cerrar la página entera. Puede ser deliberado (contenido de pago, por ejemplo): confirmarlo antes de tocarlo.',
   },
+  // Decision 170: data-nosnippet que esconde lo principal o que Google ignora.
+  'data_nosnippet_contenido_principal': {
+    que: 'En páginas indexables, el atributo data-nosnippet cubre el H1 (el título visible principal) o la mayor parte del contenido principal. Va una fila por plantilla; en los detalles, el motivo (h1, contenido o los dos) y la fracción mediana del contenido cubierta.',
+    google: 'Google no usa como fragmento el texto marcado con data-nosnippet, y según su documentación las funciones de IA de la Búsqueda (AI Overviews, AI Mode) se controlan con las mismas directivas: ese texto tampoco se usa ahí. La página sigue indexada, pero el resultado sale con un fragmento sacado de lo que queda (el menú, el pie) y lo principal no se cita en las respuestas de IA. Solo se mide en span, div y section, que es donde Google documenta que se aplica, y puede leerse antes o después del render.',
+    arreglo: 'Dejar data-nosnippet solo en el trozo que no se quiere citar (un precio, un aviso legal, un bloque de reseñas) y no en el contenedor del artículo o del título. Si se marcó a propósito (contenido de pago), confirmarlo antes de tocarlo. Google pide no añadirlo ni quitarlo con JavaScript. Se ve tras volver a rastrear.',
+  },
+  'data_nosnippet_ignorado': {
+    que: 'Páginas indexables con el atributo data-nosnippet en elementos que no son span, div ni section (en los detalles, cuáles: p, article, li…). Una fila por plantilla.',
+    google: 'Su documentación dice que data-nosnippet se aplica en span, div y section; en otro elemento no está documentado, así que no se puede contar con que ese texto quede fuera del fragmento y de AI Overviews. (La propia documentación de Google lo lleva en elementos propios y en un nav: no se afirma que lo ignore, solo que no lo garantiza.)',
+    arreglo: 'Si ese texto no debe citarse, envolverlo en un span, div o section con data-nosnippet. Si da igual, quitar el atributo para que nadie se confunda. Es informativo.',
+  },
   'max_snippet_restrictivo': {
     que: 'Una página indexable limita su fragmento con «max-snippet» a menos de 160 caracteres (en los detalles, el límite).',
     google: 'Respeta el límite: el fragmento del resultado se corta ahí, y las funciones de IA de la Búsqueda solo pueden citar ese trozo. Con varias directivas, aplica la más restrictiva; «max-snippet:-1» es sin límite.',
@@ -913,6 +924,8 @@ const ISSUE_LABEL_EXTRA = {
   robots_difiere_para_googlebot: 'robots.txt distinto para Googlebot',
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
+  data_nosnippet_contenido_principal: 'data-nosnippet esconde el H1 o el contenido',
+  data_nosnippet_ignorado: 'data-nosnippet en un elemento que Google ignora',
   ancla_generica: 'Enlazada con anclas genéricas',
   trafico_en_pagina_perdida: 'Página con tráfico de Google que se pierde',
   indexable_no_indexada_por_google: 'Indexable que Google no tiene indexada',

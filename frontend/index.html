@@ -2422,6 +2422,53 @@
                     </template>
                   </div>
                 </template>
+                <!-- robots.txt de prueba (decision 171): el veredicto y la linea
+                     que decide, con la logica del crawler y sin descargar nada. -->
+                <details class="mt-2" data-testid="robots-prueba">
+                  <summary class="text-sm"><b>Probar un robots.txt</b> <span class="text-dim">antes de subirlo</span></summary>
+                  <div class="text-sm text-dim mb-1">Pega el fichero o parte del guardado:
+                    <template x-for="h in robotsBots.hosts" :key="'c' + h.origen">
+                      <button type="button" class="btn btn-sm" @click="robotsPruebaCargar(h.origen)" x-text="h.origen"></button>
+                    </template>
+                  </div>
+                  <textarea x-model="robotsPrueba.texto" rows="8" style="width:100%;font-family:monospace;font-size:.8rem" placeholder="User-agent: *&#10;Disallow: /privado/"></textarea>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem" class="mt-1">
+                    <label class="text-sm">URLs o rutas, una por línea
+                      <textarea x-model="robotsPrueba.urls" rows="4" style="width:100%"></textarea></label>
+                    <label class="text-sm">Agentes, uno por línea
+                      <textarea x-model="robotsPrueba.agentes" rows="4" style="width:100%"></textarea></label>
+                  </div>
+                  <div class="mt-1 text-sm">
+                    <select x-model="robotsPrueba.modo">
+                      <option value="google">Como Google (token del bot: Googlebot, GPTBot…)</option>
+                      <option value="rastreador">Como nuestro rastreo (User-Agent entero)</option>
+                    </select>
+                    <button type="button" class="btn btn-primary btn-sm" :disabled="robotsPrueba.cargando || !robotsPrueba.urls.trim()" @click="robotsPruebaEvaluar()">Evaluar</button>
+                    <span class="red" x-show="robotsPrueba.error" x-text="robotsPrueba.error"></span>
+                  </div>
+                  <template x-if="robotsPrueba.resultado">
+                    <div class="mt-1">
+                      <div class="text-sm text-dim" x-text="fmt.num(robotsPrueba.resultado.diagnostico.grupos) + ' grupos · ' + fmt.num(robotsPrueba.resultado.diagnostico.sitemaps.length) + ' sitemaps' + (robotsPrueba.resultado.diagnostico.recortado ? ' · pasa de 500 KiB: Google no lee lo de detrás' : '')"></div>
+                      <template x-for="l in robotsPrueba.resultado.diagnostico.ignoradas" :key="'i' + l.linea">
+                        <div class="text-sm orange">Línea <span x-text="l.linea"></span>: <code x-text="l.texto"></code> <span x-text="'— ' + robotsPruebaMotivo(l.motivo)"></span></div>
+                      </template>
+                      <div class="table-wrap"><table class="tbl" style="font-size:.8rem">
+                        <thead><tr><th>Agente</th><th>URL</th><th>Veredicto</th><th>Línea que decide</th><th>Grupo</th></tr></thead>
+                        <tbody>
+                          <template x-for="(r, i) in robotsPrueba.resultado.resultados" :key="i">
+                            <tr>
+                              <td x-text="r.agente"></td>
+                              <td x-text="r.url"></td>
+                              <td :class="r.permitida ? '' : 'orange'" x-text="r.permitida ? 'Permitida' : 'Bloqueada'"></td>
+                              <td><code x-show="r.linea" x-text="r.linea ? ('l.' + r.linea + ' ' + r.texto) : ''"></code><span class="text-dim" x-show="!r.linea">ninguna regla casa</span></td>
+                              <td x-text="r.grupo ? (r.grupo + ' (l.' + r.linea_grupo + ')') : 'ninguno: todo permitido'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table></div>
+                    </div>
+                  </template>
+                </details>
               </div>
             </template>
 
@@ -4019,6 +4066,8 @@
                 <ul class="informe-alertas">
                   <li x-show="informe.ia.nosnippet" class="sev-warning"
                       x-text="(n => fmt.num(n) + (n === 1 ? ' página indexable lleva' : ' páginas indexables llevan'))(informe.ia.nosnippet) + ' «nosnippet»: Google no las usa en AI Overviews ni enseña su texto en el resultado.'"></li>
+                  <li x-show="informe.ia.data_nosnippet" class="sev-warning"
+                      x-text="(n => fmt.num(n) + (n === 1 ? ' página indexable esconde' : ' páginas indexables esconden'))(informe.ia.data_nosnippet) + ' su H1 o la mayor parte de su contenido con «data-nosnippet»: ese texto no sale en el fragmento ni en AI Overviews.'"></li>
                   <li x-show="informe.ia.max_snippet"
                       x-text="fmt.num(informe.ia.max_snippet) + (informe.ia.max_snippet === 1 ? ' página limita' : ' páginas limitan') + ' su fragmento con «max-snippet»: la IA de Google solo puede citar ese trozo.'"></li>
                   <li x-show="informe.ia.solo_con_js.plantillas" class="sev-warning"

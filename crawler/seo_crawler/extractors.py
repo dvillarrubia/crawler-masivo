@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import logging
 import re
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
@@ -1878,6 +1879,19 @@ def _raiz_del_body(selector):
         return None
     raiz = body[0].root
     return raiz if hasattr(raiz, "tag") else None
+
+
+def medir_data_nosnippet(selector, main_content: str | None = None) -> dict[str, Any] | None:
+    """Lo que ``data-nosnippet`` esconde al fragmento en la pagina (decision
+    170, ``shared/data_nosnippet.py``). Best-effort: cualquier fallo da None,
+    que es «no medido», y no se lleva la fila de ``html_meta``."""
+    try:
+        from shared.data_nosnippet import medir
+
+        return medir(_raiz_del_body(selector), main_content)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("No se pudo medir data-nosnippet", exc_info=True)
+        return None
 
 
 def extract_word_count(selector) -> int:

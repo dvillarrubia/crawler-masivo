@@ -60,6 +60,7 @@ from seo_crawler.extractors import (
     extract_resources,
     extract_security_headers,
     extract_videos,
+    medir_data_nosnippet,
     extract_structured_data,
     extract_visible_text,
     extract_word_count,
@@ -2218,6 +2219,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         except Exception:  # noqa: BLE001
             logger.warning("No se pudieron leer los videos de %s", final_url, exc_info=True)
             videos = None
+        # Decision 170: lo que `data-nosnippet` esconde al fragmento, sobre el
+        # body rastreado (servido o renderizado). Best-effort: NULL = no medido.
+        data_nosnippet = medir_data_nosnippet(selector, main_content)
 
         yield HtmlMetaItem(
             url_hash=final_hash,
@@ -2278,6 +2282,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             videos=videos,
             amphtml=meta.get("amphtml"),
             alternate_movil=meta.get("alternate_movil"),
+            data_nosnippet=data_nosnippet,
         )
 
         # Headings
