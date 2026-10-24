@@ -315,13 +315,23 @@
        404», que no es el hallazgo. Hace falta un juego con más positivos (y
        quizá otra redacción) antes de poner umbral a la respuesta «sí».
      - `es_pagina_de_utilidad` v1: 91,5 %; 7 de sus 8 fallos eran páginas de
-       error contadas como de utilidad. La v2 lo dice y sube al 97,9 %: con
-       **umbral 0,65** decide 39 de las 41 de utilidad reales sin fallo (cota
-       de Wilson 0,91) y 55 «no» con 2 fallos (cota 0,88), sin aviso de clase
-       arrastrada. Es la primera pregunta con umbral; sus etiquetas son de
-       Claude, contrastadas solo en parte con la persona (que marcaba estas
-       páginas como «soft 404» con el criterio viejo).
-   - **La pantalla separa lo decidido de lo incierto**: por respuesta dice
+       error contadas como de utilidad. La v2 lo dice y sube al 97,9 %, pero
+       **sin umbral**. El común que salía (0,65) solo se sostenía contando dos
+       veces los estados repetidos (11 de 94 filas son la misma página con y
+       sin www); sin ellos no sale ninguno, y el «no» decidido se quedaba en
+       cota 0,88, por debajo del objetivo. Además se midió sobre el mismo juego
+       con el que se redactó la v2, con dos clientes, etiquetas de Claude sin
+       re-etiquetar para la v2 y 3 de ellas incoherentes con su definición
+       (páginas 401 marcadas como de utilidad). Para ponerle umbral hace falta
+       un juego más grande, de más clientes, no usado para redactarla y
+       etiquetado con el criterio v2.
+   - **`evaluar` quita los estados repetidos** (cuenta una vez cada estado
+     idéntico y dice cuántos quitó y cuántos se contradecían) y **`avisos`
+     salta también cuando una respuesta decidida queda por debajo del
+     objetivo** aunque el umbral común llegue. Las dos cosas las vio otra
+     revisión independiente, en la PR que ponía 0,65.
+   - **La pantalla separa lo decidido de lo incierto** (para cuando haya
+     umbrales): por respuesta dice
      cuántas están decididas, la tabla enseña el estado de cada fila y el
      aviso de «orientativas» depende de si la pregunta tiene umbral HOY, no de
      si alguna fila salió decidida (antes, una sola decidida lo escondía para

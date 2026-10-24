@@ -6,9 +6,10 @@ error del sitio (sonda), titulo de error, busqueda vacia, OutOfStock— y lo
 dudoso lo marca `soft_404_candidato` con `candidato_llm`. Esta pregunta solo
 se hace sobre esos candidatos: es el prefiltro barato del plan.
 
-Medidas en la decision 169. `es_soft_404` v2 sigue sin umbral (uno comun
-solo decidiria los «no»), asi que sale `incierto`; `es_pagina_de_utilidad`
-v2 tiene umbral 0,65.
+Medidas en la decision 169 y sin umbral, asi que todo sale `incierto` y nada
+llega a un informe: en `es_soft_404` v2 un umbral comun solo decidiria los
+«no», y en `es_pagina_de_utilidad` v2 solo salia contando dos veces las URLs
+repetidas.
 """
 
 from __future__ import annotations
@@ -50,10 +51,11 @@ ES_PAGINA_DE_UTILIDAD = Pregunta(
     # v2: en v1 Jev contaba las paginas de error como de utilidad (7 de sus 8
     # fallos). Una pagina de error es un soft 404, no un paso de un proceso.
     version=2,
-    # Medido el 24-oct-2026 con 94 candidatos (decision 169): 97,9 %. Con 0,65
-    # decide 39 de las 41 de utilidad reales sin fallo (cota 0,91) y 55 «no»
-    # con 2 fallos (cota 0,88); `avisos` no salta.
-    umbral=0.65,
+    # Medido el 24-oct-2026 con 94 candidatos (decision 169): 97,9 %, pero sin
+    # umbral. El comun (0,65) solo salia contando dos veces los estados
+    # repetidos (con y sin www); sin ellos no hay umbral, y el «no» se quedaba
+    # por debajo del objetivo (cota 0,88). Falta un juego mas grande, de mas
+    # clientes, no usado para redactarla, y etiquetado con el criterio v2.
     instrucciones=(
         "Judging by its address, title, main heading and the start of its main content, is this "
         "web page a functional step of a process rather than content anyone would look for in a "
@@ -68,7 +70,7 @@ ES_PAGINA_DE_UTILIDAD = Pregunta(
         "false": "The page offers information someone could search for, even if short.",
     },
     descripcion=("Pagina de utilidad sin valor de busqueda (login, gracias, baja, check-in), "
-                 "sobre los mismos sospechosos que el soft 404 (decision 169). Umbral 0,65."),
+                 "sobre los mismos sospechosos que el soft 404 (decision 169). Sin umbral (#8)."),
 )
 
 PREGUNTAS = [ES_SOFT_404, ES_PAGINA_DE_UTILIDAD]

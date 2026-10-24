@@ -67,7 +67,18 @@ def test_un_umbral_comun_que_solo_decide_los_no_se_avisa():
     assert si["recuperadas"] == round(2 / 29, 4)
     assert m["por_respuesta"]["false"]["decididas"] == 60
     assert m["por_respuesta"]["false"]["reales"] == 65
-    assert len(m["avisos"]) == 1 and "«true»" in m["avisos"][0]
+    assert any("decidido el 7 %" in a and "«true»" in a for a in m["avisos"])
+
+
+def test_una_respuesta_decidida_bajo_el_objetivo_se_avisa():
+    """El umbral comun llega, pero el «no» decidido solo no (decision 169)."""
+    filas = ([{"etiqueta": "true", "respuesta": "true", "confianza": 0.9}] * 60
+             + [{"etiqueta": "false", "respuesta": "false", "confianza": 0.9}] * 28
+             + [{"etiqueta": "true", "respuesta": "false", "confianza": 0.9}] * 2)
+    m = E.metricas(filas, objetivo=0.9)
+    assert m["umbral"] == 0.9
+    assert m["por_respuesta"]["false"]["precision_minima"] < 0.9
+    assert any("«false» decididos" in a for a in m["avisos"])
 
 
 def test_sin_umbral_no_hay_avisos_ni_decididas():
@@ -229,3 +240,22 @@ def test_evaluar_rechaza_un_juego_de_otra_version(tmp_path):
         f["version"] = 99
     with pytest.raises(SystemExit, match="version"):
         S.evaluar(juego, [], objetivo=0.9)
+
+
+def test_evaluar_cuenta_una_vez_cada_estado_repetido():
+    """La misma pagina con y sin www es la misma entrada para Jev (decision
+    169): cuenta una vez, y se dice si las copias tenian otra etiqueta."""
+    S = _script()
+    from shared.preguntas import obtener
+
+    p = obtener("es_soft_404")
+    estado = {"titulo": "A", "h1": "A", "contenido": "x", "palabras": 1, "ruta": "/a"}
+    juego = [{"id": f"https://{h}x.com/a", "pregunta": p.nombre, "version": p.version,
+              "estado": estado, "etiqueta": e} for h, e in (("", "true"), ("www.", "true"), ("m.", "false"))]
+    juego.append({"id": "https://x.com/b", "pregunta": p.nombre, "version": p.version,
+                  "estado": {**estado, "ruta": "/b"}, "etiqueta": "false"})
+    respuestas = [{"id": f["id"], "pregunta": p.nombre, "version": p.version, "respuesta": "true",
+                   "confianza": 0.9} for f in juego]
+    inf = S.evaluar(juego, respuestas, objetivo=0.9)
+    assert inf["evaluables"] == 2
+    assert inf["estados_repetidos_quitados"] == 2 and inf["repetidos_con_otra_etiqueta"] == 1

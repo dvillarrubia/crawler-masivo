@@ -248,6 +248,12 @@ def test_resultados_separan_lo_decidido_y_dicen_el_umbral_de_hoy(entorno, monkey
                        origen="modelo", modelo="typesafe/jev-1.13", coste_usd=0.0))
     s.commit()
     s.close()
+    # Con umbral (hoy ninguna de las dos lo tiene: se simula en el catalogo).
+    import dataclasses
+
+    from shared.preguntas import CATALOGO
+    monkeypatch.setitem(CATALOGO, "es_pagina_de_utilidad",
+                        dataclasses.replace(CATALOGO["es_pagina_de_utilidad"], umbral=0.65))
     res = api.get(f"/api/jobs/{jid}/enrichment/{run['id']}").json()["resultados"]
     util, soft = res["es_pagina_de_utilidad"], res["es_soft_404"]
     assert util["umbral"] == 0.65 and util["por_respuesta"] == {"true": 2}
