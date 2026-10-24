@@ -1128,8 +1128,8 @@
      llegan a Jev porque `solo_marca` no las reconoce; en Workoholics muchos
      titles no llevan la marca y no sale de `marcas_del_host`, y en Penguin
      la marca es «Penguin Libros ES», con espacio y sufijo), (2)
-     texto por defecto o de error (Home, Page not found, Access denied,
-     Search results for), también un agradecimiento que no nombra ninguna
+     texto por defecto o de error (Untitled, Access denied, Search results
+     for), también un agradecimiento que no nombra ninguna
      acción, aunque sea en una confirmación («Muchas gracias» es `true`,
      «Registration sent» `false`), (3) un nombre interno de plantilla, bloque o
      fichero o un código, (4) una etiqueta vaga sin asunto, y (5) en la página
@@ -1160,14 +1160,34 @@
      compara cada ejemplo citado (entre comillas o en una lista entre
      paréntesis) con las **huellas** de los titles de los tres juegos
      (`tests/fixtures/titles_juegos_title_es_generico.txt`, sha256 de cada
-     fragmento entre separadores; sin titles de clientes en el repo), generadas
-     con la orden nueva `scripts/evaluar_decisiones.py huellas`. Solo se
-     admiten «Home», «Contact» y «Projects», palabras de la propia definición
-     que tiene cualquier sitio. También se cambiaron los ejemplos que eran
+     fragmento entre separadores), generadas con la orden nueva
+     `scripts/evaluar_decisiones.py huellas`. Las huellas **no ocultan** los
+     titles: son sha256 sin sal de textos cortos y se recuperarían probando un
+     diccionario; solo evitan guardar la lista legible en el repo. Y el test
+     solo ve la copia literal (normalizada a minúsculas, espacios y NFC, entre
+     comillas simples, dobles o tipográficas, o en una lista entre
+     paréntesis): una paráfrasis, una traducción o un sinónimo no casan con
+     ninguna huella. **No hay lista blanca**: un primer intento admitía
+     «Home», «Contact» y «Projects» como vocabulario de la definición, pero
+     los tres son titles de los juegos («Contact» en /contact está tal cual
+     en el de precisión, «Projects | …» en el conjunto de 2.000) y «Projects»
+     en /projects/ es sinónimo directo de un falso positivo medido («Work» en
+     /work/). Una segunda revisión lo vio: la sección en su página se ilustra
+     con una inventada sin huella («'Lost property' on /lost-property/») y
+     «Home» sale de la lista de textos por defecto (quedan «Untitled», «New
+     page», «Welcome»…). También se cambiaron los ejemplos que eran
      paráfrasis de un fallo medido («Solar plant» por «Planta Fotovoltaica»,
      «<client name> | Projects» por «Iberdrola | Work», «News» en
      /news/<year>/, «Downloads» en /products/<range>/downloads,
-     «promo-apr-23»); «<Brand> <country>» se queda porque es la regla misma.
+     «promo-apr-23», y «'Technical service' on /technical-services/<city>»,
+     traducción literal de «SAT» en /sats/<ciudad>-NN, que está en los tres
+     juegos, por «'Clinics' on /clinics/<town>»; con el mismo criterio,
+     buscando a mano la traducción al castellano de cada ejemplo en las
+     huellas, «'Timetable' on /courses/<course>/timetable» por «'Exam
+     dates'» («Horarios» está en los juegos), y salen de las listas «Page not
+     found» y «Thank you, Thanks a lot», traducciones literales de «Página no
+     encontrada», «Gracias» y «Muchas gracias»: el agradecimiento se queda
+     como regla, sin ejemplo); «<Brand> <country>» se queda porque es la regla misma.
    - Los casos reales van en **`CASOS_FRONTERA`** de
      `shared/preguntas/coherencia.py`, como en `tipo_pagina.py` (178): caso,
      respuesta y la frase que lo decide, incluidos los pares que las
@@ -1208,15 +1228,17 @@
      Jev): re-etiquetar los dos juegos, `responder --confirmar` y `evaluar`,
      y el de precisión otra vez sobre el mismo conjunto de 2.000. **Esa
      medida es optimista por construcción**: la v2 se redactó mirando estos
-     fallos, y aunque ningún ejemplo es un title de los juegos, las reglas y
-     varios ejemplos con marcadores siguen su forma («<Brand> <country>», el
+     fallos, y aunque ningún ejemplo citado casa con la huella de un title de
+     los juegos (el test lo comprueba sin lista blanca; no ve paráfrasis ni
+     traducciones, que se revisan a mano), las reglas y varios ejemplos con
+     marcadores siguen su forma («<Brand> <country>», el
      nombre propio seguido de la sección, el proyecto descrito con palabras
      comunes, la etiqueta de subsección). Sirve para ver si la v2 arregla lo
      que quería y no rompe los verdaderos positivos, **no para darla por
      buena**: la v2 no se valida, ni se le pone umbral, hasta medirla en un
      juego de censos no usados aquí (169).
-   - **Coste** (fórmula de la 162): 3.979 caracteres de pregunta frente a
-     1.999, ~490 tokens más por llamada: en Penguin (2.661 llamadas) ~0,05 $
+   - **Coste** (fórmula de la 162): 3.899 caracteres de pregunta frente a
+     1.999, ~475 tokens más por llamada: en Penguin (2.661 llamadas) ~0,05 $
      más por censo, en La Salle (845) ~0,02 $.
    - Fuera: que `solo_marca` reconozca la marca sin espacios ni sufijo o la
      del dominio cuando `marcas_del_host` no da ninguna (sacaría

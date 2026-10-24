@@ -111,8 +111,8 @@ TITLE_ES_GENERICO = Pregunta(
         "licences', 'Coach parking'), also when the path is opaque (only ids or parameters), and "
         "also under a specific item when the topic is that item's own and not a label its sibling "
         "items repeat (a project or research line under an institute); the section itself when "
-        "the page is that section and the path puts it under no specific item ('Contact' on "
-        "/contact, 'Projects' on /projects/, a category on its category page); or, on a "
+        "the page is that section and the path puts it under no specific item ('Lost property' "
+        "on /lost-property/, a category on its category page); or, on a "
         "confirmation page, a title that names the action that was completed ('Subscription "
         "confirmed', 'Order placed'). "
         "A title that is too long, keyword-stuffed, badly written, in another language or about a "
@@ -120,9 +120,9 @@ TITLE_ES_GENERICO = Pregunta(
         "Answer true only when what remains names nothing specific: "
         "(1) nothing at all, because the title is only the brand, in any spelling, capitalisation "
         "or spacing ('ACME', 'AcmeGroup'); "
-        "(2) placeholder, default or error text (Home, Untitled, New page, Welcome, Lorem ipsum, "
-        "{{title}}, Page not found, Access denied, Search results for), including a thank-you "
-        "that names no action (Thank you, Thanks a lot), on a confirmation page too; "
+        "(2) placeholder, default or error text (Untitled, New page, Welcome, Lorem ipsum, "
+        "{{title}}, Access denied, Search results for), including a thank-you that names no "
+        "action, on a confirmation page too; "
         "(3) an internal or technical name instead of a title (a template, block or file name such "
         "as 'card-grid-tpl' or 'hero_v3_final', a reference code such as REF-2231 or Node 45); "
         "(4) a vague label that names no subject (Details, Information, Overview, Article, "
@@ -131,9 +131,9 @@ TITLE_ES_GENERICO = Pregunta(
         "of (one product, range, course, study level, institute, centre, magazine, hotel, city or "
         "year: a parent folder names that item) and the title does not name that item, a title "
         "that only names the general section or service those sibling pages share ('Hotels' on "
-        "/hotels/<hotel name>, 'Technical service' on /technical-services/<city>), or a label the "
-        "matching page of any other item of that kind would carry word for word ('Timetable' on "
-        "/courses/<course>/timetable, 'Team' on /labs/<lab name>/team, 'Programme' on "
+        "/hotels/<hotel name>, 'Clinics' on /clinics/<town>), or a label the "
+        "matching page of any other item of that kind would carry word for word ('Exam dates' on "
+        "/courses/<course>/exam-dates, 'Team' on /labs/<lab name>/team, 'Programme' on "
         "/festival/<year>/programme). The test for (5): would the same title fit, unchanged, the "
         "same page of another course, institute, magazine or year? If yes, true; if only this "
         "item could have it, false. "
@@ -182,7 +182,8 @@ CASOS_FRONTERA = [
      "would the same title fit, unchanged"),
     ("Salle «Training and Capacity Building» en /cfi-centre-funding-innovation/...", "true",
      "would the same title fit, unchanged"),
-    ("Salle «Presentació» en /revista-comprendre/presentacio", "true", "magazine"),
+    ("Salle «Presentació» en /revista-comprendre/presentacio", "true",
+     "the same page of another course, institute, magazine or year"),
     ("Salle «Redacció» en /revista-comprendre/redaccio y «Subscription» en "
      "/comprendre-magazine/subscription", "true", "would carry word for word"),
     ("Salle «Nirvana» en /innova-institute/nirvana (un proyecto del instituto)", "false",
@@ -196,7 +197,7 @@ CASOS_FRONTERA = [
      "in any spelling, capitalisation"),
     ("Saunier «SAT» en /sats/bizkaia-26/", "true", "those sibling pages share"),
     ("Lopesan «headerpage» en /es/headerpage", "true", "an internal or technical name"),
-    ("Saunier «401 – No autorizado»", "true", "Access denied"),
+    ("Saunier «401 – No autorizado»", "true", "placeholder, default or error text"),
 ]
 
 SCHEMA_CONTRADICE_CONTENIDO = Pregunta(

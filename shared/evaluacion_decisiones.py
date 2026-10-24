@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from typing import Any, Iterable
 
@@ -492,10 +493,13 @@ def para_reetiquetar(juego: list[dict], version: int) -> list[dict]:
 # --- Fugas de un juego a las instrucciones (decision 182) ---
 # Un ejemplo de las instrucciones copiado de un title del juego con el que se
 # mide infla la medida (lecciones de la 169 y la 180). Para vigilarlo sin meter
-# en el repo los titles de los clientes, se guardan HUELLAS de sus fragmentos.
+# en el repo la LISTA de titles de los clientes, se guardan HUELLAS de sus
+# fragmentos. No los ocultan: son sha256 sin sal de textos cortos y se podrian
+# recuperar probando un diccionario; solo evitan tener la lista legible.
 
 _SEPARADORES_TITLE = re.compile(r"\s[|\-\u2013\u2014:]\s|\|")
 _ENTRE_COMILLAS = re.compile(r"(?<![A-Za-z])'([^']+?)'(?![A-Za-z])")
+_ENTRE_OTRAS_COMILLAS = re.compile(r'"([^"]+?)"|\u2018([^\u2019]+?)\u2019|\u201c([^\u201d]+?)\u201d|\u00ab([^\u00bb]+?)\u00bb')
 _ENTRE_PARENTESIS = re.compile(r"\(([^()]*)\)")
 
 
@@ -503,7 +507,7 @@ def fragmentos_de_title(texto: str) -> set[str]:
     """El texto entero y cada trozo entre separadores de title («|», « - »,
     « – », « : »), en minusculas y con los espacios juntados. Asi «Becas |
     Marca» casa con un ejemplo «Becas» y la marca no hace falta conocerla."""
-    t = re.sub(r"\s+", " ", (texto or "").strip().lower())
+    t = re.sub(r"\s+", " ", unicodedata.normalize("NFC", texto or "").strip().lower())
     salida = {t} | {trozo.strip() for trozo in _SEPARADORES_TITLE.split(t)}
     return {f for f in salida if f}
 
@@ -524,9 +528,14 @@ def huellas_de_juego(filas: Iterable[dict], campo: str) -> set[str]:
 
 def ejemplos_de_instrucciones(texto: str) -> list[str]:
     """Lo que unas instrucciones citan como ejemplo: lo que va entre comillas
-    simples (sin contar el apostrofo de «site's») y cada elemento de una lista
-    entre parentesis. Sobra algo de ruido; lo que importa es no dejarse nada."""
+    (simples sin contar el apostrofo de «site's», dobles, tipograficas o
+    angulares) y cada elemento de una lista entre parentesis. Sobra algo de
+    ruido, y se escapa lo que no tiene esa forma: un ejemplo sin comillas fuera
+    de un parentesis, una parafrasis, una traduccion o un sinonimo de un title
+    del juego («Work» frente a «Projects») no casan con ninguna huella. Es una
+    red para la copia literal, no prueba que no haya fuga."""
     salida = [m.strip() for m in _ENTRE_COMILLAS.findall(texto)]
+    salida += [next(g for g in m if g).strip() for m in _ENTRE_OTRAS_COMILLAS.findall(texto)]
     for lista in _ENTRE_PARENTESIS.findall(texto):
         salida += [x.strip().strip("'") for x in lista.split(",")]
     return list(dict.fromkeys(e for e in salida if e))
@@ -534,6 +543,9 @@ def ejemplos_de_instrucciones(texto: str) -> list[str]:
 
 def fugas(texto: str, huellas: set[str]) -> list[tuple[str, str]]:
     """(ejemplo, fragmento) de cada ejemplo de `texto` con un fragmento cuya
-    huella esta en las de un juego."""
+    huella esta en las de un juego. Los fragmentos se comparan en NFC y en
+    NFD: unas huellas generadas antes de normalizar pueden venir de un title
+    con los acentos descompuestos."""
     return [(e, f) for e in ejemplos_de_instrucciones(texto)
-            for f in sorted(fragmentos_de_title(e)) if huella(f) in huellas]
+            for f in sorted(fragmentos_de_title(e))
+            if huella(f) in huellas or huella(unicodedata.normalize("NFD", f)) in huellas]

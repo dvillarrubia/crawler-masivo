@@ -489,7 +489,7 @@ HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
             ("title_describe_contenido", 2): "cfb30e2f6f487516",
             }
 # v2 del title generico: el nombre propio no es generico (decision 182).
-HUELLAS |= {("title_es_generico", 2): "626668bf4a2edeb9"}
+HUELLAS |= {("title_es_generico", 2): "a9817259e28e9786"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

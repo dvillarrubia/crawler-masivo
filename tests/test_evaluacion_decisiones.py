@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -302,6 +303,13 @@ def test_las_fugas_se_buscan_por_huella_de_cada_fragmento_del_title(tmp_path):
              "(Uno, Otra cosa).")
     assert E.ejemplos_de_instrucciones(texto)[:2] == ["becas Y  ayudas", "Nada"]
     assert E.fugas(texto, h) == [("becas Y  ayudas", "becas y ayudas"), ("Otra cosa", "otra cosa")]
+    # Comillas dobles o tipograficas, y acentos compuestos o descompuestos en
+    # cualquiera de los dos lados: una huella vieja de un title en NFD tambien casa.
+    nfd = unicodedata.normalize("NFD", "Formació")
+    h2 = {E.huella(nfd.lower())} | E.huellas_de_juego([{"estado": {"titulo": "Redacció"}}], "titulo")
+    assert E.huella("redacció") in h2
+    otras = 'Uses "Formació" and \u201cRedacci' + unicodedata.normalize("NFD", "ó") + '\u201d.'
+    assert [e for e, _ in E.fugas(otras, h2)] == ["Formació", "Redacci" + unicodedata.normalize("NFD", "ó")]
 
     S = _script()
     entrada, salida = tmp_path / "juego.jsonl", tmp_path / "huellas.txt"

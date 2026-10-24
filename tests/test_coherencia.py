@@ -370,11 +370,6 @@ def test_title_generico_v2_el_nombre_propio_no_es_generico():
         assert de_un_cliente not in i + " ".join(p.opciones.values()), de_un_cliente
 
 
-# Palabras de la propia definicion que tiene cualquier sitio y que estan, como
-# es natural, entre los titles de los juegos: no son una fuga de un caso.
-VOCABULARIO_DE_LA_DEFINICION = {"home", "contact", "projects"}
-
-
 def test_ningun_ejemplo_del_title_generico_sale_de_los_juegos_con_que_se_mide():
     """Decision 182: un ejemplo copiado de un title de los juegos (como
     «Scholarships and grants» en el primer borrador de la v2) infla la medida
@@ -390,10 +385,13 @@ def test_ningun_ejemplo_del_title_generico_sale_de_los_juegos_con_que_se_mide():
                if x.strip() and not x.startswith("#")}
     assert len(huellas) > 3000
     texto = p.instrucciones + " " + " ".join(p.opciones.values())
-    encontradas = [(e, f) for e, f in fugas(texto, huellas) if f not in VOCABULARIO_DE_LA_DEFINICION]
-    assert encontradas == []
-    # Y la comprobacion de verdad pilla la fuga que tuvo el primer borrador.
+    # Sin lista blanca: «Home», «Contact» y «Projects», que se admitian como
+    # vocabulario de la definicion, son titles de los juegos (y «Projects»,
+    # sinonimo de un falso positivo medido): se cambiaron por otros sin huella.
+    assert fugas(texto, huellas) == []
+    # Y la comprobacion de verdad pilla las fugas que tuvieron los borradores.
     assert fugas("a specific topic ('Scholarships and grants')", huellas)
+    assert fugas("its own page ('Projects' on /projects/)", huellas)
 
 
 def _casos_title_generico():
