@@ -278,3 +278,26 @@
      `incierto` y nada va a un informe. El test que solo dejaba existir el
      módulo de ejemplo pasa a exigir esto de cualquier módulo: si alguna de sus
      preguntas no tiene umbral, va marcado.
+
+<a id="d169"></a>
+169. **Las preguntas se redactan con el criterio de la revisión humana: «legal»
+   incluye lo normativo y el soft 404 se parte en dos** (#8, #9, #11). Una
+   persona revisó a ciegas 40 ejemplos dudosos del juego de la 159 y coincidió
+   solo en la mitad con las etiquetas de Claude y con Jev. No era ruido, eran
+   dos criterios sistemáticos:
+   - **Lo normativo es legal.** Las 7 discrepancias de `es_pagina_legal` eran
+     políticas ESG, prevención de riesgos penales, alertas de seguridad de
+     producto, avisos de subvenciones e información legal para accionistas.
+     Para SEO son lo mismo que un aviso legal: existen por obligación, no para
+     posicionar. `es_pagina_legal` v2 las cuenta.
+   - **Una página de utilidad no es un soft 404.** La persona marcaba como «sí»
+     logins, páginas de gracias o confirmación, la baja y el check-in online:
+     funcionan como deben, pero no tienen valor de búsqueda. Son dos hallazgos
+     distintos (un error disfrazado se arregla; una página de utilidad se
+     saca del índice), así que son dos preguntas: `es_soft_404` v2 (error o
+     vacío, y dice expresamente que un login o un «gracias» no lo son) y
+     `es_pagina_de_utilidad` v1, en su propio módulo sobre los mismos
+     sospechosos (`candidatos_soft404`).
+   - Subir la versión invalida la caché y obliga a re-etiquetar y medir: un
+     umbral calibrado con la redacción vieja no vale para la nueva. Las tres
+     siguen sin umbral y marcadas como sin evaluar hasta medirlas.

@@ -13,17 +13,28 @@ from shared.preguntas import Pregunta
 ES_PAGINA_LEGAL = Pregunta(
     nombre="es_pagina_legal",
     tipo="noul",
-    version=1,
+    # v2 (decision 169): el criterio de la revision humana del juego de #8.
+    # Cuenta tambien lo que existe por obligacion (cumplimiento, ESG,
+    # subvenciones, gobierno corporativo, alertas de producto), no solo los
+    # cuatro textos legales de siempre.
+    version=2,
     instrucciones=(
-        "Is this web page a legal or policy page (legal notice, privacy "
-        "policy, cookie policy, terms and conditions) rather than regular "
-        "site content?"
+        "Is this web page a legal, regulatory or compliance page rather than "
+        "regular site content? Count the classic legal texts (legal notice, "
+        "privacy policy, cookie policy, terms and conditions) and also pages "
+        "that exist to meet an obligation: compliance and ethics (criminal "
+        "risk prevention, code of conduct, whistleblowing channel), ESG or "
+        "sustainability policies, notices of public grants or subsidies "
+        "received, corporate governance or legal information for "
+        "shareholders, and product safety alerts or regulatory notices."
     ),
     opciones={
-        "true": "The page's main purpose is a legal notice, privacy, cookie or terms text.",
+        "true": ("The page's main purpose is a legal, regulatory or compliance text, "
+                 "including ESG policies, grant notices and governance information."),
         "false": "The page is regular content: product, article, service, listing or home.",
     },
-    descripcion="Ejemplo de #7. Sin evaluar: no usar para decidir nada.",
+    descripcion=("Ejemplo de #7, ampliada en la decision 169 a lo normativo y de "
+                 "cumplimiento. Sin umbral: no usar para decidir nada."),
     ejemplo=True,
 )
 
