@@ -52,6 +52,9 @@ class Pregunta:
     descripcion: str = ""
     # Las de ejemplo no se usan en produccion: estan para fijar la forma.
     ejemplo: bool = False
+    # Nombres cortos para la pantalla, uno por nivel de un score, en orden (las
+    # respuestas de un choice o un noul salen del diccionario unico de la
+    # pantalla, decision 176). No se envian: no entran en la huella (177).
     etiquetas: tuple[str, ...] = field(default_factory=tuple)
     # (pregunta, respuesta): esta solo se LEE cuando otra pregunta del mismo
     # estado respondio eso (decision 175: la recomendacion de una
@@ -121,11 +124,13 @@ def _cargar() -> dict[str, Pregunta]:
     from shared.preguntas import canibalizacion
     from shared.preguntas import tipo_pagina
     from shared.preguntas import intencion
+    from shared.preguntas import coherencia  # decision 177 (#16, #17)
 
     todas = ejemplo.PREGUNTAS + soft404.PREGUNTAS
     todas = todas + canibalizacion.PREGUNTAS
     todas = todas + tipo_pagina.PREGUNTAS
     todas = todas + intencion.PREGUNTAS
+    todas = todas + coherencia.PREGUNTAS
     catalogo: dict[str, Pregunta] = {}
     for p in todas:
         if p.nombre in catalogo:

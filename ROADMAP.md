@@ -1083,6 +1083,17 @@ se lanza solo.
   Pendiente: comprobar con una clave real que la estimación cae dentro del
   ±30% del coste, la opción por perfil de repetirlo en cada rastreo programado,
   y los resultados como columnas del explorador y del CSV.
+- **Hecho, sin evaluar: title y marcado frente al contenido
+  ([#16](https://github.com/dvillarrubia/crawler-masivo/issues/16),
+  [#17](https://github.com/dvillarrubia/crawler-masivo/issues/17))**: tres
+  módulos nuevos en el botón. Si el title dice de qué va el contenido (por
+  niveles), si el title es genérico más allá de la lista de placeholders, y si
+  el texto visible contradice un precio, valoración, fecha o disponibilidad del
+  marcado. Sin preguntar lo que ya dice una regla y por muestra de plantilla:
+  en Lopesan, unos 6 céntimos los tres. Sin umbral, todo sale orientativo y las
+  incidencias que saldrían de ellos esperan a su juego de evaluación (decisión
+  177). Fuera: description genérica, h1 genérico, alt, idioma, caducidad,
+  confianza, YMYL, canonical, hreflang y noindex sospechoso.
 
 ---
 

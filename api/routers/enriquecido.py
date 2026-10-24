@@ -94,6 +94,41 @@ def _estimar(db, job, cuerpo):
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
+def _nivel(pregunta, respuesta: str | None) -> str | None:
+    """Un score se agrupa por su nivel mas cercano («0»...«3»), no por el
+    numero que devuelve Jev (2,62 y 2,9 son el mismo nivel): si no, la pantalla
+    enseñaba una entrada por decimal (decision 177). Lo demas, tal cual."""
+    if respuesta is None or pregunta is None or pregunta.tipo != "score":
+        return respuesta
+    from shared.evaluacion_decisiones import etiqueta_de_respuesta
+
+    return etiqueta_de_respuesta("score", respuesta, len(pregunta.opciones))
+
+
+def _etiquetas(pregunta) -> dict[str, str]:
+    """El nombre corto de cada nivel de un score, para la pantalla (decision
+    177): «2» no dice nada y cada score nombra sus niveles a su manera. Las
+    respuestas de un choice o un sí/no salen del diccionario unico de la
+    pantalla (`RESPUESTA_ENRIQ`, decision 176), no de aqui."""
+    if pregunta is None or pregunta.tipo != "score":
+        return {}
+    nombres = list(pregunta.etiquetas) or [str(i) for i in range(len(pregunta.opciones))]
+    return {str(i): n for i, n in enumerate(nombres)}
+
+
+def _opciones(pregunta) -> list[str] | None:
+    """El orden en que la pantalla pinta las respuestas (decision 176): las
+    opciones de un choice del catalogo y los niveles «0»...«n-1» de un score,
+    que es como llega agrupado (177). Las opciones del cliente (178), sin orden."""
+    if pregunta is None or not pregunta.opciones or pregunta.opciones_del_cliente:
+        return None
+    if pregunta.tipo == "score":
+        return [str(i) for i in range(len(pregunta.opciones))]
+    if pregunta.tipo == "choice":
+        return list(pregunta.opciones)
+    return None
+
+
 def _resultados(db: Session, run_id: uuid.UUID) -> dict:
     filas = (db.query(Decision.pregunta, Decision.estado, Decision.respuesta,
                       func.count(Decision.id), func.coalesce(func.sum(Decision.coste_usd), 0.0),
@@ -111,14 +146,16 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
         p = salida.setdefault(pregunta, {"por_estado": {}, "por_respuesta": {},
                                          "decididas_por_respuesta": {}, "total": 0, "coste_usd": 0.0,
                                          "umbral": actual.umbral if actual else None,
-                                         "tipo": actual.tipo if actual else None})
+                                         "tipo": actual.tipo if actual else None,
+                                         "etiquetas": _etiquetas(actual)})
         # Decision 176: un choice se pinta con sus opciones en orden y una fila
         # de `intencion_busqueda` es una busqueda de una pagina, no una URL. Las
         # de una pregunta con las opciones del cliente (178) no son las del
-        # catalogo: sin orden que dar.
-        p["opciones"] = (list(actual.opciones) if actual and actual.tipo in ("choice", "score")
-                         and actual.opciones and not actual.opciones_del_cliente else None)
+        # catalogo: sin orden que dar. Un score se agrupa por nivel (177), asi
+        # que sus opciones son los niveles «0»...«n-1».
+        p["opciones"] = _opciones(actual)
         p["ambito"] = ambito or "url"
+        respuesta = _nivel(actual, respuesta)
         p["total"] += n
         p["coste_usd"] = round(p["coste_usd"] + float(coste), 8)
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
@@ -154,6 +191,7 @@ def _solo_lo_que_aplica(db, run_id, nombre: str, p: dict, actual) -> None:
     p.update({"por_estado": {}, "por_respuesta": {}, "decididas_por_respuesta": {}, "total": 0,
               "solo_si": list(actual.solo_si)})
     for estado, respuesta, n in filas:
+        respuesta = _nivel(actual, respuesta)
         p["total"] += n
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
         if respuesta is not None:
@@ -264,18 +302,29 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
                   Decision.ambito, Decision.estado_enviado["busqueda"].as_string(),
                   Decision.estado_enviado["paginas"])
          .join(Url, Url.id == Decision.url_id).filter(Decision.run_id == run_id))
+    actual = CATALOGO.get(pregunta) if pregunta else None
     if pregunta:
         q = q.filter(Decision.pregunta == pregunta)
-        actual = CATALOGO.get(pregunta)
         if actual is not None and actual.solo_si is not None:
             q = q.filter(_condicion(actual))
-    if respuesta:
+    if respuesta and actual is not None and actual.tipo == "score" and respuesta.isdigit():
+        # El nivel de un score (decision 177): [nivel - 0,5, nivel + 0,5), con
+        # los extremos abiertos, como lo redondea `etiqueta_de_respuesta`.
+        from sqlalchemy import Float, cast
+
+        nivel, valor = int(respuesta), cast(Decision.respuesta, Float)
+        if nivel > 0:
+            q = q.filter(valor >= nivel - 0.5)
+        if nivel < len(actual.opciones) - 1:
+            q = q.filter(valor < nivel + 0.5)
+    elif respuesta:
         q = q.filter(Decision.respuesta == respuesta)
     total = q.count()
     filas = q.order_by(Decision.id).offset((page - 1) * page_size).limit(page_size).all()
     return {"total": total, "page": page, "page_size": page_size,
             "items": [{"id": i, "url": u, "pregunta": p, "estado": e, "origen": o,
-                       "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m,
+                       "respuesta": r, "nivel": _nivel(CATALOGO.get(p), r) if r is not None else None,
+                       "confianza": c, "coste_usd": cu, "motivo": m,
                        "busqueda": b if amb != "url" else None,
                        "rutas": _rutas(pag) if amb != "url" else None}
                       for i, u, p, e, o, r, c, cu, m, amb, b, pag in filas]}

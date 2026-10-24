@@ -63,8 +63,11 @@ def modulo_de(pregunta: str):
     raise SystemExit(f"Ningun modulo de shared/enriquecido.py hace la pregunta {pregunta!r}")
 
 
-def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> list[dict]:
-    """Las filas del juego: estado, de donde sale y la etiqueta vacia."""
+def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int,
+            informe: dict | None = None) -> list[dict]:
+    """Las filas del juego: estado, de donde sale y la etiqueta vacia. En
+    `informe["estados_repetidos"]`, cuantos estados repetidos se saltaron
+    (decision 177: que la salida lo diga)."""
     import uuid
 
     from shared.evaluacion_decisiones import muestra_estratificada
@@ -125,6 +128,7 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
     # el sitio y las marcas de su censo.
     por_plantilla: dict[str, list[tuple]] = {}
     vistos: set[str] = set()
+    repetidos = 0
     for jid in sorted(candidatos_de):
         candidatos = candidatos_de[jid]
         for i in range(0, len(candidatos), 500):
@@ -133,10 +137,13 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
             for e in modulo.construir_estados(session, [c[1] for c in trozo]):
                 clave = _clave_del_juego(e.datos)
                 if clave in vistos:
+                    repetidos += 1
                     continue
                 vistos.add(clave)
                 _, uid, url, plantilla = por_uid[e.url_id]
                 por_plantilla.setdefault(plantilla, []).append((jid, uid, url, plantilla, e))
+    if informe is not None:
+        informe["estados_repetidos"] = repetidos
     elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)
     return [{"id": url if e.ambito == "url" else f"{e.ambito}|{_clave_del_juego(e.datos)}",
              "job_id": jid, "url_id": uid, "plantilla": plantilla, "ambito": e.ambito,
@@ -380,14 +387,16 @@ def main(argv: list[str] | None = None) -> int:
         from shared.preguntas import obtener
 
         s = SessionLocal()
+        informe: dict = {}
         try:
-            filas = extraer(s, args.pregunta, args.job, args.n, args.semilla)
+            filas = extraer(s, args.pregunta, args.job, args.n, args.semilla, informe)
         finally:
             s.close()
         salida = args.salida or f"tests/decisiones/{args.pregunta}/v{obtener(args.pregunta).version}.jsonl"
         _escribir(salida, filas)
         plantillas = len({f["plantilla"] for f in filas})  # con el host: dos sitios son dos
-        print(f"{len(filas)} ejemplos de {plantillas} plantillas en {salida}. Falta etiquetarlos "
+        print(f"{len(filas)} ejemplos de {plantillas} plantillas en {salida} "
+              f"({informe.get('estados_repetidos', 0)} estados repetidos saltados). Falta etiquetarlos "
               "(campo `etiqueta` y `etiquetado_por`).")
     elif args.orden == "responder":
         estimacion, respuestas = responder(_leer(args.juego), args.confirmar)
