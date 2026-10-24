@@ -533,3 +533,67 @@ def test_la_api_da_la_propuesta_por_plantilla_y_el_tipo_de_la_pregunta(tmp_path,
     assert api.get(f"/api/jobs/{jid}/enrichment/{rid}/plantillas").json()["pregunta"] == "tipo_pagina"
     import uuid
     assert api.get(f"/api/jobs/{jid}/enrichment/{uuid.uuid4()}/plantillas").status_code == 404
+
+
+def test_v2_criterios_generales_y_sin_nombres_del_juego():
+    """Decision 181: la v2 dice «que hace la pagina» (vender un item, captar,
+    explicar como pagar o pedir ayuda, presentar lo propio que no se vende,
+    publicar lo obligatorio) en vez de «de que item habla». Lo que se envia no
+    lleva nombres del juego de 300, pero SI sus patrones (salio de sus errores):
+    este test no detecta ese sobreajuste, solo lo hara medir en otro juego."""
+    p = tp_preguntas().TIPO_PAGINA
+    assert p.version == 2
+    assert "ask what the page does for the visitor" in p.instrucciones
+    # ficha_producto excluye por escrito las cuatro cosas que se quedaba de mas.
+    no_es = p.opciones["ficha_producto"].split(" Not ", 1)[1]
+    for otra in ("(landing_comercial)", "(ayuda)", "(corporativa)", "(legal)"):
+        assert otra in no_es, otra
+    enviado = p.instrucciones + " ".join(d or "" for d in p.opciones.values())
+    for del_juego in ("La Salle", "Salle", "Lopesan", "Saunier", "Penguin", "Workoholics", "FEDER",
+                      "822/2021", "VSMA", "Technova"):
+        assert del_juego not in enviado, del_juego
+
+
+def test_v2_sin_los_solapes_de_significado_de_la_revision():
+    """Decision 181 (revision de #247): el test de CASOS_FRONTERA mira la frase
+    literal; estos son los solapes de significado que encontro la revision y
+    que la redaccion ya no tiene. No sustituye a medir."""
+    p = tp_preguntas().TIPO_PAGINA
+    afirma = {k: d.split(" Not ")[0] for k, d in p.opciones.items()}
+    # Los servicios de apoyo al alumno son `ayuda`: la instruccion general no
+    # manda «services» que no se venden a `corporativa`.
+    frase_corp = p.instrucciones.split("is ayuda;")[1].split("is corporativa")[0]
+    assert "services" not in frase_corp
+    # Un hub que solo reparte a secciones de ayuda (becas, servicios) es listado:
+    # `ayuda` ya no reclama cualquier hub, ni las practicas (etiqueta unificada).
+    assert "also as a hub" not in afirma["ayuda"]
+    assert "internships" not in afirma["ayuda"]
+    assert "(listado)" in p.opciones["ayuda"].split(" Not ", 1)[1]
+    # La financiacion promocional para comprar es landing; la de la matricula, ayuda.
+    assert "financing" not in afirma["ayuda"]
+    assert "promotional financing offer" in afirma["landing_comercial"]
+    # Concurso: landing si invita a apuntarse, articulo si solo informa.
+    assert "invites prospects to sign up" in afirma["landing_comercial"]
+    assert "does not invite to sign up" in afirma["articulo"]
+    # Convenios: las tablas de instituciones socias son listado (lo que la v1
+    # acertaba en 3 de 5), no corporativa.
+    assert "partner institutions" not in afirma["corporativa"]
+    assert "partner institutions" in afirma["listado"]
+    # La lista de normativas que enlaza a sus paginas es listado; legal solo se
+    # queda la lista de documentos para descargar.
+    assert "also when the page is a list of them" not in p.opciones["legal"]
+    # «Por que estudiar» de UN programa sigue siendo su ficha.
+    assert "argues why to choose it" in afirma["ficha_producto"]
+    # Segunda revision: las practicas las reclama `corporativa` y nadie mas.
+    assert "internship" in afirma["corporativa"]
+    assert [k for k, d in afirma.items() if "internship" in d.lower()] == ["corporativa"]
+    # Lo propio que «no se vende» de `corporativa` excluye la parte de UN item
+    # que se vende y el servicio del campus al que uno se apunta (ficha_producto).
+    no_corp = p.opciones["corporativa"].split(" Not ", 1)[1]
+    assert "restaurant" in no_corp and "gym" in no_corp and "(ficha_producto)" in no_corp
+    assert "not sold on their own" not in afirma["corporativa"]
+    # El aviso de cofinanciacion al inicio no hace legal a un proyecto: legal solo
+    # se queda la pagina cuyo proposito es el aviso.
+    assert "co-funding" not in afirma["legal"]
+    assert "whose purpose is to give notice of public grants" in afirma["legal"]
+    assert "merely opens with a notice of its public funding" in p.opciones["legal"].split(" Not ", 1)[1]

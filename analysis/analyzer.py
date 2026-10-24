@@ -52,7 +52,9 @@ from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from analysis import avisos_de_medios
 from analysis import avisos_de_nosnippet
+from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
+from shared.rel_de_enlace import sql_nofollow_por_rel
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
     x_robots_para_bot,
@@ -376,6 +378,9 @@ class SEOAnalyzer:
         # no se reportaba nunca. Un salto solo es una redireccion normal.
         self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+        # Las que llevan `solo_enlazada_con_nofollow` (decision 183): lo escribe
+        # la profundidad de clic y lo lee el aviso por destino.
+        self._solo_con_nofollow: set[int] = set()
         self.enlaces_plantilla_min_paginas = t.get("enlaces_plantilla_min_paginas", 10)  # d106
         # Avisos del servidor (decisiones 109 y 110, `avisos_de_servidor.py`).
         self.respuesta_lenta_ms = t.get("respuesta_lenta_ms", 1000)
@@ -433,6 +438,7 @@ class SEOAnalyzer:
         avisos_de_medios.avisar(self)  # decisiones 154, 155 y 156
         avisos_de_nosnippet.avisar(self)  # decision 170
         self.analyze_robots_syntax()
+        avisos_de_nofollow.avisar_paginas_nofollow(self)  # decision 183
         self.analyze_duplicates()
         self.analyze_near_duplicates()
         self.analyze_redirect_chains()
@@ -4219,6 +4225,9 @@ class SEOAnalyzer:
             # El ancla, solo si es generica («leer mas», «aqui», «read more»;
             # decision 147). NULL en el resto: no engorda la temporal.
             Column("ancla_generica", Text),
+            # El enlace es `nofollow` por su propio `rel` (o `ugc`/`sponsored`),
+            # no por la directiva de la pagina (decision 183). True o NULL.
+            Column("nofollow_rel", Boolean),
             prefixes=["TEMPORARY"],
         )
         aristas.create(self.session.connection())
@@ -4252,6 +4261,7 @@ class SEOAnalyzer:
             case((and_(Link.is_internal.is_(True),
                        func.lower(func.trim(Link.anchor_text)).in_(avisos_de_enlaces.ANCLAS_GENERICAS)),
                   func.lower(func.trim(Link.anchor_text))), else_=None),
+            sql_nofollow_por_rel(Link.follow, Link.rel),  # decision 183
         ).join(origen, origen.id == Link.from_url_id)
         if pag is not None:
             # Una temporal de las paginas de paginacion, por clave primaria:
@@ -4262,7 +4272,7 @@ class SEOAnalyzer:
                 ["destino_id", "origen_id", "es_interno", "origen_cuenta", "seguible",
                  "veces", "utm_hash", "sin_ancla_destino", "sin_ancla_posicion",
                  "sin_ancla_imagen", "origen_pag_excluida", "origen_pag_profunda",
-                 "rel_destino_url", "externo_hash", "ancla_generica"],
+                 "rel_destino_url", "externo_hash", "ancla_generica", "nofollow_rel"],
                 consulta
                 .outerjoin(destino, and_(
                     destino.url_hash == Link.to_url_hash,
@@ -4332,6 +4342,8 @@ class SEOAnalyzer:
         avisos_de_enlaces.avisar_enlaces_a_respuestas(self, aristas)  # decision 106
         avisos_de_enlaces.avisar_enlaces_sin_ancla(self, aristas)  # decision 121
         avisos_de_enlaces.avisar_anclas_genericas(self, aristas)  # decision 147
+        avisos_de_nofollow.avisar_enlaces_nofollow(  # decision 183
+            self, aristas, excluir=self._solo_con_nofollow)
         if con_sondas:
             avisos_de_sondas.avisar_enlaces_externos(self, aristas)  # decision 123
 
@@ -4391,7 +4403,9 @@ class SEOAnalyzer:
           sale ningun camino;
         - lo que no tiene camino queda en NULL, y si es indexable y alguien la
           enlaza emite `not_reachable_from_home` (si nadie la enlaza ya es
-          `orphan_page` o `sitemap_orphan`, decision 36).
+          `orphan_page` o `sitemap_orphan`, decision 36), o
+          `solo_enlazada_con_nofollow` si todo lo que la enlaza es `nofollow`
+          (decision 183).
 
         Por niveles y en el servidor, no cargando el grafo en Python: en
         penguin son 10 millones de aristas.
@@ -4400,6 +4414,7 @@ class SEOAnalyzer:
 
         from shared.models import Hreflang
 
+        self._solo_con_nofollow = set()
         self.session.execute(
             update(Url).where(Url.job_id == self.job_id).values(click_depth=None)
         )
@@ -4513,8 +4528,12 @@ class SEOAnalyzer:
         # rastrear (decision 172): no se afirma que no lo haya.
         if self._topes_cortaron():
             sin_camino = []
+        # Las que solo reciben `nofollow` llevan ese aviso, que dice la causa
+        # (decision 183); la paginacion va antes, como con la profundidad.
+        self._solo_con_nofollow = avisos_de_nofollow.solo_con_nofollow(
+            self, aristas, [u for u, _, _ in sin_camino if u not in de_paginacion])
         for url_id, entrantes, en_sitemap in sin_camino:
-            if url_id in de_paginacion:
+            if url_id in de_paginacion or url_id in self._solo_con_nofollow:
                 continue
             self._add_issue(
                 url_id, "not_reachable_from_home", "warning",

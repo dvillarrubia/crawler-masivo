@@ -183,6 +183,9 @@ const ISSUE_LABEL = {
   'sitemap_orphan': 'Huérfana (solo en sitemap)',
   'solo_enlazada_por_redireccion': 'Solo se llega por una redirección',
   'not_reachable_from_home': 'Sin camino de enlaces desde la home',
+  'solo_enlazada_con_nofollow': 'Solo enlazada con nofollow',
+  'pagina_nofollow': 'Página indexable con nofollow',
+  'enlace_interno_nofollow': 'Enlaces internos nofollow',
   'not_in_sitemap': 'No incluida en el sitemap',
   'sitemap_no_indexable': 'En el sitemap sin ser indexable',
   'sitemap_supera_limite': 'Sitemap por encima del límite de Google',
@@ -4450,7 +4453,7 @@ const EXP_TABS = [
   // Las redirecciones no son HTML: el ambito va sobre las internas.
   { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
-  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
+  { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','pagina_nofollow','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
   // Decision 137: lo que decide si la pagina sale en el fragmento y en las
   // funciones de IA de la Busqueda, y si los buscadores de IA pueden entrar.
@@ -4475,7 +4478,7 @@ const EXP_TABS = [
     columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
   { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
-  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
+  { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_con_nofollow','enlace_interno_nofollow','pagina_nofollow','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],

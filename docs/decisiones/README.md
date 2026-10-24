@@ -14,13 +14,13 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 173 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 182 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -209,7 +209,9 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de doce opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
 | 179 | Una respuesta rara se mide con un juego de precisión (todas las veces que Jev la da en un conjunto amplio, más un control aleatorio): su precisión sí, su recall no | [`llm-y-enriquecido`](llm-y-enriquecido.md#d179) |
 | 180 | `intencion_pagina` v2 (navegacional solo la portada, `existing_users` y `corporate` nuevas) y `title_describe_contenido` v2 (nombrar la página es el nivel alto aunque sea corto), con lo medido de la v1 y el juego listo para re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d180) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (233/300, con un juego que empuja hacia Jev) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
 | 182 | `title_es_generico` v2: un nombre propio o un tema concreto no es genérico aunque sea corto, y la etiqueta que tienen todos los ítems de una sección sin decir cuál sí (prueba: ¿valdría igual en otro ítem de ese tipo?); ejemplos vigilados por huella contra los juegos, casos frontera en el código y juegos a re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d182) |
+| 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
 
 ## Anadir una decision
 
