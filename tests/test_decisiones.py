@@ -467,7 +467,10 @@ def test_fusionar_resumen_suma_y_se_queda_con_el_peor_estado():
 # nueva: este test es el que lo impide.
 HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550ca4cd93c9626",
            ("es_pagina_legal", 2): "dd0345f0f28408ad", ("es_soft_404", 2): "e3d75320bde45267",
-           ("es_pagina_de_utilidad", 1): "3928932eba01e723", ("es_pagina_de_utilidad", 2): "43adee04faca5150"}
+           ("es_pagina_de_utilidad", 1): "3928932eba01e723", ("es_pagina_de_utilidad", 2): "43adee04faca5150",
+           ("paginas_sustitutas", 1): "225630a8878de877",
+           ("recomendacion_canibalizacion", 1): "c3bd3e673d6ac86f",
+           }
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

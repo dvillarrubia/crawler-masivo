@@ -538,6 +538,28 @@ def _valor_cache(d: Decision) -> dict:
             "proveedor": d.proveedor}
 
 
+def _partir(pendientes: list[Pregunta]) -> list[list[Pregunta]]:
+    """Las llamadas que hacen falta para las preguntas pendientes de un estado.
+
+    Las de un estado van juntas (decision 84: el estado se paga una vez), con
+    dos excepciones. Una llamada va a UN modelo: si el catalogo mezclara
+    modelos se parte por modelo. Y una pregunta con `solo_si` va SOLA (decision
+    175): su instruccion da por hecha la respuesta de otra («son sustitutas»),
+    y leida junto a ella la empujaria; ademas la evaluacion (#8) pregunta una
+    a una, y lo calibrado tiene que ser el prompt que corre en produccion. Asi
+    la clave de cache, que no depende de las acompañantes, sigue siendo
+    valida: lo que se juntaria no cambia lo que se responde.
+    """
+    grupos: list[list[Pregunta]] = []
+    por_modelo: dict[str, list[Pregunta]] = {}
+    for p in pendientes:
+        if p.solo_si is not None:
+            grupos.append([p])
+        else:
+            por_modelo.setdefault(p.modelo, []).append(p)
+    return [*por_modelo.values(), *grupos]
+
+
 class CapaDecisiones:
     """Una por ejecucion: el presupuesto, la observabilidad y el corte son
     suyos. `fabrica_cliente=None` = capa desactivada (sin clave o con
@@ -622,9 +644,9 @@ class CapaDecisiones:
         llamadas = tokens = 0
         for ce, e in primero.items():
             pendientes = [p for p in preguntas if todas[(ce, p.nombre)] not in encontrado]
-            if pendientes:
+            for grupo in _partir(pendientes):
                 llamadas += 1
-                tokens += self._tokens_estimados(self._cuerpo(e, pendientes))
+                tokens += self._tokens_estimados(self._cuerpo(e, grupo))
         return {"estados": len(estados), "estados_distintos": len(primero),
                 "preguntas": len(preguntas), "aciertos_cache": len(encontrado),
                 "llamadas": llamadas, "tokens_estimados": tokens,
@@ -692,13 +714,8 @@ class CapaDecisiones:
 
     async def _llamar(self, cliente: ClienteOpenRouter, estado: Estado, clave_est: str,
                       pendientes: list[Pregunta]) -> list[Decision]:
-        # Las preguntas de un estado van todas al MISMO modelo en una llamada;
-        # si el catalogo mezclara modelos se parte por modelo.
-        por_modelo: dict[str, list[Pregunta]] = {}
-        for p in pendientes:
-            por_modelo.setdefault(p.modelo, []).append(p)
         salida: list[Decision] = []
-        for modelo, grupo in por_modelo.items():
+        for grupo in _partir(pendientes):
             salida.extend(await self._llamar_un_modelo(cliente, estado, clave_est, grupo))
         return salida
 

@@ -15,12 +15,13 @@ hacer deprisa cuando algo se va de las manos.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import exists, func
+from sqlalchemy.orm import Session, aliased
 
 from shared.cola import encolar_enriquecido
 from shared.database import get_session
@@ -116,7 +117,41 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
             p["por_respuesta"][respuesta] = p["por_respuesta"].get(respuesta, 0) + n
             if estado == "decidido":
                 p["decididas_por_respuesta"][respuesta] = p["decididas_por_respuesta"].get(respuesta, 0) + n
+    for pregunta, p in salida.items():
+        _solo_lo_que_aplica(db, run_id, pregunta, p, CATALOGO.get(pregunta))
     return salida
+
+
+def _condicion(pregunta):
+    """La fila de la pregunta de la que depende esta (`solo_si`, decision 175):
+    la del MISMO estado (clave y URL) y la misma ejecucion."""
+    otra, valor = pregunta.solo_si
+    c = aliased(Decision)
+    return exists().where(c.run_id == Decision.run_id, c.clave == Decision.clave,
+                          c.url_id == Decision.url_id, c.pregunta == otra, c.respuesta == valor)
+
+
+def _solo_lo_que_aplica(db, run_id, nombre: str, p: dict, actual) -> None:
+    """Una pregunta con `solo_si` (la recomendacion de una canibalizacion) se
+    cuenta solo donde la otra respondio lo que pide: su respuesta sobre un
+    reparto legitimo no significa nada. Lo demas va en `no_aplica`; el coste
+    sigue siendo el de todas, que se pagaron."""
+    if actual is None or actual.solo_si is None:
+        return
+    filas = (db.query(Decision.estado, Decision.respuesta, func.count(Decision.id))
+             .filter(Decision.run_id == run_id, Decision.pregunta == nombre, _condicion(actual))
+             .group_by(Decision.estado, Decision.respuesta).all())
+    total = p["total"]
+    p.update({"por_estado": {}, "por_respuesta": {}, "decididas_por_respuesta": {}, "total": 0,
+              "solo_si": list(actual.solo_si)})
+    for estado, respuesta, n in filas:
+        p["total"] += n
+        p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
+        if respuesta is not None:
+            p["por_respuesta"][respuesta] = p["por_respuesta"].get(respuesta, 0) + n
+            if estado == "decidido":
+                p["decididas_por_respuesta"][respuesta] = p["decididas_por_respuesta"].get(respuesta, 0) + n
+    p["no_aplica"] = total - p["total"]
 
 
 def _respuesta(db: Session, run: EnrichmentRun, con_resultados: bool = True) -> EnrichmentRunResponse:
@@ -208,21 +243,46 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
                             page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
                             db: Session = Depends(get_session)):
     """Las respuestas URL a URL. `estado_enviado` no sale: es contenido de la
-    pagina y para revisarlo esta #8."""
+    pagina y para revisarlo esta #8. De el solo salen la busqueda y las rutas
+    de un grupo (decision 175: en un modulo por grupo la URL es solo donde
+    cuelga, y sin ellas la fila no dice que se juzgo). Filtrando por una pregunta con
+    `solo_si`, solo las filas donde aplica."""
+    from shared.preguntas import CATALOGO
+
     _run(db, job_id, run_id)
     q = (db.query(Decision.id, Url.url, Decision.pregunta, Decision.estado, Decision.origen,
-                  Decision.respuesta, Decision.confianza, Decision.coste_usd, Decision.motivo)
+                  Decision.respuesta, Decision.confianza, Decision.coste_usd, Decision.motivo,
+                  Decision.ambito, Decision.estado_enviado["busqueda"].as_string(),
+                  Decision.estado_enviado["paginas"])
          .join(Url, Url.id == Decision.url_id).filter(Decision.run_id == run_id))
     if pregunta:
         q = q.filter(Decision.pregunta == pregunta)
+        actual = CATALOGO.get(pregunta)
+        if actual is not None and actual.solo_si is not None:
+            q = q.filter(_condicion(actual))
     if respuesta:
         q = q.filter(Decision.respuesta == respuesta)
     total = q.count()
     filas = q.order_by(Decision.id).offset((page - 1) * page_size).limit(page_size).all()
     return {"total": total, "page": page, "page_size": page_size,
             "items": [{"id": i, "url": u, "pregunta": p, "estado": e, "origen": o,
-                       "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m}
-                      for i, u, p, e, o, r, c, cu, m in filas]}
+                       "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m,
+                       "busqueda": b if amb != "url" else None,
+                       "rutas": _rutas(pag) if amb != "url" else None}
+                      for i, u, p, e, o, r, c, cu, m, amb, b, pag in filas]}
+
+
+def _rutas(paginas) -> list[str] | None:
+    """Las rutas del par juzgado (decision 175): la URL de la fila es solo
+    donde cuelga, y sin las dos rutas no se sabe que dos paginas se juzgaron."""
+    if isinstance(paginas, str):
+        try:
+            paginas = json.loads(paginas)
+        except ValueError:
+            return None
+    if not isinstance(paginas, list):
+        return None
+    return [str(p.get("ruta")) for p in paginas if isinstance(p, dict) and p.get("ruta")] or None
 
 
 @router.patch("/jobs/{job_id}/enrichment/{run_id}/cancel", response_model=EnrichmentRunResponse)

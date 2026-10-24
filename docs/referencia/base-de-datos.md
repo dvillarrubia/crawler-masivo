@@ -21,7 +21,7 @@
 | `issues` | 1:N from urls | issue_type, severity, details (JSON) |
 | `clients` | root | nombre, slug (unico), dominios, config_defecto (parcial), integraciones (sin secretos) |
 | `crawl_profiles` | 1:N from clients | nombre, rol, seeds, config (parcial), last_job_id |
-| `decisions` | 1:N from jobs | clave, pregunta, version_pregunta, estado, respuesta, coste_usd, run_id (decision 84) |
+| `decisions` | 1:N from jobs | clave, pregunta, version_pregunta, estado, respuesta, coste_usd, run_id (decision 84). `ambito='consulta'`: un par de canibalizacion; `url_id` es la URL menor del par y la busqueda y las rutas van en `estado_enviado` (decision 175) |
 | `enrichment_runs` | 1:N from jobs | modulos, alcance, estimacion, presupuesto_usd, gastado_usd, estado, progreso (decision 85) |
 | `custom_extraction` | 1:N from urls (con `job_id`) | nombre, clase (extractor/busqueda), estado, n, valor, valor_clave, valor_num, valores, render (decision 104). Una fila por (URL, regla) EVALUADA: sin fila = no evaluada, no «vacio». Migracion: `migrar_custom_extraction()` en `init_db.py` |
 | `robots_txt` | 1:N from jobs | host, url, url_final, status_code, error, response_class, intentos, bytes, sha256, cuerpo (solo 2xx, recortado a 500 KiB), recortado, comprobacion (JSON: segunda peticion al cerrar), evaluacion (JSON del analisis, por bot). Una fila por (job, URL del robots.txt), solo hosts internos y como mucho 200 por job. Sin fila = no evaluado (decisiones 112 y 113). Migracion: `migrar_robots_txt()` |
