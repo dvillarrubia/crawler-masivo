@@ -17,6 +17,7 @@ Nada sale a la red: `conftest.py` hace fallar cualquier transporte real.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -347,3 +348,69 @@ def test_title_v2_el_nivel_alto_es_nombrar_la_pagina_aunque_sea_corto():
     for de_un_cliente in ("Penguin", "La Salle", "Fuerteventura", "Lopesan", "tigres", "Carnaval",
                           "Maspalomas", "Memòria", "Meloneras"):
         assert de_un_cliente not in p.instrucciones + " ".join(p.opciones)
+
+
+def test_title_generico_v2_el_nombre_propio_no_es_generico():
+    """Decision 182: la v1 decia «generico» a titles cortos con nombre propio
+    (el cliente de un caso, «<marca> <pais>», un proyecto) y «no generico» a
+    la etiqueta que tienen todos los items de una seccion. La v2 lo escribe a
+    los dos lados, con una prueba explicita para la frontera de (5)."""
+    from shared.preguntas import CATALOGO
+
+    p = CATALOGO["title_es_generico"]
+    assert p.version == 2 and set(p.opciones) == {"true", "false"}
+    i = p.instrucciones
+    assert i.index("Answer false") < i.index("Answer true") < i.index("When unsure")
+    assert "read it as a name" in i and "'<Brand> <country>'" in i
+    assert "decide with the test for (5) instead" in i[i.index("When unsure"):]
+    for de_un_cliente in ("Penguin", "La Salle", "Salle", "Lopesan", "Workoholics", "Iberdrola",
+                          "ICOBEN", "CAF", "Saunier", "SAT", "SafiraAqua", "Culpa", "Chile",
+                          "Fotovoltaica", "Normativa", "Work |", "headerpage", "Re_",
+                          "Scholarships", "Accessible rooms", "Solar plant", "Downloads"):
+        assert de_un_cliente not in i + " ".join(p.opciones.values()), de_un_cliente
+
+
+def test_ningun_ejemplo_del_title_generico_sale_de_los_juegos_con_que_se_mide():
+    """Decision 182: un ejemplo copiado de un title de los juegos (como
+    «Scholarships and grants» en el primer borrador de la v2) infla la medida
+    (169, 180). Se compara cada ejemplo citado con las huellas de los titles
+    del juego de 200, el de precision y el conjunto de 2.000, no con una lista
+    a mano. Si se re-extraen los juegos, regenerar el fichero con
+    `scripts/evaluar_decisiones.py huellas`."""
+    from shared.evaluacion_decisiones import fugas
+    from shared.preguntas.coherencia import TITLE_ES_GENERICO as p
+
+    fichero = Path(__file__).parent / "fixtures" / "titles_juegos_title_es_generico.txt"
+    huellas = {x.strip() for x in fichero.read_text(encoding="utf-8").splitlines()
+               if x.strip() and not x.startswith("#")}
+    assert len(huellas) > 3000
+    texto = p.instrucciones + " " + " ".join(p.opciones.values())
+    # Sin lista blanca: «Home», «Contact» y «Projects», que se admitian como
+    # vocabulario de la definicion, son titles de los juegos (y «Projects»,
+    # sinonimo de un falso positivo medido): se cambiaron por otros sin huella.
+    assert fugas(texto, huellas) == []
+    # Y la comprobacion de verdad pilla las fugas que tuvieron los borradores.
+    assert fugas("a specific topic ('Scholarships and grants')", huellas)
+    assert fugas("its own page ('Projects' on /projects/)", huellas)
+
+
+def _casos_title_generico():
+    from shared.preguntas.coherencia import CASOS_FRONTERA
+
+    return CASOS_FRONTERA
+
+
+@pytest.mark.parametrize("caso,respuesta,frase", _casos_title_generico())
+def test_la_frase_de_cada_caso_frontera_sigue_en_su_parte(caso, respuesta, frase):
+    """Cada caso real que caia entre las dos respuestas (falsos positivos y
+    negativos de la v1, los pares contradictorios de la regla (5) y los
+    positivos que hay que conservar) tiene la frase que lo decide en la parte
+    de su respuesta y no en la otra. Vigila que nadie la mueva o la borre; no
+    prueba que el significado de la otra parte no lo cubra tambien."""
+    from shared.preguntas.coherencia import TITLE_ES_GENERICO
+
+    i = TITLE_ES_GENERICO.instrucciones
+    partes = {"false": i[i.index("Answer false"):i.index("Answer true")],
+              "true": i[i.index("Answer true"):i.index("When unsure")]}
+    reclaman = [r for r, texto in partes.items() if frase in texto]
+    assert reclaman == [respuesta], (caso, reclaman)

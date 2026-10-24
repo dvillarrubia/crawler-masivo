@@ -100,3 +100,12 @@ def test_claude_md_ya_no_guarda_decisiones():
     texto = (RAIZ / "CLAUDE.md").read_text()
     assert not _DECISION.search(texto), "hay una decision numerada en CLAUDE.md"
     assert len(texto.splitlines()) < 250
+
+
+def test_el_indice_tiene_una_sola_fila_por_decision():
+    """Un rebase que junta los dos lados de un conflicto deja dos filas del
+    mismo numero (paso con la 175 y la 181) y el test de arriba no lo ve:
+    construye un dict y se queda con la ultima."""
+    filas = collections.Counter(m.group(1) for m in _FILA_INDICE.finditer(INDICE.read_text()))
+    repetidas = sorted(n for n, v in filas.items() if v > 1)
+    assert not repetidas, f"docs/decisiones/README.md repite la fila de {repetidas}"

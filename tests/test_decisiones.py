@@ -490,6 +490,8 @@ HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
             }
 # v2 del tipo de pagina con los fallos medidos de la v1 (decision 181).
 HUELLAS |= {("tipo_pagina", 2): "b8c3c045e01aea33"}
+# v2 del title generico: el nombre propio no es generico (decision 182).
+HUELLAS |= {("title_es_generico", 2): "a9817259e28e9786"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():
