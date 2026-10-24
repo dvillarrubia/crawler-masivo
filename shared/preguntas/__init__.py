@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 # Verificado el 2026-10-13 en `GET https://openrouter.ai/api/v1/models/
@@ -53,6 +53,21 @@ class Pregunta:
     # Las de ejemplo no se usan en produccion: estan para fijar la forma.
     ejemplo: bool = False
     etiquetas: tuple[str, ...] = field(default_factory=tuple)
+    # Opciones que pone cada cliente (decision 178: `categoria_cliente` con su
+    # `config.taxonomia`). Las del catalogo son de muestra: se pregunta con
+    # `con_opciones`, que fija `variante` (la huella de las opciones), y la
+    # variante entra en la clave de cache: cambiar la taxonomia no puede servir
+    # respuestas elegidas entre otras opciones.
+    opciones_del_cliente: bool = False
+    variante: str = ""
+
+    def con_opciones(self, opciones: dict) -> "Pregunta":
+        """La misma pregunta con las opciones de un cliente."""
+        if not self.opciones_del_cliente:
+            raise ValueError(f"{self.nombre}: sus opciones son las del catalogo")
+        crudo = json.dumps(opciones, sort_keys=True, ensure_ascii=False)
+        return replace(self, opciones=dict(opciones),
+                       variante=hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:12])
 
     def __post_init__(self):
         if self.tipo not in TIPOS:
@@ -96,9 +111,12 @@ class Pregunta:
 
 def _cargar() -> dict[str, Pregunta]:
     from shared.preguntas import ejemplo, soft404
+    from shared.preguntas import tipo_pagina
 
     catalogo: dict[str, Pregunta] = {}
-    for p in ejemplo.PREGUNTAS + soft404.PREGUNTAS:
+    preguntas = ejemplo.PREGUNTAS + soft404.PREGUNTAS
+    preguntas = preguntas + tipo_pagina.PREGUNTAS
+    for p in preguntas:
         if p.nombre in catalogo:
             raise ValueError(f"pregunta duplicada: {p.nombre}")
         catalogo[p.nombre] = p

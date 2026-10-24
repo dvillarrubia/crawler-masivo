@@ -76,9 +76,17 @@ class Modulo:
     # El prefiltro barato: soft 404 solo sobre los candidatos de la decision
     # 105, no sobre todo el censo. None = todas las del alcance.
     filtrar_urls: Callable[[Any, Any, list[int]], list[int]] | None = None
+    # (session, job) -> las preguntas con las opciones del job: la categoria
+    # del cliente pregunta por SU taxonomia (decision 178). None = las del catalogo.
+    preguntas_del_job: Callable[[Any, Any], list[Pregunta]] | None = None
 
     def objetos_pregunta(self) -> list[Pregunta]:
         return [obtener(n) for n in self.preguntas]
+
+    def preguntas_para(self, session, job) -> list[Pregunta]:
+        if self.preguntas_del_job is not None:
+            return self.preguntas_del_job(session, job)
+        return self.objetos_pregunta()
 
 
 def _trozos(lista: list, n: int = 500):
@@ -209,7 +217,41 @@ def _registro_inicial() -> dict[str, Modulo]:
             ejemplo=True,
         ),
     ]
+    modulos += _modulos_tipo_pagina()
     return {m.nombre: m for m in modulos}
+
+
+def _modulos_tipo_pagina() -> list[Modulo]:
+    # Tipo de pagina y categoria del cliente (#12, decision 178): una muestra
+    # por plantilla, no cada URL. Sin umbral (#8): marcados y todo incierto.
+    from shared import tipo_pagina as tp
+
+    return [
+        Modulo(
+            nombre="tipo_pagina",
+            titulo="Tipo de pagina (por plantilla)",
+            descripcion=("Que es cada plantilla: portada, listado, ficha de producto o servicio, landing "
+                         "comercial, articulo, corporativa, contacto, ayuda, legal, utilidad u otro. Pregunta "
+                         "por 3 a 8 URLs de cada plantilla y propone la respuesta para la plantilla entera "
+                         "con su acuerdo. Sin evaluar (#8): las respuestas salen inciertas y no se propaga nada."),
+            preguntas=("tipo_pagina",),
+            construir_estados=tp.estados_tipo_pagina,
+            filtrar_urls=tp.muestra_por_plantilla,
+            ejemplo=True,
+        ),
+        Modulo(
+            nombre="categoria_cliente",
+            titulo="Categoria del cliente (por plantilla)",
+            descripcion=("A cual de las categorias de negocio del cliente (su taxonomia, `taxonomia` en la "
+                         "configuracion) pertenece cada plantilla. Sin taxonomia no pregunta nada. Sin evaluar "
+                         "(#8): las respuestas salen inciertas."),
+            preguntas=("categoria_cliente",),
+            construir_estados=tp.estados_tipo_pagina,
+            filtrar_urls=tp.muestra_si_hay_taxonomia,
+            preguntas_del_job=tp.preguntas_de_taxonomia,
+            ejemplo=True,
+        ),
+    ]
 
 
 REGISTRO: dict[str, Modulo] = _registro_inicial()
@@ -372,7 +414,7 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
              "aciertos_cache": 0, "decisiones": 0}
     for nombre in orden:
         m = REGISTRO[nombre]
-        preguntas = m.objetos_pregunta()
+        preguntas = m.preguntas_para(session, job)
         ids = m.filtrar_urls(session, job.id, url_ids) if m.filtrar_urls else url_ids
         estados = m.construir_estados(session, ids) if ids else []
         e = capa.estimar(estados, preguntas) if estados else {
@@ -525,7 +567,7 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
             if m is None:
                 errores.append(f"modulo {nombre!r} ya no existe; se omite")
                 continue
-            preguntas = m.objetos_pregunta()
+            preguntas = m.preguntas_para(s, job)
             ids = ids_de[nombre]
             hechas = _hechas(s, run.id, [p.nombre for p in preguntas])
             pendientes = [u for u in ids if u not in hechas]
