@@ -544,6 +544,13 @@ class Job(Base):
     # totales por tipo, peticiones, cortada, sondas...}}`. NULL = rastreo
     # anterior o adaptador apagado. Las entidades van a `adapter_entities`.
     adapters = Column(JSON, nullable=True)
+    # Topes por subdominio o carpeta (decision 172), lo escribe el spider al
+    # cerrar: `{"reglas": [{regla, tope, grupos, grupos_cortados, rastreadas,
+    # sin_rastrear, lista_completa}], "cortados": [{regla, grupo, tope,
+    # rastreadas, sin_rastrear}], "sin_rastrear", "recuento_aproximado"}`.
+    # NULL = el job no tenia topes. Con `sin_rastrear` > 0 el censo esta
+    # truncado en esos grupos: el analisis no afirma ausencias ahi.
+    topes_carpeta = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)

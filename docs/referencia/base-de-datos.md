@@ -50,6 +50,8 @@ siendo lo que hizo el rastreo. Migracion en `init_db.py`.
 
 `jobs.sitemaps` (JSON, decision 126): lo escribe el spider al cerrar. `ficheros` (por fichero: url, status, formato, declaradas —contadas enteras, tambien las que pasan del tope—, devueltas, hijos, internas, bytes descomprimidos, cortado, entradas_guardadas, leido_at), `pedidos`, `leidos`, `parcial`, `tope_entradas`, `entradas_guardadas`, `entradas_recortadas`. NULL = rastreo anterior o sin sitemaps. Migracion en `init_db.py`.
 
+`jobs.topes_carpeta` (JSON, decision 172): lo escribe el spider al cerrar si el job tiene `topes_por_carpeta`. `reglas` (por regla: regla, tope, grupos, grupos_cortados, rastreadas, sin_rastrear, lista_completa), `cortados` (por grupo cortado, hasta 2.000: regla, grupo, tope, rastreadas, sin_rastrear), `sin_rastrear` (URLs descubiertas y no pedidas: un minimo), `recuento_aproximado`. NULL = sin topes. Con `sin_rastrear` > 0 y la frontera agotada, `finish_reason = tope_por_carpeta`. Migracion en `init_db.py`.
+
 `jobs.adapters` (JSON, decision 161): `{"wordpress": {...}}` lo escribe el spider (detectado, rest abierta/cerrada/bloqueada_por_robots/no_detectado, codigo, raiz, plugin_seo, namespaces, evidencia, tipos con total/paginas/leidas/recortado, peticiones, cortada, sondas) y el analisis le anade `analisis`. NULL = rastreo anterior o adaptador apagado. Migracion en `init_db.py`.
 
 `jobs.sondas_resumen` (JSON, decisiones 123 y 124): lo escribe el analisis. `enlaces_externos` (distintos, comprobados, rotos, dominios_muertos, por_veredicto) y `recursos` (comprobados, rotos, por_veredicto). NULL = sin sondas. Migracion en `init_db.py`.

@@ -384,6 +384,8 @@ class SEOAnalyzer:
         self.wp_taxonomia_anemica_max = t.get("wp_taxonomia_anemica_max", 1)  # d161
         self._job_config = (job.config or {}) if job else {}
         self._job_tls = getattr(job, "tls", None) if job else None
+        # Lo que dejaron sin rastrear los topes por carpeta (decision 172).
+        self._topes_carpeta = getattr(job, "topes_carpeta", None) if job else None
         self.near_duplicate_similarity = t.get(
             "near_duplicate_similarity", nd.UMBRAL_SIMILITUD
         )
@@ -4505,6 +4507,10 @@ class SEOAnalyzer:
             )
         ).all()
         de_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
+        # El camino desde la home puede pasar por lo que un tope dejo sin
+        # rastrear (decision 172): no se afirma que no lo haya.
+        if self._topes_cortaron():
+            sin_camino = []
         for url_id, entrantes, en_sitemap in sin_camino:
             if url_id in de_paginacion:
                 continue
@@ -4937,6 +4943,20 @@ class SEOAnalyzer:
 
     # -- Link Analysis ------------------------------------------------------
 
+    def _topes_cortaron(self) -> bool:
+        """True si algun tope de `topes_por_carpeta` dejo URLs sin pedir
+        (decision 172).
+
+        Entonces el censo esta truncado y NO solo en el grupo cortado: las
+        paginas que el tope no pidio tambien enlazan a otras carpetas (un post
+        de /blog/ sin pedir puede ser el unico que enlaza a /producto/x). Que
+        una URL no tenga entrantes, o que no se llegue a ella desde la home, no
+        se puede afirmar en ninguna parte del censo (decisiones 67 y 70).
+        """
+        from shared.topes_carpeta import corto
+
+        return corto(self._topes_carpeta)
+
     def analyze_links(self) -> None:
         """Link analysis -- flag orphan pages and pages with excessive outlinks."""
         logger.debug("Analyzing links ...")
@@ -4976,8 +4996,14 @@ class SEOAnalyzer:
         sin_enlazar = self._avisar_canonical_sin_enlazar()
         # La que solo cuelga de paginas 2+ en noindex o canonicalizadas a la 1
         # tiene su aviso, que dice de donde cuelga (decision 122).
-        desde_paginacion = avisos_de_paginacion.avisar_solo_desde_paginacion(
-            self, excluir=sin_enlazar)
+        # Con un tope que corto, «solo la enlaza la paginacion» tampoco se
+        # afirma: la pueden enlazar paginas que no se pidieron (decision 172).
+        if self._topes_cortaron():
+            desde_paginacion = avisos_de_paginacion.sustituidas(self)
+            rows = []
+        else:
+            desde_paginacion = avisos_de_paginacion.avisar_solo_desde_paginacion(
+                self, excluir=sin_enlazar)
         for (url_id,) in rows:
             if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "orphan_page", "warning")
@@ -5172,6 +5198,8 @@ class SEOAnalyzer:
         aviso que sustituye en esas paginas.
         """
         ids = self._ids_canonical_sin_enlazar()
+        if self._topes_cortaron():  # decision 172
+            return ids
         for uid, detalle in ids.items():
             self._add_issue(uid, "canonical_sin_enlazar", "warning", dict(detalle))
         return ids
@@ -5216,6 +5244,8 @@ class SEOAnalyzer:
             .group_by(Url.id, Url.in_sitemap)
         ).all()
 
+        if self._topes_cortaron():  # decision 172
+            filas = []
         for url_id, en_sitemap, saltos, ejemplo in filas:
             self._add_issue(
                 url_id,
@@ -5280,6 +5310,8 @@ class SEOAnalyzer:
         ).all()
         sin_enlazar = self._ids_canonical_sin_enlazar()
         desde_paginacion = avisos_de_paginacion.sustituidas(self)  # decision 122
+        if self._topes_cortaron():  # decision 172
+            rows = []
         for (url_id,) in rows:
             if url_id not in sin_enlazar and url_id not in desde_paginacion:
                 self._add_issue(url_id, "sitemap_orphan", "warning")

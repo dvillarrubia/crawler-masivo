@@ -121,6 +121,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sitemaps JSON"))
         # Lo que leyo el adaptador de WordPress (decision 161)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS adapters JSON"))
+        # Lo que dejaron sin rastrear los topes por carpeta (decision 172)
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS topes_carpeta JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).

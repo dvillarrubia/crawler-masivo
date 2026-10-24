@@ -126,7 +126,8 @@ def get_progress(
         # "finished" = frontera agotada (dato completo)
         # "max_urls_reached" = cortado por el tope (dato PARCIAL)
         "finish_reason": job.finish_reason,
-        "truncated": job.finish_reason == "max_urls_reached",
+        # Tambien un tope por carpeta que dejo URLs sin pedir (decision 172).
+        "truncated": job.finish_reason in ("max_urls_reached", "tope_por_carpeta"),
     }
 
 

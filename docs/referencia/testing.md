@@ -368,3 +368,12 @@ va detras de otro job, y la ficha va por `ix_adent_job_hash_alt` y no por
 leidas y censo por tipo, por que no se afirma, sin analizar) y que la casilla
 del modal solo se manda si se cambia frente a lo heredado, y que con «Solo en
 WordPress» abierto las flechas no abren fichas de la tabla oculta.
+Topes por carpeta (decision 172): `test_topes_carpeta.py` (las reglas de
+`shared/topes_carpeta.py`, la validacion y la herencia en `JobConfig`, el
+herencia con otra grafia, `ClavesCompactas`, el `Presupuesto` y `corto`, `_con_topes` del worker y el `SeoSpider` real
+con el arnes: lo que no cabe no se pide —tampoco desde el sitemap ni tras un
+salto—, las semillas si, y el recuento a `jobs.topes_carpeta`),
+`test_analyzer_topes_carpeta_db.py` (SQLite: con un tope cortado no hay
+`orphan_page` ni `sitemap_orphan` en ninguna parte del censo, tampoco en otra
+carpeta enlazada solo desde lo no pedido; sin corte, como siempre) y
+`test_topes_carpeta_api.py` (informe y ficha; tambien en el trabajo de la API).
