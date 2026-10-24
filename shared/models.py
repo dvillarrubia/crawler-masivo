@@ -539,6 +539,11 @@ class Job(Base):
     # "entradas_recortadas"}`. NULL = rastreo anterior o sin sitemap. Las
     # entradas, una por (fichero, URL), van a `sitemap_entries`.
     sitemaps = Column(JSON, nullable=True)
+    # Lo que leyeron los adaptadores de CMS (decision 161), lo escribe el
+    # spider: `{"wordpress": {detectado, rest, raiz, plugin_seo, namespaces,
+    # totales por tipo, peticiones, cortada, sondas...}}`. NULL = rastreo
+    # anterior o adaptador apagado. Las entidades van a `adapter_entities`.
+    adapters = Column(JSON, nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -1270,6 +1275,53 @@ class SitemapEntry(Base):
 
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),
+    )
+
+
+class AdapterEntity(Base):
+    """Una entidad que un CMS dice que publica, leida de su API (decision 161).
+
+    Hoy solo WordPress (`adaptador='wordpress'`): una fila por entrada, pagina,
+    entrada de un tipo propio, adjunto o termino de la REST API publica, y una
+    por cada sonda del adaptador (`tipo='sonda_paginacion'` o
+    `'sonda_adjunto'`: lo que respondio la pagina N+1 de un archivo o la pagina
+    de un adjunto). Las sondas NO son URLs del censo: no estan en `urls`.
+
+    Sin clave foranea a `urls`: que la entidad no tenga fila alli es justo el
+    hallazgo, y el emparejamiento se hace al analizar, por `(job_id,
+    url_hash)` (el indice unico de `urls`), o por `url_hash_alt` (la misma URL
+    con el otro esquema: un WordPress con `home` en http servido por https).
+    `en_alcance` = la URL pasaba los filtros del job (patrones, longitud,
+    carpetas): si no, que no este en el censo no dice nada. Cada proceso de
+    Scrapy vuelve a leer la REST API entera y borra antes lo que hubiera.
+    """
+
+    __tablename__ = "adapter_entities"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    adaptador = Column(String(32), nullable=False)
+    tipo = Column(String(64), nullable=False)
+    id_externo = Column(String(64), nullable=True)
+    url = Column(Text, nullable=True)
+    url_hash = Column(String(64), nullable=True)
+    url_hash_alt = Column(String(64), nullable=True)
+    en_alcance = Column(Boolean, nullable=True)
+    # `publish`, `inherit` (adjuntos)... de la REST API.
+    estado = Column(String(32), nullable=True)
+    # Sondas: el codigo HTTP que respondio la URL.
+    status_code = Column(Integer, nullable=True)
+    # Terminos: cuantas entradas publicadas tiene (`count`).
+    cuenta = Column(Integer, nullable=True)
+    # `modified_gmt` tal cual lo da la API.
+    modificado = Column(String(40), nullable=True)
+    # El resto: taxonomia, padre, fichero del adjunto, y de una sonda la
+    # redireccion, el content-type, robots y canonical.
+    datos = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_adent_job_tipo", "job_id", "tipo"),
+        Index("ix_adent_job_hash", "job_id", "url_hash"),
     )
 
 

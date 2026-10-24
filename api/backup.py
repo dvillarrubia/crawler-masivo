@@ -39,6 +39,7 @@ from shared.models import (
     RespuestaSondeada,
     ProfileRun,
     SitemapEntry,
+    AdapterEntity,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,9 @@ _TABLAS_SOLO_JOB: list[tuple[str, type]] = [
     ("respuestas_sondeadas", RespuestaSondeada),
     # Entradas de cada fichero de sitemap (decision 126).
     ("sitemap_entries", SitemapEntry),
+    # Entidades de la REST API de WordPress y sus sondas (decision 161). Sin
+    # clave foranea a `urls`: se emparejan al analizar, por url_hash.
+    ("adapter_entities", AdapterEntity),
     # La fila de la evolucion del job (decision 130). Se podria rehacer con
     # `rellenar_evolucion.py`, pero viaja: un censo importado tiene que salir
     # en la evolucion de su cliente sin pasos aparte.
@@ -595,6 +599,9 @@ def import_backup_zip(
             # Lo leido de cada fichero de sitemap (decision 126): sin el, los
             # avisos de sitemaps no salen al re-analizar el censo importado.
             sitemaps=job_data.get("sitemaps"),
+            # Lo que leyo el adaptador de WordPress (decision 161): sin el, los
+            # avisos de WordPress no salen al re-analizar el censo importado.
+            adapters=job_data.get("adapters"),
         )
         db.add(job)
         db.flush()

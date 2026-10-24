@@ -279,7 +279,8 @@ def servir(robots_prohibe_todo: bool = False,
             if ruta in movil and ("Mobile" in ua or "iPhone" in ua):
                 status, headers, body = movil[ruta]
             else:
-                spec = rutas.get(ruta, (404, {}, b"no"))
+                spec = (_ruta_con_consulta(rutas, self.path)
+                        or rutas.get(ruta, (404, {}, b"no")))
                 if isinstance(spec, dict):
                     # Una respuesta por metodo (decisiones 123 y 124): sin las
                     # pseudo-cabeceras de `_cabeceras_especiales`.
@@ -328,6 +329,33 @@ def servir(robots_prohibe_todo: bool = False,
     return srv, port
 
 
+def _ruta_con_consulta(rutas: dict, path: str):
+    """La ruta propia de un test que lleva consulta (`/api?page=2`): casa si
+    la ruta es la misma y la peticion trae TODOS sus parametros; si casan
+    varias, la que mas trae. Las demas rutas casan sin mirar la consulta."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    pedida = urlsplit(path)
+    params = set(parse_qsl(pedida.query, keep_blank_values=True))
+    mejor, n = None, -1
+    for clave, spec in rutas.items():
+        if "?" not in clave:
+            continue
+        p = urlsplit(clave)
+        suyos = set(parse_qsl(p.query, keep_blank_values=True))
+        if p.path == pedida.path and suyos <= params and len(suyos) > n:
+            mejor, n = spec, len(suyos)
+    return mejor
+
+
+# Peticiones a la vez, como mucho, a las rutas que empiezan por alguno de
+# estos prefijos (`vigilar_concurrencia`): el adaptador WordPress pide dos a la
+# vez como mucho (decision 161).
+VIGILAR: list[str] = []
+EN_VUELO = {"ahora": 0, "max": 0}
+_CERROJO = __import__("threading").Lock()
+
+
 # (ip del servidor, metodo, ruta, cabeceras) de cada peticion a un servidor de
 # «tercero» (decision 123): que llega, con que metodo y sin que credenciales.
 EXTERNAS: list[tuple[str, str, str, dict]] = []
@@ -344,6 +372,19 @@ class _Manejador(BaseHTTPRequestHandler):
         raise NotImplementedError
 
     def _responder(self, metodo: str):
+        vigilada = any(self.path.startswith(p) for p in VIGILAR)
+        if vigilada:
+            with _CERROJO:
+                EN_VUELO["ahora"] += 1
+                EN_VUELO["max"] = max(EN_VUELO["max"], EN_VUELO["ahora"])
+        try:
+            self._responder_de_verdad(metodo)
+        finally:
+            if vigilada:
+                with _CERROJO:
+                    EN_VUELO["ahora"] -= 1
+
+    def _responder_de_verdad(self, metodo: str):
         host = (self.headers.get("Host") or "").split(":")[0]
         PETICIONES.append((time.monotonic(), host, self.path))
         CABECERAS.append((host, self.path, {k.lower(): v for k, v in self.headers.items()}))
@@ -507,6 +548,7 @@ def main() -> None:
         _srv_tls, tls_port = servir_tls_caducado()
 
     externos = servir_externos(entrada.get("externos"), port)
+    VIGILAR.extend(entrada.get("vigilar_concurrencia") or [])
 
     trampa = None
     if entrada.get("trampa_llm"):
@@ -569,6 +611,24 @@ def main() -> None:
                 return lambda *a, **k: None
 
         modulo_spider.redis.Redis.from_url = classmethod(lambda cls, *a, **k: _RedisFalso())
+
+    if entrada.get("perder_wp_listas"):
+        # Peticiones a la REST API que se pierden sin callback ni errback
+        # (decision 161): ocupan su hueco en vuelo y nunca vuelven, asi que la
+        # cola solo sigue si `spider_idle` la reanima con `engine.crawl`.
+        import seo_crawler.sonda_wordpress as modulo_wp
+
+        perder = {"quedan": int(entrada["perder_wp_listas"])}
+        soltar = modulo_wp.AdaptadorWordPressMixin._wp_soltar
+
+        def _wp_soltar(self):
+            for req in soltar(self):
+                if req.meta.get("wp_rol") == "lista" and perder["quedan"] > 0:
+                    perder["quedan"] -= 1
+                    continue
+                yield req
+
+        modulo_wp.AdaptadorWordPressMixin._wp_soltar = _wp_soltar
 
     if entrada.get("simular_navegador"):
         # Como con render JS: la redireccion no la sigue el spider sino quien
@@ -717,12 +777,17 @@ def main() -> None:
             "ancho", "alto",
             # SitemapEntradasItem (decision 126)
             "fichero", "entradas",
+            # EntidadesAdaptadorItem (decision 161)
+            "adaptador", "entidades",
         )}
         for k in ("url", "redirect_url", "to_url", "redirige_a", "fichero"):
             if fila.get(k):
                 fila[k] = fila[k].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         for e in fila.get("entradas") or []:
             e["url"] = e["url"].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
+        for e in fila.get("entidades") or []:
+            if e.get("url"):
+                e["url"] = e["url"].replace(base, "OTRO").replace(f"localhost:{port}", "SEMILLA")
         salida.append(fila)
     if entrada.get("ver_cabeceras"):
         print("@@CABECERAS@@" + json.dumps(CABECERAS))
@@ -737,6 +802,8 @@ def main() -> None:
         print("@@JOB@@" + json.dumps(ACTUALIZACIONES_JOB, default=str))
     if entrada.get("externos"):
         print("@@EXTERNAS@@" + json.dumps(EXTERNAS))
+    if VIGILAR:
+        print("@@CONCURRENCIA@@" + json.dumps(EN_VUELO))
     print("@@PETICIONES@@" + json.dumps(PETICIONES))
     print("@@ITEMS@@" + json.dumps(salida))
 

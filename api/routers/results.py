@@ -1326,6 +1326,76 @@ def get_robots(job_id: uuid.UUID, db: Session = Depends(get_session)):
     return {"bots": BOTS_INFO, "hosts": hosts}
 
 
+# ---------------------------------------------------------------------------
+# WordPress por su REST API (decision 161)
+# ---------------------------------------------------------------------------
+@router.get("/wordpress")
+def get_wordpress(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Lo que leyo el adaptador WordPress y lo que hay de cada tipo.
+
+    `resumen` es `jobs.adapters["wordpress"]` tal cual (detectado, estado de la
+    REST API, plugin SEO, totales de `X-WP-Total`, si se corto, y el
+    `analisis`: lo que se afirmo y lo que no, y por que). `por_tipo`, cuantas
+    entidades se leyeron y cuantas estan en el censo, por (job_id, url_hash).
+    NULL en `resumen` = rastreo anterior o adaptador apagado.
+    """
+    from shared.models import AdapterEntity as E
+
+    job = _get_job_or_404(job_id, db)
+    resumen = (job.adapters or {}).get("wordpress") if job.adapters else None
+    # Como el analisis: por `url_hash` o por la misma URL con el otro esquema.
+    en_censo = exists().where(Url.job_id == E.job_id,
+                              or_(Url.url_hash == E.url_hash, Url.url_hash == E.url_hash_alt))
+    filas = (
+        db.query(E.tipo, func.count(E.id), func.sum(case((en_censo, 1), else_=0)))
+        .filter(E.job_id == job_id, E.adaptador == "wordpress")
+        .group_by(E.tipo).order_by(E.tipo).all()
+    )
+    return {
+        "resumen": resumen,
+        "por_tipo": [{"tipo": t, "leidas": int(n), "en_el_censo": int(c or 0)}
+                     for t, n, c in filas],
+    }
+
+
+@router.get("/wordpress/entidades")
+def get_wordpress_entidades(
+    job_id: uuid.UUID,
+    tipo: str | None = Query(None, max_length=64),
+    solo_no_rastreadas: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_session),
+):
+    """Entidades de la REST API de WordPress (y sus sondas), paginadas.
+
+    `solo_no_rastreadas=true` deja las que no tienen fila en `urls` (ni con
+    el otro esquema): la lista «solo en WordPress». Que no esten en el censo
+    no es por si solo un hallazgo: en un censo truncado o cortado por la
+    profundidad no se afirma (ver `resumen.analisis` en `/wordpress`).
+    """
+    from shared.models import AdapterEntity as E
+
+    _get_job_or_404(job_id, db)
+    q = db.query(E).filter(E.job_id == job_id, E.adaptador == "wordpress")
+    if tipo:
+        q = q.filter(E.tipo == tipo)
+    if solo_no_rastreadas:
+        q = q.filter(
+            ~exists().where(Url.job_id == E.job_id, Url.url_hash == E.url_hash),
+            or_(E.url_hash_alt.is_(None),
+                ~exists().where(Url.job_id == E.job_id, Url.url_hash == E.url_hash_alt)),
+        )
+    total = q.count()
+    filas = q.order_by(E.tipo, E.url, E.id).offset((page - 1) * page_size).limit(page_size).all()
+    items = [{
+        "tipo": e.tipo, "id_externo": e.id_externo, "url": e.url, "en_alcance": e.en_alcance,
+        "estado": e.estado, "status_code": e.status_code, "cuenta": e.cuenta,
+        "modificado": e.modificado, "datos": e.datos,
+    } for e in filas]
+    return _paginate(items, total, page, page_size)
+
+
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)
 def get_url_detail(
     job_id: uuid.UUID,

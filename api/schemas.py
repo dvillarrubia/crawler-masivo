@@ -280,6 +280,10 @@ class AnalysisThresholdsConfig(BaseModel):
     gsc_canibalizacion_min_clics: int = Field(default=10, ge=1, le=100_000_000)
     gsc_canibalizacion_min_impresiones: int = Field(default=1000, ge=1, le=100_000_000)
     gsc_canibalizacion_clics_grave: int = Field(default=100, ge=1, le=100_000_000)
+    # WordPress (decision 161): un termino (categoria, etiqueta) con estas
+    # entradas publicadas o menos es una taxonomia anemica si su archivo es
+    # indexable. 1 = el archivo repite la unica entrada que tiene.
+    wp_taxonomia_anemica_max: int = Field(default=1, ge=0, le=1000)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +332,47 @@ class BusquedaAMedida(BaseModel):
     fuente: Literal["html", "texto", "contenido"] = "html"
     dentro_de: str | None = Field(None, max_length=500)  # selector CSS que acota
     solo_urls: str | None = Field(None, max_length=500)
+
+
+class WordPressAdapterConfig(BaseModel):
+    """Adaptador WordPress (#33, decision 161): leer la REST API publica.
+
+    `auto` (por defecto) pide la raiz de la REST API de cada host de las
+    semillas y solo sigue si responde un indice de WordPress; `on` la pide
+    tambien si el sitio no la anuncia (la misma peticion, hoy); `off`, nada.
+    Las peticiones van por el spider (UA, huella TLS, cabeceras del job,
+    robots.txt y ritmo del host) y no cuentan en `max_urls`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    modo: Literal["auto", "on", "off"] = "auto"
+    # Peticiones a la REST API a la vez, como mucho (comparten el slot del host
+    # con el rastreo, asi que su Crawl-delay y su Retry-After valen igual).
+    max_concurrencia: int = Field(default=2, ge=1, le=2)
+    # Tope de peticiones del adaptador en un rastreo: indice, tipos, listados y sondas.
+    max_peticiones: int = Field(default=1000, ge=10, le=20_000)
+    # Minutos como mucho leyendo la REST API desde la primera peticion. Con un
+    # Crawl-delay alto la cola puede seguir cuando ya no quedan paginas: esto
+    # acota cuanto puede alargar el job (con latido, decision 161).
+    max_minutos: int = Field(default=20, ge=1, le=240)
+    # Entidades leidas por tipo (entradas, paginas, cada taxonomia). El total
+    # se sabe igual por `X-WP-Total`.
+    max_entidades_por_tipo: int = Field(default=20_000, ge=100, le=1_000_000)
+    # Medios: solo para la muestra de paginas de adjunto y el recuento.
+    max_medios: int = Field(default=1000, ge=0, le=100_000)
+    # Paginas de adjunto que se piden si el rastreo no las encuentra (hallazgo 2).
+    muestra_adjuntos: int = Field(default=20, ge=0, le=500)
+    # Archivos (home y terminos) a los que se pide la pagina N+1 (hallazgo 5).
+    sondas_paginacion: int = Field(default=5, ge=0, le=50)
+
+
+class AdaptersConfig(BaseModel):
+    """Adaptadores de CMS por job (decision 161)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wordpress: WordPressAdapterConfig = Field(default_factory=WordPressAdapterConfig)
 
 
 class TemplateRule(BaseModel):
@@ -417,6 +462,8 @@ class JobConfig(BaseModel):
     # contienen no cuentan como canibalizacion de la home. Coincidencia simple,
     # sin mayusculas ni acentos; lo ambiguo es trabajo de #169.
     marcas: list[str] = Field(default_factory=list, max_length=50)
+    # Adaptadores de CMS (decision 161): hoy WordPress por su REST API.
+    adapters: AdaptersConfig = Field(default_factory=AdaptersConfig)
 
     @field_validator("impersonate")
     @classmethod
@@ -754,6 +801,9 @@ class JobResponse(BaseModel):
     soft404: dict[str, Any] | None = None
     # Certificado TLS por host, el dia del rastreo (decision 110).
     tls: dict[str, Any] | None = None
+    # Lo que leyo el adaptador de WordPress (decision 161): detectado, estado
+    # de la REST API, plugin SEO, totales por tipo y si se corto.
+    adapters: dict[str, Any] | None = None
     # Enlaces externos y recursos comprobados (decisiones 123 y 124). Con
     # «comprobados < distintos», que no haya aviso no dice nada: sin este campo
     # en la respuesta, eso solo se veia entrando en la base de datos.

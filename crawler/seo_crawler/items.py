@@ -219,6 +219,21 @@ class SitemapEntradasItem(scrapy.Item):
     entradas = scrapy.Field()
 
 
+class EntidadesAdaptadorItem(scrapy.Item):
+    """Entidades que un CMS dice que publica, leidas de su API (decision 161).
+
+    Un item por respuesta de la REST API (una pagina de un listado) o por
+    sonda, con `entidades` = [{tipo, id_externo, url, url_hash, url_hash_alt,
+    en_alcance, estado, status_code, cuenta, modificado, datos}]: el pipeline
+    las inserta en `adapter_entities`. NO es una pagina y no cuenta en el
+    progreso del job.
+    """
+
+    job_id = scrapy.Field()
+    adaptador = scrapy.Field()
+    entidades = scrapy.Field()
+
+
 class RespuestaSondeadaItem(scrapy.Item):
     """Lo que respondio una URL sondeada: un enlace externo o un recurso
     embebido que no es del censo (decisiones 123 y 124).

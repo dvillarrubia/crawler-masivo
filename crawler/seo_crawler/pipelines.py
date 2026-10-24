@@ -20,6 +20,7 @@ from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
     EnlacesNoRastreablesItem,
+    EntidadesAdaptadorItem,
     HeadingItem,
     HreflangItem,
     HtmlMetaItem,
@@ -170,6 +171,8 @@ class PostgresPipeline:
             self._handle_sondeada(item)
         elif isinstance(item, SitemapEntradasItem):
             self._handle_sitemap(item)
+        elif isinstance(item, EntidadesAdaptadorItem):
+            self._handle_entidades(item)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -660,6 +663,60 @@ class PostgresPipeline:
         except Exception:
             self._rollback()
             logger.exception("Fallo al confirmar las entradas del sitemap %s", fichero)
+
+    # ------------------------------------------------------------------
+    # EntidadesAdaptadorItem (decision 161)
+    # ------------------------------------------------------------------
+    _AE_COLUMNAS = ("tipo", "id_externo", "url", "url_hash", "url_hash_alt", "en_alcance",
+                    "estado", "status_code", "cuenta", "modificado", "datos")
+
+    def _handle_entidades(self, item: EntidadesAdaptadorItem) -> None:
+        """Inserta en `adapter_entities` lo leido de una respuesta del adaptador.
+
+        Sin borrado previo: lo que hubiera del job lo borra el spider al
+        empezar a leer la REST API (cada proceso la vuelve a leer entera). Sin
+        la tabla (base sin migrar) el rastreo sigue igual y no se guardan.
+        """
+        import uuid
+
+        from shared.models import AdapterEntity
+
+        job_id = item.get("job_id")
+        try:
+            job_id = uuid.UUID(str(job_id))
+        except ValueError:
+            pass
+        adaptador = (item.get("adaptador") or "")[:32]
+        filas = []
+        for e in item.get("entidades") or []:
+            fila = {c: e.get(c) for c in self._AE_COLUMNAS}
+            for c, tope in (("tipo", 64), ("id_externo", 64), ("estado", 32), ("modificado", 40)):
+                if fila.get(c) is not None:
+                    fila[c] = str(fila[c]).replace("\x00", "")[:tope]
+            if isinstance(fila.get("url"), str):
+                fila["url"] = fila["url"].replace("\x00", "")
+            if not fila.get("tipo"):
+                continue
+            filas.append({"job_id": job_id, "adaptador": adaptador, **fila})
+        if not filas:
+            return
+        try:
+            with self.session.begin_nested():
+                for inicio in range(0, len(filas), 1000):
+                    self.session.execute(AdapterEntity.__table__.insert(),
+                                         filas[inicio:inicio + 1000])
+        except Exception:
+            if not getattr(self, "_ae_aviso", False):
+                self._ae_aviso = True
+                logger.warning("No se pudieron guardar las entidades del adaptador %s "
+                               "(decision 161); el rastreo sigue", adaptador, exc_info=True)
+            return
+        try:
+            self.session.commit()
+            self._uncommitted = 0
+        except Exception:
+            self._rollback()
+            logger.exception("Fallo al confirmar %d entidades del adaptador", len(filas))
 
     # ------------------------------------------------------------------
     # SecurityItem handling (upsert linked to Url)

@@ -4,7 +4,7 @@
 
 ## Database (PostgreSQL)
 
-18 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
+19 tables. Full schema documented in **`SEO_CRAWLER_DB.md`** (connection strings, all columns, example queries).
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
@@ -29,6 +29,7 @@
 | `capturas_alternativas` | 1:N from urls (con `job_id`) | perfil (movil, escritorio; mas adelante crudo para la Ola 7.1), modo (render/sin_render), estado (comparada, redirige, respuesta_distinta, no_evaluada), plantilla, user_agent, status_code, response_class, redirige_a, vary_base, vary, medidas, diferencias, volatiles, detalle (decision 119). Una fila por URL muestreada y perfil aunque no difiera: sin fila = no evaluada. Migracion: `migrar_capturas_alternativas()` |
 | `respuestas_sondeadas` | 1:N from jobs (SIN url FK) | url_hash (el de `links.to_url_hash`), url, host, uso (enlace/recurso), interno, metodo (HEAD/GET; NULL = no pedida), status_code, final_url, final_status, saltos, veredicto (`shared/sondas.py`), response_class, host_caido, content_type, content_length, error (decisiones 123 y 124); `uso='og_image'` con ancho y alto (decision 154). Lo que respondio una URL que el rastreo pidio SIN que sea del censo: enlaces externos y recursos embebidos. Unica por (job_id, url_hash); sin fila = no comprobada. En `TABLAS_POR_JOB`, `borrar_job` y el backup. Migracion: `migrar_respuestas_sondeadas()` |
 | `sitemap_entries` | 1:N from jobs (SIN url FK) | url_hash (el de `urls.url_hash`), url, fichero (la URL del fichero de sitemap), lastmod (crudo, recortado a 64), videos (cuantos `<video:video>` declara; NULL = leida antes de la decision 155). Una fila por (fichero, URL interna): la misma URL en tres ficheros son tres filas; una URL del sitemap sin rastrear tiene fila aqui y no en `urls`. Indice (job_id, url_hash). Tope `SITEMAP_ENTRIES_MAX` (250.000) por proceso de rastreo. En `TABLAS_POR_JOB`, `borrar_job` y el backup. Migracion: `migrar_sitemap_entries()` (decision 126) |
+| `adapter_entities` | 1:N from jobs (SIN url FK) | adaptador (`wordpress`), tipo (`post`, `page`, un tipo propio, `attachment`, `category`, `post_tag`... y `sonda_paginacion`/`sonda_adjunto`), id_externo, url, url_hash (el de `urls.url_hash`), url_hash_alt (otro esquema), en_alcance (pasaba los filtros del job), estado (`publish`, `inherit`), status_code (sondas), cuenta (entradas de un termino), modificado, datos (JSON). Lo que la REST API de WordPress dice que hay: que no tenga fila en `urls` es el hallazgo, por eso no hay FK. Indices (job_id, tipo) y (job_id, url_hash). En `TABLAS_POR_JOB`, `borrar_job` y el backup. Migracion: `migrar_adapter_entities()` (decision 161) |
 | `profile_runs` | 1:1 con jobs | job_id (unico), criterio, analisis_version, crawler_version, status/finish_reason (foto), urls y urls_2xx..5xx/bloqueadas (internas), paginas_html, indexables, click_depth_medio, indexables_sin_camino, incidencias, errores, avisos, info, urls_con_error, top_tipos (JSON), pagerank_desperdiciado, pagerank_indexable, segundos, calculado_at. La evolucion de cada ejecucion (decision 130): la escriben `run_analysis` y el cierre del worker, sin leer `links`. Solo cifras: cliente, perfil y tipo se leen de `jobs`. En `TABLAS_DEL_CENSO`, `borrar_job` y el backup. Migracion: `migrar_profile_runs()`; relleno: `scripts/rellenar_evolucion.py [--simular]` |
 
 `urls.response_class` dice si la respuesta era la pagina o un muro delante
@@ -46,6 +47,8 @@ siendo lo que hizo el rastreo. Migracion en `init_db.py`.
 `urls.ttfb_ms` y `urls.content_encoding` (decision 109): el tiempo del servidor hasta el primer byte y la compresion servida, medidos en el handler; `response_time_ms` sigue siendo la peticion entera. `jobs.tls` (JSON, decision 110): la sonda del certificado por host. `jobs.health["retry_after"]` (decision 111): lo que se respeto de los `Retry-After`. Las tres columnas, nullables y sin DEFAULT, con su `ALTER ... IF NOT EXISTS` en `init_db.py`.
 
 `jobs.sitemaps` (JSON, decision 126): lo escribe el spider al cerrar. `ficheros` (por fichero: url, status, formato, declaradas —contadas enteras, tambien las que pasan del tope—, devueltas, hijos, internas, bytes descomprimidos, cortado, entradas_guardadas, leido_at), `pedidos`, `leidos`, `parcial`, `tope_entradas`, `entradas_guardadas`, `entradas_recortadas`. NULL = rastreo anterior o sin sitemaps. Migracion en `init_db.py`.
+
+`jobs.adapters` (JSON, decision 161): `{"wordpress": {...}}` lo escribe el spider (detectado, rest abierta/cerrada/bloqueada_por_robots/no_detectado, codigo, raiz, plugin_seo, namespaces, evidencia, tipos con total/paginas/leidas/recortado, peticiones, cortada, sondas) y el analisis le anade `analisis`. NULL = rastreo anterior o adaptador apagado. Migracion en `init_db.py`.
 
 `jobs.sondas_resumen` (JSON, decisiones 123 y 124): lo escribe el analisis. `enlaces_externos` (distintos, comprobados, rotos, dominios_muertos, por_veredicto) y `recursos` (comprobados, rotos, por_veredicto). NULL = sin sondas. Migracion en `init_db.py`.
 

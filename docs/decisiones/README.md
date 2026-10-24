@@ -13,7 +13,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
@@ -187,6 +187,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 158 | El tráfico de Google entre dos censos, agrupado por lo que cambió en esas páginas, y nunca «por» | [`comparacion-y-alertas`](comparacion-y-alertas.md#d158) |
 | 159 | Una pregunta a Jev se mide antes de decidir nada, y el juego se prepara sin gastar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d159) |
 | 160 | Lo que Google y Chromium hacen de verdad: meta refresh con espacios, región ISO 3166-1, X-Robots-Tag en no HTML, LocalBusiness, y una imagen es su URL sin `?t=` | [`indexabilidad`](indexabilidad.md#d160) |
+| 161 | WordPress por su REST API pública: lo que el sitio publica frente a lo que el rastreo encontró | [`incidencias`](incidencias.md#d161) |
 | 162 | Jev en producción: la primera llamada real calibra la estimación y el gasto se cuenta una vez | [`llm-y-enriquecido`](llm-y-enriquecido.md#d162) |
 | 163 | La primera pregunta de verdad: soft 404, solo sobre lo sospechoso y marcada como sin evaluar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d163) |
 | 164 | robots.txt se respeta en TODAS las peticiones que esperan su descarga, no solo en las dos primeras | [`indexabilidad`](indexabilidad.md#d164) |

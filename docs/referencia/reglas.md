@@ -16,9 +16,10 @@
   tambien con render y tras una redireccion; sin jar de cookies por defecto. 114.
 - **Una sonda no es una URL del censo** (soft 404, enlace externo, recurso,
   og:image): su propio callback, sin `PageItem`, sin gastar `max_urls` ni contar
-  para la salud; vive en `jobs.soft404` o `respuestas_sondeadas`. Decisiones
-  105, 123, 124 y 154 (la de la og:image, encendida de serie: acotada por
-  `og_image_muestra` y por plantilla).
+  para la salud; vive en `jobs.soft404`, `respuestas_sondeadas` o
+  `adapter_entities`. Decisiones 105, 123, 124, 154 (la de la og:image,
+  encendida de serie: acotada por `og_image_muestra` y por plantilla) y 161
+  (la REST API de WordPress: dos a la vez, en el slot del host).
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 

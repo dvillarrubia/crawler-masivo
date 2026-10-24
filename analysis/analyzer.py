@@ -48,6 +48,7 @@ from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor, oportu
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from analysis import avisos_de_medios
+from analysis import avisos_de_wordpress
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
     x_robots_para_bot,
@@ -372,6 +373,7 @@ class SEOAnalyzer:
         self.respuesta_lenta_grave_ms = t.get("respuesta_lenta_grave_ms", 3000)
         self.respuesta_lenta_min_paginas = t.get("respuesta_lenta_min_paginas", 20)
         self.tls_dias_aviso = t.get("tls_dias_aviso", 7)
+        self.wp_taxonomia_anemica_max = t.get("wp_taxonomia_anemica_max", 1)  # d161
         self._job_config = (job.config or {}) if job else {}
         self._job_tls = getattr(job, "tls", None) if job else None
         self.near_duplicate_similarity = t.get(
@@ -441,6 +443,9 @@ class SEOAnalyzer:
         avisos_de_sondas.avisar_recursos_rotos(self)  # decision 124
         self.analyze_sitemap()
         avisos_de_sitemaps.avisar(self)  # decision 126
+        # WordPress por su REST API (decision 161): despues de la
+        # indexabilidad, los enlaces y el sitemap, que es con lo que se cruza.
+        avisos_de_wordpress.avisar_sin_tumbar(self)
         # Search Console (decision 142): despues de la indexabilidad y de los
         # entrantes, que es con lo que se cruza.
         avisos_de_gsc.avisar(self)

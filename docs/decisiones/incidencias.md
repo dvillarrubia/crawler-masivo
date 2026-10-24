@@ -1244,3 +1244,147 @@
    análisis completo, 18-24 s. Revisado por un agente aparte: nueve hallazgos,
    todos arreglados con su test. Lopesan no tiene `marcas` declaradas: conviene
    ponérselas.
+
+<a id="d161"></a>
+161. **WordPress por su REST API pública: lo que el sitio dice que publica
+   frente a lo que el rastreo encontró, leído por el spider y afirmado solo en
+   un censo entero** (#33).
+   - **Dónde se lee: en el spider, a la vez que el rastreo**
+     (`crawler/seo_crawler/sonda_wordpress.py`), no en el worker antes del
+     análisis ni, nunca, en un request de la API. Así cada petición hereda lo
+     que el rastreo ya hace y una descarga aparte tendría que repetir: UA y
+     huella TLS del navegador (11, 132; un WAF tipo F5 corta a `urllib`),
+     proxy, cabeceras y credenciales solo hacia el sitio (114), robots.txt en
+     `respect`, `Crawl-delay` (81) y `Retry-After` (111). Corre a la vez que
+     las páginas y con prioridad sobre ellas, así que en un sitio con ritmo
+     normal no alarga el job; con un `Crawl-delay` alto la cola puede seguir
+     cuando ya no quedan páginas, y entonces **sí lo alarga, como mucho
+     `max_minutos` (20)** desde la primera petición. El tope se mira al
+     encolar y al soltar cada petición: la página 1 de un listado encola de
+     golpe hasta 1.000, y mirándolo solo al encolar, con `Crawl-delay` 10 esa
+     cola seguía unas 2,8 h (y con `max_runtime_hours` bajo el job cerraba
+     truncado). Pasado el tope no se suelta nada más y la lectura queda
+     `cortada: tope_de_tiempo`. Cada respuesta escribe el
+     latido y mira la cancelación como las otras sondas (`LATIDO_S` 60): sin
+     eso, 180 peticiones con `Crawl-delay` 10 pasaban de los 30 minutos del
+     vigilante y el job se reencolaba como estancado (revisión de #226).
+     Como las demás sondas (105, 123, 124): callback propio, no gasta
+     `max_urls`, no cuenta para la salud y no es una URL del censo.
+   - **Dos peticiones a la vez como mucho, por una cola propia y en el slot
+     del HOST**, no en uno aparte (`DOWNLOAD_SLOTS`): un slot propio sumaría
+     dos peticiones más al sitio y se saltaría su `Crawl-delay`, que se
+     guarda por slot. Prioridad 5, para que la lectura acabe pronto y un tope
+     de URLs no la corte. Si una petición se pierde sin callback, `spider_idle`
+     suelta la cola.
+   - **Detección = la petición misma.** Con la respuesta de cada semilla (la
+     URL final), se pide `/wp-json/` en su origen y la raíz que anuncie la
+     cabecera `Link` o el `<link rel="https://api.w.org/">` (subcarpeta,
+     `?rest_route=/`); solo se sigue si responde un índice con `wp/v2`. Se
+     prueba `/wp-json/` aunque la home no la anuncie: blogs.uoc.edu no lleva
+     el `<link>` y su REST API responde. **No se pide al arrancar** porque el
+     `RobotsTxtMiddleware` de Scrapy 2.19 da el parser solo a las DOS primeras
+     peticiones que esperan el robots.txt de un host y `None` (todo permitido)
+     a las demás: medido en el arnés, con `Disallow: /wp-json/` la petición
+     desde `start_requests` salía igual. Al llegar la respuesta de la semilla,
+     el robots.txt de su host ya está leído. (El fallo de Scrapy lo arregla
+     la decisión 164 para todas las peticiones; pedir desde la semilla se
+     queda porque además es cuando se ve la raíz que anuncia.)
+   - **Qué se lee**: el índice (nombre, home, `show_on_front`, namespaces →
+     plugin SEO), `wp/v2/types` y `wp/v2/taxonomies` para saber qué tipos y
+     taxonomías hay (fuera los internos del núcleo: menús, patrones,
+     plantillas, fuentes), cada tipo con `per_page=100` y `_fields` mínimos,
+     **paginando por `X-WP-TotalPages`** (más allá es un 400, y una página
+     puede venir con menos de 100 aunque haya más: en wordpress.org/news,
+     `media?per_page=1` devuelve `[]` con 1.685 en `X-WP-Total`), los medios
+     hasta `max_medios` (1.000; el total sale de la cabecera) y los términos
+     ordenados por `count`. Nunca `/wp/v2/users`. Topes en
+     `adapters.wordpress` del `JobConfig` (`max_peticiones` 1.000,
+     `max_entidades_por_tipo` 20.000). Un 429 o 503 (tras los reintentos de
+     Scrapy) para la lectura entera, también en una sonda; en el índice es
+     «limitada» (no se sabe si está abierta), y un 401/403/404 o un HTML es
+     «cerrada». El rastreo sigue. Una lista (`max_depth` 0) no la lee.
+   - **Solo el sitio** (como las sondas de la 123, `shared/red.py`): una raíz
+     anunciada o un salto solo se piden si son internos del job, y si su host
+     es de red privada, solo si es un host del job tal cual (la semilla o
+     aquel al que saltó). Las redirecciones no las sigue Scrapy: se siguen a
+     mano (tres como mucho) con esa misma comprobación, y la raíz pasa a ser
+     la del destino con su ruta (`/wp-json/` → `/es/wp-json/` con WPML). Una
+     raíz anunciada fuera del sitio (un WordPress headless en `cms.x.com`) se
+     anota en `intentos` como `raiz_fuera_del_sitio` y se prueba `/wp-json/`
+     del origen; si tampoco responde, `rest: "raiz_fuera_del_sitio"`, no
+     «cerrada». Si la semilla no anuncia raíz, se prueba antes la que confirmó
+     una ejecución anterior. Un
+     `<link rel="https://api.w.org/" href="http://169.254.169.254/">` no se
+     pide.
+   - **Dónde va**: `adapter_entities` (una fila por entidad y por sonda, sin
+     FK a `urls`: que no tenga fila allí es el hallazgo; se empareja al
+     analizar por `(job_id, url_hash)` o por `url_hash_alt`, la misma URL con
+     el otro esquema) y el resumen en `jobs.adapters["wordpress"]`. **Una
+     reanudación no borra lo leído al arrancar**: si la ejecución anterior la
+     leyó entera (`completa`) no se repite; si no, se vuelve a pedir empezando
+     por la raíz que confirmó (`raiz`: una subcarpeta o `?rest_route=/` no se
+     ven sin la semilla), y lo anterior se borra solo cuando ESTA ejecución
+     confirma el índice. Si no llega a confirmarlo, se queda el resumen y las
+     entidades de la anterior con una nota (`reanudacion`), nunca
+     «no detectado». `en_alcance` = la URL pasa los filtros del job. En
+     `TABLAS_POR_JOB`, `borrar_job` y el backup.
+   - **Sondas** (hallazgos 2 y 5), sin seguir redirecciones: hasta
+     `muestra_adjuntos` (20) páginas de adjunto, y la página `N+1` de hasta
+     `sondas_paginacion` (5) archivos: la home de entradas (solo con
+     `show_on_front=posts`) con `N` = `X-WP-Total` de entradas, y los términos
+     con más entradas. Una categoría muestra también las de sus hijas, así
+     que su `count` no es un tope: solo hojas, y solo si la primera página
+     trae todas las categorías.
+   - **Los avisos** (`analysis/avisos_de_wordpress.py`, en un savepoint con
+     el try entero, 74), todos agrupados (36, 53, 64, 73):
+     **`wp_publicado_no_rastreado`** (warning, por host y tipo): publicado, en
+     alcance, sin fila en el censo y sin enlace desde ninguna página rastreada
+     (o solo nofollow). **Solo en un censo entero** (67, 70, 89): ni truncado
+     (`MOTIVOS_TRUNCADO`) ni cortado por `max_depth` (alguna URL llegó a la
+     profundidad máxima: lo que cuelga de ella no se vio; con el valor por
+     defecto, 3, es lo normal en un blog) ni con filtros de URL
+     (`exclude_patterns`, `include_patterns`, `url_filters`): pueden dejar
+     fuera la paginación o los archivos desde los que se llega a una entrada
+     que sí pasa el filtro (70). En esos casos la cifra va al
+     resumen (`no_afirmable`) y la lista a `GET /wordpress/entidades`, sin
+     incidencia. Lo rastreado y sin entrantes no se repite: ya es
+     `orphan_page`. Un tipo propio solo cuenta si el rastreo encontró alguna
+     entrada suya (los autores invitados de Co-Authors Plus tienen REST API y
+     no página). **`wp_adjunto_indexable`** (warning, por host): del censo o
+     de la muestra, con `estado_indexabilidad` (39): en blogs.uoc.edu las
+     páginas de adjunto dan 200 con canonical al fichero, y eso no es
+     indexable. **`wp_taxonomia_anemica`** (info, por host y taxonomía):
+     archivo rastreado e indexable con `wp_taxonomia_anemica_max` (1)
+     entradas o menos. **`wp_paginacion_sin_fin`** (warning si alguna es
+     indexable, si no info, por host): la página N+1 responde 200 en HTML;
+     si el host tiene soft 404 de serie (105) ya lo dice el soft 404.
+   - **El hallazgo 4 (sitemap frente a contenido) no se hace**: en la
+     dirección que se puede afirmar (indexable y fuera del sitemap) ya es
+     `not_in_sitemap`; para lo no rastreado no se sabe si es indexable (Yoast
+     quita del sitemap lo que lleva noindex, y eso es correcto).
+   - **Medido** (24-oct-2026), con el spider de verdad (curl_cffi y huella
+     de Chrome, robots.txt en `respect`) en local contra tres WordPress
+     públicos, a una petición por segundo (`DOWNLOAD_DELAY` 1, una a la vez
+     por host) y con un tope de 30-40 URLs; la base, la de pruebas:
+     **wordpress.org/news** (raíz anunciada `/news/wp-json/`; la del origen
+     es otro WordPress, el de wordpress.org): 63 peticiones del adaptador,
+     1.112 entradas de 1.112 (`X-WP-Total`), 2 páginas, 86 de un tipo propio
+     (`podcast`), 22 categorías, 272 etiquetas, 966 medios leídos de 1.685
+     (tope de 1.000 en 10 páginas, que vienen cortas), cuatro tipos de Jetpack
+     con 401 (anotados, sin error). Las 20 páginas de adjunto de la muestra:
+     301 al fichero. Las 5 sondas de paginación (p. ej.
+     `/category/releases/page/485/` con 484 entradas): 404. **rankmath.com**
+     (sin cabecera `Link`; `<link>` en el head): Rank Math detectado, 72
+     peticiones, 327 entradas, 66 páginas, 1.325 de tipos propios (base de
+     conocimiento, changelog, productos), 557 medios leídos de 29.554; 20
+     adjuntos con 301 y 5 sondas con 404. **blogs.uoc.edu** (Yoast, sin
+     `<link>` ni cabecera en la home): detectado por `/wp-json/` en el origen,
+     33 peticiones, 6 páginas, 51 medios; las 20 páginas de adjunto responden
+     200 con `index, follow` y canonical al fichero: no indexables, sin aviso.
+     Ningún aviso emitido en los tres, como debe ser: los censos de prueba
+     están truncados (`no_afirmable`: 1.074, 363 y 5 publicadas sin afirmar)
+     y ninguna sonda dio 200. Lo que dicen los cuatro avisos cuando saltan
+     está ejecutado en `tests/test_avisos_de_wordpress_db.py`, y la lectura,
+     contra un WordPress falso con dos peticiones a la vez como mucho, en
+     `tests/test_wordpress_spider.py`. Falta verlos en un censo entero de
+     producción.
