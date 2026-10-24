@@ -335,6 +335,22 @@ def evaluar_lote(texto: str, urls: list[str], agentes: list[str], *,
     return salida
 
 
+_ASTERISCOS = re.compile(r"\*+")
+
+
+def _trozos(campo: str, valor: str) -> int:
+    """Cota de los trozos entre comodines que `_Grupo._anadir` recorrera por
+    esta regla al emparejar una URL: cada `*` es un `find` mas, una regla con
+    `$` se anade dos veces (la otra con el `$` escapado) y un `Allow` que acaba
+    en `/index.html`, una mas. Es lo que cuesta la regla, no 1 (decision 171)."""
+    n = 1 + len(_ASTERISCOS.findall(valor))
+    if "$" in valor:
+        n *= 2
+    if campo in _ALLOW and valor.rstrip("$").endswith("/index.html"):
+        n += 1
+    return n
+
+
 def diagnostico(texto: str | None) -> dict:
     """Lo que un robots.txt pegado tiene de raro antes de subirlo (decision 171).
 
@@ -352,6 +368,8 @@ def diagnostico(texto: str | None) -> dict:
     sitemaps: list[dict] = []
     grupos = 0
     reglas = 0
+    trozos = 0
+    con_comodin = 0
     en_grupo = False
     anterior = None
     for n, linea in enumerate(leido.splitlines(), start=1):
@@ -367,6 +385,11 @@ def diagnostico(texto: str | None) -> dict:
             ignoradas.append({"linea": n, "texto": escrita[:300], "motivo": "no_es_directiva"})
             continue
         campo, valor = d
+        # El mismo recorrido de estado que `_grupos`: una directiva desconocida
+        # tambien cierra la lista de `User-agent` (la siguiente abre otro grupo).
+        previo = anterior
+        if campo not in _DEL_SITIO:
+            anterior = campo
         if campo not in _TODAS:
             ignoradas.append({"linea": n, "texto": escrita[:300],
                               "motivo": "directiva_desconocida"})
@@ -376,19 +399,27 @@ def diagnostico(texto: str | None) -> dict:
                 sitemaps.append({"linea": n, "url": valor[:2000]})
             continue
         if campo in _USER_AGENT:
-            if anterior not in _USER_AGENT:
+            if previo is not None and previo not in _USER_AGENT:
+                # Abre grupo nuevo aunque venga vacio: `_grupos` olvida el
+                # anterior, y las reglas que siguen a un `User-agent:` sin
+                # nombre no son de nadie.
+                en_grupo = False
+            if previo not in _USER_AGENT:
                 grupos += 1
             en_grupo = en_grupo or bool(valor)
         elif campo in (_ALLOW | _DISALLOW) and valor:
             if en_grupo:
                 reglas += 1
+                trozos += _trozos(campo, valor)
+                con_comodin += "*" in valor
             else:
                 ignoradas.append({"linea": n, "texto": escrita[:300],
-                                  "motivo": "regla_sin_user_agent"})
-        if campo not in _DEL_SITIO:
-            anterior = campo
+                                  "motivo": "regla_tras_user_agent_vacio" if grupos
+                                  else "regla_sin_user_agent"})
     return {"bytes": len(bruto), "recortado": len(bruto) > LIMITE_BYTES,
-            "grupos": grupos, "reglas": reglas, "sitemaps": sitemaps, "ignoradas": ignoradas}
+            "grupos": grupos, "reglas": reglas, "trozos": trozos,
+            "reglas_con_comodin": con_comodin,
+            "sitemaps": sitemaps, "ignoradas": ignoradas}
 
 
 def estado_guardado(fila) -> str:

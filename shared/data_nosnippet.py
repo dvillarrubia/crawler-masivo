@@ -28,7 +28,9 @@ el que haya: no se afirma que Google viera el otro):
   cubierto no cuenta: se queda corto, nunca se pasa (decision 67). None si no
   hay contenido principal medido;
 - `ignorados` y `etiquetas_ignoradas`: el atributo en otros elementos (`p`,
-  `article`, `nav`, uno propio...), fuera de lo documentado. No cuentan para
+  `article`, `nav`, uno propio...), fuera de lo documentado, que se pintan y
+  no estan ya dentro de un `span`/`div`/`section` marcado (ahi su texto ya
+  queda cubierto y no hay nada que avisar). No cuentan para
   lo cubierto: no se afirma que escondan nada. La pagina de Google que lo
   documenta lo lleva en `devsite-*` y en un `nav` (medido el 2026-10-24): que
   no se garantice no es que se ignore, y por eso solo se anota.
@@ -85,15 +87,21 @@ def medir(raiz_body, main_content: str | None = None) -> dict[str, Any]:
     if raiz_body is None:
         return salida
     validos = []
-    etiquetas_ignoradas: dict[str, int] = {}
+    otros = []
     for el in raiz_body.iter():
         if not isinstance(el.tag, str) or not _tiene_atributo(el):
             continue
-        tag = el.tag.lower()
-        if tag not in ELEMENTOS_VALIDOS:
-            etiquetas_ignoradas[tag] = etiquetas_ignoradas.get(tag, 0) + 1
+        (validos if el.tag.lower() in ELEMENTOS_VALIDOS else otros).append(el)
+    conjunto = set(validos)
+    etiquetas_ignoradas: dict[str, int] = {}
+    for el in otros:
+        # Dentro de un span/div/section marcado su texto ya esta cubierto, y
+        # oculto no se pinta: en los dos casos no hay nada que avisar.
+        if (any(a in conjunto for a in el.iterancestors())
+                or _nodo_oculto(el) or _oculto_por_ancestro(el)):
             continue
-        validos.append(el)
+        tag = el.tag.lower()
+        etiquetas_ignoradas[tag] = etiquetas_ignoradas.get(tag, 0) + 1
     if etiquetas_ignoradas:
         salida["ignorados"] = sum(etiquetas_ignoradas.values())
         salida["etiquetas_ignoradas"] = sorted(
@@ -101,7 +109,6 @@ def medir(raiz_body, main_content: str | None = None) -> dict[str, Any]:
     if not validos:
         return salida
 
-    conjunto = set(validos)
     exteriores = [el for el in validos
                   if not any(a in conjunto for a in el.iterancestors())
                   and not _nodo_oculto(el) and not _oculto_por_ancestro(el)]

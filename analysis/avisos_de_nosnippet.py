@@ -10,8 +10,10 @@ va anclada en la URL MENOR del grupo (88), con `paginas_afectadas` y ejemplos.
   no usa ese texto en el fragmento ni, con las mismas directivas, en AI
   Overviews y AI Mode (137): la pagina sale con un fragmento de lo que sobra (el
   menu, el pie) o sin el. Puede ser deliberado (contenido de pago): la ficha
-  pide confirmarlo. El motivo (`h1`, `contenido`, `h1_y_contenido`) va en la
-  clave del grupo.
+  pide confirmarlo. Una fila por (host, plantilla): el motivo de cada pagina
+  (`h1`, `contenido`, `h1_y_contenido`) va como recuento en `motivos`, no en la
+  clave; si no, la misma plantilla salia en dos o tres filas segun cada pagina
+  quedara por encima o por debajo del umbral.
 - `data_nosnippet_ignorado` (`info`): el atributo en un elemento que no es
   `span`, `div` ni `section`, fuera de lo que Google documenta: no se puede
   contar con que esconda nada. No se afirma que Google lo ignore (su propia
@@ -70,6 +72,7 @@ def avisar(analizador) -> None:
     principal, ignorado = _Grupos(), _Grupos()
     etiquetas: dict[tuple, set[str]] = {}
     medidas: dict[tuple, list[float]] = {}
+    motivos: dict[tuple, dict[str, int]] = {}
     for f in filas:
         datos = f.data_nosnippet if isinstance(f.data_nosnippet, dict) else None
         if not datos or not (datos.get("elementos") or datos.get("ignorados")):
@@ -83,8 +86,10 @@ def avisar(analizador) -> None:
         plantilla = _plantilla(f.url)
         motivo = esconde_lo_principal(datos)
         if motivo:
-            clave = (host, plantilla, motivo)
+            clave = (host, plantilla)
             principal.anotar(clave, f.url, f.id)
+            cuenta = motivos.setdefault(clave, {})
+            cuenta[motivo] = cuenta.get(motivo, 0) + 1
             if isinstance(datos.get("principal"), (int, float)):
                 medidas.setdefault(clave, []).append(float(datos["principal"]))
         if datos.get("ignorados"):
@@ -94,7 +99,7 @@ def avisar(analizador) -> None:
 
     def _detalle_principal(k):
         fr = medidas.get(k) or []
-        d = {"host": k[0], "plantilla": k[1], "motivo": k[2],
+        d = {"host": k[0], "plantilla": k[1], "motivos": dict(sorted(motivos[k].items())),
              "umbral_contenido": UMBRAL_PRINCIPAL}
         if fr:
             d["fraccion_contenido_mediana"] = sorted(fr)[len(fr) // 2]

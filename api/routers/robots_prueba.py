@@ -18,7 +18,8 @@ para validar un robots.txt ANTES de subirlo.
 - `diagnostico`: lineas que el parser se salta (directiva desconocida, regla
   antes de cualquier `User-agent`), los `Sitemap` y si pasa de 500 KiB.
 
-Puro calculo, sin BD; el tope de tamano y de pares acota lo que cuesta.
+Puro calculo, sin BD; el tope de tamano y el de coste (`coste`: trozos entre
+comodines y longitud de las URLs, no solo reglas x pares) acotan lo que cuesta.
 """
 
 from __future__ import annotations
@@ -36,11 +37,31 @@ router = APIRouter(prefix="/api/robots", tags=["robots"])
 MAX_ROBOTS_BYTES = 1024 * 1024
 MAX_URLS = 500
 MAX_AGENTES = 20
-# Reglas x URLs x agentes. Cada par recorre las reglas de su grupo: medido, unos
-# 4,5 M emparejamientos por segundo, asi que esto es ~1 s en el peor caso. Un
-# robots.txt real (decenas de reglas) con 500 URLs y 20 agentes queda muy por
-# debajo; uno de 20.000 reglas con esos pares tardaba 44 s y ocupaba un hilo.
-MAX_COMPROBACIONES = 5_000_000
+# Tope de lo que cuesta emparejar, en unidades de ~70 ns (decision 171). Un
+# emparejamiento no cuesta lo mismo siempre: `_Patron.casa` hace un `find` por
+# cada trozo entre comodines (diagnostico["trozos"]), y en una regla con `*`
+# cada `find` puede recorrer la URL entera (una sin `*` es un `startswith`).
+# Medido: ~70 ns por trozo y URL, hasta ~1,1 us por regla con comodin y KiB de
+# URL (agujas largas o casi coincidentes: ~16 unidades por KiB) y ~8 us por par
+# (agente, URL) de normalizar y montar la fila. Con 15 M unidades el peor caso
+# medido ronda 1 s. Contar solo reglas x pares dejaba pasar 120 reglas de 2.000
+# comodines contra URLs de 4 KiB (minutos de CPU).
+MAX_COMPROBACIONES = 15_000_000
+_UNIDADES_POR_BYTE_DE_URL = 16 / 1024
+_UNIDADES_POR_PAR = 100
+
+
+def coste(diag: dict, urls: list[str], agentes: int) -> int:
+    """Cota de las unidades de emparejamiento de la prueba, por agente: cada
+    trozo de regla contra cada URL, cada regla con comodin recorriendo cada URL
+    y lo fijo de cada par."""
+    trozos = max(diag.get("trozos") or 0, diag.get("reglas") or 0, 1)
+    con_comodin = diag.get("reglas_con_comodin") or 0
+    largo = sum(len(u) for u in urls)
+    return int(agentes * (trozos * len(urls) + con_comodin * largo * _UNIDADES_POR_BYTE_DE_URL
+                          + _UNIDADES_POR_PAR * len(urls)))
+
+
 _TOKEN = re.compile(r"[A-Za-z_-]+")
 
 
@@ -98,10 +119,11 @@ def probar_robots(cuerpo: PruebaRobots):
         raise HTTPException(422, "Falta al menos una URL o ruta")
     agentes = list(dict.fromkeys(_agente(a, cuerpo.modo) for a in cuerpo.agentes))
     diag = diagnostico(cuerpo.robots_txt)
-    if max(diag["reglas"], 1) * len(urls) * len(agentes) > MAX_COMPROBACIONES:
+    if coste(diag, urls, len(agentes)) > MAX_COMPROBACIONES:
         raise HTTPException(
-            422, f"Demasiadas comprobaciones ({diag['reglas']} reglas x {len(urls)} URLs x "
-                 f"{len(agentes)} agentes): reduce las URLs o los agentes")
+            422, f"Demasiadas comprobaciones ({diag['reglas']} reglas con {diag['trozos']} "
+                 f"trozos entre comodines x {len(urls)} URLs x {len(agentes)} agentes): "
+                 "reduce las URLs, su longitud o los agentes")
     resultados = evaluar_lote(cuerpo.robots_txt, urls, agentes,
                               como_google=cuerpo.modo == "google")
     return {

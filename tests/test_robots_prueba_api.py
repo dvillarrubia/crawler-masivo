@@ -176,3 +176,50 @@ def test_tope_de_comprobaciones(cliente):
     r = cliente.post("/api/robots/probar", json={"robots_txt": enorme, "urls": ["/x/1.pdf"]})
     assert r.status_code == 200
     assert r.json()["diagnostico"]["reglas"] == 20000
+
+
+def test_tope_cuenta_comodines_y_largo_de_url(cliente):
+    """120 reglas de 2.000 comodines contra 500 URLs de 4 KiB y 20 agentes son
+    1,2 M «reglas x pares», por debajo del tope viejo, y minutos de CPU: el
+    coste cuenta los trozos entre comodines y lo que mide la URL."""
+    import time
+
+    pat = "/" + "*x" * 2000 + "*y"
+    txt = "User-agent: *\n" + "".join(f"Disallow: {pat}{i}\n" for i in range(120))
+    urls = ["/" + "x" * 4000 + str(i) for i in range(500)]
+    t0 = time.perf_counter()
+    r = cliente.post("/api/robots/probar", json={
+        "robots_txt": txt, "urls": urls, "agentes": [f"Bot{chr(65 + i)}" for i in range(20)]})
+    assert r.status_code == 422, r.text
+    assert "trozos" in r.json()["detail"]
+    assert time.perf_counter() - t0 < 5
+    # Un robots.txt normal con 500 URLs y 20 agentes pasa.
+    normal = "User-agent: *\n" + "".join(f"Disallow: /*?{k}=\n" for k in "abcdefghij") + \
+        "".join(f"Disallow: /priv{i}/\n" for i in range(40))
+    r = cliente.post("/api/robots/probar", json={
+        "robots_txt": normal, "urls": [f"/blog/articulo-{i}?utm=1" for i in range(500)],
+        "agentes": [f"Bot{chr(65 + i)}" for i in range(20)]})
+    assert r.status_code == 200
+
+
+def test_coste_peor_caso_aceptado_cabe_en_segundos():
+    """En el tope, el peor caso medido (agujas largas que recorren la URL,
+    reglas simples contra URLs largas) no pasa de unos pocos segundos."""
+    import time
+
+    from api.routers.robots_prueba import MAX_COMPROBACIONES, coste
+    from shared.robots_regla import diagnostico, evaluar_lote
+
+    casos = [
+        ("User-agent: *\n" + "".join(f"Disallow: /*{'x' * 1000}y{i}\n" for i in range(200)),
+         ["/" + "x" * 4090] * 100),
+        ("User-agent: *\n" + "".join(f"Disallow: /p{i}/\n" for i in range(2000)),
+         [f"/x/{i}" for i in range(500)]),
+    ]
+    for txt, urls in casos:
+        c = coste(diagnostico(txt), urls, 1)
+        t0 = time.perf_counter()
+        evaluar_lote(txt, urls, ["Googlebot"])
+        por_unidad = (time.perf_counter() - t0) / c
+        # ~40-75 ns medidos; holgura x4 para una maquina de CI lenta.
+        assert por_unidad * MAX_COMPROBACIONES < 5, por_unidad

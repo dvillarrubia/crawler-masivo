@@ -60,7 +60,7 @@ def test_los_tres_elementos_validos(etiqueta):
 
 
 @pytest.mark.parametrize("etiqueta", ["p", "article", "li", "main", "h2", "td"])
-def test_en_otro_elemento_google_lo_ignora(etiqueta):
+def test_en_otro_elemento_no_documentado(etiqueta):
     contenedor = {"li": "ul", "td": "table><tr"}.get(etiqueta)
     cuerpo = f"<{etiqueta} data-nosnippet>texto que sigue saliendo</{etiqueta}>"
     if contenedor:
@@ -69,6 +69,20 @@ def test_en_otro_elemento_google_lo_ignora(etiqueta):
     assert m["elementos"] == 0
     assert m["ignorados"] == 1
     assert m["etiquetas_ignoradas"] == [etiqueta]
+
+
+@pytest.mark.parametrize("cuerpo", [
+    # Dentro de un div marcado: su texto ya esta cubierto por el div.
+    "<div data-nosnippet><p data-nosnippet>Uno dos tres cuatro</p></div>",
+    "<section data-nosnippet><ul><li data-nosnippet>Uno dos tres</li></ul></section>",
+    # Oculto: no se pinta, no hay texto que salga en el fragmento.
+    '<p data-nosnippet hidden>Uno dos tres cuatro</p>',
+    '<div style="display:none"><p data-nosnippet>Uno dos tres cuatro</p></div>',
+])
+def test_no_documentado_ya_cubierto_u_oculto_no_cuenta(cuerpo):
+    m = medir(_body(cuerpo))
+    assert m["ignorados"] == 0
+    assert "etiquetas_ignoradas" not in m
 
 
 @pytest.mark.parametrize("atributo", ['data-nosnippet', 'data-nosnippet=""',
@@ -258,6 +272,9 @@ def test_el_analisis_agrupa_por_plantilla_y_solo_en_indexables():
     a = pagina("/blog/a", dict(tapado, principal=0.8))
     pagina("/blog/c", {"elementos": 1, "ignorados": 0, "palabras": 4, "h1": False,
                        "principal": 0.02})                                 # un precio: bien
+    # La misma plantilla, pero aqui solo el H1: misma fila, no otra por motivo.
+    pagina("/blog/i", {"elementos": 1, "ignorados": 0, "palabras": 3, "h1": True,
+                       "principal": 0.1})
     pagina("/blog/d", tapado, indexable=False)                             # noindex: no
     pagina("/blog/e", tapado, status=404)
     pagina("/blog/f", tapado, robots="nosnippet")                          # ya avisa 137
@@ -281,14 +298,16 @@ def test_el_analisis_agrupa_por_plantilla_y_solo_en_indexables():
     principal = sorted(por_tipo["data_nosnippet_contenido_principal"],
                        key=lambda x: x[2]["plantilla"])
     assert len(principal) == 2
-    blog = next(p for p in principal if p[2]["motivo"] == "h1_y_contenido")
+    blog = next(p for p in principal if p[2]["plantilla"].startswith("/blog"))
     assert blog[0] == a.id and blog[0] != b.id      # anclada en la URL menor
     assert blog[1] == "warning"
-    assert blog[2]["paginas_afectadas"] == 2
-    assert blog[2]["paginas_ejemplo"] == ["https://x.com/blog/a", "https://x.com/blog/b"]
-    assert blog[2]["fraccion_contenido_mediana"] == 0.95
-    ficha = next(p for p in principal if p[2]["motivo"] == "h1")
-    assert ficha[0] == solo_h1.id
+    assert blog[2]["paginas_afectadas"] == 3
+    assert blog[2]["paginas_ejemplo"] == ["https://x.com/blog/a", "https://x.com/blog/b",
+                                          "https://x.com/blog/i"]
+    assert blog[2]["motivos"] == {"h1": 1, "h1_y_contenido": 2}
+    assert blog[2]["fraccion_contenido_mediana"] == 0.8
+    ficha = next(p for p in principal if p[2]["plantilla"].startswith("/ficha"))
+    assert ficha[0] == solo_h1.id and ficha[2]["motivos"] == {"h1": 1}
 
     (ignorado,) = por_tipo["data_nosnippet_ignorado"]
     assert ignorado[0] == ign.id and ignorado[1] == "info"
@@ -395,7 +414,7 @@ def test_tuberia_y_analisis_en_postgres():
         assert len(avisos) == 1
         tipo, d = avisos[0]
         assert tipo == "data_nosnippet_contenido_principal"
-        assert d["paginas_afectadas"] == 2 and d["motivo"] == "h1_y_contenido"
+        assert d["paginas_afectadas"] == 2 and d["motivos"] == {"h1_y_contenido": 2}
     finally:
         with engine.begin() as c:
             c.execute(text("DELETE FROM html_meta WHERE url_id IN "

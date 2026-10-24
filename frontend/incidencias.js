@@ -100,9 +100,9 @@ const ISSUE_INFO = {
     google: 'La indexa, pero la enseña sin fragmento de texto en los resultados. Según la documentación de Google sobre las funciones de IA de la Búsqueda, esas mismas directivas son las que controlan qué se usa en AI Overviews y AI Mode: con «nosnippet», el contenido de la página no se usa como entrada directa ahí. Un resultado sin descripción convierte peor y la página desaparece de las respuestas de IA de Google.',
     arreglo: 'Quitar «nosnippet» de las plantillas indexables. Si hay un trozo concreto que no se quiere citar (un precio, un aviso legal), marcarlo con el atributo data-nosnippet en vez de cerrar la página entera. Puede ser deliberado (contenido de pago, por ejemplo): confirmarlo antes de tocarlo.',
   },
-  // Decision 170: data-nosnippet que esconde lo principal o que Google ignora.
+  // Decision 170: data-nosnippet que esconde lo principal o en un elemento no documentado.
   'data_nosnippet_contenido_principal': {
-    que: 'En páginas indexables, el atributo data-nosnippet cubre el H1 (el título visible principal) o la mayor parte del contenido principal. Va una fila por plantilla; en los detalles, el motivo (h1, contenido o los dos) y la fracción mediana del contenido cubierta.',
+    que: 'En páginas indexables, el atributo data-nosnippet cubre el H1 (el título visible principal) o la mayor parte del contenido principal. Va una fila por plantilla; en los detalles, cuántas páginas lo hacen por cada motivo (h1, contenido o los dos) y la fracción mediana del contenido cubierta.',
     google: 'Google no usa como fragmento el texto marcado con data-nosnippet, y según su documentación las funciones de IA de la Búsqueda (AI Overviews, AI Mode) se controlan con las mismas directivas: ese texto tampoco se usa ahí. La página sigue indexada, pero el resultado sale con un fragmento sacado de lo que queda (el menú, el pie) y lo principal no se cita en las respuestas de IA. Solo se mide en span, div y section, que es donde Google documenta que se aplica, y puede leerse antes o después del render.',
     arreglo: 'Dejar data-nosnippet solo en el trozo que no se quiere citar (un precio, un aviso legal, un bloque de reseñas) y no en el contenedor del artículo o del título. Si se marcó a propósito (contenido de pago), confirmarlo antes de tocarlo. Google pide no añadirlo ni quitarlo con JavaScript. Se ve tras volver a rastrear.',
   },
@@ -925,7 +925,7 @@ const ISSUE_LABEL_EXTRA = {
   bot_busqueda_ia_bloqueado: 'Buscador de IA bloqueado en robots.txt',
   nosnippet_en_indexable: 'Indexable sin fragmento (nosnippet)',
   data_nosnippet_contenido_principal: 'data-nosnippet esconde el H1 o el contenido',
-  data_nosnippet_ignorado: 'data-nosnippet en un elemento que Google ignora',
+  data_nosnippet_ignorado: 'data-nosnippet en un elemento no documentado',
   ancla_generica: 'Enlazada con anclas genéricas',
   trafico_en_pagina_perdida: 'Página con tráfico de Google que se pierde',
   indexable_no_indexada_por_google: 'Indexable que Google no tiene indexada',

@@ -5290,6 +5290,7 @@ function robotsPruebaUI() {
     robotsPruebaMotivo(m) {
       return ({ directiva_desconocida: 'directiva que no se lee',
                 regla_sin_user_agent: 'regla antes de cualquier User-agent: no es de ningún grupo',
+                regla_tras_user_agent_vacio: 'regla tras un User-agent vacío: no es de ningún grupo',
                 no_es_directiva: 'no es una directiva' })[m] || m;
     },
   };

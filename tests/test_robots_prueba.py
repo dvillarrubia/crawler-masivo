@@ -172,3 +172,48 @@ def test_diagnostico_recortado_a_500_kib():
 def test_varios_user_agent_seguidos_son_un_grupo():
     assert diagnostico("User-agent: a\nUser-agent: b\nDisallow: /\nUser-agent: c\nAllow: /\n"
                        )["grupos"] == 2
+
+
+def test_regla_tras_user_agent_vacio_no_se_lee():
+    """`_grupos` cierra el grupo en un `User-agent:` vacio tras reglas, y lo que
+    sigue no es de nadie: el diagnostico lo dice en vez de contarlo como regla."""
+    t = "User-agent: *\nDisallow: /a\nUser-agent:\nDisallow: /b\n"
+    d = diagnostico(t)
+    assert d["reglas"] == 1
+    assert [(x["linea"], x["motivo"]) for x in d["ignoradas"]] == [
+        (4, "regla_tras_user_agent_vacio")]
+    (r,) = evaluar_lote(t, ["/b"], ["Googlebot"])
+    assert r["permitida"] is True and r["linea"] is None
+    # Vacio seguido de uno con nombre: ese si abre grupo.
+    d = diagnostico("User-agent: *\nDisallow: /a\nUser-agent:\nUser-agent: x\nDisallow: /b\n")
+    assert d["reglas"] == 2 and d["ignoradas"] == []
+
+
+def test_diagnostico_cuenta_las_mismas_reglas_que_la_evaluacion():
+    """Al azar: las `Allow`/`Disallow` que el diagnostico cuenta como reglas son
+    las que `_grupos` mete en algun grupo, y las demas salen en `ignoradas`."""
+    import random
+
+    from shared.robots_regla import _grupos
+
+    piezas = ["User-agent: *", "User-agent: Googlebot", "User-agent:", "useragent bot",
+              "Disallow: /a", "Disallow:", "Allow: /b*c$", "Dissallow: /d", "Noindex: /e",
+              "Crawl-delay: 5", "Sitemap: https://x.com/s.xml", "Host: x.com", "",
+              "# comentario", "Disallow: /f # nota", "basura sin dos puntos"]
+    rnd = random.Random(171)
+    for _ in range(3000):
+        lineas = [rnd.choice(piezas) for _ in range(rnd.randint(1, 12))]
+        texto = "\n".join(lineas) + "\n"
+        d = diagnostico(texto)
+        aplicadas = {r.linea for g in _grupos(texto).values() for r in g.reglas}
+        assert d["reglas"] == len(aplicadas), texto
+        sueltas = {x["linea"] for x in d["ignoradas"] if x["motivo"].startswith("regla_")}
+        assert not (sueltas & aplicadas), texto
+
+
+def test_trozos_cuenta_los_comodines():
+    d = diagnostico("User-agent: *\nDisallow: /a\nDisallow: /a*b**c\nAllow: /x*$\n"
+                    "Allow: /d/index.html\n")
+    # 1 + 3 + (2 x 2, con el `$` se anade dos veces) + (1 + 1 por el index.html)
+    assert d["trozos"] == 1 + 3 + 4 + 2
+    assert d["reglas_con_comodin"] == 2

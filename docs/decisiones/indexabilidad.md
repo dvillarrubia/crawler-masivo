@@ -1171,15 +1171,20 @@
      cubierto y no cubierto no cuenta: la medida se queda corta, nunca se pasa (67).
    - **`data_nosnippet_contenido_principal`** (`warning`): indexable 2xx con
      respuesta válida cuyo `data-nosnippet` cubre el H1 o al menos la mitad del
-     contenido principal. Por (host, plantilla, motivo) con `paginas_afectadas`
-     y la fracción mediana (36, 64, 88). No se suma a una página con `nosnippet`
+     contenido principal. Una fila por (host, plantilla) con `paginas_afectadas`,
+     la fracción mediana y en `motivos` cuántas páginas lo hacen por el H1, por
+     el contenido o por los dos (36, 64, 88): con el motivo en la clave, la
+     misma plantilla salía en dos o tres filas según cada página quedara a un
+     lado u otro del umbral. No se suma a una página con `nosnippet`
      o `max-snippet:0`, que ya lleva `nosnippet_en_indexable`.
    - **`data_nosnippet_ignorado`** (`info`), por plantilla: el atributo en un
      elemento que no es `span`, `div` ni `section`. **No se afirma que Google lo
      ignore**: la propia página de Google que lo documenta lo lleva en
      elementos propios (`devsite-*`) y en un `nav`. Se dice lo que se sabe: fuera
      de lo documentado, no se puede contar con ello. Esos elementos no cuentan
-     para lo cubierto.
+     para lo cubierto, y tampoco se anotan si están ocultos o dentro de un
+     `span`/`div`/`section` ya marcado (su texto ya queda cubierto). La etiqueta
+     dice «elemento no documentado», no «que Google ignora».
    - En el informe, `ia.data_nosnippet` (páginas afectadas), y los dos tipos en
      la vista IA del Explorador.
    Medido el 2026-10-24 con 8 páginas descargadas desde local: la de Google
@@ -1207,13 +1212,27 @@
      Googlebot, Google no casaría ningún grupo y saldría «todo permitido».
      Las claves del catálogo (`oai-searchbot`) valen por su token.
    - **`diagnostico`** (`shared/robots_regla.diagnostico`): líneas que el parser
-     se salta con el mismo `_directiva` (directiva desconocida, como `Noindex:`;
-     regla antes de cualquier `User-agent`; texto que no es directiva), los
-     `Sitemap`, grupos y reglas, y si pasa de los 500 KiB que lee Google.
-   - **Tope de coste**: reglas × URLs × agentes ≤ 5 M. Medido: unos 4,5 M
-     emparejamientos por segundo; un fichero de 20.000 reglas con 500 URLs y 20
-     agentes tardaba 44 s y ocupaba un hilo de la API. Uno real (decenas de
-     reglas) queda muy por debajo. Pide token, como todo `/api`.
+     se salta con el mismo `_directiva` y el mismo recorrido de estado que
+     `_grupos` (directiva desconocida, como `Noindex:`; regla antes de cualquier
+     `User-agent` o tras un `User-agent:` vacío, que cierra el grupo anterior;
+     texto que no es directiva), los `Sitemap`, grupos y reglas, y si pasa de
+     los 500 KiB que lee Google. Un test al azar comprueba que las reglas que
+     cuenta son las que la evaluación mete en algún grupo.
+   - **Tope de coste** (`robots_prueba.coste`, ≤ 15 M unidades de ~70 ns): un
+     emparejamiento no cuesta siempre lo mismo. `_Patron.casa` hace un `find`
+     por cada trozo entre comodines, y en una regla con `*` cada `find` puede
+     recorrer la URL entera. Por agente se suman los trozos de las reglas por
+     cada URL (`diagnostico.trozos`; una regla con `$` cuenta doble porque se
+     añade dos veces), 16 unidades por KiB de URL por cada regla con comodín y
+     100 por par (normalizar y montar la fila). Medido el 2026-10-24: 40-75 ns
+     por unidad en los peores casos (agujas de 1.000 caracteres contra URLs de
+     4 KiB, patrones periódicos, 5.000 reglas simples), es decir ~1 s en el
+     tope. El primer tope (reglas × URLs × agentes ≤ 5 M) suponía un coste fijo
+     por emparejamiento y dejaba pasar 120 reglas de 2.000 comodines contra
+     500 URLs de 4 KiB y 20 agentes (minutos de CPU; ahora 2.478 M unidades,
+     rechazado). Un fichero de 20.000 reglas con 500 URLs y 20 agentes (44 s)
+     sigue rechazado, y uno real (decenas de reglas) con esos pares queda
+     muy por debajo (1,7 M). Pide token, como todo `/api`.
    - **En la interfaz**, bajo «robots.txt por bot» del resumen del rastreo:
      pegar el fichero o partir del guardado de un host del censo
      (`GET /api/jobs/{id}/robots/cuerpo?origen=`), URLs y agentes, y la tabla con
