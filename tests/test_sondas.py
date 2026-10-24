@@ -253,3 +253,20 @@ def test_og_image_por_plantilla_a_cero_es_sin_tope_en_el_esquema_y_en_la_sonda()
                for r in sp._sonda_og_image(f"https://x.com/og{i}.png", f"https://x.com/p/{i}")]
     assert len(pedidas) == 4
     assert sp._sr_sin_comprobar["og_por_plantilla"] == 0
+
+
+def test_lo_excluido_no_se_pide_pero_se_cuenta(caplog):
+    """«Esto no se toca» vale para la sonda (124), pero sin callarlo: la UOC
+    excluye las imagenes por extension y la og:image salia «0 pedidas, 0 sin
+    comprobar», como si no hubiera nada que medir."""
+    import logging
+    import re
+
+    sp = _Spider({"comprobar_recursos": True}).obj
+    sp._exclude_patterns = [re.compile(r"\.(jpe?g|png)(\?|$)").search]
+    assert list(sp._sondas_de_pagina([], [{"url": "https://x.com/a.png"}, {"url": "https://x.com/b.jpg"}])) == []
+    assert list(sp._sonda_og_image("https://x.com/og.jpg", "https://x.com/p")) == []
+    assert sp._sr_sin_comprobar["excluida"] == 3
+    with caplog.at_level(logging.WARNING):
+        sp._sr_al_cerrar("finished")
+    assert "resource_types" in caplog.text
