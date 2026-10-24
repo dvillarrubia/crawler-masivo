@@ -68,7 +68,7 @@ def test_resumir_cuenta_todos_los_nodos_y_guarda_pocos_ejemplos_recortados():
     assert len(cc["ejemplos"]) == 2 and len(cc["ejemplos"][0]["html"]) == 240
     assert cc["ejemplos"][1]["selector"] == "#host b"  # shadow DOM: lista de listas
     assert r["incompletas"] == [{"regla": "bypass", "impacto": "serious", "criterios": ["2.4.1"],
-                                 "nivel": "A", "ayuda": "Saltar", "url_ayuda": "u", "nodos": 1}]
+                                 "nivel": "A", "ayuda": "Saltar", "url_ayuda": None, "nodos": 1}]
 
 
 def test_una_regla_experimental_no_se_afirma():
@@ -234,3 +234,132 @@ def test_reanalizar_da_lo_mismo():
     primero = sorted((f.issue_type, f.details["regla"]) for f in _analizar(s, j))
     s.query(Issue).delete()
     assert sorted((f.issue_type, f.details["regla"]) for f in _analizar(s, j)) == primero
+
+
+# --- Lo que devuelve el navegador lo controla la pagina auditada ------------
+# (puede suplantar `window.axe` antes de que se inyecte el bundle).
+
+
+def test_url_ayuda_solo_http_o_https():
+    def url(h):
+        r = resumir({"version": "4", "incomplete": [], "violations": [
+            {"id": "r", "impact": "critical", "tags": ["wcag2a"], "help": "h", "helpUrl": h,
+             "nodes": []}]})
+        return r["violaciones"][0]["url_ayuda"]
+
+    assert url("javascript:alert(document.domain)") is None
+    assert url(" JaVaScRiPt:alert(1)") is None
+    assert url("data:text/html,x") is None
+    assert url("https://dequeuniversity.com/rules/axe/4.14/r?application=axeAPI") \
+        == "https://dequeuniversity.com/rules/axe/4.14/r?application=axeAPI"
+
+
+def test_resumir_pone_tope_a_las_reglas_y_se_queda_con_las_mas_graves():
+    from shared.accesibilidad import MAX_REGLAS
+
+    viol = [{"id": f"r{i}", "impact": "minor", "tags": ["wcag2a"], "nodes": []}
+            for i in range(50_000)]
+    viol.append({"id": "grave", "impact": "critical", "tags": ["wcag2a"], "nodes": []})
+    r = resumir({"version": "x", "violations": viol, "incomplete": viol, "passes": "no"})
+    assert len(r["violaciones"]) == MAX_REGLAS and len(r["incompletas"]) == MAX_REGLAS
+    assert r["reglas_recortadas"] > 0 and r["reglas_que_pasan"] == 0
+    # Una lista que no es lista no revienta: cuenta como vacia.
+    assert resumir({"version": "x", "violations": "x", "incomplete": 3})["violaciones"] == []
+
+
+# --- Comparacion entre censos (shared.comparacion) ---------------------------
+
+
+def _inc(url, plantilla="/blog/:slug", gk="k1", tipo="accesibilidad_grave"):
+    return {"issue_type": tipo, "severity": "warning", "group_key": gk, "url": url,
+            "plantilla": plantilla}
+
+
+def _cmp(a, b, pa, pb, urls=("https://x.com/blog/a", "https://x.com/blog/b")):
+    from shared.comparacion import comparar_incidencias
+
+    return comparar_incidencias(a, b, analisis_a="v", analisis_b="v", urls_del_nuevo=set(urls),
+                                urls_del_anterior=set(urls),
+                                plantillas_axe_a=pa, plantillas_axe_b=pb)
+
+
+def test_comparar_el_mismo_aviso_de_axe_en_otra_pagina_de_la_muestra_sigue():
+    r = _cmp([_inc("https://x.com/blog/a")], [_inc("https://x.com/blog/b")],
+             {"/blog/:slug"}, {"/blog/:slug"})
+    assert r["nuevas"]["total"] == 0 and r["resueltas"]["total"] == 0
+    assert r["siguen"]["total"] == 1
+
+
+def test_comparar_sin_axe_en_el_nuevo_no_afirma_resueltas():
+    r = _cmp([_inc("https://x.com/blog/a")], [], {"/blog/:slug"}, set())
+    assert r["resueltas"]["total"] == 0 and r["sin_pagina_en_el_nuevo"] == 0
+    assert r["no_afirmables_por_muestra"]["total"] == 1
+    # Sin saber que evaluo (None), tampoco.
+    r = _cmp([_inc("https://x.com/blog/a")], [], {"/blog/:slug"}, None)
+    assert r["resueltas"]["total"] == 0 and r["no_afirmables_por_muestra"]["total"] == 1
+
+
+def test_comparar_sin_axe_en_el_anterior_no_afirma_nuevas():
+    r = _cmp([], [_inc("https://x.com/blog/a")], set(), {"/blog/:slug"})
+    assert r["nuevas"]["total"] == 0 and r["nuevas"]["en_url_existente"]["total"] == 0
+    assert r["no_afirmables_por_muestra"]["total"] == 1
+
+
+def test_comparar_con_la_plantilla_evaluada_en_los_dos_si_afirma():
+    # Resuelta aunque la pagina muestreada antes ya no este en el censo: el
+    # aviso es de la plantilla, y el nuevo la evaluo en otra pagina.
+    r = _cmp([_inc("https://x.com/blog/vieja")], [], {"/blog/:slug"}, {"/blog/:slug"})
+    assert r["resueltas"]["total"] == 1 and r["sin_pagina_en_el_nuevo"] == 0
+    r = _cmp([], [_inc("https://x.com/blog/a", gk="k2")], {"/blog/:slug"}, {"/blog/:slug"})
+    assert r["nuevas"]["total"] == 1 and r["no_afirmables_por_muestra"]["total"] == 0
+    # Otra plantilla que el anterior no muestreo: no se afirma.
+    r = _cmp([], [_inc("https://x.com/a", plantilla="/:x")], {"/blog/:slug"}, {"/:x"})
+    assert r["nuevas"]["total"] == 0 and r["no_afirmables_por_muestra"]["total"] == 1
+
+
+def test_comparar_lo_que_no_es_de_axe_no_cambia():
+    otro = {"issue_type": "missing_title", "severity": "error", "group_key": None,
+            "url": "https://x.com/blog/a"}
+    r = _cmp([otro], [], None, None)
+    assert r["resueltas"]["total"] == 1 and r["no_afirmables_por_muestra"]["total"] == 0
+
+
+def test_comparar_dos_censos_reales_con_otra_muestra_y_luego_sin_axe():
+    """De la BD a la comparacion: el anterior muestreo /f/a, el nuevo /f/b
+    (la concurrencia cambia la muestra), y un tercero no paso axe."""
+    from shared.accesibilidad import plantillas_evaluadas
+    from shared.comparacion import comparar_incidencias, incidencias_de_censo
+
+    s, j1 = _montar()
+    _axe(s, j1, _pagina(s, j1, "/f/a"), CRUDO)
+    _pagina(s, j1, "/f/b")
+    _analizar(s, j1)
+
+    def censo(con_axe):
+        j = Job(id=uuid.uuid4(), name="t", status="analyzing", seeds=["https://x.com/"], config={})
+        s.add(j)
+        s.flush()
+        _pagina(s, j, "/f/a")
+        b = _pagina(s, j, "/f/b")
+        if con_axe:
+            _axe(s, j, b, CRUDO)
+        _analizar(s, j)
+        return j
+
+    def cmp(viejo, nuevo):
+        return comparar_incidencias(
+            incidencias_de_censo(s, viejo.id), incidencias_de_censo(s, nuevo.id),
+            analisis_a="v", analisis_b="v",
+            urls_del_nuevo={"https://x.com/f/a", "https://x.com/f/b"},
+            urls_del_anterior={"https://x.com/f/a", "https://x.com/f/b"},
+            plantillas_axe_a=plantillas_evaluadas(s, viejo.id),
+            plantillas_axe_b=plantillas_evaluadas(s, nuevo.id))
+
+    assert incidencias_de_censo(s, j1.id)[0]["plantilla"] == "/f/:slug"
+    assert plantillas_evaluadas(s, j1.id) == {"/f/:slug"}
+    j2, j3 = censo(True), censo(False)
+    assert plantillas_evaluadas(s, j3.id) == set()
+    r = cmp(j1, j2)
+    assert (r["nuevas"]["total"], r["resueltas"]["total"], r["siguen"]["total"]) == (0, 0, 2)
+    r = cmp(j2, j3)
+    assert r["resueltas"]["total"] == 0 and r["no_afirmables_por_muestra"]["total"] == 2

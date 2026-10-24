@@ -2225,6 +2225,8 @@ def get_diff(
         from shared.comparacion import _aplicar_rutas, _norm
         from shared.respuestas import NO_VALIDAS
 
+        from shared.accesibilidad import plantillas_evaluadas
+
         reglas_rutas = compilar_mapa_rutas(rutas)
         resultado["incidencias"] = comparar_incidencias(
             incidencias_de_censo(db, viejo_id),
@@ -2249,6 +2251,10 @@ def get_diff(
             # regla que lo emitia ha cambiado.
             analisis_a=antes.get("analisis_version"),
             analisis_b=ahora.get("analisis_version"),
+            # Un aviso de axe solo es «nuevo» o «resuelto» si el otro censo
+            # evaluo su plantilla (decision 174).
+            plantillas_axe_a=plantillas_evaluadas(db, viejo_id),
+            plantillas_axe_b=plantillas_evaluadas(db, nuevo_id),
         )
 
     # `antes` y `ahora` los pone la comparacion, por FECHA: aqui se asignaban

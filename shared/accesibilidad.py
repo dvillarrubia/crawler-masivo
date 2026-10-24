@@ -45,8 +45,18 @@ TIPO_POR_IMPACTO = {
     "minor": ("accesibilidad_menor", "info"),
 }
 
+# Los tipos de incidencia de axe. La comparacion entre censos los casa por
+# plantilla y regla, no por la URL de la muestra (`shared.comparacion`).
+TIPOS: frozenset[str] = frozenset(t for t, _ in TIPO_POR_IMPACTO.values())
+
 # `capturas_alternativas.perfil` de las paginas que pasaron por axe.
 PERFIL = "axe"
+
+# Reglas por pagina que se guardan, en cada lista (violaciones, incompletas).
+# axe-core trae ~100 reglas; el resultado lo calcula la pagina auditada, que
+# puede suplantar `window.axe`, y sin tope una pagina hostil metia decenas de
+# miles de reglas, y una incidencia por cada una y plantilla, en el censo.
+MAX_REGLAS = 200
 
 MAX_EJEMPLOS_NODO = 3
 MAX_TEXTO = 240
@@ -82,6 +92,15 @@ def _texto(v: Any) -> str:
     return str(v or "")[:MAX_TEXTO]
 
 
+def _url_ayuda(v: Any) -> str | None:
+    """Solo http(s): el enlace lo pinta la tarjeta y el valor sale de la pagina
+    auditada (puede suplantar `window.axe`), asi que un `javascript:` no pasa."""
+    u = str(v or "").strip()
+    if len(u) > 500 or not re.match(r"^https?://", u, re.IGNORECASE):
+        return None
+    return u
+
+
 def _impacto(v: Any) -> str | None:
     return v if v in ORDEN_IMPACTO else None
 
@@ -97,7 +116,7 @@ def _regla(r: dict, con_ejemplos: bool) -> dict[str, Any] | None:
         "criterios": criterios(etiquetas),
         "nivel": nivel(etiquetas),
         "ayuda": _texto(r.get("help")),
-        "url_ayuda": _texto(r.get("helpUrl")),
+        "url_ayuda": _url_ayuda(r.get("helpUrl")),
         # El script del navegador manda `n` (todos) y solo los primeros nodos.
         "nodos": int(r["n"]) if isinstance(r.get("n"), int) else (
             len(nodos) if isinstance(nodos, list) else 0),
@@ -124,21 +143,33 @@ def resumir(crudo: Any) -> dict[str, Any] | None:
     def experimental(r) -> bool:
         return isinstance(r, dict) and "experimental" in (r.get("tags") or [])
 
-    crudas = [r for r in crudo.get("violations") or [] if isinstance(r, dict)]
+    def lista(v) -> list:
+        return v if isinstance(v, list) else []
+
+    # Se cortan antes de resumir (cada regla resumida cuesta) y despues de
+    # ordenar, para quedarse con las mas graves. Una lista que no es lista
+    # (la pagina puede devolver cualquier cosa) cuenta como vacia.
+    crudas = [r for r in lista(crudo.get("violations"))[: MAX_REGLAS * 10] if isinstance(r, dict)]
     viol = [x for x in (_regla(r, True) for r in crudas if not experimental(r)) if x]
-    inc = [x for x in (_regla(r, False) for r in (crudo.get("incomplete") or [])
+    inc = [x for x in (_regla(r, False) for r in lista(crudo.get("incomplete"))[: MAX_REGLAS * 10]
                                                  + [r for r in crudas if experimental(r)]) if x]
     clave = lambda x: (ORDEN_IMPACTO.get(x["impacto"], 9), -x["nodos"], x["regla"])  # noqa: E731
     viol.sort(key=clave)
     inc.sort(key=clave)
+    recortadas = max(0, len(viol) - MAX_REGLAS) + max(0, len(inc) - MAX_REGLAS)
+    viol, inc = viol[:MAX_REGLAS], inc[:MAX_REGLAS]
     ms = crudo.get("ms")
-    return {
+    salida = {
         "axe": str(crudo.get("version") or "")[:20] or None,
         "ms_axe": round(float(ms)) if isinstance(ms, (int, float)) and ms >= 0 else None,
         "violaciones": viol,
         "incompletas": inc,
-        "reglas_que_pasan": int(crudo.get("passes") or 0),
+        "reglas_que_pasan": crudo["passes"] if isinstance(crudo.get("passes"), int)
+        and crudo["passes"] >= 0 else 0,
     }
+    if recortadas:
+        salida["reglas_recortadas"] = recortadas
+    return salida
 
 
 def agregar(filas: Iterable[tuple[int, str, str | None, dict | None]]) -> dict[str, Any]:
@@ -229,3 +260,18 @@ def filas_evaluadas(session, job_id) -> list[tuple]:
     ).all()
     return [(u, url, p, m) for u, url, p, m, status, clase in filas
             if status and 200 <= status < 300 and clase not in NO_VALIDAS]
+
+
+def plantillas_evaluadas(session, job_id) -> set[str] | None:
+    """Las plantillas de un censo con alguna pagina evaluada por axe (vacio si
+    no se paso axe). La comparacion entre censos solo afirma «nueva» o
+    «resuelta» de un aviso de axe si el otro censo evaluo esa plantilla.
+
+    None si no se puede leer: entonces no se afirma ninguna de las dos.
+    """
+    try:
+        with session.begin_nested():
+            return {(p or "?") for _, _, p, m in filas_evaluadas(session, job_id)
+                    if isinstance(m, dict)}
+    except Exception:  # noqa: BLE001
+        return None

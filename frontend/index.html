@@ -2315,6 +2315,13 @@
                       incidencias no aparecen ahora, pero el censo anterior esta
                       truncado: pueden no haberse resuelto, sino no haberse visto.
                     </div>
+                    <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
+                         x-show="diff.incidencias.no_afirmables_por_muestra?.total">
+                      <span x-text="fmt.num(diff.incidencias.no_afirmables_por_muestra?.total)"></span>
+                      avisos de accesibilidad aparecen o faltan en una plantilla
+                      que uno de los dos censos no paso por axe: no se cuentan
+                      como nuevos ni como resueltos.
+                    </div>
                   </div>
                 </template>
 

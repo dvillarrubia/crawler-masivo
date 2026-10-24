@@ -1093,6 +1093,27 @@
      por regla, más las incompletas y el coste, con la misma consulta
      `shared.accesibilidad.filas_evaluadas`) y una tarjeta en el resumen con
      las reglas más graves.
+   - **Entre censos** (`shared.comparacion.comparar_incidencias`): la muestra
+     es la primera página de cada plantilla que se parsea, y cambia de un
+     rastreo a otro con la concurrencia. Anclados por la URL, el mismo fallo de
+     plantilla salía cada semana como «nuevo» (y regresión) en una página y
+     «resuelto» en otra, y un censo con `axe_muestra` 0 daba por resueltos
+     todos los del anterior (67, 89). Los dos tipos van en
+     `ANCLADOS_POR_GRUPO` (casan por host y `plantilla|regla`, como los de la
+     122), y «nuevo» solo se afirma si el censo anterior evaluó esa plantilla
+     con axe, y «resuelto» si la evaluó el nuevo
+     (`shared.accesibilidad.plantillas_evaluadas`; None, no se sabe, no afirma
+     nada). El resto va a `incidencias.no_afirmables_por_muestra` y la
+     comparación lo dice. Los avisos de render de la 140 tienen el mismo
+     riesgo y quedan fuera: es otra decisión.
+   - **Lo que devuelve axe lo calcula la página auditada**: `page.evaluate`
+     corre en su mundo y la página puede suplantar `window.axe`. `resumir`
+     solo guarda un `helpUrl` http(s) (la tarjeta lo pinta como enlace) y como
+     mucho `MAX_REGLAS` (200) violaciones y 200 incompletas por página, las
+     más graves, con `reglas_recortadas` si cortó: axe-core trae ~100 reglas,
+     y sin tope una página hostil metía decenas de miles de incidencias por
+     plantilla. Que el resultado pueda ser falso en una página hostil no se
+     evita (haría falta un mundo aislado); se acota lo que puede costar.
    - **Qué cubre**: lo automatizable de WCAG 2.x A/AA, en torno a un 30-40 %
      de los criterios (por volumen de incidencias, Deque midió ~57 % en 2021).
      **Qué no**: el teclado y el foco, el orden de lectura, si un texto
@@ -1112,8 +1133,9 @@
    s**; el rastreo de 12 URLs pasó de 36,0 a 37,4 s (BOE), de 38,1 a 39,5 s
    (INE) y de 36,2 a 41,5 s (UOC), porque las sondas van en paralelo con el
    censo. Con 30 páginas por censo, del orden de 30-50 s de render repartidos.
-   Tests: `tests/test_accesibilidad.py` (resumen, agregación y el análisis
-   contra SQLite), `tests/test_sonda_axe_spider.py` (spider real con Chromium:
+   Tests: `tests/test_accesibilidad.py` (resumen, saneado, agregación, el
+   análisis contra SQLite y la comparación entre censos con otra muestra y
+   sin axe), `tests/test_sonda_axe_spider.py` (spider real con Chromium:
    fallos conocidos, CSP, AMD, fallo solo tras el JavaScript, tope total y por
    plantilla, sin gastar `max_urls`), `tests/test_accesibilidad_api.py`
    (trabajo de la API) y `tests/test_accesibilidad_frontend.py`.

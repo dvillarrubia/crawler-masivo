@@ -48,7 +48,10 @@
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un
   sitio limpio. 28, 32.
 - **La accesibilidad nunca es `error`** (topa la nota SEO) y lo que axe deja en
-  `incomplete` no se afirma; sin paginas evaluadas no hay «sin fallos». 174.
+  `incomplete` no se afirma; sin paginas evaluadas no hay «sin fallos». Entre
+  censos, un aviso de axe casa por plantilla y regla, y solo es «nuevo» o
+  «resuelto» si el otro censo evaluo esa plantilla. Lo que devuelve axe lo
+  calcula la pagina auditada: se sanea (enlaces solo http(s), tope de reglas). 174.
 - **Un valor extraido a medida sin fila es «no evaluado», no «vacio»**: «no
   contiene» es `estado='sin_coincidencia'` y nunca incluye bloqueadas ni errores. 104.
 - **Un segmento es `urls.segmento`, materializado** (analisis o `POST /segmentos`); la
