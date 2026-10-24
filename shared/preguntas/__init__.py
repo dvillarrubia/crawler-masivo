@@ -52,6 +52,8 @@ class Pregunta:
     descripcion: str = ""
     # Las de ejemplo no se usan en produccion: estan para fijar la forma.
     ejemplo: bool = False
+    # Nombres cortos para la pantalla, uno por nivel de un score (en orden) u
+    # opcion de un choice. No se envian: no entran en la huella (decision 177).
     etiquetas: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
@@ -99,6 +101,11 @@ def _cargar() -> dict[str, Pregunta]:
 
     catalogo: dict[str, Pregunta] = {}
     for p in ejemplo.PREGUNTAS + soft404.PREGUNTAS:
+        if p.nombre in catalogo:
+            raise ValueError(f"pregunta duplicada: {p.nombre}")
+        catalogo[p.nombre] = p
+    from shared.preguntas import coherencia  # decision 177 (#16, #17)
+    for p in coherencia.PREGUNTAS:
         if p.nombre in catalogo:
             raise ValueError(f"pregunta duplicada: {p.nombre}")
         catalogo[p.nombre] = p

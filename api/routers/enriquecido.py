@@ -93,6 +93,30 @@ def _estimar(db, job, cuerpo):
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
+def _nivel(pregunta, respuesta: str | None) -> str | None:
+    """Un score se agrupa por su nivel mas cercano («0»...«3»), no por el
+    numero que devuelve Jev (2,62 y 2,9 son el mismo nivel): si no, la pantalla
+    enseñaba una entrada por decimal (decision 177). Lo demas, tal cual."""
+    if respuesta is None or pregunta is None or pregunta.tipo != "score":
+        return respuesta
+    from shared.evaluacion_decisiones import etiqueta_de_respuesta
+
+    return etiqueta_de_respuesta("score", respuesta, len(pregunta.opciones))
+
+
+def _etiquetas(pregunta) -> dict[str, str]:
+    """Lo que la pantalla escribe por respuesta: el nombre corto de cada nivel
+    de un score (o de cada opcion de un choice) si la pregunta lo trae."""
+    if pregunta is None:
+        return {}
+    if pregunta.tipo == "score":
+        nombres = list(pregunta.etiquetas) or [str(i) for i in range(len(pregunta.opciones))]
+        return {str(i): n for i, n in enumerate(nombres)}
+    if pregunta.tipo == "choice" and pregunta.etiquetas:
+        return dict(zip(pregunta.opciones, pregunta.etiquetas))
+    return {}
+
+
 def _resultados(db: Session, run_id: uuid.UUID) -> dict:
     filas = (db.query(Decision.pregunta, Decision.estado, Decision.respuesta,
                       func.count(Decision.id), func.coalesce(func.sum(Decision.coste_usd), 0.0))
@@ -108,7 +132,10 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
         actual = CATALOGO.get(pregunta)
         p = salida.setdefault(pregunta, {"por_estado": {}, "por_respuesta": {},
                                          "decididas_por_respuesta": {}, "total": 0, "coste_usd": 0.0,
-                                         "umbral": actual.umbral if actual else None})
+                                         "umbral": actual.umbral if actual else None,
+                                         "tipo": actual.tipo if actual else None,
+                                         "etiquetas": _etiquetas(actual)})
+        respuesta = _nivel(actual, respuesta)
         p["total"] += n
         p["coste_usd"] = round(p["coste_usd"] + float(coste), 8)
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
@@ -215,13 +242,27 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
          .join(Url, Url.id == Decision.url_id).filter(Decision.run_id == run_id))
     if pregunta:
         q = q.filter(Decision.pregunta == pregunta)
-    if respuesta:
+    from shared.preguntas import CATALOGO
+
+    actual = CATALOGO.get(pregunta) if pregunta else None
+    if respuesta and actual is not None and actual.tipo == "score" and respuesta.isdigit():
+        # El nivel de un score (decision 177): [nivel - 0,5, nivel + 0,5), con
+        # los extremos abiertos, como lo redondea `etiqueta_de_respuesta`.
+        from sqlalchemy import Float, cast
+
+        nivel, valor = int(respuesta), cast(Decision.respuesta, Float)
+        if nivel > 0:
+            q = q.filter(valor >= nivel - 0.5)
+        if nivel < len(actual.opciones) - 1:
+            q = q.filter(valor < nivel + 0.5)
+    elif respuesta:
         q = q.filter(Decision.respuesta == respuesta)
     total = q.count()
     filas = q.order_by(Decision.id).offset((page - 1) * page_size).limit(page_size).all()
     return {"total": total, "page": page, "page_size": page_size,
             "items": [{"id": i, "url": u, "pregunta": p, "estado": e, "origen": o,
-                       "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m}
+                       "respuesta": r, "nivel": _nivel(CATALOGO.get(p), r) if r is not None else None,
+                       "confianza": c, "coste_usd": cu, "motivo": m}
                       for i, u, p, e, o, r, c, cu, m in filas]}
 
 

@@ -56,6 +56,7 @@
 | `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
 | `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
 | `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
+| `coherencia.py` | Filtros y estados de los modulos `title_contenido`, `title_generico` y `schema_visible` del enriquecido (#16, #17, decision 177): lo que ya dice una regla no se pregunta, muestra por plantilla, y del marcado solo los valores verificables con los fragmentos visibles donde mirarlos |
 | `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
 | `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
 | `topes_carpeta.py` | Topes de URLs por subdominio o carpeta (decision 172): `compilar` (valida `topes_por_carpeta`), `grupos_de(url, reglas)` (el cupo de ruta y el de host), `clave_normal` (la misma regla con otra grafia, para la herencia), `Presupuesto` (lo que lleva el spider, con `ClavesCompactas`, y su `resumen` para `jobs.topes_carpeta`), `corto` (si algun tope dejo URLs sin pedir: el worker y el analizador) y `describir` (la frase del informe). La usan `JobConfig`, `fusionar_config`, el spider, el worker y el analizador |
@@ -93,7 +94,7 @@
 | POST | `/api/jobs/{id}/enrichment/estimate` | Llamadas tras la cache, tokens, coste, tiempo y gasto del mes del cliente. No gasta nada |
 | POST | `/api/jobs/{id}/enrichment` | Crea y encola una ejecucion. **Exige `X-Enrichment-Token`**; sin `ENRICHMENT_TOKEN` en el entorno, 403 |
 | GET | `/api/jobs/{id}/enrichment[/{run_id}]` | Ejecuciones del job / una con su progreso, coste y resultados por pregunta |
-| GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`) |
+| GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`). En un score, `respuesta` es el nivel («0»...) y cada fila trae `nivel` (decision 177) |
 | PATCH | `/api/jobs/{id}/enrichment/{run_id}/cancel` | Cancela (pendiente: en el acto; en curso: entre lotes, conservando lo pagado) |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |

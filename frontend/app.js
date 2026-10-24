@@ -3147,6 +3147,27 @@ function app() {
       } catch (e) { this.showToast(e.message, 'error'); }
     },
 
+    // Respuestas de una pregunta del enriquecido en la pantalla (decision 177):
+    // un score llega agrupado por nivel («0»...«3») y se escribe con el nombre
+    // corto de cada nivel, en orden; un sí/no, como siempre.
+    entradasEnriq(r) {
+      const e = Object.entries(r.por_respuesta || {});
+      return r.tipo === 'score' ? e.sort((a, b) => Number(a[0]) - Number(b[0])) : e;
+    },
+    etiquetaEnriq(pregunta, resp) {
+      const r = ((this.enriqRun && this.enriqRun.resultados) || {})[pregunta] || {};
+      return (r.etiquetas || {})[resp] || fmt.respuestaEnriq(resp);
+    },
+    textoDecisionEnriq(d) {
+      if (d.respuesta === null) return d.motivo || '—';
+      const r = ((this.enriqRun && this.enriqRun.resultados) || {})[d.pregunta] || {};
+      if (r.tipo === 'score') {
+        const n = Number(d.respuesta);
+        return this.etiquetaEnriq(d.pregunta, d.nivel) + (isNaN(n) ? '' : ' (' + n.toFixed(2) + ')');
+      }
+      return this.etiquetaEnriq(d.pregunta, d.respuesta);
+    },
+
     async cargarDecisionesEnriq(pregunta = undefined, respuesta = undefined) {
       if (!this.job || !this.enriqRun) return;
       if (pregunta !== undefined) this.enriqFiltro = { pregunta, respuesta, page: 1 };
