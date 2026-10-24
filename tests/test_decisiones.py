@@ -475,9 +475,9 @@ HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550
 HUELLAS |= {("tipo_pagina", 1): "adaa08da9112608e"}
 HUELLAS |= {("categoria_cliente", 1): "209745826be33223"}
 # Intencion y embudo (decision 176)
-HUELLAS |= {("intencion_pagina", 1): "d7567fa4f61aacf3",
-            ("etapa_embudo", 1): "017b89d5da8a4696",
-            ("intencion_busqueda", 1): "ef6ba73c6fc8a02d",
+HUELLAS |= {("intencion_pagina", 1): "a4589e2b81d4a4fb",
+            ("etapa_embudo", 1): "22ab1379c09d763a",
+            ("intencion_busqueda", 1): "a436ff6f5e5ff168",
             }
 
 

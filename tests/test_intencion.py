@@ -32,7 +32,8 @@ import shared.enriquecido as enr  # noqa: E402
 from shared import intencion as I  # noqa: E402
 from shared.gsc import clave_de_url  # noqa: E402
 from shared.models import (  # noqa: E402
-    Client, Decision, EnrichmentRun, GscConsulta, GscEstado, Heading, HtmlMeta, Job, PageContent, Url,
+    Client, Decision, EnrichmentRun, GscConsulta, GscEstado, Heading, HtmlMeta, Job, PageContent,
+    StructuredData, Url,
 )
 from shared.preguntas import CATALOGO  # noqa: E402
 from test_enriquecido import _motor  # noqa: E402
@@ -42,7 +43,13 @@ EN_VENTANA = date(2026, 10, 1)
 FUERA = date(2026, 6, 1)
 
 
-def sembrar(Sesion, *, con_gsc=True, integracion_activa=True, cliente=True):
+# Lo descargado de la serie `consultas` (decision 157): cubre la ventana del
+# censo (2026-07-24 a 2026-10-21).
+SERIE = {"consultas": {"primer_dia": "2026-04-30", "ultimo_dia": "2026-10-22"}}
+
+
+def sembrar(Sesion, *, con_gsc=True, integracion_activa=True, cliente=True, inicio=None,
+            detalle=SERIE):
     """Un censo de acme.com (semilla con www) con:
     - /tienda/zapato-rojo (transaccional) con 3 busquedas, una de marca;
     - /blog/como-limpiar (informacional) con 2 busquedas, una comercial;
@@ -62,11 +69,11 @@ def sembrar(Sesion, *, con_gsc=True, integracion_activa=True, cliente=True):
         s.flush()
     job = Job(name="censo", status="completed", seeds=["https://www.acme.com/"],
               config={"marcas": ["Acme", "acme shoes"]}, cliente_id=c.id if c else None,
-              started_at=datetime(2026, 10, 21, 1, tzinfo=timezone.utc))
+              started_at=inicio or datetime(2026, 10, 21, 1, tzinfo=timezone.utc))
     s.add(job)
     s.flush()
     if c is not None and con_gsc:
-        s.add(GscEstado(cliente_id=c.id, propiedad=PROPIEDAD, estado="ok"))
+        s.add(GscEstado(cliente_id=c.id, propiedad=PROPIEDAD, estado="ok", detalle=detalle))
         s.add(GscEstado(cliente_id=c.id, propiedad="sc-domain:vieja.com", estado="ok"))
 
     ids = {}
@@ -88,6 +95,9 @@ def sembrar(Sesion, *, con_gsc=True, integracion_activa=True, cliente=True):
         return u
 
     url("/tienda/zapato-rojo", 1, "Zapato rojo | Acme", "Zapato rojo", "Compra el zapato rojo. 49 EUR.", 160)
+    # Lo que declara la ficha: los tipos de sitio no entran en el estado.
+    for tipo in ("Product", "Offer", "WebPage", "Person, Organization", "BreadcrumbList"):
+        s.add(StructuredData(url_id=ids["/tienda/zapato-rojo"], format="jsonld", schema_type=tipo))
     url("/blog/como-limpiar", 2, "Como limpiar zapatos", "Como limpiar zapatos", "Guia paso a paso.", 60)
     url("/blog/otra", 3, "Otra guia", "Otra guia", "Mas consejos.", 5)
     url("/vacia", 4, None, None, None)
@@ -264,7 +274,11 @@ def test_la_pagina_lleva_ruta_titulo_h1_y_contenido_y_sin_nada_no_entra(tmp_path
         "/tienda/zapato-rojo", "/blog/como-limpiar", "/blog/otra")]
     (e,) = I.estados_intencion_pagina(s, [ids["/tienda/zapato-rojo"]])
     assert e.datos == {"ruta": "/tienda/zapato-rojo", "titulo": "Zapato rojo | Acme",
-                       "h1": "Zapato rojo", "contenido": "Compra el zapato rojo. 49 EUR."}
+                       "h1": "Zapato rojo", "contenido": "Compra el zapato rojo. 49 EUR.",
+                       "tipos_schema": ["Offer", "Product"]}
+    # Sin datos estructurados, la lista vacia (la clave siempre esta).
+    (otra,) = I.estados_intencion_pagina(s, [ids["/blog/otra"]])
+    assert otra.datos["tipos_schema"] == []
     s.close()
 
 
@@ -385,14 +399,15 @@ def test_la_cache_de_una_busqueda_es_por_cliente(tmp_path, capa_activa, fake_llm
 def test_desajuste_no_cuenta_marca_ni_dudosas():
     d = I.desajuste("informational", [
         {"intencion": "transactional", "clics": 30}, {"intencion": "informational", "clics": 10},
-        {"intencion": "navigational", "clics": 500}, {"intencion": "unclear", "clics": 50},
+        {"intencion": "navigational", "clics": 20}, {"intencion": "unclear", "clics": 50},
         {"intencion": None, "clics": 7}])
-    assert d["clics_que_cuentan"] == 40 and d["clics_sin_contar"] == 557
+    assert d["clics_que_cuentan"] == 40 and d["clics_sin_contar"] == 77
     assert d["intencion_dominante"] == "transactional" and d["desalineada"]
-    assert d["parte_alineada"] == 0.25 and d["clics_desalineados"] == 30
+    assert d["parte_alineada"] == 0.25 and d["clics_desalineados"] == 30 and d["sin_afirmar"] is None
     # Solo marca: nada que afirmar.
     solo_marca = I.desajuste("transactional", [{"intencion": "navigational", "clics": 99}])
     assert not solo_marca["desalineada"] and solo_marca["parte_alineada"] is None
+    assert solo_marca["sin_afirmar"] == "manda_la_marca"
     # Pagina sin intencion clara: no se afirma desajuste.
     assert not I.desajuste("unclear", [{"intencion": "transactional", "clics": 9}])["desalineada"]
     # Empate a la mitad: no es mayoria de otra intencion.
@@ -418,6 +433,83 @@ def test_la_incidencia_esta_apagada_sin_umbral_y_con_umbral_solo_usa_lo_decidido
     paginas[0]["busquedas"][0]["estado"] = "decidido"
     paginas[0]["estado_pagina"] = "incierto"
     assert I.incidencias_intencion_desalineada("j", paginas) == []
+
+
+def test_una_pagina_de_marca_o_con_mas_clics_de_marca_no_se_da_por_desalineada():
+    """Revision de la decision 176: las busquedas de marca no cuentan para la
+    parte alineada, asi que una pagina navegacional saldria con un 0 % alineado
+    con un solo clic de otra intencion; y 1.000 clics de marca con 5
+    informacionales no dicen que la pagina este desalineada."""
+    home = I.desajuste("navigational", [{"intencion": "navigational", "clics": 1000},
+                                        {"intencion": "informational", "clics": 5}])
+    assert not home["desalineada"] and home["sin_afirmar"] == "pagina_de_marca"
+    assert home["parte_alineada"] is None and home["clics_desalineados"] == 0
+    assert home["intencion_dominante"] == "navigational"
+    ficha = I.desajuste("transactional", [{"intencion": "navigational", "clics": 1000},
+                                          {"intencion": "commercial", "clics": 1}])
+    assert not ficha["desalineada"] and ficha["sin_afirmar"] == "manda_la_marca"
+    # Con la marca por debajo de la otra intencion, si se afirma.
+    otra = I.desajuste("transactional", [{"intencion": "navigational", "clics": 10},
+                                         {"intencion": "informational", "clics": 30},
+                                         {"intencion": "transactional", "clics": 5}])
+    assert otra["desalineada"] and otra["intencion_dominante"] == "informational"
+    # Lo que no tiene clics hoy (None) no pesa.
+    assert not I.desajuste("informational", [{"intencion": "transactional", "clics": None}])["desalineada"]
+
+
+def test_las_reglas_de_las_preguntas_van_en_orden_y_sin_contradecirse():
+    """Revision de la decision 176: «day pass <isla>» o «hoteles <isla>» no
+    encajaban en ninguna opcion (la comercial excluia las que nombran un lugar)
+    y una ficha de hotel sin el widget de reserva en el texto quedaba entre tres."""
+    pagina, busqueda = CATALOGO["intencion_pagina"], CATALOGO["intencion_busqueda"]
+    for p in (pagina, busqueda):
+        assert "first rule" in p.instrucciones.lower()
+    # La comercial de la busqueda admite un lugar; ninguna lo excluye ya.
+    assert "with or without a place" in busqueda.opciones["commercial"]
+    assert "place" not in busqueda.opciones["commercial"].split("NOT")[1]
+    assert "'day pass'" in busqueda.instrucciones and "NOT an action word" in busqueda.instrucciones
+    assert "place name on its own" in busqueda.opciones["informational"]
+    # La pagina: la senal del texto que falta y el desempate de los listados.
+    assert "tipos_schema" in pagina.instrucciones and "absence is not evidence" in pagina.instrucciones
+    assert "site's own range" in pagina.instrucciones
+    assert "NOT the home page" in pagina.opciones["transactional"]
+
+
+# --- cobertura de Search Console ------------------------------------------------------
+
+def test_un_censo_sin_dias_descargados_no_afirma_que_no_haya_busquedas(tmp_path):
+    """Revision de la decision 176: un censo de antes de conectar Search Console
+    (o de hace mas de los dias que se guardan) no tiene busquedas porque no hay
+    datos, y eso es lo que se dice (reglas 67 y 70)."""
+    Sesion = _motor(tmp_path)
+    jid, ids = sembrar(Sesion, inicio=datetime(2025, 1, 1, 1, tzinfo=timezone.utc))
+    s = Sesion()
+    assert I.paginas_con_busquedas(s, jid, list(ids.values())) == []
+    motivo = I.motivo_sin_busquedas(s, jid)
+    assert "No hay busquedas de Search Console descargadas" in motivo
+    assert "no tiene busquedas con clics" not in motivo
+    cob = I.cobertura_de_la_ventana(s, s.get(Job, jid))
+    assert cob["cubierto"] is None and cob["completa"] is False
+    # Sin la serie en `gsc_estado` (nada descargado aun), lo mismo.
+    s.query(GscEstado).update({GscEstado.detalle: None})
+    s.commit()
+    assert "No hay busquedas de Search Console descargadas" in I.motivo_sin_busquedas(s, jid)
+    s.close()
+
+
+def test_una_ventana_descargada_en_parte_se_dice(tmp_path):
+    Sesion = _motor(tmp_path)
+    jid, ids = sembrar(Sesion, detalle={"consultas": {"primer_dia": "2026-09-01",
+                                                      "ultimo_dia": "2026-10-22"}})
+    s = Sesion()
+    cob = I.cobertura_de_la_ventana(s, s.get(Job, jid))
+    assert cob["cubierto"] == (date(2026, 9, 1), date(2026, 10, 21)) and not cob["completa"]
+    assert "del 2026-09-01 al 2026-10-21" in I.aviso_de_cobertura(cob)
+    s.query(GscConsulta).delete()
+    s.commit()
+    motivo = I.motivo_sin_busquedas(s, jid)
+    assert "entre el 2026-09-01 y el 2026-10-21" in motivo and "no hay datos descargados" in motivo
+    s.close()
 
 
 # --- juego de evaluacion -------------------------------------------------------------

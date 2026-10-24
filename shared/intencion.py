@@ -4,7 +4,8 @@ decision 176).
 Dos modulos del enriquecido (`shared/enriquecido.REGISTRO`) se apoyan aqui:
 
 - **`intencion_pagina`**: `intencion_pagina` y `etapa_embudo` sobre la ruta, el
-  titulo, el primer H1 que se pinta y el principio del contenido principal.
+  titulo, el primer H1 que se pinta, el principio del contenido principal y los
+  tipos de schema.org que declara (sin los de sitio).
   Solo las paginas con algo que juzgar (titulo, H1 o contenido).
 - **`intencion_busquedas`**: `intencion_busqueda` sobre las busquedas de Search
   Console (`gsc_consultas`, decision 157) que traen clics a cada pagina en la
@@ -22,14 +23,16 @@ que las dos lo tengan.
 
 Lo que no se puede afirmar no se afirma: las busquedas de marca o ajenas
 (`navigational`) pueden caer en cualquier pagina de esa marca, y las `unclear`
-no dicen nada; ninguna de las dos cuenta para el desajuste.
+no dicen nada; ninguna de las dos cuenta para el desajuste. Por lo mismo, de
+una pagina navegacional, o de una cuyos clics son sobre todo de marca, no se
+afirma desajuste (`sin_afirmar`); ni se dice «no hay busquedas» de una ventana
+que no esta descargada (`cobertura_de_la_ventana`).
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -62,10 +65,44 @@ def _uuid(v):
 # ---------------------------------------------------------------------------
 # Pagina
 # ---------------------------------------------------------------------------
+# Tipos de schema.org que van en todas las paginas de un sitio (o son piezas de
+# otro tipo) y no dicen nada de la pagina: fuera del estado, para no gastar
+# tokens ni romper la cache entre paginas que solo se distinguen en eso.
+TIPOS_SCHEMA_DE_SITIO = frozenset({
+    "organization", "website", "webpage", "breadcrumblist", "listitem", "person", "imageobject",
+    "imagegallery", "searchaction", "entrypoint", "sitenavigationelement", "wpheader",
+    "wpfooter", "wpsidebar", "geocoordinates", "postaladdress", "quantitativevalue",
+    "locationfeaturespecification", "contactpoint", "thing",
+})
+MAX_TIPOS_SCHEMA = 8
+
+
+def tipos_schema_por_url(session, url_ids: list[int]) -> dict[int, list[str]]:
+    """{url_id: [tipo, ...]}: los tipos de schema.org que declara cada pagina
+    (`structured_data.schema_type`, que puede traer «Person, Organization»),
+    sin los de sitio, ordenados y sin repetir. Es la senal que el texto no da:
+    el widget de reserva y el precio no salen en los 600 caracteres de
+    contenido, y un `Hotel` con `Offer` o un `Product` si (decision 176)."""
+    from shared.models import StructuredData
+
+    tipos: dict[int, set[str]] = {}
+    for trozo in _trozos(list(url_ids)):
+        for uid, t in session.query(StructuredData.url_id, StructuredData.schema_type).filter(
+                StructuredData.url_id.in_(trozo), StructuredData.schema_type.isnot(None)):
+            for parte in str(t).split(","):
+                parte = parte.strip()
+                if parte and parte.casefold() not in TIPOS_SCHEMA_DE_SITIO:
+                    tipos.setdefault(uid, set()).add(parte)
+    return {u: sorted(v)[:MAX_TIPOS_SCHEMA] for u, v in tipos.items()}
+
+
 def estados_intencion_pagina(session, url_ids: list[int]):
-    """Ruta, titulo, primer H1 visible y 600 caracteres de contenido sin
-    plantilla (`estados_titulo_h1_contenido`). La ruta ayuda (`/blog/`,
-    `/reservar/`) y no rompe la cache entre la URL con y sin `www.`."""
+    """Ruta, titulo, primer H1 visible, 600 caracteres de contenido sin
+    plantilla (`estados_titulo_h1_contenido`) y los tipos de schema.org que
+    declara. La ruta ayuda (`/blog/`, `/reservar/`) y no rompe la cache entre la
+    URL con y sin `www.`; los tipos de schema separan la ficha de un hotel o un
+    producto (que se reserva o se compra aunque el texto solo lo describa) de
+    una landing de marca."""
     from shared.enriquecido import estados_titulo_h1_contenido
     from shared.models import Url
 
@@ -74,8 +111,10 @@ def estados_intencion_pagina(session, url_ids: list[int]):
     for trozo in _trozos(list(url_ids)):
         for uid, path in session.query(Url.id, Url.path).filter(Url.id.in_(trozo)):
             rutas[uid] = path or "/"
+    tipos = tipos_schema_por_url(session, url_ids)
     for e in base:
-        e.datos = {"ruta": rutas.get(e.url_id, "/"), **e.datos}
+        e.datos = {"ruta": rutas.get(e.url_id, "/"), **e.datos,
+                   "tipos_schema": tipos.get(e.url_id, [])}
     return base
 
 
@@ -127,9 +166,10 @@ def _job_de(session, url_ids: list[int]):
     return session.get(Job, fila[0]) if fila else None
 
 
-def busquedas_por_url(session, job, url_ids: list[int]) -> dict[int, list[tuple[str, int]]]:
-    """{url_id: [(busqueda, clics), ...]}: las `MAX_BUSQUEDAS_POR_PAGINA` con
-    mas clics de cada URL en la ventana del censo, de las propiedades activas
+def busquedas_por_url(session, job, url_ids: list[int],
+                      maximo: int | None = MAX_BUSQUEDAS_POR_PAGINA) -> dict[int, list[tuple[str, int]]]:
+    """{url_id: [(busqueda, clics), ...]}: las `maximo` con mas clics de cada
+    URL (None = todas) en la ventana del censo, de las propiedades activas
     del cliente. Vacio sin cliente, sin Search Console o sin la tabla (una base
     sin migrar): best-effort, el try cubre la funcion entera (decision 74).
 
@@ -179,7 +219,7 @@ def busquedas_por_url(session, job, url_ids: list[int]) -> dict[int, list[tuple[
             # Mas clics, despues mas impresiones y la busqueda: orden total, para
             # que el estado (y su cache) no cambie entre dos lecturas.
             lista.sort(key=lambda t: (-t[0], -t[1], t[2]))
-            salida[uid] = [(q, c) for c, _, q in lista[:MAX_BUSQUEDAS_POR_PAGINA]]
+            salida[uid] = [(q, c) for c, _, q in (lista if maximo is None else lista[:maximo])]
         return salida
     except Exception:  # noqa: BLE001
         logger.exception("Busquedas de Search Console para la intencion: fallo; sin busquedas")
@@ -217,9 +257,74 @@ def paginas_con_busquedas(session, job_id, url_ids: list[int]) -> list[int]:
     return [u for u in url_ids if con.get(u)]
 
 
+def cobertura_de_la_ventana(session, job) -> dict | None:
+    """Que parte de la ventana del censo tiene busquedas descargadas, segun la
+    serie `consultas` de `gsc_estado.detalle` (decision 157) de las propiedades
+    activas: {"ventana": (desde, hasta), "cubierto": (desde, hasta) | None,
+    "completa": bool}. None sin cliente o sin Search Console.
+
+    Hace falta para no afirmar una ausencia (reglas 67 y 70): un censo de antes
+    de conectar Search Console, o de hace mas de los dias que se guardan
+    (`SEARCH_CONSOLE_DETALLE_DIAS`, lo anterior se borra), no tiene busquedas
+    porque no hay datos, no porque no las hubiera. Best-effort: el try cubre la
+    funcion entera."""
+    try:
+        from datetime import date, timedelta
+
+        from shared.gsc import RETRASO_DIAS, propiedades_activas, ventana_del_censo
+        from shared.models import GscEstado
+
+        if job is None or not job.cliente_id:
+            return None
+        propiedades = propiedades_activas(session, job.cliente_id)
+        if not propiedades:
+            return None
+        desde, hasta = ventana_del_censo(job)
+        primeros, ultimos = [], []
+        for e in session.query(GscEstado).filter(GscEstado.cliente_id == job.cliente_id,
+                                                  GscEstado.propiedad.in_(propiedades)):
+            serie = (e.detalle or {}).get("consultas") or {}
+            if serie.get("primer_dia") and serie.get("ultimo_dia"):
+                primeros.append(date.fromisoformat(str(serie["primer_dia"])[:10]))
+                ultimos.append(date.fromisoformat(str(serie["ultimo_dia"])[:10]))
+        cubierto = None
+        if primeros:
+            a, b = max(desde, min(primeros)), min(hasta, max(ultimos))
+            cubierto = (a, b) if a <= b else None
+        # Los ultimos dias de la ventana llegan con el retraso de Google
+        # (`RETRASO_DIAS`): un censo de ayer no puede tenerlos y no por eso
+        # esta incompleto.
+        hasta_posible = min(hasta, date.today() - timedelta(days=RETRASO_DIAS))
+        completa = bool(cubierto and cubierto[0] <= desde and cubierto[1] >= hasta_posible)
+        return {"ventana": (desde, hasta), "cubierto": cubierto, "completa": completa}
+    except Exception:  # noqa: BLE001
+        logger.exception("Cobertura de Search Console para la intencion: fallo")
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
+def aviso_de_cobertura(cob: dict | None) -> str | None:
+    """Lo que hay que decir cuando la ventana no esta descargada entera."""
+    if not cob or cob["completa"]:
+        return None
+    desde, hasta = cob["ventana"]
+    if cob["cubierto"] is None:
+        return (f"No hay busquedas de Search Console descargadas entre el {desde} y el {hasta} "
+                "(la ventana del censo): o el censo es de antes de conectarlo, o es tan viejo que "
+                "esos dias ya se han borrado. No se puede saber que busquedas tenia.")
+    a, b = cob["cubierto"]
+    return (f"Solo hay busquedas de Search Console descargadas del {a} al {b} de una ventana del "
+            f"{desde} al {hasta}: las busquedas y sus clics salen de esos dias, no de la ventana "
+            "entera.")
+
+
 def motivo_sin_busquedas(session, job_id) -> str:
-    """Por que `intencion_busquedas` no tiene trabajo, dicho para quien lanza."""
-    from shared.gsc import propiedades_activas, ventana_del_censo
+    """Por que `intencion_busquedas` no tiene trabajo, dicho para quien lanza.
+    Solo afirma que no hay busquedas si la ventana esta descargada."""
+    from shared.gsc import propiedades_activas
     from shared.models import Job
 
     job = session.get(Job, _uuid(job_id))
@@ -233,9 +338,19 @@ def motivo_sin_busquedas(session, job_id) -> str:
     if not propiedades:
         return ("El cliente no tiene Search Console conectado (o aun no se ha descargado nada): "
                 "este modulo no tiene busquedas que clasificar.")
-    desde, hasta = ventana_del_censo(job)
-    return (f"Search Console no tiene busquedas con clics de estas paginas entre el {desde} y el "
-            f"{hasta}: este modulo no tiene trabajo.")
+    cob = cobertura_de_la_ventana(session, job)
+    if cob is None or cob["cubierto"] is None:
+        return (aviso_de_cobertura(cob) if cob else
+                "No se ha podido leer que dias de Search Console hay descargados.") + \
+            " Este modulo no tiene trabajo."
+    a, b = cob["cubierto"]
+    texto = (f"Search Console no tiene busquedas con clics de estas paginas entre el {a} y el "
+             f"{b}: este modulo no tiene trabajo.")
+    if not cob["completa"]:
+        desde, hasta = cob["ventana"]
+        texto += (f" Del resto de la ventana del censo ({desde} a {hasta}) no hay datos "
+                  "descargados: de esos dias no se puede decir nada.")
+    return texto
 
 
 # ---------------------------------------------------------------------------
@@ -246,13 +361,21 @@ def desajuste(intencion_pagina: str | None, busquedas: list[dict],
     """Reparto de los clics de una pagina por la intencion de sus busquedas y
     cuanto casa con la intencion de la pagina.
 
-    `busquedas`: [{"intencion", "clics", "estado"?}]. No cuentan las
-    `navigational` ni las `unclear` (ver el modulo) ni las que no tienen
-    respuesta. `desalineada` = la intencion de la pagina se conoce (no es
-    `unclear`), hay clics que cuentan, la intencion que mas clics concentra es
-    otra y la de la pagina se queda con menos de la mitad: la definicion de
-    #39 («no coincide con la que concentra la mayoria»). Con
-    `solo_decididas`, solo las busquedas `decidido` (la incidencia de verdad).
+    `busquedas`: [{"intencion", "clics", "estado"?}]. No cuentan para la parte
+    alineada las `navigational` ni las `unclear` (ver el modulo) ni las que no
+    tienen respuesta o no tienen clics (`clics` None: ya no estan en Search
+    Console). `desalineada` = la definicion de #39 («no coincide con la que
+    concentra la mayoria»), y solo cuando se puede afirmar:
+
+    - la intencion de la pagina se conoce y se puede comparar: ni `unclear` ni
+      `navigational` (sus busquedas, las de marca, no cuentan, asi que una
+      pagina de marca saldria siempre con un 0 % alineado);
+    - la intencion que mas clics concentra, CONTANDO las de marca, es otra y no
+      es la marca: 1.000 clics de marca y 5 informacionales no dicen que la
+      home este desalineada;
+    - y la de la pagina se queda con menos de la mitad de los que cuentan.
+
+    Con `solo_decididas`, solo las busquedas `decidido` (la incidencia de verdad).
     """
     por_intencion: dict[str, int] = {}
     excluidos = 0
@@ -265,20 +388,32 @@ def desajuste(intencion_pagina: str | None, busquedas: list[dict],
         por_intencion[intencion] = por_intencion.get(intencion, 0) + clics
     contables = {k: v for k, v in por_intencion.items() if k not in NO_CUENTAN}
     total = sum(contables.values())
-    alineados = contables.get(intencion_pagina, 0) if intencion_pagina else 0
-    dominante = (sorted(contables.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-                 if total else None)
-    conocida = intencion_pagina is not None and intencion_pagina != "unclear"
-    parte = (alineados / total) if total else None
+    # La que manda contando la marca (sin `unclear`, que no dice nada).
+    clasificadas = {k: v for k, v in por_intencion.items() if k != "unclear" and v > 0}
+    dominante = (sorted(clasificadas.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+                 if clasificadas else None)
+    comparable = intencion_pagina is not None and intencion_pagina not in NO_CUENTAN
+    alineados = contables.get(intencion_pagina, 0) if comparable else 0
+    parte = (alineados / total) if (total and comparable) else None
+    if not comparable:
+        sin_afirmar = "pagina_de_marca" if intencion_pagina == "navigational" else "pagina_sin_intencion"
+    elif dominante == "navigational":
+        sin_afirmar = "manda_la_marca"
+    elif not total:
+        sin_afirmar = "sin_clics_que_cuenten"
+    else:
+        sin_afirmar = None
     return {
         "clics_por_intencion": por_intencion,
         "clics_que_cuentan": total,
         "clics_sin_contar": sum(v for k, v in por_intencion.items() if k in NO_CUENTAN) + excluidos,
         "clics_alineados": alineados,
-        "clics_desalineados": total - alineados if conocida else 0,
+        "clics_desalineados": total - alineados if comparable else 0,
         "parte_alineada": None if parte is None else round(parte, 4),
         "intencion_dominante": dominante,
-        "desalineada": bool(conocida and total and dominante != intencion_pagina and parte < 0.5),
+        # Por que no se afirma nada de esta pagina (None = se puede comparar).
+        "sin_afirmar": sin_afirmar,
+        "desalineada": bool(sin_afirmar is None and dominante != intencion_pagina and parte < 0.5),
     }
 
 
@@ -321,9 +456,14 @@ def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
     de sus busquedas con los clics y el desajuste; y el embudo con el trafico
     real (clics de la pagina por etapa y por plantilla, #169 punto 2).
 
-    Lee las decisiones de ESTA ejecucion; los clics se vuelven a leer de
-    `gsc_consultas` en la misma ventana (no se guardan en el estado, para que la
-    cache no dependa de ellos). Todo orientativo mientras falte un umbral.
+    Las busquedas son las que se PREGUNTARON en esta ejecucion
+    (`decisions.estado_enviado`), no las que hoy serian el top 10: la descarga
+    diaria y la retencion cambian `gsc_consultas`, y la pantalla de una
+    ejecucion vieja no puede cambiar de busquedas sin que nadie lo diga. Los
+    clics, que no van en el estado (la cache no puede depender de ellos), se
+    leen de `gsc_consultas` en la ventana del censo; una busqueda preguntada
+    que ya no esta sale con `clics` None y se cuenta en el resumen. Todo
+    orientativo mientras falte un umbral.
     """
     from shared.decisiones import clave_estado
     from shared.models import Decision, EnrichmentRun, Job, Url
@@ -337,19 +477,32 @@ def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
 
     def filas(pregunta):
         return (session.query(Decision.url_id, Decision.clave, Decision.respuesta,
-                              Decision.confianza, Decision.estado)
-                .filter(Decision.run_id == run.id, Decision.pregunta == pregunta).all())
+                              Decision.confianza, Decision.estado, Decision.estado_enviado)
+                .filter(Decision.run_id == run.id, Decision.pregunta == pregunta)
+                .order_by(Decision.id).all())
 
-    pagina = {u: (r, c, e) for u, _, r, c, e in filas("intencion_pagina")}
-    etapa = {u: (r, c, e) for u, _, r, c, e in filas("etapa_embudo")}
-    de_busqueda: dict[tuple[int, str], tuple] = {(u, k): (r, c, e)
-                                                 for u, k, r, c, e in filas("intencion_busqueda")}
+    pagina = {u: (r, c, e) for u, _, r, c, e, _ in filas("intencion_pagina")}
+    etapa = {u: (r, c, e) for u, _, r, c, e, _ in filas("etapa_embudo")}
+    preguntadas: dict[int, dict[str, dict]] = {}
+    sitio, marcas = sitio_del_job(job), marcas_del_job(job)
+    for u, k, r, c, e, env in filas("intencion_busqueda"):
+        env = env if isinstance(env, dict) else {}
+        if env.get("sitio") is not None:
+            # El sitio y las marcas con que se pregunto, no los de hoy: con
+            # ellos se vuelve a formar la clave para cruzar los clics.
+            sitio, marcas = env.get("sitio"), list(env.get("marcas") or [])
+        preguntadas.setdefault(u, {})[k] = {"busqueda": env.get("busqueda"), "intencion": r,
+                                            "confianza": c, "estado": e}
     umbrales = {n: obtener(n).umbral for n in ("intencion_pagina", "etapa_embudo", "intencion_busqueda")}
 
     # --- desajuste ---------------------------------------------------------
-    con_busquedas = sorted({u for u, _ in de_busqueda})
-    sitio, marcas = sitio_del_job(job), marcas_del_job(job)
-    por_url = busquedas_por_url(session, job, con_busquedas) if con_busquedas else {}
+    con_busquedas = sorted(preguntadas)
+    clics_de: dict[tuple[int, str], int] = {}
+    if con_busquedas:
+        for uid, lista in busquedas_por_url(session, job, con_busquedas, maximo=None).items():
+            for q, clics in lista:
+                k = clave_estado(estado_de_busqueda(sitio, marcas, q))
+                clics_de[(uid, k)] = clics_de.get((uid, k), 0) + clics
     urls = {}
     ids = sorted(set(con_busquedas) | set(etapa) | set(pagina))
     for trozo in _trozos(ids):
@@ -358,13 +511,15 @@ def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
             urls[uid] = (url, path, clics)
     paginas = []
     total_por_intencion: dict[str, int] = {}
+    sin_clics_hoy = 0
     for uid in con_busquedas:
         intencion, conf, est = pagina.get(uid, (None, None, None))
         busquedas = []
-        for q, clics in por_url.get(uid, []):
-            r = de_busqueda.get((uid, clave_estado(estado_de_busqueda(sitio, marcas, q))))
-            busquedas.append({"busqueda": q, "clics": clics, "intencion": r[0] if r else None,
-                              "confianza": r[1] if r else None, "estado": r[2] if r else None})
+        for k, b in preguntadas[uid].items():
+            clics = clics_de.get((uid, k))
+            sin_clics_hoy += clics is None
+            busquedas.append({**b, "clics": clics})
+        busquedas.sort(key=lambda b: (b["clics"] is None, -(b["clics"] or 0), b["busqueda"] or ""))
         d = desajuste(intencion, busquedas)
         for k, v in d["clics_por_intencion"].items():
             total_por_intencion[k] = total_por_intencion.get(k, 0) + v
@@ -379,6 +534,10 @@ def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
         "clics_desalineados": sum(p["clics_desalineados"] for p in paginas),
         "clics_que_cuentan": sum(p["clics_que_cuentan"] for p in paginas),
         "clics_por_intencion": total_por_intencion,
+        # Busquedas preguntadas que ya no tienen clics en `gsc_consultas`
+        # (retencion, o la descarga diaria rehizo esos dias).
+        "busquedas_sin_clics_hoy": sin_clics_hoy,
+        "aviso_cobertura": aviso_de_cobertura(cobertura_de_la_ventana(session, job)),
         "orientativo": umbrales["intencion_pagina"] is None or umbrales["intencion_busqueda"] is None,
         "incidencia_activa": bool(umbrales["intencion_pagina"] is not None
                                   and umbrales["intencion_busqueda"] is not None),
@@ -407,6 +566,7 @@ def intencion_frente_a_busquedas(session, run_id, limite: int = 100) -> dict:
 __all__ = [
     "MAX_BUSQUEDAS_POR_PAGINA", "NO_CUENTAN", "estados_intencion_pagina",
     "paginas_con_algo_que_juzgar", "busquedas_por_url", "estados_intencion_busquedas",
-    "paginas_con_busquedas", "motivo_sin_busquedas", "desajuste",
+    "paginas_con_busquedas", "motivo_sin_busquedas", "cobertura_de_la_ventana",
+    "aviso_de_cobertura", "desajuste",
     "incidencias_intencion_desalineada", "intencion_frente_a_busquedas", "sitio_del_job",
 ]

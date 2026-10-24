@@ -1024,6 +1024,8 @@ cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»)
   *Puntos 1 y 2, código hecho* (decisión 176): intención de las búsquedas con
   caché por cliente, desajuste ponderado por clics y embudo con tráfico, todo
   orientativo; `intencion_desalineada` preparada y apagada hasta tener umbral.
+  Las páginas de marca no se dan por desalineadas y las preguntas van con
+  reglas en orden (revisión del PR #243).
   Falta: etiquetar el juego (#8) y los puntos 4-7.
 - [#170](https://github.com/dvillarrubia/crawler-masivo/issues/170) **Más adelante**: exportación a BigQuery, GA4 y DataForSEO.
 

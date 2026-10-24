@@ -2050,8 +2050,15 @@
                     <div class="text-dim" style="font-size:.75rem;margin:.25rem 0 .5rem"
                          x-show="(enriqIntencion.resumen && enriqIntencion.resumen.orientativo) || (enriqIntencion.embudo && enriqIntencion.embudo.orientativo)">
                       Orientativo: las preguntas no tienen umbral calibrado (#8). Las búsquedas de marca o de otras
-                      marcas (navegacionales) y las que no están claras no cuentan para el desajuste.
+                      marcas (navegacionales) y las que no están claras no cuentan para el desajuste, y una página de
+                      marca, o una con más clics de marca que de cualquier otra intención, no se da por desalineada.
                     </div>
+                    <div class="text-dim" style="font-size:.75rem;margin:.25rem 0 .5rem"
+                         x-show="enriqIntencion.resumen && enriqIntencion.resumen.aviso_cobertura"
+                         x-text="enriqIntencion.resumen && enriqIntencion.resumen.aviso_cobertura"></div>
+                    <div class="text-dim" style="font-size:.75rem;margin:.25rem 0 .5rem"
+                         x-show="enriqIntencion.resumen && enriqIntencion.resumen.busquedas_sin_clics_hoy"
+                         x-text="enriqIntencion.resumen && (fmt.num(enriqIntencion.resumen.busquedas_sin_clics_hoy) + ' búsquedas preguntadas ya no tienen clics en Search Console (se han borrado o rehecho esos días): salen sin clics y no pesan.')"></div>
                     <template x-if="enriqIntencion.resumen">
                       <div style="font-size:.82rem">
                         <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
@@ -2077,9 +2084,10 @@
                                   <td style="max-width:24rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="p.url"></td>
                                   <td x-text="p.intencion_pagina ? fmt.respuestaEnriq(p.intencion_pagina) : '—'"></td>
                                   <td style="max-width:22rem;font-size:.75rem"
-                                      x-text="p.busquedas.slice(0, 3).map(b => b.busqueda + ' (' + (b.intencion ? fmt.respuestaEnriq(b.intencion) : '—') + ', ' + b.clics + ')').join(' · ')"></td>
+                                      x-text="p.busquedas.slice(0, 3).map(b => (b.busqueda || '—') + ' (' + (b.intencion ? fmt.respuestaEnriq(b.intencion) : '—') + ', ' + (b.clics == null ? 'sin clics hoy' : b.clics) + ')').join(' · ')"></td>
                                   <td style="text-align:right" x-text="fmt.num(p.clics_desalineados)"></td>
-                                  <td style="text-align:right" x-text="p.parte_alineada == null ? '—' : Math.round(100 * p.parte_alineada) + '%'"></td>
+                                  <td style="text-align:right" :title="fmt.sinAfirmarEnriq(p.sin_afirmar)"
+                                      x-text="['pagina_de_marca', 'manda_la_marca'].includes(p.sin_afirmar) ? 'marca' : (p.parte_alineada == null ? '—' : Math.round(100 * p.parte_alineada) + '%')"></td>
                                 </tr>
                               </template>
                             </tbody>

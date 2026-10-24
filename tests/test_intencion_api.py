@@ -70,3 +70,46 @@ def test_el_desajuste_se_lee_por_api(entorno):
     assert r["embudo"]["por_etapa"]["bofu"]["clics"] == 160
     otro = api.get(f"/api/jobs/00000000-0000-0000-0000-000000000000/enrichment/{rid}/intencion")
     assert otro.status_code == 404
+
+
+def test_la_pantalla_ensena_lo_preguntado_aunque_cambie_search_console(entorno):
+    """Revision de la decision 176: la descarga diaria y la retencion cambian
+    `gsc_consultas`; la pantalla de una ejecucion sigue ensenando las busquedas
+    que se preguntaron, y las que ya no tienen clics salen con clics None."""
+    from datetime import date
+
+    from shared.gsc import clave_de_url
+    from shared.models import Client, GscConsulta
+
+    api, jid, rid = entorno
+    antes = api.get(f"/api/jobs/{jid}/enrichment/{rid}/intencion").json()
+    tienda = next(p for p in antes["paginas"] if p["url"].endswith("/zapato-rojo"))
+    preguntadas = {b["busqueda"] for b in tienda["busquedas"]}
+    assert preguntadas == {"comprar zapato rojo", "como limpiar zapatos rojos", "acme"}
+
+    s = enr_sesion(api)
+    clave = clave_de_url("https://www.acme.com/tienda/zapato-rojo")
+    # Se borra una preguntada y entra otra nueva con mas clics que ninguna.
+    s.query(GscConsulta).filter(GscConsulta.url_clave == clave,
+                                GscConsulta.consulta == "como limpiar zapatos rojos").delete()
+    cliente = s.query(Client).first()
+    s.add(GscConsulta(cliente_id=cliente.id, propiedad="https://www.acme.com/", fecha=date(2026, 10, 3),
+                      url_clave=clave, consulta="zapatos baratos", clics=900, impresiones=1000))
+    s.commit()
+    s.close()
+
+    despues = api.get(f"/api/jobs/{jid}/enrichment/{rid}/intencion").json()
+    tienda = next(p for p in despues["paginas"] if p["url"].endswith("/zapato-rojo"))
+    assert {b["busqueda"] for b in tienda["busquedas"]} == preguntadas
+    borrada = next(b for b in tienda["busquedas"] if b["busqueda"] == "como limpiar zapatos rojos")
+    assert borrada["clics"] is None and borrada["intencion"] == "informational"
+    assert all(b["intencion"] for b in tienda["busquedas"])
+    assert despues["resumen"]["busquedas_sin_clics_hoy"] == 1
+    assert despues["resumen"]["paginas_comparadas"] == antes["resumen"]["paginas_comparadas"]
+
+
+def enr_sesion(api):
+    from shared.database import get_session
+
+    gen = api.app.dependency_overrides[get_session]()
+    return next(gen)
