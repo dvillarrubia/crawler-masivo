@@ -4057,8 +4057,8 @@
                 <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
                 <!-- De qué fichero(s) de sitemap viene y con qué lastmod (decisión 126) -->
                 <template x-for="(sm, n) in (urlDetail.sitemaps || [])" :key="'sm' + n">
-                  <div class="text-sm text-dim truncate" :title="sm.fichero"
-                       x-text="'Sitemap: ' + sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod')"></div>
+                  <div class="text-sm text-dim truncate" :title="sm.fichero + ((sm.hreflang || []).length ? '\n' + sm.hreflang.map(h => h[0] + ' → ' + h[1]).join('\n') : '')"
+                       x-text="'Sitemap: ' + sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod') + ((sm.hreflang || []).length ? ' · hreflang: ' + sm.hreflang.map(h => h[0]).join(', ') : '')"></div>
                 </template>
               </div>
               <div class="card">
@@ -5143,8 +5143,8 @@
                         <template x-if="(expUrlDetail.sitemaps || []).length">
                           <dd>
                             <template x-for="(sm, n) in expUrlDetail.sitemaps" :key="'esm' + n">
-                              <div class="truncate" :title="sm.fichero"
-                                   x-text="sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod')"></div>
+                              <div class="truncate" :title="sm.fichero + ((sm.hreflang || []).length ? '\n' + sm.hreflang.map(h => h[0] + ' → ' + h[1]).join('\n') : '')"
+                                   x-text="sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod') + ((sm.hreflang || []).length ? ' · hreflang: ' + sm.hreflang.map(h => h[0]).join(', ') : '')"></div>
                             </template>
                           </dd>
                         </template>

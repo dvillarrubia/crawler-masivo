@@ -79,6 +79,7 @@ from seo_crawler.sitemaps import (
     parse_robots_sitemaps,
 )
 from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
+from shared.sitemaps import compactar_hreflang
 from shared.respuestas import (
     NO_VALIDAS, UMBRAL_POR_DEFECTO, VENTANA_POR_DEFECTO, VentanaDeSalud,
     clasificar_respuesta,
@@ -112,6 +113,13 @@ logger = logging.getLogger(__name__)
 # `jobs.sitemaps.entradas_recortadas` lo dice: los avisos que salen de las
 # entradas no pueden afirmar nada de las que faltan.
 SITEMAP_ENTRIES_MAX = int(os.getenv("SITEMAP_ENTRIES_MAX", "250000"))
+
+# Tope de anotaciones hreflang del sitemap guardadas por proceso (decision
+# 167), ~60 bytes cada una ya compactada (medido en Typeform): 2 millones son
+# ~120 MB en el peor caso (250.000 entradas con 8 idiomas). Pasado el tope, la entrada se guarda
+# con `hreflang` a NULL (no se sabe) y `jobs.sitemaps.hreflang_recortado` lo
+# dice, para que el analisis no afirme ausencias.
+SITEMAP_HREFLANG_MAX = int(os.getenv("SITEMAP_HREFLANG_MAX", "2000000"))
 
 # Redirecciones seguidas que se siguen en una cadena, como Chromium y Firefox
 # (20, `ERR_TOO_MANY_REDIRECTS`). Google deja de seguir a las 10, pero cortar
@@ -563,6 +571,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         self._sitemaps_leidos: dict[str, dict] = {}
         self._sitemap_entradas_guardadas: int = 0
         self._sitemap_entradas_recortadas: bool = False
+        self._sitemap_hreflang_guardadas: int = 0
+        self._sitemap_hreflang_recortado: bool = False
         # Extraccion y busqueda a medida (decision 104). None = el job no tiene
         # reglas. `_config_invalida` = las tiene y no compilan: el job no se
         # rastrea (sale `failed` con finish_reason=config_invalida), nunca se
@@ -1209,7 +1219,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 vistas.add(url_hash)
                 entradas.append({"url": normalized, "url_hash": url_hash,
                                  "lastmod": entrada.lastmod,
-                                 "videos": entrada.videos})
+                                 "videos": entrada.videos,
+                                 "hreflang": compactar_hreflang(normalized,
+                                                                entrada.hreflang)})
             if _hash_key(url_hash) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
@@ -1229,6 +1241,18 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             self._sitemap_entradas_recortadas = True
             entradas = entradas[:hueco]
         self._sitemap_entradas_guardadas += len(entradas)
+        for e in entradas:
+            n = len(e["hreflang"] or ())
+            if self._sitemap_hreflang_guardadas + n > SITEMAP_HREFLANG_MAX:
+                if not self._sitemap_hreflang_recortado:
+                    logger.warning(
+                        "Sitemap: tope de %d anotaciones hreflang guardadas alcanzado en "
+                        "%s; las entradas que siguen se guardan sin ellas "
+                        "(SITEMAP_HREFLANG_MAX)", SITEMAP_HREFLANG_MAX, response.url)
+                self._sitemap_hreflang_recortado = True
+                e["hreflang"] = None
+                continue
+            self._sitemap_hreflang_guardadas += n
         self._anotar_sitemap(response.url, {
             "status": response.status,
             "formato": lectura.formato,
@@ -1264,6 +1288,11 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             "tope_entradas": SITEMAP_ENTRIES_MAX,
             "entradas_guardadas": self._sitemap_entradas_guardadas,
             "entradas_recortadas": self._sitemap_entradas_recortadas,
+            # El hreflang de cada entrada va en `sitemap_entries.hreflang`
+            # (decision 167): la marca dice que este censo ya lo guardaba.
+            "hreflang": 1,
+            "hreflang_guardadas": self._sitemap_hreflang_guardadas,
+            "hreflang_recortado": self._sitemap_hreflang_recortado,
         }
         try:
             from shared.database import SessionLocal

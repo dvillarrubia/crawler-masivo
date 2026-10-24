@@ -209,7 +209,8 @@ class EnlacesNoRastreablesItem(scrapy.Item):
 class SitemapEntradasItem(scrapy.Item):
     """Las entradas internas de UN fichero de sitemap (decision 126).
 
-    Un item por fichero, con `entradas` = [{url, url_hash, lastmod, videos}]: el
+    Un item por fichero, con `entradas` = [{url, url_hash, lastmod, videos,
+    hreflang}] (hreflang compactado, decision 167): el
     pipeline las inserta en `sitemap_entries` por lotes. NO es una pagina y no
     cuenta en el progreso del job.
     """

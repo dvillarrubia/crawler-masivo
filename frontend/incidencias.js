@@ -559,6 +559,12 @@ const ISSUE_INFO = {
     arreglo: 'Usar el mismo código para cada URL en todas las páginas del clúster.',
   },
 
+  'hreflang_fuentes_discrepan': {
+    que: 'Para el mismo idioma, dos fuentes de hreflang de la página dan URLs distintas (p. ej. el sitemap dice /fr/a y el <head> /fr/b). Una incidencia por host y combinación de fuentes, con las páginas afectadas y ejemplos.',
+    google: 'Lee el <head>, la cabecera HTTP y el sitemap como equivalentes y los suma: para él la página declara dos URLs para ese idioma, una señal contradictoria de la que puede ignorar una o las dos.',
+    arreglo: 'Generar el hreflang de todas las fuentes desde el mismo dato (o declararlo en una sola), con la URL canónica exacta de cada versión.',
+  },
+
   // ----- Datos estructurados -----
   'structured_data_error': {
     que: 'Un bloque de datos estructurados está roto o le falta algo obligatorio.',
@@ -874,6 +880,7 @@ const ISSUE_LABEL_EXTRA = {
   hreflang_idioma_repetido: 'Hreflang idioma repetido',
   hreflang_destino_no_indexable: 'Hreflang a URL no indexable',
   hreflang_retorno_incoherente: 'Hreflang retorno incoherente',
+  hreflang_fuentes_discrepan: 'Hreflang distinto según la fuente',
   html_supera_2mb: 'HTML de más de 2 MB',
   head_cortado: 'Head cortado antes de tiempo',
   meta_fuera_del_head: 'Metadatos fuera del head',

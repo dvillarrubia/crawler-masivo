@@ -42,6 +42,10 @@
   contiene» es `estado='sin_coincidencia'` y nunca incluye bloqueadas ni errores. 104.
 - **Un segmento es `urls.segmento`, materializado** (analisis o `POST /segmentos`); la
   primera regla VERDADERA gana y un dato desconocido no casa ni negado. Decision 125.
+- **El hreflang de una URL es la union de sus tres fuentes** (`<head>`, cabecera
+  `Link`, sitemap); el del sitemap vive en `sitemap_entries.hreflang`, no en la
+  tabla `hreflang`, y con el sitemap leido a medias (`estado_hreflang_sitemap`)
+  no se afirma que a una pagina sin entrada le falte nada. Decision 167.
 
 ## Borrado y almacenamiento
 

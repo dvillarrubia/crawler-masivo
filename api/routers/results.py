@@ -1195,18 +1195,25 @@ def export_enlaces_entrantes(
 
 def _sitemaps_de_url(db: Session, job_id: uuid.UUID, url_hash: str) -> list[dict]:
     """Los ficheros de sitemap que declaran la URL, con su lastmod (decision
-    126). Por el indice (job_id, url_hash). Sin tabla, lista vacia: es un dato
+    126) y su hreflang (decision 167: [[idioma, href]], o None si no se sabe).
+    Por el indice (job_id, url_hash). Sin tabla, lista vacia: es un dato
     opcional del censo, como las capturas."""
     from shared.models import SitemapEntry as E
+    from shared.sitemaps import expandir_hreflang
 
     try:
         with db.begin_nested():
-            filas = (db.query(E.fichero, E.lastmod)
+            filas = (db.query(E.fichero, E.lastmod, E.url, E.hreflang)
                      .filter(E.job_id == job_id, E.url_hash == url_hash)
                      .order_by(E.fichero).all())
     except Exception:  # noqa: BLE001
         return []
-    return [{"fichero": f, "lastmod": lm} for f, lm in filas]
+    salida = []
+    for f, lm, url, hl in filas:
+        pares = expandir_hreflang(url, hl)
+        salida.append({"fichero": f, "lastmod": lm,
+                       "hreflang": None if pares is None else [list(p) for p in pares]})
+    return salida
 
 
 def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[dict]:

@@ -636,7 +636,7 @@ class PostgresPipeline:
         filas = [{"job_id": job_id, "url_hash": e["url_hash"],
                   "url": (e["url"] or "").replace("\x00", ""), "fichero": fichero,
                   "lastmod": (e.get("lastmod") or None) and e["lastmod"][:64].replace("\x00", ""),
-                  "videos": e.get("videos")}
+                  "videos": e.get("videos"), "hreflang": e.get("hreflang")}
                  for e in (item.get("entradas") or [])]
         try:
             # En un SAVEPOINT: si falla (base sin la tabla) se deshace solo esto

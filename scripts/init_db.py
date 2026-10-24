@@ -389,6 +389,8 @@ def migrar_sitemap_entries() -> None:
             "ON sitemap_entries (job_id, url_hash)"))
         # `<video:video>` de cada entrada (decision 155). Sin DEFAULT: solo catalogo.
         conn.execute(text("ALTER TABLE sitemap_entries ADD COLUMN IF NOT EXISTS videos INTEGER"))
+        # hreflang de cada entrada (decision 167). Sin DEFAULT: solo catalogo.
+        conn.execute(text("ALTER TABLE sitemap_entries ADD COLUMN IF NOT EXISTS hreflang JSON"))
     print("Sitemaps: tabla sitemap_entries e indice al dia.")
 
 

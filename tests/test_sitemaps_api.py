@@ -58,7 +58,9 @@ def entorno(tmp_path, monkeypatch):
             SitemapEntry(job_id=job.id, url_hash="hdos", url=dos.url, fichero=B,
                          lastmod="2026-02-01"),
             SitemapEntry(job_id=job.id, url_hash="hdos", url=dos.url, fichero=A,
-                         lastmod="2026-01-01"),
+                         lastmod="2026-01-01",
+                         # Compactado (decision 167): el mismo origen va sin el.
+                         hreflang=[["es", "/dos"], ["en", "https://en.x.com/two"]]),
             # Del sitemap y sin rastrear: tiene fila aqui y no en `urls`.
             SitemapEntry(job_id=job.id, url_hash="hnueva", url="https://x.com/nueva", fichero=A),
         ])
@@ -84,8 +86,11 @@ def entorno(tmp_path, monkeypatch):
 def test_la_ficha_dice_de_que_ficheros_viene(entorno):
     api, _, ids = entorno
     d = api.get(f"/api/jobs/{ids['job']}/urls/{ids['dos']}").json()
-    assert d["sitemaps"] == [{"fichero": B, "lastmod": "2026-02-01"},
-                             {"fichero": A, "lastmod": "2026-01-01"}]
+    # El hreflang de cada fichero, expandido; None = no se sabe (decision 167).
+    assert d["sitemaps"] == [
+        {"fichero": B, "lastmod": "2026-02-01", "hreflang": None},
+        {"fichero": A, "lastmod": "2026-01-01",
+         "hreflang": [["es", "https://x.com/dos"], ["en", "https://en.x.com/two"]]}]
     assert api.get(f"/api/jobs/{ids['job']}/urls/{ids['fuera']}").json()["sitemaps"] == []
 
 
