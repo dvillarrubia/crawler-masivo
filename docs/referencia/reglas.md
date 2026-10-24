@@ -22,6 +22,9 @@
   (la REST API de WordPress: dos a la vez, en el slot del host).
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
+- **Una URL que escribe una persona la descarga el worker, nunca la API**, por
+  `shared/prueba_en_vivo.py`: redirecciones a mano, todas las IP globales y la
+  IP fijada con `CURLOPT_RESOLVE` en cada salto. 166.
 
 ## Enlaces y PageRank
 

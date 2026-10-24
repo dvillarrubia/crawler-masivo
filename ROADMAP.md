@@ -527,8 +527,18 @@ clientes, la única sin el tag de GTM es la portada de cst.gov.sa.
 Dos cosas que se cuidan: una página que no se pudo evaluar (un PDF, un muro del
 WAF) **no cuenta como «no contiene»**, y un precio que puede leerse de dos
 maneras (`1.234`) se marca como dudoso en vez de adivinarlo. Antes de rastrear,
-las reglas se pueden probar contra el HTML de una página. Queda para después la
-pantalla para editarlas y la prueba contra una URL en vivo.
+las reglas se pueden probar contra el HTML de una página.
+
+**Pantalla y prueba en vivo (24 de octubre, decisión 166).** El modal de Nuevo
+rastreo tiene una pestaña «Extracción» para escribir las reglas, con las del
+cliente y del perfil marcadas como heredadas (se pueden cambiar o quitar solo
+para ese rastreo), y un botón «Probar» que descarga una URL de verdad y enseña
+qué saca cada regla. La descarga la hace el rastreador, no la API, y no puede
+apuntar a la red interna del servidor ni aunque una redirección lo intente. Sin
+JavaScript renderizado todavía (lo avisa). Además, un censo ya rastreado con el
+HTML guardado se puede re-extraer con reglas nuevas sin volver a rastrear, y la
+columna «Cambio frente al anterior» del Explorador dice si cambió el precio o
+dejó de estar el tag.
 
 ### Rastreos detrás de un muro (16 de octubre)
 
@@ -839,9 +849,9 @@ es cada plantilla— y va con
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
   mapas de redirección para recuperar enlaces perdidos.
 - [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34) **Extracción
-  personalizada**: hecha la base (arriba). Falta la pantalla para editar las
-  reglas, probarlas contra una URL en vivo, buscar en el HTML de origen cuando
-  el rastreo renderiza y avisar como incidencia (comparar valores entre censos ya está).
+  personalizada**: hecha la base, la pantalla y la prueba en vivo (arriba). Falta
+  probar con render, buscar en el HTML de origen cuando el rastreo renderiza y
+  avisar como incidencia (comparar valores entre censos ya está).
 - **Segmentos de negocio** (ola 3.3, decisión 125, en revisión en
   [#172](https://github.com/dvillarrubia/crawler-masivo/pull/172)): «fichas»,
   «blog», «categorías» definidos por cliente, con el porcentaje de cada

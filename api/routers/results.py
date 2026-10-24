@@ -337,6 +337,7 @@ def _cambios(db: Session, ref: uuid.UUID | None, urls: list) -> dict[int, str | 
     Mismos campos y criterio que la comparacion de censos (decision 67):
     codigo, indexabilidad, titulo, canonical y palabras si cambian mas de un
     20% sobre el MAYOR de los dos (si no, A->B y B->A dirian cosas distintas).
+    Y lo extraido a medida, con los guardias de la decision 127 (decision 166).
     """
     if ref is None or not urls:
         return {}
@@ -344,6 +345,13 @@ def _cambios(db: Session, ref: uuid.UUID | None, urls: list) -> dict[int, str | 
         u.url_hash: u for u in db.query(Url).options(joinedload(Url.html_meta))
         .filter(Url.job_id == ref, Url.url_hash.in_([u.url_hash for u in urls]))
     }
+    try:
+        extraido = _cambios_extraidos(db, ref, urls, antes)
+    except Exception:  # noqa: BLE001 — la columna sigue sin lo extraido
+        import logging
+
+        logging.getLogger(__name__).exception("cambios: no se pudo comparar lo extraido")
+        extraido = {}
     salida: dict[int, str | None] = {}
     for u in urls:
         a = antes.get(u.url_hash)
@@ -364,7 +372,73 @@ def _cambios(db: Session, ref: uuid.UUID | None, urls: list) -> dict[int, str | 
         pa, pu = a.content_word_count or a.word_count, u.content_word_count or u.word_count
         if pa is not None and pu is not None and max(pa, pu) and abs(pa - pu) / max(pa, pu) > 0.2:
             partes.append(f"palabras {pa}→{pu}")
+        partes.extend(extraido.get(u.id, []))
         salida[u.id] = "; ".join(partes) or None
+    return salida
+
+
+def _corto(valor, n: int = 30) -> str:
+    v = " ".join(str(valor if valor is not None else "—").split())
+    return v if len(v) <= n else v[:n - 1] + "…"
+
+
+def _cambios_extraidos(db: Session, ref: uuid.UUID, urls: list, antes: dict) -> dict[int, list[str]]:
+    """Lo extraido a medida que cambia en cada URL frente al censo `ref`, con
+    los guardias de la comparacion de censos (decision 127): solo las reglas
+    con el mismo nombre y la misma definicion en los dos censos, solo filas
+    con dato (`ok`/`sin_coincidencia`) en los dos, y el mismo `render`. Sin
+    fila en uno de los dos no es un cambio (104). Decision 166."""
+    from shared.comparacion import (
+        ESTADOS_CON_DATO, _mismo_valor, _reglas_comparables, reglas_a_medida,
+    )
+
+    job_id = urls[0].job_id
+    jobs = {j.id: j for j in db.query(Job).filter(Job.id.in_([job_id, ref]))}
+    if job_id not in jobs or ref not in jobs:
+        return {}
+    comparables, _fuera = _reglas_comparables(
+        {"reglas_a_medida": reglas_a_medida(jobs[ref].config)},
+        {"reglas_a_medida": reglas_a_medida(jobs[job_id].config)}, {}, {})
+    if not comparables:
+        return {}
+    etiquetas = {n: (r.get("etiqueta") or n) for n, (_c, r) in reglas_del_job(jobs[job_id]).items()}
+    CE = CustomExtraction
+
+    def filas(jid, ids):
+        out: dict[int, dict[str, dict]] = {}
+        for f in (db.query(CE.url_id, CE.nombre, CE.estado, CE.valor_clave, CE.valor_num, CE.render)
+                  .filter(CE.job_id == jid, CE.url_id.in_(ids), CE.nombre.in_(list(comparables)))):
+            out.setdefault(f.url_id, {})[f.nombre] = {
+                "estado": f.estado, "valor": f.valor_clave, "num": f.valor_num, "render": f.render}
+        return out
+
+    ahora = filas(job_id, [u.id for u in urls])
+    ids_antes = {a.id: a.url_hash for a in antes.values()}
+    previo_por_hash = {ids_antes[uid]: v for uid, v in filas(ref, list(ids_antes)).items()} \
+        if ids_antes else {}
+    salida: dict[int, list[str]] = {}
+    for u in urls:
+        pa, pb = previo_por_hash.get(u.url_hash) or {}, ahora.get(u.id) or {}
+        partes = []
+        for nombre in sorted(comparables):
+            ea, eb = pa.get(nombre), pb.get(nombre)
+            if ea is None or eb is None:
+                continue
+            if ea["estado"] not in ESTADOS_CON_DATO or eb["estado"] not in ESTADOS_CON_DATO:
+                continue
+            if None not in (ea["render"], eb["render"]) and bool(ea["render"]) != bool(eb["render"]):
+                continue
+            et = etiquetas.get(nombre, nombre)
+            antes_ok, ahora_ok = ea["estado"] == "ok", eb["estado"] == "ok"
+            if comparables[nombre] == "busqueda":
+                if antes_ok != ahora_ok:
+                    partes.append(f"{'pasa a contener' if ahora_ok else 'deja de contener'} {et}")
+            elif antes_ok and ahora_ok and not _mismo_valor(ea, eb):
+                partes.append(f"{et} {_corto(ea['valor'])}→{_corto(eb['valor'])}")
+            elif antes_ok != ahora_ok:
+                partes.append(f"{et} {'aparece' if ahora_ok else 'desaparece'}")
+        if partes:
+            salida[u.id] = partes
     return salida
 
 

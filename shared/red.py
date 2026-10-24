@@ -7,9 +7,10 @@ haria que el rastreo leyera la red interna del VPS (SSRF). Lo interno del sitio
 que se audita no pasa por aqui: es el sitio, y lo decide el usuario al sembrar.
 
 Solo se mira la forma del host, sin resolverlo: un nombre publico que resuelve a
-una IP privada (rebinding) no se detecta. Cerrar eso exige fijar la IP con
-`CURLOPT_RESOLVE` y comprobarla en cada salto, que es lo que planea la prueba de
-extraccion en vivo (`docs/referencia/pendiente.md`).
+una IP privada (rebinding) no se detecta. La prueba de extraccion en vivo
+(`shared/prueba_en_vivo.py`, decision 166), cuya URL escribe una persona, ademas
+resuelve, exige que todas las IP sean globales y la fija con `CURLOPT_RESOLVE`
+en cada salto.
 
 **La forma del host es la que lee curl, no la de `ipaddress`** (revision de
 #184, decision 154): la sonda de la og:image va encendida de serie y con GET,

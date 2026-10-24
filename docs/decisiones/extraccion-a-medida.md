@@ -331,3 +331,114 @@
    configuración del cliente, del perfil o del rastreo, o por la API); la
    columna en el CSV completo de 83 columnas, y que la importación de un backup
    la conserve (se recupera re-segmentando: 2 s).
+
+<a id="d166"></a>
+166. **Las reglas a medida se editan en el modal y se prueban contra una URL en
+   vivo que descarga el worker, con la IP comprobada y fijada en cada salto**
+   (#34, la «PR 2» de la 104 y lo que quedaba suelto). Cuatro piezas:
+
+   - **Pestaña «Extracción» en el modal de Nuevo rastreo.** Una tarjeta por
+     regla (nombre, CSS/XPath/regex, expresión, qué devuelve, atributo,
+     cuántas coincidencias, texto o número). Las heredadas llevan la marca
+     «Heredada · cliente» o «· perfil» (`config-resuelta` da la fusión; el
+     origen se mira en la config del perfil) y su firma de origen: **sin tocar
+     no se mandan** —se heredan en el servidor, como el resto del modal—,
+     cambiadas se mandan enteras (sustituyen por nombre, 104) y **quitadas van
+     como `null`**, con «Restaurar». El nombre de una heredada no se edita: un
+     cambio de nombre es quitar una y crear otra, y el formulario no puede
+     mandarlo a medias. Los campos que la pestaña no edita (`solo_urls`,
+     `separador_decimal`, `grupo`…) viajan tal cual. La validación es la del
+     servidor: el 422 sale en el aviso del modal y el modal salta a la pestaña
+     si es de `custom_extraction`. Lo único que se dice en el cliente es lo que
+     no necesita preguntar (nombre vacío, mal formado o repetido). Las
+     búsquedas (`custom_search`) no tienen pestaña todavía: las heredadas se
+     heredan igual y la prueba las evalúa. **Volver a «Sin cliente»** deja sin
+     herencia en el servidor: las heredadas pasan a propias (se ven sin la
+     marca y se mandan enteras) y las quitadas desaparecen; y por si acaso,
+     sin `cliente_id` una fila marcada heredada se manda igual. **Cambiar de
+     cliente o de perfil** rehace el formulario con lo heredado y conserva las
+     reglas propias (con el nombre de una heredada, la propia la sustituye,
+     como en el servidor); lo que se cambió en una heredada sí se pierde,
+     porque era sobre la definición del origen anterior.
+   - **«Probar» contra una URL en vivo: la API no descarga nada.**
+     `POST /api/extraccion/probar` con `url` valida la forma y las reglas (422
+     sin encolar), deja la petición en `extraccion:pruebas` con un `vence` y
+     espera con `BLPOP` la respuesta en `extraccion:prueba:<id>`
+     (`PRUEBA_EN_VIVO_ESPERA_S`, 35 s; 504 si no llega, que es lo que pasa
+     mientras un despliegue recrea el worker). La atiende un **hilo propio del
+     worker** (`_atender_pruebas_en_vivo`), no el bucle principal: ese bloquea
+     `BRPOP_TIMEOUT` en la cola de rastreos y duerme con los huecos llenos, y
+     la prueba la espera una persona. **El hilo lo arranca `main()` una sola vez,
+     antes del bucle** (`_arrancar_pruebas_en_vivo`): arrancado desde el
+     vigilante, los primeros 5 min tras cada despliegue no había quien atendiera
+     (504) y luego nacía uno nuevo cada 5 min sin morir ninguno. En la API la
+     espera tiene **su propio semáforo** (`CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ`,
+     4; luego 429): esperar a Redis no gasta CPU, y con el de las pruebas
+     locales dos esperas de 35 s dejaban en 429 una prueba con HTML pegado.
+     En el worker, dos a la vez (`PRUEBAS_EN_VIVO_A_LA_VEZ`);
+     sin hueco no se saca nada de la cola, y lo vencido se descarta sin pedir.
+     Mismo `evaluar_documento` que la prueba con HTML pegado y que el script
+     de abajo, sobre la misma `aplicar` del spider (23, 39). Respuesta: estado,
+     valor(es) y detalle por regla, las no evaluadas, los saltos y avisos.
+   - **SSRF, en la URL inicial y en CADA salto** (`shared/prueba_en_vivo.py`).
+     A diferencia de las sondas (123, 154), aquí la URL la escribe una persona
+     y la descarga sale del VPS, que ve Postgres, Redis y la API. Las
+     redirecciones se siguen a mano (`allow_redirects=False`, tope 10) y cada
+     destino pasa por: esquema http/https, sin credenciales, la forma del host
+     de `shared/red.py`, un host sin escapes `%XX` (curl los decodifica antes de
+     resolver, así que la clave fijada no casaría y curl resolvería otro nombre:
+     `127.0.0.%31` es 127.0.0.1) y en ASCII (un host internacionalizado se pasa
+     a punycode antes de comprobarlo, fijarlo y pedirlo, para que curl no lo
+     convierta por su cuenta), y **resolverlo aquí con todas sus IP globales** (una
+     sola privada y no se pide: con una A pública y otra interna, curl podría
+     elegir la interna). **La IP comprobada se fija con `CURLOPT_RESOLVE`**
+     para esa petición, así que un DNS que contesta una IP pública a la
+     comprobación y una privada a la conexión (rebinding) no cambia a dónde se
+     conecta; y sin proxy del entorno (`trust_env=False`), que resolvería por
+     su cuenta. Comprobado con curl_cffi de verdad contra un servidor local:
+     `sitio.example`, que no existe en el DNS, llega al servidor con su `Host`
+     (la IP fijada es la que se usa); una redirección a `127.0.0.2`, a
+     `169.254.169.254`, a `localhost` o a un nombre que resuelve a una IP
+     interna se corta y el servidor **nunca recibe** `/secreto`. Quitando la
+     comprobación de los saltos, el test del nombre que resuelve a una interna
+     falla (contrafactual hecho). Y en local contra Internet:
+     `169.254.169.254.nip.io` → 422 «resuelve a 169.254.169.254». 5 MB como
+     mucho y 25 s de descarga (`PRUEBA_EN_VIVO_DESCARGA_S`).
+   - **Lo que la prueba no afirma.** **Sin render**: descarga el HTML de la
+     respuesta; si el job renderiza, lo dice, y la pestaña lo avisa siempre
+     (render en la prueba queda pendiente, con `fuente=html_crudo`, la PR 3).
+     Un 404 o un PDF no se evalúan (el rastreo tampoco) y salen como «no
+     evaluadas» con el motivo; un muro (`clasificar_respuesta`, 103) da
+     `pagina_bloqueada`; `fuente=contenido` se avisa porque el contenido
+     principal lo calcula el extractor del rastreo. Sin cabeceras, cookies ni
+     credenciales del job: la prueba solo lleva el User Agent y la huella del
+     formulario (o los heredados).
+   - **`scripts/reextraer_a_medida.py`** re-extrae un censo sobre su
+     `raw_html`, sin re-rastrear y directo a la BD (no llama a la API). Fusiona
+     las reglas de `--reglas` con las del censo como la herencia y las guarda
+     en `jobs.config`, para que la comparación (127) vea la definición de
+     verdad. Toma **el candado del job** (el del análisis) y se niega con el
+     job en marcha: el spider escribe la tabla sin candado. **Todo va en una
+     transacción**, con las reglas de `jobs.config` en el mismo commit que las
+     filas: con un commit por lote, un proceso muerto a medias dejaba filas de
+     la regla nueva bajo la config vieja, y la comparación (127) y la columna
+     «cambios» habrían dado por cambio del sitio lo que era de la regla.
+     Mientras corre, quien lee ve el censo como estaba. Una página sin
+     `raw_html` no se puede evaluar: pierde las filas de las reglas que cambian
+     o se quitan (ya no dicen nada de la regla nueva) y conserva las de las que
+     no cambian; el resumen dice cuántas se quedan así. Un muro, `pagina_bloqueada`.
+   - **La columna «Cambio frente al anterior» del Explorador mira también lo
+     extraído** («Precio 19,95 €→21,00 €», «deja de contener GTM», «stock
+     desaparece»), con los guardias de la 127 reutilizados de
+     `shared/comparacion.py`: misma regla y misma definición en los dos
+     censos, filas con dato (`ok`/`sin_coincidencia`) en los dos y el mismo
+     `render`; sin fila en uno no es un cambio. Una consulta más por página de
+     la tabla, por `custom_extraction.job_id` (37); si falla, la columna sale
+     sin lo extraído.
+
+   **Fuera**: render en la prueba en vivo, una pestaña para `custom_search` y
+   las plantillas de reglas por cliente desde la interfaz. Las capturas de
+   `docs/ux/capturas.py` no se hicieron (la BD local no tiene un censo); la
+   pestaña se probó en Chrome contra una API local con un cliente y un perfil
+   con reglas, la prueba en vivo contra example.com y el 422 de una XPath con
+   `re:test()`.

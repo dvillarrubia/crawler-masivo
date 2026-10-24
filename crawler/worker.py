@@ -1690,6 +1690,79 @@ def _recuperar_enriquecidos(rconn) -> None:
         logger.exception("No se pudieron recuperar las ejecuciones de enriquecido")
 
 
+# ---------------------------------------------------------------------------
+# Prueba de reglas a medida contra una URL en vivo (#34, decision 166)
+# ---------------------------------------------------------------------------
+PRUEBAS_EN_VIVO_A_LA_VEZ = max(1, int(os.getenv("PRUEBAS_EN_VIVO_A_LA_VEZ", "2")))
+_hilo_pruebas: threading.Thread | None = None
+_hilo_pruebas_candado = threading.Lock()
+
+
+def _arrancar_pruebas_en_vivo() -> threading.Thread:
+    """Arranca el hilo de pruebas en vivo UNA vez por proceso, y lo devuelve.
+
+    Lo llama `main()` al arrancar, antes del bucle. Al principio se arrancaba
+    dentro de `_quizas_recuperar` y pasaban dos cosas (revision de #233): los
+    primeros `RECOVERY_INTERVAL_SECONDS` tras cada arranque —tras cada
+    despliegue— nadie atendia la cola y toda prueba daba 504, y despues nacia
+    un hilo nuevo cada 5 min que no terminaba nunca, cada uno con su conexion,
+    su pool y su semaforo: el tope `PRUEBAS_EN_VIVO_A_LA_VEZ` pasaba a ser 2xN.
+    Si el hilo ya esta vivo no se crea otro."""
+    global _hilo_pruebas
+    with _hilo_pruebas_candado:
+        if _hilo_pruebas is None or not _hilo_pruebas.is_alive():
+            _hilo_pruebas = threading.Thread(target=_atender_pruebas_en_vivo,
+                                             args=(_shutdown_event,),
+                                             name="pruebas-en-vivo", daemon=True)
+            _hilo_pruebas.start()
+        return _hilo_pruebas
+
+
+def _atender_pruebas_en_vivo(parada: threading.Event) -> None:
+    """Hilo propio que bloquea en `extraccion:pruebas` y despacha cada prueba a
+    un pool pequeno. Aparte del bucle principal porque ese bloquea en la cola
+    de rastreos (`BRPOP_TIMEOUT`) y duerme cuando los huecos estan llenos: la
+    prueba la espera una persona delante del formulario. Best-effort con el try
+    cubriendo la funcion ENTERA (decision 74): este hilo no puede tumbar el
+    worker, y un fallo de Redis solo espera y reintenta."""
+    try:
+        from shared.prueba_en_vivo import COLA_PRUEBAS, atender_mensaje
+
+        conexion = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True,
+                                            socket_timeout=BRPOP_TIMEOUT + 10)
+        pool = ThreadPoolExecutor(max_workers=PRUEBAS_EN_VIVO_A_LA_VEZ,
+                                  thread_name_prefix="prueba-en-vivo")
+        huecos = threading.BoundedSemaphore(PRUEBAS_EN_VIVO_A_LA_VEZ)
+
+        def _una(crudo: str) -> None:
+            try:
+                pid = atender_mensaje(conexion, crudo)
+                if pid:
+                    logger.info("Prueba en vivo %s atendida", pid)
+            finally:
+                huecos.release()
+
+        while not parada.is_set():
+            # Sin hueco no se saca nada de la cola: lo que espera, espera en
+            # Redis con su `vence`, no en la memoria de este proceso.
+            if not huecos.acquire(timeout=1):
+                continue
+            try:
+                r = conexion.blpop(COLA_PRUEBAS, timeout=BRPOP_TIMEOUT)
+            except Exception as exc:  # noqa: BLE001
+                huecos.release()
+                logger.warning("Redis: no se pudo leer la cola de pruebas en vivo (%s)", exc)
+                parada.wait(2)
+                continue
+            if not r:
+                huecos.release()
+                continue
+            pool.submit(_una, r[1])
+        pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("El hilo de pruebas en vivo se ha parado")
+
+
 def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
     """Re-queue jobs stuck in 'running' with no recent activity.
 
@@ -1784,6 +1857,9 @@ def main() -> None:
 
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
+    # Una vez y antes del bucle: desde el primer segundo hay quien atienda las
+    # pruebas en vivo (decision 166).
+    _arrancar_pruebas_en_vivo()
     ultima_recuperacion = time.time()
     # A cero para que la primera vuelta ya mire las programaciones: si el
     # worker arranca justo despues de un despliegue, el disparo perdido de ese

@@ -16,7 +16,7 @@
 | `routers/clientes.py` | Clientes, perfiles e integraciones (#36, decision 83). Resuelve la herencia de configuracion al crear un job (`resolver_config`) |
 | `routers/almacenamiento.py` | Lo que ocupa la base, cada tabla y los Parquet de enlaces archivados (decision 96). Router propio: en el de jobs la ruta caeria debajo de `GET /{job_id}` |
 | `routers/segmentos.py` | Segmentos de negocio (decision 125): listar y re-segmentar un censo |
-| `routers/extraccion.py` | Extraccion y busqueda a medida (#34, decision 104): probar reglas sin red (`POST /api/extraccion/probar`), resumen y distribucion de valores de un censo |
+| `routers/extraccion.py` | Extraccion y busqueda a medida (#34, decision 104): probar reglas (`POST /api/extraccion/probar`; con `url`, la descarga el worker, decision 166), resumen y distribucion de valores de un censo |
 | `routers/enriquecido.py` | Analisis enriquecido (#40, decision 85): estimar, crear (con `X-Enrichment-Token`), leer y cancelar ejecuciones. No llama a ningun modelo: encola en `enrichment:pending` |
 
 ### Crawler (`crawler/`)
@@ -106,7 +106,7 @@
 | GET/POST/DELETE | `/api/clients/{id}/vistas[/{vista_id}]` | Vistas guardadas del Explorador (`clients.vistas_explorador`): la consulta de la URL con nombre, válida en cualquier censo del cliente |
 | GET | `/api/uso/explorador` | Qué pestañas, filtros, órdenes, problemas y columnas se piden en el Explorador (`?dias=`). Solo nombres, nunca valores (`api/uso.py`) |
 | GET | `/api/jobs/{id}/urls/export` | CSV de la vista del Explorador: mismos filtros y orden que `/urls`, solo las columnas de `?columnas=` (claves de `COLUMNAS_VISTA` y `x.<nombre>`: una columna por posicion con `cuantos=todos`, formulas escapadas) |
-| POST | `/api/extraccion/probar` | Prueba reglas a medida (decision 104) contra `html` pegado (5 MB como mucho, 413) o el `raw_html` de `job_id` + `url_id` (409 si no se guardo). Hereda con `cliente_id`/`profile_id`. Sin red. Dos a la vez como mucho (429; `CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ`). Devuelve por regla estado, n, valor(es), valor_num, ms y avisos de coste |
+| POST | `/api/extraccion/probar` | Prueba reglas a medida (decision 104) contra `html` pegado (5 MB como mucho, 413) o el `raw_html` de `job_id` + `url_id` (409 si no se guardo). Hereda con `cliente_id`/`profile_id`. O `url` en vivo (decision 166): la API valida (422), encola en `extraccion:pruebas` y espera al worker (504 si no contesta en `PRUEBA_EN_VIVO_ESPERA_S`; 422 si un salto apunta a la red interna; 502 si falla la descarga), con `user_agent`/`impersonate` opcionales; sin render. La API nunca descarga. Dos a la vez como mucho (429; `CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ`); las de `url`, con su propio tope (`CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ`, 4). Devuelve por regla estado, n, valor(es), valor_num, ms y avisos de coste |
 | GET | `/api/jobs/{id}/extraccion` | Por regla: definicion, firma, evaluadas, por estado, renderizadas y los 5 valores mas frecuentes; avisa si un extractor no encontro nada |
 | GET | `/api/jobs/{id}/extraccion/{nombre}/valores` | Distribucion paginada de `valor_clave` |
 | GET | `/api/jobs/{id}/issues` | SEO issues (`?severity=`, `?issue_type=`, `?segmento=` —solo las de su página: fuera las de `paginas_afectadas` > 1, decision 125—), por gravedad y tipo |

@@ -1,10 +1,12 @@
 """Extraccion y busqueda a medida (#34, decision 104): probar reglas y leer
 lo que dieron en un censo.
 
-- `POST /api/extraccion/probar` aplica las reglas a un HTML pegado o al
-  `raw_html` de una URL de un censo. **Sin red**: no descarga nada, asi que no
-  hay superficie de SSRF (la prueba contra una URL en vivo la hara el worker,
-  PR 2). Usa la MISMA funcion que el spider (`shared.extraccion_a_medida`).
+- `POST /api/extraccion/probar` aplica las reglas a un HTML pegado, al
+  `raw_html` de una URL de un censo o a una URL en vivo. **La API no descarga
+  nada**: la URL en vivo la pide el worker (cola `extraccion:pruebas`, con las
+  comprobaciones de SSRF de `shared/prueba_en_vivo.py`, decision 166) y la API
+  espera su respuesta. Usa la MISMA funcion que el spider
+  (`shared.extraccion_a_medida`).
 - `GET /api/jobs/{id}/extraccion` resume cada regla del censo: evaluadas,
   estados, renderizadas y los valores mas frecuentes.
 - `GET /api/jobs/{id}/extraccion/{nombre}/valores`: la distribucion paginada.
@@ -18,7 +20,6 @@ from __future__ import annotations
 import math
 import os
 import threading
-import time
 import uuid
 from typing import Any
 
@@ -35,7 +36,6 @@ from api.schemas import BusquedaAMedida, ExtractorAMedida, JobConfig
 router = APIRouter(prefix="/api", tags=["extraccion"])
 
 MAX_HTML_BYTES = 5 * 1024 * 1024
-AVISO_MS = 50.0
 # Pruebas a la vez. Una XPath o un CSS no se pueden interrumpir (lxml no tiene
 # timeout) y el endpoint no pide autenticacion: sin tope, unas decenas de
 # peticiones con `div ~ div ~ div` sobre 5 MB ocupaban todo el threadpool y
@@ -45,6 +45,14 @@ AVISO_MS = 50.0
 # cuesta como mucho UNA regla lenta. lxml suelta el GIL al evaluar.
 PROBAR_CONCURRENCIA = max(1, int(os.getenv("CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ", "2")))
 _pruebas = threading.BoundedSemaphore(PROBAR_CONCURRENCIA)
+# La prueba en vivo (decision 166) tiene su propio tope: aqui no gasta CPU,
+# espera a Redis hasta `ESPERA_S`. Con el semaforo de arriba, dos pruebas en
+# vivo lentas (o dos 504 durante un despliegue) dejaban en 429 las de HTML
+# pegado, que tardan milisegundos (revision de #233). Este acota los hilos del
+# threadpool que pueden quedarse esperando al worker.
+PROBAR_EN_VIVO_CONCURRENCIA = max(
+    1, int(os.getenv("CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ", "4")))
+_pruebas_en_vivo = threading.BoundedSemaphore(PROBAR_EN_VIVO_CONCURRENCIA)
 
 
 class ProbarExtraccion(BaseModel):
@@ -60,6 +68,13 @@ class ProbarExtraccion(BaseModel):
     url_id: int | None = None
     # Ruta contra la que se evalua `solo_urls` con HTML pegado (p. ej. /p/123).
     ruta: str | None = None
+    # O una URL en vivo (decision 166): la descarga el WORKER, no la API, con
+    # las comprobaciones de SSRF de `shared/prueba_en_vivo.py`.
+    url: str | None = Field(None, max_length=2048)
+    # Identidad de la descarga en vivo, como en el job (el formulario manda la
+    # suya; sin ellas, la del cliente/perfil o la de serie).
+    user_agent: str | None = Field(None, max_length=1000)
+    impersonate: str | None = Field(None, max_length=40)
 
 
 def _config_de_prueba(db: Session, cuerpo: ProbarExtraccion) -> dict:
@@ -69,6 +84,10 @@ def _config_de_prueba(db: Session, cuerpo: ProbarExtraccion) -> dict:
         "custom_search": {k: (v.model_dump() if v is not None else None)
                           for k, v in cuerpo.custom_search.items()},
     }
+    if cuerpo.user_agent:
+        propias["user_agent"] = cuerpo.user_agent
+    if cuerpo.impersonate:
+        propias["impersonate"] = cuerpo.impersonate
     if cuerpo.cliente_id or cuerpo.profile_id:
         from api.routers.clientes import resolver_cliente_y_perfil, resolver_config
 
@@ -84,21 +103,17 @@ def _config_de_prueba(db: Session, cuerpo: ProbarExtraccion) -> dict:
             {"loc": list(e.get("loc", [])), "msg": e.get("msg")} for e in exc.errors()])
 
 
-def _titulo(raiz) -> str | None:
-    if raiz is None:
-        return None
-    t = raiz.find(".//title")
-    return (t.text or "").strip() if t is not None and t.text else None
-
-
 @router.post("/extraccion/probar")
 def probar(cuerpo: ProbarExtraccion, db: Session = Depends(get_session)) -> dict[str, Any]:
     from shared import extraccion_a_medida as xm
 
-    if (cuerpo.html is None) == (cuerpo.job_id is None):
+    fuentes = sum(x is not None for x in (cuerpo.html, cuerpo.job_id, cuerpo.url))
+    if fuentes != 1:
         raise HTTPException(status_code=422,
-                            detail="Una sola fuente: `html` o `job_id` + `url_id`")
+                            detail="Una sola fuente: `html`, `job_id` + `url_id` o `url`")
     config = _config_de_prueba(db, cuerpo)
+    if cuerpo.url is not None:
+        return _probar_en_vivo(xm, config, cuerpo.url)
     avisos: list[str] = []
     contenido = None
     render = None
@@ -163,47 +178,65 @@ def probar(cuerpo: ProbarExtraccion, db: Session = Depends(get_session)) -> dict
         _pruebas.release()
 
 
-def _probar(xm, comp, config, cuerpo, html, contenido, ruta, render, fuente,
-            avisos) -> dict[str, Any]:
-    from lxml import html as lhtml
+def _probar_en_vivo(xm, config: dict, url: str) -> dict[str, Any]:
+    """La prueba contra una URL en vivo: la valida aqui (forma y reglas, para
+    dar el 422 sin esperar), la encola para el worker y espera su respuesta
+    (decision 166). La API no abre ninguna conexion hacia la URL."""
+    from api.dependencies import get_redis
+    from shared import prueba_en_vivo as pv
 
     try:
-        raiz = lhtml.fromstring(html) if html.strip() else None
-    except Exception:  # noqa: BLE001 — HTML que lxml no entiende
-        raiz = None
-    texto = None
-    if raiz is not None:
-        from shared.texto_visible import _lineas_visibles
-
-        body = raiz.find(".//body")
-        texto = "\n".join(_lineas_visibles(body if body is not None else raiz))
-    medir: dict[str, float] = {}
-    t0 = time.perf_counter()
-    filas = xm.aplicar(raiz, html, comp, texto=texto, contenido=contenido, ruta=ruta,
-                       titulo=_titulo(raiz), render=render, presupuesto=xm.Presupuesto(),
-                       medir=medir)
-    total_ms = (time.perf_counter() - t0) * 1000
-    evaluadas = {f["nombre"] for f in filas}
-    max_urls = config.get("max_urls")
-    for nombre, ms in medir.items():
-        if ms > AVISO_MS:
-            paginas = max_urls or 10_000
-            avisos.append(
-                f"{nombre}: {ms:.0f} ms en esta pagina; x {paginas:,} paginas son unos "
-                f"{ms * paginas / 60000:.0f} min de rastreo".replace(",", "."))
+        pv.comprobar_forma(url)
+    except pv.URLNoPermitida as exc:
+        raise HTTPException(status_code=422, detail=f"url: {exc}") from None
+    xm.compilar(config.get("custom_extraction"), config.get("custom_search"))
+    if not _pruebas_en_vivo.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Hay {PROBAR_EN_VIVO_CONCURRENCIA} pruebas contra una URL en vivo en "
+                   f"curso; vuelve a intentarlo en unos segundos")
+    try:
+        try:
+            rconn = get_redis()
+            peticion = {"url": url.strip(), "config": {
+                k: config.get(k) for k in ("custom_extraction", "custom_search", "user_agent",
+                                           "impersonate", "render_js", "max_urls")}}
+            pid = pv.encolar(rconn, peticion)
+            resultado = pv.esperar(rconn, pid)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — Redis caido
+            raise HTTPException(status_code=503,
+                                detail=f"No se pudo encolar la prueba: {exc}") from None
+    finally:
+        _pruebas_en_vivo.release()
+    if resultado is None:
+        raise HTTPException(
+            status_code=504,
+            detail=f"El worker no contesto en {pv.ESPERA_S:.0f} s: puede estar reiniciandose "
+                   f"(un despliegue) o la pagina tarda demasiado. Vuelve a intentarlo")
+    if not resultado.get("ok"):
+        codigo = {"url_no_permitida": 422, "reglas": 422, "descarga": 502}.get(
+            resultado.get("motivo"), 500)
+        prefijo = "url: " if resultado.get("motivo") == "url_no_permitida" else ""
+        raise HTTPException(status_code=codigo, detail=prefijo + str(resultado.get("error")))
+    d = resultado.get("descarga") or {}
     return {
-        "fuente": fuente,
-        "render": render,
-        "ms": round(total_ms, 2),
-        "reglas": [
-            {**{k: f[k] for k in ("nombre", "clase", "estado", "n", "valor", "valores",
-                                  "valor_num", "truncado", "detalle")},
-             "ms": round(medir.get(f["nombre"], 0.0), 2)}
-            for f in filas
-        ],
-        "no_evaluadas": [rc.nombre for rc in comp.reglas if rc.nombre not in evaluadas],
-        "avisos": avisos,
+        "fuente": f"URL en vivo {d.get('url_final') or url} (HTTP {d.get('status')})",
+        "render": False, "ms": resultado.get("ms", 0.0),
+        "reglas": resultado.get("reglas") or [],
+        "no_evaluadas": resultado.get("no_evaluadas") or [],
+        "avisos": resultado.get("avisos") or [],
+        "descarga": d,
     }
+
+
+def _probar(xm, comp, config, cuerpo, html, contenido, ruta, render, fuente,
+            avisos) -> dict[str, Any]:
+    r = xm.evaluar_documento(comp, html, contenido=contenido, ruta=ruta, render=render,
+                             max_urls=config.get("max_urls"))
+    return {"fuente": fuente, "render": render, "ms": r["ms"], "reglas": r["reglas"],
+            "no_evaluadas": r["no_evaluadas"], "avisos": avisos + r["avisos"]}
 
 
 @router.get("/jobs/{job_id}/extraccion")

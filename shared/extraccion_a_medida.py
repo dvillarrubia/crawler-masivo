@@ -757,3 +757,72 @@ def aplicar(raiz, html: str, comp: Compiladas, *, texto: str | None = None,
             medir[rc.nombre] = ms
         filas.append(fila)
     return filas
+
+
+# ---------------------------------------------------------------------------
+# Probar reglas sobre UN documento (la prueba de la API, la prueba en vivo del
+# worker y el re-extraer sobre `raw_html`, decision 166)
+# ---------------------------------------------------------------------------
+AVISO_MS = 50.0
+
+
+def titulo_de(raiz) -> str | None:
+    """El `<title>` del documento lxml, o None."""
+    if raiz is None:
+        return None
+    t = raiz.find(".//title")
+    return (t.text or "").strip() if t is not None and t.text else None
+
+
+def preparar(html: str):
+    """(raiz lxml, texto visible del body) de un HTML. Nunca lanza: un HTML que
+    lxml no entiende da (None, None) y las reglas CSS/XPath salen
+    `sin_coincidencia`, como en el rastreo."""
+    from lxml import html as lhtml
+
+    try:
+        raiz = lhtml.fromstring(html) if (html or "").strip() else None
+    except Exception:  # noqa: BLE001 — HTML que lxml no entiende
+        raiz = None
+    texto = None
+    if raiz is not None:
+        from shared.texto_visible import _lineas_visibles
+
+        body = raiz.find(".//body")
+        texto = "\n".join(_lineas_visibles(body if body is not None else raiz))
+    return raiz, texto
+
+
+def evaluar_documento(comp: Compiladas, html: str, *, contenido: str | None = None,
+                      ruta: str = "/", render: bool | None = None,
+                      max_urls: int | None = None,
+                      bloqueada: bool | None = None) -> dict[str, Any]:
+    """Aplica las reglas a un documento y devuelve lo que ensena una prueba:
+    una entrada por regla evaluada (con sus ms), las que `solo_urls` deja
+    fuera y los avisos de coste. La MISMA `aplicar` que el spider."""
+    raiz, texto = preparar(html)
+    medir: dict[str, float] = {}
+    t0 = time.perf_counter()
+    filas = aplicar(raiz, html, comp, texto=texto, contenido=contenido, ruta=ruta,
+                    titulo=titulo_de(raiz), render=render, presupuesto=Presupuesto(),
+                    medir=medir, bloqueada=bloqueada)
+    total_ms = (time.perf_counter() - t0) * 1000
+    evaluadas = {f["nombre"] for f in filas}
+    avisos: list[str] = []
+    for nombre, ms in medir.items():
+        if ms > AVISO_MS:
+            paginas = max_urls or 10_000
+            avisos.append(
+                f"{nombre}: {ms:.0f} ms en esta pagina; x {paginas:,} paginas son unos "
+                f"{ms * paginas / 60000:.0f} min de rastreo".replace(",", "."))
+    return {
+        "ms": round(total_ms, 2),
+        "reglas": [
+            {**{k: f[k] for k in ("nombre", "clase", "estado", "n", "valor", "valores",
+                                  "valor_num", "truncado", "detalle")},
+             "ms": round(medir.get(f["nombre"], 0.0), 2)}
+            for f in filas
+        ],
+        "no_evaluadas": [rc.nombre for rc in comp.reglas if rc.nombre not in evaluadas],
+        "avisos": avisos,
+    }

@@ -105,6 +105,57 @@ def test_el_vigilante_vuelve_a_pasar_cuando_toca(monkeypatch):
     assert len(pasadas) == 2
 
 
+def test_el_hilo_de_pruebas_en_vivo_nace_una_vez_y_no_con_el_vigilante(monkeypatch):
+    """Revision de #233 (decision 166): el hilo se arrancaba dentro de
+    `_quizas_recuperar`, asi que nacia uno nuevo cada 5 min sin que muriera
+    ninguno (12 por hora, cada uno con su conexion y su semaforo) y los
+    primeros 5 min tras un despliegue no habia ninguno: toda prueba, 504."""
+    import threading
+
+    import crawler.worker as w
+
+    parada = threading.Event()
+
+    def _stub(evento):
+        parada.wait(10)
+
+    monkeypatch.setattr(w, "_recover_stale_jobs", lambda rc: None)
+    monkeypatch.setattr(w, "_recuperar_enriquecidos", lambda rc: None)
+    monkeypatch.setattr(w, "_atender_pruebas_en_vivo", _stub)
+    monkeypatch.setattr(w, "_hilo_pruebas", None)
+    monkeypatch.setattr(w, "RECOVERY_INTERVAL_SECONDS", 300)
+
+    def vivos():
+        return [h for h in threading.enumerate() if h.name == "pruebas-en-vivo" and h.is_alive()]
+
+    antes = len(vivos())
+    try:
+        t0 = 1000.0
+        ultima = t0
+        for k in range(1, 13):          # una hora simulada de vigilante
+            ultima = w._quizas_recuperar("rc", ultima, t0 + 300 * k)
+        assert len(vivos()) == antes, "el vigilante no arranca hilos de pruebas"
+        primero = w._arrancar_pruebas_en_vivo()
+        segundo = w._arrancar_pruebas_en_vivo()
+        assert primero is segundo and primero.is_alive()
+        assert len(vivos()) == antes + 1
+    finally:
+        parada.set()
+
+
+def test_main_arranca_el_hilo_de_pruebas_antes_del_bucle():
+    """Complementa al anterior, que ejecuta: aqui solo se mira el sitio de la
+    llamada, antes del bucle y no dentro."""
+    import inspect
+
+    import crawler.worker as w
+
+    fuente = inspect.getsource(w.main)
+    corte = fuente.index("while not _shutdown_event.is_set():")
+    assert "_arrancar_pruebas_en_vivo()" in fuente[:corte]
+    assert "_arrancar_pruebas_en_vivo" not in inspect.getsource(w._quizas_recuperar)
+
+
 def test_el_bucle_del_worker_llama_al_vigilante_periodicamente():
     """Que la llamada este DENTRO del bucle, no solo antes de el."""
     import inspect
