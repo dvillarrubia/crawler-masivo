@@ -845,7 +845,11 @@ es cada plantilla— y va con
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)
   **WordPress**: cruzar el rastreo con lo que el propio WordPress dice que tiene
-  publicado.
+  publicado. Hecha la lectura de la REST API durante el rastreo y cuatro avisos
+  (contenido publicado que el rastreo no encuentra, páginas de adjunto
+  indexables, categorías y etiquetas casi vacías, paginación que no acaba;
+  decisión 161). Falta la interfaz propia (tarjeta en el Resumen, «Solo en
+  WordPress» en el Explorador) y el inventario de plugins.
 
 ### 3a. Lo que FreeCrawl tiene y nos falta (17 de octubre)
 

@@ -88,6 +88,7 @@ from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
 from seo_crawler.sonda_paridad import ParidadMovilMixin, contextos_del_perfil
 from seo_crawler.sonda_render import RenderCrudoMixin
+from seo_crawler.sonda_wordpress import AdaptadorWordPressMixin
 from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
@@ -512,7 +513,7 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
 
 
 class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudoMixin, SondaRespuestasMixin,
-                scrapy.Spider):
+                AdaptadorWordPressMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -608,6 +609,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         espera (decision 110). Scrapy vuelve a preguntar cada 5 s, y la sonda
         tiene su propio timeout, asi que no puede colgar el cierre."""
         if self._tls_en_vuelo():
+            from scrapy.exceptions import DontCloseSpider
+
+            raise DontCloseSpider
+        # Lecturas de la REST API de WordPress que se quedaron en la cola sin
+        # nada en vuelo (decision 161): se sueltan y se espera.
+        if self._wp_reanimar():
             from scrapy.exceptions import DontCloseSpider
 
             raise DontCloseSpider
@@ -736,6 +743,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             # -- Sondas de respuesta: enlaces externos y recursos (123, 124) --
             # Despues de los patrones: los de exclusion valen tambien para ellas.
             self._iniciar_sondas_respuesta()
+            # -- Adaptador WordPress (decision 161) --
+            # Despues de los patrones y de `max_depth`: una lista no lo usa.
+            self._iniciar_wordpress()
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)
@@ -891,6 +901,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         self._persist_sitemaps_leidos()
         if self._sondas_activas():
             self._sr_al_cerrar(reason)
+        self._wp_al_cerrar(reason)  # decision 161
         if getattr(self, "_presupuesto_a_medida", None) is not None:
             # Lo que costo cada regla en el reactor: es la cifra con la que se
             # decide si una regla merece la pena en un censo grande.
@@ -2096,6 +2107,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
 
         if is_html and is_success and internal and not refresh_target:
             yield from self._sonda_de_plantilla(final_url)  # decision 105
+            if not muro:
+                # REST API de WordPress (decision 161): desde la semilla, o al
+                # reanudar desde la primera pagina de cada host.
+                yield from self._wp_de_pagina(response, depth, response.selector)
             if not muro:
                 yield from self._paridad_de_pagina(response, final_url)  # decision 119
                 yield from self._render_crudo_de_pagina(response, final_url)  # decision 140

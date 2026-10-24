@@ -612,6 +612,26 @@ const ISSUE_INFO = {
     google: 'No es un error: las procesa igual. Pero si el lastmod no coincide entre ficheros, el sitio se contradice sobre cuándo cambió la página.',
     arreglo: 'Que cada URL esté en un solo fichero (por sección o por tipo). Si es un sitemap «completo» que repite los de sección, quitar uno de los dos.',
   },
+  'wp_publicado_no_rastreado': {
+    que: 'Contenido que WordPress publica (entradas, páginas o un tipo propio, según su REST API) y que el rastreo no encontró: ninguna página rastreada lo enlaza, o solo con nofollow. Sale una vez por host y tipo, con cuántas son y ejemplos. Solo en un censo entero: en uno truncado o cortado por la profundidad máxima no se afirma (lo dice el resumen de WordPress).',
+    google: 'Solo llega a esas URLs por el sitemap o por enlaces de fuera. Sin enlaces internos no reciben autoridad del sitio y las rastrea menos; si tampoco están en el sitemap, puede no encontrarlas nunca.',
+    arreglo: 'Enlazarlas desde donde corresponda (categoría, entradas relacionadas, menú) o, si sobran, despublicarlas o redirigirlas. Lo rastreado y sin enlaces entrantes no sale aquí: es «página huérfana».',
+  },
+  'wp_adjunto_indexable': {
+    que: 'Páginas de adjunto de WordPress (una por cada imagen o fichero subido) que responden 200 en HTML y son indexables. Sale una vez por host, con las del rastreo y las de la muestra que pide el rastreo aparte.',
+    google: 'Cada una es una página casi vacía (la imagen y poco más): contenido escaso que compite con la entrada que la contiene y gasta rastreo. Desde WordPress 6.4 una instalación nueva las redirige al fichero; una actualizada las conserva.',
+    arreglo: 'Redirigir las páginas de adjunto al fichero: en Yoast, «Redirigir las URL de los adjuntos»; en Rank Math, «Redirigir adjuntos»; o la opción wp_attachment_pages_enabled a 0.',
+  },
+  'wp_taxonomia_anemica': {
+    que: 'Archivos de categoría o etiqueta indexables con una entrada o ninguna (umbral wp_taxonomia_anemica_max). Sale una vez por host y taxonomía, con cuántos son y ejemplos.',
+    google: 'Un archivo con una sola entrada repite esa entrada con otra URL: contenido escaso y casi duplicado. Muchas etiquetas así diluyen el rastreo y el enlazado.',
+    arreglo: 'Fusionar o borrar las etiquetas de una sola entrada, o marcar esos archivos noindex (Yoast y Rank Math lo permiten por taxonomía) hasta que tengan contenido.',
+  },
+  'wp_paginacion_sin_fin': {
+    que: 'La página N+1 de un archivo con N entradas (la home del blog, una categoría, una etiqueta) responde 200. Con cualquier número de entradas por página esa página no puede existir. Sale una vez por host, con las URLs probadas y si enlazan a la siguiente.',
+    google: 'Una página que no debería existir y responde 200 es un soft 404; si además enlaza a la siguiente, es una trampa de rastreo sin fin que gasta presupuesto en páginas vacías.',
+    arreglo: 'Que el tema o el plugin de paginación devuelva 404 pasada la última página (es lo que hace WordPress de serie) y no pinte el enlace «siguiente» en la última.',
+  },
   'solo_enlazada_por_redireccion': {
     que: 'Solo se llega a la página a través de una redirección: los enlaces internos apuntan a la URL vieja.',
     google: 'Acaba dejando de rastrear la URL vieja, y con ella el camino a esta.',
@@ -875,6 +895,10 @@ const ISSUE_LABEL_EXTRA = {
   amphtml_incorrecto: 'Versión AMP incorrecta',
   alternate_movil_incorrecto: 'Versión móvil incorrecta',
   encabezado_salta_nivel: 'Titulares que saltan de nivel',
+  wp_publicado_no_rastreado: 'WordPress: publicado y no rastreado',
+  wp_adjunto_indexable: 'WordPress: páginas de adjunto indexables',
+  wp_taxonomia_anemica: 'WordPress: categorías o etiquetas casi vacías',
+  wp_paginacion_sin_fin: 'WordPress: paginación que sigue dando 200',
   redireccion_por_javascript: 'Redirección por JavaScript',
 
   respuesta_no_valida: 'No era la página (WAF, captcha, 429)',

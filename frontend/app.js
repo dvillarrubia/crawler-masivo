@@ -4269,6 +4269,11 @@ const EXP_TABS = [
   // sin in_sitemap en el filtro: dejaria vacio el chip de not_in_sitemap.
   { key: 'a_sitemap',  label: 'Sitemap',       icon: 'map',          filter: { is_internal: true }, ambito: ['sitemap_no_indexable','sitemap_orphan','not_in_sitemap','sitemap_supera_limite','lastmod_futuro','en_varios_sitemaps','video_sin_sitemap_de_video'],
     columns: ['url','status_code','indexable','indexability_status','redirect_url','canonical_href','inlinks_count','in_sitemap'] },
+  // WordPress por su REST API (decision 161): casi todo agrupado por host o
+  // por tipo; solo hay chips si el censo detecto un WordPress con la REST API
+  // abierta.
+  { key: 'a_wordpress', label: 'WordPress',    icon: 'layout-template', filter: { is_internal: true }, ambito: ['wp_publicado_no_rastreado','wp_adjunto_indexable','wp_taxonomia_anemica','wp_paginacion_sin_fin'],
+    columns: ['url','status_code','indexable','inlinks_count','in_sitemap'] },
   { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   // Paridad movil/escritorio (decision 119): solo hay chips si el censo se

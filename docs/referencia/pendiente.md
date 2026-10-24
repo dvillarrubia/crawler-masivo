@@ -65,6 +65,18 @@ order of priority:
 - JavaScript comparison tab (raw HTML vs rendered)
 - Structured data rich-result validation (only basic @type/required-prop checks)
 - Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40
+- WordPress (decision 161, #33): hecha la lectura de la REST API y los avisos 1, 2, 3 y 5.
+  Falta la interfaz que pide la issue (casilla en el modal, tarjeta «WordPress» en el
+  Resumen, «Solo en WordPress» en el Explorador sobre `GET /wordpress/entidades` y la
+  entidad en la ficha de la URL), el inventario de plugins por `?ver=` y el hallazgo 4
+  (sitemap frente a contenido, descartado por ahora: ver la decision).
+- **Robots.txt y peticiones concurrentes (Scrapy 2.19)**: el `RobotsTxtMiddleware`
+  devuelve el parser a la peticion que pide el robots.txt de un host y a la PRIMERA
+  que lo espera; las demas que esperan a la vez reciben `None` = todo permitido
+  (`Deferred.asFuture` no devuelve el resultado a la cadena). Medido en el arnes con
+  la decision 161. Hoy al arrancar esperan la semilla, la sonda de soft 404 y el
+  robots.txt de los sitemaps, asi que no muerde; una cuarta peticion al arrancar se
+  saltaria robots.txt. Arreglo: un middleware propio que espere con su propio Deferred.
 
 ## Reference Documents
 

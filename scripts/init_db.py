@@ -118,6 +118,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sondas_resumen JSON"))
         # Ficheros de sitemap leidos (decision 126)
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sitemaps JSON"))
+        # Lo que leyo el adaptador de WordPress (decision 161)
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS adapters JSON"))
         # La clave que distingue dos hallazgos del mismo tipo en la misma
         # URL: el codigo de hreflang, el grupo de un duplicado, la imagen sin
         # alt. Sin ella no se puede decir "esto se arreglo" entre censos (#32).
@@ -187,6 +189,7 @@ def main() -> None:
     migrar_respuestas_sondeadas()
     migrar_sitemap_entries()
     migrar_profile_runs()
+    migrar_adapter_entities()
 
     print("Done.")
 
@@ -404,6 +407,24 @@ def migrar_profile_runs() -> None:
 
     ProfileRun.__table__.create(bind=engine, checkfirst=True)
     print("Evolucion: tabla profile_runs al dia.")
+
+
+def migrar_adapter_entities() -> None:
+    """Entidades de la REST API de WordPress (decision 161).
+
+    Tabla NUEVA, que crea create_all con sus indices: ningun ALTER sobre `urls`
+    ni `issues`. Aqui se asegura que existe y que tiene sus indices por si se
+    creo antes que ellos, bajo el `lock_timeout` de `main()`.
+    """
+    from shared.models import AdapterEntity
+
+    AdapterEntity.__table__.create(bind=engine, checkfirst=True)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_adent_job_tipo ON adapter_entities (job_id, tipo)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_adent_job_hash ON adapter_entities (job_id, url_hash)"))
+    print("WordPress: tabla adapter_entities al dia.")
 
 
 if __name__ == "__main__":
