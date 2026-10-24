@@ -242,6 +242,21 @@ const ISSUE_INFO = {
     google: 'El texto del enlace es una de las pistas con las que entiende de qué trata la página de destino. Con «leer más» no recibe ninguna de su propio sitio, y entre varias páginas enlazadas igual no hay nada que las distinga.',
     arreglo: 'Cambiar el componente que pinta el enlace (la tarjeta del listado, el botón del bloque) para que el texto diga de qué es el destino, o que el enlace sea el propio título. Informativo.',
   },
+  'solo_enlazada_con_nofollow': {
+    que: 'Página indexable a la que el sitio enlaza, pero solo con enlaces nofollow (rel="nofollow", "ugc" o "sponsored" en el enlace, o una directiva nofollow en la página que enlaza), y sin ningún camino de enlaces seguibles desde la home. En los detalles, cuántas páginas la enlazan, por qué motivo y ejemplos.',
+    google: 'Trata el nofollow como una pista para no seguir el enlace: puede no descubrir la página por ahí, y si la descubre no le llega ninguna señal de su propio sitio. Queda a merced del sitemap y de los enlaces externos.',
+    arreglo: 'Quitar el nofollow de los enlaces internos que llevan a ella (o la directiva nofollow de las páginas que la enlazan), o enlazarla desde una sección alcanzable. Si de verdad no debe posicionar, ponerle noindex.',
+  },
+  'pagina_nofollow': {
+    que: 'Página indexable que declara nofollow (o none) en su meta robots, en su meta googlebot o en la cabecera X-Robots-Tag. Va una fila por plantilla, con cuántas páginas y la directiva de una de ellas.',
+    google: '«No sigas los enlaces de esta página»: ninguno de sus enlaces le sirve para descubrir otras páginas ni les pasa señales. La página se indexa igual.',
+    arreglo: 'Quitar el nofollow de la directiva (suele ser una opción del CMS o de un plugin SEO aplicada a toda la plantilla). Si lo que se quería era sacarla del índice, la directiva es noindex.',
+  },
+  'enlace_interno_nofollow': {
+    que: 'Enlaces internos con rel="nofollow" (o "ugc"/"sponsored") a esta página, que es indexable. Una fila por página de destino, con cuántas páginas la enlazan así y cuántas en total; «plantilla» si son 10 o más (suele ser el menú, el pie o un componente). Un nofollow a una página no indexable (el login, el carrito) no sale: ahí es correcto.',
+    google: 'El nofollow es para enlaces que no respaldas; para los del propio sitio Google recomienda robots.txt. Lo trata como una pista: esos enlaces pueden no rastrearse y no pasan señales a una página que el sitio sí quiere en el índice.',
+    arreglo: 'Quitar el rel="nofollow" de los enlaces internos a esta página (en el componente o la plantilla si son muchos). Informativo: la página sigue enlazada por otros caminos.',
+  },
   'canonical_missing': {
     que: 'La página no declara canonical.',
     google: 'Elige ella misma la URL canónica entre las variantes que encuentre.',

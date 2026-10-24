@@ -227,6 +227,17 @@ todos los clientes; se pega su token una vez y se elige el canal de una lista.
 Si el bot no está invitado al canal, la ficha lo dice y cómo arreglarlo.
 [Decisión 149](docs/decisiones/comparacion-y-alertas.md#d149).
 
+### Enlaces internos con nofollow (24 de octubre)
+
+Tres avisos sobre el `nofollow` dentro del propio sitio, que el crawler ya
+guardaba y nadie decía: la página indexable a la que solo llegan enlaces
+`nofollow` (y por eso no tiene camino desde la home), la plantilla de páginas
+indexables que declara `nofollow` en su meta robots, y la página indexable a la
+que el sitio enlaza con `rel="nofollow"`. En Lopesan, los banners del lateral
+del blog enlazan las páginas de destino de hoteles (Gran Canaria, Punta Cana,
+República Dominicana...) con `nofollow sponsored` desde 92 a 154 páginas.
+[Decisión 183](docs/decisiones/enlazado-y-pagerank.md#d183).
+
 ### Más comprobaciones: valores de datos estructurados y anclas genéricas (19 de octubre)
 
 Dos avisos nuevos. Los datos estructurados ya no solo tienen que estar: Google

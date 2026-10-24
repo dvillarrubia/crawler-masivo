@@ -1021,3 +1021,79 @@
    - `test_el_mismo_enlace_en_dos_posiciones_es_un_origen` fija que la tabla no
      se vuelva a partir por posicion: con la pagina contada dos veces, el techo
      baja de 0,333 a 0,3 y el test falla (comprobado con el mutante).
+
+<a id="d183"></a>
+183. **El `nofollow` dentro del propio sitio se avisa donde se pierde la
+   señal: en la página que solo lo recibe, en la plantilla que lo declara y en
+   el destino indexable al que apunta** (paridad con «Internal nofollow» y
+   «Directives: nofollow» de Screaming Frog, que no teníamos). El crawler ya
+   guardaba `links.follow` y `links.rel`, y el PageRank y la profundidad de clic
+   ya ignoraban el `nofollow` (38), pero ningún aviso lo decía: una página a la
+   que solo llegan enlaces `nofollow` salía como `not_reachable_from_home`, sin
+   la causa. Tres tipos nuevos, en `analysis/avisos_de_nofollow.py`:
+   - **`solo_enlazada_con_nofollow`** (warning, por página): indexable, sin
+     camino desde la home y con todos sus entrantes que cuentan (internos, de
+     otra página, desde una 200 sin `noindex`: el criterio de `inlinks_count`)
+     en `nofollow`, por el `rel` o por la directiva de la página que enlaza.
+     Sale de las candidatas de `not_reachable_from_home` y lo **sustituye**
+     (36): los dos dicen «no se llega» y este dice por qué. La paginación va
+     antes (122), y con un tope por carpeta que cortó no se afirma (172),
+     porque la puede enlazar una página que no se pidió.
+   - **`pagina_nofollow`** (warning, agrupada por host y plantilla): indexable
+     que declara `nofollow` o `none` en el meta robots, el meta googlebot o la
+     `X-Robots-Tag`. Google: «Do not follow the links on this page». Se lee
+     con `es_nofollow` (`shared/indexabilidad.py`), la misma regla con la que
+     el spider deja sus enlaces en `follow=False` (23): `index/nofollow` no es
+     `nofollow` (eso es `robots_invalid_syntax`) y `bingbot: nofollow` no es
+     para Google. Una `noindex, nofollow` no entra: no es indexable.
+   - **`enlace_interno_nofollow`** (info, por destino, como `ancla_generica`,
+     147): enlaces internos con `rel` `nofollow`, `ugc` o `sponsored` a una
+     indexable 200. Google pide el `nofollow` para lo que uno no respalda y,
+     para los enlaces del propio sitio, robots.txt; es una pista para no
+     rastrear ni pasar señales a una página que el sitio quiere en el índice.
+     En los detalles, cuántas páginas la enlazan así y cuántas en total;
+     `alcance: plantilla` desde `enlaces_plantilla_min_paginas` (10). Un
+     `nofollow` a una no indexable (login, carrito) no avisa: ahí es lo
+     correcto. El destino con `solo_enlazada_con_nofollow` no lo lleva (36).
+   - **Sin otra lectura de `links`** (37, 41): una columna más en la temporal
+     de aristas, `nofollow_rel`, True solo si el enlace es `nofollow` por su
+     `rel` (NULL en el resto, no engorda la temporal). Separa el `rel` de la
+     directiva de página, que dejan el mismo `follow=False` y se arreglan en
+     sitios distintos. Lo fija `test_no_anade_lecturas_de_links`.
+   - **La indexabilidad, el PageRank y la profundidad no cambian**: solo se
+     dice lo que ya calculaban.
+
+   Medido en producción con una consulta equivalente de **solo lectura**
+   (contenedor efímero con la imagen del worker, sesión `readonly`, el
+   Parquet de enlaces montado `:ro`):
+
+   | censo | URLs | enlaces internos `nofollow` por `rel` (que cuentan) | `enlace_interno_nofollow` | `solo_enlazada_con_nofollow` | `pagina_nofollow` (páginas) |
+   |---|---|---|---|---|---|
+   | Lopesan semanal 2026-10-21 | 5.578 | 3.115 | **9** (4 de plantilla) | 0 | 0 |
+   | Lopesan entero 2026-10-19 | 5.715 | 3.095 | 9 (4 de plantilla) | 0 | 0 |
+   | Salle URL | 20.891 | 20 | 3 | 0 | **3** |
+   | penguin | 87.570 | 72.078 | 0 | 0 | 0 |
+   | Saunier + re-magazine | 2.916 | 0 | 0 | 0 | 0 |
+
+   - **Lopesan** es el hallazgo: los banners del lateral del blog («Banner
+     Gran Canaria», «Punta Cana Banner», «Fuerteventura Banner»...) enlazan
+     las páginas de destino de hoteles (`/es/hoteles/espana/gran-canaria`,
+     `/es/hoteles/republica-dominicana/punta-cana`...) con
+     `rel="nofollow sponsored"`, desde 154, 107 y 92 páginas: el propio
+     sitio marca como publicidad pagada los enlaces a sus páginas
+     comerciales.
+   - **penguin** tiene 72.078 enlaces internos `nofollow` (el «Mi cuenta»,
+     «Mis pedidos», «Contacta» de la cabecera) y no avisa ninguno: van a
+     URLs no indexables o que no se rastrearon. Es el filtro del destino
+     funcionando, no un hueco.
+   - **Salle**: el login del observatorio de IA (3 idiomas, 6-8 páginas cada
+     uno, indexable) y tres fichas de asignatura con `noarchive, nofollow,
+     noimageindex, noodp, nosnippet, notranslate, noydir` en el meta robots.
+   - `solo_enlazada_con_nofollow` no sale en ningún censo vigente. En
+     re-magazine (`b55bb9d0`, de septiembre) la consulta daba 21, pero sus
+     orígenes son `noindex, nofollow` con `urls.noindex` sin rellenar (el
+     censo es anterior a la columna): re-analizado, esas páginas no tienen
+     entrantes que cuenten y son huérfanas. Se queda porque es el caso grave
+     (la ficha a la que todo el sitio enlaza con `nofollow`) y cuesta una
+     consulta sobre las candidatas de `not_reachable_from_home`, que suelen
+     ser decenas.
