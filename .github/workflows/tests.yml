@@ -124,7 +124,7 @@ jobs:
           tests/test_cache_estaticos.py tests/test_clientes.py
           tests/test_decisiones_api.py tests/test_decisiones.py tests/test_llm.py
           tests/test_enriquecido.py tests/test_enriquecido_api.py
-          tests/test_tipo_pagina.py
+          tests/test_tipo_pagina.py tests/test_coherencia.py
           tests/test_intencion.py tests/test_intencion_api.py
           tests/test_stats_api.py tests/test_rastreos_y_panel_api.py
           tests/test_explorador_api.py tests/test_archivo_enlaces.py

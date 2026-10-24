@@ -231,6 +231,7 @@ def _registro_inicial() -> dict[str, Modulo]:
         _modulo_intencion_busquedas(),
     ]
     modulos += _modulos_tipo_pagina()
+    modulos += _modulos_coherencia()  # decision 177 (#16, #17)
     return {m.nombre: m for m in modulos}
 
 
@@ -282,6 +283,52 @@ def _modulos_tipo_pagina() -> list[Modulo]:
             filtrar_urls=tp.muestra_si_hay_taxonomia,
             preguntas_del_job=tp.preguntas_de_taxonomia,
             por_que_vacio=tp.sin_taxonomia,
+            ejemplo=True,
+        ),
+    ]
+
+
+def _modulos_coherencia() -> list[Modulo]:
+    """Title frente a contenido, title generico y marcado frente a lo visible
+    (#16, #17; decision 177). Filtros y estados en `shared/coherencia.py`. Sin
+    umbral: marcados como sin evaluar, todo sale incierto."""
+    from shared import coherencia as c
+
+    return [
+        Modulo(
+            nombre="title_contenido",
+            titulo="Title frente al contenido",
+            descripcion=("Si el title dice de que va el contenido (score de 4 niveles). Sin las que "
+                         "ya resuelve una regla (sin title, placeholder, duplicado exacto) ni las de "
+                         "menos de 50 palabras; hasta 100 por plantilla. Sin evaluar (#8): las "
+                         "respuestas salen inciertas y no van a ningun informe."),
+            preguntas=("title_describe_contenido",),
+            construir_estados=c.estados_title_contenido,
+            filtrar_urls=c.candidatos_title_contenido,
+            ejemplo=True,
+        ),
+        Modulo(
+            nombre="title_generico",
+            titulo="Title generico",
+            descripcion=("Si el title, quitada la marca, no identifica la pagina («Detalle noticia», "
+                         "«SAT»). Solo titles de 4 palabras o menos sin la marca, sin la portada y sin "
+                         "los placeholders que ya dice la regla; hasta 50 titles distintos por "
+                         "plantilla. Sin evaluar (#8): las respuestas salen inciertas."),
+            preguntas=("title_es_generico",),
+            construir_estados=c.estados_title_generico,
+            filtrar_urls=c.candidatos_title_generico,
+            ejemplo=True,
+        ),
+        Modulo(
+            nombre="schema_visible",
+            titulo="Datos estructurados frente a lo visible",
+            descripcion=("Si el texto visible contradice un precio, valoracion, fecha de un evento "
+                         "u oferta o la disponibilidad del marcado. Solo paginas con algo visible con lo que "
+                         "comparar; hasta 10 por plantilla. Que un valor no se vea no se afirma. Sin "
+                         "evaluar (#8): las respuestas salen inciertas."),
+            preguntas=("schema_contradice_contenido",),
+            construir_estados=c.estados_schema,
+            filtrar_urls=c.candidatos_schema,
             ejemplo=True,
         ),
     ]

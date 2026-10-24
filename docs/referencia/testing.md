@@ -119,6 +119,10 @@ una plantilla mixta, `propagable` solo con umbral, la taxonomia del cliente como
 opciones (la del cliente hoy sobre la del job, con descripciones) y como clave de
 cache, el aviso sin taxonomia, cada caso frontera en una sola opcion, `extraer` sin estados repetidos y el endpoint),
 tambien en el trabajo de la API.
+Coherencia de title y marcado (decision 177): `test_coherencia.py` (valores
+del marcado y fragmentos visibles, filtros contra SQLite, los tres modulos de
+punta a punta con el `FakeLLM`, el score agrupado por nivel en la API y
+`extraer` sin estados repetidos).
 Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se
 borra TODO lo del censo y nada de lo demas, los dos guardias, que `forzar`
 salta el de la serie y nunca el de en marcha, que `simular` no toca nada, el

@@ -156,7 +156,8 @@ def test_un_modulo_con_una_pregunta_sin_evaluar_va_marcado():
     # (test_tipo_pagina.py...), y varias ramas anaden modulos a la vez.
     assert {"pagina_legal", "soft_404", "pagina_de_utilidad", "canibalizacion",
             "tipo_pagina", "categoria_cliente",
-            "intencion_pagina", "intencion_busquedas"} <= set(enr.REGISTRO)
+            "intencion_pagina", "intencion_busquedas",
+            "title_contenido", "title_generico", "schema_visible"} <= set(enr.REGISTRO)
 
 
 # --- alcance y estados ---------------------------------------------------------

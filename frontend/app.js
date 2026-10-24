@@ -3205,6 +3205,23 @@ function app() {
       } catch { this.enriqIntencion = null; }
     },
 
+    // Un score llega agrupado por nivel («0»...«3», en orden en `opciones`) y
+    // se escribe con el nombre corto de cada nivel (`etiquetas`, decision 177);
+    // lo demas, con el diccionario unico de `fmt.respuestaEnriq`.
+    etiquetaEnriq(pregunta, resp) {
+      const r = ((this.enriqRun && this.enriqRun.resultados) || {})[pregunta] || {};
+      return (r.etiquetas || {})[resp] || fmt.respuestaEnriq(resp);
+    },
+    textoDecisionEnriq(d) {
+      if (d.respuesta === null) return d.motivo || '—';
+      const r = ((this.enriqRun && this.enriqRun.resultados) || {})[d.pregunta] || {};
+      if (r.tipo === 'score') {
+        const n = Number(d.respuesta);
+        return this.etiquetaEnriq(d.pregunta, d.nivel) + (isNaN(n) ? '' : ' (' + n.toFixed(2) + ')');
+      }
+      return this.etiquetaEnriq(d.pregunta, d.respuesta);
+    },
+
     async cargarDecisionesEnriq(pregunta = undefined, respuesta = undefined) {
       if (!this.job || !this.enriqRun) return;
       if (pregunta !== undefined) this.enriqFiltro = { pregunta, respuesta, page: 1 };
@@ -3220,7 +3237,8 @@ function app() {
     // Respuestas de una pregunta. Un choice corto con sus opciones (la
     // intencion o el embudo, decision 176) se lee en el orden del catalogo, y
     // las que no esten en el, detras; uno largo (el tipo de pagina, decision
-    // 178) o sin opciones, de la mas frecuente a la menos.
+    // 178) o sin opciones, de la mas frecuente a la menos. Un score trae como
+    // opciones sus niveles «0»...«n-1» (decision 177): sale en orden de nivel.
     respuestasEnriq(r) {
       const pares = Object.entries(r.por_respuesta || {});
       if (!r.opciones || r.opciones.length > 7) return pares.sort((a, b) => b[1] - a[1]);

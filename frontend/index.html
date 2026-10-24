@@ -1984,7 +1984,7 @@
                     <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.5rem;font-size:.82rem">
                       <template x-for="[resp, n] in respuestasEnriq(r)" :key="resp">
                         <a href="#" @click.prevent="cargarDecisionesEnriq(preg, resp)">
-                          <strong x-text="fmt.respuestaEnriq(resp)"></strong> <span x-text="fmt.num(n)"></span>
+                          <strong x-text="etiquetaEnriq(preg, resp)"></strong> <span x-text="fmt.num(n)"></span>
                           <span class="text-dim" x-show="r.umbral != null"
                                 x-text="'(' + fmt.num((r.decididas_por_respuesta || {})[resp] || 0) + ' decididas)'"></span>
                         </a>
@@ -2118,7 +2118,7 @@
                 <template x-if="enriqDecisiones">
                   <div class="card">
                     <div class="text-dim" style="font-size:.8rem;margin-bottom:.4rem"
-                         x-text="fmt.num(enriqDecisiones.total) + ' respuestas' + (enriqFiltro.respuesta ? ' «' + fmt.respuestaEnriq(enriqFiltro.respuesta) + '»' : '')"></div>
+                         x-text="fmt.num(enriqDecisiones.total) + ' respuestas' + (enriqFiltro.respuesta ? ' «' + etiquetaEnriq(enriqFiltro.pregunta, enriqFiltro.respuesta) + '»' : '')"></div>
                     <div style="overflow-x:auto">
                       <table>
                         <thead><tr><th style="text-align:left">URL</th><th style="text-align:left" x-show="enriqDecisiones.items.some(d => d.busqueda)">búsqueda</th><th>respuesta</th><th>estado</th><th>confianza</th><th>origen</th><th style="text-align:right">coste</th></tr></thead>
@@ -2130,7 +2130,7 @@
                                 <div x-text="d.busqueda || '—'"></div>
                                 <div class="text-dim" style="font-size:.72rem" x-show="d.rutas" x-text="(d.rutas || []).join(' · ')"></div>
                               </td>
-                              <td x-text="d.respuesta === null ? (d.motivo || '—') : fmt.respuestaEnriq(d.respuesta)"></td>
+                              <td x-text="textoDecisionEnriq(d)"></td>
                               <td x-text="d.estado"></td>
                               <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
                               <td x-text="d.origen"></td>

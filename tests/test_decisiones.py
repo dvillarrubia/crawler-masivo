@@ -479,6 +479,11 @@ HUELLAS |= {("intencion_pagina", 1): "a4589e2b81d4a4fb",
             ("etapa_embudo", 1): "22ab1379c09d763a",
             ("intencion_busqueda", 1): "a436ff6f5e5ff168",
             }
+# Title frente al contenido, title generico y marcado frente a lo visible (#16, #17, decision 177).
+HUELLAS |= {("title_describe_contenido", 1): "d55396cb489ef138",
+            ("title_es_generico", 1): "c337521a7552f8f2",
+            ("schema_contradice_contenido", 1): "591101cbca2ef33f",
+            }
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():
