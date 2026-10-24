@@ -83,6 +83,21 @@ Se lanza con `python scripts/lanzar_job.py <cliente> [--canary] [--set k=v]`.
 Solo `projects/_ejemplo/` se versiona; ver `projects/README.md`. **Nunca**
 reglas de un cliente en código.
 
+## Re-extraer las reglas a medida de un censo (decision 166)
+
+Sin re-rastrear, sobre `page_content.raw_html` (solo si el censo se lanzó con
+`extraction.store_raw_html`), dentro del contenedor del crawler:
+
+```bash
+python scripts/reextraer_a_medida.py <job_id> --reglas r.json --dry-run   # cuenta
+python scripts/reextraer_a_medida.py <job_id> --reglas r.json            # escribe
+```
+
+`r.json` lleva `custom_extraction` y/o `custom_search`; se fusiona con las del
+censo (por nombre; `null` quita) y se guarda en `jobs.config`. Toma el candado
+del job y se niega con el job en marcha. Las páginas sin `raw_html` pierden las
+filas de las reglas que cambian (quedan «no evaluadas»).
+
 ## Automatic JS-render check
 
 Every crawl that finishes **without** `render_js` triggers

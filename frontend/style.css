@@ -1459,3 +1459,36 @@ body.modo-compartido .topbar, body.modo-compartido .breadcrumbs { display: none 
 .informe-bots{display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:.25rem .75rem;font-size:.9rem;margin-bottom:.4rem}
 .informe-bots>div{display:flex;gap:.4rem;align-items:baseline;border-bottom:1px dotted var(--border)}
 .informe-bots strong{margin-left:auto}
+
+/* Extraccion a medida en el modal de Nuevo rastreo (#34, decision 166) */
+.tab-con-icono{display:flex;align-items:center;gap:.3rem}
+.icono-13{width:13px;height:13px}
+.icono-14{width:14px;height:14px;opacity:.6}
+.xm-contador{font-size:.68rem;background:var(--accent,#5BAE23);color:#fff;border-radius:9px;padding:0 .4rem;line-height:1.3rem}
+.xm-pestana{margin-top:1rem}
+.xm-intro{margin:0 0 .6rem}
+.xm-vacio{margin:.5rem 0}
+.xm-regla{border:1px solid var(--border);border-radius:var(--radius,4px);padding:.55rem .65rem;margin-bottom:.55rem}
+.xm-regla--heredada{border-left:3px solid var(--blue)}
+.xm-regla--quitada{opacity:.6;border-style:dashed}
+.xm-regla-cabecera{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.35rem;min-height:1.6rem}
+.xm-hueco{flex:1}
+.xm-marca{font-size:.72rem;color:var(--blue);background:var(--blue-bg);border-radius:3px;padding:.1rem .4rem}
+.xm-error{font-size:.75rem;color:var(--red)}
+.xm-campos{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:.1rem .65rem}
+.xm-campos .form-group{margin-bottom:.35rem}
+.xm-campo-ancho{grid-column:1 / -1}
+.xm-acciones{margin:.2rem 0 1rem}
+.xm-seccion{display:flex;align-items:center;gap:.35rem}
+.xm-probar{display:flex;gap:.5rem;align-items:center}
+.xm-probar input{flex:1;min-width:0}
+.xm-spinner{width:12px;height:12px}
+.xm-prueba-error{margin-top:.6rem;padding:.45rem .65rem;border:1px solid var(--red);color:var(--red);border-radius:var(--radius,4px);font-size:.82rem;white-space:pre-wrap}
+.xm-resultado{margin-top:.7rem}
+.xm-resultado .table-wrap{margin:.4rem 0}
+.xm-aviso{margin:.2rem 0}
+.xm-valor{max-width:18rem}
+.xm-estado{font-size:.72rem;padding:.05rem .35rem;border-radius:3px;background:rgba(107,114,128,.1);color:var(--text-dim)}
+.xm-estado--ok{background:var(--green-bg);color:var(--green)}
+.xm-estado--error,.xm-estado--tiempo_agotado,.xm-estado--pagina_bloqueada,.xm-estado--conversion_fallida{background:var(--red-bg);color:var(--red)}
+@media (max-width:600px){.xm-probar{flex-direction:column;align-items:stretch}}

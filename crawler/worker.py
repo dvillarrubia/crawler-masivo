@@ -1518,6 +1518,8 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
         return ultima_vez
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
+    threading.Thread(target=_atender_pruebas_en_vivo, args=(_shutdown_event,),
+                     name="pruebas-en-vivo", daemon=True).start()
     return ahora
 
 
@@ -1688,6 +1690,57 @@ def _recuperar_enriquecidos(rconn) -> None:
             encolar_enriquecido(rconn, rid)
     except Exception:
         logger.exception("No se pudieron recuperar las ejecuciones de enriquecido")
+
+
+# ---------------------------------------------------------------------------
+# Prueba de reglas a medida contra una URL en vivo (#34, decision 166)
+# ---------------------------------------------------------------------------
+PRUEBAS_EN_VIVO_A_LA_VEZ = max(1, int(os.getenv("PRUEBAS_EN_VIVO_A_LA_VEZ", "2")))
+
+
+def _atender_pruebas_en_vivo(parada: threading.Event) -> None:
+    """Hilo propio que bloquea en `extraccion:pruebas` y despacha cada prueba a
+    un pool pequeno. Aparte del bucle principal porque ese bloquea en la cola
+    de rastreos (`BRPOP_TIMEOUT`) y duerme cuando los huecos estan llenos: la
+    prueba la espera una persona delante del formulario. Best-effort con el try
+    cubriendo la funcion ENTERA (decision 74): este hilo no puede tumbar el
+    worker, y un fallo de Redis solo espera y reintenta."""
+    try:
+        from shared.prueba_en_vivo import COLA_PRUEBAS, atender_mensaje
+
+        conexion = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True,
+                                            socket_timeout=BRPOP_TIMEOUT + 10)
+        pool = ThreadPoolExecutor(max_workers=PRUEBAS_EN_VIVO_A_LA_VEZ,
+                                  thread_name_prefix="prueba-en-vivo")
+        huecos = threading.BoundedSemaphore(PRUEBAS_EN_VIVO_A_LA_VEZ)
+
+        def _una(crudo: str) -> None:
+            try:
+                pid = atender_mensaje(conexion, crudo)
+                if pid:
+                    logger.info("Prueba en vivo %s atendida", pid)
+            finally:
+                huecos.release()
+
+        while not parada.is_set():
+            # Sin hueco no se saca nada de la cola: lo que espera, espera en
+            # Redis con su `vence`, no en la memoria de este proceso.
+            if not huecos.acquire(timeout=1):
+                continue
+            try:
+                r = conexion.blpop(COLA_PRUEBAS, timeout=BRPOP_TIMEOUT)
+            except Exception as exc:  # noqa: BLE001
+                huecos.release()
+                logger.warning("Redis: no se pudo leer la cola de pruebas en vivo (%s)", exc)
+                parada.wait(2)
+                continue
+            if not r:
+                huecos.release()
+                continue
+            pool.submit(_una, r[1])
+        pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("El hilo de pruebas en vivo se ha parado")
 
 
 def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:

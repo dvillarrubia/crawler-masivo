@@ -471,6 +471,7 @@ async function api(path, opts = {}) {
 /* ===== Main App ===== */
 function app() {
   return {
+    ...extraccionUI(),   // pestaña «Extracción» del modal (#34, decision 166)
     // Navegacion
     view: 'jobs',
     programaciones: [],
@@ -1153,6 +1154,7 @@ function app() {
     async openCreate(preset = null) {
       this.createForm = _freshForm();
       this.createError = null;
+      this.extraccionPrueba = { url: '', cargando: false, error: null, resultado: null };
       this.createPerfiles = [];
       this.showCreate = true;
       this.$nextTick(() => lucide.createIcons());
@@ -1206,6 +1208,7 @@ function app() {
           nuevo.name = base ? `${base} · ${new Date().toISOString().slice(0, 10)}` : '';
         }
         this.createForm = nuevo;
+        this.extraccionMarcarOrigen();
       } catch (e) { this.createError = e.message; }
     },
 
@@ -1250,7 +1253,10 @@ function app() {
         await this.loadJobs();
         if (this.view === 'client' && this.cliente) await this.abrirCliente(this.cliente.id, this.clienteTab);
         this.showToast('Rastreo iniciado correctamente');
-      } catch (e) { this.createError = e.message; }
+      } catch (e) {
+        this.createError = e.message;
+        if (/custom_extraction/.test(e.message)) this.createForm.configTab = 'extraccion';
+      }
       this.creating = false;
     },
 
@@ -4656,6 +4662,7 @@ function _freshForm() {
     cliente_id: '',
     profile_id: '',
     configTab: 'general',
+    extraccion: [],      // reglas a medida (decision 166): ver _extraccionAConfig
     // General
     max_depth: 3,
     max_urls: 50000,
@@ -4832,6 +4839,8 @@ function _configDesdeForm(f) {
     cfg[seccion][campo] = v;
   }
   _wpConfigDesdeForm(f, cfg);
+  const ce = _extraccionAConfig(f);
+  if (ce) cfg.custom_extraction = ce;
   return cfg;
 }
 
@@ -4840,6 +4849,7 @@ function _configDesdeForm(f) {
 // resto se queda con los valores de siempre del modal.
 function _formDesdeConfig(f, cfg) {
   const poner = (campo, valor) => { if (valor !== undefined && valor !== null) f[campo] = valor; };
+  _extraccionDesdeConfig(f, cfg);
   ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
    'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
     .forEach(k => poner(k, cfg[k]));
@@ -5077,3 +5087,138 @@ function fraseReglaPropia(r, catalogo) {
        + r.umbral + (r.modo === 'cambio_pct' ? '%' : '');
 }
 const DIAS_SEMANA = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+
+
+// ===== Extraccion a medida en el modal de Nuevo rastreo (#34, decision 166) =====
+// Una fila por regla. Las heredadas (cliente o perfil) guardan su firma de
+// origen: sin tocar no se mandan (se heredan en el servidor), cambiadas se
+// mandan enteras (sustituyen por nombre) y quitadas van como `null`. Los
+// campos que el formulario no edita (solo_urls, separador_decimal, grupo...)
+// viajan tal cual dentro de `extra`.
+const XM_CAMPOS = ['tipo', 'expresion', 'devuelve', 'atributo', 'cuantos', 'valor'];
+const XM_NOMBRE = /^[a-z][a-z0-9_]{0,39}$/;
+let _xmId = 0;
+
+function _xmFila(nombre, regla, heredada) {
+  const r = regla || {};
+  const extra = {};
+  for (const [k, v] of Object.entries(r)) if (!XM_CAMPOS.includes(k)) extra[k] = v;
+  const fila = {
+    _id: ++_xmId, nombre: nombre || '', heredada: !!heredada, quitada: false, origen: 'cliente',
+    tipo: r.tipo || 'css', expresion: r.expresion || '', devuelve: r.devuelve || 'texto',
+    atributo: r.atributo || '', cuantos: r.cuantos || 'primero', valor: r.valor || 'texto', extra,
+  };
+  fila._firma = heredada ? JSON.stringify(_xmRegla(fila)) : null;
+  fila._original = heredada ? JSON.parse(JSON.stringify(fila)) : null;
+  return fila;
+}
+
+// La regla tal como la espera `ExtractorAMedida`, sin los campos vacios.
+function _xmRegla(fila) {
+  const r = { ...fila.extra, tipo: fila.tipo, expresion: (fila.expresion || '').trim(),
+              cuantos: fila.cuantos };
+  if (fila.tipo !== 'regex') {
+    r.devuelve = fila.devuelve;
+    if (fila.devuelve === 'atributo') r.atributo = (fila.atributo || '').trim();
+    else delete r.atributo;
+  } else {
+    delete r.devuelve; delete r.atributo;
+  }
+  if (fila.cuantos !== 'recuento') r.valor = fila.valor; else delete r.valor;
+  return r;
+}
+
+function _extraccionDesdeConfig(f, cfg) {
+  const ce = (cfg && cfg.custom_extraction) || {};
+  f.extraccion = Object.entries(ce).filter(([, r]) => r && typeof r === 'object')
+    .map(([n, r]) => _xmFila(n, r, true));
+}
+
+// Lo que se manda en `config.custom_extraction`, o null si no hay nada que
+// mandar (todo heredado y sin tocar, o sin reglas).
+function _extraccionAConfig(f) {
+  const salida = {};
+  for (const fila of (f.extraccion || [])) {
+    const nombre = (fila.nombre || '').trim();
+    if (!nombre) continue;
+    if (fila.heredada) {
+      if (fila.quitada) salida[nombre] = null;
+      else if (JSON.stringify(_xmRegla(fila)) !== fila._firma) salida[nombre] = _xmRegla(fila);
+    } else if (!fila.quitada) {
+      salida[nombre] = _xmRegla(fila);
+    }
+  }
+  return Object.keys(salida).length ? salida : null;
+}
+
+function extraccionUI() {
+  return {
+    extraccionPrueba: { url: '', cargando: false, error: null, resultado: null },
+
+    extraccionActivas() {
+      return ((this.createForm && this.createForm.extraccion) || []).filter(r => !r.quitada).length;
+    },
+    extraccionNueva() {
+      this.createForm.extraccion.push(_xmFila('', null, false));
+      this.$nextTick(() => window.lucide && lucide.createIcons());
+    },
+    extraccionQuitar(i) {
+      const fila = this.createForm.extraccion[i];
+      if (fila.heredada) fila.quitada = true;
+      else this.createForm.extraccion.splice(i, 1);
+    },
+    extraccionRestaurar(i) {
+      const fila = this.createForm.extraccion[i];
+      if (!fila._original) return;
+      const copia = JSON.parse(JSON.stringify(fila._original));
+      this.createForm.extraccion.splice(i, 1, { ...copia, _id: ++_xmId, origen: fila.origen,
+                                                _original: fila._original });
+    },
+    extraccionTocada(fila) {
+      return !!fila.heredada && JSON.stringify(_xmRegla(fila)) !== fila._firma;
+    },
+    // Lo que se puede decir sin preguntar al servidor; el resto es su 422.
+    extraccionErrorNombre(fila, i) {
+      if (fila.quitada) return '';
+      const n = (fila.nombre || '').trim();
+      if (!n) return 'Falta el nombre';
+      if (!XM_NOMBRE.test(n)) return 'Nombre: minúsculas, cifras y _, empezando por letra';
+      if (this.createForm.extraccion.some((o, j) => j !== i && !o.quitada && (o.nombre || '').trim() === n)) {
+        return 'Nombre repetido';
+      }
+      return '';
+    },
+    // ¿Cliente o perfil? config-resuelta da la fusion; el perfil se mira aparte.
+    extraccionMarcarOrigen() {
+      const f = this.createForm;
+      const perfil = (this.createPerfiles || []).find(p => p.id === f.profile_id);
+      const delPerfil = (perfil && perfil.config && perfil.config.custom_extraction) || {};
+      for (const fila of f.extraccion) {
+        if (!fila.heredada) continue;
+        fila.origen = Object.prototype.hasOwnProperty.call(delPerfil, fila.nombre) ? 'perfil' : 'cliente';
+        fila._original.origen = fila.origen;
+      }
+      if (!this.extraccionPrueba.url) {
+        this.extraccionPrueba.url = (f.seeds || '').split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
+      }
+    },
+    async probarExtraccion() {
+      const p = this.extraccionPrueba;
+      const f = this.createForm;
+      p.cargando = true; p.error = null; p.resultado = null;
+      try {
+        if (!p.url) p.url = (f.seeds || '').split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
+        const cuerpo = { url: (p.url || '').trim(), custom_extraction: _extraccionAConfig(f) || {} };
+        if (f.cliente_id) cuerpo.cliente_id = f.cliente_id;
+        if (f.profile_id) cuerpo.profile_id = f.profile_id;
+        const ua = f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset];
+        if (ua) cuerpo.user_agent = ua;
+        if (f.impersonate) cuerpo.impersonate = f.impersonate;
+        p.resultado = await api('/extraccion/probar', { method: 'POST', body: JSON.stringify(cuerpo) });
+      } catch (e) {
+        p.error = e.message;
+      }
+      p.cargando = false;
+    },
+  };
+}

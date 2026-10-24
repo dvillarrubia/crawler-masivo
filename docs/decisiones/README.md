@@ -19,7 +19,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163 |
-| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34) y segmentos de negocio | 104, 125 |
+| [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
 
@@ -194,6 +194,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 165 | El tráfico que esperaba a los datos se avisa al completarse, una vez; una caída general se dice antes que los grupos; y el contenido se compara por su hash | [`comparacion-y-alertas`](comparacion-y-alertas.md#d165) |
 | 167 | Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos fuentes que discrepan son un aviso por host | [`indexabilidad`](indexabilidad.md#d167) |
 | 168 | La interfaz del adaptador WordPress, y plugins y tema por la ruta de sus ficheros (el `?ver=` solo con forma de versión) | [`incidencias`](incidencias.md#d168) |
+| 166 | Las reglas a medida se editan en el modal y se prueban contra una URL en vivo que descarga el worker, con la IP comprobada y fijada en cada salto | [`extraccion-a-medida`](extraccion-a-medida.md#d166) |
 
 ## Anadir una decision
 

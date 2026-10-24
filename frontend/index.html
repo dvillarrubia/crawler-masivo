@@ -5636,6 +5636,12 @@
           <button type="button" class="tab" :class="createForm.configTab === 'analysis' && 'active'" @click="createForm.configTab = 'analysis'" style="display:flex;align-items:center;gap:.3rem">
             <i data-lucide="bar-chart-2" style="width:13px;height:13px"></i> Análisis
           </button>
+          <!-- Extraccion a medida (#34, decision 166): bloque propio -->
+          <button type="button" class="tab tab-con-icono" :class="createForm.configTab === 'extraccion' && 'active'"
+                  @click="createForm.configTab = 'extraccion'" data-testid="tab-extraccion">
+            <i data-lucide="scan-text" class="icono-13"></i> Extracción
+            <span class="xm-contador" x-show="extraccionActivas()" x-text="extraccionActivas()"></span>
+          </button>
         </div>
 
         <!-- ===== TAB: General ===== -->
@@ -5983,6 +5989,140 @@
               <input type="number" x-model="createForm.max_outlinks" min="1" max="10000">
             </div>
           </div>
+        </div>
+
+        <!-- ===== TAB: Extraccion a medida (#34, decision 166) =====
+             Reglas CSS/XPath/regex que el rastreo aplica a cada pagina HTML 2xx.
+             Las heredadas del cliente o del perfil llevan su marca: si no se
+             tocan no se mandan (se heredan en el servidor), si se cambian se
+             sustituyen enteras y si se quitan se manda `null`. La validacion
+             es la del servidor (422) y sale arriba, en el aviso del modal. -->
+        <div x-show="createForm.configTab === 'extraccion'" class="xm-pestana" data-testid="pestana-extraccion">
+          <p class="text-sm text-dim xm-intro">
+            Datos que se sacan de cada página HTML 2xx del rastreo (precio, SKU, autor…): salen como
+            columnas <code>x.&lt;nombre&gt;</code> en el Explorador y en el CSV. Una página sin fila es
+            «no evaluada», que no es «vacía».
+          </p>
+          <template x-if="!createForm.extraccion.length">
+            <p class="text-sm text-dim xm-vacio">Sin reglas. Añade una para empezar.</p>
+          </template>
+          <template x-for="(r, i) in createForm.extraccion" :key="r._id">
+            <div class="xm-regla" :class="{ 'xm-regla--quitada': r.quitada, 'xm-regla--heredada': r.heredada }"
+                 data-testid="regla-extraccion">
+              <div class="xm-regla-cabecera">
+                <template x-if="r.heredada">
+                  <span class="xm-marca" :title="'Viene de la configuración del ' + r.origen + '. Si la cambias, solo cambia para este rastreo.'"
+                        x-text="(r.quitada ? 'Quitada · ' : (extraccionTocada(r) ? 'Cambiada · ' : 'Heredada · ')) + r.origen"></span>
+                </template>
+                <span class="xm-error" x-show="extraccionErrorNombre(r, i)" x-text="extraccionErrorNombre(r, i)"></span>
+                <span class="xm-hueco"></span>
+                <template x-if="r.heredada && (r.quitada || extraccionTocada(r))">
+                  <button type="button" class="btn btn-sm" @click="extraccionRestaurar(i)">Restaurar</button>
+                </template>
+                <button type="button" class="btn btn-sm" x-show="!r.quitada" @click="extraccionQuitar(i)"
+                        :title="r.heredada ? 'No aplicarla en este rastreo (se manda null)' : 'Quitar la regla'">Quitar</button>
+              </div>
+              <div class="xm-campos" x-show="!r.quitada">
+                <div class="form-group">
+                  <label>Nombre</label>
+                  <input type="text" x-model="r.nombre" placeholder="precio" maxlength="40" :disabled="r.heredada"
+                         :title="r.heredada ? 'El nombre de una heredada no se cambia: quítala y crea otra' : 'Minúsculas, cifras y _; empieza por letra'">
+                </div>
+                <div class="form-group">
+                  <label>Tipo</label>
+                  <select x-model="r.tipo">
+                    <option value="css">Selector CSS</option>
+                    <option value="xpath">XPath</option>
+                    <option value="regex">Regex</option>
+                  </select>
+                </div>
+                <div class="form-group xm-campo-ancho">
+                  <label x-text="r.tipo === 'regex' ? 'Expresión regular (sobre el HTML)' : (r.tipo === 'xpath' ? 'XPath' : 'Selector CSS')"></label>
+                  <input type="text" x-model="r.expresion" class="mono"
+                         :placeholder="r.tipo === 'regex' ? 'sku: (\\w+)' : (r.tipo === 'xpath' ? '//span[@itemprop=\'price\']' : '.precio .final')">
+                </div>
+                <div class="form-group" x-show="r.tipo !== 'regex'">
+                  <label>Devuelve</label>
+                  <select x-model="r.devuelve">
+                    <option value="texto">Texto</option>
+                    <option value="html_interno">HTML interno</option>
+                    <option value="html">HTML del elemento</option>
+                    <option value="atributo">Atributo</option>
+                  </select>
+                </div>
+                <div class="form-group" x-show="r.tipo !== 'regex' && r.devuelve === 'atributo'">
+                  <label>Atributo</label>
+                  <input type="text" x-model="r.atributo" placeholder="content" class="mono">
+                </div>
+                <div class="form-group">
+                  <label>Coincidencias</label>
+                  <select x-model="r.cuantos">
+                    <option value="primero">La primera</option>
+                    <option value="todos">Todas</option>
+                    <option value="recuento">Solo contarlas</option>
+                  </select>
+                </div>
+                <div class="form-group" x-show="r.cuantos !== 'recuento'">
+                  <label>Valor</label>
+                  <select x-model="r.valor">
+                    <option value="texto">Texto</option>
+                    <option value="numero">Número (filtrable por rango)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </template>
+          <div class="xm-acciones">
+            <button type="button" class="btn btn-sm" @click="extraccionNueva()" data-testid="extraccion-nueva">
+              <i data-lucide="plus" class="icono-13"></i> Añadir regla
+            </button>
+          </div>
+
+          <div class="config-section xm-seccion">
+            <i data-lucide="flask-conical" class="icono-14"></i> Probar contra una URL en vivo
+          </div>
+          <p class="text-sm text-dim xm-intro">
+            La descarga el worker (no tu navegador) con el User Agent y la huella del formulario, y aplica
+            las reglas de esta pestaña más las heredadas. <strong>Sin render de JavaScript</strong>: lee el
+            HTML de la respuesta, así que lo que monte el JavaScript puede no salir aquí.
+          </p>
+          <div class="xm-probar">
+            <input type="url" x-model="extraccionPrueba.url" placeholder="https://midominio.com/una-ficha"
+                   @keydown.enter.prevent="probarExtraccion()" data-testid="extraccion-url">
+            <button type="button" class="btn btn-sm" @click="probarExtraccion()" data-testid="extraccion-probar"
+                    :disabled="extraccionPrueba.cargando || !(extraccionPrueba.url || createForm.seeds)">
+              <span class="spinner xm-spinner" x-show="extraccionPrueba.cargando"></span> Probar
+            </button>
+          </div>
+          <template x-if="extraccionPrueba.error">
+            <div class="xm-prueba-error" x-text="extraccionPrueba.error" data-testid="extraccion-error"></div>
+          </template>
+          <template x-if="extraccionPrueba.resultado">
+            <div class="xm-resultado" data-testid="extraccion-resultado">
+              <p class="text-sm text-dim" x-text="extraccionPrueba.resultado.fuente"></p>
+              <template x-for="a in extraccionPrueba.resultado.avisos" :key="a">
+                <p class="form-hint xm-aviso" x-text="a"></p>
+              </template>
+              <div class="table-wrap" x-show="extraccionPrueba.resultado.reglas.length">
+                <table>
+                  <thead><tr><th>Regla</th><th>Estado</th><th>Valor</th><th>Detalle</th></tr></thead>
+                  <tbody>
+                    <template x-for="f in extraccionPrueba.resultado.reglas" :key="f.nombre">
+                      <tr>
+                        <td class="mono" x-text="f.nombre"></td>
+                        <td><span class="xm-estado" :class="'xm-estado--' + f.estado" x-text="f.estado"></span></td>
+                        <td class="xm-valor" :title="f.valores ? f.valores.join(' | ') : (f.valor || '')"
+                            x-text="f.valores ? f.valores.join(' | ') : (f.valor ?? '—')"></td>
+                        <td class="text-dim" x-text="f.detalle || (f.n != null ? f.n + ' coincidencia(s)' : '')"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-sm text-dim" x-show="extraccionPrueba.resultado.no_evaluadas.length"
+                 x-text="'Sin evaluar en esta URL: ' + extraccionPrueba.resultado.no_evaluadas.join(', ')"></p>
+            </div>
+          </template>
         </div>
 
         </details>
