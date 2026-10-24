@@ -11,6 +11,9 @@ import asyncio
 import os
 import uuid
 
+import json
+import math
+
 import pytest
 
 pytest.importorskip("httpx")
@@ -551,3 +554,22 @@ def test_cache_y_contadores_en_redis():
     finally:
         for k in usadas:
             r.delete(k)
+
+
+def test_dos_urls_con_el_mismo_estado_pagan_una_vez():
+    """Una llamada, dos URLs: la respuesta va a las dos, el coste solo a la
+    primera. Con el coste en cada copia, la suma de `decisions` contaba el mismo
+    pago dos veces (decision 162)."""
+    fake = FakeLLM(coste=0.0004)
+    res = _preguntar(_capa(fake), [E("igual"), E("igual"), E("otro")], [P("a")])
+    assert fake.llamadas == 2
+    assert [r[0].respuesta for r in res] == ["true", "true", "true"]
+    assert [r[0].coste_usd for r in res] == [0.0004, 0.0, 0.0004]
+    assert sum(r[0].coste_usd for r in res) == pytest.approx(0.0008)
+
+
+def test_la_estimacion_cuenta_el_coste_fijo_de_cada_llamada():
+    """Medido en la primera llamada real: tokens = 0,247 x caracteres + 246."""
+    capa = _capa(FakeLLM())
+    cuerpo = {"state": "x" * 1000}
+    assert capa._tokens_estimados(cuerpo) == math.ceil(len(json.dumps(cuerpo)) / 4) + dec.TOKENS_FIJOS_POR_LLAMADA

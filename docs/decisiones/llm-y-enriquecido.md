@@ -234,3 +234,26 @@
      probadas sin red; el script se prueba de punta a punta con `FakeLLM`.
    Queda de #8 lo que necesita la clave y personas: etiquetar, la vista de
    revisión en la interfaz y `decision_labels`.
+
+<a id="d162"></a>
+162. **Jev en producción: la primera llamada real calibra la estimación y el gasto
+   se cuenta una vez** (#40). El 24-oct-2026 se configuró la clave de
+   OpenRouter en el servidor (`DECISIONS_ENABLED=1`, `ENRICHMENT_TOKEN` y un
+   tope global de **5 $ al mes**, `ENRICHMENT_MAX_USD_MES`). Primera llamada:
+   el juego de 150 páginas de Lopesan (159) con `es_pagina_legal`, a mano y con
+   `--confirmar`. 150 respuestas de `typesafe/jev-1.13-20260917`, todas
+   `incierto` (sin umbral no hay `decidido`, 84); 5 «legales»: cuatro
+   políticas de privacidad con 0,98-0,99 y «Criminal Risk Prevention» con 0,65.
+   - **La estimación se quedaba corta**: 0,0022 $ estimados y un 52 % más
+     facturado. Ajustando los tokens reales contra los caracteres enviados:
+     **tokens = 0,247 × caracteres + 246** (error medio del 2,8 %, frente al
+     27,6 % de «caracteres / 3»). Hay un coste fijo por llamada que el
+     proveedor añade. La estimación pasa a `caracteres / 4 + 250`, un pelo por
+     encima, que es el lado bueno para una reserva. El precio facturado
+     cuadra con el publicado (0,042 $/Mtok).
+   - **El gasto de los estados repetidos se contaba varias veces**: dos URLs con
+     el mismo estado hacen UNA llamada, pero cada copia de la decisión llevaba
+     el coste, y la suma de `decisions` —de la que se siembra el gasto del mes
+     al arrancar— lo contaba tantas veces como URLs (14 de 150 en esta prueba).
+     Ahora el coste va solo en la primera copia. El gasto de la ejecución
+     (`gastado_usd`) ya salía del presupuesto y estaba bien.

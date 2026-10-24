@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 # 0,000000042 $/token de entrada y 0 de salida. Solo se usa para la RESERVA y
 # cuando la respuesta no trae `usage.cost`; lo que cuenta es el coste real.
 PRECIO_USD_MTOK_DEFECTO = 0.042
+# Lo que cada llamada a `/systemone` factura ademas del cuerpo (decision 162).
+TOKENS_FIJOS_POR_LLAMADA = 250
 
 # decidido | incierto | sin_decidir
 DECIDIDO, INCIERTO, SIN_DECIDIR = "decidido", "incierto", "sin_decidir"
@@ -581,9 +583,13 @@ class CapaDecisiones:
 
     # -- estimacion sin llamar (#40) --------------------------------------
     def _tokens_estimados(self, cuerpo: Any) -> int:
-        # ~3 caracteres por token: por encima de lo real en texto latino, que
-        # es el lado bueno para una RESERVA.
-        return max(1, math.ceil(len(json.dumps(cuerpo, ensure_ascii=False)) / 3))
+        # Medido en la primera llamada real (24-oct-2026, 150 paginas de Lopesan,
+        # decision 162): tokens = 0,247 x caracteres + 246. Hay un coste FIJO
+        # por llamada que el proveedor anade; con «caracteres / 3» la
+        # estimacion se quedaba un 34 % corta y el coste real fue un 52 % mayor
+        # que lo que enseño el dialogo de #40. Con 4 y 250, un pelo por encima
+        # (error medio del 2,8 %), que es el lado bueno para una RESERVA.
+        return max(1, math.ceil(len(json.dumps(cuerpo, ensure_ascii=False)) / 4) + TOKENS_FIJOS_POR_LLAMADA)
 
     def _coste(self, tokens_entrada: int) -> float:
         return tokens_entrada * self.precio / 1_000_000
@@ -830,13 +836,22 @@ class CapaDecisiones:
                     por_clave[ce][d.pregunta] = d
 
         resultado = []
+        pagadas: set[tuple[str, str]] = set()
         for ce in claves_est:
             fila = []
             for p in preguntas:
                 d = por_clave[ce][p.nombre]
                 # Copia: dos URLs con el mismo estado comparten respuesta pero
-                # no la fila de `decisions`.
-                fila.append(Decision(**asdict(d)))
+                # no la fila de `decisions`. El coste, SOLO en la primera: se
+                # pago una llamada, y con el coste en cada copia la suma de
+                # `decisions` (de la que sale el gasto del mes al arrancar)
+                # contaba el mismo pago tantas veces como URLs (decision 162).
+                copia = Decision(**asdict(d))
+                if (ce, p.nombre) in pagadas:
+                    copia.coste_usd = 0.0 if d.coste_usd is not None else None
+                    copia.tokens_entrada = 0 if d.tokens_entrada is not None else None
+                pagadas.add((ce, p.nombre))
+                fila.append(copia)
             resultado.append(fila)
         self._contar(resultado, preguntas)
         return resultado
