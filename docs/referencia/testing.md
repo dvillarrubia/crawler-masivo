@@ -102,6 +102,10 @@ confianza), `test_decisiones_api.py`, `test_decisiones_no_se_disparan.py` y
 `tests/requirements-contrato.txt` y corre en su propio trabajo de CI). Todos
 con el `FakeLLM` de `tests/fake_llm.py`: **ningun test llama a la red**, y
 `conftest.py` hace fallar cualquier transporte real hacia OpenRouter.
+La medida de una pregunta (decisiones 159 y 179): `test_evaluacion_decisiones.py`
+(metricas, umbral, muestra y el script de punta a punta) y
+`test_evaluacion_precision.py` (juego de precision con datos sinteticos: la
+precision sale la de verdad, el recall no se afirma y el control lo estima).
 Analisis enriquecido (decision 85): `test_enriquecido.py` (modulos y
 dependencias, alcance, estimacion sin llamar, corte por presupuesto y por tope
 mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y

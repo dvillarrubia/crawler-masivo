@@ -1,6 +1,6 @@
 """Juego de evaluacion y medida de una pregunta a Jev (#8, decision 159).
 
-Cuatro ordenes, en el orden en que se usan:
+Cinco ordenes, en el orden en que se usan:
 
     extraer   <pregunta> --job <id> [--job <id> ...] [--n 200] [--semilla 0]
               Saca un juego estratificado por plantilla de censos reales a
@@ -18,6 +18,16 @@ Cuatro ordenes, en el orden en que se usan:
     repetir   <respuestas_1.jsonl> <respuestas_2.jsonl> [--acuerdo]
               Repetibilidad (la misma pregunta dos veces) o, con --acuerdo,
               acuerdo y kappa entre dos jueces o dos redacciones.
+    precision <conjunto.jsonl> <respuestas.jsonl> --respuesta X
+              [--positivos N] [--control 100] [--semilla 0] [--salida ...]
+              Juego de PRECISION de una respuesta rara (decision 179): de un
+              conjunto amplio ya pasado por `responder` (p. ej. `extraer --n
+              2000`), todas las filas donde Jev contesto X (o las N de mas
+              confianza) mas un control aleatorio, cada una con su `origen`
+              (`positivo_jev` | `control`). Se etiqueta a ciegas y `evaluar` lo
+              reconoce: precision y umbral propio de X sobre los positivos, y
+              el recall no se afirma (solo el control lo estima). No llama a
+              nadie.
 
 Uso (dentro del contenedor del crawler):
 
@@ -326,6 +336,7 @@ def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
               if r.get("pregunta") == p.nombre and r.get("version") == p.version}
     filas = []
     invalidas = 0
+    de_precision = any(f.get("origen") for f in juego)
     # El mismo estado dos veces (la URL con y sin www, la misma ruta en otro
     # host) es la misma entrada para Jev: contarla dos veces infla la muestra
     # y puede sostener un umbral que sin ella no sale (decision 169). Cuenta
@@ -345,8 +356,12 @@ def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
             invalidas += 1
         filas.append({"etiqueta": etiqueta,
                       "respuesta": etiqueta_de_respuesta(p.tipo, r.get("respuesta"), niveles),
-                      "confianza": r.get("confianza"), "tokens": r.get("tokens"), "coste": r.get("coste")})
-    informe = metricas(filas, objetivo=objetivo)
+                      "confianza": r.get("confianza"), "tokens": r.get("tokens"), "coste": r.get("coste"),
+                      "origen": f.get("origen"), "en_control": bool(f.get("en_control"))})
+    if de_precision:
+        informe = _evaluar_precision(juego, filas, objetivo)
+    else:
+        informe = metricas(filas, objetivo=objetivo)
     informe["pregunta"], informe["version"], informe["umbral_actual"] = p.nombre, p.version, p.umbral
     informe["respuestas_de_otra_version"] = sum(
         1 for r in respuestas if r.get("pregunta") == p.nombre and r.get("version") != p.version)
@@ -356,6 +371,81 @@ def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
     ids = {f["id"] for f in juego}
     informe["respuestas_fuera_del_juego"] = sum(1 for r in respuestas if r.get("id") not in ids)
     return informe
+
+
+def _evaluar_precision(juego: list[dict], filas: list[dict], objetivo: float) -> dict:
+    """Un juego de `precision` (decision 179): la precision de su respuesta
+    sale de los positivos, y el recall no se afirma. Las metricas de un juego
+    aleatorio (acierto, ECE, umbral comun) aqui saldrian sesgadas: los
+    positivos estan sobrerrepresentados, y no se calculan."""
+    from shared.evaluacion_decisiones import metricas_precision
+
+    resumenes = {json.dumps(f.get("juego_precision"), sort_keys=True) for f in juego}
+    if len(resumenes) != 1 or not juego[0].get("juego_precision"):
+        raise SystemExit("El juego mezcla filas de juegos de precision distintos (o sin `juego_precision`): "
+                         "un juego de precision se evalua solo.")
+    resumen = juego[0]["juego_precision"]
+    try:
+        informe = metricas_precision(filas, resumen["respuesta"], objetivo=objetivo,
+                                     todos_los_positivos=bool(resumen.get("todos_los_positivos", True)),
+                                     confianza_minima=resumen.get("confianza_minima"))
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    informe["juego_precision"] = resumen
+    return informe
+
+
+def precision(conjunto: list[dict], respuestas: list[dict], respuesta: str, *, n_positivos: int | None,
+              n_control: int, semilla: int) -> tuple[list[dict], dict]:
+    """El juego de precision de `respuesta` (decision 179) y su resumen.
+
+    `conjunto` es un juego amplio sin etiquetar (`extraer --n 2000`) y
+    `respuestas`, lo que `responder` devolvio sobre el. Las filas salen tal
+    cual, con `origen`, `en_control` y el resumen en `juego_precision`, y
+    barajadas: agrupadas, los positivos se verian juntos. Quien etiqueta no
+    debe ver `origen` (lleva la respuesta de Jev): se le pasa id y estado."""
+    import random
+
+    from shared.evaluacion_decisiones import etiqueta_de_respuesta, normalizar_etiqueta
+    from shared.evaluacion_decisiones import seleccion_de_precision
+
+    if not conjunto:
+        raise SystemExit("El conjunto esta vacio")
+    if any(f.get("origen") for f in conjunto):
+        raise SystemExit("El conjunto ya es un juego de precision: se saca de un conjunto amplio de `extraer`")
+    p = pregunta_del_juego(conjunto)
+    otras = sorted({f.get("version") for f in conjunto} - {p.version})
+    if otras:
+        raise SystemExit(f"El conjunto es de la version {otras} y el catalogo esta en la {p.version}")
+    x = normalizar_etiqueta(p.tipo, respuesta, p.opciones)
+    if x is None:
+        raise SystemExit(f"«{respuesta}» no es una respuesta de {p.nombre}")
+    niveles = len(p.opciones) if p.tipo == "score" else None
+    por_id = {r["id"]: r for r in respuestas if r.get("pregunta") == p.nombre and r.get("version") == p.version}
+    respondidas, sin = [], 0
+    for f in conjunto:
+        r = por_id.get(f["id"]) or {}
+        v = etiqueta_de_respuesta(p.tipo, r.get("respuesta"), niveles)
+        if v is None:
+            sin += 1
+            continue
+        respondidas.append({"id": f["id"], "respuesta": v, "confianza": r.get("confianza")})
+    if not respondidas:
+        raise SystemExit("Ninguna fila del conjunto tiene respuesta de esa pregunta y version: falta `responder`")
+    try:
+        seleccion, resumen = seleccion_de_precision(respondidas, x, n_positivos=n_positivos,
+                                                    n_control=n_control, semilla=semilla)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    if not resumen["respuestas_x"]:
+        raise SystemExit(f"Jev no contesto «{x}» en ninguna de las {len(respondidas)} filas respondidas: "
+                         "no hay positivos y el juego solo traeria el control (para eso, un juego aleatorio)")
+    resumen["sin_respuesta"] = sin
+    filas = [{**f, "origen": seleccion[f["id"]]["origen"], "en_control": seleccion[f["id"]]["en_control"],
+              "juego_precision": resumen}
+             for f in conjunto if f["id"] in seleccion]
+    random.Random(semilla).shuffle(filas)
+    return filas, resumen
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -380,6 +470,14 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("primera")
     d.add_argument("segunda")
     d.add_argument("--acuerdo", action="store_true")
+    e = sub.add_parser("precision")
+    e.add_argument("conjunto")
+    e.add_argument("respuestas")
+    e.add_argument("--respuesta", required=True)
+    e.add_argument("--positivos", type=int, default=None)
+    e.add_argument("--control", type=int, default=None)
+    e.add_argument("--semilla", type=int, default=0)
+    e.add_argument("--salida")
     args = ap.parse_args(argv)
 
     if args.orden == "extraer":
@@ -439,6 +537,21 @@ def main(argv: list[str] | None = None) -> int:
 
         uno, dos = vocabulario(primera), vocabulario(segunda)
         print(json.dumps((acuerdo if args.acuerdo else repetibilidad)(uno, dos), ensure_ascii=False, indent=1))
+    elif args.orden == "precision":
+        from shared.evaluacion_decisiones import CONTROL_PRECISION
+
+        conjunto = _leer(args.conjunto)
+        filas, resumen = precision(conjunto, _leer(args.respuestas), args.respuesta,
+                                   n_positivos=args.positivos,
+                                   n_control=CONTROL_PRECISION if args.control is None else args.control,
+                                   semilla=args.semilla)
+        p = pregunta_del_juego(conjunto)
+        salida = args.salida or f"tests/decisiones/{p.nombre}/v{p.version}_precision_{resumen['respuesta']}.jsonl"
+        _escribir(salida, filas)
+        print(json.dumps(resumen, ensure_ascii=False, indent=1))
+        print(f"{len(filas)} filas en {salida}: {resumen['positivos_en_juego']} positivos de Jev "
+              f"(de {resumen['respuestas_x']} «{resumen['respuesta']}») y un control de {resumen['control']}. "
+              "Falta etiquetarlas a ciegas: quien etiqueta ve id y estado, no `origen`.")
     return 0
 
 

@@ -100,6 +100,50 @@ corta a medias (Ctrl-C, OOM, despliegue) no cambia nada y se puede repetir.
 Las páginas sin `raw_html` pierden las
 filas de las reglas que cambian (quedan «no evaluadas»).
 
+## Medir una pregunta a Jev (decisiones 159 y 179)
+
+Todo con `scripts/evaluar_decisiones.py`, dentro del contenedor del crawler o
+en uno efímero con el repo montado. Solo `responder --confirmar` llama a Jev
+(y gasta con los presupuestos del botón de #40); lo demás no llama a nadie.
+
+**Juego aleatorio** (acierto, calibración y umbral común, 159):
+
+```bash
+python scripts/evaluar_decisiones.py extraer <pregunta> --job <id> --job <id> --n 200
+#   etiquetar a ciegas (campo `etiqueta` y `etiquetado_por`)
+python scripts/evaluar_decisiones.py responder tests/decisiones/<pregunta>/v<N>.jsonl --salida r.jsonl             # estima
+python scripts/evaluar_decisiones.py responder tests/decisiones/<pregunta>/v<N>.jsonl --salida r.jsonl --confirmar # gasta
+python scripts/evaluar_decisiones.py evaluar tests/decisiones/<pregunta>/v<N>.jsonl r.jsonl
+```
+
+**Juego de precisión de una respuesta rara** (179): cuando la respuesta que
+importa sale pocas veces (9 «sí» de 200) y `avisos` dice que su cota no llega.
+
+1. Conjunto amplio sin etiquetar, de censos **no usados** para redactar la
+   pregunta: `extraer <pregunta> --job … --n 2000 --salida amplio.jsonl`. La
+   salida dice cuántos ejemplos salen de verdad (puede haber menos de 2.000).
+2. Estimar y, si se aprueba, responder: `responder amplio.jsonl --salida
+   r_amplio.jsonl` enseña llamadas y coste (con lo medido el 24-oct, unos
+   0,06-0,10 $ por 2.000); con `--confirmar` gasta.
+3. Sacar el juego: `precision amplio.jsonl r_amplio.jsonl --respuesta true
+   [--positivos N] [--control 100] [--semilla 0]` →
+   `tests/decisiones/<pregunta>/v<N>_precision_true.jsonl`, con todas las
+   «true» de Jev (o las N de más confianza, con los empates) y el control.
+   Cuántas «true» hay lo dice el resumen: hacen falta ~35 aciertos para que la
+   cota llegue a 0,9.
+4. Etiquetar **a ciegas**: el `origen` delata la respuesta de Jev. Quien
+   etiqueta recibe solo id y estado
+   (`jq -c '{id, pregunta, version, estado, opciones}' juego.jsonl`), y la
+   etiqueta se vuelve a pegar por `id` en el fichero del juego.
+5. `evaluar <juego_precision.jsonl> r_amplio.jsonl` (con las MISMAS respuestas
+   de las que salió: con otras se niega, y lo nota si a una fila le falta
+   respuesta, si un positivo ya no dice X o si una fila de control dice una X
+   que el juego habría metido como positivo). Sin ninguna «true» de Jev en el
+   conjunto, `precision` no saca juego. Da la precisión de la respuesta, su
+   cota y su umbral propio sobre los positivos; el recall sale `null` y solo
+   el bloque `control` lo estima, con su tamaño. El umbral común no sale de
+   este juego: se pone con el aleatorio.
+
 ## Automatic JS-render check
 
 Every crawl that finishes **without** `render_js` triggers
