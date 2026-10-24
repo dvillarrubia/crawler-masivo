@@ -18,6 +18,11 @@ inferior de Wilson al 95 %, no la precision a secas: 29 de 30 es «0,97» y su
 cota es 0,83) cubriendo al menos `MIN_CUBIERTAS` ejemplos. Sin eso no hay
 umbral: una pregunta sin evaluar no puede firmar respuestas
 (`decisiones.estado_por_confianza`).
+
+Con una respuesta rara (9 «si» de 200), la precision de esa respuesta se mide
+con un **juego de precision** (`seleccion_de_precision`, `metricas_precision`;
+decision 179): todas las veces que Jev la dio en un conjunto amplio, mas un
+control aleatorio. Da su precision y su umbral propio, nunca su recall.
 """
 
 from __future__ import annotations
@@ -249,6 +254,151 @@ def elegir_umbral(curva: list[dict], *, objetivo: float = PRECISION_OBJETIVO,
         if all(q["precision_minima"] >= objetivo for q in validos[i:]):
             return p["umbral"]
     return None
+
+
+# --- juego de precision de una respuesta (decision 179) ----------------------------
+#
+# Con la respuesta interesante rara (paginas_sustitutas 9 de 200), un juego
+# aleatorio no trae positivos bastantes: la cota de Wilson del «si» se queda en
+# 0,35-0,65 aunque Jev acierte todos. El juego de precision etiqueta TODAS las
+# veces que Jev contesto X en un conjunto amplio (o las N con mas confianza)
+# mas una muestra aleatoria de control. La precision de X sale exacta para ese
+# conjunto; el recall, no: los X reales que Jev no vio solo aparecen en el
+# control.
+
+ORIGEN_POSITIVO = "positivo_jev"
+ORIGEN_CONTROL = "control"
+CONTROL_PRECISION = 100
+
+
+def _es_confianza(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= float(v) <= 1.0
+
+
+def seleccion_de_precision(respondidas: list[dict], respuesta: str, *, n_positivos: int | None = None,
+                           n_control: int = CONTROL_PRECISION,
+                           semilla: int = 0) -> tuple[dict[str, dict], dict[str, Any]]:
+    """Que filas de un conjunto amplio ya respondido entran en el juego de
+    precision de `respuesta`, y de donde sale cada una.
+
+    `respondidas`: [{"id", "respuesta" (en el vocabulario de la etiqueta),
+    "confianza"}], una por fila con respuesta. Devuelve ({id: {"origen",
+    "en_control"}}, resumen). Positivos: todas las filas con esa respuesta o,
+    con `n_positivos`, las de mas confianza, con los empates del corte dentro
+    (asi «todo X con confianza >= c esta en el juego» sigue siendo cierto y su
+    precision tambien). Control: una muestra uniforme de TODO el conjunto
+    (tambien puede caer en un positivo, que queda `en_control`), lo unico del
+    juego que se parece al conjunto entero. Determinista con la semilla."""
+    import random
+
+    filas = sorted(respondidas, key=lambda r: str(r["id"]))
+    suyas = [r for r in filas if r.get("respuesta") == respuesta]
+    suyas.sort(key=lambda r: (-(float(r["confianza"]) if _es_confianza(r.get("confianza")) else -1.0),
+                              str(r["id"])))
+    elegidas = suyas
+    corte = None
+    if n_positivos is not None and n_positivos < len(suyas):
+        if n_positivos <= 0:
+            raise ValueError("n_positivos tiene que ser 1 o mas")
+        ultima = suyas[n_positivos - 1].get("confianza")
+        if not _es_confianza(ultima):
+            raise ValueError("no se pueden elegir las de mas confianza: hay respuestas sin confianza")
+        corte = float(ultima)
+        elegidas = [r for r in suyas if _es_confianza(r.get("confianza")) and float(r["confianza"]) >= corte]
+    seleccion = {str(r["id"]): {"origen": ORIGEN_POSITIVO, "en_control": False} for r in elegidas}
+    control = random.Random(semilla).sample(filas, min(max(n_control, 0), len(filas)))
+    for r in control:
+        clave = str(r["id"])
+        if clave in seleccion:
+            seleccion[clave]["en_control"] = True
+        else:
+            seleccion[clave] = {"origen": ORIGEN_CONTROL, "en_control": True}
+    resumen = {"respuesta": respuesta, "conjunto": len(filas), "respuestas_x": len(suyas),
+               "positivos_en_juego": len(elegidas), "todos_los_positivos": len(elegidas) == len(suyas),
+               "confianza_minima": corte, "control": len(control), "semilla": semilla}
+    return seleccion, resumen
+
+
+def metricas_precision(filas: Iterable[dict], respuesta: str, *, objetivo: float = PRECISION_OBJETIVO,
+                       min_cubiertas: int = MIN_CUBIERTAS,
+                       todos_los_positivos: bool = True) -> dict[str, Any]:
+    """Lo que dice un juego de precision de la respuesta `respuesta`.
+
+    Cada fila como en `metricas`, mas "origen" (`positivo_jev` | `control`) y
+    "en_control". La precision de X y su cota de Wilson se calculan sobre los
+    positivos (todas las X de Jev del conjunto, o las de confianza >= el corte),
+    y el umbral propio de X, con su curva: todas las X por encima de cualquier
+    confianza del juego estan etiquetadas. El recall NO: los X reales que Jev
+    contesto con otra cosa no estan entre los positivos, y el juego tampoco
+    sirve para el acierto, la ECE ni el umbral comun (los positivos estan
+    sobrerrepresentados). Lo unico que los estima es el control, una muestra
+    uniforme del conjunto, y se da aparte, con su tamano."""
+    todas = list(filas)
+    positivos = [f for f in todas if f.get("origen") == ORIGEN_POSITIVO]
+    otra = sum(1 for f in positivos if f.get("respuesta") is not None and f["respuesta"] != respuesta)
+    if otra:
+        raise ValueError(f"{otra} positivos del juego no tienen la respuesta «{respuesta}» en estas "
+                         "respuestas: no son las respuestas con las que se saco el juego")
+    validas = _filas_validas(positivos)
+    aciertos = sum(1 for f in validas if f["etiqueta"] == respuesta)
+    con_conf = [(float(f["confianza"]), f["etiqueta"] == respuesta) for f in validas
+                if _es_confianza(f.get("confianza"))]
+    curva = curva_cobertura(con_conf, len(con_conf))
+    umbral_propio = elegir_umbral(curva, objetivo=objetivo, min_cubiertas=min_cubiertas)
+    cota = wilson_inferior(aciertos, len(validas))
+    sin_etiqueta = sum(1 for f in positivos if f.get("etiqueta") in (None, ""))
+    sin_respuesta = sum(1 for f in positivos if f.get("respuesta") is None)
+    salida: dict[str, Any] = {
+        "respuesta": respuesta, "positivos": len(positivos), "evaluables": len(validas),
+        "sin_etiqueta": sin_etiqueta, "sin_respuesta": sin_respuesta, "aciertos": aciertos,
+        "precision": _r(aciertos / len(validas)) if validas else None,
+        "precision_minima": _r(cota), "objetivo": objetivo,
+        "umbral_propio": umbral_propio, "curva": curva,
+        "recall": None,
+        "recall_no_estimable": (
+            f"Los positivos son las respuestas «{respuesta}» de Jev: los «{respuesta}» reales que Jev "
+            "contesto con otra cosa no estan entre ellos, asi que el juego no dice cuantos se le "
+            "escapan. Solo el control (muestra aleatoria del conjunto) lo estima."),
+        "umbral": None,
+        "umbral_no_sale_de_este_juego": (
+            "El umbral comun pide la precision de todas las respuestas en una muestra que se parezca "
+            "al conjunto; aqui los positivos estan sobrerrepresentados. Se pone con un juego aleatorio, "
+            "y este dice si la respuesta rara llega sola (umbral_propio)."),
+    }
+    control = [f for f in todas if f.get("en_control")]
+    inf_control = metricas(control, objetivo=objetivo, min_cubiertas=min_cubiertas)
+    reales = [f for f in _filas_validas(control) if f["etiqueta"] == respuesta]
+    vistos = sum(1 for f in reales if f["respuesta"] == respuesta)
+    salida["control"] = {
+        "ejemplos": len(control), "evaluables": inf_control["evaluables"],
+        "acierto": inf_control["acierto"], "reales_x": len(reales),
+        "recall_x": _r(vistos / len(reales)) if reales else None,
+        "recall_x_minimo": _r(wilson_inferior(vistos, len(reales))),
+        "nota": ("Muestra aleatoria del conjunto amplio: estima el recall, el acierto y la calibracion "
+                 "del conjunto, con su tamano. Con pocos «%s» reales (%d) el recall es orientativo."
+                 % (respuesta, len(reales))),
+    }
+    avisos = []
+    if sin_respuesta:
+        avisos.append(f"{sin_respuesta} positivos no tienen respuesta en este fichero: se evalua con las "
+                      "respuestas de las que salio el juego")
+    if sin_etiqueta:
+        avisos.append(f"faltan {sin_etiqueta} positivos por etiquetar: la precision ya no es la de todas "
+                      f"las «{respuesta}» del juego, sino la de las etiquetadas")
+    if not todos_los_positivos:
+        avisos.append(f"el juego trae las «{respuesta}» de mas confianza, no todas: la precision es la "
+                      "de esas (confianza >= el corte), no la de cualquier respuesta "
+                      f"«{respuesta}»")
+    if cota is not None and cota < objetivo:
+        avisos.append(f"la cota de la precision de «{respuesta}» es {_r(cota)}, por debajo del "
+                      f"objetivo {objetivo}")
+    if validas and umbral_propio is None:
+        avisos.append(f"«{respuesta}» no tiene umbral propio: ninguna confianza deja {min_cubiertas} o mas "
+                      "por encima con la cota sobre el objetivo")
+    if len(reales) < MIN_REALES_AVISO:
+        avisos.append(f"el control trae {len(reales)} «{respuesta}» reales: su recall no dice nada")
+    salida["avisos"] = avisos
+    return salida
 
 
 def repetibilidad(primera: dict[str, str | None], segunda: dict[str, str | None]) -> dict[str, Any]:

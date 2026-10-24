@@ -860,3 +860,58 @@
    - Fuera: el contexto del sitio (`tipo_negocio`, una pregunta por sitio en
      jev-seo y la menos estable entre ejecuciones), el nivel 2 por vertical
      (ficha de hotel, de habitación) y la paginación de #12, que es determinista.
+
+<a id="d179"></a>
+179. **Una respuesta rara se mide con un juego de precisión: todas las veces que
+   Jev la da en un conjunto amplio, más un control aleatorio; su precisión sí,
+   su recall no** (#8). En la medida del 24-oct-2026 (juegos aleatorios de
+   200, etiqueta de Claude a ciegas) la respuesta que importa es rara:
+   `paginas_sustitutas` 9 «sí» reales de 200, `schema_contradice_contenido` 6 y
+   `title_es_generico` 17, y Jev contesta «sí» 7, 3 y 8 veces. Aunque acierte
+   todas, la cota de Wilson del «sí» se queda en 0,65 (7 de 7), 0,44 (3 de 3) y
+   0,41 (6 de 8), y `avisos` lo marca: con un juego aleatorio no hay positivos
+   bastantes para calibrar el «sí» (hacen falta ~35 aciertos seguidos para una
+   cota de 0,9). Etiquetar 2.000 al azar para tener 70 «sí» no tiene sentido.
+   - **`evaluar_decisiones.py precision <conjunto> <respuestas> --respuesta X`**
+     saca, de un conjunto amplio ya respondido, **todas** las filas donde Jev
+     contestó X (o, con `--positivos N`, las N de más confianza, con los empates
+     del corte dentro) y un **control** uniforme de todo el conjunto
+     (`--control`, 100 por defecto; puede caer en un positivo, que queda
+     `en_control`). Cada fila lleva su `origen` (`positivo_jev` | `control`),
+     `en_control` y el resumen (`juego_precision`: respuesta, tamaño del
+     conjunto, cuántas X había, cuántas entran, corte de confianza, semilla).
+     Barajadas y sin llamar a nadie. No se saca de otro juego de precisión.
+   - **`evaluar` lo reconoce por el `origen`**: la precisión de X y su cota se
+     calculan **sobre los positivos**, y como todas las X de Jev del conjunto
+     están en el juego (o todas las de confianza ≥ el corte), la precisión es la
+     de verdad para ese conjunto; la curva y el **umbral propio** de X salen de
+     ellos con el mismo criterio de la 159 (Wilson ≥ objetivo con 30 o más por
+     encima). **El recall no se afirma** (`recall: null` y por qué): los X reales
+     que Jev contestó con otra cosa no están entre los positivos. Tampoco el
+     acierto, la ECE ni el umbral común: los positivos están
+     sobrerrepresentados y saldrían sesgados (`umbral: null`; el común se pone
+     con un juego aleatorio). Lo único que estima el recall es el **control**,
+     y se da aparte con su tamaño (`control.recall_x`, su cota y cuántos X
+     reales trae; con menos de 10, `avisos` dice que no dice nada). Avisa
+     también si faltan positivos por etiquetar (la precisión ya no es la de
+     todas), si el juego es de las N de más confianza y si los positivos no
+     tienen la respuesta X en el fichero que se le pasa (otras respuestas: no
+     evalúa).
+   - **Etiquetar a ciegas.** El `origen` delata la respuesta de Jev: quien
+     etiqueta ve id y estado, no el fichero entero (el procedimiento, en
+     `docs/referencia/operacion.md`).
+   - **Tamaño y coste** con lo medido (frecuencia del «sí» de Jev en el juego
+     de 200 y coste medio por fila de `r_<pregunta>_v1.jsonl`): un conjunto de
+     2.000 daría ~70 «sí» en `paginas_sustitutas` (0,10 $), ~80 en
+     `title_es_generico` (0,07 $) y ~30 en `schema_contradice_contenido`
+     (0,06 $). El marcado no llega con los censos de hoy: entre los cuatro de
+     la 177 hay unas 1.060 llamadas posibles, ~16 «sí» esperados; hace falta
+     más clientes con valores verificables. El título genérico tiene además
+     precisión observada 0,75 (6 de 8; los dos fallos eran `[duda: true]` en la
+     etiqueta): con ella no llega aunque haya positivos de sobra, y el juego lo
+     dirá.
+   - **Lo que no resuelve**: el recall del «sí» (`title_es_generico` ve 6 de 17)
+     sigue necesitando juegos aleatorios grandes o un juego de recall aparte
+     (sacar lo que una regla barata marca como candidato y Jev contesta «no»).
+     Y no pone umbral a nada: las tres preguntas siguen sin umbral hasta medir
+     con estos juegos.
