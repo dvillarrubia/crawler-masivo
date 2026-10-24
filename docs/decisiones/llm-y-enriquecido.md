@@ -1460,3 +1460,104 @@
      «WORKOHOLICS» y «PenguinLibros» sin preguntar; cambia el filtro de la 177
      y la incidencia por regla aún no existe), y mandar la marca en el estado
      (arriba).
+
+<a id="d184"></a>
+184. **`schema_contradice_contenido` v3: si los fragmentos dan el precio del
+   ítem de la página y el importe exacto declarado no es ninguno de sus
+   precios, eso es una contradicción, no una ausencia** (#8, #17; mide lo que
+   dejó la 177). La pregunta salta de la v1 a la **v3** (huella en
+   `HUELLAS`) y sigue **sin umbral**: todo sale `incierto`. El estado no
+   cambia.
+   - **Lo que fallaba de la v1.** Censos rastreados el 24-oct-2026 de tres
+     sitios con schema que no se usaron para redactar ninguna pregunta
+     (Ilerna 002beac0, Telpark 6959c5bf, mytransfers e680723a; 5.037
+     páginas); juego de 600 estados
+     (`/data/archivo/jev/schema_censos_nuevos_etiquetado.jsonl`) etiquetado
+     el 25-oct por dos agentes a ciegas, con un juez para los desacuerdos (no
+     hubo ninguno; el fichero no lo guarda). **97,5 %**, pero de las **19
+     contradicciones reales** Jev solo ve 4 (los «no» fallados, con confianza
+     0,55-0,79) y no da ningún falso «sí». Las 15 que calla son el mismo caso:
+     el marcado declara un importe (un `priceRange` de un solo importe en las
+     fichas de parking, el `price` de un curso) y la página da el precio de
+     ese mismo ítem, pero ninguno es el declarado. La v1 lo juntaba con «el
+     valor no aparece en los fragmentos» (que no prueba nada). En los juegos
+     de la 177 (200 y precisión, 118) todos los «sí» eran otro caso, la
+     moneda (EUR declarado, USD visible en Lopesan), y ahí la v1 acertaba con
+     confianza 0,50-0,69.
+   - **La v3**, en inglés como la v1: `titulo` y `h1` dicen cuál es el ítem.
+     **true** si el marcado declara un importe exacto para el ítem (`price`,
+     o un `priceRange` de un solo importe), los fragmentos dan el precio
+     básico del ítem y el declarado no es ninguno de los precios del ítem,
+     aunque la diferencia sea pequeña (un marcado desfasado es justo lo que
+     se busca). Un `lowPrice` es un mínimo: solo se contradice si es mayor que
+     el precio más bajo del ítem. Un `priceRange` escrito como gama o con
+     símbolos (`$$`) solo se contradice con un precio del ítem fuera de ella.
+     Moneda, valoración, fecha y disponibilidad, como en la v1. **false** si
+     los fragmentos no dan ningún valor del ítem o solo los de sus partes,
+     opciones o variantes; si el declarado coincide con cualquiera de los del
+     ítem en cualquier papel (base, por hora, por noche, con descuento,
+     tachado); si la cifra distinta es de otra cosa (otro producto,
+     habitación, sede o parking listado en la misma página, un extra, una
+     cuota mensual o una señal, un total de varios ítems, noches o personas,
+     un «desde» coherente), o si solo cambia el formato.
+   - **Por qué v3 y no v2.** La v2 fue el primer borrador. Se midió con un
+     contenedor efímero del worker con el texto montado y **nunca se
+     desplegó**, pero sus respuestas quedaron en la caché de producción con
+     versión 2. `clave_cache` lleva la versión y no el texto, así que el
+     texto corregido, medido con la misma versión, recibió las respuestas
+     del borrador (coste estimado 0). Por eso la v3, con las dos huellas en
+     `HUELLAS`. **Regla para la próxima:** antes de medir un texto en el
+     contenedor efímero, súbele la versión; dos borradores no comparten
+     número.
+     - El borrador trataba un `lowPrice` como un precio exacto: si no
+       coincidía con ningún precio visible, era contradicción. La revisión
+       de la PR vio que eso no se sostiene, porque un `lowPrice` es un mínimo
+       y los fragmentos son parciales. El borrador tampoco decía nada de un
+       `priceRange` escrito como gama.
+       Con el borrador salían **17 de 19 y 3 falsos «sí»** en el juego de 600
+       (cursos de Ilerna cuyo `price` es la suma de las asignaturas, que son
+       las que dan los fragmentos), 200/200 y 118/118.
+   - **La v3, medida antes de mergear** en el mismo contenedor efímero
+     (respuestas en `/data/archivo/jev/r_schema_v3_*.jsonl`; juegos
+     `schema_v3_*.jsonl`, que son los mismos con `version` 3):
+     - Juego de 600: **598/600**; **17 de 19** contradicciones (la v1 veía 4)
+       y **ningún falso «sí»**. Los dos «no» fallados son un curso de Ilerna
+       (0,52) y un parking cuyo `priceRange` difiere en cinco céntimos del
+       precio de la primera hora (0,62). Cota de los «true» decididos: 0,82.
+     - Juego de 200 de la 177: **200/200** (6 de 6; la v1 acertaba 3).
+       Precisión de la 177 (118): **117/118**. El falso «sí» que queda es el
+       de la v1, un 4,5/5 escrito dentro de una reseña (0,53). `evaluar` no lo
+       puntúa como juego de precisión porque se sacó con las respuestas de la
+       v1.
+     - Juntos (800, sin el de precisión): **23 de 23** «true» decididos
+       aciertan, **cota 0,86**: no llega a 0,9, así que **sin umbral**. Con
+       cero falsos «sí» harían falta unos 35 aciertos «true» (34/34 da 0,899 y
+       35/35, 0,901), unas 38 contradicciones reales con esta recuperación.
+       Con el falso «sí» del juego de precisión, la precisión real tampoco es
+       cero fallos.
+   - **Lo que no se puede afirmar.**
+     - El juego de 600 no es ciego para quien redactó la v3: se escribió
+       viendo sus fallos, aunque sin copiar casos.
+     - Sus 17 aciertos son 8 ítems distintos: 15 son de 6 parkings de
+       Telpark en varios idiomas y 2 de cursos de Ilerna con el mismo `price`
+       de plantilla. 6 de los 17 tienen confianza de 0,54 a 0,57.
+     - Los ejemplos de formato vienen de la v1 y salen en los juegos de la
+       177: «116€» y «2026-10-31» son los valores de la página de ofertas de
+       Lopesan, y «4,5/5» es el texto de la reseña del falso «sí». Inflan algo
+       el 200/200 y el 117/118, no el juego de 600. Esta pregunta no tiene la
+       vigilancia por huella de la 182.
+     - Sin medir: `lowPrice` (no sale en ningún juego), las variantes, y el
+       precio con y sin IVA.
+     - Un `priceRange` de un solo importe se sigue leyendo como precio
+       exacto, como en el borrador. Que coincida con la primera hora es una
+       costumbre de Telpark (unas 510 de sus 566 filas), no de schema.org. Un
+       restaurante con `priceRange: 25 €` que lista sus platos podría dar un
+       falso «sí».
+     - Las instrucciones chocan en un caso. Un `lowPrice` mayor que los
+       precios de variantes que se ven sería «true» por la regla del mínimo y
+       «false» por la de «solo partes, opciones o variantes». Queda para la
+       v4, con un juego que tenga `lowPrice`.
+     - La medida limpia es un censo que nadie haya mirado.
+   - Fuera: tocar el estado (mandar el precio de cada asignatura con su
+     etiqueta para poder sumar el total) y cambiar los ejemplos de formato
+     heredados (otra versión, otra medida).
