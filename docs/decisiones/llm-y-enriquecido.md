@@ -1509,11 +1509,11 @@
      `HUELLAS`. **Regla para la próxima:** antes de medir un texto en el
      contenedor efímero, súbele la versión; dos borradores no comparten
      número.
-     - El borrador decía que `lowPrice` y cualquier `priceRange` se
-       contradicen si no coinciden con un precio visible. La revisión de la PR
-       vio que eso no se sostiene: un `lowPrice` es un mínimo y los fragmentos
-       son parciales, y un `priceRange` igual a la primera hora es una
-       costumbre de Telpark (unas 510 de sus 566 filas), no de schema.org.
+     - El borrador trataba un `lowPrice` como un precio exacto: si no
+       coincidía con ningún precio visible, era contradicción. La revisión
+       de la PR vio que eso no se sostiene, porque un `lowPrice` es un mínimo
+       y los fragmentos son parciales. El borrador tampoco decía nada de un
+       `priceRange` escrito como gama.
        Con el borrador salían **17 de 19 y 3 falsos «sí»** en el juego de 600
        (cursos de Ilerna cuyo `price` es la suma de las asignaturas, que son
        las que dan los fragmentos), 200/200 y 118/118.
@@ -1538,8 +1538,9 @@
    - **Lo que no se puede afirmar.**
      - El juego de 600 no es ciego para quien redactó la v3: se escribió
        viendo sus fallos, aunque sin copiar casos.
-     - Sus 17 aciertos son 9 ítems distintos: 6 parkings de Telpark en varios
-       idiomas y 3 cursos de Ilerna con el mismo `price` de plantilla.
+     - Sus 17 aciertos son 8 ítems distintos: 15 son de 6 parkings de
+       Telpark en varios idiomas y 2 de cursos de Ilerna con el mismo `price`
+       de plantilla. 6 de los 17 tienen confianza de 0,54 a 0,57.
      - Los ejemplos de formato vienen de la v1 y salen en los juegos de la
        177: «116€» y «2026-10-31» son los valores de la página de ofertas de
        Lopesan, y «4,5/5» es el texto de la reseña del falso «sí». Inflan algo
@@ -1547,6 +1548,15 @@
        vigilancia por huella de la 182.
      - Sin medir: `lowPrice` (no sale en ningún juego), las variantes, y el
        precio con y sin IVA.
+     - Un `priceRange` de un solo importe se sigue leyendo como precio
+       exacto, como en el borrador. Que coincida con la primera hora es una
+       costumbre de Telpark (unas 510 de sus 566 filas), no de schema.org. Un
+       restaurante con `priceRange: 25 €` que lista sus platos podría dar un
+       falso «sí».
+     - Las instrucciones chocan en un caso. Un `lowPrice` mayor que los
+       precios de variantes que se ven sería «true» por la regla del mínimo y
+       «false» por la de «solo partes, opciones o variantes». Queda para la
+       v4, con un juego que tenga `lowPrice`.
      - La medida limpia es un censo que nadie haya mirado.
    - Fuera: tocar el estado (mandar el precio de cada asignatura con su
      etiqueta para poder sumar el total) y cambiar los ejemplos de formato
