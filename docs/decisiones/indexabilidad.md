@@ -1076,7 +1076,9 @@
      puede no rastrearse nunca y llega antes que la página, sin `url_id`. El
      href del mismo origen se guarda sin él (`/en/a`), `shared/sitemaps.py`
      (`compactar_hreflang` / `expandir_hreflang`), porque lo usan el spider y el
-     análisis. `[]` = ninguno; NULL = no se sabe. Tope
+     análisis; salvo si lo que queda empieza por `//` (`https://x.com//fr/a`,
+     un fallo de CMS que existe), que se leería como URL relativa al protocolo
+     con host `fr` y se guarda entero (revisión de la PR #231). `[]` = ninguno; NULL = no se sabe. Tope
      `SITEMAP_HREFLANG_MAX` (2 millones por proceso; pasado, la entrada va con
      NULL y `jobs.sitemaps.hreflang_recortado`), además del de entradas.
      **Medido** en Typeform (8.144 entradas, 21.156 anotaciones): ~60 bytes por
@@ -1100,10 +1102,26 @@
      tope de URLs; `estado_hreflang_sitemap`) y el sitio usa hreflang en el
      sitemap, a una página sin entrada guardada no se le afirma que no devuelva
      el enlace, que no se autorreferencie, que su clúster no tenga x-default ni
-     un retorno incoherente: puede estar en lo no leído. Si en lo leído ninguna
+     un retorno incoherente: puede estar en lo no leído. Que el sitio lo usa lo
+     dice lo que el spider GUARDÓ (`jobs.sitemaps.hreflang_guardadas` o el
+     tope), no solo las entradas de URLs rastreadas: lo leído puede declarar
+     hreflang solo de URLs que no se rastrearon. Si en lo leído ninguna
      entrada declara hreflang, se da por que el sitio no lo usa ahí (lo pone un
      plugin para todas o para ninguna) y todo queda como antes. Un censo
      anterior (sin la marca `jobs.sitemaps.hreflang`) no lee la columna.
+   - **Memoria del análisis**: el tope se dimensionó por la BD, pero el
+     análisis tiene cada anotación en memoria. Con una estructura por fuente
+     (un set por anotación y un diccionario página → código → fuente → destinos)
+     eran ~2,3 KB por anotación, también solo con HTML (+875 B frente a antes):
+     4,6 GB al tope en un contenedor de 4 GB. Ahora las dos consultas se leen
+     por lotes, cada href y su clave se guardan una vez (una URL de un clúster
+     de N idiomas sale en N páginas) y las fuentes de cada anotación son bits
+     en una lista alineada con las filas; las páginas con dos fuentes o más se
+     agrupan después, una a una. **Medido** con `tracemalloc` sobre
+     `analyze_hreflang` (SQLite, clústeres perfectos de 8 y 20 idiomas): 160 k
+     anotaciones solo HTML, 223 MB en master, 363 con la primera versión, 114
+     ahora; 160 k solo del sitemap, 372 → 110 MB; 1 M solo del sitemap, 573 MB
+     (~575 B por anotación, ~1,15 GB al tope).
    - **De dónde sale cada aviso**: el de una anotación que SOLO declara el
      sitemap (`hreflang_broken_target`, `hreflang_missing_return`,
      `hreflang_invalid_lang`) lleva `origen: "sitemap"` en el detalle, porque
@@ -1117,7 +1135,11 @@
      `es` (`/es/plantillas-sub-category/...`) que dan 404 y que el `<head>` no
      declara (comprobado con curl). Ninguna discrepancia en esa muestra.
    - **Qué pide**: re-rastrear (el hreflang del sitemap no está en los censos
-     ya hechos). Queda fuera: la nota de /insights y el CSV cuentan solo la
-     tabla `hreflang`, y la pestaña Hreflang del Explorador lista esas filas;
+     ya hechos). La nota de Internacionalización de /insights cuenta la tabla
+     `hreflang`; un sitio con el hreflang solo en el sitemap no tiene filas,
+     pero sus avisos sí: un error abierto le pone el tope de la decisión 92 y
+     cada aviso se recomienda (salía un 100 sin recomendaciones con errores en
+     Problemas; `metrics.solo_sitemap`). Queda fuera: los porcentajes de la
+     nota y el CSV cuentan solo la tabla `hreflang`, y la pestaña Hreflang del Explorador lista esas filas;
      las del sitemap se ven en la ficha de la URL y en los avisos. Tests:
      `tests/test_hreflang_sitemap.py`.

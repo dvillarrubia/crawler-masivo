@@ -21,6 +21,8 @@ import time
 import uuid
 from contextlib import contextmanager
 import re
+import sys
+from array import array
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -173,6 +175,11 @@ def _respuesta_valida():
     """
     return or_(Url.response_class.is_(None),
                Url.response_class.notin_(sorted(NO_VALIDAS)))
+
+
+# Fuentes de una anotacion hreflang, como bits (decision 167): `Hreflang.origen`
+# (NULL es el `<head>`) y el sitemap, que no tiene fila.
+_BIT_FUENTE = {"html": 1, "cabecera": 2, "sitemap": 4}
 
 
 def _clave(url: str | None):
@@ -1717,38 +1724,64 @@ class SEOAnalyzer:
         # esa), y las repetidas reciben su mismo veredicto al final, para que
         # no queden a NULL en la nota de /insights. Asi re-analizar arregla los
         # censos ya guardados, que el extractor no deduplicaba.
-        rows = []
+        #
+        # Memoria: todo lo de aqui es por anotacion, y un sitemap con 20
+        # idiomas son millones (revision de la PR #231: ~1,7 KB por anotacion
+        # del sitemap con una estructura por fuente). Por eso las dos
+        # consultas se leen por lotes, cada href y su clave se guardan UNA vez
+        # (una URL de un cluster de N idiomas aparece en N paginas), y las
+        # fuentes de cada anotacion son bits en `mascaras`, alineada con
+        # `rows`, no un set por anotacion.
+        rows: list[tuple] = []
+        mascaras: list[int] = []
         representante: dict[tuple, int] = {}
         repetidas: dict[int, list[int]] = defaultdict(list)
-        # Pagina -> codigo (casefold) -> fuente -> destinos. Solo lo que Google
-        # lee (no el body) y de TODAS las filas, no solo las representantes:
-        # es de donde sale `hreflang_fuentes_discrepan` (decision 167).
-        por_fuente: dict[int, dict[str, dict[str, set]]] = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(set)))
-        # Clave de la anotacion -> fuentes que la declaran, para decir en el
-        # aviso de que fuente sale lo que solo esta en el sitemap.
-        fuentes_de: dict[tuple, set[str]] = defaultdict(set)
-        filas_html = sorted(
-            (tuple(f) for f in self.session.execute(stmt).all()), key=lambda f: f[0])
-        filas_sitemap = [(-(i + 1), uid, lang, href, False, "sitemap")
-                         for i, (uid, lang, href) in enumerate(sm["filas"])]
-        for fila in filas_html + filas_sitemap:
-            hid, uid, lang, href, en_body, origen = fila
-            clave = (uid, (lang or "").casefold(), _clave(href) or href)
-            if not en_body:
-                fuentes_de[clave].add(origen or "html")
-                por_fuente[uid][(lang or "").casefold()][origen or "html"].add(
-                    _clave(href) or href)
+        # Pagina -> fuentes con alguna anotacion (bits): solo las que tienen
+        # dos o mas pueden discrepar (decision 167).
+        mascara_pagina: dict[int, int] = defaultdict(int)
+        # href -> (el mismo href, su clave): el primero que se vio se reutiliza.
+        canon: dict[str | None, tuple] = {}
+        minusculas: dict[str, str] = {}
+
+        def _cf(lang: str | None) -> str:
+            c = minusculas.get(lang or "")
+            if c is None:
+                c = minusculas[lang or ""] = sys.intern((lang or "").casefold())
+            return c
+
+        def _filas():
+            yield from self.session.execute(
+                stmt.order_by(Hreflang.id).execution_options(yield_per=BATCH_SIZE))
+            yield from sm["filas"]
+
+        for hid, uid, lang, href, en_body, origen in _filas():
+            par = canon.get(href)
+            if par is None:
+                par = canon[href] = (href, _clave(href))
+            href, nh = par
+            if lang:
+                lang = sys.intern(lang)
+            clave = (uid, _cf(lang), nh or href)
+            bit = 0 if en_body else _BIT_FUENTE.get(origen or "html", 1)
+            if bit:
+                mascara_pagina[uid] |= bit
+            fila = (hid, uid, lang, href, en_body)
             i = representante.get(clave)
             if i is None:
                 representante[clave] = len(rows)
                 rows.append(fila)
-            elif rows[i][4] and not en_body:
+                mascaras.append(bit)
+                continue
+            mascaras[i] |= bit
+            if rows[i][4] and not en_body:
                 repetidas[hid].append(rows[i][0])
                 repetidas[hid].extend(repetidas.pop(rows[i][0], []))
                 rows[i] = fila
-            else:
+            elif hid > 0:
+                # Una del sitemap repetida (id negativo) no tiene fila que
+                # escribir: no se apunta.
                 repetidas[rows[i][0]].append(hid)
+        del representante
 
         # Map each crawled page to the set of hreflang targets it declares,
         # so we can check whether a target links back (reciprocal return tag).
@@ -1762,15 +1795,21 @@ class SEOAnalyzer:
         # Pagina -> destinos a los que apunta con cualquier codigo, valido o no:
         # para la autorreferencia basta con que exista (si su codigo esta mal,
         # el aviso es `hreflang_invalid_lang`, no este).
-        for _hid, page_id, lang, href, en_body, _origen in rows:
-            nh = _clave(href)
+        for _hid, page_id, lang, href, en_body in rows:
+            nh = canon[href][1]
             if nh and not en_body:
                 targets_by_page[page_id].add(nh)
                 if _lang_hreflang_valido(lang)[0]:
-                    codigos[page_id][nh].add(lang.casefold())
+                    codigos[page_id][nh].add(_cf(lang))
 
         # Anotaciones agrupadas por veredicto, para escribirlas por lotes.
         por_veredicto: dict[tuple[bool, bool | None], list[int]] = {}
+
+        def apuntar(veredicto: tuple, hid: int) -> None:
+            # Las del sitemap (id negativo) no tienen fila que escribir.
+            if hid > 0:
+                por_veredicto.setdefault(veredicto, []).append(hid)
+
         # Pagina -> idiomas anotados en el `<body>`.
         en_body_por_pagina: dict[int, list[str]] = defaultdict(list)
         # Destino no indexable -> pagina indexable que lo anota -> idiomas.
@@ -1786,11 +1825,34 @@ class SEOAnalyzer:
                     and uid not in sm["conocidas"])
 
         # Mismo codigo hacia URLs distintas segun la fuente (decision 167).
-        discrepantes, entre_fuentes = self._hreflang_discrepancias(
-            por_fuente, fuente, url_status, url_id_by_norm, info_url)
+        def por_fuente():
+            """(pagina, codigo -> fuente -> destinos) de las paginas fuente con
+            dos fuentes o mas, una a una: solo lo que Google lee (no el body).
+            Sale de las representantes, cuya mascara junta las fuentes de todas
+            sus repetidas."""
+            varias = {p for p, m in mascara_pagina.items() if m & (m - 1) and fuente(p)}
+            if not varias:
+                return
+            filas_de: dict[int, array] = defaultdict(lambda: array("q"))
+            for i, f in enumerate(rows):
+                if mascaras[i] and f[1] in varias:
+                    filas_de[f[1]].append(i)
+            for page_id, indices in filas_de.items():
+                por_codigo: dict[str, dict[str, set]] = defaultdict(
+                    lambda: defaultdict(set))
+                for i in indices:
+                    _h, _p, lang, href, _b = rows[i]
+                    destino = canon[href][1] or href
+                    for nombre, bit in _BIT_FUENTE.items():
+                        if mascaras[i] & bit:
+                            por_codigo[_cf(lang)][nombre].add(destino)
+                yield page_id, por_codigo
 
-        for hreflang_id, url_id, lang, href, en_body, _origen in rows:
-            norm_href = _clave(href)
+        discrepantes, entre_fuentes = self._hreflang_discrepancias(
+            por_fuente(), fuente, url_status, url_id_by_norm, info_url)
+
+        for n_fila, (hreflang_id, url_id, lang, href, en_body) in enumerate(rows):
+            norm_href = canon[href][1]
 
             lang_is_valid, idioma_malo, region_mala = _lang_hreflang_valido(lang)
 
@@ -1798,8 +1860,7 @@ class SEOAnalyzer:
             # valido, que sigue siendo verdad, y nada mas. Lo que tenga mal lo
             # tendra tambien su canonica, y ahi es donde se avisa.
             if not fuente(url_id):
-                por_veredicto.setdefault((lang_is_valid, None), []).append(
-                    hreflang_id)
+                apuntar((lang_is_valid, None), hreflang_id)
                 continue
 
             # Un hreflang en el `<body>` Google lo ignora: esa anotacion no
@@ -1810,8 +1871,7 @@ class SEOAnalyzer:
             # idioma es valido, que sigue siendo verdad.
             if en_body:
                 en_body_por_pagina[url_id].append(lang)
-                por_veredicto.setdefault((lang_is_valid, None), []).append(
-                    hreflang_id)
+                apuntar((lang_is_valid, None), hreflang_id)
                 continue
 
             # Reciprocal return tag. Only decidable when the target page was
@@ -1881,14 +1941,12 @@ class SEOAnalyzer:
             # era el mismo hallazgo dos veces (decision 36). Medido en progym:
             # 139 de las 140 `hreflang_missing_return` eran esto.
             # Lo que solo declara el sitemap se dice: el arreglo va alli.
-            de_sitemap = fuentes_de.get(
-                (url_id, (lang or "").casefold(), norm_href or href)) == {"sitemap"}
+            de_sitemap = mascaras[n_fila] == _BIT_FUENTE["sitemap"]
             if return_ok is False:
                 sin_retorno.append((hreflang_id, lang_is_valid, url_id, lang,
                                     href, norm_href, de_sitemap))
             else:
-                por_veredicto.setdefault((lang_is_valid, return_ok), []).append(
-                    hreflang_id)
+                apuntar((lang_is_valid, return_ok), hreflang_id)
 
             if not lang_is_valid:
                 detalle = {"lang": lang}
@@ -1954,9 +2012,9 @@ class SEOAnalyzer:
             if norm_href is not None and variante_de.get(url_id) == norm_href:
                 # La autorreferencia escrita con otra URL: no se afirma que
                 # falte el retorno (ni en la nota de /insights).
-                por_veredicto.setdefault((lang_valid, None), []).append(hreflang_id)
+                apuntar((lang_valid, None), hreflang_id)
                 continue
-            por_veredicto.setdefault((lang_valid, False), []).append(hreflang_id)
+            apuntar((lang_valid, False), hreflang_id)
             detalle = {"lang": lang, "href": href}
             if de_sitemap:
                 detalle["origen"] = "sitemap"
@@ -1969,9 +2027,7 @@ class SEOAnalyzer:
             )
 
         for (lang_valid, return_ok), ids in por_veredicto.items():
-            ids = ids + [r for hid in ids for r in repetidas.get(hid, ())]
-            # Las del sitemap (id negativo) no tienen fila que escribir.
-            ids = [i for i in ids if i > 0]
+            ids = ids + [r for hid in ids for r in repetidas.get(hid, ()) if r > 0]
             for i in range(0, len(ids), 5000):
                 self.session.execute(
                     update(Hreflang)
@@ -1988,57 +2044,89 @@ class SEOAnalyzer:
     def _hreflang_del_sitemap(self) -> dict:
         """El hreflang del sitemap de las URLs rastreadas (decision 167).
 
-        Devuelve ``filas`` [(url_id, lang, href)], ``conocidas`` (las URLs con
-        su entrada leida, aunque no declare nada), ``en_uso`` (alguna entrada
-        declara hreflang) y ``completo`` (`shared.sitemaps.estado_hreflang_sitemap`).
-        Un censo anterior a la columna, o una base sin migrar, sale vacio y
-        completo: el analisis queda como antes, solo con el HTML y la cabecera.
+        Devuelve ``filas``, un generador de ``(id < 0, url_id, lang, href,
+        False, "sitemap")`` que se lee por lotes, y tres datos que se completan
+        al recorrerlo: ``conocidas`` (las URLs con su entrada leida, aunque no
+        declare nada), ``en_uso`` (el sitio declara hreflang en el sitemap) y
+        ``completo`` (`shared.sitemaps.estado_hreflang_sitemap`). Un censo
+        anterior a la columna, o una base sin migrar, sale vacio y completo:
+        el analisis queda como antes, solo con el HTML y la cabecera.
+
+        ``en_uso`` sale de lo que el spider GUARDO (`hreflang_guardadas` o el
+        tope de `jobs.sitemaps`), no solo de las entradas que casan con una
+        URL rastreada: un sitemap leido a medias que declara hreflang de URLs
+        que no se rastrearon tambien dice que el sitio lo usa, y entonces lo
+        que falte en una pagina sin entrada leida no se afirma.
 
         `sitemap_entries` se une con `urls` por su indice unico
         ``(job_id, url_hash)``: una entrada de una URL que no se rastreo no es
-        fuente de nada, y asi no se cargan en memoria.
+        fuente de nada, y asi no se cargan en memoria. Las filas no se juntan
+        en una lista: el sitemap de un sitio grande son millones de
+        anotaciones (revision de la PR #231).
 
         Best-effort entero: si algo falla, el hreflang se analiza sin el
-        sitemap en vez de tumbar el analisis.
+        sitemap en vez de tumbar el analisis (y si falla a medias de leerlo,
+        lo leido vale y lo demas no se conoce).
         """
-        vacio = {"filas": [], "conocidas": set(), "en_uso": False,
-                 "completo": True}
+        def vacio() -> dict:
+            return {"filas": iter(()), "conocidas": set(), "en_uso": False,
+                    "completo": True}
         try:
-            from shared.models import Job, SitemapEntry
-            from shared.sitemaps import estado_hreflang_sitemap, expandir_hreflang
+            from shared.models import Job
+
+            from shared.sitemaps import estado_hreflang_sitemap
 
             job = self.session.get(Job, self.job_id)
-            guardado, completo = estado_hreflang_sitemap(
-                getattr(job, "sitemaps", None) if job is not None else None)
+            resumen = getattr(job, "sitemaps", None) if job is not None else None
+            guardado, completo = estado_hreflang_sitemap(resumen)
             if not guardado:
-                return vacio
+                return vacio()
+            estado = {"conocidas": set(), "completo": completo,
+                      "en_uso": bool(resumen.get("hreflang_guardadas")
+                                     or resumen.get("hreflang_recortado"))}
+            estado["filas"] = self._filas_hreflang_sitemap(estado)
+            return estado
+        except Exception:  # noqa: BLE001 -- best-effort (decision 40)
+            logger.warning("No se pudo leer el hreflang del sitemap; se analiza "
+                           "sin el (decision 167)", exc_info=True)
+            return vacio()
+
+    def _filas_hreflang_sitemap(self, estado: dict):
+        """Las anotaciones de :meth:`_hreflang_del_sitemap`, por lotes.
+
+        Best-effort: si falla, lo leido vale, y si el sitio usa hreflang en el
+        sitemap lo demas no se conoce (no se afirman ausencias); si no consta
+        que lo use, el analisis queda como antes, con el HTML y la cabecera.
+        """
+        n = 0
+        try:
+            from shared.models import SitemapEntry
+            from shared.sitemaps import expandir_hreflang
+
             with self.session.begin_nested():
-                resultado = self.session.execute(
+                consulta = (
                     select(Url.id, SitemapEntry.url, SitemapEntry.hreflang)
                     .join(Url, and_(Url.job_id == SitemapEntry.job_id,
                                     Url.url_hash == SitemapEntry.url_hash))
                     .where(SitemapEntry.job_id == self.job_id,
                            SitemapEntry.hreflang.isnot(None))
-                ).all()
-            filas: list[tuple] = []
-            vistas: set[tuple] = set()
-            conocidas: set[int] = set()
-            for uid, url, guardado_json in resultado:
-                pares = expandir_hreflang(url, guardado_json)
-                if pares is None:
-                    continue
-                conocidas.add(uid)
-                for lang, href in pares:
-                    clave = (uid, lang, href)
-                    if clave not in vistas:
-                        vistas.add(clave)
-                        filas.append(clave)
-            return {"filas": filas, "conocidas": conocidas,
-                    "en_uso": bool(filas), "completo": completo}
+                    .execution_options(yield_per=BATCH_SIZE)
+                )
+                for uid, url, guardado_json in self.session.execute(consulta):
+                    pares = expandir_hreflang(url, guardado_json)
+                    if pares is None:
+                        continue
+                    estado["conocidas"].add(uid)
+                    for lang, href in pares:
+                        n += 1
+                        estado["en_uso"] = True
+                        yield (-n, uid, lang, href, False, "sitemap")
         except Exception:  # noqa: BLE001 -- best-effort (decision 40)
             logger.warning("No se pudo leer el hreflang del sitemap; se analiza "
                            "sin el (decision 167)", exc_info=True)
-            return vacio
+            # Si se sabe que el sitio lo usa (lo guardado o lo ya leido), lo que
+            # no se pudo leer no se conoce; si no, queda como antes.
+            estado["completo"] = not estado["en_uso"]
 
     @staticmethod
     def _hreflang_discrepancias(por_fuente, fuente, url_status, url_id_by_norm,
@@ -2049,6 +2137,8 @@ class SEOAnalyzer:
         el HTML dice `fr -> /fr/a` y el sitemap `fr -> /fr/b`, para el la
         pagina declara dos URLs para el frances, una senal contradictoria de
         la que puede descartar una o las dos (decision 167).
+
+        *por_fuente*: iterable de ``(pagina, {codigo: {fuente: destinos}})``.
 
         Devuelve ``(discrepantes, entre_fuentes)``:
 
@@ -2062,7 +2152,7 @@ class SEOAnalyzer:
         """
         discrepantes: dict[tuple, dict[str, tuple]] = {}
         entre_fuentes: set[tuple] = set()
-        for page_id, por_codigo in por_fuente.items():
+        for page_id, por_codigo in por_fuente:
             if not fuente(page_id):
                 continue
             for codigo, fuentes in por_codigo.items():

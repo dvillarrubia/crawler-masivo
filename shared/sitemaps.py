@@ -110,7 +110,11 @@ def compactar_hreflang(url_entrada: str, pares) -> list[list[str]]:
             continue
         idioma = idioma.replace("\x00", "")[:20]
         href = href.replace("\x00", "")
-        if origen and href.startswith(origen + "/"):
+        # Lo que queda tras el origen tiene que volver igual: `//fr/a` (una
+        # ruta con doble barra, un fallo de CMS que existe) se leeria como
+        # URL relativa al protocolo con host `fr`, y se guarda entera.
+        if (origen and href.startswith(origen + "/")
+                and not href.startswith(origen + "//")):
             href = href[len(origen):]
         salida.append([idioma, href])
     return salida

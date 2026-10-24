@@ -3377,12 +3377,21 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         Url, Hreflang.url_id == Url.id,
     ).filter(Url.job_id == job_id).scalar() or 0
 
+    # Sin filas en `hreflang` el sitio puede declararlo solo en el sitemap
+    # (decision 167): esas anotaciones no tienen fila, pero sus avisos si.
+    # Solo sin ninguno de los dos no hay nada que contar.
+    solo_sitemap = False
     if total_hreflang == 0:
-        return CategoryInsight(
-            key="i18n", name="Internacionalizacion", icon="🌐", score=100,
-            metrics={"total_hreflang": 0, "languages": [], "pct_return_ok": 0, "pct_lang_valid": 0},
-            recommendations=[],
-        )
+        hay_avisos = db.query(Issue.id).filter(
+            Issue.job_id == job_id, Issue.issue_type.like("hreflang\\_%", escape="\\"),
+        ).first() is not None
+        if not hay_avisos:
+            return CategoryInsight(
+                key="i18n", name="Internacionalizacion", icon="🌐", score=100,
+                metrics={"total_hreflang": 0, "languages": [], "pct_return_ok": 0, "pct_lang_valid": 0},
+                recommendations=[],
+            )
+        solo_sitemap = True
 
     # Languages detected
     lang_rows = (
@@ -3427,6 +3436,13 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
     destino_malo = _incidencias("hreflang_broken_target",
                                 "hreflang_destino_no_indexable")
     sin_autorref = _incidencias("hreflang_sin_autorreferencia")
+    if solo_sitemap:
+        # Sin filas no hay porcentaje que calcular, pero lo que el analisis
+        # avisa del sitemap se recomienda igual (los dos son una incidencia
+        # por anotacion), y un error abierto baja la nota abajo: un 100 sin
+        # recomendaciones con errores en Problemas era afirmar «bueno».
+        missing_return = _incidencias("hreflang_missing_return")
+        invalid_lang = _incidencias("hreflang_invalid_lang")
 
     pct_return_ok = _safe_pct(return_ok, return_ok + missing_return)
     pct_lang_valid = _safe_pct(lang_valid, lang_valid + invalid_lang)
@@ -3437,13 +3453,19 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
 
     # La nota solo con lo verificado. Sin nada verificado no hay nota que dar:
     # se deja en 100 (nada que corregir que sepamos) y se avisa abajo.
+    # Solo del sitemap no hay denominador (las anotaciones correctas no tienen
+    # fila): un porcentaje sobre los avisos daria 0 % y se queda en 100 con el
+    # tope de abajo si hay un error.
     partes = []
-    if return_ok + missing_return:
-        partes.append(pct_return_ok)
-    if lang_valid + invalid_lang:
-        partes.append(pct_lang_valid)
-    if destino_malo:
-        partes.append(pct_destino_ok)
+    if solo_sitemap:
+        pct_return_ok = pct_lang_valid = pct_destino_ok = 0
+    else:
+        if return_ok + missing_return:
+            partes.append(pct_return_ok)
+        if lang_valid + invalid_lang:
+            partes.append(pct_lang_valid)
+        if destino_malo:
+            partes.append(pct_destino_ok)
     score = sum(partes) / len(partes) if partes else 100
     # Y con un error abierto la categoria no puede decir «bueno», por pocas
     # anotaciones que sean (el criterio de la nota global, decision 92): en
@@ -3481,7 +3503,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             affected_count=sin_autorref,
             issue_types=["hreflang_sin_autorreferencia"],
         ))
-    if not partes:
+    if not partes and not solo_sitemap:
         recs.append(Recommendation(
             priority="baja", title="Hreflang sin verificar",
             description=f"Las {total_hreflang} etiquetas hreflang no se han podido verificar (retorno e idioma). Relanza el analisis del job para comprobarlas.",
@@ -3498,6 +3520,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
             "destino_malo": destino_malo, "pct_destino_ok": pct_destino_ok,
             "sin_autorreferencia": sin_autorref,
             "invalid_lang": invalid_lang, "lang_unknown": lang_unknown,
+            "solo_sitemap": solo_sitemap,
         },
         recommendations=recs,
     )

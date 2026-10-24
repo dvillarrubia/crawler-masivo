@@ -52,6 +52,17 @@ def test_compactar_quita_el_origen_propio_y_expandir_lo_devuelve():
         ["en", "https://www.x.com:8443/en/a"]]
 
 
+def test_una_ruta_con_doble_barra_hace_el_viaje_de_ida_y_vuelta():
+    """`https://x.com//fr/a` compactado a `//fr/a` volvia como URL relativa al
+    protocolo con host `fr`: discrepancia falsa con el HTML y destino roto
+    perdido (revision de la PR #231)."""
+    url = "https://x.com/es/a"
+    pares = [("fr", "https://x.com//fr/a"), ("en", "https://x.com/en//a")]
+    guardado = compactar_hreflang(url, pares)
+    assert guardado == [["fr", "https://x.com//fr/a"], ["en", "/en//a"]]
+    assert expandir_hreflang(url, guardado) == pares
+
+
 def test_expandir_distingue_no_se_sabe_de_ninguno():
     assert expandir_hreflang("https://x.com/", None) is None
     assert expandir_hreflang("https://x.com/", []) == []
@@ -435,7 +446,7 @@ def _sin_retorno_desde_sitemap_desconocido(sitemaps):
     """ES (HTML) anota EN; EN no lo devuelve en el HTML ni tiene entrada de
     sitemap guardada; FR si la tiene. El sitio usa hreflang en el sitemap."""
     s, j = _montar(sitemaps=sitemaps)
-    es, en, fr = _url(s, j, ES), _url(s, j, EN), _url(s, j, FR)
+    es, en, _fr = _url(s, j, ES), _url(s, j, EN), _url(s, j, FR)
     _html(s, es, ("es", ES), ("en", EN), ("x-default", ES))
     _html(s, en, ("en", EN))
     _sitemap(s, j, FR, ("fr", FR), ("es", ES), ("x-default", ES))
@@ -485,4 +496,81 @@ def test_sin_la_tabla_el_analisis_sigue():
     es, en = _url(s, j, ES), _url(s, j, EN)
     _html(s, es, ("es", ES), ("en", EN))
     _html(s, en, ("en", EN))
+    assert [i.details["href"] for i in _de(_analizar(s, j), "hreflang_missing_return")] == [EN]
+
+
+# ---------------------------------------------------------------------------
+# Revision de la PR #231
+# ---------------------------------------------------------------------------
+def test_ruta_con_doble_barra_en_las_dos_fuentes_no_discrepa():
+    """El mismo `https://x.com//fr/a` en el HTML y en el sitemap: el sitemap
+    lo devolvia como `//fr/a` (host `fr`) y salia una discrepancia falsa."""
+    s, j = _montar()
+    _url(s, j, "https://x.com/")
+    cl = (("es", ES), ("en", EN), ("fr", "https://x.com//fr/a"), ("x-default", ES))
+    for u in (ES, EN):
+        _html(s, _url(s, j, u), *cl)
+        _sitemap(s, j, u, *cl)
+    assert not _de(_analizar(s, j), "hreflang_fuentes_discrepan")
+
+
+def test_ruta_con_doble_barra_rota_solo_en_el_sitemap_se_ve():
+    s, j = _montar()
+    roto = "https://x.com//fr/a"
+    _url(s, j, roto, status=404)
+    for u in (ES, EN):
+        _url(s, j, u)
+        _sitemap(s, j, u, ("es", ES), ("en", EN), ("fr", roto), ("x-default", ES))
+    rotos = _de(_analizar(s, j), "hreflang_broken_target")
+    assert len(rotos) == 2
+    assert {i.details["origen"] for i in rotos} == {"sitemap"}
+
+
+def test_sitemap_a_medias_con_hreflang_solo_de_urls_no_rastreadas_no_afirma():
+    """`en_uso` miraba solo las entradas de URLs rastreadas: si lo leido
+    declaraba hreflang de otras, se afirmaba el retorno que falta en EN, que
+    puede estar en la parte no leida. Lo guardado (`hreflang_guardadas`)
+    dice que el sitio lo usa."""
+    s, j = _montar(sitemaps={**SITEMAP_COMPLETO, "parcial": True, "hreflang_guardadas": 3})
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    _html(s, es, ("es", ES), ("en", EN))
+    _html(s, en, ("en", EN))
+    _sitemap(s, j, "https://x.com/it/a", ("it", "https://x.com/it/a"), ("es", ES))
+    assert _de(_analizar(s, j), "hreflang_missing_return") == []
+
+
+def test_sitemap_completo_con_hreflang_de_otras_urls_si_afirma():
+    """Completo, la misma situacion es un hecho: EN no tiene entrada."""
+    s, j = _montar(sitemaps={**SITEMAP_COMPLETO, "hreflang_guardadas": 3})
+    es, en = _url(s, j, ES), _url(s, j, EN)
+    _html(s, es, ("es", ES), ("en", EN))
+    _html(s, en, ("en", EN))
+    _sitemap(s, j, "https://x.com/it/a", ("it", "https://x.com/it/a"), ("es", ES))
+    assert [i.details["href"] for i in _de(_analizar(s, j), "hreflang_missing_return")] == [EN]
+
+
+def test_fallo_a_medias_de_leer_el_sitemap_no_afirma_ausencias(monkeypatch):
+    """Best-effort: si la lectura por lotes falla tras alguna fila, lo leido
+    vale y lo demas no se conoce (sin el fallo, EN no tiene entrada en un
+    sitemap completo y su retorno que falta si se afirma)."""
+    de = "https://x.com/de/a"
+    s, j = _montar(sitemaps={**SITEMAP_COMPLETO, "hreflang_guardadas": 4})
+    _html(s, _url(s, j, ES), ("es", ES), ("en", EN))
+    _html(s, _url(s, j, EN), ("en", EN))
+    for u in (FR, de):
+        _url(s, j, u)
+        _sitemap(s, j, u, ("fr", FR), ("de", de))
+    import shared.sitemaps as sm_mod
+    original = sm_mod.expandir_hreflang
+    llamadas = []
+
+    def expandir(url, guardado):
+        llamadas.append(url)
+        if len(llamadas) > 1:
+            raise RuntimeError("corte")
+        return original(url, guardado)
+    monkeypatch.setattr(sm_mod, "expandir_hreflang", expandir)
+    assert _de(_analizar(s, j), "hreflang_missing_return") == []
+    monkeypatch.setattr(sm_mod, "expandir_hreflang", original)
+    s.query(Issue).delete()
     assert [i.details["href"] for i in _de(_analizar(s, j), "hreflang_missing_return")] == [EN]
