@@ -265,6 +265,44 @@ def _grupo_de(grupos: dict[str, _Grupo], agente: str) -> _Grupo | None:
     return g if puntos else None
 
 
+def _leido(texto: str | None) -> str:
+    return (texto or "").encode("utf-8")[:LIMITE_BYTES].decode("utf-8", "ignore")
+
+
+def _preparar(leido: str, original: list[str], agente: str, como_google: bool) -> dict:
+    """El grupo que aplica a `agente` y la base del resultado (sin la URL)."""
+    fuente = grupos_como_google(leido, agente) if como_google else leido
+    vacio = {"permitida": True, "linea": None, "texto": None, "directiva": None,
+             "valor": None, "grupo": None, "linea_grupo": None}
+    grupo = _grupo_de(_grupos(fuente), agente)
+    if grupo is None:
+        return {"grupo": None, "base": vacio}
+    linea_grupo = grupo.lineas_ua[0] if grupo.lineas_ua else None
+    # La linea `User-agent` tal y como esta escrita: es lo que se busca en el fichero.
+    nombre = (original[linea_grupo - 1].split("#")[0].strip()
+              if linea_grupo and linea_grupo <= len(original) else grupo.nombre)
+    return {"grupo": grupo, "base": dict(vacio, grupo=nombre, linea_grupo=linea_grupo),
+            "vacio": vacio}
+
+
+def _decidir(preparado: dict, original: list[str], url: str) -> dict:
+    if "/robots.txt" in url and urlsplit(url).path == "/robots.txt":
+        return dict(preparado.get("vacio") or preparado["base"])
+    resultado = dict(preparado["base"])
+    grupo = preparado["grupo"]
+    if grupo is None:
+        return resultado
+    ruta = ruta_normalizada(url)
+    for r in grupo.reglas:
+        if r.patron.casa(ruta):
+            resultado.update(
+                permitida=r.campo == "allow", linea=r.linea,
+                texto=original[r.linea - 1].strip() if r.linea <= len(original) else None,
+                directiva="Allow" if r.campo == "allow" else "Disallow", valor=r.valor)
+            break
+    return resultado
+
+
 def regla_que_decide(texto: str, url: str, agente: str, *,
                      como_google: bool = True) -> dict:
     """Que decide el robots.txt `texto` para `agente` sobre `url`.
@@ -277,30 +315,111 @@ def regla_que_decide(texto: str, url: str, agente: str, *,
     "linea_grupo"}``. Sin regla que case, ``linea`` es None (permitida porque
     nada la prohibe); sin grupo que aplique, ``grupo`` tambien.
     """
-    leido = (texto or "").encode("utf-8")[:LIMITE_BYTES].decode("utf-8", "ignore")
+    leido = _leido(texto)
     original = leido.splitlines()
-    fuente = grupos_como_google(leido, agente) if como_google else leido
-    vacio = {"permitida": True, "linea": None, "texto": None, "directiva": None,
-             "valor": None, "grupo": None, "linea_grupo": None}
-    if "/robots.txt" in url and urlsplit(url).path == "/robots.txt":
-        return vacio
-    grupo = _grupo_de(_grupos(fuente), agente)
-    if grupo is None:
-        return vacio
-    linea_grupo = grupo.lineas_ua[0] if grupo.lineas_ua else None
-    # La linea `User-agent` tal y como esta escrita: es lo que se busca en el fichero.
-    nombre = (original[linea_grupo - 1].split("#")[0].strip()
-              if linea_grupo and linea_grupo <= len(original) else grupo.nombre)
-    resultado = dict(vacio, grupo=nombre, linea_grupo=linea_grupo)
-    ruta = ruta_normalizada(url)
-    for r in grupo.reglas:
-        if r.patron.casa(ruta):
-            resultado.update(
-                permitida=r.campo == "allow", linea=r.linea,
-                texto=original[r.linea - 1].strip() if r.linea <= len(original) else None,
-                directiva="Allow" if r.campo == "allow" else "Disallow", valor=r.valor)
-            break
-    return resultado
+    return _decidir(_preparar(leido, original, agente, como_google), original, url)
+
+
+def evaluar_lote(texto: str, urls: list[str], agentes: list[str], *,
+                 como_google: bool = True) -> list[dict]:
+    """`regla_que_decide` para cada (agente, url), leyendo el fichero una vez
+    por agente: el robots.txt de prueba (decision 171). Mismo resultado que
+    llamarla una a una, con ``agente`` y ``url`` en cada fila."""
+    leido = _leido(texto)
+    original = leido.splitlines()
+    salida = []
+    for agente in agentes:
+        preparado = _preparar(leido, original, agente, como_google)
+        for url in urls:
+            salida.append(dict(_decidir(preparado, original, url), agente=agente, url=url))
+    return salida
+
+
+_ASTERISCOS = re.compile(r"\*+")
+
+
+def _trozos(campo: str, valor: str) -> int:
+    """Cota de los trozos entre comodines que `_Grupo._anadir` recorrera por
+    esta regla al emparejar una URL: cada `*` es un `find` mas, una regla con
+    `$` se anade dos veces (la otra con el `$` escapado) y un `Allow` que acaba
+    en `/index.html`, una mas. Es lo que cuesta la regla, no 1 (decision 171)."""
+    n = 1 + len(_ASTERISCOS.findall(valor))
+    if "$" in valor:
+        n *= 2
+    if campo in _ALLOW and valor.rstrip("$").endswith("/index.html"):
+        n += 1
+    return n
+
+
+def diagnostico(texto: str | None) -> dict:
+    """Lo que un robots.txt pegado tiene de raro antes de subirlo (decision 171).
+
+    Las lineas que el parser se salta, con el mismo `_directiva` que la
+    evaluacion: una directiva que no conoce (`Noindex:`, que Google dejo de
+    leer en 2019, o una errata que la tolerancia de Protego no cubre) y una
+    `Allow`/`Disallow` antes de cualquier `User-agent`, que no es de ningun
+    grupo. Mas los `Sitemap` y si el fichero pasa del tope de 500 KiB que lee
+    Google (lo de detras no existe para el). No juzga las reglas: eso es la
+    evaluacion.
+    """
+    bruto = (texto or "").encode("utf-8")
+    leido = _leido(texto)
+    ignoradas: list[dict] = []
+    sitemaps: list[dict] = []
+    grupos = 0
+    reglas = 0
+    trozos = 0
+    con_comodin = 0
+    en_grupo = False
+    anterior = None
+    for n, linea in enumerate(leido.splitlines(), start=1):
+        escrita = linea.strip()
+        h = linea.find("#")
+        if h != -1:
+            linea = linea[:h]
+        linea = linea.strip()
+        if not linea:
+            continue
+        d = _directiva(linea)
+        if d is None:
+            ignoradas.append({"linea": n, "texto": escrita[:300], "motivo": "no_es_directiva"})
+            continue
+        campo, valor = d
+        # El mismo recorrido de estado que `_grupos`: una directiva desconocida
+        # tambien cierra la lista de `User-agent` (la siguiente abre otro grupo).
+        previo = anterior
+        if campo not in _DEL_SITIO:
+            anterior = campo
+        if campo not in _TODAS:
+            ignoradas.append({"linea": n, "texto": escrita[:300],
+                              "motivo": "directiva_desconocida"})
+            continue
+        if campo in _SITEMAP:
+            if valor:
+                sitemaps.append({"linea": n, "url": valor[:2000]})
+            continue
+        if campo in _USER_AGENT:
+            if previo is not None and previo not in _USER_AGENT:
+                # Abre grupo nuevo aunque venga vacio: `_grupos` olvida el
+                # anterior, y las reglas que siguen a un `User-agent:` sin
+                # nombre no son de nadie.
+                en_grupo = False
+            if previo not in _USER_AGENT:
+                grupos += 1
+            en_grupo = en_grupo or bool(valor)
+        elif campo in (_ALLOW | _DISALLOW) and valor:
+            if en_grupo:
+                reglas += 1
+                trozos += _trozos(campo, valor)
+                con_comodin += "*" in valor
+            else:
+                ignoradas.append({"linea": n, "texto": escrita[:300],
+                                  "motivo": "regla_tras_user_agent_vacio" if grupos
+                                  else "regla_sin_user_agent"})
+    return {"bytes": len(bruto), "recortado": len(bruto) > LIMITE_BYTES,
+            "grupos": grupos, "reglas": reglas, "trozos": trozos,
+            "reglas_con_comodin": con_comodin,
+            "sitemaps": sitemaps, "ignoradas": ignoradas}
 
 
 def estado_guardado(fila) -> str:
@@ -350,4 +469,4 @@ def reglas_de_url(fila, url: str, *, bloqueada_googlebot: bool | None,
     return out
 
 
-__all__ = ["estado_guardado", "regla_que_decide", "reglas_de_url", "ruta_normalizada"]
+__all__ = ["diagnostico", "estado_guardado", "evaluar_lote", "regla_que_decide", "reglas_de_url", "ruta_normalizada"]

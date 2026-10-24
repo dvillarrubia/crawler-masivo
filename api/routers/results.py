@@ -1408,6 +1408,25 @@ def get_robots(job_id: uuid.UUID, db: Session = Depends(get_session)):
     return {"bots": BOTS_INFO, "hosts": hosts}
 
 
+@router.get("/robots/cuerpo")
+def get_robots_cuerpo(job_id: uuid.UUID, origen: str = Query(..., max_length=300),
+                      db: Session = Depends(get_session)):
+    """El robots.txt guardado de un origen del censo, en texto: el punto de
+    partida del robots.txt de prueba (decision 171). 404 si no hay fila o se
+    guardo sin cuerpo (no respondio, o no era un 2xx)."""
+    from urllib.parse import urlsplit
+
+    from shared.robots_txt import origen as origen_de
+
+    _get_job_or_404(job_id, db)
+    o = origen_de(origen) or origen
+    fila = _filas_robots(db, job_id, host=(urlsplit(o).hostname or "")).get(o)
+    if fila is None or fila.cuerpo is None:
+        raise HTTPException(404, "No hay robots.txt guardado de ese origen en este censo")
+    return {"origen": o, "url": fila.url, "cuerpo": fila.cuerpo,
+            "recortado": fila.recortado, "fecha": fila.fecha}
+
+
 # ---------------------------------------------------------------------------
 # WordPress por su REST API (decision 161)
 # ---------------------------------------------------------------------------
@@ -3863,6 +3882,7 @@ def _ia_del_informe(db: Session, job: Job) -> dict | None:
     from shared.robots_txt import BOTS_INFO
 
     salida: dict[str, Any] = {"bots": [], "nosnippet": 0, "max_snippet": 0,
+                              "data_nosnippet": 0,
                               "solo_con_js": {"paginas": 0, "plantillas": 0, "muestreadas": 0}}
     sitio = urlsplit(_raiz_del_sitio((job.seeds or [None])[0]) or "").hostname or ""
     try:
@@ -3892,7 +3912,12 @@ def _ia_del_informe(db: Session, job: Job) -> dict | None:
         salida["solo_con_js"]["paginas"] += int(d.get("paginas_afectadas") or 0)
         salida["solo_con_js"]["muestreadas"] += int(d.get("paginas_muestreadas") or 0)
         salida["solo_con_js"]["plantillas"] += 1
-    if not (salida["bots"] or salida["nosnippet"] or salida["max_snippet"] or salida["solo_con_js"]["plantillas"]):
+    # Decision 170: agrupado por plantilla, se suman sus paginas afectadas.
+    for (d,) in db.query(Issue.details).filter(
+            Issue.job_id == job.id, Issue.issue_type == "data_nosnippet_contenido_principal"):
+        salida["data_nosnippet"] += int((d or {}).get("paginas_afectadas") or 0)
+    if not (salida["bots"] or salida["nosnippet"] or salida["max_snippet"] or salida["data_nosnippet"]
+            or salida["solo_con_js"]["plantillas"]):
         return None
     return salida
 

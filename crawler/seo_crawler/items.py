@@ -110,6 +110,7 @@ class HtmlMetaItem(scrapy.Item):
     # Videos, AMP y version movil (decisiones 155 y 156)
     videos = scrapy.Field()
     amphtml = scrapy.Field()
+    data_nosnippet = scrapy.Field()  # decision 170
     alternate_movil = scrapy.Field()
 
 

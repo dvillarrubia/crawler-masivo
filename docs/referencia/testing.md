@@ -230,6 +230,18 @@ excepcion real de curl_cffi), `test_retry_after.py` (el parser y el
 middleware con un slot simulado: sube, no lo baja AUTOTHROTTLE, vuelve al
 Crawl-delay, tope, latido) y `test_avisos_de_servidor_db.py` (los cinco
 avisos contra SQLite, con su ficha y su ambito en el frontend).
+`data-nosnippet` (decision 170): `test_data_nosnippet.py` (`medir` con HTML a
+mano: solo `span`/`div`/`section`, booleano y sin caja, anidados, lo oculto, el
+H1 y el contenido por lineas con un pie largo que no cubre el articulo;
+`SeoSpider.parse` con el contenido principal real y un fallo que deja NULL sin
+perder la fila; el aviso contra SQLite por plantilla; ficha, nombre y ambito).
+robots.txt de prueba (decision 171): `test_robots_prueba.py` (casos limite de
+comodines, `$`, grupos y longitud, el lote igual que una a una y el veredicto
+contra Protego en los dos modos; `diagnostico`, con un test al azar de que
+cuenta las mismas reglas que la evaluacion y el `User-agent:` vacio) y
+`test_robots_prueba_api.py` (el endpoint con TestClient, 422, tope de coste
+con comodines y URLs largas, el peor caso aceptado en segundos y el cuerpo
+guardado; trabajo de la API).
 Paginacion (decision 122): `test_paginacion.py` (las formas de `shared/paginacion.py`,
 `?p=123` sin evidencia, otros parametros, barra final, mayusculas),
 `test_analyzer_paginacion_db.py` (SQLite: canonical a la 1 agrupado por plantilla,

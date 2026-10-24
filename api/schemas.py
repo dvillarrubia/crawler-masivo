@@ -894,6 +894,8 @@ class HtmlMetaResponse(BaseModel):
     videos: list[dict[str, Any]] | None = None
     amphtml: str | None = None
     alternate_movil: str | None = None
+    # Decision 170: lo que data-nosnippet esconde al fragmento.
+    data_nosnippet: dict[str, Any] | None = None
 
 
 class PageContentResponse(BaseModel):

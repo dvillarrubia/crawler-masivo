@@ -342,6 +342,17 @@ Explorador tiene una vista **IA** con eso y con los buscadores de IA bloqueados
 en robots.txt. En Salle salieron tres páginas con todo bloqueado menos el
 `noindex`, que era lo que querían. [Decisión 137](docs/decisiones/indexabilidad.md#d137).
 
+### `data-nosnippet` y robots.txt de prueba (24 de octubre)
+
+El rastreo mide ahora lo que `data-nosnippet` esconde al fragmento (y a AI
+Overviews): avisa por plantilla cuando una indexable lo pone sobre el H1 o sobre
+la mayor parte del contenido, y anota el atributo en elementos donde Google no
+documenta que se aplique. Pide re-rastrear. [Decisión 170](docs/decisiones/indexabilidad.md#d170).
+Y en el resumen del rastreo, bajo «robots.txt por bot», se puede pegar un
+robots.txt (o partir del guardado), unas URLs y unos agentes, y ver el veredicto
+y la línea que decide con la misma lógica que el crawler, antes de subirlo.
+[Decisión 171](docs/decisiones/indexabilidad.md#d171).
+
 ### Alertas a medida de cada cliente y resumen semanal (18 de octubre)
 
 Ola 5.2 del plan (decisión 135). En la ficha del cliente hay una pestaña

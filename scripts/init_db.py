@@ -84,7 +84,8 @@ def main() -> None:
         # Videos de la pagina y versiones AMP y movil anunciadas (decisiones
         # 155 y 156). Nullables y sin DEFAULT: solo catalogo.
         for columna, tipo in (("videos", "JSON"), ("amphtml", "TEXT"),
-                              ("alternate_movil", "TEXT")):
+                              ("alternate_movil", "TEXT"),
+                              ("data_nosnippet", "JSON")):  # decision 170
             conn.execute(text(f"ALTER TABLE html_meta ADD COLUMN IF NOT EXISTS {columna} {tipo}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_urls_content_hash ON urls (content_hash)"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS closest_similarity FLOAT"))

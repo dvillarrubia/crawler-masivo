@@ -472,6 +472,7 @@ async function api(path, opts = {}) {
 function app() {
   return {
     ...extraccionUI(),   // pestaña «Extracción» del modal (#34, decision 166)
+    ...robotsPruebaUI(), // robots.txt de prueba en el resumen (decision 171)
     // Navegacion
     view: 'jobs',
     programaciones: [],
@@ -4354,7 +4355,7 @@ const EXP_TABS = [
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
   // Decision 137: lo que decide si la pagina sale en el fragmento y en las
   // funciones de IA de la Busqueda, y si los buscadores de IA pueden entrar.
-  { key: 'a_ia',       label: 'IA',            icon: 'sparkles',     filter: HTML_INTERNO, ambito: ['nosnippet_en_indexable','max_snippet_restrictivo','bot_busqueda_ia_bloqueado','contenido_solo_con_js'],
+  { key: 'a_ia',       label: 'IA',            icon: 'sparkles',     filter: HTML_INTERNO, ambito: ['nosnippet_en_indexable','max_snippet_restrictivo','data_nosnippet_contenido_principal','data_nosnippet_ignorado','bot_busqueda_ia_bloqueado','contenido_solo_con_js'],
     columns: ['url','status_code','indexable','meta_robots','x_robots_tag','pagerank_score'] },
   // Decision 142: Search Console cruzado con el rastreo.
   { key: 'a_trafico',  label: 'Tráfico de Google', icon: 'trending-up', filter: { is_internal: true }, ambito: ['trafico_en_pagina_perdida','trafico_en_redireccion','huerfana_con_trafico','indexable_sin_impresiones','trafico_en_variante_con_parametros','indexable_no_indexada_por_google','google_elige_otro_canonical','google_tiene_canonical_antiguo','oportunidad_posicion','ctr_bajo_para_posicion','canibalizacion_por_consulta','sitemap_no_enviado_a_google','sitemap_no_leido_por_google','sitemap_con_errores_en_google'],
@@ -5249,6 +5250,48 @@ function extraccionUI() {
         p.error = e.message;
       }
       p.cargando = false;
+    },
+  };
+}
+
+
+/* ===== robots.txt de prueba (decision 171) =====
+   Pega un robots.txt (o carga el guardado de un host del censo), unas URLs y
+   unos agentes, y el servidor dice el veredicto y la linea que decide con la
+   MISMA logica que el crawler (`shared/robots_regla.py`). No descarga nada. */
+function robotsPruebaUI() {
+  return {
+    robotsPrueba: { texto: '', urls: '/', agentes: 'Googlebot\nOAI-SearchBot\nGPTBot',
+                    modo: 'google', cargando: false, error: null, resultado: null },
+
+    async robotsPruebaCargar(origen) {
+      const p = this.robotsPrueba;
+      p.error = null;
+      try {
+        const r = await api(`/jobs/${this.job.id}/robots/cuerpo?origen=${encodeURIComponent(origen)}`);
+        p.texto = r.cuerpo || '';
+      } catch (e) { p.error = e.message; }
+    },
+
+    async robotsPruebaEvaluar() {
+      const p = this.robotsPrueba;
+      const lineas = t => (t || '').split('\n').map(x => x.trim()).filter(Boolean);
+      p.error = null; p.resultado = null; p.cargando = true;
+      try {
+        p.resultado = await api('/robots/probar', {
+          method: 'POST',
+          body: JSON.stringify({ robots_txt: p.texto, urls: lineas(p.urls),
+                                 agentes: lineas(p.agentes), modo: p.modo }),
+        });
+      } catch (e) { p.error = e.message; }
+      finally { p.cargando = false; }
+    },
+
+    robotsPruebaMotivo(m) {
+      return ({ directiva_desconocida: 'directiva que no se lee',
+                regla_sin_user_agent: 'regla antes de cualquier User-agent: no es de ningún grupo',
+                regla_tras_user_agent_vacio: 'regla tras un User-agent vacío: no es de ningún grupo',
+                no_es_directiva: 'no es una directiva' })[m] || m;
     },
   };
 }

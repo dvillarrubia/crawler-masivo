@@ -172,6 +172,7 @@ filtrar por `urls.is_html`.
 | videos | json | Videos de la pagina (`extract_videos`): `[{tipo: video\|youtube\|vimeo, id, src, decorativo}]`, como mucho 20. `[]` = ninguno; NULL = rastreo anterior, y marca de «medido» de `amphtml` y `alternate_movil`. Decision 155 |
 | amphtml | text | `<link rel="amphtml">` del head, resuelto. Decision 156 |
 | alternate_movil | text | `<link rel="alternate" media="...max-width...">` del head (sin hreflang), resuelto: la version movil en otra URL. Decision 156 |
+| data_nosnippet | json | Lo que `data-nosnippet` esconde al fragmento (`shared/data_nosnippet.medir`): `{elementos, palabras, h1, principal, ignorados, etiquetas_ignoradas}`. `{"elementos": 0, "ignorados": 0}` = medido y sin atributo; NULL = rastreo anterior o fallo al medir. Decision 170 |
 
 ### `headings` — Encabezados H1-H6
 | Columna | Tipo | Descripcion |
