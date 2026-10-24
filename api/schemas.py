@@ -485,6 +485,28 @@ class JobConfig(BaseModel):
     marcas: list[str] = Field(default_factory=list, max_length=50)
     # Adaptadores de CMS (decision 161): hoy WordPress por su REST API.
     adapters: AdaptersConfig = Field(default_factory=AdaptersConfig)
+    # Taxonomia de negocio del cliente (#12, decision 178): las opciones de la
+    # pregunta `categoria_cliente` del analisis enriquecido. Hasta 20 (con mas,
+    # un choice se reparte y no decide nada); sin ella, ese modulo no pregunta.
+    taxonomia: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("taxonomia")
+    @classmethod
+    def _taxonomia_valida(cls, v: list[str]) -> list[str]:
+        limpias: list[str] = []
+        for c in v or []:
+            nombre = " ".join(str(c or "").split())
+            if not nombre:
+                continue
+            if len(nombre) > 80:
+                raise ValueError(f"categoria de mas de 80 caracteres: {nombre[:40]!r}...")
+            if nombre.lower() == "ninguna":
+                raise ValueError("«ninguna» no puede ser una categoria: es la respuesta para "
+                                 "las paginas que no son de ninguna")
+            if nombre.lower() in {x.lower() for x in limpias}:
+                raise ValueError(f"categoria repetida: {nombre!r}")
+            limpias.append(nombre)
+        return limpias
 
     @field_validator("impersonate")
     @classmethod

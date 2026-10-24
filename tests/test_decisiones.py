@@ -471,6 +471,9 @@ HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550
            ("paginas_sustitutas", 1): "225630a8878de877",
            ("recomendacion_canibalizacion", 1): "c3bd3e673d6ac86f",
            }
+# Tipo de pagina y categoria del cliente (#12, decision 178).
+HUELLAS |= {("tipo_pagina", 1): "ab3e7a78aef79670"}
+HUELLAS |= {("categoria_cliente", 1): "6c6db1c007fcc3c3"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

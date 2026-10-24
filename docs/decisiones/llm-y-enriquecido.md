@@ -451,3 +451,108 @@
      el aviso, las homes de idioma en la regla de marca de la 157 y los
      clientes sin Search Console (pares por título o MinHash, #18).
 
+<a id="d178"></a>
+178. **El tipo de página se pregunta por plantilla, con una taxonomía general de
+   once opciones, y la categoría del cliente con su propia taxonomía** (#12;
+   lo esperan #22, #169 punto 7 y #198). Dos módulos nuevos, `tipo_pagina` y
+   `categoria_cliente`, con su pregunta `choice` en `shared/preguntas/tipo_pagina.py`
+   y la muestra, el estado y la propuesta en `shared/tipo_pagina.py`.
+   - **Una muestra por plantilla, no cada URL.** La plantilla es la de
+     `plantilla_de` (las reglas del cliente en `config.templates` y, si no casa
+     ninguna, la forma de la ruta) con el host delante y **sin `www.`**; dentro
+     de una plantilla, la misma ruta con y sin `www` es una sola muestra (la 169
+     vio que contarla dos veces infla el acuerdo). Se preguntan
+     `3 + log10(n)` URLs por plantilla, hasta 8, las primeras por `url_hash`
+     (repetir sale de caché). El filtro es el `filtrar_urls` del módulo, así que
+     estimación, ejecución y `extraer` preguntan lo mismo. Medido el
+     24-oct-2026 en producción, solo lectura:
+
+     | Censo | Indexables | Plantillas | Se preguntan | Coste estimado | URL a URL |
+     |---|---|---|---|---|---|
+     | Lopesan (1e7ea651) | 3.216 | 84 | 262 | 0,015 $ | ~0,19 $ |
+     | Saunier Duval (40ea596f) | 1.080 | 68 | 153 | 0,009 $ | ~0,06 $ |
+     | Salle (49ddb8f5) | 13.069 | 247 | 558 | 0,032 $ | ~0,76 $ |
+     | Penguin (d3fda8a5) | 78.457 | 100 | 405 | ~0,024 $ | ~4,6 $ |
+
+     El coste sale de `capa.estimar` sobre los estados reales de la muestra
+     (caracteres / 4 + 250, decisión 162, a 0,042 $/Mtok): unos 1.380 tokens por
+     llamada, de los que ~900 son la pregunta con sus once opciones y ~220 el
+     estado (888 caracteres de media en Lopesan, 1.020 como mucho). Lo de Penguin
+     es tokens medios × llamadas. URL a URL, Penguin solo se comería casi todo el
+     tope global de 5 $ al mes.
+   - **El estado**: lo de `pagina_legal` (título, H1 visible, 600 caracteres del
+     contenido sin plantilla) más la ruta, las palabras propias, el `og:type`, si
+     tiene `rel=next/prev` y los tipos de schema **que no están en todas las
+     páginas** (`SCHEMA_DE_TODAS`: WebSite, Organization, BreadcrumbList,
+     WebPage... están en 3.215 de las 3.216 indexables de Lopesan y no distinguen nada). En Lopesan es
+     lo que separa una habitación (`HotelRoom`, `Offer`), un hotel (`Hotel`), un
+     destino (`TouristDestination`), una entrada (`BlogPosting`) y una categoría
+     del blog (`CollectionPage`), que comparten forma de ruta.
+   - **La taxonomía**: `home`, `listado`, `ficha_producto`, `landing_comercial`,
+     `articulo`, `corporativa`, `contacto_ubicacion`, `ayuda`, `legal`,
+     `utilidad` y `otro`. Once, como la de jev-seo, y cada opción dice qué es,
+     ejemplos y **qué no es** (en jev-seo eso subió el acuerdo de 20 a 27 sobre
+     30). `legal` y `utilidad` con el criterio de `es_pagina_legal` v2 y
+     `es_pagina_de_utilidad` v2 (169): lo normativo es legal y un login no es un
+     error. La frontera producto/documentación, la más débil en jev-seo, va
+     escrita en las dos opciones. Lo que el código ya sabe (paginación, facetas,
+     búsqueda interna por la URL; un 4xx) no se pregunta: el alcance son
+     indexables 200, y lo determinista de #12 queda para el analizador. Las
+     claves van en castellano porque son las de los umbrales por tipo de #12 y la
+     matriz de #22; las descripciones, en inglés.
+   - **Una pregunta, un criterio**: «qué ES la página por su propósito», no de qué
+     habla. Una entrada del blog sobre un hotel es `articulo`.
+   - **La propuesta por plantilla** (`propuesta_por_plantilla`,
+     `GET /api/jobs/{id}/enrichment/{run}/plantillas`): por plantilla, la
+     respuesta de sus muestras, cuántas coinciden, la confianza media y a cuántas
+     URLs del alcance se propondría. `mixta` si las muestras no coinciden (en
+     Lopesan, las plantillas de hoteles de 7 tramos juntan la lista de
+     habitaciones, la gastronomía y las ofertas de cada hotel): no se propone nada y hará falta decidirla URL a URL.
+     `propagable` solo si todas coinciden y todas están `decidido`, lo que exige
+     umbral; **hoy ninguna lo es** y no se escribe nada en ninguna URL. La
+     pantalla del enriquecido la enseña («Ver la respuesta por plantilla»), con
+     las opciones en castellano y las respuestas de un `choice` de la más
+     frecuente a la menos.
+   - **La taxonomía del cliente** (punto 5 de #12): `config.taxonomia`, declarada
+     en `JobConfig` (hasta 20 categorías de hasta 80 caracteres, sin repetir y
+     sin «ninguna», que es la respuesta para lo que no es de ninguna). Es otra
+     pregunta y no las opciones de `tipo_pagina`: el tipo es el mismo en todos los
+     clientes porque de él cuelgan umbrales y relevancia; la categoría es del
+     negocio («Calderas», «Aerotermia»). `categoria_cliente` lleva las del job
+     como opciones (`Pregunta.con_opciones`): sus opciones del catálogo son de
+     muestra y nunca se envían. Sin taxonomía de dos categorías o más, el módulo
+     no pregunta nada ni cuesta nada.
+     - **Otras opciones, otra clave de caché.** `con_opciones` fija `variante` (la
+       huella de las opciones) y `clave_cache` la añade, solo si existe: las
+       claves de las preguntas de siempre no cambian y su caché sigue valiendo.
+       La tabla `decisions` no guarda la variante, así que una fila solo vale de
+       caché si sus probabilidades son sobre las mismas opciones: cambiar la
+       taxonomía vuelve a preguntar, en vez de servir respuestas elegidas entre
+       otras categorías.
+     - `extraer` guarda las opciones en cada fila del juego y exige una sola
+       taxonomía por juego; `responder` y `evaluar` preguntan y miden con ellas.
+   - **`extraer` sin estados repetidos.** Recorre el orden estratificado de
+     siempre (los `n` primeros son los mismos) y salta un estado idéntico a uno ya
+     cogido, rellenando con el siguiente hasta `n`. Vale para todas las preguntas.
+   - **Sin evaluar**: las dos preguntas sin umbral y los dos módulos marcados
+     (`ejemplo=True`): todo sale `incierto`, nada se propaga y nada va a un
+     informe. El juego se saca con
+     `evaluar_decisiones.py extraer tipo_pagina --job …` y hay que etiquetarlo
+     con varios clientes, con casos de la frontera producto/ayuda y de plantillas
+     mixtas.
+   - **Preparado y apagado hasta que haya umbral** (lo que #12 pide y depende de
+     él): rellenar `urls.page_type` desde la propuesta `propagable`, los umbrales
+     por tipo del analizador (`analysis_thresholds.por_tipo`) y sustituir `REGLAS`
+     de `check_js_templates.py`. Ninguno existe todavía: un tipo mal puesto
+     silenciaría avisos de verdad.
+   - **Cómo lo usarán los demás.** #22 lee el tipo por plantilla para la matriz
+     de relevancia (`esperado_por_diseño` de `low_word_count` en `legal`,
+     `contacto_ubicacion` o `utilidad`, una sola fuente por caso con `por_tipo`) y
+     para agrupar acciones («las fichas de producto sin H1»); la prioridad pesa
+     más una `ficha_producto` o un `listado` que una `legal`. #198 excluye de la
+     poda lo que salga `legal` o `contacto_ubicacion` con umbral. #169 punto 7 es
+     #22 con los clics de Search Console. Ninguno debe leerlo antes de que la
+     pregunta tenga umbral, o leerá respuestas inciertas como si fueran ciertas.
+   - Fuera: el contexto del sitio (`tipo_negocio`, una pregunta por sitio en
+     jev-seo y la menos estable entre ejecuciones), el nivel 2 por vertical
+     (ficha de hotel, de habitación) y la paginación de #12, que es determinista.
