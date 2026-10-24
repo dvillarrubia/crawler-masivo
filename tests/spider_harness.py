@@ -612,6 +612,24 @@ def main() -> None:
 
         modulo_spider.redis.Redis.from_url = classmethod(lambda cls, *a, **k: _RedisFalso())
 
+    if entrada.get("perder_wp_listas"):
+        # Peticiones a la REST API que se pierden sin callback ni errback
+        # (decision 161): ocupan su hueco en vuelo y nunca vuelven, asi que la
+        # cola solo sigue si `spider_idle` la reanima con `engine.crawl`.
+        import seo_crawler.sonda_wordpress as modulo_wp
+
+        perder = {"quedan": int(entrada["perder_wp_listas"])}
+        soltar = modulo_wp.AdaptadorWordPressMixin._wp_soltar
+
+        def _wp_soltar(self):
+            for req in soltar(self):
+                if req.meta.get("wp_rol") == "lista" and perder["quedan"] > 0:
+                    perder["quedan"] -= 1
+                    continue
+                yield req
+
+        modulo_wp.AdaptadorWordPressMixin._wp_soltar = _wp_soltar
+
     if entrada.get("simular_navegador"):
         # Como con render JS: la redireccion no la sigue el spider sino quien
         # descarga (aqui el RedirectMiddleware de Scrapy, que rellena

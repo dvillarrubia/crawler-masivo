@@ -171,3 +171,14 @@ def test_apagado_o_en_modo_lista_no_se_pide_nada(config):
     items, pedidas, resumen, _ = _rastrear(_wordpress(), config=config)
     assert not [p for p in pedidas if p.startswith("/wp-json")]
     assert _entidades(items) == [] and resumen is None
+
+
+def test_si_se_pierden_peticiones_spider_idle_reanima_la_cola():
+    """Las dos primeras listas se pierden sin callback: con los dos huecos
+    ocupados la cola solo sigue por `_wp_reanimar` -> `engine.crawl(req)`,
+    que es el unico uso de esa llamada en el repo (Scrapy 2.19)."""
+    items, pedidas, resumen, _ = _rastrear(_wordpress(), perder_wp_listas=2)
+    tipos = {e["tipo"] for e in _entidades(items)}
+    leidos = {t for t, d in resumen["tipos"].items() if d.get("leidas")}
+    assert len(leidos) >= 3, resumen["tipos"]
+    assert "sonda_paginacion" in tipos or "sonda_adjunto" in tipos

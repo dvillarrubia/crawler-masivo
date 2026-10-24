@@ -232,3 +232,51 @@ def test_un_503_en_una_sonda_corta_la_lectura():
     assert sp._wp_resumen["cortada"] == "503"
     assert not [i for i in items if not isinstance(i, scrapy.Request)]
     assert not sp._wp_cola
+
+
+# --- Segunda revision de #226 ---------------------------------------------------
+
+def test_pasado_el_tope_no_se_suelta_lo_que_ya_estaba_en_la_cola():
+    """La pagina 1 de un listado encola de golpe el resto: el tope se mira
+    tambien al soltar."""
+    sp = _spider(config={"max_depth": 5, "adapters": {"wordpress": {"max_minutos": 1}}})
+    for n in range(2, 12):
+        sp._wp_encolar(f"https://x.com/wp-json/wp/v2/posts?page={n}", "lista")
+    assert len(sp._wp_cola) == 10
+    sp._wp_inicio_s -= 61
+    assert list(sp._wp_soltar()) == []
+    assert sp._wp_resumen["cortada"] == "tope_de_tiempo" and not sp._wp_cola
+
+
+def test_una_raiz_headless_se_anota_y_se_prueba_el_origen():
+    sp = _spider()
+    cuerpo = b'<html><head><link rel="https://api.w.org/" href="https://cms.otro.com/wp-json/"></head></html>'
+    r = _respuesta("https://x.com/", html=True, cuerpo=cuerpo)
+    pedidas = [p.url for p in sp._wp_de_pagina(r, 0, r.selector)]
+    assert pedidas and pedidas[0].startswith("https://x.com/wp-json/")
+    assert {"raiz": "https://cms.otro.com/wp-json/", "como": "anunciada",
+            "estado": "raiz_fuera_del_sitio"} in sp._wp_resumen["intentos"]
+    list(sp.parse_wp(_respuesta(pedidas[0], 404, b"no",
+                                meta={"wp_rol": "indice", "wp_raiz": "https://x.com/wp-json/"})))
+    sp._wp_al_cerrar("finished")
+    assert sp._wp_resumen["rest"] == "raiz_fuera_del_sitio"
+
+
+def test_tras_un_salto_la_raiz_lleva_la_ruta_del_destino(base):
+    sp = _spider(_job(base))
+    indice = json.dumps({"namespaces": ["wp/v2"], "home": "https://x.com/es"}).encode()
+    (tipos,) = list(sp.parse_wp(_respuesta(
+        "https://x.com/es/wp-json/?_fields=name,url", 200, indice,
+        meta={"wp_rol": "indice", "wp_raiz": "https://x.com/wp-json/", "wp_saltos": 1})))
+    assert sp._wp_raiz == "https://x.com/es/wp-json/"
+    assert tipos.url == "https://x.com/es/wp-json/wp/v2/types"
+
+
+def test_una_semilla_que_esta_vez_no_anuncia_usa_la_raiz_anterior(base):
+    job = _job(base, {"wordpress": {"detectado": True, "rest": "abierta",
+                                    "raiz": "https://x.com/blog/wp-json/"}})
+    sp = _spider(job)
+    r = _respuesta("https://x.com/", html=True, cuerpo=b"<html></html>")
+    pedidas = [p.url for p in sp._wp_de_pagina(r, 0, r.selector)]
+    assert pedidas == ["https://x.com/blog/wp-json/?_fields=name,url,home,namespaces,"
+                       "show_on_front,page_for_posts"]

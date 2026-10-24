@@ -14,8 +14,9 @@ y el `Retry-After` (111). Y corre a la vez que el rastreo, no despues, con
 prioridad sobre las paginas: en un sitio con ritmo normal acaba antes que el
 rastreo. Con un Crawl-delay alto la cola puede seguir cuando ya no quedan
 paginas y SI alarga el job: como mucho `max_minutos` (20) desde la primera
-peticion, con latido para que el vigilante del worker no lo de por
-estancado. Nunca dentro de un request de la API.
+peticion, que se mira al encolar Y al soltar cada peticion (la cola de una
+pagina 1 entra de golpe), con latido para que el vigilante del worker no lo
+de por estancado. Nunca dentro de un request de la API.
 
 Como las demas sondas (decisiones 105, 123 y 124), con su propio callback:
 
@@ -269,6 +270,11 @@ class AdaptadorWordPressMixin:
             headers=cabeceras, dont_filter=True, priority=PRIORIDAD))
 
     def _wp_soltar(self) -> Generator[scrapy.Request, None, None]:
+        # El tope de tiempo se mira tambien al SOLTAR: la pagina 1 de cada
+        # listado encola de golpe el resto, y con un Crawl-delay alto esa
+        # cola podria seguir horas despues de acabarse las paginas.
+        if self._wp_cola and self._wp_fuera_de_tiempo():
+            return
         while self._wp_cola and self._wp_en_vuelo < self._wp_max_vuelo:
             self._wp_en_vuelo += 1
             yield self._wp_cola.popleft()
@@ -289,12 +295,22 @@ class AdaptadorWordPressMixin:
     # ------------------------------------------------------------------
     # Arranque y deteccion
     # ------------------------------------------------------------------
-    def _wp_pedir_indice(self, raiz: str, como: str) -> None:
+    def _wp_pedir_indice(self, raiz: str, como: str) -> bool:
+        """Encola el indice de *raiz*. False si no es del sitio (un WordPress
+        headless en `cms.x.com`): se anota en `intentos` y quien llama prueba
+        `/wp-json/` del origen."""
         if raiz in self._wp_raices_pedidas or self._wp_raiz:
-            return
+            return True
         self._wp_raices_pedidas.add(raiz)
+        if not self._wp_puede_pedir(raiz):
+            self._wp_resumen["intentos"].append(
+                {"raiz": raiz, "como": como, "estado": "raiz_fuera_del_sitio"})
+            logger.info("WordPress: la raiz %s no es del sitio; no se pide", raiz)
+            return False
+        self._wp_indices_encolados = getattr(self, "_wp_indices_encolados", 0) + 1
         self._wp_encolar(W.url_rest(raiz, "", {"_fields": W.CAMPOS_INDICE}), "indice",
                          wp_raiz=raiz, wp_como=como)
+        return True
 
     def _wp_de_pagina(self, response: Response, depth: int, selector=None) -> Generator:
         """Desde la respuesta de una semilla (o, al reanudar, de la primera
@@ -333,17 +349,20 @@ class AdaptadorWordPressMixin:
                 if b"/wp-content/" in response.body or b"/wp-includes/" in response.body:
                     evidencia.append("rutas_wp_content")
                 self._wp_resumen["evidencia"] = sorted(set(evidencia))
-            if not raiz and depth > 0:
-                # Al reanudar no se ve la semilla: la raiz que confirmo la
-                # ejecucion anterior (una subcarpeta, `?rest_route=/`), antes
-                # que `/wp-json/` del origen, que puede ser OTRO WordPress.
-                raiz = self._wp_raiz_previa()
-            if raiz:
-                # La anunciada manda: en wordpress.org/news la raiz es
-                # /news/wp-json/ y la del origen es OTRO WordPress (el de
-                # wordpress.org). El origen solo si no anuncia ninguna.
-                self._wp_pedir_indice(raiz, "anunciada" if depth == 0 else "anterior")
-            elif len(self._wp_raices_pedidas) < MAX_HOSTS:
+            como = "anunciada"
+            if not raiz:
+                # La raiz que confirmo una ejecucion anterior (una subcarpeta,
+                # `?rest_route=/`), antes que `/wp-json/` del origen, que puede
+                # ser OTRO WordPress: al reanudar, o si la semilla esta vez no
+                # la anuncia.
+                raiz, como = self._wp_raiz_previa(), "anterior"
+            # La anunciada manda: en wordpress.org/news la raiz es
+            # /news/wp-json/ y la del origen es OTRO WordPress (el de
+            # wordpress.org). El origen solo si no hay otra, o si la que hay
+            # no es del sitio.
+            if raiz and self._wp_pedir_indice(raiz, como):
+                pass
+            elif getattr(self, "_wp_indices_encolados", 0) < MAX_HOSTS:
                 origen = W.raiz_por_defecto(response.url)
                 if origen:
                     self._wp_pedir_indice(origen, "origen")
@@ -464,9 +483,17 @@ class AdaptadorWordPressMixin:
                 self._wp_pedir_indice(urlunsplit((p.scheme, p.netloc, "/", "rest_route=/", "")),
                                       "rest_route")
             return
-        # Si la peticion salto (http -> https), la raiz es la del destino.
+        # Si la peticion salto (http -> https, `/wp-json/` -> `/es/wp-json/`
+        # con WPML), la raiz es la del destino, ruta incluida: si no, cada
+        # peticion volveria a saltar y gastaria el doble de `max_peticiones`.
         final, pedida = urlsplit(response.url), urlsplit(raiz)
-        if (final.scheme, final.netloc) != (pedida.scheme, pedida.netloc):
+        if response.meta.get("wp_saltos"):
+            from urllib.parse import parse_qsl, urlencode
+
+            ruta = [(k, v) for k, v in parse_qsl(final.query) if k == "rest_route"]
+            raiz = urlunsplit((final.scheme, final.netloc, final.path or "/",
+                               urlencode(ruta, safe="/"), ""))
+        elif (final.scheme, final.netloc) != (pedida.scheme, pedida.netloc):
             raiz = urlunsplit((final.scheme, final.netloc, pedida.path, pedida.query, ""))
         self._wp_raiz = raiz
         self._wp_indice = {k: datos.get(k) for k in ("name", "url", "home", "show_on_front",
@@ -721,7 +748,14 @@ class AdaptadorWordPressMixin:
                 # El rastreo cerro con lecturas pendientes (tope de URLs, cancelado).
                 r["cortada"] = f"cierre: {reason}"
             if not r["detectado"] and not r.get("rest"):
-                r["rest"] = "cerrada" if r["evidencia"] else "no_detectado"
+                fuera = [i for i in r["intentos"] if i.get("estado") == "raiz_fuera_del_sitio"]
+                if fuera and all(i.get("estado") == "raiz_fuera_del_sitio" or
+                                 i.get("status") == 404 for i in r["intentos"]):
+                    # La REST API esta en otro host (headless): no se ha
+                    # comprobado, no es «cerrada».
+                    r["rest"] = "raiz_fuera_del_sitio"
+                else:
+                    r["rest"] = "cerrada" if r["evidencia"] else "no_detectado"
             previo = getattr(self, "_wp_previo", None) or {}
             if not r["detectado"] and previo.get("detectado"):
                 # Una reanudacion que no llego a confirmar la REST API no

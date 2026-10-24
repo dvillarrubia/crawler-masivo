@@ -1259,7 +1259,12 @@
      las páginas y con prioridad sobre ellas, así que en un sitio con ritmo
      normal no alarga el job; con un `Crawl-delay` alto la cola puede seguir
      cuando ya no quedan páginas, y entonces **sí lo alarga, como mucho
-     `max_minutos` (20)** desde la primera petición. Cada respuesta escribe el
+     `max_minutos` (20)** desde la primera petición. El tope se mira al
+     encolar y al soltar cada petición: la página 1 de un listado encola de
+     golpe hasta 1.000, y mirándolo solo al encolar, con `Crawl-delay` 10 esa
+     cola seguía unas 2,8 h (y con `max_runtime_hours` bajo el job cerraba
+     truncado). Pasado el tope no se suelta nada más y la lectura queda
+     `cortada: tope_de_tiempo`. Cada respuesta escribe el
      latido y mira la cancelación como las otras sondas (`LATIDO_S` 60): sin
      eso, 180 peticiones con `Crawl-delay` 10 pasaban de los 30 minutos del
      vigilante y el job se reencolaba como estancado (revisión de #226).
@@ -1303,7 +1308,13 @@
      anunciada o un salto solo se piden si son internos del job, y si su host
      es de red privada, solo si es un host del job tal cual (la semilla o
      aquel al que saltó). Las redirecciones no las sigue Scrapy: se siguen a
-     mano (tres como mucho) con esa misma comprobación. Un
+     mano (tres como mucho) con esa misma comprobación, y la raíz pasa a ser
+     la del destino con su ruta (`/wp-json/` → `/es/wp-json/` con WPML). Una
+     raíz anunciada fuera del sitio (un WordPress headless en `cms.x.com`) se
+     anota en `intentos` como `raiz_fuera_del_sitio` y se prueba `/wp-json/`
+     del origen; si tampoco responde, `rest: "raiz_fuera_del_sitio"`, no
+     «cerrada». Si la semilla no anuncia raíz, se prueba antes la que confirmó
+     una ejecución anterior. Un
      `<link rel="https://api.w.org/" href="http://169.254.169.254/">` no se
      pide.
    - **Dónde va**: `adapter_entities` (una fila por entidad y por sonda, sin
