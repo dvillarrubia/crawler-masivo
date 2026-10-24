@@ -212,6 +212,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
 | 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 (229/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
 | 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (232/300) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
+| 181 | `tipo_pagina` v2: «qué hace la página» y no «de qué ítem habla» (captación y paquetes son landing, pagos y apoyo al alumno ayuda, lo propio que no se vende corporativa, la documentación de calidad legal), con lo medido de la v1 tras unificar las etiquetas que se contradecían (233/300, con un juego que empuja hacia Jev) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d181) |
 
 ## Anadir una decision
 

@@ -35,7 +35,7 @@ from shared.preguntas import Pregunta
 TIPO_PAGINA = Pregunta(
     nombre="tipo_pagina",
     tipo="choice",
-    # v2 (decision 181): las fronteras que fallaron en la v1 medida (232/300 con
+    # v2 (decision 181): las fronteras que fallaron en la v1 medida (233/300 con
     # la etiqueta de cada plantilla unificada).
     version=2,
     instrucciones=(
@@ -47,8 +47,8 @@ TIPO_PAGINA = Pregunta(
         "not make a page its product page: ask what the page does for the visitor. Presenting one item for "
         "sale or booking is ficha_producto; persuading, or inviting people to sign up for an event, is "
         "landing_comercial; explaining how to pay, apply or get support is ayuda; presenting the "
-        "organisation's own facilities, centres or research, which are not sold, is corporativa; publishing "
-        "documents required by a regulation is legal. The start of the content may still include menu text; "
+        "organisation's own facilities, centres or research, which visitors do not buy, book or sign up for, "
+        "is corporativa; publishing documents required by a regulation is legal. The start of the content may still include menu text; "
         "ignore it. Each option says what it is not; when two seem to fit, follow those exclusions. Use "
         "'otro' only when none fits."
     ),
@@ -61,16 +61,19 @@ TIPO_PAGINA = Pregunta(
                     "brand's hotels or products, a blog category, tag or archive, a list of offers, projects, "
                     "people or partner institutions (also as a table), a paginated or filtered listing, or a "
                     "section hub whose content is little more than links to its subsections, also when those "
-                    "subsections are about admissions, scholarships, services or regulations. Not the page of "
+                    "subsections are about admissions, scholarships, services, regulations or academic "
+                    "information, even if it also links to one or two documents. Not the page of "
                     "one single item or person that happens to link to others (ficha_producto, perfil), not a "
-                    "page whose links lead straight to practical resources such as schedules, catalogues or "
-                    "tools (ayuda) and not the organisation's own structure and departments (corporativa)."),
+                    "page whose links all lead straight to practical resources such as schedules, catalogues "
+                    "or tools (ayuda) and not the organisation's own structure and departments (corporativa)."),
         "ficha_producto": ("The page of ONE specific product, service, property or item that the site sells, "
                            "rents, books or enrols people in (a product, a hotel, a room, a book, a course or "
-                           "degree, a service plan), presented as that item: what it is, includes or costs, "
+                           "degree, a service plan, a campus gym or sports programme people sign up for), "
+                           "presented as that item: what it is, includes or costs, "
                            "its features or syllabus, also a page of that one programme that argues why to "
                            "choose it; or a part of that one item (its restaurant, spa or gallery, or one "
-                           "subject or module of a degree with its objectives and syllabus). Not a promotion, "
+                           "subject or module of a degree with its objectives and syllabus), even if that part is "
+                           "not sold separately. Not a promotion, "
                            "package, campaign, invitation to an event or 'why study here' page for a whole "
                            "area or the organisation (landing_comercial), not how to pay, finance, apply for "
                            "or get support in it (ayuda), not the organisation's own facilities, centres or "
@@ -106,11 +109,17 @@ TIPO_PAGINA = Pregunta(
         "corporativa": ("Information about the organisation itself rather than what it sells: about us, "
                         "history, mission and values, careers and job offers, the press room, awards, an "
                         "investors overview, its structure and departments, its own research groups and "
-                        "research lines, and its own facilities, labs, campus, incubators and in-house centres "
-                        "that are presented but not sold on their own. Not a brand page that lists what the "
-                        "brand sells or a list or table of partner institutions (listado), not one person's profile (perfil), not a campaign or a 'why choose us' "
-                        "pitch (landing_comercial) and not policies, compliance texts, quality reports or "
-                        "notices of grants received (legal)."),
+                        "research lines, its own facilities, labs, campus, incubators, institutes and in-house "
+                        "centres, presented as part of the organisation and not as something a visitor buys, "
+                        "books or signs up for (also when the page opens with a notice of the public funding "
+                        "they received), and its internship programme placing its students in companies. "
+                        "Not a part of one item that is sold, such as a hotel's restaurant, spa or "
+                        "gastronomy, nor a campus service people sign up for, such as a gym or sports "
+                        "programme (ficha_producto), not a brand page that lists what the brand sells or a "
+                        "list or table of partner institutions (listado), not one person's profile (perfil), "
+                        "not a campaign or a 'why choose us' pitch (landing_comercial) and not policies, "
+                        "compliance texts, quality reports or pages whose purpose is a notice of grants "
+                        "received (legal)."),
         "contacto_ubicacion": ("How to reach the business: a contact page or form, a store, office, dealer or "
                                "technical service locator, or the page of one shop, office or service point "
                                "with its address and opening hours. Not a hotel or venue presented as something "
@@ -121,7 +130,7 @@ TIPO_PAGINA = Pregunta(
                   "steps and documents to register or apply; practical information on exchange or mobility "
                   "programmes; support classes, tutoring and other academic support for those already "
                   "enrolled; schedules, academic calendars, library catalogues and search portals, also a page "
-                  "whose links lead straight to those schedules or catalogues; interactive tools that help a "
+                  "whose links all lead straight to those schedules or catalogues; interactive tools that help a "
                   "customer choose or calculate (a grant or subsidy finder, a sizing calculator, a product "
                   "configurator or simulator) or a page that gathers such tools for professionals; and "
                   "information on public grants a customer can apply for. Not the page that presents and "
@@ -132,15 +141,16 @@ TIPO_PAGINA = Pregunta(
         "legal": ("A legal, regulatory or compliance text or document: legal notice, privacy, cookies, terms and "
                   "conditions, and pages that exist to meet an obligation (criminal risk prevention, code of "
                   "conduct, whistleblowing channel, ESG or sustainability policies and sustainability reports, "
-                  "notices of public grants or subsidies the company itself received, also a page whose "
-                  "content opens with a notice of public co-funding before describing a project, corporate "
-                  "governance or legal information for shareholders, product safety alerts), academic or "
+                  "a page whose purpose is to give notice of public grants or subsidies the company itself "
+                  "received, corporate governance or legal information for shareholders, product safety alerts), academic or "
                   "internal regulations, and quality-assurance documentation: the quality system published to "
                   "comply with a law, and the verification, monitoring or accreditation reports and official "
                   "documents of a programme or product, also a page that lists those documents for download. "
                   "Not a tool or guide about grants a customer can apply for (ayuda), not a hub that links to "
-                  "separate pages of regulations (listado) and not the page that presents the programme "
-                  "itself (ficha_producto)."),
+                  "separate pages of regulations (listado), not the page of a project, lab or institute "
+                  "that merely opens with a notice of its public funding (what that project is: "
+                  "corporativa, articulo...) and not the page that presents the programme itself "
+                  "(ficha_producto)."),
         "utilidad": ("A functional step with no search value: login or account area, registration, password "
                      "reset, cart, checkout, thank-you or confirmation, unsubscribe, online check-in, an employee "
                      "or customer portal entrance, internal search results, a test page. Not a contact page "
@@ -171,7 +181,7 @@ CASOS_FRONTERA = [
     ("Saunier /para-el-usuario/servicios/planes-renove/subvenciones-2610567.html, «Subvenciones y ayudas»",
      "ayuda", "public grants a customer can apply for"),
     ("Una pagina de subvenciones recibidas por la empresa", "legal", "grants or subsidies the company itself"),
-    # v2 (decision 181): los fallos de la v1 en el juego de 300 (232 aciertos con
+    # v2 (decision 181): los fallos de la v1 en el juego de 300 (233 aciertos con
     # la etiqueta de cada plantilla unificada: convenios, hub de normativa, grupos
     # de investigacion, practicas, «por que estudiar» y proyectos de I+D tenian
     # etiquetas que se contradecian). Criterios generales, no las URLs del juego.
@@ -212,8 +222,6 @@ CASOS_FRONTERA = [
      "quality system published to comply with a law"),
     ("Salle /grados/informacion-academica/normativa-academica/<normativa>, el texto de una normativa", "legal",
      "academic or internal regulations"),
-    ("Salle /la-salle-y-la-investigacion/iaslab, empieza por el aviso de cofinanciacion FEDER", "legal",
-     "notice of public co-funding"),
     ("Lopesan /corporate/lopesan-for-good/sustainability-reports", "legal", "sustainability reports"),
     # 4) Ayuda frente a listado: el listado es de paginas del mismo tipo; el hub
     # que solo reparte a otras secciones sigue siendo listado aunque sean de ayuda.
@@ -224,12 +232,25 @@ CASOS_FRONTERA = [
     ("Salle /nuevos-alumnos/proceso-de-admision, reparte a grados y masteres", "listado",
      "section hub whose content is little more than links"),
     ("Salle /doctorado/servicios-para-el-estudiante-de-doctorado y /precios-becas-y-ayudas, hubs", "listado",
-     "admissions, scholarships, services or regulations"),
+     "admissions, scholarships, services, regulations"),
     ("Salle /informacion-academica/normativa-academica, hub que enlaza a cada normativa", "listado",
-     "admissions, scholarships, services or regulations"),
+     "admissions, scholarships, services, regulations"),
     ("Salle /convenis-de-cooperacio-academica/*, tabla de universidades sin pagina propia (v1 acertaba)",
      "listado", "partner institutions (also as a table)"),
     ("Salle /organitzacio-i-estructura/departaments-academics", "corporativa", "structure and departments"),
+    # Lo propio que no se compra frente a la parte de un item que si se vende.
+    # Un laboratorio o instituto que abre con el aviso FEDER es lo que es el
+    # proyecto, no legal (segunda revision de #247: etiquetas v4).
+    ("Salle /la-salle-y-la-investigacion/iaslab e /ioticat, abren con el aviso FEDER", "corporativa",
+     "also when the page opens with a notice of the public funding"),
+    ("Salle /practicas-en-empresas, el programa de practicas propio (etiqueta unificada)", "corporativa",
+     "internship programme placing its students"),
+    ("Salle /serveis-del-campus/sport-fitness, gimnasio del campus al que uno se apunta", "ficha_producto",
+     "campus gym or sports programme people sign up for"),
+    ("Lopesan /<hotel>/gastronomy, los restaurantes de UN hotel", "ficha_producto",
+     "even if that part is not sold separately"),
+    ("Salle /masters-postgraduates/academic-information, reparte a normativa y calendarios", "listado",
+     "even if it also links to one or two documents"),
     # 5) Menores.
     ("Lopesan /de, portada de la version alemana", "home", "'/de'"),
     ("Lopesan /es/corporativa/noticias/detalle-noticia1, una sola palabra", "otro", "one or two words"),

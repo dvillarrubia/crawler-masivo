@@ -584,3 +584,16 @@ def test_v2_sin_los_solapes_de_significado_de_la_revision():
     assert "also when the page is a list of them" not in p.opciones["legal"]
     # «Por que estudiar» de UN programa sigue siendo su ficha.
     assert "argues why to choose it" in afirma["ficha_producto"]
+    # Segunda revision: las practicas las reclama `corporativa` y nadie mas.
+    assert "internship" in afirma["corporativa"]
+    assert [k for k, d in afirma.items() if "internship" in d.lower()] == ["corporativa"]
+    # Lo propio que «no se vende» de `corporativa` excluye la parte de UN item
+    # que se vende y el servicio del campus al que uno se apunta (ficha_producto).
+    no_corp = p.opciones["corporativa"].split(" Not ", 1)[1]
+    assert "restaurant" in no_corp and "gym" in no_corp and "(ficha_producto)" in no_corp
+    assert "not sold on their own" not in afirma["corporativa"]
+    # El aviso de cofinanciacion al inicio no hace legal a un proyecto: legal solo
+    # se queda la pagina cuyo proposito es el aviso.
+    assert "co-funding" not in afirma["legal"]
+    assert "whose purpose is to give notice of public grants" in afirma["legal"]
+    assert "merely opens with a notice of its public funding" in p.opciones["legal"].split(" Not ", 1)[1]
