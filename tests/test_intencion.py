@@ -636,3 +636,21 @@ def test_la_v2_deja_navigational_solo_para_la_portada_y_la_pantalla_traduce_todo
     bloque = app.split("const RESPUESTA_ENRIQ = {")[1].split("};")[0]
     claves = set(re.findall(r"(\w+):\s*'", bloque))
     assert set(p.opciones) <= claves
+
+
+def test_v2_las_fronteras_del_programa_concreto_y_ejemplos_genericos():
+    """Decision 180 (revision): con «la primera regla que encaje», la regla 3
+    (un programa concreto) se quedaba los documentos de calidad de UN programa
+    (title = el nombre del master) y la financiacion («programa de ayudas»)
+    antes de llegar a la 6 y la 7. La regla 3 los excluye por escrito, «por que
+    elegir nuestro <programa>» depende del contenido, y los ejemplos no salen
+    del juego con el que se midio la v1 (lo inflarian)."""
+    p = CATALOGO["intencion_pagina"]
+    regla3 = p.instrucciones.split("(3)")[1].split("(4)")[0]
+    regla4 = p.instrucciones.split("(4)")[1].split("(5)")[0]
+    assert "quality-assurance or accreditation documents" in regla3 and "(rule 6)" in regla3
+    assert "financing" in regla3 and "(rule 7)" in regla3
+    assert "when the content presents that one" in regla3 and "rather than for one programme" in regla4
+    assert "NOT the quality or official documents" in p.opciones["transactional"]
+    for del_juego in ("La Salle", "Penguin", "Lopesan", "UOC", "Management", "23F", "Maspalomas"):
+        assert del_juego not in p.instrucciones + " ".join(p.opciones.values()), del_juego

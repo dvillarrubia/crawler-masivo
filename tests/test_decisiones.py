@@ -485,8 +485,8 @@ HUELLAS |= {("title_describe_contenido", 1): "d55396cb489ef138",
             ("schema_contradice_contenido", 1): "591101cbca2ef33f",
             }
 # v2 de la intencion de la pagina y del title frente al contenido (decision 180).
-HUELLAS |= {("intencion_pagina", 2): "4de96c3ead3e9ed9",
-            ("title_describe_contenido", 2): "ced4744b0d002337",
+HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
+            ("title_describe_contenido", 2): "cfb30e2f6f487516",
             }
 
 

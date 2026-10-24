@@ -980,16 +980,24 @@
         que el sitio vende, reserva o deja solicitar o apuntarse, también «por
         qué elegir nuestro <programa>» y el **primer** alta en un programa de
         fidelización, área privada o suscripción (entrar en la cuenta que ya se
-        tiene es la 2).
+        tiene es la 2). Excluye por escrito los documentos oficiales, de
+        calidad o de acreditación de UN programa (la 6) y la financiación y
+        las becas (la 7): con «la primera que encaje» y el title igual al
+        nombre del máster, la regla 3 se los quedaba antes de llegar a ellas
+        (en la v1 Jev ya les daba 0,30-0,48 de transaccional). «Por qué elegir
+        nuestro <programa>» es de aquí solo si el contenido presenta ese
+        programa.
      4. `commercial`: varios para elegir, también la selección de varios
         productos en venta escrita como artículo (los «libros sobre el 23F» de
         Penguin, `BlogPosting` + `Offer`), «por qué elegirnos» para un área
-        amplia («por qué estudiar Management en…») y los casos de éxito.
+        amplia y no para un programa (`'why study at <university>'`, `'why
+        choose <firm> for <a whole field>'`) y los casos de éxito.
      5. `local`: dirección, cómo llegar, horario de un sitio físico o un
         localizador de tiendas o técnicos (la página de contacto general, no).
      6. `corporate` (nueva): la organización en sí y no lo que vende: quiénes
         somos, valores, gobierno, sostenibilidad, cumplimiento y alertas de
-        seguridad de producto, documentos de calidad o acreditación,
+        seguridad de producto, documentos de calidad o acreditación (también
+        los de un solo programa o producto),
         subvenciones recibidas, textos legales, empleo, prensa, redes sociales,
         contacto general, directorio y fichas de personal, sus escuelas,
         institutos, grupos y proyectos de investigación, y convenios.
@@ -1004,13 +1012,23 @@
      "pagina_sin_equivalente"`, con su texto en la pantalla): ninguna búsqueda
      puede casar con ella y saldría siempre un 0 % alineado, el mismo
      razonamiento que la página de marca de la 176. La pantalla traduce las dos
-     opciones (`RESPUESTA_ENRIQ`) y un test lo comprueba.
+     opciones (`RESPUESTA_ENRIQ`) y un test lo comprueba; `navigational`, que
+     comparten página y búsqueda, se rotula «navegacional (portada o marca)».
    - **`title_describe_contenido` v2**: primero «qué es la página» (qué ítem
      presenta, qué sección o listado es, de qué tema trata), avisando de que
-     el H1 puede ser un eslogan y el fragmento un menú, metadatos (editorial,
-     fecha, «pagos 100 % seguros»), la biografía del autor, una cita o el
-     primer elemento de un listado, que son partes de la página y no otro
-     asunto; después, solo si el title lo nombra. La escala:
+     el H1 puede ser un eslogan y el fragmento un menú, los datos de un
+     producto (editorial, precio, «pagos 100 % seguros»), la biografía del
+     autor, una cita o el primer elemento de un listado, que son partes de la
+     página y no otro asunto; después, solo si el title lo nombra. Con **dos
+     excepciones** escritas, porque sin ellas esa indulgencia se comía los
+     únicos negativos del juego (el estado del title no lleva la ruta, así que
+     el modelo no ve `/gestion-de-la-calidad/`): una lista de documentos o
+     informes SOBRE el ítem que nombra el title, cada uno con «View» o
+     «Download» y su fecha, es la página de sus documentos (nivel 2), y un
+     title que nombra un evento, una oferta o una promoción que ni el H1 ni el
+     fragmento mencionan mientras describen otra cosa promete lo que la
+     página no enseña (nivel 0). Por eso «fecha» ya no está entre los
+     metadatos que se perdonan. La escala:
      0 otro asunto o engaña · 1 genérico (solo la marca o una etiqueta que
      valdría para muchas páginas) · 2 algo relacionado pero no exactamente esta
      página (el ítem padre cuando la página es una parte de él: sus
@@ -1031,7 +1049,8 @@
      <publisher>'`, `'Hotels in <island>'`, `'/mx/'`) y no los del juego: con
      «El oro de los tigres» en la instrucción, medir sobre el juego que lo
      contiene inflaría el acierto (la lección de la 169). Un test lo vigila en
-     la del title.
+     la del title y en la de la intención («Management», «La Salle», «UOC»…:
+     la primera redacción de la regla 4 copiaba casi una fila del juego).
    - **Las etiquetas del juego v1 no valen para la v2.** En la intención
      cambian las opciones (dos nuevas y `navigational` reducida a la
      portada); en el title cambia lo que significa cada nivel. `evaluar` ya
@@ -1047,10 +1066,11 @@
      malos de verdad (los `title_es_generico` positivos y titles de plantilla
      sin rellenar), que este juego no tiene.
    - **Coste** (fórmula de la 162, caracteres / 4): la v2 de la intención añade
-     2.461 caracteres de pregunta (5.572 frente a 3.111), unos 600 tokens por
-     llamada: en Lopesan (3.216 llamadas) ~1,9 M tokens y **~0,08 $** más por
-     censo, de 0,24 a ~0,32 $. La del title, 875 caracteres (~220 tokens): en
-     Penguin (3.695 llamadas) ~0,03 $ más. Las opciones se recortaron para no
+     2.965 caracteres de pregunta (6.076 frente a 3.111, con las exclusiones
+     de la regla 3 de la revisión), unos 740 tokens por llamada: en Lopesan
+     (3.216 llamadas) ~2,4 M tokens y **~0,10 $** más por censo, de 0,24 a
+     ~0,34 $. La del title, 1.319 caracteres (~330 tokens, con sus dos
+     excepciones): en Penguin (3.695 llamadas) ~0,05 $ más. Las opciones se recortaron para no
      repetir las listas de las reglas: la primera redacción pesaba 6.869.
    - Fuera: `etapa_embudo` y `intencion_busqueda` (sin medir con este juego;
      siguen en v1), añadir la ruta al estado del title (habría resuelto las

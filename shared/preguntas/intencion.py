@@ -75,18 +75,24 @@ INTENCION_PAGINA = Pregunta(
         "(3) a page about ONE specific product, service, hotel, villa, room, programme, course, "
         "ticket, event, information session, visit or offer that the site sells, books or lets "
         "outsiders sign up for or request, is transactional, even if its text only describes it; "
-        "this includes 'why choose our <one programme>' and signing up for the first time to a "
-        "membership, loyalty programme, private area or subscription; "
+        "this includes 'why choose our <one programme>' when the content presents that one "
+        "programme, and signing up for the first time to a membership, loyalty programme, private "
+        "area or subscription; but NOT the official, quality-assurance or accreditation documents "
+        "of one programme or product (rule 6), even when the title and heading are its name and "
+        "the content is a list of its reports, NOR scholarships, grants or financing schemes for "
+        "studying or buying (rule 7); "
         "(4) a page that lists or presents several products, services, programmes or hotels to "
         "choose from (also the site's own range, 'our hotels in <place>'), a selection of several "
         "products for sale written as an article ('7 books about X'), a page arguing why to choose "
-        "the organisation for a broad area ('why study at <university>', 'why study management at "
-        "<university>'), or case studies and a portfolio, is commercial; "
+        "the organisation for a broad area rather than for one programme ('why study at "
+        "<university>', 'why choose <firm> for <a whole field>'), or case studies and a "
+        "portfolio, is commercial; "
         "(5) a page whose main content is where a venue is, how to get there, its opening hours, "
         "or a locator of branches, shops or technicians, is local; "
         "(6) any other page about the organisation itself rather than about what it sells is "
         "corporate: about us, values, history, governance, sustainability, compliance and product "
-        "safety notices, quality-assurance or accreditation documents, grants it received, legal "
+        "safety notices, quality-assurance or accreditation documents (also those of one "
+        "programme or product), grants it received, legal "
         "texts (privacy, cookies, terms), careers, press room, social media links, a general "
         "contact page, its staff directory or a staff profile, its schools, institutes, research "
         "groups and research projects, and its agreements with other institutions; "
@@ -110,7 +116,9 @@ INTENCION_PAGINA = Pregunta(
             "Rule 3: someone ready to act on one specific product, service, hotel, room, programme, "
             "course, event, session, visit or offer, or signing up for the first time, whether or "
             "not the booking or price shows in the text. NOT a page listing several (commercial), "
-            "NOT using an account someone already has (existing_users)."),
+            "NOT using an account someone already has (existing_users), NOT the quality or "
+            "official documents of one programme (corporate), NOT financing or scholarships "
+            "(informational)."),
         "navigational": (
             "Rule 1: only the home page or a language or country root. NOT any other page about "
             "the organisation (corporate) or for its existing customers or students "
@@ -233,8 +241,9 @@ INTENCION_BUSQUEDA = Pregunta(
         "unclear": ("No rule fits: a code, a string with no meaning, a single generic word that is "
                     "not a place, product or brand. Do not use it when a rule fits."),
     },
-    descripcion=("Intencion de una busqueda real de Search Console (#169 punto 1), con las mismas "
-                 "opciones que la de la pagina. Sin evaluar (#8): todo incierto."),
+    descripcion=("Intencion de una busqueda real de Search Console (#169 punto 1), con las "
+                 "opciones de la de la pagina salvo usuarios existentes y corporativa (decision "
+                 "180). Sin evaluar (#8): todo incierto."),
 )
 
 PREGUNTAS = [INTENCION_PAGINA, ETAPA_EMBUDO, INTENCION_BUSQUEDA]

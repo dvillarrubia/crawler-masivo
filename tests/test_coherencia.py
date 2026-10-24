@@ -337,5 +337,13 @@ def test_title_v2_el_nivel_alto_es_nombrar_la_pagina_aunque_sea_corto():
     assert "even briefly" in p.opciones[3] and "different subject" in p.opciones[0]
     assert "generic" in p.opciones[1] and "parent item" in p.opciones[2]
     assert "biography" in p.instrucciones and "slogan" in p.instrucciones
-    for de_un_cliente in ("Penguin", "La Salle", "Fuerteventura", "Lopesan", "tigres"):
+    # Revision: los metadatos de un producto son parte de la pagina, pero una
+    # lista de documentos SOBRE el item que nombra el title es nivel 2, y un
+    # title de evento u oferta que nada de lo visible menciona es nivel 0: sin
+    # esas dos excepciones la v2 no separaba los pocos negativos del juego.
+    assert "ABOUT the item the title names" in p.instrucciones and "(level 2)" in p.instrucciones
+    assert "event, offer or promotion" in p.instrucciones and "(level 0)" in p.instrucciones
+    assert "date" not in p.instrucciones.split("Two exceptions")[0]
+    for de_un_cliente in ("Penguin", "La Salle", "Fuerteventura", "Lopesan", "tigres", "Carnaval",
+                          "Maspalomas", "Memòria", "Meloneras"):
         assert de_un_cliente not in p.instrucciones + " ".join(p.opciones)

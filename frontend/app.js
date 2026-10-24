@@ -215,7 +215,7 @@ const RESPUESTA_ENRIQ = {
   contacto_ubicacion: 'contacto o ubicación', ayuda: 'ayuda, documentación o herramienta', legal: 'legal',
   utilidad: 'utilidad', otro: 'otro', ninguna: 'ninguna',
   informational: 'informacional', commercial: 'comercial', transactional: 'transaccional',
-  navigational: 'navegacional / marca', local: 'local', unclear: 'no está claro',
+  navigational: 'navegacional (portada o marca)', local: 'local', unclear: 'no está claro',
   existing_users: 'para quien ya es cliente o alumno', corporate: 'corporativa / institucional',
   tofu: 'TOFU', mofu: 'MOFU', bofu: 'BOFU', post_purchase: 'postventa',
   out_of_funnel: 'fuera del embudo', sin_respuesta: 'sin respuesta',
