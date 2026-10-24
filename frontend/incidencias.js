@@ -243,7 +243,7 @@ const ISSUE_INFO = {
     arreglo: 'Cambiar el componente que pinta el enlace (la tarjeta del listado, el botón del bloque) para que el texto diga de qué es el destino, o que el enlace sea el propio título. Informativo.',
   },
   'solo_enlazada_con_nofollow': {
-    que: 'Página indexable a la que el sitio enlaza, pero solo con enlaces nofollow (rel="nofollow", "ugc" o "sponsored" en el enlace, o una directiva nofollow en la página que enlaza), y sin ningún camino de enlaces seguibles desde la home. En los detalles, cuántas páginas la enlazan, por qué motivo y ejemplos.',
+    que: 'Página indexable a la que las páginas que cuentan (200 y sin noindex) enlazan solo con enlaces nofollow (rel="nofollow", "ugc" o "sponsored" en el enlace, o una directiva nofollow en la página que enlaza), y sin ningún camino de enlaces seguibles desde la home. En los detalles, cuántas páginas la enlazan, por qué motivo y ejemplos.',
     google: 'Trata el nofollow como una pista para no seguir el enlace: puede no descubrir la página por ahí, y si la descubre no le llega ninguna señal de su propio sitio. Queda a merced del sitemap y de los enlaces externos.',
     arreglo: 'Quitar el nofollow de los enlaces internos que llevan a ella (o la directiva nofollow de las páginas que la enlazan), o enlazarla desde una sección alcanzable. Si de verdad no debe posicionar, ponerle noindex.',
   },
@@ -1048,6 +1048,9 @@ const DETALLE_LABEL = {
   cluster: 'clúster',
   alternativas: 'alternativas',
   variante_propia: 'se anota como',
+  paginas_con_nofollow: 'páginas con nofollow',
+  con_rel_nofollow: 'enlazan con rel nofollow',
+  con_nofollow_de_pagina: 'enlazan desde una página nofollow',
   clusters_afectados: 'clústeres sin x-default',
   clusters_del_host: 'clústeres del host',
   cuantas_urls: 'URLs con ese código',
