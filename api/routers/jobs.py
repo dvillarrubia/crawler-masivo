@@ -592,8 +592,10 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
         # El Parquet de sus enlaces, si estaban archivados (decision 95). Despues
         # del commit: si el borrado de la BD fallase, el job seguiria pidiendo
         # su fichero.
-        from shared import archivo_enlaces
+        from shared import archivo_enlaces, capturas_pantalla
         archivo_enlaces.borrar(job_id)
+        # Y sus capturas de pantalla (decision 173), en el mismo volumen.
+        capturas_pantalla.borrar(job_id)
     else:
         db.flush()
     return {"completo": True, "filas": filas}
@@ -759,6 +761,7 @@ def eliminar_jobs(
     filas_totales: dict[str, int] = {}
     bytes_conocidos, sin_medir = 0, False
     archivo_bytes, archivo_sin_medir = 0, False
+    capturas_bytes = 0
 
     candidatos = []
     for i in ids:
@@ -809,6 +812,10 @@ def eliminar_jobs(
             # Sin medir (ya estaba a medias): ni la base ni su Parquet se saben.
             archivado = bool(job.enlaces_archivados)
             medida = {"archivado": archivado, "archivo_bytes": None if archivado else 0}
+            # Las capturas (decision 173) siguen en disco hasta el final del
+            # borrado: esas si se pueden medir.
+            from shared import capturas_pantalla
+            medida["capturas_bytes"] = capturas_pantalla.bytes_en_disco(job.id)
         fila = {"id": job.id, "nombre": job.name, "status": job.status,
                 "created_at": job.created_at,
                 "filas": medida.get("filas"), "bytes": medida.get("bytes"),
@@ -816,6 +823,7 @@ def eliminar_jobs(
                 # quita con el job, y ese espacio SI vuelve al disco.
                 "archivado": bool(medida.get("archivado")),
                 "archivo_bytes": medida.get("archivo_bytes"),
+                "capturas_bytes": medida.get("capturas_bytes") or 0,
                 "aviso": avisos.get(job.id)}
 
         if not cuerpo.simular:
@@ -829,6 +837,7 @@ def eliminar_jobs(
                 continue
 
         eliminados.append(fila)
+        capturas_bytes += medida.get("capturas_bytes") or 0
         if medida.get("archivado") and medida.get("archivo_bytes") is None:
             archivo_sin_medir = True
         else:
@@ -849,6 +858,7 @@ def eliminar_jobs(
         bytes_incompletos=sin_medir,
         archivo_bytes=archivo_bytes,
         archivo_incompleto=archivo_sin_medir,
+        capturas_bytes=capturas_bytes,
         filas=filas_totales,
         nota=NOTA_DE_ESPACIO,
     )

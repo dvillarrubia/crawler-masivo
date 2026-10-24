@@ -18,6 +18,9 @@ del sitio, y quita las que dejo la pagina anterior (decision 114).
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
+
+from .blocklist import _host_bloqueado
 
 logger = logging.getLogger(__name__)
 
@@ -190,3 +193,61 @@ def _ruta_con_credenciales(page, request, cabeceras: dict):
                 pass
 
     return _ruta
+
+
+# ---------------------------------------------------------------------------
+# Capturas de pantalla (decision 173)
+# ---------------------------------------------------------------------------
+# El rastreo con render no descarga imagenes ni fuentes (PLAYWRIGHT_ABORT_REQUEST:
+# no cambian el HTML y cuestan la mitad del tiempo). Una captura sin ellas no
+# se parece a la pagina, asi que la pestana de una captura las deja pasar. Los
+# rastreadores de anuncios y analitica siguen fuera (`blocklist.py`): no
+# pintan nada que importe y si cuestan.
+TIPOS_QUE_PINTAN = frozenset({"image", "font"})
+
+
+async def _ruta_que_pinta(route, peticion) -> None:
+    """Deja pasar imagenes y fuentes que no son de un rastreador; lo demas,
+    al manejador siguiente (las credenciales del job o scrapy-playwright)."""
+    try:
+        if peticion.resource_type in TIPOS_QUE_PINTAN and not _host_bloqueado(
+                urlsplit(peticion.url).hostname or ""):
+            await route.continue_()
+            return
+        await route.fallback()
+    except Exception as exc:  # noqa: BLE001 -- la pagina ya se cerro, o la ruta se atendio
+        logger.debug("Ruta de captura: %s", exc)
+
+
+async def preparar_pagina_captura(page, request=None) -> None:
+    """``preparar_pagina`` y, encima, la ruta que deja pasar imagenes y fuentes.
+
+    Las rutas de Playwright se atienden de la ULTIMA registrada a la primera:
+    esta va despues de la de scrapy-playwright (que aborta las imagenes) y de
+    la de credenciales, asi que decide antes y les pasa lo que no es suyo.
+    """
+    await preparar_pagina(page, request)
+    try:
+        await page.route("**/*", _ruta_que_pinta)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Captura sin imagenes ni fuentes: %s", exc)
+
+
+async def capturar_pantalla(page, opciones: dict | None = None):
+    """``PageMethod`` que hace la captura y devuelve los bytes del JPEG, o None.
+
+    La primera pantalla (sin `full_page`): es lo que se ve al abrir, y una
+    pagina entera en movil son 20.000 px de alto. A escala CSS: en el movil
+    (DPR 2,625) la imagen sale de 412x915 y no de 1082x2402, que ocupa siete
+    veces mas y no ensena nada distinto. Nunca lanza: una captura que falla no
+    puede costar la respuesta.
+    """
+    opciones = opciones or {}
+    try:
+        return await page.screenshot(
+            type="jpeg", quality=int(opciones.get("calidad", 70)), full_page=False,
+            scale="css", animations="disabled", caret="hide",
+            timeout=int(opciones.get("timeout_ms", 15000)))
+    except Exception as exc:  # noqa: BLE001
+        logger.info("No se pudo hacer la captura de %s: %s", getattr(page, "url", "?"), exc)
+        return None

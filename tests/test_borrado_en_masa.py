@@ -612,3 +612,31 @@ def test_candado_ocupado_contra_postgres():
     finally:
         s.close()
         motor.dispose()
+
+
+def test_las_capturas_de_pantalla_se_miden_y_se_van_con_el_job(entorno):
+    """Decision 173: las capturas viven en el volumen de archivo, fuera de la
+    base. La vista previa dice lo que ocupan (medido), el borrado en masa y el
+    de la ficha se las llevan, y las de otro censo se quedan."""
+    from shared import capturas_pantalla
+
+    api, Sesion, ids = entorno
+    jpeg = b"\xff\xd8\xff" + b"x" * 997
+    for jid in (ids["prueba"], ids["canario"], ids["serie_apagada"]):
+        capturas_pantalla.guardar(jid, "a" * 64, "movil", jpeg, {"plantilla": "/p/*"})
+    carpeta = capturas_pantalla.directorio(ids["prueba"])
+    medida = capturas_pantalla.bytes_en_disco(ids["prueba"])
+    assert medida > 1000
+
+    d = _borrar(api, [ids["prueba"]], simular=True)
+    assert d["eliminados"][0]["capturas_bytes"] == medida
+    assert d["capturas_bytes"] == medida
+    assert carpeta.is_dir(), "la simulacion no puede tocar las capturas"
+
+    d = _borrar(api, [ids["prueba"]])
+    assert d["capturas_bytes"] == medida
+    assert not carpeta.exists()
+    assert capturas_pantalla.directorio(ids["serie_apagada"]).is_dir(), "las de otro censo se quedan"
+
+    assert api.delete(f"/api/jobs/{ids['canario']}").status_code in (200, 204)
+    assert not capturas_pantalla.directorio(ids["canario"]).exists()

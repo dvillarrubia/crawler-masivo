@@ -230,10 +230,15 @@ def _cambio_de_contenido(pa: dict, pb: dict, usar_hash: bool = False) -> list[st
 
 def _config_de_extraccion(job) -> tuple:
     """Lo de la config del job que cambia el contenido principal extraido, y
-    con el su hash: el render, el recorte de promos y los selectores propios."""
+    con el su hash: el render, el perfil de dispositivo (un sitio con servido
+    dinamico da a un movil otro HTML: decision 173), el recorte de promos y
+    los selectores propios."""
+    from shared.perfiles import perfil_de_ua
+
     cfg = getattr(job, "config", None) or {}
     ext = cfg.get("extraction") or {}
-    return (bool(cfg.get("render_js")), ext.get("extract_page_content", True) is not False,
+    return (bool(cfg.get("render_js")), perfil_de_ua(cfg.get("user_agent")),
+            ext.get("extract_page_content", True) is not False,
             ext.get("strip_promo_blocks", True) is not False,
             tuple(sorted(ext.get("custom_boilerplate_selectors") or [])))
 

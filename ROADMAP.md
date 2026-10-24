@@ -934,7 +934,12 @@ que les copiamos, la idea, no su definición. Por olas de
   staging (#149, #156).
 - **Móvil frente a escritorio** (ola 7.4): pedir una muestra con el
   user-agent de smartphone y comparar lo que cambia
-  ([#161](https://github.com/dvillarrubia/crawler-masivo/pull/161)).
+  ([#161](https://github.com/dvillarrubia/crawler-masivo/pull/161)). Y
+  (decisión 173) el preset «Chrome - Android (móvil)» para rastrear entero
+  como un móvil coherente, la comparación automática que no cruza perfiles y
+  capturas de pantalla por muestra de plantilla, en uno o los dos perfiles,
+  visibles en la ficha de la URL. Quedan las capturas de página entera y
+  compararlas entre censos.
 - **Los restos** ([#184](https://github.com/dvillarrubia/crawler-masivo/issues/184),
   decisiones 153-156): titulares que saltan de nivel (basta re-analizar); y con
   un rastreo nuevo, el tamaño real de la `og:image` (una muestra acotada,

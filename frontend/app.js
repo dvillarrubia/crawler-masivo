@@ -44,6 +44,11 @@ const UA_PRESETS = {
   // la huella automatica salia de la 133 y el UA de la 124 (decision 132).
   firefox_win: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
   edge_win:    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
+  // Un movil que es un navegador y no un bot (decision 173): `UA_CHROME_ANDROID`
+  // de `shared/perfiles.py`, con la version de su huella TLS (`chrome131_android`)
+  // para que la huella automatica case. Con el, el contexto de render es de
+  // movil (412x915, DPR 2,625, tactil). Comprobado por test.
+  chrome_android: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
   // developers.google.com/search/docs/crawling-indexing/google-common-crawlers
   googlebot_mobile: `Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_EVERGREEN} Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)`,
   // La cadena antigua de escritorio, sin Chrome: se conserva para que los
@@ -80,6 +85,7 @@ const UA_LABELS = {
   safari_mac:  'Safari - macOS',
   firefox_win: 'Firefox - Windows',
   edge_win:    'Edge - Windows',
+  chrome_android: 'Chrome - Android (móvil)',
   googlebot_mobile: 'Googlebot smartphone',
   googlebot:   'Googlebot escritorio (cadena antigua)',
   bingbot:     'Bingbot',
@@ -1074,7 +1080,7 @@ function app() {
       const medidaPrevia = Object.fromEntries(b.previa.eliminados.map(e => [e.id, e]));
       const acumulado = { eliminados: [], omitidos: [], filas: {}, bytes_aprox: 0,
                           bytes_incompletos: false, archivo_bytes: 0, archivo_incompleto: false,
-                          sin_terminar: 0, nota: b.previa.nota };
+                          capturas_bytes: 0, sin_terminar: 0, nota: b.previa.nota };
       b.paso = 'borrando';
       b.hechos = 0;
       b.total = total;
@@ -1106,6 +1112,7 @@ function app() {
           const m = medidaPrevia[e.id] || e;
           if (m.bytes != null) acumulado.bytes_aprox += m.bytes;
           else acumulado.bytes_incompletos = true;
+          acumulado.capturas_bytes += m.capturas_bytes || 0;
           if (m.archivado && m.archivo_bytes == null) acumulado.archivo_incompleto = true;
           else acumulado.archivo_bytes += m.archivo_bytes || 0;
         }
@@ -4762,6 +4769,10 @@ function _freshForm() {
     paridad_movil_muestra: 0,
     paridad_movil_por_plantilla: 3,
     paridad_movil_ua: 'chrome_android',
+    // Capturas de pantalla (decision 173): 0 = apagadas
+    capturas_muestra: 0,
+    capturas_por_plantilla: 1,
+    capturas_ambos_perfiles: false,
     // HTTP
     custom_headers: '',
     accept_language: '',
@@ -4837,6 +4848,9 @@ function _configDesdeForm(f) {
       paridad_movil_muestra: parseInt(f.paridad_movil_muestra) || 0,
       paridad_movil_por_plantilla: parseInt(f.paridad_movil_por_plantilla) || 3,
       paridad_movil_ua: f.paridad_movil_ua || 'chrome_android',
+      capturas_muestra: parseInt(f.capturas_muestra) || 0,
+      capturas_por_plantilla: parseInt(f.capturas_por_plantilla) || 1,
+      capturas_ambos_perfiles: !!f.capturas_ambos_perfiles,
     },
     url_filters: {
       max_url_length: parseInt(f.max_url_length) || 0,
@@ -4915,7 +4929,8 @@ function _formDesdeConfig(f, cfg) {
     'crawl_svg', 'crawl_other']);
   sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
     'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
-    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua']);
+    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua',
+    'capturas_muestra', 'capturas_por_plantilla', 'capturas_ambos_perfiles']);
   // Las sondas (decisiones 123 y 124): lo heredado se pinta Y pasa a ser la
   // base, para que lanzar sin tocarlas no lo repita en el job.
   f._sondasBase = { ...(f._sondasBase || _sondasDeSerie()) };

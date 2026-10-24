@@ -1139,3 +1139,113 @@
    fallos conocidos, CSP, AMD, fallo solo tras el JavaScript, tope total y por
    plantilla, sin gastar `max_urls`), `tests/test_accesibilidad_api.py`
    (trabajo de la API) y `tests/test_accesibilidad_frontend.py`.
+<a id="d173"></a>
+173. **El perfil de dispositivo va entero y por nombre, la comparacion no cruza
+   perfiles y las capturas de pantalla son una sonda por plantilla en el
+   volumen de archivo** (Ola 7.4 de `docs/PLAN_MEJOR_CRAWLER.md`). Lo que ya
+   habia (decision 119, #161): los contextos de Playwright con nombre por
+   perfil (`perfil_movil` / `perfil_escritorio`, 412×915 a DPR 2,625 y tactil,
+   o 1280×720), el contexto `custom` del censo que pasa a ser de movil con un
+   UA de movil, la huella `chrome131_android` sin render y la paridad movil por
+   muestra; y el aviso de la comparacion cuando los dos censos son de perfil
+   distinto. **No se duplica nada de eso.** Lo que faltaba:
+   - **Un movil que sea un navegador en el formulario.** Para rastrear como
+     movil solo estaba el preset de Googlebot smartphone: un bot (decision 98:
+     un WAF que verifica bots lo bloquea o le sirve otra cosa desde nuestra IP)
+     y, como bot, con la huella de escritorio de serie. Nuevo preset **«Chrome -
+     Android (movil)»** con `UA_CHROME_ANDROID` (Chrome 131, la version de su
+     huella): con «Automatica» la API deduce `chrome131_android`, el
+     `sec-ch-ua-platform` sale `"Android"` y, con render, el contexto del censo
+     es de movil. Un test comprueba que es la cadena de `shared/perfiles.py` y
+     que UA y huella son el mismo navegador. La huella `chrome131_android`
+     tambien se puede elegir a mano.
+   - **La comparacion automatica no cruza perfiles.** `censo_anterior` (la
+     referencia de las alertas y de los cambios) elegia el mas reciente del
+     host aunque fuera de escritorio y el nuevo de movil: en un sitio con
+     servido dinamico, las alertas saltarian por el dispositivo. Ahora solo es
+     referencia un censo del MISMO perfil (`perfil_de_ua`), tambien dentro de
+     una programacion; si no hay ninguno, no se compara, como una lista frente
+     a un censo. La comparacion manual entre dos censos elegidos sigue
+     permitida, con su aviso de perfil (119): comparar movil con escritorio a
+     proposito es justo lo que se quiere a veces. Y el hash del contenido del
+     trafico entre censos (decision 165) no se compara entre perfiles
+     (`_config_de_extraccion`): el HTML de un movil es otro.
+   - **Capturas de pantalla por muestra de plantilla.** Con
+     `crawl_behavior.capturas_muestra` (0 de serie; tope 50) el spider vuelve a
+     pedir, como mucho `capturas_por_plantilla` (1; tope 5) por plantilla, las
+     paginas internas HTML 2xx que no son un muro, **siempre con render**
+     aunque el censo no lo lleve (lo que se quiere ver es como se pinta), y
+     guarda la primera pantalla en JPEG (calidad 70, escala CSS: 412×915 en
+     movil y no 1082×2402, siete veces menos y nada distinto). Con el
+     dispositivo del censo (contexto `custom`) y, con `capturas_ambos_perfiles`,
+     tambien con el otro, en el MISMO contexto con nombre que la paridad y con
+     el UA de la misma funcion (`ua_de_perfil_alternativo`): un contexto de
+     Playwright se crea con los argumentos de la primera peticion que lo
+     nombra, y dos sondas que lo construyeran distinto se pisarian.
+     - **Las imagenes si se descargan en la pestana de la captura.** El render
+       del rastreo aborta imagenes y fuentes (`PLAYWRIGHT_ABORT_REQUEST`): una
+       captura asi no se parece a la pagina. `preparar_pagina_captura` registra
+       una ruta DESPUES de la de scrapy-playwright (Playwright atiende de la
+       ultima a la primera) que deja pasar imagenes y fuentes que no son de un
+       rastreador (`blocklist.py`) y le pasa el resto. Probado en contra: sin
+       esa ruta, los tests de la imagen fallan.
+     - **Sonda, no URL del censo** (105): callback y errback propios, sin
+       `PageItem`, `dont_filter`, fuera de `max_urls`, robots.txt respetado,
+       sin tocar la salud, jar propio y latido por tiempo. Una captura que es
+       un muro (103) o un no-2xx no se guarda: no es la pagina. Al reanudar,
+       lo ya capturado cuenta, y cuenta por PAGINA con alguna captura de
+       cualquier perfil (`paginas_por_plantilla`), que es como se gasta el
+       cupo al pedir: contando solo el perfil del censo, una plantilla cuya
+       captura del censo fallo y la del otro perfil no recuperaba cupo, y ese
+       otro perfil pasaba de `capturas_por_plantilla` en cada reanudacion. Una
+       pagina sin ninguna captura guardada no deja rastro y se reintenta con
+       otra URL: eso no pasa del tope. Y `guardar` aplica un tope duro de
+       `MAX_POR_JOB` (100) imagenes por censo, aunque algo pida mas.
+       Best-effort con el `try` sobre cada funcion
+       (40): sin captura, el rastreo sigue igual.
+     - **Almacen: el volumen de archivo, sin tabla** (como el Parquet de 95 y
+       150): `<ARCHIVO_DIR>/capturas/<job_id>/<url_hash>.<perfil>.jpg` y un
+       `.json` de metadatos por imagen (plantilla, viewport, UA, URL final),
+       escritos con temporal + `replace` para que la API nunca lea uno a
+       medias. Son decenas de ficheros por censo y lo unico que se pregunta es
+       «que capturas tiene esta URL» y «cuanto ocupan»; un indice comun seria
+       leer-modificar-escribir. El nombre sale de un `uuid` y un hash
+       validados: no se puede salir de la carpeta. `shared/capturas_pantalla.py`.
+     - **Se van con el censo**: `borrar_job` (ficha, cliente y borrado en
+       masa) quita la carpeta despues del commit; la vista previa y el
+       resultado del borrado en masa dicen lo que ocupan (`capturas_bytes`,
+       medido; ese espacio si vuelve al disco), y el panel de espacio suma las
+       de todo el volumen (`capturas_bytes` de `/api/almacenamiento`, y el
+       modal «Espacio en disco» lo pinta). No viajan en el backup (son imagenes del sitio que
+       se pueden volver a hacer); queda dicho.
+     - **Se ven en la ficha de la URL**: `GET /urls/{id}` trae
+       `capturas_pantalla` (metadatos y `src`) y
+       `GET /urls/{id}/captura/{perfil}` sirve el JPEG (`Cache-Control:
+       private`, y la URL tiene que ser de ESE censo: la misma URL en otro
+       censo no ve la imagen). `GET /api/jobs/{id}/capturas` lista las del
+       censo. En el formulario, «Capturas: paginas», «Por plantilla» y «Movil y
+       escritorio», junto a la paridad.
+   Medido el 2026-10-24 con el spider real desde local contra
+   **es.wikipedia.org** (servido dinamico: `Vary: User-Agent` y 1,55 MB de HTML
+   a escritorio frente a 1,65 MB a movil, sin redireccion), tres articulos en
+   modo lista sin render, con la paridad y las capturas de los dos perfiles:
+   la paridad da en dos de los tres 60 y 30 enlaces internos que faltan en
+   movil (0 volatiles), y las capturas ensenan las dos pieles (la movil con su
+   banner de la aplicacion; la de escritorio con el indice y el panel de
+   apariencia), con las fotos. Pesan 60-66 kB las moviles y 109-126 kB las de
+   escritorio: con el tope de 50 paginas y los dos perfiles, unos 9 MB por
+   censo. Doce paginas pedidas (3 del censo, 3 de la paridad y 6 capturas, mas
+   los recursos de estas), con robots.txt y 1,5 s entre ellas.
+   **Lo que no se ha hecho**: rastrear un censo ENTERO como movil desde el
+   arnes de pruebas (el contexto `custom` de movil lo pone el worker con `-s
+   USER_AGENT`, ya probado en la decision 119); la huella movil para un UA de
+   bot movil (Googlebot smartphone sigue con la de escritorio de serie,
+   decision 132: un bot no se mira); capturas de pagina entera; y compararlas
+   entre censos.
+   Tests: `tests/test_capturas_pantalla.py` (almacen, ficha e imagen con
+   TestClient, referencia del mismo perfil, hash entre perfiles, preset y
+   topes), `tests/test_capturas_pantalla_spider.py` (el SeoSpider real con
+   Chromium: una por plantilla y perfil con el tamano del dispositivo, la
+   imagen pedida por la captura con el UA de cada perfil y no por el render
+   del censo, y la paridad a la vez) y `tests/test_borrado_en_masa.py` (se
+   miden y se van con el job).

@@ -307,15 +307,17 @@ def _archivo_de_jobs(db, ids: list) -> dict[Any, dict[str, Any]]:
     if not ids:
         return {}
     try:
-        from shared import archivo_enlaces
+        from shared import archivo_enlaces, capturas_pantalla
         from shared.models import Job
 
         filas = (db.query(Job.id, Job.enlaces_archivados)
                  .filter(Job.id.in_(ids)).all())
         return {
-            jid: ({"archivado": True,
-                   "archivo_bytes": archivo_enlaces.bytes_en_disco(jid, resumen)}
-                  if resumen else dict(_SIN_ARCHIVO))
+            jid: {**({"archivado": True,
+                      "archivo_bytes": archivo_enlaces.bytes_en_disco(jid, resumen)}
+                     if resumen else dict(_SIN_ARCHIVO)),
+                  # Las capturas de pantalla (decision 173): medidas, 0 sin ellas.
+                  "capturas_bytes": capturas_pantalla.bytes_en_disco(jid)}
             for jid, resumen in filas
         }
     except Exception:
@@ -327,8 +329,8 @@ NOTA_DE_ESPACIO = (
     "Borrar censos libera espacio DENTRO de la base de datos: Postgres lo "
     "reutiliza en los siguientes rastreos, pero el fichero no se encoge sin un "
     "VACUUM FULL, que bloquea la tabla entera. Lo que se gana es que el disco "
-    "deje de crecer. Los enlaces archivados en Parquet son la excepcion: "
-    "borrar su fichero si devuelve el espacio al disco."
+    "deje de crecer. Los enlaces archivados en Parquet y las capturas de "
+    "pantalla son la excepcion: borrar sus ficheros si devuelve el espacio al disco."
 )
 
 
@@ -345,9 +347,11 @@ def resumen_de_disco(db) -> dict[str, Any]:
     """
     from sqlalchemy import text
 
-    from shared import archivo_enlaces
+    from shared import archivo_enlaces, capturas_pantalla
 
     archivo = archivo_enlaces.resumen_del_directorio()
+    # Las capturas de pantalla (decision 173), en el mismo volumen.
+    archivo["capturas_bytes"] = capturas_pantalla.resumen_del_directorio()["capturas_bytes"]
     if not es_postgres(db):
         return {"total_bytes": None, "tablas": [], "nota": NOTA_DE_ESPACIO, **archivo}
 
