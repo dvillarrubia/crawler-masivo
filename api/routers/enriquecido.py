@@ -15,6 +15,7 @@ hacer deprisa cuando algo se va de las manos.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import uuid
 
@@ -242,16 +243,17 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
                             page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
                             db: Session = Depends(get_session)):
     """Las respuestas URL a URL. `estado_enviado` no sale: es contenido de la
-    pagina y para revisarlo esta #8. De el solo sale la busqueda de un grupo
-    (decision 175: en un modulo por grupo la URL es solo donde cuelga, y sin la
-    busqueda la fila no dice de que grupo es). Filtrando por una pregunta con
+    pagina y para revisarlo esta #8. De el solo salen la busqueda y las rutas
+    de un grupo (decision 175: en un modulo por grupo la URL es solo donde
+    cuelga, y sin ellas la fila no dice que se juzgo). Filtrando por una pregunta con
     `solo_si`, solo las filas donde aplica."""
     from shared.preguntas import CATALOGO
 
     _run(db, job_id, run_id)
     q = (db.query(Decision.id, Url.url, Decision.pregunta, Decision.estado, Decision.origen,
                   Decision.respuesta, Decision.confianza, Decision.coste_usd, Decision.motivo,
-                  Decision.ambito, Decision.estado_enviado["busqueda"].as_string())
+                  Decision.ambito, Decision.estado_enviado["busqueda"].as_string(),
+                  Decision.estado_enviado["paginas"])
          .join(Url, Url.id == Decision.url_id).filter(Decision.run_id == run_id))
     if pregunta:
         q = q.filter(Decision.pregunta == pregunta)
@@ -265,8 +267,22 @@ def decisiones_de_ejecucion(job_id: uuid.UUID, run_id: uuid.UUID,
     return {"total": total, "page": page, "page_size": page_size,
             "items": [{"id": i, "url": u, "pregunta": p, "estado": e, "origen": o,
                        "respuesta": r, "confianza": c, "coste_usd": cu, "motivo": m,
-                       "busqueda": b if amb != "url" else None}
-                      for i, u, p, e, o, r, c, cu, m, amb, b in filas]}
+                       "busqueda": b if amb != "url" else None,
+                       "rutas": _rutas(pag) if amb != "url" else None}
+                      for i, u, p, e, o, r, c, cu, m, amb, b, pag in filas]}
+
+
+def _rutas(paginas) -> list[str] | None:
+    """Las rutas del par juzgado (decision 175): la URL de la fila es solo
+    donde cuelga, y sin las dos rutas no se sabe que dos paginas se juzgaron."""
+    if isinstance(paginas, str):
+        try:
+            paginas = json.loads(paginas)
+        except ValueError:
+            return None
+    if not isinstance(paginas, list):
+        return None
+    return [str(p.get("ruta")) for p in paginas if isinstance(p, dict) and p.get("ruta")] or None
 
 
 @router.patch("/jobs/{job_id}/enrichment/{run_id}/cancel", response_model=EnrichmentRunResponse)

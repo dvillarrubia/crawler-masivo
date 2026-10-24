@@ -2018,7 +2018,10 @@
                           <template x-for="d in enriqDecisiones.items" :key="d.id">
                             <tr>
                               <td style="max-width:32rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="d.url"></td>
-                              <td x-show="enriqDecisiones.items.some(x => x.busqueda)" x-text="d.busqueda || '—'"></td>
+                              <td x-show="enriqDecisiones.items.some(x => x.busqueda)">
+                                <div x-text="d.busqueda || '—'"></div>
+                                <div class="text-dim" style="font-size:.72rem" x-show="d.rutas" x-text="(d.rutas || []).join(' · ')"></div>
+                              </td>
                               <td x-text="d.respuesta === null ? (d.motivo || '—') : fmt.respuestaEnriq(d.respuesta)"></td>
                               <td x-text="d.estado"></td>
                               <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
@@ -6496,9 +6499,9 @@
           <template x-if="enriqEstimacion && !enriqEstimando">
             <div class="text-sm" style="display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;font-variant-numeric:tabular-nums">
               <span>URLs en el alcance</span><strong x-text="fmt.num(enriqEstimacion.urls)"></strong>
-              <!-- Modulos por grupo (decision 175): cuentan busquedas, no URLs -->
+              <!-- Modulos por grupo (decision 175): cuentan pares busqueda + dos paginas, no URLs -->
               <template x-for="[nombre, pm] in Object.entries(enriqEstimacion.por_modulo || {}).filter(([n, x]) => x.unidad === 'grupos')" :key="nombre">
-                <div style="display:contents"><span x-text="'Búsquedas que juzga «' + nombre + '»'"></span><strong x-text="fmt.num(pm.urls)"></strong></div>
+                <div style="display:contents"><span x-text="'Pares de páginas que juzga «' + nombre + '»'"></span><strong x-text="fmt.num(pm.urls)"></strong></div>
               </template>
               <span>Llamadas (después de la caché)</span><strong x-text="fmt.num(enriqEstimacion.llamadas)"></strong>
               <span>Ya en caché, no se repagan</span><strong x-text="fmt.num(enriqEstimacion.aciertos_cache) + ' de ' + fmt.num(enriqEstimacion.decisiones)"></strong>

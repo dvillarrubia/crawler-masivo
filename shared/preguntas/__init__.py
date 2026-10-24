@@ -55,9 +55,10 @@ class Pregunta:
     etiquetas: tuple[str, ...] = field(default_factory=tuple)
     # (pregunta, respuesta): esta solo se LEE cuando otra pregunta del mismo
     # estado respondio eso (decision 175: la recomendacion de una
-    # canibalizacion, solo si las paginas son sustitutas). Se pregunta en la
-    # misma llamada; la condicion la aplican la pantalla y la evaluacion. No
-    # se envia, asi que no entra en la huella.
+    # canibalizacion, solo si las paginas son sustitutas). Va en SU llamada,
+    # nunca junto a otras (`shared.decisiones._partir`): su instruccion da por
+    # hecha la otra respuesta y la empujaria. La condicion la aplican la
+    # pantalla y la evaluacion. No se envia, asi que no entra en la huella.
     solo_si: tuple[str, str] | None = None
 
     def __post_init__(self):

@@ -344,43 +344,86 @@
      global escondía esto.
 
 <a id="d175"></a>
-175. **La canibalización se juzga por grupo (búsqueda + URLs), con dos
-   preguntas en una llamada y la recomendación leída solo si son sustitutas**
-   (#18, #169 punto 3). Entrada: los avisos `canibalizacion_por_consulta` de la
-   decisión 157, que dicen QUÉ búsqueda se reparte entre varias URLs, no si
-   compiten ni qué hacer. Módulo `canibalizacion` con `paginas_sustitutas`
-   (noul: ¿quien hace esta búsqueda quedaría igual de servido con cualquiera?)
-   y `recomendacion_canibalizacion` (choice: `fusionar`, `diferenciar`,
-   `canonicalizar`, `dejar`). Dos hallazgos, dos preguntas (169): la segunda
-   da por hecho que compiten y dice qué NO es cada opción.
-   - **La unidad es el grupo, no la URL.** En Lopesan (censo `1e7ea651`) hay
-     459 avisos sobre 167 URLs ancla: una URL está en varios grupos y no puede
-     ser la clave. `Modulo.por_grupo`: su `filtrar_urls` devuelve ids de
-     INCIDENCIA y su `construir_estados` los recibe; cada `Estado` va con
-     `ambito="consulta"` y `url_id` = el ancla del aviso (la URL menor del
-     grupo, estable entre censos; la de más clics es justo la que se invierte
-     en una canibalización). El resto de URLs va en el estado. En `decisions`
-     el grupo es `url_id` + `estado_enviado.busqueda` (o la `clave`). Reanudar
-     reconoce lo hecho por la clave del estado, no por la URL; el progreso
-     cuenta grupos, y la estimación los devuelve con `unidad: "grupos"`.
-   - **Filtro**: los avisos con ALGUNA URL en el alcance (por defecto, alguna
-     indexable: el ancla puede ser una canonicalizada; con carpeta, alguna
-     dentro), por clics en juego y como mucho **300** (`MAX_GRUPOS`): en
-     Lopesan son el 93 % de los clics repartidos (26.017 de 27.993) y el
-     último tiene 16. Entran 457 de 459; dos no tienen ninguna URL indexable.
-   - **Estado mínimo**: la búsqueda y, por página, la ruta (no la URL: con y
-     sin www es el mismo estado), la parte de la búsqueda en tramos de 5 %,
-     clics e impresiones a dos cifras significativas y la posición entera —
-     como pide #169: un recrawl con un tráfico parecido sale de caché—, si es
-     indexable, título, primer H1 que se pinta y 500 caracteres del contenido
-     sin plantilla. El contenido medio de esas páginas son 4.777 caracteres:
-     sin recorte, diez veces más caro.
-   - **Las dos preguntas van en la misma llamada**, no la segunda tras la
-     primera. Medido: 1.361 tokens por llamada con las dos, 1.000 con solo la
-     primera y 1.045 con solo la segunda (el estado se paga otra vez).
-     Preguntar aparte solo ahorra si menos del 35 % de los grupos son
-     sustitutas, y como mucho medio céntimo por ejecución; a cambio la
-     estimación sería una cota y la ejecución, dos pasadas.
+175. **La canibalización se juzga por pares de páginas del mismo idioma
+   (búsqueda + dos URLs), con dos preguntas en llamadas separadas y la
+   recomendación leída solo si son sustitutas** (#18, #169 punto 3; revisada en
+   el PR #244). Entrada: los avisos `canibalizacion_por_consulta` de la decisión
+   157, que dicen QUÉ búsqueda se reparte entre varias URLs, no si compiten ni
+   qué hacer. Módulo `canibalizacion` con `paginas_sustitutas` (noul: ¿quien
+   hace esta búsqueda quedaría igual de servido con cualquiera de las dos?) y
+   `recomendacion_canibalizacion` (choice: `fusionar`, `diferenciar`,
+   `canonicalizar`, `dejar`). Dos hallazgos, dos preguntas (169).
+   - **La unidad es el par, no la URL ni el grupo.** Una URL está en varios
+     avisos (en Lopesan, censo `1e7ea651`, 459 avisos sobre 167 URLs ancla) y
+     no puede ser la clave. Y el grupo entero tampoco: 33 de 459 avisos tienen
+     3 o 4 páginas y en algunos solo dos son sustitutas («anfi del mar»: la
+     ficha del hotel y dos posts que entre sí son el mismo). Juzgando el
+     grupo, un `false` perdía esa canibalización y un `fusionar` no decía qué
+     fusionar. Un aviso de n páginas da C(n,2) pares (como mucho 10).
+     `Modulo.por_grupo`: su `filtrar_urls` (`pares_canibalizacion`) devuelve
+     ids de PAR (`aviso × 16 + k`, solo viven dentro de una ejecución) y su
+     `construir_estados` los recibe; cada `Estado` va con `ambito="consulta"`
+     y `url_id` = la URL menor del par (estable entre censos). En `decisions`
+     el par es la `clave` (hash del estado), o `estado_enviado.busqueda` y sus
+     rutas, que `GET .../decisions` devuelve en `rutas` y la pantalla pinta
+     bajo la búsqueda. Reanudar reconoce lo hecho por la clave; el progreso y
+     la estimación cuentan pares (`unidad: "grupos"`).
+   - **Un par en idiomas distintos no se pregunta.** Según la revisión del PR, 128 de los 459 avisos
+     mezclan secciones de idioma (`/en/` frente a `/de/hotels` en «lopesan
+     hotels»). Eso no es una canibalización que se arregle fusionando o
+     diferenciando sino segmentación internacional, y preguntarlo daba un
+     «no son sustitutas» que, con el efecto encendido, rebajaría el aviso como
+     reparto legítimo: lo que no se puede afirmar no se afirma. El idioma es
+     `<html lang>`; si falta (censos de antes de la columna, como `391b5ed6`),
+     la anotación hreflang de la propia URL, y si no, el tramo de idioma de la
+     ruta. Sin saber el de alguna de las dos, se pregunta. En Lopesan quedan
+     fuera 132 de 528 pares y 112 búsquedas sin ningún par preguntable
+     (6.696 de sus 27.993 clics); el aviso de la 157 sigue como está.
+   - **Filtro**: los pares con ALGUNA página en el alcance (por defecto,
+     alguna indexable; con carpeta, alguna dentro) y del mismo idioma, de las
+     búsquedas con más clics en juego, como mucho **300** búsquedas
+     (`MAX_GRUPOS`). En Lopesan son 328 pares con 20.816 clics; sin tope, 394
+     pares de 347 búsquedas.
+   - **Estado mínimo**: la búsqueda, `reparto_por` (clics, o impresiones en una
+     búsqueda sin clics: las instrucciones explican que entonces `parte_pct`
+     es de impresiones), `otras_paginas` (cuántas URLs más se la reparten: las
+     partes del par no suman 100) y, por página, la ruta (con y sin www es el
+     mismo estado), la parte en tramos de 5 %, clics e impresiones a dos cifras
+     significativas, la posición entera, `no_indexable` (el motivo:
+     `Canonicalised`, `Noindex`...) y `canonica` (la URL que ya declara como
+     canónica, si apunta a otra), título, primer H1 que se pinta y 500
+     caracteres del contenido sin plantilla. Sin el motivo y la canónica, Jev
+     recomendaba canonicalizar lo que ya lo está: en Lopesan 74 páginas de 73
+     avisos ya son `Canonicalised` (`/es/` → `/es`, una variante con `gclid`),
+     todas hacia una URL de fuera del aviso (si estuviera dentro, la 157 ya las
+     habría unido). **Las dos páginas van ordenadas por ruta**, no por parte:
+     en un reparto casi al 50 % («kumara», 0,524/0,472) el orden por parte se
+     invierte de un recrawl a otro con las mismas cifras redondeadas y la
+     caché fallaba.
+   - **Las URLs se buscan por `(job_id, url_hash)`**, el índice único: `urls.url`
+     no tiene índice y un `url IN (...)` recorría todas las filas del job en
+     cada trozo, dentro de la petición síncrona de la estimación. `url_hash` es
+     el SHA-256 de `urls.url` (comprobado en producción: 0 distintas en las
+     5.578 de Lopesan y en una muestra del 1 % de la tabla); lo que no case por
+     hash se busca por URL.
+   - **Búsquedas de marca: un solo criterio.** La primera versión decía en
+     `paginas_sustitutas` que una página principal frente a una ficha es
+     `false` y en la opción `dejar` que una búsqueda de marca «donde vale
+     cualquier página» era el caso de dejar: o Jev contradecía sus ejemplos o
+     esa rama no se leía nunca (278 de 459 búsquedas de Lopesan contienen
+     «lopesan»). Ahora `paginas_sustitutas` dice que una búsqueda de marca
+     (aunque esté mal escrita) frente a la home o una home de idioma (`/en/`)
+     y una ficha es `false`, y `dejar` es solo «las dos ya están en las
+     posiciones 1 a 3». Con las marcas declaradas, la 157 ya quita `/`; las
+     homes de idioma no (su `_es_home` solo mira `/`), y queda pendiente ahí.
+   - **Llamadas separadas** (`shared.decisiones._partir`): una pregunta con
+     `solo_si` va siempre sola. Su instrucción da por hecho que las páginas
+     compiten, y en la misma llamada podía empujar a la primera hacia el sí;
+     además la evaluación (`responder`) pregunta una a una, y el umbral se
+     habría medido con un prompt distinto del de producción, con una
+     `clave_cache` que no distingue entre los dos. Ahora el cuerpo de la
+     primera pregunta es idéntico en los dos sitios (lo comprueba un test con
+     el `FakeLLM`). La estimación cuenta las dos llamadas.
    - **`Pregunta.solo_si`** (`("paginas_sustitutas", "true")`): la pantalla y
      `GET .../decisions?pregunta=` cuentan la recomendación solo donde la otra
      respuesta del mismo estado lo cumple; el resto sale como `no_aplica` (el
@@ -389,20 +432,22 @@
      posibles. En el juego (`extraer`), la recomendación se etiqueta solo
      donde las páginas son sustitutas y lo demás se deja vacío.
    - **Coste medido en Lopesan** (24-oct-2026, solo lectura, `caracteres / 4 +
-     250` de la 162): 300 llamadas, 408.258 tokens, **0,017 $** (con los 457
-     grupos, 0,026 $). En producción solo dos censos tienen avisos de
-     canibalización, los dos de Lopesan (el otro, `391b5ed6`: 442 grupos, el
-     mismo coste con el tope).
-   - **`extraer` por grupo**: estratifica por host y COMBINACIÓN de
-     plantillas del grupo, y quita los repetidos (la misma búsqueda con las
-     mismas rutas en dos censos o con y sin www, y los estados idénticos).
+     250` de la 162): 328 pares, 656 llamadas, 777.651 tokens, **0,033 $**
+     (1.185 tokens por llamada; en una sola llamada habrían sido 0,023 $). Sin
+     tope, 394 pares y 0,039 $. El otro censo con avisos, `391b5ed6` (también
+     de Lopesan): 332 pares y 0,033 $. Son los dos únicos de producción.
+   - **`extraer` por par**: estratifica por host y COMBINACIÓN de plantillas
+     del par, y quita los repetidos (la misma búsqueda con las mismas rutas en
+     dos censos o con y sin www, y los estados idénticos).
    - **Sin umbral y marcado como sin evaluar**: todo sale `incierto`.
      `efecto_en_el_aviso` (rebajar el aviso si no son sustitutas, confirmarlo
      con la recomendación si lo son, como pide #169) está escrito y probado,
      pero **apagado**: solo actúa con decisiones `decidido`, que sin umbral no
      hay, y nadie lo llama hasta que un módulo pueda emitir o rebajar avisos
-     (pendiente de la 85).
+     (pendiente de la 85). Al encenderlo, un aviso se confirma si alguno de
+     sus pares sale sustituto y se rebaja solo si TODOS se preguntaron y
+     salieron que no: con un par en otro idioma, no se rebaja.
    - Queda: etiquetar el juego y medirlo (#8), el umbral, encender el efecto en
-     el aviso y los clientes sin Search Console (pares por título o MinHash,
-     #18).
+     el aviso, las homes de idioma en la regla de marca de la 157 y los
+     clientes sin Search Console (pares por título o MinHash, #18).
 

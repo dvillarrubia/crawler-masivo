@@ -3,19 +3,22 @@ SQLite y el FakeLLM: nada sale a la red (decisiones 84 y 85).
 
 Lo que hay que sujetar:
 
-- la unidad es el grupo (busqueda + URLs), no la URL: una URL en dos grupos
-  son dos estados, dos llamadas y dos juegos de filas, y reanudar reconoce lo
-  hecho por el estado;
-- el filtro coge los avisos de la 157 con alguna URL en el alcance, por clics
-  y con tope; el estado lleva rutas, cifras redondeadas y contenido recortado;
-- las dos preguntas van en UNA llamada, y la estimacion lo cuenta igual;
-- la recomendacion solo se cuenta donde las paginas son sustitutas (`solo_si`);
+- la unidad es el PAR (busqueda + dos de sus URLs), no la URL ni el grupo: un
+  aviso de tres paginas son tres pares, una URL en dos avisos son dos estados,
+  y reanudar reconoce lo hecho por el estado;
+- el filtro coge los pares de los avisos de la 157 con alguna URL en el
+  alcance, por clics, con tope y SOLO del mismo idioma; el estado lleva rutas
+  ordenadas, cifras redondeadas, por que no es indexable y su canonica;
+- la recomendacion (con `solo_si`) va en SU llamada, en produccion como en la
+  evaluacion, y la estimacion lo cuenta igual;
+- la recomendacion solo se cuenta donde las paginas son sustitutas;
 - el efecto en el aviso esta apagado mientras no haya umbral.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import uuid
 
@@ -25,13 +28,13 @@ pytest.importorskip("httpx")
 
 import shared.enriquecido as enr  # noqa: E402
 import shared.enriquecido_canibalizacion as can  # noqa: E402
-from shared.models import Decision, EnrichmentRun, Issue, Job, Url  # noqa: E402
+from shared.models import Decision, EnrichmentRun, Hreflang, HtmlMeta, Issue, Job, Url  # noqa: E402
 from test_enriquecido import _decisiones, _leer, _motor, _run, capa_activa, sembrar  # noqa: E402,F401
 
 PREGUNTAS = ["paginas_sustitutas", "recomendacion_canibalizacion"]
 
 
-def _aviso(s, jid, consulta, clics, urls, imp=None):
+def _aviso(s, jid, consulta, clics, urls, imp=None, reparto_por="clics"):
     """Un `canibalizacion_por_consulta` como lo escribe la 157: cuelga de la
     URL menor del grupo y lleva las URLs ordenadas por parte."""
     ids = {u: i for i, u in s.query(Url.id, Url.url).filter(Url.job_id == jid)}
@@ -40,7 +43,7 @@ def _aviso(s, jid, consulta, clics, urls, imp=None):
     i = Issue(job_id=jid, url_id=ids.get(ancla) or min(ids.values()), issue_type="canibalizacion_por_consulta",
               severity="warning" if clics >= 100 else "info", details={
                   "consulta": consulta, "clics": clics, "impresiones": imp or clics * 10,
-                  "reparto_por": "clics",
+                  "reparto_por": reparto_por,
                   "urls": [{"url": u, "clics": c, "impresiones": im, "parte": round(c / total, 3),
                             "posicion": pos, "en_censo": True, "indexable": True, "estado": "Indexable",
                             "plantilla": "/tienda/:slug" if "tienda" in u else "/blog/:slug"}
@@ -50,57 +53,152 @@ def _aviso(s, jid, consulta, clics, urls, imp=None):
     return i.id
 
 
+A = "https://acme.com"
+
+
 def _sembrar_grupos(Sesion):
     jid, _ = sembrar(Sesion, n=6)
     s = Sesion()
-    a = "https://acme.com"
-    g1 = _aviso(s, jid, "zapatos rojos", 300, [(f"{a}/tienda/p-0", 180, 2049, 1.4),
-                                               (f"{a}/blog/post-1", 120, 1449, 2.6)])
+    por_ruta = {u.path: u for u in s.query(Url).filter(Url.job_id == jid)}
+    # Idiomas: p-4 y post-3 en castellano (`<html lang>`), post-5 en aleman
+    # solo por su hreflang a si misma (censo de antes de `html_lang`).
+    s.get(HtmlMeta, por_ruta["/tienda/p-4"].id).html_lang = "es-ES"
+    s.get(HtmlMeta, por_ruta["/blog/post-3"].id).html_lang = "es"
+    s.add(Hreflang(url_id=por_ruta["/blog/post-5"].id, lang="de-DE", href=f"{A}/blog/post-5"))
+    s.add(Hreflang(url_id=por_ruta["/blog/post-5"].id, lang="es-ES", href=f"{A}/blog/post-3"))
+    # /canon declara como canonica una URL que no esta en el aviso.
+    por_ruta["/canon"].indexability_status = "Canonicalised"
+    s.add(HtmlMeta(url_id=por_ruta["/canon"].id, title="Canon", canonical_href=f"{A}/tienda/p-0-nueva"))
+    g1 = _aviso(s, jid, "zapatos rojos", 300, [(f"{A}/tienda/p-0", 180, 2049, 1.4),
+                                               (f"{A}/blog/post-1", 120, 1449, 2.6)])
     # La misma URL ancla en otro grupo: es otro estado, no la misma unidad.
-    g2 = _aviso(s, jid, "zapatos", 50, [(f"{a}/tienda/p-2", 30, 874, 3.2), (f"{a}/blog/post-1", 20, 9299, 7.7)])
+    g2 = _aviso(s, jid, "zapatos", 50, [(f"{A}/tienda/p-2", 30, 874, 3.2), (f"{A}/blog/post-1", 20, 9299, 7.7)])
     # Ninguna de sus URLs esta en el alcance (no indexable y fuera del censo).
-    g3 = _aviso(s, jid, "canon", 900, [(f"{a}/canon", 500, 5000, 1.0), (f"{a}/fuera", 400, 4000, 2.0)])
+    g3 = _aviso(s, jid, "canon", 900, [(f"{A}/canon", 500, 5000, 1.0), (f"{A}/fuera", 400, 4000, 2.0)])
+    # Tres paginas: tres pares, y los dos con la de aleman no se preguntan.
+    g4 = _aviso(s, jid, "botas", 200, [(f"{A}/tienda/p-4", 80, 900, 2.0), (f"{A}/blog/post-3", 70, 800, 2.5),
+                                       (f"{A}/blog/post-5", 50, 700, 3.0)])
+    # Una canonicalizada contra una indexable.
+    g5 = _aviso(s, jid, "zapato canon", 40, [(f"{A}/blog/post-1", 25, 300, 4.0), (f"{A}/canon", 15, 200, 6.0)])
     s.commit()
     s.close()
-    return jid, g1, g2, g3
+    return jid, g1, g2, g3, g4, g5
 
 
-def test_grupos_por_clics_con_tope_y_solo_del_alcance(tmp_path, monkeypatch):
+def test_pares_por_clics_con_tope_del_alcance_y_del_mismo_idioma(tmp_path, monkeypatch):
     Sesion = _motor(tmp_path)
-    jid, g1, g2, g3 = _sembrar_grupos(Sesion)
+    jid, g1, g2, g3, g4, g5 = _sembrar_grupos(Sesion)
+    par = can.id_de_par
     s = Sesion()
     alcance = enr.urls_del_alcance(s, jid, {})
-    assert can.grupos_canibalizacion(s, jid, alcance) == [g1, g2]       # g3: nada en el alcance
-    monkeypatch.setattr(can, "MAX_GRUPOS", 1)
-    assert can.grupos_canibalizacion(s, jid, alcance) == [g1]           # el de mas clics
-    # Con una carpeta, entra el grupo con ALGUNA pagina dentro.
-    blog = enr.urls_del_alcance(s, jid, {"carpeta": "/tienda/p-2"})
+    # g3: nada en el alcance; g4: de sus tres pares solo el que no lleva la de aleman.
+    assert can.pares_canibalizacion(s, jid, alcance) == [par(g1, 0), par(g4, 0), par(g2, 0), par(g5, 0)]
+    assert can.deshacer_par(par(g4, 2)) == (g4, 2)
+    monkeypatch.setattr(can, "MAX_GRUPOS", 2)
+    assert can.pares_canibalizacion(s, jid, alcance) == [par(g1, 0), par(g4, 0)]   # las de mas clics
+    # Con una carpeta, entra el par con ALGUNA pagina dentro.
+    tienda = enr.urls_del_alcance(s, jid, {"carpeta": "/tienda/p-2"})
     monkeypatch.setattr(can, "MAX_GRUPOS", 300)
-    assert can.grupos_canibalizacion(s, jid, blog) == [g2]
-    assert can.grupos_canibalizacion(s, jid, []) == []
+    assert can.pares_canibalizacion(s, jid, tienda) == [par(g2, 0)]
+    assert can.pares_canibalizacion(s, jid, []) == []
     s.close()
 
 
-def test_el_estado_es_del_grupo_minimo_y_redondeado(tmp_path):
+def test_idioma_de_la_ruta_y_sin_saberlo_se_pregunta():
+    assert can._idioma_de_ruta("https://a.com/blog/de/fehmarn") == "de"
+    assert can._idioma_de_ruta("https://a.com/tv/x") == ""
+    assert can.mismo_idioma("es", "") and can.mismo_idioma("es", "es") and not can.mismo_idioma("en", "de")
+
+
+def test_las_urls_se_buscan_por_hash_con_el_indice_unico(tmp_path):
+    """`urls.url` no tiene indice (#244): se busca por (job_id, url_hash) y solo
+    lo que no case por hash, por URL."""
+    from sqlalchemy import event
+
     Sesion = _motor(tmp_path)
-    jid, g1, g2, _ = _sembrar_grupos(Sesion)
+    jid, *_ = _sembrar_grupos(Sesion)
     s = Sesion()
-    # La 157 cuelga el aviso de la URL menor del grupo: aqui, la del blog en los dos.
+    buena = s.query(Url).filter(Url.job_id == jid, Url.path == "/tienda/p-0").one()
+    buena.url_hash = hashlib.sha256(buena.url.encode()).hexdigest()
+    s.commit()
+    sql = []
+    event.listen(s.get_bind(), "before_cursor_execute", lambda *a: sql.append(a[2]))
+    assert can._ids_por_url(s, jid, {buena.url}) == {buena.url: buena.id}
+    assert len(sql) == 1 and "url_hash IN" in sql[0]
+    sql.clear()
+    otra = f"{A}/blog/post-1"                    # hash de prueba: cae a la URL
+    assert otra in can._ids_por_url(s, jid, {buena.url, otra})
+    assert len(sql) == 2 and "url_hash IN" in sql[0] and "urls.url IN" in sql[1]
+    s.close()
+
+
+def test_el_estado_es_del_par_minimo_y_redondeado(tmp_path):
+    Sesion = _motor(tmp_path)
+    jid, g1, g2, g3, g4, g5 = _sembrar_grupos(Sesion)
+    s = Sesion()
+    par = can.id_de_par
+    # El par cuelga de su URL menor: aqui, la del blog en los dos.
     ancla = s.query(Url.id).filter(Url.job_id == jid, Url.path == "/blog/post-1").scalar()
-    e1, e2 = can.estados_canibalizacion(s, [g1, g2])
+    e1, e2 = can.estados_canibalizacion(s, [par(g1, 0), par(g2, 0)])
     assert e1.ambito == "consulta" and e1.url_id == ancla and e2.url_id == ancla
     assert e1.datos["busqueda"] == "zapatos rojos" and e1.datos["reparto_por"] == "clics"
+    assert e1.datos["otras_paginas"] == 0
     primera, segunda = e1.datos["paginas"]
-    assert set(primera) == {"ruta", "parte_pct", "clics", "impresiones", "posicion", "indexable",
-                            "titulo", "h1", "contenido"}
-    # La ruta, no la URL: con y sin www es el mismo estado (decision 169).
-    assert primera["ruta"] == "/tienda/p-0" and segunda["ruta"] == "/blog/post-1"
-    assert (primera["parte_pct"], primera["clics"], primera["impresiones"], primera["posicion"]) == (60, 180, 2000, 1)
-    assert e2.datos["paginas"][1]["impresiones"] == 9300 and e2.datos["paginas"][0]["impresiones"] == 870
+    assert set(primera) == {"ruta", "parte_pct", "clics", "impresiones", "posicion", "no_indexable",
+                            "canonica", "titulo", "h1", "contenido"}
+    # Ordenadas por RUTA (no por parte) y la ruta, no la URL (decision 169).
+    assert primera["ruta"] == "/blog/post-1" and segunda["ruta"] == "/tienda/p-0"
+    assert (segunda["parte_pct"], segunda["clics"], segunda["impresiones"], segunda["posicion"]) == (60, 180, 2000, 1)
+    assert segunda["no_indexable"] is None and segunda["canonica"] is None
+    assert e2.datos["paginas"][0]["impresiones"] == 9300 and e2.datos["paginas"][1]["impresiones"] == 870
     # El h1 que se pinta y el contenido recortado.
-    assert primera["h1"] == "H1 0" and len(primera["contenido"]) == can.CARACTERES_CONTENIDO
-    # Un aviso que ya no existe no da estado.
-    assert can.estados_canibalizacion(s, [g1, 999999]) and len(can.estados_canibalizacion(s, [g1, 999999])) == 1
+    assert segunda["h1"] == "H1 0" and len(segunda["contenido"]) == can.CARACTERES_CONTENIDO
+    # Un grupo de tres: el par sabe que hay una pagina mas.
+    (e4,) = can.estados_canibalizacion(s, [par(g4, 0)])
+    assert e4.datos["otras_paginas"] == 1 and [p["ruta"] for p in e4.datos["paginas"]] == ["/blog/post-3", "/tienda/p-4"]
+    # La canonicalizada dice por que y a donde apunta (#244: sin eso, Jev
+    # recomendaria canonicalizar lo que ya lo esta).
+    (e5,) = can.estados_canibalizacion(s, [par(g5, 0)])
+    canon = next(p for p in e5.datos["paginas"] if p["ruta"] == "/canon")
+    assert canon["no_indexable"] == "Canonicalised" and canon["canonica"] == "/tienda/p-0-nueva"
+    # Un aviso que ya no existe, o un par que no tiene, no da estado.
+    assert len(can.estados_canibalizacion(s, [par(g1, 0), par(999999, 0), par(g1, 5)])) == 1
+    s.close()
+
+
+def test_el_orden_del_aviso_no_cambia_la_clave(tmp_path):
+    """Un reparto casi al 50 % se invierte de un recrawl a otro con las mismas
+    cifras redondeadas: la clave del estado no puede cambiar (#244)."""
+    from shared.decisiones import clave_estado
+
+    Sesion = _motor(tmp_path)
+    jid, *_ = _sembrar_grupos(Sesion)
+    s = Sesion()
+    a = _aviso(s, jid, "kumara", 100, [(f"{A}/tienda/p-0", 51, 500, 2.0), (f"{A}/blog/post-1", 49, 500, 2.0)])
+    b = _aviso(s, jid, "kumara", 100, [(f"{A}/blog/post-1", 51, 500, 2.0), (f"{A}/tienda/p-0", 49, 500, 2.0)])
+    for i in (a, b):            # mismas cifras redondeadas: 50 % las dos
+        d = dict(s.get(Issue, i).details)
+        d["urls"] = [dict(u, parte=0.5, clics=50) for u in d["urls"]]
+        s.get(Issue, i).details = d
+    s.commit()
+    ea, eb = can.estados_canibalizacion(s, [can.id_de_par(a, 0), can.id_de_par(b, 0)])
+    assert clave_estado(ea.datos) == clave_estado(eb.datos)
+    s.close()
+
+
+def test_reparto_por_impresiones_viaja_en_el_estado(tmp_path):
+    Sesion = _motor(tmp_path)
+    jid, *_ = _sembrar_grupos(Sesion)
+    s = Sesion()
+    i = _aviso(s, jid, "sin clics", 0, [(f"{A}/tienda/p-0", 0, 600, 5.0), (f"{A}/blog/post-1", 0, 400, 6.0)],
+               imp=1000, reparto_por="impresiones")
+    d = dict(s.get(Issue, i).details)
+    d["urls"] = [dict(u, parte=round(u["impresiones"] / 1000, 3)) for u in d["urls"]]
+    s.get(Issue, i).details = d
+    s.commit()
+    (e,) = can.estados_canibalizacion(s, [can.id_de_par(i, 0)])
+    assert e.datos["reparto_por"] == "impresiones"
+    assert sorted(p["parte_pct"] for p in e.datos["paginas"]) == [40, 60]
     s.close()
 
 
@@ -110,52 +208,97 @@ def test_redondear(n, esperado):
     assert can.redondear(n) == esperado
 
 
-def test_estimar_una_llamada_por_grupo_con_las_dos_preguntas(tmp_path, monkeypatch, capa_activa):
+def test_estimar_una_llamada_por_pregunta_condicionada(tmp_path, monkeypatch, capa_activa):
     from shared.decisiones import CapaDecisiones
     from shared.preguntas import obtener
 
     Sesion = _motor(tmp_path)
-    jid, g1, g2, _ = _sembrar_grupos(Sesion)
+    jid, g1, g2, g3, g4, g5 = _sembrar_grupos(Sesion)
     s = Sesion()
     e = enr.estimar(s, s.get(Job, jid), ["canibalizacion"], {})
     pm = e["por_modulo"]["canibalizacion"]
-    assert pm["urls"] == 2 and pm["unidad"] == "grupos" and pm["llamadas"] == 2
-    assert pm["decisiones"] == 4
-    # Decision 162: tokens = caracteres / 4 + 250 por llamada, con las DOS preguntas.
+    # Cuatro pares; la recomendacion (solo_si) va en su propia llamada: 8.
+    assert pm["urls"] == 4 and pm["unidad"] == "grupos" and pm["llamadas"] == 8
+    assert pm["decisiones"] == 8
+    # Decision 162: tokens = caracteres / 4 + 250 POR LLAMADA, cada pregunta con su estado.
     capa = CapaDecisiones(None)
-    preguntas = [obtener(n) for n in PREGUNTAS]
-    tokens = sum(capa._tokens_estimados(capa._cuerpo(x, preguntas))
-                 for x in can.estados_canibalizacion(s, [g1, g2]))
+    tokens = sum(capa._tokens_estimados(capa._cuerpo(x, [obtener(n)]))
+                 for x in can.estados_canibalizacion(s, can.pares_canibalizacion(
+                     s, jid, enr.urls_del_alcance(s, jid, {})))
+                 for n in PREGUNTAS)
     assert pm["tokens_estimados"] == tokens
     assert e["coste_estimado_usd"] == pytest.approx(tokens * 0.042 / 1_000_000, abs=1e-8)
     s.close()
 
 
-def test_de_punta_a_punta_y_reanudar_por_estado(tmp_path, capa_activa, fake_llm):
+def test_la_pregunta_condicionada_va_sola_y_las_demas_juntas():
+    """#244: leida en la misma llamada, la recomendacion («han sido juzgadas
+    sustitutas») empujaria a la primera; y la evaluacion pregunta una a una."""
+    from shared.decisiones import _partir
+    from shared.preguntas import CATALOGO, obtener
+
+    sust, rec = obtener("paginas_sustitutas"), obtener("recomendacion_canibalizacion")
+    assert _partir([sust, rec]) == [[sust], [rec]]
+    otras = [p for p in CATALOGO.values() if p.solo_si is None][:2]
+    assert _partir(otras) == [otras]
+    otro_modelo = dataclasses.replace(otras[1], modelo="typesafe/otro-1.0")
+    assert _partir([otras[0], otro_modelo]) == [[otras[0]], [otro_modelo]]
+
+
+def test_de_punta_a_punta_y_reanudar_por_estado(tmp_path, capa_activa, fake_llm, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
     from shared.decisiones import clave_estado
 
     Sesion = _motor(tmp_path)
-    jid, g1, g2, _ = _sembrar_grupos(Sesion)
+    jid, g1, g2, g3, g4, g5 = _sembrar_grupos(Sesion)
     fake = fake_llm(coste=0.0001)
     rid = _run(Sesion, jid, modulos=("canibalizacion",))
     assert enr.ejecutar(rid, sesion_factory=Sesion, transport=fake.transport) == enr.COMPLETADA
     filas = _decisiones(Sesion, rid)
-    # Dos grupos con la misma ancla: dos llamadas, cada una con las dos preguntas.
-    assert fake.llamadas == 2
-    assert all(set(p["questions"]) == set(PREGUNTAS) for p in fake.peticiones)
-    assert {p["state"]["busqueda"] for p in fake.peticiones} == {"zapatos rojos", "zapatos"}
-    assert len(filas) == 4 and {f.ambito for f in filas} == {"consulta"}
-    assert len({f.url_id for f in filas}) == 1 and len({f.clave for f in filas}) == 2
+    # Cuatro pares x dos preguntas, cada una en SU llamada.
+    assert fake.llamadas == 8
+    assert sorted(tuple(p["questions"]) for p in fake.peticiones) == sorted(
+        [("paginas_sustitutas",)] * 4 + [("recomendacion_canibalizacion",)] * 4)
+    assert {p["state"]["busqueda"] for p in fake.peticiones} == {"zapatos rojos", "zapatos", "botas",
+                                                                 "zapato canon"}
+    assert len(filas) == 8 and {f.ambito for f in filas} == {"consulta"}
+    assert len({f.clave for f in filas}) == 4
     assert {f.estado for f in filas} == {"incierto"}                    # sin umbral (84)
     r = _leer(Sesion, rid)
-    assert r.progreso["procesadas"] == 2 and r.progreso["total"] == 2
+    assert r.progreso["procesadas"] == 4 and r.progreso["total"] == 4
 
-    # Reanudar tras un corte: un grupo ya hecho en ESTA ejecucion (por la clave
-    # de su estado; la URL no basta porque los dos cuelgan de la misma).
+    # Lo calibrado es lo que corre: el cuerpo de `responder` (evaluacion) para
+    # la primera pregunta es el mismo que el de la ejecucion.
+    ruta = Path(__file__).resolve().parent.parent / "scripts" / "evaluar_decisiones.py"
+    spec = importlib.util.spec_from_file_location("evaluar_decisiones_script", ruta)
+    S = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(S)
+    s = Sesion()
+    juego = S.extraer(s, "paginas_sustitutas", [str(jid)], n=10, semilla=0)
+    s.close()
+    fake_eval = fake_llm(coste=0.0001)
+    from shared.decisiones import CapaDecisiones
+    from shared.llm import ClienteOpenRouter, ConfigLLM
+
+    capa = CapaDecisiones(lambda: ClienteOpenRouter(ConfigLLM(api_key="sk-de-prueba"),
+                                                    transport=fake_eval.transport))
+    monkeypatch.setenv("ENRICHMENT_TOKEN", "x" * 16)
+    S.responder(juego, confirmar=True, capa=capa)
+    def prompt(p):          # lo que lee el modelo (sin session_id ni user)
+        return json.dumps({k: p.get(k) for k in ("model", "state", "questions")}, sort_keys=True)
+
+    en_prod = {prompt(p) for p in fake.peticiones if "paginas_sustitutas" in p["questions"]}
+    en_eval = {prompt(p) for p in fake_eval.peticiones}
+    assert en_eval and en_eval <= en_prod
+
+    # Reanudar tras un corte: un par ya hecho en ESTA ejecucion (por la clave
+    # de su estado; la URL no basta porque varios cuelgan de la misma).
     fake2 = fake_llm(coste=0.0001)
     rid2 = _run(Sesion, jid, modulos=("canibalizacion",))
     s = Sesion()
-    (e1,) = can.estados_canibalizacion(s, [g1])
+    (e1,) = can.estados_canibalizacion(s, [can.id_de_par(g1, 0)])
     for p in PREGUNTAS:
         s.add(Decision(job_id=jid, url_id=e1.url_id, run_id=rid2, ambito="consulta",
                        clave=clave_estado(e1.datos), pregunta=p, version_pregunta=1, estado="incierto",
@@ -163,11 +306,11 @@ def test_de_punta_a_punta_y_reanudar_por_estado(tmp_path, capa_activa, fake_llm)
     s.commit()
     s.close()
     assert enr.ejecutar(rid2, sesion_factory=Sesion, transport=fake2.transport) == enr.COMPLETADA
-    # El otro grupo sale de la cache de la primera ejecucion: cero llamadas, y
+    # Los otros salen de la cache de la primera ejecucion: cero llamadas, y
     # el hecho no se repite.
     assert fake2.llamadas == 0
-    assert len(_decisiones(Sesion, rid2)) == 4
-    assert _leer(Sesion, rid2).progreso["procesadas"] == 2
+    assert len(_decisiones(Sesion, rid2)) == 8
+    assert _leer(Sesion, rid2).progreso["procesadas"] == 4
 
 
 def test_la_recomendacion_solo_cuenta_donde_son_sustitutas(tmp_path, monkeypatch):
@@ -179,7 +322,7 @@ def test_la_recomendacion_solo_cuenta_donde_son_sustitutas(tmp_path, monkeypatch
     from shared.database import get_session
 
     Sesion = _motor(tmp_path)
-    jid, g1, g2, _ = _sembrar_grupos(Sesion)
+    jid, g1, g2, *_ = _sembrar_grupos(Sesion)
     app = FastAPI()
     app.include_router(enriquecido.router)
 
@@ -194,7 +337,7 @@ def test_la_recomendacion_solo_cuenta_donde_son_sustitutas(tmp_path, monkeypatch
     api = TestClient(app)
     rid = _run(Sesion, jid, modulos=("canibalizacion",))
     s = Sesion()
-    e1, e2 = can.estados_canibalizacion(s, [g1, g2])
+    e1, e2 = can.estados_canibalizacion(s, [can.id_de_par(g1, 0), can.id_de_par(g2, 0)])
     for e, (sust, rec) in ((e1, ("true", "fusionar")), (e2, ("false", "dejar"))):
         for p, r in zip(PREGUNTAS, (sust, rec)):
             s.add(Decision(job_id=jid, url_id=e.url_id, run_id=rid, ambito="consulta",
@@ -214,6 +357,8 @@ def test_la_recomendacion_solo_cuenta_donde_son_sustitutas(tmp_path, monkeypatch
     d = api.get(f"/api/jobs/{jid}/enrichment/{rid}/decisions",
                 params={"pregunta": "recomendacion_canibalizacion"}).json()
     assert d["total"] == 1 and d["items"][0]["busqueda"] == "zapatos rojos"
+    # Las dos rutas del par: la URL de la fila es solo donde cuelga.
+    assert d["items"][0]["rutas"] == ["/blog/post-1", "/tienda/p-0"]
     todas = api.get(f"/api/jobs/{jid}/enrichment/{rid}/decisions").json()
     assert todas["total"] == 4 and {x["busqueda"] for x in todas["items"]} == {"zapatos rojos", "zapatos"}
 
@@ -244,6 +389,13 @@ def test_las_preguntas_sin_umbral_y_la_condicion_bien_puesta():
     assert sust.umbral is None and rec.umbral is None and enr.REGISTRO["canibalizacion"].ejemplo
     assert rec.tipo == "choice" and set(rec.opciones) == {"fusionar", "diferenciar", "canonicalizar", "dejar"}
     assert rec.solo_si == ("paginas_sustitutas", "true")
+    # #244: las busquedas de marca no pueden ser a la vez «no sustitutas» en una
+    # y el caso de «dejar» en la otra (la rama no se leeria nunca).
+    assert "brand" in sust.instrucciones and "brand" not in rec.instrucciones
+    assert "brand" not in rec.opciones["dejar"]
+    # Las dos explican `reparto_por`, `no_indexable` y `canonica`.
+    for p in (sust, rec):
+        assert all(c in p.instrucciones for c in ("reparto_por", "no_indexable", "canonica"))
     # La condicion no viaja: no cambia lo enviado ni la huella.
     assert "solo_si" not in json.dumps(rec.a_api())
     base = dict(nombre="x", tipo="noul", version=1, instrucciones="¿x?")
@@ -266,7 +418,7 @@ def test_extraer_el_juego_de_grupos_sin_repetidos(tmp_path):
     spec.loader.exec_module(S)
 
     Sesion = _motor(tmp_path)
-    jid, g1, g2, _ = _sembrar_grupos(Sesion)
+    jid, *_ = _sembrar_grupos(Sesion)
     # Un segundo censo del sitio con www: las mismas busquedas y rutas.
     s = Sesion()
     viejo = s.get(Job, jid)
@@ -287,11 +439,14 @@ def test_extraer_el_juego_de_grupos_sin_repetidos(tmp_path):
     s.commit()
     j2 = job2.id
     filas = S.extraer(s, "paginas_sustitutas", [str(jid), str(j2)], n=10, semilla=0)
-    assert sorted(f["estado"]["busqueda"] for f in filas) == ["botas", "zapatos", "zapatos rojos"]
+    # «zapatos rojos» con www tiene las mismas rutas: un ejemplo. «botas» del
+    # segundo censo es OTRO par (otras rutas): otro ejemplo.
+    assert sorted(f["estado"]["busqueda"] for f in filas) == ["botas", "botas", "zapato canon", "zapatos",
+                                                              "zapatos rojos"]
     assert all(f["ambito"] == "consulta" and f["grupo"] and f["etiqueta"] is None for f in filas)
     assert all("+" in f["plantilla"] or "|" in f["plantilla"] for f in filas)
     rec = S.extraer(s, "recomendacion_canibalizacion", [str(jid)], n=10, semilla=0)
-    assert len(rec) == 2 and "paginas_sustitutas" in rec[0]["nota"]
+    assert len(rec) == 4 and "paginas_sustitutas" in rec[0]["nota"]
     # Determinista con la semilla.
     assert [f["id"] for f in S.extraer(s, "paginas_sustitutas", [str(jid), str(j2)], n=2, semilla=3)] == \
         [f["id"] for f in S.extraer(s, "paginas_sustitutas", [str(jid), str(j2)], n=2, semilla=3)]

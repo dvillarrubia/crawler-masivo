@@ -116,15 +116,16 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
 
 
 def _extraer_grupos(session, p, modulo, jobs: list[str], n: int, semilla: int) -> list[dict]:
-    """El juego de un modulo por grupo (decision 175: una busqueda y las URLs
-    que se la reparten). Estratificado por host y COMBINACION de plantillas
-    del grupo (ficha + ficha no es lo mismo que listado + ficha), y sin
-    repetidos: la misma busqueda con las mismas rutas es un ejemplo aunque
+    """El juego de un modulo por grupo (decision 175: una busqueda y un par de
+    las URLs que se la reparten). Estratificado por host y COMBINACION de
+    plantillas del par (ficha + ficha no es lo mismo que listado + ficha), y
+    sin repetidos: la misma busqueda con las mismas rutas es un ejemplo aunque
     venga de dos censos o con y sin www (la 169 vio que eso infla la muestra),
     y dos estados identicos, tambien."""
     import uuid
     from urllib.parse import urlsplit
 
+    from shared.enriquecido_canibalizacion import deshacer_par, pares_de_aviso
     from shared.evaluacion_decisiones import muestra_estratificada
     from shared.models import Issue, Job, Url
     from shared.plantillas import plantilla_de, reglas_de_plantilla
@@ -140,20 +141,24 @@ def _extraer_grupos(session, p, modulo, jobs: list[str], n: int, semilla: int) -
             Url.job_id == job.id, Url.is_internal.is_(True), Url.is_html.is_(True),
             Url.status_code == 200, Url.indexable.is_(True)).order_by(Url.id)]
         grupos = modulo.filtrar_urls(session, job.id, alcance)
+        avisos = sorted({deshacer_par(g)[0] for g in grupos})
         detalles = {}
-        for i in range(0, len(grupos), 500):
-            detalles.update(session.query(Issue.id, Issue.details).filter(Issue.id.in_(grupos[i:i + 500])).all())
+        for i in range(0, len(avisos), 500):
+            detalles.update(session.query(Issue.id, Issue.details).filter(Issue.id.in_(avisos[i:i + 500])).all())
         for gid in grupos:
-            d = detalles.get(gid) or {}
-            urls = [u for u in (d.get("urls") or []) if isinstance(u, dict) and u.get("url")]
-            rutas = tuple(sorted(urlsplit(u["url"]).path or "/" for u in urls))
+            iid, k = deshacer_par(gid)
+            d = detalles.get(iid) or {}
+            par = {kk: (a, b) for kk, a, b in pares_de_aviso(d)}.get(k)
+            if par is None:
+                continue
+            rutas = tuple(sorted(urlsplit(u["url"]).path or "/" for u in par))
             clave = (str(d.get("consulta") or "").casefold(), rutas)
             if clave in vistas:
                 continue
             vistas.add(clave)
-            host = urlsplit(urls[0]["url"]).hostname if urls else ""
+            host = urlsplit(par[0]["url"]).hostname
             formas = sorted({u.get("plantilla") or plantilla_de(urlsplit(u["url"]).path or "/", reglas)
-                             for u in urls})
+                             for u in par})
             estrato = f"{host or ''}|{' + '.join(formas)}"
             por_plantilla.setdefault(estrato, []).append((str(job.id), gid, d.get("consulta"), rutas, estrato))
     elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)

@@ -76,9 +76,9 @@ class Modulo:
     # El prefiltro barato: soft 404 solo sobre los candidatos de la decision
     # 105, no sobre todo el censo. None = todas las del alcance.
     filtrar_urls: Callable[[Any, Any, list[int]], list[int]] | None = None
-    # La unidad no es la URL sino un grupo (decision 175: una busqueda y las
-    # URLs que se la reparten). `filtrar_urls` devuelve entonces ids de GRUPO
-    # (los del aviso que lo origina) y `construir_estados` los recibe; cada
+    # La unidad no es la URL sino un grupo (decision 175: una busqueda y dos
+    # de las URLs que se la reparten). `filtrar_urls` devuelve entonces ids de
+    # GRUPO (los define el modulo) y `construir_estados` los recibe; cada
     # Estado lleva en `url_id` la URL donde cuelga el grupo, que puede estar
     # en varios. Lo hecho al reanudar se reconoce por la clave del estado.
     por_grupo: bool = False
@@ -220,18 +220,19 @@ def _registro_inicial() -> dict[str, Modulo]:
 
 
 def _modulo_canibalizacion() -> Modulo:
-    from shared.enriquecido_canibalizacion import estados_canibalizacion, grupos_canibalizacion
+    from shared.enriquecido_canibalizacion import estados_canibalizacion, pares_canibalizacion
 
     return Modulo(
         nombre="canibalizacion",
         titulo="Canibalizacion por busqueda (juicio)",
         descripcion=("Para cada busqueda que Search Console reparte entre varias URLs (aviso de la "
-                     "decision 157), si las paginas son sustitutas para quien la hace y, solo si lo "
-                     "son, que hacer: fusionar, diferenciar, canonicalizar o dejar. Las 300 de mas "
-                     "clics. Sin evaluar (#8): las respuestas salen inciertas y no van a ningun informe."),
+                     "decision 157), por pares de paginas del mismo idioma: si son sustitutas para "
+                     "quien la hace y, solo si lo son, que hacer: fusionar, diferenciar, canonicalizar "
+                     "o dejar. Las 300 busquedas de mas clics. Sin evaluar (#8): las respuestas salen "
+                     "inciertas y no van a ningun informe."),
         preguntas=("paginas_sustitutas", "recomendacion_canibalizacion"),
         construir_estados=estados_canibalizacion,
-        filtrar_urls=grupos_canibalizacion,
+        filtrar_urls=pares_canibalizacion,
         por_grupo=True,
         ejemplo=True,
     )

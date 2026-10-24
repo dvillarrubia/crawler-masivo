@@ -204,6 +204,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 174 | Accesibilidad con axe-core por muestra de plantilla: vendorizado, apagado de serie, una fila por regla y plantilla, nunca `error`, y lo que axe no decide no se afirma | [`render-y-descarga`](render-y-descarga.md#d174) |
 | 173 | Perfil de dispositivo entero y por nombre (preset Chrome Android), la comparación automática no cruza perfiles y capturas de pantalla por muestra de plantilla en el volumen de archivo | [`render-y-descarga`](render-y-descarga.md#d173) |
 | 175 | La canibalización se juzga por grupo (búsqueda + URLs), con dos preguntas en una llamada y la recomendación leída solo si son sustitutas | [`llm-y-enriquecido`](llm-y-enriquecido.md#d175) |
+| 175 | La canibalización se juzga por pares de páginas del mismo idioma (búsqueda + dos URLs), con dos preguntas en llamadas separadas y la recomendación leída solo si son sustitutas | [`llm-y-enriquecido`](llm-y-enriquecido.md#d175) |
 
 ## Anadir una decision
 
