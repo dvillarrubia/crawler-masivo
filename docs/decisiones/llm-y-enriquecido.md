@@ -299,5 +299,26 @@
      `es_pagina_de_utilidad` v1, en su propio módulo sobre los mismos
      sospechosos (`candidatos_soft404`).
    - Subir la versión invalida la caché y obliga a re-etiquetar y medir: un
-     umbral calibrado con la redacción vieja no vale para la nueva. Las tres
-     siguen sin umbral y marcadas como sin evaluar hasta medirlas.
+     umbral calibrado con la redacción vieja no vale para la nueva.
+   - **Medido el 24-oct-2026** (1 céntimo en Jev). El juego de la 159 se
+     re-etiquetó a ciegas con las definiciones nuevas. En `es_pagina_legal` se
+     usaron las etiquetas de la persona donde las había (14, todas coinciden);
+     en el soft 404 no, porque respondió con el criterio viejo, que juntaba
+     error y utilidad.
+     - `es_pagina_legal` v2: 99 % sobre 300. 0,55 cubriría todo con cota de
+       Wilson 0,971, pero no se pone: es la pregunta de ejemplo.
+     - `es_soft_404` v2: 93,6 % sobre 94, y **sin umbral**. El umbral común
+       que salía (0,90, 66 % de cobertura, 62 de 62 aciertos) decidía 60 «no»
+       y 2 «sí»: de los 29 soft 404 reales, 27 se quedaban inciertos, entre
+       ellos las ocho páginas de error evidentes, que Jev contesta «sí» con
+       0,57-0,89. Un umbral así solo serviría para decir «esto no es un soft
+       404», que no es el hallazgo. Hace falta un juego con más positivos (y
+       quizá otra redacción) antes de poner umbral a la respuesta «sí».
+     - `es_pagina_de_utilidad` v1: 91,5 %; 7 de sus 8 fallos eran páginas de
+       error contadas como de utilidad. La v2 lo dice; sin medir todavía.
+   - **La evaluación separa ahora las respuestas** (`por_respuesta`): cuántas
+     de cada una decide el umbral elegido, con qué cota, qué parte de las
+     reales recupera y qué umbral tendría esa respuesta sola; y `avisos` dice
+     cuándo el umbral común casi no decide una clase con 10 o más reales
+     (menos del 25 %). Fue una revisión independiente la que vio que la cifra
+     global escondía esto.
