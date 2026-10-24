@@ -266,6 +266,20 @@ contexto movil de verdad; y con Postgres, la tuberia, el analisis y que
 reanudar no repite) y `test_paridad_movil_analisis.py` (la comparacion, los
 perfiles, el preset del formulario, el contexto `custom` con el UA del job,
 los avisos contra SQLite y el aviso de perfil distinto entre censos).
+Accesibilidad con axe (decision 174): `test_accesibilidad.py` (el resumen de
+`axe.run` —todos los nodos, ejemplos recortados, shadow DOM, experimental sin
+afirmar, un resultado roto es no evaluado—, la agregacion por regla y
+plantilla, el axe vendorizado con su licencia y su README, y el analisis
+contra SQLite: una fila por regla y plantilla anclada en la URL menor, nunca
+`error`, incompletas, muros, 404 y no evaluadas sin aviso, render y paridad
+sin mezclarse, sin tabla y re-analizar), `test_sonda_axe_spider.py` (el
+`SeoSpider` real con Chromium contra un sitio con fallos conocidos: imagen sin
+alt, boton sin nombre, contraste, campo sin etiqueta; CSP estricta, cargador
+AMD, fallo solo tras el JavaScript, pagina limpia, cupo por plantilla y tope
+total, con y sin render, sin gastar `max_urls`; apagado de serie),
+`test_accesibilidad_api.py` (el endpoint con TestClient; trabajo de la API) y
+`test_accesibilidad_frontend.py` (Chromium: las claves del modal solo si se
+cambian, impacto, ambito y detalles, y la tarjeta que no afirma sin paginas).
 Huella TLS y UA (decision 132): `test_huella_en_la_peticion.py` (el
 `SeoSpider` real con curl_cffi contra un servidor que anota lo que llega: UA,
 `sec-ch-ua` y `sec-ch-ua-platform` de serie, de un config viejo con el UA de

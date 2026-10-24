@@ -47,6 +47,7 @@ from analysis import pagerank as prk
 from analysis import avisos_de_enlaces, avisos_de_sondas
 from analysis import avisos_de_paginacion
 from analysis import avisos_de_gsc, avisos_de_render, avisos_de_servidor, oportunidades_gsc
+from analysis import avisos_de_accesibilidad
 from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from analysis import avisos_de_medios
@@ -442,6 +443,7 @@ class SEOAnalyzer:
         self.analyze_soft_404()
         self.analyze_paridad_movil()
         avisos_de_render.avisar(self)  # decision 140
+        avisos_de_accesibilidad.avisar(self)  # decision 174
         self.analyze_url_issues()
         # Despues de la indexabilidad (necesita `Url.noindex`) y antes de los
         # conteos: deja marcadas las paginas que la lectura de `links` de

@@ -1044,3 +1044,76 @@
    truncado entero, como con `max_urls`: afinarla por grupo (afirmar ausencias
    fuera de las carpetas cortadas) es trabajo aparte. El proxy por cliente tampoco
    entra aquí.
+<a id="d174"></a>
+174. **Accesibilidad con axe-core, por muestra de plantilla y sin afirmar lo
+   que axe no decide** (Ola 8 de `docs/PLAN_MEJOR_CRAWLER.md`). Se vende a la
+   UOC y al sector público (EAA, RD 1112/2018: WCAG 2.1 AA), y pasar axe a
+   todo el censo es el «qué NO hacer» 5 del plan: un render por URL para una
+   señal que casi siempre es de plantilla.
+   - **Sonda** `crawler/seo_crawler/sonda_axe.py` (`SondaAxeMixin`), con el
+     patrón de las decisiones 119 y 140: una página del censo por plantilla
+     (`config.templates` o `shared.plantillas.firma_de_ruta`) se vuelve a
+     pedir con Chromium, fuera de `max_urls`, sin seguir redirecciones,
+     respetando robots.txt, y cuando el DOM se calma (la misma espera del
+     render del censo) se ejecuta axe. Va a `capturas_alternativas` con
+     `perfil='axe'`: el borrado, el tamaño del censo, el backup y la ficha de
+     la URL ya la cubren, y render y paridad filtran sus perfiles. Una fila por
+     página muestreada aunque no haya violaciones; sin fila, «no evaluada».
+   - **Apagada de serie**: `crawl_behavior.axe_muestra` (0; tope 500) y
+     `axe_por_plantilla` (1), declaradas en `JobConfig` y en el modal (solo se
+     mandan si se cambian, como las demás sondas). Cada página es un render
+     más, también en un censo sin render, que es por lo que no va encendida.
+   - **axe-core vendorizado** (4.14.0, MPL-2.0, con su licencia y la de
+     terceros, versión, integridad npm y sumas en
+     `seo_crawler/vendor/axe/README.md`): nada se baja de un CDN durante el
+     rastreo. Se inyecta con `page.evaluate`, que no pasa por la CSP de la
+     página (medido con `script-src 'self'`) ni por un cargador AMD, con los
+     textos de ayuda en castellano (`locales/es.json`). Solo las reglas WCAG
+     2.0/2.1/2.2 A y AA (`shared.accesibilidad.ETIQUETAS`), sin iframes, con
+     un tope de 20 s dentro de la página y 90 s de descarga.
+   - **No se quitan banners ni modales** (el render del censo sí, con
+     `_BOILERPLATE_REMOVAL_JS`): son parte de la página que recibe quien la
+     visita. Lo que el render
+     bloquea (imágenes, fuentes, analítica) no entra: un contraste sobre una
+     imagen de fondo lo deja axe en «incomplete».
+   - **Lo que axe deja en `incomplete` no se afirma** (67, 89): se guarda y la
+     tarjeta lo lista como «a revisar a mano», sin aviso. Una regla marcada
+     `experimental` va con ellas aunque falle. Una página no evaluada (muro,
+     redirección, otro código, axe que no terminó, error) no cuenta en las
+     muestreadas, y una tarjeta sin páginas evaluadas dice que no se puede
+     afirmar nada, nunca «sin fallos».
+   - **Análisis** `analysis/avisos_de_accesibilidad.py`: **una fila por (regla,
+     plantilla)** con páginas afectadas sobre muestreadas, elementos, criterios
+     WCAG, nivel y ejemplos con su selector, anclada en la URL menor (36, 64).
+     `accesibilidad_grave` (impacto crítico o grave de axe) es `warning` y
+     `accesibilidad_menor` (moderado o leve), `info`: **nunca `error`**, que
+     topa la nota SEO (92), y la accesibilidad no es un factor de
+     posicionamiento. Best-effort entero (40). Ámbito «Accesibilidad» en el
+     Explorador, `GET /api/jobs/{id}/accesibilidad` (lo mismo que los avisos
+     por regla, más las incompletas y el coste, con la misma consulta
+     `shared.accesibilidad.filas_evaluadas`) y una tarjeta en el resumen con
+     las reglas más graves.
+   - **Qué cubre**: lo automatizable de WCAG 2.x A/AA, en torno a un 30-40 %
+     de los criterios (por volumen de incidencias, Deque midió ~57 % en 2021).
+     **Qué no**: el teclado y el foco, el orden de lectura, si un texto
+     alternativo describe la imagen, subtítulos y audiodescripción, el
+     contenido de iframes y de estados que piden interacción (menús abiertos,
+     modales), y los contrastes sobre imagen. Una plantilla sin avisos no es
+     una plantilla accesible; lo dicen la ficha y la tarjeta.
+   Medido en local con el spider real (sin render, 12 URLs, `axe_muestra` 8 y
+   1 por plantilla, `DOWNLOAD_DELAY` 1 s, robots.txt respetado) el
+   2026-10-24: **www.boe.es** 5 plantillas, `target-size` (2.5.8, grave) en
+   todas y 18-39 contrastes en «incomplete»; **www.ine.es** 8 plantillas,
+   `aria-hidden-focus` (4.1.2) en las 8 y `color-contrast` (1.4.3) en 5;
+   **www.uoc.edu** 6 plantillas, `aria-allowed-attr` (crítico) en 5,
+   `image-alt` en la home, `list`, `label-content-name-mismatch` y
+   `target-size`. Coste: axe tarda **60-580 ms** por página (la home de la
+   UOC, la más pesada) y la descarga entera (render, espera y axe) **0,8-1,7
+   s**; el rastreo de 12 URLs pasó de 36,0 a 37,4 s (BOE), de 38,1 a 39,5 s
+   (INE) y de 36,2 a 41,5 s (UOC), porque las sondas van en paralelo con el
+   censo. Con 30 páginas por censo, del orden de 30-50 s de render repartidos.
+   Tests: `tests/test_accesibilidad.py` (resumen, agregación y el análisis
+   contra SQLite), `tests/test_sonda_axe_spider.py` (spider real con Chromium:
+   fallos conocidos, CSP, AMD, fallo solo tras el JavaScript, tope total y por
+   plantilla, sin gastar `max_urls`), `tests/test_accesibilidad_api.py`
+   (trabajo de la API) y `tests/test_accesibilidad_frontend.py`.

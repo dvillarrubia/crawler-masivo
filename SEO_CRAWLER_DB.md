@@ -341,7 +341,7 @@ sin fila = no evaluada.
 | id | bigint (PK) | |
 | job_id | UUID (FK → jobs, CASCADE) | Para filtrar y borrar por censo sin unir con `urls` (decision 37) |
 | url_id | bigint (FK → urls, CASCADE) | La pagina del censo |
-| perfil | varchar(20) | movil, escritorio (la alternativa de un censo con UA movil); crudo (7.1) |
+| perfil | varchar(20) | movil, escritorio (la alternativa de un censo con UA movil); crudo o render (decision 140); axe (decision 174: `medidas` = resumen de axe-core —version, ms_axe, violaciones e incompletas por regla con impacto, criterios WCAG, nodos y ejemplos—, `estado` evaluada o no_evaluada, `detalle` = ms_axe, ms_total o el motivo) |
 | modo | varchar(12) | render, sin_render: el mismo que la pagina del censo |
 | estado | varchar(24) | comparada, redirige, respuesta_distinta, no_evaluada |
 | plantilla | text | `config.templates` o `firma_de_ruta` |

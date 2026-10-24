@@ -2494,6 +2494,45 @@
               </div>
             </template>
 
+            <!-- Accesibilidad con axe-core por muestra de plantilla (decision 174):
+                 solo si el job lo pidio o trae capturas. Lo «a revisar» de axe
+                 no se afirma, y sin paginas evaluadas no se dice «sin fallos». -->
+            <template x-if="accesibilidad && (accesibilidad.pedida || accesibilidad.paginas.evaluadas || accesibilidad.paginas.no_evaluadas)">
+              <div class="card" style="grid-column:1/-1" data-testid="tarjeta-accesibilidad">
+                <div class="card-header"><h2>Accesibilidad (WCAG 2.x A/AA)</h2>
+                  <span class="text-sm text-dim" x-text="'axe-core ' + (accesibilidad.axe || '') + ' · ' + fmt.num(accesibilidad.paginas.evaluadas) + ' páginas de ' + fmt.num(accesibilidad.plantillas) + ' plantillas' + (accesibilidad.coste && accesibilidad.coste.ms_pagina_mediana != null ? ' · ' + (accesibilidad.coste.ms_pagina_mediana / 1000).toFixed(1) + ' s por página' : '')"></span></div>
+                <p class="text-sm text-dim">Muestra por plantilla con el navegador. axe detecta lo automatizable, en torno a un 30-40&nbsp;% de los criterios WCAG A/AA: una plantilla sin fallos aquí no es una plantilla accesible (el teclado, el orden de lectura o si un texto alternativo describe la imagen se revisan a mano). Imágenes, fuentes e iframes no se cargan en el render.</p>
+                <template x-if="!accesibilidad.paginas.evaluadas">
+                  <div class="text-sm" data-testid="accesibilidad-sin-evaluar">Ninguna página evaluada<span x-show="accesibilidad.paginas.no_evaluadas" x-text="': ' + Object.entries(accesibilidad.paginas.motivos).map(([m, n]) => m + ' (' + n + ')').join(', ')"></span>. No se puede decir nada de la accesibilidad de este rastreo.</div>
+                </template>
+                <template x-if="accesibilidad.paginas.evaluadas && !accesibilidad.reglas.length">
+                  <div class="text-sm">axe no encontró incumplimientos automatizables en las páginas de la muestra.</div>
+                </template>
+                <template x-if="accesibilidad.reglas.length">
+                  <div class="table-wrap"><table class="tbl" style="font-size:.8rem" data-testid="accesibilidad-reglas">
+                    <thead><tr><th>Impacto</th><th>Regla</th><th>WCAG</th><th>Plantillas</th><th>Páginas</th><th>Elementos</th></tr></thead>
+                    <tbody>
+                      <template x-for="r in accesibilidad.reglas.slice(0, 12)" :key="r.regla">
+                        <tr>
+                          <td :class="impactoAxe(r.impacto)[1]" x-text="impactoAxe(r.impacto)[0]"></td>
+                          <td><a :href="r.url_ayuda" target="_blank" rel="noopener" x-text="r.ayuda || r.regla"></a> <code class="text-dim" x-text="r.regla"></code></td>
+                          <td x-text="(r.criterios.join(', ') || '—') + (r.nivel ? ' (' + r.nivel + ')' : '')"></td>
+                          <td :title="r.plantillas.map(p => p.plantilla + ': ' + p.paginas + ' de ' + p.de).join('\n')" x-text="fmt.num(r.plantillas.length)"></td>
+                          <td x-text="fmt.num(r.paginas)"></td>
+                          <td x-text="fmt.num(r.nodos)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table></div>
+                </template>
+                <div class="text-sm text-dim mt-1" x-show="accesibilidad.reglas.length > 12" x-text="'Y ' + (accesibilidad.reglas.length - 12) + ' reglas más en Problemas (Accesibilidad).'"></div>
+                <div class="text-sm text-dim mt-1" x-show="accesibilidad.incompletas.length" data-testid="accesibilidad-incompletas"
+                     x-text="'A revisar a mano, sin afirmar (axe no pudo decidir): ' + accesibilidad.incompletas.map(r => r.regla).join(', ')"></div>
+                <div class="text-sm text-dim mt-1" x-show="accesibilidad.paginas.evaluadas && accesibilidad.paginas.no_evaluadas"
+                     x-text="fmt.num(accesibilidad.paginas.no_evaluadas) + ' páginas de la muestra sin evaluar: ' + Object.entries(accesibilidad.paginas.motivos).map(([m, n]) => m + ' (' + n + ')').join(', ')"></div>
+              </div>
+            </template>
+
             <!-- Comprobaciones fuera del censo: certificado (110), soft 404
                  (105), sondas de respuesta (123/124) y sitemaps (126). Cada
                  tarjeta solo si el job trae ese dato: sin el, un rastreo viejo
@@ -5871,6 +5910,14 @@
             <div class="form-group">
               <label title="Imágenes de og:image distintas que se descargan (los primeros 64 KB) para medir su ancho y alto, como mucho 5 nuevas por plantilla. 0 = apagado">og:image a medir (0 = no)</label>
               <input type="number" x-model="createForm.og_image_muestra" min="0" max="5000" data-testid="sonda-og-image">
+            </div>
+            <div class="form-group">
+              <label title="Páginas del censo que se vuelven a renderizar para pasarles axe-core (WCAG 2.x A/AA), como mucho las de «por plantilla» de cada plantilla. Cada una es un render más, también sin «Render JS». 0 = apagado">Accesibilidad (axe): páginas (0 = no)</label>
+              <input type="number" x-model="createForm.axe_muestra" min="0" max="500" data-testid="sonda-axe">
+            </div>
+            <div class="form-group" x-show="parseInt(createForm.axe_muestra) > 0">
+              <label>Por plantilla</label>
+              <input type="number" x-model="createForm.axe_por_plantilla" min="1" max="20">
             </div>
           </div>
           <div class="form-row-3">

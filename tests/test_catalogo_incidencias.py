@@ -31,6 +31,8 @@ _NO_LITERALES = {
                     "canonical_cambia_al_renderizar", "nofollow_cambia_al_renderizar",
                     "contenido_solo_con_js", "cambia_al_renderizar",
                     "respuesta_cambia_al_renderizar"},
+    # avisos_de_accesibilidad.py (decision 174)
+    "tipo_axe": {"accesibilidad_grave", "accesibilidad_menor"},
     "tipo_de_serie": {"paginacion_canonical_a_la_primera", "paginacion_noindex",
                       "solo_enlazada_desde_paginacion_profunda", "paginacion_sin_enlace",
                       "paginacion_siguiente_rota", "paginacion_rel_incorrecto"},
@@ -42,7 +44,7 @@ FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
            "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py",
            "avisos_de_sitemaps.py", "avisos_de_render.py", "avisos_de_gsc.py",
            "oportunidades_gsc.py", "avisos_de_medios.py", "avisos_de_wordpress.py",
-           "avisos_de_nosnippet.py")
+           "avisos_de_nosnippet.py", "avisos_de_accesibilidad.py")
 
 
 def _llamadas() -> list[ast.expr]:

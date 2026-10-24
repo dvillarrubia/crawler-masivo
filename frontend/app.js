@@ -280,6 +280,8 @@ const fmt = {
     const corta = u => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
     for (const [k, v] of Object.entries(d)) {
       if (v == null || v === '' || k === 'otro_dominio_registrable' || k === 'paginas_del_host') continue;
+      // Accesibilidad (decision 174): el impacto ya va en castellano y el enlace, en la ficha.
+      if (k === 'impacto_axe' || k === 'url_ayuda') continue;
       if (k === 'validation_issues' && Array.isArray(v)) {
         partes.push(v[0] + (v.length > 1 ? ` (y ${v.length - 1} más)` : ''));
       } else if (k === 'duplicate_urls' && Array.isArray(v)) {
@@ -659,6 +661,8 @@ function app() {
     // Vista detalle de URL
     urlDetail: null,
     robotsBots: null,
+    // Accesibilidad con axe por muestra de plantilla (decision 174)
+    accesibilidad: null,
     urlDetailTab: 'general',
     urlDetailLoading: false,
     contentViewMode: 'markdown',
@@ -1920,6 +1924,11 @@ function app() {
       try {
         this.robotsBots = await api(`/jobs/${this.job.id}/robots`);
       } catch { this.robotsBots = null; }
+      // axe por muestra de plantilla (decision 174): solo pinta algo si el
+      // job lo pidio o trae capturas; si falla, la ficha sale igual.
+      try {
+        this.accesibilidad = await api(`/jobs/${this.job.id}/accesibilidad`);
+      } catch { this.accesibilidad = null; }
     },
 
     // ------- Polling de progreso -------
@@ -4363,6 +4372,9 @@ const EXP_TABS = [
   // Decision 140: el HTML del servidor frente al render, por muestra de plantilla.
   { key: 'a_js',       label: 'JavaScript',    icon: 'code',         filter: HTML_INTERNO, ambito: ['noindex_solo_en_crudo','noindex_solo_al_renderizar','canonical_cambia_al_renderizar','nofollow_cambia_al_renderizar','contenido_solo_con_js','cambia_al_renderizar','respuesta_cambia_al_renderizar','redireccion_por_javascript'],
     columns: ['url','status_code','indexable','canonical_href','meta_robots','content_word_count'] },
+  // Decision 174: axe-core por muestra de plantilla (una fila por regla y plantilla).
+  { key: 'a_a11y',     label: 'Accesibilidad', icon: 'accessibility', filter: HTML_INTERNO, ambito: ['accesibilidad_grave','accesibilidad_menor'],
+    columns: ['url','status_code','title','html_lang','indexable'] },
   { key: 'a_html',     label: 'HTML ignorado', icon: 'scissors',     filter: HTML_INTERNO, ambito: ['html_supera_2mb','head_cortado','meta_fuera_del_head'],
     columns: ['url','status_code','content_length','title','meta_robots','indexable'] },
   { key: 'a_hreflang', label: 'Hreflang',      icon: 'languages',    filter: HTML_INTERNO, ambito: ['hreflang_missing_return','hreflang_invalid_lang','hreflang_broken_target','hreflang_in_body','hreflang_sin_autorreferencia','hreflang_sin_x_default','hreflang_idioma_repetido','hreflang_destino_no_indexable','hreflang_retorno_incoherente','hreflang_fuentes_discrepan','html_lang_no_coincide_hreflang'],
@@ -4554,6 +4566,16 @@ function tipoWp(tipo) {
   return WP_TIPO_TEXTO[tipo] || tipo || '—';
 }
 
+// Decision 174: nombre y color del impacto de axe en la tarjeta.
+const IMPACTO_AXE = {
+  critical: ['Crítico', 'red'], serious: ['Grave', 'orange'],
+  moderate: ['Moderado', ''], minor: ['Leve', 'text-dim'],
+};
+
+function impactoAxe(impacto) {
+  return IMPACTO_AXE[impacto] || ['—', 'text-dim'];
+}
+
 // null si el job no trae el resumen del adaptador (rastreo anterior o con el
 // adaptador apagado) o si no hubo ni rastro de WordPress: entonces la tarjeta
 // no sale, y «no sale» no quiere decir «no es WordPress» en un rastreo viejo.
@@ -4653,6 +4675,9 @@ const SONDAS_CAMPOS = {
   sondas_por_host:            ['crawl_behavior', 50,    'int'],
   // Decision 154: medir la og:image, encendida de serie (0 = apagada).
   og_image_muestra:           ['crawl_behavior', 200,   'int'],
+  // Decision 174: axe por muestra de plantilla, apagado de serie (0).
+  axe_muestra:                ['crawl_behavior', 0,     'int'],
+  axe_por_plantilla:          ['crawl_behavior', 1,     'int'],
 };
 
 function _valorSonda(campo, v) {
@@ -4708,6 +4733,8 @@ function _freshForm() {
     recursos_max: 20000,
     sondas_por_host: 50,
     og_image_muestra: 200,
+    axe_muestra: 0,
+    axe_por_plantilla: 1,
     _sondasBase: _sondasDeSerie(),
     // Adaptador WordPress (decision 168): `_wpConfigDesdeForm`.
     wp_analizar: true,

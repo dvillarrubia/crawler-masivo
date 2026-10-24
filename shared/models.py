@@ -1182,7 +1182,8 @@ class CapturaAlternativa(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     url_id = Column(BigInteger, ForeignKey("urls.id", ondelete="CASCADE"), nullable=False)
     # movil | escritorio (la alternativa de un censo rastreado con UA movil);
-    # mas adelante, crudo (7.1)
+    # crudo | render (decision 140); axe (decision 174: `medidas` es el
+    # resumen de axe-core y `estado` evaluada | no_evaluada)
     perfil = Column(String(20), nullable=False)
     # render | sin_render: las dos capturas van SIEMPRE en el mismo modo
     modo = Column(String(12), nullable=True)

@@ -152,6 +152,17 @@ const ISSUE_INFO = {
     google: 'Googlebot pide primero sin renderizar: lo que recibe ahí decide si la página entra en la cola de render.',
     arreglo: 'Revisar las reglas del servidor o del CDN que distinguen por navegador (detección de bots, redirecciones por JavaScript).',
   },
+  // Decision 174: accesibilidad con axe-core sobre una muestra por plantilla.
+  'accesibilidad_grave': {
+    que: 'axe-core encuentra un incumplimiento de WCAG 2.x (nivel A o AA) de impacto crítico o grave en las páginas de la muestra de esta plantilla: una fila por regla y plantilla, con las páginas afectadas sobre las muestreadas, los elementos (nodos) y ejemplos con su selector. En los detalles, la regla, los criterios WCAG y el enlace a la explicación de Deque.',
+    google: 'La accesibilidad no es un factor de posicionamiento directo, y por eso no baja la nota SEO. Sí es una obligación legal: la Ley Europea de Accesibilidad (EAA, aplicable desde junio de 2025) para comercio electrónico, banca y transporte, y el RD 1112/2018 para el sector público, ambos con WCAG 2.1 AA como referencia. Algunas reglas coinciden con lo que Google sí lee: textos alternativos de imágenes, anclas de enlace con texto y el idioma de la página.',
+    arreglo: 'Corregirlo en la plantilla (casi siempre es el menú, el pie, un formulario o un componente común) siguiendo la explicación de la regla. axe solo detecta lo automatizable, en torno a un 30-40 % de los criterios: una plantilla sin avisos no está certificada como accesible, hace falta revisión manual.',
+  },
+  'accesibilidad_menor': {
+    que: 'axe-core encuentra un incumplimiento de WCAG 2.x (nivel A o AA) de impacto moderado o leve en las páginas de la muestra de esta plantilla. Una fila por regla y plantilla, como en los graves.',
+    google: 'No afecta al posicionamiento. Cuenta para el cumplimiento de WCAG 2.1 AA (EAA, RD 1112/2018), aunque con menos impacto para quien usa tecnologías de apoyo.',
+    arreglo: 'Corregirlo en la plantilla cuando se toque, después de los graves. Lo que axe deja «a revisar» (por ejemplo, el contraste sobre una imagen) no sale aquí: lo cuenta la tarjeta de accesibilidad del resumen y hay que mirarlo a mano.',
+  },
   // Decision 142: Search Console cruzado con el rastreo (90 días hasta el día del rastreo).
   'trafico_en_pagina_perdida': {
     que: 'La página ha recibido clics desde Google en los 90 días anteriores al rastreo y hoy da error (4xx o 5xx), tiene noindex o está bloqueada por robots.txt. En los detalles, los clics.',
@@ -948,6 +959,8 @@ const ISSUE_LABEL_EXTRA = {
   contenido_solo_con_js: 'Contenido o enlaces solo con JavaScript',
   cambia_al_renderizar: 'Metadatos que cambian al renderizar',
   respuesta_cambia_al_renderizar: 'Respuesta distinta con y sin navegador',
+  accesibilidad_grave: 'Accesibilidad: fallo WCAG crítico o grave',
+  accesibilidad_menor: 'Accesibilidad: fallo WCAG moderado o leve',
   max_snippet_restrictivo: 'Fragmento limitado (max-snippet)',
   enlace_no_rastreable: 'Enlace que Google no puede seguir',
   enlace_interno_a_error: 'Enlace interno a un error',
@@ -1032,6 +1045,8 @@ const DETALLE_LABEL = {
   cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'comprobada',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
+  // Accesibilidad con axe (decisión 174)
+  regla: 'regla de axe', impacto: 'impacto', wcag: 'WCAG', nivel: 'nivel', ayuda: 'pide', nodos: 'elementos',
 
   ejemplos: 'ejemplos',
   similarity: 'similitud',

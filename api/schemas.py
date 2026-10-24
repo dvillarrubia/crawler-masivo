@@ -154,6 +154,12 @@ class CrawlBehaviorConfig(BaseModel):
     # por pagina y hay que pedirlo.
     render_crudo_muestra: int | None = Field(default=None, ge=0, le=500)
     render_crudo_por_plantilla: int = Field(default=3, ge=1, le=50)
+    # Accesibilidad con axe-core (decision 174, Ola 8): cuantas paginas del
+    # censo se vuelven a renderizar para pasarles axe (WCAG 2.x A/AA), como
+    # mucho `axe_por_plantilla` por plantilla. Cada una es un render mas,
+    # tambien en un censo sin render: 0 = apagado, que es lo de serie.
+    axe_muestra: int = Field(default=0, ge=0, le=500)
+    axe_por_plantilla: int = Field(default=1, ge=1, le=20)
     # chrome_android por defecto: con Googlebot desde nuestra IP un WAF que
     # verifica bots lo bloquea o sirve otra cosa (decision 98)
     paridad_movil_ua: Literal["chrome_android", "googlebot_smartphone"] = "chrome_android"

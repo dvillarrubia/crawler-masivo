@@ -75,7 +75,9 @@
     "recursos_max": 20000,
     "sondas_por_host": 50,
     "og_image_muestra": 200,
-    "og_image_por_plantilla": 5
+    "og_image_por_plantilla": 5,
+    "axe_muestra": 0,
+    "axe_por_plantilla": 1
   },
   "extraction": {
     "extract_structured_data": true,

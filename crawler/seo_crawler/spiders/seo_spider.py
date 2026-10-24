@@ -89,6 +89,7 @@ from seo_crawler.sonda_respuestas import SondaRespuestasMixin
 from seo_crawler.sonda_soft404 import SondaSoft404Mixin
 from seo_crawler.sonda_tls import SondaTlsMixin, motivo_error_tls
 from seo_crawler.sonda_paridad import ParidadMovilMixin, contextos_del_perfil
+from seo_crawler.sonda_axe import SondaAxeMixin
 from seo_crawler.sonda_render import RenderCrudoMixin
 from seo_crawler.sonda_wordpress import AdaptadorWordPressMixin
 from seo_crawler.items import (
@@ -521,8 +522,8 @@ def _cabeceras_de(response: Response) -> dict[str, str]:
     return salida
 
 
-class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudoMixin, SondaRespuestasMixin,
-                AdaptadorWordPressMixin, scrapy.Spider):
+class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudoMixin, SondaAxeMixin,
+                SondaRespuestasMixin, AdaptadorWordPressMixin, scrapy.Spider):
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
@@ -771,6 +772,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             self._iniciar_paridad(session)
             # -- Respuesta frente a render (decision 140) --
             self._iniciar_render_crudo(session)
+            # -- Accesibilidad con axe por muestra de plantilla (decision 174) --
+            self._iniciar_axe(session)
 
             # -- Sondas de respuesta: enlaces externos y recursos (123, 124) --
             # Despues de los patrones: los de exclusion valen tambien para ellas.
@@ -2229,6 +2232,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if not muro:
                 yield from self._paridad_de_pagina(response, final_url)  # decision 119
                 yield from self._render_crudo_de_pagina(response, final_url)  # decision 140
+                yield from self._axe_de_pagina(response, final_url)  # decision 174
 
         # -- HTML-specific extraction (only for 2xx HTML) ------------------
         # Un muro no aporta nada mas: ni metadatos, ni titulares, ni enlaces
