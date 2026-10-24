@@ -18,7 +18,8 @@ canonical entre el rastreo del 3 y el del 10». Reglas:
   mismo hacia arriba (la otra mitad del seguimiento: «+X clics donde se arreglo
   el canonical»).
 - **Se agrupan por lo que cambio en esa URL** entre los dos censos: status,
-  redireccion o error nuevos, noindex, canonical, title, H1, contenido, sale
+  redireccion o error nuevos, noindex, canonical, title, H1, contenido (por
+  `content_hash` si lo tienen las dos, y si no por palabras: decision 165), sale
   del sitemap, pierde enlaces o PageRank, desaparece del censo. Una pagina con
   dos cambios esta en los dos grupos. Lo que no cambio en nada va a «sin
   cambio tecnico en el rastreo».
@@ -29,14 +30,17 @@ canonical entre el rastreo del 3 y el del 10». Reglas:
   mientras subia la buena (38 a 121): sin esto salia «8 paginas perdieron 290
   clics sin cambio tecnico», cuando era Google haciendo caso al canonical.
 - **Nunca se afirma causalidad**: «coincide con», no «por». Si la caida es de
-  todo el sitio, se dice que es general. Si hay datos del ano anterior y el
+  todo el sitio, se dice primero que es general, y los grupos van detras como
+  detalle, no como causa (decision 165). Si hay datos del ano anterior y el
   mismo periodo cayo lo mismo, se dice que es estacional.
 - **Rupturas de serie conocidas** de Search Console: si una ventana las cruza,
   se avisa (afectan a las impresiones; los clics, que son lo que se compara,
   no).
 
 Los textos se redactan AQUI (`textos`), una sola vez: los usan la ficha del
-rastreo y el aviso de Slack, para que digan lo mismo.
+rastreo, la del cliente y el aviso de Slack, para que digan lo mismo. Si la
+comparacion espero a los datos, al completarse se avisa otra vez, una sola
+(decision 165).
 """
 
 from __future__ import annotations
@@ -87,6 +91,7 @@ CAMBIOS = {
     "title": "cambia el title",
     "h1": "cambia el H1",
     "contenido": "cambia mucho el contenido",
+    "texto_contenido": "cambia el texto del contenido principal",
     "sale_del_sitemap": "sale del sitemap",
     "pierde_enlaces": "pierde enlaces internos",
     "pierde_pagerank": "pierde PageRank interno",
@@ -186,9 +191,7 @@ def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
         salida.append("title")
     if _norm_texto(pa.get("h1")) != _norm_texto(pb.get("h1")):
         salida.append("h1")
-    wa, wb = pa.get("word_count"), pb.get("word_count")
-    if wa and wb is not None and abs(wb - wa) >= CONTENIDO_MIN_PALABRAS and abs(wb - wa) / wa >= CONTENIDO_PARTE:
-        salida.append("contenido")
+    salida.extend(_cambio_de_contenido(pa, pb))
     if pa.get("in_sitemap") is True and pb.get("in_sitemap") is False:
         salida.append("sale_del_sitemap")
     if _pierde_inlinks(pa.get("inlinks"), pb.get("inlinks")):
@@ -197,6 +200,28 @@ def cambios_de_pagina(pa: dict | None, pb: dict | None) -> list[str]:
     if ra is not None and rb is not None and ra - rb >= PAGERANK_MIN_PUNTOS:
         salida.append("pierde_pagerank")
     return salida
+
+
+def _cambio_de_contenido(pa: dict, pb: dict) -> list[str]:
+    """«contenido» (cambia mucho: al menos el 30 % y 50 palabras), «texto_contenido»
+    (el mismo numero de palabras, mas o menos, pero otro texto) o nada.
+
+    Con `content_hash` en las DOS paginas manda el hash (decision 165): un texto
+    reescrito con las mismas palabras no se veia, y dos hashes iguales son el
+    mismo contenido principal aunque el recuento de palabras varie por una
+    version del extractor. Si falta en cualquiera de las dos (censo anterior a
+    la columna, pagina sin contenido principal), la regla de siempre por
+    palabras: no se compara un hash con nada.
+    """
+    wa, wb = pa.get("word_count"), pb.get("word_count")
+    mucho = bool(wa and wb is not None and abs(wb - wa) >= CONTENIDO_MIN_PALABRAS
+                 and abs(wb - wa) / wa >= CONTENIDO_PARTE)
+    ha, hb = pa.get("content_hash"), pb.get("content_hash")
+    if ha and hb:
+        if ha == hb:
+            return []
+        return ["contenido"] if mucho else ["texto_contenido"]
+    return ["contenido"] if mucho else []
 
 
 def _destinos(pagina: dict | None) -> list[str]:
@@ -441,6 +466,15 @@ def textos(r: dict[str, Any]) -> list[str]:
                          ": puede ser demanda, competencia, la página de resultados o un cambio de Google."))
     elif est.get("igual") and var is not None and var < 0:
         lineas.append("El mismo periodo del año anterior varió lo mismo: parece estacional.")
+    # Con una caida general, los grupos de paginas son DETALLE, no la causa
+    # (decision 165): primero que es de todo el sitio, y los grupos detras de
+    # una frase que lo dice. Sin ella, «40 paginas perdieron 300 clics; coincide
+    # con que cambia el title» se lee como la explicacion de una caida que
+    # tambien tienen las paginas que no cambiaron.
+    if r.get("general") and (r.get("caidas") or r.get("subidas")):
+        lineas.append("Por páginas, como detalle y no como causa (la caída es de todo el sitio, también de "
+                      "las que no cambiaron):")
+
     def paginas(g):
         return _cuantos(g["paginas"], "página", "páginas")
 
@@ -516,11 +550,58 @@ def completar_pendientes(db, cliente_id, limite: int = 10) -> int:
                                      concluyente=comp.get("concluyente") is not False)
             if nuevo is None or nuevo.get("pendiente"):
                 continue
+            # Se reclama la fila antes de escribir: con dos propiedades del
+            # mismo cliente sincronizando a la vez, las dos llegarian aqui con
+            # el job pendiente y el aviso saldria dos veces.
+            db.refresh(job, with_for_update=True)
+            comp = job.comparacion if isinstance(job.comparacion, dict) else {}
+            t = comp.get("trafico")
+            if not (isinstance(t, dict) and t.get("pendiente")):
+                db.rollback()
+                continue
+            # `aviso` marca que este job ya paso por el aviso: lo que se avisa
+            # es el paso de pendiente a hecho, una vez (decision 165).
+            nuevo = {**nuevo, "aviso": {"estado": "por_enviar"}}
             job.comparacion = {**comp, "trafico": nuevo}
             flag_modified(job, "comparacion")
             db.commit()
             hechos += 1
+            _avisar_completado(db, job)
         except Exception:
             db.rollback()
             logger.exception("No se pudo completar el trafico pendiente del job %s", getattr(job, "id", "?"))
     return hechos
+
+
+def _avisar_completado(db, job) -> None:
+    """Manda el trafico recien completado al Slack del cliente y deja anotado
+    el resultado en `trafico.aviso`. Best-effort: nunca lanza.
+
+    Al acabar el rastreo, el informe de Slack salio con «Search Console aún no
+    tiene datos…»; sin esto, la caida de verdad se quedaba en la ficha y no
+    llegaba a nadie. Va por el mismo sitio que ese informe (`avisar_de_trafico`:
+    rastreos programados, canal del cliente con «informe» activo) y con los
+    mismos `textos`.
+    """
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+
+        from shared.avisos import avisar_de_trafico
+        from shared.models import Client
+
+        cliente = db.get(Client, job.cliente_id) if getattr(job, "cliente_id", None) else None
+        trafico = (job.comparacion or {}).get("trafico") or {}
+        enviado = avisar_de_trafico(cliente, job, trafico)
+        comp = dict(job.comparacion or {})
+        comp["trafico"] = {**trafico, "aviso": {
+            "estado": "enviado" if enviado else "no_enviado",
+            "en": datetime.now(timezone.utc).isoformat(timespec="seconds")}}
+        job.comparacion = comp
+        flag_modified(job, "comparacion")
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception("No se pudo avisar del trafico completado del job %s", getattr(job, "id", "?"))

@@ -204,3 +204,35 @@ def avisar_de_informe(cliente, job, resumen: dict) -> bool:
     except Exception:
         logger.exception("No se pudo avisar del informe del job %s", getattr(job, "id", "?"))
         return False
+
+
+def texto_de_trafico(nombre_job: str, trafico: dict) -> str:
+    """El aviso del trafico de Google que esperaba a los datos y ya esta
+    (decision 165). Las frases, las de `trafico_entre_censos.textos`: el mismo
+    redactor que el informe y la ficha."""
+    from shared.trafico_entre_censos import textos
+
+    lineas = [f"*{nombre_job}*: ya hay datos de Search Console para comparar el tráfico de Google "
+              "con el rastreo anterior (al terminar aún no habían llegado)."]
+    lineas.extend(textos(trafico))
+    return "\n".join(lineas)
+
+
+def avisar_de_trafico(cliente, job, trafico: dict) -> bool:
+    """El trafico completado de un rastreo PROGRAMADO, al canal del cliente con
+    el «informe» activo: el mismo camino que `avisar_de_informe`, que fue el que
+    dijo «aún no tiene datos». Sin Slack configurado, o lanzado a mano, no hace
+    nada. Nunca lanza."""
+    try:
+        if cliente is None or getattr(job, "programacion_id", None) is None:
+            return False
+        if not isinstance(trafico, dict) or trafico.get("pendiente"):
+            return False
+        from shared.slack import enviar_a_cliente
+
+        enlace = (f"{BASE_PUBLICA}/" + RUTA_FICHA_RASTREO.format(job_id=job.id) if BASE_PUBLICA else None)
+        return enviar_a_cliente(cliente, "informe", texto_de_trafico(job.name, trafico),
+                                enlace, "Ver el rastreo") > 0
+    except Exception:
+        logger.exception("No se pudo avisar del trafico del job %s", getattr(job, "id", "?"))
+        return False

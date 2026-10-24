@@ -528,6 +528,9 @@ function app() {
     // serie elegida en el desplegable.
     clienteEvolucion: null,
     evolucionClave: null,
+    // Ultimo trafico de Google entre censos de cada perfil (decision 165):
+    // GET /clients/{id}/trafico, con las frases ya redactadas por el servidor.
+    clienteTrafico: [],
     cliente: null,
     clienteTab: 'rastreos',
     // Reglas de alerta y resumen semanal del cliente (decision 135)
@@ -1291,6 +1294,12 @@ function app() {
         if (!s.find(x => x.clave === this.evolucionClave))
           this.evolucionClave = (s.find(x => x.comparables >= 2) || s[0] || {}).clave || null;
       } catch (e) { this.clienteEvolucion = null; }
+      // Aparte tambien: sin Search Console la lista viene vacia y no se pinta.
+      this.clienteTrafico = [];
+      try {
+        const t = await api(`/clients/${id}/trafico`);
+        if (this.cliente && this.cliente.id === id) this.clienteTrafico = t || [];
+      } catch (e) { this.clienteTrafico = []; }
     },
 
     // --- Reglas de alerta (decision 135) -------------------------------------

@@ -1571,6 +1571,7 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             Url.url, Url.status_code, Url.indexability_status, Url.word_count,
             Url.response_class,
             Url.unique_inlinks_count, Url.click_depth, Url.pagerank_score, Url.in_sitemap,
+            Url.content_hash,
             HtmlMeta.canonical_href, HtmlMeta.title,
             HtmlMeta.canonical_distintos, HtmlMeta.meta_description,
         )
@@ -1609,6 +1610,9 @@ def paginas_de_censo(db, job_id) -> list[dict[str, Any]]:
             "meta_description": f.meta_description,
             # El trafico entre censos (decision 158) agrupa por «sale del sitemap».
             "in_sitemap": f.in_sitemap,
+            # Y por «cambia el contenido», mejor por el hash del contenido
+            # principal que por las palabras (decision 158, #167).
+            "content_hash": f.content_hash,
             "sd_tipos": tipos.get(f.id, []),
             "hreflang": idiomas.get(f.id, []),
         }

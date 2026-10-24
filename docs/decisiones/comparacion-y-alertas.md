@@ -871,3 +871,49 @@
    - **Un solo redactor**: `textos()` escribe las frases («coincide con», nunca
      «por») y las usan la tarjeta de la ficha del rastreo y el aviso de Slack
      del rastreo programado (`resumen_semanal` → `avisos.texto_de_informe`).
+
+<a id="d165"></a>
+165. **El tráfico que esperaba a los datos se avisa al completarse, una vez; una
+   caída general se dice antes que los grupos; y el contenido se compara por su
+   hash** (#167, restos de la 158).
+   - **Aviso al completarse.** El informe de Slack del rastreo programado sale
+     al acabar el rastreo, cuando los datos de Search Console casi nunca llegan
+     aún al final de la ventana: decía «aún no tiene datos…» y
+     `completar_pendientes` rellenaba después `jobs.comparacion` sin avisar, así
+     que la caída de verdad no llegaba a nadie. Ahora, al completarse, se manda
+     por el **mismo camino que ese informe** (`avisos.avisar_de_trafico`:
+     rastreos programados, canal del cliente con «informe» activo) y con las
+     mismas frases de `textos()`. **Una sola vez**: antes de escribir se relee
+     la fila con `FOR UPDATE` y solo sigue si sigue `pendiente` (dos propiedades
+     del mismo cliente sincronizando a la vez llegaban las dos), y queda
+     `trafico.aviso` = `{estado: por_enviar | enviado | no_enviado, en}`. Sin
+     Slack configurado, o en un rastreo lanzado a mano, no sale nada
+     (`no_enviado`). Un fallo al avisar no deshace la comparación (best-effort
+     con el `try` sobre la función entera, 74). No va por `ALERTA_WEBHOOK_URL`:
+     el informe tampoco va, y el aviso tiene que llegar a quien leyó el «aún no».
+   - **En la ficha del cliente.** `GET /api/clients/{id}/trafico` da el último
+     tráfico entre censos de cada perfil (de los 30 rastreos más recientes con
+     comparación), con las frases de `textos()` calculadas en el servidor: la
+     tarjeta de la ficha no redacta nada. Un pendiente sale con su motivo y
+     «esperando datos».
+   - **Caída general: primero general, los grupos como detalle.** Con
+     `general` (el sitio cae un 30 % o más), la segunda frase ya decía que es
+     general, pero después venían las líneas por grupo («40 páginas perdieron
+     300 clics; coincide con que cambia el title») como si explicaran la caída,
+     que también tienen las páginas que no cambiaron. Se eligió **conservar los
+     grupos** detrás de una frase que los presenta como «detalle y no como
+     causa», en vez de quitarlos: si además de la caída general un grupo cae
+     mucho más (un 404 nuevo), sigue siendo un dato útil, y quitarlo esconde
+     justo lo que hay que arreglar. Sin `general` no cambia nada.
+   - **Contenido por `content_hash`.** Por palabras (30 % y 50 palabras) no se
+     veía un texto reescrito con el mismo largo. Si las DOS páginas tienen
+     `urls.content_hash` (SHA-256 del contenido principal normalizado, 47):
+     hashes iguales = mismo contenido, aunque varíe el recuento; distintos con
+     el cambio de palabras de siempre = «cambia mucho el contenido»
+     (`contenido`); distintos sin él = «cambia el texto del contenido
+     principal» (`texto_contenido`, un grupo aparte para no mezclar una fecha
+     cambiada con una página vaciada). Si falta en cualquiera de las dos (censo
+     anterior a la columna, página sin contenido principal), la regla por
+     palabras de la 158.
+   - **Fuera** (pendiente de decisión del usuario): el cambio de plantilla entre
+     censos como grupo propio; hoy cada grupo solo lista sus plantillas.

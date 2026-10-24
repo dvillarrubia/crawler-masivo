@@ -274,3 +274,141 @@ def test_solo_las_propiedades_activas_y_los_hosts_del_censo(s):
     s.commit()
     r = T.comparar_trafico(s, ja, jb, paginas, paginas)
     assert (r["clics_anterior"], r["clics_nuevo"], r["general"]) == (500, 500, False)
+
+
+# --- Decision 165 -------------------------------------------------------------
+
+@pytest.mark.parametrize("pa, pb, esperado", [
+    # Mismas palabras, otro texto: con hash en las dos, se ve.
+    (_p("/a", content_hash="h1"), _p("/a", content_hash="h2"), ["texto_contenido"]),
+    # Otro texto y muchas menos palabras: «cambia mucho», no las dos cosas.
+    (_p("/a", content_hash="h1"), _p("/a", word_count=200, content_hash="h2"), ["contenido"]),
+    # Mismo hash: el mismo contenido aunque el recuento varie.
+    (_p("/a", content_hash="h1"), _p("/a", word_count=200, content_hash="h1"), []),
+    # Sin hash en una de las dos: la regla de siempre, por palabras.
+    (_p("/a"), _p("/a", content_hash="h2"), []),
+    (_p("/a", content_hash="h1"), _p("/a", word_count=200), ["contenido"]),
+])
+def test_contenido_por_hash_si_lo_tienen_las_dos(pa, pb, esperado):
+    assert T.cambios_de_pagina(pa, pb) == esperado
+
+
+def test_caida_general_primero_general_y_los_grupos_como_detalle(s):
+    c, ja, jb = _montar(s)
+    paginas_a = [_p(f"/p{i}") for i in range(10)]
+    paginas_b = [_p(f"/p{i}", title="otro" if i < 4 else "T") for i in range(10)]
+    for i in range(10):
+        _clics(s, c, f"/p{i}", 100, 40)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, paginas_a, paginas_b)
+    assert r["general"] is True
+    t = r["textos"]
+    i_general = next(i for i, x in enumerate(t) if "general en todo el sitio" in x)
+    i_detalle = next(i for i, x in enumerate(t) if x.startswith("Por páginas, como detalle y no como causa"))
+    i_title = next(i for i, x in enumerate(t) if "cambia el title" in x)
+    i_sin = next(i for i, x in enumerate(t) if "sin cambio técnico" in x)
+    assert i_general == 1 and i_general < i_detalle < i_title and i_detalle < i_sin
+
+
+def test_sin_caida_general_no_hay_frase_de_detalle(s):
+    c, ja, jb = _montar(s)
+    _clics(s, c, "/a", 100, 20)
+    for i in range(30):
+        _clics(s, c, f"/e{i}", 100, 100)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [_p("/a")], [_p("/a", title="otro")])
+    assert r["general"] is False
+    assert not any("como detalle" in x for x in r["textos"])
+
+
+def _pendiente_que_se_completa(s, *, programado=True, slack=True):
+    """Un censo cuya comparacion de trafico espero a los datos, y los datos que
+    llegan despues."""
+    c, ja, jb = _montar(s, ultimo=date(2026, 9, 25))
+    if slack:
+        c.integraciones = c.integraciones + [{"tipo": "slack", "activa": True, "credencial_env": "SLACK_X",
+                                              "parametros": {"canal": "C1"}}]
+    if programado:
+        jb.programacion_id = uuid.uuid4()
+    _clics(s, c, "/a", 100, 10)
+    for i in range(30):
+        _clics(s, c, f"/e{i}", 100, 100)
+    s.commit()
+    r = T.comparar_trafico(s, ja, jb, [_p("/a")], [_p("/a")])
+    assert r["pendiente"] is True
+    jb.comparacion = {"comparado_con": str(ja.id), "trafico": r}
+    s.commit()
+    d = date(2026, 9, 26)
+    while d <= date(2026, 9, 29):
+        s.add(GscPagina(cliente_id=c.id, propiedad="sc-domain:x.com", fecha=d, url="https://x.com/__dia",
+                        url_clave="__dia", clics=0, impresiones=1))
+        d += timedelta(days=1)
+    s.commit()
+    return c, ja, jb
+
+
+@pytest.fixture
+def enviados(monkeypatch):
+    """Lo que sale a Slack, sin red: `publicar` es la llamada a la API."""
+    import shared.credenciales
+    import shared.slack
+
+    import shared.comparacion
+
+    salida = []
+    # Los dos censos, sin montar `urls`: la pagina que cae y el resto estable.
+    paginas = [_p("/a")] + [_p(f"/e{i}") for i in range(30)]
+    monkeypatch.setattr(shared.comparacion, "paginas_para_comparar", lambda db, a, b: (paginas, paginas))
+    monkeypatch.setattr(shared.slack, "publicar",
+                        lambda token, canal, texto, enlace=None, titulo="Abrir": salida.append((canal, texto)) or {})
+    monkeypatch.setattr(shared.credenciales, "credencial", lambda integ: "xoxb-falso")
+    monkeypatch.setattr(shared.slack, "_anotar", lambda *a, **k: None)
+    return salida
+
+
+def test_al_completarse_se_avisa_una_vez_con_el_texto_de_trafico(s, enviados):
+    from shared.models import Job as JobM
+
+    c, ja, jb = _pendiente_que_se_completa(s)
+    assert T.completar_pendientes(s, c.id) == 1
+    assert len(enviados) == 1
+    canal, texto = enviados[0]
+    t = s.get(JobM, jb.id).comparacion["trafico"]
+    assert canal == "C1" and t["comparable"] is True and t["aviso"]["estado"] == "enviado"
+    # Las frases son las de `textos`, el mismo redactor que la ficha.
+    for linea in T.textos(t):
+        assert linea in texto
+    assert "aún no tiene datos hasta" not in texto and "1 página perdió 90 clics" in texto
+    # Una sola vez: otra descarga no repite el aviso.
+    assert T.completar_pendientes(s, c.id) == 0
+    assert len(enviados) == 1
+
+
+def test_sin_slack_o_lanzado_a_mano_no_sale_nada(s, enviados):
+    from shared.models import Job as JobM
+
+    c, ja, jb = _pendiente_que_se_completa(s, slack=False)
+    assert T.completar_pendientes(s, c.id) == 1
+    assert enviados == []
+    assert s.get(JobM, jb.id).comparacion["trafico"]["aviso"]["estado"] == "no_enviado"
+
+
+def test_lanzado_a_mano_no_avisa(s, enviados):
+    c, ja, jb = _pendiente_que_se_completa(s, programado=False)
+    assert T.completar_pendientes(s, c.id) == 1
+    assert enviados == []
+
+
+def test_un_fallo_al_avisar_no_deshace_la_comparacion(s, enviados, monkeypatch):
+    import shared.avisos
+    from shared.models import Job as JobM
+
+    c, ja, jb = _pendiente_que_se_completa(s)
+
+    def roto(*a, **k):
+        raise RuntimeError("slack caido")
+
+    monkeypatch.setattr(shared.avisos, "avisar_de_trafico", roto)
+    assert T.completar_pendientes(s, c.id) == 1
+    t = s.get(JobM, jb.id).comparacion["trafico"]
+    assert t["comparable"] is True and t["aviso"]["estado"] == "por_enviar"

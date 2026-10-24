@@ -928,9 +928,17 @@ cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»)
   impresiones, y el informe ordenado por tráfico.
 - [#166](https://github.com/dvillarrubia/crawler-masivo/issues/166) **Oportunidades**: posiciones 4-20 con poco enlazado (con las
   páginas desde las que enlazar), CTR bajo para su posición, canibalización por
-  búsqueda, rendimiento por plantilla y sitemaps según Google.
+  búsqueda, rendimiento por plantilla y sitemaps según Google. *Código hecho*
+  (decisión 157, PR #219; tablas `gsc_consultas` y `gsc_sitemaps` documentadas,
+  umbrales `gsc_*` y `marcas` en `projects/_ejemplo`). Falta: la revisión a mano
+  en UOC, verlo en producción con un censo real y declarar `marcas` de cada
+  cliente.
 - [#167](https://github.com/dvillarrubia/crawler-masivo/issues/167) **Alertas con la causa**: la caída de clics agrupada por lo que
-  cambió entre dos rastreos.
+  cambió entre dos rastreos. *Código hecho* (decisiones 158 y 165): ficha del
+  rastreo y del cliente, Slack al acabar y otra vez, una sola, cuando la
+  comparación esperaba a los datos; contenido por `content_hash`; la caída
+  general antes que los grupos. Falta: el cambio de plantilla como grupo
+  (decisión del usuario) y reproducir una caída conocida en dos clientes.
 - [#168](https://github.com/dvillarrubia/crawler-masivo/issues/168) **Inspección de URL por muestra**: el canonical que elige Google,
   indexables no indexadas y nuestro veredicto frente al de Google.
 - [#169](https://github.com/dvillarrubia/crawler-masivo/issues/169) **Jev con búsquedas reales**: intención, embudo, canibalización
