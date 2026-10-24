@@ -1077,3 +1077,99 @@
      fichas de libro sin tocar la escala, pero cambia el estado y la caché de
      todos los títulos), y que la pantalla nombre los niveles de un score con
      los de la versión de hoy aunque las decisiones guardadas sean de la v1.
+
+<a id="d182"></a>
+182. **`title_es_generico` v2: un nombre propio o un tema concreto no es
+   genérico aunque el title sea corto, y la etiqueta que tienen todos los
+   ítems de una sección sin decir cuál sí** (#8, #16; mide lo que dejó la
+   177). La pregunta sube a la v2 (huella en `HUELLAS`) y sigue **sin
+   umbral**: todo sale `incierto`. El estado no cambia.
+   - **Medido el 24-oct-2026** (producción, solo lectura;
+     `/data/archivo/jev/`, etiqueta de Claude a ciegas con nota y `[duda: x]`,
+     respuestas de Jev de ese día, cruzadas por id):
+     - Juego de 200 de la 159 (`title_es_generico_v1_etiquetado.jsonl`):
+       **93,5 %**, pero casi todo son negativos fáciles (181 de 183 bien). De
+       los **17 genéricos** Jev solo ve 6: los otros 11, con confianza
+       0,52-0,87, son la etiqueta que se repite en cada estudio, instituto o
+       año sin decir de cuál («Normativa» en /estudis/enginyeria/normativa,
+       «Formació» en /innova-institute/formacio-…, «Documentación» en
+       /documentacion/accesorios-bc/, «Notas de prensa» en /noticias/2016/) y
+       «Gracias». Sus 2 falsos positivos: el libro «Poesía» y «Grupos de
+       investigación» con ruta opaca.
+     - Juego de precisión de la 179 (`prec_title_es_generico_etiquetado.jsonl`
+       sobre 2.000 titles): Jev dijo «sí, genérico» **51** veces y **34**
+       lo eran (0,67, cota de Wilson 0,53). Los **17 falsos positivos**, todos
+       con confianza 0,50-0,73, son titles cortos que nombran algo con nombre
+       propio: el cliente de un caso de agencia («Iberdrola | Work», «CAF |
+       Work», «ICOBEN | Work», dos idiomas), la versión de un país («Penguin
+       Libros Chile», «… Perú», «… Uruguay» en /cl/, /pe/, /uy/), un proyecto
+       («Planta Fotovoltaica | Grupo Lopesan», tres idiomas), las categorías de
+       FAQ de La Salle con ruta opaca («Direcciones académicas», «Servicios del
+       Campus», «Grupos de investigación»), la sección en su propia página
+       («Work» en /work/), «Registration sent», el término «International» y un
+       artículo con title de otro tema. En el control aleatorio (100), 5
+       genéricos y Jev ve 4; el que se le escapa es «Presentació» en
+       /revista-comprendre/presentacio, el mismo fallo que el juego de 200.
+     - Los dos fallos son **de definición**: la v1 no decía que una marca más
+       una palabra no es la marca, ni que un nombre propio sigue nombrando
+       aunque detrás vaya la sección, ni separaba «la sección en su página»
+       de «la etiqueta que tienen todos los ítems de esa sección».
+   - **La v2**, en inglés como la v1, en tres partes: quitar **solo** la
+     marca (la del dominio; «<Brand> <country>» o «<Brand> Kids» se quedan con
+     lo añadido); **false** si lo que queda nombra algo concreto (un cliente,
+     empresa, proyecto, producto, libro, curso, lugar, país, persona, evento o
+     app, aunque sea una palabra, desconocida, o la siga la sección; el ítem
+     de la ruta descrito con palabras comunes; un tema concreto también con
+     ruta opaca; la sección en su propia página; el paso que acaba de pasar en
+     una confirmación); **true** solo si no nombra nada: (1) solo la marca, con
+     cualquier grafía («ACME», «AcmeGroup»: «WORKOHOLICS» y «PenguinLibros»
+     llegan a Jev porque `solo_marca` no las reconoce; en Workoholics muchos
+     titles no llevan la marca y no sale de `marcas_del_host`, y en Penguin
+     la marca es «Penguin Libros ES», con espacio y sufijo), (2)
+     texto por defecto o de error (Home, Page not found, Access denied, Thank
+     you, Search results for), (3) un nombre interno de plantilla, bloque o
+     fichero o un código, (4) una etiqueta vaga sin asunto, y (5) en la página
+     de UN ítem o subsección (producto, gama, curso, área de estudios,
+     instituto, hotel, ciudad, año), la sección o el servicio que comparten
+     sus hermanas o una etiqueta que tiene cada uno sin decir cuál. Y una
+     regla de desempate: en la duda entre nombre y etiqueta, **nombre** (lo
+     que no se puede afirmar no se afirma, 67).
+   - **Ejemplos con marcadores** (`'<client name> | Projects'`, `'<Brand>
+     <country>'`, `'Timetable' on /courses/<course>/timetable`), ninguno de
+     los juegos: salen «SAT», «SafiraAqua» y «Culpa», que la v1 llevaba y
+     están en los dos juegos. Un test lo vigila (169, 180). Los casos reales
+     van en **`CASOS_FRONTERA`** de `shared/preguntas/coherencia.py`, como en
+     `tipo_pagina.py` (178): caso, respuesta y la frase que lo decide, que
+     tiene que estar en la parte «Answer false» o «Answer true» de su
+     respuesta y no en la otra (`tests/test_coherencia.py`). No se envían.
+   - **El estado basta** (title, dominio y ruta): todos los fallos se
+     deciden con lo que ya va; la ruta dice el padre («enginyeria»,
+     «accesorios-bc», «2016») y el dominio la marca. Mandar la marca calculada
+     (`marcas_del_host`) ayudaría con «<marca> <país>», pero cambia el estado:
+     las filas de los juegos ya guardados no la llevan, `responder` los
+     reutiliza tal cual y lo medido tras el merge no sería lo de producción.
+   - **Cambian algunas etiquetas**, así que los juegos se re-etiquetan a
+     ciegas (`evaluar_decisiones.py reetiquetar <juego> --salida <juego_v2>`,
+     180) en vez de reutilizarlos. Las que cambian, según la regla (5) y el
+     desempate: en el de 200, «Serveis per a l'estudiant» en
+     /estudis/masters-i-postgraus/ y /cursos-despecialitzacio/ (eran `false`
+     con `[duda: true]`) y «Publicaciones y conferencias» en
+     /cfi-centro-de-financiacion-e-innovacion/ pasan a `true`, la misma
+     etiqueta de subsección que «Formació» del Innova Institute; en el de
+     precisión, «Ciudad Sostenible 2017» en /2017-08-21/la-conca-de-barbera
+     (era `true` con `[duda: false]`) pasa a `false`: nada en la ruta dice que
+     sea la serie. Quedan dudosas «Portal clientes» (`false` en /login, `true`
+     en /register) y «Climatización correcta» en un proyecto de viviendas.
+   - **Se medirá tras el merge** (lo hace el orquestador, que es quien llama a
+     Jev): re-etiquetar los dos juegos, `responder --confirmar` y `evaluar`,
+     y el de precisión otra vez sobre el mismo conjunto de 2.000. Como la v2 se
+     redactó mirando estos juegos, para el **umbral** hace falta además un
+     juego de censos no usados aquí (169).
+   - **Coste** (fórmula de la 162): 3.303 caracteres de pregunta frente a
+     1.999, ~330 tokens más por llamada: en Penguin (2.661 llamadas) ~0,04 $
+     más por censo, en La Salle (845) ~0,01 $.
+   - Fuera: que `solo_marca` reconozca la marca sin espacios ni sufijo o la
+     del dominio cuando `marcas_del_host` no da ninguna (sacaría
+     «WORKOHOLICS» y «PenguinLibros» sin preguntar; cambia el filtro de la 177
+     y la incidencia por regla aún no existe), y mandar la marca en el estado
+     (arriba).

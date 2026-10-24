@@ -347,3 +347,42 @@ def test_title_v2_el_nivel_alto_es_nombrar_la_pagina_aunque_sea_corto():
     for de_un_cliente in ("Penguin", "La Salle", "Fuerteventura", "Lopesan", "tigres", "Carnaval",
                           "Maspalomas", "Memòria", "Meloneras"):
         assert de_un_cliente not in p.instrucciones + " ".join(p.opciones)
+
+
+def test_title_generico_v2_el_nombre_propio_no_es_generico():
+    """Decision 182: la v1 decia «generico» a titles cortos con nombre propio
+    (el cliente de un caso, «<marca> <pais>», un proyecto) y «no generico» a
+    la etiqueta que tienen todos los items de una seccion. La v2 lo escribe a
+    los dos lados con ejemplos de marcador: ninguno sale de los juegos con los
+    que se midio (lo inflarian, 169 y 180)."""
+    from shared.preguntas import CATALOGO
+
+    p = CATALOGO["title_es_generico"]
+    assert p.version == 2 and set(p.opciones) == {"true", "false"}
+    i = p.instrucciones
+    assert i.index("Answer false") < i.index("Answer true") < i.index("When unsure")
+    assert "read it as a name" in i and "'<Brand> <country>'" in i
+    for de_un_cliente in ("Penguin", "La Salle", "Salle", "Lopesan", "Workoholics", "Iberdrola",
+                          "ICOBEN", "CAF", "Saunier", "SAT", "SafiraAqua", "Culpa", "Chile",
+                          "Fotovoltaica", "Normativa", "Work |", "headerpage", "Re_"):
+        assert de_un_cliente not in i + " ".join(p.opciones.values()), de_un_cliente
+
+
+def _casos_title_generico():
+    from shared.preguntas.coherencia import CASOS_FRONTERA
+
+    return CASOS_FRONTERA
+
+
+@pytest.mark.parametrize("caso,respuesta,frase", _casos_title_generico())
+def test_cada_caso_frontera_del_title_generico_lo_reclama_su_respuesta(caso, respuesta, frase):
+    """Cada caso real que caia entre las dos respuestas (falsos positivos y
+    negativos de la v1, y los positivos que hay que conservar) tiene su frase
+    en la parte de su respuesta y no en la otra."""
+    from shared.preguntas.coherencia import TITLE_ES_GENERICO
+
+    i = TITLE_ES_GENERICO.instrucciones
+    partes = {"false": i[i.index("Answer false"):i.index("Answer true")],
+              "true": i[i.index("Answer true"):i.index("When unsure")]}
+    reclaman = [r for r, texto in partes.items() if frase in texto]
+    assert reclaman == [respuesta], (caso, reclaman)

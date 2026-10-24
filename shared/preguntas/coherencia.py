@@ -9,7 +9,11 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
 - `title_es_generico` (noul): si el title, quitada la marca, no identifica la
   pagina. Se juzga con el title, el dominio y la ruta, como en un resultado de
   busqueda (la ruta dice QUE es la pagina: «SAT» en /sats/a-coruna-100 frente a
-  /sat/); si ademas describe o no el contenido es la pregunta anterior.
+  /sat/); si ademas describe o no el contenido es la pregunta anterior. v2
+  (decision 182): un nombre propio o un tema concreto no es generico aunque
+  sea corto o lo siga el nombre de la seccion; si lo es la etiqueta que tienen
+  todos los items de una seccion sin decir cual. Los casos reales que caian
+  entre las dos respuestas estan en `CASOS_FRONTERA`.
 - `schema_contradice_contenido` (noul): si lo visible contradice un valor del
   marcado (precio, valoracion, fecha de un evento u oferta, disponibilidad).
   Solo la contradiccion: que un valor no aparezca en los fragmentos no prueba
@@ -77,37 +81,94 @@ TITLE_DESCRIBE_CONTENIDO = Pregunta(
 TITLE_ES_GENERICO = Pregunta(
     nombre="title_es_generico",
     tipo="noul",
-    version=1,
+    # v2 (decision 182): un nombre propio o un tema concreto NO es generico
+    # aunque el title sea corto o vaya seguido del nombre de la seccion, y la
+    # marca se quita con cualquier grafia pero solo ella («<marca> <pais>» se
+    # queda con el pais). Al otro lado, la etiqueta que tienen todos los items
+    # de una seccion sin decir cual es generica. La v1 decia «si, generico» a
+    # 17 de 51 titles con nombre propio (cota de Wilson 0,53) y «no» a 11 de 17
+    # genericos del juego de 200.
+    version=2,
     instrucciones=(
         "You see a page title, the website's domain and the page's URL path, as a searcher would "
-        "in a results page. Set the brand or site name aside. Does the rest of the title fail to "
-        "name what this specific page is? Use the path only to tell what kind of page it is and "
-        "which item it is about (a product, a book, a city, an article, a section); do not judge "
-        "whether the title matches the page's content in detail. "
-        "Answer true when the title is only the brand or domain; placeholder or default text (Home, "
-        "Untitled, New page, Default, Welcome, Lorem ipsum, {{title}}); a reference code (REF-2231, "
-        "P00123, Node 45); a label that would fit many pages of the site (Product, Details, News "
-        "detail, Information, Results, Category, Article, Page 2); or when the path shows the page "
-        "is about one specific item and the title only names the general section or service it "
-        "belongs to ('SAT' on /sats/a-coruna-100, 'Hotels' on /hotels/costa-meloneras, 'News detail' "
-        "on /news/2026/new-opening). "
-        "Answer false when the title names the item or section the path points to, even in one or "
-        "two words and even if it is a proper name a stranger would not recognise: a product or book "
-        "name ('SafiraAqua' on /products/safiraaqua.html, 'Culpa' on /es/novela/123-libro-culpa), a "
-        "place, a person, a topic, or the section itself when the page is that section ('SAT' on "
-        "/sat/, 'Contact' on /contact, 'Hotel offers' on /offers/). If the path is opaque (only ids "
-        "or parameters), judge the title alone, and a proper name or an acronym that could name the "
-        "page is false. NOT generic either: a title that is too long, keyword-stuffed, badly written "
-        "or in another language but names its subject, or one that names a concrete subject "
-        "different from the path (that is a different question)."
+        "in a results page. Once the brand is set aside, does the title fail to tell this page "
+        "apart from the site's other pages? Use the path only to tell what kind of page it is and "
+        "which item it belongs to; do not judge whether the title matches the page's content. "
+        "Set aside only the brand: the site or company name, usually the one in the domain. A word "
+        "added to the brand is not the brand and counts ('<Brand> <country>', '<Brand> Kids'). "
+        "Answer false when what remains names something specific: a proper name or a specific "
+        "term that singles out one client, company, partner, project, product, book, course, "
+        "place, country, city, person, event or app, even in one word, even if a stranger would "
+        "not recognise it and even when the section name follows it ('<client name> | Projects' "
+        "on /projects/<client>/, '<Brand> <country>' on the /<country code>/ version of the site, "
+        "'<project name>' on the page of that project, a book or product name on its page); the "
+        "one item the path points to described in common words ('Solar plant' on the page of the "
+        "company's solar plant project); a "
+        "specific topic in ordinary words ('Scholarships and grants', 'Accessible rooms'), also when "
+        "the path is opaque (only ids or parameters); the section itself when the page is that "
+        "section ('Contact' on /contact, 'Projects' on /projects/, a category on its category "
+        "page); or the step that just happened on a confirmation page ('Subscription confirmed'). "
+        "A title that is too long, keyword-stuffed, badly written, in another language or about a "
+        "different subject than the path is also false: those are other questions. "
+        "Answer true only when what remains names nothing specific: "
+        "(1) nothing at all, because the title is only the brand, in any spelling, capitalisation "
+        "or spacing ('ACME', 'AcmeGroup'); "
+        "(2) placeholder, default or error text (Home, Untitled, New page, Welcome, Lorem ipsum, "
+        "{{title}}, Page not found, Access denied, Thank you, Search results for); "
+        "(3) an internal or technical name instead of a title (a template, block or file name such "
+        "as 'menu-block' or 'promo-apr-23', a reference code such as REF-2231 or Node 45); "
+        "(4) a vague label that names no subject (Details, Information, Overview, Article, Results, "
+        "Category, Page 2); "
+        "(5) when the path shows the page belongs to ONE specific item or subsection (one product, "
+        "range, course, area of study, institute, hotel, city or year), a title that only names the "
+        "general section or service "
+        "those sibling pages share ('Hotels' on /hotels/<hotel name>, 'Technical service' on "
+        "/technical-services/<city>), or a label every such item has without naming which one "
+        "('Timetable' on /courses/<course>/timetable, 'Downloads' on /products/<range>/downloads, "
+        "'News' on /news/<year>/). "
+        "When unsure whether a word is a name or a generic label, read it as a name: answer true "
+        "only when you can tell that the title names nothing specific."
     ),
     opciones={
-        "true": "Without the brand, the title does not name this page: brand only, placeholder, code, a label that fits many pages, or only the section of a page about one specific item.",
-        "false": "The title names the item or section this page is, even briefly or with a proper name.",
+        "true": ("Without the brand, the title names nothing specific: brand only, placeholder or "
+                 "error text, an internal name or code, a vague label, or only the section, or a "
+                 "label every item has, on the page of one specific item."),
+        "false": ("The title names something specific: a client, project, product, place, "
+                  "country, person or topic, or the section when the page is that section."),
     },
     descripcion=("Title que no identifica la pagina, mas alla de la lista cerrada de la decision "
-                 "121 (#16). Sin evaluar (#8): todo incierto."),
+                 "121 (#16, v2 decision 182). Sin evaluar (#8): todo incierto."),
 )
+
+# Casos reales de produccion (24-oct-2026, solo lectura; juegos de la decision
+# 182) que caian entre las dos respuestas, la que les toca con la v2 y la frase
+# de las instrucciones que lo dice. La frase esta en la parte de esa respuesta
+# («Answer false ...» o «Answer true ...») y no en la otra (lo comprueba
+# `tests/test_coherencia.py`). No se envian: las instrucciones llevan ejemplos
+# con marcadores, no estos (medir sobre el juego que los contiene lo inflaria,
+# la leccion de la 169 y la 180).
+CASOS_FRONTERA = [
+    # Falsos positivos de la v1 en el juego de precision (confianza 0,50-0,73).
+    ("Workoholics «Iberdrola | Work» en /eu/work/iberdrola/ (caso de un cliente)", "false",
+     "even when the section name follows it"),
+    ("Penguin «Penguin Libros Chile» en /cl/", "false", "'<Brand> <country>' on the /<country code>/"),
+    ("Lopesan «Planta Fotovoltaica | Grupo Lopesan» en /corporativa/subvenciones/proyecto-planta-...",
+     "false", "described in common words"),
+    ("Salle «Servicios del Campus» en /es/grupos_campos/faq/62075", "false", "also when the path is opaque"),
+    ("Workoholics «Work» en /work/", "false", "the section itself when the page is that section"),
+    ("Saunier «Registration sent» en /solicitar-alta-en-area-privada/registration-sent-366273.html",
+     "false", "the step that just happened"),
+    # Falsos negativos de la v1 en el juego de 200.
+    ("Salle «Normativa» en /ca/estudis/enginyeria/normativa", "true", "a label every such item has"),
+    ("Saunier «Notas de prensa» en /sobre-saunier-duval/noticias/2016/", "true", "'News' on /news/<year>/"),
+    ("Saunier «Gracias» en /buscador-textos-prescripcion/gracias", "true", "Thank you"),
+    # Verdaderos positivos que la v2 tiene que conservar.
+    ("Workoholics «WORKOHOLICS» en /legal/ y Penguin «PenguinLibros»", "true",
+     "in any spelling, capitalisation"),
+    ("Saunier «SAT» en /sats/bizkaia-26/", "true", "only names the general section or service"),
+    ("Lopesan «headerpage» en /es/headerpage", "true", "an internal or technical name"),
+    ("Saunier «401 – No autorizado»", "true", "Access denied"),
+]
 
 SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     nombre="schema_contradice_contenido",
