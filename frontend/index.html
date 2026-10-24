@@ -467,6 +467,27 @@
               </template>
             </div>
 
+            <!-- Trafico de Google entre los dos ultimos censos de cada perfil
+                 (decisiones 158 y 165). Las frases vienen del servidor, del
+                 mismo redactor que la ficha del rastreo y el aviso de Slack. -->
+            <template x-if="clienteTrafico && clienteTrafico.length">
+              <div class="card mb-2 text-sm" data-testid="trafico-cliente">
+                <h3 style="font-size:1rem" class="mb-1">Tráfico de Google entre censos</h3>
+                <template x-for="t in clienteTrafico" :key="t.job_id">
+                  <div style="margin-bottom:.5rem">
+                    <a :href="'#/rastreos/' + t.job_id" x-text="(t.perfil ? t.perfil + ' · ' : '') + t.job"></a>
+                    <span class="text-dim" x-show="t.fecha" x-text="' · ' + (t.fecha || '').slice(0, 10)"></span>
+                    <span class="badge badge-pending" x-show="t.pendiente" style="margin-left:.3rem">esperando datos</span>
+                    <ul style="margin:.2rem 0 0;padding-left:1.1rem">
+                      <template x-for="(x, n) in t.textos" :key="n">
+                        <li x-text="x"></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </div>
+            </template>
+
             <!-- Evolucion por perfil (decision 130): graficas de `profile_runs`.
                  Solo los censos comparables hacen linea; lo fallido, truncado,
                  canario o lista va abajo con una ×. Un corte «v» marca que entre

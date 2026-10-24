@@ -397,6 +397,46 @@ def evolucion_del_cliente(
     return leer(db, client_id, profile_id=profile_id, limite=limite)
 
 
+@router.get("/{client_id}/trafico")
+def trafico_del_cliente(client_id: uuid.UUID, limite: int = Query(30, ge=1, le=200),
+                        db: Session = Depends(get_session)):
+    """El ultimo trafico de Google entre censos de cada perfil del cliente
+    (decisiones 158 y 165), para su ficha.
+
+    Las frases las redacta `trafico_entre_censos.textos`, el mismo redactor del
+    informe de Slack y de la ficha del rastreo: aqui no se escribe ninguna. Se
+    leen los `limite` rastreos mas recientes con comparacion; un perfil cuyo
+    ultimo rastreo con trafico es mas viejo que eso no sale.
+    """
+    from shared.trafico_entre_censos import textos
+
+    cliente = _buscar(db, client_id)
+    perfiles = list(db.query(CrawlProfile).filter(CrawlProfile.cliente_id == cliente.id))
+    nombres = {p.id: p.nombre for p in perfiles}
+    # La competencia no esta en el Search Console del cliente: un trafico suyo
+    # guardado antes de la decision 165 diria «0 clics» de un sitio sin datos.
+    competidores = {p.id for p in perfiles if p.rol == "competidor"}
+    vistos: set = set()
+    salida = []
+    for j in (db.query(Job).filter(Job.cliente_id == cliente.id, Job.comparacion.isnot(None))
+              .order_by(Job.created_at.desc()).limit(limite)):
+        t = (j.comparacion or {}).get("trafico") if isinstance(j.comparacion, dict) else None
+        if not isinstance(t, dict) or j.profile_id in vistos or j.profile_id in competidores:
+            continue
+        vistos.add(j.profile_id)
+        salida.append({
+            "job_id": str(j.id), "job": j.name,
+            "perfil": nombres.get(j.profile_id) if j.profile_id else None,
+            "fecha": (j.started_at or j.created_at).isoformat() if (j.started_at or j.created_at) else None,
+            "comparado_con": j.comparacion.get("comparado_con"),
+            "comparable": bool(t.get("comparable")), "pendiente": bool(t.get("pendiente")),
+            "general": bool(t.get("general")),
+            "textos": textos(t),
+            "aviso": t.get("aviso"),
+        })
+    return salida
+
+
 @router.get("/{client_id}/profiles/{profile_id}/evolucion")
 def evolucion_del_perfil(
     client_id: uuid.UUID,

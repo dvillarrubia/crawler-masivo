@@ -15,7 +15,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163 |
@@ -191,6 +191,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 162 | Jev en producción: la primera llamada real calibra la estimación y el gasto se cuenta una vez | [`llm-y-enriquecido`](llm-y-enriquecido.md#d162) |
 | 163 | La primera pregunta de verdad: soft 404, solo sobre lo sospechoso y marcada como sin evaluar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d163) |
 | 164 | robots.txt se respeta en TODAS las peticiones que esperan su descarga, no solo en las dos primeras | [`indexabilidad`](indexabilidad.md#d164) |
+| 165 | El tráfico que esperaba a los datos se avisa al completarse, una vez; una caída general se dice antes que los grupos; y el contenido se compara por su hash | [`comparacion-y-alertas`](comparacion-y-alertas.md#d165) |
 
 ## Anadir una decision
 

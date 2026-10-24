@@ -871,3 +871,69 @@
    - **Un solo redactor**: `textos()` escribe las frases («coincide con», nunca
      «por») y las usan la tarjeta de la ficha del rastreo y el aviso de Slack
      del rastreo programado (`resumen_semanal` → `avisos.texto_de_informe`).
+
+<a id="d165"></a>
+165. **El tráfico que esperaba a los datos se avisa al completarse, una vez; una
+   caída general se dice antes que los grupos; y el contenido se compara por su
+   hash** (#167, restos de la 158).
+   - **Aviso al completarse.** El informe de Slack del rastreo programado sale
+     al acabar el rastreo, cuando los datos de Search Console casi nunca llegan
+     aún al final de la ventana: decía «aún no tiene datos…» y
+     `completar_pendientes` rellenaba después `jobs.comparacion` sin avisar, así
+     que la caída de verdad no llegaba a nadie. Ahora, al completarse, se manda
+     por el **mismo camino que ese informe** (`avisos.avisar_de_trafico`:
+     rastreos programados, canal del cliente con «informe» activo) y con las
+     mismas frases de `textos()`. **Una sola vez**: antes de escribir se relee
+     la fila con `FOR UPDATE` y solo sigue si sigue `pendiente` (dos propiedades
+     del mismo cliente sincronizando a la vez llegaban las dos), y queda
+     `trafico.aviso` = `{estado: por_enviar | enviado | no_enviado, en}`. Sin
+     Slack configurado, o en un rastreo lanzado a mano, no sale nada
+     (`no_enviado`). **La competencia, nunca**: el worker corta su informe y
+     sus alertas (`rol == "competidor"`), y su tráfico no está en el Search
+     Console del cliente (con sus hosts, el total da 0: «Clics de Google: 0 y
+     0»). `comparar_trafico` devuelve None para un perfil competidor,
+     `completar_pendientes` salta los que quedaran pendientes de antes,
+     `avisar_de_trafico` recibe el perfil y no avisa, y la ficha del cliente no
+     los lista (revisión del PR #230). Un fallo al avisar no deshace la comparación (best-effort
+     con el `try` sobre la función entera, 74). No va por `ALERTA_WEBHOOK_URL`:
+     el informe tampoco va, y el aviso tiene que llegar a quien leyó el «aún no».
+   - **En la ficha del cliente.** `GET /api/clients/{id}/trafico` da el último
+     tráfico entre censos de cada perfil (de los 30 rastreos más recientes con
+     comparación), con las frases de `textos()` calculadas en el servidor: la
+     tarjeta de la ficha no redacta nada. Un pendiente sale con su motivo y
+     «esperando datos».
+   - **Caída general: primero general, los grupos como detalle.** Con
+     `general` (el sitio cae un 30 % o más), la segunda frase ya decía que es
+     general, pero después venían las líneas por grupo («40 páginas perdieron
+     300 clics; coincide con que cambia el title») como si explicaran la caída,
+     que también tienen las páginas que no cambiaron. Se eligió **conservar los
+     grupos** detrás de una frase que los presenta como «detalle y no como
+     causa», en vez de quitarlos: si además de la caída general un grupo cae
+     mucho más (un 404 nuevo), sigue siendo un dato útil, y quitarlo esconde
+     justo lo que hay que arreglar. La frase solo sale si detrás va al menos
+     una línea de grupo (las subidas sin cambio, de trasvase o sin dato
+     anterior no se escriben). Sin `general` no cambia nada.
+   - **Contenido por `content_hash`.** Por palabras (30 % y 50 palabras) no se
+     veía un texto reescrito con el mismo largo. El hash solo cuenta si los dos
+     censos tienen la **misma `crawler_version`, conocida en los dos** (66), y
+     la misma config de extracción (`render_js`, `extract_page_content`,
+     `strip_promo_blocks`, `custom_boilerplate_selectors`):
+     `hash_comparable()`, guardado como `trafico.contenido_por_hash`. El hash
+     cambia entero con un carácter, y con otra versión de
+     `extract_main_content` (seis cambios entre agosto y octubre) cambian
+     TODOS: cada página que cae saldría con «cambia el texto» en vez de «sin
+     cambio técnico», atribuyendo al sitio una diferencia nuestra (66, 91).
+     Con eso, y si las DOS páginas tienen
+     `urls.content_hash` (SHA-256 del contenido principal normalizado, 47):
+     hashes iguales = mismo contenido, aunque varíe el recuento; distintos con
+     el cambio de palabras de siempre = «cambia mucho el contenido»
+     (`contenido`); distintos sin él = «cambia el texto del contenido
+     principal» (`texto_contenido`, un grupo aparte para no mezclar una fecha
+     cambiada con una página vaciada). Si falta en cualquiera de las dos (censo
+     anterior a la columna, página sin contenido principal) o los censos no son
+     comparables por hash, la regla por palabras de la 158. Queda: en un sitio
+     con fechas relativas, contadores o precios en el contenido principal, dos
+     censos con el mismo código también tienen hashes distintos; por eso es un
+     grupo aparte («cambia el texto», no «cambia mucho») y nunca dice «por».
+   - **Fuera** (pendiente de decisión del usuario): el cambio de plantilla entre
+     censos como grupo propio; hoy cada grupo solo lista sus plantillas.

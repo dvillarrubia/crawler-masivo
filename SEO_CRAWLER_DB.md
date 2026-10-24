@@ -449,6 +449,40 @@ FROM decisions WHERE run_id = 'UUID-AQUI'
 GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC;
 ```
 
+### `gsc_consultas` — Search Console por URL, búsqueda y día (decisión 157)
+Lo que piden la canibalización por búsqueda, la curva de CTR por posición y las oportunidades (`analysis/oportunidades_gsc.py`). La descarga `shared/gsc_detalle.py` una vez al día, con relleno hacia atrás aparte de `gsc_paginas` (su estado va en `gsc_estado.detalle`).
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| cliente_id | UUID (FK → clients, CASCADE) | |
+| propiedad | varchar(512) | `sc-domain:x.com` o `https://www.x.com/` |
+| fecha | date | |
+| url_clave | varchar(64) | La de `gsc_paginas` (`shared.gsc.clave_de_url`); la URL en texto está allí |
+| consulta | text | La búsqueda. Las anonimizadas no las da Google |
+| clics / impresiones | int | |
+| posicion | float | Media ponderada por impresiones, la de Google |
+
+Índice `(cliente_id, fecha)`; sin índice único: un día se reescribe entero (~29.000 filas al día en Lopesan). Retención `SEARCH_CONSOLE_DETALLE_DIAS` (180 por defecto, mínimo 90). La suma por búsqueda nunca cuadra con el total de la página.
+
+### `gsc_sitemaps` — Un sitemap según Google (decisión 157)
+De la Sitemaps API. Única por `(cliente_id, propiedad, path)`; los que Google deja de listar se borran.
+
+| Columna | Tipo | Descripcion |
+|---|---|---|
+| id | bigint (PK) | |
+| cliente_id | UUID (FK → clients, CASCADE) | Indexado |
+| propiedad | varchar(512) | |
+| path | text | URL del sitemap |
+| enviado / descargado | timestamptz | `lastSubmitted` / `lastDownloaded` |
+| pendiente | bool | `isPending` |
+| es_indice | bool | `isSitemapsIndex` |
+| avisos / errores | int | `warnings` / `errors` |
+| enviadas | JSON | `contents[]` como `[{type, submitted}]`. `indexed` está obsoleto desde 2019 y no se guarda |
+| visto_en | timestamptz | Última vez que Google lo listó |
+
+Solo lista los sitemaps ENVIADOS a Search Console: que uno del sitio no tenga fila no dice que Google no lo lea (`sitemap_no_enviado_a_google` es informativo).
+
 **Issue types:** missing_title, title_too_short, title_too_long, duplicate_title, missing_description, description_too_short, description_too_long, duplicate_description, missing_h1, multiple_h1, status_4xx, status_5xx, redirect_chain, image_missing_alt, http_url, mixed_content, missing_hsts, missing_csp, low_word_count, url_too_long, url_non_ascii, url_uppercase, url_underscores, url_multiple_slashes, url_has_parameters, url_non_seo_friendly, url_cms_faceted, orphan_page, high_outlink_count
 
 ---
