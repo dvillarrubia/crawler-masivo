@@ -35,8 +35,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 PERFILES = ("escritorio", "movil")
-# Tope duro por censo, aunque la config pida mas: `capturas_muestra` (50) por
-# los dos perfiles. Una captura movil a escala CSS ronda 50-150 kB.
+# Tope duro de imagenes por censo, aunque la config pida mas: `capturas_muestra`
+# (50) por los dos perfiles. Lo aplica `guardar`: una imagen nueva por encima no
+# se escribe (reemplazar una que ya existe, si). Una captura movil a escala CSS
+# ronda 50-150 kB.
 MAX_POR_JOB = 100
 # Una imagen mayor que esto no es una primera pantalla en JPEG: algo ha ido mal
 # (o es un PNG a pagina completa) y no se guarda.
@@ -87,6 +89,10 @@ def guardar(job_id, url_hash: str, perfil: str, imagen: bytes, meta: dict[str, A
     base.mkdir(parents=True, exist_ok=True)
     nombre = _nombre(url_hash, perfil)
     destino = base / f"{nombre}.jpg"
+    if not destino.exists():
+        ya = sum(1 for f in base.glob("*.jpg") if not f.name.startswith("."))
+        if ya >= MAX_POR_JOB:
+            raise ValueError(f"el censo ya tiene {ya} capturas, el tope es {MAX_POR_JOB}")
     tmp = base / f".{nombre}.jpg.tmp"
     tmp.write_bytes(imagen)
     tmp.replace(destino)
@@ -148,6 +154,19 @@ def cuantas_por_plantilla(job_id) -> dict[tuple[str, str], int]:
     return cuenta
 
 
+def paginas_por_plantilla(job_id) -> dict[str, int]:
+    """plantilla -> PAGINAS (URLs distintas) con alguna captura guardada, de
+    cualquier perfil. Es lo que rehace el cupo al reanudar: en el rastreo el
+    cupo se gasta por pagina, al pedir sus capturas para todos los perfiles a la
+    vez, asi que contar por perfil devolveria cupo a una plantilla cuya captura
+    de ese perfil fallo y la del otro no, y el otro perfil acabaria con mas de
+    `capturas_por_plantilla` (decision 173)."""
+    paginas: dict[str, set[str]] = {}
+    for m in listar(job_id):
+        paginas.setdefault(m.get("plantilla") or "", set()).add(m.get("url_hash") or "")
+    return {k: len(v) for k, v in paginas.items()}
+
+
 def bytes_en_disco(job_id) -> int:
     """Lo que ocupan las capturas del censo, MEDIDO. 0 si no tiene; nunca lanza
     (si la carpeta no se puede leer, 0 y un aviso en el log: lo usa la
@@ -193,6 +212,7 @@ def borrar(job_id) -> None:
 
 __all__ = [
     "PERFILES", "MAX_POR_JOB", "MAX_BYTES", "directorio_base", "directorio", "ruta_imagen",
-    "es_jpeg", "guardar", "listar", "de_url", "cuantas_por_plantilla", "bytes_en_disco",
+    "es_jpeg", "guardar", "listar", "de_url", "cuantas_por_plantilla", "paginas_por_plantilla",
+    "bytes_en_disco",
     "resumen_del_directorio", "borrar",
 ]

@@ -152,3 +152,54 @@ def test_apagado_no_deja_nada(tmp_path, chromium):
     r = _rastrear(tmp_path, chromium, render=False)
     assert r["metas"] == [] and not r["carpeta"].exists()
     assert _imagenes(r["cabeceras"]) == []
+
+
+# ---------------------------------------------------------------------------
+# Reanudar: el cupo se rehace por pagina, de cualquier perfil (sin navegador)
+# ---------------------------------------------------------------------------
+def _spider_de_capturas(job_id: str, **cb):
+    from scrapy.settings import Settings
+    from seo_crawler.sonda_capturas import CapturasPantallaMixin
+
+    class _Spider(CapturasPantallaMixin):
+        pass
+
+    s = _Spider()
+    s.job_id = job_id
+    s.job_config = {"crawl_behavior": cb}  # sin UA: el de serie, de escritorio
+    s.settings = Settings()
+    return s
+
+
+def test_al_reanudar_la_captura_del_otro_perfil_gasta_el_cupo(tmp_path, monkeypatch):
+    """La captura de escritorio (perfil del censo) de /ficha/n-1 fallo y la
+    movil se guardo. Al reanudar, /ficha/* no vuelve a tener cupo: si lo
+    tuviera, se pedirian las dos de /ficha/n-2 y el perfil movil acabaria con
+    dos capturas de una plantilla con tope 1, y una mas en cada reanudacion."""
+    from shared import capturas_pantalla
+
+    monkeypatch.setenv("ARCHIVO_DIR", str(tmp_path / "archivo"))
+    job = str(uuid.uuid4())
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    capturas_pantalla.guardar(job, "ab" * 32, "movil", jpeg, {"plantilla": "/ficha/*"})
+    s = _spider_de_capturas(job, capturas_muestra=1, capturas_por_plantilla=1,
+                            capturas_ambos_perfiles=True)
+    s._iniciar_capturas()
+    assert s._capt_perfil_censo == "escritorio" and s._capt_perfiles == ["escritorio", "movil"]
+    assert s._capt_cupos == {"/ficha/*": 1} and s._capt_pedidas == 1
+    # Con el tope total gastado, ninguna pagina pide capturas
+    assert list(s._capturas_de_pagina(None, "http://x.test/ficha/n-2")) == []
+
+
+def test_al_reanudar_los_dos_perfiles_de_una_pagina_cuentan_una_vez(tmp_path, monkeypatch):
+    from shared import capturas_pantalla
+
+    monkeypatch.setenv("ARCHIVO_DIR", str(tmp_path / "archivo"))
+    job = str(uuid.uuid4())
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    for perfil in ("movil", "escritorio"):
+        capturas_pantalla.guardar(job, "ab" * 32, perfil, jpeg, {"plantilla": "/ficha/*"})
+    s = _spider_de_capturas(job, capturas_muestra=3, capturas_por_plantilla=2,
+                            capturas_ambos_perfiles=True)
+    s._iniciar_capturas()
+    assert s._capt_cupos == {"/ficha/*": 1} and s._capt_pedidas == 1

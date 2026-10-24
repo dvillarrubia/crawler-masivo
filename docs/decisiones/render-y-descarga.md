@@ -1193,7 +1193,15 @@
        `PageItem`, `dont_filter`, fuera de `max_urls`, robots.txt respetado,
        sin tocar la salud, jar propio y latido por tiempo. Una captura que es
        un muro (103) o un no-2xx no se guarda: no es la pagina. Al reanudar,
-       lo ya capturado cuenta. Best-effort con el `try` sobre cada funcion
+       lo ya capturado cuenta, y cuenta por PAGINA con alguna captura de
+       cualquier perfil (`paginas_por_plantilla`), que es como se gasta el
+       cupo al pedir: contando solo el perfil del censo, una plantilla cuya
+       captura del censo fallo y la del otro perfil no recuperaba cupo, y ese
+       otro perfil pasaba de `capturas_por_plantilla` en cada reanudacion. Una
+       pagina sin ninguna captura guardada no deja rastro y se reintenta con
+       otra URL: eso no pasa del tope. Y `guardar` aplica un tope duro de
+       `MAX_POR_JOB` (100) imagenes por censo, aunque algo pida mas.
+       Best-effort con el `try` sobre cada funcion
        (40): sin captura, el rastreo sigue igual.
      - **Almacen: el volumen de archivo, sin tabla** (como el Parquet de 95 y
        150): `<ARCHIVO_DIR>/capturas/<job_id>/<url_hash>.<perfil>.jpg` y un
@@ -1207,7 +1215,8 @@
        masa) quita la carpeta despues del commit; la vista previa y el
        resultado del borrado en masa dicen lo que ocupan (`capturas_bytes`,
        medido; ese espacio si vuelve al disco), y el panel de espacio suma las
-       de todo el volumen. No viajan en el backup (son imagenes del sitio que
+       de todo el volumen (`capturas_bytes` de `/api/almacenamiento`, y el
+       modal «Espacio en disco» lo pinta). No viajan en el backup (son imagenes del sitio que
        se pueden volver a hacer); queda dicho.
      - **Se ven en la ficha de la URL**: `GET /urls/{id}` trae
        `capturas_pantalla` (metadatos y `src`) y

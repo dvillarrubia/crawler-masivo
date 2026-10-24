@@ -6817,7 +6817,11 @@
           <strong x-text="fmt.bytes(almacenamiento.censo_bytes)"></strong> son datos de rastreos.<span
             x-show="almacenamiento.archivo_ficheros"> Fuera de ella, los enlaces archivados de
             <strong x-text="fmt.num(almacenamiento.archivo_ficheros)"></strong> censos ocupan
-            <strong x-text="fmt.bytes(almacenamiento.archivo_bytes)"></strong>.</span></p>
+            <strong x-text="fmt.bytes(almacenamiento.archivo_bytes)"></strong>.</span><span
+            x-show="almacenamiento.capturas_bytes > 0"> Las capturas de pantalla ocupan
+            <strong x-text="fmt.bytes(almacenamiento.capturas_bytes)"></strong>.</span><span
+            x-show="almacenamiento.capturas_bytes === null"> No se pudo medir la carpeta de
+            capturas de pantalla.</span></p>
         <div class="table-wrap" style="margin-top:.8rem;max-height:18rem;overflow:auto">
           <table>
             <thead><tr><th>Tabla</th><th style="text-align:right">Ocupa</th><th style="text-align:right">Filas</th></tr></thead>

@@ -76,13 +76,15 @@ class CapturasPantallaMixin:
                         self._capt_reglas.append((str(nombre), re.compile(str(patron), re.I)))
                 except re.error:
                     pass
-            # Al reanudar, lo ya capturado cuenta (por plantilla, del perfil del censo).
-            self._capt_cupos: dict[str, int] = {}
-            self._capt_pedidas = 0
-            for (plantilla, perfil), n in capturas_pantalla.cuantas_por_plantilla(self.job_id).items():
-                if perfil == self._capt_perfil_censo:
-                    self._capt_cupos[plantilla] = self._capt_cupos.get(plantilla, 0) + n
-                    self._capt_pedidas += n
+            # Al reanudar, lo ya capturado cuenta: por PAGINA con alguna captura,
+            # de cualquier perfil, que es como se gasta el cupo al pedir. Contar
+            # solo el perfil del censo devolveria cupo a una plantilla cuya
+            # captura del censo fallo y la del otro perfil no, y ese perfil
+            # pasaria del tope en cada reanudacion. Una pagina sin ninguna
+            # captura guardada no deja rastro y vuelve a tener cupo: no pasa
+            # del tope, solo lo reintenta.
+            self._capt_cupos = dict(capturas_pantalla.paginas_por_plantilla(self.job_id))
+            self._capt_pedidas = sum(self._capt_cupos.values())
             logger.info("Capturas de pantalla: hasta %d paginas, %d por plantilla, perfiles %s",
                         self._capt_max, self._capt_por_plantilla, ", ".join(self._capt_perfiles))
         except Exception:  # noqa: BLE001

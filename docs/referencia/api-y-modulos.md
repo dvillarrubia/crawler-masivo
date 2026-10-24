@@ -74,7 +74,7 @@
 | `modo_lista.py` | Modo lista y veredicto (decision 128): `es_lista`, `umbral_absoluto` (lo que recibe `comparar_censos(umbral_absoluto=)`), `acotar_a_la_lista` (la referencia recortada a las URLs de la lista) y `veredicto(db, job)` |
 | `dimensiones_imagen.py` | `dimensiones(bytes)` -> (ancho, alto) o None, de la cabecera de PNG, GIF, JPEG, WebP, AVIF/HEIF y BMP, sin Pillow; `BYTES_NECESARIOS` (64 KB) es el `Range` de la sonda de la og:image (decision 154) |
 | `wordpress.py` | Lo que se sabe de un WordPress por su REST API (decision 161): `raiz_de_cabecera`, `raiz_por_defecto`, `url_rest` (con y sin enlaces permanentes), `es_indice`, `plugin_seo`, `tipos_de_contenido` y `taxonomias` (fuera los internos del nucleo), `url_de_pagina` (pagina N de un archivo) |
-| `capturas_pantalla.py` | Almacen de capturas de pantalla en el volumen de archivo (decision 173): `<ARCHIVO_DIR>/capturas/<job_id>/<url_hash>.<perfil>.jpg` y su `.json`; `guardar` (atomica), `listar`, `de_url`, `bytes_en_disco`, `resumen_del_directorio` y `borrar` (la llama `borrar_job`) |
+| `capturas_pantalla.py` | Almacen de capturas de pantalla en el volumen de archivo (decision 173): `<ARCHIVO_DIR>/capturas/<job_id>/<url_hash>.<perfil>.jpg` y su `.json`; `guardar` (atomica, con el tope duro `MAX_POR_JOB`), `listar`, `de_url`, `paginas_por_plantilla` (rehace el cupo del spider al reanudar), `bytes_en_disco`, `resumen_del_directorio` y `borrar` (la llama `borrar_job`) |
 | `paridad.py` | `diferencias(base, alternativa)` campo a campo con sus umbrales (palabras del contenido principal, enlaces internos que faltan), `canonical_efectivo`, `vary_por_user_agent`, `resumen` (decision 119) |
 
 ## API Endpoints

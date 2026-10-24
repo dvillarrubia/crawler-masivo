@@ -60,6 +60,35 @@ def test_guardar_listar_y_borrar(archivo):
     capturas_pantalla.borrar(job)  # dos veces no lanza
 
 
+def test_paginas_por_plantilla_cuenta_urls_de_cualquier_perfil(archivo):
+    job = uuid.uuid4()
+    capturas_pantalla.guardar(job, H, "movil", JPEG, {"plantilla": "/p/*"})
+    capturas_pantalla.guardar(job, H, "escritorio", JPEG, {"plantilla": "/p/*"})
+    capturas_pantalla.guardar(job, "cd" * 32, "movil", JPEG, {"plantilla": "/p/*"})
+    capturas_pantalla.guardar(job, "ef" * 32, "escritorio", JPEG, {"plantilla": "/q/*"})
+    assert capturas_pantalla.paginas_por_plantilla(job) == {"/p/*": 2, "/q/*": 1}
+
+
+def test_el_tope_duro_por_censo_se_aplica_al_guardar(archivo, monkeypatch):
+    monkeypatch.setattr(capturas_pantalla, "MAX_POR_JOB", 2)
+    job = uuid.uuid4()
+    capturas_pantalla.guardar(job, H, "movil", JPEG, {})
+    capturas_pantalla.guardar(job, H, "escritorio", JPEG, {})
+    with pytest.raises(ValueError):
+        capturas_pantalla.guardar(job, "cd" * 32, "movil", JPEG, {})
+    assert len(capturas_pantalla.listar(job)) == 2
+    # Reemplazar una que ya esta no es una mas
+    capturas_pantalla.guardar(job, H, "movil", JPEG + b"\x01", {})
+    assert capturas_pantalla.ruta_imagen(job, H, "movil").read_bytes() == JPEG + b"\x01"
+
+
+def test_el_panel_de_espacio_ensena_las_capturas():
+    """El modal «Espacio en disco» pinta `capturas_bytes` de /api/almacenamiento."""
+    html = (RAIZ / "frontend" / "index.html").read_text(encoding="utf-8")
+    modal = html.split("ESPACIO EN DISCO", 1)[1].split("</template>", 1)[0]
+    assert "almacenamiento.capturas_bytes" in modal
+
+
 def test_lo_que_no_es_una_captura_no_se_guarda(archivo):
     job = uuid.uuid4()
     with pytest.raises(ValueError):
