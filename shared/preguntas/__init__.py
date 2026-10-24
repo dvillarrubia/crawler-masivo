@@ -95,10 +95,10 @@ class Pregunta:
 
 
 def _cargar() -> dict[str, Pregunta]:
-    from shared.preguntas import ejemplo
+    from shared.preguntas import ejemplo, soft404
 
     catalogo: dict[str, Pregunta] = {}
-    for p in ejemplo.PREGUNTAS:
+    for p in ejemplo.PREGUNTAS + soft404.PREGUNTAS:
         if p.nombre in catalogo:
             raise ValueError(f"pregunta duplicada: {p.nombre}")
         catalogo[p.nombre] = p

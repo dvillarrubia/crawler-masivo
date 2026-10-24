@@ -465,7 +465,7 @@ def test_fusionar_resumen_suma_y_se_queda_con_el_peor_estado():
 # version nueva, se apunta aqui. Si cambia el texto y NO la version, la cache
 # seguiria sirviendo respuestas a la pregunta vieja como si fueran de la
 # nueva: este test es el que lo impide.
-HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d"}
+HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550ca4cd93c9626"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

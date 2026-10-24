@@ -72,6 +72,10 @@ class Modulo:
     # Los de ejemplo se ven en el dialogo marcados como tal: sus respuestas
     # no estan evaluadas (#8) y no deben acabar en un informe.
     ejemplo: bool = False
+    # (session, job_id, url_ids del alcance) -> las que este modulo pregunta.
+    # El prefiltro barato: soft 404 solo sobre los candidatos de la decision
+    # 105, no sobre todo el censo. None = todas las del alcance.
+    filtrar_urls: Callable[[Any, Any, list[int]], list[int]] | None = None
 
     def objetos_pregunta(self) -> list[Pregunta]:
         return [obtener(n) for n in self.preguntas]
@@ -116,6 +120,53 @@ def estados_titulo_h1_contenido(session, url_ids: list[int]) -> list[Estado]:
             for u in url_ids]
 
 
+def estados_soft404(session, url_ids: list[int]) -> list[Estado]:
+    """Lo de `estados_titulo_h1_contenido` y, ademas, la ruta y las palabras:
+    `/agotado/` o una pagina de 12 palabras dicen mucho de si es un error."""
+    from shared.models import Url
+
+    base = estados_titulo_h1_contenido(session, url_ids)
+    datos = {}
+    for trozo in _trozos(list(url_ids)):
+        for uid, path, palabras in session.query(Url.id, Url.path, Url.content_word_count).filter(
+                Url.id.in_(trozo)):
+            datos[uid] = (path or "/", palabras)
+    for e in base:
+        ruta, palabras = datos.get(e.url_id, ("/", None))
+        e.datos = {"ruta": ruta, "palabras": palabras, **e.datos}
+    return base
+
+
+# Por debajo de estas palabras de contenido propio una pagina indexable es
+# sospechosa aunque la version sin modelo no la marque. Medido el 24-oct-2026:
+# 17 de 3.216 indexables en Lopesan y 47 de 1.080 en Saunier Duval.
+SOFT404_POCAS_PALABRAS = 50
+
+
+def candidatos_soft404(session, job_id, url_ids: list[int]) -> list[int]:
+    """De las URLs del alcance, las sospechosas de soft 404: las que la version
+    determinista dejo como candidatas (decision 105) y las que tienen menos de
+    `SOFT404_POCAS_PALABRAS` palabras propias. Las afirmadas (`soft_404`) no se
+    preguntan: ya estan decididas sin modelo. En produccion la determinista
+    solo dejaba UN candidato: sin las de poco contenido, el modulo no tenia
+    nada que hacer."""
+    from shared.models import Issue, Url
+
+    if not url_ids:
+        return []
+    sospechosas: set[int] = set()
+    afirmadas: set[int] = set()
+    for trozo in _trozos(list(url_ids)):
+        for uid, tipo in session.query(Issue.url_id, Issue.issue_type).filter(
+                Issue.job_id == _uuid(job_id), Issue.issue_type.in_(("soft_404_candidato", "soft_404")),
+                Issue.url_id.in_(trozo)):
+            (sospechosas if tipo == "soft_404_candidato" else afirmadas).add(uid)
+        sospechosas |= {uid for (uid,) in session.query(Url.id).filter(
+            Url.id.in_(trozo), Url.content_word_count.isnot(None),
+            Url.content_word_count < SOFT404_POCAS_PALABRAS)}
+    return [u for u in url_ids if u in sospechosas and u not in afirmadas]
+
+
 def _registro_inicial() -> dict[str, Modulo]:
     # El unico modulo que hay: la pregunta de ejemplo de #7. Los de verdad
     # (#11 tipo de pagina, #12 soft 404...) llegan con su pregunta evaluada.
@@ -128,6 +179,21 @@ def _registro_inicial() -> dict[str, Modulo]:
                          "para probar el circuito, no para decidir nada."),
             preguntas=("es_pagina_legal",),
             construir_estados=estados_titulo_h1_contenido,
+            ejemplo=True,
+        ),
+        Modulo(
+            nombre="soft_404",
+            titulo="Soft 404 (candidatos)",
+            descripcion=("Si la pagina comunica un error, un producto que ya no esta, una busqueda "
+                         "vacia o un «proximamente» aunque responda 200. Solo sobre las sospechosas: "
+                         "los candidatos de la version sin modelo (decision 105) y las de menos de "
+                         "50 palabras. Sin evaluar (#8): las respuestas salen inciertas y no van a "
+                         "ningun informe."),
+            preguntas=("es_soft_404",),
+            construir_estados=estados_soft404,
+            filtrar_urls=candidatos_soft404,
+            # Sin umbral (#8): se ve marcado en el dialogo y nada suyo va a un
+            # informe. Pasa a False el dia que su pregunta tenga umbral.
             ejemplo=True,
         ),
     ]
@@ -295,13 +361,15 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
     for nombre in orden:
         m = REGISTRO[nombre]
         preguntas = m.objetos_pregunta()
-        estados = m.construir_estados(session, url_ids) if url_ids else []
+        ids = m.filtrar_urls(session, job.id, url_ids) if m.filtrar_urls else url_ids
+        estados = m.construir_estados(session, ids) if ids else []
         e = capa.estimar(estados, preguntas) if estados else {
             "estados": 0, "estados_distintos": 0, "preguntas": len(preguntas),
             "aciertos_cache": 0, "llamadas": 0, "tokens_estimados": 0,
             "coste_estimado_usd": 0.0}
         # Decisiones (estado distinto x pregunta) que ya estan pagadas.
         e["decisiones"] = e["estados_distintos"] * len(preguntas)
+        e["urls"] = len(ids)
         por_modulo[nombre] = e
         for k in total:
             total[k] += e[k]
@@ -427,6 +495,14 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
         return FALLIDA
 
     url_ids = urls_del_alcance(s, job.id, run.alcance)
+    # Las URLs de cada modulo ANTES de empezar: con un prefiltro (soft 404)
+    # cada modulo tiene las suyas, y el total del progreso no puede crecer.
+    ids_de = {}
+    for nombre in run.modulos:
+        m = REGISTRO.get(nombre)
+        if m is not None:
+            ids_de[nombre] = m.filtrar_urls(s, job.id, url_ids) if m.filtrar_urls else url_ids
+    total_urls = sum(len(v) for v in ids_de.values())
     progreso = dict(run.progreso or {})
     por_modulo = dict(progreso.get("por_modulo") or {})
     errores: list[str] = list(run.errores or [])
@@ -438,11 +514,12 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                 errores.append(f"modulo {nombre!r} ya no existe; se omite")
                 continue
             preguntas = m.objetos_pregunta()
+            ids = ids_de[nombre]
             hechas = _hechas(s, run.id, [p.nombre for p in preguntas])
-            pendientes = [u for u in url_ids if u not in hechas]
-            pm = por_modulo.setdefault(nombre, {"total": len(url_ids), "procesadas": 0,
+            pendientes = [u for u in ids if u not in hechas]
+            pm = por_modulo.setdefault(nombre, {"total": len(ids), "procesadas": 0,
                                                 "de_cache": 0, "sin_decidir": 0})
-            pm["total"] = len(url_ids)
+            pm["total"] = len(ids)
             pm["procesadas"] = len(hechas)
             for trozo in _trozos(pendientes, lote):
                 s.expire(run)
@@ -466,7 +543,7 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                 pm["sin_decidir"] += sum(1 for f in filas if f.estado == SIN_DECIDIR)
                 run.progreso = {"modulo": nombre, "por_modulo": por_modulo,
                                 "procesadas": sum(v["procesadas"] for v in por_modulo.values()),
-                                "total": len(url_ids) * len(run.modulos)}
+                                "total": total_urls}
                 run.gastado_usd = round(previo + capa.presupuesto.gastado_ejecucion, 10)
                 run.errores = errores[:50] or None
                 run.latido_at = _ahora()

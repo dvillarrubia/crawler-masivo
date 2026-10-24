@@ -145,11 +145,14 @@ def test_modulo_desconocido_y_ciclo():
         enr.resolver_modulos(["a"], reg)
 
 
-def test_hoy_solo_existe_el_modulo_de_la_pregunta_de_ejemplo():
-    # Los modulos de verdad son #9 (y se evaluan en #8): que nadie cuele uno
-    # aqui sin su pregunta evaluada.
-    assert list(enr.REGISTRO) == ["pagina_legal"]
-    assert enr.REGISTRO["pagina_legal"].ejemplo is True
+def test_un_modulo_con_una_pregunta_sin_evaluar_va_marcado():
+    # Los modulos de verdad se evaluan en #8: uno con alguna pregunta sin
+    # umbral tiene que ir marcado (`ejemplo`), para que el dialogo lo diga y
+    # nada suyo acabe en un informe (decision 163).
+    for m in enr.REGISTRO.values():
+        sin_umbral = [p.nombre for p in m.objetos_pregunta() if p.umbral is None]
+        assert not sin_umbral or m.ejemplo, f"{m.nombre}: preguntas sin evaluar {sin_umbral}"
+    assert set(enr.REGISTRO) == {"pagina_legal", "soft_404"}
 
 
 # --- alcance y estados ---------------------------------------------------------
@@ -455,3 +458,29 @@ def test_el_worker_saca_de_su_cola_sin_tocar_la_de_rastreos(monkeypatch):
     assert ejecutor.enviados[-1] == ("_ejecutar_enriquecido", ("r2",))
     # La de rastreos ni se ha mirado.
     assert cola.listas["jobs:pending"] == ["j1"]
+
+
+def test_soft_404_solo_pregunta_por_los_candidatos(tmp_path, monkeypatch, capa_activa):
+    """Decision 163: el modulo de soft 404 pregunta SOLO por lo que la version
+    sin modelo dejo como candidato (decision 105), en la estimacion igual que
+    al ejecutar; las afirmadas y el resto del censo no cuestan nada."""
+    from shared.models import Issue, Url
+
+    _trampa_cliente(monkeypatch)
+    Sesion = _motor(tmp_path)
+    jid, _ = sembrar(Sesion, n=6)
+    s = Sesion()
+    ids = sorted(uid for (uid,) in s.query(Url.id).filter(Url.job_id == jid, Url.indexable.is_(True)))
+    s.add(Issue(job_id=jid, url_id=ids[0], issue_type="soft_404_candidato", severity="info", details={}))
+    s.add(Issue(job_id=jid, url_id=ids[1], issue_type="soft_404_candidato", severity="info", details={}))
+    s.add(Issue(job_id=jid, url_id=ids[2], issue_type="soft_404", severity="warning", details={}))
+    s.get(Url, ids[3]).content_word_count = 12           # poco contenido: sospechosa
+    s.get(Url, ids[2]).content_word_count = 5            # afirmada sin modelo: no se pregunta
+    s.get(Url, ids[4]).content_word_count = 800
+    s.commit()
+    assert enr.candidatos_soft404(s, jid, ids) == [ids[0], ids[1], ids[3]]
+    e = enr.estimar(s, s.get(Job, jid), ["soft_404"], {})
+    assert e["por_modulo"]["soft_404"]["urls"] == 3 and e["llamadas"] == 3
+    (est,) = enr.estados_soft404(s, [ids[0]])
+    assert set(est.datos) == {"ruta", "palabras", "titulo", "h1", "contenido"}
+    s.close()
