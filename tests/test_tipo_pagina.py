@@ -6,12 +6,14 @@ Lo que hay que sujetar:
 - se pregunta por una MUESTRA de cada plantilla (3 a 8 URLs), igual en la
   estimacion que al ejecutar, y la misma pagina con y sin www es una muestra;
 - el estado lleva ruta, palabras, og:type, paginacion y los tipos de schema
-  que no estan en todas las paginas, y nada mas que lo minimo;
+  que no estan en todas las paginas, solo si los hay, y nada mas que lo minimo;
 - la estimacion cuenta los tokens como la decision 162 (caracteres / 4 + 250);
 - sin umbral todo sale `incierto` y ninguna plantilla es `propagable`; una
   plantilla cuyas muestras no coinciden es `mixta`;
-- `categoria_cliente` no pregunta nada sin taxonomia, manda las categorias del
-  job como opciones, y otra taxonomia es otra clave de cache (tambien en BD);
+- `categoria_cliente` no pregunta nada sin taxonomia y lo dice, manda las
+  categorias (la del cliente hoy, si no la del job) como opciones, con su
+  descripcion si la tienen, y otra taxonomia es otra clave de cache;
+- cada caso frontera de produccion lo reclama una sola opcion de `tipo_pagina`;
 - `extraer` saca el juego de la muestra y sin estados repetidos.
 """
 
@@ -36,11 +38,12 @@ from test_enriquecido import _motor, capa_activa  # noqa: E402,F401
 from fake_llm import FakeLLM  # noqa: E402
 
 
-def sembrar(Sesion, *, taxonomia=None, templates=None):
+def sembrar(Sesion, *, taxonomia=None, templates=None, taxonomia_cliente=None):
     """Un censo con tres plantillas: 40 entradas de blog (la mitad repetidas
     con www), 12 fichas `/tienda/:slug` y una portada."""
     s = Sesion()
-    cliente = Client(nombre="Acme", slug="acme", dominios=["acme.com"])
+    cliente = Client(nombre="Acme", slug="acme", dominios=["acme.com"],
+                     config_defecto={"taxonomia": taxonomia_cliente} if taxonomia_cliente else {})
     s.add(cliente)
     s.flush()
     config = {}
@@ -85,6 +88,12 @@ def sembrar(Sesion, *, taxonomia=None, templates=None):
     jid = job.id
     s.close()
     return jid
+
+
+def tp_preguntas():
+    from shared.preguntas import tipo_pagina
+
+    return tipo_pagina
 
 
 def _ids(s, jid):
@@ -147,6 +156,23 @@ def test_el_estado_es_minimo_y_quita_el_schema_de_todas_las_paginas(tmp_path):
     assert e.datos["og_type"] == "product" and e.datos["paginada"] is True
     assert e.datos["ruta"] == "/tienda/producto-a" and e.datos["palabras"] == 40
     assert len(e.datos["contenido"]) <= enr.CARACTERES_CONTENIDO
+    s.close()
+
+
+def test_el_estado_no_manda_lo_que_el_sitio_no_tiene(tmp_path):
+    """Salle y Penguin no tienen `content_word_count`, Salle ni schema ni
+    og:type: esas claves no se mandan vacias."""
+    Sesion = _motor(tmp_path)
+    jid = sembrar(Sesion)
+    s = Sesion()
+    u = s.query(Url).filter(Url.job_id == jid, Url.path == "/blog/entrada-1").first()
+    u.content_word_count = None
+    s.query(HtmlMeta).filter(HtmlMeta.url_id == u.id).update({HtmlMeta.og_type: None})
+    s.query(StructuredData).filter(StructuredData.url_id == u.id).delete()
+    s.commit()
+    (e,) = tp.estados_tipo_pagina(s, [u.id])
+    assert set(e.datos) == {"ruta", "titulo", "h1", "contenido"}
+    assert "when present" in tp_preguntas().TIPO_PAGINA.instrucciones
     s.close()
 
 
@@ -258,13 +284,42 @@ def test_con_umbral_y_todo_decidido_la_plantilla_es_propagable(tmp_path, capa_ac
 
 # --- categoria del cliente ------------------------------------------------------------
 
-def test_sin_taxonomia_la_categoria_no_pregunta_nada(tmp_path, capa_activa):
+def test_sin_taxonomia_la_categoria_no_pregunta_nada_y_dice_por_que(tmp_path, capa_activa):
     Sesion = _motor(tmp_path)
     jid = sembrar(Sesion)
     s = Sesion()
     e = enr.estimar(s, s.get(Job, jid), ["categoria_cliente"], {})
     assert e["por_modulo"]["categoria_cliente"]["urls"] == 0 and e["llamadas"] == 0
+    assert "taxonomia" in e["por_modulo"]["categoria_cliente"]["aviso"]
+    assert e["avisos"] == [e["por_modulo"]["categoria_cliente"]["aviso"]]
+    assert enr.estimar(s, s.get(Job, jid), ["tipo_pagina"], {})["avisos"] == []
     s.close()
+    rid = _run(Sesion, jid, ["categoria_cliente"])
+    fake = FakeLLM()
+    assert enr.ejecutar(rid, sesion_factory=Sesion, transport=fake.transport) == enr.COMPLETADA
+    s = Sesion()
+    assert fake.llamadas == 0
+    assert any("taxonomia" in x for x in s.get(EnrichmentRun, rid).errores or [])
+    s.close()
+
+
+def test_la_taxonomia_del_cliente_vale_para_un_censo_ya_rastreado(tmp_path, capa_activa):
+    """El job se rastreo sin taxonomia (su config ya no se puede cambiar); el
+    cliente la tiene ahora: se pregunta con la suya, y manda sobre la del job."""
+    Sesion = _motor(tmp_path)
+    jid = sembrar(Sesion, taxonomia=["Vieja A", "Vieja B"],
+                  taxonomia_cliente=["Calderas", {"nombre": "Aerotermia",
+                                                  "descripcion": "Heat pumps that heat water and rooms."}])
+    s = Sesion()
+    e = enr.estimar(s, s.get(Job, jid), ["categoria_cliente"], {})
+    assert e["por_modulo"]["categoria_cliente"]["urls"] == 9 and e["avisos"] == []
+    s.close()
+    fake = FakeLLM()
+    rid = _run(Sesion, jid, ["categoria_cliente"])
+    assert enr.ejecutar(rid, sesion_factory=Sesion, transport=fake.transport) == enr.COMPLETADA
+    criterios = fake.peticiones[0]["questions"]["categoria_cliente"]["criteria"]
+    assert list(criterios) == ["Calderas", "Aerotermia", "ninguna"]
+    assert criterios["Aerotermia"] == "Heat pumps that heat water and rooms." and criterios["Calderas"] is None
 
 
 def test_la_categoria_pregunta_por_la_taxonomia_del_job_y_otra_es_otra_clave(tmp_path, capa_activa):
@@ -317,8 +372,32 @@ def test_las_opciones_del_cliente_cambian_la_clave_y_no_las_del_catalogo():
     assert opciones_de_taxonomia(["A", "a", " ", "ninguna"]) is None
 
 
+def test_la_categoria_solo_juzga_de_que_trata_la_pagina():
+    """Un criterio: el tipo de pagina lo dice `tipo_pagina`. Una pagina de
+    contacto o de servicio tecnico de una sola categoria es de esa categoria."""
+    p = tp_preguntas().CATEGORIA_CLIENTE
+    texto = (p.instrucciones + " " + p.opciones["ninguna"]).lower()
+    for tipo in ("home page", "legal", "corporate", "contact pages"):
+        assert tipo not in texto, tipo
+    assert "whatever kind of page it is" in texto
+
+
+@pytest.mark.parametrize("ejemplo,opcion,frase", tp_preguntas().CASOS_FRONTERA)
+def test_cada_caso_frontera_lo_reclama_una_sola_opcion(ejemplo, opcion, frase):
+    """Lo que va antes del primer «Not» de una opcion es lo que reclama; tras
+    el «Not», lo que excluye. Cada caso real que caia entre dos o tres
+    opciones (Penguin autores, Salle directorio y asignaturas, marcas de
+    Lopesan, buscador de subvenciones de Saunier) lo reclama exactamente una."""
+    opciones = tp_preguntas().TIPO_PAGINA.opciones
+    reclaman = [k for k, d in opciones.items() if frase.lower() in d.split(" Not ")[0].lower()]
+    assert reclaman == [opcion], (ejemplo, reclaman)
+
+
 @pytest.mark.parametrize("taxonomia,error", [
     (["Calderas", "calderas"], "repetida"),
+    (["Calderas", {"nombre": "calderas", "descripcion": "x"}], "repetida"),
+    (["Calderas", {"nombre": "Aerotermia", "otra": "x"}], "desconocidas"),
+    (["Calderas", {"nombre": "Aerotermia", "descripcion": "x" * 401}], "400"),
     (["Ninguna", "Calderas"], "ninguna"),
     (["x" * 81, "Calderas"], "80"),
     ([f"c{i}" for i in range(21)], "20"),
@@ -339,6 +418,10 @@ def test_la_taxonomia_sobrevive_al_config_del_job():
 
     c = JobConfig(taxonomia=["  Calderas ", "", "Aire  acondicionado"])
     assert c.model_dump()["taxonomia"] == ["Calderas", "Aire acondicionado"]
+    c = JobConfig(taxonomia=["Calderas", {"nombre": " Aerotermia ", "descripcion": " Bombas  de calor "},
+                             {"nombre": "Solar"}])
+    assert c.model_dump()["taxonomia"] == ["Calderas", {"nombre": "Aerotermia", "descripcion": "Bombas de calor"},
+                                           "Solar"]
 
 
 # --- el juego de evaluacion -----------------------------------------------------------------

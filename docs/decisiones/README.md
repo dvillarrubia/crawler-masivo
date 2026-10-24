@@ -199,7 +199,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 169 | Las preguntas se redactan con el criterio de la revisión humana: «legal» incluye lo normativo y el soft 404 se parte en dos (página de utilidad aparte) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d169) |
 | 170 | `data-nosnippet` se mide al rastrear, y solo se avisa cuando esconde el H1 o la mayor parte del contenido de una indexable | [`indexabilidad`](indexabilidad.md#d170) |
 | 171 | robots.txt de prueba: veredicto y línea que decide de un robots.txt pegado, con la lógica del crawler y sin descargar nada | [`indexabilidad`](indexabilidad.md#d171) |
-| 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de once opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
+| 178 | El tipo de página se pregunta por plantilla, con una taxonomía general de doce opciones, y la categoría del cliente con su propia taxonomía | [`llm-y-enriquecido`](llm-y-enriquecido.md#d178) |
 
 ## Anadir una decision
 

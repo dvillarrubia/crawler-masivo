@@ -79,6 +79,9 @@ class Modulo:
     # (session, job) -> las preguntas con las opciones del job: la categoria
     # del cliente pregunta por SU taxonomia (decision 178). None = las del catalogo.
     preguntas_del_job: Callable[[Any, Any], list[Pregunta]] | None = None
+    # (session, job) -> por que este modulo no preguntara nada en ese job, o
+    # None. Lo ensenan la estimacion y la ejecucion (decision 178).
+    por_que_vacio: Callable[[Any, Any], str | None] | None = None
 
     def objetos_pregunta(self) -> list[Pregunta]:
         return [obtener(n) for n in self.preguntas]
@@ -231,7 +234,7 @@ def _modulos_tipo_pagina() -> list[Modulo]:
             nombre="tipo_pagina",
             titulo="Tipo de pagina (por plantilla)",
             descripcion=("Que es cada plantilla: portada, listado, ficha de producto o servicio, landing "
-                         "comercial, articulo, corporativa, contacto, ayuda, legal, utilidad u otro. Pregunta "
+                         "comercial, articulo, perfil, corporativa, contacto, ayuda, legal, utilidad u otro. Pregunta "
                          "por 3 a 8 URLs de cada plantilla y propone la respuesta para la plantilla entera "
                          "con su acuerdo. Sin evaluar (#8): las respuestas salen inciertas y no se propaga nada."),
             preguntas=("tipo_pagina",),
@@ -242,13 +245,14 @@ def _modulos_tipo_pagina() -> list[Modulo]:
         Modulo(
             nombre="categoria_cliente",
             titulo="Categoria del cliente (por plantilla)",
-            descripcion=("A cual de las categorias de negocio del cliente (su taxonomia, `taxonomia` en la "
-                         "configuracion) pertenece cada plantilla. Sin taxonomia no pregunta nada. Sin evaluar "
-                         "(#8): las respuestas salen inciertas."),
+            descripcion=("A cual de las categorias de negocio del cliente (`taxonomia` en su "
+                         "configuracion, vale tambien para censos ya rastreados) pertenece cada plantilla. "
+                         "Sin taxonomia no pregunta nada. Sin evaluar (#8): las respuestas salen inciertas."),
             preguntas=("categoria_cliente",),
             construir_estados=tp.estados_tipo_pagina,
             filtrar_urls=tp.muestra_si_hay_taxonomia,
             preguntas_del_job=tp.preguntas_de_taxonomia,
+            por_que_vacio=tp.sin_taxonomia,
             ejemplo=True,
         ),
     ]
@@ -412,6 +416,7 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
     por_modulo: dict[str, dict] = {}
     total = {"llamadas": 0, "tokens_estimados": 0, "coste_estimado_usd": 0.0,
              "aciertos_cache": 0, "decisiones": 0}
+    avisos: list[str] = []
     for nombre in orden:
         m = REGISTRO[nombre]
         preguntas = m.preguntas_para(session, job)
@@ -424,6 +429,11 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
         # Decisiones (estado distinto x pregunta) que ya estan pagadas.
         e["decisiones"] = e["estados_distintos"] * len(preguntas)
         e["urls"] = len(ids)
+        if not ids and m.por_que_vacio is not None:
+            aviso = m.por_que_vacio(session, job)
+            if aviso:
+                e["aviso"] = aviso
+                avisos.append(aviso)
         por_modulo[nombre] = e
         for k in total:
             total[k] += e[k]
@@ -443,6 +453,7 @@ def estimar(session, job, modulos: list[str], alcance: dict | None, *, redis=Non
         "segundos_estimados": math.ceil(total["llamadas"] / rpm * 60),
         "rpm": rpm,
         "presupuesto_sugerido_usd": sugerido,
+        "avisos": avisos,
         **topes(session, job),
     }
 
@@ -569,6 +580,11 @@ async def _ejecutar(s, run_id, sesion_factory, redis, transport, lote: int) -> s
                 continue
             preguntas = m.preguntas_para(s, job)
             ids = ids_de[nombre]
+            if not ids and m.por_que_vacio is not None:
+                aviso = m.por_que_vacio(s, job)
+                if aviso and aviso not in errores:
+                    errores.append(aviso)
+                    run.errores = errores[:50]
             hechas = _hechas(s, run.id, [p.nombre for p in preguntas])
             pendientes = [u for u in ids if u not in hechas]
             pm = por_modulo.setdefault(nombre, {"total": len(ids), "procesadas": 0,
