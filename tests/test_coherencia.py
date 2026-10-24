@@ -284,7 +284,7 @@ def test_la_pantalla_agrupa_el_score_por_nivel(tmp_path, monkeypatch):
     api = TestClient(app)
     res = api.get(f"/api/jobs/{jid}/enrichment/{rid}").json()["resultados"]["title_describe_contenido"]
     assert res["tipo"] == "score" and res["por_respuesta"] == {"3": 3, "0": 1, "1": 1}
-    assert res["etiquetas"]["3"] == "describe el contenido" and res["etiquetas"]["0"] == "otro asunto"
+    assert res["etiquetas"]["3"] == "nombra la página" and res["etiquetas"]["0"] == "otro asunto o engaña"
     # Las opciones de un score son sus niveles: la pantalla los pinta en orden
     # con el mismo `respuestasEnriq` que un choice (decision 176).
     assert res["opciones"] == ["0", "1", "2", "3"] and res["ambito"] == "url"
@@ -322,3 +322,28 @@ def test_extraer_saca_el_juego_sin_estados_repetidos(tmp_path):
     assert sum(f["estado"]["ruta"] == s.get(Url, ids[1]).path for f in filas) == 1
     assert {f["pregunta"] for f in filas} == {"title_es_generico"} and all(f["etiqueta"] is None for f in filas)
     s.close()
+
+
+def test_title_v2_el_nivel_alto_es_nombrar_la_pagina_aunque_sea_corto():
+    """Decision 180: la v1 puntuaba 1 o 2 el title que nombra el libro, el
+    destino o la seccion porque el fragmento hablaba del autor o el H1 era un
+    eslogan. En la v2 el nivel alto es «nombra lo que la pagina es», los bajos
+    son otro asunto, generico o engaño, y los ejemplos son genericos (no salen
+    del juego con el que se midio la v1, que lo inflarian)."""
+    from shared.preguntas import CATALOGO
+
+    p = CATALOGO["title_describe_contenido"]
+    assert p.version == 2 and len(p.opciones) == len(p.etiquetas) == 4
+    assert "even briefly" in p.opciones[3] and "different subject" in p.opciones[0]
+    assert "generic" in p.opciones[1] and "parent item" in p.opciones[2]
+    assert "biography" in p.instrucciones and "slogan" in p.instrucciones
+    # Revision: los metadatos de un producto son parte de la pagina, pero una
+    # lista de documentos SOBRE el item que nombra el title es nivel 2, y un
+    # title de evento u oferta que nada de lo visible menciona es nivel 0: sin
+    # esas dos excepciones la v2 no separaba los pocos negativos del juego.
+    assert "ABOUT the item the title names" in p.instrucciones and "(level 2)" in p.instrucciones
+    assert "event, offer or promotion" in p.instrucciones and "(level 0)" in p.instrucciones
+    assert "date" not in p.instrucciones.split("Two exceptions")[0]
+    for de_un_cliente in ("Penguin", "La Salle", "Fuerteventura", "Lopesan", "tigres", "Carnaval",
+                          "Maspalomas", "Memòria", "Meloneras"):
+        assert de_un_cliente not in p.instrucciones + " ".join(p.opciones)

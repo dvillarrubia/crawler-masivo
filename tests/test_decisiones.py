@@ -484,6 +484,10 @@ HUELLAS |= {("title_describe_contenido", 1): "d55396cb489ef138",
             ("title_es_generico", 1): "9abc084f764fc672",
             ("schema_contradice_contenido", 1): "591101cbca2ef33f",
             }
+# v2 de la intencion de la pagina y del title frente al contenido (decision 180).
+HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
+            ("title_describe_contenido", 2): "cfb30e2f6f487516",
+            }
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():

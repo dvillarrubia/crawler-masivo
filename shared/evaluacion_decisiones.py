@@ -468,3 +468,20 @@ def muestra_estratificada(por_plantilla: dict[str, list[Any]], n: int, *, semill
                 break
             salida.append(colas[plantilla].pop())
     return salida
+
+
+def para_reetiquetar(juego: list[dict], version: int) -> list[dict]:
+    """El mismo juego (mismos estados e ids) listo para etiquetar A CIEGAS con
+    otra version de la pregunta (decision 180): la version nueva y sin la
+    etiqueta, quien la puso ni la nota de antes. Una etiqueta de la v1 no vale
+    para la v2 si cambian las opciones o lo que significa cada nivel, y verla
+    empujaria a repetirla. `evaluar` exige que el juego sea de la version del
+    catalogo, asi que sin esto un juego viejo no se puede volver a medir."""
+    salida = []
+    for fila in juego:
+        if fila.get("version") == version:
+            raise ValueError(f"{fila.get('id')}: el juego ya es de la version {version}")
+        nueva = {k: v for k, v in fila.items() if k not in ("etiqueta", "etiquetado_por", "nota")}
+        salida.append({**nueva, "version": version, "etiqueta": None, "etiquetado_por": None,
+                       "nota": ""})
+    return salida

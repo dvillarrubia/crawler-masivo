@@ -28,6 +28,10 @@ Cinco ordenes, en el orden en que se usan:
               reconoce: precision y umbral propio de X sobre los positivos, y
               el recall no se afirma (solo el control lo estima). No llama a
               nadie.
+    reetiquetar <juego.jsonl> --salida <juego_vN.jsonl>
+              El mismo juego para la version del catalogo, sin etiquetas ni
+              notas, para etiquetarlo a ciegas con el criterio nuevo
+              (decision 180). No llama a nadie.
 
 Uso (dentro del contenedor del crawler):
 
@@ -478,6 +482,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--control", type=int, default=None)
     e.add_argument("--semilla", type=int, default=0)
     e.add_argument("--salida")
+    f = sub.add_parser("reetiquetar")
+    f.add_argument("juego")
+    f.add_argument("--salida", required=True)
     args = ap.parse_args(argv)
 
     if args.orden == "extraer":
@@ -518,6 +525,16 @@ def main(argv: list[str] | None = None) -> int:
 
         informe = evaluar(_leer(args.juego), _leer(args.respuestas), args.objetivo or PRECISION_OBJETIVO)
         print(json.dumps(informe, ensure_ascii=False, indent=1))
+    elif args.orden == "reetiquetar":
+        from shared.evaluacion_decisiones import para_reetiquetar
+
+        juego = _leer(args.juego)
+        if not juego:
+            raise SystemExit("El juego esta vacio")
+        p = pregunta_del_juego(juego)
+        _escribir(args.salida, para_reetiquetar(juego, p.version))
+        print(f"{len(juego)} ejemplos de {p.nombre} en {args.salida}, version {p.version} y sin "
+              "etiquetar: etiquetarlos a ciegas con el criterio de esa version.")
     elif args.orden == "repetir":
         from shared.evaluacion_decisiones import acuerdo, etiqueta_de_respuesta, repetibilidad
         from shared.preguntas import obtener

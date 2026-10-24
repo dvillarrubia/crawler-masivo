@@ -207,10 +207,13 @@ def test_las_preguntas_tienen_un_criterio_salida_y_ninguna_umbral():
         assert p.tipo == "choice" and p.umbral is None and "unclear" in p.opciones
         # Cada opcion dice lo que NO es (leccion de la decision 169).
         assert all("NOT" in d for o, d in p.opciones.items() if o != "unclear"), p.nombre
-    # Las mismas opciones en la pagina y en la busqueda: se comparan.
-    from shared.preguntas.intencion import ETAPAS, INTENCIONES
+    # Las mismas opciones en la pagina y en la busqueda, salvo las dos que solo
+    # tiene la pagina (decision 180): se comparan.
+    from shared.preguntas.intencion import ETAPAS, INTENCIONES, INTENCIONES_PAGINA, SOLO_PAGINA
 
-    assert list(pagina.opciones) == list(busqueda.opciones) == list(INTENCIONES)
+    assert list(busqueda.opciones) == list(INTENCIONES)
+    assert list(pagina.opciones) == list(INTENCIONES_PAGINA)
+    assert set(pagina.opciones) - set(busqueda.opciones) == set(SOLO_PAGINA)
     assert list(embudo.opciones) == list(ETAPAS)
     # Intencion y embudo son dos preguntas, no una mezclada.
     assert set(embudo.opciones) & set(pagina.opciones) == {"unclear"}
@@ -472,7 +475,8 @@ def test_las_reglas_de_las_preguntas_van_en_orden_y_sin_contradecirse():
     # La pagina: la senal del texto que falta y el desempate de los listados.
     assert "tipos_schema" in pagina.instrucciones and "absence is not evidence" in pagina.instrucciones
     assert "site's own range" in pagina.instrucciones
-    assert "NOT the home page" in pagina.opciones["transactional"]
+    # v2 (decision 180): la portada es la unica navegacional.
+    assert pagina.opciones["navigational"].startswith("Rule 1: only the home page")
 
 
 # --- cobertura de Search Console ------------------------------------------------------
@@ -598,3 +602,55 @@ def test_uuid_de_job_en_texto(tmp_path):
         ids["/tienda/zapato-rojo"], ids["/blog/como-limpiar"], ids["/blog/otra"]]
     assert isinstance(uuid.UUID(str(jid)), uuid.UUID)
     s.close()
+
+
+def test_una_pagina_corporativa_o_de_usuarios_existentes_no_se_compara():
+    """Decision 180: `existing_users` y `corporate` solo las tiene la pagina.
+    Ninguna busqueda puede casar con ellas, asi que compararlas daria siempre
+    un 0 % alineado: no se afirma nada."""
+    from shared.preguntas.intencion import SOLO_PAGINA
+
+    for intencion in SOLO_PAGINA:
+        d = I.desajuste(intencion, [{"intencion": "informational", "clics": 40},
+                                    {"intencion": "navigational", "clics": 5}])
+        assert not d["desalineada"] and d["sin_afirmar"] == "pagina_sin_equivalente"
+        assert d["parte_alineada"] is None and d["clics_desalineados"] == 0
+
+
+def test_la_v2_deja_navigational_solo_para_la_portada_y_la_pantalla_traduce_todo():
+    """Decision 180: la v1 metia en `navigational` lo corporativo y lo de quien
+    ya es cliente o alumno, y Jev acertaba 50 de 88. La v2 lo separa, y la
+    pantalla tiene el nombre en castellano de cada opcion."""
+    import re
+    from pathlib import Path
+
+    p = CATALOGO["intencion_pagina"]
+    assert p.version == 2
+    assert "and nothing else is" in p.instrucciones
+    for regla, opcion in enumerate(("navigational", "existing_users", "transactional", "commercial",
+                                    "local", "corporate", "informational"), start=1):
+        texto = p.instrucciones.split(f"({regla})")[1].split(f"({regla + 1})")[0]
+        assert re.search(rf"\b(is|are) {opcion}\b", texto), opcion
+        assert p.opciones[opcion].startswith(f"Rule {regla}"), opcion
+    app = (Path(__file__).resolve().parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+    bloque = app.split("const RESPUESTA_ENRIQ = {")[1].split("};")[0]
+    claves = set(re.findall(r"(\w+):\s*'", bloque))
+    assert set(p.opciones) <= claves
+
+
+def test_v2_las_fronteras_del_programa_concreto_y_ejemplos_genericos():
+    """Decision 180 (revision): con «la primera regla que encaje», la regla 3
+    (un programa concreto) se quedaba los documentos de calidad de UN programa
+    (title = el nombre del master) y la financiacion («programa de ayudas»)
+    antes de llegar a la 6 y la 7. La regla 3 los excluye por escrito, «por que
+    elegir nuestro <programa>» depende del contenido, y los ejemplos no salen
+    del juego con el que se midio la v1 (lo inflarian)."""
+    p = CATALOGO["intencion_pagina"]
+    regla3 = p.instrucciones.split("(3)")[1].split("(4)")[0]
+    regla4 = p.instrucciones.split("(4)")[1].split("(5)")[0]
+    assert "quality-assurance or accreditation documents" in regla3 and "(rule 6)" in regla3
+    assert "financing" in regla3 and "(rule 7)" in regla3
+    assert "when the content presents that one" in regla3 and "rather than for one programme" in regla4
+    assert "NOT the quality or official documents" in p.opciones["transactional"]
+    for del_juego in ("La Salle", "Penguin", "Lopesan", "UOC", "Management", "23F", "Maspalomas"):
+        assert del_juego not in p.instrucciones + " ".join(p.opciones.values()), del_juego

@@ -259,3 +259,30 @@ def test_evaluar_cuenta_una_vez_cada_estado_repetido():
     inf = S.evaluar(juego, respuestas, objetivo=0.9)
     assert inf["evaluables"] == 2
     assert inf["estados_repetidos_quitados"] == 2 and inf["repetidos_con_otra_etiqueta"] == 1
+
+
+def test_reetiquetar_deja_el_juego_a_ciegas_para_la_version_nueva(tmp_path):
+    """Decision 180: una etiqueta de la v1 no vale para una v2 con otras
+    opciones o niveles, y verla empuja a repetirla. `reetiquetar` da los mismos
+    estados para la version del catalogo, sin etiqueta ni nota, y despues
+    `evaluar` ya los acepta."""
+    S = _script()
+    from shared.preguntas import obtener
+
+    p = obtener("intencion_pagina")
+    estado = {"ruta": "/a", "titulo": "A", "h1": "A", "contenido": "x"}
+    viejo = [{"id": "https://x.com/a", "pregunta": p.nombre, "version": p.version - 1,
+              "estado": estado, "etiqueta": "navigational", "etiquetado_por": "claude",
+              "nota": "Normativa académica. [duda: informational]", "plantilla": "x.com|/a"}]
+    with pytest.raises(SystemExit, match="version"):
+        S.evaluar(viejo, [], objetivo=0.9)
+    entrada, salida = tmp_path / "v1.jsonl", tmp_path / "v2.jsonl"
+    entrada.write_text(json.dumps(viejo[0]) + "\n", encoding="utf-8")
+    assert S.main(["reetiquetar", str(entrada), "--salida", str(salida)]) == 0
+    (fila,) = [json.loads(x) for x in salida.read_text(encoding="utf-8").splitlines()]
+    assert fila["version"] == p.version and fila["estado"] == estado and fila["id"] == viejo[0]["id"]
+    assert fila["etiqueta"] is None and fila["etiquetado_por"] is None and fila["nota"] == ""
+    assert fila["plantilla"] == "x.com|/a"
+    assert S.evaluar([fila], [], objetivo=0.9)["sin_etiqueta"] == 1
+    with pytest.raises(ValueError, match="ya es de la version"):
+        E.para_reetiquetar([fila], p.version)
