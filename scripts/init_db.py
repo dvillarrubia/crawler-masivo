@@ -426,6 +426,10 @@ def migrar_adapter_entities() -> None:
             "CREATE INDEX IF NOT EXISTS ix_adent_job_tipo ON adapter_entities (job_id, tipo)"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_adent_job_hash ON adapter_entities (job_id, url_hash)"))
+        # Decision 168: la ficha de una URL busca tambien por el otro esquema.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_adent_job_hash_alt"
+            " ON adapter_entities (job_id, url_hash_alt)"))
     print("WordPress: tabla adapter_entities al dia.")
 
 

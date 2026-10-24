@@ -1458,8 +1458,9 @@ def get_wordpress_assets(
     db: Session = Depends(get_session),
 ):
     """Plugins y tema de un WordPress por los CSS y JS que cargan sus paginas
-    (decision 168), en las primeras `muestra` paginas HTML del censo (por orden
-    de rastreo: las menos profundas primero, que cubren las plantillas).
+    (decision 168), en las primeras `muestra` paginas HTML del censo (las
+    menos profundas primero, que cubren las plantillas; a igual profundidad,
+    por orden de rastreo).
 
     Lo que no sale aqui no se afirma que no exista: un plugin sin CSS ni JS
     propios, uno que solo carga en una plantilla fuera de la muestra, o un
@@ -1473,9 +1474,13 @@ def get_wordpress_assets(
     # Los ids primero y luego `url_id IN (...)` por lotes: con la subconsulta
     # dentro, Postgres estimaba mal y recorria `resources` entera (9,7 M filas,
     # 2,6 s en produccion); con la lista va por `ix_resources_url_id` (0,75 s).
+    # Por profundidad y no solo por `id`: con `ORDER BY id LIMIT` Postgres podia
+    # recorrer `urls_pkey` filtrando el job, y leer las filas de todos los jobs
+    # con ids anteriores (coste que crece con la base, no con el censo). Sin
+    # indice que de este orden, entra por el `job_id` y ordena lo del job.
     ids = [i for (i,) in db.execute(
         select(Url.id).where(Url.job_id == job_id, Url.is_html.is_(True))
-        .order_by(Url.id).limit(muestra))]
+        .order_by(Url.crawl_depth.asc().nulls_last(), Url.id).limit(muestra))]
     por_url: dict[str, int] = {}
     for n in range(0, len(ids), 1000):
         for recurso, paginas in db.execute(
@@ -1494,7 +1499,9 @@ def get_wordpress_assets(
 def _wordpress_de_url(db: Session, job_id: uuid.UUID, url_hash: str | None) -> list[dict]:
     """Las entidades de la REST API de WordPress que son esta URL (decision
     168): por `url_hash` (indice `ix_adent_job_hash`) o por `url_hash_alt`, la
-    misma URL con el otro esquema, como el analisis. Sin las sondas, que no
+    misma URL con el otro esquema (indice `ix_adent_job_hash_alt`), como el
+    analisis: con los dos indices el OR es un BitmapOr y no un recorrido de
+    todas las entidades del job cada vez que se abre una ficha. Sin las sondas, que no
     son entidades. Sin tabla, lista vacia (dato opcional, como los sitemaps)."""
     from shared.models import AdapterEntity as E
 

@@ -4051,6 +4051,10 @@ function app() {
       if (this._expKeyHandler) return;
       this._expKeyHandler = (e) => {
         if (this.view !== 'explorer') return;
+        // Con «Solo en WordPress» abierto la tabla de URLs esta oculta: las
+        // flechas desplazan esa lista y no abren a ciegas la ficha de una fila
+        // que no se ve (aparecia abierta al volver a la tabla).
+        if (this.expWp) return;
         // Don't hijack typing inside inputs/textareas/contenteditable
         const t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;

@@ -193,3 +193,25 @@ def test_al_quitar_el_cliente_lo_que_se_ve_es_lo_que_se_lanza():
         " _formDesdeConfig(f, {adapters: {wordpress: {modo: 'off'}}});"
         " f.cliente_id = ''; return _configDesdeForm(f); }")
     assert c["adapters"] == {"wordpress": {"modo": "off"}}
+
+
+# ------------------------------------------------- teclado del Explorador ----
+def test_con_solo_en_wordpress_las_flechas_no_abren_fichas_ocultas():
+    """Con el panel «Solo en WordPress» abierto la tabla de URLs esta oculta:
+    las flechas no piden la ficha de una fila invisible ni bloquean el
+    desplazamiento de la lista. Con la tabla, siguen moviendo la seleccion."""
+    r = _evaluar(
+        "() => { const a = app(); const pedidas = [];"
+        " a.view = 'explorer'; a.expUrls = [{id: 1}, {id: 2}, {id: 3}]; a.expSelectedIndex = -1;"
+        " a.selectExplorerUrl = (u, i) => { pedidas.push(u.id); a.expSelectedIndex = i; };"
+        " a._scrollSelectedRowIntoView = () => {};"
+        " a._bindExplorerKeyNav();"
+        " const pulsar = () => { const e = new KeyboardEvent('keydown', {key: 'ArrowDown',"
+        " cancelable: true}); window.dispatchEvent(e); return e.defaultPrevented; };"
+        " a.expWp = true; const conWp = [pulsar(), pulsar(), pedidas.slice()];"
+        " a.expWp = false; const sinWp = [pulsar(), pedidas.slice()];"
+        " a._unbindExplorerKeyNav && a._unbindExplorerKeyNav();"
+        " return [conWp, sinWp]; }")
+    con_wp, sin_wp = r
+    assert con_wp == [False, False, []]
+    assert sin_wp == [True, [1]]

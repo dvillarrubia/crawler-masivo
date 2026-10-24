@@ -1429,9 +1429,14 @@
      con sellos de tiempo. Por eso solo cuenta como version un `ver` con un
      punto (`^\d+(\.\d+)+`, con sufijos como `-rc.1`) y fuera de `/cache/`, y si coincide con la de
      WordPress se marca «(la de WordPress)». El plugin sale igual, sin
-     version. **En una muestra**: las primeras 2.000 paginas HTML por orden
-     de rastreo (las menos profundas, que cubren las plantillas); con el
-     censo entero, Lopesan (5.700 paginas) tardaba 3 s. Los ids se piden
+     version. **En una muestra**: las primeras 2.000 paginas HTML por
+     `crawl_depth` (las menos profundas, que cubren las plantillas; a igual
+     profundidad, por `id`); con el censo entero, Lopesan (5.700 paginas)
+     tardaba 3 s. No por `id` solo: con `ORDER BY id LIMIT`, Postgres puede
+     recorrer `urls_pkey` filtrando el job y leer las filas de todos los jobs
+     con ids anteriores (en produccion, 20.891 de otro job para un censo
+     grande), un coste que crece con la base y no con el censo; sin indice
+     que de el orden por profundidad, entra por `job_id` y ordena lo del job. Los ids se piden
      primero y luego `url_id IN (...)` por lotes de 1.000: con la subconsulta
      dentro, Postgres estimaba mal y recorria `resources` entera (9,7 M
      filas, 2,6 s); con la lista va por `ix_resources_url_id` (0,75 s). Lo
@@ -1453,7 +1458,15 @@
      tipo, ID, estado, `modified_gmt` y, en un termino, cuantas entradas
      tiene. Se empareja como el analisis, por `url_hash` o por `url_hash_alt`
      (la misma URL con el otro esquema), sin las sondas, y sin tabla es una
-     lista vacia, como los sitemaps (126).
+     lista vacia, como los sitemaps (126). `url_hash_alt` tiene su indice
+     (`ix_adent_job_hash_alt`, job_id delante): sin el, el OR no podia ir por
+     `ix_adent_job_hash` y Postgres filtraba todas las entidades del job
+     (decenas de miles en un WordPress grande) cada vez que se abria una
+     ficha. La migracion lo crea en `migrar_adapter_entities()`.
+   - **Con «Solo en WordPress» abierto, las flechas del teclado no mueven la
+     tabla de URLs**, que esta oculta: antes pedian la ficha de una fila
+     invisible y bloqueaban el desplazamiento de la lista, y al volver a la
+     tabla aparecia abierta una ficha que nadie eligio.
    - Probado con un censo WordPress sembrado en local (capturas antes y
      despues de Resumen, ficha de URL, Explorador y modal) y los endpoints
      contra SQLite y Postgres (`tests/test_wordpress_ui_api.py`); la tarjeta

@@ -200,3 +200,120 @@ def test_inventario_de_un_job_sin_nada(api):
     cliente, _ = api
     r = cliente.get(f"/api/jobs/{uuid.uuid4()}/wordpress/assets")
     assert r.status_code == 404
+
+
+def test_inventario_empieza_por_las_menos_profundas(api):
+    """La muestra son las paginas menos profundas (las que cubren las
+    plantillas); a igual profundidad, por orden de rastreo."""
+    cliente, ids = api
+    from api.routers import results  # noqa: F401
+
+    sesion = next(cliente.app.dependency_overrides[get_session]())
+    try:
+        sesion.get(Url, ids["/a/"]).crawl_depth = 2
+        sesion.get(Url, ids["/b/"]).crawl_depth = 1
+        sesion.get(Url, ids["/c/"]).crawl_depth = 0
+        sesion.commit()
+    finally:
+        sesion.close()
+    d = cliente.get(f"/api/jobs/{ids['job']}/wordpress/assets", params={"muestra": 1}).json()
+    # /c/ (profundidad 0) solo carga el tema.
+    assert d["paginas_miradas"] == 1
+    assert [t["slug"] for t in d["temas"]] == ["astra"] and d["plugins"] == []
+
+
+# -------------------------------------------------------------- planes ----
+# Lo que preocupa aqui es el plan, no el resultado: solo en Postgres. Se
+# captura la consulta que lanza el endpoint y se le pide su EXPLAIN.
+@pytest.fixture
+def pg():
+    if not URL_PG:
+        pytest.skip("sin PAGERANK_TEST_DATABASE_URL")
+    engine = create_engine(URL_PG)
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+def _cliente_que_captura(engine):
+    from sqlalchemy import event
+
+    from api.routers import results
+
+    capturadas: list[tuple[str, object]] = []
+    event.listen(engine, "before_cursor_execute",
+                 lambda conn, cur, sql, params, ctx, many: capturadas.append((sql, params)))
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    app = FastAPI()
+    app.include_router(results.router)
+
+    def _sesion():
+        s = Sesion()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    return TestClient(app), capturadas
+
+
+def _plan(engine, capturadas, trozo: str) -> str:
+    sql, params = next((s, p) for s, p in capturadas if trozo in s)
+    with engine.connect() as c:
+        cur = c.connection.cursor()
+        cur.execute("EXPLAIN " + sql, params)
+        return "\n".join(f[0] for f in cur.fetchall())
+
+
+def test_plan_de_la_muestra_no_recorre_otros_jobs(pg):
+    """Un censo cuyos ids van detras de muchos de otro job: la muestra no
+    entra por `urls_pkey` filtrando el job (leeria todas las filas de los
+    jobs anteriores), sino por el `job_id`."""
+    with sessionmaker(bind=pg)() as s:
+        viejo, nuevo = (Job(id=uuid.uuid4(), name=n, status="completed", seeds=[], config={})
+                        for n in ("viejo", "nuevo"))
+        s.add_all([viejo, nuevo])
+        s.flush()
+        for job, n in ((viejo, 6000), (nuevo, 2000)):
+            s.add_all([Url(job_id=job.id, url=f"https://x.com/{i}", url_hash=f"{job.id}-{i}",
+                           host="x.com", path=f"/{i}", is_internal=True, is_html=True,
+                           status_code=200, resource_type="html") for i in range(n)])
+            s.flush()
+        s.commit()
+        nuevo_id = nuevo.id
+    with pg.connect() as c:
+        c.exec_driver_sql("ANALYZE urls")
+        c.commit()
+    cliente, capturadas = _cliente_que_captura(pg)
+    r = cliente.get(f"/api/jobs/{nuevo_id}/wordpress/assets", params={"muestra": 20})
+    assert r.status_code == 200, r.text
+    plan = _plan(pg, capturadas, "FROM urls")
+    assert "urls_pkey" not in plan, plan
+
+
+def test_plan_de_la_ficha_va_por_los_dos_hashes(pg):
+    """La entidad de la ficha se busca por `url_hash` o `url_hash_alt`: con
+    indice en los dos, el OR va por ellos y no filtra todo el job."""
+    with sessionmaker(bind=pg)() as s:
+        job = Job(id=uuid.uuid4(), name="wp-grande", status="completed", seeds=[], config={})
+        s.add(job)
+        s.flush()
+        u = Url(job_id=job.id, url="https://x.com/a/", url_hash=f"a-{job.id}", host="x.com",
+                path="/a/", is_internal=True, is_html=True, status_code=200,
+                resource_type="html")
+        s.add(u)
+        s.add_all([AdapterEntity(job_id=job.id, adaptador="wordpress", tipo="post",
+                                 id_externo=str(i), url=f"https://x.com/p{i}/",
+                                 url_hash=f"e{i}-{job.id}", url_hash_alt=f"alt{i}-{job.id}")
+                   for i in range(5000)])
+        s.commit()
+        ids = (job.id, u.id)
+    with pg.connect() as c:
+        c.exec_driver_sql("ANALYZE adapter_entities")
+        c.commit()
+    cliente, capturadas = _cliente_que_captura(pg)
+    r = cliente.get(f"/api/jobs/{ids[0]}/urls/{ids[1]}")
+    assert r.status_code == 200, r.text
+    plan = _plan(pg, capturadas, "FROM adapter_entities")
+    assert "ix_adent_job_hash_alt" in plan and "ix_adent_job_tipo" not in plan, plan

@@ -332,8 +332,12 @@ SQLite y Postgres (`PAGERANK_TEST_DATABASE_URL`) la entidad de WordPress en la
 ficha de la URL (por `url_hash` o el otro esquema, nunca una sonda), «Solo en
 WordPress» sin sondas y con busqueda, y el inventario de plugins y tema por los
 CSS y JS con URLs reales del blog de Lopesan (copias de WP Rocket, `ver=1`,
-sellos de tiempo, version igual a la de WordPress, muestra);
+sellos de tiempo, version igual a la de WordPress, muestra por profundidad),
+y en Postgres los planes: la muestra no entra por `urls_pkey` cuando el censo
+va detras de otro job, y la ficha va por `ix_adent_job_hash_alt` y no por
+`ix_adent_job_tipo`;
 `test_wordpress_frontend.py` (Chromium) la tarjeta del Resumen
 (`resumenWordPress`: sin resumen o sin rastro no sale, publicadas frente a
 leidas y censo por tipo, por que no se afirma, sin analizar) y que la casilla
-del modal solo se manda si se cambia frente a lo heredado.
+del modal solo se manda si se cambia frente a lo heredado, y que con «Solo en
+WordPress» abierto las flechas no abren fichas de la tabla oculta.
