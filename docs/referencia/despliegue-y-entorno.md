@@ -145,6 +145,7 @@ CUSTOM_EXTRACTION_TIMEOUT_MS=50           # timeout de cada regex
 CUSTOM_EXTRACTION_PRESUPUESTO_MS=250      # todas las reglas de una pagina; una sola regla que pase de esto cuenta como agotada
 CUSTOM_EXTRACTION_AGOTADOS=3              # timeouts (o reglas lentas) tras los que una regla se desactiva el resto del job
 CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ=2      # API: POST /api/extraccion/probar simultaneos; el siguiente es 429
+CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ=4  # API: pruebas con `url` esperando al worker a la vez (semaforo aparte); la siguiente es 429
 PRUEBA_EN_VIVO_ESPERA_S=35                # API: lo que espera al worker una prueba con `url` (decision 166); luego 504
 PRUEBA_EN_VIVO_DESCARGA_S=25              # worker: tope de la descarga de la prueba en vivo, saltos incluidos
 PRUEBAS_EN_VIVO_A_LA_VEZ=2                # worker: pruebas en vivo atendidas a la vez (hilo propio)

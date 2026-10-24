@@ -45,6 +45,14 @@ MAX_HTML_BYTES = 5 * 1024 * 1024
 # cuesta como mucho UNA regla lenta. lxml suelta el GIL al evaluar.
 PROBAR_CONCURRENCIA = max(1, int(os.getenv("CUSTOM_EXTRACTION_PRUEBAS_A_LA_VEZ", "2")))
 _pruebas = threading.BoundedSemaphore(PROBAR_CONCURRENCIA)
+# La prueba en vivo (decision 166) tiene su propio tope: aqui no gasta CPU,
+# espera a Redis hasta `ESPERA_S`. Con el semaforo de arriba, dos pruebas en
+# vivo lentas (o dos 504 durante un despliegue) dejaban en 429 las de HTML
+# pegado, que tardan milisegundos (revision de #233). Este acota los hilos del
+# threadpool que pueden quedarse esperando al worker.
+PROBAR_EN_VIVO_CONCURRENCIA = max(
+    1, int(os.getenv("CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ", "4")))
+_pruebas_en_vivo = threading.BoundedSemaphore(PROBAR_EN_VIVO_CONCURRENCIA)
 
 
 class ProbarExtraccion(BaseModel):
@@ -182,11 +190,11 @@ def _probar_en_vivo(xm, config: dict, url: str) -> dict[str, Any]:
     except pv.URLNoPermitida as exc:
         raise HTTPException(status_code=422, detail=f"url: {exc}") from None
     xm.compilar(config.get("custom_extraction"), config.get("custom_search"))
-    if not _pruebas.acquire(blocking=False):
+    if not _pruebas_en_vivo.acquire(blocking=False):
         raise HTTPException(
             status_code=429,
-            detail=f"Hay {PROBAR_CONCURRENCIA} pruebas de extraccion en curso; vuelve a "
-                   f"intentarlo en unos segundos")
+            detail=f"Hay {PROBAR_EN_VIVO_CONCURRENCIA} pruebas contra una URL en vivo en "
+                   f"curso; vuelve a intentarlo en unos segundos")
     try:
         try:
             rconn = get_redis()
@@ -201,7 +209,7 @@ def _probar_en_vivo(xm, config: dict, url: str) -> dict[str, Any]:
             raise HTTPException(status_code=503,
                                 detail=f"No se pudo encolar la prueba: {exc}") from None
     finally:
-        _pruebas.release()
+        _pruebas_en_vivo.release()
     if resultado is None:
         raise HTTPException(
             status_code=504,

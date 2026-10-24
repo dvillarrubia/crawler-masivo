@@ -95,7 +95,9 @@ python scripts/reextraer_a_medida.py <job_id> --reglas r.json            # escri
 
 `r.json` lleva `custom_extraction` y/o `custom_search`; se fusiona con las del
 censo (por nombre; `null` quita) y se guarda en `jobs.config`. Toma el candado
-del job y se niega con el job en marcha. Las páginas sin `raw_html` pierden las
+del job y se niega con el job en marcha. Va en una sola transacción: si se
+corta a medias (Ctrl-C, OOM, despliegue) no cambia nada y se puede repetir.
+Las páginas sin `raw_html` pierden las
 filas de las reglas que cambian (quedan «no evaluadas»).
 
 ## Automatic JS-render check

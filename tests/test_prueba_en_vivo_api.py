@@ -155,3 +155,32 @@ def test_la_api_no_carga_curl_cffi(api):
     assert cliente.post("/api/extraccion/probar", json={"url": "https://x.com/", **REGLAS}
                         ).status_code == 200
     assert ("curl_cffi" in sys.modules) == antes
+
+
+def test_la_prueba_en_vivo_no_gasta_los_huecos_de_las_pruebas_locales(api, monkeypatch):
+    """Revision de #233: compartian semaforo, y dos pruebas en vivo esperando
+    al worker (35 s) dejaban en 429 una prueba con HTML pegado."""
+    import threading
+
+    from api.routers import extraccion
+
+    cliente, doble = api
+    monkeypatch.setattr(extraccion, "_pruebas_en_vivo", threading.BoundedSemaphore(1))
+    assert extraccion._pruebas_en_vivo.acquire(blocking=False)   # una en vivo esperando
+    try:
+        r = cliente.post("/api/extraccion/probar", json={
+            "html": "<p class='precio'>3</p>", **REGLAS})
+        assert r.status_code == 200, r.text
+        r = cliente.post("/api/extraccion/probar", json={"url": "https://x.com/", **REGLAS})
+        assert r.status_code == 429 and "en vivo" in r.json()["detail"]
+    finally:
+        extraccion._pruebas_en_vivo.release()
+    # Y al reves: las locales llenas no frenan la en vivo.
+    monkeypatch.setattr(extraccion, "_pruebas", threading.BoundedSemaphore(1))
+    assert extraccion._pruebas.acquire(blocking=False)
+    try:
+        doble.contestar = None
+        r = cliente.post("/api/extraccion/probar", json={"url": "https://x.com/", **REGLAS})
+        assert r.status_code == 504
+    finally:
+        extraccion._pruebas.release()

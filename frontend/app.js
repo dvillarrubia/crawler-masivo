@@ -1180,7 +1180,12 @@ function app() {
       }
       f.profile_id = profileId;
       this.createPerfiles = [];
-      if (!f.cliente_id) return;
+      if (!f.cliente_id) {
+        // Sin cliente el servidor no hereda nada: lo que la pestaña enseñaba
+        // como heredado pasa a ser propio y se manda (revision de #233).
+        _extraccionSinCliente(f);
+        return;
+      }
       try {
         this.createPerfiles = await api(`/clients/${f.cliente_id}/profiles`);
       } catch (e) { this.createError = e.message; return; }
@@ -1201,6 +1206,10 @@ function app() {
         nuevo.profile_id = f.profile_id;
         nuevo.configTab = f.configTab;
         nuevo.seeds = (r.seeds && r.seeds.length) ? r.seeds.join('\n') : f.seeds;
+        // Las reglas propias no son herencia: cambiar de cliente o de perfil
+        // no las borra (revision de #233). Con el nombre de una heredada, la
+        // propia la sustituye, como en el servidor.
+        _extraccionConservarPropias(nuevo, f);
         if (!nuevo.name) {
           const perfil = this.createPerfiles.find(p => p.id === f.profile_id);
           const cliente = this.clientes.find(c => c.id === f.cliente_id);
@@ -5134,14 +5143,35 @@ function _extraccionDesdeConfig(f, cfg) {
     .map(([n, r]) => _xmFila(n, r, true));
 }
 
+// Al volver a «Sin cliente»: las heredadas se quedan como propias (se ven y
+// se mandan) y las quitadas desaparecen.
+function _extraccionSinCliente(f) {
+  f.extraccion = (f.extraccion || []).filter(fila => !(fila.heredada && fila.quitada))
+    .map(fila => (fila.heredada
+      ? { ...fila, heredada: false, quitada: false, _firma: null, _original: null }
+      : fila));
+}
+
+// Lleva a `nuevo` (recien heredado) las reglas propias de `viejo`.
+function _extraccionConservarPropias(nuevo, viejo) {
+  const propias = (viejo.extraccion || []).filter(fila => !fila.heredada);
+  const nombres = new Set(propias.map(fila => (fila.nombre || '').trim()).filter(Boolean));
+  nuevo.extraccion = [
+    ...(nuevo.extraccion || []).filter(fila => !nombres.has((fila.nombre || '').trim())),
+    ...propias,
+  ];
+}
+
 // Lo que se manda en `config.custom_extraction`, o null si no hay nada que
-// mandar (todo heredado y sin tocar, o sin reglas).
+// mandar (todo heredado y sin tocar, o sin reglas). Sin cliente no hay
+// herencia en el servidor: una fila marcada heredada se manda como propia.
 function _extraccionAConfig(f) {
   const salida = {};
+  const hereda = !!f.cliente_id;
   for (const fila of (f.extraccion || [])) {
     const nombre = (fila.nombre || '').trim();
     if (!nombre) continue;
-    if (fila.heredada) {
+    if (fila.heredada && hereda) {
       if (fila.quitada) salida[nombre] = null;
       else if (JSON.stringify(_xmRegla(fila)) !== fila._firma) salida[nombre] = _xmRegla(fila);
     } else if (!fila.quitada) {

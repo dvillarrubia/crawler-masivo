@@ -173,6 +173,34 @@ def test_lo_que_impide_reextraer(sesion):
     assert _filas(sesion, jid)[next(iter(_filas(sesion, jid)))].valor == "viejo"
 
 
+def test_si_muere_a_medias_no_queda_nada_cambiado(sesion, monkeypatch):
+    """Revision de #233: con un commit por lote, un fallo en el tercer lote
+    dejaba las filas del primero con la regla NUEVA y `jobs.config` con la
+    VIEJA, y la comparacion entre censos (127) lo tomaba por cambio del sitio."""
+    from shared import extraccion_a_medida as xm
+
+    jid, u = _poblar(sesion)
+    monkeypatch.setattr(rx, "LOTE", 1)        # un lote por URL: con_html, sin_html, muro...
+    original = xm.aplicar
+
+    def aplicar(*a, **kw):
+        if kw.get("bloqueada"):               # el muro, en un lote posterior
+            raise RuntimeError("muere a medias")
+        return original(*a, **kw)
+
+    monkeypatch.setattr(xm, "aplicar", aplicar)
+    with pytest.raises(RuntimeError, match="a medias"):
+        rx.reextraer(sesion, jid, NUEVAS, candado=_siempre)
+    sesion.expire_all()
+    f = _filas(sesion, jid)
+    # Ni las filas del primer lote ni las borradas del segundo han cambiado.
+    assert f[(u["con_html"], "sku")].valor == "viejo"
+    assert (u["con_html"], "texto") not in f
+    assert f[(u["sin_html"], "gtm")].valor == "viejo"
+    cfg = sesion.get(Job, jid).config
+    assert cfg["custom_extraction"]["sku"]["expresion"] == ".sku" and "gtm" in cfg["custom_search"]
+
+
 def test_main_lee_el_fichero_y_sale_con_2_si_no_se_puede(sesion, tmp_path, monkeypatch, capsys):
     import shared.database
 

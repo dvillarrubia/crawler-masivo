@@ -41,7 +41,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from shared.red import es_host_privado
 
@@ -96,6 +96,12 @@ def comprobar_forma(url: str) -> None:
         raise URLNoPermitida("solo se prueban URLs http:// o https://")
     if not partes.hostname:
         raise URLNoPermitida("la URL no tiene host")
+    if "%" in partes.hostname:
+        # curl decodifica los %XX del host antes de resolver y conectar: la
+        # clave de CURLOPT_RESOLVE (el host sin decodificar) no casaria y curl
+        # resolveria por su cuenta otro nombre (`127.0.0.%31` es 127.0.0.1).
+        # Ningun host de Internet los necesita (revision de #233).
+        raise URLNoPermitida("el host lleva escapes %XX: escribelo sin ellos")
     if partes.username or partes.password:
         raise URLNoPermitida("la URL lleva credenciales: quitalas")
     try:
@@ -129,6 +135,26 @@ class Descarga:
     ip: str
     saltos: list[dict[str, Any]] = field(default_factory=list)
     ms: float = 0.0
+
+
+def _url_ascii(url: str) -> str:
+    """*url* con el host internacionalizado en ASCII (punycode). Lo que se
+    comprueba, lo que se fija con CURLOPT_RESOLVE y lo que pide curl tiene que
+    ser el MISMO nombre: si curl recibe `sítio.example` y lo pasa el solo a
+    punycode, la clave fijada (unicode) no casa y resuelve por su cuenta. Con
+    el host ya en ASCII curl no lo transforma (salvo mayusculas, que en la
+    clave no cuentan)."""
+    comprobar_forma(url)
+    partes = urlsplit(url)
+    host = partes.hostname or ""
+    if host.isascii():
+        return url
+    try:
+        ascii_ = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise URLNoPermitida(f"host no valido: {host}") from None
+    netloc = ascii_ + (f":{partes.port}" if partes.port is not None else "")
+    return urlunsplit((partes.scheme, netloc, partes.path, partes.query, partes.fragment))
 
 
 def _destino(url: str, resolver, permitida) -> tuple[str, int, str]:
@@ -174,6 +200,7 @@ def descargar_segura(url: str, *, user_agent: str | None = None,
     actual = url
     saltos: list[dict[str, Any]] = []
     for _ in range(max_saltos + 1):
+        actual = _url_ascii(actual)
         host, puerto, ip = _destino(actual, resolver, permitida)
         queda = timeout_s - (time.monotonic() - inicio)
         if queda <= 0:

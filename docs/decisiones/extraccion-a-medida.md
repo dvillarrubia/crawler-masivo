@@ -352,7 +352,14 @@
      si es de `custom_extraction`. Lo único que se dice en el cliente es lo que
      no necesita preguntar (nombre vacío, mal formado o repetido). Las
      búsquedas (`custom_search`) no tienen pestaña todavía: las heredadas se
-     heredan igual y la prueba las evalúa.
+     heredan igual y la prueba las evalúa. **Volver a «Sin cliente»** deja sin
+     herencia en el servidor: las heredadas pasan a propias (se ven sin la
+     marca y se mandan enteras) y las quitadas desaparecen; y por si acaso,
+     sin `cliente_id` una fila marcada heredada se manda igual. **Cambiar de
+     cliente o de perfil** rehace el formulario con lo heredado y conserva las
+     reglas propias (con el nombre de una heredada, la propia la sustituye,
+     como en el servidor); lo que se cambió en una heredada sí se pierde,
+     porque era sobre la definición del origen anterior.
    - **«Probar» contra una URL en vivo: la API no descarga nada.**
      `POST /api/extraccion/probar` con `url` valida la forma y las reglas (422
      sin encolar), deja la petición en `extraccion:pruebas` con un `vence` y
@@ -361,7 +368,14 @@
      mientras un despliegue recrea el worker). La atiende un **hilo propio del
      worker** (`_atender_pruebas_en_vivo`), no el bucle principal: ese bloquea
      `BRPOP_TIMEOUT` en la cola de rastreos y duerme con los huecos llenos, y
-     la prueba la espera una persona. Dos a la vez (`PRUEBAS_EN_VIVO_A_LA_VEZ`);
+     la prueba la espera una persona. **El hilo lo arranca `main()` una sola vez,
+     antes del bucle** (`_arrancar_pruebas_en_vivo`): arrancado desde el
+     vigilante, los primeros 5 min tras cada despliegue no había quien atendiera
+     (504) y luego nacía uno nuevo cada 5 min sin morir ninguno. En la API la
+     espera tiene **su propio semáforo** (`CUSTOM_EXTRACTION_PRUEBAS_EN_VIVO_A_LA_VEZ`,
+     4; luego 429): esperar a Redis no gasta CPU, y con el de las pruebas
+     locales dos esperas de 35 s dejaban en 429 una prueba con HTML pegado.
+     En el worker, dos a la vez (`PRUEBAS_EN_VIVO_A_LA_VEZ`);
      sin hueco no se saca nada de la cola, y lo vencido se descarta sin pedir.
      Mismo `evaluar_documento` que la prueba con HTML pegado y que el script
      de abajo, sobre la misma `aplicar` del spider (23, 39). Respuesta: estado,
@@ -371,7 +385,11 @@
      y la descarga sale del VPS, que ve Postgres, Redis y la API. Las
      redirecciones se siguen a mano (`allow_redirects=False`, tope 10) y cada
      destino pasa por: esquema http/https, sin credenciales, la forma del host
-     de `shared/red.py`, y **resolverlo aquí con todas sus IP globales** (una
+     de `shared/red.py`, un host sin escapes `%XX` (curl los decodifica antes de
+     resolver, así que la clave fijada no casaría y curl resolvería otro nombre:
+     `127.0.0.%31` es 127.0.0.1) y en ASCII (un host internacionalizado se pasa
+     a punycode antes de comprobarlo, fijarlo y pedirlo, para que curl no lo
+     convierta por su cuenta), y **resolverlo aquí con todas sus IP globales** (una
      sola privada y no se pide: con una A pública y otra interna, curl podría
      elegir la interna). **La IP comprobada se fija con `CURLOPT_RESOLVE`**
      para esa petición, así que un DNS que contesta una IP pública a la
@@ -400,7 +418,12 @@
      las reglas de `--reglas` con las del censo como la herencia y las guarda
      en `jobs.config`, para que la comparación (127) vea la definición de
      verdad. Toma **el candado del job** (el del análisis) y se niega con el
-     job en marcha: el spider escribe la tabla sin candado. Una página sin
+     job en marcha: el spider escribe la tabla sin candado. **Todo va en una
+     transacción**, con las reglas de `jobs.config` en el mismo commit que las
+     filas: con un commit por lote, un proceso muerto a medias dejaba filas de
+     la regla nueva bajo la config vieja, y la comparación (127) y la columna
+     «cambios» habrían dado por cambio del sitio lo que era de la regla.
+     Mientras corre, quien lee ve el censo como estaba. Una página sin
      `raw_html` no se puede evaluar: pierde las filas de las reglas que cambian
      o se quitan (ya no dicen nada de la regla nueva) y conserva las de las que
      no cambian; el resumen dice cuántas se quedan así. Un muro, `pagina_bloqueada`.

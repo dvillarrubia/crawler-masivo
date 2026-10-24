@@ -66,6 +66,7 @@ class _Manejador(BaseHTTPRequestHandler):
             "/salto-rebind": f"http://rebind.example:{puerto}/secreto",
             "/salto-localhost": f"http://localhost:{puerto}/secreto",
             "/salto-ftp": "ftp://sitio.example/x",
+            "/salto-escapado": f"http://127.0.0.%31:{puerto}/secreto",
             "/bucle": "/bucle",
         }
         if self.path in saltos:
@@ -94,8 +95,10 @@ def servidor():
         srv.shutdown()
 
 
+IDN = "sítio.example"
+IDN_ASCII = IDN.encode("idna").decode("ascii")
 DNS = {"sitio.example": ["127.0.0.1"], "rebind.example": ["127.0.0.2"],
-       "mixto.example": ["127.0.0.1", "10.0.0.7"]}
+       "mixto.example": ["127.0.0.1", "10.0.0.7"], IDN_ASCII: ["127.0.0.1"]}
 
 
 def _resolver(host, puerto):
@@ -123,6 +126,8 @@ def _vistas():
     "http://localhost/", "http://127.0.0.1/", "http://0x7f000001/", "http://2130706433/",
     "http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://10.1.2.3/", "http://169.254.169.254/",
     "http://redis:6379/", "http://api.internal/", "http://x.com:99999/",
+    # curl decodifica los %XX del host: la IP fijada no seria la usada.
+    "http://127.0.0.%31/", "http://%6cocalhost.localdomain./", "http://sitio%2eexample/",
 ])
 def test_la_forma_rechaza_lo_que_no_es_internet(url):
     with pytest.raises(pv.URLNoPermitida):
@@ -162,8 +167,17 @@ def test_una_redireccion_se_sigue_comprobando_cada_salto(servidor):
     assert [s["status"] for s in d.saltos] == [302]
 
 
+def test_un_host_internacionalizado_se_comprueba_y_se_fija_en_ascii(servidor):
+    """Lo que se resuelve, lo que se fija y lo que pide curl es el mismo nombre
+    (punycode): con el unicode en la clave de CURLOPT_RESOLVE, un curl con IDN
+    lo convertiria el solo y resolveria por su cuenta (revision de #233)."""
+    d = pv.descargar_segura(f"http://{IDN}:{servidor}/ficha", **KW)
+    assert d.status == 200 and d.ip == "127.0.0.1"
+    assert _Manejador.vistas[-1] == ("/ficha", f"{IDN_ASCII}:{servidor}")
+
+
 @pytest.mark.parametrize("ruta", ["/salto-ip-privada", "/salto-metadatos", "/salto-rebind",
-                                  "/salto-localhost", "/salto-ftp"])
+                                  "/salto-localhost", "/salto-ftp", "/salto-escapado"])
 def test_una_redireccion_a_la_red_interna_se_corta_antes_de_pedirla(servidor, ruta):
     with pytest.raises(pv.URLNoPermitida):
         pv.descargar_segura(f"http://sitio.example:{servidor}{ruta}", **KW)

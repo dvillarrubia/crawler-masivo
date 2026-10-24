@@ -1518,8 +1518,6 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
         return ultima_vez
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
-    threading.Thread(target=_atender_pruebas_en_vivo, args=(_shutdown_event,),
-                     name="pruebas-en-vivo", daemon=True).start()
     return ahora
 
 
@@ -1696,6 +1694,28 @@ def _recuperar_enriquecidos(rconn) -> None:
 # Prueba de reglas a medida contra una URL en vivo (#34, decision 166)
 # ---------------------------------------------------------------------------
 PRUEBAS_EN_VIVO_A_LA_VEZ = max(1, int(os.getenv("PRUEBAS_EN_VIVO_A_LA_VEZ", "2")))
+_hilo_pruebas: threading.Thread | None = None
+_hilo_pruebas_candado = threading.Lock()
+
+
+def _arrancar_pruebas_en_vivo() -> threading.Thread:
+    """Arranca el hilo de pruebas en vivo UNA vez por proceso, y lo devuelve.
+
+    Lo llama `main()` al arrancar, antes del bucle. Al principio se arrancaba
+    dentro de `_quizas_recuperar` y pasaban dos cosas (revision de #233): los
+    primeros `RECOVERY_INTERVAL_SECONDS` tras cada arranque —tras cada
+    despliegue— nadie atendia la cola y toda prueba daba 504, y despues nacia
+    un hilo nuevo cada 5 min que no terminaba nunca, cada uno con su conexion,
+    su pool y su semaforo: el tope `PRUEBAS_EN_VIVO_A_LA_VEZ` pasaba a ser 2xN.
+    Si el hilo ya esta vivo no se crea otro."""
+    global _hilo_pruebas
+    with _hilo_pruebas_candado:
+        if _hilo_pruebas is None or not _hilo_pruebas.is_alive():
+            _hilo_pruebas = threading.Thread(target=_atender_pruebas_en_vivo,
+                                             args=(_shutdown_event,),
+                                             name="pruebas-en-vivo", daemon=True)
+            _hilo_pruebas.start()
+        return _hilo_pruebas
 
 
 def _atender_pruebas_en_vivo(parada: threading.Event) -> None:
@@ -1837,6 +1857,9 @@ def main() -> None:
 
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
+    # Una vez y antes del bucle: desde el primer segundo hay quien atienda las
+    # pruebas en vivo (decision 166).
+    _arrancar_pruebas_en_vivo()
     ultima_recuperacion = time.time()
     # A cero para que la primera vuelta ya mire las programaciones: si el
     # worker arranca justo despues de un despliegue, el disparo perdido de ese

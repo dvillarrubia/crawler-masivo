@@ -151,13 +151,18 @@ prueba de reglas y su tope de pruebas a la vez, uso, y fusion al guardar un
 perfil o al cambiar el cliente; trabajo de la API),
 Edicion y prueba en vivo (decision 166): `test_prueba_en_vivo.py` (curl_cffi de
 verdad contra un servidor local: forma de la URL, todas las IP globales, IP fijada
-con `CURLOPT_RESOLVE`, redireccion a IP privada o a un nombre que resuelve a una
+con `CURLOPT_RESOLVE`, host con `%XX` rechazado y host internacionalizado fijado
+en punycode, redireccion a IP privada o a un nombre que resuelve a una
 cortada sin pedirla, tope de saltos y de bytes, `atender` con estado por regla,
 y el hilo real del worker contra Redis con `REDIS_TEST_URL`; trabajo del
 crawler), `test_prueba_en_vivo_api.py` (la API encola y espera, 422 sin encolar,
-504 sin worker, codigos de lo que no pudo el worker; trabajo de la API),
-`test_reextraer_a_medida.py` (el script contra SQLite y, con Postgres, el
-candado del job) y `test_cambios_extraidos_api.py` (la columna `cambios` con
+504 sin worker, codigos de lo que no pudo el worker, semaforo propio frente a
+las pruebas locales; trabajo de la API),
+`test_reextraer_a_medida.py` (el script contra SQLite, que muerto a medias no
+deja nada cambiado, y, con Postgres, el candado del job),
+`test_extraccion_modal_frontend.py` (`app.js` en Chromium: al volver a «Sin
+cliente» las heredadas se lanzan, y cambiar de perfil conserva las propias),
+el hilo de pruebas en vivo arrancado una vez en `main()` en `test_worker.py` y `test_cambios_extraidos_api.py` (la columna `cambios` con
 los guardias de la 127),
 `test_spider_a_medida.py` (el `SeoSpider` real con el arnes: lo emitido, la
 marca `config_invalida` en Redis y, con Postgres, lo guardado tras reanudar,
