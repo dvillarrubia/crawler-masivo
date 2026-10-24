@@ -9,8 +9,9 @@ pregunta = un hallazgo):
   intencion, no mezclada: una comparativa es comercial y MOFU, pero una pagina
   de precios tambien es comercial y suele ser BOFU (#39).
 - `intencion_busqueda`: que quiere quien escribe una busqueda real de Search
-  Console. Las MISMAS opciones que `intencion_pagina`, para poder compararlas
-  (el desajuste ponderado por clics, `shared/intencion.py`).
+  Console. Las opciones de `intencion_pagina` salvo las dos que solo tiene la
+  pagina (`SOLO_PAGINA`, decision 180), para poder compararlas (el desajuste
+  ponderado por clics, `shared/intencion.py`).
 
 Las opciones se redactan como «quien llegaria aqui» (la redaccion con la que
 jev-seo obtuvo 59 de 59 repeticiones iguales, comentario de #39), con lo que
@@ -20,7 +21,12 @@ ficha de hotel sin el widget de reserva en el texto encajaban en dos opciones
 o en ninguna (revision de la decision 176). `unclear` es la salida obligatoria de
 #9: sin ella el modelo tiene que elegir aunque el estado no diga nada.
 
-Sin evaluar (#8): sin juego etiquetado no hay umbral, todo sale `incierto` y
+`intencion_pagina` v2 (decision 180): medida la v1 contra la etiqueta (76,5 %),
+el fallo era `navigational`, que juntaba la portada, lo corporativo y las
+paginas para quien ya es cliente o alumno. La v2 deja `navigational` solo para
+la portada y separa `existing_users` y `corporate`.
+
+Sin umbral (#8): sin juego etiquetado con su criterio no hay umbral, todo sale `incierto` y
 nada va a un informe. La incidencia `intencion_desalineada` esta preparada
 pero apagada hasta que `intencion_pagina` e `intencion_busqueda` tengan umbral.
 """
@@ -32,63 +38,106 @@ from shared.preguntas import Pregunta
 # Etiquetas comunes de la pagina y de la busqueda. El orden es el de la
 # pantalla; no cambiar una etiqueta sin subir la version de las dos preguntas.
 INTENCIONES = ("informational", "commercial", "transactional", "navigational", "local", "unclear")
+# La pagina tiene dos mas (decision 180): una busqueda no es «de usuarios ya
+# existentes» ni «corporativa» (se reparten entre navegacional e
+# informacional), una pagina si. Con ellas el desajuste no se afirma
+# (`shared.intencion.SOLO_PAGINA`).
+SOLO_PAGINA = ("existing_users", "corporate")
+INTENCIONES_PAGINA = INTENCIONES[:-1] + SOLO_PAGINA + ("unclear",)
 ETAPAS = ("tofu", "mofu", "bofu", "post_purchase", "out_of_funnel", "unclear")
 
 INTENCION_PAGINA = Pregunta(
     nombre="intencion_pagina",
     tipo="choice",
-    version=1,
+    # v2 (decision 180): `navigational` solo para la portada y dos opciones
+    # que la busqueda no tiene, `existing_users` y `corporate`. La v1 metia en
+    # `navigational` todo lo «de la organizacion» y Jev solo acertaba 50 de 88.
+    version=2,
     instrucciones=(
         "Judging by this web page's address ('ruta'), title, main heading, the start of its main "
-        "content and the schema.org types it declares ('tipos_schema', may be empty), which search "
-        "need is the page built to satisfy? Classify the page itself, not the searches it might "
-        "rank for, and pick its MAIN purpose. 'contenido' is only the first few hundred characters "
-        "of the main text: booking widgets, prices and buy buttons usually do NOT appear in it, so "
-        "their absence is not evidence. Types such as Hotel, HotelRoom, Product, Service, Event or "
-        "Offer mean the page presents something that can be booked or bought. Apply the first rule "
-        "that fits: (1) the site's home page ('/' or a language root such as '/en/') is "
-        "navigational; (2) a page about ONE specific product, service, hotel, room, treatment, "
-        "ticket or offer that the site sells or books is transactional, even if its text only "
-        "describes it; (3) a page that lists several products, services or hotels to choose from, "
-        "including the site's own range ('our hotels in <place>', 'hotels with day pass'), is "
-        "commercial; (4) a page whose main content is where a venue is or how to get there is "
-        "local; (5) any other page about the organisation itself (about us, corporate, contact, "
-        "careers, employee area, legal) is navigational; (6) guides, news, ideas and destination "
-        "information are informational."
+        "content and the schema.org types it declares ('tipos_schema', may be empty), who is the "
+        "page built for and what do they want from it? Classify the page itself, not the searches "
+        "it might rank for, and pick its MAIN purpose. 'contenido' is only the first few hundred "
+        "characters of the main text and may start with a menu or breadcrumbs: booking widgets, "
+        "prices and buy buttons usually do NOT appear in it, so their absence is not evidence. "
+        "Types such as Hotel, HotelRoom, Product, Service, Event or Offer mean the page presents "
+        "something that can be booked or bought. Apply the FIRST rule that fits: "
+        "(1) the site's home page or a language or country root ('/', '/en/', '/mx/') is "
+        "navigational, and nothing else is; "
+        "(2) a page for people who ALREADY are customers, students, guests, members or employees "
+        "of the organisation, or who have just sent a form, so they can use a service or do "
+        "something there, is existing_users: log in, private or customer area, manage a booking, "
+        "warranty or support requests, manuals, technical documentation or downloads for owners "
+        "or installers, academic regulations, timetables and calendars, library, tutoring, "
+        "mentoring or career services for enrolled students, student clubs and associations, the "
+        "alumni community, exchanges for enrolled students, a thank-you or confirmation page "
+        "(signing up for the first time is rule 3); "
+        "(3) a page about ONE specific product, service, hotel, villa, room, programme, course, "
+        "ticket, event, information session, visit or offer that the site sells, books or lets "
+        "outsiders sign up for or request, is transactional, even if its text only describes it; "
+        "this includes 'why choose our <one programme>' and signing up for the first time to a "
+        "membership, loyalty programme, private area or subscription; "
+        "(4) a page that lists or presents several products, services, programmes or hotels to "
+        "choose from (also the site's own range, 'our hotels in <place>'), a selection of several "
+        "products for sale written as an article ('7 books about X'), a page arguing why to choose "
+        "the organisation for a broad area ('why study at <university>', 'why study management at "
+        "<university>'), or case studies and a portfolio, is commercial; "
+        "(5) a page whose main content is where a venue is, how to get there, its opening hours, "
+        "or a locator of branches, shops or technicians, is local; "
+        "(6) any other page about the organisation itself rather than about what it sells is "
+        "corporate: about us, values, history, governance, sustainability, compliance and product "
+        "safety notices, quality-assurance or accreditation documents, grants it received, legal "
+        "texts (privacy, cookies, terms), careers, press room, social media links, a general "
+        "contact page, its staff directory or a staff profile, its schools, institutes, research "
+        "groups and research projects, and its agreements with other institutions; "
+        "(7) guides, how-to, news, articles, explanations, FAQs, destination information, and "
+        "explanations of how admission, enrolment, scholarships or financing work for newcomers, "
+        "are informational."
     ),
     opciones={
         "informational": (
-            "Rule 6: someone who wants to learn or find information: a guide, how-to, explanation, "
-            "news, ideas, things to do, information about a destination, a blog post (also when it "
-            "mentions a product in passing). NOT a page that presents one specific thing to book or "
-            "buy, or lists several of them to choose from."),
+            "Rule 7: someone who wants to learn something: guides, news, articles, FAQs, "
+            "destinations, how admission or financing work. NOT a selection of products for sale "
+            "(commercial), NOT the organisation's own research or quality documents (corporate), "
+            "NOT regulations or timetables for people already enrolled (existing_users)."),
         "commercial": (
-            "Rule 3: someone choosing between options: a listing or category page of several "
-            "products, services or hotels (also when they are all the site's own), comparisons, "
-            "'best of' lists, reviews. NOT the page of one specific product, service or hotel "
-            "(that is transactional), and NOT a list of places to visit or things to do "
-            "(informational)."),
+            "Rule 4: someone choosing between several products, services, programmes or hotels, "
+            "including the site's own range, product selections written as articles, 'why choose "
+            "us' for a broad area, case studies. NOT the page of one specific item "
+            "(transactional), NOT places to visit (informational), NOT services for existing "
+            "students or customers (existing_users)."),
         "transactional": (
-            "Rule 2: someone ready to act on one specific product, service, hotel, room, "
-            "treatment, ticket or offer: the page that presents it, whether or not the booking or "
-            "buy option shows in the text you get. NOT a page listing several of them, and NOT the "
-            "home page."),
+            "Rule 3: someone ready to act on one specific product, service, hotel, room, programme, "
+            "course, event, session, visit or offer, or signing up for the first time, whether or "
+            "not the booking or price shows in the text. NOT a page listing several (commercial), "
+            "NOT using an account someone already has (existing_users)."),
         "navigational": (
-            "Rules 1 and 5: someone who wants this brand or organisation itself: the home page, "
-            "about us, corporate information, contact, careers, an employee or customer area, legal "
-            "texts. NOT the page of one specific product, service or hotel, and NOT a page listing "
-            "several of them, even if people reach them by searching the brand."),
+            "Rule 1: only the home page or a language or country root. NOT any other page about "
+            "the organisation (corporate) or for its existing customers or students "
+            "(existing_users), even if people reach it by searching the brand."),
         "local": (
-            "Rule 4: someone who wants to find or get to a physical place: the main content is the "
-            "address, directions, a map, opening hours or a store locator. NOT a hotel, venue or "
-            "service page that merely names its location."),
+            "Rule 5: someone who wants to find or get to a physical place: address, directions, "
+            "map, opening hours, a locator. NOT a page that merely names its location, NOT a "
+            "general contact page (corporate)."),
+        "existing_users": (
+            "Rule 2: someone who already is a customer, student, guest, member or employee, or has "
+            "just sent a form, and comes to use a service: login, private area, support, manuals, "
+            "regulations, timetables, library, student services, a confirmation page. NOT a page "
+            "that tries to win a newcomer (transactional or commercial), NOT legal or corporate "
+            "information (corporate)."),
+        "corporate": (
+            "Rule 6: someone who wants to know about the organisation itself: about us, "
+            "governance, sustainability, compliance, quality documents, legal texts, careers, "
+            "press, contact, staff, its institutes and research. NOT the home page (navigational), "
+            "NOT services for existing users (existing_users), NOT what it sells (transactional or "
+            "commercial)."),
         "unclear": (
-            "The address, title, heading, content and types are too thin, generic or contradictory "
-            "to apply any rule. Do not use it just because two options are close: apply the rules "
-            "in order."),
+            "Too thin, generic or contradictory to apply any rule (for example, the content is "
+            "only the site menu). Do not use it just because two options are close."),
     },
-    descripcion=("Intencion de la pagina (#39): informacional, comercial, transaccional, "
-                 "navegacional, local o no esta claro. Sin evaluar (#8): todo incierto."),
+    descripcion=("Intencion de la pagina (#39, v2 decision 180): informacional, comercial, "
+                 "transaccional, navegacional (solo la portada), local, usuarios existentes, "
+                 "corporativa o no esta claro. Sin umbral: todo incierto."),
 )
 
 ETAPA_EMBUDO = Pregunta(

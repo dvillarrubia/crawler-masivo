@@ -216,6 +216,7 @@ const RESPUESTA_ENRIQ = {
   utilidad: 'utilidad', otro: 'otro', ninguna: 'ninguna',
   informational: 'informacional', commercial: 'comercial', transactional: 'transaccional',
   navigational: 'navegacional / marca', local: 'local', unclear: 'no está claro',
+  existing_users: 'para quien ya es cliente o alumno', corporate: 'corporativa / institucional',
   tofu: 'TOFU', mofu: 'MOFU', bofu: 'BOFU', post_purchase: 'postventa',
   out_of_funnel: 'fuera del embudo', sin_respuesta: 'sin respuesta',
 };
@@ -386,6 +387,7 @@ const fmt = {
     pagina_de_marca: 'Página de marca: sus búsquedas (las de marca) no cuentan, no se puede comparar.',
     manda_la_marca: 'La mayoría de sus clics son de marca: no se afirma desajuste.',
     pagina_sin_intencion: 'Sin intención de página clara.',
+    pagina_sin_equivalente: 'Página para usuarios existentes o corporativa: ninguna búsqueda tiene esa intención, no se compara.',
     sin_clics_que_cuenten: 'Ningún clic de búsquedas que cuenten.',
   })[m] || '',
   campoDiff: c => ({

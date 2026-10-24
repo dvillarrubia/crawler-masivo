@@ -35,6 +35,8 @@ import logging
 import uuid
 from urllib.parse import urlsplit
 
+from shared.preguntas.intencion import SOLO_PAGINA
+
 logger = logging.getLogger(__name__)
 
 # Cuantas busquedas por pagina se preguntan, por clics. Medido el 24-oct-2026
@@ -47,6 +49,9 @@ MAX_BUSQUEDAS_POR_PAGINA = 10
 MIN_CLICS = 1
 # Lo que no cuenta para el desajuste (ver el docstring del modulo).
 NO_CUENTAN = ("navigational", "unclear")
+# `SOLO_PAGINA` (importado arriba): intenciones que solo tiene la pagina
+# (decision 180); ninguna busqueda las tiene, asi que una pagina asi saldria
+# siempre con un 0 % alineado y no se compara.
 AMBITO_BUSQUEDA = "busqueda"
 # Por encima de estas URLs se lee la ventana entera una vez (ver
 # `busquedas_por_url`).
@@ -369,7 +374,8 @@ def desajuste(intencion_pagina: str | None, busquedas: list[dict],
 
     - la intencion de la pagina se conoce y se puede comparar: ni `unclear` ni
       `navigational` (sus busquedas, las de marca, no cuentan, asi que una
-      pagina de marca saldria siempre con un 0 % alineado);
+      pagina de marca saldria siempre con un 0 % alineado), ni una de las que
+      la busqueda no tiene (`SOLO_PAGINA`, decision 180);
     - la intencion que mas clics concentra, CONTANDO las de marca, es otra y no
       es la marca: 1.000 clics de marca y 5 informacionales no dicen que la
       home este desalineada;
@@ -392,11 +398,14 @@ def desajuste(intencion_pagina: str | None, busquedas: list[dict],
     clasificadas = {k: v for k, v in por_intencion.items() if k != "unclear" and v > 0}
     dominante = (sorted(clasificadas.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
                  if clasificadas else None)
-    comparable = intencion_pagina is not None and intencion_pagina not in NO_CUENTAN
+    comparable = (intencion_pagina is not None and intencion_pagina not in NO_CUENTAN
+                  and intencion_pagina not in SOLO_PAGINA)
     alineados = contables.get(intencion_pagina, 0) if comparable else 0
     parte = (alineados / total) if (total and comparable) else None
     if not comparable:
-        sin_afirmar = "pagina_de_marca" if intencion_pagina == "navigational" else "pagina_sin_intencion"
+        sin_afirmar = ("pagina_de_marca" if intencion_pagina == "navigational"
+                       else "pagina_sin_equivalente" if intencion_pagina in SOLO_PAGINA
+                       else "pagina_sin_intencion")
     elif dominante == "navigational":
         sin_afirmar = "manda_la_marca"
     elif not total:

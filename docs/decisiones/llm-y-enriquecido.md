@@ -919,3 +919,141 @@
      (sacar lo que una regla barata marca como candidato y Jev contesta «no»).
      Y no pone umbral a nada: las tres preguntas siguen sin umbral hasta medir
      con estos juegos.
+<a id="d180"></a>
+180. **`intencion_pagina` v2 y `title_describe_contenido` v2: navegacional solo
+   para la portada, dos opciones para lo que no es de búsqueda, y el title que
+   nombra la página es el nivel alto aunque sea corto** (#8, #16, #39; mide lo
+   que dejaron la 176 y la 177). Las dos preguntas suben de versión (huellas en
+   `HUELLAS`) y siguen **sin umbral**: todo sale `incierto`.
+   - **Medido el 24-oct-2026** (producción, solo lectura; juegos de 200 de la
+     159 en `/data/archivo/jev/`, etiqueta de Claude a ciegas con nota y
+     `[duda: x]`, respuestas de Jev de ese día; `evaluar` en un contenedor
+     efímero). Ningún estado repetido.
+     - `intencion_pagina` v1: **76,5 %**. Casi todo el fallo es
+       `navigational`: 88 reales y Jev acierta 50 (recall 0,57), con 29
+       `informational` y 7 `transactional`; su precisión es 0,98, así que
+       cuando lo dice acierta: el problema es la definición, no el modelo. La
+       otra cara es `informational`: 65 respuestas para 33 reales (precisión
+       0,49). Del resto, `transactional` 58 de 61 y `commercial` 13 de 16.
+       Saldría un umbral común de 0,84, que **no se pone**: la etiqueta con la
+       que se calcula es la de una definición que esta decisión cambia.
+     - `title_describe_contenido` v1: **78,5 %**. 192 de las 200 etiquetas son
+       «describe el contenido» y Jev las baja a 2 (29) o a 1 (11), varias con
+       confianza 0,00-0,1. El juego casi no tiene negativos (7 de nivel 2, 1 de
+       nivel 0): mide bien si Jev reconoce un buen title, no si detecta uno malo.
+   - **Por qué `navigational` fallaba.** La regla 5 de la v1 («cualquier otra
+     página sobre la organización») metía en la misma opción la portada, lo
+     corporativo (ESG, privacidad, sala de prensa, directorio, proyectos de
+     investigación, documentación de calidad) y las páginas para quien **ya**
+     es cliente, alumno o miembro (normativa académica, horarios, biblioteca,
+     tutorías, clubes, login, confirmación de un formulario). La intención de
+     una *búsqueda* navegacional es clara (nombra la marca); la de una
+     *página* no, y Jev, con razón, veía «informational» en una normativa o en
+     un horario. Revisadas a mano las **47 discrepancias**: 38 eran
+     `navigational` de la etiqueta; con la v2 serían 16 `existing_users`, 11
+     `corporate`, 5 `commercial` («por qué estudiar en La Salle», un portfolio),
+     4 `transactional` (un programa o una actividad concretos a los que
+     apuntarse), 1 `informational` y 1 `unclear` (el contenido es el menú).
+     Las otras 9 conservan su opción y 6 de ellas tienen ahora la frontera
+     escrita: las selecciones de libros en venta (comercial, Jev decía
+     informacional), el localizador de servicios técnicos (local), las sesiones
+     informativas a las que apuntarse (transaccional) y la financiación de los
+     estudios (informacional); la oficina con ubicación y horario (local) Jev
+     la llamó navegacional, que la v2 ya no admite fuera de la portada. Quedan
+     2 que la redacción no cambia: «UOC Corporate» (varias soluciones,
+     comercial; Jev transaccional) y las villas de Lopesan sin schema (una,
+     transaccional; Jev comercial con 0,96).
+   - **`intencion_pagina` v2**: ocho opciones con reglas en orden («la primera
+     que encaje», como la 176), cada una con lo que NO es:
+     1. `navigational`: **solo** la portada o una raíz de idioma o país, «and
+        nothing else is».
+     2. `existing_users` (nueva): para quien ya es cliente, alumno, huésped,
+        miembro o empleado, o acaba de enviar un formulario: login, área
+        privada, gestionar una reserva, garantías y soporte, manuales y
+        documentación para quien tiene o instala el producto, normativa
+        académica, horarios, biblioteca, tutorías, mentoría y bolsa de trabajo
+        de alumnos, clubes, alumni, movilidad de alumnos matriculados, gracias y
+        confirmación. Va antes que la transaccional y la comercial: la lista de
+        servicios al estudiante es de esta opción, no un listado comercial.
+     3. `transactional`: UN producto, servicio, hotel, villa, habitación,
+        programa, curso, entrada, evento, sesión informativa, visita u oferta
+        que el sitio vende, reserva o deja solicitar o apuntarse, también «por
+        qué elegir nuestro <programa>» y el **primer** alta en un programa de
+        fidelización, área privada o suscripción (entrar en la cuenta que ya se
+        tiene es la 2).
+     4. `commercial`: varios para elegir, también la selección de varios
+        productos en venta escrita como artículo (los «libros sobre el 23F» de
+        Penguin, `BlogPosting` + `Offer`), «por qué elegirnos» para un área
+        amplia («por qué estudiar Management en…») y los casos de éxito.
+     5. `local`: dirección, cómo llegar, horario de un sitio físico o un
+        localizador de tiendas o técnicos (la página de contacto general, no).
+     6. `corporate` (nueva): la organización en sí y no lo que vende: quiénes
+        somos, valores, gobierno, sostenibilidad, cumplimiento y alertas de
+        seguridad de producto, documentos de calidad o acreditación,
+        subvenciones recibidas, textos legales, empleo, prensa, redes sociales,
+        contacto general, directorio y fichas de personal, sus escuelas,
+        institutos, grupos y proyectos de investigación, y convenios.
+     7. `informational`: guías, noticias, artículos, FAQ, destinos y cómo
+        funciona la admisión, las becas o la financiación para quien llega.
+   - **La búsqueda no cambia** (`intencion_busqueda` sigue en v1 con
+     `INTENCIONES`): una búsqueda no es «de usuarios existentes» ni
+     «corporativa» (se reparten entre marca e informacional). La página tiene
+     `INTENCIONES_PAGINA` = las de la búsqueda + `SOLO_PAGINA`, y el test
+     comprueba que la diferencia son exactamente esas dos. El **desajuste no
+     se afirma** de una página con una de ellas (`sin_afirmar =
+     "pagina_sin_equivalente"`, con su texto en la pantalla): ninguna búsqueda
+     puede casar con ella y saldría siempre un 0 % alineado, el mismo
+     razonamiento que la página de marca de la 176. La pantalla traduce las dos
+     opciones (`RESPUESTA_ENRIQ`) y un test lo comprueba.
+   - **`title_describe_contenido` v2**: primero «qué es la página» (qué ítem
+     presenta, qué sección o listado es, de qué tema trata), avisando de que
+     el H1 puede ser un eslogan y el fragmento un menú, metadatos (editorial,
+     fecha, «pagos 100 % seguros»), la biografía del autor, una cita o el
+     primer elemento de un listado, que son partes de la página y no otro
+     asunto; después, solo si el title lo nombra. La escala:
+     0 otro asunto o engaña · 1 genérico (solo la marca o una etiqueta que
+     valdría para muchas páginas) · 2 algo relacionado pero no exactamente esta
+     página (el ítem padre cuando la página es una parte de él: sus
+     documentos, sus habitaciones, sus opiniones) · 3 nombra el ítem, la
+     sección, el listado o el tema, **aunque sea corto, un nombre propio o una
+     pregunta**. Revisadas a mano las **43 discrepancias**: 22 fichas de libro
+     de Penguin (title = el libro; el fragmento empieza por la editorial y la
+     biografía del autor), 6 hubs de destino de Lopesan (title «Hoteles en X»,
+     H1 eslogan), 4 «¿Por qué estudiar…?», un listado de noticias cuyo H1 es la
+     primera noticia, un aviso legal con H1 «Responsabilidad de los usuarios»,
+     un login, portadas y secciones de La Salle: con la v2, todas al 3 por
+     regla escrita. Las 3 de la otra dirección (etiqueta 2, Jev 3: el title
+     nombra el máster y la página es su documentación de calidad) son el
+     ejemplo del nivel 2. Queda una dudosa: «International» en el listado de
+     proyectos internacionales, que tanto es la sección como una etiqueta
+     genérica.
+   - **Los ejemplos son genéricos**, con marcadores (`'<book title> |
+     <publisher>'`, `'Hotels in <island>'`, `'/mx/'`) y no los del juego: con
+     «El oro de los tigres» en la instrucción, medir sobre el juego que lo
+     contiene inflaría el acierto (la lección de la 169). Un test lo vigila en
+     la del title.
+   - **Las etiquetas del juego v1 no valen para la v2.** En la intención
+     cambian las opciones (dos nuevas y `navigational` reducida a la
+     portada); en el title cambia lo que significa cada nivel. `evaluar` ya
+     rechaza un juego de otra versión; para re-etiquetar está
+     `evaluar_decisiones.py reetiquetar <juego> --salida <juego_v2>`
+     (`para_reetiquetar`): los mismos estados e ids con la versión del catálogo
+     y **sin etiqueta, autor ni nota**, para etiquetar a ciegas sin ver la de
+     la v1. Probado sobre los dos juegos del 24-oct (200 filas cada uno, en
+     local). Siguiente paso: re-etiquetar a ciegas esos dos juegos, `responder
+     --confirmar` (~0,01 $ cada uno) y `evaluar`. Y como las dos v2 se
+     redactaron mirando estos juegos, para el **umbral** hace falta además un
+     juego nuevo de censos no usados aquí (169), y en el title, con titles
+     malos de verdad (los `title_es_generico` positivos y titles de plantilla
+     sin rellenar), que este juego no tiene.
+   - **Coste** (fórmula de la 162, caracteres / 4): la v2 de la intención añade
+     2.461 caracteres de pregunta (5.572 frente a 3.111), unos 600 tokens por
+     llamada: en Lopesan (3.216 llamadas) ~1,9 M tokens y **~0,08 $** más por
+     censo, de 0,24 a ~0,32 $. La del title, 875 caracteres (~220 tokens): en
+     Penguin (3.695 llamadas) ~0,03 $ más. Las opciones se recortaron para no
+     repetir las listas de las reglas: la primera redacción pesaba 6.869.
+   - Fuera: `etapa_embudo` y `intencion_busqueda` (sin medir con este juego;
+     siguen en v1), añadir la ruta al estado del title (habría resuelto las
+     fichas de libro sin tocar la escala, pero cambia el estado y la caché de
+     todos los títulos), y que la pantalla nombre los niveles de un score con
+     los de la versión de hoy aunque las decisiones guardadas sean de la v1.
