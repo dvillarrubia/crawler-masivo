@@ -607,18 +607,33 @@
      (`title_missing`), el placeholder (`title_generico`, decisión 121) y los
      duplicados exactos (`title_duplicate`: ese title hay que cambiarlo igual);
      ni lo que no tiene contenido con el que comparar (menos de 50 palabras,
-     el mismo corte que el soft 404). Del resto, 100 por plantilla.
-   - **`title_generico` → `title_es_generico`** (noul). Se juzga leyendo SOLO
-     el title y el dominio, como en un resultado: si describe el contenido es la
-     pregunta anterior, y juntarlas era mezclar dos criterios (169). Solo titles
-     de **4 palabras o menos sin la marca** (la marca, como la regla: el segmento
-     que está en más de la mitad de los titles del host), sin la portada (su
-     title con la marca sola es «qué dice la portada», #199) y sin los
-     placeholders de la regla. Los duplicados exactos **sí** entran: que 40
-     páginas digan «SAT» lo dice `title_duplicate`, no si «SAT» dice de qué va, y
-     cuestan una llamada (el estado no lleva la ruta). Por plantilla, 50 titles
-     distintos con todas sus URLs. En producción salen «Detalle noticia»
-     (Lopesan), «SAT» (Saunier Duval) o «| Penguin Libros ES».
+     el mismo corte que el soft 404), ni el title que es **solo la marca**
+     («Saunier Duval» en /buscador/): «solo el tema general» por
+     construcción. Del resto, 100 por plantilla.
+   - **`title_generico` → `title_es_generico`** (noul). Se juzga con el
+     **title, el dominio y la ruta**, como en un resultado; sin el contenido:
+     si lo describe es la pregunta anterior, y juntarlas era mezclar dos
+     criterios (169). La ruta entró en la revisión del PR: solo con el title la
+     definición no separaba los casos reales. «SAT» es correcto en la página
+     del servicio (/sat/) y genérico en las 67 fichas de ciudad de Saunier
+     Duval (/sats/a-coruna-100), y «SafiraAqua», «LineAqua» (productos de
+     Saunier Duval) o «Culpa», «Lar», «Lobos» (libros de Penguin) parecían un
+     código hasta que la ruta dice qué son. Las instrucciones dan esos ejemplos
+     de los dos lados; con una ruta opaca (ids o parámetros) se juzga el title
+     solo, y un nombre propio o una sigla que podría nombrar la página es
+     `false` (lo que no se puede afirmar no se afirma). Solo titles de **4
+     palabras o menos sin la marca** (la marca, como la regla: el segmento que
+     está en más de la mitad de los titles del host), sin la portada (su title
+     con la marca sola es «qué dice la portada», #199), sin los placeholders de
+     la regla y **sin los que son solo la marca** («Saunier Duval», «| Penguin
+     Libros ES»): genéricos por definición, no se preguntan; el día que haya
+     incidencia, esos salen por regla. Con dos segmentos distintos que pasan
+     los dos por marca («Detalle | Acme» cuando casi todo el sitio se titula
+     así) no se sabe cuál es la marca y sí se pregunta. Los duplicados exactos
+     entran (que 40 páginas digan «SAT» lo dice `title_duplicate`, no si «SAT»
+     dice de qué va), pero como el estado lleva la ruta cada URL es una
+     llamada: por plantilla, 50 titles distintos y **3 URLs de cada uno**. En
+     producción salen «Detalle noticia» (Lopesan) o «SAT» (Saunier Duval).
    - **`schema_visible` → `schema_contradice_contenido`** (noul). Solo la
      **contradicción**: el texto guardado es el contenido principal, no la
      página (el HTML no se guarda; el precio del lateral no está), así que que un
@@ -628,7 +643,15 @@
      fechas de un evento y validez de una oferta; JSON-LD y microdatos, nunca el
      bloque entero; una lista de más de 3 valores es un listado y no entra) y
      hasta 1.000 caracteres de `content_text` alrededor de sus números y de
-     cualquier precio, valoración, fecha o disponibilidad escrita. **Sin nada
+     cualquier precio, valoración, fecha o disponibilidad escrita, repartidos
+     por prioridad: primero las ventanas de un valor declarado, después las
+     genéricas, cada una entera o recortada alrededor de su coincidencia, nunca
+     un corte al final (la revisión del PR vio que ese corte se comía el
+     precio declarado cuando salía detrás de otros, y Jev habría visto
+     `Offer.price: 178` frente a «99 / 120 / 135 / 150»: una contradicción
+     fabricada por el estado; en las 2.315 páginas reales con un valor
+     declarado escrito, ninguna se queda sin ninguno y 3 pierden alguno por
+     sitio, frente a 5 antes). **Sin nada
      visible con lo que comparar, no se pregunta.** Ni autor ni fecha de
      publicación: el extractor quita la firma, y lo único que se encontraría es
      el mismo nombre, nunca uno distinto. Un `@graph` son varios bloques (el
@@ -641,10 +664,15 @@
 
      | Censo (indexables) | title_contenido | title_generico | schema_visible |
      |---|---|---|---|
-     | Lopesan 1e7ea651 (3.216) | 1.661 URLs, 0,050 $ | 101 URLs, 89 llamadas, 0,002 $ | 151, 0,005 $ |
-     | Saunier Duval 40ea596f (1.080) | 240, 0,007 $ | 461 URLs, 178 llamadas, 0,004 $ | 0 (sin valores verificables) |
-     | Penguin d3fda8a5 (78.457) | 3.695, 0,11 $ | 7.651 URLs, 2.654 llamadas, 0,067 $ | ~900, ~0,03 $ (465 y 0,014 $ en 1/32 de las URLs) |
-     | La Salle 49ddb8f5 (13.069) | 818, 0,024 $ | 1.359 URLs, 632 llamadas, 0,016 $ | 10 de 26 comparables (una plantilla), 0,0003 $ |
+     | Lopesan 1e7ea651 (3.216) | 1.661 URLs, 0,050 $ | 101 URLs y llamadas, 0,0035 $ | 151, 0,005 $ |
+     | Saunier Duval 40ea596f (1.080) | 240, 0,007 $ | 366 URLs, 205 llamadas, 0,007 $ | 0 (sin valores verificables) |
+     | Penguin d3fda8a5 (78.457) | 3.695, 0,11 $ | 4.694 URLs, 2.661 llamadas, 0,093 $ | ~900, ~0,03 $ (465 y 0,014 $ en 1/32 de las URLs) |
+     | La Salle 49ddb8f5 (13.069) | 818, 0,024 $ | 894 URLs, 845 llamadas, 0,029 $ | 10 de 26 comparables (una plantilla), 0,0003 $ |
+
+     El genérico es tras la revisión (ruta en el estado, 3 URLs por title):
+     antes, sin ruta y con todas las URLs de cada title, costaba 0,002 $,
+     0,004 $, 0,067 $ y 0,016 $. Llamadas por debajo de URLs: la misma página
+     con y sin www es el mismo estado.
 
      Sin la muestra por plantilla, la alineación costaba 0,093 $ en Lopesan y
      0,83 $ en Penguin, y el genérico de Penguin 0,55 $ (todas sus fichas de

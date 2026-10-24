@@ -481,7 +481,7 @@ HUELLAS |= {("intencion_pagina", 1): "a4589e2b81d4a4fb",
             }
 # Title frente al contenido, title generico y marcado frente a lo visible (#16, #17, decision 177).
 HUELLAS |= {("title_describe_contenido", 1): "d55396cb489ef138",
-            ("title_es_generico", 1): "c337521a7552f8f2",
+            ("title_es_generico", 1): "9abc084f764fc672",
             ("schema_contradice_contenido", 1): "591101cbca2ef33f",
             }
 

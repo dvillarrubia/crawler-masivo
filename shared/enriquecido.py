@@ -311,9 +311,9 @@ def _modulos_coherencia() -> list[Modulo]:
             nombre="title_generico",
             titulo="Title generico",
             descripcion=("Si el title, quitada la marca, no identifica la pagina («Detalle noticia», "
-                         "«SAT»). Solo titles de 4 palabras o menos sin la marca, sin la portada y sin "
+                         "«SAT»). Solo titles de 4 palabras o menos sin la marca (y no solo la marca), sin la portada y sin "
                          "los placeholders que ya dice la regla; hasta 50 titles distintos por "
-                         "plantilla. Sin evaluar (#8): las respuestas salen inciertas."),
+                         "plantilla y 3 URLs de cada uno. Sin evaluar (#8): las respuestas salen inciertas."),
             preguntas=("title_es_generico",),
             construir_estados=c.estados_title_generico,
             filtrar_urls=c.candidatos_title_generico,

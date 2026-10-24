@@ -5,8 +5,9 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
 - `title_describe_contenido` (score): si el title dice de que va el contenido.
   Solo el asunto; ni el estilo, ni la longitud, ni las palabras clave.
 - `title_es_generico` (noul): si el title, quitada la marca, no identifica la
-  pagina. Se juzga leyendo SOLO el title, como en un resultado de busqueda; si
-  ademas describe o no el contenido es la pregunta anterior.
+  pagina. Se juzga con el title, el dominio y la ruta, como en un resultado de
+  busqueda (la ruta dice QUE es la pagina: «SAT» en /sats/a-coruna-100 frente a
+  /sat/); si ademas describe o no el contenido es la pregunta anterior.
 - `schema_contradice_contenido` (noul): si lo visible contradice un valor del
   marcado (precio, valoracion, fecha de un evento u oferta, disponibilidad).
   Solo la contradiccion: que un valor no aparezca en los fragmentos no prueba
@@ -52,21 +53,31 @@ TITLE_ES_GENERICO = Pregunta(
     tipo="noul",
     version=1,
     instrucciones=(
-        "Read only this page title and the website's domain, as a searcher would see them in a "
-        "results page. Once the brand or site name is set aside, does the title fail to identify "
-        "what this specific page is about? Answer true when nothing that names a subject is left: "
-        "the title is only the brand or domain, a placeholder or default text (Home, Untitled, New "
-        "page, Default, Welcome, Lorem ipsum, {{title}}), a code or acronym that means nothing to a "
-        "searcher, or a label so general it would fit many different pages of the site (Product, "
-        "Details, News detail, Information, Results, Category, Article, Page 2). Answer false when "
-        "the title names a concrete subject, even in one or two words: a product, a book, a place, "
-        "a person, a service, a topic, or a clearly identified section or function of the site "
-        "(Contact, Privacy policy, Hotel offers, Careers). A title that is too long, keyword-stuffed, "
-        "badly written or in another language but names its subject is NOT generic."
+        "You see a page title, the website's domain and the page's URL path, as a searcher would "
+        "in a results page. Set the brand or site name aside. Does the rest of the title fail to "
+        "name what this specific page is? Use the path only to tell what kind of page it is and "
+        "which item it is about (a product, a book, a city, an article, a section); do not judge "
+        "whether the title matches the page's content in detail. "
+        "Answer true when the title is only the brand or domain; placeholder or default text (Home, "
+        "Untitled, New page, Default, Welcome, Lorem ipsum, {{title}}); a reference code (REF-2231, "
+        "P00123, Node 45); a label that would fit many pages of the site (Product, Details, News "
+        "detail, Information, Results, Category, Article, Page 2); or when the path shows the page "
+        "is about one specific item and the title only names the general section or service it "
+        "belongs to ('SAT' on /sats/a-coruna-100, 'Hotels' on /hotels/costa-meloneras, 'News detail' "
+        "on /news/2026/new-opening). "
+        "Answer false when the title names the item or section the path points to, even in one or "
+        "two words and even if it is a proper name a stranger would not recognise: a product or book "
+        "name ('SafiraAqua' on /products/safiraaqua.html, 'Culpa' on /es/novela/123-libro-culpa), a "
+        "place, a person, a topic, or the section itself when the page is that section ('SAT' on "
+        "/sat/, 'Contact' on /contact, 'Hotel offers' on /offers/). If the path is opaque (only ids "
+        "or parameters), judge the title alone, and a proper name or an acronym that could name the "
+        "page is false. NOT generic either: a title that is too long, keyword-stuffed, badly written "
+        "or in another language but names its subject, or one that names a concrete subject "
+        "different from the path (that is a different question)."
     ),
     opciones={
-        "true": "Without the brand, the title does not say what the page is about (brand only, placeholder or a label that fits many pages).",
-        "false": "The title names a concrete subject or a clearly identified section, even briefly.",
+        "true": "Without the brand, the title does not name this page: brand only, placeholder, code, a label that fits many pages, or only the section of a page about one specific item.",
+        "false": "The title names the item or section this page is, even briefly or with a proper name.",
     },
     descripcion=("Title que no identifica la pagina, mas alla de la lista cerrada de la decision "
                  "121 (#16). Sin evaluar (#8): todo incierto."),
