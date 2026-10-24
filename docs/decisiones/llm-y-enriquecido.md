@@ -1077,3 +1077,109 @@
      fichas de libro sin tocar la escala, pero cambia el estado y la caché de
      todos los títulos), y que la pantalla nombre los niveles de un score con
      los de la versión de hoy aunque las decisiones guardadas sean de la v1.
+
+<a id="d181"></a>
+181. **`tipo_pagina` v2: «qué hace la página», no «de qué ítem habla», con las
+   fronteras que fallaron en la v1 medida** (#8, #12; mide lo que dejó la
+   178). La pregunta sube a la versión 2 (huella en `HUELLAS`) y sigue **sin
+   umbral**: todo sale `incierto` y ninguna plantilla es `propagable`.
+   - **Medido el 24-oct-2026**: 300 páginas de Lopesan, Penguin, Saunier
+     Duval, La Salle y Workoholics, etiquetadas a ciegas y revisadas, con las
+     respuestas de Jev a la v1: **229/300 (76 %)**. `ficha_producto` tiene
+     recall 1,0 y `articulo` 0,96; el fallo está en lo que se les cuela y en
+     las opciones que casi nunca salen:
+     1. **`ficha_producto` de más** (115 predichas para 88 reales): «por qué
+        estudiar <área> aquí», una actividad o un paquete (son
+        `landing_comercial`, 7); financiación, becas, pagos, intercambio y
+        clases de apoyo para el alumno (`ayuda`, 7); instalaciones y servicios
+        propios del campus que no se venden (`corporativa`, 6); memorias e
+        informes de acreditación de una titulación (`legal`, 4). La página
+        **nombra** un programa y Jev la tomaba por su ficha.
+     2. **`landing_comercial` casi nunca** (5 de 22): campañas de marca,
+        captación (jornadas de puertas abiertas, sesiones informativas, charlas
+        para familias, concursos), paquetes (bodas, viajes de fin de curso),
+        «por qué estudiar aquí», la presentación comercial a un tipo de cliente.
+     3. **`legal` se escapa** (19 de 29): documentación de calidad y
+        acreditación (también como lista de documentos), el sistema de calidad
+        publicado por obligación legal, la normativa académica, el aviso de
+        cofinanciación pública al inicio de la página de un proyecto y las
+        memorias de sostenibilidad (Jev las veía como `listado`).
+     4. **`ayuda` frente a `listado`** (6): hubs de horarios, catálogos de
+        biblioteca y portales de búsqueda, la página que reúne las herramientas
+        para profesionales; y **`corporativa` frente a `listado`** (4): la tabla
+        de convenios sin páginas propias, los departamentos.
+     5. Menores: la portada `/de` (Jev `listado`), una página de una sola
+        palabra (Jev `articulo`), los grupos de investigación propios (Jev
+        `perfil`) y los proyectos de I+D propios (Jev `articulo`).
+   - **El criterio general**, en las instrucciones: nombrar un producto, curso
+     o programa no hace a la página su ficha; se pregunta qué hace por el
+     visitante. Presentar UN ítem para venderlo o reservarlo es
+     `ficha_producto`; persuadir o invitar a un evento, `landing_comercial`;
+     explicar cómo pagar, inscribirse o recibir apoyo, `ayuda`; presentar lo
+     propio que no se vende (instalaciones, servicios internos, investigación),
+     `corporativa`; publicar lo que exige una norma, `legal`.
+   - **Cada frontera en la parte afirmativa de UNA opción** (antes del primer
+     «Not», como exige `test_tipo_pagina.py`) y excluida tras el «Not» de las
+     otras; 28 casos nuevos en `CASOS_FRONTERA`, agrupados por patrón:
+     - `ficha_producto` dice ahora «presentado como ese ítem: qué es, qué
+       incluye o cuesta, sus características o su temario» y excluye por
+       escrito las cuatro cosas que se quedaba (landing, ayuda, corporativa,
+       legal). La parte afirmativa no pierde nada de la v1 (producto, hotel,
+       habitación, libro, curso o grado, plan; su restaurante, spa o una
+       asignatura), para no tocar su recall.
+     - `landing_comercial`: paquete con lo que incluye (boda, viaje,
+       estancia), experiencia promocionada en varios establecimientos, campaña
+       de marca, presentación comercial a un tipo de cliente («qué te
+       ofrecemos»), «por qué estudiar aquí / por qué elegirnos» para un área
+       entera o la organización (para un programa que se presenta sigue siendo
+       su ficha, como la 180) y la captación (jornada de puertas abiertas,
+       sesión informativa, charla, concurso). Una lista de ofertas sigue
+       siendo `listado`.
+     - `ayuda`: cómo pagar, financiación, becas, inscripción; intercambio,
+       movilidad y prácticas; clases de apoyo y servicios para quien ya está
+       matriculado o es cliente; horarios, calendarios académicos, catálogos y
+       portales de biblioteca **también como hub que enlaza a ellos**, y la
+       página que reúne las herramientas para profesionales. `utilidad`
+       excluye las instrucciones de inscripción o pago.
+     - `listado` dice que lleva a páginas **del mismo tipo** (productos,
+       artículos, hoteles, ofertas, eventos, personas) y se queda el hub de
+       sección que es poco más que enlaces a sus subsecciones (lo etiquetado
+       así: el proceso de admisión que reparte a grados y másteres); excluye los
+       recursos prácticos (`ayuda`) y las tablas de departamentos o
+       instituciones socias sin página propia (`corporativa`).
+     - `corporativa`: estructura y departamentos, convenios e instituciones
+       socias, **grupos de investigación propios** (la decisión: `corporativa`,
+       no `perfil`, que se queda con personas y entidades de fuera), líneas y
+       proyectos de I+D propios, e instalaciones, laboratorios, campus,
+       incubadoras y centros propios que se presentan pero no se venden. El
+       restaurante o el spa de UN hotel siguen siendo parte de su ficha.
+     - `legal`: normativa académica o interna, sistema de calidad publicado por
+       obligación legal, informes de verificación, seguimiento o acreditación
+       y documentos oficiales de un programa o producto (también su lista),
+       memorias de sostenibilidad y la página que abre con un aviso de
+       cofinanciación pública antes de describir un proyecto.
+     - `home` admite `/de` con o sin barra; `otro`, la página cuyo contenido
+       propio son una o dos palabras (y `articulo` la excluye).
+   - **Sin sobreajustar**: criterios generales (servicio propio que no se
+     vende, página de captación, documentación por obligación) y ningún
+     nombre del juego en lo que se envía: un test vigila «La Salle», «Salle»,
+     «Lopesan», «Saunier», «Penguin», «Workoholics», «FEDER», «822/2021»,
+     «VSMA» y «Technova». Las URLs están solo en los comentarios de
+     `CASOS_FRONTERA`, que no se envían.
+   - **Riesgos que hay que mirar al medir**: `articulo` excluye ahora la
+     presentación de los proyectos de investigación propios (una noticia sobre
+     uno debería seguir siendo `articulo`), y `ayuda` crece mucho (horarios,
+     becas, prácticas): puede comerse páginas que eran `listado` o
+     `corporativa` en la v1 y acertaban.
+   - **Coste** (fórmula de la 162, caracteres / 4): la pregunta enviada pasa de
+     4.868 a 8.280 caracteres (instrucciones de 626 a 1.070, opciones de unos
+     4.100 a 6.955), **+3.412 caracteres, ~853 tokens por llamada**. Como se
+     pregunta por muestra de plantilla (178), por censo es poco: Salle (558
+     llamadas) ~0,48 M tokens, **~0,02 $** más; Penguin (405) ~0,015 $;
+     Lopesan (262) ~0,01 $; Saunier (153) ~0,006 $, a 0,042 $/Mtok.
+   - **La v2 se mide tras el merge en un juego nuevo, con otra semilla** y
+     censos o páginas que no estén en el de 300: está redactada mirando sus
+     errores, y medirla sobre él inflaría el acierto (169, 180). Las
+     etiquetas de la v1 sirven de referencia, pero `evaluar` rechaza un juego
+     de otra versión; el orquestador llama a Jev (`responder --confirmar`) y
+     evalúa. Solo con esa medida se podrá hablar de umbral.

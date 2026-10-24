@@ -533,3 +533,21 @@ def test_la_api_da_la_propuesta_por_plantilla_y_el_tipo_de_la_pregunta(tmp_path,
     assert api.get(f"/api/jobs/{jid}/enrichment/{rid}/plantillas").json()["pregunta"] == "tipo_pagina"
     import uuid
     assert api.get(f"/api/jobs/{jid}/enrichment/{uuid.uuid4()}/plantillas").status_code == 404
+
+
+def test_v2_criterios_generales_y_sin_nombres_del_juego():
+    """Decision 181: la v2 dice «que hace la pagina» (vender un item, captar,
+    explicar como pagar o pedir ayuda, presentar lo propio que no se vende,
+    publicar lo obligatorio) en vez de «de que item habla», y sus ejemplos no
+    salen del juego de 300 con el que se midio la v1: lo inflarian (169, 180)."""
+    p = tp_preguntas().TIPO_PAGINA
+    assert p.version == 2
+    assert "ask what the page does for the visitor" in p.instrucciones
+    # ficha_producto excluye por escrito las cuatro cosas que se quedaba de mas.
+    no_es = p.opciones["ficha_producto"].split(" Not ", 1)[1]
+    for otra in ("(landing_comercial)", "(ayuda)", "(corporativa)", "(legal)"):
+        assert otra in no_es, otra
+    enviado = p.instrucciones + " ".join(d or "" for d in p.opciones.values())
+    for del_juego in ("La Salle", "Salle", "Lopesan", "Saunier", "Penguin", "Workoholics", "FEDER",
+                      "822/2021", "VSMA", "Technova"):
+        assert del_juego not in enviado, del_juego

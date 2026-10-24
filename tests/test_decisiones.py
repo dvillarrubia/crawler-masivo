@@ -488,6 +488,8 @@ HUELLAS |= {("title_describe_contenido", 1): "d55396cb489ef138",
 HUELLAS |= {("intencion_pagina", 2): "660b56e6bc5b9def",
             ("title_describe_contenido", 2): "cfb30e2f6f487516",
             }
+# v2 del tipo de pagina con los fallos medidos de la v1 (decision 181).
+HUELLAS |= {("tipo_pagina", 2): "d54b4e098aee62fa"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():
