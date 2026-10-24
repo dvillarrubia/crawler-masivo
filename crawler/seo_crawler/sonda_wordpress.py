@@ -322,8 +322,9 @@ class AdaptadorWordPressMixin:
         dos primeras peticiones que esperan el robots.txt de un host, y a las
         demas `None` (= todo permitido). Medido en el arnes: con la peticion a
         `/wp-json/` en `start_requests`, robots.txt la prohibia y se pedia
-        igual. Cuando llega la respuesta de una pagina, el robots.txt de su
-        host ya esta leido.
+        igual. Lo arregla la decision 164 para todas las peticiones; desde
+        aqui se sigue pidiendo porque es cuando se ve la raiz que anuncia la
+        semilla, y el robots.txt de su host ya esta leido.
         """
         if not self._wp_activo() or self._wp_raiz:
             return

@@ -1286,10 +1286,9 @@
      peticiones que esperan el robots.txt de un host y `None` (todo permitido)
      a las demás: medido en el arnés, con `Disallow: /wp-json/` la petición
      desde `start_requests` salía igual. Al llegar la respuesta de la semilla,
-     el robots.txt de su host ya está leído. (El fallo de Scrapy afecta a
-     cualquier petición que espere el primer robots.txt de un host junto con
-     otras dos; hoy son la semilla, la sonda de soft 404 y el robots.txt de los
-     sitemaps. Queda en `pendiente.md`.)
+     el robots.txt de su host ya está leído. (El fallo de Scrapy lo arregla
+     la decisión 164 para todas las peticiones; pedir desde la semilla se
+     queda porque además es cuando se ve la raíz que anuncia.)
    - **Qué se lee**: el índice (nombre, home, `show_on_front`, namespaces →
      plugin SEO), `wp/v2/types` y `wp/v2/taxonomies` para saber qué tipos y
      taxonomías hay (fuera los internos del núcleo: menús, patrones,

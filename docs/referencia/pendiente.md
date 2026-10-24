@@ -70,17 +70,6 @@ order of priority:
   Resumen, «Solo en WordPress» en el Explorador sobre `GET /wordpress/entidades` y la
   entidad en la ficha de la URL), el inventario de plugins por `?ver=` y el hallazgo 4
   (sitemap frente a contenido, descartado por ahora: ver la decision).
-- **Robots.txt y peticiones concurrentes (Scrapy 2.19, Twisted 26.4)**: en
-  `scrapy/downloadermiddlewares/robotstxt.py`, `robot_parser` (lineas 86-116) guarda un
-  `Deferred` por host (l. 91) y cada peticion que espera lo hace con
-  `await maybe_deferred_to_future(parser)` (l. 115). `Deferred.asFuture` (Twisted,
-  `defer.py` l. 1191) CONSUME el resultado: tras el primer que espera, la cadena sigue
-  con `None`, y `process_request_2` con `rp=None` deja pasar todo. Experimento sin red
-  (servidor local, `Disallow: /privado/`, N peticiones en `start`): con N=3 se pide
-  `/privado/2`; con N=5, `/privado/2..4`; igual con reactor asyncio que con select.
-  Hoy al arrancar esperan la semilla, la sonda de soft 404 y el robots.txt de los
-  sitemaps, asi que no muerde salvo con 3+ semillas del mismo host. Arreglo: un
-  middleware propio que reparta el parser a cada espera (decision 161).
 
 ## Reference Documents
 

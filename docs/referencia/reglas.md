@@ -20,9 +20,6 @@
   `adapter_entities`. Decisiones 105, 123, 124, 154 (la de la og:image,
   encendida de serie: acotada por `og_image_muestra` y por plantilla) y 161
   (la REST API de WordPress: dos a la vez, en el slot del host).
-- **Nada que respete robots.txt se pide desde `start_requests` junto a la
-  semilla**: Scrapy 2.19 solo da el parser a las dos primeras peticiones que
-  esperan el robots.txt de un host. Decision 161, `pendiente.md`.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 
