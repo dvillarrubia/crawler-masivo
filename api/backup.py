@@ -602,6 +602,9 @@ def import_backup_zip(
             # Lo que leyo el adaptador de WordPress (decision 161): sin el, los
             # avisos de WordPress no salen al re-analizar el censo importado.
             adapters=job_data.get("adapters"),
+            # Lo que dejaron sin rastrear los topes por carpeta (decision 172):
+            # sin el, el censo importado pasaria por entero en esas carpetas.
+            topes_carpeta=job_data.get("topes_carpeta"),
         )
         db.add(job)
         db.flush()

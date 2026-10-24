@@ -27,6 +27,10 @@ milestone.
 - Sigue bien las redirecciones, incluidas las meta refresh, y guarda cada salto
   de la cadena.
 - Configuración por cliente: reglas de plantillas de cada sitio.
+- Topes de URLs por subdominio o carpeta, aparte del máximo de URLs: cada blog
+  de un multisite con su cupo. Lo que no cabe no se pide, el rastreo dice
+  cuántas URLs dejó en cada parte y el informe no afirma huérfanas ni
+  ausencias ahí (24 de octubre, decisión 172).
 
 ### Auditoría SEO automática
 

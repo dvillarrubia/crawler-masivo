@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
@@ -195,6 +195,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 167 | Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos fuentes que discrepan son un aviso por host | [`indexabilidad`](indexabilidad.md#d167) |
 | 168 | La interfaz del adaptador WordPress, y plugins y tema por la ruta de sus ficheros (el `?ver=` solo con forma de versión) | [`incidencias`](incidencias.md#d168) |
 | 166 | Las reglas a medida se editan en el modal y se prueban contra una URL en vivo que descarga el worker, con la IP comprobada y fijada en cada salto | [`extraccion-a-medida`](extraccion-a-medida.md#d166) |
+| 172 | Topes de URLs por subdominio o carpeta: un cupo aparte de `max_urls`, lo que no cabe no se pide, y ahí no se afirman ausencias | [`render-y-descarga`](render-y-descarga.md#d172) |
 | 169 | Las preguntas se redactan con el criterio de la revisión humana: «legal» incluye lo normativo y el soft 404 se parte en dos (página de utilidad aparte) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d169) |
 | 170 | `data-nosnippet` se mide al rastrear, y solo se avisa cuando esconde el H1 o la mayor parte del contenido de una indexable | [`indexabilidad`](indexabilidad.md#d170) |
 | 171 | robots.txt de prueba: veredicto y línea que decide de un robots.txt pegado, con la lógica del crawler y sin descargar nada | [`indexabilidad`](indexabilidad.md#d171) |

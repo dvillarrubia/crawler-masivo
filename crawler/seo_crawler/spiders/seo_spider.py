@@ -586,6 +586,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         self._salud = VentanaDeSalud()
         self._parar_si_bloqueado: bool = True
         self._bloqueo: str | None = None
+        # Topes por subdominio o carpeta (decision 172): None = el job no
+        # tiene. Un presupuesto aparte de `max_urls` (`shared/topes_carpeta.py`).
+        self._topes = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -743,6 +746,24 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     logger.error("Reglas a medida no validas; el job no se rastrea: %s",
                                  self._config_invalida)
 
+            # -- Topes por subdominio o carpeta (decision 172) --
+            # Como las reglas a medida: si no compilan el job no se rastrea,
+            # nunca se ignoran en silencio (rastrear sin el tope pedido es
+            # justo el censo que alguien quiso evitar).
+            if self.job_config.get("topes_por_carpeta"):
+                from shared.topes_carpeta import Presupuesto, compilar
+
+                try:
+                    reglas_tope = compilar(self.job_config.get("topes_por_carpeta"))
+                    if reglas_tope:
+                        self._topes = Presupuesto(reglas_tope)
+                        logger.info("Topes por carpeta: %s", ", ".join(
+                            f"{r.clave}={r.tope}" for r in reglas_tope))
+                except ValueError as exc:
+                    self._config_invalida = f"topes_por_carpeta: {exc}"[:500]
+                    logger.error("Topes por carpeta no validos; el job no se rastrea: %s",
+                                 self._config_invalida)
+
             # -- Sondas de soft 404 (decision 105) y TLS por host (110) --
             self._iniciar_sondas(job)
             self._iniciar_sonda_tls(job)
@@ -877,6 +898,16 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 .filter(Url.job_id == self.job_id)
                 .yield_per(10_000)
             } - reintentar_hashes
+            if self._topes is not None:
+                # Reanudar: lo ya rastreado gasta su cupo. Lo que se dejo sin
+                # rastrear se vuelve a contar al recorrer la frontera (son
+                # justo sus enlaces pendientes), asi que empieza en cero.
+                for url_previa, hash_previo in (
+                    session.query(Url.url, Url.url_hash)
+                    .filter(Url.job_id == self.job_id)
+                    .yield_per(10_000)
+                ):
+                    self._topes.contar(url_previa, _hash_key(hash_previo))
             if self._already_crawled_hashes:
                 self._resume_mode = True
                 self._crawled_count = (
@@ -910,6 +941,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
         self._persist_sitemaps_leidos()
+        self._persist_topes()
         if self._sondas_activas():
             self._sr_al_cerrar(reason)
         self._wp_al_cerrar(reason)  # decision 161
@@ -1081,6 +1113,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             # Sin dont_filter (ver _page_request): la semilla quedaba fuera del
             # set de vistas, cualquier enlace interno a la home la volvia a
             # rastrear a mayor profundidad y se perdia el depth 0.
+            if self._topes is not None:
+                # Una semilla se pide siempre: la escribio alguien (172).
+                self._topes.contar(normalized, _hash_key(compute_url_hash(normalized)))
             yield self._page_request(normalized, 0)
 
         # Sondas de soft 404 por host (decision 105): no cuentan ni se guardan
@@ -1136,6 +1171,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
             if not self._should_follow(normalized):
+                continue
+            if not self._cabe_en_tope(normalized):
                 continue
             yield self._page_request(normalized, 1)
 
@@ -1227,6 +1264,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 continue
             if not self._should_follow(normalized):
                 continue
+            if not self._cabe_en_tope(normalized):
+                continue
             # The scheduler dupefilter drops these if link discovery already
             # queued the same URL. La profundidad 1 se respeta gracias a
             # middlewares.DepthMiddleware (la de Scrapy la pisaba).
@@ -1310,6 +1349,50 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 sesion.close()
         except Exception as exc:  # noqa: BLE001 -- no tumba el cierre del rastreo
             logger.warning("No se pudo guardar el resumen de sitemaps: %s", exc)
+
+    def _cabe_en_tope(self, url: str) -> bool:
+        """Si *url* cabe en los topes por carpeta del job (decision 172).
+
+        Se pregunta justo antes de encolar una URL nueva (enlace, sitemap,
+        redireccion, frontera de una reanudacion): la que no cabe ni se pide,
+        y cuenta una vez como dejada sin rastrear en su cupo. Las semillas no
+        pasan por aqui: se piden siempre y gastan cupo (`Presupuesto.contar`).
+        """
+        if self._topes is None:
+            return True
+        try:
+            return self._topes.admitir(url, _hash_key(compute_url_hash(url)))
+        except Exception:  # noqa: BLE001 -- una URL rara no tumba el rastreo
+            logger.warning("Tope por carpeta: no se pudo evaluar %s", url, exc_info=True)
+            return True
+
+    def _persist_topes(self) -> None:
+        """Escribe `jobs.topes_carpeta` (decision 172). Con algun tope que
+        dejo URLs sin rastrear, el worker lo convierte en
+        `finish_reason=tope_por_carpeta` si la frontera se agoto: el censo no
+        esta entero y nada puede afirmar ausencias (decision 67).
+        Best-effort: nada de aqui tumba el cierre del rastreo."""
+        try:
+            if self._topes is None:
+                return
+            resumen = self._topes.resumen()
+            from shared.database import SessionLocal
+            from shared.models import Job
+
+            sesion = SessionLocal()
+            try:
+                sesion.query(Job).filter(Job.id == self.job_id).update(
+                    {"topes_carpeta": resumen}, synchronize_session=False)
+                sesion.commit()
+            finally:
+                sesion.close()
+            if self._topes.cortado:
+                logger.warning(
+                    "Topes por carpeta: %d URLs descubiertas sin rastrear en %d partes "
+                    "del sitio; el censo queda INCOMPLETO en ellas",
+                    resumen["sin_rastrear"], len(resumen["cortados"]))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudo guardar el resumen de topes por carpeta: %s", exc)
 
     def _borrar_entradas_anteriores(self, sesion) -> None:
         """Sin entradas en este proceso, fuera las del anterior (decision 126).
@@ -1631,6 +1714,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             return
         if self._already_crawled_hashes and \
                 _hash_key(compute_url_hash(destino)) in self._already_crawled_hashes:
+            return
+        if not self._cabe_en_tope(destino):
             return
         yield self._page_request(destino, depth, saltos)
 
@@ -2511,6 +2596,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                         if self._already_crawled_hashes and \
                                 _hash_key(link_hash) in self._already_crawled_hashes:
                             continue
+                        if self._topes is not None and not self._topes.admitir(
+                                link["url"], _hash_key(link_hash)):
+                            continue  # tope por carpeta (decision 172)
                         yield self._page_request(link["url"], depth + 1)
 
     # ------------------------------------------------------------------

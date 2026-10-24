@@ -4716,6 +4716,8 @@ function _freshForm() {
     include_patterns: '',
     max_url_length: 0,
     max_folder_depth: 0,
+    // Topes por carpeta (decision 172): «regla = tope» por linea.
+    topes_por_carpeta: '',
     // Extraction (Contenido)
     extract_structured_data: true,
     extract_hreflang: true,
@@ -4813,6 +4815,11 @@ function _configDesdeForm(f) {
       max_url_length: parseInt(f.max_url_length) || 0,
       max_folder_depth: parseInt(f.max_folder_depth) || 0,
     },
+    // El formulario llega con lo heredado, asi que lo que se ve es lo que se
+    // lanza: una regla heredada que se borra va como `null`, que en la
+    // herencia la quita (un dict se fusiona por clave y no borraria nada).
+    topes_por_carpeta: _topesDesdeTexto(f.topes_por_carpeta,
+      (f.cliente_id && f._topesBase) || []),
     extraction: {
       extract_structured_data: f.extract_structured_data,
       extract_hreflang: f.extract_hreflang,
@@ -4892,6 +4899,10 @@ function _formDesdeConfig(f, cfg) {
     f._sondasBase[campo] = v;
   }
   sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
+  if (cfg.topes_por_carpeta && typeof cfg.topes_por_carpeta === 'object') {
+    f.topes_por_carpeta = _topesATexto(cfg.topes_por_carpeta);
+    f._topesBase = Object.keys(cfg.topes_por_carpeta);
+  }
   sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
     'extract_page_content', 'store_raw_html']);
   const http = cfg.http || {};
@@ -4904,6 +4915,28 @@ function _formDesdeConfig(f, cfg) {
     'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);
   _wpModoDesdeConfig(f, cfg);
   return f;
+}
+
+// Topes por carpeta (decision 172): «regla = tope» por linea <-> {regla: tope}.
+// Una linea sin numero se manda igual, como texto, para que la API diga que
+// esta mal en vez de tirarla aqui en silencio.
+function _topesDesdeTexto(texto, heredadas) {
+  const salida = {};
+  (heredadas || []).forEach(regla => { salida[regla] = null; });
+  (texto || '').split('\n').forEach(linea => {
+    linea = linea.trim();
+    if (!linea) return;
+    const i = linea.lastIndexOf('=');
+    const regla = (i > 0 ? linea.substring(0, i) : linea).trim();
+    const valor = i > 0 ? linea.substring(i + 1).trim() : '';
+    salida[regla] = /^\d+$/.test(valor) ? parseInt(valor, 10) : valor;
+  });
+  return salida;
+}
+
+function _topesATexto(obj) {
+  return Object.entries(obj || {}).filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k} = ${v}`).join('\n');
 }
 
 function _kvTexto(obj, sep) {

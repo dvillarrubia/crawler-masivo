@@ -3848,6 +3848,7 @@ _TEXTO_TRUNCADO = {
     "max_runtime_reached": "se detuvo al agotar el tiempo máximo",
     "stalled": "se quedó parado y se cerró",
     "cancelled": "se canceló a medias",
+    "tope_por_carpeta": "dejó partes del sitio sin rastrear por los topes por carpeta",
 }
 
 
@@ -3968,9 +3969,16 @@ def get_informe(
     motivo = job.finish_reason or ""
     if job.status != "completed":
         fiabilidad.append(f"El rastreo no terminó bien (estado «{job.status}»): las cifras son parciales.")
-    elif motivo in MOTIVOS_TRUNCADO and not lista:
+    elif motivo in MOTIVOS_TRUNCADO and not lista and motivo != "tope_por_carpeta":
         fiabilidad.append(f"El rastreo {_TEXTO_TRUNCADO.get(motivo, motivo)}: el informe no cubre el "
                           "sitio entero, y lo que no se rastreó no se puede dar por bueno ni por malo.")
+    # Los topes por carpeta (decision 172), con las partes concretas: tambien
+    # junto a otro corte, que no dice cuales se quedaron a medias.
+    from shared.topes_carpeta import describir
+
+    topes = describir(getattr(job, "topes_carpeta", None))
+    if topes:
+        fiabilidad.append(f"{topes}: ahí el informe no cubre todo y no se afirma que falte nada.")
     if motivo == "bloqueado_por_waf":
         fiabilidad.append("Un cortafuegos (WAF) bloqueó parte del rastreo: las páginas detrás del muro "
                           "no se han auditado.")

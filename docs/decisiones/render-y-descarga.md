@@ -950,3 +950,77 @@
    sitio cuyo JavaScript quita un noindex, cambia el canonical o monta el
    menú; los de render necesitan Chromium y en CI se saltan) y
    `tests/test_render_crudo_analisis.py`.
+
+<a id="d172"></a>
+172. **Topes de URLs por subdominio o carpeta: un cupo aparte de `max_urls`, lo que no cabe no se pide, y ahí no se afirman ausencias**
+
+   **Problema.** En un multisite (blogs.uoc.edu, con un blog por carpeta de primer
+   nivel: 14 en su portada el 24-oct) o en un sitio con una parte enorme y poco
+   valiosa (un archivo, un buscador interno), el único freno era `max_urls`, que es
+   global: lo gasta lo que el recorrido encuentra antes, y lo que queda fuera no
+   deja rastro. Y si se corta, todo el censo queda truncado (decisión 67).
+
+   **Decisión.** `JobConfig.topes_por_carpeta`: `{"regla": tope}` con la sintaxis
+   de `shared/topes_carpeta.py`, el único sitio con la regla (la usan `JobConfig`,
+   el spider y el analizador; decisiones 23, 39 y 64):
+
+   - `"*"` = cada carpeta de primer nivel de cada host; las páginas sueltas de la
+     raíz (`/`, `/contacto`) no están en ninguna; `"/blog/"` = ese prefijo, en cada
+     host por separado (`/blog` cuenta como su portada); `"blogs.uoc.edu"` o
+     `"blogs.uoc.edu/*"` = el host entero; `"blogs.uoc.edu/blog/"` y
+     `"blogs.uoc.edu/*/"` = lo mismo solo en ese host.
+   - Una URL tiene como mucho **dos cupos**: el de su host y el de su ruta, que es
+     la regla de ruta más concreta (un prefijo antes que un comodín; entre
+     prefijos, el más largo; a igual longitud, el que nombra el host). Así
+     `{"/blog/": 500, "*": 300}` da 500 al blog y 300 al resto de carpetas, y
+     `{"blogs.uoc.edu/*": 2000, "*": 300}` acota cada blog y el host a la vez.
+   - Es un **dict**: en la herencia cliente → perfil → job se fusiona por regla y
+     `null` la quita (`shared/clientes.fusionar_config`), como cualquier dict.
+   - Una regla que no se entiende (`"blog/"` sin barra inicial, un comodín en
+     medio, un tope 0) **se rechaza** al validar el config, y si llegara al spider
+     el job no se rastrea (`config_invalida`, como las reglas a medida): rastrear
+     sin el tope pedido es justo el censo que alguien quiso evitar.
+
+   En el **spider**, la pregunta se hace al ENCOLAR (enlaces, sitemap, destino de
+   una redirección y frontera al reanudar): lo que no cabe **no se pide**, no basta
+   con no guardarlo. Cuenta URLs del censo de cualquier tipo (un salto o una imagen
+   de la carpeta también gastan cupo; con `"*"` en un WordPress, `/wp-content/` es
+   una carpeta más, y un `"/wp-content/"` más alto lo saca del comodín). Las
+   semillas se piden siempre y gastan cupo. Las sondas (soft 404, respuestas,
+   WordPress) no pasan por aquí. Al reanudar, lo ya rastreado gasta su cupo desde la
+   BD y lo dejado se vuelve a contar al recorrer la frontera (son sus enlaces
+   pendientes). Al cerrar escribe `jobs.topes_carpeta`: por regla (grupos, grupos
+   cortados, rastreadas, sin rastrear) y por grupo cortado; `sin_rastrear` son las
+   URLs **descubiertas** y no pedidas, una vez cada una, así que es un mínimo (lo
+   enlazado solo desde lo no pedido ni se llegó a ver).
+
+   **Lo que no se puede afirmar** (67, 70). Si algún tope dejó URLs sin pedir y la
+   frontera se agotó, el worker escribe `finish_reason = tope_por_carpeta`
+   (`_con_topes`, leyendo `jobs.topes_carpeta`), que entra en `MOTIVOS_TRUNCADO`:
+   así lo reutiliza todo lo que ya trataba el truncado por `max_urls` (la
+   comparación y sus alertas, la evolución, el veredicto del modo lista, los
+   destinos fuera del censo de `enlace_no_rastreable`, WordPress, el informe y
+   `truncated` en el progreso). Un corte por `max_urls`, por tiempo o un
+   estancamiento mandan sobre él. Además, en el **análisis**, las URLs de un grupo
+   cortado no llevan `orphan_page`, `sitemap_orphan`, `not_reachable_from_home`,
+   `canonical_sin_enlazar` ni `solo_enlazada_por_redireccion`: quien las enlaza
+   puede ser justo lo que no se pidió (`SEOAnalyzer._ids_en_parte_topada`, con
+   `PartesCortadas`; si la lista de grupos se recortó al guardarla, pasados 2.000,
+   la regla entera cuenta como cortada). `not_in_sitemap` no cambia: compara una
+   página rastreada con el sitemap leído, y eso no depende de lo que se dejó.
+
+   **Medida.** El spider real contra blogs.uoc.edu desde local, `max_depth` 2,
+   `max_urls` 45 y solo HTML (unas 45 peticiones por pasada): con `{"*": 3}` las 45
+   URLs se reparten en 17 carpetas (3 como mucho cada una) y `jobs.topes_carpeta`
+   cuenta **1.248 URLs descubiertas sin pedir en 15 blogs** (411 en
+   `llenguailiteratura`, 202 en `comunicacio`); sin topes, 13 carpetas de hasta 4 y
+   ningún rastro de lo que quedó fuera. Tests: `tests/test_topes_carpeta.py` (las
+   reglas, la herencia, el presupuesto, el worker y el `SeoSpider` real con el arnés:
+   lo que no cabe no se pide, también desde el sitemap o tras un salto, y las
+   semillas sí), `tests/test_analyzer_topes_carpeta_db.py` y
+   `tests/test_topes_carpeta_api.py` (informe y ficha).
+
+   **Queda fuera.** La comparación entre censos trata el censo topado como
+   truncado entero, como con `max_urls`: afinarla por grupo (afirmar ausencias
+   fuera de las carpetas cortadas) es trabajo aparte. El proxy por cliente tampoco
+   entra aquí.

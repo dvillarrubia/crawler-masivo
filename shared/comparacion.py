@@ -66,6 +66,9 @@ logger = logging.getLogger(__name__)
 MOTIVOS_TRUNCADO = frozenset({
     "max_urls_reached", "max_runtime_reached", "stalled", "cancelled",
     "closespider_itemcount", "closespider_pagecount", "closespider_timeout",
+    # Frontera agotada, pero algun tope por carpeta dejo URLs sin pedir
+    # (decision 172): en esas partes el censo no esta entero.
+    "tope_por_carpeta",
 })
 
 # Cuántas URLs de ejemplo se devuelven por cada tipo de cambio.

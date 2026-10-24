@@ -418,6 +418,12 @@ class JobConfig(BaseModel):
     # adivinar el tamano del sitio ANTES de rastrearlo: quedarse corto truncaba
     # el crawl en silencio y el PageRank salia calculado sobre un grafo parcial.
     max_urls: int | None = Field(default=None, ge=1, le=5_000_000)
+    # Topes por subdominio o carpeta (Ola 8, decision 172): un presupuesto
+    # aparte de `max_urls`, `{"regla": tope}` con la sintaxis de
+    # `shared/topes_carpeta.py` (`"*"` por carpeta de primer nivel, `"/blog/"`,
+    # `"blogs.uoc.edu/*"`). Un dict: en la herencia cliente -> perfil -> job se
+    # fusiona por regla y `null` la quita (por eso `| None` tambien aqui).
+    topes_por_carpeta: dict[str, int | None] = Field(default_factory=dict)
     follow_external: bool = False
     robots_mode: Literal["respect", "ignore", "audit"] = "respect"
     concurrent_requests: int = Field(default=DEFAULT_CONCURRENT_REQUESTS, ge=1, le=256)
@@ -497,6 +503,14 @@ class JobConfig(BaseModel):
             if ua:
                 self.__dict__["user_agent"] = ua
         return self
+
+    @field_validator("topes_por_carpeta")
+    @classmethod
+    def _topes_validos(cls, v: dict) -> dict:
+        from shared.topes_carpeta import compilar
+
+        compilar(v)  # ValueError con todos los motivos juntos
+        return v
 
     @model_validator(mode="after")
     def _lista_sin_sitemap(self):
@@ -841,6 +855,9 @@ class JobDetailResponse(JobResponse):
     # entradas_guardadas, entradas_recortadas}`. NULL = rastreo anterior o sin
     # sitemap.
     sitemaps: dict[str, Any] | None = None
+    # Lo que dejaron sin rastrear los topes por carpeta (decision 172): por
+    # regla y por grupo cortado. NULL = el job no tenia topes.
+    topes_carpeta: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -704,10 +704,10 @@ def _run_job(job_id: str) -> None:
             # antes `finish_reason` solo se escribia DESPUES de analizar —en el
             # analisis automatico de cada rastreo valia NULL—. Se escribe el
             # mismo motivo que al cerrar; la marca de Redis se consume alli.
-            job.finish_reason = _motivo_de_fin(
+            job.finish_reason = _con_topes(job, _motivo_de_fin(
                 job_id, razon_cero=razon_cero, sin_guardar=sin_guardar,
                 stalled=stalled, timed_out=timed_out, consumir=False,
-                bloqueo=bloqueo)
+                bloqueo=bloqueo))
             session.commit()
     except Exception:
         session.rollback()
@@ -749,10 +749,10 @@ def _run_job(job_id: str) -> None:
             # OJO con el orden: el timeout manda. Antes se ponia "finished"
             # por defecto, asi que un rastreo cortado por tiempo afirmaba haber
             # agotado la frontera teniendo 1.051 URLs pendientes.
-            motivo = _motivo_de_fin(
+            motivo = _con_topes(job, _motivo_de_fin(
                 job_id, razon_cero=razon_cero, sin_guardar=sin_guardar,
                 stalled=stalled, timed_out=timed_out, consumir=True,
-                bloqueo=bloqueo)
+                bloqueo=bloqueo))
             job.finish_reason = motivo
             if salud is not None:
                 job.health = salud
@@ -1140,6 +1140,22 @@ def _motivo_de_fin(job_id: str, *, razon_cero: str, sin_guardar: bool, stalled: 
             rc.delete(f"job:{job_id}:finish_reason")
             rc.delete(f"job:{job_id}:bloqueo")
     except Exception:
+        pass
+    return motivo
+
+
+def _con_topes(job, motivo: str) -> str:
+    """`tope_por_carpeta` si la frontera se agoto pero algun tope por
+    carpeta dejo URLs sin pedir (decision 172): el censo no esta entero en
+    esas partes, y el motivo entra en `MOTIVOS_TRUNCADO` para que nada afirme
+    ausencias (decision 67). Lo lee de `jobs.topes_carpeta`, que el spider
+    escribe al cerrar. Un corte por tope de URLs, por tiempo o un
+    estancamiento mandan: cortan mas y ya son truncado."""
+    try:
+        resumen = getattr(job, "topes_carpeta", None)
+        if motivo == "finished" and isinstance(resumen, dict) and resumen.get("sin_rastrear"):
+            return "tope_por_carpeta"
+    except Exception:  # noqa: BLE001 -- sin el dato, el motivo de siempre
         pass
     return motivo
 
