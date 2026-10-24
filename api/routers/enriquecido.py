@@ -98,15 +98,24 @@ def _resultados(db: Session, run_id: uuid.UUID) -> dict:
                       func.count(Decision.id), func.coalesce(func.sum(Decision.coste_usd), 0.0))
              .filter(Decision.run_id == run_id)
              .group_by(Decision.pregunta, Decision.estado, Decision.respuesta).all())
+    from shared.preguntas import CATALOGO
+
     salida: dict[str, dict] = {}
     for pregunta, estado, respuesta, n, coste in filas:
-        p = salida.setdefault(pregunta, {"por_estado": {}, "por_respuesta": {}, "total": 0,
-                                         "coste_usd": 0.0})
+        # El umbral de HOY (decision 169): sin el, la interfaz avisa de que todo
+        # es orientativo aunque alguna fila vieja diga otra cosa; con el, separa
+        # por respuesta lo decidido de lo incierto, que no tiene el mismo aplomo.
+        actual = CATALOGO.get(pregunta)
+        p = salida.setdefault(pregunta, {"por_estado": {}, "por_respuesta": {},
+                                         "decididas_por_respuesta": {}, "total": 0, "coste_usd": 0.0,
+                                         "umbral": actual.umbral if actual else None})
         p["total"] += n
         p["coste_usd"] = round(p["coste_usd"] + float(coste), 8)
         p["por_estado"][estado] = p["por_estado"].get(estado, 0) + n
         if respuesta is not None:
             p["por_respuesta"][respuesta] = p["por_respuesta"].get(respuesta, 0) + n
+            if estado == "decidido":
+                p["decididas_por_respuesta"][respuesta] = p["decididas_por_respuesta"].get(respuesta, 0) + n
     return salida
 
 

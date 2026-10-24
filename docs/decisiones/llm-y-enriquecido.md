@@ -315,7 +315,17 @@
        404», que no es el hallazgo. Hace falta un juego con más positivos (y
        quizá otra redacción) antes de poner umbral a la respuesta «sí».
      - `es_pagina_de_utilidad` v1: 91,5 %; 7 de sus 8 fallos eran páginas de
-       error contadas como de utilidad. La v2 lo dice; sin medir todavía.
+       error contadas como de utilidad. La v2 lo dice y sube al 97,9 %: con
+       **umbral 0,65** decide 39 de las 41 de utilidad reales sin fallo (cota
+       de Wilson 0,91) y 55 «no» con 2 fallos (cota 0,88), sin aviso de clase
+       arrastrada. Es la primera pregunta con umbral; sus etiquetas son de
+       Claude, contrastadas solo en parte con la persona (que marcaba estas
+       páginas como «soft 404» con el criterio viejo).
+   - **La pantalla separa lo decidido de lo incierto**: por respuesta dice
+     cuántas están decididas, la tabla enseña el estado de cada fila y el
+     aviso de «orientativas» depende de si la pregunta tiene umbral HOY, no de
+     si alguna fila salió decidida (antes, una sola decidida lo escondía para
+     todas).
    - **La evaluación separa ahora las respuestas** (`por_respuesta`): cuántas
      de cada una decide el umbral elegido, con qué cota, qué parte de las
      reales recupera y qué umbral tendría esa respuesta sola; y `avisos` dice

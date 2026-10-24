@@ -201,12 +201,12 @@ def _registro_inicial() -> dict[str, Modulo]:
             titulo="Paginas de utilidad (candidatos)",
             descripcion=("Si la pagina es un paso de un proceso sin valor de busqueda: login, "
                          "registro, gracias o confirmacion, baja, check-in, carrito. Sobre los mismos "
-                         "sospechosos que el soft 404 (decision 169). Sin evaluar (#8): las respuestas "
-                         "salen inciertas y no van a ningun informe."),
+                         "sospechosos que el soft 404 (decision 169). Evaluada: decide con confianza "
+                         ">= 0,65 y deja el resto incierto."),
             preguntas=("es_pagina_de_utilidad",),
             construir_estados=estados_soft404,
             filtrar_urls=candidatos_soft404,
-            ejemplo=True,
+            ejemplo=False,
         ),
     ]
     return {m.nombre: m for m in modulos}

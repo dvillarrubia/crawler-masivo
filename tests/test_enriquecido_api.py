@@ -228,3 +228,30 @@ def test_borrar_el_job_se_lleva_sus_ejecuciones(entorno, monkeypatch):
     s = Sesion()
     assert s.query(EnrichmentRun).count() == 0
     s.close()
+
+
+def test_resultados_separan_lo_decidido_y_dicen_el_umbral_de_hoy(entorno, monkeypatch):
+    """Decision 169: el aviso de «orientativas» depende de si la pregunta tiene
+    umbral hoy, y por respuesta se cuenta cuantas estan decididas."""
+    from shared.models import Decision, Url
+
+    api, Sesion, _, jid = entorno
+    monkeypatch.setenv("ENRICHMENT_TOKEN", TOKEN)
+    run = _lanzar(api, jid, token=TOKEN).json()
+    s = Sesion()
+    ids = [u for (u,) in s.query(Url.id).filter(Url.job_id == jid).limit(3)]
+    filas = [("es_pagina_de_utilidad", "decidido", "true"), ("es_pagina_de_utilidad", "incierto", "true"),
+             ("es_soft_404", "incierto", "true")]
+    for n, (preg, estado, resp) in enumerate(filas):
+        s.add(Decision(job_id=jid, url_id=ids[n], run_id=uuid.UUID(run["id"]), clave=f"{n:064d}",
+                       pregunta=preg, version_pregunta=2, estado=estado, respuesta=resp,
+                       origen="modelo", modelo="typesafe/jev-1.13", coste_usd=0.0))
+    s.commit()
+    s.close()
+    res = api.get(f"/api/jobs/{jid}/enrichment/{run['id']}").json()["resultados"]
+    util, soft = res["es_pagina_de_utilidad"], res["es_soft_404"]
+    assert util["umbral"] == 0.65 and util["por_respuesta"] == {"true": 2}
+    assert util["decididas_por_respuesta"] == {"true": 1}
+    assert soft["umbral"] is None and soft["decididas_por_respuesta"] == {}
+    d = api.get(f"/api/jobs/{jid}/enrichment/{run['id']}/decisions").json()
+    assert {x["estado"] for x in d["items"]} == {"decidido", "incierto"}
