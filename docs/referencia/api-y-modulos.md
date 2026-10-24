@@ -56,7 +56,8 @@
 | `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
 | `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
 | `enriquecido.py` | Analisis enriquecido bajo demanda (#40, decision 85): registro de modulos con dependencias, alcance, `estimar()` sin llamar a nadie y `ejecutar()` por lotes en el worker (corte por presupuesto, cancelar, reanudar) |
-| `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Solo una de ejemplo: el catalogo es #9 y la evaluacion #8 |
+| `preguntas/` | Catalogo versionado de preguntas (`Pregunta`: nombre, tipo, instrucciones, opciones, version, modelo fijado). Sin umbral todas: la evaluacion es #8. `intencion.py`: `intencion_pagina`, `etapa_embudo` e `intencion_busqueda` (decision 176) |
+| `intencion.py` | Intencion de la pagina y de sus busquedas (decision 176): estados y filtros de los modulos `intencion_pagina` e `intencion_busquedas` (las 10 busquedas con mas clics de cada pagina en la ventana del censo), `desajuste` ponderado por clics, `incidencias_intencion_desalineada` (apagada sin umbral) e `intencion_frente_a_busquedas` |
 | `almacenamiento.py` | Cuanto ocupa un censo y cuanto ocupa la base (decision 96). Estimacion por filas x bytes/fila; los enlaces se cuentan por censo y con presupuesto, lo que no se puede medir viene a `None`, y un censo archivado se mide por su Parquet (`archivo_bytes`, aparte) |
 | `topes_carpeta.py` | Topes de URLs por subdominio o carpeta (decision 172): `compilar` (valida `topes_por_carpeta`), `grupos_de(url, reglas)` (el cupo de ruta y el de host), `clave_normal` (la misma regla con otra grafia, para la herencia), `Presupuesto` (lo que lleva el spider, con `ClavesCompactas`, y su `resumen` para `jobs.topes_carpeta`), `corto` (si algun tope dejo URLs sin pedir: el worker y el analizador) y `describir` (la frase del informe). La usan `JobConfig`, `fusionar_config`, el spider, el worker y el analizador |
 | `segmentos.py` | Segmentos de negocio (decision 125): `validar`, `Segmentador` (primera regla verdadera, logica de tres valores, repuesto `firma_de_ruta`) y `segmentar(session, job_id, reglas)`, que materializa `urls.segmento` y `jobs.segmentacion`. La usan el analizador y la API |
@@ -93,7 +94,8 @@
 | POST | `/api/jobs/{id}/enrichment/estimate` | Llamadas tras la cache, tokens, coste, tiempo y gasto del mes del cliente. No gasta nada |
 | POST | `/api/jobs/{id}/enrichment` | Crea y encola una ejecucion. **Exige `X-Enrichment-Token`**; sin `ENRICHMENT_TOKEN` en el entorno, 403 |
 | GET | `/api/jobs/{id}/enrichment[/{run_id}]` | Ejecuciones del job / una con su progreso, coste y resultados por pregunta |
-| GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`) |
+| GET | `/api/jobs/{id}/enrichment/{run_id}/decisions` | Respuestas URL a URL (`?pregunta=`, `?respuesta=`, `?page=`); las de una búsqueda traen `busqueda` (decision 176) |
+| GET | `/api/jobs/{id}/enrichment/{run_id}/intencion` | Intención de cada página frente a la de sus búsquedas, ponderado por clics, y el embudo con tráfico por etapa y plantilla (`?limite=`). Orientativo sin umbral (decision 176) |
 | PATCH | `/api/jobs/{id}/enrichment/{run_id}/cancel` | Cancela (pendiente: en el acto; en curso: entre lotes, conservando lo pagado) |
 | GET | `/api/jobs/{id}` | Get job details |
 | PATCH | `/api/jobs/{id}/cancel` | Cancel job |
