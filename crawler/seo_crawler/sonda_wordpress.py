@@ -10,8 +10,12 @@ hereda lo que el rastreo ya hace bien y una descarga aparte tendria que
 repetir: el UA y la huella TLS del navegador (decisiones 11 y 132; un WAF
 tipo F5 bloquea a `urllib`), el proxy, las cabeceras y credenciales del job
 solo hacia el sitio (114), robots.txt en modo `respect`, el `Crawl-delay` (81)
-y el `Retry-After` (111). Y corre a la vez que el rastreo, no despues: no
-alarga el job. Nunca dentro de un request de la API.
+y el `Retry-After` (111). Y corre a la vez que el rastreo, no despues, con
+prioridad sobre las paginas: en un sitio con ritmo normal acaba antes que el
+rastreo. Con un Crawl-delay alto la cola puede seguir cuando ya no quedan
+paginas y SI alarga el job: como mucho `max_minutos` (20) desde la primera
+peticion, con latido para que el vigilante del worker no lo de por
+estancado. Nunca dentro de un request de la API.
 
 Como las demas sondas (decisiones 105, 123 y 124), con su propio callback:
 
@@ -44,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Generator
@@ -59,6 +64,10 @@ logger = logging.getLogger(__name__)
 # Hosts de las semillas a los que se pide `/wp-json/` en modo auto.
 MAX_HOSTS = 3
 PRIORIDAD = 5
+# Cada cuanto se escribe el latido y se mira la cancelacion (como las sondas).
+LATIDO_S = 60.0
+# Saltos de una peticion a la REST API que se siguen a mano.
+MAX_SALTOS = 3
 
 
 def _hash(url: str | None) -> str | None:
@@ -97,7 +106,7 @@ class AdaptadorWordPressMixin:
     # ------------------------------------------------------------------
     # Estado
     # ------------------------------------------------------------------
-    def _iniciar_wordpress(self) -> None:
+    def _iniciar_wordpress(self, job=None) -> None:
         cfg = ((self.job_config.get("adapters") or {}).get("wordpress") or {})
         modo = cfg.get("modo", "auto")
         if modo not in ("auto", "on", "off"):
@@ -109,6 +118,7 @@ class AdaptadorWordPressMixin:
         self._wp_modo = modo
         self._wp_max_vuelo = max(1, min(2, int(cfg.get("max_concurrencia", 2) or 2)))
         self._wp_max_peticiones = int(cfg.get("max_peticiones", 1000) or 1000)
+        self._wp_max_segundos = 60.0 * float(cfg.get("max_minutos", 20) or 20)
         self._wp_max_por_tipo = int(cfg.get("max_entidades_por_tipo", 20_000) or 20_000)
         self._wp_max_medios = int(cfg.get("max_medios", 1000) or 0)
         self._wp_muestra_adjuntos = int(cfg.get("muestra_adjuntos", 20) or 0)
@@ -116,6 +126,8 @@ class AdaptadorWordPressMixin:
         self._wp_cola = deque()
         self._wp_en_vuelo = 0
         self._wp_peticiones = 0
+        self._wp_inicio_s: float | None = None
+        self._wp_ultimo_latido = time.monotonic()
         self._wp_raices_pedidas: set[str] = set()
         self._wp_raiz: str | None = None
         self._wp_indice: dict = {}
@@ -126,15 +138,33 @@ class AdaptadorWordPressMixin:
             "intentos": [], "tipos": {}, "peticiones": 0, "cortada": None,
             "sondas": {"paginacion": 0, "adjuntos": 0},
         }
+        # Lo que dejo una ejecucion anterior del job (reanudacion). Se conserva
+        # hasta que ESTA vuelva a confirmar la REST API: una reanudacion tras
+        # un estancamiento no puede borrar lo leido ni afirmar «no detectado»
+        # porque esta vez no llego a leerla.
+        previo = ((getattr(job, "adapters", None) or {}).get(W.ADAPTADOR)
+                  if job is not None else None)
+        self._wp_previo: dict | None = previo if isinstance(previo, dict) else None
         if modo == "off":
             return
-        # Cada proceso vuelve a leer la REST API entera: lo de una ejecucion
-        # anterior del job (reanudacion) se borra antes de empezar.
+        if self._wp_previo and self._wp_previo.get("detectado") \
+                and self._wp_previo.get("completa"):
+            # Ya se leyo entera: no se repite ni se toca.
+            logger.info("WordPress: la REST API ya se leyo entera en una ejecucion anterior")
+            self._wp_modo = "off"
+
+    def _wp_raiz_previa(self) -> str | None:
+        previo = getattr(self, "_wp_previo", None) or {}
+        return previo.get("raiz") if previo.get("detectado") else None
+
+    def _wp_borrar_anteriores(self) -> None:
+        """Al confirmar la REST API en ESTA ejecucion, lo de una anterior se
+        borra: se vuelve a leer entera."""
         try:
+            import uuid
+
             from shared.database import SessionLocal
             from shared.models import AdapterEntity
-
-            import uuid
 
             try:
                 jid = uuid.UUID(str(self.job_id))
@@ -155,25 +185,85 @@ class AdaptadorWordPressMixin:
     def _wp_activo(self) -> bool:
         return getattr(self, "_wp_modo", "off") != "off" and self._wp_cola is not None
 
+    def _wp_latir(self) -> None:
+        """Latido y cancelacion, como las otras sondas (decisiones 15 y 123):
+        con un Crawl-delay alto la cola de la REST API puede seguir cuando ya
+        no quedan paginas, y sin latido el vigilante del worker daria el job
+        por estancado."""
+        ahora = time.monotonic()
+        if ahora - getattr(self, "_wp_ultimo_latido", 0.0) < LATIDO_S:
+            return
+        self._wp_ultimo_latido = ahora
+        try:
+            self._write_heartbeat()
+            if self._should_cancel():
+                logger.info("Cancel signal received for job %s during WordPress reads, "
+                            "stopping", self.job_id)
+                self.crawler.engine.close_spider(self, "cancelled")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("WordPress: no se pudo escribir el latido: %s", exc)
+
+    def _wp_fuera_de_tiempo(self) -> bool:
+        inicio = getattr(self, "_wp_inicio_s", None)
+        if inicio is None or time.monotonic() - inicio <= self._wp_max_segundos:
+            return False
+        if not self._wp_resumen.get("cortada"):
+            self._wp_resumen["cortada"] = "tope_de_tiempo"
+            logger.warning("WordPress: %d minutos leyendo la REST API; la lectura queda parcial",
+                           self._wp_max_segundos // 60)
+        self._wp_cola.clear()
+        return True
+
+    def _wp_puede_pedir(self, url: str | None) -> bool:
+        """Solo el sitio: una URL interna del job, y si su host es de red
+        privada (`shared/red.py`), solo si es un host del job (el de una
+        semilla, que eligio el usuario, o al que salto el sitio desde ella).
+        Un `<link rel="https://api.w.org/" href="http://api:8000/">` o un
+        salto a 169.254.169.254 no se piden."""
+        from shared.red import es_host_privado
+
+        if not url:
+            return False
+        p = urlsplit(url)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            return False
+        try:
+            if not self._is_internal(url):
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+        host = p.hostname.lower()
+        if es_host_privado(host):
+            # Solo si es un host del job tal cual (el de una semilla o al que
+            # salto la semilla), no uno que entra por `crawl_subdomains`.
+            return host in {h.lower() for h in getattr(self, "allowed_hosts", ()) or ()}
+        return True
+
     # ------------------------------------------------------------------
     # Cola: dos a la vez como mucho
     # ------------------------------------------------------------------
     def _wp_encolar(self, url: str | None, rol: str, **meta) -> None:
         if not url or not self._wp_activo() or self._wp_resumen.get("cortada"):
             return
+        if not self._wp_puede_pedir(url):
+            logger.warning("WordPress: %s no es del sitio; no se pide", url)
+            return
         if self._wp_peticiones >= self._wp_max_peticiones:
             self._wp_resumen["cortada"] = "tope_de_peticiones"
             logger.warning("WordPress: tope de %d peticiones; la lectura queda parcial",
                            self._wp_max_peticiones)
             return
+        if self._wp_inicio_s is None:
+            self._wp_inicio_s = time.monotonic()
+        if self._wp_fuera_de_tiempo():
+            return
         self._wp_peticiones += 1
         es_sonda = rol.startswith("sonda_")
-        m: dict[str, Any] = {"depth": 0, "wp_rol": rol, "handle_httpstatus_all": True, **meta}
-        cabeceras = None
-        if es_sonda:
-            m["dont_redirect"] = True
-        else:
-            cabeceras = {"Accept": "application/json"}
+        # Sin seguir redirecciones (tampoco la REST API): un salto se sigue a
+        # mano en `parse_wp`, y solo dentro del sitio.
+        m: dict[str, Any] = {"depth": 0, "wp_rol": rol, "handle_httpstatus_all": True,
+                             "dont_redirect": True, **meta}
+        cabeceras = None if es_sonda else {"Accept": "application/json"}
         self._wp_cola.append(scrapy.Request(
             url, callback=self.parse_wp, errback=self.error_wp, meta=m,
             headers=cabeceras, dont_filter=True, priority=PRIORIDAD))
@@ -243,11 +333,16 @@ class AdaptadorWordPressMixin:
                 if b"/wp-content/" in response.body or b"/wp-includes/" in response.body:
                     evidencia.append("rutas_wp_content")
                 self._wp_resumen["evidencia"] = sorted(set(evidencia))
+            if not raiz and depth > 0:
+                # Al reanudar no se ve la semilla: la raiz que confirmo la
+                # ejecucion anterior (una subcarpeta, `?rest_route=/`), antes
+                # que `/wp-json/` del origen, que puede ser OTRO WordPress.
+                raiz = self._wp_raiz_previa()
             if raiz:
                 # La anunciada manda: en wordpress.org/news la raiz es
                 # /news/wp-json/ y la del origen es OTRO WordPress (el de
                 # wordpress.org). El origen solo si no anuncia ninguna.
-                self._wp_pedir_indice(raiz, "anunciada")
+                self._wp_pedir_indice(raiz, "anunciada" if depth == 0 else "anterior")
             elif len(self._wp_raices_pedidas) < MAX_HOSTS:
                 origen = W.raiz_por_defecto(response.url)
                 if origen:
@@ -261,9 +356,20 @@ class AdaptadorWordPressMixin:
     # ------------------------------------------------------------------
     def parse_wp(self, response: Response) -> Generator:
         self._wp_en_vuelo = max(0, self._wp_en_vuelo - 1)
+        self._wp_latir()
         rol = response.meta.get("wp_rol")
         try:
-            if rol == "indice":
+            if 300 <= response.status < 400 and not (rol or "").startswith("sonda_"):
+                # Se sigue a mano y dentro del sitio; si no, se anota y ya.
+                if not self._wp_seguir_salto(response):
+                    if rol == "indice":
+                        self._wp_resumen["intentos"].append(
+                            {"raiz": response.meta.get("wp_raiz"), "status": response.status,
+                             "salto_no_seguido": _cabecera(response, "Location")})
+                    else:
+                        tipo = response.meta.get("wp_tipo") or rol
+                        self._wp_resumen["tipos"].setdefault(tipo, {})["status"] = response.status
+            elif rol == "indice":
                 yield from self._wp_indice_leido(response)
             elif rol in ("tipos", "taxonomias"):
                 self._wp_catalogo_leido(response, rol)
@@ -275,8 +381,27 @@ class AdaptadorWordPressMixin:
             logger.warning("WordPress: fallo al leer %s (%s): %s", response.url, rol, exc)
         yield from self._wp_soltar()
 
+    def _wp_seguir_salto(self, response: Response) -> bool:
+        """Un salto de la REST API (http -> https, barra final), seguido a
+        mano y solo dentro del sitio (`_wp_puede_pedir`). True si se siguio."""
+        loc = _cabecera(response, "Location")
+        saltos = int(response.meta.get("wp_saltos", 0) or 0)
+        if not loc or saltos >= MAX_SALTOS:
+            return False
+        destino = response.urljoin(loc.strip())
+        if not self._wp_puede_pedir(destino):
+            logger.warning("WordPress: %s salta fuera del sitio (%s); no se sigue",
+                           response.url, destino)
+            return False
+        meta = {k: v for k, v in response.meta.items()
+                if k.startswith("wp_") and k != "wp_rol"}
+        meta["wp_saltos"] = saltos + 1
+        self._wp_encolar(destino, response.meta.get("wp_rol"), **meta)
+        return True
+
     def error_wp(self, failure) -> Generator:
         self._wp_en_vuelo = max(0, self._wp_en_vuelo - 1)
+        self._wp_latir()
         try:
             req = failure.request
             rol = req.meta.get("wp_rol")
@@ -330,7 +455,8 @@ class AdaptadorWordPressMixin:
                 self._wp_resumen["rest"] = "cerrada"
                 self._wp_resumen["codigo"] = response.status
             elif response.status in (429, 503):
-                self._wp_resumen["rest"] = "cerrada"
+                # El sitio pide esperar: no se sabe si esta abierta.
+                self._wp_resumen["rest"] = "limitada"
                 self._wp_resumen["codigo"] = response.status
             # `on`: sin enlaces permanentes la raiz es `?rest_route=/`.
             if self._wp_modo == "on" and "rest_route" not in (raiz or ""):
@@ -355,6 +481,9 @@ class AdaptadorWordPressMixin:
         self._wp_resumen["evidencia"] = sorted(set(self._wp_resumen["evidencia"]) | {"rest_api"})
         logger.info("WordPress detectado en %s (%s)", raiz, self._wp_resumen["plugin_seo"] or
                     "sin plugin SEO conocido")
+        # Confirmada en ESTA ejecucion: se vuelve a leer entera, y lo de una
+        # anterior (reanudacion) se borra ahora, no al arrancar.
+        self._wp_borrar_anteriores()
         self._wp_persistir()
         self._wp_encolar(W.url_rest(raiz, "wp/v2/types"), "tipos")
         return
@@ -535,6 +664,10 @@ class AdaptadorWordPressMixin:
         from shared.respuestas import clasificar_respuesta
 
         rol = response.meta["wp_rol"]
+        if self._wp_corte(response):
+            # Un 429/503 en una sonda no dice nada de la pagina: no se guarda,
+            # y se deja de pedir como con la REST API.
+            return
         datos = dict(response.meta.get("wp_datos") or {})
         cabeceras = {
             k.decode("latin-1").lower(): ", ".join(v.decode("latin-1", "replace") for v in vs or [])
@@ -589,6 +722,18 @@ class AdaptadorWordPressMixin:
                 r["cortada"] = f"cierre: {reason}"
             if not r["detectado"] and not r.get("rest"):
                 r["rest"] = "cerrada" if r["evidencia"] else "no_detectado"
+            previo = getattr(self, "_wp_previo", None) or {}
+            if not r["detectado"] and previo.get("detectado"):
+                # Una reanudacion que no llego a confirmar la REST API no
+                # afirma «no detectado»: se queda lo de la ejecucion anterior
+                # (y sus entidades, que no se han borrado), con la nota.
+                previo = dict(previo)
+                previo["reanudacion"] = {"rest": r.get("rest"), "codigo": r.get("codigo"),
+                                         "cortada": r.get("cortada")}
+                self._wp_resumen = previo
+                self._wp_persistir()
+                return
+            r["completa"] = r["detectado"] and not r.get("cortada")
             r["peticiones"] = self._wp_peticiones
             r["terminado_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             self._wp_persistir()
@@ -600,10 +745,15 @@ class AdaptadorWordPressMixin:
             from shared.database import SessionLocal
             from shared.models import Job
 
-            self._wp_resumen["peticiones"] = self._wp_peticiones
+            import uuid
+
+            try:
+                jid = uuid.UUID(str(self.job_id))
+            except ValueError:
+                jid = self.job_id
             sesion = SessionLocal()
             try:
-                sesion.query(Job).filter(Job.id == self.job_id).update(
+                sesion.query(Job).filter(Job.id == jid).update(
                     {"adapters": {W.ADAPTADOR: self._wp_resumen}}, synchronize_session=False)
                 sesion.commit()
             finally:

@@ -1255,7 +1255,14 @@
      que el rastreo ya hace y una descarga aparte tendría que repetir: UA y
      huella TLS del navegador (11, 132; un WAF tipo F5 corta a `urllib`),
      proxy, cabeceras y credenciales solo hacia el sitio (114), robots.txt en
-     `respect`, `Crawl-delay` (81) y `Retry-After` (111). Y no alarga el job.
+     `respect`, `Crawl-delay` (81) y `Retry-After` (111). Corre a la vez que
+     las páginas y con prioridad sobre ellas, así que en un sitio con ritmo
+     normal no alarga el job; con un `Crawl-delay` alto la cola puede seguir
+     cuando ya no quedan páginas, y entonces **sí lo alarga, como mucho
+     `max_minutos` (20)** desde la primera petición. Cada respuesta escribe el
+     latido y mira la cancelación como las otras sondas (`LATIDO_S` 60): sin
+     eso, 180 peticiones con `Crawl-delay` 10 pasaban de los 30 minutos del
+     vigilante y el job se reencolaba como estancado (revisión de #226).
      Como las demás sondas (105, 123, 124): callback propio, no gasta
      `max_urls`, no cuenta para la salud y no es una URL del censo.
    - **Dos peticiones a la vez como mucho, por una cola propia y en el slot
@@ -1289,14 +1296,27 @@
      ordenados por `count`. Nunca `/wp/v2/users`. Topes en
      `adapters.wordpress` del `JobConfig` (`max_peticiones` 1.000,
      `max_entidades_por_tipo` 20.000). Un 429 o 503 (tras los reintentos de
-     Scrapy) para la lectura entera; un 401/403/404 o un HTML en el índice es
-     «cerrada» y el rastreo sigue. Una lista (`max_depth` 0) no la lee.
+     Scrapy) para la lectura entera, también en una sonda; en el índice es
+     «limitada» (no se sabe si está abierta), y un 401/403/404 o un HTML es
+     «cerrada». El rastreo sigue. Una lista (`max_depth` 0) no la lee.
+   - **Solo el sitio** (como las sondas de la 123, `shared/red.py`): una raíz
+     anunciada o un salto solo se piden si son internos del job, y si su host
+     es de red privada, solo si es un host del job tal cual (la semilla o
+     aquel al que saltó). Las redirecciones no las sigue Scrapy: se siguen a
+     mano (tres como mucho) con esa misma comprobación. Un
+     `<link rel="https://api.w.org/" href="http://169.254.169.254/">` no se
+     pide.
    - **Dónde va**: `adapter_entities` (una fila por entidad y por sonda, sin
      FK a `urls`: que no tenga fila allí es el hallazgo; se empareja al
      analizar por `(job_id, url_hash)` o por `url_hash_alt`, la misma URL con
-     el otro esquema) y el resumen en `jobs.adapters["wordpress"]`. Cada
-     proceso de Scrapy la vuelve a leer entera y borra antes lo que hubiera
-     (reanudación). `en_alcance` = la URL pasa los filtros del job. En
+     el otro esquema) y el resumen en `jobs.adapters["wordpress"]`. **Una
+     reanudación no borra lo leído al arrancar**: si la ejecución anterior la
+     leyó entera (`completa`) no se repite; si no, se vuelve a pedir empezando
+     por la raíz que confirmó (`raiz`: una subcarpeta o `?rest_route=/` no se
+     ven sin la semilla), y lo anterior se borra solo cuando ESTA ejecución
+     confirma el índice. Si no llega a confirmarlo, se queda el resumen y las
+     entidades de la anterior con una nota (`reanudacion`), nunca
+     «no detectado». `en_alcance` = la URL pasa los filtros del job. En
      `TABLAS_POR_JOB`, `borrar_job` y el backup.
    - **Sondas** (hallazgos 2 y 5), sin seguir redirecciones: hasta
      `muestra_adjuntos` (20) páginas de adjunto, y la página `N+1` de hasta
@@ -1312,7 +1332,10 @@
      (o solo nofollow). **Solo en un censo entero** (67, 70, 89): ni truncado
      (`MOTIVOS_TRUNCADO`) ni cortado por `max_depth` (alguna URL llegó a la
      profundidad máxima: lo que cuelga de ella no se vio; con el valor por
-     defecto, 3, es lo normal en un blog). En esos casos la cifra va al
+     defecto, 3, es lo normal en un blog) ni con filtros de URL
+     (`exclude_patterns`, `include_patterns`, `url_filters`): pueden dejar
+     fuera la paginación o los archivos desde los que se llega a una entrada
+     que sí pasa el filtro (70). En esos casos la cifra va al
      resumen (`no_afirmable`) y la lista a `GET /wordpress/entidades`, sin
      incidencia. Lo rastreado y sin entrantes no se repite: ya es
      `orphan_page`. Un tipo propio solo cuenta si el rastreo encontró alguna

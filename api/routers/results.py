@@ -1343,7 +1343,9 @@ def get_wordpress(job_id: uuid.UUID, db: Session = Depends(get_session)):
 
     job = _get_job_or_404(job_id, db)
     resumen = (job.adapters or {}).get("wordpress") if job.adapters else None
-    en_censo = exists().where(Url.job_id == E.job_id, Url.url_hash == E.url_hash)
+    # Como el analisis: por `url_hash` o por la misma URL con el otro esquema.
+    en_censo = exists().where(Url.job_id == E.job_id,
+                              or_(Url.url_hash == E.url_hash, Url.url_hash == E.url_hash_alt))
     filas = (
         db.query(E.tipo, func.count(E.id), func.sum(case((en_censo, 1), else_=0)))
         .filter(E.job_id == job_id, E.adaptador == "wordpress")

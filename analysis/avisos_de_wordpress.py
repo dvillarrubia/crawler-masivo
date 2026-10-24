@@ -75,9 +75,10 @@ def avisar_sin_tumbar(az) -> dict[str, Any] | None:
     """`avisar` en un savepoint y con el try cubriendolo entero (decision 74):
     una respuesta rara de la REST API no puede llevarse por delante el
     analisis ni deshacer lo que ya lleva hecho."""
-    az._flush_issues()
     pendientes = list(az._pending_issues)
     try:
+        az._flush_issues()
+        pendientes = []
         with az.session.begin_nested():
             return avisar(az)
     except Exception:
@@ -204,7 +205,15 @@ def _alcance_del_censo(az, job) -> str | None:
     motivo = (getattr(job, "finish_reason", None) or "")
     if motivo in MOTIVOS_TRUNCADO:
         return f"truncado ({motivo})"
-    tope = (getattr(job, "config", None) or {}).get("max_depth", DEFAULT_MAX_DEPTH)
+    config = getattr(job, "config", None) or {}
+    # Con filtros de URL el censo tiene otro alcance (decision 70): pueden
+    # dejar fuera la paginacion o los archivos (/tag/, /page/N/) desde los
+    # que se llega a una entrada que si pasa el filtro.
+    filtros = config.get("url_filters") or {}
+    if config.get("exclude_patterns") or config.get("include_patterns") \
+            or filtros.get("max_url_length") or filtros.get("max_folder_depth"):
+        return "alcance (filtros de URL del job)"
+    tope = config.get("max_depth", DEFAULT_MAX_DEPTH)
     maxima = az.session.execute(
         select(func.max(Url.crawl_depth)).where(Url.job_id == az.job_id)).scalar()
     if maxima is not None and tope is not None and maxima >= tope:

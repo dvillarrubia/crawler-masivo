@@ -147,13 +147,15 @@ def test_la_tuberia_guarda_y_una_reanudacion_empieza_de_cero(base):
     with Sesion() as s:
         assert s.query(AdapterEntity).filter(AdapterEntity.job_id == jid).count() == 4
 
-    # Otro proceso: el spider borra lo de antes al arrancar el adaptador.
+    # Otro proceso: el spider borra lo de antes cuando confirma la REST API
+    # en ESTA ejecucion (no al arrancar: test_wordpress_revision.py).
     from seo_crawler.spiders.seo_spider import SeoSpider
 
     sp = SeoSpider(job_id=str(jid))
     sp.job_config = {"max_depth": 5}
     sp.max_depth = 5
     sp._iniciar_wordpress()
+    sp._wp_borrar_anteriores()
     with Sesion() as s:
         assert s.query(AdapterEntity).filter(AdapterEntity.job_id == jid).count() == 0
     _proceso(jid, [_entidades(2)])

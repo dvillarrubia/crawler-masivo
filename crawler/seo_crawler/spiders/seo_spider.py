@@ -745,7 +745,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             self._iniciar_sondas_respuesta()
             # -- Adaptador WordPress (decision 161) --
             # Despues de los patrones y de `max_depth`: una lista no lo usa.
-            self._iniciar_wordpress()
+            self._iniciar_wordpress(job)
 
             # -- Sitemap ingestion (Screaming Frog parity) --
             self._use_sitemap = self.job_config.get("use_sitemap", True)

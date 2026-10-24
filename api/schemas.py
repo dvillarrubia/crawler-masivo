@@ -352,6 +352,10 @@ class WordPressAdapterConfig(BaseModel):
     max_concurrencia: int = Field(default=2, ge=1, le=2)
     # Tope de peticiones del adaptador en un rastreo: indice, tipos, listados y sondas.
     max_peticiones: int = Field(default=1000, ge=10, le=20_000)
+    # Minutos como mucho leyendo la REST API desde la primera peticion. Con un
+    # Crawl-delay alto la cola puede seguir cuando ya no quedan paginas: esto
+    # acota cuanto puede alargar el job (con latido, decision 161).
+    max_minutos: int = Field(default=20, ge=1, le=240)
     # Entidades leidas por tipo (entradas, paginas, cada taxonomia). El total
     # se sabe igual por `X-WP-Total`.
     max_entidades_por_tipo: int = Field(default=20_000, ge=100, le=1_000_000)

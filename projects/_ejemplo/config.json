@@ -94,6 +94,7 @@
       "modo": "auto",
       "max_concurrencia": 2,
       "max_peticiones": 1000,
+      "max_minutos": 20,
       "max_entidades_por_tipo": 20000,
       "max_medios": 1000,
       "muestra_adjuntos": 20,

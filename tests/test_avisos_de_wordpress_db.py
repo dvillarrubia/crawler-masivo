@@ -287,3 +287,40 @@ def test_un_fallo_no_tumba_el_analisis(monkeypatch):
     monkeypatch.setattr(avisos_de_wordpress, "_censo", _rompe)
     assert avisos_de_wordpress.avisar_sin_tumbar(SEOAnalyzer(s, j.id)) is None
     assert s.execute(select(Job.id)).first() is not None, "la sesion sigue viva"
+
+
+# --- Revision de la PR #226 -----------------------------------------------------
+
+def test_con_filtros_de_url_no_se_afirma_lo_no_rastreado():
+    """Un `exclude_patterns` que deja fuera /tag/ o /page/N/ corta el camino
+    a entradas que si pasan el filtro: otro alcance (decision 70)."""
+    for config in ({"exclude_patterns": ["*/tag/*"]}, {"include_patterns": ["re:/blog/"]},
+                   {"url_filters": {"max_folder_depth": 2}}):
+        s, j = _montar(config=config)
+        _entidad(s, j, "post", "/huerfana/")
+        r = _avisar(s, j)
+        assert _issues(s, j, "wp_publicado_no_rastreado") == []
+        assert r["wp_publicado_no_rastreado"]["no_afirmable"].startswith("alcance")
+
+
+def test_si_falla_el_volcado_previo_no_tumba_el_analisis(monkeypatch):
+    s, j = _montar()
+    an = SEOAnalyzer(s, j.id)
+
+    def _rompe():
+        raise RuntimeError("volcado")
+
+    monkeypatch.setattr(an, "_flush_issues", _rompe)
+    assert avisos_de_wordpress.avisar_sin_tumbar(an) is None
+
+
+def test_el_otro_esquema_cuenta_como_en_el_censo():
+    s, j = _montar()
+    _url(s, j, "/http-en-wp/")
+    s.add(AdapterEntity(job_id=j.id, adaptador="wordpress", tipo="post", url="http://x.com/http-en-wp/",
+                        url_hash="h:otro", url_hash_alt="h:x.com/http-en-wp/", en_alcance=True,
+                        estado="publish"))
+    s.flush()
+    r = _avisar(s, j)
+    assert r["por_tipo"]["post"] == {"leidas": 1, "en_el_censo": 1}
+    assert _issues(s, j, "wp_publicado_no_rastreado") == []
