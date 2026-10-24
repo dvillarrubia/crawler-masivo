@@ -772,9 +772,10 @@ def borrar_cliente(
     db.delete(cliente)
     db.commit()
     # Los Parquet de enlaces de sus jobs, despues del commit (decision 95)
-    from shared import archivo_enlaces
+    from shared import archivo_enlaces, capturas_pantalla
     for jid in borrados:
         archivo_enlaces.borrar(jid)
+        capturas_pantalla.borrar(jid)  # decision 173
 
 
 @router.get("/{client_id}/config-resuelta", response_model=ConfigResueltaResponse)

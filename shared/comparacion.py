@@ -1779,16 +1779,26 @@ def censo_anterior(db, job):
     if not job.seeds or not job.started_at:
         return None
 
+    # Un censo con UA de movil y otro de escritorio no ven la misma pagina en
+    # un sitio con servido dinamico o m-dot (decisiones 119 y 173): comparar
+    # uno con otro atribuiria al sitio lo que es del dispositivo, y las alertas
+    # saltarian por eso. Solo es referencia un censo del MISMO perfil; si no
+    # hay ninguno, no se compara (como con una lista frente a un censo).
+    yo_perfil = perfil_de_ua((job.config or {}).get("user_agent"))
+
+    def mismo_perfil(c) -> bool:
+        return perfil_de_ua((c.config or {}).get("user_agent")) == yo_perfil
+
     programacion = getattr(job, "programacion_id", None)
     if programacion:
-        de_la_serie = (
-            db.query(Job)
+        de_la_serie = next((
+            c for c in db.query(Job)
             .filter(Job.id != job.id, Job.programacion_id == programacion,
                     Job.status == "completed", Job.started_at.isnot(None),
                     Job.started_at < job.started_at)
             .order_by(Job.started_at.desc())
-            .first()
-        )
+            .yield_per(50)
+            if mismo_perfil(c)), None)
         if de_la_serie is not None:
             return de_la_serie
         # Primera ejecución de la serie: se cae a la regla del host, que ahora
@@ -1836,6 +1846,8 @@ def censo_anterior(db, job):
         # enlaces: la de QA suele llevar la home, asi que «abarca» a un censo
         # sembrado en la home y, siendo la mas reciente, ganaba.
         if es_lista(c.config) and not yo_lista:
+            continue
+        if not mismo_perfil(c):
             continue
         if mas_reciente is None:
             mas_reciente = c

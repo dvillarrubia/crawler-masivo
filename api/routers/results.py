@@ -1316,6 +1316,49 @@ def _capturas_alternativas(db: Session, job_id: uuid.UUID, url_id: int) -> list[
     } for c in filas]
 
 
+def _capturas_pantalla(job_id: uuid.UUID, url_obj: Url) -> list[dict]:
+    """Las capturas de pantalla de la URL (decision 173), con la ruta de su
+    imagen. Del volumen de archivo, por `url_hash`; vacia si no hay."""
+    from shared import capturas_pantalla
+
+    return [{**m, "src": f"/api/jobs/{job_id}/urls/{url_obj.id}/captura/{m['perfil']}"}
+            for m in capturas_pantalla.de_url(job_id, url_obj.url_hash)]
+
+
+@router.get("/capturas")
+def listar_capturas(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Las capturas de pantalla del censo (decision 173): metadatos, sin la
+    imagen. `capturas_muestra` en `crawl_behavior` las enciende; sin ella la
+    lista sale vacia, que no es lo mismo que «la pagina no se pinta»."""
+    from shared import capturas_pantalla
+
+    job = _get_job_or_404(job_id, db)
+    cb = (job.config or {}).get("crawl_behavior") or {}
+    return {"job_id": str(job_id), "pedidas": int(cb.get("capturas_muestra") or 0),
+            "capturas": capturas_pantalla.listar(job_id)}
+
+
+@router.get("/urls/{url_id}/captura/{perfil}")
+def imagen_de_captura(job_id: uuid.UUID, url_id: int, perfil: str,
+                      db: Session = Depends(get_session)):
+    """El JPEG de la captura de una URL con un perfil (decision 173)."""
+    from fastapi.responses import FileResponse
+
+    from shared import capturas_pantalla
+
+    if perfil not in capturas_pantalla.PERFILES:
+        raise HTTPException(status_code=404, detail="Perfil desconocido")
+    url_hash = db.query(Url.url_hash).filter(Url.id == url_id, Url.job_id == job_id).scalar()
+    if not url_hash:
+        raise HTTPException(status_code=404, detail="URL no encontrada en este censo")
+    ruta = capturas_pantalla.ruta_imagen(job_id, url_hash, perfil)
+    if not ruta.is_file():
+        raise HTTPException(status_code=404, detail="Esta URL no tiene captura con ese perfil")
+    # Privada: la imagen es del censo de un cliente y la API pide token.
+    return FileResponse(ruta, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/urls/{url_id}  -- full detail for a single URL
 # ---------------------------------------------------------------------------
@@ -1749,6 +1792,7 @@ def get_url_detail(
     # La ficha lleva todas las reglas a medida evaluadas en la URL (decision 104)
     resp.a_medida = _a_medida(db, job_id, [url_obj.id]).get(url_obj.id, {})
     resp.capturas_alternativas = _capturas_alternativas(db, job_id, url_obj.id)
+    resp.capturas_pantalla = _capturas_pantalla(job_id, url_obj)
     resp.robots_regla = _robots_regla(db, job_id, url_obj)
     resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
     resp.wordpress = _wordpress_de_url(db, job_id, url_obj.url_hash)

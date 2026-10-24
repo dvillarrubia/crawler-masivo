@@ -4284,6 +4284,27 @@
                 <div class="text-sm text-dim" x-show="(urlDetail.issues || []).length > 5"
                      x-text="'y ' + ((urlDetail.issues || []).length - 5) + ' más'"></div>
               </div>
+              <!-- Capturas de pantalla por muestra de plantilla (decisión 173):
+                   la primera pantalla con el dispositivo del censo y, si se
+                   pidió, con el otro. Solo las URLs muestreadas tienen. -->
+              <template x-if="(urlDetail.capturas_pantalla || []).length">
+                <div class="card" data-testid="url-capturas">
+                  <div class="veredicto-titulo">Captura de pantalla</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-start">
+                    <template x-for="c in urlDetail.capturas_pantalla" :key="c.perfil">
+                      <figure style="margin:0;max-width:100%">
+                        <a :href="c.src" target="_blank" rel="noopener">
+                          <img :src="c.src" loading="lazy" :alt="'Captura ' + c.perfil"
+                               :style="'display:block;max-width:100%;border:1px solid var(--border);border-radius:4px;width:' + (c.perfil === 'movil' ? '206px' : '420px')">
+                        </a>
+                        <figcaption class="text-sm text-dim"
+                                    :title="c.user_agent || ''"
+                                    x-text="(c.perfil === 'movil' ? 'Móvil' : 'Escritorio') + (c.ancho ? ' · ' + c.ancho + '×' + c.alto : '') + (c.plantilla ? ' · plantilla ' + c.plantilla : '') + (c.url_final ? ' · acabó en ' + c.url_final : '')"></figcaption>
+                      </figure>
+                    </template>
+                  </div>
+                </div>
+              </template>
               <!-- Extraccion a medida (decision 104): lo que dieron las reglas
                    en esta URL. «No evaluada» no es «vacío». -->
               <template x-if="expAMedida.length">
@@ -5808,6 +5829,7 @@
                 <option value="safari_mac">Safari - macOS</option>
                 <option value="firefox_win">Firefox - Windows</option>
                 <option value="edge_win">Edge - Windows</option>
+                <option value="chrome_android" title="Un móvil que es un navegador: huella TLS de Android y, con render, ventana de 412×915 a DPR 2,625 y táctil (decisión 173). La comparación entre censos distingue el perfil">Chrome - Android (móvil)</option>
                 <optgroup label="Buscadores">
                   <option value="googlebot_mobile">Googlebot smartphone</option>
                   <option value="googlebot">Googlebot escritorio (cadena antigua)</option>
@@ -5830,6 +5852,7 @@
                 <option value="chrome124">Chrome 124 (la de serie hasta octubre de 2026)</option>
                 <option value="firefox147">Firefox 147</option>
                 <option value="safari260">Safari 26</option>
+                <option value="chrome131_android">Chrome 131 Android</option>
                 <option value="edge101">Edge 101</option>
               </select>
             </div>
@@ -5942,6 +5965,19 @@
                 <option value="chrome_android">Chrome Android</option>
                 <option value="googlebot_smartphone">Googlebot smartphone</option>
               </select>
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label title="Páginas de las que se guarda una captura de la primera pantalla, una muestra por plantilla, con render aunque el rastreo no lo lleve. Se ven en la ficha de la URL. 0 = apagado (decisión 173)">Capturas: páginas (0 = no)</label>
+              <input type="number" x-model="createForm.capturas_muestra" min="0" max="50" data-testid="capturas-muestra">
+            </div>
+            <div class="form-group">
+              <label>Por plantilla</label>
+              <input type="number" x-model="createForm.capturas_por_plantilla" min="1" max="5">
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label" title="Además del dispositivo del rastreo, el otro: móvil si se rastrea de escritorio y al revés"><input type="checkbox" x-model="createForm.capturas_ambos_perfiles"> Móvil y escritorio</label>
             </div>
           </div>
 
@@ -6686,6 +6722,8 @@
                 x-show="borrado.previa.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
                 x-show="borrado.previa.archivo_bytes > 0">, más
                 <strong x-text="fmt.bytes(borrado.previa.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.previa.capturas_bytes > 0">, más
+                <strong x-text="fmt.bytes(borrado.previa.capturas_bytes)"></strong> de capturas</span><span
                 x-show="borrado.previa.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
             </p>
             <p class="text-dim text-sm" style="margin-top:.35rem;line-height:1.5"
@@ -6728,6 +6766,8 @@
                 x-show="borrado.resultado.bytes_incompletos" class="text-dim">, y alguno más que no se pudo medir</span><span
                 x-show="borrado.resultado.archivo_bytes > 0">, más
                 <strong x-text="fmt.bytes(borrado.resultado.archivo_bytes)"></strong> de enlaces archivados</span><span
+                x-show="borrado.resultado.capturas_bytes > 0">, más
+                <strong x-text="fmt.bytes(borrado.resultado.capturas_bytes)"></strong> de capturas</span><span
                 x-show="borrado.resultado.archivo_incompleto" class="text-dim">, y algún archivo de enlaces que no se pudo medir</span>.
             </p>
             <p class="text-sm" style="margin-top:.4rem;color:var(--orange)" x-show="borrado.resultado.sin_terminar > 0">

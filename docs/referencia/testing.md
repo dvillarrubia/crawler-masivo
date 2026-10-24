@@ -280,6 +280,15 @@ total, con y sin render, sin gastar `max_urls`; apagado de serie),
 `test_accesibilidad_api.py` (el endpoint con TestClient; trabajo de la API) y
 `test_accesibilidad_frontend.py` (Chromium: las claves del modal solo si se
 cambian, impacto, ambito y detalles, y la tarjeta que no afirma sin paginas).
+Perfil y capturas de pantalla (decision 173): `test_capturas_pantalla.py`
+(el almacen del volumen de archivo, la ficha y la imagen con TestClient y
+SQLite, que la captura de un censo no se sirve desde otro, la referencia
+automatica del mismo perfil, el hash del contenido entre perfiles, el preset
+Chrome Android y los topes; en el trabajo de la API del CI) y
+`test_capturas_pantalla_spider.py` (el `SeoSpider` real con Chromium: una por
+plantilla y perfil con el tamano del dispositivo, la imagen la pide la
+captura con el UA de cada perfil y no el render del censo, y con la paridad a
+la vez; se salta sin Chromium). El borrado, en `test_borrado_en_masa.py`.
 Huella TLS y UA (decision 132): `test_huella_en_la_peticion.py` (el
 `SeoSpider` real con curl_cffi contra un servidor que anota lo que llega: UA,
 `sec-ch-ua` y `sec-ch-ua-platform` de serie, de un config viejo con el UA de

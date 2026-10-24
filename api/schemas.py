@@ -163,6 +163,15 @@ class CrawlBehaviorConfig(BaseModel):
     # chrome_android por defecto: con Googlebot desde nuestra IP un WAF que
     # verifica bots lo bloquea o sirve otra cosa (decision 98)
     paridad_movil_ua: Literal["chrome_android", "googlebot_smartphone"] = "chrome_android"
+    # Capturas de pantalla (decision 173): la primera pantalla de una muestra
+    # por plantilla, con render aunque el censo no lo lleve, guardada en el
+    # volumen de archivo y visible en la ficha de la URL. Con el dispositivo
+    # del censo y, con `capturas_ambos_perfiles`, tambien con el otro (movil o
+    # escritorio). Sondas fuera de max_urls: un render por pagina y perfil.
+    # 0 = apagado, que es lo de serie. Tope pequeno a proposito: son imagenes.
+    capturas_muestra: int = Field(default=0, ge=0, le=50)
+    capturas_por_plantilla: int = Field(default=1, ge=1, le=5)
+    capturas_ambos_perfiles: bool = False
     # Sondas de respuesta (decisiones 123 y 124): piden con HEAD (GET de
     # repuesto) lo que el sitio enlaza a otros sitios y lo que embebe, sin que
     # sea del censo: no gastan max_urls, no se guardan en `urls` y no cuentan
@@ -1085,6 +1094,9 @@ class UrlDetailResponse(UrlResponse):
     outlinks: list[LinkResponse] = []
     # La misma URL pedida con otro perfil (decision 119): una por perfil
     capturas_alternativas: list[dict[str, Any]] = []
+    # Capturas de pantalla de la URL (decision 173), una por perfil: los
+    # metadatos y `src`, la ruta de la imagen en la API. Vacia = no se capturo.
+    capturas_pantalla: list[dict[str, Any]] = []
     # La linea de robots.txt que bloquea la URL, para Googlebot y para nuestro
     # rastreo (decision 129). None = no esta bloqueada o no se puede afirmar.
     robots_regla: dict[str, Any] | None = None
@@ -1222,6 +1234,8 @@ class JobBorrado(BaseModel):
     # medido. None = archivado pero no se sabe cuanto ocupa.
     archivado: bool = False
     archivo_bytes: int | None = 0
+    # Capturas de pantalla del censo (decision 173), medidas en disco.
+    capturas_bytes: int = 0
     # Solo en la simulacion: lo que conviene saber antes de darle, sin que
     # impida nada.
     aviso: str | None = None
@@ -1251,6 +1265,9 @@ class BorradoEnMasaResultado(BaseModel):
     archivo_bytes: int = 0
     # True = algun Parquet no se pudo medir y `archivo_bytes` se queda corto.
     archivo_incompleto: bool = False
+    # Capturas de pantalla que se van con estos censos (decision 173): como el
+    # Parquet, vuelven al disco en el acto.
+    capturas_bytes: int = 0
     filas: dict[str, int] = {}
     nota: str
 
@@ -1273,6 +1290,8 @@ class Almacenamiento(BaseModel):
     # tanto fuera de `total_bytes`. None = el directorio no se pudo leer.
     archivo_bytes: int | None = None
     archivo_ficheros: int | None = None
+    # Las capturas de pantalla (decision 173), tambien en el volumen de archivo.
+    capturas_bytes: int | None = None
     nota: str
 
 

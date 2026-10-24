@@ -46,8 +46,8 @@ from scrapy.http import HtmlResponse, Response
 from shared.indexabilidad import es_nofollow, es_noindex, misma_url
 from shared.paridad import canonical_efectivo, diferencias, resumen
 from shared.perfiles import (
-    IMPERSONATE_MOVIL, IMPERSONATE_POR_DEFECTO, UA_CHROME_ESCRITORIO, UA_MOVIL_POR_NOMBRE, contexto_playwright,
-    es_ua_movil,
+    IMPERSONATE_MOVIL, IMPERSONATE_POR_DEFECTO, contexto_playwright, es_ua_movil,
+    ua_de_perfil_alternativo,
 )
 from shared.plantillas import firma_de_ruta
 
@@ -175,10 +175,7 @@ class ParidadMovilMixin:
         # El perfil que NO es el del censo
         self._paridad_movil = not es_ua_movil(ua_job)
         self._paridad_perfil = "movil" if self._paridad_movil else "escritorio"
-        self._paridad_ua = (
-            UA_MOVIL_POR_NOMBRE.get(cb.get("paridad_movil_ua") or "chrome_android",
-                                    UA_MOVIL_POR_NOMBRE["chrome_android"])
-            if self._paridad_movil else UA_CHROME_ESCRITORIO)
+        self._paridad_ua = ua_de_perfil_alternativo(self._paridad_perfil, cb.get("paridad_movil_ua"))
         self._paridad_impersonate = None
         if self._paridad_movil:
             if impersonate_movil_disponible():

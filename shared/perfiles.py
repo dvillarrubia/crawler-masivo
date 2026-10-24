@@ -255,6 +255,21 @@ def perfil_de_ua(ua: str | None) -> str:
     return "movil" if es_ua_movil(ua) else "escritorio"
 
 
+def ua_de_perfil_alternativo(perfil: str, ua_movil: str | None = None) -> str:
+    """El UA con el que se pide el perfil `perfil` cuando NO es el del censo.
+
+    Lo usan la paridad (decision 119) y las capturas (173), que comparten el
+    contexto de Playwright con nombre (`perfil_movil` / `perfil_escritorio`):
+    se crea con los argumentos de la primera peticion que lo nombra, asi que
+    las dos tienen que construirlo igual. `ua_movil` es
+    `crawl_behavior.paridad_movil_ua`.
+    """
+    if perfil == "movil":
+        return UA_MOVIL_POR_NOMBRE.get(ua_movil or "chrome_android",
+                                       UA_MOVIL_POR_NOMBRE["chrome_android"])
+    return UA_CHROME_ESCRITORIO
+
+
 def contexto_playwright(ua: str, movil: bool, base: dict | None = None) -> dict:
     """Argumentos de `browser.new_context` para un perfil.
 
@@ -276,4 +291,5 @@ __all__ = [
     "contexto_playwright", "PERFILES_IMPERSONATE", "IMPERSONATE_POR_DEFECTO",
     "UA_POR_DEFECTO", "familia_de_huella", "ua_para_huella", "navegador_de_ua",
     "huella_para_ua", "incoherencia_ua_huella", "cabeceras_de_huella",
+    "ua_de_perfil_alternativo",
 ]

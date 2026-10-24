@@ -157,7 +157,8 @@ def _presets_del_formulario() -> dict[str, str]:
 _SIN_HUELLA_DE_SU_VERSION = {"edge_win"}
 
 
-@pytest.mark.parametrize("preset", ["chrome_win", "chrome_mac", "safari_mac", "firefox_win"])
+@pytest.mark.parametrize("preset", ["chrome_win", "chrome_mac", "safari_mac", "firefox_win",
+                                    "chrome_android"])
 def test_cada_preset_de_navegador_con_huella_automatica_es_un_navegador_que_existe(preset):
     """Con «Automatica» (el valor de serie del formulario) la API deduce la huella
     del UA del preset. Si el preset lleva una version sin perfil (Firefox 124: el
@@ -172,5 +173,5 @@ def test_cada_preset_de_navegador_con_huella_automatica_es_un_navegador_que_exis
 def test_los_presets_sin_huella_de_su_version_estan_contados():
     presets = _presets_del_formulario()
     navegadores = {k for k, ua in presets.items() if perfiles.navegador_de_ua(ua)}
-    assert navegadores == {"chrome_win", "chrome_mac", "safari_mac", "firefox_win"} \
-        | _SIN_HUELLA_DE_SU_VERSION
+    assert navegadores == {"chrome_win", "chrome_mac", "safari_mac", "firefox_win",
+                           "chrome_android"} | _SIN_HUELLA_DE_SU_VERSION

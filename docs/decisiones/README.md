@@ -11,6 +11,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 174 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 173 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
@@ -201,6 +202,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 170 | `data-nosnippet` se mide al rastrear, y solo se avisa cuando esconde el H1 o la mayor parte del contenido de una indexable | [`indexabilidad`](indexabilidad.md#d170) |
 | 171 | robots.txt de prueba: veredicto y línea que decide de un robots.txt pegado, con la lógica del crawler y sin descargar nada | [`indexabilidad`](indexabilidad.md#d171) |
 | 174 | Accesibilidad con axe-core por muestra de plantilla: vendorizado, apagado de serie, una fila por regla y plantilla, nunca `error`, y lo que axe no decide no se afirma | [`render-y-descarga`](render-y-descarga.md#d174) |
+| 173 | Perfil de dispositivo entero y por nombre (preset Chrome Android), la comparación automática no cruza perfiles y capturas de pantalla por muestra de plantilla en el volumen de archivo | [`render-y-descarga`](render-y-descarga.md#d173) |
 
 ## Anadir una decision
 

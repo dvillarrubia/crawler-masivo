@@ -21,7 +21,11 @@
   encendida de serie: acotada por `og_image_muestra` y por plantilla) y 161
   (la REST API de WordPress: dos a la vez, en el slot del host). La de axe
   (174) va en `capturas_alternativas` con `perfil='axe'`: quien lea esa tabla
-  filtra su perfil.
+  filtra su perfil. Las capturas de pantalla (173) tambien van por el slot del
+  host: una por plantilla, con tope, y un muro no se guarda.
+- **Un perfil de dispositivo es UA, huella TLS y contexto de render juntos**
+  (`shared/perfiles.py`), y la comparacion automatica solo usa de referencia un
+  censo del mismo perfil. Decisiones 119 y 173.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su
@@ -64,7 +68,8 @@
 ## Borrado y almacenamiento
 
 - **Un censo se borra con `borrar_job`** (ficha, cliente y borrado en masa): es la que
-  quita tambien el Parquet de sus enlaces archivados. Decision 96.
+  quita tambien el Parquet de sus enlaces archivados y sus capturas de pantalla
+  (`shared/capturas_pantalla.py`, en el mismo volumen). Decisiones 96 y 173.
 - Una tabla nueva del censo entra en `shared/almacenamiento.py` y en el borrado
   en masa en el mismo PR: lo exige el test de tablas del censo.
 - **Un contenedor efimero se borra con `docker rm -fv`**, no `-f`: el `--rm` no
