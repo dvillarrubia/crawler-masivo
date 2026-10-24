@@ -65,11 +65,12 @@ order of priority:
 - JavaScript comparison tab (raw HTML vs rendered)
 - Structured data rich-result validation (only basic @type/required-prop checks)
 - Any automatic call to a model: the decisions layer (decision 84) exists but nothing triggers it until #40
-- WordPress (decision 161, #33): hecha la lectura de la REST API y los avisos 1, 2, 3 y 5.
-  Falta la interfaz que pide la issue (casilla en el modal, tarjeta «WordPress» en el
-  Resumen, «Solo en WordPress» en el Explorador sobre `GET /wordpress/entidades` y la
-  entidad en la ficha de la URL), el inventario de plugins por `?ver=` y el hallazgo 4
-  (sitemap frente a contenido, descartado por ahora: ver la decision).
+- WordPress (decisiones 161 y 168, #33): hecha la lectura de la REST API, los avisos 1,
+  2, 3 y 5, y la interfaz (casilla en el modal, tarjeta «WordPress» en el Resumen con el
+  inventario de plugins y tema por los CSS y JS, «Solo en WordPress» en el Explorador y
+  la entidad en la ficha de la URL). Falta verlo en un censo WordPress entero de
+  produccion, el hallazgo 4 (sitemap frente a contenido, descartado por ahora: ver la
+  161) y, si se quiere, exportar «Solo en WordPress» en CSV.
 
 ## Reference Documents
 

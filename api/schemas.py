@@ -1067,6 +1067,12 @@ class UrlDetailResponse(UrlResponse):
     # por fichero. Vacio = no esta en ningun fichero guardado (o el censo es
     # anterior a la tabla; `in_sitemap` dice si estaba).
     sitemaps: list[dict[str, Any]] = []
+    # Lo que la REST API de WordPress dice de esta URL (decision 161, 168):
+    # tipo (`post`, `page`, `category`...), su ID, estado y `modified_gmt`.
+    # Emparejado como en el analisis: por `url_hash` o por la misma URL con el
+    # otro esquema. Vacio = el adaptador no la leyo (no es WordPress, no se
+    # analizo, o no es una entidad que la REST API liste).
+    wordpress: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

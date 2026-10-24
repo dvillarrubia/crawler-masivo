@@ -6,6 +6,7 @@ import csv
 import io
 import logging
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -13,7 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, case, exists, func, or_
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from api.backup import stream_backup_zip
@@ -1370,6 +1371,7 @@ def get_wordpress_entidades(
     job_id: uuid.UUID,
     tipo: str | None = Query(None, max_length=64),
     solo_no_rastreadas: bool = False,
+    buscar: str | None = Query(None, max_length=200),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_session),
@@ -1377,9 +1379,11 @@ def get_wordpress_entidades(
     """Entidades de la REST API de WordPress (y sus sondas), paginadas.
 
     `solo_no_rastreadas=true` deja las que no tienen fila en `urls` (ni con
-    el otro esquema): la lista «solo en WordPress». Que no esten en el censo
-    no es por si solo un hallazgo: en un censo truncado o cortado por la
-    profundidad no se afirma (ver `resumen.analisis` en `/wordpress`).
+    el otro esquema): la lista «solo en WordPress» del Explorador (decision
+    168), sin las sondas, que no son entidades del sitio sino peticiones del
+    adaptador. Que no esten en el censo no es por si solo un hallazgo: en un
+    censo truncado o cortado por la profundidad no se afirma (ver
+    `resumen.analisis` en `/wordpress`). `buscar`, texto dentro de la URL.
     """
     from shared.models import AdapterEntity as E
 
@@ -1387,8 +1391,11 @@ def get_wordpress_entidades(
     q = db.query(E).filter(E.job_id == job_id, E.adaptador == "wordpress")
     if tipo:
         q = q.filter(E.tipo == tipo)
+    if buscar:
+        q = q.filter(E.url.icontains(buscar, autoescape=True))
     if solo_no_rastreadas:
         q = q.filter(
+            ~E.tipo.startswith("sonda_", autoescape=True),
             ~exists().where(Url.job_id == E.job_id, Url.url_hash == E.url_hash),
             or_(E.url_hash_alt.is_(None),
                 ~exists().where(Url.job_id == E.job_id, Url.url_hash == E.url_hash_alt)),
@@ -1401,6 +1408,109 @@ def get_wordpress_entidades(
         "modificado": e.modificado, "datos": e.datos,
     } for e in filas]
     return _paginate(items, total, page, page_size)
+
+
+# Plugins y tema por la ruta de sus ficheros (decision 168). El nombre sale de
+# la carpeta (`/wp-content/plugins/<slug>/`): eso es fiable, el fichero esta
+# ahi. El `?ver=` no tanto: lo pone quien encola el fichero y, si no pasa
+# version, WordPress pone la suya; WP Rocket y similares sirven copias en
+# `/wp-content/cache/` con un numero de cache. Solo cuenta como version un
+# `ver` con forma de version (con un punto) y fuera de una copia de cache.
+_RE_WP_ASSET = re.compile(r"/wp-content/(plugins|themes)/([A-Za-z0-9._-]{1,100})/")
+_RE_WP_VER = re.compile(r"[?&]ver=([^&#]{1,40})")
+# Cada tramo opcional empieza por su separador: sin ambiguedad al partir, asi
+# un `ver` raro no hace retroceder la regex de forma exponencial.
+_RE_FORMA_VERSION = re.compile(r"^\d+(\.\d+)+[A-Za-z0-9]*([.-][A-Za-z0-9]+)*$")
+WP_ASSETS_MUESTRA = 2000
+
+
+def _inventario_wp(filas, version_wp: str | None) -> dict[str, list[dict]]:
+    """`filas` = (resource_url, paginas). Plugins y temas con las paginas en
+    las que aparece cada uno (la mayor de sus ficheros: un mismo plugin carga
+    varios en la misma pagina) y las versiones vistas, de mas a menos paginas."""
+    grupos: dict[tuple[str, str], dict] = {}
+    for url, paginas in filas:
+        m = _RE_WP_ASSET.search(url or "")
+        if not m:
+            continue
+        clase = "plugins" if m.group(1) == "plugins" else "temas"
+        g = grupos.setdefault((clase, m.group(2)), {"slug": m.group(2), "paginas": 0,
+                                                    "versiones": {}})
+        g["paginas"] = max(g["paginas"], int(paginas or 0))
+        v = _RE_WP_VER.search(url)
+        if v and "/wp-content/cache/" not in url and _RE_FORMA_VERSION.match(v.group(1)):
+            g["versiones"][v.group(1)] = max(g["versiones"].get(v.group(1), 0), int(paginas or 0))
+    salida: dict[str, list[dict]] = {"plugins": [], "temas": []}
+    for (clase, _), g in sorted(grupos.items(), key=lambda kv: (-kv[1]["paginas"], kv[0][1])):
+        salida[clase].append({
+            "slug": g["slug"], "paginas": g["paginas"],
+            "versiones": [{"version": v, "paginas": n,
+                           "igual_que_wordpress": bool(version_wp) and v == version_wp}
+                          for v, n in sorted(g["versiones"].items(), key=lambda kv: -kv[1])],
+        })
+    return salida
+
+
+@router.get("/wordpress/assets")
+def get_wordpress_assets(
+    job_id: uuid.UUID,
+    muestra: int = Query(WP_ASSETS_MUESTRA, ge=1, le=20_000),
+    db: Session = Depends(get_session),
+):
+    """Plugins y tema de un WordPress por los CSS y JS que cargan sus paginas
+    (decision 168), en las primeras `muestra` paginas HTML del censo (por orden
+    de rastreo: las menos profundas primero, que cubren las plantillas).
+
+    Lo que no sale aqui no se afirma que no exista: un plugin sin CSS ni JS
+    propios, uno que solo carga en una plantilla fuera de la muestra, o un
+    sitio que renombra `wp-content`. Con la muestra entera de Lopesan
+    (5.700 paginas) la consulta tarda 3 s en produccion: por eso la muestra.
+    """
+    from shared.models import Resource
+
+    job = _get_job_or_404(job_id, db)
+    resumen = ((job.adapters or {}).get("wordpress") or {}) if job.adapters else {}
+    # Los ids primero y luego `url_id IN (...)` por lotes: con la subconsulta
+    # dentro, Postgres estimaba mal y recorria `resources` entera (9,7 M filas,
+    # 2,6 s en produccion); con la lista va por `ix_resources_url_id` (0,75 s).
+    ids = [i for (i,) in db.execute(
+        select(Url.id).where(Url.job_id == job_id, Url.is_html.is_(True))
+        .order_by(Url.id).limit(muestra))]
+    por_url: dict[str, int] = {}
+    for n in range(0, len(ids), 1000):
+        for recurso, paginas in db.execute(
+                select(Resource.resource_url, func.count(func.distinct(Resource.url_id)))
+                .where(Resource.url_id.in_(ids[n:n + 1000]),
+                       Resource.resource_type.in_(("css", "js")),
+                       Resource.resource_url.like("%/wp-content/%"))
+                .group_by(Resource.resource_url)):
+            # Lotes de paginas distintas: las cuentas se suman sin repetir.
+            por_url[recurso] = por_url.get(recurso, 0) + int(paginas)
+    return {"paginas_miradas": len(ids), "muestra": muestra,
+            "version_wordpress": resumen.get("version"),
+            **_inventario_wp(por_url.items(), resumen.get("version"))}
+
+
+def _wordpress_de_url(db: Session, job_id: uuid.UUID, url_hash: str | None) -> list[dict]:
+    """Las entidades de la REST API de WordPress que son esta URL (decision
+    168): por `url_hash` (indice `ix_adent_job_hash`) o por `url_hash_alt`, la
+    misma URL con el otro esquema, como el analisis. Sin las sondas, que no
+    son entidades. Sin tabla, lista vacia (dato opcional, como los sitemaps)."""
+    from shared.models import AdapterEntity as E
+
+    if not url_hash:
+        return []
+    try:
+        with db.begin_nested():
+            filas = (db.query(E.tipo, E.id_externo, E.estado, E.modificado, E.cuenta, E.url)
+                     .filter(E.job_id == job_id, E.adaptador == "wordpress",
+                             or_(E.url_hash == url_hash, E.url_hash_alt == url_hash),
+                             ~E.tipo.startswith("sonda_", autoescape=True))
+                     .order_by(E.tipo, E.id).limit(20).all())
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"tipo": t, "id": i, "estado": st, "modificado": m, "cuenta": c, "url": u}
+            for t, i, st, m, c, u in filas]
 
 
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)
@@ -1476,6 +1586,7 @@ def get_url_detail(
     resp.capturas_alternativas = _capturas_alternativas(db, job_id, url_obj.id)
     resp.robots_regla = _robots_regla(db, job_id, url_obj)
     resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
+    resp.wordpress = _wordpress_de_url(db, job_id, url_obj.url_hash)
 
     out_items = []
     for link_obj, src_url in outlink_rows:
