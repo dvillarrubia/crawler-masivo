@@ -80,10 +80,20 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
         return _extraer_grupos(session, p, modulo, jobs, n, semilla)
     por_plantilla: dict[str, list[tuple]] = {}
     vistas: set[str] = set()
+    opciones = None
     for jid in jobs:
         job = session.get(Job, uuid.UUID(str(jid)))
         if job is None:
             raise SystemExit(f"No existe el job {jid}")
+        if p.opciones_del_cliente:
+            # Las opciones son las del cliente (decision 178): el juego va con
+            # ellas, y dos taxonomias distintas son dos juegos.
+            (pc,) = modulo.preguntas_para(session, job)
+            if not pc.variante:
+                raise SystemExit(f"El job {jid} no tiene taxonomia: {pregunta} no pregunta nada ahi")
+            if opciones is not None and pc.opciones != opciones:
+                raise SystemExit(f"{pregunta}: los jobs tienen taxonomias distintas; un juego por cliente")
+            opciones = pc.opciones
         reglas = reglas_de_plantilla((job.config or {}).get("templates"))
         # Ordenado: sin ORDER BY, Postgres devuelve otro orden tras un VACUUM y
         # la misma semilla daba otra muestra.
@@ -107,12 +117,46 @@ def extraer(session, pregunta: str, jobs: list[str], n: int, semilla: int) -> li
             # dos plantillas, no una.
             plantilla = f"{urlsplit(url).hostname or ''}|{plantilla_de(path or '/', reglas)}"
             por_plantilla.setdefault(plantilla, []).append((str(job.id), uid, url, plantilla))
-    elegidas = muestra_estratificada(por_plantilla, n, semilla=semilla)
-    estados = modulo.construir_estados(session, [uid for _, uid, _, _ in elegidas])
-    return [{"id": url, "job_id": jid, "url_id": uid, "plantilla": plantilla,
-             "pregunta": p.nombre, "version": p.version, "estado": e.datos,
-             "etiqueta": None, "etiquetado_por": None, "nota": ""}
-            for (jid, uid, url, plantilla), e in zip(elegidas, estados)]
+    # Todas en el orden estratificado (los `n` primeros son los de siempre) y
+    # se van cogiendo saltando los estados repetidos: la misma pagina con y sin
+    # www es el mismo ejemplo para Jev y contarlo dos veces infla el juego
+    # (decision 169). Se rellena con la siguiente hasta llegar a `n`.
+    total = sum(len(v) for v in por_plantilla.values())
+    orden = muestra_estratificada(por_plantilla, total, semilla=semilla)
+    filas: list[dict] = []
+    estados_vistos: set[str] = set()
+    for i in range(0, len(orden), 200):
+        if len(filas) >= n:
+            break
+        trozo = orden[i:i + 200]
+        for (jid, uid, url, plantilla), e in zip(
+                trozo, modulo.construir_estados(session, [uid for _, uid, _, _ in trozo])):
+            clave = json.dumps(e.datos, sort_keys=True, ensure_ascii=False, default=str)
+            if clave in estados_vistos:
+                continue
+            estados_vistos.add(clave)
+            fila = {"id": url, "job_id": jid, "url_id": uid, "plantilla": plantilla,
+                    "pregunta": p.nombre, "version": p.version, "estado": e.datos,
+                    "etiqueta": None, "etiquetado_por": None, "nota": ""}
+            if opciones is not None:
+                fila["opciones"] = opciones
+            filas.append(fila)
+            if len(filas) >= n:
+                break
+    return filas
+
+
+def pregunta_del_juego(juego: list[dict]):
+    """La pregunta del juego, con las opciones del cliente si las trae
+    (decision 178: `categoria_cliente` pregunta por la taxonomia del job)."""
+    from shared.preguntas import obtener
+
+    p = obtener(juego[0]["pregunta"])
+    if p.opciones_del_cliente:
+        if not juego[0].get("opciones"):
+            raise SystemExit(f"{p.nombre}: el juego no trae las opciones del cliente")
+        p = p.con_opciones(juego[0]["opciones"])
+    return p
 
 
 def _extraer_grupos(session, p, modulo, jobs: list[str], n: int, semilla: int) -> list[dict]:
@@ -189,11 +233,10 @@ def responder(juego: list[dict], confirmar: bool, capa=None) -> tuple[dict, list
     ejecucion (la estimacion x 1,5) y deja las decisiones en `decisions`.
     """
     from shared.decisiones import Estado, capa_desde_entorno
-    from shared.preguntas import obtener
 
     if not juego:
         raise SystemExit("El juego esta vacio")
-    p = obtener(juego[0]["pregunta"])
+    p = pregunta_del_juego(juego)
     estados = [Estado(datos=f["estado"], url_id=f.get("url_id"), ambito=f.get("ambito") or "url")
                for f in juego]
     if capa is None:
@@ -243,13 +286,11 @@ def _capa_con_presupuesto(estimacion: dict, capa_desde_entorno):
 
 def evaluar(juego: list[dict], respuestas: list[dict], objetivo: float) -> dict:
     from shared.evaluacion_decisiones import etiqueta_de_respuesta, metricas
-    from shared.preguntas import obtener
-
     from shared.evaluacion_decisiones import normalizar_etiqueta
 
     if not juego:
         raise SystemExit("El juego esta vacio")
-    p = obtener(juego[0]["pregunta"])
+    p = pregunta_del_juego(juego)
     otras = sorted({f.get("version") for f in juego} - {p.version})
     if otras:
         raise SystemExit(f"El juego es de la version {otras} y el catalogo esta en la {p.version}: "

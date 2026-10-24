@@ -64,6 +64,9 @@
   `Link`, sitemap); el del sitemap vive en `sitemap_entries.hreflang`, no en la
   tabla `hreflang`, y con el sitemap leido a medias (`estado_hreflang_sitemap`)
   no se afirma que a una pagina sin entrada le falte nada. Decision 167.
+- **Una pregunta a Jev con opciones del cliente se manda con `con_opciones`**
+  (su `variante` entra en la clave de cache); el tipo de pagina se pregunta por
+  plantilla y nada lo lee como cierto sin umbral. Decision 178.
 
 ## Borrado y almacenamiento
 

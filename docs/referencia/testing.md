@@ -113,6 +113,12 @@ punta a punta con el `FakeLLM` (pares del mismo idioma, la pregunta con
 reanudar por la clave del estado), filtro, estado (ordenado por ruta, con la
 canonica), busqueda por `url_hash`, estimacion, `solo_si` en la pantalla, el
 efecto apagado y el `extraer` sin repetidos.
+Tipo de pagina (decision 178): `test_tipo_pagina.py` (muestra por plantilla sin
+la misma ruta con y sin www, estado, tokens de la estimacion, punta a punta con
+una plantilla mixta, `propagable` solo con umbral, la taxonomia del cliente como
+opciones (la del cliente hoy sobre la del job, con descripciones) y como clave de
+cache, el aviso sin taxonomia, cada caso frontera en una sola opcion, `extraer` sin estados repetidos y el endpoint),
+tambien en el trabajo de la API.
 Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se
 borra TODO lo del censo y nada de lo demas, los dos guardias, que `forzar`
 salta el de la serie y nunca el de en marcha, que `simular` no toca nada, el

@@ -372,6 +372,22 @@ robots.txt (o partir del guardado), unas URLs y unos agentes, y ver el veredicto
 y la línea que decide con la misma lógica que el crawler, antes de subirlo.
 [Decisión 171](docs/decisiones/indexabilidad.md#d171).
 
+### Tipo de página por plantilla con Jev (24 de octubre)
+
+En el análisis enriquecido hay dos módulos nuevos. **Tipo de página** dice qué
+es cada plantilla del sitio (portada, listado, ficha de producto o servicio,
+landing comercial, artículo, perfil de una persona, corporativa, contacto,
+ayuda, legal, utilidad u otro) preguntando por unas pocas URLs de cada una, no
+por todas: en Lopesan, 262 de 3.216 páginas y unos 2 céntimos; en Penguin, 405
+de 78.457. En la pestaña
+«Enriquecido», «Ver la respuesta por plantilla» enseña qué responden sus
+muestras, si coinciden y a cuántas páginas se aplicaría. **Categoría del
+cliente** hace lo mismo con las categorías de negocio que se pongan en
+`taxonomia` de la configuración del cliente (vale también para los censos ya
+rastreados, y cada categoría puede llevar su descripción). Las dos están sin evaluar: las
+respuestas son orientativas y todavía no se aplican a ninguna página ni a los
+umbrales del análisis. [Decisión 178](docs/decisiones/llm-y-enriquecido.md#d178).
+
 ### Alertas a medida de cada cliente y resumen semanal (18 de octubre)
 
 Ola 5.2 del plan (decisión 135). En la ficha del cliente hay una pestaña
@@ -1019,7 +1035,11 @@ se lanza solo.
 - Detectar los bloqueos que no se anuncian ([#10](https://github.com/dvillarrubia/crawler-masivo/issues/10);
   los que sí se anuncian ya se detectan sin modelo, decisión 103)
   y soft 404 ([#11](https://github.com/dvillarrubia/crawler-masivo/issues/11)).
-- Tipo de página ([#12](https://github.com/dvillarrubia/crawler-masivo/issues/12)).
+- Tipo de página ([#12](https://github.com/dvillarrubia/crawler-masivo/issues/12)):
+  **hecha la pregunta por plantilla y la categoría del cliente** (decisión 178),
+  sin evaluar. Falta etiquetar su juego y ponerle umbral; después, el tipo en
+  cada URL, los umbrales por tipo del análisis y sustituir `REGLAS` de
+  `check_js_templates.py`.
 - Intención de búsqueda y embudo TOFU/MOFU/BOFU, contrastados con las keywords
   ([#39](https://github.com/dvillarrubia/crawler-masivo/issues/39)).
 - Checks on-page nuevos

@@ -485,6 +485,42 @@ class JobConfig(BaseModel):
     marcas: list[str] = Field(default_factory=list, max_length=50)
     # Adaptadores de CMS (decision 161): hoy WordPress por su REST API.
     adapters: AdaptersConfig = Field(default_factory=AdaptersConfig)
+    # Taxonomia de negocio del cliente (#12, decision 178): las opciones de la
+    # pregunta `categoria_cliente` del analisis enriquecido. Hasta 20 (con mas,
+    # un choice se reparte y no decide nada); sin ella, ese modulo no pregunta.
+    # Cada categoria es un nombre o `{"nombre", "descripcion"}`: la descripcion
+    # (que entra, que no) es lo que el modelo lee para decidir, y sin ella solo
+    # tiene el nombre.
+    taxonomia: list[str | dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+    @field_validator("taxonomia")
+    @classmethod
+    def _taxonomia_valida(cls, v: list) -> list:
+        limpias: list = []
+        vistos: set[str] = set()
+        for c in v or []:
+            if isinstance(c, dict):
+                sobran = set(c) - {"nombre", "descripcion"}
+                if sobran:
+                    raise ValueError(f"categoria con claves desconocidas: {sorted(sobran)}")
+                nombre = " ".join(str(c.get("nombre") or "").split())
+                descripcion = " ".join(str(c.get("descripcion") or "").split())
+                if len(descripcion) > 400:
+                    raise ValueError(f"descripcion de mas de 400 caracteres en {nombre[:40]!r}")
+            else:
+                nombre, descripcion = " ".join(str(c or "").split()), ""
+            if not nombre:
+                continue
+            if len(nombre) > 80:
+                raise ValueError(f"categoria de mas de 80 caracteres: {nombre[:40]!r}...")
+            if nombre.lower() == "ninguna":
+                raise ValueError("«ninguna» no puede ser una categoria: es la respuesta para "
+                                 "las paginas que no son de ninguna")
+            if nombre.lower() in vistos:
+                raise ValueError(f"categoria repetida: {nombre!r}")
+            vistos.add(nombre.lower())
+            limpias.append({"nombre": nombre, "descripcion": descripcion} if descripcion else nombre)
+        return limpias
 
     @field_validator("impersonate")
     @classmethod

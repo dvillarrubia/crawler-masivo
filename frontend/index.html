@@ -1982,7 +1982,7 @@
                       <span class="text-dim" style="font-size:.8rem" x-text="fmt.num(r.total) + ' respuestas · ' + fmt.usd(r.coste_usd)"></span>
                     </div>
                     <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.5rem;font-size:.82rem">
-                      <template x-for="[resp, n] in Object.entries(r.por_respuesta)" :key="resp">
+                      <template x-for="[resp, n] in respuestasEnriq(r)" :key="resp">
                         <a href="#" @click.prevent="cargarDecisionesEnriq(preg, resp)">
                           <strong x-text="fmt.respuestaEnriq(resp)"></strong> <span x-text="fmt.num(n)"></span>
                           <span class="text-dim" x-show="r.umbral != null"
@@ -2001,8 +2001,44 @@
                     <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="r.umbral == null">
                       Sin umbral calibrado (#8) ninguna respuesta sale «decidido»: son orientativas.
                     </div>
+                    <div style="font-size:.8rem;margin-top:.35rem" x-show="['tipo_pagina', 'categoria_cliente'].includes(preg)">
+                      <a href="#" @click.prevent="cargarPlantillasEnriq(preg)">Ver la respuesta por plantilla</a>
+                      <span class="text-dim">: se pregunta por unas pocas URLs de cada plantilla y se propone para todas.</span>
+                    </div>
                     <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="r.umbral != null">
                       Solo las «decididas» pasan el umbral de la pregunta (<span x-text="Math.round(100 * r.umbral) + ' %'"></span> de confianza, medido con su juego de evaluación); las demás son orientativas.
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="enriqPlantillas">
+                  <div class="card" style="margin-bottom:1rem">
+                    <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline;flex-wrap:wrap">
+                      <strong>Por plantilla: <code x-text="enriqPlantillas.pregunta"></code></strong>
+                      <span class="text-dim" style="font-size:.8rem"
+                            x-text="fmt.num(enriqPlantillas.total_plantillas) + ' plantillas · ' + fmt.num(enriqPlantillas.urls_cubiertas) + ' URLs con propuesta'"></span>
+                    </div>
+                    <div class="text-dim" style="font-size:.75rem;margin:.3rem 0 .5rem">
+                      «Mixta»: sus muestras no coinciden y no se propone nada (habrá que decidirla URL a URL).
+                      <span x-show="enriqPlantillas.umbral == null">Sin umbral calibrado (#8) ninguna es «propagable»: todo es orientativo y no se escribe en ninguna URL.</span>
+                    </div>
+                    <div style="overflow-x:auto">
+                      <table>
+                        <thead><tr><th style="text-align:left">plantilla</th><th>URLs</th><th>respuesta</th><th>acuerdo</th><th>confianza</th><th style="text-align:left">estado</th></tr></thead>
+                        <tbody>
+                          <template x-for="f in enriqPlantillas.plantillas" :key="f.plantilla">
+                            <tr>
+                              <td style="max-width:28rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="f.plantilla" :title="f.plantilla"></td>
+                              <td style="text-align:right" x-text="fmt.num(f.urls)"></td>
+                              <td x-text="f.respuesta == null ? '—' : fmt.respuestaEnriq(f.respuesta)"
+                                  :title="Object.entries(f.respuestas || {}).map(([k, v]) => fmt.respuestaEnriq(k) + ': ' + v).join(' · ')"></td>
+                              <td style="text-align:right" x-text="f.acuerdo == null ? '—' : (f.respondidas * f.acuerdo).toFixed(0) + ' de ' + f.muestras"></td>
+                              <td style="text-align:right" x-text="f.confianza_media == null ? '—' : (100 * f.confianza_media).toFixed(0) + '%'"></td>
+                              <td x-text="fmt.estadoPlantillaEnriq(f.estado)"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </template>
@@ -6517,6 +6553,9 @@
               <span>Gasto del mes de la instancia</span>
               <strong x-text="fmt.usd(enriqEstimacion.global.gastado_mes_usd) + ' de ' + (enriqEstimacion.global.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.global.tope_mensual_usd))"></strong>
             </div>
+          </template>
+          <template x-for="a in ((enriqEstimacion && !enriqEstimando && enriqEstimacion.avisos) || [])" :key="a">
+            <div class="form-hint" style="margin-top:.4rem;color:var(--orange)" x-text="a"></div>
           </template>
           <div class="form-hint" style="margin-top:.4rem">
             Estimación por caracteres; el coste real sale de lo que cobra OpenRouter y la ejecución se para en seco al llegar al presupuesto.
