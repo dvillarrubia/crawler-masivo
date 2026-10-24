@@ -873,6 +873,7 @@ function app() {
       if (this.expAgrupar) q.set('agrupar', this.expAgruparPor);
       if (this.expPlantilla) q.set('plantilla', this.expPlantilla);
       if (this.expSegmento) q.set('segmento', this.expSegmento);
+      if (this.expWp) q.set('wordpress', this.wpSolo.tipo || 'todo');
       const f = Object.fromEntries(Object.entries(this.expColumnFilters).filter(([, v]) =>
         v && (v.op === 'vacio' || v.op === 'con_valor' || (v.value ?? '').toString().trim() !== '')));
       if (Object.keys(f).length) q.set('filtros', JSON.stringify(f));
@@ -890,6 +891,7 @@ function app() {
         agrupar: ['plantilla', 'segmento'].includes(q.get('agrupar')),
         agruparPor: q.get('agrupar') === 'segmento' ? 'segmento' : 'plantilla',
         plantilla: q.get('plantilla') || '', segmento: q.get('segmento') || '',
+        wordpress: q.get('wordpress') || '',
       };
     },
 
@@ -3283,6 +3285,86 @@ function app() {
     },
 
     // ===================================================================
+    //      WORDPRESS (decisiones 161 y 168): inventario y «Solo en WordPress»
+    // ===================================================================
+    wpAssets: null,             // GET /jobs/{id}/wordpress/assets, al pintar la tarjeta
+    wpAssetsJob: null,          // de qué job es `wpAssets`
+    wpAssetsError: '',
+    expWp: false,               // el Explorador enseña «Solo en WordPress» en vez de la tabla
+    wpSolo: { items: [], total: 0, page: 1, pages: 1, tipo: '', buscar: '', cargando: false, error: '' },
+    _wpBuscarTimer: null,
+    _wpPedida: '',
+
+    async cargarWpAssets() {
+      if (!this.job || this.wpAssetsJob === this.job.id) return;
+      const id = this.job.id;
+      this.wpAssetsJob = id;
+      this.wpAssets = null;
+      this.wpAssetsError = '';
+      try {
+        const r = await api(`/jobs/${id}/wordpress/assets`);
+        if (this.wpAssetsJob === id) this.wpAssets = r;
+      } catch (e) {
+        if (this.wpAssetsJob === id) this.wpAssetsError = e.message;
+      }
+    },
+
+    // Desde la tarjeta del Resumen: el Explorador con la lista de ese tipo.
+    verSoloWordPress(tipo = '') {
+      this.openExplorer({ wordpress: tipo || 'todo' });
+    },
+
+    abrirSoloWordPress(tipo = '') {
+      this.expWp = true;
+      this.expDetailOpen = false;
+      this.wpSolo = { ...this.wpSolo, items: [], total: 0, page: 1, pages: 1, tipo: tipo || '', buscar: '', error: '' };
+      this.cargarSoloWordPress();
+    },
+
+    cerrarSoloWordPress() {
+      this.expWp = false;
+    },
+
+    async cargarSoloWordPress() {
+      if (!this.job) return;
+      const w = this.wpSolo;
+      const q = new URLSearchParams({ solo_no_rastreadas: 'true', page: String(w.page), page_size: '100' });
+      if (w.tipo) q.set('tipo', w.tipo);
+      if (w.buscar.trim()) q.set('buscar', w.buscar.trim());
+      const pedida = q.toString();
+      this._wpPedida = pedida;
+      w.cargando = true;
+      w.error = '';
+      try {
+        const r = await api(`/jobs/${this.job.id}/wordpress/entidades?${pedida}`);
+        // Una respuesta lenta de una búsqueda anterior no pisa la última.
+        if (this._wpPedida !== pedida) return;
+        Object.assign(this.wpSolo, { items: r.items || [], total: r.total || 0, pages: r.pages || 1 });
+      } catch (e) {
+        this.wpSolo.error = e.message;
+      } finally {
+        this.wpSolo.cargando = false;
+      }
+    },
+
+    elegirTipoSoloWordPress(tipo) {
+      this.wpSolo.tipo = tipo;
+      this.wpSolo.page = 1;
+      this.cargarSoloWordPress();
+    },
+
+    buscarSoloWordPress() {
+      clearTimeout(this._wpBuscarTimer);
+      this._wpBuscarTimer = setTimeout(() => { this.wpSolo.page = 1; this.cargarSoloWordPress(); }, 400);
+    },
+
+    paginaSoloWordPress(n) {
+      if (n < 1 || n > this.wpSolo.pages) return;
+      this.wpSolo.page = n;
+      this.cargarSoloWordPress();
+    },
+
+    // ===================================================================
     //                         EXPLORER VIEW
     // ===================================================================
     expTab: 'all',
@@ -3426,6 +3508,8 @@ function app() {
       this.expAgruparPor = preajuste.agruparPor || 'plantilla';
       this.expPlantilla = preajuste.plantilla || '';
       this.expSegmento = preajuste.segmento || '';
+      if (preajuste.wordpress) this.abrirSoloWordPress(preajuste.wordpress === 'todo' ? '' : preajuste.wordpress);
+      else this.expWp = false;
       if (!this.segmentosJob) this.cargarSegmentos();
       this.expPlantillas = null;
       this.expDetailOpen = false;
@@ -3473,6 +3557,7 @@ function app() {
     // y se ven en el contador «N filtros», que los quita de golpe.
     setExplorerTab(tab) {
       const antes = EXP_TABS.find(t => t.key === this.expTab);
+      this.expWp = false;
       this.expTab = tab;
       // Entre vistas de ambito, el problema elegido es de la anterior: fuera.
       if (antes && antes.ambito && this.expProblema && this.expProblema.split(',').every(t => antes.ambito.includes(t))) {
@@ -3966,6 +4051,10 @@ function app() {
       if (this._expKeyHandler) return;
       this._expKeyHandler = (e) => {
         if (this.view !== 'explorer') return;
+        // Con «Solo en WordPress» abierto la tabla de URLs esta oculta: las
+        // flechas desplazan esa lista y no abren a ciegas la ficha de una fila
+        // que no se ve (aparecia abierta al volver a la tabla).
+        if (this.expWp) return;
         // Don't hijack typing inside inputs/textareas/contenteditable
         const t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
@@ -4424,6 +4513,108 @@ function resumenSitemaps(job) {
   };
 }
 
+// ---- WordPress por su REST API (decisiones 161 y 168) ----
+// La tarjeta del Resumen, la casilla del modal, «Solo en WordPress» del
+// Explorador y la entidad en la ficha de la URL. Funciones puras sobre `job`
+// para probarlas en Chromium (tests/test_wordpress_frontend.py).
+const WP_REST_TEXTO = {
+  abierta: ['abierta', 'green'],
+  cerrada: ['cerrada', 'orange'],
+  limitada: ['limitada (429 o 503): no se sabe si está abierta', 'orange'],
+  bloqueada_por_robots: ['prohibida por robots.txt: no se leyó', 'orange'],
+  raiz_fuera_del_sitio: ['anunciada fuera del sitio: no se leyó', 'orange'],
+};
+const WP_CLASE_TEXTO = { entrada: 'Contenido', termino: 'Taxonomía', medio: 'Medios' };
+const WP_ORDEN_CLASE = { entrada: 0, termino: 1, medio: 2 };
+const WP_TIPO_TEXTO = {
+  post: 'Entrada', page: 'Página', attachment: 'Adjunto', category: 'Categoría',
+  post_tag: 'Etiqueta', product: 'Producto', product_cat: 'Categoría de producto',
+  product_tag: 'Etiqueta de producto',
+};
+// Namespaces del núcleo de WordPress: no dicen nada de los plugins.
+const WP_NS_NUCLEO = new Set(['wp', 'oembed', 'wp-site-health', 'wp-block-editor', 'wp-abilities', 'batch']);
+
+function tipoWp(tipo) {
+  return WP_TIPO_TEXTO[tipo] || tipo || '—';
+}
+
+// null si el job no trae el resumen del adaptador (rastreo anterior o con el
+// adaptador apagado) o si no hubo ni rastro de WordPress: entonces la tarjeta
+// no sale, y «no sale» no quiere decir «no es WordPress» en un rastreo viejo.
+function resumenWordPress(job) {
+  const wp = job && job.adapters && job.adapters.wordpress;
+  if (!wp || typeof wp !== 'object') return null;
+  const evidencia = Array.isArray(wp.evidencia) ? wp.evidencia : [];
+  if (!wp.detectado && !evidencia.length) return null;
+  const analisis = wp.analisis && typeof wp.analisis === 'object' ? wp.analisis : null;
+  const porTipo = (analisis && analisis.por_tipo && typeof analisis.por_tipo === 'object') ? analisis.por_tipo : {};
+  const tipos = (wp.tipos && typeof wp.tipos === 'object') ? wp.tipos : {};
+  const filas = [...new Set([...Object.keys(tipos), ...Object.keys(porTipo)])].map(t => {
+    const d = tipos[t] || {};
+    const a = porTipo[t] || null;
+    const leidas = a ? Number(a.leidas) || 0 : (d.leidas ?? null);
+    const enCenso = a ? Number(a.en_el_censo) || 0 : null;
+    return {
+      tipo: t, nombre: tipoWp(t), clase: d.clase || null, clase_texto: WP_CLASE_TEXTO[d.clase] || '—',
+      publicadas: d.total ?? null, leidas, en_el_censo: enCenso,
+      solo_wp: enCenso == null || leidas == null ? null : Math.max(0, leidas - enCenso),
+      recortado: !!d.recortado, status: d.status ?? null,
+    };
+  }).sort((x, y) => ((WP_ORDEN_CLASE[x.clase] ?? 3) - (WP_ORDEN_CLASE[y.clase] ?? 3))
+    || ((y.publicadas ?? y.leidas ?? 0) - (x.publicadas ?? x.leidas ?? 0)) || x.tipo.localeCompare(y.tipo));
+  const [restTexto, restNivel] = WP_REST_TEXTO[wp.rest] || [wp.rest ? String(wp.rest) : 'sin confirmar', 'orange'];
+  // Un plugin que registra rutas en la REST API lo hace con su namespace
+  // (`yoast/v1`, `wc/store/v1`): el primer tramo, sin repetir. No todos los
+  // plugins registran rutas, así que no es la lista entera.
+  const namespaces = [...new Set((Array.isArray(wp.namespaces) ? wp.namespaces : [])
+    .filter(n => typeof n === 'string').map(n => n.split('/')[0]).filter(n => n && !WP_NS_NUCLEO.has(n)))];
+  const nr = analisis && analisis.wp_publicado_no_rastreado && typeof analisis.wp_publicado_no_rastreado === 'object'
+    ? analisis.wp_publicado_no_rastreado : null;
+  return {
+    version: wp.version || null, plugin_seo: wp.plugin_seo || null,
+    nombre: wp.nombre || null, raiz: wp.raiz || null,
+    detectado: !!wp.detectado, evidencia, rest: wp.rest || null,
+    rest_texto: restTexto + (wp.codigo && wp.rest && wp.rest !== 'abierta' ? ` (${wp.codigo})` : ''),
+    rest_nivel: restNivel, abierta: wp.rest === 'abierta',
+    cortada: wp.cortada || null, peticiones: wp.peticiones ?? null,
+    reanudacion: wp.reanudacion || null,
+    analizado: !!analisis, filas, namespaces,
+    no_rastreadas: nr ? (Number(nr.no_rastreadas) || 0) : null,
+    no_afirmable: nr ? (nr.no_afirmable || null) : null,
+    sin_afirmar: nr ? (Number(nr.sin_afirmar) || 0) : null,
+    emitidos: nr ? (Number(nr.emitidos) || 0) : null,
+  };
+}
+
+// La entidad de WordPress de la ficha de una URL, en una línea.
+function textoEntidadWp(w) {
+  if (!w) return '';
+  const partes = [tipoWp(w.tipo), 'ID ' + (w.id ?? '—')];
+  if (w.estado && w.estado !== 'publish' && w.estado !== 'inherit') partes.push(w.estado);
+  if (w.cuenta != null) partes.push(w.cuenta + (w.cuenta === 1 ? ' entrada' : ' entradas'));
+  if (w.modificado) partes.push('modificada ' + String(w.modificado).slice(0, 10));
+  return partes.join(' · ');
+}
+
+// La casilla «Analizar WordPress (REST API)» del modal: marcada = `auto` (o
+// el `on` heredado), sin marcar = `off`. Como las sondas, solo se manda si se
+// CAMBIA respecto a lo que cargó el modal (lo de serie o lo heredado del
+// cliente y el perfil): sin tocarla, el job hereda, y la fusión del servidor
+// es profunda, así que mandar solo `modo` no pisa los topes del perfil.
+function _wpModoDesdeConfig(f, cfg) {
+  const modo = ((cfg && cfg.adapters) || {}).wordpress && cfg.adapters.wordpress.modo;
+  if (!modo) return;
+  f._wpModoBase = modo;
+  f.wp_analizar = modo !== 'off';
+}
+
+function _wpConfigDesdeForm(f, cfg) {
+  // Sin cliente el servidor no hereda nada: se compara con lo de serie.
+  const base = (f.cliente_id && f._wpModoBase) || 'auto';
+  if (!!f.wp_analizar === (base !== 'off')) return;
+  cfg.adapters = { wordpress: { modo: f.wp_analizar ? 'auto' : 'off' } };
+}
+
 // El veredicto del modo lista con sus textos (decision 128).
 const VEREDICTO_TEXTO = {
   pasa: ['La lista pasa', 'green'],
@@ -4501,6 +4692,9 @@ function _freshForm() {
     sondas_por_host: 50,
     og_image_muestra: 200,
     _sondasBase: _sondasDeSerie(),
+    // Adaptador WordPress (decision 168): `_wpConfigDesdeForm`.
+    wp_analizar: true,
+    _wpModoBase: 'auto',
     exclude_patterns: '',
     include_patterns: '',
     max_url_length: 0,
@@ -4637,6 +4831,7 @@ function _configDesdeForm(f) {
     if (v === null || v === _valorSonda(campo, base[campo])) continue;
     cfg[seccion][campo] = v;
   }
+  _wpConfigDesdeForm(f, cfg);
   return cfg;
 }
 
@@ -4687,6 +4882,7 @@ function _formDesdeConfig(f, cfg) {
   poner('basic_auth_user', http.basic_auth_user);
   sub(cfg.analysis_thresholds, ['title_min_length', 'title_max_length', 'description_min_length',
     'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);
+  _wpModoDesdeConfig(f, cfg);
   return f;
 }
 

@@ -1352,6 +1352,24 @@ tr.fila-marcada td{background:var(--accent-subtle)}
    veredicto del modo lista: el tono de cada lectura. */
 .chk .green{color:var(--green)}.chk .red{color:var(--red)}.chk .orange{color:var(--orange)}
 
+/* WordPress por su REST API (decisiones 161 y 168): casilla del modal,
+   tarjeta del Resumen y «Solo en WordPress» del Explorador. */
+.wp-opcion{margin:.5rem 0 1rem}
+.wp-opcion p{margin:.25rem 0 0}
+.wp-datos{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .75rem;margin:0 0 .5rem;font-size:.85rem}
+.wp-datos dt{color:var(--text-dim)}
+.wp-datos dd{margin:0}
+.wp-tabla{font-size:.8rem}
+.wp-plugins{margin-top:.5rem;word-break:break-word}
+.wp-assets{margin-top:.75rem}
+.exp-main.con-wp>:not(.exp-wp){display:none!important}
+.exp-wp{display:flex;flex-direction:column;min-height:0;flex:1}
+.exp-wp-icono{width:13px;height:13px}
+.exp-wp-cuerpo{padding:.6rem;overflow:auto;flex:1}
+.exp-wp-cuerpo p{margin:0 0 .5rem}
+.exp-wp-url{word-break:break-all}
+.exp-wp-paginas{display:flex;gap:.6rem;align-items:center;margin-top:.6rem}
+
 /* Evolucion por perfil (decision 130): graficas SVG propias */
 .text-orange{color:var(--orange)}
 .evo-rejilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.75rem}

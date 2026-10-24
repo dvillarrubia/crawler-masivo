@@ -1388,3 +1388,89 @@
      contra un WordPress falso con dos peticiones a la vez como mucho, en
      `tests/test_wordpress_spider.py`. Falta verlos en un censo entero de
      producción.
+
+<a id="d168"></a>
+168. **La interfaz del adaptador WordPress (decision 161), y los plugins y el
+   tema por la ruta de sus ficheros, con el `?ver=` solo cuando tiene forma
+   de version** (#33).
+   - **La casilla «Analizar WordPress (REST API)»** del modal Nuevo rastreo
+     (pestana Spider, junto a las sondas): marcada es `auto`, sin marcar es
+     `off`. Como las sondas (123, 124), **solo se manda si se cambia**
+     respecto a lo que cargo el modal: sin tocarla, el job hereda del cliente
+     y el perfil; desmarcarla frente a un perfil que la tiene manda `off`, y
+     marcarla frente a un `off` heredado manda `auto`. Se manda solo
+     `adapters.wordpress.modo`: `fusionar_config` es profunda y los topes del
+     perfil siguen. Un `on` heredado se pinta marcado y no se repite. Al
+     volver a «Sin cliente» se compara con lo de serie (el servidor ya no
+     hereda): lo que se ve es lo que se lanza.
+   - **La tarjeta «WordPress» del Resumen sale solo si el job trae
+     `jobs.adapters.wordpress` y hubo rastro de WordPress** (`detectado` o
+     alguna `evidencia`, p. ej. el meta generator con la REST API cerrada). Un
+     rastreo anterior o con el adaptador apagado no la pinta, y que no salga
+     no dice «no es WordPress». Lee el resumen tal cual, sin una consulta
+     mas: version, plugin SEO, estado de la REST API (con el codigo si no
+     esta abierta), y por tipo **publicadas** (`X-WP-Total`), **leidas**, **en
+     el censo** y **solo en WordPress** (leidas sin fila en el censo, de
+     `analisis.por_tipo`). «Solo en WordPress» no es un hallazgo y la cabecera
+     lo dice; si el analisis no lo afirmo (`no_afirmable`, decision 67), la
+     tarjeta dice cuantas y por que. Sin analizar, «en el censo» es «—», no 0.
+     Los plugins con rutas en la REST API salen del primer tramo de cada
+     namespace (`yoast/v1`, `wc/store/v1` → `yoast`, `wc`), sin los del
+     nucleo, y diciendo que no todos los plugins registran rutas.
+   - **Plugins y tema por los CSS y JS** (`GET /wordpress/assets`, bajo
+     demanda al pintar la tarjeta): el nombre sale de la carpeta
+     (`/wp-content/plugins/<slug>/`, `/wp-content/themes/<slug>/`), y eso es
+     fiable: el fichero esta ahi. **El `?ver=` no**: lo pone quien encola el
+     fichero, y si no pasa version WordPress pone la suya; WP Rocket sirve
+     copias en `/wp-content/cache/` con un numero de cache, y hay `ver=1` y
+     sellos de tiempo. Medido en produccion (24-oct-2026) en el blog de
+     Lopesan: `jet-engine` solo en copias de cache (`ver=1791341166`),
+     `sitepress-multilingual-cms` con `ver=1` y `ver=495000`, `astra-child`
+     con sellos de tiempo. Por eso solo cuenta como version un `ver` con un
+     punto (`^\d+(\.\d+)+`, con sufijos como `-rc.1`) y fuera de `/cache/`, y si coincide con la de
+     WordPress se marca «(la de WordPress)». El plugin sale igual, sin
+     version. **En una muestra**: las primeras 2.000 paginas HTML por
+     `crawl_depth` (las menos profundas, que cubren las plantillas; a igual
+     profundidad, por `id`); con el censo entero, Lopesan (5.700 paginas)
+     tardaba 3 s. No por `id` solo: con `ORDER BY id LIMIT`, Postgres puede
+     recorrer `urls_pkey` filtrando el job y leer las filas de todos los jobs
+     con ids anteriores (en produccion, 20.891 de otro job para un censo
+     grande), un coste que crece con la base y no con el censo; sin indice
+     que de el orden por profundidad, entra por `job_id` y ordena lo del job. Los ids se piden
+     primero y luego `url_id IN (...)` por lotes de 1.000: con la subconsulta
+     dentro, Postgres estimaba mal y recorria `resources` entera (9,7 M
+     filas, 2,6 s); con la lista va por `ix_resources_url_id` (0,75 s). Lo
+     que no sale no se afirma que no exista (un plugin sin CSS ni JS, uno que
+     solo carga en una plantilla fuera de la muestra, un `wp-content`
+     renombrado), y la tarjeta lo dice.
+   - **«Solo en WordPress» en el Explorador**: una entrada propia en la barra
+     (solo con la REST API abierta) que cambia la tabla de URLs por un panel
+     sobre `GET /wordpress/entidades?solo_no_rastreadas=true`, con filtro por
+     tipo, busqueda en la URL y paginas de 100, y en la ruta
+     (`#/rastreos/<id>/explorador?wordpress=<tipo|todo>`): se puede pegar. No
+     es una pestana mas de `EXP_TABS` porque no son filas de `urls`: el
+     filtro, el orden, las columnas y la ficha de la tabla no valen para
+     ellas. La cifra de cada tipo en la tarjeta enlaza aqui.
+     `solo_no_rastreadas` deja fuera las sondas (`sonda_paginacion`,
+     `sonda_adjunto`): son peticiones del adaptador, no entidades del sitio, y
+     una pagina N+1 «sin fila en el censo» no es contenido que falte.
+   - **La entidad en la ficha de la URL** (`UrlDetailResponse.wordpress`):
+     tipo, ID, estado, `modified_gmt` y, en un termino, cuantas entradas
+     tiene. Se empareja como el analisis, por `url_hash` o por `url_hash_alt`
+     (la misma URL con el otro esquema), sin las sondas, y sin tabla es una
+     lista vacia, como los sitemaps (126). `url_hash_alt` tiene su indice
+     (`ix_adent_job_hash_alt`, job_id delante): sin el, el OR no podia ir por
+     `ix_adent_job_hash` y Postgres filtraba todas las entidades del job
+     (decenas de miles en un WordPress grande) cada vez que se abria una
+     ficha. La migracion lo crea en `migrar_adapter_entities()`.
+   - **Con «Solo en WordPress» abierto, las flechas del teclado no mueven la
+     tabla de URLs**, que esta oculta: antes pedian la ficha de una fila
+     invisible y bloqueaban el desplazamiento de la lista, y al volver a la
+     tabla aparecia abierta una ficha que nadie eligio.
+   - Probado con un censo WordPress sembrado en local (capturas antes y
+     despues de Resumen, ficha de URL, Explorador y modal) y los endpoints
+     contra SQLite y Postgres (`tests/test_wordpress_ui_api.py`); la tarjeta
+     y la casilla, ejecutando `app.js` en Chromium
+     (`tests/test_wordpress_frontend.py`). No hay todavia un censo WordPress
+     analizado en produccion (el unico job con `adapters` es de un sitio que
+     no lo es): la tarjeta no se ha visto con datos reales de un cliente.

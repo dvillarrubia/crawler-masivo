@@ -854,8 +854,12 @@ es cada plantilla— y va con
   publicado. Hecha la lectura de la REST API durante el rastreo y cuatro avisos
   (contenido publicado que el rastreo no encuentra, páginas de adjunto
   indexables, categorías y etiquetas casi vacías, paginación que no acaba;
-  decisión 161). Falta la interfaz propia (tarjeta en el Resumen, «Solo en
-  WordPress» en el Explorador) y el inventario de plugins.
+  decisión 161). Con interfaz propia: casilla «Analizar WordPress» al lanzar,
+  tarjeta en el Resumen (versión, plugin SEO, lo publicado frente a lo
+  rastreado por tipo, y plugins y tema por los ficheros que cargan las
+  páginas), «Solo en WordPress» en el Explorador y la entidad en la ficha de
+  cada URL (decisión 168). Falta verlo en un censo WordPress entero de
+  producción.
 
 ### 3a. Lo que FreeCrawl tiene y nos falta (17 de octubre)
 

@@ -13,7 +13,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
@@ -193,6 +193,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 164 | robots.txt se respeta en TODAS las peticiones que esperan su descarga, no solo en las dos primeras | [`indexabilidad`](indexabilidad.md#d164) |
 | 165 | El tráfico que esperaba a los datos se avisa al completarse, una vez; una caída general se dice antes que los grupos; y el contenido se compara por su hash | [`comparacion-y-alertas`](comparacion-y-alertas.md#d165) |
 | 167 | Hreflang del sitemap: se guarda y se suma al del HTML y la cabecera; dos fuentes que discrepan son un aviso por host | [`indexabilidad`](indexabilidad.md#d167) |
+| 168 | La interfaz del adaptador WordPress, y plugins y tema por la ruta de sus ficheros (el `?ver=` solo con forma de versión) | [`incidencias`](incidencias.md#d168) |
 
 ## Anadir una decision
 

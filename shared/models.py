@@ -1328,6 +1328,9 @@ class AdapterEntity(Base):
     __table_args__ = (
         Index("ix_adent_job_tipo", "job_id", "tipo"),
         Index("ix_adent_job_hash", "job_id", "url_hash"),
+        # La ficha de una URL busca por los dos hashes (decision 168): sin este
+        # el OR no puede ir por indice y filtra todas las entidades del job.
+        Index("ix_adent_job_hash_alt", "job_id", "url_hash_alt"),
     )
 
 

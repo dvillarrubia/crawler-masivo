@@ -2529,6 +2529,82 @@
               </div>
             </template>
 
+            <!-- WordPress por su REST API (decisiones 161 y 168). Solo si el job
+                 trae el resumen del adaptador y hubo rastro de WordPress: un
+                 rastreo anterior o con el adaptador apagado no dice «no es WordPress». -->
+            <template x-if="resumenWordPress(job)">
+              <div class="card chk wp-tarjeta" data-testid="tarjeta-wordpress" x-data="{ get wp() { return resumenWordPress(job) }, nsAbierto: false }" x-init="cargarWpAssets()">
+                <div class="card-header"><h2>WordPress</h2>
+                  <span class="text-sm text-dim" x-text="wp.nombre || wp.raiz || ''"></span></div>
+                <dl class="wp-datos">
+                  <dt>Versión</dt>
+                  <dd x-text="wp.version || 'no la publica (sin meta generator)'"></dd>
+                  <dt>Plugin SEO</dt>
+                  <dd x-text="wp.plugin_seo || (wp.abierta ? 'ninguno conocido en la REST API' : '—')"></dd>
+                  <dt>REST API</dt>
+                  <dd :class="wp.rest_nivel" x-text="wp.rest_texto"></dd>
+                </dl>
+                <div x-show="wp.cortada" class="text-sm orange" x-text="'Lectura cortada (' + String(wp.cortada).replace(/_/g, ' ') + '): los totales de cada tipo salen de X-WP-Total, pero no se leyeron todas las entidades.'"></div>
+                <div x-show="wp.reanudacion" class="text-sm text-dim">Datos de una ejecución anterior del rastreo: esta no llegó a confirmar la REST API.</div>
+                <template x-if="wp.filas.length">
+                  <div class="table-wrap"><table class="tbl wp-tabla">
+                    <thead><tr><th>Tipo</th><th>Clase</th><th title="X-WP-Total: lo que el sitio dice que publica">Publicadas</th><th>Leídas</th><th title="Leídas que tienen fila en el censo (por la URL, o la misma con el otro esquema)">En el censo</th><th title="Leídas sin fila en el censo: no es por sí solo un hallazgo">Solo en WordPress</th></tr></thead>
+                    <tbody>
+                      <template x-for="f in wp.filas" :key="f.tipo">
+                        <tr>
+                          <td :title="f.tipo" x-text="f.nombre"></td>
+                          <td x-text="f.clase_texto"></td>
+                          <td x-text="f.publicadas == null ? (f.status ? 'sin acceso (' + f.status + ')' : '—') : fmt.num(f.publicadas)"></td>
+                          <td x-text="f.leidas == null ? '—' : fmt.num(f.leidas) + (f.recortado ? ' (tope)' : '')"></td>
+                          <td x-text="f.en_el_censo == null ? '—' : fmt.num(f.en_el_censo)"></td>
+                          <td>
+                            <template x-if="f.solo_wp && wp.abierta"><a href="#" @click.prevent="verSoloWordPress(f.tipo)" x-text="fmt.num(f.solo_wp)"></a></template>
+                            <template x-if="!(f.solo_wp && wp.abierta)"><span x-text="f.solo_wp == null ? '—' : fmt.num(f.solo_wp)"></span></template>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table></div>
+                </template>
+                <div x-show="wp.abierta && !wp.analizado" class="text-sm text-dim">Leída, sin analizar todavía: «En el censo» sale al acabar el análisis.</div>
+                <div x-show="wp.no_afirmable" class="text-sm orange"
+                     x-text="fmt.num(wp.sin_afirmar) + ' publicadas sin rastrear que no se afirman como hallazgo: el censo tiene otro alcance (' + wp.no_afirmable + '). La lista está en «Solo en WordPress».'"></div>
+                <div x-show="wp.emitidos" class="text-sm"><a href="#" @click.prevent="verTipoDeIncidencia('wp_publicado_no_rastreado', ''); switchTab('issues')">Ver los avisos de contenido publicado y no rastreado</a></div>
+                <template x-if="wp.namespaces.length">
+                  <div class="text-sm wp-plugins">
+                    <span class="text-dim" title="Cada plugin que registra rutas en la REST API lo hace con su espacio de nombres. No todos lo hacen: no es la lista entera.">Plugins con rutas en la REST API:</span>
+                    <span x-text="(nsAbierto ? wp.namespaces : wp.namespaces.slice(0, 12)).join(', ')"></span>
+                    <a href="#" x-show="wp.namespaces.length > 12" @click.prevent="nsAbierto = !nsAbierto" x-text="nsAbierto ? 'menos' : 'y ' + (wp.namespaces.length - 12) + ' más'"></a>
+                  </div>
+                </template>
+                <!-- Inventario por la ruta de los CSS y JS (decisión 168), bajo demanda -->
+                <div class="wp-assets" data-testid="wp-assets">
+                  <template x-if="wpAssetsError"><div class="text-sm text-dim" x-text="'Inventario por los ficheros: ' + wpAssetsError"></div></template>
+                  <template x-if="!wpAssets && !wpAssetsError"><div class="text-sm text-dim">Leyendo plugins y tema de los CSS y JS…</div></template>
+                  <template x-if="wpAssets && (wpAssets.plugins.length || wpAssets.temas.length)">
+                    <div>
+                      <div class="text-sm text-dim" x-text="'Por los CSS y JS de ' + fmt.num(wpAssets.paginas_miradas) + ' páginas HTML (las primeras del rastreo). La versión es la del ?ver= del fichero: suele ser la del plugin, pero la pone quien lo carga.'"></div>
+                      <div class="table-wrap"><table class="tbl wp-tabla">
+                        <thead><tr><th>Tema o plugin</th><th>Páginas</th><th>Versión en ?ver=</th></tr></thead>
+                        <tbody>
+                          <template x-for="a in [...wpAssets.temas.map(t => ({...t, clase: 'tema'})), ...wpAssets.plugins.map(t => ({...t, clase: 'plugin'}))]" :key="a.clase + a.slug">
+                            <tr>
+                              <td><span x-text="a.slug"></span> <span class="text-dim" x-text="a.clase"></span></td>
+                              <td x-text="fmt.num(a.paginas)"></td>
+                              <td x-text="a.versiones.length ? a.versiones.slice(0, 3).map(v => v.version + (v.igual_que_wordpress ? ' (la de WordPress)' : '')).join(', ') : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table></div>
+                    </div>
+                  </template>
+                  <template x-if="wpAssets && !wpAssets.plugins.length && !wpAssets.temas.length">
+                    <div class="text-sm text-dim" x-text="'Ningún CSS ni JS de /wp-content/plugins/ ni /wp-content/themes/ en ' + fmt.num(wpAssets.paginas_miradas) + ' páginas (o el sitio renombra la carpeta).'"></div>
+                  </template>
+                </div>
+              </div>
+            </template>
+
             <div class="card" style="grid-column:1/-1">
               <div class="card-header"><h2>Configuración</h2></div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;font-size:.85rem">
@@ -4060,6 +4136,10 @@
                   <div class="text-sm text-dim truncate" :title="sm.fichero + ((sm.hreflang || []).length ? '\n' + sm.hreflang.map(h => h[0] + ' → ' + h[1]).join('\n') : '')"
                        x-text="'Sitemap: ' + sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod') + ((sm.hreflang || []).length ? ' · hreflang: ' + sm.hreflang.map(h => h[0]).join(', ') : '')"></div>
                 </template>
+                <!-- La entidad de WordPress que es esta URL (decisión 168) -->
+                <template x-for="(w, n) in (urlDetail.wordpress || [])" :key="'wp' + n">
+                  <div class="text-sm text-dim" data-testid="url-wordpress" x-text="'WordPress: ' + textoEntidadWp(w)"></div>
+                </template>
               </div>
               <div class="card">
                 <div class="veredicto-titulo">
@@ -4648,7 +4728,7 @@
                   <div class="exp-sidebar-titulo" x-text="tab.header"></div>
                 </template>
                 <template x-if="!tab.divider && !tab.header && (!tab.requiere || expAMedida.length)">
-                  <button type="button" class="exp-tab" :class="expTab === tab.key && 'active'" @click="setExplorerTab(tab.key)">
+                  <button type="button" class="exp-tab" :class="expTab === tab.key && !expWp && 'active'" @click="setExplorerTab(tab.key)">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
                     <template x-if="!tab.ambito">
@@ -4663,10 +4743,66 @@
               </div>
             </template>
           </div>
+          <!-- «Solo en WordPress» (decisión 168): lo que la REST API publica y
+               el censo no tiene. Otra fuente que la tabla de URLs: panel propio. -->
+          <template x-if="resumenWordPress(job) && resumenWordPress(job).abierta">
+            <div class="exp-sidebar-group">
+              <div class="exp-sidebar-titulo">WordPress</div>
+              <button type="button" class="exp-tab" :class="expWp && 'active'" @click="abrirSoloWordPress('')" data-testid="exp-solo-wordpress">
+                <i data-lucide="file-question" class="exp-tab-icon"></i>
+                <span>Solo en WordPress</span>
+              </button>
+            </div>
+          </template>
         </div>
 
         <!-- Main area -->
-        <div class="exp-main">
+        <div class="exp-main" :class="expWp && 'con-wp'">
+          <template x-if="expWp">
+            <div class="exp-wp" data-testid="exp-wp" x-data="{ get wp() { return resumenWordPress(job) || { filas: [] } } }">
+              <div class="exp-toolbar">
+                <button class="exp-back" @click="cerrarSoloWordPress()"><i data-lucide="arrow-left" class="exp-wp-icono"></i><span>Volver a la tabla</span></button>
+                <div class="exp-search-wrap">
+                  <i data-lucide="search"></i>
+                  <input type="text" class="exp-search" placeholder="Buscar en la URL..." x-model="wpSolo.buscar" @input="buscarSoloWordPress()">
+                </div>
+                <select class="exp-problema" :class="wpSolo.tipo && 'has-value'" aria-label="Filtrar por tipo de WordPress" @change="elegirTipoSoloWordPress($event.target.value)">
+                  <option value="" :selected="!wpSolo.tipo">Todos los tipos</option>
+                  <template x-for="f in wp.filas" :key="f.tipo">
+                    <option :value="f.tipo" :selected="wpSolo.tipo === f.tipo" x-text="f.nombre + (f.solo_wp != null ? ' · ' + fmt.num(f.solo_wp) : '')"></option>
+                  </template>
+                </select>
+                <span class="exp-results-count" x-text="wpSolo.cargando ? 'Cargando…' : fmt.num(wpSolo.total) + ' resultados'"></span>
+              </div>
+              <div class="exp-wp-cuerpo">
+                <p class="text-sm text-dim">La REST API las publica y el censo no tiene ninguna fila con su URL (ni con el otro esquema). No es por sí solo un hallazgo: pueden estar fuera del alcance del rastreo, en un tipo sin página pública o colgar de páginas que el rastreo no llegó a ver.</p>
+                <p class="text-sm text-orange" x-show="wp.no_afirmable" x-text="'En este censo no se afirma: ' + wp.no_afirmable + '.'"></p>
+                <p class="text-sm text-red" x-show="wpSolo.error" x-text="wpSolo.error"></p>
+                <div class="table-wrap"><table class="tbl wp-tabla">
+                  <thead><tr><th>URL</th><th>Tipo</th><th>ID</th><th title="Si la URL pasa los filtros del rastreo">En el alcance</th><th>Modificada</th></tr></thead>
+                  <tbody>
+                    <template x-for="e in wpSolo.items" :key="e.tipo + ':' + e.id_externo">
+                      <tr>
+                        <td class="exp-wp-url"><a :href="e.url" target="_blank" rel="noopener" x-text="e.url || '(sin URL)'"></a></td>
+                        <td :title="e.tipo" x-text="tipoWp(e.tipo)"></td>
+                        <td x-text="e.id_externo ?? '—'"></td>
+                        <td :class="e.en_alcance === false ? 'text-dim' : ''" x-text="e.en_alcance == null ? '—' : (e.en_alcance ? 'Sí' : 'No')"></td>
+                        <td x-text="e.modificado ? String(e.modificado).slice(0, 10) : '—'"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!wpSolo.cargando && !wpSolo.items.length && !wpSolo.error">
+                      <tr><td colspan="5" class="text-dim">Ninguna: todo lo que se leyó de este tipo está en el censo.</td></tr>
+                    </template>
+                  </tbody>
+                </table></div>
+                <div class="exp-wp-paginas" x-show="wpSolo.pages > 1">
+                  <button class="btn btn-sm" :disabled="wpSolo.page <= 1" @click="paginaSoloWordPress(wpSolo.page - 1)">Anterior</button>
+                  <span class="text-sm" x-text="'Página ' + wpSolo.page + ' de ' + wpSolo.pages"></span>
+                  <button class="btn btn-sm" :disabled="wpSolo.page >= wpSolo.pages" @click="paginaSoloWordPress(wpSolo.page + 1)">Siguiente</button>
+                </div>
+              </div>
+            </div>
+          </template>
 
           <!-- Toolbar -->
           <div class="exp-toolbar">
@@ -5147,6 +5283,12 @@
                                    x-text="sm.fichero + (sm.lastmod ? ' · lastmod ' + sm.lastmod : ' · sin lastmod') + ((sm.hreflang || []).length ? ' · hreflang: ' + sm.hreflang.map(h => h[0]).join(', ') : '')"></div>
                             </template>
                           </dd>
+                        </template>
+                        <template x-if="(expUrlDetail.wordpress || []).length">
+                          <dt>WordPress</dt>
+                        </template>
+                        <template x-if="(expUrlDetail.wordpress || []).length">
+                          <dd><template x-for="(w, n) in expUrlDetail.wordpress" :key="'ewp' + n"><div x-text="textoEntidadWp(w)"></div></template></dd>
                         </template>
                         <dt>Problemas</dt>
                         <dd>
@@ -5664,6 +5806,14 @@
                 <option value="googlebot_smartphone">Googlebot smartphone</option>
               </select>
             </div>
+          </div>
+
+          <!-- Adaptador WordPress (decisiones 161 y 168): «auto» de serie. Solo
+               se manda si se toca (`_wpConfigDesdeForm`): sin tocarla, hereda
+               del cliente y el perfil. -->
+          <div class="wp-opcion" data-testid="wp-opcion">
+            <label class="checkbox-label" title="Pide /wp-json/ al sitio y, solo si responde un WordPress, lee lo que publica: entradas, páginas, taxonomías y medios. Así salen las entradas publicadas que el rastreo no encontró, los adjuntos indexables, las taxonomías casi vacías y la paginación sin fin."><input type="checkbox" x-model="createForm.wp_analizar" data-testid="wp-analizar"> Analizar WordPress (REST API)</label>
+            <p class="text-sm text-dim">Si el sitio no es un WordPress, cuesta una petición. Si lo es, hasta 1.000 peticiones a su REST API, dos a la vez y con el ritmo y el robots.txt del rastreo, sin contar en el máximo de URLs.</p>
           </div>
 
           <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
