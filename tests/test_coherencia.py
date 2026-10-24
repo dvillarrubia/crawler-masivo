@@ -73,6 +73,29 @@ def test_fragmentos_visibles():
     assert "4,5/5" in coh.fragmentos_visibles("Valoracion media 4,5/5 de 120 clientes.", nota)
 
 
+def test_fragmentos_no_pierden_el_valor_declarado_por_el_corte():
+    """El fragmento del valor declarado entra aunque salga tarde en el texto,
+    detras de otros precios y disponibilidades: sin el, Jev ve «178» en el
+    marcado y solo «99 / 120 / 135 / 150» en lo visible, y contesta contradice
+    (revision de #242)."""
+    relleno = "texto de relleno sin cifras " * 12
+    texto = ""
+    for p in ["99€", "120€", "135€", "150€"]:
+        texto += relleno + f"Habitacion desde {p} por noche. "
+    texto += relleno + " Disponible. " + relleno + " Disponible. " + relleno
+    texto += "Precio de esta habitacion: 178€ por noche." + relleno
+    h = coh.hechos_schema([{"@type": "Offer", "price": "178", "availability": "https://schema.org/InStock"}])
+    f = coh.fragmentos_visibles(texto, h)
+    assert "178€" in f and len(f) <= coh.MAX_TEXTO_VISIBLE
+    # Y lo generico rellena lo que queda, sin pasarse.
+    assert "99€" in f
+    # Muchos valores: nunca pasa del tope, y cada trozo entra entero o no entra.
+    largo = " ".join(f"{relleno} precio {n}€ disponible" for n in range(10, 60))
+    h2 = coh.hechos_schema([{"@type": "Offer", "price": str(n)} for n in (10, 11, 12)])
+    f2 = coh.fragmentos_visibles(largo, h2)
+    assert len(f2) <= coh.MAX_TEXTO_VISIBLE and "10€" in f2
+
+
 def test_muestra_portada_y_palabras():
     filas = [("a", "3", 3), ("a", "1", 1), ("a", "2", 2), ("b", "9", 9)]
     assert coh.muestra_por_plantilla(filas, 2) == [1, 2, 9]
@@ -125,11 +148,38 @@ def test_title_generico_corto_sin_portada_y_un_estado_por_title(tmp_path, monkey
     # Los tres «Detalle» (duplicados exactos: entran), «Ofertas» y «Contacto».
     assert elegidas == [ids[0], ids[1], ids[2], ids[5], ids[7]]
     estados = coh.estados_title_generico(s, elegidas)
-    assert estados[0].datos == {"titulo": "Detalle | Acme", "sitio": "acme.com"}
-    assert estados[0].datos == estados[1].datos == estados[2].datos   # una llamada
-    # Muestra por plantilla de titles DISTINTOS, con todas sus URLs.
+    # La ruta va en el estado: «SAT» en /sats/a-coruna y en /sat/ no es el
+    # mismo caso, y sin ella la definicion no los separa (revision de #242).
+    assert estados[0].datos == {"titulo": "Detalle | Acme", "sitio": "acme.com",
+                                "ruta": s.get(Url, ids[0]).path}
+    assert len({e.datos["ruta"] for e in estados[:3]}) == 3
+    # Muestra por plantilla de titles DISTINTOS, y por title hasta
+    # GENERICO_URLS_POR_TITLE de sus URLs.
+    # (los tres «Detalle» estan en dos plantillas: /tienda/ y /blog/).
+    monkeypatch.setattr(coh, "GENERICO_URLS_POR_TITLE", 1)
+    elegidas = coh.candidatos_title_generico(s, jid, ids)
+    assert len([u for u in elegidas if u in ids[:3]]) == 2
     monkeypatch.setattr(coh, "GENERICO_POR_PLANTILLA", 1)
     assert len(coh.candidatos_title_generico(s, jid, ids)) <= 4
+    s.close()
+
+
+def test_title_solo_marca_no_se_pregunta(tmp_path):
+    """Un title que, quitada la marca, se queda sin palabras es generico (y no
+    dice nada del contenido) por construccion: lo resuelve una regla, no Jev."""
+    Sesion = _motor(tmp_path)
+    jid, _ = sembrar(Sesion, n=6)
+    s = Sesion()
+    ids = _ids(s, jid)
+    titulos = ["Ofertas | Acme", "Contacto | Acme", "Blog | Acme", "Tienda | Acme", "Acme", "| Acme"]
+    for u, t in zip(ids, titulos):
+        s.get(HtmlMeta, u).title = t
+    s.commit()
+    assert coh.solo_marca("Acme", frozenset({"acme"})) and coh.solo_marca("| Acme", frozenset({"acme"}))
+    # Dos segmentos que pasan los dos por marca: no se sabe cual es, se pregunta.
+    assert not coh.solo_marca("Detalle | Acme", frozenset({"acme", "detalle"}))
+    assert not set(ids[4:]) & set(coh.candidatos_title_generico(s, jid, ids))
+    assert not set(ids[4:]) & set(coh.candidatos_title_contenido(s, jid, ids))
     s.close()
 
 
@@ -257,10 +307,14 @@ def test_extraer_saca_el_juego_sin_estados_repetidos(tmp_path):
     for u in ids:
         s.get(HtmlMeta, u).title = "Detalle | Acme"
     s.get(HtmlMeta, ids[0]).title = "Ofertas | Acme"
+    # La misma pagina con www: mismo title, mismo sitio y misma ruta.
+    con_www = s.get(Url, ids[3])
+    con_www.host, con_www.path = "www.acme.com", s.get(Url, ids[1]).path
+    con_www.url = "https://www.acme.com" + con_www.path
     s.commit()
     informe: dict = {}
     filas = S.extraer(s, "title_es_generico", [str(jid)], 10, 0, informe)
-    assert sorted(f["estado"]["titulo"] for f in filas) == ["Detalle | Acme", "Ofertas | Acme"]
-    assert informe["estados_repetidos"] == 6
+    assert len(filas) == 7 and informe["estados_repetidos"] == 1
+    assert sum(f["estado"]["ruta"] == s.get(Url, ids[1]).path for f in filas) == 1
     assert {f["pregunta"] for f in filas} == {"title_es_generico"} and all(f["etiqueta"] is None for f in filas)
     s.close()

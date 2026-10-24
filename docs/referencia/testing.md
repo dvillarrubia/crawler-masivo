@@ -108,7 +108,9 @@ mensual, relanzar a coste 0, cancelar, reanudar, la cola del worker) y
 `test_enriquecido_api.py` (token: desactivado, incorrecto y nunca en una
 respuesta; validacion, 409, cancelar), los dos tambien en el trabajo de la API.
 Coherencia de title y marcado (decision 177): `test_coherencia.py` (valores
-del marcado y fragmentos visibles, filtros contra SQLite, los tres modulos de
+del marcado y fragmentos visibles, que el corte no se coma el valor declarado,
+que el title solo marca no se pregunte y la ruta en el estado del generico,
+filtros contra SQLite, los tres modulos de
 punta a punta con el `FakeLLM`, el score agrupado por nivel en la API y
 `extraer` sin estados repetidos).
 Borrado en masa y espacio (decision 96): `test_borrado_en_masa.py` (que se

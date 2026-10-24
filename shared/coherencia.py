@@ -45,10 +45,16 @@ TITLE_POR_PLANTILLA = 100
 # «Detalle noticia», «SAT», «| Penguin Libros ES». Uno de cinco palabras o mas ya
 # nombra algo (y si no, es otro problema: un title mal escrito, no generico).
 GENERICO_MAX_PALABRAS = 4
-# Titles DISTINTOS por plantilla en `title_generico` (con todas sus URLs: el
-# mismo title en 40 paginas es una llamada y 40 filas, que es lo que se quiere
-# ver). Sin esto, las 30.000 fichas de libro de Penguin, todas de 2-4 palabras.
+# Titles DISTINTOS por plantilla en `title_generico`. Sin esto, las 30.000
+# fichas de libro de Penguin, todas de 2-4 palabras.
 GENERICO_POR_PLANTILLA = 50
+# Y de cada title, hasta estas URLs (las de menor url_hash). El estado lleva la
+# ruta (revision de #242), asi que cada URL es una llamada: «SAT» en 67 fichas
+# de ciudad se juzga igual con 3, y el resto lo dice `title_duplicate`.
+GENERICO_URLS_POR_TITLE = 3
+# Lo que se ensena de la ruta: «/sats/a-coruna-100» o «/productos/safira.html»
+# dicen que es la pagina; mas alla de esto es un slug o parametros.
+MAX_RUTA = 120
 # Muestra por plantilla de `schema_visible`: el marcado lo pinta la plantilla, y
 # un campo mal cableado sale en todas sus paginas.
 SCHEMA_POR_PLANTILLA = 10
@@ -112,6 +118,18 @@ def palabras_sin_marca(titulo: str, marcas: frozenset[str]) -> int:
     from shared.titulos import segmentos
 
     return sum(len(s.split()) for s in segmentos(titulo) if s not in marcas)
+
+
+def solo_marca(titulo: str, marcas: frozenset[str]) -> bool:
+    """El title es la marca y nada mas («Saunier Duval», «| Penguin Libros ES»):
+    generico fuera de la portada y «solo el tema general» por construccion, asi
+    que no se pregunta. Con dos segmentos distintos que pasan los dos por marca
+    («Detalle | Acme» cuando casi todo el sitio se titula asi) no se sabe cual
+    es la marca (la regla 121 dice lo mismo) y si se pregunta."""
+    from shared.titulos import segmentos
+
+    segs = set(segmentos(titulo))
+    return len(segs) == 1 and next(iter(segs)) in marcas
 
 
 def _tipo(item: dict) -> str:
@@ -252,8 +270,14 @@ def fragmentos_visibles(texto: str | None, hechos: list[dict]) -> str:
     valoracion, fecha o disponibilidad si el marcado declara uno de esa clase.
     Vacio = no hay nada visible con lo que comparar, y la pagina no se pregunta.
 
-    Primero lo que casa con un valor declarado y despues lo generico, en el
-    orden del texto, unidos con « … » y hasta `MAX_TEXTO_VISIBLE` caracteres.
+    El presupuesto de `MAX_TEXTO_VISIBLE` caracteres se reparte por prioridad:
+    primero las ventanas de lo que casa con un valor declarado y despues las
+    genericas, cada una entera o recortada alrededor de su coincidencia, nunca
+    cortando el resultado al final. Un corte final se comia la cola del texto, y
+    con ella el precio declarado cuando salia detras de otros precios: Jev veia
+    `Offer.price: 178` frente a «99 / 120 / 135 / 150» y contestaba que
+    contradice (revision de #242). Se devuelven en el orden del texto, unidos
+    con « … ».
     """
     if not texto or not hechos:
         return ""
@@ -268,27 +292,38 @@ def fragmentos_visibles(texto: str | None, hechos: list[dict]) -> str:
         genericos += [(m.start(), m.end()) for m in PATRONES[c].finditer(texto)][:4]
     if not tramos and not genericos:
         return ""
-    ventanas: list[list[int]] = []
-    for a, b in tramos + genericos:
-        ventanas.append([max(0, a - VENTANA), min(len(texto), b + VENTANA)])
-    # Se recorta por prioridad (lo que casa con un valor primero) y despues se
-    # funde y se ordena por posicion.
+    sep = " … "
+
+    def fundir(ventanas: list[list[int]]) -> list[list[int]]:
+        salida: list[list[int]] = []
+        for a, b in sorted(ventanas):
+            if salida and a <= salida[-1][1]:
+                salida[-1][1] = max(salida[-1][1], b)
+            else:
+                salida.append([a, b])
+        return salida
+
+    def largo(ventanas: list[list[int]]) -> int:
+        # Cota superior del resultado: normalizar espacios solo acorta.
+        f = fundir(ventanas)
+        return sum(b - a for a, b in f) + len(sep) * max(0, len(f) - 1)
+
     elegidas: list[list[int]] = []
-    total = 0
-    for v in ventanas:
-        if total >= MAX_TEXTO_VISIBLE:
-            break
-        elegidas.append(v)
-        total += v[1] - v[0]
-    elegidas.sort()
-    fundidas: list[list[int]] = []
-    for a, b in elegidas:
-        if fundidas and a <= fundidas[-1][1]:
-            fundidas[-1][1] = max(fundidas[-1][1], b)
-        else:
-            fundidas.append([a, b])
+    for a, b in tramos + genericos:
+        va, vb = max(0, a - VENTANA), min(len(texto), b + VENTANA)
+        if largo(elegidas + [[va, vb]]) > MAX_TEXTO_VISIBLE:
+            # Recortada alrededor de su coincidencia hasta lo que quede; si no
+            # cabe ni la coincidencia con algo de contexto, fuera.
+            holgura = MAX_TEXTO_VISIBLE - largo(elegidas + [[a, b]])
+            if holgura < 20:
+                continue
+            va, vb = max(0, a - holgura // 2), min(len(texto), b + holgura // 2)
+            if largo(elegidas + [[va, vb]]) > MAX_TEXTO_VISIBLE:
+                continue
+        elegidas.append([va, vb])
+    fundidas = fundir(elegidas)
     trozos = [" ".join(texto[a:b].split()) for a, b in fundidas]
-    return " … ".join(trozos)[:MAX_TEXTO_VISIBLE]
+    return sep.join(t for t in trozos if t)
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +419,8 @@ def candidatos_title_contenido(session, job_id, url_ids: list[int]) -> list[int]
     placeholder de `title_generico` (decision 121) y los duplicados exactos
     (`title_duplicate`: ese title hay que cambiarlo igual, describa o no su
     pagina). Fuera tambien lo que no tiene contenido con el que comparar: sin
-    `content_text` o con menos de `CONTENIDO_MINIMO_PALABRAS` palabras propias.
-    Del resto, `TITLE_POR_PLANTILLA` por plantilla.
+    `content_text` o con menos de `CONTENIDO_MINIMO_PALABRAS` palabras propias,
+    ni el title que es solo la marca (`solo_marca`). Del resto, `TITLE_POR_PLANTILLA` por plantilla.
     """
     from shared.titulos import es_title_generico
 
@@ -403,7 +438,8 @@ def candidatos_title_contenido(session, job_id, url_ids: list[int]) -> list[int]
             continue
         if d["palabras"] is not None and d["palabras"] < CONTENIDO_MINIMO_PALABRAS:
             continue
-        if es_title_generico(t, marcas.get(d["host"], frozenset())):
+        m = marcas.get(d["host"], frozenset())
+        if es_title_generico(t, m) or solo_marca(t, m):
             continue
         filas.append((d["plantilla"], d["url_hash"], uid))
     elegidas = set(muestra_por_plantilla(filas, TITLE_POR_PLANTILLA))
@@ -424,12 +460,14 @@ def estados_title_contenido(session, url_ids: list[int]):
 def candidatos_title_generico(session, job_id, url_ids: list[int]) -> list[int]:
     """Las URLs cuyo title puede no identificar la pagina: con title, que no es
     ya un placeholder de la regla, que no es la portada y que, quitada la marca,
-    tiene como mucho `GENERICO_MAX_PALABRAS` palabras.
+    tiene como mucho `GENERICO_MAX_PALABRAS` palabras. El que es solo la marca
+    es generico por definicion (`solo_marca`): no se pregunta.
 
     Los duplicados exactos SI entran: que 40 paginas digan «SAT» lo dice
-    `title_duplicate`, no si «SAT» dice de que va cada una; y cuestan una sola
-    llamada (mismo estado). Por plantilla se cogen `GENERICO_POR_PLANTILLA`
-    titles distintos con TODAS sus URLs.
+    `title_duplicate`, no si «SAT» dice de que va cada una. Por plantilla se
+    cogen `GENERICO_POR_PLANTILLA` titles distintos y de cada uno hasta
+    `GENERICO_URLS_POR_TITLE` URLs (el estado lleva la ruta: cada una es una
+    llamada).
     """
     from shared.titulos import es_title_generico
 
@@ -438,38 +476,53 @@ def candidatos_title_generico(session, job_id, url_ids: list[int]) -> list[int]:
     info = _plantillas(session, job_id, url_ids)
     titulos = _titulos(session, url_ids)
     marcas = _marcas(session, job_id)
-    claves_de: dict[int, tuple[str, str]] = {}
-    primera: dict[tuple[str, tuple[str, str]], str] = {}
+    grupos: dict[tuple[str, tuple[str, str]], list[tuple[str, int]]] = {}
     for uid in url_ids:
         d, t = info.get(uid), titulos.get(uid, "")
         if not d or not t or es_portada(d["path"]):
             continue
         m = marcas.get(d["host"], frozenset())
-        if es_title_generico(t, m) or palabras_sin_marca(t, m) > GENERICO_MAX_PALABRAS:
+        if es_title_generico(t, m):
+            continue
+        if solo_marca(t, m) or palabras_sin_marca(t, m) > GENERICO_MAX_PALABRAS:
             continue
         clave = (sitio(d["host"]), t.lower())
-        claves_de[uid] = clave
-        k = (d["plantilla"], clave)
-        if k not in primera or d["url_hash"] < primera[k]:
-            primera[k] = d["url_hash"]
-    elegidas = set(muestra_por_plantilla(
-        ((p, orden, clave) for (p, clave), orden in primera.items()), GENERICO_POR_PLANTILLA))
-    return [u for u in url_ids if claves_de.get(u) in elegidas]
+        grupos.setdefault((d["plantilla"], clave), []).append((d["url_hash"], uid))
+    for g in grupos.values():
+        g.sort()
+    elegidos = muestra_por_plantilla(
+        ((p, g[0][0], (p, clave)) for (p, clave), g in grupos.items()), GENERICO_POR_PLANTILLA)
+    elegidas = {uid for k in elegidos for _, uid in grupos[k][:GENERICO_URLS_POR_TITLE]}
+    return [u for u in url_ids if u in elegidas]
+
+
+def ruta_visible(path: str | None) -> str:
+    """La ruta como la leeria una persona: sin codificar y corta."""
+    from urllib.parse import unquote
+
+    r = unquote(path or "/")
+    return r if len(r) <= MAX_RUTA else r[:MAX_RUTA] + "…"
 
 
 def estados_title_generico(session, url_ids: list[int]):
-    """El title y el dominio, nada mas: si el title identifica la pagina se
-    juzga leyendo el title, como en un resultado de busqueda. Sin la ruta, el
-    mismo title en 40 paginas es UN estado y una llamada."""
+    """El title, el dominio y la ruta. Solo con el title la definicion no
+    separaba los casos (revision de #242): «SAT» es correcto en la pagina del
+    servicio y generico en la de A Coruña (/sats/a-coruna-100), y «SafiraAqua» o
+    «Culpa» parecen un codigo hasta que la ruta dice que son un producto o un
+    libro. Sin el contenido: si el title lo describe es `title_contenido`."""
     from shared.decisiones import Estado
     from shared.models import Url
 
     titulos = _titulos(session, url_ids)
     hosts: dict[int, str] = {}
+    rutas: dict[int, str] = {}
     for trozo in _trozos(list(url_ids)):
-        for uid, host, url in session.query(Url.id, Url.host, Url.url).filter(Url.id.in_(trozo)):
+        for uid, host, url, path in session.query(Url.id, Url.host, Url.url, Url.path).filter(
+                Url.id.in_(trozo)):
             hosts[uid] = host or urlsplit(url or "").hostname or ""
-    return [Estado(datos={"titulo": titulos.get(u, ""), "sitio": sitio(hosts.get(u))}, url_id=u)
+            rutas[uid] = path or urlsplit(url or "").path or "/"
+    return [Estado(datos={"titulo": titulos.get(u, ""), "sitio": sitio(hosts.get(u)),
+                          "ruta": ruta_visible(rutas.get(u))}, url_id=u)
             for u in url_ids]
 
 

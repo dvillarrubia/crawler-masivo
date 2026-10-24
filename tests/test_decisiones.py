@@ -471,7 +471,7 @@ HUELLAS = {("es_pagina_legal", 1): "22ada5c93222ca3d", ("es_soft_404", 1): "3550
            }
 # Decision 177 (#16, #17), en lineas propias para que otras ramas no choquen.
 HUELLAS[("title_describe_contenido", 1)] = "d55396cb489ef138"
-HUELLAS[("title_es_generico", 1)] = "c337521a7552f8f2"
+HUELLAS[("title_es_generico", 1)] = "9abc084f764fc672"
 HUELLAS[("schema_contradice_contenido", 1)] = "591101cbca2ef33f"
 
 
