@@ -2498,8 +2498,12 @@
               <div class="card-header"><h2>Qué arreglar primero</h2>
                 <a :href="'#/rastreos/' + job.id + '/problemas'" class="text-sm">Ver todos</a></div>
               <div class="text-dim text-sm" style="margin:-.3rem 0 .6rem">Páginas afectadas, por prioridad (gravedad × importancia de las páginas), como en Problemas; sin los de tipo info.</div>
-              <template x-if="!principales || principales.filas === null">
+              <template x-if="!principales || (principales.filas === null && !principales.error)">
                 <div class="text-dim text-sm">Cargando…</div>
+              </template>
+              <template x-if="principales && principales.error">
+                <div class="text-sm orange">No se pudieron cargar: <span x-text="principales.error"></span>
+                  <button class="btn btn-sm" @click="principales = null; cargarPrincipales()">Reintentar</button></div>
               </template>
               <template x-if="principales && principales.filas && principales.filas.length === 0">
                 <div class="text-dim text-sm">No hay errores ni avisos.</div>

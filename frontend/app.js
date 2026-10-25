@@ -1931,6 +1931,7 @@ function app() {
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
+      this.principales = null;
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
@@ -2006,6 +2007,7 @@ function app() {
 
     _invalidateResultCaches() {
       this.insights = null;
+      this.principales = null;  // «Qué arreglar primero»: lo que se pidio con el censo a medias
       this.issues = []; this.issuesPage = 1;
       this.links = []; this.linksPage = 1;
       this.urls = []; this.urlsPage = 1;
@@ -2013,6 +2015,7 @@ function app() {
 
     _reloadActiveTab() {
       const t = this.detailTab;
+      if (t === 'overview') this.cargarPrincipales();
       if (t === 'urls') this.loadUrls();
       else if (t === 'issues') this.loadIssues();
       else if (t === 'links') this.loadLinks();
@@ -2833,8 +2836,9 @@ function app() {
       try {
         const filas = await api(`/jobs/${jobId}/issues/resumen?orden=prioridad&ejemplos=0`);
         if (this.job && this.job.id === jobId) this.principales = { jobId, filas: filas.filter(r => r.severity !== 'info').slice(0, 10) };
-      } catch (_) {
-        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: [] };
+      } catch (e) {
+        // Un fallo no es «no hay errores»: lo que no se sabe no se afirma.
+        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: null, error: e.message };
       }
     },
 
