@@ -1267,14 +1267,23 @@
    no esto.
 
    **Decisión.**
-   - Las primeras `SITEMAP_EN_COLA_MAX` (20.000, por entorno) URLs de los
-     sitemaps se encolan como antes. Las siguientes van a un fichero temporal
-     (`crawler/seo_crawler/cola_disco.py`, una URL por línea) y `spider_idle` las
-     suelta por tandas de ese tamaño cuando la cola se vacía; el dupefilter
-     descarta las que ya llegaron por un enlace, y Scrapy vuelve a llamar hasta
-     vaciar el fichero o hasta `max_urls`. Los filtros (`_should_follow`, los
-     topes por carpeta, lo ya rastreado al reanudar) se aplican antes de
-     escribirlas, igual que antes de encolarlas.
+   - Las primeras `SITEMAP_EN_COLA_MAX` (100.000, por entorno; ~400 MB medidos) URLs de
+     los sitemaps se encolan como antes. Las siguientes van, sin repetir, a un
+     fichero temporal (`crawler/seo_crawler/cola_disco.py`, una URL por línea)
+     y `spider_idle` las suelta por tandas de ese tamaño cuando la cola se
+     vacía; el dupefilter descarta las que ya llegaron por un enlace, y Scrapy
+     vuelve a llamar hasta vaciar el fichero o hasta `max_urls`. Los filtros
+     (`_should_follow`, los topes por carpeta, lo ya rastreado al reanudar y el
+     `URLLENGTH_LIMIT`, porque `engine.crawl` no pasa por los spider
+     middlewares) se aplican antes de escribirlas.
+   - **Un enlace a una URL que espera en disco va con profundidad 1**, la del
+     sitemap. Las claves de 64 bits de las que esperan viven en
+     `ClavesCompactas` (un array ordenado más un set pequeño que se funde en
+     él: ~8 bytes por clave). Sin esto, el enlace llegaba antes que la tanda
+     del disco, la URL entraba con la profundidad del enlace y, con
+     `max_depth`, sus enlaces dejaban de seguirse: lo encontró la revisión
+     (`/x` del sitemap a tres saltos de la portada, con `max_depth` 3, y `/y`,
+     enlazada desde `/x` y fuera del sitemap, no se rastreaba).
    - La membresía guarda `_hash_key` (los 64 primeros bits del sha256, la misma
      clave que el set de reanudar) en un `array("Q")`, con repeticiones: 8 bytes
      por entrada. Al cerrar se cruzan con las URLs del job leídas de la BD por
@@ -1282,35 +1291,47 @@
      completos de las rastreadas. Una colisión de 64 bits marcaría una URL como
      del sitemap sin serlo: con 25 millones de entradas (el máximo, 500
      ficheros de 50.000) y un millón de URLs rastreadas, ~1e-6.
-   - `jobs.sitemaps.semillas_diferidas` dice cuántas URLs esperaron en disco.
+   - `jobs.sitemaps.semillas_diferidas` dice cuántas URLs distintas esperaron
+     en disco (algunas pueden haber llegado antes por un enlace), y el
+     `pending_count` del progreso las suma a la cola.
 
-   **Lo que cambia en el recorrido.** Con un sitemap de más de 20.000 URLs, las
-   que pasan del cupo ya no van por delante de lo que se descubre enlazado
-   (profundidad 1 en la cola por prioridad): se piden cuando lo demás se
-   acaba. En un rastreo sin `max_urls` se rastrea lo mismo; con `max_urls`, el
-   presupuesto lo gastan antes los enlaces que las URLs de sitemap número
-   20.001 en adelante, que antes tampoco cabían: con 4.000 de `max_urls` no se
-   llegaba a ellas. Las huérfanas y la membresía no cambian: salen del sitemap
-   entero (`sitemap_entries`, `in_sitemap`), no de lo encolado.
+   **Lo que cambia en el recorrido.** Hasta 100.000 URLs en los sitemaps, nada.
+   Con más, las que pasan del cupo y nadie enlaza se piden cuando lo demás se
+   acaba, y no por delante de lo que se descubre a profundidad 2 o más; las que
+   sí están enlazadas entran con profundidad 1 en cuanto aparece el enlace,
+   como antes. Sin `max_urls`, al final se rastrea lo mismo; con `max_urls`, el
+   presupuesto lo gastan antes los enlaces profundos que esas URLs de sitemap
+   sin enlazar. El `max_urls` mayor de los clientes (`projects/`) es 80.000, por
+   debajo del cupo. Las huérfanas y la membresía salen del sitemap entero
+   (`sitemap_entries`, `in_sitemap`), no de lo encolado.
 
    **Medido** el 25-oct, en local con la imagen del crawler y un servidor que
    sirve un índice de 50 sitemaps de 50.000 URLs (2,5 millones), `max_urls`
    200 y el contenedor a 6 GB: con el código anterior el proceso llega a 6,1 GB
    y el kernel lo mata (`-9`) sin una página rastreada, como en Casa del Libro;
-   con este, 432 MB de pico y las 200 páginas en 76 s. Y con 25 sitemaps de
-   1.000 URLs, sin enlaces entre ellas y `max_urls` 30.000: las 25.001 páginas
-   (las del sitemap y la portada), 5.000 de ellas soltadas desde el disco, en
-   241 s y con 392 MB de pico.
+   con este, 823 MB de pico y las 200 páginas en 83 s (408 MB con el cupo a
+   20.000: la diferencia son las 80.000 peticiones más en la cola, ~4 KB cada
+   una contando el planificador y el dupefilter; `ClavesCompactas` con 2,4
+   millones de claves no se nota). Y con 25 sitemaps de 1.000 URLs sin enlaces
+   entre ellas, `max_urls` 30.000 y el cupo a 20.000: las 25.001 páginas (las
+   del sitemap y la portada), 5.000 soltadas desde el disco, en 222 s y con
+   396 MB de pico.
 
    **Lo que no se ha hecho.** La reanudación pierde lo que esperaba en disco,
    como perdía lo que esperaba en la cola de memoria: al reanudar se vuelven a
-   leer los sitemaps. Y el dupefilter de Scrapy sigue guardando en memoria la
-   huella de cada petición encolada; con el cupo, son las de lo rastreado más
-   20.000.
+   leer los sitemaps. El dupefilter de Scrapy sigue guardando en memoria la
+   huella de cada petición encolada (las rastreadas más el cupo). Lo que crece
+   con el sitemap entero son 8 bytes por entrada en la membresía y 8 por URL
+   distinta en disco (con el máximo de 25 millones, ~200 MB cada uno, y el
+   doble un momento al fundir) y el fichero en la capa escribible del
+   contenedor (~100 bytes por URL, hasta ~2,5 GB). Al cerrar un job de 1 millón de URLs, el cruce de la membresía
+   ocupa ~180 MB un momento.
 
-   Tests: `tests/test_cola_disco.py` (orden, tandas, meter mientras se lee) y
-   en `tests/test_spider_sitemap_entradas.py` el SeoSpider real con el cupo a 2
-   (las 7 del sitemap se rastrean y `semillas_diferidas` es 5), `max_urls`
-   corta aunque queden URLs en disco, y contra Postgres `in_sitemap` es
-   verdadero para las del sitemap, también las que esperaron, y falso para la
-   portada.
+   Tests: `tests/test_cola_disco.py` (orden, tandas, meter mientras se lee, y
+   `ClavesCompactas` con varias fusiones) y en
+   `tests/test_spider_sitemap_entradas.py` el SeoSpider real: con el cupo a 2,
+   las 7 del sitemap se rastrean y `semillas_diferidas` es 5; con `max_urls` 3
+   y el cupo a 1, 6 esperan y se para en 3; la profundidad 1 de una URL del
+   sitemap enlazada a tres saltos, con el cupo normal y con el cupo a 1 (sin
+   el arreglo falla); y contra Postgres `in_sitemap` es verdadero para las del
+   sitemap, también las que esperaron, y falso para la portada.

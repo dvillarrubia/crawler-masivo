@@ -162,7 +162,36 @@ def test_max_urls_corta_aunque_queden_urls_en_disco():
                           capture_output=True, text=True, timeout=120, env=entorno)
     assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
     items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
-    assert len([i for i in items if i["_tipo"] == "PageItem"]) <= 3
+    job = json.loads(proc.stdout.split("@@JOB@@", 1)[1].split("\n", 1)[0])
+    (resumen,) = [a["sitemaps"] for a in job if "sitemaps" in a]
+    # 6 esperaron en disco y, con 3 paginas, alguna se quedo sin pedir.
+    assert resumen["semillas_diferidas"] == 6
+    assert len([i for i in items if i["_tipo"] == "PageItem"]) == 3
+
+
+def _pagina(t, enlaces=()):
+    a = "".join(f'<a href="{e}">{e}</a>' for e in enlaces)
+    return [200, {}, f"<html><head><title>{t}</title></head><body>{t}{a}</body></html>"]
+
+
+@pytest.mark.parametrize("cupo", ["100000", "1"])
+def test_un_enlace_a_una_url_que_espera_en_disco_va_con_profundidad_1(cupo):
+    """`/x` esta en el sitemap y tambien a tres saltos de la portada. Si
+    esperaba en disco y entraba con la profundidad del enlace (3), con
+    `max_depth` 3 no se seguian sus enlaces y `/y` no se rastreaba
+    (revision de la decision 186). Con cualquier cupo, igual."""
+    rutas = {"/sitemap_index.xml": _urlset(("/s1", None), ("/x", None)),
+             "/": _pagina("home", ["/a"]), "/a": _pagina("a", ["/b"]),
+             "/b": _pagina("b", ["/x"]), "/x": _pagina("x", ["/y"]),
+             "/y": _pagina("y"), "/s1": _pagina("s1")}
+    entrada = {"seeds": ["http://localhost:{port}/"], "config": {"max_depth": 3}, "rutas": rutas}
+    entorno = {**os.environ, "SITEMAP_EN_COLA_MAX": cupo}
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=120, env=entorno)
+    assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
+    prof = {i["url"].rsplit("/", 1)[1]: i["crawl_depth"] for i in items if i["_tipo"] == "PageItem"}
+    assert prof["x"] == 1 and prof["y"] == 2
 
 
 URL_BD = os.environ.get("PAGERANK_TEST_DATABASE_URL")

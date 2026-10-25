@@ -28,7 +28,7 @@ from scrapy import Request, signals
 from scrapy.http import HtmlResponse, Response
 from scrapy_playwright.page import PageMethod
 
-from seo_crawler.cola_disco import ColaEnDisco
+from seo_crawler.cola_disco import ClavesCompactas, ColaEnDisco
 from seo_crawler.extractors import (
     absolutize_url,
     classify_resource_type,
@@ -125,7 +125,10 @@ SITEMAP_ENTRIES_MAX = int(os.getenv("SITEMAP_ENTRIES_MAX", "250000"))
 # sitemaps de Casa del Libro (millones de URLs, ~1-1,5 KB cada una entre la
 # peticion, el dupefilter y la membresia) el proceso paso de los 4 GB del
 # contenedor a los 8 minutos y el kernel lo mato sin haber rastreado nada.
-SITEMAP_EN_COLA_MAX = int(os.getenv("SITEMAP_EN_COLA_MAX", "20000"))
+# 100.000 (~400 MB medidos: ~4 KB por peticion con el planificador y el
+# dupefilter) cubre el `max_urls` de todos los clientes (el mayor, 80.000): para
+# ellos el recorrido es el de antes.
+SITEMAP_EN_COLA_MAX = int(os.getenv("SITEMAP_EN_COLA_MAX", "100000"))
 
 # Tope de anotaciones hreflang del sitemap guardadas por proceso (decision
 # 167), ~60 bytes cada una ya compactada (medido en Typeform): 2 millones son
@@ -577,6 +580,13 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # esperan en disco a que se vacie (decision 186).
         self._sitemap_semillas_directas: int = 0
         self._sitemap_pendientes = ColaEnDisco()
+        # Claves de las que esperan en disco: un enlace a una de ellas va con
+        # la profundidad 1 del sitemap y no la del enlace (si no, con
+        # `max_depth` se dejaban de seguir sus enlaces), y no se escriben dos
+        # veces (los sitemaps de imagenes repiten la URL de la pagina).
+        self._sitemap_pendientes_claves = ClavesCompactas()
+        # El URLLENGTH_LIMIT de Scrapy (lo fija `from_crawler`; 0 = sin tope).
+        self._url_max: float = 2083
         self._sitemap_files_fetched: int = 0
         # Ficheros de sitemap pedidos. Si al cerrar quedan por debajo de los
         # parseados, la vista es parcial y no se puede afirmar que el resto de
@@ -634,6 +644,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
         crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
         crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
+        spider._url_max = crawler.settings.getint("URLLENGTH_LIMIT", 2083) or float("inf")
         return spider
 
     def spider_idle(self, spider=None):
@@ -664,8 +675,14 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         if not len(self._sitemap_pendientes):
             return False
         tanda = self._sitemap_pendientes.sacar(SITEMAP_EN_COLA_MAX)
+        prioridad = self.crawler.settings.getint("DEPTH_PRIORITY")
         for url in tanda:
-            self.crawler.engine.crawl(self._page_request(url, 1))
+            # `engine.crawl` no pasa por los spider middlewares: la prioridad
+            # de la profundidad 1 se pone aqui (la del DepthMiddleware propio)
+            # y el tope de longitud se aplico antes de escribirla.
+            req = self._page_request(url, 1)
+            req.priority -= prioridad
+            self.crawler.engine.crawl(req)
         return bool(tanda)
 
     def spider_opened(self, spider):
@@ -1304,9 +1321,13 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if not self._cabe_en_tope(normalized):
                 continue
             # Pasado el cupo, a disco: se encolan al vaciarse la cola
-            # (decision 186).
+            # (decision 186). Sin repetir, y sin las que el UrlLengthMiddleware
+            # descartaria (al soltarlas no pasan por el).
             if self._sitemap_semillas_directas >= SITEMAP_EN_COLA_MAX:
-                self._sitemap_pendientes.meter(normalized)
+                if len(normalized) > self._url_max:
+                    continue
+                if self._sitemap_pendientes_claves.anadir(_hash_key(url_hash)):
+                    self._sitemap_pendientes.meter(normalized)
                 continue
             self._sitemap_semillas_directas += 1
             # The scheduler dupefilter drops these if link discovery already
@@ -2657,6 +2678,14 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                         if self._topes is not None and not self._topes.admitir(
                                 link["url"], _hash_key(link_hash)):
                             continue  # tope por carpeta (decision 172)
+                        # Una URL del sitemap que espera en disco va con su
+                        # profundidad 1, como si hubiera entrado directa
+                        # (decision 186); la tanda del disco la descarta luego
+                        # por repetida.
+                        if len(self._sitemap_pendientes_claves) and \
+                                _hash_key(link_hash) in self._sitemap_pendientes_claves:
+                            yield self._page_request(link["url"], 1)
+                            continue
                         yield self._page_request(link["url"], depth + 1)
 
     # ------------------------------------------------------------------
@@ -2897,8 +2926,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             )
             if slot is None or getattr(slot, "scheduler", None) is None:
                 return
+            # Mas las URLs de sitemap que esperan en disco (decision 186): sin
+            # ellas, la barra llegaba al 100 % con «0 en cola» y volvia a bajar
+            # con cada tanda.
             self._redis.set(
-                f"job:{self.job_id}:pending_count", len(slot.scheduler)
+                f"job:{self.job_id}:pending_count",
+                len(slot.scheduler) + len(getattr(self, "_sitemap_pendientes", ())),
             )
         except Exception:
             # La cola es informativa: si la version de Scrapy no la expone, se
