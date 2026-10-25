@@ -4542,12 +4542,44 @@ function filasTls(job) {
       emisor: t.emisor || null,
       caduca: t.not_after || null,
       dias: dias === null ? null : Math.floor(dias),
+      // A 30 dias o menos conviene renovarlo aunque el aviso del analisis
+      // (tls_dias_aviso, 7 de serie) no haya saltado: la cifra va en naranja
+      // (revision de UX del 25-oct, 1.16; Lopesan caducaba en 14 y salia en verde).
+      renovar: dias !== null && dias >= 0 && dias <= 30,
       version: t.version || null,
       detalle: t.detalle || t.error || t.error_certificado || null,
     };
   });
   filas.sort((a, b) => a.host.localeCompare(b.host));
   return filas.length ? filas : null;
+}
+
+// robots.txt por bot (decision 129) en una frase: que bots se bloquean y
+// donde. Las tablas (doce bots por host, casi siempre «Permitida») van
+// plegadas debajo (revision de UX del 25-oct, 1.16). `nivel`: red si se
+// bloquea entero un buscador o un bot de busqueda de IA, orange si se
+// bloquea algo, '' si nada; `sin_evaluar`: hosts sin datos por bot.
+function resumenRobots(rb) {
+  if (!rb || !Array.isArray(rb.hosts) || !rb.hosts.length) return null;
+  const tipos = Object.fromEntries((rb.bots || []).map(b => [b.bot, b]));
+  const bloqueos = [];
+  let nivel = '', sinEvaluar = 0;
+  for (const h of rb.hosts) {
+    if (!h.bots) { sinEvaluar++; continue; }
+    for (const [bot, r] of Object.entries(h.bots)) {
+      if (!r || !['todo', 'parte'].includes(r.alcance)) continue;
+      const b = tipos[bot] || { token: bot, tipo: '' };
+      bloqueos.push(b.token + ' (' + (r.alcance === 'todo' ? 'todo' : 'una parte') + ' en ' + h.origen + ')');
+      if (r.alcance === 'todo' && ['buscador', 'busqueda_ia'].includes(b.tipo)) nivel = 'red';
+      else if (nivel !== 'red') nivel = 'orange';
+    }
+  }
+  const evaluados = rb.hosts.length - sinEvaluar;
+  let texto;
+  if (!evaluados) texto = 'Sin evaluar por bot: censo analizado antes de la decisión 129 o robots.txt no procesado.';
+  else if (!bloqueos.length) texto = 'Ningún bot bloqueado en la home ni en la muestra' + (evaluados > 1 ? ' de los ' + evaluados + ' hosts.' : '.');
+  else texto = 'Bloqueados: ' + bloqueos.join(', ') + '.';
+  return { texto, nivel, sin_evaluar: sinEvaluar, abrir: !!bloqueos.length };
 }
 
 // `jobs.soft404` (decision 105): `sondas` las escribe el spider (lista, una
