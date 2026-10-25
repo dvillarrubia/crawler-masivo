@@ -57,6 +57,38 @@ def test_hechos_del_marcado():
     assert not any("author" in r or "datePublished" in r for r, _ in rutas)
 
 
+def test_marcado_por_objeto():
+    """El precio y la disponibilidad de cada variante van en una linea: aplanados,
+    Jev no sabia que la talla agotada era la de 13,99 y daba contradiccion
+    (decision 185). La oferta repetida en los microdatos sale una vez; un valor
+    suelto sigue como «Tipo.campo: valor»."""
+    items = [
+        {"@type": "ProductGroup", "aggregateRating": {"ratingValue": 4.4, "reviewCount": 14},
+         "offers": {"priceCurrency": "EUR", "availability": "https://schema.org/InStock"},
+         "hasVariant": [
+             {"@type": "Product", "offers": {"price": "14.99", "availability": "InStock"}},
+             {"@type": "Product", "offers": {"price": "13.89", "availability": "InStock"}},
+             {"@type": "Product", "offers": {"price": "13.99", "availability": "OutOfStock"}}]},
+        {"@type": "Offer", "price": "13.99", "availability": "https://schema.org/OutOfStock"},
+        {"@type": "Event", "startDate": "2026-10-21"},
+    ]
+    h = coh.hechos_schema(items)
+    assert coh.lineas_marcado(h) == [
+        "ProductGroup.aggregateRating: ratingValue 4.4, reviewCount 14",
+        "ProductGroup.offers: priceCurrency EUR, availability InStock",
+        "ProductGroup.hasVariant.offers: price 14.99, availability InStock",
+        "ProductGroup.hasVariant.offers: price 13.89, availability InStock",
+        "ProductGroup.hasVariant.offers: price 13.99, availability OutOfStock",
+        "Event.startDate: 2026-10-21",
+    ]
+    # Dos variantes en stock no pierden su segundo InStock, como al aplanar.
+    assert sum(x["valor"] == "InStock" for x in h) == 3
+    # El tope cuenta objetos, no valores, y no parte uno.
+    muchas = [{"@type": "Offer", "price": str(n), "availability": "InStock"} for n in range(10, 40)]
+    h2 = coh.hechos_schema(muchas)
+    assert len(coh.lineas_marcado(h2)) == coh.MAX_HECHOS and len(h2) == 2 * coh.MAX_HECHOS
+
+
 def test_fragmentos_visibles():
     precio = [{"campo": "price", "ruta": "Offer.price", "valor": "6.64"}]
     texto = ("Una novela larga sobre el mar. " * 10 + "Formatos disponibles 6,64 € 6,99 € "
@@ -205,7 +237,7 @@ def test_schema_solo_con_algo_visible_que_comparar(tmp_path, monkeypatch):
     assert coh.candidatos_schema(s, jid, ids) == [ids[0]]
     (e,) = coh.estados_schema(s, [ids[0]])
     assert set(e.datos) == {"titulo", "h1", "marcado", "texto_visible"}
-    assert "Offer.price: 354USD$" in e.datos["marcado"] and "Offer.priceCurrency: EUR" in e.datos["marcado"]
+    assert e.datos["marcado"] == ["Offer: price 354USD$, priceCurrency EUR, availability InStock"]
     assert "354USD$" in e.datos["texto_visible"]
     # Muestra por plantilla.
     _con_marcado(s, ids[4], oferta, "From 354USD$ por noche.")

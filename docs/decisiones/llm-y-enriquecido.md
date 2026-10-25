@@ -1561,3 +1561,105 @@
    - Fuera: tocar el estado (mandar el precio de cada asignatura con su
      etiqueta para poder sumar el total) y cambiar los ejemplos de formato
      heredados (otra versión, otra medida).
+
+<a id="d185"></a>
+185. **`schema_contradice_contenido` v4: el marcado llega por objeto, con el
+   precio y la disponibilidad de cada oferta en una línea** (#8, #17; mide lo
+   que dejó la 184). Cambian el estado (`shared/coherencia.py`) y el texto
+   (v4, huella en `HUELLAS`). Sigue **sin umbral**: todo sale `incierto`.
+   - **Lo que fallaba de la v3.** La medida limpia que pedía la 184: un censo
+     que nadie había mirado (Tiendanimal d50fd131, 4.000 URLs, rastreado el
+     25-oct-2026), con 400 estados etiquetados a ciegas por dos agentes y un
+     juez (1 desacuerdo; `/data/archivo/jev/schema_v3_tiendanimal_etiquetado.jsonl`).
+     **390/400**: ve las **4 contradicciones reales** (todas de
+     disponibilidad: el marcado dice `InStock` y la ficha «Sin Stock»), con
+     confianza 0,94-0,95, pero da **10 falsos «sí»**, todos del mismo caso:
+     fichas con tallas o pesos en las que alguna variante está agotada.
+     `hechos_schema` aplanaba el marcado campo a campo y quitaba repetidos:
+     llegaban dos listas, una de precios y otra de disponibilidades, sin
+     saber cuál iba con cuál. Y el segundo `InStock` de dos variantes en
+     stock desaparecía. Jev dudaba: siete de los diez, con confianza de
+     0,51 a 0,56; los otros tres, de 0,67 a 0,85.
+   - **El estado.** `hechos_schema` agrupa los valores de un mismo objeto
+     (`grupo` y `nodo` en cada hecho) y `lineas_marcado` los pinta en una
+     línea: `ProductGroup.hasVariant.offers: price 13.99, availability
+     OutOfStock`. Un objeto de un solo valor sale como antes (`Event.startDate:
+     2026-10-21`). Un objeto de varios campos repetido en otra ruta con los
+     mismos valores escritos igual sale una vez; un valor suelto se sigue
+     distinguiendo por ruta (la nota de una reseña no es la nota media).
+     `MAX_HECHOS` cuenta objetos, no valores, y no parte uno. **La oferta de
+     los microdatos que repite la del JSON-LD con otro formato** (`20.19€`
+     frente a `20.19`) **sale dos veces**: en Tiendanimal, cada oferta. Así
+     se midió; fundirlas se midió peor (abajo, la v5).
+   - **El texto.** Cada línea de `marcado` es un objeto y sus campos se
+     comparan juntos. La disponibilidad se contradice oferta a oferta («that
+     item or that variant is sold out»). **false** también si la oferta
+     declarada `OutOfStock` es la variante que la página muestra agotada, o si
+     el grupo entero se declara `InStock` y alguna variante está disponible.
+   - **Medida antes de mergear**, con los estados rehechos por el código
+     nuevo para las mismas URLs y con las mismas etiquetas, en un contenedor
+     efímero (juegos `/data/archivo/jev/schema_v4_*.jsonl`, respuestas
+     `r_schema_v4_*.jsonl`). El texto visible solo cambia en 13 filas de
+     Tiendanimal, porque entran más ofertas.
+
+     | Juego | v3 | v4 |
+     |---|---|---|
+     | Tiendanimal (400, 4 true) | 390; 4/4; 10 falsos «sí» | **397**; 4/4; **3** falsos «sí» |
+     | Censos del 24-oct (600, 19 true) | 598; 17/19; 0 | 597; 17/19; 1 |
+     | 177, juego de 200 (6 true) | 200; 6/6; 0 | 200; 6/6; 0 |
+     | 177, precisión (118, 21 true) | 117; 21/21; 1 | **118**; 21/21; 0 |
+
+     Los seis fallos de la v4 tienen confianza de 0,43 a 0,59. Tres son
+     fichas de Tiendanimal en las que todo cuadra: en una, el JSON-LD declara
+     el precio tachado del pack y los microdatos el actual. **Al menos uno
+     sigue siendo de variantes agotadas** (dos variantes `OutOfStock` que la
+     página muestra «Sin Stock», 0,59), y otro tiene una variante agotada bien
+     marcada. Otro es el curso de Ilerna cuyo `price` suma las
+     asignaturas (0,50). Los otros dos son las dos versiones de idioma de un
+     parking de Telpark (`priceRange` 2,16 € frente a «primera hora
+     Gratuita»): la v3 las veía y la v4 no (0,43-0,46). A cambio, la v4 ve
+     los dos casos que se le escapaban a la v3. El mismo número de aciertos,
+     pero son otros.
+   - **La v5, un borrador medido peor y nunca desplegado.** La revisión de
+     la PR pidió fundir la oferta repetida con otro formato (la firma con el
+     precio como número), unir una `priceSpecification` a su oferta y añadir
+     al texto que la variante se reconoce por su precio y que «envío a
+     domicilio disponible» no es la disponibilidad de una oferta agotada. En
+     Tiendanimal: con todo, **8 falsos «sí»**; con el texto de la v4 y el
+     estado fundido, **6**; la v4, **3**. Las cuatro contradicciones reales
+     se ven en las tres. En los otros juegos, la v5 da 597/600 (16 de 19, sin
+     falsos «sí»), 200/200 y 118/118. Son casos al límite (0,5-0,8) y las
+     diferencias son pequeñas, pero van todas en el mismo sentido: se queda
+     la v4 tal como se midió. Las respuestas de la v5 están en la caché con
+     versión 5, así que **la siguiente versión es la 6** (las dos huellas, en
+     `HUELLAS`).
+   - **Lo que no se puede afirmar.**
+     - **Tiendanimal ya no es ciego**: el texto de la v4 se escribió viendo
+       sus 10 fallos. La medida limpia de la v4 es otro censo.
+     - **La v4 baja la confianza de las contradicciones reales de
+       Tiendanimal**: de 0,94-0,95 con la v3 a 0,64-0,81. Sobre los cuatro
+       juegos, todos los «true» con confianza ≥ 0,6 aciertan (44 de 44; con
+       la v3 eran 42 de 45), pero en el caso que motivó el cambio el margen
+       es de 0,04. Además, ese corte se ha elegido sobre
+       los mismos datos que se usaron para redactar la v4 y la v3, y mezcla
+       el juego de precisión, que tiene sesgo. **No es un umbral**. Es la
+       hipótesis que hay que confirmar con un juego nuevo: extraer de censos
+       sin mirar y etiquetar a ciegas los «sí» con confianza ≥ 0,6, como el
+       juego de precisión de la 179. Si salen 35 o más y aciertan todos, la
+       cota pasa de 0,9.
+     - Las 4 contradicciones de Tiendanimal son de disponibilidad, y salen
+       de 4 productos.
+     - Sin medir: `lowPrice`, el choque de la 184 entre `lowPrice` y las
+       variantes, y el precio con y sin IVA.
+     - El texto choca en un caso: false si solo se ven precios de variantes,
+       true si se ve agotada «esa variante». Las líneas no llevan talla ni
+       SKU, así que una variante solo se empareja con lo visible por su
+       precio. Y falta el caso inverso: una oferta `OutOfStock` frente a un
+       «Disponible» del envío o de la recogida en tienda, que sale en todos
+       los fragmentos de Tiendanimal. La v5 lo intentó y midió peor.
+     - Una `priceSpecification` anidada sale en una línea aparte de la
+       disponibilidad de su oferta. Solo se ven las 5 primeras variantes de
+       una lista: si la agotada es la sexta, no está.
+     - El estado es más largo: de media, un 7-10 % más de tokens.
+   - Fuera: añadir el nombre o la talla de la variante a su línea (el precio
+     ya basta para emparejarla con lo visible en los casos medidos).

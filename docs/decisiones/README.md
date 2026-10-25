@@ -20,7 +20,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -213,6 +213,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 182 | `title_es_generico` v2: un nombre propio o un tema concreto no es genérico aunque sea corto, y la etiqueta que tienen todos los ítems de una sección sin decir cuál sí (prueba: ¿valdría igual en otro ítem de ese tipo?); ejemplos vigilados por huella contra los juegos, casos frontera en el código y juegos a re-etiquetar | [`llm-y-enriquecido`](llm-y-enriquecido.md#d182) |
 | 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
 | 184 | `schema_contradice_contenido` v3: si la página da el precio del ítem y el importe exacto declarado no es ninguno de sus precios, es contradicción y no ausencia (`lowPrice` como mínimo, `priceRange` en gama); medida antes de mergear (17 de 19 contradicciones frente a 4, ningún falso «sí», sin umbral); la v2 fue un borrador que dejó respuestas en la caché | [`llm-y-enriquecido`](llm-y-enriquecido.md#d184) |
+| 185 | `schema_contradice_contenido` v4: el marcado llega por objeto (precio, moneda y disponibilidad de cada oferta en una línea) y la disponibilidad se compara oferta a oferta; en un censo nuevo (Tiendanimal) los falsos «sí» de las variantes agotadas bajan de 10 a 3, sin perder contradicciones; la v5 (fundir la oferta repetida con otro formato y más texto) se midió peor y no se despliega, y la próxima versión es la 6; sin umbral (≥ 0,6 es una hipótesis por confirmar) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d185) |
 
 ## Anadir una decision
 

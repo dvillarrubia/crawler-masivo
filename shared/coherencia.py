@@ -156,25 +156,43 @@ CAMPOS = CAMPOS_PRECIO + CAMPOS_VALORACION + CAMPOS_FECHA + CAMPOS_DISPONIBILIDA
 
 def hechos_schema(items: Iterable[dict]) -> list[dict]:
     """Los valores verificables de los bloques de marcado de una pagina:
-    `[{"campo": "price", "ruta": "Offer.price", "valor": "116€"}, ...]`.
+    `[{"campo": "price", "ruta": "Offer.price", "valor": "116€", "nodo": "Offer",
+    "grupo": 0}, ...]`.
 
     Se recorre cada bloque hasta cuatro niveles (`Product.offers.price`,
     `Hotel.starRating.ratingValue`). La disponibilidad se acorta a su nombre
-    (`InStock`). Sin repetidos y como mucho `MAX_HECHOS`.
+    (`InStock`). Los valores de un mismo objeto (una oferta: su precio, su moneda
+    y su disponibilidad) comparten `grupo`, porque van juntos: aplanados, una
+    ficha con una talla agotada a 13,99 y otras en stock a 14,99 se leia como
+    «price 13.99, price 14.99, availability InStock, availability OutOfStock» y
+    Jev no sabia cual iba con cual (decision 185). Sin objetos repetidos con
+    los mismos valores escritos igual (la oferta de los microdatos con `20.19€`
+    no es la del JSON-LD con `20.19`: fundirlas se midio peor, ver la 185) y
+    como mucho `MAX_HECHOS` objetos.
     """
     salida: list[dict] = []
-    vistos: set[tuple[str, str]] = set()
+    vistos: set = set()
+    grupos = 0
 
-    def anadir(campo: str, ruta: str, valor: str):
-        if campo == "availability":
-            valor = valor.rstrip("/").rsplit("/", 1)[-1]
-        if (ruta, valor) in vistos or len(salida) >= MAX_HECHOS:
+    def anadir_objeto(nodo: str, valores: list[tuple[str, str]]):
+        nonlocal grupos
+        if not valores or grupos >= MAX_HECHOS:
             return
-        vistos.add((ruta, valor))
-        salida.append({"campo": campo, "ruta": ruta, "valor": valor})
+        # Un objeto de varios campos es el mismo aunque se declare en otra
+        # ruta (la oferta del JSON-LD y la de los microdatos); un valor suelto
+        # no (la nota de una resena no es la nota media).
+        firma = (("objeto", frozenset(valores)) if len(valores) > 1
+                 else (f"{nodo}.{valores[0][0]}", valores[0][1]))
+        if firma in vistos:
+            return
+        vistos.add(firma)
+        for campo, valor in valores:
+            salida.append({"campo": campo, "ruta": f"{nodo}.{campo}", "valor": valor,
+                           "nodo": nodo, "grupo": grupos})
+        grupos += 1
 
     def recorrer(nodo: Any, ruta: str, nivel: int):
-        if nivel > 4 or len(salida) >= MAX_HECHOS:
+        if nivel > 4 or grupos >= MAX_HECHOS:
             return
         if isinstance(nodo, (list, tuple)):
             for x in list(nodo)[:5]:
@@ -182,10 +200,11 @@ def hechos_schema(items: Iterable[dict]) -> list[dict]:
             return
         if not isinstance(nodo, dict):
             return
+        propios: list[tuple[str, str]] = []
+        hijos: list[tuple[Any, str]] = []
         for clave, valor in nodo.items():
             if clave.startswith("@"):
                 continue
-            sub = f"{ruta}.{clave}"
             if clave in CAMPOS:
                 if isinstance(valor, (list, tuple)):
                     if len(valor) > MAX_LISTA:
@@ -195,9 +214,15 @@ def hechos_schema(items: Iterable[dict]) -> list[dict]:
                     valores = [_escalar(valor)]
                 for v in valores:
                     if v:
-                        anadir(clave, sub, v)
+                        if clave == "availability":
+                            v = v.rstrip("/").rsplit("/", 1)[-1]
+                        if (clave, v) not in propios:
+                            propios.append((clave, v))
             elif isinstance(valor, (dict, list, tuple)):
-                recorrer(valor, sub, nivel + 1)
+                hijos.append((valor, f"{ruta}.{clave}"))
+        anadir_objeto(ruta, propios)
+        for valor, sub in hijos:
+            recorrer(valor, sub, nivel + 1)
 
     def bloques(item: Any):
         # Un `@graph` (el JSON-LD de Yoast o de La Salle) son varios bloques.
@@ -604,9 +629,26 @@ def candidatos_schema(session, job_id, url_ids: list[int]) -> list[int]:
     return [u for u in url_ids if u in elegidas]
 
 
+def lineas_marcado(hechos: list[dict]) -> list[str]:
+    """Una linea por objeto del marcado: «Tipo.campo: valor» si tiene un solo
+    valor (como antes de la decision 185) y «Tipo.ruta: campo valor, campo
+    valor» si tiene varios, para que el precio y la disponibilidad de cada
+    oferta se lean juntos."""
+    por: dict[int, list[dict]] = {}
+    for h in hechos:
+        por.setdefault(h.get("grupo", id(h)), []).append(h)
+    lineas = []
+    for hs in por.values():
+        if len(hs) == 1:
+            lineas.append(f"{hs[0]['ruta']}: {hs[0]['valor']}")
+        else:
+            lineas.append(f"{hs[0]['nodo']}: " + ", ".join(f"{h['campo']} {h['valor']}" for h in hs))
+    return lineas
+
+
 def estados_schema(session, url_ids: list[int]):
-    """Title y h1 (de que cosa habla la pagina), los valores del marcado como
-    «Tipo.campo: valor» y los fragmentos visibles. Nunca el JSON-LD entero."""
+    """Title y h1 (de que cosa habla la pagina), los valores del marcado por
+    objeto (`lineas_marcado`) y los fragmentos visibles. Nunca el JSON-LD entero."""
     from shared.decisiones import Estado
 
     datos = datos_schema(session, url_ids)
@@ -615,14 +657,14 @@ def estados_schema(session, url_ids: list[int]):
         d = datos.get(u) or {"titulo": "", "h1": "", "hechos": [], "texto_visible": ""}
         salida.append(Estado(datos={
             "titulo": d["titulo"], "h1": d["h1"],
-            "marcado": [f"{h['ruta']}: {h['valor']}" for h in d["hechos"]],
+            "marcado": lineas_marcado(d["hechos"]),
             "texto_visible": d["texto_visible"]}, url_id=u))
     return salida
 
 
 __all__ = [
     "candidatos_title_contenido", "estados_title_contenido", "candidatos_title_generico",
-    "estados_title_generico", "candidatos_schema", "estados_schema", "hechos_schema",
+    "estados_title_generico", "candidatos_schema", "estados_schema", "hechos_schema", "lineas_marcado",
     "fragmentos_visibles", "muestra_por_plantilla", "datos_schema", "es_portada",
     "palabras_sin_marca", "sitio",
 ]
