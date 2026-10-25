@@ -217,7 +217,8 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     # v4 (decision 185): el marcado llega por objeto (el precio, la moneda y la
     # disponibilidad de cada oferta en una linea) y una variante agotada que la
     # pagina muestra agotada no contradice: aplanado, Jev daba 10 falsos «si»
-    # en 400 fichas de una tienda con tallas.
+    # en 400 fichas de una tienda con tallas. La v5 (un borrador medido peor y
+    # nunca desplegado) tiene respuestas en la cache: la siguiente es la 6.
     version=4,
     instrucciones=(
         "A web page declares the values under 'marcado' in its structured data (schema.org markup, "

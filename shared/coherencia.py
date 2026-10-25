@@ -165,9 +165,10 @@ def hechos_schema(items: Iterable[dict]) -> list[dict]:
     y su disponibilidad) comparten `grupo`, porque van juntos: aplanados, una
     ficha con una talla agotada a 13,99 y otras en stock a 14,99 se leia como
     «price 13.99, price 14.99, availability InStock, availability OutOfStock» y
-    Jev no sabia cual iba con cual (decision 185). Sin objetos repetidos (los
-    microdatos suelen repetir las ofertas del JSON-LD) y como mucho `MAX_HECHOS`
-    objetos.
+    Jev no sabia cual iba con cual (decision 185). Sin objetos repetidos con
+    los mismos valores escritos igual (la oferta de los microdatos con `20.19€`
+    no es la del JSON-LD con `20.19`: fundirlas se midio peor, ver la 185) y
+    como mucho `MAX_HECHOS` objetos.
     """
     salida: list[dict] = []
     vistos: set = set()
