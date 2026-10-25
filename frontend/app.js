@@ -945,7 +945,7 @@ function app() {
     seccion() {
       if (['clients', 'client'].includes(this.view)) return 'clientes';
       if (this.view === 'programados') return 'programados';
-      if (['detail', 'explorer', 'url-detail'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
       return 'rastreos';
     },
 
@@ -954,7 +954,7 @@ function app() {
     // en la evolucion de nadie.
     _presetDelContexto() {
       if (this.view === 'client' && this.cliente) return { cliente_id: this.cliente.id };
-      if (['detail', 'explorer', 'url-detail'].includes(this.view) && this.job && this.job.cliente_id) {
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) {
         return { cliente_id: this.job.cliente_id, profile_id: this.job.profile_id || '' };
       }
       return null;
@@ -968,7 +968,7 @@ function app() {
         m.push({ texto: 'Clientes', href: '#/clientes' });
         m.push({ texto: this.cliente ? this.cliente.nombre : 'Nuevo cliente' });
       }
-      if (['detail', 'explorer', 'url-detail'].includes(v) && this.job) {
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(v) && this.job) {
         if (this.job.cliente_id) {
           m.push({ texto: 'Clientes', href: '#/clientes' });
           m.push({ texto: this.job.cliente_nombre || this.job.client_id, href: '#/clientes/' + this.job.cliente_id });
@@ -977,6 +977,7 @@ function app() {
         }
         m.push({ texto: this.job.name, href: '#/rastreos/' + this.job.id });
         if (v === 'explorer') m.push({ texto: 'Explorador' });
+        if (v === 'informe') m.push({ texto: 'Informe para el cliente' });
         if (v === 'url-detail') {
           if (this.urlDetailDesde === 'explorer') m.push({ texto: 'Explorador', href: '#/rastreos/' + this.job.id + '/explorador' });
           const u = this.urlDetail && this.urlDetail.url;

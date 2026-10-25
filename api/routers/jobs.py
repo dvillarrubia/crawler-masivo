@@ -349,6 +349,15 @@ def update_job(
         job.tipo = cambios["tipo"]
     if "cliente_id" in cambios:
         nuevo = cambios["cliente_id"]
+        # Un perfil es de un cliente: al cambiarlo de cliente, el perfil del
+        # anterior se suelta. Si no, «Nuevo rastreo» y «Programar» desde este
+        # rastreo mandaban el cliente nuevo con el perfil viejo y el servidor
+        # contestaba 422 (revision de la fase 1.4 de UX, 25-oct).
+        if job.profile_id is not None:
+            from shared.models import CrawlProfile
+            perfil = db.get(CrawlProfile, job.profile_id)
+            if perfil is None or nuevo is None or perfil.cliente_id != nuevo:
+                job.profile_id = None
         if nuevo is None:
             job.cliente_id = None
         else:
