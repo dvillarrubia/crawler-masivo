@@ -882,6 +882,9 @@ def borrar_perfil(
 ):
     """Borra el perfil. Sus rastreos se quedan, colgados solo del cliente."""
     perfil = _perfil(db, client_id, profile_id)
+    # Sus incidentes no los iba a cerrar ningun rastreo (decision 188).
+    from shared.incidentes import SERIE_BORRADA, cerrar_serie
+    cerrar_serie(db, f"perfil:{perfil.id}", SERIE_BORRADA)
     db.query(Job).filter(Job.profile_id == perfil.id).update(
         {Job.profile_id: None}, synchronize_session=False)
     db.query(Programacion).filter(Programacion.profile_id == perfil.id).update(

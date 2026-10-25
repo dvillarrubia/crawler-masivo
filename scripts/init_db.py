@@ -180,6 +180,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS content_text_original TEXT"))
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS content_markdown_original TEXT"))
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMPTZ"))
+        # Por que se cerro un incidente sin rastreo (decision 188).
+        conn.execute(text("ALTER TABLE incidentes ADD COLUMN IF NOT EXISTS motivo_cierre VARCHAR(32)"))
         # El texto tras el h1 (decision 187).
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS texto_tras_h1 TEXT"))
         conn.commit()

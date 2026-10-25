@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from shared.database import get_session
+from shared.incidentes import SERIE_BORRADA, SERIE_PAUSADA, cerrar_serie
 from shared.models import Programacion
 from shared.programaciones import proxima_desde
 
@@ -105,10 +106,13 @@ def editar_programacion(
 ):
     prog = _buscar(prog_id, db)
     cambios = cuerpo.model_dump(exclude_unset=True)
+    pausada = prog.activa and cambios.get("activa") is False
     for campo, valor in cambios.items():
         setattr(prog, campo, valor)
     if {"cron", "zona_horaria", "activa"} & set(cambios):
         _recalcular(prog)
+    if pausada:
+        _cerrar_su_serie(db, prog, SERIE_PAUSADA)
     db.commit()
     db.refresh(prog)
     return prog
@@ -121,5 +125,15 @@ def borrar_programacion(prog_id: uuid.UUID, db: Session = Depends(get_session)):
     Son censos entregados o comparables: borrarlos al quitar el calendario
     sería tirar el histórico del cliente por cambiar de idea sobre la hora.
     """
-    db.delete(_buscar(prog_id, db))
+    prog = _buscar(prog_id, db)
+    _cerrar_su_serie(db, prog, SERIE_BORRADA)
+    db.delete(prog)
     db.commit()
+
+
+def _cerrar_su_serie(db: Session, prog, motivo: str) -> None:
+    """Decision 188: sus incidentes no los iba a cerrar ningun rastreo. Solo si
+    la serie es la de la programacion: una que lanza un perfil es la serie del
+    perfil, que se puede seguir lanzando a mano (`serie_de_job`)."""
+    if prog.profile_id is None:
+        cerrar_serie(db, f"programacion:{prog.id}", motivo)

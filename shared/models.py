@@ -199,6 +199,9 @@ class Incidente(Base):
     abierto_en = Column(DateTime(timezone=True), default=_utcnow)
     visto_en = Column(DateTime(timezone=True), nullable=True)
     cerrado_en = Column(DateTime(timezone=True), nullable=True)
+    # Por que se cerro sin un rastreo que lo comprobara (decision 188):
+    # «serie_pausada» o «serie_borrada». NULL = lo cerro `cerrado_job_id`.
+    motivo_cierre = Column(String(32), nullable=True)
     actualizado_en = Column(DateTime(timezone=True), default=_utcnow)
     # Sin aviso hasta ese dia (incluido); el incidente se sigue llevando.
     silenciado_hasta = Column(Date, nullable=True)
