@@ -1404,7 +1404,9 @@
                 </template>
               </div>
             </div>
-            <div class="flex gap-1">
+            <!-- flex-wrap: con el boton del informe, en movil la fila se salia
+                 de la pantalla (revision de la fase 1.3). -->
+            <div class="flex gap-1" style="flex-wrap:wrap;justify-content:flex-end">
               <template x-if="['pending','running'].includes(job.status)">
                 <button class="btn btn-sm btn-danger" @click="cancelJob()" style="display:flex;align-items:center;gap:.3rem">
                   <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
@@ -1415,6 +1417,15 @@
                   <i data-lucide="play-circle" style="width:13px;height:13px"></i> Reanudar
                 </button>
               </template>
+              <!-- El informe para el cliente (decision 138) es una de las tareas
+                   principales: boton propio y no una opcion de Exportar, donde
+                   se tomaba por una descarga (revision de UX del 25-oct, 1.3). -->
+              <button class="btn btn-sm btn-primary" data-testid="abrir-informe"
+                      @click="location.hash = '#/rastreos/' + job.id + '/informe-cliente'"
+                      :disabled="job.status !== 'completed'" style="display:flex;align-items:center;gap:.3rem"
+                      :data-tip="job.status === 'completed' ? 'Nota, qué arreglar primero y qué ha cambiado; se guarda como PDF' : 'Solo con el rastreo completado y analizado'">
+                <i data-lucide="file-check-2" style="width:13px;height:13px"></i> Informe para el cliente
+              </button>
               <!-- Se programa DESDE un rastreo que ya salio bien: sus semillas y
                    su configuracion son las buenas, y repetirlas es un clic. -->
               <button class="btn btn-sm" @click="abrirProgramar()" style="display:flex;align-items:center;gap:.3rem"
@@ -1437,12 +1448,6 @@
                   <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
                 </button>
                 <div class="menu" x-show="menuAbierto === 'exportar'" x-transition.opacity role="menu" style="min-width:19rem">
-                  <!-- Decision 138: el informe para el cliente, imprimible a PDF. -->
-                  <button role="menuitem" data-testid="abrir-informe" @click="menuAbierto = ''; location.hash = '#/rastreos/' + job.id + '/informe-cliente'"
-                          :disabled="job.status !== 'completed'">
-                    <i data-lucide="file-check-2" style="width:14px;height:14px"></i>
-                    <span>Informe para el cliente<span class="menu-sub">Nota, qué arreglar primero y qué ha cambiado; se guarda como PDF</span></span></button>
-                  <hr>
                   <!-- Decision 145: el censo en Excel, con varias hojas. -->
                   <button role="menuitem" @click="menuAbierto = ''; window.location.href = API + '/jobs/' + job.id + '/export.xlsx'"
                           :disabled="!['completed','failed','cancelled'].includes(job.status)" data-testid="exportar-excel">
@@ -1721,8 +1726,8 @@
           <button class="tab" role="tab" :aria-selected="detailTab === 'diff'" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
             <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
           </button>
-          <button class="tab" role="tab" :aria-selected="detailTab === 'insights'" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Informe SEO con puntuaciones y recomendaciones">
-            <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Informe SEO
+          <button class="tab" role="tab" :aria-selected="detailTab === 'insights'" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Puntuación SEO por categorías, con recomendaciones. El entregable es «Informe para el cliente», arriba">
+            <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Puntuación
           </button>
           <div class="menu-wrap" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
             <button class="tab" role="tab" :aria-selected="['semantic','enriquecido','cleaning'].includes(detailTab)"
@@ -3900,7 +3905,7 @@
           <div>
             <!-- Loading -->
             <template x-if="insightsLoading">
-              <div class="loading-overlay"><div class="spinner"></div> Generando informe SEO...</div>
+              <div class="loading-overlay"><div class="spinner"></div> Calculando la puntuación...</div>
             </template>
 
             <template x-if="!insightsLoading && insights">

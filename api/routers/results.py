@@ -3955,7 +3955,7 @@ def _tope_por_errores(job_id: uuid.UUID, db: Session) -> TopeDeNota | None:
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/informe — el informe para el cliente (Ola 6.2,
 # decision 138). Junta lo que ya calculan los demas endpoints; no mide nada
-# nuevo. La interfaz lo pinta en una pagina imprimible (`#/rastreos/<id>/informe`)
+# nuevo. La interfaz lo pinta en una pagina imprimible (`#/rastreos/<id>/informe-cliente`)
 # con las fichas de `incidencias.js`, que viven en el frontend.
 # ---------------------------------------------------------------------------
 _TEXTO_TRUNCADO = {
