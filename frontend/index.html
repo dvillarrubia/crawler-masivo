@@ -638,7 +638,7 @@
                            UX del 25-oct, 1.12): «abierto» iba en el rojo de un
                            rastreo fallido, y una buena noticia de tipo info parecia
                            un fallo. -->
-                      <span class="badge" :style="'color:#fff;background:' + fmt.colorSeveridad(i.severidad)"
+                      <span class="badge" :style="'background:transparent;color:' + fmt.colorSeveridad(i.severidad) + ';border:1px solid ' + fmt.colorSeveridad(i.severidad)"
                             x-text="({critical: 'Crítica', warning: 'Aviso', info: 'Info'})[i.severidad] || i.severidad"></span>
                       <strong x-text="tituloIncidente(i)"></strong>
                       <span class="text-sm text-dim" x-text="({abierto: 'abierto', visto: 'visto', cerrado: 'cerrado'})[i.estado] || i.estado"></span>
