@@ -1561,3 +1561,73 @@
    - Fuera: tocar el estado (mandar el precio de cada asignatura con su
      etiqueta para poder sumar el total) y cambiar los ejemplos de formato
      heredados (otra versión, otra medida).
+
+<a id="d185"></a>
+185. **`schema_contradice_contenido` v4: el marcado llega por objeto, con el
+   precio y la disponibilidad de cada oferta en una línea** (#8, #17; mide lo
+   que dejó la 184). Cambian el estado (`shared/coherencia.py`) y el texto
+   (v4, huella en `HUELLAS`). Sigue **sin umbral**: todo sale `incierto`.
+   - **Lo que fallaba de la v3.** La medida limpia que pedía la 184: un censo
+     que nadie había mirado (Tiendanimal d50fd131, 4.000 URLs, rastreado el
+     25-oct-2026), con 400 estados etiquetados a ciegas por dos agentes y un
+     juez (1 desacuerdo; `/data/archivo/jev/schema_v3_tiendanimal_etiquetado.jsonl`).
+     **390/400**: ve las **4 contradicciones reales** (todas de
+     disponibilidad: el marcado dice `InStock` y la ficha «Sin Stock»), con
+     confianza 0,94-0,95, pero da **10 falsos «sí»**, todos del mismo caso:
+     fichas con tallas o pesos en las que alguna variante está agotada.
+     `hechos_schema` aplanaba el marcado campo a campo y quitaba repetidos:
+     llegaban dos listas, una de precios y otra de disponibilidades, sin
+     saber cuál iba con cuál. Y el segundo `InStock` de dos variantes en
+     stock desaparecía. Jev contestaba a ciegas, con confianza ~0,5.
+   - **El estado.** `hechos_schema` agrupa los valores de un mismo objeto
+     (`grupo` y `nodo` en cada hecho) y `lineas_marcado` los pinta en una
+     línea: `ProductGroup.hasVariant.offers: price 13.99, availability
+     OutOfStock`. Un objeto de un solo valor sale como antes (`Event.startDate:
+     2026-10-21`). Un objeto de varios campos repetido en otra ruta (la oferta
+     de los microdatos que repite la del JSON-LD) sale una vez; un valor
+     suelto se sigue distinguiendo por ruta (la nota de una reseña no es la
+     nota media). `MAX_HECHOS` cuenta objetos, no valores, y no parte uno.
+   - **El texto.** Cada línea de `marcado` es un objeto y sus campos se
+     comparan juntos. La disponibilidad se contradice oferta a oferta («that
+     item or that variant is sold out»). **false** también si la oferta
+     declarada `OutOfStock` es la variante que la página muestra agotada, o si
+     el grupo entero se declara `InStock` y alguna variante está disponible.
+   - **Medida antes de mergear**, con los estados rehechos por el código
+     nuevo para las mismas URLs y con las mismas etiquetas, en un contenedor
+     efímero (juegos `/data/archivo/jev/schema_v4_*.jsonl`, respuestas
+     `r_schema_v4_*.jsonl`). El texto visible solo cambia en 13 filas de
+     Tiendanimal, porque entran más ofertas.
+
+     | Juego | v3 | v4 |
+     |---|---|---|
+     | Tiendanimal (400, 4 true) | 390; 4/4; 10 falsos «sí» | **397**; 4/4; **3** falsos «sí» |
+     | Censos del 24-oct (600, 19 true) | 598; 17/19; 0 | 597; 17/19; 1 |
+     | 177, juego de 200 (6 true) | 200; 6/6; 0 | 200; 6/6; 0 |
+     | 177, precisión (118, 21 true) | 117; 21/21; 1 | **118**; 21/21; 0 |
+
+     Los cinco fallos de la v4 tienen confianza de 0,43 a 0,59 y ninguno es de
+     variantes agotadas. Tres son fichas de Tiendanimal en las que todo
+     cuadra (en una, el JSON-LD declara el precio tachado del pack y los
+     microdatos el actual). Otro es el curso de Ilerna cuyo `price` suma las
+     asignaturas (0,50). Los otros dos son las dos versiones de idioma de un
+     parking de Telpark (`priceRange` 2,16 € frente a «primera hora
+     Gratuita»): la v3 las veía y la v4 no (0,43-0,46). A cambio, la v4 ve
+     los dos casos que se le escapaban a la v3. El mismo número de aciertos,
+     pero son otros.
+   - **Lo que no se puede afirmar.**
+     - **Tiendanimal ya no es ciego**: el texto de la v4 se escribió viendo
+       sus 10 fallos. La medida limpia de la v4 es otro censo.
+     - Sobre los cuatro juegos, todos los «true» con confianza ≥ 0,6 aciertan
+       (44 de 44, todos «true» reales). Pero ese corte se ha elegido sobre
+       los mismos datos que se usaron para redactar la v4 y la v3, y mezcla
+       el juego de precisión, que tiene sesgo. **No es un umbral**. Es la
+       hipótesis que hay que confirmar con un juego nuevo: extraer de censos
+       sin mirar y etiquetar a ciegas los «sí» con confianza ≥ 0,6, como el
+       juego de precisión de la 179. Si salen 35 o más y aciertan todos, la
+       cota pasa de 0,9.
+     - Las 4 contradicciones de Tiendanimal son de disponibilidad, y salen
+       de 4 productos.
+     - Sin medir: `lowPrice`, el choque de la 184 entre `lowPrice` y las
+       variantes, y el precio con y sin IVA.
+   - Fuera: añadir el nombre o la talla de la variante a su línea (el precio
+     ya basta para emparejarla con lo visible en los casos medidos).

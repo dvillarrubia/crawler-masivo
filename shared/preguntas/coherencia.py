@@ -21,7 +21,8 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
   la fecha de publicacion: la firma no esta en el contenido guardado. v3
   (decision 184): si los fragmentos dan el precio del item y el importe exacto
   declarado no es ninguno de sus precios, eso no es ausencia sino
-  contradiccion.
+  contradiccion. v4 (decision 185): el marcado llega por objeto y la
+  disponibilidad se compara oferta a oferta.
 
 Ninguna esta evaluada (#8): sin umbral, todo sale `incierto` y nada va a un
 informe. Las incidencias de #16/#17 que saldrian de ellas (`title_desalineado`,
@@ -213,13 +214,19 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     # 24-oct). La v2 fue el primer borrador, medido con un contenedor efimero
     # y nunca desplegado: sus respuestas estan en la cache con version 2, y
     # la clave no lleva el texto, asi que este no puede reusar ese numero.
-    version=3,
+    # v4 (decision 185): el marcado llega por objeto (el precio, la moneda y la
+    # disponibilidad de cada oferta en una linea) y una variante agotada que la
+    # pagina muestra agotada no contradice: aplanado, Jev daba 10 falsos «si»
+    # en 400 fichas de una tienda con tallas.
+    version=4,
     instrucciones=(
         "A web page declares the values under 'marcado' in its structured data (schema.org markup, "
         "which visitors do not see). 'texto_visible' holds fragments of the text visitors do see on "
         "that page; they are partial. 'titulo' and 'h1' tell which item the page is about: the one "
-        "product, room, course, venue or service it presents. Does the visible text clearly "
-        "contradict at least one declared value for that item? "
+        "product, room, course, venue or service it presents. Each line of 'marcado' is one "
+        "object of the markup; when a line lists several fields (price, currency, availability), "
+        "they belong to the same offer or variant and are compared together. Does the visible "
+        "text clearly contradict at least one declared value for that item? "
         "Answer true when the fragments show that same item with a different value for the same "
         "thing. For a price: the markup declares one exact amount for the item (price, or a "
         "priceRange written as a single amount) and the fragments show the item's own basic price, "
@@ -229,8 +236,9 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
         "than the lowest price the page gives for the item. A priceRange written as a range or as "
         "symbols ($$) is contradicted only by a price of the item outside it. Also true for "
         "a different currency for the same item's price, a different rating or number of reviews, "
-        "a different event date or offer validity date, or a different availability (the markup "
-        "says InStock and the page says sold out). "
+        "a different event date or offer validity date, or a different availability for the "
+        "same offer (the markup says InStock and the page says that item or that variant is sold "
+        "out). "
         "Answer false when the fragments give no price, rating, date or availability for that item "
         "at all, or only prices of its parts, options or variants (a declared value that is simply "
         "not mentioned proves nothing); when the declared "
@@ -239,14 +247,17 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
         "to something else: another product, room, venue or branch listed on the same page, an "
         "add-on, a monthly instalment or deposit, a total for several items, nights or people, or "
         "a 'from' price for a whole range that is consistent with the declared one; or when only "
-        "the format differs (116€ and 116,00 EUR, 2026-10-31 and 31 October 2026, 4.5 and 4,5/5)."
+        "the format differs (116€ and 116,00 EUR, 2026-10-31 and 31 October 2026, 4.5 and 4,5/5). "
+        "Also false when an offer declared OutOfStock is the variant the page shows as sold out, "
+        "or when a product group as a whole is declared InStock and at least one of its variants "
+        "is available."
     ),
     opciones={
         "true": "A declared value is visibly contradicted for the page's own item (price, currency, rating, date or availability).",
         "false": "The values match, the differing figure belongs to something else, or the item's values are not shown.",
     },
     descripcion=("Marcado que contradice lo visible: precio, valoracion, fecha de un evento u "
-                 "oferta o disponibilidad (#17, v3 decision 184). Sin evaluar (#8): todo incierto."),
+                 "oferta o disponibilidad (#17, v4 decision 185). Sin evaluar (#8): todo incierto."),
 )
 
 PREGUNTAS = [TITLE_DESCRIBE_CONTENIDO, TITLE_ES_GENERICO, SCHEMA_CONTRADICE_CONTENIDO]

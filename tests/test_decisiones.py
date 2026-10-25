@@ -497,6 +497,8 @@ HUELLAS |= {("title_es_generico", 2): "a9817259e28e9786"}
 HUELLAS |= {("schema_contradice_contenido", 2): "826d86ea9a09574f",
             ("schema_contradice_contenido", 3): "4651022f0fb38742",
             }
+# v4: el marcado por objeto y la disponibilidad oferta a oferta (decision 185).
+HUELLAS |= {("schema_contradice_contenido", 4): "5b4e1661c0d0829f"}
 
 
 def test_cambiar_el_texto_de_una_pregunta_obliga_a_subir_su_version():
