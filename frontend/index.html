@@ -1587,7 +1587,7 @@
 
         <!-- Lo que cambio respecto al censo anterior va lo primero del
              Resumen, justo bajo las pestanas (y en Comparar), y la tarjeta
-             «N alertas» de aqui arriba se ve en todas: una alerta a la que hay
+             «N alertas», encima de las pestanas, se ve en todas: una alerta a la que hay
              que ir no es una alerta. En Lopesan, media seccion canonicalizada a
              un servidor de pruebas se entrego como un aviso `info` entre
              315.119 incidencias. -->
@@ -1742,7 +1742,8 @@
         <!-- Lo que antes iba encima de las pestanas y se repetia en todas
              (revision de UX del 25-oct, fase 1.1): Search Console y la
              extraccion a medida, solo en el Resumen; el trafico y lo que ha
-             cambiado frente al anterior, en el Resumen y en Comparar. Encima
+             cambiado frente al anterior, en el Resumen y en Comparar (con el
+             censo de la comparacion automatica). Encima
              de las pestanas quedan la cabecera, los avisos criticos y las
              tarjetas. -->
         <!-- Search Console en la ventana del rastreo (decision 142). -->
@@ -1827,7 +1828,7 @@
           </div>
         </template>
         <!-- Trafico de Google entre los dos rastreos, por lo que cambio (decision 158). -->
-        <template x-if="job.comparacion && job.comparacion.trafico && ['overview', 'diff'].includes(detailTab)">
+        <template x-if="job.comparacion && job.comparacion.trafico && (detailTab === 'overview' || (detailTab === 'diff' && (!diffOtro || diffOtro === job.comparacion.comparado_con)))">
           <div class="card mb-2 text-sm" data-testid="trafico-entre-censos">
             <strong>Tráfico de Google frente al rastreo anterior</strong>
             <ul style="margin:.3rem 0 0;padding-left:1.1rem">
@@ -1853,7 +1854,10 @@
             </template>
           </div>
         </template>
-        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && ['overview', 'diff'].includes(detailTab)">
+        <!-- En Comparar, solo mientras carga la comparacion con el mismo censo: luego
+             sus alertas salen en el resultado y se veian dos veces; con otro
+             censo elegido no son las suyas. -->
+        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && (detailTab === 'overview' || (detailTab === 'diff' && !diff && (!diffOtro || diffOtro === job.comparacion.comparado_con)))">
           <div class="card mb-2"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
             <div class="text-sm">
