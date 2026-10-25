@@ -1516,7 +1516,8 @@ function app() {
     graficaEvolucion(metrica) {
       const serie = this.serieEvolucion();
       if (!serie) return '';
-      return svgGrafica(modeloGrafica(serie.puntos, metrica, { etiqueta: this.etiquetaMetrica(metrica) }));
+      const mejor = (((this.clienteEvolucion || {}).metricas || {})[metrica] || {}).mejor || 'baja';
+      return svgGrafica(modeloGrafica(serie.puntos, metrica, { etiqueta: this.etiquetaMetrica(metrica), mejor }));
     },
 
     // El ultimo valor comparable de una metrica y la flecha frente al
@@ -5170,6 +5171,15 @@ function modeloGrafica(puntos, metrica, opciones) {
     anterior = punto;
   });
   m.ultimo = m.puntos.length ? m.puntos[m.puntos.length - 1].valor : null;
+  // El ultimo tramo, del color de la flecha (revision de UX del 25-oct, 1.13):
+  // rojo si empeora segun `opciones.mejor` ('baja' o 'sube'); antes salia
+  // siempre del verde de la marca, tambien con 41 URLs en 4xx frente a 35.
+  // Un tramo discontinuo (cambio de version del analisis) no se juzga.
+  const ult = m.tramos[m.tramos.length - 1];
+  if (ult && !ult.discontinuo && o.mejor && ult.y2 !== ult.y1) {
+    const sube = ult.y2 < ult.y1;  // en SVG la y crece hacia abajo
+    ult.sentido = (sube ? 'sube' : 'baja') === o.mejor ? 'mejora' : 'empeora';
+  }
   return m;
 }
 
@@ -5184,7 +5194,7 @@ function svgGrafica(m) {
     if (c.analisis) partes.push(`<text x="${c.x}" y="${m.arriba - 5}" text-anchor="middle" class="evo-corte-txt"><title>${_escSvg(c.titulo)}</title>v</text>`);
   }
   for (const t of m.tramos) {
-    partes.push(`<line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}" class="evo-linea${t.discontinuo ? ' discontinua' : ''}"/>`);
+    partes.push(`<line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}" class="evo-linea${t.discontinuo ? ' discontinua' : ''}${t.sentido ? ' ' + t.sentido : ''}"/>`);
   }
   for (const p of m.puntos) {
     partes.push(`<a href="#/rastreos/${_escSvg(p.job_id)}"><circle cx="${p.x}" cy="${p.y}" r="3.2" class="evo-punto"><title>${_escSvg(p.titulo)}</title></circle></a>`);

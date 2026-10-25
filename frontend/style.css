@@ -1380,6 +1380,7 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .evo-eje{font-size:9px;fill:var(--text-dim)}
 .evo-linea{stroke:var(--accent);stroke-width:1.8;fill:none}
 .evo-linea.discontinua{stroke-dasharray:4 3;stroke:var(--text-dim)}
+.evo-linea.empeora{stroke:var(--red)}
 .evo-punto{fill:var(--accent);stroke:var(--bg-card);stroke-width:1}
 .evo-fuera{font-size:11px;fill:var(--text-dim);cursor:pointer}
 .evo-corte{stroke:var(--orange);stroke-width:1;stroke-dasharray:2 2}
