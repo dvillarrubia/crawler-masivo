@@ -1585,11 +1585,12 @@
           </div>
         </template>
 
-        <!-- Que cambio respecto al censo anterior del mismo sitio, calculado
-             al cerrar el rastreo. Va ARRIBA y antes que las cifras: una
-             alerta a la que hay que ir no es una alerta. En Lopesan, media
-             seccion canonicalizada a un servidor de pruebas se entrego como
-             un aviso `info` entre 315.119 incidencias. -->
+        <!-- Lo que cambio respecto al censo anterior va lo primero del
+             Resumen, justo bajo las pestanas (y en Comparar), y la tarjeta
+             «N alertas» de aqui arriba se ve en todas: una alerta a la que hay
+             que ir no es una alerta. En Lopesan, media seccion canonicalizada a
+             un servidor de pruebas se entrego como un aviso `info` entre
+             315.119 incidencias. -->
         <!-- Reglas propias del cliente que han saltado al cerrar el rastreo
              (decision 135). Se editan en la ficha del cliente, pestaña Alertas. -->
         <template x-if="job.alertas_cliente && (job.alertas_cliente.disparadas || []).length">
@@ -1606,147 +1607,8 @@
           </div>
         </template>
 
-        <!-- Search Console en la ventana del rastreo (decision 142). -->
-        <template x-if="job.gsc_resumen">
-          <div class="card mb-2 text-sm" data-testid="gsc-resumen">
-            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-              <strong>Tráfico de Google (Search Console)</strong>
-              <span class="text-dim" x-text="'del ' + fmt.dia(job.gsc_resumen.desde) + ' al ' + fmt.dia(job.gsc_resumen.hasta)"></span>
-            </div>
-            <div style="margin-top:.3rem">
-              <strong x-text="fmt.num(job.gsc_resumen.clics)"></strong> clics y
-              <strong x-text="fmt.num(job.gsc_resumen.impresiones)"></strong> impresiones;
-              <span x-text="job.gsc_resumen.clics ? Math.round(100 * job.gsc_resumen.clics_en_urls_del_censo / job.gsc_resumen.clics) + ' % de los clics en URLs de este rastreo' : ''"></span>
-              <span x-show="job.gsc_resumen.clics_en_variantes" x-text="'· ' + fmt.num(job.gsc_resumen.clics_en_variantes) + ' en variantes con parámetros'"></span>
-            </div>
-            <div x-show="job.gsc_resumen.urls_fuera_del_censo" style="margin-top:.3rem">
-              <span x-text="fmt.num(job.gsc_resumen.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(job.gsc_resumen.clics_fuera_del_censo) + ' clics): huérfanas o fuera del alcance.'"></span>
-              <details><summary class="text-dim" style="cursor:pointer">Ver las que más reciben</summary>
-                <ul style="margin:.3rem 0 0;padding-left:1.1rem">
-                  <template x-for="u in job.gsc_resumen.fuera_del_censo" :key="u.url">
-                    <li><span x-text="fmt.num(u.clics)"></span> · <span class="informe-url" x-text="u.url"></span></li>
-                  </template>
-                </ul>
-              </details>
-            </div>
-            <div x-show="!job.gsc_resumen.cubre_la_ventana" class="text-dim" style="margin-top:.3rem">
-              Los datos no cubren los 90 días enteros (o Google recortó algún día): no se afirma que una página no tuvo impresiones.
-            </div>
-            <!-- Lo que puede traer trafico (decision 157). -->
-            <template x-if="job.gsc_resumen.oportunidades">
-              <div style="margin-top:.4rem" data-testid="gsc-oportunidades">
-                <div>
-                  <span x-text="fmt.num(job.gsc_resumen.oportunidades.oportunidad_posicion) + ' páginas en posición 4-20 con poco enlazado'"></span>
-                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.ctr_bajo_para_posicion) + ' con CTR bajo para su posición'"></span>
-                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.canibalizacion_por_consulta) + ' búsquedas repartidas entre varias URLs'"></span>
-                </div>
-                <div x-show="job.gsc_resumen.oportunidades.consultas_desde && job.gsc_resumen.oportunidades.consultas_desde > job.gsc_resumen.desde" class="text-dim">
-                  Las búsquedas solo están desde el <span x-text="fmt.dia(job.gsc_resumen.oportunidades.consultas_desde)"></span>: el reparto es de esos días.
-                </div>
-                <details x-show="(job.gsc_resumen.oportunidades.por_plantilla || []).length">
-                  <summary class="text-dim" style="cursor:pointer">Rendimiento por plantilla y por profundidad</summary>
-                  <template x-for="tabla in [['Plantilla', job.gsc_resumen.oportunidades.por_plantilla], ['Clics desde la home', job.gsc_resumen.oportunidades.por_profundidad]]" :key="tabla[0]">
-                    <table class="table text-sm" style="margin-top:.4rem">
-                      <thead><tr><th x-text="tabla[0]"></th><th>Indexables</th><th>Con impresiones</th><th>Clics</th><th>Impresiones</th><th>CTR</th><th>Posición</th></tr></thead>
-                      <tbody>
-                        <template x-for="f in tabla[1] || []" :key="f.grupo">
-                          <tr>
-                            <td x-text="f.grupo"></td>
-                            <td x-text="fmt.num(f.indexables)"></td>
-                            <td x-text="fmt.num(f.con_impresiones) + (f.indexables ? ' (' + Math.round(100 * f.con_impresiones / f.indexables) + ' %)' : '')"></td>
-                            <td x-text="fmt.num(f.clics)"></td>
-                            <td x-text="fmt.num(f.impresiones)"></td>
-                            <td x-text="f.ctr == null ? '—' : (100 * f.ctr).toFixed(1) + ' %'"></td>
-                            <td x-text="f.posicion == null ? '—' : f.posicion"></td>
-                          </tr>
-                        </template>
-                      </tbody>
-                    </table>
-                  </template>
-                </details>
-                <details x-show="job.gsc_resumen.oportunidades.curva_ctr">
-                  <summary class="text-dim" style="cursor:pointer">Curva de CTR del sitio por posición</summary>
-                  <div class="text-dim" x-show="(job.gsc_resumen.oportunidades.curva_ctr || {}).sin_marcas" style="margin-top:.3rem">
-                    Sin marcas declaradas en la configuración del cliente: la curva mezcla las búsquedas de marca, que tienen otro CTR.
-                  </div>
-                  <table class="table text-sm" style="margin-top:.4rem">
-                    <thead><tr><th>Posición</th><th>Búsquedas × página</th><th>CTR mediano</th><th>Cuartil bajo</th></tr></thead>
-                    <tbody>
-                      <template x-for="tr in ['1','2','3','4-5','6-10','11-20'].filter(t => ((job.gsc_resumen.oportunidades.curva_ctr || {}).tramos || {})[t])" :key="tr">
-                        <tr :class="job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : 'text-dim'">
-                          <td x-text="tr"></td>
-                          <td x-text="fmt.num(job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].filas) + (job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : ' (pocas: no se usa)')"></td>
-                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].mediana).toFixed(1) + ' %'"></td>
-                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].p25).toFixed(1) + ' %'"></td>
-                        </tr>
-                      </template>
-                    </tbody>
-                  </table>
-                </details>
-              </div>
-            </template>
-          </div>
-        </template>
 
-        <!-- Trafico de Google entre los dos rastreos, por lo que cambio (decision 158). -->
-        <template x-if="job.comparacion && job.comparacion.trafico">
-          <div class="card mb-2 text-sm" data-testid="trafico-entre-censos">
-            <strong>Tráfico de Google frente al rastreo anterior</strong>
-            <ul style="margin:.3rem 0 0;padding-left:1.1rem">
-              <template x-for="t in job.comparacion.trafico.textos || [job.comparacion.trafico.motivo]" :key="t">
-                <li x-text="t"></li>
-              </template>
-            </ul>
-            <template x-for="sentido in [['Caídas', job.comparacion.trafico.caidas], ['Subidas', job.comparacion.trafico.subidas]].filter(s => (s[1] || []).length)" :key="sentido[0]">
-              <details>
-                <summary class="text-dim" style="cursor:pointer" x-text="sentido[0] + ' según lo que cambió (una página puede estar en dos grupos)'"></summary>
-                <template x-for="g in sentido[1]" :key="g.cambio">
-                  <div style="margin-top:.4rem">
-                    <span x-text="fmt.num(g.paginas) + ' páginas · ' + (g.diferencia > 0 ? '+' : '') + fmt.num(g.diferencia) + ' clics · ' + g.texto"></span>
-                    <span class="text-dim" x-show="(g.plantillas || []).length" x-text="' (' + (g.plantillas || []).join(', ') + ')'"></span>
-                    <ul style="margin:.2rem 0 0;padding-left:1.1rem">
-                      <template x-for="e in g.ejemplos" :key="e.url">
-                        <li><span x-text="fmt.num(e.clics_antes) + ' → ' + fmt.num(e.clics_despues)"></span> · <span class="informe-url" x-text="e.url"></span></li>
-                      </template>
-                    </ul>
-                  </div>
-                </template>
-              </details>
-            </template>
-          </div>
-        </template>
 
-        <template x-if="job.comparacion && (job.comparacion.alertas || []).length">
-          <div class="card mb-2"
-               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
-            <div class="text-sm">
-              <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
-              Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
-              (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
-            </div>
-            <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
-              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
-                            + fmt.colorSeveridad(al.severidad)">
-                <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
-                  <strong x-text="fmt.tituloAlerta(al)"></strong>
-                  <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
-                    <strong x-text="fmt.num(al.paginas)"></strong>
-                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
-                  </span>
-                </div>
-                <div class="text-sm" x-text="al.que_decide_google"></div>
-                <div class="text-dim" style="font-size:.78rem" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
-                <!-- Por segmento de negocio (decision 127): «el 100 % de las
-                     fichas» dice que mirar; la forma de la ruta, no. -->
-                <div class="text-dim" style="font-size:.78rem" x-show="(al.segmentos || []).length"
-                     x-text="(al.segmentos || []).slice(0,3).map(sg => sg.segmento + ' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + sg.pct + '%').join(' · ')"></div>
-              </div>
-            </template>
-            <div class="text-dim" style="font-size:.78rem;margin-top:.5rem">
-              El detalle, con ejemplos y plantillas, en la pestana Comparar.
-            </div>
-          </div>
-        </template>
 
         <!-- Aviso de grafo incompleto por JavaScript. El PageRank se calcula
              igual y antes se entregaba sin decir nada: el aviso solo existia en
@@ -1784,37 +1646,6 @@
           </div>
         </template>
 
-        <!-- Extraccion a medida (decision 104): una linea por regla con lo
-             que dio, y enlaces al Explorador ya filtrado. -->
-        <template x-if="resumenAMedida && resumenAMedida.reglas.length">
-          <div class="card mb-2">
-            <div class="veredicto-titulo">
-              Extracción a medida
-              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en el Explorador</a>
-            </div>
-            <template x-if="resumenAMedida.render_js">
-              <div class="text-sm text-dim">Se extrae del DOM renderizado y sin banners: una etiqueta que inyecta el JavaScript sí está; un banner que el rastreo quitó, no.</div>
-            </template>
-            <div class="table-wrap"><table class="tbl">
-              <thead><tr><th>Regla</th><th>Evaluadas</th><th>Con valor</th><th>Sin coincidencia</th><th>Bloqueadas / error</th><th>Valores más frecuentes</th></tr></thead>
-              <tbody>
-                <template x-for="r in resumenAMedida.reglas" :key="r.nombre">
-                  <tr>
-                    <td x-text="r.etiqueta"></td>
-                    <td x-text="fmt.num(r.evaluadas)"></td>
-                    <td x-text="fmt.num(r.ok)"></td>
-                    <td><a href="#" @click.prevent="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')" x-text="fmt.num(r.sin_coincidencia)"></a></td>
-                    <td x-text="fmt.num(r.bloqueadas) + ' / ' + fmt.num(r.errores + r.desactivadas)"></td>
-                    <td class="text-sm" x-text="(r.top || []).map(t => t.valor + ' (' + t.paginas + ')').join(' · ')"></td>
-                  </tr>
-                </template>
-              </tbody>
-            </table></div>
-            <template x-for="a in (resumenAMedida.avisos || [])" :key="a">
-              <div class="text-sm orange" x-text="a"></div>
-            </template>
-          </div>
-        </template>
 
         <!-- Tarjetas (UX-13). Antes eran «URLs totales» y «Procesadas» con
              la misma cifra, y «Fallidas 0» en rojo. Ahora cada una contesta
@@ -1907,6 +1738,183 @@
             </div>
           </div>
         </div>
+
+        <!-- Lo que antes iba encima de las pestanas y se repetia en todas
+             (revision de UX del 25-oct, fase 1.1): Search Console y la
+             extraccion a medida, solo en el Resumen; el trafico y lo que ha
+             cambiado frente al anterior, en el Resumen y en Comparar. Encima
+             de las pestanas quedan la cabecera, los avisos criticos y las
+             tarjetas. -->
+        <!-- Search Console en la ventana del rastreo (decision 142). -->
+        <template x-if="job.gsc_resumen && detailTab === 'overview'">
+          <div class="card mb-2 text-sm" data-testid="gsc-resumen">
+            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+              <strong>Tráfico de Google (Search Console)</strong>
+              <span class="text-dim" x-text="'del ' + fmt.dia(job.gsc_resumen.desde) + ' al ' + fmt.dia(job.gsc_resumen.hasta)"></span>
+            </div>
+            <div style="margin-top:.3rem">
+              <strong x-text="fmt.num(job.gsc_resumen.clics)"></strong> clics y
+              <strong x-text="fmt.num(job.gsc_resumen.impresiones)"></strong> impresiones;
+              <span x-text="job.gsc_resumen.clics ? Math.round(100 * job.gsc_resumen.clics_en_urls_del_censo / job.gsc_resumen.clics) + ' % de los clics en URLs de este rastreo' : ''"></span>
+              <span x-show="job.gsc_resumen.clics_en_variantes" x-text="'· ' + fmt.num(job.gsc_resumen.clics_en_variantes) + ' en variantes con parámetros'"></span>
+            </div>
+            <div x-show="job.gsc_resumen.urls_fuera_del_censo" style="margin-top:.3rem">
+              <span x-text="fmt.num(job.gsc_resumen.urls_fuera_del_censo) + ' URLs con clics que el rastreo no encontró (' + fmt.num(job.gsc_resumen.clics_fuera_del_censo) + ' clics): huérfanas o fuera del alcance.'"></span>
+              <details><summary class="text-dim" style="cursor:pointer">Ver las que más reciben</summary>
+                <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+                  <template x-for="u in job.gsc_resumen.fuera_del_censo" :key="u.url">
+                    <li><span x-text="fmt.num(u.clics)"></span> · <span class="informe-url" x-text="u.url"></span></li>
+                  </template>
+                </ul>
+              </details>
+            </div>
+            <div x-show="!job.gsc_resumen.cubre_la_ventana" class="text-dim" style="margin-top:.3rem">
+              Los datos no cubren los 90 días enteros (o Google recortó algún día): no se afirma que una página no tuvo impresiones.
+            </div>
+            <!-- Lo que puede traer trafico (decision 157). -->
+            <template x-if="job.gsc_resumen.oportunidades">
+              <div style="margin-top:.4rem" data-testid="gsc-oportunidades">
+                <div>
+                  <span x-text="fmt.num(job.gsc_resumen.oportunidades.oportunidad_posicion) + ' páginas en posición 4-20 con poco enlazado'"></span>
+                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.ctr_bajo_para_posicion) + ' con CTR bajo para su posición'"></span>
+                  · <span x-text="fmt.num(job.gsc_resumen.oportunidades.canibalizacion_por_consulta) + ' búsquedas repartidas entre varias URLs'"></span>
+                </div>
+                <div x-show="job.gsc_resumen.oportunidades.consultas_desde && job.gsc_resumen.oportunidades.consultas_desde > job.gsc_resumen.desde" class="text-dim">
+                  Las búsquedas solo están desde el <span x-text="fmt.dia(job.gsc_resumen.oportunidades.consultas_desde)"></span>: el reparto es de esos días.
+                </div>
+                <details x-show="(job.gsc_resumen.oportunidades.por_plantilla || []).length">
+                  <summary class="text-dim" style="cursor:pointer">Rendimiento por plantilla y por profundidad</summary>
+                  <template x-for="tabla in [['Plantilla', job.gsc_resumen.oportunidades.por_plantilla], ['Clics desde la home', job.gsc_resumen.oportunidades.por_profundidad]]" :key="tabla[0]">
+                    <table class="table text-sm" style="margin-top:.4rem">
+                      <thead><tr><th x-text="tabla[0]"></th><th>Indexables</th><th>Con impresiones</th><th>Clics</th><th>Impresiones</th><th>CTR</th><th>Posición</th></tr></thead>
+                      <tbody>
+                        <template x-for="f in tabla[1] || []" :key="f.grupo">
+                          <tr>
+                            <td x-text="f.grupo"></td>
+                            <td x-text="fmt.num(f.indexables)"></td>
+                            <td x-text="fmt.num(f.con_impresiones) + (f.indexables ? ' (' + Math.round(100 * f.con_impresiones / f.indexables) + ' %)' : '')"></td>
+                            <td x-text="fmt.num(f.clics)"></td>
+                            <td x-text="fmt.num(f.impresiones)"></td>
+                            <td x-text="f.ctr == null ? '—' : (100 * f.ctr).toFixed(1) + ' %'"></td>
+                            <td x-text="f.posicion == null ? '—' : f.posicion"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </template>
+                </details>
+                <details x-show="job.gsc_resumen.oportunidades.curva_ctr">
+                  <summary class="text-dim" style="cursor:pointer">Curva de CTR del sitio por posición</summary>
+                  <div class="text-dim" x-show="(job.gsc_resumen.oportunidades.curva_ctr || {}).sin_marcas" style="margin-top:.3rem">
+                    Sin marcas declaradas en la configuración del cliente: la curva mezcla las búsquedas de marca, que tienen otro CTR.
+                  </div>
+                  <table class="table text-sm" style="margin-top:.4rem">
+                    <thead><tr><th>Posición</th><th>Búsquedas × página</th><th>CTR mediano</th><th>Cuartil bajo</th></tr></thead>
+                    <tbody>
+                      <template x-for="tr in ['1','2','3','4-5','6-10','11-20'].filter(t => ((job.gsc_resumen.oportunidades.curva_ctr || {}).tramos || {})[t])" :key="tr">
+                        <tr :class="job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : 'text-dim'">
+                          <td x-text="tr"></td>
+                          <td x-text="fmt.num(job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].filas) + (job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].valida ? '' : ' (pocas: no se usa)')"></td>
+                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].mediana).toFixed(1) + ' %'"></td>
+                          <td x-text="(100 * job.gsc_resumen.oportunidades.curva_ctr.tramos[tr].p25).toFixed(1) + ' %'"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </details>
+              </div>
+            </template>
+          </div>
+        </template>
+        <!-- Trafico de Google entre los dos rastreos, por lo que cambio (decision 158). -->
+        <template x-if="job.comparacion && job.comparacion.trafico && ['overview', 'diff'].includes(detailTab)">
+          <div class="card mb-2 text-sm" data-testid="trafico-entre-censos">
+            <strong>Tráfico de Google frente al rastreo anterior</strong>
+            <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+              <template x-for="t in job.comparacion.trafico.textos || [job.comparacion.trafico.motivo]" :key="t">
+                <li x-text="t"></li>
+              </template>
+            </ul>
+            <template x-for="sentido in [['Caídas', job.comparacion.trafico.caidas], ['Subidas', job.comparacion.trafico.subidas]].filter(s => (s[1] || []).length)" :key="sentido[0]">
+              <details>
+                <summary class="text-dim" style="cursor:pointer" x-text="sentido[0] + ' según lo que cambió (una página puede estar en dos grupos)'"></summary>
+                <template x-for="g in sentido[1]" :key="g.cambio">
+                  <div style="margin-top:.4rem">
+                    <span x-text="fmt.num(g.paginas) + ' páginas · ' + (g.diferencia > 0 ? '+' : '') + fmt.num(g.diferencia) + ' clics · ' + g.texto"></span>
+                    <span class="text-dim" x-show="(g.plantillas || []).length" x-text="' (' + (g.plantillas || []).join(', ') + ')'"></span>
+                    <ul style="margin:.2rem 0 0;padding-left:1.1rem">
+                      <template x-for="e in g.ejemplos" :key="e.url">
+                        <li><span x-text="fmt.num(e.clics_antes) + ' → ' + fmt.num(e.clics_despues)"></span> · <span class="informe-url" x-text="e.url"></span></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </details>
+            </template>
+          </div>
+        </template>
+        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && ['overview', 'diff'].includes(detailTab)">
+          <div class="card mb-2"
+               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
+            <div class="text-sm">
+              <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
+              Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
+              (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
+            </div>
+            <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
+                            + fmt.colorSeveridad(al.severidad)">
+                <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
+                  <strong x-text="fmt.tituloAlerta(al)"></strong>
+                  <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
+                    <strong x-text="fmt.num(al.paginas)"></strong>
+                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
+                  </span>
+                </div>
+                <div class="text-sm" x-text="al.que_decide_google"></div>
+                <div class="text-dim" style="font-size:.78rem" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
+                <!-- Por segmento de negocio (decision 127): «el 100 % de las
+                     fichas» dice que mirar; la forma de la ruta, no. -->
+                <div class="text-dim" style="font-size:.78rem" x-show="(al.segmentos || []).length"
+                     x-text="(al.segmentos || []).slice(0,3).map(sg => sg.segmento + ' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + sg.pct + '%').join(' · ')"></div>
+              </div>
+            </template>
+            <div class="text-dim" style="font-size:.78rem;margin-top:.5rem" x-show="detailTab !== 'diff'">
+              El detalle, con ejemplos y plantillas, en la pestaña <a href="#" @click.prevent="switchTab('diff')">Comparar</a>.
+            </div>
+          </div>
+        </template>
+        <!-- Extraccion a medida (decision 104): una linea por regla con lo
+             que dio, y enlaces al Explorador ya filtrado. -->
+        <template x-if="resumenAMedida && resumenAMedida.reglas.length && detailTab === 'overview'">
+          <div class="card mb-2">
+            <div class="veredicto-titulo">
+              Extracción a medida
+              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en el Explorador</a>
+            </div>
+            <template x-if="resumenAMedida.render_js">
+              <div class="text-sm text-dim">Se extrae del DOM renderizado y sin banners: una etiqueta que inyecta el JavaScript sí está; un banner que el rastreo quitó, no.</div>
+            </template>
+            <div class="table-wrap"><table class="tbl">
+              <thead><tr><th>Regla</th><th>Evaluadas</th><th>Con valor</th><th>Sin coincidencia</th><th>Bloqueadas / error</th><th>Valores más frecuentes</th></tr></thead>
+              <tbody>
+                <template x-for="r in resumenAMedida.reglas" :key="r.nombre">
+                  <tr>
+                    <td x-text="r.etiqueta"></td>
+                    <td x-text="fmt.num(r.evaluadas)"></td>
+                    <td x-text="fmt.num(r.ok)"></td>
+                    <td><a href="#" @click.prevent="verAMedida(r.nombre, r.clase === 'busqueda' ? 'no' : 'vacio')" x-text="fmt.num(r.sin_coincidencia)"></a></td>
+                    <td x-text="fmt.num(r.bloqueadas) + ' / ' + fmt.num(r.errores + r.desactivadas)"></td>
+                    <td class="text-sm" x-text="(r.top || []).map(t => t.valor + ' (' + t.paginas + ')').join(' · ')"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table></div>
+            <template x-for="a in (resumenAMedida.avisos || [])" :key="a">
+              <div class="text-sm orange" x-text="a"></div>
+            </template>
+          </div>
+        </template>
 
         <!-- ===== PESTANA: ENRIQUECIDO (#40) ===== -->
         <template x-if="detailTab === 'enriquecido'">
