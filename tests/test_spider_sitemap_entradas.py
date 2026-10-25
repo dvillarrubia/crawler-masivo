@@ -175,15 +175,18 @@ def _pagina(t, enlaces=()):
 
 
 @pytest.mark.parametrize("cupo", ["100000", "1"])
-def test_un_enlace_a_una_url_que_espera_en_disco_va_con_profundidad_1(cupo):
-    """`/x` esta en el sitemap y tambien a tres saltos de la portada. Si
-    esperaba en disco y entraba con la profundidad del enlace (3), con
-    `max_depth` 3 no se seguian sus enlaces y `/y` no se rastreaba
-    (revision de la decision 186). Con cualquier cupo, igual."""
+@pytest.mark.parametrize("por_redireccion", [False, True])
+def test_un_enlace_a_una_url_que_espera_en_disco_va_con_profundidad_1(cupo, por_redireccion):
+    """`/x` esta en el sitemap y tambien a tres saltos de la portada (o al
+    final de una 301 desde `/xold`). Si esperaba en disco y entraba con la
+    profundidad del enlace (3), con `max_depth` 3 no se seguian sus enlaces y
+    `/y` no se rastreaba (revision de la decision 186). Con cualquier cupo,
+    igual."""
     rutas = {"/sitemap_index.xml": _urlset(("/s1", None), ("/x", None)),
              "/": _pagina("home", ["/a"]), "/a": _pagina("a", ["/b"]),
-             "/b": _pagina("b", ["/x"]), "/x": _pagina("x", ["/y"]),
-             "/y": _pagina("y"), "/s1": _pagina("s1")}
+             "/b": _pagina("b", ["/xold" if por_redireccion else "/x"]),
+             "/xold": [301, {"Location": "http://localhost:{port}/x"}, ""],
+             "/x": _pagina("x", ["/y"]), "/y": _pagina("y"), "/s1": _pagina("s1")}
     entrada = {"seeds": ["http://localhost:{port}/"], "config": {"max_depth": 3}, "rutas": rutas}
     entorno = {**os.environ, "SITEMAP_EN_COLA_MAX": cupo}
     proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],

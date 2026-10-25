@@ -667,6 +667,17 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
 
             raise DontCloseSpider
 
+    def _profundidad_hacia(self, url_hash: str, depth: int) -> int:
+        """La profundidad de una peticion a `url_hash`: 1 si es una URL del
+        sitemap que espera en disco, como si hubiera entrado directa (decision
+        186), y la que trae si no. Por enlace y por redireccion: si llegaba
+        antes con la del origen, con `max_depth` sus enlaces dejaban de
+        seguirse. La tanda del disco la descarta luego por repetida."""
+        claves = getattr(self, "_sitemap_pendientes_claves", None)
+        if claves is not None and len(claves) and _hash_key(url_hash) in claves:
+            return min(depth, 1)
+        return depth
+
     def _sitemap_soltar_pendientes(self) -> bool:
         """Encola la siguiente tanda de URLs de sitemap que esperaban en disco.
         True si encolo alguna. Una tanda entera de repetidas (ya vistas por un
@@ -1794,7 +1805,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             return
         if not self._cabe_en_tope(destino):
             return
-        yield self._page_request(destino, depth, saltos)
+        yield self._page_request(
+            destino, self._profundidad_hacia(compute_url_hash(destino), depth), saltos)
 
     # ------------------------------------------------------------------
     # Main parse
@@ -2678,15 +2690,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                         if self._topes is not None and not self._topes.admitir(
                                 link["url"], _hash_key(link_hash)):
                             continue  # tope por carpeta (decision 172)
-                        # Una URL del sitemap que espera en disco va con su
-                        # profundidad 1, como si hubiera entrado directa
-                        # (decision 186); la tanda del disco la descarta luego
-                        # por repetida.
-                        if len(self._sitemap_pendientes_claves) and \
-                                _hash_key(link_hash) in self._sitemap_pendientes_claves:
-                            yield self._page_request(link["url"], 1)
-                            continue
-                        yield self._page_request(link["url"], depth + 1)
+                        yield self._page_request(
+                            link["url"], self._profundidad_hacia(link_hash, depth + 1))
 
     # ------------------------------------------------------------------
     # Error handling

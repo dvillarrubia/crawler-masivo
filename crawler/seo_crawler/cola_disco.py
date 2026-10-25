@@ -59,10 +59,11 @@ class ColaEnDisco:
 
 
 class ClavesCompactas:
-    """Conjunto de enteros de 64 bits a ~8 bytes por clave: un array ordenado
-    (busqueda binaria) y un set con las recien llegadas, que se funde en el
-    array cuando pasa de la cuarta parte de el. Un `set` de Python son ~90
-    bytes por clave: con millones de URLs en los sitemaps, cientos de MB.
+    """Conjunto de enteros de 64 bits: un array ordenado (8 bytes por clave,
+    busqueda binaria) y un set con las recien llegadas (~70 bytes cada una),
+    que se funde en el array cuando pasa de la cuarta parte de el. Medido con
+    10 millones: ~15 bytes por clave en reposo y el doble un momento al fundir
+    (1,8 s). Un `set` de Python con todas son ~90 bytes por clave.
 
     Lo usa el spider para saber si un enlace apunta a una URL del sitemap que
     espera en disco (y entonces va con la profundidad 1 del sitemap, no la del

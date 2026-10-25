@@ -1276,14 +1276,17 @@
      (`_should_follow`, los topes por carpeta, lo ya rastreado al reanudar y el
      `URLLENGTH_LIMIT`, porque `engine.crawl` no pasa por los spider
      middlewares) se aplican antes de escribirlas.
-   - **Un enlace a una URL que espera en disco va con profundidad 1**, la del
-     sitemap. Las claves de 64 bits de las que esperan viven en
-     `ClavesCompactas` (un array ordenado más un set pequeño que se funde en
-     él: ~8 bytes por clave). Sin esto, el enlace llegaba antes que la tanda
-     del disco, la URL entraba con la profundidad del enlace y, con
-     `max_depth`, sus enlaces dejaban de seguirse: lo encontró la revisión
-     (`/x` del sitemap a tres saltos de la portada, con `max_depth` 3, y `/y`,
-     enlazada desde `/x` y fuera del sitemap, no se rastreaba).
+   - **Un enlace o una redirección hacia una URL que espera en disco va con
+     profundidad 1**, la del sitemap (`_profundidad_hacia`). Las claves de 64
+     bits de las que esperan viven en `ClavesCompactas` (un array ordenado más
+     un set de las recién llegadas que se funde en él al pasar de la cuarta
+     parte; medido con 10 millones, ~15 bytes por clave en reposo, el doble un
+     momento al fundir, y la fusión más larga 1,8 s). Sin esto, el enlace
+     llegaba antes que la tanda del disco, la URL entraba con la profundidad
+     del enlace y, con `max_depth`, sus enlaces dejaban de seguirse: lo
+     encontró la revisión, primero por enlace (`/x` del sitemap a tres saltos
+     de la portada, con `max_depth` 3, y `/y`, enlazada desde `/x` y fuera del
+     sitemap, no se rastreaba) y después por una 301 (`/xold` → `/x`).
    - La membresía guarda `_hash_key` (los 64 primeros bits del sha256, la misma
      clave que el set de reanudar) en un `array("Q")`, con repeticiones: 8 bytes
      por entrada. Al cerrar se cruzan con las URLs del job leídas de la BD por
@@ -1293,13 +1296,17 @@
      ficheros de 50.000) y un millón de URLs rastreadas, ~1e-6.
    - `jobs.sitemaps.semillas_diferidas` dice cuántas URLs distintas esperaron
      en disco (algunas pueden haber llegado antes por un enlace), y el
-     `pending_count` del progreso las suma a la cola.
+     `pending_count` del progreso las suma a la cola: se pasa con las que ya
+     llegaron por enlace, que la tanda descartará, pero no llega al 100 % con
+     URLs esperando.
 
-   **Lo que cambia en el recorrido.** Hasta 100.000 URLs en los sitemaps, nada.
+   **Lo que cambia en el recorrido.** Hasta 100.000 entradas de sitemap que
+   pasan los filtros (las repetidas entre ficheros gastan cupo), nada.
    Con más, las que pasan del cupo y nadie enlaza se piden cuando lo demás se
    acaba, y no por delante de lo que se descubre a profundidad 2 o más; las que
    sí están enlazadas entran con profundidad 1 en cuanto aparece el enlace,
-   como antes. Sin `max_urls`, al final se rastrea lo mismo; con `max_urls`, el
+   como antes, también si se llega por una redirección. Sin `max_urls`, al
+   final se rastrea lo mismo; con `max_urls`, el
    presupuesto lo gastan antes los enlaces profundos que esas URLs de sitemap
    sin enlazar. El `max_urls` mayor de los clientes (`projects/`) es 80.000, por
    debajo del cupo. Las huérfanas y la membresía salen del sitemap entero
@@ -1321,10 +1328,13 @@
    como perdía lo que esperaba en la cola de memoria: al reanudar se vuelven a
    leer los sitemaps. El dupefilter de Scrapy sigue guardando en memoria la
    huella de cada petición encolada (las rastreadas más el cupo). Lo que crece
-   con el sitemap entero son 8 bytes por entrada en la membresía y 8 por URL
-   distinta en disco (con el máximo de 25 millones, ~200 MB cada uno, y el
-   doble un momento al fundir) y el fichero en la capa escribible del
-   contenedor (~100 bytes por URL, hasta ~2,5 GB). Al cerrar un job de 1 millón de URLs, el cruce de la membresía
+   con el sitemap entero son 8 bytes por entrada en la membresía (~200 MB con
+   el máximo de 25 millones), ~15 por URL distinta en disco (~365 MB en
+   reposo y ~690 MB al fundir con 25 millones; una fusión así bloquea el
+   reactor unos 5 s) y el fichero en la capa escribible del contenedor
+   (~100 bytes por URL, hasta ~2,5 GB). El tope de longitud se mira sobre la
+   URL normalizada, no la escapada que mide el `UrlLengthMiddleware`: una URL
+   con caracteres no ASCII justo por debajo puede pasarlo al pedirse. Al cerrar un job de 1 millón de URLs, el cruce de la membresía
    ocupa ~180 MB un momento.
 
    Tests: `tests/test_cola_disco.py` (orden, tandas, meter mientras se lee, y
@@ -1332,6 +1342,6 @@
    `tests/test_spider_sitemap_entradas.py` el SeoSpider real: con el cupo a 2,
    las 7 del sitemap se rastrean y `semillas_diferidas` es 5; con `max_urls` 3
    y el cupo a 1, 6 esperan y se para en 3; la profundidad 1 de una URL del
-   sitemap enlazada a tres saltos, con el cupo normal y con el cupo a 1 (sin
-   el arreglo falla); y contra Postgres `in_sitemap` es verdadero para las del
+   sitemap enlazada a tres saltos o al final de una 301, con el cupo normal y
+   con el cupo a 1 (sin el arreglo fallan); y contra Postgres `in_sitemap` es verdadero para las del
    sitemap, también las que esperaron, y falso para la portada.
