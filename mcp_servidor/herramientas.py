@@ -157,10 +157,14 @@ def alertas(api: Api, cliente: str, cerradas: bool = False) -> list[dict]:
             for i in api.get(f"/clients/{cid}/incidentes", estado="cerrados" if cerradas else "vivos")]
 
 
-def search_console(api: Api, cliente: str) -> list[dict]:
+def search_console(api: Api, cliente: str, serie: bool = False, dias: int = 90) -> list[dict]:
     """Estado de Search Console del cliente: propiedad, días guardados, últimos
-    28 días e inspección de URLs."""
-    return api.get(f"/clients/{_cliente_id(api, cliente)}/gsc")
+    28 días e inspección de URLs. Con `serie`, la serie diaria de `dias` días y
+    las páginas y búsquedas con más clics (28 días frente a los 28 anteriores)."""
+    cid = _cliente_id(api, cliente)
+    if serie:
+        return api.get(f"/clients/{cid}/gsc/serie", dias=dias)
+    return api.get(f"/clients/{cid}/gsc")
 
 
 # --- consulta libre (decision 151) ---------------------------------------
