@@ -344,7 +344,8 @@ página— solo existe tras el render.
 
 ### Informe para el cliente en PDF (18 de octubre)
 
-En la ficha de un rastreo, Exportar → **Informe para el cliente** abre una
+En la ficha de un rastreo, el botón **Informe para el cliente** (antes
+dentro de Exportar; revisión de UX del 25-oct) abre una
 página lista para imprimir o guardar como PDF. Lleva la nota del sitio y por
 qué, las cifras, lo que ha cambiado desde el rastreo anterior, las diez cosas
 que hay que arreglar primero (cada una con qué es, qué decide Google y cómo se

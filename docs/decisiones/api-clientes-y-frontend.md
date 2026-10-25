@@ -297,8 +297,9 @@
      enlaces que monta el JavaScript (`_pagerank_fiable`, decisión 35) salen
      en un recuadro «Antes de leer las cifras», arriba. Un informe que parece
      completo y no lo es hace más daño que no entregarlo (decisiones 67 y 103).
-   - **La página**: `#/rastreos/<id>/informe-cliente`, desde Exportar →
-     «Informe para el cliente». Las fichas (qué es, qué decide Google, cómo se
+   - **La página**: `#/rastreos/<id>/informe-cliente`, desde el botón
+     «Informe para el cliente» de la cabecera de la ficha (estaba en
+     Exportar hasta la revisión de UX del 25-oct). Las fichas (qué es, qué decide Google, cómo se
      arregla) salen de `incidencias.js`, que vive en el frontend; por eso el
      endpoint devuelve datos y la interfaz pinta. Se imprime o se guarda como
      PDF desde el navegador (`@media print` quita la barra y los botones), y
