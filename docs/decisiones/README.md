@@ -15,7 +15,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
@@ -214,6 +214,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 185 | `schema_contradice_contenido` v4: el marcado llega por objeto (precio, moneda y disponibilidad de cada oferta en una línea) y la disponibilidad se compara oferta a oferta; en un censo nuevo (Tiendanimal) los falsos «sí» de las variantes agotadas bajan de 10 a 3, sin perder contradicciones; la v5 (fundir la oferta repetida con otro formato y más texto) se midió peor y no se despliega, y la próxima versión es la 6; sin umbral (≥ 0,6 es una hipótesis por confirmar) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d185) |
 | 186 | Las URLs de los sitemaps no entran todas de golpe en la cola: pasado un cupo (`SITEMAP_EN_COLA_MAX`, 100.000) esperan en disco y entran al vaciarse (con profundidad 1 si un enlace llega antes), y la membresía guarda 8 bytes por URL; un sitemap de millones de URLs ya no mata el rastreo por memoria (Casa del Libro, 2,9 GB y `-9`) | [`render-y-descarga`](render-y-descarga.md#d186) |
 | 187 | El texto que sigue al h1 (1.000 caracteres) se guarda aparte del contenido principal en las páginas con marcado verificable: en una ficha, la caja de compra, que trafilatura tiraba en el 6 % de las fichas de Planeta Huerto; el contenido principal no cambia | [`contenido`](contenido.md#d187) |
+| 188 | Los incidentes de una serie que ya no va a rastrear nadie (programación pausada o borrada, perfil borrado) se cierran con su motivo y sin afirmar que el fallo se fue; antes quedaban abiertos para siempre | [`comparacion-y-alertas`](comparacion-y-alertas.md#d188) |
 
 ## Anadir una decision
 

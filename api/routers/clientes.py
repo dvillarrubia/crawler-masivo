@@ -648,8 +648,8 @@ def cambiar_incidente(client_id: uuid.UUID, incidente_id: uuid.UUID, cambio: Inc
     ahora = datetime.now(timezone.utc)
     if "estado" in datos and datos["estado"]:
         if inc.estado == CERRADO:
-            raise HTTPException(409, "Ya está cerrado: lo cerró un rastreo que no lo vio. "
-                                     "Si vuelve, se abre otro.")
+            raise HTTPException(409, "Ya está cerrado (lo cerró un rastreo que no lo vio, o se "
+                                     "pausó o borró su serie). Si vuelve, se abre otro.")
         inc.estado = datos["estado"]
         inc.visto_en = ahora if datos["estado"] == "visto" else None
     if "silenciado_hasta" in datos:
@@ -882,6 +882,9 @@ def borrar_perfil(
 ):
     """Borra el perfil. Sus rastreos se quedan, colgados solo del cliente."""
     perfil = _perfil(db, client_id, profile_id)
+    # Sus incidentes no los iba a cerrar ningun rastreo (decision 188).
+    from shared.incidentes import SERIE_BORRADA, cerrar_serie
+    cerrar_serie(db, f"perfil:{perfil.id}", SERIE_BORRADA)
     db.query(Job).filter(Job.profile_id == perfil.id).update(
         {Job.profile_id: None}, synchronize_session=False)
     db.query(Programacion).filter(Programacion.profile_id == perfil.id).update(

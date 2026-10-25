@@ -937,3 +937,44 @@
      grupo aparte («cambia el texto», no «cambia mucho») y nunca dice «por».
    - **Fuera** (pendiente de decisión del usuario): el cambio de plantilla entre
      censos como grupo propio; hoy cada grupo solo lista sus plantillas.
+
+<a id="d188"></a>
+188. **Los incidentes de una serie que ya no va a rastrear nadie se cierran al pausar o borrar su programación, o al borrar su perfil, con el motivo y sin afirmar que el fallo se fue**
+
+   **Problema.** Un incidente (decisión 139) solo lo cierra un rastreo de su
+   serie que ya no ve la alerta. Si la serie se queda sin rastreos (se pausa o
+   se borra su programación, o se borra su perfil), sus incidentes se quedan
+   abiertos para siempre: cuentan en la portada y en la pestaña Alertas como si
+   alguien tuviera que mirarlos. Pasó el 25-oct con Lopesan: tenía dos
+   programaciones semanales activas que hacían dos series iguales, cada alerta
+   salía dos veces, y al pausar la del miércoles sus tres incidentes no los iba
+   a cerrar nadie (se cerraron a mano en la base de datos).
+
+   **Decisión.** `shared.incidentes.cerrar_serie(db, serie, motivo)` cierra los
+   vivos (abiertos y vistos) de una serie, con `motivo_cierre` («serie_pausada»
+   o «serie_borrada», columna nueva) y sin `cerrado_job_id`. Lo llaman:
+   - `PATCH /api/programaciones/{id}` cuando `activa` pasa de verdadero a falso;
+   - `DELETE /api/programaciones/{id}`;
+   - `DELETE /api/clients/{id}/profiles/{id}`.
+
+   Una programación que lanza un perfil no cierra nada: su serie es la del
+   perfil (`serie_de_job`), que se puede seguir lanzando a mano (hueco
+   conocido: si solo la lanzaba esa programación, sus incidentes siguen vivos;
+   se cierran al borrar el perfil). Un rastreo de una programación que se
+   pausó o se borró mientras corría no abre incidentes ni avisa al terminar:
+   `actualizar` cierra lo que hubiera vivo con el mismo motivo (lo encontró la
+   revisión). El MCP (`alertas`) devuelve `motivo_cierre`. La interfaz
+   pinta «cerrado el …: se pausó su programación (no se comprobó si sigue)»:
+   el cierre dice que nadie lo va a comprobar, no que el fallo se arreglara
+   (decisiones 67 y 89). Si la serie se reactiva y el fallo sigue, el primer
+   rastreo abre un incidente nuevo y avisa (salvo que esa clave esté
+   silenciada): es correcto, porque el anterior se cerró sin comprobarlo.
+
+   Una persona sigue sin poder cerrar un incidente a mano (`IncidenteCambio`
+   solo admite abierto y visto): pausar la serie no es decir que está
+   arreglado, es dejar de vigilarla.
+
+   Tests: `tests/test_incidentes_serie_cerrada.py` (pausar cierra los abiertos
+   y los vistos con su motivo y la API los devuelve; cambiar el nombre o
+   reactivar no cierra nada; con perfil no se toca la serie del perfil; borrar
+   la programación o el perfil cierra los suyos).
