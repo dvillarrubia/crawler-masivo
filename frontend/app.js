@@ -202,10 +202,12 @@ const POSITION_LABEL = {
 
 // Pestanas de la ficha <-> tramo de la URL (#/rastreos/<id>/<tramo>)
 const TAB_SLUG = {
-  overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'informe',
+  overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'puntuacion',
   semantic: 'semantico', diff: 'comparar', enriquecido: 'enriquecido', cleaning: 'limpieza',
 };
-const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k]));
+// `informe` era el tramo de la pestana Puntuacion antes de la revision de UX
+// del 25-oct: los enlaces guardados siguen abriendola.
+const SLUG_TAB = { ...Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k])), informe: 'insights' };
 
 // Helpers
 // Respuestas de los choice del enriquecido, en castellano: el tipo de pagina
@@ -610,7 +612,7 @@ function app() {
     progressTimer: null,
     progress: null,
 
-    // Pestana Informe SEO
+    // Pestana Puntuacion (antes «Informe SEO»)
     insights: null,
     insightsLoading: false,
     expandedCategories: {},
