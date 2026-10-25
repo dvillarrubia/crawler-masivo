@@ -1640,7 +1640,7 @@
        Tiendanimal**: de 0,94-0,95 con la v3 a 0,64-0,81. Sobre los cuatro
        juegos, todos los «true» con confianza ≥ 0,6 aciertan (44 de 44; con
        la v3 eran 42 de 45), pero en el caso que motivó el cambio el margen
-       es de 0,04. Pero ese corte se ha elegido sobre
+       es de 0,04. Además, ese corte se ha elegido sobre
        los mismos datos que se usaron para redactar la v4 y la v3, y mezcla
        el juego de precisión, que tiene sesgo. **No es un umbral**. Es la
        hipótesis que hay que confirmar con un juego nuevo: extraer de censos
