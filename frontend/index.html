@@ -1700,9 +1700,13 @@
                  decia cuantas paginas hay que tocar. -->
             <button class="stat-card stat-link" @click="issueFilters.severity = 'error'; issueFilters.issue_type = ''; issues = []; switchTab('issues')"
                     data-tip="Páginas con al menos un problema de gravedad error: lo primero que hay que mirar">
-              <div class="stat-value" :class="stats.paginas_con_error ? 'red' : 'green'" x-text="fmt.num(stats.paginas_con_error)"></div>
+              <!-- Sin analizar (en curso o fallido antes del analisis) no se
+                   sabe: «—», no un 0 en verde. -->
+              <div class="stat-value" :class="!job.analisis_version ? '' : (stats.paginas_con_error ? 'red' : 'green')"
+                   :style="!job.analisis_version ? 'color:var(--text-dim)' : ''"
+                   x-text="job.analisis_version ? fmt.num(stats.paginas_con_error) : '—'"></div>
               <div class="stat-label">Páginas con error</div>
-              <div class="stat-sub" x-text="(n => n ? n + (n === 1 ? ' tipo de error' : ' tipos de error') : 'ningún error')(stats.issues_by_type.filter(i => i.severity === 'error').length)"></div>
+              <div class="stat-sub" x-text="!job.analisis_version ? 'sin analizar todavía' : (n => n ? n + (n === 1 ? ' tipo de error' : ' tipos de error') : 'ningún error')(stats.issues_by_type.filter(i => i.severity === 'error').length)"></div>
             </button>
             <button class="stat-card stat-link" @click="switchTab('diff')"
                     data-tip="Lo que ha cambiado respecto al censo anterior del mismo sitio">
