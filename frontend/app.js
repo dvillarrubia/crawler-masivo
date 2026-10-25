@@ -4545,7 +4545,7 @@ function filasTls(job) {
       // A 30 dias o menos conviene renovarlo aunque el aviso del analisis
       // (tls_dias_aviso, 7 de serie) no haya saltado: la cifra va en naranja
       // (revision de UX del 25-oct, 1.16; Lopesan caducaba en 14 y salia en verde).
-      renovar: dias !== null && dias >= 0 && dias <= 30,
+      renovar: dias !== null && dias >= 0 && Math.floor(dias) <= 30,
       version: t.version || null,
       detalle: t.detalle || t.error || t.error_certificado || null,
     };
@@ -4577,9 +4577,15 @@ function resumenRobots(rb) {
   const evaluados = rb.hosts.length - sinEvaluar;
   let texto;
   if (!evaluados) texto = 'Sin evaluar por bot: censo analizado antes de la decisión 129 o robots.txt no procesado.';
-  else if (!bloqueos.length) texto = 'Ningún bot bloqueado en la home ni en la muestra' + (evaluados > 1 ? ' de los ' + evaluados + ' hosts.' : '.');
+  else if (!bloqueos.length) texto = 'Ningún bot bloqueado en la home ni en la muestra' + (evaluados > 1 ? ' de los ' + evaluados + ' hosts evaluados.' : (sinEvaluar ? ' del host evaluado.' : '.'));
   else texto = 'Bloqueados: ' + bloqueos.join(', ') + '.';
-  return { texto, nivel, sin_evaluar: sinEvaluar, abrir: !!bloqueos.length };
+  // Un host sin evaluar puede ser un robots.txt inaccesible (5xx, 429): para
+  // Google es «no rastrear nada». No se da por bueno (revision de la 1.16).
+  if (evaluados && sinEvaluar) {
+    texto += ' ' + sinEvaluar + (sinEvaluar === 1 ? ' host sin evaluar' : ' hosts sin evaluar') + ': mira su robots.txt en el detalle.';
+    if (nivel !== 'red') nivel = 'orange';
+  }
+  return { texto, nivel, sin_evaluar: sinEvaluar, abrir: !!bloqueos.length || !!sinEvaluar };
 }
 
 // `jobs.soft404` (decision 105): `sondas` las escribe el spider (lista, una

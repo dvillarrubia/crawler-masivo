@@ -145,6 +145,14 @@ def test_robots_en_una_frase():
     grave = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
         {"origen": "https://a.x", "bots": {"oai": {"alcance": "todo"}}}, {"origen": "https://b.x", "bots": None}]}) + ")")
     assert grave["nivel"] == "red" and grave["sin_evaluar"] == 1
+    # Un host sin evaluar (robots.txt inaccesible) no deja decir «ninguno»
+    # sin mas: se dice, en naranja, y el detalle se abre.
+    mezcla = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"googlebot": {"alcance": "nada"}}},
+        {"origen": "https://b.x", "bots": None}, {"origen": "https://c.x", "bots": None}]}) + ")")
+    assert mezcla["texto"] == ("Ningún bot bloqueado en la home ni en la muestra del host evaluado. "
+                               "2 hosts sin evaluar: mira su robots.txt en el detalle.")
+    assert mezcla["nivel"] == "orange" and mezcla["abrir"] is True
     assert _evaluar("() => resumenRobots({hosts: []})") is None
 
 
