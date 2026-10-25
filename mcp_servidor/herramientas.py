@@ -149,11 +149,13 @@ def comparar(api: Api, rastreo: str, con: str) -> dict:
 
 
 def alertas(api: Api, cliente: str, cerradas: bool = False) -> list[dict]:
-    """Las alertas con estado del cliente (abiertas o, con `cerradas`, las ya resueltas)."""
+    """Las alertas con estado del cliente: abiertas o, con `cerradas`, las cerradas.
+    Una cerrada con `motivo_cierre` no se resolvio: se pauso o se borro su serie
+    y nadie lo comprobo (decision 188)."""
     cid = _cliente_id(api, cliente)
     return [{"titulo": i["titulo"], "estado": i["estado"], "gravedad": i["severidad"],
              "serie": i.get("nombre_serie"), "desde": i.get("abierto_en"), "veces": i.get("veces"),
-             "cerrada": i.get("cerrado_en")}
+             "cerrada": i.get("cerrado_en"), "motivo_cierre": i.get("motivo_cierre")}
             for i in api.get(f"/clients/{cid}/incidentes", estado="cerrados" if cerradas else "vivos")]
 
 

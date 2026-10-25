@@ -124,3 +124,24 @@ def test_borrar_la_programacion_o_el_perfil_cierra_los_suyos(entorno):
     assert _estado(Sesion, ids["de_sola"]) == ("cerrado", "serie_borrada", None)
     assert api.delete(f"/api/clients/{ids['acme']}/profiles/{ids['perfil']}").status_code == 204
     assert _estado(Sesion, ids["de_perfil"]) == ("cerrado", "serie_borrada", None)
+
+
+def test_un_rastreo_que_acaba_tras_pausar_no_reabre_ni_avisa(entorno):
+    """Revision de la decision 188: se pausa la programacion con su rastreo en
+    marcha; al terminar, `actualizar` no abre nada ni devuelve avisos."""
+    import types
+
+    from shared.incidentes import actualizar
+
+    api, Sesion, ids = entorno
+    assert api.patch(f"/api/programaciones/{ids['sola']}", json={"activa": False}).status_code == 200
+    job = types.SimpleNamespace(id=uuid.uuid4(), profile_id=None, programacion_id=ids["sola"],
+                                cliente_id=ids["acme"], created_at=T)
+    comparacion = {"comparable": True, "concluyente": True,
+                   "alertas": [{"regla": "rotas", "severidad": "critical", "paginas": 3, "de": 9}]}
+    with Sesion() as s:
+        assert actualizar(s, job, comparacion, None) == []
+        s.commit()
+        vivos = s.query(Incidente).filter(Incidente.serie == f"programacion:{ids['sola']}",
+                                          Incidente.estado != "cerrado").count()
+    assert vivos == 0

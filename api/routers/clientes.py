@@ -648,8 +648,8 @@ def cambiar_incidente(client_id: uuid.UUID, incidente_id: uuid.UUID, cambio: Inc
     ahora = datetime.now(timezone.utc)
     if "estado" in datos and datos["estado"]:
         if inc.estado == CERRADO:
-            raise HTTPException(409, "Ya está cerrado: lo cerró un rastreo que no lo vio. "
-                                     "Si vuelve, se abre otro.")
+            raise HTTPException(409, "Ya está cerrado (lo cerró un rastreo que no lo vio, o se "
+                                     "pausó o borró su serie). Si vuelve, se abre otro.")
         inc.estado = datos["estado"]
         inc.visto_en = ahora if datos["estado"] == "visto" else None
     if "silenciado_hasta" in datos:

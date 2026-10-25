@@ -958,12 +958,17 @@
    - `DELETE /api/clients/{id}/profiles/{id}`.
 
    Una programación que lanza un perfil no cierra nada: su serie es la del
-   perfil (`serie_de_job`), que se puede seguir lanzando a mano. La interfaz
-   pinta «cerrado el … : se pausó su programación (no se comprobó si sigue)»:
+   perfil (`serie_de_job`), que se puede seguir lanzando a mano (hueco
+   conocido: si solo la lanzaba esa programación, sus incidentes siguen vivos;
+   se cierran al borrar el perfil). Un rastreo de una programación que se
+   pausó o se borró mientras corría no abre incidentes ni avisa al terminar:
+   `actualizar` cierra lo que hubiera vivo con el mismo motivo (lo encontró la
+   revisión). El MCP (`alertas`) devuelve `motivo_cierre`. La interfaz
+   pinta «cerrado el …: se pausó su programación (no se comprobó si sigue)»:
    el cierre dice que nadie lo va a comprobar, no que el fallo se arreglara
    (decisiones 67 y 89). Si la serie se reactiva y el fallo sigue, el primer
-   rastreo abre un incidente nuevo y avisa: es correcto, porque el anterior se
-   cerró sin comprobarlo.
+   rastreo abre un incidente nuevo y avisa (salvo que esa clave esté
+   silenciada): es correcto, porque el anterior se cerró sin comprobarlo.
 
    Una persona sigue sin poder cerrar un incidente a mano (`IncidenteCambio`
    solo admite abierto y visto): pausar la serie no es decir que está

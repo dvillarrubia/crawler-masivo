@@ -641,12 +641,16 @@
                       <span x-text="i.nombre_serie || i.serie"></span>
                       · desde el <a :href="'#/rastreos/' + i.abierto_job_id" x-show="i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></a><span x-show="!i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></span>
                       <span x-show="i.veces > 1" x-text="'· en ' + i.veces + ' rastreos seguidos'"></span>
-                      <template x-if="i.cerrado_en && i.cerrado_job_id">
+                      <template x-if="i.cerrado_en && !i.motivo_cierre && i.cerrado_job_id">
                         <span>· cerrado el <a :href="'#/rastreos/' + i.cerrado_job_id" x-text="fmt.dia(i.cerrado_en)"></a></span>
                       </template>
                       <!-- Cerrado sin rastreo (decision 188): se dice por que, y no que el fallo se fuera. -->
-                      <template x-if="i.cerrado_en && !i.cerrado_job_id">
+                      <template x-if="i.cerrado_en && i.motivo_cierre">
                         <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en) + ({serie_pausada: ': se pausó su programación', serie_borrada: ': se borró su programación o su perfil'}[i.motivo_cierre] || '') + ' (no se comprobó si sigue)'"></span>
+                      </template>
+                      <!-- Cerrado por un rastreo que luego se borro: se sabe la fecha y nada mas. -->
+                      <template x-if="i.cerrado_en && !i.motivo_cierre && !i.cerrado_job_id">
+                        <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en)"></span>
                       </template>
                       <span x-show="i.silenciado_hasta && i.estado !== 'cerrado'" x-text="'· sin avisos hasta el ' + fmt.dia(i.silenciado_hasta)"></span>
                     </div>

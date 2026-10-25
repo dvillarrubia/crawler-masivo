@@ -108,6 +108,16 @@ def actualizar(db, job, comparacion: dict[str, Any] | None, propias: dict[str, A
     serie = serie_de_job(job)
     if serie is None:
         return None
+    # Un rastreo de una programacion que se pauso o se borro mientras corria
+    # no abre nada ni avisa: sus incidentes se cerraron al pausarla (decision
+    # 188) y, si se abrieran ahora, no los cerraria nadie. Lo que pudiera haber
+    # vivo se cierra con el mismo motivo.
+    motivo = _serie_sin_rastreos(db, serie)
+    if motivo:
+        cerrar_serie(db, serie, motivo, ahora)
+        db.flush()
+        logger.info("Job %s: la serie %s ya no rastrea (%s); no abre incidentes", job.id, serie, motivo)
+        return []
     if not _es_el_mas_reciente(db, job, serie):
         logger.info("Job %s: hay un rastreo posterior en %s; no toca los incidentes", job.id, serie)
         return []
@@ -172,6 +182,26 @@ def actualizar(db, job, comparacion: dict[str, Any] | None, propias: dict[str, A
 
 
 SERIE_PAUSADA, SERIE_BORRADA = "serie_pausada", "serie_borrada"
+
+
+def _serie_sin_rastreos(db, serie: str) -> str | None:
+    """SERIE_PAUSADA o SERIE_BORRADA si la serie es una programacion pausada o
+    que ya no existe; None si sigue (o es la de un perfil, que se puede lanzar
+    a mano mientras exista: un perfil borrado ya no da rastreos con su serie)."""
+    import uuid as _uuid
+
+    from shared.models import Programacion
+
+    tipo, _, ident = serie.partition(":")
+    if tipo != "programacion":
+        return None
+    try:
+        prog = db.get(Programacion, _uuid.UUID(ident))
+    except ValueError:
+        return None
+    if prog is None:
+        return SERIE_BORRADA
+    return None if prog.activa else SERIE_PAUSADA
 
 
 def cerrar_serie(db, serie: str, motivo: str, ahora: datetime | None = None) -> int:
