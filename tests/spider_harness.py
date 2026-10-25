@@ -779,6 +779,8 @@ def main() -> None:
             "fichero", "entradas",
             # EntidadesAdaptadorItem (decision 161)
             "adaptador", "entidades",
+            # ContentItem: el texto tras el h1 (decision 187)
+            "texto_tras_h1",
         )}
         for k in ("url", "redirect_url", "to_url", "redirige_a", "fichero"):
             if fila.get(k):

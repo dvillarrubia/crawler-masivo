@@ -3270,6 +3270,86 @@ def _hero_dentro_perdido(container, texto: str | None) -> str | None:
     return _block_text(bloque) or None
 
 
+# Tope del texto que sigue al <h1> y se guarda aparte (decision 187). En una
+# ficha, el nombre, el precio, el PVPR, el stock y los descuentos por cantidad
+# de Planeta Huerto son ~700 caracteres; las variantes con su stock de
+# Tiendanimal, algo mas.
+TRAS_H1_MAX = 1000
+# Caracter de uso privado que marca el h1 al aplanar el documento.
+_MARCA_H1 = "\ue000"
+
+
+def extract_texto_tras_h1(
+    selector,
+    *,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+    max_chars: int = TRAS_H1_MAX,
+) -> str | None:
+    """El texto visible que sigue al primer ``<h1>`` en el orden de lectura,
+    desde el propio h1 y hasta *max_chars*: en una ficha de producto, la caja
+    de compra (nombre, precio, variantes, disponibilidad). Se guarda aparte del
+    contenido principal (decision 187).
+
+    El contenido principal lo decide trafilatura, que en las fichas se queda a
+    veces con el bloque de recomendados y tira la caja de compra: en Planeta
+    Huerto, 178 de 3.000 fichas se guardaban sin su propio precio, y Jev
+    comparaba el marcado con el precio de otro producto. Se lee del documento
+    entero ya limpio (la caja de compra puede caer fuera de ``<main>``), con
+    el h1 del contenedor principal si lo tiene; si no, el primero.
+    """
+    raw_html = selector.get()
+    if not raw_html:
+        return None
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    if container is None:
+        return None
+    raiz = container.getroottree().getroot()
+    # El primer h1 con texto: el del contenedor principal si tiene; si no, el
+    # del documento (un h1 que solo envuelve el logo no cuenta).
+    h1 = next((h for h in container.iter("h1") if _block_text(h)), None)
+    if h1 is None:
+        h1 = next((h for h in raiz.iter("h1") if _block_text(h)), None)
+    if h1 is None:
+        return None
+    # Se localiza por POSICION, con una marca dentro del h1 (el arbol es una
+    # copia recien parseada): buscandolo por su texto se empezaba en la primera
+    # linea igual, que puede ser otro bloque de antes con el mismo nombre y
+    # otro precio (revision de la decision 187).
+    # U+E000 es tambien el primer glifo de algunas fuentes de iconos: si la
+    # pagina ya lo trae, se quita antes de marcar, o se empezaria en ese icono.
+    for el in raiz.iter():
+        if isinstance(el.tag, str):
+            if el.text and _MARCA_H1 in el.text:
+                el.text = el.text.replace(_MARCA_H1, "")
+            if el.tail and _MARCA_H1 in el.tail:
+                el.tail = el.tail.replace(_MARCA_H1, "")
+    h1.text = _MARCA_H1 + (h1.text or "")
+    cuerpo = next(raiz.iter("body"), raiz)
+    lineas = _block_text(cuerpo).splitlines()
+    desde = next((k for k, ln in enumerate(lineas) if _MARCA_H1 in ln), None)
+    if desde is None:
+        return None
+    salida: list[str] = []
+    largo = 0
+    for ln in lineas[desde:]:
+        ln = ln.replace(_MARCA_H1, "").strip()
+        if not ln:
+            continue
+        if largo + len(ln) > max_chars:
+            # La linea que no cabe entra hasta el ultimo espacio, si queda
+            # sitio para algo con sentido.
+            trozo = ln[:max(0, max_chars - largo)].rsplit(" ", 1)[0]
+            if len(trozo) > 20:
+                salida.append(trozo)
+            break
+        salida.append(ln)
+        largo += len(ln) + 1
+    return "\n".join(salida) or None
+
+
 def _main_container(
     html: str, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
 ):

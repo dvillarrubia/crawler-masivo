@@ -13,7 +13,7 @@
 | `html_meta` | 1:1 with urls | title, meta_description, canonical_href, og_*, twitter_*, head_cortado_por y fuera_del_head (decision 102; NULL en censos anteriores), canonical_distintos (decision 115; NULL en censos anteriores); viewport, html_lang, canonical_crudo, og_image_forma, redireccion_js, charset_* y texto_mal_codificado (decision 108; NULL = no medido); videos (JSON), amphtml y alternate_movil (decisiones 155 y 156; `videos` NULL = no medido) |
 | `headings` | 1:N from urls | tag (h1-h6), position, text |
 | `links` | N:N graph | from_url_id, to_url, anchor_text, rel, link_position, follow |
-| `page_content` | 1:1 with urls | content_text, content_markdown |
+| `page_content` | 1:1 with urls | content_text, content_markdown, texto_tras_h1 (los 1.000 caracteres que siguen al h1, solo en paginas con marcado verificable; decision 187) |
 | `hreflang` | 1:N from urls | lang, href, origen (`html`/`cabecera`, decision 116; NULL = del HTML) |
 | `structured_data` | 1:N from urls | raw (JSON), format, schema_type |
 | `resources` | 1:N from urls | resource_url, resource_type, alt_text, size_bytes (lo rellena el analisis con la sonda de recursos, decision 124; NULL = no se sabe) |
