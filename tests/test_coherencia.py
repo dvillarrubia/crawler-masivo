@@ -222,6 +222,25 @@ def _con_marcado(s, uid, raw, texto=None):
         s.get(PageContent, uid).content_text = texto
 
 
+def test_schema_con_el_texto_tras_el_h1(tmp_path):
+    """La caja de compra que el contenido principal perdio (decisiones 187 y
+    188): llega a Jev como `tras_h1`, y basta para preguntar aunque los
+    fragmentos del contenido no tengan nada que comparar."""
+    Sesion = _motor(tmp_path)
+    jid, _ = sembrar(Sesion, n=2)
+    s = Sesion()
+    ids = _ids(s, jid)
+    oferta = {"@type": "Offer", "price": "42.27", "priceCurrency": "EUR", "availability": "InStock"}
+    _con_marcado(s, ids[0], oferta, "Proteína vegana. También puede interesarte.")
+    s.get(PageContent, ids[0]).texto_tras_h1 = "Proteína Vegana 1 kg\n42,27 €   PVPR\n\nEn stock"
+    _con_marcado(s, ids[1], oferta, "Sin cifras.")
+    s.commit()
+    assert coh.candidatos_schema(s, jid, ids) == [ids[0]]
+    (e,) = coh.estados_schema(s, [ids[0]])
+    assert e.datos["tras_h1"] == "Proteína Vegana 1 kg / 42,27 € PVPR / En stock"
+    s.close()
+
+
 def test_schema_solo_con_algo_visible_que_comparar(tmp_path, monkeypatch):
     Sesion = _motor(tmp_path)
     jid, _ = sembrar(Sesion, n=6)
@@ -236,7 +255,8 @@ def test_schema_solo_con_algo_visible_que_comparar(tmp_path, monkeypatch):
     s.commit()
     assert coh.candidatos_schema(s, jid, ids) == [ids[0]]
     (e,) = coh.estados_schema(s, [ids[0]])
-    assert set(e.datos) == {"titulo", "h1", "marcado", "texto_visible"}
+    assert set(e.datos) == {"titulo", "h1", "marcado", "tras_h1", "texto_visible"}
+    assert e.datos["tras_h1"] == ""          # rastreado sin el texto tras el h1
     assert e.datos["marcado"] == ["Offer: price 354USD$, priceCurrency EUR, availability InStock"]
     assert "354USD$" in e.datos["texto_visible"]
     # Muestra por plantilla.

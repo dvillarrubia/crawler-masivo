@@ -22,7 +22,8 @@ Tres preguntas, una por hallazgo (decision 169: no mezclar dos criterios):
   (decision 184): si los fragmentos dan el precio del item y el importe exacto
   declarado no es ninguno de sus precios, eso no es ausencia sino
   contradiccion. v4 (decision 185): el marcado llega por objeto y la
-  disponibilidad se compara oferta a oferta.
+  disponibilidad se compara oferta a oferta. v6 (decision 188): tambien el
+  texto que sigue al h1 (la caja de compra, decision 187).
 
 Ninguna esta evaluada (#8): sin umbral, todo sale `incierto` y nada va a un
 informe. Las incidencias de #16/#17 que saldrian de ellas (`title_desalineado`,
@@ -218,15 +219,23 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
     # disponibilidad de cada oferta en una linea) y una variante agotada que la
     # pagina muestra agotada no contradice: aplanado, Jev daba 10 falsos «si»
     # en 400 fichas de una tienda con tallas. La v5 (un borrador medido peor y
-    # nunca desplegado) tiene respuestas en la cache: la siguiente es la 6.
-    version=4,
+    # nunca desplegado) tiene respuestas en la cache.
+    # v6 (decision 188): el texto que sigue al h1 (`tras_h1`, la caja de compra
+    # de una ficha, decision 187), porque el contenido principal la perdia y
+    # Jev comparaba con el precio de otro producto; y un «sin stock» de un
+    # tramo de cantidad no es la disponibilidad del item.
+    version=6,
     instrucciones=(
         "A web page declares the values under 'marcado' in its structured data (schema.org markup, "
         "which visitors do not see). 'texto_visible' holds fragments of the text visitors do see on "
         "that page; they are partial. 'titulo' and 'h1' tell which item the page is about: the one "
         "product, room, course, venue or service it presents. Each line of 'marcado' is one "
         "object of the markup; when a line lists several fields (price, currency, availability), "
-        "they belong to the same offer or variant and are compared together. Does the visible "
+        "they belong to the same offer or variant and are compared together. 'tras_h1', when "
+        "present, is the visible text that follows the page's h1 in reading order: on a product "
+        "page it is the buy box, where the item's own price, variants and availability come "
+        "first, before any list of other products; when it gives the item's own price or "
+        "availability, compare with that. Does the visible "
         "text clearly contradict at least one declared value for that item? "
         "Answer true when the fragments show that same item with a different value for the same "
         "thing. For a price: the markup declares one exact amount for the item (price, or a "
@@ -251,14 +260,15 @@ SCHEMA_CONTRADICE_CONTENIDO = Pregunta(
         "the format differs (116€ and 116,00 EUR, 2026-10-31 and 31 October 2026, 4.5 and 4,5/5). "
         "Also false when an offer declared OutOfStock is the variant the page shows as sold out, "
         "or when a product group as a whole is declared InStock and at least one of its variants "
-        "is available."
+        "is available; and when 'sold out' is said only of a quantity tier or bulk pack (buy 12, "
+        "a pack of 6) or of another product, while the item itself is shown in stock or for sale."
     ),
     opciones={
         "true": "A declared value is visibly contradicted for the page's own item (price, currency, rating, date or availability).",
         "false": "The values match, the differing figure belongs to something else, or the item's values are not shown.",
     },
     descripcion=("Marcado que contradice lo visible: precio, valoracion, fecha de un evento u "
-                 "oferta o disponibilidad (#17, v4 decision 185). Sin evaluar (#8): todo incierto."),
+                 "oferta o disponibilidad (#17, v6 decision 188). Sin evaluar (#8): todo incierto."),
 )
 
 PREGUNTAS = [TITLE_DESCRIBE_CONTENIDO, TITLE_ES_GENERICO, SCHEMA_CONTRADICE_CONTENIDO]

@@ -499,9 +499,10 @@ HUELLAS |= {("schema_contradice_contenido", 2): "826d86ea9a09574f",
             }
 # v4: el marcado por objeto y la disponibilidad oferta a oferta (decision 185).
 # La v5 fue un borrador medido (peor) y nunca desplegado: sus respuestas estan
-# en la cache, y la proxima version es la 6.
+# en la cache. La v6 (decision 188) anade el texto que sigue al h1.
 HUELLAS |= {("schema_contradice_contenido", 4): "5b4e1661c0d0829f",
             ("schema_contradice_contenido", 5): "83dbeea042b09d28",
+            ("schema_contradice_contenido", 6): "d3f5c251255cbad4",
             }
 
 

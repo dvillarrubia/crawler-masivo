@@ -567,7 +567,9 @@ def _con_marcado(session, url_ids: list[int]) -> set[int]:
 def datos_schema(session, url_ids: list[int]) -> dict[int, dict]:
     """Por URL: title, h1, los valores verificables del marcado (JSON-LD y
     microdatos; el RDFa que hay en produccion es FOAF/SIOC de Drupal, sin
-    precios ni valoraciones) y los fragmentos del contenido donde mirar."""
+    precios ni valoraciones), los fragmentos del contenido donde mirar y el
+    texto que sigue al h1 (`tras_h1`, decision 187: en una ficha, la caja de
+    compra; vacio en lo rastreado antes)."""
     from shared.models import Heading, PageContent, StructuredData
 
     items: dict[int, list] = {}
@@ -585,17 +587,23 @@ def datos_schema(session, url_ids: list[int]) -> dict[int, dict]:
     titulos = _titulos(session, con_hechos)
     h1: dict[int, str] = {}
     textos: dict[int, str] = {}
+    tras_h1: dict[int, str] = {}
     for trozo in _trozos(con_hechos):
         for uid, texto in (session.query(Heading.url_id, Heading.text)
                            .filter(Heading.url_id.in_(trozo), Heading.tag == "h1",
                                    Heading.oculto.isnot(True))
                            .order_by(Heading.url_id, Heading.position)):
             h1.setdefault(uid, texto or "")
-        for uid, texto in session.query(PageContent.url_id, PageContent.content_text).filter(
+        for uid, texto, tras in session.query(
+                PageContent.url_id, PageContent.content_text, PageContent.texto_tras_h1).filter(
                 PageContent.url_id.in_(trozo)):
             textos[uid] = texto or ""
+            # Una linea por bloque, unidas con « / » como se leen.
+            tras_h1[uid] = " / ".join(" ".join(ln.split()) for ln in (tras or "").splitlines()
+                                      if ln.strip())
     return {u: {"titulo": titulos.get(u, ""), "h1": h1.get(u, ""), "hechos": hechos[u],
-                "texto_visible": fragmentos_visibles(textos.get(u), hechos[u])}
+                "texto_visible": fragmentos_visibles(textos.get(u), hechos[u]),
+                "tras_h1": tras_h1.get(u, "")}
             for u in con_hechos}
 
 
@@ -621,7 +629,8 @@ def candidatos_schema(session, job_id, url_ids: list[int]) -> list[int]:
         for trozo in _trozos(cola, SCHEMA_POR_PLANTILLA):
             datos = datos_schema(session, trozo)
             for u in trozo:
-                if dentro < SCHEMA_POR_PLANTILLA and datos.get(u, {}).get("texto_visible"):
+                d = datos.get(u, {})
+                if dentro < SCHEMA_POR_PLANTILLA and (d.get("texto_visible") or d.get("tras_h1")):
                     elegidas.add(u)
                     dentro += 1
             if dentro >= SCHEMA_POR_PLANTILLA:
@@ -648,16 +657,19 @@ def lineas_marcado(hechos: list[dict]) -> list[str]:
 
 def estados_schema(session, url_ids: list[int]):
     """Title y h1 (de que cosa habla la pagina), los valores del marcado por
-    objeto (`lineas_marcado`) y los fragmentos visibles. Nunca el JSON-LD entero."""
+    objeto (`lineas_marcado`), el texto que sigue al h1 (decision 187; v6,
+    decision 188) y los fragmentos visibles. Nunca el JSON-LD entero."""
     from shared.decisiones import Estado
 
     datos = datos_schema(session, url_ids)
     salida = []
     for u in url_ids:
-        d = datos.get(u) or {"titulo": "", "h1": "", "hechos": [], "texto_visible": ""}
+        d = datos.get(u) or {"titulo": "", "h1": "", "hechos": [], "texto_visible": "",
+                             "tras_h1": ""}
         salida.append(Estado(datos={
             "titulo": d["titulo"], "h1": d["h1"],
             "marcado": lineas_marcado(d["hechos"]),
+            "tras_h1": d["tras_h1"],
             "texto_visible": d["texto_visible"]}, url_id=u))
     return salida
 
