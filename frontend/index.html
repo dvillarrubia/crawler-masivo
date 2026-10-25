@@ -50,7 +50,7 @@
         <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
     </nav>
     <div class="topbar-actions">
-      <button class="btn btn-primary btn-sm" @click="openCreate()" data-tip="Crear un nuevo rastreo (atajo: n)" style="display:flex;align-items:center;gap:.35rem">
+      <button class="btn btn-primary btn-sm" @click="openCreate(_presetDelContexto())" data-tip="Crear un nuevo rastreo (atajo: n); si estás en un cliente, ya viene elegido" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
       </button>
       <div class="menu-wrap" @click.outside="menuAbierto === 'app' && (menuAbierto = '')">
@@ -5853,6 +5853,10 @@
               </template>
             </select>
           </div>
+        </div>
+        <div class="form-hint orange" x-show="!createForm.cliente_id" style="margin:-.4rem 0 .8rem" data-testid="aviso-sin-cliente">
+          Sin cliente, el rastreo no hereda ninguna configuración ni cuenta en la evolución,
+          las alertas o la portada de nadie. Elige uno salvo que sea una prueba suelta.
         </div>
         <div class="form-hint" x-show="createForm.cliente_id" style="margin:-.4rem 0 .8rem">
           La configuracion viene precargada con la del cliente y la del perfil. Lo que cambies aqui
