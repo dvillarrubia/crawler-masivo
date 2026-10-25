@@ -64,6 +64,12 @@ def test_empieza_en_el_h1_aunque_su_texto_salga_antes():
     assert ex.extract_texto_tras_h1(Selector(text=html)).splitlines()[-1] == "9 €"
 
 
+def test_un_icono_con_el_caracter_de_la_marca_no_mueve_el_comienzo():
+    html = ("<html><body><p><span class='icon'>&#xe000;</span> Envío</p><p>Otro 5 €</p>"
+            "<main><h1>Prod</h1><p>9 €</p></main></body></html>")
+    assert ex.extract_texto_tras_h1(Selector(text=html)) == "Prod\n9 €"
+
+
 def test_un_h1_sin_texto_no_tapa_al_siguiente():
     html = ("<html><body><main><h1><a href='/'><img alt=''></a></h1>"
             "<h1>Prod</h1><p>9 €</p></main></body></html>")

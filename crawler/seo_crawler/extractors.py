@@ -3318,6 +3318,14 @@ def extract_texto_tras_h1(
     # copia recien parseada): buscandolo por su texto se empezaba en la primera
     # linea igual, que puede ser otro bloque de antes con el mismo nombre y
     # otro precio (revision de la decision 187).
+    # U+E000 es tambien el primer glifo de algunas fuentes de iconos: si la
+    # pagina ya lo trae, se quita antes de marcar, o se empezaria en ese icono.
+    for el in raiz.iter():
+        if isinstance(el.tag, str):
+            if el.text and _MARCA_H1 in el.text:
+                el.text = el.text.replace(_MARCA_H1, "")
+            if el.tail and _MARCA_H1 in el.tail:
+                el.tail = el.tail.replace(_MARCA_H1, "")
     h1.text = _MARCA_H1 + (h1.text or "")
     cuerpo = next(raiz.iter("body"), raiz)
     lineas = _block_text(cuerpo).splitlines()
