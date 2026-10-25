@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from array import array
 from datetime import datetime, timezone
 from typing import Any, Generator
 from urllib.parse import parse_qsl, urljoin, urlparse
@@ -27,6 +28,7 @@ from scrapy import Request, signals
 from scrapy.http import HtmlResponse, Response
 from scrapy_playwright.page import PageMethod
 
+from seo_crawler.cola_disco import ColaEnDisco
 from seo_crawler.extractors import (
     absolutize_url,
     classify_resource_type,
@@ -116,6 +118,14 @@ logger = logging.getLogger(__name__)
 # `jobs.sitemaps.entradas_recortadas` lo dice: los avisos que salen de las
 # entradas no pueden afirmar nada de las que faltan.
 SITEMAP_ENTRIES_MAX = int(os.getenv("SITEMAP_ENTRIES_MAX", "250000"))
+
+# URLs de los sitemaps que entran directas en la cola de Scrapy (decision 186).
+# Las siguientes esperan en un fichero (`ColaEnDisco`) y se sueltan por tandas
+# de este tamano cuando la cola se vacia. Antes entraban todas: con los
+# sitemaps de Casa del Libro (millones de URLs, ~1-1,5 KB cada una entre la
+# peticion, el dupefilter y la membresia) el proceso paso de los 4 GB del
+# contenedor a los 8 minutos y el kernel lo mato sin haber rastreado nada.
+SITEMAP_EN_COLA_MAX = int(os.getenv("SITEMAP_EN_COLA_MAX", "20000"))
 
 # Tope de anotaciones hreflang del sitemap guardadas por proceso (decision
 # 167), ~60 bytes cada una ya compactada (medido en Typeform): 2 millones son
@@ -556,11 +566,17 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # la BD en start_requests (ver _iter_frontier), no se carga entera.
         self._already_crawled_hashes: set[int] = set()
         self._resume_mode: bool = False
-        # Sitemap ingestion state. OJO: _sitemap_url_hashes guarda el sha256
-        # completo (no la clave compacta) porque se escribe tal cual en la BD
-        # al persistir Url.in_sitemap.
+        # Sitemap ingestion state. La membresia guarda la clave compacta de
+        # cada URL (`_hash_key`, 8 bytes en un array, con repeticiones) y no el
+        # sha256 en texto en un set (~190 bytes): con millones de URLs en los
+        # sitemaps era la mitad de la memoria del proceso (decision 186). Al
+        # cerrar se cruza con las URLs rastreadas del job.
         self._use_sitemap: bool = True
-        self._sitemap_url_hashes: set[str] = set()
+        self._sitemap_claves: array = array("Q")
+        # URLs de sitemap que ya entraron en la cola de Scrapy, y las que
+        # esperan en disco a que se vacie (decision 186).
+        self._sitemap_semillas_directas: int = 0
+        self._sitemap_pendientes = ColaEnDisco()
         self._sitemap_files_fetched: int = 0
         # Ficheros de sitemap pedidos. Si al cerrar quedan por debajo de los
         # parseados, la vista es parcial y no se puede afirmar que el resto de
@@ -634,6 +650,23 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             from scrapy.exceptions import DontCloseSpider
 
             raise DontCloseSpider
+        # URLs de los sitemaps que esperaban en disco (decision 186).
+        if self._sitemap_soltar_pendientes():
+            from scrapy.exceptions import DontCloseSpider
+
+            raise DontCloseSpider
+
+    def _sitemap_soltar_pendientes(self) -> bool:
+        """Encola la siguiente tanda de URLs de sitemap que esperaban en disco.
+        True si encolo alguna. Una tanda entera de repetidas (ya vistas por un
+        enlace) la descarta el dupefilter y Scrapy vuelve a llamar al quedarse
+        sin nada: se sigue hasta vaciar la cola o hasta `max_urls`."""
+        if not len(self._sitemap_pendientes):
+            return False
+        tanda = self._sitemap_pendientes.sacar(SITEMAP_EN_COLA_MAX)
+        for url in tanda:
+            self.crawler.engine.crawl(self._page_request(url, 1))
+        return bool(tanda)
 
     def spider_opened(self, spider):
         """Load job config from PostgreSQL and connect to Redis."""
@@ -1256,9 +1289,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if not self._is_internal(normalized):
                 continue  # sitemaps must not seed foreign hosts
             url_hash = compute_url_hash(normalized)
-            # El sha256 completo va al set de membresia (se escribe en BD);
-            # para el set de resume hay que usar la clave compacta.
-            self._sitemap_url_hashes.add(url_hash)
+            self._sitemap_claves.append(_hash_key(url_hash))
             if url_hash not in vistas:
                 vistas.add(url_hash)
                 entradas.append({"url": normalized, "url_hash": url_hash,
@@ -1272,6 +1303,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 continue
             if not self._cabe_en_tope(normalized):
                 continue
+            # Pasado el cupo, a disco: se encolan al vaciarse la cola
+            # (decision 186).
+            if self._sitemap_semillas_directas >= SITEMAP_EN_COLA_MAX:
+                self._sitemap_pendientes.meter(normalized)
+                continue
+            self._sitemap_semillas_directas += 1
             # The scheduler dupefilter drops these if link discovery already
             # queued the same URL. La profundidad 1 se respeta gracias a
             # middlewares.DepthMiddleware (la de Scrapy la pisaba).
@@ -1334,6 +1371,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             "tope_entradas": SITEMAP_ENTRIES_MAX,
             "entradas_guardadas": self._sitemap_entradas_guardadas,
             "entradas_recortadas": self._sitemap_entradas_recortadas,
+            # URLs que esperaron en disco por pasar de SITEMAP_EN_COLA_MAX
+            # (decision 186); 0 = todas entraron directas en la cola.
+            "semillas_diferidas": self._sitemap_pendientes.escritas,
             # El hreflang de cada entrada va en `sitemap_entries.hreflang`
             # (decision 167): la marca dice que este censo ya lo guardaba.
             "hreflang": 1,
@@ -1437,14 +1477,24 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         sitemap was found, rows keep in_sitemap = NULL ("no sitemap data"),
         which the analyzer uses to skip sitemap checks entirely.
         """
-        if not self._use_sitemap or not self._sitemap_url_hashes:
+        self._sitemap_pendientes.cerrar()
+        if not self._use_sitemap or not len(self._sitemap_claves):
             return
         from shared.database import SessionLocal
         from shared.models import Url
 
         session = SessionLocal()
         try:
-            hashes = list(self._sitemap_url_hashes)
+            # Las URLs del job (las rastreadas, muchas menos que las del
+            # sitemap en un sitio grande) por clave compacta, y una pasada por
+            # el array de la membresia (decision 186).
+            del_job: dict[int, str] = {}
+            for (h,) in session.query(Url.url_hash).filter(
+                    Url.job_id == self.job_id).yield_per(20000):
+                if h:
+                    del_job[_hash_key(h)] = h
+            hashes = sorted({del_job[k] for k in self._sitemap_claves if k in del_job})
+            del del_job
             for start in range(0, len(hashes), 5000):
                 batch = hashes[start:start + 5000]
                 session.query(Url).filter(
@@ -1464,8 +1514,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 # Medido en un Liferay con 395 sitemaps hijos: se leia el 12,6%.
                 logger.warning(
                     "Sitemap incompleto (%d de %d ficheros leidos): %d URLs "
-                    "marcadas en sitemap; el resto queda como desconocido en "
-                    "vez de fuera",
+                    "rastreadas marcadas en sitemap; el resto queda como "
+                    "desconocido en vez de fuera",
                     self._sitemap_files_fetched,
                     self._sitemap_requested,
                     len(hashes),
@@ -1475,8 +1525,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     Url.job_id == self.job_id, Url.in_sitemap.is_(None),
                 ).update({Url.in_sitemap: False}, synchronize_session=False)
             session.commit()
-            logger.info("Sitemap membership persisted: %d URLs in sitemap",
-                        len(hashes))
+            logger.info("Sitemap membership persisted: %d URLs rastreadas en el "
+                        "sitemap (%d entradas leidas)", len(hashes), len(self._sitemap_claves))
         except Exception:
             session.rollback()
             logger.exception("Failed to persist sitemap membership")

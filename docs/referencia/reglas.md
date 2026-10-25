@@ -26,6 +26,9 @@
 - **Un perfil de dispositivo es UA, huella TLS y contexto de render juntos**
   (`shared/perfiles.py`), y la comparacion automatica solo usa de referencia un
   censo del mismo perfil. Decisiones 119 y 173.
+- **Nada en memoria del spider crece con el sitemap entero**: lo que pasa de
+  `SITEMAP_EN_COLA_MAX` espera en disco y la membresia son 8 bytes por URL. Un
+  sitio con millones de URLs en sus sitemaps mataba el rastreo por memoria. 186.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su

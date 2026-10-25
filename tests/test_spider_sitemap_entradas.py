@@ -124,7 +124,93 @@ def test_con_tope_de_entradas_se_recorta_y_se_dice(tmp_path):
     assert f["declaradas"] == 3 and f["entradas_guardadas"] == 2
 
 
+def _sin_enlaces(n):
+    """Un sitio cuya portada no enlaza nada: las paginas solo se conocen por el
+    sitemap, que lista `/p1`..`/pn`."""
+    rutas = {"/sitemap_index.xml": _urlset(*[(f"/p{i}", None) for i in range(1, n + 1)]),
+             "/": [200, {}, "<html><head><title>portada</title></head><body>hola</body></html>"]}
+    for i in range(1, n + 1):
+        rutas[f"/p{i}"] = [200, {}, f"<html><head><title>p{i}</title></head><body>p{i}</body></html>"]
+    return rutas
+
+
+def test_pasado_el_cupo_las_urls_del_sitemap_esperan_en_disco_y_se_rastrean():
+    """Con mas URLs en los sitemaps que `SITEMAP_EN_COLA_MAX`, las de mas
+    esperan en disco y entran al vaciarse la cola (decision 186): se rastrean
+    todas, y `jobs.sitemaps` dice cuantas esperaron."""
+    entrada = {"seeds": ["http://localhost:{port}/"], "config": {"max_depth": 1},
+               "rutas": _sin_enlaces(7), "ver_job": True}
+    entorno = {**os.environ, "SITEMAP_EN_COLA_MAX": "2"}
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=120, env=entorno)
+    assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
+    job = json.loads(proc.stdout.split("@@JOB@@", 1)[1].split("\n", 1)[0])
+    rastreadas = {i["url"].rsplit("/", 1)[1] for i in items if i["_tipo"] == "PageItem"}
+    assert {f"p{i}" for i in range(1, 8)} <= rastreadas
+    (resumen,) = [a["sitemaps"] for a in job if "sitemaps" in a]
+    assert resumen["semillas_diferidas"] == 5
+    # Las entradas del sitemap se guardan todas, esperen o no.
+    assert resumen["entradas_guardadas"] == 7
+
+
+def test_max_urls_corta_aunque_queden_urls_en_disco():
+    entrada = {"seeds": ["http://localhost:{port}/"], "config": {"max_depth": 1, "max_urls": 3},
+               "rutas": _sin_enlaces(7), "ver_job": True}
+    entorno = {**os.environ, "SITEMAP_EN_COLA_MAX": "1"}
+    proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                          capture_output=True, text=True, timeout=120, env=entorno)
+    assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
+    items = json.loads(proc.stdout.split("@@ITEMS@@", 1)[1])
+    assert len([i for i in items if i["_tipo"] == "PageItem"]) <= 3
+
+
 URL_BD = os.environ.get("PAGERANK_TEST_DATABASE_URL")
+
+
+def test_la_membresia_marca_las_rastreadas_aunque_esperaran_en_disco():
+    """`urls.in_sitemap` sale de las claves compactas (decision 186): True
+    para las del sitemap, tambien las que esperaron en disco, y False para la
+    portada, que no esta en el (la vista del sitemap es completa)."""
+    if not URL_BD:
+        pytest.skip("sin PAGERANK_TEST_DATABASE_URL")
+    import socket
+    import uuid
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    from shared.models import Base, Job, Url
+
+    engine = create_engine(URL_BD)
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine)
+    jid = uuid.uuid4()
+    with socket.socket() as so:
+        so.bind(("127.0.0.1", 0))
+        puerto = so.getsockname()[1]
+    with Sesion() as s:
+        s.add(Job(id=jid, name="test sitemap en disco", status="running", seeds=[], config={}))
+        s.commit()
+    try:
+        rutas = _sin_enlaces(5)
+        # Con BD el arnes sirve en 127.0.0.1 (ver el test de reanudar).
+        rutas["/sitemap_index.xml"][2] = rutas["/sitemap_index.xml"][2].replace("localhost", "127.0.0.1")
+        entrada = {"seeds": ["http://127.0.0.1:{port}/"], "config": {"max_depth": 1},
+                   "rutas": rutas, "bd": URL_BD, "job_id": str(jid), "puerto": puerto}
+        entorno = {**os.environ, "SITEMAP_EN_COLA_MAX": "2"}
+        proc = subprocess.run([sys.executable, HARNESS, json.dumps(entrada)],
+                              capture_output=True, text=True, timeout=120, env=entorno)
+        assert "@@ITEMS@@" in proc.stdout, proc.stdout + proc.stderr
+        with Sesion() as s:
+            filas = {u.split(str(puerto), 1)[-1]: m for u, m in s.query(Url.url, Url.in_sitemap)
+                     .filter(Url.job_id == jid, Url.status_code == 200)}
+        assert filas.get("/") is False
+        assert {k: v for k, v in filas.items() if k != "/"} == {f"/p{i}": True for i in range(1, 6)}
+    finally:
+        with engine.begin() as c:
+            c.execute(text("DELETE FROM jobs WHERE id = :j"), {"j": str(jid)})
+        engine.dispose()
 
 
 @pytest.mark.parametrize("sitemap,quedan", [
