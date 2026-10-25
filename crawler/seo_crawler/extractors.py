@@ -3270,6 +3270,70 @@ def _hero_dentro_perdido(container, texto: str | None) -> str | None:
     return _block_text(bloque) or None
 
 
+# Tope del texto que sigue al <h1> y se guarda aparte (decision 187). En una
+# ficha, el nombre, el precio, el PVPR, el stock y los descuentos por cantidad
+# de Planeta Huerto son ~700 caracteres; las variantes con su stock de
+# Tiendanimal, algo mas.
+TRAS_H1_MAX = 1000
+
+
+def extract_texto_tras_h1(
+    selector,
+    *,
+    strip_promo: bool = True,
+    extra_selectors: list[str] | None = None,
+    max_chars: int = TRAS_H1_MAX,
+) -> str | None:
+    """El texto visible que sigue al primer ``<h1>`` en el orden de lectura,
+    desde el propio h1 y hasta *max_chars*: en una ficha de producto, la caja
+    de compra (nombre, precio, variantes, disponibilidad). Se guarda aparte del
+    contenido principal (decision 187).
+
+    El contenido principal lo decide trafilatura, que en las fichas se queda a
+    veces con el bloque de recomendados y tira la caja de compra: en Planeta
+    Huerto, 178 de 3.000 fichas se guardaban sin su propio precio, y Jev
+    comparaba el marcado con el precio de otro producto. Se lee del documento
+    entero ya limpio (la caja de compra puede caer fuera de ``<main>``), con
+    el h1 del contenedor principal si lo tiene; si no, el primero.
+    """
+    raw_html = selector.get()
+    if not raw_html:
+        return None
+    container = _main_container(
+        raw_html, strip_promo=strip_promo, extra_selectors=extra_selectors
+    )
+    if container is None:
+        return None
+    raiz = container.getroottree().getroot()
+    h1 = next(container.iter("h1"), None)
+    if h1 is None:
+        h1 = next(raiz.iter("h1"), None)
+    if h1 is None:
+        return None
+    del_h1 = _block_text(h1).splitlines()
+    if not del_h1:
+        return None
+    cuerpo = next(raiz.iter("body"), raiz)
+    lineas = _block_text(cuerpo).splitlines()
+    try:
+        desde = lineas.index(del_h1[0])
+    except ValueError:
+        # El h1 repetido antes (una miga de pan con el mismo texto) lo junta
+        # la deduplicacion de lineas; sin rastro, solo el h1.
+        lineas, desde = del_h1, 0
+    salida: list[str] = []
+    largo = 0
+    for ln in lineas[desde:]:
+        if largo + len(ln) > max_chars:
+            resto = max_chars - largo
+            if resto > 20:
+                salida.append(ln[:resto])
+            break
+        salida.append(ln)
+        largo += len(ln) + 1
+    return "\n".join(salida) or None
+
+
 def _main_container(
     html: str, *, strip_promo: bool = True, extra_selectors: list[str] | None = None
 ):

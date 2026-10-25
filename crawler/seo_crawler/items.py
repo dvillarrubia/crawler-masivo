@@ -192,6 +192,7 @@ class ContentItem(scrapy.Item):
     content_length = scrapy.Field()
     content_markdown = scrapy.Field()
     raw_html = scrapy.Field()
+    texto_tras_h1 = scrapy.Field()  # decision 187
 
 
 class EnlacesNoRastreablesItem(scrapy.Item):

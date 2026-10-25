@@ -442,3 +442,54 @@
      en el sitemap de vídeo (67, 89): no se emite, y
      `jobs.sondas_resumen.sitemap_de_video` dice `evaluado: false` y el
      motivo.
+
+<a id="d187"></a>
+187. **El texto que sigue al h1 se guarda aparte del contenido principal en las páginas con marcado verificable: en una ficha, la caja de compra que trafilatura tira a veces**
+
+   **Problema.** Al medir la pregunta del schema en Planeta Huerto (25-oct),
+   Jev dijo que el marcado contradecía lo visible en fichas cuyo texto
+   guardado no traía su propio precio: solo los del bloque «También puede
+   interesarte», de otros productos. El contenido principal lo decide
+   trafilatura (`extract_main_content`), y en esas fichas se queda con el
+   bloque de recomendados y tira la caja de compra; el respaldo
+   (`_fallback_extract_text`) sí la tiene, pero solo se usa cuando trafilatura
+   conserva menos de la mitad de las palabras, y aquí conserva más. En el
+   censo (3.000 fichas con precio en el marcado), **178 (6 %) se guardaron sin
+   su precio** (comparando importes como números). Reproducido el 25-oct con
+   la ficha de la proteína Energy Feelings: el HTML lleva `42,27 €` en la caja
+   de compra y el contenido guardado no.
+
+   **Decisión.** `extract_texto_tras_h1`: el texto visible que sigue al primer
+   `<h1>` en orden de lectura (el del contenedor principal; si no tiene, el
+   primero del documento), desde el propio h1 y hasta `TRAS_H1_MAX` (1.000)
+   caracteres, leído del documento entero ya limpio de banners (la caja de
+   compra puede caer fuera de `<main>`). Va en `page_content.texto_tras_h1`,
+   **solo en las páginas cuyo marcado declara valores que la pregunta del
+   schema compara** (`hechos_schema` no vacío: precio, valoración, fecha,
+   disponibilidad); NULL en las demás y en lo rastreado antes. El contenido
+   principal no cambia: lo usan el recuento de palabras, los casi duplicados,
+   el contenido escaso y la comparación entre censos, y cambiarlo movería
+   todos esos avisos.
+
+   Se probó antes subir por los ancestros del h1 mientras el bloque cupiera en
+   1.500 caracteres: en Planeta Huerto sale la caja de compra, pero en Druni y
+   en Tiendanimal el bloque del h1 es el titular solo (el siguiente ancestro ya
+   es media página), sin precio ni variantes. En orden de lectura, tras el
+   nombre del producto vienen el precio, las variantes con su stock y el botón
+   de compra en las tres tiendas.
+
+   **Medido** el 25-oct con 40 fichas descargadas (20 de las 178 de Planeta
+   Huerto sin precio en el contenido, 10 de Druni y 10 de Tiendanimal): el
+   texto tras el h1 trae el precio declarado en las 40; el contenido principal
+   seguía sin él en las 20 de Planeta Huerto. ~25 ms por página (vuelve a
+   parsear el documento limpio), solo en las que tienen ese marcado.
+
+   **Lo que no se ha hecho.** Usarlo: la pregunta del schema
+   (`schema_contradice_contenido`) sigue leyendo `content_text`; que lea
+   también esto es su versión 6, que hay que medir con censos rastreados
+   después de desplegar. No se re-extrae lo ya rastreado (no se guarda el HTML).
+
+   Tests: `tests/test_texto_tras_h1.py` (empieza en el h1 y sigue en orden de
+   lectura sin lo de antes, tope sin cortar en seco, h1 fuera de `<main>`, sin
+   h1, y el SeoSpider real: lo guarda en la ficha con oferta en JSON-LD y no
+   en la misma página sin marcado).

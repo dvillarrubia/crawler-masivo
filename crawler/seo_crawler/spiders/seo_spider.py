@@ -54,6 +54,7 @@ from seo_crawler.extractors import (
     extract_enlaces_no_rastreables,
     extract_main_content,
     extract_main_content_markdown,
+    extract_texto_tras_h1,
     extract_meta,
     extract_meta_refresh,
     extract_meta_refresh_target,
@@ -1383,6 +1384,33 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             yield SitemapEntradasItem(job_id=self.job_id, fichero=response.url,
                                       entradas=entradas)
 
+    def _texto_tras_h1(self, selector, sd_items, strip_promo, extra_selectors) -> str | None:
+        """El texto que sigue al h1 (decision 187), solo en las paginas cuyo
+        marcado declara algo que la pregunta del schema compara con lo visible:
+        es para eso, y en las demas son ~1 KB y ~25 ms por pagina sin uso.
+        Best-effort: un fallo deja la columna en NULL, nunca la pagina sin
+        guardar."""
+        try:
+            from shared.coherencia import FORMATOS_SCHEMA, hechos_schema
+
+            bloques = []
+            for sd in sd_items:
+                if sd.get("format") not in FORMATOS_SCHEMA:
+                    continue
+                raw = sd.get("raw")
+                if isinstance(raw, dict):
+                    bloques.append(raw)
+                elif isinstance(raw, list):
+                    bloques.extend(x for x in raw if isinstance(x, dict))
+            if not bloques or not hechos_schema(bloques):
+                return None
+            return extract_texto_tras_h1(
+                selector, strip_promo=strip_promo, extra_selectors=extra_selectors)
+        except Exception:  # noqa: BLE001 -- es un dato de apoyo
+            logger.debug("texto tras el h1 fallo en %s", getattr(selector, "url", ""),
+                         exc_info=True)
+            return None
+
     def _anotar_sitemap(self, url: str, datos: dict) -> None:
         self._sitemaps_leidos[url] = {
             "url": url, **datos,
@@ -2525,6 +2553,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             )
 
         # Structured data
+        sd_items = []
         if self._extraction.get("extract_structured_data", True):
             try:
                 sd_items = extract_structured_data(response.text, response.url)
@@ -2645,6 +2674,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     content_length=len(main_content) if main_content else 0,
                     content_markdown=content_md,
                     raw_html=html_crudo,
+                    texto_tras_h1=self._texto_tras_h1(
+                        selector, sd_items, strip_promo, extra_selectors),
                 )
 
         # -- Extraccion y busqueda a medida (decision 104) -------------------

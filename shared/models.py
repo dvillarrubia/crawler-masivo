@@ -986,6 +986,13 @@ class PageContent(Base):
     # que es justo lo que hace falta para re-extraer).
     raw_html = Column(Text, nullable=True)
 
+    # El texto visible que sigue al primer h1, hasta 1.000 caracteres: en una
+    # ficha, la caja de compra (decision 187). Solo en las paginas cuyo marcado
+    # declara valores verificables (precio, valoracion, fecha, disponibilidad);
+    # NULL en las demas y en lo rastreado antes. Aparte de `content_text`
+    # porque trafilatura tira a veces la caja de compra de una ficha.
+    texto_tras_h1 = Column(Text, nullable=True)
+
     # Post-crawl cleaning: originals kept for revert; cleaned_at marks state.
     content_text_original = Column(Text, nullable=True)
     content_markdown_original = Column(Text, nullable=True)
