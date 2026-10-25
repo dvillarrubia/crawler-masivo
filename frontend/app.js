@@ -629,7 +629,12 @@ function app() {
     enlaces: null,            // enlaces de solo lectura del cliente (decision 143)
     enlaceNuevo: null,        // el que se acaba de crear: el unico momento en que se ve el token
     informeCargando: false,
-    issuesOrden: 'gravedad',  // o 'prioridad': gravedad x importancia de las paginas (decision 136)
+    // 'prioridad' (gravedad x importancia de las paginas, decision 136) o
+    // 'gravedad'. De serie, prioridad: es el orden de «Qué arreglar primero»
+    // del Resumen, y los dos sitios tienen que decir lo mismo (revision de UX
+    // del 25-oct, 1.2).
+    issuesOrden: 'prioridad',
+    principales: null,        // { jobId, filas }: «Qué arreglar primero» del Resumen
     issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
@@ -2817,6 +2822,22 @@ function app() {
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
     },
 
+    // «Qué arreglar primero» del Resumen: los mismos tipos y el mismo orden
+    // que la pestana Problemas por prioridad, en paginas afectadas y sin los
+    // de tipo info. Antes eran los tipos con mas incidencias: el alt de las
+    // imagenes y el sitemap por delante de 41 paginas en 4xx.
+    async cargarPrincipales() {
+      if (!this.job || (this.principales && this.principales.jobId === this.job.id)) return;
+      const jobId = this.job.id;
+      this.principales = { jobId, filas: null };
+      try {
+        const filas = await api(`/jobs/${jobId}/issues/resumen?orden=prioridad&ejemplos=0`);
+        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: filas.filter(r => r.severity !== 'info').slice(0, 10) };
+      } catch (_) {
+        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: [] };
+      }
+    },
+
     resumenIssues(severidad) {
       const r = this.issuesResumen || [];
       return severidad ? r.filter(x => x.severity === severidad) : r;
@@ -3320,11 +3341,6 @@ function app() {
       return Math.max(1, ...this.stats.urls_by_status_group.map(s => s.count));
     },
 
-    maxIssueCount() {
-      if (!this.stats) return 1;
-      return Math.max(1, ...this.stats.issues_by_type.map(i => i.count));
-    },
-
     issueBarColor(sev) {
       return { error:'var(--red)', warning:'var(--orange)', info:'var(--blue)' }[sev] || 'var(--text-dim)';
     },
@@ -3337,11 +3353,6 @@ function app() {
     get issueTypes() {
       if (!this.stats) return [];
       return [...new Set(this.stats.issues_by_type.map(i => i.issue_type))];
-    },
-
-    get issuesSorted() {
-      if (!this.stats) return [];
-      return [...this.stats.issues_by_type].sort((a, b) => b.count - a.count);
     },
 
     crawledPercent() {
