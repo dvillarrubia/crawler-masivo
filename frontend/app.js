@@ -3233,6 +3233,18 @@ function app() {
       })[preg] || preg;
     },
 
+    // Las descripciones de los modulos (shared/enriquecido.py) hablan de
+    // «Sin evaluar (#8)» y «salen inciertas»: en pantalla, en llano.
+    descripcionEnriq(t) {
+      return String(t || '').replace(/Sin evaluar \(#8\)/g, 'Sin calibrar').replace(/Sin umbral \(#8[^)]*\)/g, 'Sin calibrar')
+        .replace(/salen inciertas/g, 'son orientativas').replace(/todo incierto/g, 'todo orientativo');
+    },
+
+    // Una respuesta suelta: su estado en palabras.
+    estadoUnaEnriq(est) {
+      return ({ decidido: 'decidida', incierto: 'orientativa', sin_decidir: 'sin decidir' })[est] || est;
+    },
+
     // Los estados de las respuestas, en palabras: «incierto» era jerga.
     estadoEnriq(est, n) {
       const t = ({ decidido: ['decidida', 'decididas'], incierto: ['orientativa', 'orientativas'],

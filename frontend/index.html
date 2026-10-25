@@ -2132,7 +2132,7 @@
                                 <div class="text-dim" style="font-size:.72rem" x-show="d.rutas" x-text="(d.rutas || []).join(' · ')"></div>
                               </td>
                               <td x-text="textoDecisionEnriq(d)"></td>
-                              <td x-text="d.estado"></td>
+                              <td x-text="estadoUnaEnriq(d.estado)"></td>
                               <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
                               <td x-text="d.origen"></td>
                               <td style="text-align:right" x-text="fmt.usd(d.coste_usd)"></td>
@@ -6579,7 +6579,7 @@
                        @change="alternarModuloEnriq(m.nombre, $el.checked)">
                 <span x-text="m.titulo"></span>
               </label>
-              <div class="form-hint" x-text="m.descripcion"></div>
+              <div class="form-hint" x-text="descripcionEnriq(m.descripcion)"></div>
               <div class="form-hint" x-show="m.depende_de.length" x-text="'Necesita: ' + m.depende_de.join(', ') + ' (se añade solo)'"></div>
             </div>
           </template>
