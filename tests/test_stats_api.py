@@ -96,6 +96,25 @@ def test_las_tarjetas_cuentan_solo_paginas_html_internas_con_2xx(entorno):
     assert d["no_indexables"] == 1         # 3; la 4 esta sin analizar
 
 
+def test_paginas_con_error_cuenta_urls_distintas(tmp_path, entorno):
+    """La tarjeta «Páginas con error» (revision de UX del 25-oct, 1.11):
+    URLs distintas con algun error, no incidencias. Con dos errores mas en la
+    pagina que ya tenia uno y uno en otra, son 2 paginas."""
+    api, jid = entorno
+    assert api.get(f"/api/jobs/{jid}/stats").json()["paginas_con_error"] == 1
+    from shared.database import get_session as gs
+    ses = next(api.app.dependency_overrides[gs]())
+    u1, u3 = (ses.query(Url).filter(Url.job_id == jid, Url.url_hash == h).one() for h in ("h1", "h3"))
+    ses.add_all([
+        Issue(job_id=jid, url_id=u3.id, issue_type="broken_internal_link", severity="error", details={}),
+        Issue(job_id=jid, url_id=u3.id, issue_type="status_4xx", severity="error", details={}),
+        Issue(job_id=jid, url_id=u1.id, issue_type="status_4xx", severity="error", details={}),
+    ])
+    ses.commit()
+    ses.close()
+    assert api.get(f"/api/jobs/{jid}/stats").json()["paginas_con_error"] == 2
+
+
 def test_problemas_salen_por_gravedad(entorno):
     api, jid = entorno
     items = api.get(f"/api/jobs/{jid}/issues").json()["items"]

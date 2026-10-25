@@ -1695,11 +1695,14 @@
               <div class="stat-sub" x-show="stats.paginas_html"
                    x-text="Math.round(stats.indexables / Math.max(1, stats.paginas_html) * 100) + ' % · ' + fmt.num(stats.no_indexables) + ' no indexables'"></div>
             </button>
+            <!-- En paginas y no en incidencias (revision de UX del 25-oct, 1.11):
+                 «11.681 incidencias en total» sumaba tambien las info y no
+                 decia cuantas paginas hay que tocar. -->
             <button class="stat-card stat-link" @click="issueFilters.severity = 'error'; issueFilters.issue_type = ''; issues = []; switchTab('issues')"
-                    data-tip="Incidencias de gravedad error: lo primero que hay que mirar">
-              <div class="stat-value" :class="erroresDelJob() ? 'red' : 'green'" x-text="fmt.num(erroresDelJob())"></div>
-              <div class="stat-label">Errores</div>
-              <div class="stat-sub" x-text="fmt.num(stats.issues_by_type.reduce((a,i) => a + i.count, 0)) + ' incidencias en total'"></div>
+                    data-tip="Páginas con al menos un problema de gravedad error: lo primero que hay que mirar">
+              <div class="stat-value" :class="stats.paginas_con_error ? 'red' : 'green'" x-text="fmt.num(stats.paginas_con_error)"></div>
+              <div class="stat-label">Páginas con error</div>
+              <div class="stat-sub" x-text="(n => n ? n + (n === 1 ? ' tipo de error' : ' tipos de error') : 'ningún error')(stats.issues_by_type.filter(i => i.severity === 'error').length)"></div>
             </button>
             <button class="stat-card stat-link" @click="switchTab('diff')"
                     data-tip="Lo que ha cambiado respecto al censo anterior del mismo sitio">

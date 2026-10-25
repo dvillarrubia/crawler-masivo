@@ -1235,6 +1235,9 @@ class JobStats(BaseModel):
     # False en los censos analizados antes de la decision 90: ahi un
     # click_depth NULL es «sin calcular», no «sin camino desde la home».
     click_depth_calculada: bool = False
+    # URLs distintas con alguna incidencia de gravedad error (la tarjeta
+    # «Páginas con error»; la misma cuenta que el tope de la Puntuacion).
+    paginas_con_error: int = 0
 
 
 # ---------------------------------------------------------------------------

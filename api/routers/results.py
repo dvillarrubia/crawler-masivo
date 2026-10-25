@@ -2405,6 +2405,12 @@ def get_stats(
         exists().where(Url.job_id == job_id, Url.click_depth.isnot(None))
     ).scalar()
 
+    # La tarjeta de errores en paginas y no en incidencias (revision de UX del
+    # 25-oct, 1.11): la misma cuenta que el tope de la Puntuacion.
+    paginas_con_error = db.query(func.count(func.distinct(Issue.url_id))).filter(
+        Issue.job_id == job_id, Issue.severity == "error",
+    ).scalar() or 0
+
     return JobStats(
         job_id=job.id,
         total_urls=total_urls,
@@ -2428,6 +2434,7 @@ def get_stats(
         indexables=indexables or 0,
         no_indexables=no_indexables or 0,
         click_depth_calculada=bool(click_depth_calculada),
+        paginas_con_error=paginas_con_error,
     )
 
 
