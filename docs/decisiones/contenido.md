@@ -487,9 +487,18 @@
    **Lo que no se ha hecho.** Usarlo: la pregunta del schema
    (`schema_contradice_contenido`) sigue leyendo `content_text`; que lea
    también esto es su versión 6, que hay que medir con censos rastreados
-   después de desplegar. No se re-extrae lo ya rastreado (no se guarda el HTML).
+   después de desplegar. No se re-extrae lo ya rastreado (solo se podría en los
+   censos con `store_raw_html`). Un h1 que solo existe para lectores de pantalla
+   (`sr-only`) cuenta como titular: es la regla de oculto que comparte el
+   extractor.
+
+   El h1 se localiza por su posición (una marca dentro de él al aplanar el
+   documento) y no por su texto: buscándolo por texto se empezaba en la
+   primera línea igual, que podía ser un bloque anterior con el mismo nombre y
+   otro precio (lo encontró la revisión). Se toma el primer h1 con texto.
 
    Tests: `tests/test_texto_tras_h1.py` (empieza en el h1 y sigue en orden de
-   lectura sin lo de antes, tope sin cortar en seco, h1 fuera de `<main>`, sin
-   h1, y el SeoSpider real: lo guarda en la ficha con oferta en JSON-LD y no
+   lectura sin lo de antes, también con el mismo texto antes del h1, un h1
+   vacío no tapa al siguiente, el tope corta en un espacio, h1 fuera de
+   `<main>`, sin h1, y el SeoSpider real: lo guarda en la ficha con oferta en JSON-LD y no
    en la misma página sin marcado).

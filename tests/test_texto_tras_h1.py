@@ -40,12 +40,34 @@ def test_empieza_en_el_h1_y_sigue_en_orden_de_lectura():
     assert "Energy Feelings" not in t and "Inicio" not in t
 
 
-def test_tope_de_caracteres_sin_cortar_en_seco():
-    t = ex.extract_texto_tras_h1(Selector(text=FICHA), max_chars=60)
-    assert len(t) <= 60
-    assert t.startswith("Proteína Vegana Vainilla 1 kg\n42,27 €")
-    # Lo que no cabe no aparece a medias si quedan menos de 20 caracteres.
-    assert "32,50" not in t
+def test_tope_de_caracteres_cortando_en_un_espacio():
+    # 29 + 1 + 7 + 1 caracteres caben; de «En stock» caben 5 (menos de 20: fuera).
+    t = ex.extract_texto_tras_h1(Selector(text=FICHA), max_chars=43)
+    assert t == "Proteína Vegana Vainilla 1 kg\n42,27 €"
+    # Una linea larga que no cabe entra hasta el ultimo espacio, no a medias.
+    largo = FICHA.replace("<div>En stock</div>",
+                          "<div>Envío gratis en pedidos de más de cuarenta euros a península</div>")
+    t = ex.extract_texto_tras_h1(Selector(text=largo), max_chars=80)
+    ultima = t.splitlines()[-1]
+    assert len(t) <= 80 and "Envío gratis en pedidos".startswith(ultima[:23])
+    assert not ultima.endswith(("ped", "pedid", "cuar"))
+
+
+def test_empieza_en_el_h1_aunque_su_texto_salga_antes():
+    """Un bloque anterior con el mismo nombre y otro precio (un recomendado,
+    una miga de pan, la marca enlazada) no es el comienzo: es el h1."""
+    html = ("<html><body><main><section><p>Proteína X</p><p>19,99 €</p><p>Ver</p></section>"
+            "<p>Texto entre medias.</p><h1>Proteína X</h1><p>42,27 €</p></main></body></html>")
+    assert ex.extract_texto_tras_h1(Selector(text=html)).splitlines()[:2] == ["Proteína X", "42,27 €"]
+    # Igual salvo mayusculas justo antes: la deduplicacion no se come el h1.
+    html = "<html><body><main><div>PROTEÍNA X</div><h1>Proteína X</h1><p>9 €</p></main></body></html>"
+    assert ex.extract_texto_tras_h1(Selector(text=html)).splitlines()[-1] == "9 €"
+
+
+def test_un_h1_sin_texto_no_tapa_al_siguiente():
+    html = ("<html><body><main><h1><a href='/'><img alt=''></a></h1>"
+            "<h1>Prod</h1><p>9 €</p></main></body></html>")
+    assert ex.extract_texto_tras_h1(Selector(text=html)) == "Prod\n9 €"
 
 
 def test_h1_fuera_de_main():

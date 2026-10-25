@@ -3275,6 +3275,8 @@ def _hero_dentro_perdido(container, texto: str | None) -> str | None:
 # de Planeta Huerto son ~700 caracteres; las variantes con su stock de
 # Tiendanimal, algo mas.
 TRAS_H1_MAX = 1000
+# Caracter de uso privado que marca el h1 al aplanar el documento.
+_MARCA_H1 = "\ue000"
 
 
 def extract_texto_tras_h1(
@@ -3305,29 +3307,35 @@ def extract_texto_tras_h1(
     if container is None:
         return None
     raiz = container.getroottree().getroot()
-    h1 = next(container.iter("h1"), None)
+    # El primer h1 con texto: el del contenedor principal si tiene; si no, el
+    # del documento (un h1 que solo envuelve el logo no cuenta).
+    h1 = next((h for h in container.iter("h1") if _block_text(h)), None)
     if h1 is None:
-        h1 = next(raiz.iter("h1"), None)
+        h1 = next((h for h in raiz.iter("h1") if _block_text(h)), None)
     if h1 is None:
         return None
-    del_h1 = _block_text(h1).splitlines()
-    if not del_h1:
-        return None
+    # Se localiza por POSICION, con una marca dentro del h1 (el arbol es una
+    # copia recien parseada): buscandolo por su texto se empezaba en la primera
+    # linea igual, que puede ser otro bloque de antes con el mismo nombre y
+    # otro precio (revision de la decision 187).
+    h1.text = _MARCA_H1 + (h1.text or "")
     cuerpo = next(raiz.iter("body"), raiz)
     lineas = _block_text(cuerpo).splitlines()
-    try:
-        desde = lineas.index(del_h1[0])
-    except ValueError:
-        # El h1 repetido antes (una miga de pan con el mismo texto) lo junta
-        # la deduplicacion de lineas; sin rastro, solo el h1.
-        lineas, desde = del_h1, 0
+    desde = next((k for k, ln in enumerate(lineas) if _MARCA_H1 in ln), None)
+    if desde is None:
+        return None
     salida: list[str] = []
     largo = 0
     for ln in lineas[desde:]:
+        ln = ln.replace(_MARCA_H1, "").strip()
+        if not ln:
+            continue
         if largo + len(ln) > max_chars:
-            resto = max_chars - largo
-            if resto > 20:
-                salida.append(ln[:resto])
+            # La linea que no cabe entra hasta el ultimo espacio, si queda
+            # sitio para algo con sentido.
+            trozo = ln[:max(0, max_chars - largo)].rsplit(" ", 1)[0]
+            if len(trozo) > 20:
+                salida.append(trozo)
             break
         salida.append(ln)
         largo += len(ln) + 1
