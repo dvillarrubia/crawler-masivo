@@ -281,7 +281,17 @@
           </button>
         </div>
 
-        <template x-if="!clientes.length">
+        <template x-if="!clientes.length && clientesEstado === 'cargando'">
+          <div class="empty text-dim" style="padding:2.5rem 1.5rem" data-testid="clientes-cargando">Cargando clientes…</div>
+        </template>
+        <template x-if="clientesEstado === 'error'">
+          <div class="card mb-2" style="border-left:3px solid var(--red)" data-testid="clientes-error">
+            <strong>No se pudieron cargar los clientes.</strong>
+            <span class="text-dim text-sm" x-text="clientesError"></span>
+            <button class="btn btn-sm" style="margin-left:.5rem" @click="cargarClientes()">Reintentar</button>
+          </div>
+        </template>
+        <template x-if="!clientes.length && clientesEstado === 'ok'">
           <div class="empty" style="padding:2.5rem 1.5rem">
             <h3 style="margin-bottom:.5rem;font-size:1.05rem">Todavía no hay clientes</h3>
             <p class="text-dim" style="max-width:440px;line-height:1.5">
@@ -319,7 +329,7 @@
                 <th style="text-align:left">alertas</th>
               </tr></thead>
               <tbody>
-                <template x-for="p in (panelClientes ? panelClientes.clientes : [])" :key="p.id">
+                <template x-for="p in filasPanelOrdenadas()" :key="p.id">
                   <tr @click="location.hash = '#/clientes/' + p.id" style="cursor:pointer">
                     <td>
                       <a :href="'#/clientes/' + p.id" @click.stop><strong x-text="p.nombre"></strong></a>
