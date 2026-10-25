@@ -9,9 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 174 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga y robots.txt | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 173 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183 |
@@ -214,6 +212,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 183 | El `nofollow` dentro del propio sitio se avisa donde se pierde la señal: la página que solo lo recibe, la plantilla que lo declara y el destino indexable al que apunta | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d183) |
 | 184 | `schema_contradice_contenido` v3: si la página da el precio del ítem y el importe exacto declarado no es ninguno de sus precios, es contradicción y no ausencia (`lowPrice` como mínimo, `priceRange` en gama); medida antes de mergear (17 de 19 contradicciones frente a 4, ningún falso «sí», sin umbral); la v2 fue un borrador que dejó respuestas en la caché | [`llm-y-enriquecido`](llm-y-enriquecido.md#d184) |
 | 185 | `schema_contradice_contenido` v4: el marcado llega por objeto (precio, moneda y disponibilidad de cada oferta en una línea) y la disponibilidad se compara oferta a oferta; en un censo nuevo (Tiendanimal) los falsos «sí» de las variantes agotadas bajan de 10 a 3, sin perder contradicciones; la v5 (fundir la oferta repetida con otro formato y más texto) se midió peor y no se despliega, y la próxima versión es la 6; sin umbral (≥ 0,6 es una hipótesis por confirmar) | [`llm-y-enriquecido`](llm-y-enriquecido.md#d185) |
+| 186 | Las URLs de los sitemaps no entran todas de golpe en la cola: pasado un cupo (`SITEMAP_EN_COLA_MAX`, 100.000) esperan en disco y entran al vaciarse (con profundidad 1 si un enlace llega antes), y la membresía guarda 8 bytes por URL; un sitemap de millones de URLs ya no mata el rastreo por memoria (Casa del Libro, 2,9 GB y `-9`) | [`render-y-descarga`](render-y-descarga.md#d186) |
 
 ## Anadir una decision
 

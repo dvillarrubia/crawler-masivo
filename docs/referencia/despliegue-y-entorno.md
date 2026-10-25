@@ -107,6 +107,7 @@ MAX_SITEMAP_FILES=500            # cuantos ficheros de sitemap se siguen
 MAX_URLS_PER_SITEMAP=50000       # URLs por fichero
 MAX_SITEMAP_BYTES=52428800       # tope del XML YA DESCOMPRIMIDO (bomba gzip)
 SITEMAP_ENTRIES_MAX=250000       # filas de sitemap_entries por rastreo (decision 126)
+SITEMAP_EN_COLA_MAX=100000       # URLs de sitemap encoladas directas; las demas esperan en disco (decision 186)
 SITEMAP_HREFLANG_MAX=2000000     # anotaciones hreflang del sitemap guardadas por rastreo (~60 B cada una en la BD y ~575 B en memoria al analizar; decision 167)
 
 # robots.txt
