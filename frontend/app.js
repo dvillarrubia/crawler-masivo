@@ -535,7 +535,10 @@ function app() {
     editarJob: null,          // { name, tipo, cliente_id } mientras el dialogo esta abierto
     editarError: '',          // '' | 'app' | 'exportar' | 'mas'
     urlDetailId: null,
-    urlDetailDesde: 'detail', // a donde vuelve la ficha de URL: 'detail' | 'explorer'
+    // Ultima consulta del Explorador de este rastreo ({ job, qs }): la pestana
+    // URLs y la miga «URLs» vuelven a ella con sus filtros y su pagina
+    // (revision de UX del 25-oct, 2.6).
+    _expUltimo: null,
     _aplicandoRuta: false,
     loading: false,
     error: null,
@@ -739,6 +742,7 @@ function app() {
       // pagina) se sustituye la entrada: cada tecla en un filtro no puede ser
       // un paso del boton atras.
       this.$watch('_ruta()', h => {
+        if (this.view === 'explorer' && this.job) this._expUltimo = { job: this.job.id, qs: this._estadoExplorador() };
         if (!h || location.hash === h) return;
         const mismaVista = location.hash.split('?')[0] === h.split('?')[0];
         if (this._aplicandoRuta || mismaVista) history.replaceState(null, '', h);
@@ -784,7 +788,7 @@ function app() {
     // #/rastreos                       lista de rastreos (?estado=)
     // #/rastreos/<id>[/<pestana>]      ficha; pestanas en castellano (TAB_SLUG)
     // #/rastreos/<id>/problemas?tipo=&gravedad=
-    // #/rastreos/<id>/explorador
+    // #/rastreos/<id>/explorador      pestana URLs (tambien /urls)
     // #/rastreos/<id>/url/<url_id>
     // #/clientes · #/clientes/<id> · #/clientes/nuevo · #/programados
     _ruta() {
@@ -870,7 +874,8 @@ function app() {
           if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
           if (!this.job) return;
           const sub = p[2];
-          if (sub === 'explorador') {
+          // `urls` es el nombre de la pestana (2.6): lleva al Explorador.
+          if (sub === 'explorador' || sub === 'urls') {
             const pre = this._preajusteExplorador(q);
             if (this.view !== 'explorer' || this._estadoExplorador() !== new URLSearchParams(qs || '').toString()) {
               this.openExplorer(pre);
@@ -985,10 +990,13 @@ function app() {
           m.push({ texto: 'Rastreos', href: '#/rastreos' });
         }
         m.push({ texto: this.job.name, href: '#/rastreos/' + this.job.id });
-        if (v === 'explorer') m.push({ texto: 'Explorador' });
+        // El Explorador es la pestana URLs de la ficha, y la ficha de una URL
+        // cuelga de ella (revision de UX del 25-oct, 2.6): sin boton «Volver»,
+        // la miga es el camino de vuelta, con los filtros que habia.
+        if (v === 'explorer') m.push({ texto: 'URLs' });
         if (v === 'informe') m.push({ texto: 'Informe para el cliente' });
         if (v === 'url-detail') {
-          if (this.urlDetailDesde === 'explorer') m.push({ texto: 'Explorador', href: '#/rastreos/' + this.job.id + '/explorador' });
+          m.push({ texto: 'URLs', href: this._rutaUrls() });
           const u = this.urlDetail && this.urlDetail.url;
           m.push({ texto: u ? u.replace(/^https?:\/\/[^/]+/, '') || '/' : 'URL' });
         }
@@ -2321,6 +2329,13 @@ function app() {
     },
 
     async switchTab(tab) {
+      // Desde URLs (Explorador o ficha de una URL) las demas pestanas vuelven
+      // a la ficha del censo: comparten cabecera y fila de pestanas.
+      if (this.view === 'explorer') this._unbindExplorerKeyNav();
+      if (['explorer', 'url-detail'].includes(this.view)) {
+        this.view = 'detail';
+        window.scrollTo({ top: 0 });
+      }
       this.detailTab = tab;
       if (tab === 'urls' && this.urls.length === 0) this.loadUrls();
       if (tab === 'issues') {
@@ -2812,8 +2827,7 @@ function app() {
       this.urlDetailLoading = true;
       this.urlDetailTab = 'seo';
       this.urlDetail = null;
-      if (this.view === 'explorer') { this.urlDetailDesde = 'explorer'; this._unbindExplorerKeyNav(); }
-      else if (this.view === 'detail') this.urlDetailDesde = 'detail';
+      if (this.view === 'explorer') this._unbindExplorerKeyNav();
       this.urlDetailId = urlId;
       this.view = 'url-detail';
       try {
@@ -2822,18 +2836,6 @@ function app() {
       this.urlDetailLoading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
       this.$nextTick(() => lucide.createIcons());
-    },
-
-    backToDetail() {
-      this.urlDetail = null;
-      this.urlDetailId = null;
-      if (this.urlDetailDesde === 'explorer') {
-        this.view = 'explorer';
-        this._bindExplorerKeyNav();
-        return;
-      }
-      this.view = 'detail';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
     // ------- Problemas -------
@@ -3736,10 +3738,52 @@ function app() {
       this.$nextTick(() => lucide.createIcons());
     },
 
-    backFromExplorer() {
-      this._unbindExplorerKeyNav();
-      this.view = 'detail';
-      this.$nextTick(() => lucide.createIcons());
+    // La ruta de la pestana URLs: la ultima consulta del Explorador de este
+    // rastreo si la hay, para volver sin perder filtros ni pagina.
+    _rutaUrls() {
+      if (!this.job) return '';
+      const u = this._expUltimo && this._expUltimo.job === this.job.id ? this._expUltimo.qs : '';
+      return '#/rastreos/' + this.job.id + '/explorador' + (u ? '?' + u : '');
+    },
+
+    // Pestana activa de la fila del censo. «URLs» es el Explorador y la
+    // ficha de una URL; las demas, la ficha con esa pestana (revision de UX
+    // del 25-oct, 2.6; V29: antes la del Explorador nunca salia activa).
+    pestanaActiva(t) {
+      if (t === 'urls') return ['explorer', 'url-detail'].includes(this.view);
+      return this.view === 'detail' && this.detailTab === t;
+    },
+
+    // El Explorador ocupa el alto que queda bajo la cabecera y las pestanas
+    // del censo, que cambian de alto (pestanas en dos filas en movil, cifras
+    // que llegan tarde): se mide donde empieza y se recalcula al cambiar el
+    // tamano de la ventana o de la cabecera. Con 26rem de minimo: en una
+    // pantalla baja la pagina se desplaza en vez de dejar la tabla en nada.
+    ajustarAltoExplorador() {
+      const fijar = () => {
+        const el = document.querySelector('.explorer');
+        if (!el) return;
+        const top = el.getBoundingClientRect().top + window.scrollY;
+        el.style.height = 'max(26rem, calc(100vh - ' + Math.round(top) + 'px))';
+      };
+      fijar();
+      if (!this._altoExpObs) {
+        window.addEventListener('resize', fijar);
+        this._altoExpObs = window.ResizeObserver ? new ResizeObserver(fijar) : { observe() {}, disconnect() {} };
+      }
+      // La cabecera y las pestanas son otros nodos tras cada vuelta a la
+      // ficha: se vuelven a observar (observar no cambia alturas, no hay bucle).
+      this._altoExpObs.disconnect();
+      document.querySelectorAll('.ficha-cabecera, .tabs-main').forEach(n => this._altoExpObs.observe(n));
+    },
+
+    // Pestana URLs (revision de UX del 25-oct, 2.6). En el Explorador no
+    // hace nada; desde otra pestana o desde la ficha de una URL, vuelve a la
+    // ultima consulta.
+    irAUrls() {
+      if (this.view === 'explorer') return;
+      const u = this._expUltimo && this._expUltimo.job === this.job.id ? this._expUltimo.qs : '';
+      this.openExplorer(u ? this._preajusteExplorador(new URLSearchParams(u)) : {});
     },
 
     loadExplorerBadges() {

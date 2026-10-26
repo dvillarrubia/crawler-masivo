@@ -991,6 +991,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 - [#122](https://github.com/dvillarrubia/crawler-masivo/issues/122) **El cliente como entrada**: portada por cliente, con su
   último censo y sus alertas.
 - [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
+- **URLs dentro de la ficha del censo** (revisión de UX del 25-oct, 2.6,
+  hecho el 26-oct): el Explorador es la pestaña **URLs** y, con la ficha de
+  cada URL, conserva la cabecera del censo (compacta) y las pestañas. Sin
+  botón «Volver»: la miga «URLs» y la pestaña vuelven a la última consulta con
+  sus filtros y su página. Queda pendiente que el panel lateral de una fila
+  sea una versión recortada de la misma ficha de URL (hoy es otro componente).
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

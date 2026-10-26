@@ -145,6 +145,12 @@ Sin fecha; se va haciendo cuando se toca cada zona.
 | 3 · Cliente como eje | #122 | hecha (#128) |
 | 4 · Pulido | #123 | casi: queda pasar los estilos en línea a clases (#129) |
 
+Revisión del 25-oct, 2.6 (26-oct): el Explorador pasa a ser la pestaña
+«URLs» de la ficha del censo, activa también en la ficha de una URL (era V29:
+nunca salía activa), con la cabecera compacta encima y sin botón «Volver».
+Pendiente: el panel lateral del Explorador como versión recortada de la ficha
+de URL; hoy repite los datos con otros bloques y otro orden.
+
 ### Lo que salió por el camino (2026-10-14)
 
 Cosas que no estaban en la auditoría y aparecieron al hacerla:
