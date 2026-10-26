@@ -1721,13 +1721,57 @@ def _wordpress_de_url(db: Session, job_id: uuid.UUID, url_hash: str | None) -> l
             for t, i, st, m, c, u in filas]
 
 
+def _inspeccion_google(db: Session, job: Job, url_obj: Url) -> dict | None:
+    """La ultima inspeccion de Google de esta URL (decision 189, sobre la 144):
+    si la tiene indexada y que canonical elige. Es una muestra diaria y
+    rotatoria del CLIENTE, no del censo: va con su fecha y la de la ultima
+    visita de Google, y la ficha lo dice asi. Las comparaciones con la regla de
+    `shared.indexabilidad.misma_url`, la misma del analisis: dos copias
+    acabarian discrepando. Sin cliente, sin inspeccion o sin la tabla: None.
+    Best-effort: el `try` cubre la funcion entera (decision 40)."""
+    try:
+        if not getattr(job, "cliente_id", None):
+            return None
+        from shared.gsc import clave_de_url
+        from shared.indexabilidad import misma_url
+        from shared.models import GscInspeccion as G
+
+        with db.begin_nested():
+            fila = (db.query(G)
+                    .filter(G.cliente_id == job.cliente_id, G.url_clave == clave_de_url(url_obj.url),
+                            G.error.is_(None))
+                    .order_by(G.fecha.desc()).first())
+        if fila is None:
+            return None
+        meta = url_obj.html_meta
+        declarado_hoy = (meta.canonical_href or meta.canonical_header) if meta else None
+        declarado_hoy = declarado_hoy or url_obj.url
+        return {
+            "fecha": fila.fecha.isoformat() if fila.fecha else None,
+            "ultimo_rastreo": fila.ultimo_rastreo.isoformat() if fila.ultimo_rastreo else None,
+            "verdict": fila.verdict,
+            "cobertura": fila.cobertura,
+            "canonical_google": fila.canonical_google,
+            "canonical_visto": fila.canonical_usuario,
+            # Google eligio la misma que vio declarada (None: falta alguna)
+            "google_acepta": (misma_url(fila.canonical_google, fila.canonical_usuario)
+                              if fila.canonical_google and fila.canonical_usuario else None),
+            # Lo que Google vio declarado es lo que la pagina declara hoy:
+            # si no, su eleccion es de una version anterior (decision 144).
+            "visto_igual_que_hoy": (misma_url(fila.canonical_usuario, declarado_hoy)
+                                    if fila.canonical_usuario else None),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)
 def get_url_detail(
     job_id: uuid.UUID,
     url_id: int,
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
 
     url_obj = (
         db.query(Url)
@@ -1796,6 +1840,7 @@ def get_url_detail(
     resp.robots_regla = _robots_regla(db, job_id, url_obj)
     resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
     resp.wordpress = _wordpress_de_url(db, job_id, url_obj.url_hash)
+    resp.google_inspeccion = _inspeccion_google(db, job, url_obj)
 
     out_items = []
     for link_obj, src_url in outlink_rows:

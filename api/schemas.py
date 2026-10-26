@@ -1150,6 +1150,11 @@ class UrlDetailResponse(UrlResponse):
     # otro esquema. Vacio = el adaptador no la leyo (no es WordPress, no se
     # analizo, o no es una entidad que la REST API liste).
     wordpress: list[dict[str, Any]] = []
+    # La ultima inspeccion de Google de la URL (decision 189): fecha, ultima
+    # visita, cobertura y canonical que elige Google frente al que vio
+    # declarado. None = Search Console no la ha inspeccionado (es una muestra
+    # diaria del cliente) o el censo no tiene cliente.
+    google_inspeccion: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

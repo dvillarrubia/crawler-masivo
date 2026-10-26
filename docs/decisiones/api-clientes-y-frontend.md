@@ -514,3 +514,29 @@
    Probado de punta a punta con el cliente oficial del SDK contra uvicorn: 401,
    descubrimiento, registro, autorizar con la clave, token, las 17
    herramientas, y un lanzamiento simulado que no escribe nada.
+
+<a id="d189"></a>
+189. **La ficha de una URL trae la última inspección de Google de esa URL
+   (`google_inspeccion`), con su fecha, y no solo cuando algo no cuadra**
+   (revisión de UX del 25-oct, 2.7; sobre la 144). La canonical que elige
+   Google solo llegaba a la interfaz por los avisos
+   `google_elige_otro_canonical` y `google_tiene_canonical_antiguo`, que salen
+   cuando no coincide: en las 3.727 URLs de Lopesan inspeccionadas, 155. En las
+   demás no se podía decir «Google acepta tu canonical» aunque estuviera
+   guardado. Se lee de `gsc_inspecciones` por cliente y `url_clave`
+   (`shared.gsc.clave_de_url`), la última sin error:
+   - **Con su fecha y la de la última visita de Google**: es una muestra
+     rotatoria del cliente, no del censo; la ficha dice «según la inspección de
+     Google del 19 oct (su última visita: 11 oct)». No se limita a la ventana
+     de −30/+14 días del análisis: es la última que hay, y va fechada.
+   - **`google_acepta` y `visto_igual_que_hoy` se calculan en la API con
+     `shared.indexabilidad.misma_url`**, la regla del análisis: una copia en
+     JavaScript acabaría discrepando del aviso. Si Google vio declarada otra
+     canonical que la de hoy, su elección es de una versión anterior y la
+     ficha no dice que Google ignore la de hoy.
+   - **None no es «Google no la tiene»**: sin cliente, sin inspección o solo
+     con inspecciones fallidas. La ficha dice que no está inspeccionada solo
+     si el censo tiene inspecciones (`gsc_resumen.inspeccion`); contra una API
+     sin el campo, usa los detalles de los avisos y, sin ellos, «no consta».
+   - Best-effort: el `try` cubre la función entera; un fallo deja la ficha
+     igual, sin el campo. Test: `tests/test_ficha_url_google.py`.
