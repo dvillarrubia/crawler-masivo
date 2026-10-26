@@ -420,6 +420,9 @@ const fmt = {
         partes.push((DETALLE_LABEL[k] || k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
       } else if (k === 'canonical_host') {
         if (!d.canonical) partes.push('a ' + v);
+      } else if (k === 'inspeccionada' || k === 'ultimo_rastreo_google') {
+        // Fechas de la inspeccion de Google: «19 oct», no el ISO entero.
+        partes.push((DETALLE_LABEL[k] || k) + ' ' + (/^\d{4}-\d\d-\d\d/.test(v) ? fmt.diaCorto(v) : v));
       } else if (k === 'target_status') {
         partes.push(`el destino responde ${v}`);
       } else if (k === 'clase') {
@@ -808,6 +811,8 @@ function app() {
     accesibilidad: null,
     urlDetailTab: 'general',
     urlDetailLoading: false,
+    urlProblemas: [],          // problemas de la URL agrupados por tipo (2.7)
+    urlTiposJob: null,         // { job, por: {tipo: paginas} } para «Ver las N paginas»
     contentViewMode: 'markdown',
 
     // ------- Init -------
@@ -3258,12 +3263,157 @@ function app() {
       if (this.view === 'explorer') this._unbindExplorerKeyNav();
       this.urlDetailId = urlId;
       this.view = 'url-detail';
+      this.urlProblemas = [];
+      this.cargarPaginasPorTipo();
       try {
-        this.urlDetail = await api(`/jobs/${this.job.id}/urls/${urlId}`);
+        const d = await api(`/jobs/${this.job.id}/urls/${urlId}`);
+        this.urlProblemas = this._agruparProblemasUrl(d.issues);
+        this.urlDetail = d;
       } catch (e) { this.error = e.message; }
       this.urlDetailLoading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
       this.$nextTick(() => lucide.createIcons());
+    },
+
+    // Los problemas de la URL agrupados por tipo (revision de UX del 25-oct,
+    // 2.7; V27): antes salia el mismo tipo cuatro veces, con el JSON en crudo
+    // y sin enlace a su tipo. Un grupo por tipo con su gravedad mas alta, los
+    // detalles legibles y sin repetir, y si es de plantilla o de servidor: un
+    // hallazgo con `paginas_afectadas` (decisiones 53, 64 y 73) o con
+    // `alcance` cuelga de una pagina de anclaje y se arregla una vez.
+    _agruparProblemasUrl(issues) {
+      const ORDEN = { error: 0, warning: 1, info: 2 };
+      const por = new Map();
+      for (const i of issues || []) {
+        let g = por.get(i.issue_type);
+        if (!g) {
+          g = { tipo: i.issue_type, severity: i.severity, n: 0, dePlantilla: 0, deServidor: 0,
+                paginasAfectadas: 0, detalles: new Map() };
+          por.set(i.issue_type, g);
+        }
+        g.n++;
+        if ((ORDEN[i.severity] ?? 3) < (ORDEN[g.severity] ?? 3)) g.severity = i.severity;
+        const d = i.details || {};
+        const pa = +d.paginas_afectadas || 0;
+        if (d.alcance === 'host' || (d.host && d.paginas_del_host != null)) g.deServidor++;
+        else if (d.alcance === 'plantilla' || pa > 1) g.dePlantilla++;
+        g.paginasAfectadas = Math.max(g.paginasAfectadas, pa);
+        const txt = this.detalleEnFicha(d);
+        if (txt) g.detalles.set(txt, (g.detalles.get(txt) || 0) + 1);
+      }
+      return [...por.values()].map(g => ({
+        ...g,
+        // «servidor» o «plantilla» solo si lo son TODAS las del tipo en esta
+        // pagina; si solo algunas, «en parte» (no se afirma de las demas).
+        alcance: g.deServidor === g.n ? 'servidor'
+          : g.dePlantilla + g.deServidor === g.n ? 'plantilla'
+          : g.dePlantilla + g.deServidor ? 'parte' : null,
+        detalles: [...g.detalles].map(([texto, n]) => ({ texto, n })),
+      })).sort((a, b) => (ORDEN[a.severity] ?? 3) - (ORDEN[b.severity] ?? 3) || b.n - a.n);
+    },
+
+    // El detalle de una incidencia en la ficha de SU url: sin lo que ya dice
+    // la cabecera del grupo (plantilla, paginas afectadas, ejemplos, que aqui
+    // empezaban por la propia pagina).
+    detalleEnFicha(d) {
+      if (!d || typeof d !== 'object') return '';
+      const c = { ...d };
+      for (const k of ['alcance', 'paginas_afectadas', 'apariciones', 'paginas_ejemplo', 'paginas_del_host',
+                       'verdict', 'ventana_dias']) delete c[k];
+      for (const k of ['destinos_internos_distintos', 'destinos_fuera_del_censo']) if (!c[k]) delete c[k];
+      // «posición nav» → «en Navegación»: el nombre que usa la pestana Enlaces.
+      if (typeof c.posicion === 'string' && POSITION_LABEL[c.posicion]) {
+        c.en = POSITION_LABEL[c.posicion].toLowerCase(); delete c.posicion;
+      }
+      const pa = +d.paginas_afectadas || 0;
+      return [fmt.detalles(c), pa > 1 ? 'en ' + fmt.num(pa) + ' páginas' : ''].filter(Boolean).join(' · ');
+    },
+
+    // Paginas con cada tipo en el censo, para «Ver las N paginas con este
+    // problema». Sin segmento (la de Problemas puede llevar uno) y sumando
+    // las gravedades del tipo, como filtra la pestana URLs por `issue_type`.
+    // Si falla, el enlace sale sin cifra.
+    async cargarPaginasPorTipo() {
+      const job = this.job && this.job.id;
+      if (!job || (this.urlTiposJob && this.urlTiposJob.job === job)) return;
+      try {
+        const filas = await api(`/jobs/${job}/issues/resumen?ejemplos=0`);
+        const por = {};
+        for (const r of filas) por[r.issue_type] = (por[r.issue_type] || 0) + r.paginas;
+        if (this.job && this.job.id === job) this.urlTiposJob = { job, por };
+      } catch (_) { /* sin cifra */ }
+    },
+
+    // Texto del enlace a URLs filtrada por el tipo; si empieza por «Solo» no
+    // hay a donde ir y se pinta sin enlace.
+    textoVerPaginasTipo(g) {
+      const n = this.urlTiposJob && this.job && this.urlTiposJob.job === this.job.id
+        ? this.urlTiposJob.por[g.tipo] : null;
+      // Un hallazgo de plantilla se anota en una pagina de ejemplo: URLs
+      // lista esas, no las miles a las que afecta.
+      if (g.alcance === 'plantilla' || g.alcance === 'servidor') {
+        if (n === 1) return 'Solo se anota en esta página';
+        return n ? 'Ver en URLs las ' + fmt.num(n) + (n === 1 ? ' página donde se anota' : ' páginas donde se anota')
+          : 'Ver en URLs las páginas donde se anota';
+      }
+      if (!n) return 'Ver las páginas con este problema';
+      return n === 1 ? 'Solo esta página tiene este problema' : 'Ver las ' + fmt.num(n) + ' páginas con este problema';
+    },
+
+    // Tarjeta «Google (90 dias)» (revision de UX del 25-oct, 2.7; V28): lo
+    // que ya guarda la URL de Search Console (`gsc_*`, decision 142) y la
+    // canonical que elige Google segun su inspeccion (decision 189). NULL no
+    // es 0: sin datos se dice por que, sin ceros que parezcan datos.
+    googleDeUrl() {
+      const u = this.urlDetail;
+      if (!u) return null;
+      const r = this.job && this.job.gsc_resumen;
+      const g = { ventana: r && r.desde && r.hasta ? 'del ' + fmt.diaCorto(r.desde) + ' al ' + fmt.diaCorto(r.hasta) : '',
+                  cifras: null, frase: '', canonical: null, inspeccion: null, canonicalFrase: '' };
+      if (u.gsc_clics != null || u.gsc_impresiones != null) {
+        // El analisis solo escribe 0 si Search Console cubre la ventana entera.
+        if (!u.gsc_impresiones) g.frase = 'No ha salido en ninguna búsqueda de Google en estos 90 días.';
+        else g.cifras = { clics: u.gsc_clics || 0, impresiones: u.gsc_impresiones, posicion: u.gsc_posicion };
+      } else if (!r) {
+        g.frase = 'Este censo no tiene datos de Search Console: el cliente no lo tiene conectado o el censo se analizó antes de conectarlo.';
+      } else if (u.is_internal === false) {
+        g.frase = 'Es una URL de fuera del sitio: Search Console solo da datos de las del sitio.';
+      } else if (!r.cubre_la_ventana) {
+        g.frase = 'Search Console no cubre los 90 días enteros' + (r.datos_desde ? ' (hay datos desde el ' + fmt.diaCorto(r.datos_desde) + ')' : '')
+          + ': no se puede decir cuánto tráfico trae esta URL.';
+      } else {
+        g.frase = 'Search Console no tiene datos de esta URL.';
+      }
+      if (!r || !r.inspeccion) return g;  // el cliente no tiene inspecciones
+      const insp = u.google_inspeccion;
+      const TIPOS = ['google_elige_otro_canonical', 'google_tiene_canonical_antiguo', 'indexable_no_indexada_por_google'];
+      const aviso = (u.issues || []).find(i => TIPOS.includes(i.issue_type));
+      if (insp) {
+        g.inspeccion = { fecha: insp.fecha, visita: insp.ultimo_rastreo, cobertura: insp.cobertura };
+        if (insp.canonical_google) {
+          g.canonical = insp.canonical_google;
+          g.canonicalFrase = insp.visto_igual_que_hoy === false
+            ? 'Google la eligió cuando la página declaraba otra canonical; hoy declara otra distinta: cambiará con la próxima visita de Google.'
+            : insp.google_acepta ? 'La misma que declara la página.'
+            : insp.google_acepta === false ? 'No es la que declara la página: Google no le hace caso a su canonical.' : '';
+        }
+      } else if (insp === undefined && aviso) {
+        // Una API sin `google_inspeccion` (anterior a la decision 189): lo que
+        // dicen los avisos de la inspeccion, que solo salen si algo no cuadra.
+        const d = aviso.details || {};
+        g.inspeccion = { fecha: d.inspeccionada, visita: d.ultimo_rastreo_google, cobertura: d.cobertura };
+        if (d.canonical_de_google) {
+          g.canonical = d.canonical_de_google;
+          g.canonicalFrase = aviso.issue_type === 'google_elige_otro_canonical'
+            ? 'No es la que declara la página: Google no le hace caso a su canonical.'
+            : 'Google la eligió cuando la página declaraba otra canonical; hoy declara otra distinta: cambiará con la próxima visita de Google.';
+        }
+      } else if (insp === null) {
+        g.canonicalFrase = 'Search Console aún no ha inspeccionado esta URL (inspecciona unas cuantas cada día): no se sabe qué canonical elige Google.';
+      } else {
+        g.canonicalFrase = 'Qué canonical elige Google: no consta para esta URL.';
+      }
+      return g;
     },
 
     // ------- Problemas -------

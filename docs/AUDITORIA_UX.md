@@ -156,6 +156,17 @@ nunca salía activa), con la cabecera compacta encima y sin botón «Volver».
 Pendiente: el panel lateral del Explorador como versión recortada de la ficha
 de URL; hoy repite los datos con otros bloques y otro orden.
 
+Revisión del 25-oct, 2.7 (26-oct; V27, V28): la ficha de URL agrupa sus
+problemas por tipo (en `/blog/` de Lopesan, 23 avisos pasan a 5 bloques), con
+el texto de `incidencias.js`, el detalle legible, si es de plantilla o del
+servidor (`paginas_afectadas` o `alcance`, decisiones 53, 64 y 73; «en parte»
+si solo lo son algunas) y el enlace a URLs filtrada por el tipo. En un
+hallazgo de plantilla el enlace dice «las N páginas donde se anota»: URLs
+lista las páginas de anclaje, no las miles afectadas. La tarjeta «Google (90
+días)» lee `gsc_clics`, `gsc_impresiones` y `gsc_posicion` de la URL (NULL no
+es 0: sin datos dice por qué) y la canonical de Google de `google_inspeccion`
+(decisión 189); contra una API anterior, de los avisos de la inspección.
+
 ### Lo que salió por el camino (2026-10-14)
 
 Cosas que no estaban en la auditoría y aparecieron al hacerla:

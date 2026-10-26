@@ -4882,26 +4882,63 @@
                   <div class="text-sm text-dim" data-testid="url-wordpress" x-text="'WordPress: ' + textoEntidadWp(w)"></div>
                 </template>
               </div>
+              <!-- Un tipo por fila, con cuantas veces y si es de plantilla
+                   (revision de UX del 25-oct, 2.7; V27): antes el mismo tipo
+                   salia repetido hasta llenar las cinco filas. -->
               <div class="card">
                 <div class="veredicto-titulo">
                   Problemas
-                  <a href="#" class="text-sm" style="margin-left:auto" x-show="(urlDetail.issues || []).length"
-                     @click.prevent="urlDetailTab = 'issues'">ver detalle</a>
+                  <a href="#" class="text-sm" style="margin-left:auto" x-show="urlProblemas.length"
+                     @click.prevent="urlDetailTab = 'issues'">ver qué le pasa</a>
                 </div>
-                <template x-if="!(urlDetail.issues || []).length">
+                <template x-if="!urlProblemas.length">
                   <div class="veredicto-valor green">Ninguno</div>
                 </template>
                 <ul class="veredicto-lista">
-                  <template x-for="(i, n) in [...(urlDetail.issues || [])].sort((a, b) => ({error:0,warning:1,info:2}[a.severity] ?? 3) - ({error:0,warning:1,info:2}[b.severity] ?? 3)).slice(0, 5)" :key="n">
+                  <template x-for="g in urlProblemas.slice(0, 5)" :key="g.tipo">
                     <li>
-                      <span class="sev-chip" :class="'sev-' + i.severity" x-text="fmt.severity(i.severity)"></span>
-                      <span x-text="fmt.issue(i.issue_type)" :title="fmt.detalles(i.details)"></span>
+                      <span class="sev-chip" :class="'sev-' + g.severity" x-text="fmt.severity(g.severity)"></span>
+                      <span class="url-problema-nombre">
+                        <span x-text="fmt.issue(g.tipo)"></span><span class="text-dim" x-show="g.n > 1" x-text="' × ' + g.n"></span>
+                        <span class="chip-alcance" x-show="g.alcance === 'plantilla' || g.alcance === 'servidor'"
+                              x-text="g.alcance === 'servidor' ? 'del servidor' : 'de plantilla'"></span>
+                      </span>
                     </li>
                   </template>
                 </ul>
-                <div class="text-sm text-dim" x-show="(urlDetail.issues || []).length > 5"
-                     x-text="'y ' + ((urlDetail.issues || []).length - 5) + ' más'"></div>
+                <div class="text-sm text-dim" x-show="urlProblemas.length > 5"
+                     x-text="'y ' + (urlProblemas.length - 5) + (urlProblemas.length - 5 === 1 ? ' tipo más' : ' tipos más')"></div>
               </div>
+              <!-- Google (90 dias) (revision de UX del 25-oct, 2.7; V28): lo que
+                   Search Console dice de esta URL. Sin datos, una frase que dice
+                   por que; nunca ceros que parezcan datos. -->
+              <template x-for="g in [googleDeUrl()].filter(Boolean)" :key="'google'">
+                <div class="card url-google">
+                  <div class="veredicto-titulo">
+                    Google (90 días)
+                    <span class="text-sm" style="margin-left:auto;text-transform:none;letter-spacing:0" x-show="g.ventana" x-text="g.ventana"></span>
+                  </div>
+                  <template x-if="g.cifras">
+                    <div class="url-google-cifras">
+                      <div><strong x-text="fmt.num(g.cifras.clics)"></strong><span class="text-sm text-dim">clics</span></div>
+                      <div><strong x-text="fmt.num(g.cifras.impresiones)"></strong><span class="text-sm text-dim">impresiones</span></div>
+                      <div x-show="g.cifras.posicion != null"><strong x-text="fmt.num(g.cifras.posicion)"></strong><span class="text-sm text-dim">posición media</span></div>
+                    </div>
+                  </template>
+                  <div class="text-sm" x-show="g.frase" x-text="g.frase"></div>
+                  <template x-if="g.canonical">
+                    <div class="text-sm url-google-canonical">
+                      <span class="text-dim">Canonical que elige Google:</span>
+                      <a :href="g.canonical" target="_blank" rel="noopener" x-text="g.canonical"></a>
+                    </div>
+                  </template>
+                  <div class="text-sm text-dim" x-show="g.canonicalFrase" x-text="g.canonicalFrase"></div>
+                  <template x-if="g.inspeccion && g.inspeccion.fecha">
+                    <div class="text-sm text-dim"
+                         x-text="'Según la inspección de Google del ' + fmt.diaCorto(g.inspeccion.fecha) + (g.inspeccion.visita ? ' (su última visita: ' + fmt.diaCorto(g.inspeccion.visita) + ')' : '') + (g.inspeccion.cobertura ? ': ' + g.inspeccion.cobertura.charAt(0).toLowerCase() + g.inspeccion.cobertura.slice(1) + '.' : '.')"></div>
+                  </template>
+                </div>
+              </template>
               <!-- Capturas de pantalla por muestra de plantilla (decisión 173):
                    la primera pantalla con el dispositivo del censo y, si se
                    pidió, con el otro. Solo las URLs muestreadas tienen. -->
@@ -4980,9 +5017,9 @@
                 <div class="stat-label" data-tip="Importancia de esta página según los enlaces internos que recibe, en escala 0-100 logaritmica anclada al máximo del sitio: cada 25 puntos son diez veces menos autoridad que la página mas fuerte.">PageRank (0-100)</div>
               </div>
               <div class="stat-card">
-                <div class="stat-value" style="font-size:1.3rem" :class="urlDetail.issues?.length > 0 ? 'orange' : 'green'"
-                  x-text="urlDetail.issues?.length || 0"></div>
-                <div class="stat-label">Problemas</div>
+                <div class="stat-value" style="font-size:1.3rem" :class="urlProblemas.length > 0 ? 'orange' : 'green'"
+                  x-text="urlProblemas.length"></div>
+                <div class="stat-label">Tipos de problema</div>
               </div>
             </div>
 
@@ -5005,7 +5042,7 @@
                 Recursos <span class="count" x-text="urlDetail.resources?.length || 0"></span>
               </button>
               <button type="button" class="tab" :class="urlDetailTab === 'issues' && 'active'" @click="urlDetailTab = 'issues'">
-                Problemas <span class="count" x-text="urlDetail.issues?.length || 0"></span>
+                Problemas <span class="count" x-text="urlProblemas.length"></span>
               </button>
               <button type="button" class="tab" :class="urlDetailTab === 'general' && 'active'" @click="urlDetailTab = 'general'">Todos los campos</button>
               <button type="button" class="tab" :class="urlDetailTab === 'security' && 'active'" @click="urlDetailTab = 'security'">Seguridad</button>
@@ -5330,34 +5367,63 @@
 
             <!-- ===== TAB: PROBLEMAS ===== -->
             <template x-if="urlDetailTab === 'issues'">
+              <!-- Que le pasa a la URL, un bloque por tipo (revision de UX del
+                   25-oct, 2.7; V27): que es, el detalle legible y sin repetir,
+                   que decide Google, como se arregla, si es de plantilla y el
+                   enlace a las demas paginas con el mismo problema. -->
               <div class="card">
-                <template x-if="urlDetail.issues && urlDetail.issues.length > 0">
+                <template x-if="urlProblemas.length > 0">
                   <div>
-                    <div class="flex items-center justify-between mb-2">
-                      <h3 class="seo-section-title" style="margin:0">Problemas detectados</h3>
-                      <span class="text-dim text-sm" x-text="urlDetail.issues.length + ' problemas'"></span>
+                    <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:.25rem .75rem">
+                      <h3 class="seo-section-title" style="margin:0">Qué le pasa a esta página</h3>
+                      <span class="text-dim text-sm"
+                            x-text="fmt.num(urlProblemas.length) + (urlProblemas.length === 1 ? ' tipo de problema' : ' tipos de problema') + ((urlDetail.issues || []).length !== urlProblemas.length ? ' · ' + fmt.num(urlDetail.issues.length) + ' avisos' : '')"></span>
                     </div>
                     <div class="issues-list">
-                      <template x-for="i in urlDetail.issues" :key="i.id">
-                        <div class="issue-item" :class="'issue-' + i.severity">
-                          <div class="issue-header">
-                            <span :class="'severity-' + i.severity" style="font-weight:600;text-transform:uppercase;font-size:.75rem"
-                              x-text="fmt.severity(i.severity)"></span>
-                            <span style="font-weight:500" x-text="fmt.issue(i.issue_type)"></span>
+                      <template x-for="g in urlProblemas" :key="g.tipo">
+                        <div class="issue-item url-problema" :class="'issue-' + g.severity" x-data="{ todos: false }">
+                          <div class="issue-header" style="flex-wrap:wrap">
+                            <span class="sev-chip" :class="'sev-' + g.severity" x-text="fmt.severity(g.severity)"></span>
+                            <strong x-text="fmt.issue(g.tipo)"></strong>
+                            <span class="text-dim text-sm" x-show="g.n > 1" x-text="g.n + ' veces'"></span>
+                            <span class="chip-alcance" x-show="g.alcance"
+                                  x-text="g.alcance === 'servidor' ? 'es del servidor: se arregla una vez' : g.alcance === 'plantilla' ? 'es de plantilla: se arregla una vez' : 'en parte de plantilla'"></span>
                           </div>
-                          <template x-if="i.details">
-                            <div class="issue-details">
-                              <template x-for="[k, v] in Object.entries(i.details)" :key="k">
-                                <span class="issue-detail-item"><span class="text-dim" x-text="k + ':'"></span> <span x-text="v"></span></span>
+                          <p class="text-sm" x-show="(ISSUE_INFO[g.tipo] || {}).que" x-text="(ISSUE_INFO[g.tipo] || {}).que"></p>
+                          <p class="text-sm text-dim" x-show="g.paginasAfectadas > 1"
+                             x-text="(g.alcance === 'servidor' ? 'Lo da el servidor en ' : 'Se repite en ') + (g.n > 1 ? 'hasta ' : '') + fmt.num(g.paginasAfectadas) + ' páginas del censo; se anota una vez, en una página de ejemplo como esta.'"></p>
+                          <template x-if="g.detalles.length">
+                            <ul class="url-problema-detalles">
+                              <template x-for="(d, n) in (todos ? g.detalles : g.detalles.slice(0, 6))" :key="n">
+                                <li><span x-text="d.texto"></span><span class="text-dim" x-show="d.n > 1" x-text="' (× ' + d.n + ')'"></span></li>
                               </template>
-                            </div>
+                              <template x-if="g.detalles.length > 6 && !todos">
+                                <li style="list-style:none"><a href="#" @click.prevent="todos = true" x-text="'Ver los ' + (g.detalles.length - 6) + ' restantes'"></a></li>
+                              </template>
+                            </ul>
                           </template>
+                          <template x-if="ISSUE_INFO[g.tipo]">
+                            <dl class="issue-explica text-sm">
+                              <dt>Qué decide Google</dt><dd x-text="ISSUE_INFO[g.tipo].google"></dd>
+                              <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[g.tipo].arreglo"></dd>
+                            </dl>
+                          </template>
+                          <div class="text-sm" style="margin-top:.35rem">
+                            <template x-if="textoVerPaginasTipo(g).startsWith('Solo')">
+                              <span class="text-dim" x-text="textoVerPaginasTipo(g)"></span>
+                            </template>
+                            <template x-if="!textoVerPaginasTipo(g).startsWith('Solo')">
+                              <a :href="'#/rastreos/' + job.id + '/explorador?problema=' + encodeURIComponent(g.tipo)"
+                                 :title="g.alcance === 'plantilla' || g.alcance === 'servidor' ? 'Un hallazgo de plantilla o de servidor se anota una vez, en una página de ejemplo; afecta a muchas más' : ''"
+                                 x-text="textoVerPaginasTipo(g) + ' →'"></a>
+                            </template>
+                          </div>
                         </div>
                       </template>
                     </div>
                   </div>
                 </template>
-                <template x-if="!urlDetail.issues || urlDetail.issues.length === 0">
+                <template x-if="urlProblemas.length === 0">
                   <div class="empty">
                     <div style="font-size:2rem;margin-bottom:.5rem">&#10003;</div>
                     <h3 style="color:var(--green)">Sin problemas</h3>

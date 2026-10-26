@@ -1585,3 +1585,14 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
   .tabla-apilable td.celda-acciones{text-align:left !important}
   .tabla-apilable .truncate{max-width:100% !important}
 }
+
+/* Ficha de URL: problemas por tipo y tarjeta de Google (revision de UX del 25-oct, 2.7) */
+.url-problema-nombre{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.1rem .4rem;min-width:0}
+.chip-alcance{font-size:.7rem;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--border);color:var(--text-dim);background:var(--bg);white-space:nowrap}
+.url-problema{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.5rem}
+.url-problema p{margin:0}
+.url-problema-detalles{margin:0;padding-left:1.1rem;font-size:.82rem;display:flex;flex-direction:column;gap:.15rem;overflow-wrap:anywhere}
+.url-google-cifras{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem}
+.url-google-cifras div{display:flex;flex-direction:column}
+.url-google-cifras strong{font-size:1.15rem}
+.url-google-canonical{overflow-wrap:anywhere}

@@ -1025,6 +1025,15 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   (`GET /api/jobs/cola`), los próximos disparos y los rastreos sin cliente;
   Programados y Todos los rastreos son apartados suyos. Detalle en
   `docs/AUDITORIA_UX.md`.
+- **Ficha de URL que explica qué le pasa** (revisión de UX del 25-oct, 2.7,
+  hecho el 26-oct; V27 y V28): los problemas de la URL agrupados por tipo,
+  con qué es, el detalle legible y sin repetir, qué decide Google, cómo se
+  arregla, «es de plantilla / del servidor: se arregla una vez» y «Ver las N
+  páginas con este problema» (la pestaña URLs filtrada). Tarjeta «Google (90
+  días)» con clics, impresiones y posición media de Search Console y la
+  canonical que elige Google según su última inspección (campo
+  `google_inspeccion` de la ficha, decisión 189); sin datos, una frase que
+  dice por qué.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

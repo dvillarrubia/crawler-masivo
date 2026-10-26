@@ -1060,7 +1060,7 @@ const DETALLE_LABEL = {
   max_snippet: 'máx. caracteres del fragmento',
   version: 'versión comparada',
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
-  cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'comprobada',
+  cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
   // Accesibilidad con axe (decisión 174)
