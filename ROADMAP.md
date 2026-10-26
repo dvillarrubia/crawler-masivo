@@ -1121,6 +1121,17 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   calcula el detalle después (V21; las incidencias guardadas, solo si los dos
   censos siguen con la versión del análisis con la que se compararon), y el
   desplegable va por tipo (V22). Solo frontend.
+- **Móvil y barra del Explorador** (revisión de UX del 25-oct, 3.2 y 3.4,
+  decisión 199; en local, sin desplegar): a 390 px la portada de clientes,
+  todos los rastreos y la evolución del cliente son tarjetas (estado, si ha
+  terminado, errores y alertas) con el patrón de Enlaces, y ninguna ruta
+  desborda (medido en las 21; `tests/test_movil_frontend.py`). En la pestaña
+  URLs la barra lateral pasa a un desplegable con sus cifras; en escritorio la
+  búsqueda va primero y ancha, «Agrupar ▾» es un solo botón, la URL queda fija
+  al desplazar, las columnas de serie empiezan por indexable, enlaces
+  entrantes y clics de Google (si hay Search Console), y todas las entradas de
+  la barra llevan su cifra («0» si es cero). «Páginas HTML» (la cifra de la
+  tarjeta) y «Todo el HTML» son dos entradas (V30). Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

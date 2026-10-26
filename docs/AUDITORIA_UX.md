@@ -392,6 +392,46 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Lo abierto: la fila de un hallazgo agrupado de otros tipos sigue contando «1
   página» (la de anclaje).
 
+### Revisión del 25-oct · 3.2 Móvil y 3.4 barra del Explorador (V41, UX-22, V30)
+
+- [x] **La página no desborda a 390 px en ninguna ruta** (V41, UX-22): medido
+  con `document.documentElement.scrollWidth` en las 21 rutas de la revisión
+  (clientes, ficha y pestañas del cliente, alta, Programados, Producción,
+  Ajustes, Rastreos, las doce pestañas del censo y la ficha de una URL) contra
+  producción, y en `tests/test_movil_frontend.py` en las cinco principales. El
+  Resumen ya no desbordaba desde 2.10/2.11 (las tablas técnicas del Resumen,
+  Problemas y URLs ya tenían su propio scroll).
+- [x] **Listas como tarjetas** con el patrón de Enlaces (`.tabla-tarjetas` y
+  `data-label`): portada de clientes (último censo, errores, tendencia,
+  alertas), todos los rastreos (cliente, estado, rastreadas, creado, duración;
+  la casilla arriba a la derecha) y la evolución del cliente (el rastreo
+  arriba, páginas, errores con su diferencia, avisos y alertas). Lo que no
+  decide en el móvil (páginas e indexables de la portada, semillas, URLs) se
+  esconde ahí. Programados y Producción ya eran tarjetas (2.12) y los perfiles
+  de Configuración ya se apilaban (2.2).
+- [x] **Explorador en móvil**: la barra lateral pasa a un desplegable «Qué URLs
+  ver» con las mismas entradas y su cifra (y las vistas guardadas); la barra
+  de arriba se reparte en filas y la ayuda de los filtros por columna se
+  esconde. La URL fija ocupa como mucho la mitad de la pantalla.
+- [x] **Barra del Explorador** (3.4): la búsqueda primero y ancha (con la barra
+  llena se quedaba en «Busc»; ahora la barra pasa a dos filas antes de
+  encogerla), «Agrupar ▾» en un solo botón con «Sin agrupar», «Por plantilla»
+  y «Por segmento», la columna URL fija al desplazar en horizontal, y columnas
+  de serie que deciden: indexable y enlaces entrantes detrás del estado, y los
+  clics de Google si el censo tiene Search Console.
+- [x] **Contadores en todas las entradas, con «0» cuando es cero** (V30,
+  decisión 199): JavaScript, CSS, 5xx y Bloqueadas salen de `/stats`; Páginas
+  HTML, Indexables, No indexables y cada ámbito SEO, del `total` de `/urls` con
+  su filtro (en un ámbito, páginas con algún problema del ámbito).
+- [x] **«HTML 3.772» frente a «3.731 páginas HTML»** (V30): no era un fallo de
+  cuenta. La tarjeta son las HTML internas que responden 2xx; la barra, todo
+  lo que responde HTML (también los 41 4xx de Lopesan). Ahora son «Páginas
+  HTML» (3.731, la que abre la tarjeta) y «Todo el HTML» (3.772).
+- Lo abierto: «Indexables 3.407» en la barra frente a «3.216» en la tarjeta,
+  por lo mismo (la barra cuenta también PDF e imágenes): se explica en el
+  `title` de la entrada, sin cambiar el filtro. «Externas» sigue sin cifra con
+  la API de producción de hoy (sin `/links/resumen`).
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v

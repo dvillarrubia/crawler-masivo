@@ -2825,6 +2825,7 @@ function app() {
       try {
         this.stats = await api(`/jobs/${this.job.id}/stats`);
       } catch { this.stats = null; }
+      if (this.view === 'explorer') this.loadExplorerBadges();
       // Que bloquea cada bot por host (decision 129). Aparte: sin la tabla
       // robots_txt (un censo viejo) la ficha sale igual.
       try {
@@ -5594,6 +5595,7 @@ function app() {
     expDetailTab: 'resumen',
     expDetailOpen: false,
     expBadgeCounts: {},
+    _expContadores: null,       // { job, valores, pidiendo }: cifras de la barra que no salen de /stats
     expColumnsByTab: {},        // { tabKey: [colKey, ...] } — persisted column selection per tab
     expColumnPickerOpen: false,
     expColumnFilters: {},       // { columnKey: { op: '>=', value: '0.5' } | { value: 'foo' } | { op: 'vacio' } }
@@ -5809,7 +5811,84 @@ function app() {
       for (const sg of this.stats.urls_by_status_group || []) {
         b[sg.status_group] = sg.count;
       }
-      this.expBadgeCounts = b;
+      // Contadores en todas las entradas, con «0» cuando es cero (revision
+      // de UX del 25-oct, 3.4). Las cuentas de /stats agrupan el censo
+      // entero: un tipo o un estado que no sale ahi es que no hay ninguno.
+      for (const k of ['js', 'css', 'image', 'pdf', '2xx', '3xx', '4xx', '5xx']) if (b[k] == null) b[k] = 0;
+      b.bloqueadas = b.blocked || 0;
+      // Lo que /stats no cuenta con el mismo filtro que la pestaña se pide
+      // aparte (cargarContadoresExplorador) y se guarda por censo.
+      // Un rastreo que no ha terminado cambia de cifras: se vuelven a contar.
+      if (['pending', 'running', 'analyzing'].includes(this.job.status) && this._expContadores && !this._expContadores.pidiendo) this._expContadores = null;
+      const c = this._expContadores && this._expContadores.job === this.job.id ? this._expContadores.valores : {};
+      this.expBadgeCounts = { ...b, ...c };
+      this.cargarContadoresExplorador();
+    },
+
+    // Las entradas cuya cifra no sale de /stats: Páginas HTML, Indexables,
+    // No indexables, la extraccion a medida y cada ambito SEO (paginas de la
+    // vista con algun problema de su ambito, no la suma de incidencias: una
+    // pagina con dos problemas del ambito cuenta una vez). Es el `total` de
+    // /urls con el filtro de la pestaña, una consulta cada vez y en orden,
+    // para no cargar la API. Si una falla, esa entrada se queda sin cifra:
+    // nunca un 0 que no se ha contado. Un ambito sin ningun tipo en el
+    // resumen de problemas es 0 sin preguntar.
+    async cargarContadoresExplorador() {
+      const job = this.job;
+      if (!job || !this.stats) return;
+      if (!this._expContadores || this._expContadores.job !== job.id) this._expContadores = { job: job.id, valores: {}, pidiendo: false };
+      const cache = this._expContadores;
+      if (cache.pidiendo) return;
+      cache.pidiendo = true;
+      try {
+        if (!this.issuesResumen) await this.loadIssuesResumen();
+        const tipos = new Set((this.issuesResumen || []).map(r => r.issue_type));
+        for (const tab of EXP_TABS) {
+          if (!this.job || this.job.id !== job.id) return;
+          if (tab.divider || tab.header || cache.valores[tab.key] != null) continue;
+          const fuera = ['paginas_html', 'indexable', 'noindex', 'a_medida'];
+          if (!tab.ambito && !fuera.includes(tab.key)) continue;
+          if (tab.requiere && !this.expAMedida.length) continue;
+          if (tab.ambito && this.issuesResumen && !this.issuesSegmento && !tab.ambito.some(t => tipos.has(t))) {
+            cache.valores[tab.key] = 0;
+          } else {
+            const q = new URLSearchParams({ page: '1', page_size: '1', ligero: 'true' });
+            for (const [k, v] of Object.entries(tab.filter || {})) q.set(k, String(v));
+            if (tab.ambito) q.set('issue_type', tab.ambito.join(','));
+            try {
+              const r = await api(`/jobs/${job.id}/urls?${q}`);
+              cache.valores[tab.key] = r.total;
+            } catch (_) { continue; }
+          }
+          if (this.job && this.job.id === job.id) this.expBadgeCounts = { ...this.expBadgeCounts, [tab.key]: cache.valores[tab.key] };
+        }
+      } finally { cache.pidiendo = false; }
+    },
+
+    // Desplegable de vistas del Explorador en movil (revision de UX del
+    // 25-oct, 3.2): las mismas entradas que la barra lateral, con su cifra.
+    textoVistaMovil(tab) {
+      const n = this.expBadgeCounts[tab.key];
+      return tab.label + (n != null ? ' · ' + fmt.num(n) : '');
+    },
+
+    elegirVistaMovil(valor) {
+      if (valor === 'wp') return this.abrirSoloWordPress('');
+      if (valor.startsWith('vista:')) {
+        const v = this.expVistas.find(x => String(x.id) === valor.slice(6));
+        if (v) this.abrirVista(v);
+        return;
+      }
+      this.setExplorerTab(valor);
+    },
+
+    // «Agrupar ▾» en un solo boton (revision de UX del 25-oct, 3.4): sin
+    // agrupar, por plantilla o por segmento.
+    agruparCon(por) {
+      this.menuAbierto = '';
+      if (!por) { if (this.expAgrupar) this.alternarAgrupar(this.expAgruparPor); return; }
+      if (this.expAgrupar && this.expAgruparPor === por) return;
+      this.alternarAgrupar(por);
     },
 
     // Cambiar de pestaña ya no borra la busqueda ni los filtros: pasar de
@@ -6203,7 +6282,7 @@ function app() {
       const stored = this.expColumnsByTab[this.expTab];
       if (stored && stored.length) return stored;
       const tabCfg = EXP_TABS.find(t => t.key === this.expTab);
-      return (tabCfg && tabCfg.columns) || EXP_DEFAULT_COLUMNS;
+      return columnasPorDefecto((tabCfg && tabCfg.columns) || EXP_DEFAULT_COLUMNS, this.job);
     },
 
     getExpAllColumnKeys() {
@@ -6518,10 +6597,13 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Otros',       ['pagerank_raw','pagerank','text_ratio','last_crawled_at']],
 ];
 
+// Las que deciden primero, junto a la URL: si se indexa y cuanto se enlaza
+// (revision de UX del 25-oct, 3.4). Los clics de Google se anaden detras de
+// los enlaces entrantes si el censo tiene Search Console (columnasPorDefecto).
 const EXP_DEFAULT_COLUMNS = [
-  'url','status_code','title','title_len','meta_description','meta_description_len',
-  'content_type','content_length','response_time_ms','click_depth',
-  'word_count','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'
+  'url','status_code','indexable','inlinks_count','title','title_len','meta_description','meta_description_len',
+  'click_depth','word_count','pagerank_score','canonical_href',
+  'content_type','content_length','response_time_ms','outlinks_count'
 ];
 
 const HTML_INTERNO = { resource_type: 'html', is_internal: true };
@@ -6583,22 +6665,36 @@ function _defsAMedida(job) {
 
 const EXP_TABS = [
   { key: 'all',        label: 'Todas',       icon: 'layers',      filter: null,                                   columns: EXP_DEFAULT_COLUMNS },
-  { key: 'html',       label: 'HTML',        icon: 'file-text',   filter: { resource_type: 'html' },              columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','content_length','inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','indexable','canonical_href','meta_robots'] },
+  // V30 (revision de UX del 25-oct, 3.4): «HTML 3.772» en la barra y «3.731
+  // paginas HTML» en la tarjeta eran dos cuentas distintas con el mismo
+  // nombre: la tarjeta cuenta las internas que responden 2xx (lo indexable) y
+  // la barra todo lo que responde HTML, tambien los 4xx y 5xx. Ahora son dos
+  // entradas con nombre propio y la tarjeta abre la suya.
+  { key: 'paginas_html', label: 'Páginas HTML', icon: 'file-text', filter: { resource_type: 'html', is_internal: true, status_group: '2xx' },
+    titulo: 'Páginas HTML internas que responden 2xx: la misma cifra que la tarjeta «Páginas HTML» del Resumen',
+    columns: ['url','status_code','indexable','inlinks_count','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','content_length','outlinks_count','external_outlinks_count','pagerank_score','canonical_href','meta_robots'] },
+  { key: 'html',       label: 'Todo el HTML', icon: 'file-text',  filter: { resource_type: 'html' },
+    titulo: 'Todas las URLs que responden HTML, también las que dan error (4xx, 5xx)',
+    columns: ['url','status_code','indexable','inlinks_count','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','content_length','outlinks_count','external_outlinks_count','pagerank_score','canonical_href','meta_robots'] },
   { key: 'js',         label: 'JavaScript',  icon: 'file-code',   filter: { resource_type: 'js' },                columns: ['url','status_code','content_length','transfer_size','response_time_ms','last_modified'] },
   { key: 'css',        label: 'CSS',         icon: 'palette',     filter: { resource_type: 'css' },               columns: ['url','status_code','content_length','transfer_size','response_time_ms','last_modified'] },
   { key: 'image',      label: 'Imágenes',    icon: 'image',       filter: { resource_type: 'image' },             columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
   { key: 'pdf',        label: 'PDFs',        icon: 'file',        filter: { resource_type: 'pdf' },               columns: ['url','status_code','content_length','transfer_size','response_time_ms'] },
   { key: '_div1', divider: true },
-  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                  columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','indexable','canonical_href'] },
+  { key: 'internal',   label: 'Internas',    icon: 'home',        filter: { is_internal: true },                  columns: ['url','status_code','indexable','inlinks_count','title','title_len','meta_description','word_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','canonical_href'] },
   { key: 'external',   label: 'Externas',    icon: 'external-link', filter: { is_internal: false },               columns: ['url','status_code','host','content_type','content_length','response_time_ms'] },
   { key: '_div2', divider: true },
-  { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },               columns: ['url','status_code','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','inlinks_count','outlinks_count','pagerank_score','indexable','canonical_href'] },
+  { key: '2xx',        label: '2xx',         icon: 'check-circle', filter: { status_group: '2xx' },               columns: ['url','status_code','indexable','inlinks_count','title','title_len','meta_description','meta_description_len','word_count','response_time_ms','outlinks_count','pagerank_score','canonical_href'] },
   { key: '3xx',        label: '3xx',         icon: 'arrow-right', filter: { status_group: '3xx' },                columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','enlazada_desde','click_depth'] },
   { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','inlinks_count','origenes','enlazada_desde','click_depth','content_type'] },
   { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','click_depth','inlinks_count'] },
   { key: '_div3', divider: true },
-  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true }, columns: ['url','status_code','title','title_len','meta_description','word_count','inlinks_count','pagerank_score','canonical_href'] },
-  { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
+  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true },
+    titulo: 'URLs internas indexables de cualquier tipo: páginas HTML y también PDF o imágenes',
+    columns: ['url','status_code','inlinks_count','title','title_len','meta_description','word_count','pagerank_score','canonical_href'] },
+  { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },
+    titulo: 'URLs internas no indexables de cualquier tipo: también las redirecciones y las que dan error',
+    columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
   // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
   // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
   { key: 'bloqueadas', label: 'Bloqueadas robots', icon: 'slash',  filter: { status_group: 'blocked' },           columns: ['url','indexability_status','inlinks_count','click_depth'] },
@@ -6675,6 +6771,16 @@ const EXP_TABS = [
   { key: 'a_servidor', label: 'Servidor',      icon: 'server',       filter: { is_internal: true }, ambito: ['respuesta_lenta','html_sin_comprimir','tls_certificado_invalido','tls_caduca_pronto','tls_version_antigua'],
     columns: ['url','status_code','status_text','ttfb_ms','response_time_ms','content_encoding','http_version'] },
 ];
+
+// Las columnas de serie de una pestaña. Con Search Console en el censo, los
+// clics de Google van detras de los enlaces entrantes (revision de UX del
+// 25-oct, 3.4): sin el, una columna vacia no dice nada y no se pone.
+function columnasPorDefecto(columnas, job) {
+  if (!(job && job.gsc_resumen) || columnas.includes('gsc_clics')) return columnas;
+  const i = columnas.indexOf('inlinks_count');
+  if (i < 0) return columnas;
+  return [...columnas.slice(0, i + 1), 'gsc_clics', ...columnas.slice(i + 1)];
+}
 
 // Un rastreo en modo lista: no sigue enlaces (decision 128, `es_lista`).
 function esModoLista(job) {
