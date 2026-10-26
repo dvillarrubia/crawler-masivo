@@ -1010,6 +1010,11 @@ function app() {
       this._stopSemanticPoll();
       this._pararEnriq();
       if (this.view === 'explorer') this._unbindExplorerKeyNav();
+      // Primero la vista y luego el job: la cabecera del censo tambien se
+      // pinta en URLs y en la ficha de URL, y si job pasa a null antes que la
+      // vista, Alpine evalua sus expresiones (job.status...) con null antes de
+      // retirar la plantilla. Quien llama pone la vista definitiva justo despues.
+      if (['detail', 'explorer', 'url-detail'].includes(this.view)) this.view = '';
       this.job = null;
     },
 
