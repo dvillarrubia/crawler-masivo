@@ -566,6 +566,8 @@ function app() {
     // Clientes (#36)
     clientes: [],
     panelClientes: null,
+    clientesEstado: 'cargando',  // 'cargando' | 'ok' | 'error'
+    clientesError: '',
     clienteSerie: [],
     serieSoloCensos: true,
     // Evolucion por perfil (decision 130): la respuesta de /evolucion y la
@@ -1345,15 +1347,33 @@ function app() {
       await this.cargarClientes();
     },
 
+    // `clientesEstado` separa «cargando», «error» y «vacio de verdad»: antes
+    // la portada decia «Todavia no hay clientes» mientras cargaba y cuando la
+    // API fallaba (revision de UX del 25-oct, 1.5).
     async cargarClientes() {
+      if (!this.clientes.length) this.clientesEstado = 'cargando';
       try {
         const [clientes, panel] = await Promise.all([api('/clients'), api('/clients/panel')]);
         this.clientes = clientes;
         this.panelClientes = panel;
+        this.clientesEstado = 'ok';
       } catch (e) {
-        this.clientes = [];
-        this.error = 'No se pudieron cargar los clientes: ' + e.message;
+        this.clientesEstado = 'error';
+        this.clientesError = e.message;
       }
+    },
+
+    // Las filas de la portada, primero las que piden atencion: incidentes
+    // abiertos, alertas criticas, alertas, y luego el censo mas reciente.
+    filasPanelOrdenadas() {
+      const filas = [...((this.panelClientes && this.panelClientes.clientes) || [])];
+      const n = (p, k) => (p.ultimo && p.ultimo[k]) || 0;
+      return filas.sort((a, b) =>
+        (b.incidentes_vivos || 0) - (a.incidentes_vivos || 0)
+        || n(b, 'alertas_criticas') - n(a, 'alertas_criticas')
+        || n(b, 'alertas') - n(a, 'alertas')
+        || String((b.ultimo || {}).created_at || '').localeCompare(String((a.ultimo || {}).created_at || ''))
+        || String(a.nombre).localeCompare(String(b.nombre)));
     },
 
     async abrirCliente(id, tab = 'rastreos') {
