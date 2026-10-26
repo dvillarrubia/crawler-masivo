@@ -1062,6 +1062,43 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   rastreo en marcha, conteos en una pasada, guardados 30 s y con tope de 20 s
   (503 claro); «es exactamente» con o sin barra final; atrás vuelve de «Quién
   la enlaza» a los destinos. Pendiente: el CSV con los filtros de la vista.
+- **El perfil como única unidad** (revisión de UX del 25-oct, 2.2; decisión 193;
+  en local, sin desplegar): una programación nueva cuelga de un perfil
+  (`hereda_perfil`) y en cada disparo el worker lee el cliente y el perfil de
+  ese momento, en vez de la copia congelada del rastreo del que se creó. La
+  serie y los incidentes son los del perfil. Programados con cliente y perfil,
+  «Editar», «Nueva programación» y aviso de repetidas; cada perfil dice cuándo
+  se repite y se programa desde él. Las viejas siguen igual hasta pasar
+  `scripts/migrar_programaciones_a_perfiles.py --confirmar` (simulación por
+  defecto), que en Lopesan deja un perfil «Sitio completo» con las tres
+  programaciones y una sola serie. Revisado el 26-oct: el worker resuelve la
+  config igual que la API (modo lista sin sitemap, UA y huella, defaults que
+  valen `None`; un test los compara caso a caso) y «Crear un perfil con este
+  rastreo» guarda su configuración, no solo las semillas. **Pendiente:**
+  ejecutarlo en producción tras desplegar (antes, la simulación) y pausar la
+  programación que sobre.
+- **Alta de cliente guiada** (2.14; decisión 194; en local): nombre y dominio,
+  perfil «Sitio principal» creado solo y «Siguiente paso» con lanzar canario,
+  lanzar censo o programar cada semana.
+- **Configuración en tres niveles** (revisión de UX del 25-oct, 2.4; decisión
+  196; en local, sin desplegar): el mismo formulario para el cliente, el perfil
+  y Nuevo rastreo, sin JSON a mano (queda en «Avanzado»). Cada campo dice si
+  viene del cliente, del perfil o es de serie, o si se ha cambiado ahí, con
+  «volver al heredado»; se valida con los límites de `JobConfig`. «Así
+  rastreará» enseña la config con la que saldría el próximo rastreo y de dónde
+  viene cada valor (`config-resuelta` con borrador), con avisos que solo
+  afirman lo que se sabe: el del WAF, si un rastreo anterior del mismo sitio
+  (no de un competidor) se paró por un bloqueo o tuvo muros, rebajado si
+  después hubo rastreos limpios. Nuevo rastreo (también el botón de la ficha)
+  trae el cliente y su perfil y lo avanzado plegado; sin cliente lo avisa.
+  Configuración del cliente en secciones plegables con índice. El JSON de
+  «Avanzado» se aplica solo, y cabeceras y cookies dicen el nivel de cada
+  clave (revisión del 26-oct).
+- **Ajustes de la agencia** (2.5; decisión 196; en local): bot de Slack,
+  llaves de Search Console, si están las claves de los modelos y su tope,
+  importar backup y tema, fuera de la ficha de cada cliente. **Pendiente:** las
+  claves de Gemini del análisis semántico siguen en la base de datos (forma
+  anterior a la decisión 141); moverlas al servidor como las llaves de GSC.
 - **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y

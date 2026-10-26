@@ -553,3 +553,109 @@
      sin el campo, usa los detalles de los avisos y, sin ellos, «no consta».
    - Best-effort: el `try` cubre la función entera; un fallo deja la ficha
      igual, sin el campo. Test: `tests/test_ficha_url_google.py`.
+
+<a id="d194"></a>
+194. **El alta de un cliente pide nombre y dominio, crea sola un perfil «Sitio principal» y acaba en el siguiente paso**
+
+   **Problema.** Dar de alta un cliente abría el formulario entero de
+   Configuración (JSON incluido) y, al guardar, se quedaba ahí, sin perfil y
+   sin decir qué hacer después (revisión de UX del 25-oct, V37). Para el
+   primer censo hacía falta además crear un perfil a mano.
+
+   **Decisión.** `POST /api/clients` acepta `perfil_principal: true`: en la
+   misma transacción crea el perfil «Sitio principal» con la home del primer
+   dominio como semilla (`https://<dominio>/`; los dominios ya se guardan sin
+   esquema ni ruta). Sin dominio no crea nada. La interfaz pide solo nombre y
+   dominio y abre la ficha en Estado con «Siguiente paso: el primer censo»:
+   «Lanzar canario» y «Lanzar censo» abren el modal de lanzar ya con el
+   cliente y el perfil (el del canario destaca su botón y explica que son 250
+   páginas que no cuentan en la evolución; nada se lanza sin confirmarlo en el
+   modal) y «Programar cada semana» abre la programación del perfil (decisión
+   193), lunes a las 03:00 de Madrid. El bloque sale mientras el cliente no
+   tenga ningún censo ni rastreo en marcha y tenga un perfil propio activo.
+   Test: `tests/test_programaciones_perfil.py` (alta con y sin perfil).
+
+<a id="d196"></a>
+196. **La configuración se edita con el mismo formulario en el cliente, el perfil y el rastreo; lo de la agencia va en Ajustes**
+
+   **Problema.** La configuración del cliente y la del perfil eran JSON a
+   mano y el modal de Nuevo rastreo un formulario de siete pestañas que abría
+   «Sin cliente», con lo avanzado desplegado y 32 concurrentes (revisión de UX
+   del 25-oct, V35 y V36). Nadie veía con qué saldría el próximo rastreo ni de
+   dónde venía cada valor, y el modal mantenía a mano una lista de claves que
+   «solo se mandan si se tocan» (sondas, WordPress, topes) para no pisar lo
+   heredado. El bot de Slack de toda la agencia se configuraba dentro de cada
+   cliente, igual que las llaves de Search Console.
+
+   **Decisión.**
+
+   - Un solo formulario (`CAMPOS_CONFIG` en `frontend/app.js`, una plantilla
+     `tpl-config-niveles`) para los tres niveles. Cada nivel guarda solo lo que
+     fija (`propia`); lo de arriba llega resuelto por la API con su procedencia
+     y cada campo dice «del cliente», «del perfil», «de serie» o «cambiado
+     aquí» con «volver al heredado». **Escribir lo mismo que lo heredado no lo
+     fija**: así un cambio del cliente sigue llegando al perfil. Al lanzar se
+     manda solo lo de ese rastreo, que `create_job` pone encima de lo heredado
+     (ya lo hacía con `exclude_unset`). El JSON queda en «Avanzado» para lo que
+     el formulario no tiene (plantillas, segmentos, marcas…).
+   - Los límites y las opciones del formulario son los de `JobConfig`:
+     `tests/test_config_niveles_frontend.py` los compara campo a campo con el
+     modelo. Una cabecera, cookie o tope heredado no se puede quitar desde un
+     nivel de abajo (la API no admite ahí un `null`): el formulario lo dice en
+     vez de perderlo en silencio. La contraseña del Basic, solo en un rastreo
+     (decisión 83).
+   - `config-resuelta` devuelve además `origen` (ruta → capa; un `null` cuenta
+     como decisión de esa capa), `serie`, `avisos` y las programaciones del
+     perfil con `config_propia` (decisión 193). `POST /api/clients/config-resuelta`
+     resuelve un **borrador** de un nivel sin guardarlo y lo valida como al
+     guardar: es el bloque «Así rastreará» mientras se edita.
+   - **Avisos solo con lo que se sabe** (`api/avisos_config.py`): el del WAF
+     sale si un rastreo anterior **del mismo sitio** se paró por un bloqueo
+     (`finish_reason`) o tuvo respuestas de muro (`health.por_clase`: WAF,
+     captcha o 429; no las binarias), con sus
+     cifras y la concurrencia de entonces frente a la de ahora; parado y con la
+     misma o más concurrencia es «peligro», muros sueltos un aviso. Sin ese
+     rastro no se dice nada del WAF. El resto sale de la propia configuración
+     (robots ignorado, se presenta como un buscador, sin tope de URLs…).
+   - Nuevo rastreo trae el cliente y su perfil principal y la configuración
+     plegada; sin cliente, un aviso y el botón «Iniciar sin cliente».
+   - Configuración del cliente en secciones plegables con índice, cada una con
+     su resumen y su «Guardar» (guardar los datos no se lleva un borrador de la
+     configuración).
+   - **Ajustes de la agencia** (`#/ajustes`, menú «…»): el bot de Slack, las
+     llaves de Search Console (se suben aquí; en el cliente se elige cuál y la
+     propiedad), si están las claves de los modelos y el tope mensual
+     (`GET /api/ajustes`: solo booleanos y la cifra del tope), importar backup
+     y el tema. Ningún secreto se enseña ni se guarda en el navegador; los de
+     la API siguen en el entorno o en `SECRETOS_DIR`.
+
+   **Lo que no cambia.** El esquema de la base de datos y lo que se guarda en
+   `clients.config_defecto`, `crawl_profiles.config` y `jobs.config`. Las
+   claves de Gemini del análisis semántico siguen donde estaban (en la base de
+   datos, como antes de esta decisión); Ajustes solo dice cuántas hay.
+
+   **Revisión del 26-oct** (revisor independiente, antes de subir):
+
+   - «Del mismo sitio» = alguna semilla del rastreo anterior en los hosts del
+     próximo (las semillas del perfil o, sin perfil, los dominios del cliente y
+     las semillas de sus perfiles propios; `www.` no cuenta). Antes miraba todo
+     el cliente, y el bloqueo del sitio de un competidor salía como «peligro»
+     en el sitio principal (reglas 67 y 70). Los rastreos limpios del mismo
+     sitio que vinieron después se dicen y rebajan el aviso (a «info» si uno
+     salió con la misma o más concurrencia que la de ahora), y «bajar la
+     concurrencia» ya no se propone si ahora sale más despacio que entonces.
+   - `config-resuelta` trae `origen_por_clave`: cabeceras, cookies, topes y
+     reglas con nombre se fusionan clave a clave, y atribuirlas enteras a la
+     última capa mandaba a quitar al perfil una cabecera que era del cliente.
+   - El JSON de «Avanzado» se aplica al dejar de escribir y antes de guardar o
+     lanzar; con un botón aparte, lo escrito sin pulsarlo se perdía en silencio
+     y la interfaz daba el guardado por bueno. Un JSON a medias bloquea el
+     guardado con su error.
+   - En los enteros el punto solo es de miles si lo parece (`5.000`): «1.5» en
+     el máximo de URLs era 15 sin aviso.
+   - El «Nuevo rastreo» visible de la ficha del cliente trae también el perfil
+     principal (solo lo hacía el atajo «n»).
+
+   Tests: `tests/test_config_niveles.py` (API: origen y origen por clave,
+   borrador, avisos del mismo sitio, ajustes sin secretos) y
+   `tests/test_config_niveles_frontend.py`.

@@ -10,6 +10,10 @@
 
 - **Scrapy corre como subproceso** por job, con los settings por `-s`; nunca en
   el proceso del worker (el reactor de Twisted no reinicia). Decisiones 1-2.
+- **Una programación colgada de un perfil se resuelve en el worker** con la
+  config del momento y los defaults de `shared/config_por_defecto.json` (el
+  worker no lleva Pydantic): un campo nuevo en `JobConfig` obliga a regenerarla
+  (lo vigila un test), y la mezcla se valida al escribir, no al disparar. 193.
 - **El UA y la huella TLS son el mismo navegador**: salen de `shared/perfiles.py`
   (`IMPERSONATE_POR_DEFECTO` -> `UA_POR_DEFECTO`), nunca un `chrome124` literal. 132.
 - **Las cabeceras, cookies y Basic del job solo van a los hosts de las semillas**,

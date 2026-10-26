@@ -461,3 +461,13 @@ Enlaces con filtros (decision 195): `tests/test_enlaces_filtros.py` ejecuta
 destino y el orden, y que el censo vivo y archivado en Parquet devuelvan lo
 mismo con lotes y grupos de filas pequenos. Necesita `pyarrow` (la imagen de la
 API de desarrollo puede no traerlo: `pip install pyarrow`).
+Configuracion en tres niveles y Ajustes (decision 196): `test_config_niveles.py`
+(API con SQLite: `config-resuelta` dice de que capa sale cada clave y trae lo de
+serie; el borrador de `POST /api/clients/config-resuelta` se valida como al
+guardar y no guarda nada; el aviso del WAF solo con un rastreo anterior parado
+o con muros, con sus cifras, y sin ese rastro nada; `GET /api/ajustes` sin el
+valor de ninguna clave) y `test_config_niveles_frontend.py` (Chromium: los
+limites y las opciones del formulario son los de `JobConfig` —necesita tambien
+pydantic—, heredado/cambiado/«volver al heredado», una cabecera heredada no se
+quita en silencio, al lanzar solo va lo de ese rastreo y el tope del canario, y
+cambiar de cliente o quitarlo conserva lo cambiado).

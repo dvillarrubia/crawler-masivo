@@ -146,16 +146,27 @@ def test_cancelar_en_dos_pasos_y_solo_lo_que_corre():
         A.cancelar_rastreo(_api(ApiFalsa(estado_job="completed")), JID, confirmar=True)
 
 
-def test_programar_guarda_la_configuracion_entera():
+def test_programar_un_perfil_lo_cuelga_de_el_con_solo_sus_cambios():
+    """Decision 193: con perfil y sin semillas propias, la programacion hereda
+    en cada disparo; se manda solo lo que cambia, no una copia congelada."""
     f = ApiFalsa()
     r = A.programar_rastreo(_api(f), "lopesan", "0 6 * * 1")
     assert r["simulacion"] and f.escrituras() == []
     r = A.programar_rastreo(_api(f), "lopesan", "0 6 * * 1", ajustes={"max_urls": 1000}, confirmar=True)
     [(_, ruta, cuerpo)] = f.escrituras()
     assert ruta == "/api/programaciones" and cuerpo["cron"] == "0 6 * * 1"
-    assert cuerpo["config"]["max_urls"] == 1000 and cuerpo["config"]["crawl_behavior"]["request_delay"] == 0.5
-    assert cuerpo["seeds"] == ["https://www.lopesan.com/"] and cuerpo["profile_id"] == PID
+    assert cuerpo["profile_id"] == PID and cuerpo["config_propia"] == {"max_urls": 1000}
+    assert "seeds" not in cuerpo and "config" not in cuerpo
     assert r["programado"] and r["cron"] == "0 6 * * 1"
+
+
+def test_programar_con_semillas_propias_guarda_la_configuracion_entera():
+    f = ApiFalsa()
+    A.programar_rastreo(_api(f), "lopesan", "0 6 * * 1", ajustes={"max_urls": 1000},
+                        semillas=["https://www.lopesan.com/es/"], confirmar=True)
+    [(_, ruta, cuerpo)] = f.escrituras()
+    assert cuerpo["config"]["max_urls"] == 1000 and cuerpo["config"]["crawl_behavior"]["request_delay"] == 0.5
+    assert cuerpo["seeds"] == ["https://www.lopesan.com/es/"] and cuerpo["profile_id"] == PID
 
 
 def test_pausar_una_programacion():

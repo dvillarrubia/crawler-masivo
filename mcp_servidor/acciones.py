@@ -151,7 +151,9 @@ def cancelar_rastreo(api: Api, rastreo: str, confirmar: bool = False) -> dict:
 
 
 def _programacion(p: dict) -> dict:
-    return {"id": p["id"], "nombre": p["nombre"], "cliente": p.get("client_id"), "cron": p["cron"],
+    return {"id": p["id"], "nombre": p["nombre"], "cliente": p.get("client_id"),
+            "perfil": p.get("perfil_nombre"), "hereda_del_perfil": p.get("hereda_perfil", False),
+            "repetida_con": p.get("repetida_con") or [], "cron": p["cron"],
             "zona_horaria": p.get("zona_horaria"), "activa": p["activa"],
             "proxima": p.get("proxima_ejecucion"), "ultima": p.get("ultima_ejecucion"),
             "ultimo_rastreo": p.get("ultimo_job_id")}
@@ -162,7 +164,7 @@ def programaciones(api: Api, cliente: str | None = None) -> list[dict]:
     if cliente:
         cid = _cliente_id(api, cliente)
         slug = next(c["slug"] for c in api.get("/clients") if str(c["id"]) == str(cid))
-    return [_programacion(p) for p in api.get("/programaciones", client_id=slug)]
+    return [_programacion(p) for p in api.get("/programaciones", client_id=slug, resumen="true")]
 
 
 def programar_rastreo(api: Api, cliente: str, cron: str, perfil: str | None = None, canario: bool = False,
@@ -180,12 +182,18 @@ def programar_rastreo(api: Api, cliente: str, cron: str, perfil: str | None = No
         return {"simulacion": True, **vista, "siguiente_paso":
                 "Nada programado. Cron de cinco campos (minuto hora dia mes dia-semana). "
                 "Si es esto, llama otra vez con confirmar=true."}
-    # Una programacion guarda su configuracion entera (la del cliente de hoy
-    # mas los cambios): es la que usara cada disparo.
-    cuerpo = {"nombre": nombre, "cliente_id": plan["cliente_id"], "seeds": plan["semillas"],
-              "config": plan["efectiva"], "cron": cron, "zona_horaria": zona_horaria, "activa": True}
-    if p:
-        cuerpo["profile_id"] = p["id"]
+    if p and not plan["semillas_propias"]:
+        # Colgada del perfil (decision 193): cada disparo hereda la config del
+        # cliente y del perfil de ESE dia; aqui solo va lo que cambia esta.
+        cuerpo = {"nombre": nombre, "profile_id": p["id"], "config_propia": plan["cambios"],
+                  "cron": cron, "zona_horaria": zona_horaria, "activa": True}
+    else:
+        # Con semillas propias o sin perfil: copia fija de la configuracion
+        # entera (la del cliente de hoy mas los cambios), como siempre.
+        cuerpo = {"nombre": nombre, "cliente_id": plan["cliente_id"], "seeds": plan["semillas"],
+                  "config": plan["efectiva"], "cron": cron, "zona_horaria": zona_horaria, "activa": True}
+        if p:
+            cuerpo["profile_id"] = p["id"]
     return {"programado": True, **_programacion(api.enviar("POST", "/programaciones", cuerpo))}
 
 

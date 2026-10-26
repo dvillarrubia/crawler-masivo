@@ -38,15 +38,28 @@ from api.schemas import (
     ClientCreate,
     ClientResponse,
     ClientUpdate,
+    ConfigBorrador,
     ConfigResueltaResponse,
     IntegracionResponse,
     JobConfig,
     ProfileCreate,
     ProfileResponse,
     ProfileUpdate,
+    validar_config_parcial,
 )
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
+
+PERFIL_PRINCIPAL = "Sitio principal"
+
+
+def home_de_dominio(dominio: str) -> str:
+    """`www.cliente.com` -> `https://www.cliente.com/`. Si ya trae esquema se
+    respeta (un staging en http)."""
+    d = dominio.strip().rstrip("/")
+    if not d.startswith(("http://", "https://")):
+        d = "https://" + d
+    return d + "/"
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +166,28 @@ def _validar_perfiles_sobre(db: Session, cliente: Client, config_defecto: dict) 
                 status_code=422,
                 detail=f"Con esta configuracion el perfil '{perfil.nombre}' dejaria de ser "
                        f"valido: {exc.detail}") from None
+        # Y lo propio de sus programaciones colgadas (decision 193).
+        _validar_programaciones(db, nuevo, perfil, perfil.config)
+
+
+def _validar_programaciones(db: Session, cliente, perfil: CrawlProfile,
+                            config_perfil: dict | None) -> None:
+    """Las programaciones que heredan de este perfil (decision 193) tienen que
+    seguir siendo validas con su nueva config: el 422 al guardar el perfil, no
+    un disparo que no se lanza el lunes."""
+    from types import SimpleNamespace
+
+    nuevo = SimpleNamespace(config=config_perfil or {})
+    for prog in (db.query(Programacion)
+                 .filter(Programacion.profile_id == perfil.id,
+                         Programacion.hereda_perfil.is_(True)).all()):
+        try:
+            resolver_config(cliente, nuevo, prog.config or {})
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Con esta configuracion la programacion '{prog.nombre}' dejaria "
+                       f"de ser valida: {exc.detail}") from None
 
 
 def nombres_de_clientes(db: Session, ids) -> dict[uuid.UUID, str]:
@@ -305,6 +340,45 @@ def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
             **cifras[j.id],
         ))
     return salida
+
+
+@router.post("/config-resuelta", response_model=ConfigResueltaResponse)
+def config_resuelta_borrador(cuerpo: ConfigBorrador, db: Session = Depends(get_session)):
+    """La configuracion con la que saldria un rastreo si `config` fuera la del
+    `nivel` (decision 196). No guarda nada: es lo que pinta «Así rastreará»
+    mientras se edita. El borrador se valida como se validaria al guardarlo
+    (claves desconocidas, limites de `JobConfig`), asi que un 422 aqui es el
+    mismo que daria Guardar."""
+    import copy
+
+    borrador = copy.deepcopy(cuerpo.config)
+    # La contrasena del Basic solo vale en un rastreo (decision 83): fuera de
+    # la validacion parcial, que la rechaza, y de vuelta despues.
+    clave = (borrador.get("http") or {}).pop("basic_auth_password", None) \
+        if cuerpo.nivel == "rastreo" and isinstance(borrador.get("http"), dict) else None
+    try:
+        borrador = validar_config_parcial(borrador)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if cuerpo.nivel == "rastreo":
+        if clave:
+            borrador.setdefault("http", {})["basic_auth_password"] = clave
+        # Un rastreo se lee como JobConfig en create_job: un null que alli no
+        # cabe tampoco cabe aqui.
+        try:
+            borrador = JobConfig.model_validate(borrador).model_dump(exclude_unset=True)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"La configuracion no es valida: {exc.errors()}")
+    cliente = perfil = None
+    if cuerpo.cliente_id or cuerpo.profile_id:
+        cliente, perfil = resolver_cliente_y_perfil(
+            db, cliente_id=cuerpo.cliente_id, profile_id=cuerpo.profile_id)
+    if cuerpo.nivel != "rastreo" and cliente is None:
+        raise HTTPException(status_code=422, detail="Sin cliente solo hay configuracion de rastreo")
+    if cuerpo.nivel == "perfil" and perfil is None:
+        # Un perfil nuevo, aun sin guardar: su borrador sobre el cliente.
+        perfil = CrawlProfile(cliente_id=cliente.id, config={}, seeds=[])
+    return _config_resuelta(db, cliente, perfil, cuerpo.nivel, borrador)
 
 
 @router.get("/panel", response_model=PanelResponse)
@@ -695,9 +769,19 @@ def crear_cliente(cuerpo: ClientCreate, db: Session = Depends(get_session)):
         notas=cuerpo.notas,
     )
     db.add(cliente)
+    if cuerpo.perfil_principal and cuerpo.dominios:
+        # Alta guiada (revision de UX del 25-oct, 2.14; decision 194): el
+        # cliente nace con un perfil «Sitio principal» sembrado en la home del
+        # primer dominio, para que el siguiente paso sea lanzar o programar y
+        # no rellenar otro formulario. En la misma transaccion: o los dos o
+        # ninguno.
+        db.flush()
+        db.add(CrawlProfile(
+            cliente_id=cliente.id, nombre=PERFIL_PRINCIPAL, rol="propio",
+            seeds=[home_de_dominio(cuerpo.dominios[0])], config={}, activo=True))
     _commit(db)
     db.refresh(cliente)
-    return _respuesta(cliente)
+    return _respuesta(cliente, _cuentas(db, [cliente.id]).get(cliente.id))
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
@@ -786,16 +870,62 @@ def config_resuelta(
     profile_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_session),
 ):
-    """Lo que tendria un job lanzado ahora: para precargar el modal."""
+    """Lo que tendria un job lanzado ahora: para precargar el modal y para el
+    bloque «Así rastreará» (decision 196: con `origen`, `serie` y `avisos`)."""
     cliente, perfil = resolver_cliente_y_perfil(
         db, cliente_id=client_id, profile_id=profile_id)
+    return _config_resuelta(db, cliente, perfil)
+
+
+def _config_resuelta(db: Session, cliente: Client | None, perfil: CrawlProfile | None,
+                     nivel: str | None = None, borrador: dict | None = None) -> ConfigResueltaResponse:
+    """La respuesta de `config-resuelta`, con `borrador` en lugar de la config
+    guardada del `nivel` (cliente, perfil o rastreo) si se pasa.
+
+    Sin cliente, como `create_job`: lo de serie con el borrador encima."""
+    from api.avisos_config import avisos_de_config, historial_de_bloqueos
+    from shared.clientes import origen_de_config, origen_por_clave
+
+    capas = {
+        "cliente": (cliente.config_defecto if cliente else None) or {},
+        "perfil": (perfil.config if perfil else None) or {},
+        "rastreo": {},
+    }
+    if nivel:
+        capas[nivel] = borrador or {}
+    if cliente is None:
+        try:
+            config = JobConfig.model_validate(capas["rastreo"]).model_dump()
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"La configuracion no es valida: {exc.errors()}")
+    else:
+        fingido_c = Client(config_defecto=capas["cliente"]) if nivel == "cliente" else cliente
+        fingido_p = (CrawlProfile(config=capas["perfil"]) if nivel == "perfil" else perfil)
+        config = resolver_config(fingido_c, fingido_p, capas["rastreo"])
+    historial = historial_de_bloqueos(db, cliente, perfil) if cliente else None
+    try:
+        avisos = avisos_de_config(config, historial)
+    except Exception:  # noqa: BLE001 - un aviso que falla no tapa la config
+        avisos = []
+    propias = []
+    if perfil is not None and perfil.id is not None:
+        for prog in (db.query(Programacion)
+                     .filter(Programacion.profile_id == perfil.id, Programacion.activa.is_(True),
+                             Programacion.hereda_perfil.is_(True)).all()):
+            claves = sorted(origen_de_config(("p", prog.config or {})))
+            if claves:
+                propias.append({"id": prog.id, "nombre": prog.nombre, "claves": claves})
     return ConfigResueltaResponse(
-        cliente_id=cliente.id,
+        cliente_id=cliente.id if cliente else None,
         profile_id=perfil.id if perfil else None,
         seeds=list(perfil.seeds or []) if perfil else [],
-        config=resolver_config(cliente, perfil, None),
-        config_heredada=fusionar_config(
-            cliente.config_defecto or {}, (perfil.config if perfil else None) or {}),
+        config=config,
+        config_heredada=fusionar_config(capas["cliente"], capas["perfil"]),
+        origen=origen_de_config(*((k, v) for k, v in capas.items())),
+        origen_por_clave=origen_por_clave(*((k, v) for k, v in capas.items())),
+        serie=JobConfig().model_dump(),
+        avisos=avisos,
+        programaciones=propias,
     )
 
 
@@ -837,15 +967,78 @@ def crear_perfil(
     cliente = _buscar(db, client_id)
     nombre = cuerpo.nombre.strip()
     _nombre_libre(db, client_id, nombre)
-    _validar_fusion(cliente, cuerpo.config)
+    config, avisos = cuerpo.config, []
+    if cuerpo.desde_job_id is not None:
+        config, avisos = _config_desde_job(db, cliente, cuerpo.desde_job_id, cuerpo.config)
+    _validar_fusion(cliente, config)
     perfil = CrawlProfile(
         cliente_id=client_id, nombre=nombre, rol=cuerpo.rol, seeds=cuerpo.seeds,
-        config=cuerpo.config, notas=cuerpo.notas, activo=cuerpo.activo,
+        config=config, notas=cuerpo.notas, activo=cuerpo.activo,
     )
     db.add(perfil)
     _commit(db)
     db.refresh(perfil)
+    perfil.avisos = avisos
     return perfil
+
+
+def _config_desde_job(db: Session, cliente: Client, job_id: uuid.UUID,
+                      encima: dict | None) -> tuple[dict, list[str]]:
+    """La config de un perfil nuevo que, sobre el cliente, reproduce la del
+    rastreo `job_id` (revision de UX del 25-oct, 2.2).
+
+    Sin esto, «Crear un perfil con esas semillas» guardaba solo las semillas:
+    el censo de Lopesan 1e7ea651 lleva `exclude_patterns` (entre ellos `%25`,
+    el que evita los 400 del F5) que su cliente no fija, y el censo semanal
+    que saliera del perfil rastrearia sin ellos.
+
+    Se guarda solo lo que difiere del cliente (como la migracion, decision
+    193), asi que los cambios del cliente siguen llegando. Lo que no se puede
+    guardar en un perfil se dice en `avisos`: la contrasena de autenticacion
+    basica (decision 83) y las claves que JobConfig ya no tiene.
+    """
+    from shared.programaciones import (
+        capa_que_reproduce, con_defaults, config_del_momento, config_por_defecto,
+    )
+
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Ese rastreo no existe")
+    if job.cliente_id is not None and job.cliente_id != cliente.id:
+        raise HTTPException(status_code=422,
+                            detail="Ese rastreo es de otro cliente")
+    avisos: list[str] = []
+    defaults = config_por_defecto()
+    tiradas: list[str] = []
+
+    def _conocidas(valor: dict, base: dict, ruta: str = "") -> dict:
+        salida = {}
+        for k, v in valor.items():
+            if k not in base:
+                tiradas.append(ruta + k)
+            elif isinstance(v, dict) and isinstance(base[k], dict) and base[k]:
+                salida[k] = _conocidas(v, base[k], f"{ruta}{k}.")
+            else:
+                salida[k] = v
+        return salida
+
+    objetivo = _conocidas(dict(job.config or {}), defaults)
+    if (objetivo.get("http") or {}).get("basic_auth_password"):
+        objetivo["http"] = {**objetivo["http"], "basic_auth_password": ""}
+        avisos.append("La contraseña de acceso de ese rastreo no se copia: un perfil no "
+                      "guarda contraseñas. Ponla al lanzar cada rastreo.")
+    if tiradas:
+        avisos.append("Ajustes de ese rastreo que ya no existen y no se copian: "
+                      + ", ".join(sorted(tiradas)) + ".")
+    capa = capa_que_reproduce(
+        lambda c: config_del_momento(cliente, None, c), con_defaults(objetivo))
+    capa = {**capa, **(encima or {})}
+    try:
+        capa = validar_config_parcial(capa)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,
+                            detail=f"La configuracion de ese rastreo no cabe en un perfil: {exc}")
+    return capa, avisos
 
 
 @router.get("/{client_id}/profiles/{profile_id}", response_model=ProfileResponse)
@@ -870,6 +1063,7 @@ def editar_perfil(
         _nombre_libre(db, client_id, cambios["nombre"], salvo=perfil.id)
     if "config" in cambios:
         _validar_fusion(_buscar(db, client_id), cambios["config"])
+        _validar_programaciones(db, _buscar(db, client_id), perfil, cambios["config"])
     for campo, valor in cambios.items():
         setattr(perfil, campo, valor)
     perfil.updated_at = datetime.now(timezone.utc)
@@ -889,6 +1083,12 @@ def borrar_perfil(
     cerrar_serie(db, f"perfil:{perfil.id}", SERIE_BORRADA)
     db.query(Job).filter(Job.profile_id == perfil.id).update(
         {Job.profile_id: None}, synchronize_session=False)
+    # Las que heredan del perfil (decision 193) son parte de el: sin perfil no
+    # tienen semillas que lanzar. Se borran con el; sus rastreos se quedan.
+    # Las de copia fija siguen lanzandose solas, solo pierden el enlace.
+    db.query(Programacion).filter(Programacion.profile_id == perfil.id,
+                                  Programacion.hereda_perfil.is_(True)).delete(
+        synchronize_session=False)
     db.query(Programacion).filter(Programacion.profile_id == perfil.id).update(
         {Programacion.profile_id: None}, synchronize_session=False)
     db.delete(perfil)

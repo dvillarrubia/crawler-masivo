@@ -302,8 +302,8 @@ def test_el_preset_chrome_android_es_un_movil_coherente():
     assert ctx["viewport"] == {"width": 412, "height": 915} and ctx["is_mobile"]
     assert ctx["device_scale_factor"] == 2.625 and ctx["user_agent"] == ua
     assert ctx["locale"] == "es-ES"
-    index = (RAIZ / "frontend" / "index.html").read_text(encoding="utf-8")
-    assert '<option value="chrome_android"' in index
+    # En el formulario de configuracion (decision 196) el desplegable sale de UA_LABELS
+    assert re.search(r"^\s*chrome_android:\s*'Chrome - Android", app, re.M)
 
 
 def test_la_api_deduce_la_huella_movil_del_preset():
