@@ -533,6 +533,13 @@ const ISSUE_INFO = {
     google: 'Puede tratarla como soft 404 si no ofrece nada más. No está afirmado: es la lista para revisar (y para la fase con modelo de #11).',
     arreglo: 'Revisar a mano. Si es un error, como «Soft 404»; si es una página útil, nada.',
   },
+  // Decision 190: lo dice la sonda, no las paginas; una fila por host con las
+  // plantillas que fallan (revision de UX del 25-oct, 2.11).
+  'soft_404_plantilla': {
+    que: 'Plantillas del sitio que responden 200 («todo bien») a una URL que no existe, en lugar de 404. Se comprueba pidiendo una dirección inventada en cada plantilla.',
+    google: 'Cualquier enlace viejo o mal escrito a esas secciones le llega como una página normal y vacía: la acaba marcando como «Soft 404» en Search Console y gasta rastreo en ella. Ninguna página del censo sale del índice por esto.',
+    arreglo: 'Pedir al cliente que esas plantillas (sus categorías, listados o fichas) devuelvan 404 a las URLs que no existen. Es un arreglo por plantilla, en el servidor o en el CMS, no página a página.',
+  },
   'low_word_count': {
     que: 'La página indexable tiene poco contenido propio (sin contar menú ni pie).',
     google: 'Contenido escaso: difícil que posicione y, en cantidad, rebaja la calidad del sitio.',

@@ -521,6 +521,8 @@ def analizar(an) -> dict[str, Any]:
     for url_id, detalles in candidatos.items():
         an._add_issue(url_id, "soft_404_candidato", "info", detalles,
                       group_key=claves_candidato.get(url_id))
+    plantillas_200 = _avisar_plantillas_que_responden_200(
+        an, sondas, info, alcance_plantilla, _clave_de_grupo)
     an._flush_issues()
 
     tapadas = _tapar(session, Issue, an.job_id, sorted(seguras))
@@ -535,11 +537,89 @@ def analizar(an) -> dict[str, Any]:
         "low_word_count_tapadas": tapadas.get("low_word_count", 0),
         "incidencias_tapadas": dict(sorted(tapadas.items())),
         "productos_agotados_no_emitidos": agotados,
+        # Plantillas (o raiz) que responden 2xx a una URL que no existe, en
+        # `soft_404_plantilla` (decision 190).
+        "plantillas_responden_200": plantillas_200,
         "sondas": len(sondas),
         "sondas_con_huella": len(utiles),
         "detalle_sondas": resumen_sondas,
     }
     return _guardar(session, job, resumen)
+
+
+def _sonda_responde_200(s: dict) -> bool:
+    """La sonda pidio una URL que no existe y el sitio contesto 2xx.
+
+    Solo lo que se puede afirmar: una que redirige no dice que respondio el
+    destino; una con error, o un muro de WAF servido con 200 (decisiones 62 y
+    103), no es la respuesta del sitio sino un bloqueo.
+    """
+    if not isinstance(s, dict) or s.get("redirige_a") or s.get("error"):
+        return False
+    st = s.get("status")
+    if not isinstance(st, int) or not (200 <= st < 300):
+        return False
+    if s.get("response_class") in NO_VALIDAS:
+        return False
+    titulo = (s.get("titulo") or "").strip().lower()
+    return not any(t in titulo for t in TITULOS_DE_BLOQUEO)
+
+
+def _avisar_plantillas_que_responden_200(an, sondas, info, alcance_plantilla, clave_de_grupo) -> int:
+    """`soft_404_plantilla` (decision 190): UNA fila por host con las plantillas
+    de ruta (y la raiz) que responden 2xx a una URL que no existe.
+
+    Lo dice la sonda, no las paginas: en Lopesan (24-oct) las 7 sondas de
+    categorias del blog respondian 200 y ninguna pagina del censo tenia su
+    huella, asi que el Resumen decia «Soft 404: 0 paginas» en verde. Es un
+    arreglo de servidor o de CMS, uno por plantilla, y se agrupa (decisiones
+    53 y 64): una fila con `plantillas_afectadas` y `paginas_afectadas` (las
+    paginas del censo que usan esas plantillas, que es lo que el arreglo toca),
+    anclada en la URL menor de ellas (88). Va como `warning`: ninguna pagina
+    del censo sale del indice por esto, pero cualquier enlace viejo o mal
+    escrito a esas plantillas es una pagina 200 vacia para Google («Soft 404»
+    en Search Console) y rastreo gastado.
+    """
+    por_host: dict[str, list[dict]] = defaultdict(list)
+    vistas: set[tuple[str, str | None]] = set()
+    for s in sondas or []:
+        if not _sonda_responde_200(s):
+            continue
+        host = (s.get("host") or "").lower()
+        clave = (host, s.get("plantilla"))
+        if clave in vistas:       # la misma sonda repetida tras un cambio de esquema
+            continue
+        vistas.add(clave)
+        por_host[host].append(s)
+    if not por_host:
+        return 0
+    paginas_por_host: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
+    for url_id, d in info.items():
+        paginas_por_host[d["host"]].append((d["url"], url_id, d["plantilla"]))
+    emitidas = 0
+    for host, lista in sorted(por_host.items()):
+        paginas = sorted(paginas_por_host.get(host, []))
+        if not paginas:
+            continue              # sin una pagina del host no hay donde anclarla
+        raiz = any(s.get("plantilla") is None for s in lista)
+        plantillas = {s.get("plantilla") for s in lista}
+        # Con la raiz respondiendo 200, todo el host: es la respuesta por
+        # defecto del servidor a lo que no conoce.
+        afectadas = paginas if raiz else [p for p in paginas if p[2] in plantillas]
+        ancla = (afectadas or paginas)[0][1]
+        filas = [{
+            "plantilla": s.get("plantilla"), "sonda": s.get("url"), "status": s.get("status"),
+            "alcance": (len(paginas) if s.get("plantilla") is None
+                        else alcance_plantilla.get((host, s.get("plantilla")), 0)),
+        } for s in sorted(lista, key=lambda x: (x.get("plantilla") is not None, x.get("plantilla") or ""))]
+        an._add_issue(ancla, "soft_404_plantilla", "warning", {
+            "host": host, "raiz": raiz,
+            "plantillas_afectadas": len(filas), "plantillas": filas,
+            "paginas_afectadas": len(afectadas),
+            "paginas_ejemplo": [p[0] for p in afectadas[:MUESTRA]],
+        }, group_key=clave_de_grupo("soft404_plantilla|" + host))
+        emitidas += len(filas)
+    return emitidas
 
 
 def _tapar(session, Issue, job_id, paginas: list[int]) -> dict[str, int]:
