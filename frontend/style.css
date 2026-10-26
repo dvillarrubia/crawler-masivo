@@ -1932,6 +1932,9 @@ td.celda-acciones{overflow:visible}
   .barra-cambios{justify-content:flex-start;padding:.55rem 1rem}
   .barra-cambios-texto{flex:1 1 100%}
   .barra-cambios > svg, .barra-cambios > i{display:none}
+  /* En la tabla apilada los botones van a la izquierda: el menu se abre hacia la derecha */
+  .tabla-apilable .menu-wrap-fila .menu{left:0;right:auto;max-width:calc(100vw - 3rem)}
+  .menu .menu-sub{white-space:normal}
 }
 /* El identificador (slug), plegado en Datos del cliente */
 .cfg-mas > summary{cursor:pointer;color:var(--accent);width:max-content;margin-top:.25rem}
