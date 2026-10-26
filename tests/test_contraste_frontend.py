@@ -38,6 +38,10 @@ MUESTRAS = [
     ("pestana activa", '<div class="tabs"><button id="m" class="tab active">Historial</button></div>'),
     ("alertas en la pestana activa", '<div class="tabs"><button class="tab active">Alertas <span id="m" class="count count-aviso">3</span></button></div>'),
     ("alertas criticas en la pestana", '<div class="tabs"><button class="tab">Alertas <span id="m" class="count count-critica">3</span></button></div>'),
+    ("alertas criticas en la pestana activa", '<div class="tabs"><button class="tab active">Alertas <span id="m" class="count count-critica">3</span></button></div>'),
+    ("alertas de aviso en la pestana", '<div class="tabs"><button class="tab">Alertas <span id="m" class="count count-aviso">3</span></button></div>'),
+    ("alertas solo informativas en la pestana", '<div class="tabs"><button class="tab">Alertas <span id="m" class="count count-info">3</span></button></div>'),
+    ("info", '<div class="card"><span id="m" class="severity-info">info</span></div>'),
     ("error", '<div class="card"><span id="m" class="text-red">85</span></div>'),
     ("aviso", '<div class="card"><span id="m" class="text-orange">3 alertas</span></div>'),
     ("bien", '<div class="card"><span id="m" class="text-green">sin alertas</span></div>'),
@@ -101,20 +105,37 @@ def test_todo_el_texto_clave_pasa_4_5(tema):
     assert not flojos, f"tema {tema}: por debajo de 4,5:1 {flojos}"
 
 
-def test_las_alertas_no_salen_del_verde_y_cancelado_es_neutro():
-    r = _medir("light")
-    verde_activa = _medir_color_pestana_activa()
-    assert r["alertas en la pestana activa"]["color"] != verde_activa
+@pytest.mark.parametrize("tema", ["light", "terminal"])
+def test_las_alertas_no_salen_del_verde_y_cancelado_es_neutro(tema):
+    # En los dos temas: en el terminal unas reglas mas especificas de
+    # `.tab .count` dejaban el numero en verde (hallazgo de la revision).
+    r = _medir(tema)
+    verdes = (_medir_color_pestana_activa(tema), _medir_color_pestana(tema), r["bien"]["color"])
+    for k in ("alertas en la pestana activa", "alertas de aviso en la pestana",
+              "alertas criticas en la pestana", "alertas criticas en la pestana activa",
+              "alertas solo informativas en la pestana"):
+        assert r[k]["color"] not in verdes, f"tema {tema}: {k} sale verde ({r[k]['color']})"
     assert r["alertas en la pestana activa"]["color"] == r["aviso"]["color"]
+    assert r["alertas de aviso en la pestana"]["color"] == r["aviso"]["color"]
     assert r["alertas criticas en la pestana"]["color"] == r["error"]["color"]
+    assert r["alertas criticas en la pestana activa"]["color"] == r["error"]["color"]
+    # Si todas son informativas, azul de info y no naranja de aviso.
+    assert r["alertas solo informativas en la pestana"]["color"] == r["info"]["color"]
     # Cancelado en gris: ni el naranja de los avisos ni el verde de «bien».
-    assert r["insignia badge-neutral"]["color"] == r["texto gris en una tarjeta"]["color"]
-    assert r["insignia badge-neutral"]["color"] not in (r["aviso"]["color"], r["bien"]["color"])
+    # (En el terminal el neutro es su gris verdoso propio, --neutral, no el --text-dim.)
+    if tema == "light":
+        assert r["insignia badge-neutral"]["color"] == r["texto gris en una tarjeta"]["color"]
+    assert r["insignia badge-neutral"]["color"] not in (r["aviso"]["color"], r["bien"]["color"], r["error"]["color"])
     # El enlace ya no es el verde de marca.
     assert r["enlace sobre el fondo"]["color"] != "rgb(91, 174, 35)"
 
 
-def _medir_color_pestana_activa() -> str:
+def _medir_color_pestana_activa(tema: str = "light") -> str:
+    return _medir_color_pestana(tema, activa=True)
+
+
+def _medir_color_pestana(tema: str = "light", activa: bool = False) -> str:
+    """Color del contador normal (no de alertas) de una pestana."""
     from playwright.async_api import async_playwright
 
     async def run():
@@ -124,8 +145,8 @@ def _medir_color_pestana_activa() -> str:
             except Exception as exc:  # pragma: no cover
                 pytest.skip(f"sin Chromium: {exc}")
             pagina = await nav.new_page()
-            await pagina.set_content("<html><head><style>" + CSS + "</style></head><body>"
-                                     '<div class="tabs"><button class="tab active">Problemas '
+            await pagina.set_content(f'<html data-theme="{tema}"><head><style>' + CSS + "</style></head><body>"
+                                     f'<div class="tabs"><button class="tab{" active" if activa else ""}">Problemas '
                                      '<span id="m" class="count">12</span></button></div></body></html>')
             c = await pagina.evaluate("getComputedStyle(document.getElementById('m')).color")
             await nav.close()

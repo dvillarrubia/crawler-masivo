@@ -425,6 +425,23 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Lo abierto: en el tema terminal todo el texto es verde por diseño, así que
   «bien» y los enlaces comparten color; lo que cambia de color son el rojo, el
   naranja y el azul.
+- [x] **Tras la revisión independiente:** en el tema terminal el número de
+  alertas de la pestaña seguía en verde (dos reglas de `theme-terminal.css` más
+  específicas ganaban a las nuevas); ahora sale en naranja, rojo o azul sobre
+  fondo casi negro, también en la pestaña activa. Si todas las alertas abiertas
+  son informativas, el número va en azul y no en el naranja de aviso. En el tema
+  claro, sobre una pestaña inactiva el naranja daba 4,2:1 y el azul 4:1: el
+  número lleva ahora fondo de tarjeta opaco y filete de su color. El test de
+  contraste mide todas esas variantes en los dos temas. La leyenda de las
+  gráficas dice «no siempre empieza en 0» (a veces sí). El verde de marca se
+  usa por fin como `var(--brand)` en el logo, el filete y los iconos. En
+  Semántico, los colores fijos de Google (#34a853, #ea4335, #4285f4, #fbbc04,
+  entre 1,7 y 3,9:1) pasan a la escala: Core verde, Focus azul, Expansion
+  naranja, Peripheral rojo; «Reforzar» (una acción, no un «bien») en azul y
+  «Reenfocar» en naranja.
+- Sigue igual a propósito: el verde de los enlaces (#37731a) y el de «bien»
+  (#1e7045) quedan muy cerca (1,05:1 entre sí). La especificación pide enlaces
+  en un verde oscuro; el enlace se distingue por ser enlace, no por el tono.
 
 ### Cómo se probó
 

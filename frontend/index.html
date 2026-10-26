@@ -36,9 +36,9 @@
        donde estuvieras, y desde la ficha de un rastreo no habia forma de ir a
        Clientes ni a Programados (hoy, apartado de Produccion). Las secciones son enlaces de verdad (#/...),
        asi que se pueden abrir en otra pestana y el boton atras funciona. -->
-  <header class="topbar" style="border-top: 3px solid #5BAE23;">
+  <header class="topbar" style="border-top: 3px solid var(--brand);">
     <a href="#/clientes" class="topbar-brand" title="Ir al panel de clientes">
-      <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:#5BAE23"></i>
+      <i data-lucide="radar" class="topbar-icon" style="width:22px;height:22px;color:var(--brand)"></i>
       <span>SEO Crawler</span>
     </a>
     <nav class="topnav" aria-label="Secciones">
@@ -782,7 +782,7 @@
               <i :data-lucide="t[1]" style="width:14px;height:14px"></i>
               <span x-text="t[2]"></span>
               <span class="count" x-show="t[0] === 'alertas' && alertasAbiertas && alertasAbiertas.length"
-                    :class="(alertasAbiertas || []).some(a => a.severidad === 'critical') ? 'count-critica' : 'count-aviso'"
+                    :class="(alertasAbiertas || []).some(a => a.severidad === 'critical') ? 'count-critica' : ((alertasAbiertas || []).every(a => a.severidad === 'info') ? 'count-info' : 'count-aviso')"
                     x-text="alertasAbiertas ? alertasAbiertas.length : ''"></span>
             </button>
           </template>
@@ -1113,7 +1113,7 @@
                       <span class="evo-ley-tramo empeora"></span> empeora ·
                       <span class="evo-fuera-txt">×</span> no comparable (fallido, truncado, canario, prueba o lista; pasa el ratón para el motivo) ·
                       <span class="evo-ley-corte">v</span> cambió la versión del análisis: el salto puede ser nuestro, no del sitio.
-                      <br>El eje vertical no empieza en 0, pero abarca al menos un 20 % del valor más alto: una variación pequeña se ve pequeña.
+                      <br>El eje vertical no siempre empieza en 0, pero abarca al menos un 20 % del valor más alto: una variación pequeña se ve pequeña.
                     </p>
                   </div>
                 </template>
@@ -4789,8 +4789,8 @@
 
             <!-- GSC Summary -->
             <template x-if="semanticResults && semanticResults.gsc_summary">
-              <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap;border-left:3px solid #4285f4">
-                <span class="text-sm" style="font-weight:600;color:#4285f4;display:flex;align-items:center;gap:.3rem">
+              <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;flex-wrap:wrap;border-left:3px solid var(--blue)">
+                <span class="text-sm" style="font-weight:600;color:var(--blue);display:flex;align-items:center;gap:.3rem">
                   <i data-lucide="bar-chart-3" style="width:14px;height:14px"></i> GSC
                 </span>
                 <span class="text-sm" data-tip="Total de clicks organicos de Google Search Console para las URLs del análisis."><strong>Clicks:</strong> <span x-text="semanticResults.gsc_summary.total_clicks.toLocaleString('es-ES')"></span></span>
@@ -4806,10 +4806,10 @@
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1rem">
                 <template x-for="ring in ['Core','Focus','Expansion','Peripheral']" :key="ring">
                   <div class="card" style="padding:.75rem 1rem;border-left:3px solid"
-                       :style="'border-left-color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]"
+                       :style="'border-left-color:' + ({Core:'var(--green)',Focus:'var(--blue)',Expansion:'var(--orange)',Peripheral:'var(--red)'})[ring]"
                        :data-tip="({Core:'Paginas mas cercanas al centro semantico (Q1). Son el nucleo tematico del sitio: el contenido que mejor define de que trata.',Focus:'Paginas cercanas al centro (Q1-Q2). Refuerzan el tema principal con contenido relevante y complementario.',Expansion:'Paginas a distancia media (Q2-Q3). Cubren temas relacionados pero no centrales. Oportunidad de reforzar o redirigir.',Peripheral:'Paginas mas alejadas del centro (>Q3). Contenido tangencial o fuera de tema. Candidatas a revisar, consolidar o eliminar.'})[ring]">
-                    <div style="font-size:.8rem;font-weight:600" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]" x-text="ring"></div>
-                    <div style="font-size:1.5rem;font-weight:700" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]"
+                    <div style="font-size:.8rem;font-weight:600" :style="'color:' + ({Core:'var(--green)',Focus:'var(--blue)',Expansion:'var(--orange)',Peripheral:'var(--red)'})[ring]" x-text="ring"></div>
+                    <div style="font-size:1.5rem;font-weight:700" :style="'color:' + ({Core:'var(--green)',Focus:'var(--blue)',Expansion:'var(--orange)',Peripheral:'var(--red)'})[ring]"
                          x-text="semanticResults.site_metrics.ring_counts[ring] || 0"></div>
                     <div class="text-dim text-sm" x-text="((semanticResults.site_metrics.ring_counts[ring] || 0) / semanticResults.total_pages * 100).toFixed(1) + '%'"></div>
                   </div>
@@ -5006,7 +5006,7 @@
                 <!-- Ring Map -->
                 <template x-if="semanticSubTab === 'rings'">
                   <div>
-                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Cada punto es una página posicionada según su distancia al <strong>centro semántico actual</strong> del sitio. El centro se calcula como la media ponderada de todos los embeddings (peso = PageRank + clicks GSC). <strong>PageRank</strong> mide la importancia de cada pagina segun cuantos enlaces internos recibe y de que paginas: una URL enlazada desde muchas paginas (o desde paginas importantes) tiene mas PageRank. Es la misma logica que usa Google internamente. Las paginas del anillo <strong style="color:#34a853">Core</strong> definen el tema principal, las del <strong style="color:#ea4335">Peripheral</strong> estan fuera de foco. El tamaño del punto refleja su autoridad.</p>
+                    <p class="text-dim text-sm" style="margin-bottom:.75rem">Cada punto es una página posicionada según su distancia al <strong>centro semántico actual</strong> del sitio. El centro se calcula como la media ponderada de todos los embeddings (peso = PageRank + clicks GSC). <strong>PageRank</strong> mide la importancia de cada pagina segun cuantos enlaces internos recibe y de que paginas: una URL enlazada desde muchas paginas (o desde paginas importantes) tiene mas PageRank. Es la misma logica que usa Google internamente. Las paginas del anillo <strong style="color:var(--green)">Core</strong> definen el tema principal, las del <strong style="color:var(--red)">Peripheral</strong> estan fuera de foco. El tamaño del punto refleja su autoridad.</p>
                     <div id="semantic-ring-chart" style="width:100%;height:600px;border-radius:8px;overflow:hidden"></div>
 
                     <!-- Target Theme -->
@@ -5039,7 +5039,7 @@
                             </span>
                             <span class="text-sm text-dim" x-text="'Tema: ' + targetResults.target_theme"></span>
                             <template x-for="ring in ['Core','Focus','Expansion','Peripheral']" :key="ring">
-                              <span class="text-sm" :style="'color:' + ({Core:'#34a853',Focus:'#4285f4',Expansion:'#fbbc04',Peripheral:'#ea4335'})[ring]">
+                              <span class="text-sm" :style="'color:' + ({Core:'var(--green)',Focus:'var(--blue)',Expansion:'var(--orange)',Peripheral:'var(--red)'})[ring]">
                                 <strong x-text="ring + ': '"></strong><span x-text="targetResults.ring_counts[ring] || 0"></span>
                               </span>
                             </template>
@@ -5052,7 +5052,7 @@
                           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                             <!-- Reinforce -->
                             <div>
-                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#34a853;display:flex;align-items:center;gap:.3rem" data-tip="Páginas cercanas al tema objetivo pero con poca autoridad. Refuerza el enlazado interno hacia ellas para mover el centro semántico hacia tu objetivo.">
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:var(--blue);display:flex;align-items:center;gap:.3rem" data-tip="Páginas cercanas al tema objetivo pero con poca autoridad. Refuerza el enlazado interno hacia ellas para mover el centro semántico hacia tu objetivo.">
                                 <i data-lucide="arrow-up-circle" style="width:14px;height:14px"></i> Reforzar (enlazar mas)
                               </h5>
                               <template x-if="targetResults.reinforce.length === 0">
@@ -5078,7 +5078,7 @@
 
                             <!-- Refocus -->
                             <div>
-                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:#ea4335;display:flex;align-items:center;gap:.3rem" data-tip="Páginas con alta autoridad pero alejadas del tema objetivo. Estan arrastrando el centro semántico en otra direccion. Opciones: reenfocar su contenido hacia el objetivo, o reducir su enlazado interno.">
+                              <h5 style="font-size:.85rem;margin-bottom:.5rem;color:var(--orange);display:flex;align-items:center;gap:.3rem" data-tip="Páginas con alta autoridad pero alejadas del tema objetivo. Estan arrastrando el centro semántico en otra direccion. Opciones: reenfocar su contenido hacia el objetivo, o reducir su enlazado interno.">
                                 <i data-lucide="arrow-down-circle" style="width:14px;height:14px"></i> Reenfocar (alejadas del objetivo)
                               </h5>
                               <template x-if="targetResults.refocus.length === 0">
@@ -7528,7 +7528,7 @@
       <div class="modal-header">
         <div>
           <h3 style="display:flex;align-items:center;gap:.4rem">
-            <i data-lucide="radar" style="width:18px;height:18px;color:#5BAE23"></i> Nuevo rastreo
+            <i data-lucide="radar" style="width:18px;height:18px;color:var(--brand)"></i> Nuevo rastreo
           </h3>
           <p class="text-dim text-sm" style="margin-top:.25rem">Configura y lanza un rastreo SEO completo de un sitio web</p>
         </div>

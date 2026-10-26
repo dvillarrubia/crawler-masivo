@@ -287,6 +287,15 @@ html[data-theme="terminal"] .modal-body .config-tabs .tab.active{
 }
 html[data-theme="terminal"] .tab .count{background:rgba(61,255,106,.12);color:var(--text);font-family:var(--font-mono);border-radius:0}
 html[data-theme="terminal"] .tab.active .count{background:var(--accent-ink);color:var(--accent)}
+/* El numero de alertas sigue la escala tambien aqui: sin esto las dos reglas de
+   arriba, mas especificas, lo dejaban en verde (revision de UX del 25-oct, 3.1).
+   Fondo casi negro tambien en la pestana activa, que es verde chillon. */
+html[data-theme="terminal"] .tab .count.count-aviso,
+html[data-theme="terminal"] .tab .count.count-critica,
+html[data-theme="terminal"] .tab .count.count-info{background:var(--accent-ink);box-shadow:inset 0 0 0 1px currentColor}
+html[data-theme="terminal"] .tab .count.count-aviso{color:var(--orange)}
+html[data-theme="terminal"] .tab .count.count-critica{color:var(--red)}
+html[data-theme="terminal"] .tab .count.count-info{color:var(--blue)}
 
 /* ----- Modal ----- */
 html[data-theme="terminal"] .modal-backdrop{background:rgba(0,6,2,.78)}
