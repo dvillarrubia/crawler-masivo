@@ -4379,7 +4379,12 @@
                       <span class="badge badge-pending" x-text="urlDetail.is_internal ? 'Interna' : 'Externa'"></span>
                     </template>
                   </div>
-                  <div class="url-full-display" x-text="urlDetail.url" :title="urlDetail.url"></div>
+                  <!-- La URL se abre y se copia (revision de UX del 25-oct, 1.10). -->
+                  <div class="url-full-display" style="display:flex;gap:.4rem;align-items:baseline">
+                    <a :href="urlDetail.url" target="_blank" rel="noopener" x-text="urlDetail.url" :title="'Abrir ' + urlDetail.url" style="word-break:break-all"></a>
+                    <button class="btn btn-sm" type="button" title="Copiar la URL"
+                            @click="navigator.clipboard ? navigator.clipboard.writeText(urlDetail.url).then(() => showToast('URL copiada')).catch(() => showToast('No se pudo copiar', 'error')) : showToast('El navegador no deja copiar aquí', 'error')">Copiar</button>
+                  </div>
                 </div>
                 <button class="btn btn-sm" @click="backToDetail()" style="display:flex;align-items:center;gap:.3rem">
                   <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Volver
@@ -4547,7 +4552,10 @@
                 Encabezados <span class="count" x-text="urlDetail.headings?.length || 0"></span>
               </button>
               <button type="button" class="tab" :class="urlDetailTab === 'links' && 'active'" @click="urlDetailTab = 'links'">
-                Enlaces <span class="count" x-text="(urlDetail.inlinks?.length || 0) + (urlDetail.outlinks?.length || 0)"></span>
+                <!-- Filas de la respuesta, con «+» si alguna lista llego al tope de 200
+                     de la API: los contadores del analisis cuentan otra cosa
+                     (apariciones, solo internos), revision de la 1.10. -->
+                Enlaces <span class="count" x-text="fmt.num((urlDetail.inlinks?.length || 0) + (urlDetail.outlinks?.length || 0)) + (((urlDetail.inlinks?.length || 0) >= 200 || (urlDetail.outlinks?.length || 0) >= 200) ? '+' : '')"></span>
               </button>
               <button type="button" class="tab" :class="urlDetailTab === 'resources' && 'active'" @click="urlDetailTab = 'resources'">
                 Recursos <span class="count" x-text="urlDetail.resources?.length || 0"></span>
@@ -4754,7 +4762,8 @@
                 <div class="card mb-2">
                   <div class="card-header">
                     <h2>Outlinks (enlaces salientes)</h2>
-                    <span class="badge badge-pending" x-text="(urlDetail.outlinks?.length || 0) + ' enlaces'"></span>
+                    <span class="badge badge-pending"
+                          x-text="fmt.num(urlDetail.outlinks?.length || 0) + ((urlDetail.outlinks?.length || 0) >= 200 ? ' primeras filas: hay más' : ' filas')"></span>
                   </div>
                   <template x-if="urlDetail.outlinks && urlDetail.outlinks.length > 0">
                     <div class="table-wrap">
@@ -4763,7 +4772,7 @@
                           <tr>
                             <th>URL Destino</th>
                             <th>Texto ancla</th>
-                            <th>Posicion</th>
+                            <th>Posición</th>
                             <th>Tipo</th>
                             <th>Follow</th>
                           </tr>
@@ -4775,7 +4784,7 @@
                               <td style="max-width:200px" :title="l.anchor_text || ''"><div class="truncate" x-text="l.anchor_text || '—'"></div></td>
                               <td x-text="fmt.position(l.link_position)"></td>
                               <td x-text="l.link_type || '—'"></td>
-                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Sí' : l.follow === false ? 'No' : '—'"></td>
                             </tr>
                           </template>
                         </tbody>
@@ -4791,16 +4800,21 @@
                 <div class="card">
                   <div class="card-header">
                     <h2>Inlinks (enlaces entrantes)</h2>
-                    <span class="badge badge-pending" x-text="(urlDetail.inlinks?.length || 0) + ' enlaces'"></span>
+                    <!-- La API manda como mucho 200: se dice de cuantos, y no se llama
+                         huerfana a una pagina con enlaces que no vinieron (1.10). -->
+                    <span class="badge badge-pending"
+                          x-text="fmt.num(urlDetail.inlinks?.length || 0) + ((urlDetail.inlinks?.length || 0) >= 200 ? ' primeras filas: hay más' : ' filas')"></span>
                   </div>
+                  <div class="text-sm text-dim" style="margin-bottom:.5rem" x-show="(urlDetail.inlinks?.length || 0) >= 200"
+                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: Explorador › CSV › Enlaces que apuntan a estas URLs.'"></div>
                   <template x-if="urlDetail.inlinks && urlDetail.inlinks.length > 0">
                     <div class="table-wrap">
                       <table>
                         <thead>
                           <tr>
-                            <th>URL Origen</th>
+                            <th>URL origen</th>
                             <th>Texto ancla</th>
-                            <th>Posicion</th>
+                            <th>Posición</th>
                             <th>Tipo</th>
                             <th>Follow</th>
                           </tr>
@@ -4808,11 +4822,13 @@
                         <tbody>
                           <template x-for="l in urlDetail.inlinks" :key="l.id">
                             <tr>
-                              <td style="max-width:350px" :title="l.from_url || ''"><div class="truncate" x-text="l.from_url || '—'"></div></td>
+                              <td style="max-width:350px" :title="l.from_url || ''"><div class="truncate">
+                                <a x-show="l.from_url_id" :href="'#/rastreos/' + job.id + '/url/' + l.from_url_id" x-text="l.from_url || '—'"></a>
+                                <span x-show="!l.from_url_id" x-text="l.from_url || '—'"></span></div></td>
                               <td style="max-width:200px" :title="l.anchor_text || ''"><div class="truncate" x-text="l.anchor_text || '—'"></div></td>
                               <td x-text="fmt.position(l.link_position)"></td>
                               <td x-text="l.link_type || '—'"></td>
-                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
+                              <td :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Sí' : l.follow === false ? 'No' : '—'"></td>
                             </tr>
                           </template>
                         </tbody>
@@ -4820,7 +4836,8 @@
                     </div>
                   </template>
                   <template x-if="!urlDetail.inlinks || urlDetail.inlinks.length === 0">
-                    <div class="text-dim text-sm" style="padding:.5rem 0">Sin inlinks</div>
+                    <div class="text-dim text-sm" style="padding:.5rem 0"
+                         x-text="urlDetail.inlinks_count === 0 ? 'Sin enlaces entrantes internos.' : (urlDetail.inlinks_count ? 'No se han podido leer sus enlaces entrantes (el análisis cuenta ' + fmt.num(urlDetail.inlinks_count) + ').' : 'Sin enlaces entrantes en la respuesta.')"></div>
                   </template>
                 </div>
               </div>
@@ -5666,7 +5683,8 @@
                     <template x-if="expDetailTab === 'inlinks'">
                       <div>
                         <template x-if="!expUrlDetail.inlinks || expUrlDetail.inlinks.length === 0">
-                          <div class="text-dim" style="padding:.5rem 0">Esta URL no recibe enlaces internos (página huérfana).</div>
+                          <div class="text-dim" style="padding:.5rem 0"
+                               x-text="expUrlDetail.inlinks_count === 0 ? 'Esta URL no recibe enlaces internos (página huérfana).' : (expUrlDetail.inlinks_count ? 'No se han podido leer sus enlaces entrantes (el análisis cuenta ' + fmt.num(expUrlDetail.inlinks_count) + ').' : 'Sin enlaces entrantes en la respuesta.')"></div>
                         </template>
                         <template x-if="expUrlDetail.inlinks && expUrlDetail.inlinks.length > 0">
                           <table class="table" style="font-size:.75rem">
@@ -5682,7 +5700,8 @@
                               <template x-for="l in expUrlDetail.inlinks" :key="l.id">
                                 <tr>
                                   <td :title="l.from_url || ''" style="max-width:380px">
-                                    <div class="truncate" x-text="l.from_url || '—'"></div>
+                                    <div class="truncate"><a x-show="l.from_url_id" :href="'#/rastreos/' + job.id + '/url/' + l.from_url_id" x-text="l.from_url || '—'"></a>
+                                      <span x-show="!l.from_url_id" x-text="l.from_url || '—'"></span></div>
                                   </td>
                                   <td :title="l.anchor_text || ''" style="max-width:200px">
                                     <div class="truncate" x-text="l.anchor_text || '—'"></div>
