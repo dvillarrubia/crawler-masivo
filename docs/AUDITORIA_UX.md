@@ -156,6 +156,43 @@ nunca salía activa), con la cabecera compacta encima y sin botón «Volver».
 Pendiente: el panel lateral del Explorador como versión recortada de la ficha
 de URL; hoy repite los datos con otros bloques y otro orden.
 
+### Revisión del 25-oct · 2.9 Pestaña IA (V32, V33, V34)
+
+- [x] Pestaña **IA** propia (`#/rastreos/<id>/ia`; el tramo viejo `enriquecido`
+  sigue abriéndola), entre Puntuación y «Más». Propia y no dentro del menú: es
+  lo único que se paga y nadie sabía si ya se había preguntado; con un nombre
+  de dos letras cabe en la fila de escritorio, y en móvil la fila queda en dos
+  líneas quitando los iconos. Sin botón en la cabecera del censo.
+- [x] Dentro: «Nueva consulta…», **Lo ya preguntado** (fecha, módulos con nombre
+  en castellano, sobre qué y a cuántas URLs, estado y gasto) y la respuesta de
+  la ejecución elegida. El progreso solo mientras corre.
+- [x] Lanzador: módulos con nombre llano, la explicación solo de lo marcado y
+  sin «(decisión 105)» ni «#8»; por defecto **las candidatas de cada módulo**,
+  con cuántas páginas pregunta cada uno («17 de 3.216»). **Clave de
+  autorización** en lugar de ENRICHMENT_TOKEN (también en los errores de la
+  API). Llamadas, memoria, tokens, presupuesto y «gasto del mes en todos los
+  clientes, con tope de N $» en **Opciones avanzadas**; si lo que queda del tope
+  no alcanza, el aviso sale a la vista. El botón dice «Lanzar y pagar hasta
+  N $» y sigue pidiendo la clave.
+- [x] **Antes de pagar otra vez**: si una ejecución de este censo (no fallida ni
+  cancelada) ya hizo todas las preguntas marcadas, «Ya se preguntó lo mismo el
+  24 oct (…): ver resultado», diciendo si fue sobre las mismas páginas.
+- [x] **Problemas**: «Revisado con IA el 24 oct, N pares: compiten en a, no en b ·
+  orientativo · ver resultado» en la canibalización (los pares salen de esos
+  avisos) y, en los candidatos a soft 404, contando solo las páginas que
+  tienen el problema (el módulo pregunta también a páginas con poco texto que
+  no lo tienen). Si alguna lista no se lee entera, o hay un segmento elegido,
+  no se dice nada. Los demás tipos no se relacionan con ninguna pregunta: sería
+  inventarlo.
+- [x] **Ficha de URL**: tarjeta «Revisado con IA» con la respuesta, si es
+  orientativa, la confianza y la fecha. Sin respuestas no sale.
+- [x] «Avanzado» pasa a **«Más»** con nombre fijo y la opción activa marcada
+  dentro (V34; también 3.7).
+- Pendiente: en Lopesan (el único censo de producción con ejecuciones) no hay
+  avisos `soft_404_candidato` ni ejecución de canibalización, así que la línea
+  de Problemas solo se ha visto con datos simulados. Las demás preguntas
+  (title genérico, marcado frente a lo visible…) no se cruzan con Problemas.
+
 ### Lo que salió por el camino (2026-10-14)
 
 Cosas que no estaban en la auditoría y aparecieron al hacerla:

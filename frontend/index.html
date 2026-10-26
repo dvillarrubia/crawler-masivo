@@ -1858,13 +1858,9 @@
                       data-tip="Repetir este mismo rastreo cada cierto tiempo">
                 <i data-lucide="calendar-clock" style="width:13px;height:13px"></i> Programar
               </button>
-              <!-- Analisis enriquecido (#40): lo UNICO que gasta dinero, siempre a
-                   mano y con el coste a la vista antes de confirmar. -->
-              <button class="btn btn-sm" @click="abrirEnriquecido()" :disabled="job.status !== 'completed'"
-                      style="display:flex;align-items:center;gap:.3rem"
-                      :data-tip="job.status === 'completed' ? 'Preguntas a un modelo sobre las URLs, con el coste estimado antes de lanzar' : 'Solo con el rastreo completado y analizado'">
-                <i data-lucide="sparkles" style="width:13px;height:13px"></i> Análisis enriquecido
-              </button>
+              <!-- El analisis con IA (#40) ya no tiene boton aqui: se lanza desde
+                   su pestana, junto a lo que ya se pregunto y con el coste
+                   antes de pagar (revision de UX del 25-oct, 2.9). -->
               <!-- Las cuatro descargas en un menu (UX-09): sueltas ocupaban
                    media cabecera y competian con lo que se usa a diario. -->
               <div class="menu-wrap" @click.outside="menuAbierto === 'exportar' && (menuAbierto = '')">
@@ -2178,23 +2174,33 @@
           <button class="tab" role="tab" :aria-selected="pestanaActiva('insights')" :class="pestanaActiva('insights') && 'active'" @click="switchTab('insights')" data-tip="Puntuación SEO por categorías, con recomendaciones. El entregable es «Informe para el cliente», arriba">
             <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Puntuación
           </button>
+          <!-- IA (revision de UX del 25-oct, 2.9): pestana propia y no una
+               opcion de «Avanzado». Es lo unico que se paga, y se lanza desde
+               aqui con el coste delante y lo ya preguntado a la vista; dentro
+               de un menu, nadie sabia si ya se habia preguntado. Cabe en la
+               fila de escritorio (nombre corto) y en movil la fila ya se
+               desplaza (1.1). -->
+          <button class="tab" role="tab" data-testid="pestana-ia" :aria-selected="pestanaActiva('enriquecido')" :class="pestanaActiva('enriquecido') && 'active'"
+                  @click="switchTab('enriquecido')" data-tip="Preguntas a la IA sobre las páginas: lo ya preguntado, sus respuestas y, con el coste delante, una consulta nueva">
+            <i data-lucide="sparkles" style="width:14px;height:14px"></i> IA
+            <span class="count" x-text="enriqRuns.length ? fmt.num(enriqRuns.length) : ''"></span>
+          </button>
+          <!-- «Más» con nombre fijo y la opcion activa marcada dentro (V34,
+               3.7): antes el boton cambiaba de nombre segun lo elegido. -->
           <div class="menu-wrap" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
-            <button class="tab" role="tab" :aria-selected="['semantic','enriquecido','cleaning'].some(t => pestanaActiva(t))"
-                    :class="['semantic','enriquecido','cleaning'].some(t => pestanaActiva(t)) && 'active'"
+            <button class="tab" role="tab" :aria-selected="['semantic','cleaning'].some(t => pestanaActiva(t))"
+                    :class="['semantic','cleaning'].some(t => pestanaActiva(t)) && 'active'"
                     @click="menuAbierto = menuAbierto === 'avanzado' ? '' : 'avanzado'" aria-haspopup="menu">
-              <i data-lucide="flask-conical" style="width:14px;height:14px"></i>
-              <span x-text="(view === 'detail' && ({semantic:'Semántico', enriquecido:'Enriquecido', cleaning:'Limpieza'})[detailTab]) || 'Avanzado'"></span>
+              <i data-lucide="flask-conical" style="width:14px;height:14px"></i> Más
               <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
             </button>
             <div class="menu" x-show="menuAbierto === 'avanzado'" x-transition.opacity role="menu" style="left:0;right:auto;min-width:20rem">
-              <button role="menuitem" @click="menuAbierto = ''; switchTab('semantic')">
+              <button role="menuitem" @click="menuAbierto = ''; switchTab('semantic')" :aria-current="pestanaActiva('semantic') ? 'page' : null"
+                      :class="pestanaActiva('semantic') && 'menu-activa'">
                 <i data-lucide="orbit" style="width:14px;height:14px"></i>
                 <span>Semántico<span class="menu-sub">Mapa de temas, canibalización y huecos de contenido</span></span></button>
-              <button role="menuitem" @click="menuAbierto = ''; switchTab('enriquecido')">
-                <i data-lucide="sparkles" style="width:14px;height:14px"></i>
-                <span>Enriquecido <span class="text-dim" x-show="enriqRuns.length" x-text="'(' + enriqRuns.length + ')'"></span>
-                  <span class="menu-sub">Ejecuciones del análisis con modelo: progreso, coste y resultados</span></span></button>
-              <button role="menuitem" @click="menuAbierto = ''; switchTab('cleaning')">
+              <button role="menuitem" @click="menuAbierto = ''; switchTab('cleaning')" :aria-current="pestanaActiva('cleaning') ? 'page' : null"
+                      :class="pestanaActiva('cleaning') && 'menu-activa'">
                 <i data-lucide="eraser" style="width:14px;height:14px"></i>
                 <span>Limpieza<span class="menu-sub">Quitar texto de plantilla del contenido extraído</span></span></button>
             </div>
@@ -2389,25 +2395,46 @@
           </div>
         </template>
 
-        <!-- ===== PESTANA: ENRIQUECIDO (#40) ===== -->
+        <!-- ===== PESTANA: IA (#40; revision de UX del 25-oct, 2.9) =====
+             Todo en un sitio: lanzar (con el coste antes de pagar), lo ya
+             preguntado y la respuesta de cada vez. Antes el boton estaba en
+             la cabecera y los resultados en «Avanzado › Enriquecido». -->
         <template x-if="detailTab === 'enriquecido'">
           <div>
-            <div class="card" style="margin-bottom:1rem" x-show="!enriqRuns.length">
-              <div class="text-dim" style="font-size:.85rem">
-                Este rastreo no tiene ejecuciones de análisis enriquecido. Nada de esto se lanza solo:
-                pulsa <strong>Análisis enriquecido</strong> en la barra de arriba para ver el coste estimado antes de decidir.
+            <div class="card ia-lanzar">
+              <div>
+                <strong>Preguntar a la IA sobre las páginas de este censo</strong>
+                <div class="text-sm text-dim" style="margin-top:.2rem">
+                  Por ejemplo, si una página que responde 200 es en realidad un error, o si dos páginas compiten por la misma búsqueda.
+                  Es de pago: antes de lanzar ves cuánto costaría, y lo que ya se preguntó no se vuelve a pagar. Nada se lanza solo.
+                </div>
               </div>
+              <button class="btn btn-primary" data-testid="ia-nueva" @click="abrirEnriquecido()" :disabled="job.status !== 'completed'"
+                      style="display:flex;align-items:center;gap:.35rem;white-space:nowrap"
+                      :data-tip="job.status === 'completed' ? 'Eliges qué preguntar y ves el coste estimado antes de confirmar' : 'Solo con el rastreo completado y analizado'">
+                <i data-lucide="sparkles" style="width:14px;height:14px"></i> Nueva consulta…
+              </button>
+            </div>
+
+            <div class="card" style="margin-bottom:1rem" x-show="!enriqRuns.length">
+              <div class="text-dim" style="font-size:.85rem">Todavía no se ha preguntado nada a la IA sobre este censo.</div>
             </div>
             <template x-if="enriqRuns.length">
               <div class="card" style="margin-bottom:1rem">
-                <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-                  <span style="font-size:.85rem">Ejecución:</span>
-                  <select @change="verEjecucion($el.value)" style="padding:.35rem .5rem;font-size:.85rem;max-width:34rem">
-                    <template x-for="r in enriqRuns" :key="r.id">
-                      <option :value="r.id" :selected="enriqRun && r.id === enriqRun.id"
-                              x-text="fmt.date(r.created_at) + '  ·  ' + fmt.estadoEnriq(r.estado) + '  ·  ' + fmt.usd(r.gastado_usd)"></option>
-                    </template>
-                  </select>
+                <div class="veredicto-titulo">Lo ya preguntado</div>
+                <div class="ia-historial" role="list">
+                  <template x-for="r in enriqRuns" :key="r.id">
+                    <button class="ia-ejec" role="listitem" :class="enriqRun && r.id === enriqRun.id && 'ia-ejec-on'"
+                            :aria-current="enriqRun && r.id === enriqRun.id ? 'true' : null" @click="verEjecucion(r.id)">
+                      <span class="ia-ejec-fecha" x-text="fmt.date(r.created_at)"></span>
+                      <span class="ia-ejec-que">
+                        <strong x-text="r.modulos.map(m => tituloModuloEnriq(m)).join(', ')"></strong>
+                        <span class="text-dim" x-text="fmt.alcanceEnriq(r.alcance) + (urlsPreguntadasEnriq(r) ? ' · ' + urlsPreguntadasEnriq(r) : '')"></span>
+                      </span>
+                      <span class="ia-ejec-estado" :style="'color:' + fmt.colorEnriq(r.estado)" x-text="fmt.estadoEnriq(r.estado)"></span>
+                      <span class="ia-ejec-coste" x-text="fmt.usd(r.gastado_usd)"></span>
+                    </button>
+                  </template>
                 </div>
               </div>
             </template>
@@ -2421,8 +2448,9 @@
                       <strong x-text="fmt.estadoEnriq(enriqRun.estado)"></strong>
                       <span class="text-dim" style="font-size:.8rem" x-show="enriqRun.motivo" x-text="' · ' + fmt.motivoEnriq(enriqRun.motivo)"></span>
                       <div class="text-dim" style="font-size:.78rem;margin-top:.2rem">
-                        Módulos: <span x-text="enriqRun.modulos.join(', ')"></span>
-                        · Alcance: <span x-text="fmt.alcanceEnriq(enriqRun.alcance)"></span>
+                        <span x-text="fmt.date(enriqRun.created_at)"></span>
+                        · <span x-text="enriqRun.modulos.map(m => tituloModuloEnriq(m)).join(', ')"></span>
+                        · Sobre: <span x-text="fmt.alcanceEnriq(enriqRun.alcance) + (urlsPreguntadasEnriq(enriqRun) ? ' (' + urlsPreguntadasEnriq(enriqRun) + ')' : '')"></span>
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
@@ -2437,10 +2465,10 @@
                       </template>
                     </div>
                   </div>
-                  <template x-if="enriqRun.progreso">
+                  <template x-if="enriqRun.progreso && ['pendiente','en_curso','cancelando'].includes(enriqRun.estado)">
                     <div style="margin-top:.6rem">
                       <div class="text-sm" style="display:flex;justify-content:space-between">
-                        <span x-text="'Módulo: ' + (enriqRun.progreso.modulo || '—')"></span>
+                        <span x-text="'Preguntando: ' + (enriqRun.progreso.modulo ? tituloModuloEnriq(enriqRun.progreso.modulo) : '—')"></span>
                         <span x-text="fmt.num(enriqRun.progreso.procesadas) + ' de ' + fmt.num(enriqRun.progreso.total) + ' URLs'"></span>
                       </div>
                       <div class="progress-bar">
@@ -3455,6 +3483,15 @@
                     </span>
                     <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
                   </button>
+                  <!-- Lo que ya contesto la IA sobre este problema (revision de
+                       UX del 25-oct, 2.9), a la vista sin desplegar la fila. -->
+                  <template x-if="lineaIAProblema(r)">
+                    <div class="ia-linea issue-ia" data-testid="problema-ia">
+                      <i data-lucide="sparkles" style="width:12px;height:12px"></i>
+                      <span x-text="(lineaIAProblema(r) || {}).texto"></span>
+                      <a href="#" @click.prevent="(x => x && verResultadoIA(x.run.id, x.pregunta))(lineaIAProblema(r))">ver resultado</a>
+                    </div>
+                  </template>
                   <div class="issue-group-body" x-show="grupoAbierto[r.issue_type]">
                     <template x-if="ISSUE_INFO[r.issue_type]">
                       <dl class="issue-explica">
@@ -4902,6 +4939,26 @@
                 <div class="text-sm text-dim" x-show="(urlDetail.issues || []).length > 5"
                      x-text="'y ' + ((urlDetail.issues || []).length - 5) + ' más'"></div>
               </div>
+              <!-- Lo que contesto la IA sobre esta pagina (revision de UX del
+                   25-oct, 2.9). Sin respuestas no sale: no haberla preguntado
+                   no es un «no». -->
+              <template x-if="iaUrl && iaUrl.length">
+                <div class="card" data-testid="url-ia">
+                  <div class="veredicto-titulo">Revisado con IA</div>
+                  <ul class="veredicto-lista">
+                    <template x-for="f in iaUrl" :key="f.run.id + f.d.pregunta">
+                      <li style="display:block">
+                        <div x-text="tituloPreguntaEnriq(f.d.pregunta)"></div>
+                        <div>La IA dice: <strong x-text="f.d.respuesta == null ? 'sin respuesta' : fmt.respuestaEnriq(f.d.nivel ?? f.d.respuesta)"></strong></div>
+                        <div class="text-sm text-dim">
+                          <span x-text="estadoUnaEnriq(f.d.estado) + (f.d.confianza == null ? '' : ', confianza ' + fmt.num(Math.round(100 * f.d.confianza)) + ' %') + ' · ' + fmt.dia(f.run.created_at) + ' · '"></span>
+                          <a href="#" @click.prevent="verResultadoIA(f.run.id, f.d.pregunta)">ver resultado</a>
+                        </div>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+              </template>
               <!-- Capturas de pantalla por muestra de plantilla (decisión 173):
                    la primera pantalla con el dispositivo del censo y, si se
                    pidió, con el otro. Solo las URLs muestreadas tienen. -->
@@ -7063,48 +7120,60 @@
   </div>
 </template>
 
-<!-- ===== MODAL: ANALISIS ENRIQUECIDO (#40) ===== -->
+<!-- ===== MODAL: NUEVA CONSULTA A LA IA (#40; revision de UX del 25-oct, 2.9) =====
+     Lo unico que gasta dinero: estima siempre antes de dejar lanzar, pide la
+     clave y el boton dice cuanto se puede pagar como mucho. Lo tecnico
+     (llamadas, cache, tokens, presupuesto, tope de todos los clientes) va
+     plegado; un aviso de tope o de repeticion sale siempre a la vista. -->
 <template x-if="enriqAbierto">
   <div class="modal-backdrop" @click.self="enriqAbierto = false" @keydown.escape.window="enriqAbierto = false">
-    <div class="modal" style="max-width:40rem">
+    <div class="modal" style="max-width:40rem" data-testid="ia-lanzador">
       <div class="modal-header">
         <h3 style="display:flex;align-items:center;gap:.4rem">
           <i data-lucide="sparkles" style="width:18px;height:18px;color:var(--accent)"></i>
-          Análisis enriquecido
+          Nueva consulta a la IA
         </h3>
-        <button class="btn-icon" @click="enriqAbierto = false" style="font-size:1.25rem">&times;</button>
+        <button class="btn-icon" @click="enriqAbierto = false" style="font-size:1.25rem" aria-label="Cerrar">&times;</button>
       </div>
       <div class="modal-body" style="padding:1.25rem">
         <p class="text-dim text-sm" style="margin-bottom:1rem">
-          Pregunta a un modelo de pago sobre las URLs de este rastreo. Antes de lanzar ves cuánto costaría;
-          lo que ya se preguntó en otra ejecución sale de la caché y no se vuelve a pagar.
+          Pregunta a un modelo de pago sobre las páginas de este censo. Antes de lanzar ves cuánto costaría;
+          lo que ya se preguntó, aquí o en otro censo, sale de la memoria y no se vuelve a pagar.
         </p>
 
         <div class="form-group">
-          <label>Módulos</label>
+          <label>Qué preguntar</label>
           <template x-for="m in enriqCatalogo" :key="m.nombre">
             <div style="margin:.3rem 0">
               <label class="checkbox-label">
                 <input type="checkbox" :checked="enriqForm.modulos.includes(m.nombre)"
                        @change="alternarModuloEnriq(m.nombre, $el.checked)">
-                <span x-text="m.titulo"></span>
+                <span x-text="etiquetaModuloEnriq(m)" :title="descripcionEnriq(m.descripcion)"></span>
               </label>
-              <div class="form-hint" x-text="descripcionEnriq(m.descripcion)"></div>
-              <div class="form-hint" x-show="m.depende_de.length" x-text="'Necesita: ' + m.depende_de.join(', ') + ' (se añade solo)'"></div>
+              <!-- La explicacion, solo de lo marcado: once parrafos tapaban
+                   el coste, que es lo que hay que ver antes de lanzar. -->
+              <div class="form-hint" x-show="enriqForm.modulos.includes(m.nombre)" x-text="descripcionEnriq(m.descripcion)"></div>
+              <div class="form-hint" x-show="m.depende_de.length && enriqForm.modulos.includes(m.nombre)" x-text="'Necesita: ' + m.depende_de.map(n => tituloModuloEnriq(n)).join(', ') + ' (se añade solo)'"></div>
             </div>
           </template>
           <div class="form-hint" x-show="enriqEstimacion && enriqEstimacion.anadidos.length"
-               x-text="'Añadidos por dependencia: ' + (enriqEstimacion ? enriqEstimacion.anadidos.join(', ') : '')"></div>
+               x-text="'Añadidos porque los necesita otro: ' + (enriqEstimacion ? enriqEstimacion.anadidos.map(n => tituloModuloEnriq(n)).join(', ') : '')"></div>
         </div>
 
+        <!-- Por defecto, las candidatas: cada modulo pregunta solo a las
+             paginas que le tocan (el soft 404, a las sospechosas), no a
+             «todas las indexables», que decia 3.216 para 17 (V32). -->
         <div class="form-group" style="margin-top:.75rem">
-          <label>Alcance</label>
+          <label>Sobre qué páginas</label>
           <select x-model="enriqForm.tipo" @change="estimarEnriquecido()">
-            <option value="todas">Todas las HTML internas, 200 e indexables</option>
-            <option value="carpeta">Solo una carpeta</option>
-            <option value="max">Un máximo de URLs (por orden de rastreo)</option>
-            <option value="muestra">Modo muestra (repartida por todo el sitio)</option>
+            <option value="todas">Las candidatas de cada módulo (recomendado)</option>
+            <option value="carpeta">Solo las de una carpeta</option>
+            <option value="max">Un máximo de páginas (por orden de rastreo)</option>
+            <option value="muestra">Una muestra repartida por todo el sitio</option>
           </select>
+          <div class="form-hint" x-show="enriqForm.tipo === 'todas'">
+            Cada módulo elige sus páginas entre las indexables: los marcados como «candidatos», solo las sospechosas; los demás, todas.
+          </div>
           <template x-if="enriqForm.tipo === 'carpeta'">
             <input type="text" x-model="enriqForm.carpeta" placeholder="/blog/" @change="estimarEnriquecido()" style="margin-top:.4rem">
           </template>
@@ -7113,66 +7182,99 @@
           </template>
         </div>
 
-        <div class="card" style="margin-top:.75rem;padding:.75rem 1rem">
-          <template x-if="enriqEstimando"><div class="text-dim text-sm">Estimando…</div></template>
+        <!-- Antes de pagar otra vez (2.9) -->
+        <template x-if="!enriqEstimando && ejecucionRepetidaEnriq()">
+          <div class="card ia-repetida" data-testid="ia-repetida">
+            <span x-text="(x => x ? 'Ya se preguntó lo mismo en este censo el ' + fmt.dia(x.run.created_at)
+                          + ' (' + fmt.estadoEnriq(x.run.estado).toLowerCase()
+                          + (x.mismoAlcance ? ', sobre las mismas páginas' : ', sobre ' + fmt.alcanceEnriq(x.run.alcance)) + '): ' : '')(ejecucionRepetidaEnriq())"></span>
+            <a href="#" @click.prevent="(x => x && verEjecucionDesdeLanzador(x.run.id))(ejecucionRepetidaEnriq())">ver resultado</a>.
+            <span class="text-dim" x-show="(ejecucionRepetidaEnriq() || {}).mismoAlcance">Repetirlo sale casi gratis (está en la memoria), pero no dirá nada nuevo.</span>
+          </div>
+        </template>
+
+        <div class="card" style="margin-top:.75rem;padding:.75rem 1rem" data-testid="ia-estimacion">
+          <template x-if="enriqEstimando"><div class="text-dim text-sm">Calculando el coste…</div></template>
+          <template x-if="!enriqEstimando && !enriqEstimacion && !enriqError">
+            <div class="text-dim text-sm">Marca qué preguntar para ver el coste.</div>
+          </template>
           <template x-if="enriqEstimacion && !enriqEstimando">
             <div class="text-sm" style="display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;font-variant-numeric:tabular-nums">
-              <span>URLs en el alcance</span><strong x-text="fmt.num(enriqEstimacion.urls)"></strong>
-              <!-- Modulos por grupo (decision 175): cuentan pares busqueda + dos paginas, no URLs -->
-              <template x-for="[nombre, pm] in Object.entries(enriqEstimacion.por_modulo || {}).filter(([n, x]) => x.unidad === 'grupos')" :key="nombre">
-                <div style="display:contents"><span x-text="'Pares de páginas que juzga «' + nombre + '»'"></span><strong x-text="fmt.num(pm.urls)"></strong></div>
+              <!-- A cuantas paginas (o pares) pregunta cada modulo de verdad -->
+              <template x-for="[nombre, pm] in Object.entries(enriqEstimacion.por_modulo || {})" :key="nombre">
+                <div style="display:contents">
+                  <span x-text="tituloModuloEnriq(nombre) + (pm.unidad === 'grupos' ? ': pares de páginas que juzga' : ': páginas a las que pregunta')"></span>
+                  <strong x-text="fmt.num(pm.urls) + (pm.unidad !== 'grupos' && pm.urls !== enriqEstimacion.urls ? ' de ' + fmt.num(enriqEstimacion.urls) : '')"></strong>
+                </div>
               </template>
-              <span>Llamadas (después de la caché)</span><strong x-text="fmt.num(enriqEstimacion.llamadas)"></strong>
-              <span>Ya en caché, no se repagan</span><strong x-text="fmt.num(enriqEstimacion.aciertos_cache) + ' de ' + fmt.num(enriqEstimacion.decisiones)"></strong>
-              <span>Tokens estimados</span><strong x-text="fmt.num(enriqEstimacion.tokens_estimados)"></strong>
-              <span>Coste estimado</span><strong x-text="fmt.usd(enriqEstimacion.coste_estimado_usd)"></strong>
+              <span>Coste estimado</span><strong data-testid="ia-coste" x-text="fmt.usd(enriqEstimacion.coste_estimado_usd)"></strong>
               <span>Tiempo estimado</span><strong x-text="fmt.duracion(enriqEstimacion.segundos_estimados)"></strong>
               <template x-if="enriqEstimacion.cliente">
                 <span x-text="'Gasto del mes de ' + (enriqEstimacion.cliente.nombre || 'el cliente')"></span>
               </template>
               <template x-if="enriqEstimacion.cliente">
-                <strong x-text="fmt.usd(enriqEstimacion.cliente.gastado_mes_usd) + ' de ' + (enriqEstimacion.cliente.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.cliente.tope_mensual_usd))"></strong>
+                <strong x-text="fmt.usd(enriqEstimacion.cliente.gastado_mes_usd) + (enriqEstimacion.cliente.tope_mensual_usd == null ? ', sin tope' : ' de ' + fmt.usd(enriqEstimacion.cliente.tope_mensual_usd))"></strong>
               </template>
-              <span>Gasto del mes de la instancia</span>
-              <strong x-text="fmt.usd(enriqEstimacion.global.gastado_mes_usd) + ' de ' + (enriqEstimacion.global.tope_mensual_usd == null ? 'sin tope' : fmt.usd(enriqEstimacion.global.tope_mensual_usd))"></strong>
             </div>
           </template>
           <template x-for="a in ((enriqEstimacion && !enriqEstimando && enriqEstimacion.avisos) || [])" :key="a">
             <div class="form-hint" style="margin-top:.4rem;color:var(--orange)" x-text="a"></div>
           </template>
+          <!-- El tope de todos los clientes va plegado, salvo si no alcanza -->
+          <template x-if="enriqEstimacion && !enriqEstimando && enriqEstimacion.global && enriqEstimacion.global.restante_usd != null && enriqEstimacion.global.restante_usd < enriqEstimacion.coste_estimado_usd">
+            <div class="form-hint" style="margin-top:.4rem;color:var(--orange)"
+                 x-text="'Al gasto del mes en todos los clientes le quedan ' + fmt.usd(enriqEstimacion.global.restante_usd) + ' hasta su tope de ' + fmt.usd(enriqEstimacion.global.tope_mensual_usd) + ': la consulta se parará antes de acabar.'"></div>
+          </template>
+        </div>
+
+        <details class="ia-opciones" :open="enriqAvanzado" @toggle="enriqAvanzado = $el.open">
+          <summary>Opciones avanzadas</summary>
+          <template x-if="enriqEstimacion && !enriqEstimando">
+            <div class="text-sm" style="display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;font-variant-numeric:tabular-nums;margin-top:.5rem">
+              <span>Llamadas al modelo (sin contar lo que ya está en la memoria)</span><strong x-text="fmt.num(enriqEstimacion.llamadas)"></strong>
+              <span>Respuestas que ya están en la memoria</span><strong x-text="fmt.num(enriqEstimacion.aciertos_cache) + ' de ' + fmt.num(enriqEstimacion.decisiones)"></strong>
+              <span>Tokens estimados</span><strong x-text="fmt.num(enriqEstimacion.tokens_estimados)"></strong>
+              <template x-if="enriqEstimacion.global">
+                <span>Gasto del mes en todos los clientes</span>
+              </template>
+              <template x-if="enriqEstimacion.global">
+                <strong x-text="fmt.usd(enriqEstimacion.global.gastado_mes_usd) + (enriqEstimacion.global.tope_mensual_usd == null ? ', sin tope' : ', con tope de ' + fmt.usd(enriqEstimacion.global.tope_mensual_usd))"></strong>
+              </template>
+            </div>
+          </template>
           <div class="form-hint" style="margin-top:.4rem">
-            Estimación por caracteres; el coste real sale de lo que cobra OpenRouter y la ejecución se para en seco al llegar al presupuesto.
+            El coste se estima por caracteres; el real es lo que cobra OpenRouter, y la consulta se para en seco al llegar al presupuesto.
           </div>
-        </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Presupuesto máximo de esta consulta ($)</label>
+            <input type="number" min="0" step="0.01" x-model="enriqForm.presupuesto">
+            <div class="form-hint">Al llegar aquí se para y queda «parcial», con lo hecho guardado. Por defecto, la estimación más un 50 %.</div>
+          </div>
+        </details>
 
         <div class="form-group" style="margin-top:.75rem">
-          <label>Presupuesto máximo de esta ejecución ($)</label>
-          <input type="number" min="0" step="0.01" x-model="enriqForm.presupuesto">
-          <div class="form-hint">Al llegar aquí se para y queda «parcial» con lo hecho guardado. Por defecto, la estimación más un 50%.</div>
-        </div>
-
-        <div class="form-group" style="margin-top:.75rem">
-          <label>Token de lanzamiento</label>
-          <input type="password" x-model="enriqToken" autocomplete="off" placeholder="ENRICHMENT_TOKEN del servidor">
-          <div class="form-hint">Se guarda solo en esta pestaña del navegador (sessionStorage) y se borra al cerrarla.</div>
+          <label>Clave de autorización</label>
+          <input type="password" x-model="enriqToken" autocomplete="off" placeholder="Pídesela a quien administra el crawler">
+          <div class="form-hint">Se guarda solo en esta pestaña del navegador y se borra al cerrarla.</div>
         </div>
         <template x-if="!enriqLanzable">
           <div class="card" style="border-left:3px solid var(--orange);padding:.6rem .8rem;font-size:.82rem">
-            El lanzamiento está desactivado en este servidor: falta <code>ENRICHMENT_TOKEN</code>. Puedes estimar, pero no lanzar.
+            Este servidor no tiene configurada la clave de autorización: puedes ver el coste, pero no lanzar.
           </div>
         </template>
         <template x-if="enriqError">
-          <div class="card" style="border-left:3px solid var(--red);padding:.6rem .8rem;font-size:.82rem;margin-top:.5rem" x-text="enriqError"></div>
+          <div class="card" style="border-left:3px solid var(--red);padding:.6rem .8rem;font-size:.82rem;margin-top:.5rem" x-text="textoErrorEnriq(enriqError)"></div>
         </template>
       </div>
       <div class="modal-footer">
         <button class="btn" @click="enriqAbierto = false">Cancelar</button>
-        <button class="btn btn-primary" @click="lanzarEnriquecido()"
+        <button class="btn btn-primary" @click="lanzarEnriquecido()" data-testid="ia-lanzar"
                 :disabled="enriqLanzando || enriqEstimando || !enriqEstimacion || !enriqLanzable || !enriqToken || !enriqForm.modulos.length"
+                :data-tip="!enriqToken ? 'Escribe la clave de autorización' : ''"
                 style="display:flex;align-items:center;gap:.4rem">
           <template x-if="enriqLanzando"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="sparkles" style="width:14px;height:14px" x-show="!enriqLanzando"></i>
-          Confirmar y lanzar
+          <span x-text="'Lanzar y pagar hasta ' + fmt.usd(parseFloat(enriqForm.presupuesto) || 0)"></span>
         </button>
       </div>
     </div>
