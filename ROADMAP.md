@@ -1121,6 +1121,24 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   calcula el detalle después (V21; las incidencias guardadas, solo si los dos
   censos siguen con la versión del análisis con la que se compararon), y el
   desplegable va por tipo (V22). Solo frontend.
+- **Bloque «Google» y Resumen que no afirma de más** (revisión de UX del
+  25-oct, 3.3 y 3.6, decisión 197; en local, sin desplegar): en el Resumen y en
+  el Estado del cliente, clics, impresiones y CTR medio con la ventana de los
+  datos al lado, una frase que dice si los clics suben o bajan y con la fecha
+  de cada cifra (o que la comparación espera a Search Console), y las páginas
+  que más cambian una vez cada una, con enlace a su ficha. El servidor escribe
+  una sola frase para la misma página en dos grupos (V46) y la ficha del
+  rastreo redacta las frases al servirla. En el Resumen: TLS que caduca en 30
+  días o menos en naranja con los días (V19), «Hosts más frecuentes» en una
+  frase cuando uno se lleva casi todo, sitemaps con las URLs aparte de los
+  índices y los ficheros vacíos dichos, que matizan «No incluida en el
+  sitemap» también en Problemas (V13), y cada alerta dice sobre qué páginas se
+  cuenta (V20).
+- **Limpieza por texto repetido** (revisión de UX del 25-oct, 3.6, decisión
+  198; en local): una frase dice para qué sirve y que luego hay que volver a
+  analizar; los grupos van por el texto que se repite en una muestra (lo que
+  más gana la limpieza primero) y el editor se abre bajo su fila con «Quitar
+  esta línea». Falta agrupar por plantilla y guardar las reglas en el cliente.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

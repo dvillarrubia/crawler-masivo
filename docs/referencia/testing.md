@@ -471,3 +471,13 @@ limites y las opciones del formulario son los de `JobConfig` —necesita tambien
 pydantic—, heredado/cambiado/«volver al heredado», una cabecera heredada no se
 quita en silencio, al lanzar solo va lo de ese rastreo y el tope del canario, y
 cambiar de cliente o quitarlo conserva lo cambiado).
+Revision de UX del 25-oct, 3.3 y 3.6 (decisiones 197 y 198):
+`test_trafico_entre_censos.py` tambien junta en una frase la misma pagina de dos
+grupos (y no lo hace sin saber que son las mismas) y comprueba que `GET
+/api/jobs/{id}` redacta las frases al servirlas; `test_limpieza_repetido.py`
+(lineas repetidas en la mitad de la muestra y el orden de `/cleaning/groups` con
+TestClient y SQLite; necesita fastapi: correr en la imagen de la API) y
+`test_google_limpieza_frontend.py` (Chromium: cifras y ventana de los datos del
+bloque «Google», frases que solo dicen lo que se sabe, paginas una vez,
+sitemaps vacios y su matiz, host dominante, base de cada alerta, y la celda,
+el orden y el editor de la Limpieza).

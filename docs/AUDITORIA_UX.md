@@ -392,6 +392,34 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Lo abierto: la fila de un hallazgo agrupado de otros tipos sigue contando «1
   página» (la de anclaje).
 
+### Revisión del 25-oct · 3.3 Google y 3.6 Limpieza y Resumen (V13, V18, V19, V20, V45, V46)
+
+- [x] V46: un bloque «Google» en el Resumen y en el Estado del cliente con tres
+  cifras (clics, impresiones, CTR medio; la posición del sitio no la trae
+  `gsc_resumen`) y la ventana de los datos al lado, una frase que solo dice lo
+  que se sabe y las páginas que más cambian, una vez cada una y con su ficha.
+  La misma página en dos grupos ya sale en una frase (decisión 197). El doble
+  «2026-10-21 · 2026-10-21» era el nombre del rastreo, que ya lleva la fecha,
+  más la fecha: se cerró en la fase 2 en la ficha del cliente y ahora también
+  en «Comparado con …» del Resumen.
+- [x] V45: Limpieza con una frase de para qué sirve y que luego hay que volver
+  a analizar, grupos por texto repetido (decisión 198), editor bajo la fila,
+  «Limpiadas» solo si hay alguna.
+- [x] V19: el TLS a 30 días o menos dice «Válido, caduca en 14 días» en naranja;
+  «Hosts más frecuentes» con tilde, oculto con un solo host y en una frase si
+  uno pasa del 95 %.
+- [x] V13: sitemaps con las URLs de los urlset aparte de los ficheros de un
+  índice («64 URLs en 25 ficheros; 1 índice con 395»), los 370 ficheros vacíos
+  dichos en naranja y el matiz de «No incluida en el sitemap» en la tarjeta y
+  en Problemas. Solo presentación: el análisis no cambia.
+- [x] V20: cada alerta del Resumen dice sobre qué páginas se cuenta, el
+  porcentaje con coma y el detalle enlaza a Comparar.
+- Ya estaba: V18 (robots.txt en una frase y las tablas plegadas, fase 1.16), la
+  tilde de «pestaña» y el enlace a Comparar de V20.
+- Probado sobre el censo de Lopesan con la API de esta rama simulada en
+  lectura: las frases redactadas con `textos` y `/cleaning/groups` ejecutado
+  sobre sus 3.772 páginas en un SQLite (sin escribir en producción).
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v

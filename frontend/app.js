@@ -4088,6 +4088,19 @@ function app() {
       this.$nextTick(() => window.lucide && lucide.createIcons());
     },
 
+    // La ficha de una URL de la que solo se sabe la direccion (las paginas del
+    // trafico entre censos; revision de UX del 25-oct, 3.3). Si no esta en
+    // este censo (una pagina que desaparecio), se dice y no se abre nada.
+    async abrirFichaPorUrl(url) {
+      if (!this.job || !url) return;
+      try {
+        const r = await api(`/jobs/${this.job.id}/urls?search=${encodeURIComponent(url)}&page_size=20&ligero=true`);
+        const fila = (r.items || []).find(u => u.url === url);
+        if (fila) { this.openUrlDetail(fila.id); return; }
+        this.showToast('Esa URL no está en este censo', 'info');
+      } catch (e) { this.showToast('No se pudo buscar la URL: ' + e.message, 'error'); }
+    },
+
     async openUrlDetail(urlId) {
       this.urlDetailLoading = true;
       this.urlDetailTab = 'seo';
@@ -4735,11 +4748,27 @@ function app() {
       } catch (e) { this.cleaningError = e.message; }
     },
 
+    // El editor se abre bajo la fila; otro clic en la misma fila lo cierra.
+    // Al cambiar de grupo las reglas empiezan de cero: las del anterior,
+    // aplicadas a otro grupo sin querer, quitarian lo que no toca
+    // (revision de UX del 25-oct, 3.6).
     selectCleaningGroup(g) {
-      this.cleaningSelectedGroup = g.group_key;
+      const otro = this.cleaningSelectedGroup !== g.group_key;
+      this.cleaningSelectedGroup = otro ? g.group_key : null;
+      if (otro) this.cleaningRules = [{ type: 'line_exact', value: '' }];
       this.cleaningPreview = null;
       this.cleaningMessage = null;
       this.$nextTick(() => lucide.createIcons());
+    },
+
+    // «Quitar esta linea» de lo que mas se repite: una regla de linea exacta,
+    // en el hueco vacio si lo hay.
+    anadirLineaLimpieza(texto) {
+      if (this.cleaningRules.some(r => r.type === 'line_exact' && r.value === texto)) return;
+      const vacia = this.cleaningRules.find(r => !r.value.trim());
+      if (vacia) { vacia.type = 'line_exact'; vacia.value = texto; }
+      else this.cleaningRules.push({ type: 'line_exact', value: texto });
+      this.cleaningPreview = null;
     },
 
     addCleaningRule() { this.cleaningRules.push({ type: 'line_contains', value: '' }); },
@@ -6702,6 +6731,13 @@ function filasTls(job) {
     else if (dias !== null && dias < 0) { estado = 'Caducado'; nivel = 'red'; }
     else if (dias !== null && dias <= aviso) { estado = 'Caduca pronto'; nivel = 'orange'; }
     else if (t.version_antigua) { estado = 'TLS antiguo'; nivel = 'orange'; }
+    // A 30 dias o menos no es «Valido» sin mas, aunque el aviso del analisis
+    // (7 de serie) no salte: Lopesan caducaba en 14 y la columna decia
+    // «Valido» en verde (revision de UX del 25-oct, 3.6; V19).
+    else if (t.verificado === true && dias !== null && Math.floor(dias) <= 30) {
+      const n = Math.floor(dias);
+      estado = 'Válido, caduca en ' + n + (n === 1 ? ' día' : ' días'); nivel = 'orange';
+    }
     else if (t.verificado === true) { estado = 'Válido'; nivel = 'green'; }
     else if (t.error) { estado = 'Sin respuesta'; nivel = 'dim'; }
     else { estado = 'Sin verificar'; nivel = 'orange'; }
@@ -6871,6 +6907,176 @@ function resumenSondas(job) {
   return filas.length ? filas : null;
 }
 
+// «Hosts más frecuentes» en una frase cuando uno se lleva el 95 % o mas de
+// las URLs (revision de UX del 25-oct, 3.6; V19): dos barras, una llena y
+// otra vacia, no dicen mas que esto. null si hay reparto de verdad.
+function hostDominante(hosts) {
+  const h = (hosts || []).filter(x => x && x.count);
+  // La API da los 20 primeros: con 20 puede haber mas y el total no se sabe.
+  if (h.length < 2 || h.length >= 20) return null;
+  const total = h.reduce((n, x) => n + x.count, 0);
+  if (h[0].count / total < 0.95) return null;
+  const resto = h.slice(1, 4).map(x => x.host + ' (' + fmt.num(x.count) + ')').join(', ') + (h.length > 4 ? ' y ' + fmt.num(h.length - 4) + ' más' : '');
+  return 'Casi todo en ' + h[0].host + ': ' + fmt.num(h[0].count) + ' de ' + fmt.num(total) + ' URLs. El resto, en ' + resto + '.';
+}
+
+// Sobre que paginas se cuenta cada alerta de la comparacion (revision de UX
+// del 25-oct, 3.6; V20). Es `BASE_DE_LA_REGLA` de shared/comparacion.py en
+// palabras; una regla que no esta aqui (las de la extraccion a medida) sale
+// sin frase, no con una inventada.
+const BASE_ALERTA_REGLA = {
+  canonical_a_otro_host: 'todas_las_comunes', canonical_a_otra_url: 'era_indexable', rotas: 'era_indexable',
+  salen_del_indice: 'era_indexable', redirigidas: 'era_indexable', pierden_contenido: 'era_indexable',
+  cambia_el_titulo: 'era_indexable', entran_en_el_indice: 'no_era_indexable',
+  desaparecen: 'era_indexable_en_el_primero', se_alejan_de_la_home: 'era_indexable',
+  pierden_enlaces_internos: 'era_indexable', pierden_pagerank: 'era_indexable',
+  pierden_datos_estructurados: 'indexable_con_datos_estructurados', pierden_hreflang: 'indexable_con_hreflang',
+  cambia_la_description: 'era_indexable',
+};
+// [una pagina, varias]
+const BASE_ALERTA_TEXTO = {
+  era_indexable: ['que era indexable en el censo anterior y está en los dos', 'que eran indexables en el censo anterior y están en los dos'],
+  no_era_indexable: ['que no era indexable en el censo anterior y está en los dos', 'que no eran indexables en el censo anterior y están en los dos'],
+  era_indexable_en_el_primero: ['que era indexable en el censo anterior', 'que eran indexables en el censo anterior'],
+  todas_las_comunes: ['que está en los dos censos', 'que están en los dos censos'],
+  indexable_con_datos_estructurados: ['indexable que tenía datos estructurados en el censo anterior', 'indexables que tenían datos estructurados en el censo anterior'],
+  indexable_con_hreflang: ['indexable que tenía hreflang en el censo anterior', 'indexables que tenían hreflang en el censo anterior'],
+};
+function baseAlerta(al) {
+  const t = al && BASE_ALERTA_TEXTO[BASE_ALERTA_REGLA[al.regla]];
+  if (!t || al.de == null) return '';
+  return al.de === 1 ? 'Sobre la única página ' + t[0] + '.' : 'Sobre las ' + fmt.num(al.de) + ' páginas ' + t[1] + '.';
+}
+
+// ---- Limpieza (revision de UX del 25-oct, 3.6; decision 198) ----
+// El texto repetido de un grupo, como se lee en su celda: «38 % · 1.250
+// caracteres por página»; sin medir, «sin medir», nunca «0 %».
+function textoRepetidoGrupo(g) {
+  if (!g || g.repetido_parte == null) return 'sin medir';
+  if (!g.repetido_parte) return 'nada';
+  return (g.repetido_parte < 0.01 ? 'menos del 1 %' : pctEs(100 * g.repetido_parte, 0)) + ' · ' + fmt.num(g.repetido_chars_medio) + ' caracteres por página';
+}
+const limpiezaConRepetido = gs => (gs || []).some(g => g && g.repetido_parte != null);
+const limpiezaConLimpiadas = gs => (gs || []).some(g => g && g.cleaned_pages);
+// Como van ordenados, para que nadie lea «por profundidad». Una API anterior
+// a la decision 198 los da por paginas y sin cifra de texto repetido.
+function textoOrdenLimpieza(gs) {
+  if (!(gs || []).length) return '';
+  return limpiezaConRepetido(gs)
+    ? 'Primero los que más texto repetido tienen (en una muestra de cada grupo): son los que más gana la limpieza. Pulsa una fila para ver lo que se repite y escribir sus reglas.'
+    : 'Por número de páginas. Pulsa una fila para escribir sus reglas.';
+}
+
+// ---- Bloque «Google» del Resumen y del Estado del cliente ----
+// Revision de UX del 25-oct, 3.3 (V46): tres cifras con la fecha de su
+// ventana al lado, una frase que solo dice lo que se sabe y las paginas que
+// mas cambian, una vez cada una. Funciones puras sobre `job` para probarlas
+// en Chromium (tests/test_google_limpieza_frontend.py).
+
+// «2026-10-06» como fecha local: `new Date('2026-10-06')` es medianoche UTC
+// y en un navegador al oeste de Greenwich salia el dia anterior.
+function diaIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+// «del 6 al 12 oct», «del 29 jul al 23 oct» o «del 28 dic de 2025 al 3 ene».
+function rangoDias(desde, hasta) {
+  const a = diaIso(desde), b = diaIso(hasta);
+  if (!a || !b) return '';
+  const hoy = new Date().getFullYear();
+  const mes = d => d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
+  const ano = d => d.getFullYear() !== hoy || a.getFullYear() !== b.getFullYear() ? ' de ' + d.getFullYear() : '';
+  const fin = b.getDate() + ' ' + mes(b) + ano(b);
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) return 'del ' + a.getDate() + ' al ' + fin;
+  return 'del ' + a.getDate() + ' ' + mes(a) + ano(a) + ' al ' + fin;
+}
+
+function pctEs(x, dec = 1) {
+  return Number(x).toLocaleString('es-ES', { maximumFractionDigits: dec }) + ' %';
+}
+
+// La frase del trafico entre censos: si los clics suben o bajan, cuanto, y la
+// ventana de cada cifra. Sin comparacion, o esperando a los datos, lo dice y
+// no saca conclusiones de los 90 dias solos.
+function conclusionTrafico(t) {
+  if (!t) return [{ texto: 'Sin comparación con el censo anterior: estas cifras solas no dicen si el tráfico sube o baja.', nivel: 'dim' }];
+  const va = t.ventana_anterior || [], vn = t.ventana_nueva || [];
+  if (t.pendiente) {
+    return [{ nivel: 'dim', texto: 'Todavía no se puede decir si los clics suben o bajan frente al censo anterior: '
+      + 'la comparación (' + rangoDias(vn[0], vn[1]) + ' frente a ' + rangoDias(va[0], va[1]) + ') espera a que Search Console tenga datos hasta el '
+      + fmt.diaCorto(diaIso(vn[1])) + '.' }];
+  }
+  if (!t.comparable) return [{ texto: t.motivo || 'El tráfico no se pudo comparar con el censo anterior.', nivel: 'dim' }];
+  const ant = fmt.num(t.clics_anterior) + ' clics ' + rangoDias(va[0], va[1]);
+  const nue = fmt.num(t.clics_nuevo) + ' ' + rangoDias(vn[0], vn[1]);
+  const dias = t.dias ? ' frente a los ' + t.dias + ' días anteriores' : ' frente al periodo anterior';
+  const salida = [];
+  if (t.variacion == null) {
+    salida.push({ nivel: '', texto: 'Sin clics en el periodo anterior (' + rangoDias(va[0], va[1]) + '): no hay porcentaje que dar. Ahora, ' + nue + '.' });
+  } else {
+    const p = 100 * t.variacion;
+    const verbo = Math.abs(p) < 1 ? 'Los clics se mantienen' : (p < 0 ? 'Los clics bajan un ' : 'Los clics suben un ') + pctEs(Math.abs(p), 0);
+    salida.push({ nivel: t.general ? 'orange' : '',
+      texto: verbo + dias + ': ' + fmt.num(t.clics_nuevo) + ' ' + rangoDias(vn[0], vn[1]) + ' frente a ' + ant + '.' });
+  }
+  if (t.general) salida.push({ nivel: 'orange', texto: 'La caída es de todo el sitio, no de unas páginas concretas.' });
+  if (t.estacional && t.estacional.igual) salida.push({ nivel: '', texto: 'El mismo periodo del año anterior varió lo mismo: parece estacional.' });
+  return salida;
+}
+
+// Las paginas que mas cambian, una vez cada una con todo lo que cambio en
+// ella: la misma pagina estaba en dos grupos y salia dos veces (V46). Solo
+// las que el servidor da como ejemplo (hasta 5 por grupo): `cortadas` dice
+// si hay mas.
+function paginasTrafico(t, max = 10) {
+  if (!t || !t.comparable) return { paginas: [], cortadas: false };
+  const por = new Map();
+  let cortadas = false;
+  for (const g of [...(t.caidas || []), ...(t.subidas || [])]) {
+    const ej = g.ejemplos || [];
+    if ((g.paginas || 0) > ej.length) cortadas = true;
+    for (const e of ej) {
+      let p = por.get(e.url);
+      if (!p) { p = { url: e.url, antes: e.clics_antes, despues: e.clics_despues, cambios: [] }; por.set(e.url, p); }
+      if (g.texto && !p.cambios.includes(g.texto)) p.cambios.push(g.texto);
+    }
+  }
+  const paginas = [...por.values()].sort((a, b) => Math.abs(b.despues - b.antes) - Math.abs(a.despues - a.antes) || a.url.localeCompare(b.url));
+  return { paginas: paginas.slice(0, max), cortadas: cortadas || paginas.length > max };
+}
+
+// Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
+// reaccionado a un job que pasa a null.
+const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null });
+
+// Todo el bloque. null si el job no trae ni Search Console ni trafico entre
+// censos (sin GSC conectado no se pinta nada).
+function bloqueGoogle(job) {
+  const g = job && job.gsc_resumen;
+  const t = job && job.comparacion && job.comparacion.trafico;
+  if (!g && !t) return null;
+  const cifras = [];
+  if (g) {
+    // La ventana de la cifra es la de los DATOS: el 26-oct la ventana llegaba
+    // al 26 y los datos al 23.
+    const hasta = g.datos_hasta && g.hasta && g.datos_hasta < g.hasta ? g.datos_hasta : g.hasta;
+    const desde = g.datos_desde && g.desde && g.datos_desde > g.desde ? g.datos_desde : g.desde;
+    const ventana = rangoDias(desde, hasta);
+    cifras.push({ etiqueta: 'Clics', valor: fmt.num(g.clics), ventana });
+    cifras.push({ etiqueta: 'Impresiones', valor: fmt.num(g.impresiones), ventana });
+    cifras.push({ etiqueta: 'CTR medio', valor: g.impresiones ? pctEs(100 * g.clics / g.impresiones) : '—', ventana });
+  }
+  const ins = g && g.inspeccion;
+  const inspeccion = ins && ins.inspeccionadas
+    ? 'De las ' + fmt.num(ins.inspeccionadas) + ' URLs inspeccionadas, Google dice que ' + fmt.num(ins.indexadas || 0)
+      + ' están indexadas' + (ins.no_indexadas ? ' y ' + fmt.num(ins.no_indexadas) + ' no' : '') + '.'
+    : null;
+  // La primera frase del servidor son los totales, que ya dice la conclusion.
+  const textos = t && t.comparable ? (t.textos || []).slice(1) : [];
+  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null };
+}
+
 // `jobs.sitemaps` (decision 126), solo en la ficha del job.
 function resumenSitemaps(job) {
   const s = job && job.sitemaps;
@@ -6878,6 +7084,12 @@ function resumenSitemaps(job) {
   const ficheros = Array.isArray(s.ficheros) ? s.ficheros : [];
   const formatos = {};
   let declaradas = 0, devueltas = 0, cortados = 0, fallidos = 0;
+  // Revision de UX del 25-oct, 3.6 (V13): «64 entradas de 459 declaradas»
+  // sumaba los 395 ficheros hijos de un indice como si fueran URLs, y «396 de
+  // 396 leidos» callaba que 370 respondieron 200 vacios. Lo que se lee de un
+  // indice son ficheros; las URLs, de los urlset; y un fichero que responde
+  // 200 sin un sitemap reconocible es un fichero del que no se sabe nada.
+  let urls = 0, conUrls = 0, indices = 0, hijos = 0, ilegibles = 0, vacios = 0;
   for (const f of ficheros) {
     if (!f) continue;
     if (f.formato) formatos[f.formato] = (formatos[f.formato] || 0) + 1;
@@ -6885,14 +7097,45 @@ function resumenSitemaps(job) {
     devueltas += Number(f.devueltas) || 0;
     if (f.cortado) cortados++;
     if (f.status != null && f.status !== 200) fallidos++;
+    if (f.formato === 'sitemapindex') { indices++; hijos += Number(f.hijos) || 0; }
+    else if (f.formato && f.formato !== 'desconocido') {
+      urls += Number(f.devueltas) || 0;
+      if (Number(f.devueltas)) conUrls++;
+    } else if (f.status === 200) {
+      ilegibles++;
+      if (f.bytes === 0) vacios++;
+    }
   }
+  const leidos = s.leidos == null ? ficheros.length : s.leidos;
   return {
     ficheros, pedidos: s.pedidos == null ? ficheros.length : s.pedidos,
-    leidos: s.leidos == null ? ficheros.length : s.leidos,
+    leidos,
     parcial: !!s.parcial, recortadas: !!s.entradas_recortadas,
     tope: s.tope_entradas || null, guardadas: s.entradas_guardadas,
     formatos: Object.entries(formatos), declaradas, devueltas, cortados, fallidos,
+    urls, conUrls, indices, hijos, ilegibles, vacios,
+    // Con algun fichero que no se pudo leer (parcial, no 200 o ilegible),
+    // «No incluida en el sitemap» no se puede afirmar: la pagina puede estar
+    // en el fichero que falta. Es presentacion: el analisis no cambia.
+    dudoso: !!s.parcial || fallidos > 0 || ilegibles > 0,
   };
+}
+
+// La frase que matiza «No incluida en el sitemap» cuando la lectura de los
+// sitemaps no fue completa (revision de UX del 25-oct, 3.6; V13). null si se
+// leyo todo: entonces el aviso se puede afirmar.
+function dudaSitemaps(job) {
+  const sm = resumenSitemaps(job);
+  if (!sm || !sm.dudoso) return null;
+  const de = ' de los ' + fmt.num(sm.pedidos) + ' ficheros de sitemap ';
+  const partes = [];
+  if (sm.ilegibles) partes.push(fmt.num(sm.ilegibles) + (partes.length ? ' ' : de)
+    + (sm.ilegibles === 1 ? 'respondió 200 ' : 'respondieron 200 ')
+    + (sm.vacios === sm.ilegibles ? (sm.ilegibles === 1 ? 'vacío' : 'vacíos') : 'sin un sitemap que se pueda leer'));
+  if (sm.fallidos) partes.push(fmt.num(sm.fallidos) + (partes.length ? ' ' : de)
+    + (sm.fallidos === 1 ? 'no respondió 200' : 'no respondieron 200'));
+  const lead = partes.length ? partes.join(' y ') : 'La lectura de los sitemaps fue parcial';
+  return lead + ': una página «no incluida» puede estar en ellos, así que no se puede afirmar que falte.';
 }
 
 // ---- WordPress por su REST API (decisiones 161 y 168) ----
