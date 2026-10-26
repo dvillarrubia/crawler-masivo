@@ -371,7 +371,9 @@ SQLite y Postgres, que no lee `links` capturando el SQL, que lo escriben
 `run_analysis` y el worker sin lanzar nunca, la serie con sus motivos y cortes
 de version, y el relleno simulado que no deja nada), `test_evolucion_api.py`
 (los endpoints, el panel y el backup; trabajo de la API) y
-`test_evolucion_frontend.py` (graficas y tendencia en Chromium).
+`test_evolucion_frontend.py` (graficas y tendencia en Chromium),
+`test_ficha_cliente_frontend.py` (rutas de las pestanas del cliente y la
+referencia de «frente al anterior», en Chromium).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

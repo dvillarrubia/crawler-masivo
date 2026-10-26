@@ -50,7 +50,9 @@
         <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
     </nav>
     <div class="topbar-actions">
-      <button class="btn btn-primary btn-sm" @click="openCreate(_presetDelContexto())" data-tip="Crear un nuevo rastreo (atajo: n); si estás en un cliente, ya viene elegido" style="display:flex;align-items:center;gap:.35rem">
+      <!-- En la ficha del cliente hay uno propio con el cliente puesto: dos
+           verdes a la vez era V47 (revision de UX del 25-oct, 2.1). -->
+      <button class="btn btn-primary btn-sm" x-show="!(view === 'client' && cliente)" @click="openCreate(_presetDelContexto())" data-tip="Crear un nuevo rastreo (atajo: n); si estás en un cliente, ya viene elegido" style="display:flex;align-items:center;gap:.35rem">
         <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
       </button>
       <div class="menu-wrap" @click.outside="menuAbierto === 'app' && (menuAbierto = '')">
@@ -326,7 +328,7 @@
                 <th style="text-align:right">indexables</th>
                 <th style="text-align:right">errores</th>
                 <th style="text-align:left">tendencia de errores</th>
-                <th style="text-align:left">alertas</th>
+                <th style="text-align:left" title="Alertas abiertas: las que saltaron y ningún rastreo posterior ha visto resueltas">alertas</th>
               </tr></thead>
               <tbody>
                 <template x-for="p in filasPanelOrdenadas()" :key="p.id">
@@ -365,17 +367,17 @@
                         </span>
                       </template>
                     </td>
+                    <!-- Las alertas abiertas (incidentes vivos, decision 139): la
+                         misma cifra que la ficha del cliente y su pestana Alertas.
+                         Antes salian a la vez «3 alertas» (las de la ultima
+                         comparacion) y «5 incidentes» (revision de UX del
+                         25-oct, 2.3; el porque, en cargarAlertasAbiertas). -->
                     <td class="text-sm">
-                      <template x-if="p.ultimo && p.ultimo.alertas">
-                        <span :class="p.ultimo.alertas_criticas ? 'text-red' : 'text-orange'"
-                              x-text="(p.ultimo.alertas_criticas ? p.ultimo.alertas_criticas + ' críticas · ' : '') + p.ultimo.alertas + (p.ultimo.alertas === 1 ? ' alerta' : ' alertas')"></span>
-                      </template>
-                      <template x-if="!p.ultimo || !p.ultimo.alertas"><span class="text-dim">—</span></template>
-                      <!-- Decision 139: lo que sigue abierto de sus series. -->
                       <template x-if="p.incidentes_vivos">
-                        <div><a :href="'#/clientes/' + p.id + '/alertas'" @click.stop class="text-red"
-                                x-text="p.incidentes_vivos + (p.incidentes_vivos === 1 ? ' incidente abierto' : ' incidentes abiertos')"></a></div>
+                        <a :href="'#/clientes/' + p.id + '/alertas'" @click.stop class="text-orange"
+                           x-text="fmt.num(p.incidentes_vivos) + (p.incidentes_vivos === 1 ? ' abierta' : ' abiertas')"></a>
                       </template>
+                      <template x-if="!p.incidentes_vivos"><span class="text-dim">—</span></template>
                     </td>
                   </tr>
                 </template>
@@ -395,27 +397,32 @@
             <div class="text-dim text-sm" x-show="cliente"
                  x-text="cliente ? (cliente.slug + ' · ' + ((cliente.dominios || []).join(', ') || 'sin dominios')) : ''"></div>
           </div>
+          <!-- El unico «Nuevo rastreo» de la ficha (revision de UX del 25-oct,
+               2.1 y V47): el de la barra de arriba se esconde aqui. Viene con
+               el cliente ya puesto. -->
           <template x-if="cliente">
-            <button class="btn btn-primary btn-sm" @click="openCreate({ cliente_id: cliente.id })"
+            <button class="btn btn-primary btn-sm" @click="openCreate({ cliente_id: cliente.id })" data-testid="cliente-nuevo-rastreo"
                     style="display:flex;align-items:center;gap:.35rem">
               <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
             </button>
           </template>
         </div>
 
-        <div class="tabs" x-show="cliente">
-          <button type="button" class="tab" :class="clienteTab === 'rastreos' && 'active'" @click="clienteTab = 'rastreos'"
-               style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="radar" style="width:14px;height:14px"></i> Rastreos
-          </button>
-          <button type="button" class="tab" :class="clienteTab === 'alertas' && 'active'" @click="clienteTab = 'alertas'; cargarReglas()"
-               style="display:flex;align-items:center;gap:.35rem" data-testid="tab-alertas">
-            <i data-lucide="bell" style="width:14px;height:14px"></i> Alertas
-          </button>
-          <button type="button" class="tab" :class="clienteTab === 'config' && 'active'" @click="clienteTab = 'config'"
-               style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="settings" style="width:14px;height:14px"></i> Configuración
-          </button>
+        <!-- Cuatro pestanas (revision de UX del 25-oct, 2.1): Estado es la de
+             entrada (que esta roto, que ha empeorado, que hay abierto);
+             Historial, la evolucion; Alertas, solo las alertas; y
+             Configuracion, los perfiles, el cliente y las reglas. -->
+        <div class="tabs tabs-cliente" x-show="cliente" role="tablist">
+          <template x-for="t in [['estado', 'activity', 'Estado'], ['historial', 'line-chart', 'Historial'], ['alertas', 'bell', 'Alertas'], ['config', 'settings', 'Configuración']]" :key="t[0]">
+            <button type="button" class="tab" role="tab" :class="clienteTab === t[0] && 'active'" :aria-selected="clienteTab === t[0]"
+                    @click="cambiarTabCliente(t[0])" :data-testid="'tab-' + t[0]"
+                    style="display:flex;align-items:center;gap:.35rem">
+              <i :data-lucide="t[1]" style="width:14px;height:14px"></i>
+              <span x-text="t[2]"></span>
+              <span class="count" x-show="t[0] === 'alertas' && alertasAbiertas && alertasAbiertas.length"
+                    x-text="alertasAbiertas ? alertasAbiertas.length : ''"></span>
+            </button>
+          </template>
         </div>
 
         <template x-if="clienteError">
@@ -423,60 +430,185 @@
                x-text="clienteError"></div>
         </template>
 
-        <!-- --- Pestana: perfiles y rastreos --- -->
-        <template x-if="cliente && clienteTab === 'rastreos'">
-          <div>
-            <div class="card mb-2">
-              <div class="flex items-center justify-between mb-1">
-                <h3 style="font-size:1rem">Perfiles de rastreo</h3>
-                <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
-              </div>
-              <p class="text-dim text-sm mb-1">
-                Que se rastrea y como: el sitio principal, el blog, otro idioma o un competidor. Un
-                rastreo lanzado desde un perfil hereda la configuración del cliente y la del perfil.
-              </p>
-              <template x-if="!clientePerfiles.length">
-                <div class="text-dim text-sm">Sin perfiles todavía.</div>
-              </template>
-              <template x-if="clientePerfiles.length">
-                <div class="table-wrap">
-                <table style="width:100%;font-size:.85rem">
-                  <thead><tr>
-                    <th style="text-align:left">perfil</th>
-                    <th style="text-align:left">semillas</th>
-                    <th style="text-align:left">último rastreo</th>
-                    <th style="width:13rem"></th>
-                  </tr></thead>
-                  <tbody>
-                    <template x-for="p in clientePerfiles" :key="p.id">
-                      <tr :style="p.activo ? '' : 'opacity:.5'">
-                        <td>
-                          <div x-text="p.nombre"></div>
-                          <span class="badge" :class="p.rol === 'competidor' ? 'badge-pending' : 'badge-completed'"
-                                x-text="p.rol"></span>
-                        </td>
-                        <td class="text-dim" x-text="(p.seeds || []).join(', ').slice(0, 80)"></td>
-                        <td>
-                          <template x-if="p.last_job_id">
-                            <a href="#" @click.prevent="openJob(p.last_job_id)">abrir</a>
-                          </template>
-                          <span class="text-dim" x-show="!p.last_job_id">nunca</span>
-                        </td>
-                        <td style="text-align:right;white-space:nowrap">
-                          <button class="btn btn-sm btn-primary"
-                                  @click="openCreate({ cliente_id: cliente.id, profile_id: p.id })">Lanzar</button>
-                          <button class="btn btn-sm" @click="editarPerfil(p)">Editar</button>
-                          <button class="btn btn-sm" @click="borrarPerfil(p)"
-                                  data-tip="Borra el perfil. Sus rastreos NO se borran">&times;</button>
-                        </td>
-                      </tr>
-                    </template>
-                  </tbody>
-                </table>
-                </div>
-              </template>
-            </div>
+        <!-- --- Pestana Estado (revision de UX del 25-oct, 2.1) --- -->
+        <template x-if="cliente && clienteTab === 'estado'">
+          <div data-testid="cliente-estado">
+            <template x-if="rastreoEnCursoCliente()">
+              <a class="card mb-2 estado-en-curso text-sm" :href="'#/rastreos/' + rastreoEnCursoCliente().id">
+                <span class="badge" :class="statusColor(rastreoEnCursoCliente().status)" x-text="fmt.status(rastreoEnCursoCliente().status)"></span>
+                <span x-text="rastreoEnCursoCliente().name"></span>
+                <span class="text-dim" x-text="'· lanzado ' + fmt.ago(rastreoEnCursoCliente().created_at)"></span>
+              </a>
+            </template>
 
+            <!-- Sin censos todavia -->
+            <template x-if="!ultimoCensoCliente()">
+              <div class="card empty" data-testid="estado-vacio">
+                <h3>Todavía no hay ningún censo de este cliente</h3>
+                <p class="text-dim text-sm" style="max-width:440px;margin:.3rem auto 0;line-height:1.5"
+                   x-text="clientePerfiles.length
+                     ? 'Lanza el primero con «Nuevo rastreo» o desde uno de sus perfiles, en Configuración. Cuando termine, aquí verás qué está roto, qué ha cambiado y qué alertas hay abiertas.'
+                     : 'Crea un perfil en Configuración (qué se rastrea y cómo) y lanza el primer rastreo con «Nuevo rastreo». Cuando termine, aquí verás qué está roto, qué ha cambiado y qué alertas hay abiertas.'"></p>
+              </div>
+            </template>
+
+            <template x-if="ultimoCensoCliente()">
+              <div>
+                <!-- El ultimo censo y sus cifras -->
+                <div class="card mb-2" data-testid="estado-ultimo-censo">
+                  <div class="estado-censo-cab">
+                    <div style="min-width:0">
+                      <div class="text-dim text-sm">Último censo</div>
+                      <a class="estado-censo-nombre" :href="'#/rastreos/' + ultimoCensoCliente().id" x-text="ultimoCensoCliente().name"></a>
+                      <div class="text-sm text-dim">
+                        <span x-text="fmt.dia(ultimoCensoCliente().created_at)"></span> ·
+                        <span class="badge" :class="statusColor(ultimoCensoCliente().status)" x-text="fmt.status(ultimoCensoCliente().status)"></span>
+                      </div>
+                    </div>
+                    <div class="estado-censo-botones">
+                      <a class="btn btn-sm" :href="'#/rastreos/' + ultimoCensoCliente().id">Ver censo</a>
+                      <a class="btn btn-sm" :href="'#/rastreos/' + ultimoCensoCliente().id + '/informe-cliente'"
+                         data-tip="Nota, qué arreglar primero y qué ha cambiado; se guarda como PDF">Informe para el cliente</a>
+                    </div>
+                  </div>
+                  <div class="estado-cifras">
+                    <div>
+                      <div class="estado-cifra" x-text="fmt.num(ultimoCensoCliente().paginas_html)"></div>
+                      <div class="text-sm text-dim">páginas</div>
+                    </div>
+                    <div>
+                      <div class="estado-cifra" x-text="fmt.num(ultimoCensoCliente().indexables)"></div>
+                      <div class="text-sm text-dim"
+                           x-text="'indexables' + (ultimoCensoCliente().paginas_html ? ' (' + fmt.num(Math.round(ultimoCensoCliente().indexables / ultimoCensoCliente().paginas_html * 100)) + ' %)' : '')"></div>
+                    </div>
+                    <!-- Paginas con error de /stats (revision 1.11), la misma
+                         cifra que la tarjeta del censo; si no llega, «—». -->
+                    <div>
+                      <div class="estado-cifra"
+                           :class="estadoCliente && estadoCliente.stats && estadoCliente.stats.paginas_con_error != null ? (estadoCliente.stats.paginas_con_error ? 'red' : 'green') : ''"
+                           x-text="estadoCliente && estadoCliente.stats && estadoCliente.stats.paginas_con_error != null ? fmt.num(estadoCliente.stats.paginas_con_error) : '—'"></div>
+                      <div class="text-sm text-dim">páginas con error</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="estado-rejilla">
+                  <!-- Los cinco primeros problemas, por prioridad (la consulta de
+                       «Que arreglar primero» del Resumen del censo) -->
+                  <div class="card" data-testid="estado-problemas">
+                    <div class="card-header"><h2>Qué arreglar primero</h2>
+                      <a class="text-sm" :href="'#/rastreos/' + ultimoCensoCliente().id + '/problemas'">Ver todos</a></div>
+                    <div class="text-dim text-sm" style="margin:-.3rem 0 .6rem">Páginas afectadas en el último censo, por prioridad (gravedad × importancia de las páginas).</div>
+                    <template x-if="!estadoCliente || (estadoCliente.principales === null && !estadoCliente.principalesError)">
+                      <div class="text-dim text-sm">Cargando…</div>
+                    </template>
+                    <template x-if="estadoCliente && estadoCliente.principalesError">
+                      <div class="text-sm text-orange">No se pudieron cargar.
+                        <button class="btn btn-sm" @click="estadoCliente = null; cargarEstadoCliente()">Reintentar</button></div>
+                    </template>
+                    <template x-if="estadoCliente && estadoCliente.principales && !estadoCliente.principales.length">
+                      <div class="text-dim text-sm">No hay errores ni avisos.</div>
+                    </template>
+                    <ol class="estado-problemas" x-show="estadoCliente && estadoCliente.principales && estadoCliente.principales.length">
+                      <template x-for="i in (estadoCliente && estadoCliente.principales) || []" :key="i.issue_type + i.severity">
+                        <li>
+                          <span class="estado-sev" :style="'background:' + issueBarColor(i.severity)" :title="fmt.severity(i.severity)"></span>
+                          <a class="estado-problema" :href="'#/rastreos/' + ultimoCensoCliente().id + '/problemas?tipo=' + encodeURIComponent(i.issue_type) + '&gravedad=' + i.severity"
+                             x-text="fmt.issue(i.issue_type)"></a>
+                          <a class="text-sm estado-paginas" :href="'#/rastreos/' + ultimoCensoCliente().id + '/explorador?problema=' + encodeURIComponent(i.issue_type) + '&gravedad=' + i.severity"
+                             :title="'Ver las URLs con «' + fmt.issue(i.issue_type) + '» en el Explorador'"
+                             x-text="fmt.num(i.paginas) + (i.paginas === 1 ? ' página' : ' páginas')"></a>
+                        </li>
+                      </template>
+                    </ol>
+                  </div>
+
+                  <!-- Lo que cambio frente al anterior: las alertas de la
+                       comparacion del ultimo censo, con la fecha del censo con el
+                       que se comparo (revision de UX del 25-oct, 2.3). -->
+                  <div class="card" data-testid="estado-cambios">
+                    <template x-if="!estadoCliente || (!estadoCliente.job && !estadoCliente.error)">
+                      <div>
+                        <div class="card-header"><h2>Qué ha cambiado</h2></div>
+                        <div class="text-dim text-sm">Cargando…</div>
+                      </div>
+                    </template>
+                    <template x-if="estadoCliente && estadoCliente.error && !estadoCliente.job">
+                      <div>
+                        <div class="card-header"><h2>Qué ha cambiado</h2></div>
+                        <div class="text-sm text-orange">No se pudo cargar la comparación.
+                          <button class="btn btn-sm" @click="estadoCliente = null; cargarEstadoCliente()">Reintentar</button></div>
+                      </div>
+                    </template>
+                    <template x-if="estadoCliente && estadoCliente.job">
+                      <div>
+                        <div class="card-header">
+                          <h2 x-text="cmpEstado() && cmpEstado().fecha_anterior ? 'Qué ha cambiado frente al ' + fmt.diaCorto(cmpEstado().fecha_anterior) : 'Qué ha cambiado'"></h2>
+                          <a class="text-sm" x-show="cmpEstado()" :href="'#/rastreos/' + estadoCliente.jobId + '/comparar'">Comparar</a>
+                        </div>
+                        <template x-if="!cmpEstado()">
+                          <div class="text-dim text-sm">Este censo no se comparó con ninguno: es el primero de su sitio o se analizó sin comparación automática.</div>
+                        </template>
+                        <template x-if="cmpEstado() && !cmpEstado().comparable">
+                          <div class="text-dim text-sm" x-text="'No se puede comparar con ' + (cmpEstado().nombre_anterior || 'el anterior') + (cmpEstado().motivo ? ': ' + cmpEstado().motivo : '') + '. Lo que no se puede afirmar no se afirma.'"></div>
+                        </template>
+                        <template x-if="cmpEstado() && cmpEstado().comparable">
+                          <div>
+                            <div class="text-dim text-sm" style="margin:-.3rem 0 .5rem" x-text="'Frente a ' + (cmpEstado().nombre_anterior || 'el censo anterior') + ', el anterior de la misma serie.'"></div>
+                            <template x-if="!(cmpEstado().alertas || []).length">
+                              <div class="text-sm"><span class="text-green">Sin alertas:</span> ningún cambio pasa los umbrales de las reglas del cliente.</div>
+                            </template>
+                            <ul class="estado-alertas" x-show="(cmpEstado().alertas || []).length">
+                              <template x-for="al in (cmpEstado().alertas || [])" :key="al.regla + (al.extraccion || '')">
+                                <li :style="'border-left-color:' + fmt.colorSeveridad(al.severidad)">
+                                  <strong x-text="fmt.tituloAlerta(al)"></strong>
+                                  <span class="text-sm text-dim" x-show="al.paginas != null"
+                                        x-text="fmt.num(al.paginas) + ' de ' + fmt.num(al.de) + ' páginas (' + fmt.num(al.pct) + ' %)'"></span>
+                                </li>
+                              </template>
+                            </ul>
+                            <template x-if="cmpEstado().incidencias && cmpEstado().incidencias.comparable">
+                              <div class="text-sm text-dim" style="margin-top:.5rem"
+                                   x-text="fmt.num((cmpEstado().incidencias.nuevas || {}).total || 0) + ' incidencias nuevas y ' + fmt.num((cmpEstado().incidencias.resueltas || {}).total || 0) + ' resueltas'"></div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Las alertas abiertas: la misma cifra que la portada y la
+                 pestana Alertas (revision de UX del 25-oct, 2.3). -->
+            <div class="card mt-2" data-testid="estado-alertas-abiertas">
+              <div class="card-header">
+                <h2 x-text="alertasAbiertas && alertasAbiertas.length ? 'Alertas abiertas (' + fmt.num(alertasAbiertas.length) + ')' : 'Alertas abiertas'"></h2>
+                <a class="text-sm" :href="'#/clientes/' + cliente.id + '/alertas'">Ver todas</a>
+              </div>
+              <template x-if="alertasAbiertas === null"><div class="text-dim text-sm">Cargando…</div></template>
+              <template x-if="alertasAbiertas && !alertasAbiertas.length">
+                <div class="text-dim text-sm">Ninguna alerta abierta.</div>
+              </template>
+              <ul class="estado-alertas" x-show="alertasAbiertas && alertasAbiertas.length">
+                <template x-for="i in (alertasAbiertas || []).slice(0, 5)" :key="i.id">
+                  <li :style="'border-left-color:' + fmt.colorSeveridad(i.severidad)">
+                    <strong x-text="tituloIncidente(i)"></strong>
+                    <span class="text-sm text-dim" x-text="(i.nombre_serie || i.serie) + ' · desde el ' + fmt.diaCorto(i.abierto_en) + (i.estado === 'visto' ? ' · vista' : '')"></span>
+                  </li>
+                </template>
+              </ul>
+              <div class="text-sm" x-show="alertasAbiertas && alertasAbiertas.length > 5">
+                <a :href="'#/clientes/' + cliente.id + '/alertas'" x-text="'Y ' + fmt.num((alertasAbiertas || []).length - 5) + ' más'"></a>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- --- Pestana Historial: trafico, evolucion por perfil y tabla --- -->
+        <template x-if="cliente && clienteTab === 'historial'">
+          <div data-testid="cliente-historial">
             <!-- Trafico de Google entre los dos ultimos censos de cada perfil
                  (decisiones 158 y 165). Las frases vienen del servidor, del
                  mismo redactor que la ficha del rastreo y el aviso de Slack. -->
@@ -486,7 +618,9 @@
                 <template x-for="t in clienteTrafico" :key="t.job_id">
                   <div style="margin-bottom:.5rem">
                     <a :href="'#/rastreos/' + t.job_id" x-text="(t.perfil ? t.perfil + ' · ' : '') + t.job"></a>
-                    <span class="text-dim" x-show="t.fecha" x-text="' · ' + (t.fecha || '').slice(0, 10)"></span>
+                    <!-- La fecha solo si el nombre no la lleva ya: salia
+                         «2026-10-26 · 2026-10-26» (V46). -->
+                    <span class="text-dim" x-show="t.fecha && !(t.job || '').includes((t.fecha || '').slice(0, 10))" x-text="' · ' + fmt.dia(t.fecha)"></span>
                     <span class="badge badge-pending" x-show="t.pendiente" style="margin-left:.3rem">esperando datos</span>
                     <ul style="margin:.2rem 0 0;padding-left:1.1rem">
                       <template x-for="(x, n) in t.textos" :key="n">
@@ -507,10 +641,10 @@
                 <div class="flex items-center mb-1" style="gap:.5rem;flex-wrap:wrap">
                   <h3 style="font-size:1rem">Evolución por perfil</h3>
                   <template x-if="clienteEvolucion.series.length > 1">
-                    <select x-model="evolucionClave" class="text-sm" style="margin-left:auto;max-width:18rem">
+                    <select x-model="evolucionClave" class="text-sm" style="margin-left:auto;max-width:min(100%,24rem)">
                       <template x-for="s in clienteEvolucion.series" :key="s.clave">
                         <option :value="s.clave" :selected="s.clave === evolucionClave"
-                                x-text="s.nombre + ' (' + s.comparables + (s.comparables === 1 ? ' censo' : ' censos') + ')'"></option>
+                                x-text="s.nombre + ' (' + s.comparables + (s.comparables === 1 ? ' censo' : ' censos') + (s.puntos.length ? ', hasta el ' + fmt.diaCorto(s.puntos[s.puntos.length - 1].fecha) : '') + ')'"></option>
                       </template>
                     </select>
                   </template>
@@ -520,6 +654,11 @@
                 </template>
                 <template x-if="serieEvolucion() && serieEvolucion().comparables >= 2">
                   <div>
+                    <!-- La referencia de las flechas, con su fecha: el censo
+                         comparable anterior de la serie, el mismo con el que se
+                         compararon sus alertas (revision de UX del 25-oct, 2.3). -->
+                    <p class="text-sm text-dim" style="margin:-.2rem 0 .6rem" x-show="referenciaSerie()" data-testid="evo-referencia"
+                       x-text="'Cada flecha compara el último censo comparable de la serie (' + fmt.diaCorto(serieEvolucion().puntos.filter(p => p.comparable).slice(-1)[0].fecha) + ') con el anterior, el del ' + fmt.diaCorto(referenciaSerie() && referenciaSerie().fecha) + '.'"></p>
                     <div class="evo-rejilla">
                       <template x-for="k in METRICAS_GRAFICADAS" :key="k">
                         <div class="evo-grafica">
@@ -553,8 +692,10 @@
 
             <div class="card">
               <!-- La serie (UX-08): cada rastreo con las cifras que se comparan
-                   de un censo a otro. La diferencia de errores se mide contra el
-                   censo ANTERIOR (no contra el canario de en medio). -->
+                   de un censo a otro. La diferencia de errores y las alertas se
+                   miden contra el censo con el que se comparo (`comparado_con`),
+                   no contra la fila de debajo: con dos programaciones, la fila
+                   de debajo es de la otra serie (revision de UX del 25-oct, 2.3). -->
               <div class="flex items-center mb-1" style="gap:.5rem;flex-wrap:wrap">
                 <h3 style="font-size:1rem">Evolución de los rastreos</h3>
                 <label class="checkbox-label text-sm" style="margin-left:auto">
@@ -591,18 +732,22 @@
                         <td style="text-align:right" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
                         <td style="text-align:right;white-space:nowrap">
                           <span x-text="fmt.num(j.errores)"></span>
-                          <template x-if="censoAnterior(j)">
-                            <span class="delta" :class="j.errores > censoAnterior(j).errores ? 'peor' : (j.errores < censoAnterior(j).errores ? 'mejor' : '')"
-                                  x-text="j.errores === censoAnterior(j).errores ? '=' : (j.errores > censoAnterior(j).errores ? '▲' : '▼') + fmt.num(Math.abs(j.errores - censoAnterior(j).errores))"></span>
+                          <template x-if="referenciaDe(j)">
+                            <span class="delta" :class="j.errores > referenciaDe(j).errores ? 'peor' : (j.errores < referenciaDe(j).errores ? 'mejor' : '')"
+                                  :title="'Frente al ' + fmt.dia(referenciaDe(j).created_at) + ': ' + fmt.num(referenciaDe(j).errores)"
+                                  x-text="j.errores === referenciaDe(j).errores ? '=' : (j.errores > referenciaDe(j).errores ? '▲' : '▼') + fmt.num(Math.abs(j.errores - referenciaDe(j).errores))"></span>
                           </template>
                         </td>
                         <td style="text-align:right" x-text="fmt.num(j.avisos)"></td>
-                        <td class="text-sm">
-                          <template x-if="j.alertas === null"><span class="text-dim">—</span></template>
-                          <template x-if="j.alertas !== null">
+                        <!-- «frente al 19 oct: 3 alertas»: las que salto ESA
+                             comparacion, con la fecha de su referencia. -->
+                        <td class="text-sm" style="white-space:nowrap">
+                          <template x-if="!j.comparado_con"><span class="text-dim">—</span></template>
+                          <template x-if="j.comparado_con">
                             <a :href="'#/rastreos/' + j.id + '/comparar'" @click.stop
-                               :class="j.alertas_criticas ? 'text-red' : ''"
-                               x-text="j.alertas ? j.alertas + (j.alertas === 1 ? ' alerta' : ' alertas') : 'sin alertas'"></a>
+                               :class="j.alertas_criticas ? 'text-red' : (j.alertas ? 'text-orange' : (j.alertas === null ? 'text-dim' : ''))"
+                               x-text="(referenciaDe(j) ? 'frente al ' + fmt.diaCorto(referenciaDe(j).created_at) + ': ' : '')
+                                       + (j.alertas === null ? 'no comparable' : j.alertas ? j.alertas + (j.alertas === 1 ? ' alerta' : ' alertas') : 'sin alertas')"></a>
                           </template>
                         </td>
                       </tr>
@@ -615,30 +760,31 @@
           </div>
         </template>
 
-        <!-- --- Pestana: reglas de alerta y resumen semanal (decision 135) ---
-             Lo que se ve aqui son las reglas EFECTIVAS: las de serie con lo que
-             el cliente haya cambiado encima. Guardar solo manda las diferencias. -->
+        <!-- --- Pestana Alertas: solo las alertas (revision de UX del 25-oct,
+             2.1); las reglas que las disparan estan en Configuracion. -->
         <template x-if="cliente && clienteTab === 'alertas'">
-          <div data-testid="reglas-cliente">
+          <div data-testid="cliente-alertas">
             <template x-if="reglasError">
               <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="reglasError"></div>
             </template>
             <!-- Incidentes (decision 139): cada alerta de una serie con su
                  estado. La abre el primer rastreo que la ve, la cierra solo el
                  que puede afirmar que ya no esta; aqui se marca vista o se
-                 silencia. -->
+                 silencia. En la interfaz se llaman «alertas», como en la
+                 portada y en Estado: un solo termino (revision 2.3). -->
             <div class="card mb-2" data-testid="incidentes">
               <div class="flex items-center gap-1" style="flex-wrap:wrap;margin-bottom:.4rem">
-                <h3 style="margin:0;font-size:1rem">Incidentes</h3>
-                <template x-for="o in [['vivos', 'Abiertos'], ['cerrados', 'Cerrados']]" :key="o[0]">
+                <h3 style="margin:0;font-size:1rem">Alertas</h3>
+                <template x-for="o in [['vivos', 'Abiertas'], ['cerrados', 'Cerradas']]" :key="o[0]">
                   <button class="btn btn-sm chip" :class="incidentesVer === o[0] && 'chip-on'"
                           @click="incidentesVer = o[0]; cargarIncidentes()" x-text="o[1]"></button>
                 </template>
               </div>
-              <p class="text-sm text-dim" style="margin:.2rem 0 .5rem">Una alerta de un perfil o de una programación se abre la primera vez que salta y solo entonces se avisa. Se cierra sola cuando un rastreo posterior que puede comprobarlo ya no la ve.</p>
+              <p class="text-sm text-dim" style="margin:.2rem 0 .5rem">Una alerta de un perfil o de una programación se abre la primera vez que salta y solo entonces se avisa. Se cierra sola cuando un rastreo posterior que puede comprobarlo ya no la ve.
+                Cuándo salta cada una se decide en <a href="#" @click.prevent="cambiarTabCliente('config'); $nextTick(() => { const r = document.getElementById('reglas-alertas'); r && r.scrollIntoView() })">Configuración › Reglas de alertas</a>.</p>
               <template x-if="incidentes === null"><div class="text-dim text-sm">Cargando…</div></template>
               <template x-if="incidentes && !incidentes.length">
-                <div class="text-dim text-sm" x-text="incidentesVer === 'vivos' ? 'Ningún incidente abierto.' : 'Ningún incidente cerrado todavía.'"></div>
+                <div class="text-dim text-sm" x-text="incidentesVer === 'vivos' ? 'Ninguna alerta abierta.' : 'Ninguna alerta cerrada todavía.'"></div>
               </template>
               <ul class="incidentes" x-show="incidentes && incidentes.length">
                 <template x-for="i in incidentes || []" :key="i.id">
@@ -682,175 +828,79 @@
                 </template>
               </ul>
             </div>
-            <template x-if="!reglasForm && !reglasError"><div class="card text-dim text-sm">Cargando reglas…</div></template>
-            <template x-if="reglasForm">
-              <div>
-                <div class="card mb-2 text-sm">
-                  <span x-show="!reglasCliente.guardadas">Este cliente usa las <strong>reglas de serie</strong>. Cualquier cambio que guardes vale para los rastreos que terminen desde ese momento.</span>
-                  <span x-show="reglasCliente.guardadas">Este cliente tiene <strong>reglas propias</strong> sobre las de serie.</span>
-                  Las alertas salen arriba en la ficha de cada rastreo; las marcadas «avisar» se mandan además por el webhook de avisos.
-                </div>
-
-                <!-- Reglas propias -->
-                <div class="card mb-2">
-                  <div class="card-header">
-                    <h2>Reglas del cliente</h2>
-                    <button class="btn btn-sm" @click="reglaNueva()" data-testid="regla-nueva">
-                      <i data-lucide="plus" style="width:14px;height:14px"></i> Nueva regla</button>
-                  </div>
-                  <div class="text-dim text-sm mb-2">Una cifra del rastreo, opcionalmente en un segmento, contra un umbral. Por ejemplo: «URLs 4xx en fichas: el valor &gt; 20». Las de cambio comparan con el censo anterior y no se evalúan si no es comparable (truncado, otro alcance o detrás de un muro).</div>
-                  <template x-if="!reglasForm.propias.length"><div class="text-dim text-sm">Sin reglas propias.</div></template>
-                  <template x-for="(r, i) in reglasForm.propias" :key="i">
-                    <div class="regla-propia">
-                      <div class="regla-campos">
-                        <label class="regla-ancho">Nombre
-                          <input type="text" x-model="r.nombre" placeholder="Fichas rotas"></label>
-                        <label class="regla-ancho">Qué se mide
-                          <select x-model="r.medida">
-                            <template x-for="[k, m] in Object.entries(reglasCliente.catalogo.medidas)" :key="k">
-                              <option :value="k" x-text="m.etiqueta" :selected="r.medida === k"></option>
-                            </template>
-                            <template x-for="t in Object.keys(ISSUE_INFO)" :key="t">
-                              <option :value="'incidencia:' + t" x-text="'Páginas con: ' + fmt.issue(t)" :selected="r.medida === 'incidencia:' + t"></option>
-                            </template>
-                          </select></label>
-                        <label>Segmento
-                          <input type="text" x-model="r.segmento" placeholder="todo el sitio" :list="'segs-' + i">
-                          <datalist :id="'segs-' + i">
-                            <template x-for="sg in reglasCliente.catalogo.segmentos" :key="sg"><option :value="sg"></option></template>
-                          </datalist></label>
-                        <label>Sobre
-                          <select x-model="r.modo">
-                            <template x-for="[k, t] in Object.entries(reglasCliente.catalogo.modos)" :key="k">
-                              <option :value="k" x-text="t" :selected="r.modo === k"></option>
-                            </template>
-                          </select></label>
-                        <label>Si es
-                          <select x-model="r.operador">
-                            <template x-for="o in reglasCliente.catalogo.operadores" :key="o"><option :value="o" x-text="o" :selected="r.operador === o"></option></template>
-                          </select></label>
-                        <label><span x-text="r.modo === 'cambio_pct' ? 'Umbral (%)' : 'Umbral'"></span>
-                          <input type="number" x-model="r.umbral" step="any"></label>
-                        <label>Gravedad
-                          <select x-model="r.severidad">
-                            <option value="critical" :selected="r.severidad === 'critical'">crítica</option>
-                            <option value="warning" :selected="r.severidad === 'warning'">aviso</option>
-                            <option value="info" :selected="r.severidad === 'info'">informativa</option>
-                          </select></label>
-                      </div>
-                      <div class="regla-pie">
-                        <span class="text-dim" x-text="fraseRegla(r)"></span>
-                        <label><input type="checkbox" x-model="r.activa"> activa</label>
-                        <label><input type="checkbox" x-model="r.avisar"> avisar</label>
-                        <button class="btn btn-sm btn-danger" @click="reglasForm.propias.splice(i, 1)">Quitar</button>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-
-                <!-- Reglas de la comparacion -->
-                <div class="card mb-2">
-                  <div class="card-header"><h2>Cambios frente al rastreo anterior</h2></div>
-                  <div class="text-dim text-sm mb-2">Las reglas que comparan página a página con el censo anterior. Saltan si afectan al % indicado del sitio (con un mínimo de páginas) o a ese % de una plantilla o segmento.</div>
-                  <div style="overflow-x:auto">
-                    <table style="width:100%;font-size:.82rem">
-                      <thead><tr><th style="text-align:left">Regla</th><th>Activa</th><th>Avisar</th><th>% del sitio</th><th>Mín. páginas</th><th>% plantilla</th></tr></thead>
-                      <tbody>
-                        <template x-for="c in reglasCliente.catalogo.comparacion" :key="c.regla">
-                          <tr>
-                            <td :title="c.que_decide_google">
-                              <span x-text="c.regla.replaceAll('_', ' ')"></span>
-                              <span class="text-dim" style="font-size:.75rem" x-text="c.severidad === 'critical' ? ' · crítica' : (c.severidad === 'warning' ? ' · aviso' : ' · info')"></span>
-                            </td>
-                            <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].activa" :aria-label="'Activa: ' + c.regla"></td>
-                            <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].avisar" :aria-label="'Avisar: ' + c.regla"></td>
-                            <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_sitio"></td>
-                            <td><input type="number" min="1" style="width:5rem" x-model="reglasForm.comparacion[c.regla].min_paginas"></td>
-                            <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_plantilla"></td>
-                          </tr>
-                        </template>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <!-- Silencio y resumen -->
-                <div class="card mb-2">
-                  <div class="regla-campos" style="align-items:end">
-                    <div class="form-group" style="margin:0">
-                      <label>Silenciar avisos hasta</label>
-                      <input type="date" x-model="reglasForm.silenciado_hasta">
-                      <div class="form-hint">Hasta ese día no sale nada por el webhook. En la ficha se siguen viendo.</div>
-                    </div>
-                    <label class="text-sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" x-model="reglasForm.resumen_semanal.activo"> Resumen semanal</label>
-                    <div class="form-group" style="margin:0">
-                      <label>Día</label>
-                      <select x-model.number="reglasForm.resumen_semanal.dia">
-                        <template x-for="d in [1,2,3,4,5,6,7]" :key="d"><option :value="d" x-text="DIAS_SEMANA[d]" :selected="reglasForm.resumen_semanal.dia === d"></option></template>
-                      </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                      <label>Hora</label>
-                      <input type="number" min="0" max="23" style="width:4.5rem" x-model.number="reglasForm.resumen_semanal.hora">
-                    </div>
-                  </div>
-                </div>
-
-                <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
-                  <button class="btn btn-primary" @click="guardarReglas()" data-testid="guardar-reglas">Guardar reglas</button>
-                  <button class="btn" @click="probarReglas()" data-tip="Evalúa las reglas del cliente, tal como están en pantalla, contra su último rastreo completado. No guarda nada">Probar contra el último rastreo</button>
-                  <button class="btn" @click="cargarReglas()">Descartar cambios</button>
-                  <button class="btn btn-danger" style="margin-left:auto" @click="restablecerReglas()" x-show="reglasCliente.guardadas">Volver a las de serie</button>
-                </div>
-
-                <template x-if="reglasPrueba">
-                  <div class="card mb-2 text-sm" data-testid="reglas-prueba">
-                    <div><strong>Prueba contra</strong> <a :href="'#/rastreos/' + reglasPrueba.job_id" x-text="reglasPrueba.nombre"></a></div>
-                    <template x-if="reglasPrueba.motivo"><div class="orange" x-text="'No se evaluó: ' + reglasPrueba.motivo"></div></template>
-                    <div x-show="!reglasPrueba.motivo" x-text="reglasPrueba.evaluadas + ' regla(s) evaluadas, ' + reglasPrueba.disparadas.length + ' saltarían'"></div>
-                    <template x-for="a in reglasPrueba.disparadas" :key="a.id">
-                      <div :class="a.severidad === 'critical' ? 'red' : 'orange'" x-text="'• ' + a.texto"></div>
-                    </template>
-                    <template x-for="x in reglasPrueba.sin_evaluar" :key="x.id">
-                      <div class="text-dim" x-text="'• ' + x.id + ': sin evaluar (' + x.motivo + ')'"></div>
-                    </template>
-                  </div>
-                </template>
-
-                <!-- Resumenes semanales -->
-                <div class="card mb-2">
-                  <div class="card-header">
-                    <h2>Resumen semanal</h2>
-                    <button class="btn btn-sm" @click="verResumenPrevio()">Ver cómo sería ahora</button>
-                  </div>
-                  <div class="text-dim text-sm mb-2" x-text="reglasForm.resumen_semanal.activo
-                       ? 'Se genera cada ' + DIAS_SEMANA[reglasForm.resumen_semanal.dia] + ' a las ' + reglasForm.resumen_semanal.hora + ':00 (' + (cliente.zona_horaria || 'Europe/Madrid') + ') con los últimos 7 días, y se manda por el webhook de avisos si hay uno configurado.'
-                       : 'Desactivado para este cliente.'"></div>
-                  <template x-if="resumenPrevia">
-                    <div class="mb-2">
-                      <div class="text-sm"><strong>Vista previa</strong> (sin guardar)</div>
-                      <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="resumenPrevia.texto"></pre>
-                    </div>
-                  </template>
-                  <template x-if="!resumenes.length && !resumenPrevia"><div class="text-dim text-sm">Todavía no se ha generado ninguno.</div></template>
-                  <template x-for="r in resumenes" :key="r.id">
-                    <details style="border-top:1px solid var(--border);padding:.4rem 0">
-                      <summary class="text-sm" style="cursor:pointer">
-                        <span x-text="'Semana hasta el ' + r.semana"></span>
-                        <span class="text-dim" x-text="r.enviado ? ' · enviado' : ' · no enviado'"></span>
-                      </summary>
-                      <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="r.texto"></pre>
-                    </details>
-                  </template>
-                </div>
-              </div>
-            </template>
           </div>
         </template>
 
-        <!-- --- Pestana: configuracion del cliente --- -->
+        <!-- --- Pestana Configuracion: perfiles, datos del cliente y reglas de
+             alertas (revision de UX del 25-oct, 2.1). Los perfiles venian
+             primero en la ficha y el editor de reglas ocupaba la pestana
+             Alertas; aqui estan juntos «que se rastrea» y «cuando avisar». -->
         <template x-if="clienteTab === 'config' || !cliente">
-          <div class="card">
+          <div data-testid="cliente-config">
+            <!-- La pestana es larga: un indice arriba para ir a lo que se busca. -->
+            <div class="text-sm config-indice" x-show="cliente">
+              Ir a:
+              <a href="#" @click.prevent="document.getElementById('cfg-perfiles').scrollIntoView()">Perfiles de rastreo</a> ·
+              <a href="#" @click.prevent="document.getElementById('cfg-datos').scrollIntoView()">Datos del cliente e integraciones</a> ·
+              <a href="#" @click.prevent="document.getElementById('reglas-alertas').scrollIntoView()">Reglas de alertas</a>
+            </div>
+            <template x-if="cliente">
+              <div id="cfg-perfiles">
+              <div class="card mb-2">
+                <div class="flex items-center justify-between mb-1">
+                  <h3 style="font-size:1rem">Perfiles de rastreo</h3>
+                  <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
+                </div>
+                <p class="text-dim text-sm mb-1">
+                  Que se rastrea y como: el sitio principal, el blog, otro idioma o un competidor. Un
+                  rastreo lanzado desde un perfil hereda la configuración del cliente y la del perfil.
+                </p>
+                <template x-if="!clientePerfiles.length">
+                  <div class="text-dim text-sm">Sin perfiles todavía.</div>
+                </template>
+                <template x-if="clientePerfiles.length">
+                  <div class="table-wrap">
+                  <table style="width:100%;font-size:.85rem">
+                    <thead><tr>
+                      <th style="text-align:left">perfil</th>
+                      <th style="text-align:left">semillas</th>
+                      <th style="text-align:left">último rastreo</th>
+                      <th style="width:13rem"></th>
+                    </tr></thead>
+                    <tbody>
+                      <template x-for="p in clientePerfiles" :key="p.id">
+                        <tr :style="p.activo ? '' : 'opacity:.5'">
+                          <td>
+                            <div x-text="p.nombre"></div>
+                            <span class="badge" :class="p.rol === 'competidor' ? 'badge-pending' : 'badge-completed'"
+                                  x-text="p.rol"></span>
+                          </td>
+                          <td class="text-dim" x-text="(p.seeds || []).join(', ').slice(0, 80)"></td>
+                          <td>
+                            <template x-if="p.last_job_id">
+                              <a href="#" @click.prevent="openJob(p.last_job_id)">abrir</a>
+                            </template>
+                            <span class="text-dim" x-show="!p.last_job_id">nunca</span>
+                          </td>
+                          <td style="text-align:right;white-space:nowrap">
+                            <button class="btn btn-sm btn-primary"
+                                    @click="openCreate({ cliente_id: cliente.id, profile_id: p.id })">Lanzar</button>
+                            <button class="btn btn-sm" @click="editarPerfil(p)">Editar</button>
+                            <button class="btn btn-sm" @click="borrarPerfil(p)"
+                                    data-tip="Borra el perfil. Sus rastreos NO se borran">&times;</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                  </div>
+                </template>
+              </div>
+              </div>
+            </template>
+
+            <div class="card mb-2" id="cfg-datos">
+              <h3 style="font-size:1rem" class="mb-1" x-show="cliente">Datos del cliente</h3>
             <div class="form-row">
               <div class="form-group">
                 <label>Nombre *</label>
@@ -1018,7 +1068,7 @@
                     <ol style="margin:.35rem 0 .6rem 1.2rem;line-height:1.55">
                       <li>En Slack, crea el canal del cliente si no existe (por ejemplo <code>#seo-cliente</code>) y escribe en él <code>/invite @Crawler SEO</code>. Sin esto el bot no puede escribir ahí; en un canal privado, ni siquiera lo ve.</li>
                       <li>Aquí, en «2. Canal», pulsa <em>Ver los canales</em> y elígelo (los que dicen «sin el bot» aún no tienen la invitación).</li>
-                      <li>En «3. Qué se manda» marca lo que quieras: las alertas llegan en cuanto termina un rastreo que las tiene; el resumen, el día de la semana que diga la pestaña Alertas; el informe, al terminar cada rastreo programado (los lanzados a mano no lo mandan).</li>
+                      <li>En «3. Qué se manda» marca lo que quieras: las alertas llegan en cuanto termina un rastreo que las tiene; el resumen, el día de la semana que diga Configuración › Reglas de alertas; el informe, al terminar cada rastreo programado (los lanzados a mano no lo mandan).</li>
                       <li>Pulsa <em>Guardar y mandar una prueba</em> y mira el canal. Si no llega, aquí mismo sale por qué.</li>
                     </ol>
                     <p class="text-dim">El token se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar. Para quitarlo de todos los clientes a la vez, en Slack: tu app → <em>Install App</em> → <em>Revoke</em>.</p>
@@ -1182,6 +1232,182 @@
                         data-tip="Borra el cliente y sus perfiles. Sus rastreos NO se borran">Borrar cliente</button>
               </template>
             </div>
+            </div>
+
+            <!-- Reglas de alertas y resumen semanal (decision 135). Lo que se ve
+                 son las reglas EFECTIVAS: las de serie con lo que el cliente haya
+                 cambiado encima. Guardar solo manda las diferencias. -->
+            <template x-if="cliente">
+              <div data-testid="reglas-cliente">
+                <h3 style="font-size:1.05rem;margin:1.25rem 0 .5rem" id="reglas-alertas">Reglas de alertas</h3>
+                <template x-if="reglasError">
+                  <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="reglasError"></div>
+                </template>
+                <template x-if="!reglasForm && !reglasError"><div class="card text-dim text-sm">Cargando reglas…</div></template>
+                <template x-if="reglasForm">
+                  <div>
+                    <div class="card mb-2 text-sm">
+                      <span x-show="!reglasCliente.guardadas">Este cliente usa las <strong>reglas de serie</strong>. Cualquier cambio que guardes vale para los rastreos que terminen desde ese momento.</span>
+                      <span x-show="reglasCliente.guardadas">Este cliente tiene <strong>reglas propias</strong> sobre las de serie.</span>
+                      Las alertas salen arriba en la ficha de cada rastreo; las marcadas «avisar» se mandan además por el webhook de avisos.
+                    </div>
+
+                    <!-- Reglas propias -->
+                    <div class="card mb-2">
+                      <div class="card-header">
+                        <h2>Reglas del cliente</h2>
+                        <button class="btn btn-sm" @click="reglaNueva()" data-testid="regla-nueva">
+                          <i data-lucide="plus" style="width:14px;height:14px"></i> Nueva regla</button>
+                      </div>
+                      <div class="text-dim text-sm mb-2">Una cifra del rastreo, opcionalmente en un segmento, contra un umbral. Por ejemplo: «URLs 4xx en fichas: el valor &gt; 20». Las de cambio comparan con el censo anterior y no se evalúan si no es comparable (truncado, otro alcance o detrás de un muro).</div>
+                      <template x-if="!reglasForm.propias.length"><div class="text-dim text-sm">Sin reglas propias.</div></template>
+                      <template x-for="(r, i) in reglasForm.propias" :key="i">
+                        <div class="regla-propia">
+                          <div class="regla-campos">
+                            <label class="regla-ancho">Nombre
+                              <input type="text" x-model="r.nombre" placeholder="Fichas rotas"></label>
+                            <label class="regla-ancho">Qué se mide
+                              <select x-model="r.medida">
+                                <template x-for="[k, m] in Object.entries(reglasCliente.catalogo.medidas)" :key="k">
+                                  <option :value="k" x-text="m.etiqueta" :selected="r.medida === k"></option>
+                                </template>
+                                <template x-for="t in Object.keys(ISSUE_INFO)" :key="t">
+                                  <option :value="'incidencia:' + t" x-text="'Páginas con: ' + fmt.issue(t)" :selected="r.medida === 'incidencia:' + t"></option>
+                                </template>
+                              </select></label>
+                            <label>Segmento
+                              <input type="text" x-model="r.segmento" placeholder="todo el sitio" :list="'segs-' + i">
+                              <datalist :id="'segs-' + i">
+                                <template x-for="sg in reglasCliente.catalogo.segmentos" :key="sg"><option :value="sg"></option></template>
+                              </datalist></label>
+                            <label>Sobre
+                              <select x-model="r.modo">
+                                <template x-for="[k, t] in Object.entries(reglasCliente.catalogo.modos)" :key="k">
+                                  <option :value="k" x-text="t" :selected="r.modo === k"></option>
+                                </template>
+                              </select></label>
+                            <label>Si es
+                              <select x-model="r.operador">
+                                <template x-for="o in reglasCliente.catalogo.operadores" :key="o"><option :value="o" x-text="o" :selected="r.operador === o"></option></template>
+                              </select></label>
+                            <label><span x-text="r.modo === 'cambio_pct' ? 'Umbral (%)' : 'Umbral'"></span>
+                              <input type="number" x-model="r.umbral" step="any"></label>
+                            <label>Gravedad
+                              <select x-model="r.severidad">
+                                <option value="critical" :selected="r.severidad === 'critical'">crítica</option>
+                                <option value="warning" :selected="r.severidad === 'warning'">aviso</option>
+                                <option value="info" :selected="r.severidad === 'info'">informativa</option>
+                              </select></label>
+                          </div>
+                          <div class="regla-pie">
+                            <span class="text-dim" x-text="fraseRegla(r)"></span>
+                            <label><input type="checkbox" x-model="r.activa"> activa</label>
+                            <label><input type="checkbox" x-model="r.avisar"> avisar</label>
+                            <button class="btn btn-sm btn-danger" @click="reglasForm.propias.splice(i, 1)">Quitar</button>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+
+                    <!-- Reglas de la comparacion -->
+                    <div class="card mb-2">
+                      <div class="card-header"><h2>Cambios frente al rastreo anterior</h2></div>
+                      <div class="text-dim text-sm mb-2">Las reglas que comparan página a página con el censo anterior. Saltan si afectan al % indicado del sitio (con un mínimo de páginas) o a ese % de una plantilla o segmento.</div>
+                      <div style="overflow-x:auto">
+                        <table style="width:100%;font-size:.82rem">
+                          <thead><tr><th style="text-align:left">Regla</th><th>Activa</th><th>Avisar</th><th>% del sitio</th><th>Mín. páginas</th><th>% plantilla</th></tr></thead>
+                          <tbody>
+                            <template x-for="c in reglasCliente.catalogo.comparacion" :key="c.regla">
+                              <tr>
+                                <td :title="c.que_decide_google">
+                                  <span x-text="c.regla.replaceAll('_', ' ')"></span>
+                                  <span class="text-dim" style="font-size:.75rem" x-text="c.severidad === 'critical' ? ' · crítica' : (c.severidad === 'warning' ? ' · aviso' : ' · info')"></span>
+                                </td>
+                                <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].activa" :aria-label="'Activa: ' + c.regla"></td>
+                                <td style="text-align:center"><input type="checkbox" x-model="reglasForm.comparacion[c.regla].avisar" :aria-label="'Avisar: ' + c.regla"></td>
+                                <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_sitio"></td>
+                                <td><input type="number" min="1" style="width:5rem" x-model="reglasForm.comparacion[c.regla].min_paginas"></td>
+                                <td><input type="number" min="0" max="100" step="any" style="width:5rem" x-model="reglasForm.comparacion[c.regla].pct_plantilla"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <!-- Silencio y resumen -->
+                    <div class="card mb-2">
+                      <div class="regla-campos" style="align-items:end">
+                        <div class="form-group" style="margin:0">
+                          <label>Silenciar avisos hasta</label>
+                          <input type="date" x-model="reglasForm.silenciado_hasta">
+                          <div class="form-hint">Hasta ese día no sale nada por el webhook. En la ficha se siguen viendo.</div>
+                        </div>
+                        <label class="text-sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" x-model="reglasForm.resumen_semanal.activo"> Resumen semanal</label>
+                        <div class="form-group" style="margin:0">
+                          <label>Día</label>
+                          <select x-model.number="reglasForm.resumen_semanal.dia">
+                            <template x-for="d in [1,2,3,4,5,6,7]" :key="d"><option :value="d" x-text="DIAS_SEMANA[d]" :selected="reglasForm.resumen_semanal.dia === d"></option></template>
+                          </select>
+                        </div>
+                        <div class="form-group" style="margin:0">
+                          <label>Hora</label>
+                          <input type="number" min="0" max="23" style="width:4.5rem" x-model.number="reglasForm.resumen_semanal.hora">
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
+                      <button class="btn btn-primary" @click="guardarReglas()" data-testid="guardar-reglas">Guardar reglas</button>
+                      <button class="btn" @click="probarReglas()" data-tip="Evalúa las reglas del cliente, tal como están en pantalla, contra su último rastreo completado. No guarda nada">Probar contra el último rastreo</button>
+                      <button class="btn" @click="cargarReglas()">Descartar cambios</button>
+                      <button class="btn btn-danger" style="margin-left:auto" @click="restablecerReglas()" x-show="reglasCliente.guardadas">Volver a las de serie</button>
+                    </div>
+
+                    <template x-if="reglasPrueba">
+                      <div class="card mb-2 text-sm" data-testid="reglas-prueba">
+                        <div><strong>Prueba contra</strong> <a :href="'#/rastreos/' + reglasPrueba.job_id" x-text="reglasPrueba.nombre"></a></div>
+                        <template x-if="reglasPrueba.motivo"><div class="orange" x-text="'No se evaluó: ' + reglasPrueba.motivo"></div></template>
+                        <div x-show="!reglasPrueba.motivo" x-text="reglasPrueba.evaluadas + ' regla(s) evaluadas, ' + reglasPrueba.disparadas.length + ' saltarían'"></div>
+                        <template x-for="a in reglasPrueba.disparadas" :key="a.id">
+                          <div :class="a.severidad === 'critical' ? 'red' : 'orange'" x-text="'• ' + a.texto"></div>
+                        </template>
+                        <template x-for="x in reglasPrueba.sin_evaluar" :key="x.id">
+                          <div class="text-dim" x-text="'• ' + x.id + ': sin evaluar (' + x.motivo + ')'"></div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Resumenes semanales -->
+                    <div class="card mb-2">
+                      <div class="card-header">
+                        <h2>Resumen semanal</h2>
+                        <button class="btn btn-sm" @click="verResumenPrevio()">Ver cómo sería ahora</button>
+                      </div>
+                      <div class="text-dim text-sm mb-2" x-text="reglasForm.resumen_semanal.activo
+                           ? 'Se genera cada ' + DIAS_SEMANA[reglasForm.resumen_semanal.dia] + ' a las ' + reglasForm.resumen_semanal.hora + ':00 (' + (cliente.zona_horaria || 'Europe/Madrid') + ') con los últimos 7 días, y se manda por el webhook de avisos si hay uno configurado.'
+                           : 'Desactivado para este cliente.'"></div>
+                      <template x-if="resumenPrevia">
+                        <div class="mb-2">
+                          <div class="text-sm"><strong>Vista previa</strong> (sin guardar)</div>
+                          <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="resumenPrevia.texto"></pre>
+                        </div>
+                      </template>
+                      <template x-if="!resumenes.length && !resumenPrevia"><div class="text-dim text-sm">Todavía no se ha generado ninguno.</div></template>
+                      <template x-for="r in resumenes" :key="r.id">
+                        <details style="border-top:1px solid var(--border);padding:.4rem 0">
+                          <summary class="text-sm" style="cursor:pointer">
+                            <span x-text="'Semana hasta el ' + r.semana"></span>
+                            <span class="text-dim" x-text="r.enviado ? ' · enviado' : ' · no enviado'"></span>
+                          </summary>
+                          <pre style="white-space:pre-wrap;font-size:.8rem;margin:.3rem 0" x-text="r.texto"></pre>
+                        </details>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
           </div>
         </template>
       </div>
@@ -1621,7 +1847,7 @@
              un servidor de pruebas se entrego como un aviso `info` entre
              315.119 incidencias. -->
         <!-- Reglas propias del cliente que han saltado al cerrar el rastreo
-             (decision 135). Se editan en la ficha del cliente, pestaña Alertas. -->
+             (decision 135). Se editan en la ficha del cliente, pestaña Configuración. -->
         <template x-if="job.alertas_cliente && (job.alertas_cliente.disparadas || []).length">
           <div class="card mb-2" data-testid="alertas-cliente"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.alertas_cliente.disparadas[0].severidad)">

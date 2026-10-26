@@ -449,6 +449,21 @@ mensual: **«¿cómo va este sitio desde que lo llevamos?»**.
   «sube» ni «baja»: el salto puede ser nuestro, no del sitio.
 - **Portada en tabla**: cada cliente con su último censo, sus errores y la
   tendencia de errores en una línea pequeña.
+- **La ficha del cliente en cuatro pestañas** (revisión de UX del 25-oct, 2.1):
+  **Estado** al entrar (último censo con páginas, indexables y páginas con
+  error; los cinco primeros problemas por prioridad, cada uno con sus URLs;
+  qué ha cambiado frente al censo anterior y las alertas abiertas),
+  **Historial** (tráfico de Google, gráficas y tabla de evolución), **Alertas**
+  (solo las alertas) y **Configuración** (perfiles, datos del cliente y reglas
+  de alertas). Un solo botón «Nuevo rastreo», con el cliente ya puesto.
+- **Una sola referencia para «frente al anterior»** (2.3): la tabla, las
+  gráficas, la tarjeta del censo y sus alertas comparan con el mismo censo, el
+  anterior de la misma programación, y lo dicen con su fecha («frente al 19
+  oct»). Antes la tabla restaba la fila de debajo, que con dos programaciones
+  era de la otra serie (85 ▲2 en la tabla, 85 ▼4 en la gráfica).
+- **«Alertas» es una sola cifra**: las abiertas (las que saltaron y ningún
+  rastreo posterior ha visto resueltas), igual en la portada, en Estado y en
+  la pestaña. Antes la portada decía «3 alertas» y «5 incidentes» a la vez.
 
 Las cifras de cada rastreo se guardan al terminar (sin leer los enlaces), así
 que la ficha no recorre los censos. Los rastreos anteriores se rellenan con

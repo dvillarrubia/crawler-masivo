@@ -209,6 +209,15 @@ const TAB_SLUG = {
 // del 25-oct: los enlaces guardados siguen abriendola.
 const SLUG_TAB = { ...Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k])), informe: 'insights' };
 
+// Pestanas de la ficha del cliente (revision de UX del 25-oct, 2.1): Estado
+// (la de entrada), Historial, Alertas y Configuracion. Los tramos viejos
+// siguen abriendo: `rastreos` era la de las graficas y la tabla (hoy
+// Historial) y `config` el nombre interno.
+const CLIENTE_TAB_SLUG = { estado: 'estado', historial: 'historial', alertas: 'alertas', config: 'configuracion' };
+const CLIENTE_TAB_ETIQUETA = { estado: 'Estado', historial: 'Historial', alertas: 'Alertas', config: 'Configuración' };
+const CLIENTE_SLUG_TAB = { ...Object.fromEntries(Object.entries(CLIENTE_TAB_SLUG).map(([k, v]) => [v, k])),
+                           rastreos: 'historial', config: 'config' };
+
 // Helpers
 // Respuestas de los choice del enriquecido, en castellano: el tipo de pagina
 // (decision 178) y la intencion y el embudo (decision 176), que llegan en
@@ -248,6 +257,15 @@ const fmt = {
   date: d => d ? new Date(d).toLocaleString('es-ES', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—',
   dia: d => d ? new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+  // «19 oct» (y el año solo si no es el de hoy): la referencia de «frente al
+  // anterior» se nombra por su fecha (revision de UX del 25-oct, 2.3).
+  diaCorto: d => {
+    if (!d) return '—';
+    const f = new Date(d);
+    const o = { day: 'numeric', month: 'short' };
+    if (f.getFullYear() !== new Date().getFullYear()) o.year = 'numeric';
+    return f.toLocaleDateString('es-ES', o);
+  },
   ago: d => {
     if (!d) return '—';
     const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
@@ -578,7 +596,14 @@ function app() {
     // GET /clients/{id}/trafico, con las frases ya redactadas por el servidor.
     clienteTrafico: [],
     cliente: null,
-    clienteTab: 'rastreos',
+    clienteTab: 'estado',
+    // Pestana Estado (revision de UX del 25-oct, 2.1): el ultimo censo con
+    // sus cifras, lo primero que arreglar y lo que cambio frente al anterior.
+    // `alertasAbiertas` va aparte de `incidentes` (la lista de la pestana
+    // Alertas, que puede estar en «Cerrados»).
+    estadoCliente: null,      // { jobId, job, stats, principales, error }
+    alertasAbiertas: null,    // GET /clients/{id}/incidentes?estado=vivos
+    _reglasDe: null,          // cliente cuyas reglas estan cargadas en `reglasForm`
     // Reglas de alerta y resumen semanal del cliente (decision 135)
     reglasCliente: null,      // GET /clients/{id}/reglas
     reglasForm: null,         // copia editable de `efectivas`
@@ -799,7 +824,11 @@ function app() {
         return '#/rastreos' + (q.toString() ? '?' + q : '');
       }
       if (v === 'clients') return '#/clientes';
-      if (v === 'client') return this.cliente ? '#/clientes/' + this.cliente.id + (this.clienteTab === 'alertas' ? '/alertas' : '') : '#/clientes/nuevo';
+      if (v === 'client') {
+        if (!this.cliente) return '#/clientes/nuevo';
+        const t = this.clienteTab;
+        return '#/clientes/' + this.cliente.id + (t && t !== 'estado' ? '/' + (CLIENTE_TAB_SLUG[t] || t) : '');
+      }
       if (v === 'programados') return '#/programados';
       if (!this.job) return '';
       const base = '#/rastreos/' + this.job.id;
@@ -854,14 +883,13 @@ function app() {
           if (!p[1]) await this.verClientes();
           else if (p[1] === 'nuevo') this.nuevoCliente();
           else {
-            // `#/clientes/<id>/alertas`: el enlace de incidentes del panel (decision 139).
-            const alertas = p[2] === 'alertas';
+            // `#/clientes/<id>[/estado|historial|alertas|configuracion]`; los
+            // tramos viejos (`rastreos`) siguen abriendo (revision de UX del 25-oct, 2.1).
+            const tab = CLIENTE_SLUG_TAB[p[2]] || 'estado';
             if (!this.cliente || this.cliente.id !== p[1] || this.view !== 'client') {
-              await this.abrirCliente(p[1], alertas ? 'alertas' : 'rastreos');
-              if (alertas) this.cargarReglas();
-            } else if (alertas && this.clienteTab !== 'alertas') {
-              this.clienteTab = 'alertas';
-              this.cargarReglas();
+              await this.abrirCliente(p[1], tab);
+            } else if (this.clienteTab !== tab) {
+              this.cambiarTabCliente(tab);
             }
           }
         } else if (p[0] === 'programados') {
@@ -975,7 +1003,12 @@ function app() {
       const v = this.view;
       if (v === 'client') {
         m.push({ texto: 'Clientes', href: '#/clientes' });
-        m.push({ texto: this.cliente ? this.cliente.nombre : 'Nuevo cliente' });
+        if (this.cliente) {
+          m.push({ texto: this.cliente.nombre, href: '#/clientes/' + this.cliente.id });
+          m.push({ texto: CLIENTE_TAB_ETIQUETA[this.clienteTab] || 'Estado' });
+        } else {
+          m.push({ texto: 'Nuevo cliente' });
+        }
       }
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(v) && this.job) {
         if (this.job.cliente_id) {
@@ -1363,23 +1396,22 @@ function app() {
       }
     },
 
-    // Las filas de la portada, primero las que piden atencion: incidentes
-    // abiertos, alertas criticas, alertas, y luego el censo mas reciente.
+    // Las filas de la portada, primero las que piden atencion: alertas
+    // abiertas (la cifra de su columna; revision de UX del 25-oct, 2.3) y
+    // luego el censo mas reciente.
     filasPanelOrdenadas() {
       const filas = [...((this.panelClientes && this.panelClientes.clientes) || [])];
-      const n = (p, k) => (p.ultimo && p.ultimo[k]) || 0;
       return filas.sort((a, b) =>
         (b.incidentes_vivos || 0) - (a.incidentes_vivos || 0)
-        || n(b, 'alertas_criticas') - n(a, 'alertas_criticas')
-        || n(b, 'alertas') - n(a, 'alertas')
         || String((b.ultimo || {}).created_at || '').localeCompare(String((a.ultimo || {}).created_at || ''))
         || String(a.nombre).localeCompare(String(b.nombre)));
     },
 
-    async abrirCliente(id, tab = 'rastreos') {
+    async abrirCliente(id, tab = 'estado') {
       this.view = 'client';
       this.clienteTab = tab;
       this.clienteError = '';
+      if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; }
       try {
         const [c, perfiles, jobs, serie] = await Promise.all([
           api(`/clients/${id}`),
@@ -1393,6 +1425,11 @@ function app() {
         this.clienteSerie = serie || [];
         this.clienteForm = _formCliente(c);
       } catch (e) { this.error = e.message; }
+      // Lo de cada pestana, y lo que necesita Estado (que es la de entrada y
+      // la que cuenta las alertas abiertas de la pestana Alertas).
+      this.cargarAlertasAbiertas();
+      this.cargarEstadoCliente();
+      this._cargarTabCliente(tab);
       // Aparte: si la evolucion falla (o la tabla aun no existe), la ficha se
       // abre igual, sin graficas.
       try {
@@ -1407,6 +1444,105 @@ function app() {
         const t = await api(`/clients/${id}/trafico`);
         if (this.cliente && this.cliente.id === id) this.clienteTrafico = t || [];
       } catch (e) { this.clienteTrafico = []; }
+    },
+
+    // Cambiar de pestana en la ficha del cliente. Las reglas de alertas viven
+    // en Configuracion y la lista de alertas en Alertas (revision de UX del
+    // 25-oct, 2.1): antes el editor ocupaba 2.124 px de la pestana Alertas.
+    cambiarTabCliente(tab) {
+      this.clienteTab = tab;
+      this._cargarTabCliente(tab);
+    },
+
+    _cargarTabCliente(tab) {
+      if (!this.cliente) return;
+      if (tab === 'alertas') this.cargarIncidentes();
+      if (tab === 'config' && this._reglasDe !== this.cliente.id) this.cargarReglas();
+    },
+
+    // El ultimo censo completado del cliente: el primero de su serie que es
+    // censo (ni canario ni prueba). Mismo criterio que la portada.
+    ultimoCensoCliente() {
+      return (this.clienteSerie || []).find(j => j.tipo === 'censo' && j.status === 'completed') || null;
+    },
+
+    // Lo mas reciente si esta en marcha: «hay uno rastreando» en Estado.
+    rastreoEnCursoCliente() {
+      return (this.clienteSerie || []).find(j => ['pending', 'running'].includes(j.status)) || null;
+    },
+
+    // Pestana Estado: la ficha del ultimo censo (su comparacion), sus cifras
+    // (/stats trae las paginas con error, revision 1.11) y los cinco primeros
+    // problemas por prioridad, con la misma consulta que «Que arreglar
+    // primero» del Resumen del censo. Cada parte falla por su cuenta: lo que
+    // no se sabe no se afirma, pero tampoco tira lo demas.
+    async cargarEstadoCliente() {
+      const u = this.ultimoCensoCliente();
+      if (!u) { this.estadoCliente = { jobId: null }; return; }
+      if (this.estadoCliente && this.estadoCliente.jobId === u.id && !this.estadoCliente.error) return;
+      const jobId = u.id;
+      const e = { jobId, job: null, stats: null, principales: null, error: '' };
+      this.estadoCliente = e;
+      const [job, stats, filas] = await Promise.all([
+        api(`/jobs/${jobId}`).catch(err => { e.error = err.message; return null; }),
+        api(`/jobs/${jobId}/stats`).catch(() => null),
+        api(`/jobs/${jobId}/issues/resumen?orden=prioridad&ejemplos=0`).catch(() => null),
+      ]);
+      if (!this.estadoCliente || this.estadoCliente.jobId !== jobId) return;
+      this.estadoCliente = {
+        ...e, job, stats,
+        principales: filas ? filas.filter(r => r.severity !== 'info').slice(0, 5) : null,
+        principalesError: filas === null,
+      };
+    },
+
+    // Las alertas abiertas del cliente: los incidentes vivos (abiertos o
+    // vistos) de sus perfiles y programaciones (decision 139).
+    //
+    // Es LA cifra de «alertas» de la portada, de la ficha y de la pestana
+    // (revision de UX del 25-oct, 2.3). Antes la portada decia «3 alertas»
+    // (las que salto la comparacion del ultimo censo) junto a «5 incidentes»
+    // (lo abierto), y eran dos palabras para casi lo mismo con dos cifras.
+    // Lo abierto es lo que hay que mirar: sigue ahi hasta que un rastreo
+    // posterior que puede comprobarlo ya no lo ve, y no desaparece porque un
+    // censo intermedio no fuese comparable. Las alertas que salto UNA
+    // comparacion son otra cosa (lo que cambio entre dos censos) y se dicen
+    // con su fecha: «frente al 19 oct: 3 alertas».
+    async cargarAlertasAbiertas() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      try {
+        const r = await api(`/clients/${id}/incidentes?estado=vivos`);
+        if (this.cliente && this.cliente.id === id) this.alertasAbiertas = r || [];
+      } catch (_) {
+        if (this.cliente && this.cliente.id === id) this.alertasAbiertas = null;
+      }
+    },
+
+    // El censo con el que se comparo `j` (`comparacion.comparado_con`): el
+    // anterior de su misma programacion, o del mismo sitio si se lanzo a mano
+    // (`shared.comparacion.censo_anterior`). Es la UNICA referencia de «frente
+    // al anterior» (revision de UX del 25-oct, 2.3): la de sus alertas, la de
+    // la tarjeta del censo y la de las graficas de su serie. Antes la tabla
+    // restaba la fila de debajo y, con dos programaciones semanales, el 26 oct
+    // salia «85 ▲2» frente al 21 oct (de la otra programacion) mientras la
+    // grafica decia «85 ▼4» frente al 19 oct.
+    referenciaDe(j) {
+      if (!j || !j.comparado_con) return null;
+      return (this.clienteSerie || []).find(x => x.id === j.comparado_con) || null;
+    },
+
+    // La comparacion automatica del ultimo censo, para «Que ha cambiado».
+    cmpEstado() {
+      return (this.estadoCliente && this.estadoCliente.job && this.estadoCliente.job.comparacion) || null;
+    },
+
+    // El punto comparable anterior al ultimo de la serie elegida: contra el
+    // que se miden las flechas de las graficas. Se nombra por su fecha.
+    referenciaSerie() {
+      const s = this.serieEvolucion();
+      const c = s ? s.puntos.filter(p => p.comparable) : [];
+      return c.length > 1 ? c[c.length - 2] : null;
     },
 
     // --- Reglas de alerta (decision 135) -------------------------------------
@@ -1427,6 +1563,7 @@ function app() {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cambio),
         });
         Object.assign(i, r);
+        this.cargarAlertasAbiertas();
       } catch (e) { this.reglasError = e.message; }
     },
 
@@ -1446,7 +1583,6 @@ function app() {
       // podia guardar sobre este) mientras llegaban las reglas nuevas.
       this.reglasCliente = null; this.reglasForm = null; this.resumenes = [];
       this.reglasError = ''; this.reglasPrueba = null; this.resumenPrevia = null;
-      this.cargarIncidentes();
       try {
         const [r, res] = await Promise.all([
           api(`/clients/${this.cliente.id}/reglas`),
@@ -1456,6 +1592,7 @@ function app() {
         this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
         this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
         this.resumenes = res || [];
+        this._reglasDe = this.cliente && this.cliente.id;
       } catch (e) { this.reglasError = e.message; }
     },
 
@@ -1927,13 +2064,6 @@ function app() {
 
     serieVisible() {
       return this.serieSoloCensos ? this.clienteSerie.filter(j => j.tipo === 'censo') : this.clienteSerie;
-    },
-
-    // El censo completado anterior a este en la serie: es contra el que se
-    // mide la diferencia de errores, saltandose canarios y pruebas.
-    censoAnterior(j) {
-      const i = this.clienteSerie.indexOf(j);
-      return this.clienteSerie.slice(i + 1).find(x => x.tipo === 'censo' && x.status === 'completed') || null;
     },
 
     nombreDePerfil(id) {
