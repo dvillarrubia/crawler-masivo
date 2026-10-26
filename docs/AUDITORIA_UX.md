@@ -125,7 +125,7 @@ Depende de #36 (clientes) y comparte terreno con él.
 Revisión del 25-oct (fase 2 del informe), hecho en la rama `ux2-cliente`:
 
 - [x] 2.1 Ficha del cliente con cuatro pestañas: Estado · Historial · Alertas · Configuración. Rutas `#/clientes/<id>[/historial|alertas|configuracion]`; `rastreos` sigue abriendo Historial. Migas «Clientes › cliente › pestaña». Un solo «Nuevo rastreo» en la ficha (V47).
-- [x] 2.3 «Frente al anterior» = `comparacion.comparado_con` en la tabla (antes, la fila de debajo) y con fecha en tabla y gráficas (V10). «Alertas» = alertas abiertas (incidentes vivos) en portada, Estado y pestaña.
+- [x] 2.3 «Frente al anterior» = `comparacion.comparado_con` en la tabla (antes, la fila de debajo) y con fecha en tabla y gráficas (V10). «Alertas» = alertas abiertas (incidentes vivos) en portada, Estado y pestaña; las de una comparación, «saltaron N» con su fecha; sin abiertas, la portada dice las que saltó el último censo.
 
 ### Fase 4 · Pulido — #123
 

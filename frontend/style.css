@@ -1514,6 +1514,7 @@ body.modo-compartido .topbar, body.modo-compartido .breadcrumbs { display: none 
 .estado-paginas{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
 .estado-alertas{list-style:none;margin:0;padding:0}
 .estado-alertas li{display:flex;flex-direction:column;gap:.1rem;padding:.3rem 0 .3rem .6rem;margin-bottom:.35rem;border-left:3px solid var(--border)}
+.estado-aviso-cmp{margin:0 0 .5rem;line-height:1.45}
 @media(max-width:768px){
   .estado-rejilla{grid-template-columns:1fr}
   .estado-cifra{font-size:1.15rem}

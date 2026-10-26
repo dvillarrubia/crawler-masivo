@@ -464,6 +464,13 @@ mensual: **«¿cómo va este sitio desde que lo llevamos?»**.
 - **«Alertas» es una sola cifra**: las abiertas (las que saltaron y ningún
   rastreo posterior ha visto resueltas), igual en la portada, en Estado y en
   la pestaña. Antes la portada decía «3 alertas» y «5 incidentes» a la vez.
+  Las de una comparación concreta se dicen con su verbo y su fecha («frente
+  al 14 oct: saltaron 3 alertas»), y «Ver las cerradas» enseña adónde fueron.
+  Sin ninguna abierta, la portada dice las que saltó el último censo (un
+  censo sin perfil ni programación no las abre) y lo sube en la lista.
+  `/serie` trae `fecha_anterior` para nombrar una referencia que no está en
+  la serie; «Qué ha cambiado» enseña los avisos de la comparación (versiones
+  distintas del crawler).
 
 Las cifras de cada rastreo se guardan al terminar (sin leer los enlaces), así
 que la ficha no recorre los censos. Los rastreos anteriores se rellenan con

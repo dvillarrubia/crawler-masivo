@@ -757,6 +757,10 @@ class CensoDeSerie(BaseModel):
     alertas: int | None = None          # de la comparacion automatica; None = no se comparo
     alertas_criticas: int | None = None
     comparado_con: uuid.UUID | None = None
+    # La fecha del censo con el que se comparo (ISO, de la comparacion): la
+    # ficha del cliente dice «frente al 19 oct» aunque ese censo no este en la
+    # serie (de otro cliente o fuera del limite). Revision de UX del 25-oct, 2.3.
+    fecha_anterior: str | None = None
 
 
 class PanelCliente(BaseModel):

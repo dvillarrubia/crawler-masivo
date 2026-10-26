@@ -328,7 +328,7 @@
                 <th style="text-align:right">indexables</th>
                 <th style="text-align:right">errores</th>
                 <th style="text-align:left">tendencia de errores</th>
-                <th style="text-align:left" title="Alertas abiertas: las que saltaron y ningún rastreo posterior ha visto resueltas">alertas</th>
+                <th style="text-align:left" title="Alertas abiertas: las que saltaron y ningún rastreo posterior ha visto resueltas. Si no hay ninguna abierta, las que saltaron en el último censo">alertas</th>
               </tr></thead>
               <tbody>
                 <template x-for="p in filasPanelOrdenadas()" :key="p.id">
@@ -377,7 +377,15 @@
                         <a :href="'#/clientes/' + p.id + '/alertas'" @click.stop class="text-orange"
                            x-text="fmt.num(p.incidentes_vivos) + (p.incidentes_vivos === 1 ? ' abierta' : ' abiertas')"></a>
                       </template>
-                      <template x-if="!p.incidentes_vivos"><span class="text-dim">—</span></template>
+                      <!-- Sin alertas abiertas, lo que salto el ultimo censo no se
+                           calla (un censo sin perfil ni programacion no las abre). -->
+                      <template x-if="alertasSinAbrirPanel(p)">
+                        <a :href="'#/rastreos/' + p.ultimo.id + '/comparar'" @click.stop
+                           :class="alertasSinAbrirPanel(p).criticas ? 'text-red' : 'text-orange'"
+                           :title="'Saltaron al comparar el censo del ' + fmt.diaCorto(p.ultimo.created_at) + ' con el anterior; no constan abiertas porque el rastreo no es de un perfil ni de una programación, o porque ya se cerraron'"
+                           x-text="'saltaron ' + fmt.num(alertasSinAbrirPanel(p).total) + ' en el último censo' + (alertasSinAbrirPanel(p).criticas ? ' (' + fmt.num(alertasSinAbrirPanel(p).criticas) + (alertasSinAbrirPanel(p).criticas === 1 ? ' crítica)' : ' críticas)') : '')"></a>
+                      </template>
+                      <template x-if="!p.incidentes_vivos && !alertasSinAbrirPanel(p)"><span class="text-dim">—</span></template>
                     </td>
                   </tr>
                 </template>
@@ -444,8 +452,12 @@
             <!-- Sin censos todavia -->
             <template x-if="!ultimoCensoCliente()">
               <div class="card empty" data-testid="estado-vacio">
-                <h3>Todavía no hay ningún censo de este cliente</h3>
-                <p class="text-dim text-sm" style="max-width:440px;margin:.3rem auto 0;line-height:1.5"
+                <!-- /serie trae los 30 mas recientes: con 30 rastreos que no son
+                     censo no se puede afirmar que no haya ninguno (revision 2.3). -->
+                <h3 x-text="serieTruncadaCliente() ? 'Ningún censo terminado entre los ' + fmt.num(clienteSerie.length) + ' rastreos más recientes' : 'Todavía no hay ningún censo de este cliente'"></h3>
+                <p class="text-sm" x-show="serieTruncadaCliente()" style="margin:.3rem 0 0">
+                  <a :href="'#/rastreos?cliente=' + cliente.id">Ver todos sus rastreos</a></p>
+                <p class="text-dim text-sm" style="max-width:440px;margin:.3rem auto 0;line-height:1.5" x-show="!serieTruncadaCliente()"
                    x-text="clientePerfiles.length
                      ? 'Lanza el primero con «Nuevo rastreo» o desde uno de sus perfiles, en Configuración. Cuando termine, aquí verás qué está roto, qué ha cambiado y qué alertas hay abiertas.'
                      : 'Crea un perfil en Configuración (qué se rastrea y cómo) y lanza el primer rastreo con «Nuevo rastreo». Cuando termine, aquí verás qué está roto, qué ha cambiado y qué alertas hay abiertas.'"></p>
@@ -554,10 +566,23 @@
                         </template>
                         <template x-if="cmpEstado() && cmpEstado().comparable">
                           <div>
-                            <div class="text-dim text-sm" style="margin:-.3rem 0 .5rem" x-text="'Frente a ' + (cmpEstado().nombre_anterior || 'el censo anterior') + ', el anterior de la misma serie.'"></div>
-                            <template x-if="!(cmpEstado().alertas || []).length">
-                              <div class="text-sm"><span class="text-green">Sin alertas:</span> ningún cambio pasa los umbrales de las reglas del cliente.</div>
+                            <!-- Solo el nombre de la referencia: la comparacion no dice si
+                                 es de la misma programacion o de la regla del host
+                                 (shared/clientes.censo_anterior), y lo que no se sabe no
+                                 se afirma. Sus avisos (versiones distintas del crawler...)
+                                 van delante de las cifras: decisiones 66, 67 y 72. -->
+                            <div class="text-dim text-sm" style="margin:-.3rem 0 .5rem" x-text="'Frente a ' + (cmpEstado().nombre_anterior || 'el censo anterior') + ', el censo con el que se comparó al terminar.'"></div>
+                            <template x-for="(av, k) in (cmpEstado().avisos || [])" :key="k">
+                              <div class="text-sm text-orange estado-aviso-cmp" x-text="av"></div>
                             </template>
+                            <!-- «Saltaron»: las alertas de ESTA comparacion. Las abiertas
+                                 (incidentes) son las de la tarjeta de abajo; un solo
+                                 sustantivo con su estado (revision de UX del 25-oct, 2.3). -->
+                            <template x-if="!(cmpEstado().alertas || []).length">
+                              <div class="text-sm"><span class="text-green">No saltó ninguna alerta:</span> ningún cambio pasa los umbrales de las reglas del cliente.</div>
+                            </template>
+                            <div class="text-sm" x-show="(cmpEstado().alertas || []).length"
+                                 x-text="(n => (n === 1 ? 'Saltó 1 alerta' : 'Saltaron ' + fmt.num(n) + ' alertas') + ':')((cmpEstado().alertas || []).length)"></div>
                             <ul class="estado-alertas" x-show="(cmpEstado().alertas || []).length">
                               <template x-for="al in (cmpEstado().alertas || [])" :key="al.regla + (al.extraccion || '')">
                                 <li :style="'border-left-color:' + fmt.colorSeveridad(al.severidad)">
@@ -588,8 +613,12 @@
                 <a class="text-sm" :href="'#/clientes/' + cliente.id + '/alertas'">Ver todas</a>
               </div>
               <template x-if="alertasAbiertas === null"><div class="text-dim text-sm">Cargando…</div></template>
+              <!-- Las que salto un censo y ya se cerraron estan en Cerradas: sin
+                   el enlace, «Ninguna alerta abierta» junto a «frente al 14 oct:
+                   saltaron 3» parecia una contradiccion (revision 2.3). -->
               <template x-if="alertasAbiertas && !alertasAbiertas.length">
-                <div class="text-dim text-sm">Ninguna alerta abierta.</div>
+                <div class="text-dim text-sm">Ninguna alerta abierta.
+                  <a href="#" @click.prevent="verAlertasCerradas()">Ver las cerradas</a></div>
               </template>
               <ul class="estado-alertas" x-show="alertasAbiertas && alertasAbiertas.length">
                 <template x-for="i in (alertasAbiertas || []).slice(0, 5)" :key="i.id">
@@ -739,15 +768,14 @@
                           </template>
                         </td>
                         <td style="text-align:right" x-text="fmt.num(j.avisos)"></td>
-                        <!-- «frente al 19 oct: 3 alertas»: las que salto ESA
+                        <!-- «frente al 19 oct: saltaron 3 alertas»: las que salto ESA
                              comparacion, con la fecha de su referencia. -->
                         <td class="text-sm" style="white-space:nowrap">
                           <template x-if="!j.comparado_con"><span class="text-dim">—</span></template>
                           <template x-if="j.comparado_con">
                             <a :href="'#/rastreos/' + j.id + '/comparar'" @click.stop
                                :class="j.alertas_criticas ? 'text-red' : (j.alertas ? 'text-orange' : (j.alertas === null ? 'text-dim' : ''))"
-                               x-text="(referenciaDe(j) ? 'frente al ' + fmt.diaCorto(referenciaDe(j).created_at) + ': ' : '')
-                                       + (j.alertas === null ? 'no comparable' : j.alertas ? j.alertas + (j.alertas === 1 ? ' alerta' : ' alertas') : 'sin alertas')"></a>
+                               x-text="textoFrenteAlAnterior(j)"></a>
                           </template>
                         </td>
                       </tr>
@@ -784,7 +812,10 @@
                 Cuándo salta cada una se decide en <a href="#" @click.prevent="cambiarTabCliente('config'); $nextTick(() => { const r = document.getElementById('reglas-alertas'); r && r.scrollIntoView() })">Configuración › Reglas de alertas</a>.</p>
               <template x-if="incidentes === null"><div class="text-dim text-sm">Cargando…</div></template>
               <template x-if="incidentes && !incidentes.length">
-                <div class="text-dim text-sm" x-text="incidentesVer === 'vivos' ? 'Ninguna alerta abierta.' : 'Ninguna alerta cerrada todavía.'"></div>
+                <div class="text-dim text-sm">
+                  <span x-text="incidentesVer === 'vivos' ? 'Ninguna alerta abierta.' : 'Ninguna alerta cerrada todavía.'"></span>
+                  <a href="#" x-show="incidentesVer === 'vivos'" @click.prevent="verAlertasCerradas()">Ver las cerradas</a>
+                </div>
               </template>
               <ul class="incidentes" x-show="incidentes && incidentes.length">
                 <template x-for="i in incidentes || []" :key="i.id">
@@ -852,7 +883,7 @@
                   <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
                 </div>
                 <p class="text-dim text-sm mb-1">
-                  Que se rastrea y como: el sitio principal, el blog, otro idioma o un competidor. Un
+                  Qué se rastrea y cómo: el sitio principal, el blog, otro idioma o un competidor. Un
                   rastreo lanzado desde un perfil hereda la configuración del cliente y la del perfil.
                 </p>
                 <template x-if="!clientePerfiles.length">
@@ -1939,9 +1970,11 @@
               <template x-if="job.comparacion && job.comparacion.comparable">
                 <div>
                   <div class="stat-value" :class="(job.comparacion.alertas || []).length ? 'orange' : 'green'"
-                       x-text="(n => n ? n + (n === 1 ? ' alerta' : ' alertas') : 'Sin alertas')((job.comparacion.alertas || []).length)"></div>
+                       x-text="(n => n ? fmt.num(n) + (n === 1 ? ' alerta' : ' alertas') : 'Ninguna alerta')((job.comparacion.alertas || []).length)"></div>
                   <div class="stat-label">Frente al censo anterior</div>
-                  <div class="stat-sub" x-text="fmt.dia(job.comparacion.fecha_anterior)"></div>
+                  <!-- «saltaron»: las de esta comparacion, no las abiertas del
+                       cliente (revision de UX del 25-oct, 2.3). -->
+                  <div class="stat-sub" x-text="(n => (n > 1 ? 'saltaron' : 'saltó') + ' frente al ' + fmt.dia(job.comparacion.fecha_anterior))((job.comparacion.alertas || []).length)"></div>
                 </div>
               </template>
               <template x-if="!(job.comparacion && job.comparacion.comparable)">

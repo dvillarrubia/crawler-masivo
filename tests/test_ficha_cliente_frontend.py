@@ -50,3 +50,45 @@ def test_rutas_de_las_pestanas_y_alias():
     assert r["config"] == "#/clientes/c1/configuracion"
     assert r["migas"] == ["Clientes", "Lopesan", "Historial"]
     assert r["alias"] == ["historial", "config", "config"]
+
+
+def test_abrir_cliente_con_un_tramo_viejo_no_deja_la_ficha_sin_pestana():
+    """Guardar o borrar un perfil recargaba con abrirCliente(id, 'rastreos'),
+    que ya no es una pestana: la ficha se quedaba en blanco."""
+    r = _evaluar("""() => { const a = app(); const out = [];
+        for (const t of ['rastreos', 'config', 'configuracion', 'loquesea', undefined]) {
+          a.abrirCliente('c1', t).catch(() => {}); out.push(a.clienteTab); }
+        return out; }""")
+    assert r == ["historial", "config", "config", "estado", "estado"]
+
+
+def test_frente_al_anterior_siempre_con_su_fecha():
+    """Revision 2.3: una referencia fuera de la serie se nombra por la
+    `fecha_anterior` de la fila; sin ella, «otro censo», nunca una cifra suelta."""
+    filas = SERIE + [
+        {"id": "j13", "tipo": "censo", "alertas": 0, "comparado_con": "fuera", "fecha_anterior": "2026-10-10T01:00:00Z"},
+        {"id": "jx", "tipo": "censo", "alertas": 3, "comparado_con": "fuera"},
+    ]
+    filas[0] = {**filas[0], "alertas": 1}
+    r = _evaluar("""() => { const a = app(); a.clienteSerie = %s;
+        return a.clienteSerie.filter(j => j.comparado_con).map(j => a.textoFrenteAlAnterior(j)); }""" % json.dumps(filas))
+    assert r[0] == "frente al 19 oct: saltó 1 alerta"
+    assert r[-2] == "frente al 10 oct: no saltó ninguna"
+    assert r[-1] == "frente a otro censo: saltaron 3 alertas"
+
+
+def test_la_portada_no_calla_las_alertas_de_un_censo_sin_serie():
+    """Un censo sin perfil ni programacion no abre alertas: sin abiertas, la
+    portada dice las que salto el ultimo censo y lo sube en la lista."""
+    r = _evaluar("""() => { const a = app();
+        a.panelClientes = { clientes: [
+          { id: 'a', nombre: 'A', incidentes_vivos: 0, ultimo: { created_at: '2026-10-26', alertas: 0 } },
+          { id: 'b', nombre: 'B', incidentes_vivos: 0, ultimo: { created_at: '2026-10-01', alertas: 3, alertas_criticas: 2 } },
+          { id: 'c', nombre: 'C', incidentes_vivos: 2, ultimo: { created_at: '2026-09-01', alertas: 5 } },
+        ] };
+        return { orden: a.filasPanelOrdenadas().map(p => p.id),
+                 b: a.alertasSinAbrirPanel(a.panelClientes.clientes[1]),
+                 c: a.alertasSinAbrirPanel(a.panelClientes.clientes[2]) }; }""")
+    assert r["orden"] == ["c", "b", "a"]
+    assert r["b"] == {"total": 3, "criticas": 2}
+    assert r["c"] is None

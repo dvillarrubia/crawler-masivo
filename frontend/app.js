@@ -1396,22 +1396,41 @@ function app() {
       }
     },
 
+    // Las alertas que salto la comparacion del ultimo censo y no constan
+    // abiertas: un censo lanzado a mano (sin perfil ni programacion) no abre
+    // alertas (shared/incidentes.serie_de_job), y sin esto la portada lo
+    // callaba con un «—» (revision de UX del 25-oct, 2.3). Si hay alertas
+    // abiertas, esas mandan: lo que salto el ultimo censo ya esta entre ellas
+    // o ya se cerro.
+    alertasSinAbrirPanel(p) {
+      if (!p || p.incidentes_vivos || !p.ultimo || !p.ultimo.alertas) return null;
+      return { total: p.ultimo.alertas, criticas: p.ultimo.alertas_criticas || 0 };
+    },
+
     // Las filas de la portada, primero las que piden atencion: alertas
-    // abiertas (la cifra de su columna; revision de UX del 25-oct, 2.3) y
-    // luego el censo mas reciente.
+    // abiertas (la cifra de su columna; revision de UX del 25-oct, 2.3), las
+    // que salto el ultimo censo sin abrirse (criticas antes) y luego el censo
+    // mas reciente.
     filasPanelOrdenadas() {
       const filas = [...((this.panelClientes && this.panelClientes.clientes) || [])];
+      const sa = p => this.alertasSinAbrirPanel(p) || { total: 0, criticas: 0 };
       return filas.sort((a, b) =>
         (b.incidentes_vivos || 0) - (a.incidentes_vivos || 0)
+        || sa(b).criticas - sa(a).criticas
+        || sa(b).total - sa(a).total
         || String((b.ultimo || {}).created_at || '').localeCompare(String((a.ultimo || {}).created_at || ''))
         || String(a.nombre).localeCompare(String(b.nombre)));
     },
 
     async abrirCliente(id, tab = 'estado') {
       this.view = 'client';
+      // El tramo de la URL o el nombre interno: un nombre viejo («rastreos»)
+      // o desconocido no puede dejar la ficha sin pestana (revision de UX del
+      // 25-oct, 2.1: tras guardar un perfil se quedaba en blanco).
+      tab = CLIENTE_SLUG_TAB[tab] || 'estado';
       this.clienteTab = tab;
       this.clienteError = '';
-      if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; }
+      if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; this.incidentesVer = 'vivos'; }
       try {
         const [c, perfiles, jobs, serie] = await Promise.all([
           api(`/clients/${id}`),
@@ -1464,6 +1483,12 @@ function app() {
     // censo (ni canario ni prueba). Mismo criterio que la portada.
     ultimoCensoCliente() {
       return (this.clienteSerie || []).find(j => j.tipo === 'censo' && j.status === 'completed') || null;
+    },
+
+    // /serie corta en 30 (su limite por defecto): si viene llena y sin censo,
+    // puede haberlo mas atras y Estado no dice «todavia no hay ninguno».
+    serieTruncadaCliente() {
+      return (this.clienteSerie || []).length >= 30;
     },
 
     // Lo mas reciente si esta en marcha: «hay uno rastreando» en Estado.
@@ -1532,6 +1557,26 @@ function app() {
       return (this.clienteSerie || []).find(x => x.id === j.comparado_con) || null;
     },
 
+    // La fecha de la referencia de una fila: la del censo de la serie o, si
+    // no esta (de otro cliente, o mas alla de los 30 de /serie), la que trae
+    // la propia fila (`fecha_anterior`). Sin ninguna de las dos (API sin
+    // desplegar) la celda dice «frente a otro censo», nunca una cifra suelta.
+    fechaReferenciaDe(j) {
+      const r = this.referenciaDe(j);
+      return (r && r.created_at) || (j && j.fecha_anterior) || null;
+    },
+
+    // «frente al 19 oct: saltaron 3 alertas». «Saltaron» porque son las de
+    // ESA comparacion; las abiertas son otra cifra, con su propio adjetivo
+    // (revision de UX del 25-oct, 2.3).
+    textoFrenteAlAnterior(j) {
+      const f = this.fechaReferenciaDe(j);
+      const ref = f ? 'frente al ' + fmt.diaCorto(f) : 'frente a otro censo';
+      if (j.alertas === null || j.alertas === undefined) return ref + ': no comparable';
+      if (!j.alertas) return ref + ': no saltó ninguna';
+      return ref + ': ' + (j.alertas === 1 ? 'saltó 1 alerta' : 'saltaron ' + fmt.num(j.alertas) + ' alertas');
+    },
+
     // La comparacion automatica del ultimo censo, para «Que ha cambiado».
     cmpEstado() {
       return (this.estadoCliente && this.estadoCliente.job && this.estadoCliente.job.comparacion) || null;
@@ -1543,6 +1588,14 @@ function app() {
       const s = this.serieEvolucion();
       const c = s ? s.puntos.filter(p => p.comparable) : [];
       return c.length > 1 ? c[c.length - 2] : null;
+    },
+
+    // La pestana Alertas con las cerradas: lo que salto un censo y un rastreo
+    // posterior ya vio resuelto (revision de UX del 25-oct, 2.3).
+    verAlertasCerradas() {
+      this.incidentesVer = 'cerrados';
+      if (this.clienteTab === 'alertas') this.cargarIncidentes();
+      else this.cambiarTabCliente('alertas');
     },
 
     // --- Reglas de alerta (decision 135) -------------------------------------
@@ -2049,7 +2102,7 @@ function app() {
         if (f.id) await api(`${base}/${f.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
         else await api(base, { method: 'POST', body: JSON.stringify(cuerpo) });
         this.perfilForm = null;
-        await this.abrirCliente(this.cliente.id, 'rastreos');
+        await this.abrirCliente(this.cliente.id, 'config');
       } catch (e) { this.perfilError = e.message; }
     },
 
@@ -2058,7 +2111,7 @@ function app() {
         mensaje: 'Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Borrar perfil', peligro: true })) return;
       try {
         await api(`/clients/${this.cliente.id}/profiles/${p.id}`, { method: 'DELETE' });
-        await this.abrirCliente(this.cliente.id, 'rastreos');
+        await this.abrirCliente(this.cliente.id, 'config');
       } catch (e) { this.clienteError = e.message; }
     },
 

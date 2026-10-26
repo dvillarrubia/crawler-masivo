@@ -300,6 +300,8 @@ def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
             alertas_criticas=(sum(1 for a in alertas if a.get("severidad") == "critical")
                               if alertas is not None else None),
             comparado_con=(comp or {}).get("comparado_con"),
+            fecha_anterior=(str((comp or {}).get("fecha_anterior"))
+                            if (comp or {}).get("fecha_anterior") else None),
             **cifras[j.id],
         ))
     return salida
