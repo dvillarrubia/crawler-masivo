@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, fields, replace
 from typing import Any, Callable
@@ -203,6 +204,21 @@ def pred_estado_sql(job_id, grupo: str):
     return Link.to_url_hash.in_(sub)
 
 
+def variantes_exactas(url: str) -> list[str]:
+    """«Es exactamente» con y sin la barra final: quien pega
+    `.../hotel-1` buscando el enlace a `.../hotel-1/` se quedaba con cero
+    resultados (revision de UX del 25-oct, 2.8). Son dos destinos distintos
+    y cada fila sigue diciendo el suyo; solo se buscan los dos."""
+    url = url.strip()
+    if not url:
+        return []
+    if not url.endswith("/"):
+        return [url, url + "/"]
+    otra = url[:-1]
+    # `https://` sin mas no tiene variante util
+    return [url] if otra.endswith(("/", ":")) else [url, otra]
+
+
 def _like(texto: str) -> str:
     return "%" + texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
@@ -212,7 +228,7 @@ def condiciones_sql(job_id, f: FiltrosEnlaces) -> list:
     if f.destino_hash:
         conds.append(Link.to_url_hash == f.destino_hash)
     if f.destino:
-        conds.append(Link.to_url == f.destino if f.destino_exacto
+        conds.append(Link.to_url.in_(variantes_exactas(f.destino)) if f.destino_exacto
                      else Link.to_url.ilike(_like(f.destino), escape="\\"))
     if f.origen:
         conds.append(Link.from_url_id.in_(
@@ -312,8 +328,8 @@ def expr_parquet(db: Session, job_id, f: FiltrosEnlaces,
     if f.destino_hash:
         partes.append(pc.field("to_url_hash") == f.destino_hash)
     if f.destino:
-        partes.append(pc.field("to_url") == f.destino if f.destino_exacto
-                      else _contiene("to_url", f.destino))
+        partes.append(pc.field("to_url").isin(pa.array(variantes_exactas(f.destino), pa.string()))
+                      if f.destino_exacto else _contiene("to_url", f.destino))
     if f.origen:
         partes.append(pc.field("from_url_id").isin(
             pa.array(_ids_de_origen(db, job_id, f.origen), pa.int64())))
@@ -366,17 +382,67 @@ def _firma_fichero(job_id) -> tuple:
     return (str(job_id), st.st_mtime_ns, st.st_size)
 
 
-def _cacheado(clave: tuple, calcular: Callable[[], Any]) -> Any:
+def _cacheado(clave: tuple, calcular: Callable[[], Any], ttl: float | None = None) -> Any:
+    """`ttl` None: hasta que cambie la clave (el Parquet, con su firma). Con
+    `ttl`, la cifra caduca a los `ttl` segundos (los enlaces de un rastreo en
+    marcha, que crecen)."""
+    ahora = time.monotonic()
     with _CACHE_LOCK:
         if clave in _CACHE:
-            _CACHE.move_to_end(clave)
-            return _CACHE[clave]
+            hecho, valor = _CACHE[clave]
+            if ttl is None or ahora - hecho < ttl:
+                _CACHE.move_to_end(clave)
+                return valor
+            del _CACHE[clave]
     valor = calcular()
     with _CACHE_LOCK:
-        _CACHE[clave] = valor
+        _CACHE[clave] = (ahora, valor)
         while len(_CACHE) > _CACHE_MAX:
             _CACHE.popitem(last=False)
     return valor
+
+
+# ---------------------------------------------------------------------------
+# Lo que se calcula sobre `links` (rastreos en curso)
+# ---------------------------------------------------------------------------
+# Revision de UX del 25-oct, 2.8: los conteos por estado y la agregacion por
+# destino recorren TODOS los enlaces del job que pasan los filtros. Sobre un
+# rastreo grande en marcha eso es trabajo en la BD de produccion mientras
+# rastrea, asi que: (1) se guarda `TTL_VIVO` segundos —pasar de pagina o
+# volver a la pestaña no repite la agregacion, y las cifras de un rastreo en
+# marcha van con ese retraso como mucho—, y (2) cada calculo tiene un tope de
+# `TOPE_VIVO_S`: pasado, se dice que no se puede agrupar ahora, en vez de
+# dejar la consulta horas compitiendo con el rastreo. Nunca una cifra a medias.
+TTL_VIVO = 30.0
+TOPE_VIVO_S = 20.0
+MENSAJE_TOPE = ("Este rastreo tiene demasiados enlaces para contarlos ahora mientras "
+                "rastrea. Filtra por destino, página de origen o texto del enlace, "
+                "o vuelve cuando acabe.")
+
+
+def _es_cancelada(e: Exception) -> bool:
+    """El `statement_timeout` de Postgres (SQLSTATE 57014)."""
+    orig = getattr(e, "orig", None)
+    return getattr(orig, "pgcode", None) == "57014"
+
+
+def _en_vivo(db: Session, clave: tuple, calcular: Callable[[], Any]) -> Any:
+    from sqlalchemy.exc import DBAPIError
+
+    from shared.almacenamiento import _tope_de_consulta, es_postgres
+
+    def con_tope():
+        if es_postgres(db):
+            _tope_de_consulta(db, TOPE_VIVO_S)
+        try:
+            return calcular()
+        except DBAPIError as e:
+            if not _es_cancelada(e):
+                raise
+            db.rollback()
+            raise HTTPException(status_code=503, detail=MENSAJE_TOPE) from e
+
+    return _cacheado(("vivo",) + clave, con_tope, ttl=TTL_VIVO)
 
 
 def vaciar_cache() -> None:
@@ -417,6 +483,20 @@ def _leer_parquet(job_id, expr, saltar: int, cuantas: int) -> list[dict]:
         if len(salida) >= cuantas:
             break
     return salida
+
+
+def contar_por_estado_sql(db: Session, job_id, base: list) -> dict[str, int]:
+    """Cuantos enlaces hay de cada estado del destino, en UNA pasada por
+    `links` (antes, un COUNT por estado: cinco recorridos). Cada estado es el
+    mismo predicado de `pred_estado_sql`; Postgres resuelve los `IN` como
+    subplanes con tabla hash, sin unir con `urls`. Los estados no se solapan
+    (el censo tapa a la sonda), asi que el orden del CASE no cambia nada."""
+    grupo = case(*[(pred_estado_sql(job_id, g), g) for g in GRUPOS if g != "sin_dato"],
+                 else_="sin_dato").label("grupo")
+    sub = select(grupo).where(*base).subquery()
+    cuentas = {g: int(n) for g, n in db.execute(
+        select(sub.c.grupo, func.count()).group_by(sub.c.grupo))}
+    return {g: cuentas.get(g, 0) for g in GRUPOS}
 
 
 def listar_enlaces(db: Session, job, f: FiltrosEnlaces, orden: str,
@@ -473,7 +553,8 @@ def listar_enlaces(db: Session, job, f: FiltrosEnlaces, orden: str,
             return db.query(Link).filter(*base, *extra)
 
         if orden == "estado":
-            por_estado = {g: consulta([pred_estado_sql(job.id, g)]).count() for g in GRUPOS}
+            por_estado = _en_vivo(db, ("conteo", str(job.id)) + f.sin_estado().clave(),
+                                  lambda: contar_por_estado_sql(db, job.id, base))
             grupos = [f.estado] if f.estado else list(GRUPOS)
             conteos = [(g, por_estado[g]) for g in grupos]
 
@@ -485,7 +566,8 @@ def listar_enlaces(db: Session, job, f: FiltrosEnlaces, orden: str,
         else:
             extra = [pred_estado_sql(job.id, f.estado)] if f.estado else []
             por_estado = None
-            conteos = [("todos", consulta(extra).count())]
+            conteos = [("todos", _en_vivo(db, ("total", str(job.id)) + f.clave(),
+                                          lambda: consulta(extra).count()))]
 
             def leer(g, saltar, cuantas):
                 # (to_url_hash, id) y no id: con `ORDER BY id` Postgres recorre
@@ -576,7 +658,8 @@ def agregados(db: Session, job, f: FiltrosEnlaces) -> list[FilaDestino]:
         clave = ("destinos",) + _firma_fichero(job.id) + base.clave()
         return _cacheado(clave, lambda: _agregar_parquet(
             job.id, expr_parquet(db, job.id, base, lambda: {})))
-    return _agregar_sql(db, job.id, base)
+    return _en_vivo(db, ("destinos", str(job.id)) + base.clave(),
+                    lambda: _agregar_sql(db, job.id, base))
 
 
 ORDENES_DESTINO = ("estado", "paginas", "url")

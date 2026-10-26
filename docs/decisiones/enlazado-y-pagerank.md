@@ -1146,6 +1146,9 @@
      interno/externo, follow, posición (`nav`, `header`, `content`,
      `sidebar`, `footer` o sin posición) y estado y código del destino. Se
      suman (Y). El texto se busca tal cual: `%` y `_` no son comodines.
+     «Es exactamente» busca la URL con y sin la barra final (`variantes_exactas`):
+     pegar `…/hotel-1` cuando el enlace lleva `…/hotel-1/` daba cero. Son dos
+     destinos distintos y cada fila sigue diciendo el suyo.
    - **Estado del destino**, una sola regla para internos y externos
      (`api/enlaces.py`, `grupo_interno` y `grupo_sonda`): si está en el censo,
      su código (≥ 400 roto, 3xx redirige, 2xx bien; sin código —bloqueada,
@@ -1191,10 +1194,30 @@
      `sin_dato`, sin ningún `SubPlan` por fila. Archivado en Parquet (4,7
      MB): 293 ms la primera vez y 45 ms las siguientes, 140 ms la vista por
      destino (36 ms con caché) y 11 ms el resumen.
+   - **Rastreos en curso (`links`), acotados.** Los conteos por estado y la
+     agregación por destino recorren todos los enlaces del job que pasan los
+     filtros, en la BD de producción mientras rastrea. Por eso: (1) los cinco
+     conteos por estado son UNA pasada (`contar_por_estado_sql`, un `CASE` con
+     los mismos predicados, agrupado); (2) lo calculado sobre `links` se guarda
+     `TTL_VIVO` = 30 s (pasar de página, volver a la pestaña o abrir el
+     Explorador no repite la agregación; las cifras de un rastreo en marcha van
+     como mucho 30 s por detrás); y (3) cada cálculo lleva `statement_timeout`
+     de `TOPE_VIVO_S` = 20 s: pasado, 503 con «demasiados enlaces para contarlos
+     ahora mientras rastrea; filtra… o vuelve cuando acabe», nunca una cifra a
+     medias ni una consulta de minutos compitiendo con el rastreo. Medido con
+     5 M de enlaces en un job (40.000 URLs, 3.000 sondas, 44.000 destinos):
+     cinco `COUNT` 12,2 s → una pasada 1,7 s; vista por destino 2,7 s.
    - **«Externas 0»** (V25): la barra del Explorador cuenta URLs del censo, y
      los externos no se rastrean. Sin ninguna en el censo, la pestaña cuenta
      los destinos externos enlazados (del resumen) y lleva a Enlaces con
-     «Externos»; con una API sin `/links/resumen`, sin cifra, nunca un 0.
+     «Externos»; con una API sin `/links/resumen`, sin cifra, nunca un 0, y el
+     clic abre la pestaña de URLs externas de siempre: llevar a Enlaces con
+     `tipo=externo` a una API que no filtra enseñaba todos los enlaces bajo un
+     filtro que no se aplicaba.
+   - **Atrás vuelve a los destinos.** Pasar de un destino a «Quién la enlaza»
+     (o cambiar entre «Por destino» y «Todos los enlaces») solo cambia lo que
+     va tras el «?», que el router trata como un filtro y sustituye; esos dos
+     pasos piden su propia entrada en el historial (`_rutaNueva`).
    - **Lo que no hace:** el CSV de enlaces sigue saliendo entero (sin los
      filtros) y la vista por destino de un censo archivado gigante (Druni,
      ~42 M filas) recorre el fichero entero la primera vez: unos segundos

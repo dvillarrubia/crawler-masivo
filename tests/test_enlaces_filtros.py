@@ -421,3 +421,94 @@ def test_archivado_sin_fichero_lo_dice_y_no_devuelve_cero(entorno):
         r = api.get(f"/api/jobs/{jid}/{ruta}")
         assert r.status_code == 409, ruta
         assert "archivados" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Revision independiente de la 2.8
+# ---------------------------------------------------------------------------
+def test_es_exactamente_encuentra_el_destino_con_o_sin_barra_final(modo):
+    """Pegar la URL sin la barra final que lleva el enlace daba cero."""
+    api, jid, _ = modo
+    con = _todas(api, jid, "links", f"destino={H}/es/hoteles/&exacto=true")[0]
+    sin = _todas(api, jid, "links", f"destino={H}/es/hoteles&exacto=true")[0]
+    assert len(con) == 4 and {i["to_url"] for i in con} == {H + "/es/hoteles/"}  # el menu
+    assert [i["id"] for i in sin] == [i["id"] for i in con]
+    # ... y al reves: con barra encuentra el enlace que no la lleva
+    al_reves = _todas(api, jid, "links", f"destino={H}/es/hoteles/abora-catarina/&exacto=true")[0]
+    assert {i["to_url"] for i in al_reves} == {H + "/es/hoteles/abora-catarina"}
+    # Sigue siendo exacto: un trozo no casa
+    assert _todas(api, jid, "links", f"destino={H}/es/hotel&exacto=true")[0] == []
+    d = _todas(api, jid, "links/destinos", f"destino={H}/es/hoteles&exacto=true")[0]
+    assert [x["to_url"] for x in d] == [H + "/es/hoteles/"]
+
+
+def test_variantes_exactas():
+    from api.enlaces import variantes_exactas
+
+    assert variantes_exactas(" https://a.es/x ") == ["https://a.es/x", "https://a.es/x/"]
+    assert variantes_exactas("https://a.es/x/") == ["https://a.es/x/", "https://a.es/x"]
+    assert variantes_exactas("https://a.es") == ["https://a.es", "https://a.es/"]
+    assert variantes_exactas("https://") == ["https://"]
+    assert variantes_exactas("") == []
+
+
+def test_conteo_por_estado_en_una_pasada_cuadra_con_un_count_por_estado(entorno):
+    api, jid, Sesion, _ = entorno
+    from api import enlaces as E
+
+    with Sesion() as s:
+        base = E.condiciones_sql(jid, E.FiltrosEnlaces())
+        uno = E.contar_por_estado_sql(s, jid, base)
+        cinco = {g: s.query(Link).filter(*base, E.pred_estado_sql(jid, g)).count()
+                 for g in E.GRUPOS}
+        assert uno == cinco
+        assert sum(uno.values()) == s.query(Link).filter(Link.job_id == jid).count()
+        pie = E.condiciones_sql(jid, E.FiltrosEnlaces(posicion="footer"))
+        assert E.contar_por_estado_sql(s, jid, pie) == {
+            "roto": 2, "redireccion": 2, "no_concluyente": 2, "sin_dato": 2, "ok": 2}
+
+
+def test_las_cifras_de_un_rastreo_en_marcha_se_guardan_un_rato(entorno, monkeypatch):
+    """Pasar de pagina o volver a la pestaña no repite la agregacion sobre
+    `links`; pasado `TTL_VIVO`, si."""
+    api, jid, Sesion, hashes = entorno
+    from api import enlaces as E
+
+    antes = api.get(f"/api/jobs/{jid}/links/resumen").json()
+    with Sesion() as s:
+        origen = s.query(Url).filter(Url.job_id == jid, Url.url == H + "/es/").one()
+        s.add(Link(job_id=jid, from_url_id=origen.id, to_url="https://www.instagram.com/lopesan",
+                   to_url_hash="h-insta", is_internal=False, follow=True,
+                   link_type="hyperlink", link_position="footer", repeticiones=1))
+        s.commit()
+    assert api.get(f"/api/jobs/{jid}/links/resumen").json() == antes
+    monkeypatch.setattr(E, "TTL_VIVO", 0.0)
+    despues = api.get(f"/api/jobs/{jid}/links/resumen").json()
+    assert despues["externos"]["destinos"] == antes["externos"]["destinos"] + 1
+
+
+def test_un_rastreo_en_marcha_que_no_se_puede_agrupar_a_tiempo_lo_dice(entorno, monkeypatch):
+    """Con el tope de Postgres vencido: 503 con un mensaje claro, nunca una
+    cifra a medias, y la sesion sigue sirviendo."""
+    api, jid, Sesion, _ = entorno
+    if Sesion.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("el tope es el statement_timeout de Postgres")
+    from sqlalchemy import text
+
+    from api import enlaces as E
+
+    original = E._agregar_sql
+
+    def lenta(db, job_id, f):
+        db.execute(text("SELECT pg_sleep(2)"))
+        return original(db, job_id, f)
+
+    monkeypatch.setattr(E, "TOPE_VIVO_S", 0.2)
+    monkeypatch.setattr(E, "_agregar_sql", lenta)
+    for ruta in ("links/destinos", "links/resumen"):
+        r = api.get(f"/api/jobs/{jid}/{ruta}")
+        assert r.status_code == 503, ruta
+        assert "demasiados enlaces" in r.json()["detail"]
+    # Lo que fallo no se guarda: sin la lentitud, contesta
+    monkeypatch.setattr(E, "_agregar_sql", original)
+    assert api.get(f"/api/jobs/{jid}/links/destinos").status_code == 200
