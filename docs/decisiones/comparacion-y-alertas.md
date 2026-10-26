@@ -1000,14 +1000,26 @@
    compararon (91), el anterior estaba entero (hay `resueltas`) y las dos
    versiones de hoy son las selladas. Para los censos anteriores a este sello
    se exige que el anterior y este tengan hoy la misma versión (lo leído de
-   `GET /api/jobs/{anterior}`); si no se puede comprobar, no se afirma. En
-   cualquiera de esos casos dice por qué («versión del análisis distinta: no
-   comparable») y no pinta etiquetas.
-   - La etiqueta va en la primera fila de cada tipo: la comparación cuenta por
-     tipo con todas sus gravedades juntas.
+   `GET /api/jobs/{anterior}`); si no se puede comprobar, no se afirma.
+   - **Y las incidencias de hoy tienen que cuadrar con las comparadas**: por
+     cada tipo, `nuevas + siguen` (+ las de axe sin muestra) es lo que el censo
+     tiene ahora (sin los tipos de Search Console que la comparación no mira,
+     `NO_COMPARABLES`). Sin el sello, si los dos censos se re-analizaron después
+     con la misma versión nueva, las versiones casan pero las cifras son de la
+     vieja; el cuadre lo destapa (en Lopesan, 26-oct, cuadran los 54 tipos
+     comparables). Un tipo nuevo del analizador que la comparación no vio
+     también lo descuadra, y es justo lo que hay que decir.
+   - En cualquiera de esos casos dice por qué («versión del análisis distinta:
+     no comparable») y no pinta etiquetas.
+   - La etiqueta va en la primera fila VISIBLE de cada tipo (con el filtro de
+     gravedad, la que se ve): la comparación cuenta por tipo con todas sus
+     gravedades juntas, y lo dice el título.
    - Son incidencias, no páginas, y lo dice el título; las que estaban en
      páginas no visitadas esta vez (`sin_pagina_en_el_nuevo`) se nombran y no
      se cuentan como resueltas. Los tipos que ya no aparecen se listan al final.
    - Con una sección elegida no se enseña: la diferencia es del sitio entero.
+   - El reparto por sección de cada tipo se pide con `segmentos_max=200`; si
+     llega lleno, «fuera de toda sección» se da como «al menos» y se avisa de
+     que puede faltar alguna sección pequeña.
 
    Tests: `tests/test_comparacion.py::test_la_comparacion_sella_con_que_version_se_analizaron_los_dos`.

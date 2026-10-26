@@ -2255,7 +2255,9 @@
                 <details x-show="(job.gsc_resumen.oportunidades.por_plantilla || []).length">
                   <summary class="text-dim" style="cursor:pointer">Rendimiento por plantilla y por profundidad</summary>
                   <template x-for="tabla in [['Plantilla', job.gsc_resumen.oportunidades.por_plantilla], ['Clics desde la home', job.gsc_resumen.oportunidades.por_profundidad]]" :key="tabla[0]">
-                    <table class="table text-sm" style="margin-top:.4rem">
+                    <!-- En un div con su propio scroll: a 390 px desbordaba el Resumen
+                         entero (y cortaba el bloque de soft 404; revision de UX del 25-oct, 2.11). -->
+                    <div class="table-wrap"><table class="table text-sm" style="margin-top:.4rem">
                       <thead><tr><th x-text="tabla[0]"></th><th>Indexables</th><th>Con impresiones</th><th>Clics</th><th>Impresiones</th><th>CTR</th><th>Posición</th></tr></thead>
                       <tbody>
                         <template x-for="f in tabla[1] || []" :key="f.grupo">
@@ -2270,7 +2272,7 @@
                           </tr>
                         </template>
                       </tbody>
-                    </table>
+                    </table></div>
                   </template>
                 </details>
                 <details x-show="job.gsc_resumen.oportunidades.curva_ctr">
@@ -3201,7 +3203,7 @@
                       <strong x-text="fmt.num(s4.plantillas_200) + (s4.plantillas_200 === 1 ? ' plantilla responde' : ' plantillas responden')"></strong>
                       200 a una URL que no existe, en lugar de 404: hay que pedir al cliente que las corrija.
                       <a href="#" x-show="s4.aviso_en_problemas" @click.prevent="verTipoDeIncidencia('soft_404_plantilla', ''); switchTab('issues')">Ver en Problemas</a>
-                      <span class="text-dim" x-show="!s4.aviso_en_problemas">Saldrá como aviso en Problemas cuando se vuelva a analizar el censo.</span>
+                      <span class="text-dim" x-show="!s4.con_aviso_190">Este censo se analizó antes de que existiera el aviso: saldrá en Problemas cuando se vuelva a analizar.</span>
                     </div>
                   </template>
                   <template x-if="!s4.analizado">
@@ -3539,7 +3541,8 @@
                             </li>
                           </template>
                           <li x-show="repartoNegocio(r).fuera" class="text-dim"
-                              x-text="fmt.num(repartoNegocio(r).fuera) + (repartoNegocio(r).fuera === 1 ? ' página' : ' páginas') + ' fuera de toda sección'"></li>
+                              x-text="(repartoNegocio(r).cortado ? 'Al menos ' : '') + fmt.num(repartoNegocio(r).fuera) + (repartoNegocio(r).fuera === 1 ? ' página' : ' páginas') + ' fuera de toda sección'"></li>
+                          <li x-show="repartoNegocio(r).cortado" class="text-dim">El reparto se corta en los 200 grupos con más páginas: puede faltar alguna sección pequeña.</li>
                         </ul>
                       </div>
                     </template>
@@ -3565,13 +3568,13 @@
                     </template>
                     <!-- 2.11: las plantillas que fallan, con la URL inventada que se pidio.
                          Es lo que hay que ensenar al cliente. -->
-                    <template x-if="r.issue_type === 'soft_404_plantilla' && resumenSoft404(job) && resumenSoft404(job).plantillas_200">
+                    <template x-if="r.issue_type === 'soft_404_plantilla' && !issuesSegmento && resumenSoft404(job) && resumenSoft404(job).plantillas_200">
                       <div data-testid="soft404-plantillas-problemas" class="soft404-plantillas">
                         <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Plantillas que responden 200 a una URL que no existe</div>
                         <ul class="issue-ejemplos">
-                          <template x-for="(f, n) in resumenSoft404(job).filas.filter(f => f.nivel === 'red')" :key="n">
+                          <template x-for="(f, n) in resumenSoft404(job).responden200" :key="n">
                             <li class="text-sm">
-                              <code x-text="f.plantilla || 'raíz del sitio'"></code>
+                              <code x-text="nombreDePlantilla(f.plantilla)" :title="f.plantilla || ''"></code>
                               <span class="text-dim" x-text="'· se pidió '"></span><a :href="f.url" target="_blank" rel="noopener" x-text="f.url" :title="f.url"></a>
                               <span class="text-dim" x-show="f.alcance != null" x-text="'· ' + fmt.num(f.alcance) + (f.alcance === 1 ? ' página del censo la usa' : ' páginas del censo la usan')"></span>
                             </li>
@@ -3587,13 +3590,13 @@
                     </ul>
                     <div class="flex gap-1 mt-1" style="flex-wrap:wrap" x-show="r.incidencias > 0">
                       <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
-                        Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
+                        <span x-text="r.incidencias === 1 ? 'Ver la incidencia' : 'Ver las ' + fmt.num(r.incidencias) + ' incidencias'"></span>
                       </button>
                       <!-- Las paginas afectadas con todas sus columnas, filtrables y
                            exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
-                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)" x-show="!cuentaDeTipo(r).propia">
+                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)" x-show="r.issue_type !== 'soft_404_plantilla' && r.paginas > 0">
                         <i data-lucide="table-2" style="width:13px;height:13px"></i>
-                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en URLs
+                        <span x-text="r.paginas === 1 ? 'Ver la página en URLs' : 'Ver las ' + fmt.num(r.paginas) + ' páginas en URLs'"></span>
                       </button>
                     </div>
                   </div>

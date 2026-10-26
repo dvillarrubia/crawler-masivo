@@ -168,7 +168,7 @@ const ISSUE_LABEL = {
   'low_word_count': 'Pocas palabras',
   'soft_404': 'Soft 404',
   'soft_404_candidato': 'Posible soft 404',
-  'soft_404_plantilla': 'Plantilla que responde 200 a URLs que no existen',
+  'soft_404_plantilla': 'Plantillas que responden 200 a URLs que no existen',
   'very_low_text_ratio': 'Ratio texto muy bajo',
   'low_text_ratio': 'Ratio texto bajo',
   'url_too_long': 'URL muy larga',
@@ -391,7 +391,7 @@ const fmt = {
       if (k === 'impacto_axe' || k === 'url_ayuda') continue;
       if (k === 'plantillas' && Array.isArray(v) && v.length && v[0] && 'sonda' in v[0]) {
         // soft_404_plantilla (decision 190): que plantillas responden 200.
-        const nombres = v.map(p => p.plantilla ? String(p.plantilla).replace(/ \(\d+n\)$/, '') : 'la raíz');
+        const nombres = [...new Set(v.map(p => nombreDePlantilla(p.plantilla)))];
         partes.push(fmt.num(v.length) + (v.length === 1 ? ' plantilla responde' : ' plantillas responden') + ' 200 a URLs que no existen: '
           + nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? ` y ${nombres.length - 3} más` : ''));
       } else if ((k === 'plantillas_afectadas' || k === 'raiz') && Array.isArray(d.plantillas)) {
@@ -736,6 +736,9 @@ function app() {
     // version, error }. Hace falta para saber si la diferencia por tipo sigue
     // siendo la de los dos censos tal como estan ahora.
     versionAnterior: null,
+    // Cuenta por tipo de este censo sin filtro de seccion ({ jobId, porTipo }):
+    // para comprobar que sus incidencias siguen siendo las comparadas (2.10).
+    cuentaSinFiltro: null,
     informe: null,            // GET /jobs/{id}/informe (decision 138)
     compartido: null,         // modo /c/<token> (decision 143): {token, cliente, censos, elegido}
     enlaces: null,            // enlaces de solo lectura del cliente (decision 143)
@@ -2254,7 +2257,7 @@ function app() {
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
-      this.versionAnterior = null;
+      this.versionAnterior = null; this.cuentaSinFiltro = null;
       this.principales = null;
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
@@ -3309,11 +3312,17 @@ function app() {
         if (!this.segmentosJob) await this.cargarSegmentos();
         if (!this.job || this.job.id !== jobId) return;
         const conNegocio = this.segmentosParaElegir().regla.length > 0;
-        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: conNegocio ? '200' : '8' });
+        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: conNegocio ? String(SEGMENTOS_MAX_NEGOCIO) : '8' });
         if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
         q.set('orden', this.issuesOrden);
         const filas = await api(`/jobs/${jobId}/issues/resumen?${q}`);
-        if (this.job && this.job.id === jobId) this.issuesResumen = filas;
+        if (!this.job || this.job.id !== jobId) return;
+        this.issuesResumen = filas;
+        if (!this.issuesSegmento) {
+          const porTipo = {};
+          for (const f of filas) porTipo[f.issue_type] = (porTipo[f.issue_type] || 0) + (f.incidencias || 0);
+          this.cuentaSinFiltro = { jobId, porTipo };
+        }
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
     },
 
@@ -3368,7 +3377,7 @@ function app() {
       const porTipo = {};
       const sumar = (lista, campo) => {
         for (const f of (lista || [])) {
-          const d = porTipo[f.tipo] || (porTipo[f.tipo] = { nuevas: 0, resueltas: 0, siguen: 0, en_url_existente: 0, severidad: f.severidad });
+          const d = porTipo[f.tipo] || (porTipo[f.tipo] = { nuevas: 0, resueltas: 0, siguen: 0, en_url_existente: 0, por_muestra: 0, severidad: f.severidad });
           d[campo] += f.total || 0;
         }
       };
@@ -3376,6 +3385,24 @@ function app() {
       sumar((inc.resueltas || {}).por_tipo, 'resueltas');
       sumar((inc.siguen || {}).por_tipo, 'siguen');
       sumar(((inc.nuevas || {}).en_url_existente || {}).por_tipo, 'en_url_existente');
+      sumar((inc.no_afirmables_por_muestra || {}).por_tipo, 'por_muestra');
+      // Las incidencias de hoy tienen que ser las que se compararon: por cada
+      // tipo, nuevas + siguen (+ las de axe sin muestra) = las que tiene ahora.
+      // Los censos de antes de la decision 191 no traen el sello de version de
+      // la comparacion, y si los dos se volvieron a analizar despues con la
+      // misma version nueva, las versiones casan pero las cifras son de la
+      // vieja; el cuadre lo destapa (medido en Lopesan, 26-oct: cuadran los 54
+      // tipos comparables). Sin la cuenta sin filtro aun, se espera.
+      const cs = this.cuentaSinFiltro;
+      if (!cs || cs.jobId !== j.id) return { ...base, ok: null };
+      const tipos = new Set([...Object.keys(porTipo), ...Object.keys(cs.porTipo)]);
+      for (const t of tipos) {
+        if (TIPOS_NO_COMPARABLES.includes(t)) continue;
+        const d = porTipo[t] || { nuevas: 0, siguen: 0, por_muestra: 0 };
+        if ((d.nuevas + d.siguen + d.por_muestra) !== (cs.porTipo[t] || 0)) {
+          return no('las incidencias de este censo ya no son las que se compararon (alguno de los dos se volvió a analizar después): no comparable');
+        }
+      }
       const resueltosDelTodo = Object.entries(porTipo)
         .filter(([, d]) => d.resueltas && !d.siguen && !d.nuevas)
         .map(([tipo, d]) => ({ tipo, ...d }))
@@ -3389,12 +3416,14 @@ function app() {
     },
 
     // La etiqueta de un tipo: «+12», «−5», «+3 · −1», «nuevo» o «igual».
-    // Solo en la primera fila de su tipo: la comparacion cuenta por tipo con
+    // Solo en la primera fila visible de su tipo: la comparacion cuenta por tipo con
     // todas sus gravedades juntas, y repetirla en las dos filas sumaria doble.
     cambioDeTipo(r, diff) {
       if (!diff || diff.ok !== true || this.issuesSegmento) return null;
       const filas = this.issuesResumen || [];
-      const primera = filas.find(x => x.issue_type === r.issue_type);
+      // La primera VISIBLE: con el filtro «Info» la fila de aviso del mismo
+      // tipo esta oculta y la etiqueta no puede ir en ella.
+      const primera = this.resumenIssues(this.issueFilters.severity).find(x => x.issue_type === r.issue_type);
       if (primera !== r) return null;
       const d = diff.porTipo[r.issue_type];
       if (!d) return null;
@@ -3428,7 +3457,10 @@ function app() {
     // cuelga de UNA pagina de anclaje y «1 página» diria otra cosa: cuenta
     // plantillas, las que el analisis apunto en `jobs.soft404.resumen`.
     cuentaDeTipo(r) {
-      if (r.issue_type === 'soft_404_plantilla') {
+      // Con una seccion elegida, no: la cifra es del sitio entero y se leeria
+      // como «esta seccion tiene 7 plantillas con soft 404»; la fila sale con
+      // 0 paginas y dice que el hallazgo no se reparte, como los demas.
+      if (r.issue_type === 'soft_404_plantilla' && !this.issuesSegmento) {
         const s4 = ((this.job && this.job.soft404) || {}).resumen || {};
         const n = s4.plantillas_responden_200;
         if (n) return { n, unidad: n === 1 ? 'plantilla' : 'plantillas', propia: true };
@@ -3453,12 +3485,15 @@ function app() {
 
     // El reparto de un tipo con secciones de negocio: las secciones y, en una
     // linea, lo que cae fuera de todas (suma de las formas de ruta).
+    // La API corta el reparto en los SEGMENTOS_MAX_NEGOCIO grupos con mas
+    // paginas: si llega lleno, puede faltar alguna seccion pequena y lo de
+    // fuera es «al menos», no la cifra entera (decision 67).
     repartoNegocio(r) {
       const reparto = r.por_segmento || [];
       const regla = new Set(((this.segmentosJob && this.segmentosJob.segmentos) || []).filter(x => x.de_regla).map(x => x.segmento));
       const dentro = reparto.filter(p => regla.has(p.segmento));
       const fuera = reparto.filter(p => !regla.has(p.segmento)).reduce((n, p) => n + p.paginas, 0);
-      return { dentro, fuera };
+      return { dentro, fuera, cortado: reparto.length >= SEGMENTOS_MAX_NEGOCIO };
     },
 
     // «Qué arreglar primero» del Resumen: los mismos tipos y el mismo orden
@@ -5317,6 +5352,27 @@ function resumenRobots(rb) {
 
 // `jobs.soft404` (decision 105): `sondas` las escribe el spider (lista, una
 // por host y por plantilla) y `resumen` el analisis.
+// Copia de `shared.respuestas.NO_VALIDAS` y `TITULOS_DE_BLOQUEO` (decisiones
+// 62 y 103) para los censos analizados antes de la decision 190, que no traen
+// la lista de sondas que cuentan.
+const SOFT404_CLASES_NO_VALIDAS = ['challenge_waf', 'captcha', 'rate_limited', 'respuesta_binaria'];
+const SOFT404_TITULOS_DE_BLOQUEO = ['just a moment', 'access denied', 'pardon our interruption', 'attention required',
+  'request unsuccessful', 'are you a robot', 'checking your browser', 'security check', '403 forbidden'];
+
+// Copia de `shared.comparacion.NO_COMPARABLES`: tipos de Search Console que
+// la comparacion entre censos no mira (cambian con el periodo de datos).
+const TIPOS_NO_COMPARABLES = ['oportunidad_posicion', 'ctr_bajo_para_posicion', 'canibalizacion_por_consulta'];
+// El tope de `segmentos_max` de /issues/resumen.
+const SEGMENTOS_MAX_NEGOCIO = 200;
+
+// Nombre legible de una plantilla de ruta (soft_404_plantilla, 2.11): sin el
+// «(4n)» del numero de tramos, que es interno, y con «…» por cada tramo
+// variable («/blog/category/:slug (3n)» -> «/blog/category/…»).
+function nombreDePlantilla(p) {
+  if (!p) return 'la raíz del sitio';
+  return String(p).replace(/ \(\d+n\)$/, '').replace(/:[a-z_]+/gi, '…');
+}
+
 function resumenSoft404(job) {
   const s = job && job.soft404;
   if (!s || typeof s !== 'object') return null;
@@ -5341,8 +5397,33 @@ function resumenSoft404(job) {
       lectura, nivel,
       coincidencias: d ? d.coincidencias : null, alcance: d ? d.alcance : null,
       ambigua: d ? !!d.ambigua : false, devuelve_portada: d ? !!d.devuelve_portada : false,
+      _cruda: x,
     };
   });
+  // Las plantillas que responden 200 a lo que no existe (revision de UX del
+  // 25-oct, 2.11). Con un analisis de la decision 190, las que el analisis
+  // conto (`sondas_responden_200`); antes, el mismo filtro que
+  // `_sonda_responde_200` de analysis/soft404.py: 2xx sin redireccion ni
+  // error, sin muro de WAF (clase de respuesta o titulo de bloqueo) y una por
+  // host y plantilla. Un muro servido con 200 no es la respuesta del sitio.
+  let responden200;
+  if (r && Array.isArray(r.sondas_responden_200)) {
+    const contadas = new Set(r.sondas_responden_200);
+    responden200 = filas.filter(f => f.nivel === 'red' && contadas.has(f.url));
+  } else {
+    const vistas = new Set();
+    responden200 = filas.filter(f => {
+      const x = f._cruda;
+      if (f.nivel !== 'red' || x.redirige_a || x.error) return false;
+      if (SOFT404_CLASES_NO_VALIDAS.includes(x.response_class)) return false;
+      const titulo = String(x.titulo || '').trim().toLowerCase();
+      if (SOFT404_TITULOS_DE_BLOQUEO.some(t => titulo.includes(t))) return false;
+      const clave = (f.host || '').toLowerCase() + '|' + (f.plantilla || '');
+      if (vistas.has(clave)) return false;
+      vistas.add(clave);
+      return true;
+    });
+  }
   return {
     filas,
     sondas: r && r.sondas != null ? r.sondas : filas.length,
@@ -5355,8 +5436,11 @@ function resumenSoft404(job) {
     // 25-oct, 2.11): con «0 paginas» en verde al lado se leia como «sin
     // soft 404». En los censos analizados con la decision 190 van ademas como
     // un aviso agrupado en Problemas (`soft_404_plantilla`).
-    plantillas_200: filas.filter(f => f.nivel === 'red').length,
+    responden200,
+    plantillas_200: responden200.length,
     aviso_en_problemas: !!(r && r.plantillas_responden_200),
+    // Analizado con la decision 190 (aunque no haya emitido nada).
+    con_aviso_190: !!(r && Array.isArray(r.sondas_responden_200)),
   };
 }
 

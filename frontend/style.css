@@ -478,13 +478,15 @@ thead{position:relative}
 th[data-tip]{overflow:visible}
 
 /* ===== Overview Grid ===== */
-.overview-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+/* minmax(0,1fr): con 1fr la columna crecia hasta lo que pedia la tabla mas ancha
+   y a 390 px el Resumen entero desbordaba (revision de UX del 25-oct, 2.11). */
+.overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.75rem}
 
 /* ===== Responsive ===== */
 @media(max-width:768px){
   .form-row{grid-template-columns:1fr}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .overview-grid{grid-template-columns:1fr}
+  .overview-grid{grid-template-columns:minmax(0,1fr)}
   .main{padding:.75rem}
 }
 @media(max-width:480px){
