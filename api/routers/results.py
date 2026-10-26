@@ -1724,15 +1724,20 @@ def _wordpress_de_url(db: Session, job_id: uuid.UUID, url_hash: str | None) -> l
 def _inspeccion_google(db: Session, job: Job, url_obj: Url) -> dict | None:
     """La ultima inspeccion de Google de esta URL (decision 189, sobre la 144):
     si la tiene indexada y que canonical elige. Es una muestra diaria y
-    rotatoria del CLIENTE, no del censo: va con su fecha y la de la ultima
-    visita de Google, y la ficha lo dice asi. Las comparaciones con la regla de
-    `shared.indexabilidad.misma_url`, la misma del analisis: dos copias
-    acabarian discrepando. Sin cliente, sin inspeccion o sin la tabla: None.
-    Best-effort: el `try` cubre la funcion entera (decision 40)."""
+    rotatoria del CLIENTE, no del censo, y `gsc_inspecciones` guarda una fila
+    por URL que se reescribe en cada inspeccion: va con su fecha y la de la
+    ultima visita de Google. Solo se compara con la canonical que declaraba la
+    pagina EN ESTE CENSO si la inspeccion cae en la ventana de la 144 (30 dias
+    antes, 14 despues; `shared.gsc.ventana_de_inspeccion`, la misma de los
+    avisos): fuera de ella, comparar dos fechas distintas no dice nada y la
+    tarjeta contradiria a los avisos de la misma ficha. Las comparaciones, con
+    `shared.indexabilidad.misma_url`, la regla del analisis. Sin cliente, sin
+    inspeccion o sin la tabla: None. Best-effort: el `try` cubre la funcion
+    entera (decision 40)."""
     try:
         if not getattr(job, "cliente_id", None):
             return None
-        from shared.gsc import clave_de_url
+        from shared.gsc import clave_de_url, ventana_de_inspeccion
         from shared.indexabilidad import misma_url
         from shared.models import GscInspeccion as G
 
@@ -1743,9 +1748,18 @@ def _inspeccion_google(db: Session, job: Job, url_obj: Url) -> dict | None:
                     .order_by(G.fecha.desc()).first())
         if fila is None:
             return None
+        desde, hasta = ventana_de_inspeccion(job)
+        fecha = fila.fecha
+        if fecha is not None and fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=timezone.utc)
+        en_ventana = fecha is not None and desde <= fecha <= hasta
         meta = url_obj.html_meta
-        declarado_hoy = (meta.canonical_href or meta.canonical_header) if meta else None
-        declarado_hoy = declarado_hoy or url_obj.url
+        declarado = (meta.canonical_href or meta.canonical_header) if meta else None
+        declarado = declarado or url_obj.url
+
+        def _igual(a, b):
+            return misma_url(a, b) if en_ventana and a and b else None
+
         return {
             "fecha": fila.fecha.isoformat() if fila.fecha else None,
             "ultimo_rastreo": fila.ultimo_rastreo.isoformat() if fila.ultimo_rastreo else None,
@@ -1753,13 +1767,18 @@ def _inspeccion_google(db: Session, job: Job, url_obj: Url) -> dict | None:
             "cobertura": fila.cobertura,
             "canonical_google": fila.canonical_google,
             "canonical_visto": fila.canonical_usuario,
-            # Google eligio la misma que vio declarada (None: falta alguna)
+            # La inspeccion vale para este censo (ventana de la decision 144)
+            "en_ventana_del_censo": en_ventana,
+            # Google eligio la misma que vio declarada (None: falta alguna).
+            # No depende del censo: las dos son de la inspeccion.
             "google_acepta": (misma_url(fila.canonical_google, fila.canonical_usuario)
                               if fila.canonical_google and fila.canonical_usuario else None),
-            # Lo que Google vio declarado es lo que la pagina declara hoy:
-            # si no, su eleccion es de una version anterior (decision 144).
-            "visto_igual_que_hoy": (misma_url(fila.canonical_usuario, declarado_hoy)
-                                    if fila.canonical_usuario else None),
+            # Lo que Google vio declarado es lo que declaraba la pagina en este
+            # censo: si no, su eleccion es de una version anterior (144).
+            "visto_igual_que_censo": _igual(fila.canonical_usuario, declarado),
+            # La que elige Google es la que declaraba la pagina en este censo:
+            # con lo visto distinto, Google ya la sigue y no hay que esperar.
+            "google_igual_que_censo": _igual(fila.canonical_google, declarado),
         }
     except Exception:  # noqa: BLE001
         return None

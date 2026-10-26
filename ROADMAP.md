@@ -1033,7 +1033,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   días)» con clics, impresiones y posición media de Search Console y la
   canonical que elige Google según su última inspección (campo
   `google_inspeccion` de la ficha, decisión 189); sin datos, una frase que
-  dice por qué.
+  dice por qué. Tras la revisión: el detalle ya no saca claves internas
+  (la canibalización dice con qué URL compite y con qué parte), la N del
+  enlace es la misma que lista URLs, la canonical de Google solo se compara
+  con la del censo si la inspección es de sus fechas (y «ya la sigue» en vez
+  de «cambiará» cuando ya coincide), y con Search Console parcial las cifras
+  dicen desde cuándo son.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

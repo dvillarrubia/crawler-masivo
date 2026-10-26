@@ -3,8 +3,12 @@ EJECUTANDO el endpoint contra una base de verdad (SQLite; Postgres con
 PAGERANK_TEST_DATABASE_URL):
 
 - la ultima inspeccion del cliente para esa URL, con su fecha, y si Google
-  acepta la canonical que vio declarada y si esa es la de hoy (con la regla de
+  acepta la canonical que vio declarada, si esa es la que declaraba la pagina
+  en el censo y si la que elige Google ya es esa (con la regla de
   `shared.indexabilidad.misma_url`, la del analisis);
+- una inspeccion fuera de la ventana de la decision 144 (30 dias antes, 14
+  despues del censo) va con su fecha pero sin compararla con el censo: son dos
+  fechas distintas (revision de la 2.7);
 - sin inspeccion, o un censo sin cliente, `google_inspeccion` es None y la
   ficha sale igual;
 - una inspeccion con error no cuenta, y la de otro cliente tampoco.
@@ -66,7 +70,7 @@ def api(request, tmp_path):
         s.add_all([c, otro])
         s.flush()
         job = Job(id=uuid.uuid4(), name="semanal", status="completed", seeds=[H + "/"], config={},
-                  cliente_id=c.id)
+                  cliente_id=c.id, started_at=_cuando(16))
         suelto = Job(id=uuid.uuid4(), name="sin cliente", status="completed", seeds=[H + "/"], config={})
         s.add_all([job, suelto])
         s.flush()
@@ -75,6 +79,8 @@ def api(request, tmp_path):
             ("rooms", job, ROOMS, MAL),            # Google ignora un canonical roto
             ("about", job, f"{H}/es/about", None),  # autocanonica sin etiqueta: acepta
             ("viejo", job, f"{H}/de/x", f"{H}/de/x"),  # Google vio otro canonical antes
+            ("ya_sigue", job, f"{H}/es/oferta", f"{H}/es/oferta"),  # vio otro, pero ya elige el del censo
+            ("tarde", job, f"{H}/es/tarde", f"{H}/es/tarde"),  # inspeccionada un mes despues del censo
             ("nada", job, f"{H}/es/nada", None),    # sin inspeccion
             ("error", job, f"{H}/es/error", None),  # solo una inspeccion con error
             ("suelta", suelto, ROOMS, MAL),         # censo sin cliente
@@ -100,6 +106,11 @@ def api(request, tmp_path):
         insp(c, f"{H}/de/x", fecha=_cuando(17), verdict="PASS", cobertura="Enviada e indexada",
              canonical_usuario=f"{H}/es/x", canonical_google=f"{H}/es/x")
         insp(c, f"{H}/es/error", fecha=_cuando(17), error="403")
+        insp(c, f"{H}/es/oferta", fecha=_cuando(19), verdict="PASS", cobertura="Enviada e indexada",
+             canonical_usuario="https://webserver-lopesan-prd.lfr.cloud/es/oferta",
+             canonical_google=f"{H}/es/oferta")
+        insp(c, f"{H}/es/tarde", fecha=datetime(2026, 11, 20, tzinfo=timezone.utc), verdict="PASS",
+             cobertura="Enviada e indexada", canonical_usuario=f"{H}/es/otra", canonical_google=f"{H}/es/otra")
         s.commit()
 
     app = FastAPI()
@@ -130,7 +141,8 @@ def test_google_elige_otro_canonical_con_su_fecha(api):
     assert g["canonical_google"] == ROOMS
     assert g["canonical_visto"] == MAL
     assert g["google_acepta"] is False
-    assert g["visto_igual_que_hoy"] is True
+    assert g["visto_igual_que_censo"] is True and g["google_igual_que_censo"] is False
+    assert g["en_ventana_del_censo"] is True
     assert g["cobertura"] == "Enviada e indexada" and g["verdict"] == "PASS"
     assert g["fecha"].startswith("2026-10-19") and g["ultimo_rastreo"].startswith("2026-10-11")
     # Los datos de Search Console por URL ya venian en la ficha
@@ -140,13 +152,35 @@ def test_google_elige_otro_canonical_con_su_fecha(api):
 def test_autocanonica_sin_etiqueta_google_acepta(api):
     cliente, ids = api
     g = _ficha(cliente, ids, "about")["google_inspeccion"]
-    assert g["google_acepta"] is True and g["visto_igual_que_hoy"] is True
+    assert g["google_acepta"] is True and g["visto_igual_que_censo"] is True
+    assert g["google_igual_que_censo"] is True
 
 
 def test_google_vio_un_canonical_que_ya_no_esta(api):
     cliente, ids = api
     g = _ficha(cliente, ids, "viejo")["google_inspeccion"]
-    assert g["visto_igual_que_hoy"] is False
+    assert g["visto_igual_que_censo"] is False
+    # y lo que eligio no es la del censo: puede cambiar en la proxima visita
+    assert g["google_igual_que_censo"] is False
+
+
+def test_google_ya_elige_la_del_censo_aunque_viera_otra(api):
+    # oferta-om-spa-costa-meloneras-cumpleanos: Google vio declarada la de
+    # webserver-lopesan-prd.lfr.cloud y aun asi elige la de www, que es la del
+    # censo. Decir «cambiara con la proxima visita» seria falso.
+    cliente, ids = api
+    g = _ficha(cliente, ids, "ya_sigue")["google_inspeccion"]
+    assert g["visto_igual_que_censo"] is False and g["google_igual_que_censo"] is True
+
+
+def test_inspeccion_fuera_de_la_ventana_no_se_compara_con_el_censo(api):
+    cliente, ids = api
+    g = _ficha(cliente, ids, "tarde")["google_inspeccion"]
+    assert g["fecha"].startswith("2026-11-20")
+    assert g["en_ventana_del_censo"] is False
+    assert g["visto_igual_que_censo"] is None and g["google_igual_que_censo"] is None
+    # lo que no depende del censo, si
+    assert g["google_acepta"] is True
 
 
 def test_sin_inspeccion_con_error_o_sin_cliente_es_none(api):

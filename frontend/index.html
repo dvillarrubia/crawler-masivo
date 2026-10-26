@@ -4926,6 +4926,7 @@
                     </div>
                   </template>
                   <div class="text-sm" x-show="g.frase" x-text="g.frase"></div>
+                  <div class="text-sm text-dim" x-show="g.parcial" x-text="g.parcial"></div>
                   <template x-if="g.canonical">
                     <div class="text-sm url-google-canonical">
                       <span class="text-dim">Canonical que elige Google:</span>
@@ -4984,7 +4985,7 @@
                 <div class="text-sm text-dim" x-show="urlDetail.click_depth == null && !(stats && stats.click_depth_calculada)">
                   Este censo se analizó antes de medir los clics desde la home: hay que volver a analizarlo.</div>
                 <div class="text-sm text-dim"
-                     x-text="fmt.num(urlDetail.unique_inlinks_count ?? urlDetail.inlinks_count) + ' páginas la enlazan · ' + fmt.num(urlDetail.inlinks_count) + ' enlaces entrantes'"></div>
+                     x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(urlDetail.unique_inlinks_count ?? urlDetail.inlinks_count) + fmt.num(urlDetail.inlinks_count) + (urlDetail.inlinks_count === 1 ? ' enlace entrante' : ' enlaces entrantes')"></div>
                 <div class="text-sm text-dim" x-show="urlDetail.pagerank_score != null"
                      x-text="'PageRank ' + urlDetail.pagerank_score + ' de 100'"></div>
               </div>

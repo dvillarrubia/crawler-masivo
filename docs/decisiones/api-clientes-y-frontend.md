@@ -526,14 +526,27 @@
    guardado. Se lee de `gsc_inspecciones` por cliente y `url_clave`
    (`shared.gsc.clave_de_url`), la última sin error:
    - **Con su fecha y la de la última visita de Google**: es una muestra
-     rotatoria del cliente, no del censo; la ficha dice «según la inspección de
-     Google del 19 oct (su última visita: 11 oct)». No se limita a la ventana
-     de −30/+14 días del análisis: es la última que hay, y va fechada.
-   - **`google_acepta` y `visto_igual_que_hoy` se calculan en la API con
-     `shared.indexabilidad.misma_url`**, la regla del análisis: una copia en
-     JavaScript acabaría discrepando del aviso. Si Google vio declarada otra
-     canonical que la de hoy, su elección es de una versión anterior y la
-     ficha no dice que Google ignore la de hoy.
+     rotatoria del cliente, no del censo, y `gsc_inspecciones` guarda una fila
+     por URL que se reescribe en cada inspección; la ficha dice «según la
+     inspección de Google del 19 oct (su última visita: 11 oct)».
+   - **Solo se compara con el censo si la inspección cae en su ventana**
+     (`en_ventana_del_censo`): la de la 144, 30 días antes y 14 después,
+     `shared.gsc.ventana_de_inspeccion`, la misma que usan los avisos (antes
+     las dos constantes vivían en `analysis/`). Fuera de ella, en un censo
+     viejo o con la URL reinspeccionada después, comparar dos fechas no dice
+     nada y la tarjeta contradiría a los avisos de la misma ficha: las
+     comparaciones con el censo salen None y la ficha lo dice.
+   - **`google_acepta`, `visto_igual_que_censo` y `google_igual_que_censo` se
+     calculan en la API con `shared.indexabilidad.misma_url`**, la regla del
+     análisis: una copia en JavaScript acabaría discrepando del aviso. Si
+     Google vio declarada otra canonical que la del censo, su elección es de
+     una versión anterior y la ficha no dice que Google ignore la del censo; y
+     si la que elige ya es la del censo (Lopesan, 
+     `oferta-om-spa-costa-meloneras-cumpleanos`: vio la de
+     `webserver-lopesan-prd.lfr.cloud` y elige la de www), dice que ya la
+     sigue, no que «cambiará con la próxima visita». Sin eso, «puede
+     cambiar», no «cambiará». Es «la del censo» y no «la de hoy»: el censo
+     puede ser viejo (revisión de la 2.7).
    - **None no es «Google no la tiene»**: sin cliente, sin inspección o solo
      con inspecciones fallidas. La ficha dice que no está inspeccionada solo
      si el censo tiene inspecciones (`gsc_resumen.inspeccion`); contra una API

@@ -56,6 +56,20 @@ def dia_del_censo(job) -> date:
     return t.date()
 
 
+# Inspecciones de URL que valen para un censo (decision 144): de 30 dias antes
+# a 14 despues del dia del censo. Las lee el analisis (avisos de la
+# inspeccion) y la ficha de URL de la API (decision 189): con dos copias, la
+# tarjeta de la ficha y los avisos de la misma pagina acabarian discrepando.
+INSPECCION_ANTES_DIAS = 30
+INSPECCION_DESPUES_DIAS = 14
+
+
+def ventana_de_inspeccion(job) -> tuple[datetime, datetime]:
+    dia = dia_del_censo(job)
+    return (datetime.combine(dia - timedelta(days=INSPECCION_ANTES_DIAS), datetime.min.time(), timezone.utc),
+            datetime.combine(dia + timedelta(days=INSPECCION_DESPUES_DIAS), datetime.max.time(), timezone.utc))
+
+
 def ventana_del_censo(job) -> tuple[date, date]:
     hasta = dia_del_censo(job)
     return hasta - timedelta(days=VENTANA_DIAS - 1), hasta

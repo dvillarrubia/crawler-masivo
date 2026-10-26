@@ -384,10 +384,63 @@ const fmt = {
     if (!d || typeof d !== 'object') return '';
     const partes = [];
     const corta = u => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
+    // Sin etiqueta, el nombre del campo sin guiones bajos: mejor un nombre
+    // tecnico que esconder el dato, pero no «content_word_count».
+    const etiq = k => DETALLE_LABEL[k] || k.replaceAll('_', ' ');
     for (const [k, v] of Object.entries(d)) {
       if (v == null || v === '' || k === 'otro_dominio_registrable' || k === 'paginas_del_host') continue;
       // Accesibilidad (decision 174): el impacto ya va en castellano y el enlace, en la ficha.
       if (k === 'impacto_axe' || k === 'url_ayuda') continue;
+      // Revision de UX del 25-oct, 2.7: claves que salian en crudo
+      // («reparto_por clics», «urls: 2», «pct 100»). Lo interno no se ensena;
+      // las listas dicen que hay dentro, no cuantas son.
+      if (['reparto_por', 'content_hash', 'verdict', 'fuente'].includes(k)) continue;
+      if (Array.isArray(v) && !v.length) continue;
+      const pctDe = x => (x * 100).toFixed(x < 0.1 ? 2 : 1).replace('.', ',').replace(/,0+$/, '') + ' %';
+      if ((k === 'urls' || k === 'compite_con') && Array.isArray(v) && v.length && typeof v[0] === 'object') {
+        // canibalizacion_por_consulta: las URLs que compiten, con su parte
+        const de = d.reparto_por === 'impresiones' ? 'de las impresiones' : 'de los clics';
+        const una = (x, i) => corta(x.url) + (x.parte != null ? ` (${pctDe(x.parte)}${i === 0 ? ' ' + de : ''}`
+          + (x.posicion != null ? ', posición ' + String(x.posicion).replace('.', ',') : '') + ')' : '');
+        partes.push((k === 'urls' ? 'compiten ' : 'compite con ') + v.slice(0, 3).map(una).join(', ')
+          + (v.length > 3 ? ` y ${v.length - 3} más` : ''));
+        continue;
+      }
+      if (k === 'parte_propia') {
+        partes.push('esta página se lleva el ' + pctDe(v) + (d.reparto_por === 'impresiones' ? ' de las impresiones' : ' de los clics'));
+        continue;
+      }
+      if (k === 'ventana' && Array.isArray(v) && v.length === 2) {
+        partes.push('del ' + fmt.diaCorto(v[0]) + ' al ' + fmt.diaCorto(v[1]));
+        continue;
+      }
+      if (k === 'consulta' && typeof v === 'string') { partes.push('búsqueda «' + v + '»'); continue; }
+      if (k === 'consultas' && Array.isArray(v)) {
+        const c = v.map(x => x && (x.consulta || x)).filter(x => typeof x === 'string');
+        if (c.length) partes.push('búsquedas «' + c.slice(0, 2).join('», «') + '»' + (c.length > 2 ? ` y ${c.length - 2} más` : ''));
+        continue;
+      }
+      if (k === 'anclas' && Array.isArray(v)) {
+        const a = v.filter(x => x && x.ancla != null);
+        if (a.length) partes.push((a.length === 1 ? 'ancla ' : 'anclas ') + a.slice(0, 3).map(x => '«' + x.ancla + '»'
+          + (x.paginas ? ` en ${fmt.num(x.paginas)} ${x.paginas === 1 ? 'página' : 'páginas'}` : '')).join(', ')
+          + (a.length > 3 ? ` y ${a.length - 3} más` : ''));
+        continue;
+      }
+      // ancla_generica: «3 de 3» ya lo dice; el % solo si falta alguno
+      if (k === 'pct' && typeof v === 'number') { if (d.con_ancla_generica == null) partes.push(fmt.num(Math.round(v)) + ' %'); continue; }
+      if (['ctr', 'ctr_esperado', 'ctr_top3_del_sitio'].includes(k) && typeof v === 'number') {
+        partes.push(etiq(k) + ' ' + pctDe(v)); continue;
+      }
+      if (k === 'tipo' && TIPO_SIN_ANCLA[v]) { partes.push(TIPO_SIN_ANCLA[v]); continue; }
+      if (k === 'motivos' && Array.isArray(v)) {
+        partes.push(v.map(m => MOTIVO_DETALLE[m] || String(m).replaceAll('_', ' ')).join(', ')); continue;
+      }
+      if (k === 'fuentes' && Array.isArray(v)) {
+        partes.push(`${fmt.num(v.length)} ${v.length === 1 ? 'página que podría enlazarla' : 'páginas que podrían enlazarla'}`); continue;
+      }
+      if (k === 'cadena' && Array.isArray(v)) { partes.push(`${v.length - 1} saltos`); continue; }
+      if (k === 'ejemplo_origen') { partes.push('p. ej. desde ' + corta(v)); continue; }
       if (k === 'validation_issues' && Array.isArray(v)) {
         partes.push(v[0] + (v.length > 1 ? ` (y ${v.length - 1} más)` : ''));
       } else if (k === 'duplicate_urls' && Array.isArray(v)) {
@@ -417,12 +470,12 @@ const fmt = {
           : (e.destino ? corta(e.destino) : (e.href || ''));
         if (txt) partes.push('p. ej. ' + (txt.length > 70 ? txt.slice(0, 70) + '…' : txt));
       } else if (['canonical', 'href', 'image_url', 'target', 'redirect_url', 'destino', 'href_ejemplo', 'destino_ejemplo'].includes(k)) {
-        partes.push((DETALLE_LABEL[k] || k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
+        partes.push(etiq(k) + ' ' + (String(v).length > 70 ? String(v).slice(0, 70) + '…' : v));
       } else if (k === 'canonical_host') {
         if (!d.canonical) partes.push('a ' + v);
       } else if (k === 'inspeccionada' || k === 'ultimo_rastreo_google') {
         // Fechas de la inspeccion de Google: «19 oct», no el ISO entero.
-        partes.push((DETALLE_LABEL[k] || k) + ' ' + (/^\d{4}-\d\d-\d\d/.test(v) ? fmt.diaCorto(v) : v));
+        partes.push(etiq(k) + ' ' + (/^\d{4}-\d\d-\d\d/.test(v) ? fmt.diaCorto(v) : v));
       } else if (k === 'target_status') {
         partes.push(`el destino responde ${v}`);
       } else if (k === 'clase') {
@@ -432,13 +485,13 @@ const fmt = {
         const cods = Object.entries(v).map(([c, n]) => `${c === 'null' ? 'sin código' : c} × ${fmt.num(n)}`);
         if (cods.length) partes.push('códigos ' + cods.join(', '));
       } else if (Array.isArray(v)) {
-        partes.push(`${DETALLE_LABEL[k] || k}: ${v.length}`);
+        partes.push(`${etiq(k)}: ${v.length}`);
       } else if (typeof v === 'object') {
         continue;
       } else if (typeof v === 'boolean') {
-        if (v) partes.push(DETALLE_LABEL[k] || k);
+        if (v) partes.pushetiq(k);
       } else {
-        partes.push(`${DETALLE_LABEL[k] || k} ${typeof v === 'number' ? fmt.num(v) : v}`);
+        partes.push(`${etiq(k)} ${typeof v === 'number' ? fmt.num(v) : v}`);
       }
     }
     return partes.join(' · ');
@@ -3264,10 +3317,10 @@ function app() {
       this.urlDetailId = urlId;
       this.view = 'url-detail';
       this.urlProblemas = [];
-      this.cargarPaginasPorTipo();
       try {
         const d = await api(`/jobs/${this.job.id}/urls/${urlId}`);
-        this.urlProblemas = this._agruparProblemasUrl(d.issues);
+        this.urlProblemas = this._agruparProblemasUrl(d.issues, d.url);
+        this.cargarPaginasPorTipo(this.urlProblemas.map(g => g.tipo));
         this.urlDetail = d;
       } catch (e) { this.error = e.message; }
       this.urlDetailLoading = false;
@@ -3281,7 +3334,7 @@ function app() {
     // detalles legibles y sin repetir, y si es de plantilla o de servidor: un
     // hallazgo con `paginas_afectadas` (decisiones 53, 64 y 73) o con
     // `alcance` cuelga de una pagina de anclaje y se arregla una vez.
-    _agruparProblemasUrl(issues) {
+    _agruparProblemasUrl(issues, propia) {
       const ORDEN = { error: 0, warning: 1, info: 2 };
       const por = new Map();
       for (const i of issues || []) {
@@ -3298,7 +3351,7 @@ function app() {
         if (d.alcance === 'host' || (d.host && d.paginas_del_host != null)) g.deServidor++;
         else if (d.alcance === 'plantilla' || pa > 1) g.dePlantilla++;
         g.paginasAfectadas = Math.max(g.paginasAfectadas, pa);
-        const txt = this.detalleEnFicha(d);
+        const txt = this.detalleEnFicha(d, propia);
         if (txt) g.detalles.set(txt, (g.detalles.get(txt) || 0) + 1);
       }
       return [...por.values()].map(g => ({
@@ -3315,9 +3368,20 @@ function app() {
     // El detalle de una incidencia en la ficha de SU url: sin lo que ya dice
     // la cabecera del grupo (plantilla, paginas afectadas, ejemplos, que aqui
     // empezaban por la propia pagina).
-    detalleEnFicha(d) {
+    detalleEnFicha(d, propia) {
       if (!d || typeof d !== 'object') return '';
       const c = { ...d };
+      // Canibalizacion: con quien compite esta pagina, que es lo que hay que
+      // arreglar; ella misma, solo con su parte.
+      if (Array.isArray(c.urls) && propia && c.urls.some(x => x && x.url === propia)) {
+        const yo = c.urls.find(x => x.url === propia);
+        c.compite_con = c.urls.filter(x => x && x.url !== propia);
+        if (yo.parte != null) c.parte_propia = yo.parte;
+        delete c.urls;
+        // primero la busqueda y con quien compite; las cifras, despues
+        const { consulta, compite_con, parte_propia, ...resto } = c;
+        return this.detalleEnFicha({ consulta, compite_con, parte_propia, ...resto }, null);
+      }
       for (const k of ['alcance', 'paginas_afectadas', 'apariciones', 'paginas_ejemplo', 'paginas_del_host',
                        'verdict', 'ventana_dias']) delete c[k];
       for (const k of ['destinos_internos_distintos', 'destinos_fuera_del_censo']) if (!c[k]) delete c[k];
@@ -3330,18 +3394,23 @@ function app() {
     },
 
     // Paginas con cada tipo en el censo, para «Ver las N paginas con este
-    // problema». Sin segmento (la de Problemas puede llevar uno) y sumando
-    // las gravedades del tipo, como filtra la pestana URLs por `issue_type`.
-    // Si falla, el enlace sale sin cifra.
-    async cargarPaginasPorTipo() {
+    // problema»: el `total` de la misma consulta que lista la pestana URLs
+    // (`/urls?issue_type=`), una por tipo de la ficha y guardada por censo.
+    // Antes se sumaban las filas de /issues/resumen por gravedad y una
+    // pagina con el tipo en aviso y en info contaba dos veces: «196 paginas»
+    // y URLs listaba 167. Si falla, el enlace sale sin cifra.
+    async cargarPaginasPorTipo(tipos) {
       const job = this.job && this.job.id;
-      if (!job || (this.urlTiposJob && this.urlTiposJob.job === job)) return;
-      try {
-        const filas = await api(`/jobs/${job}/issues/resumen?ejemplos=0`);
-        const por = {};
-        for (const r of filas) por[r.issue_type] = (por[r.issue_type] || 0) + r.paginas;
-        if (this.job && this.job.id === job) this.urlTiposJob = { job, por };
-      } catch (_) { /* sin cifra */ }
+      if (!job) return;
+      if (!this.urlTiposJob || this.urlTiposJob.job !== job) this.urlTiposJob = { job, por: {} };
+      const faltan = (tipos || []).filter(t => !(t in this.urlTiposJob.por));
+      await Promise.all(faltan.map(async t => {
+        try {
+          const r = await api(`/jobs/${job}/urls?issue_type=${encodeURIComponent(t)}&page_size=1`);
+          if (this.urlTiposJob && this.urlTiposJob.job === job)
+            this.urlTiposJob = { job, por: { ...this.urlTiposJob.por, [t]: r.total } };
+        } catch (_) { /* sin cifra */ }
+      }));
     },
 
     // Texto del enlace a URLs filtrada por el tipo; si empieza por «Solo» no
@@ -3369,11 +3438,18 @@ function app() {
       if (!u) return null;
       const r = this.job && this.job.gsc_resumen;
       const g = { ventana: r && r.desde && r.hasta ? 'del ' + fmt.diaCorto(r.desde) + ' al ' + fmt.diaCorto(r.hasta) : '',
-                  cifras: null, frase: '', canonical: null, inspeccion: null, canonicalFrase: '' };
+                  cifras: null, frase: '', canonical: null, inspeccion: null, canonicalFrase: '', parcial: '' };
       if (u.gsc_clics != null || u.gsc_impresiones != null) {
         // El analisis solo escribe 0 si Search Console cubre la ventana entera.
         if (!u.gsc_impresiones) g.frase = 'No ha salido en ninguna búsqueda de Google en estos 90 días.';
         else g.cifras = { clics: u.gsc_clics || 0, impresiones: u.gsc_impresiones, posicion: u.gsc_posicion };
+        // Con Search Console conectado hace menos de 90 dias, las cifras son
+        // de los dias que hay, no de 90 (revision de la 2.7): se dice.
+        if (g.cifras && r && r.cubre_la_ventana === false) {
+          if (r.datos_desde) g.ventana = 'del ' + fmt.diaCorto(r.datos_desde) + ' al ' + fmt.diaCorto(r.hasta);
+          g.parcial = 'Search Console no cubre los 90 días enteros' + (r.datos_desde ? ': solo hay datos desde el ' + fmt.diaCorto(r.datos_desde) : '')
+            + '. Las cifras son de esos días.';
+        }
       } else if (!r) {
         g.frase = 'Este censo no tiene datos de Search Console: el cliente no lo tiene conectado o el censo se analizó antes de conectarlo.';
       } else if (u.is_internal === false) {
@@ -3388,25 +3464,48 @@ function app() {
       const insp = u.google_inspeccion;
       const TIPOS = ['google_elige_otro_canonical', 'google_tiene_canonical_antiguo', 'indexable_no_indexada_por_google'];
       const aviso = (u.issues || []).find(i => TIPOS.includes(i.issue_type));
+      const corta = x => String(x).replace(/^https?:\/\/(www\.)?/, '');
+      // Google vio declarada otra canonical que la de este censo. Si la que
+      // elige ya es la del censo, Google ya la sigue y no hay nada que
+      // esperar; si no, PUEDE cambiar en su proxima visita (no se afirma que
+      // vaya a cambiar). La del censo, no «la de hoy»: el censo puede ser viejo.
+      const vistoOtra = (visto, yaSigue) => yaSigue
+        ? 'Ya es la que declara la página en este censo, aunque en su última visita Google la vio declarar otra'
+          + (visto ? ' (' + corta(visto) + ')' : '') + '.'
+        : 'Google la eligió cuando la página declaraba otra canonical' + (visto ? ' (' + corta(visto) + ')' : '')
+          + '; en este censo declara otra distinta: puede cambiar en la próxima visita de Google.';
       if (insp) {
         g.inspeccion = { fecha: insp.fecha, visita: insp.ultimo_rastreo, cobertura: insp.cobertura };
         if (insp.canonical_google) {
           g.canonical = insp.canonical_google;
-          g.canonicalFrase = insp.visto_igual_que_hoy === false
-            ? 'Google la eligió cuando la página declaraba otra canonical; hoy declara otra distinta: cambiará con la próxima visita de Google.'
-            : insp.google_acepta ? 'La misma que declara la página.'
-            : insp.google_acepta === false ? 'No es la que declara la página: Google no le hace caso a su canonical.' : '';
+          if (insp.en_ventana_del_censo === false) {
+            // Inspeccion lejos de la fecha del censo (fuera de la ventana de
+            // la decision 144): no se compara con lo que declaraba entonces.
+            g.canonicalFrase = 'La inspección es de otra fecha que este censo, así que no se compara con la canonical que declaraba la página en él'
+              + (insp.google_acepta === true ? '; Google eligió la misma que vio declarada.'
+                : insp.google_acepta === false ? '; Google eligió otra distinta de la que vio declarada.' : '.');
+          } else if (insp.visto_igual_que_censo === false) {
+            g.canonicalFrase = insp.google_igual_que_censo == null
+              ? 'Google la eligió cuando la página declaraba otra canonical que la de este censo.'
+              : vistoOtra(insp.canonical_visto, insp.google_igual_que_censo);
+          } else {
+            g.canonicalFrase = insp.google_acepta ? 'La misma que declara la página.'
+              : insp.google_acepta === false ? 'No es la que declara la página: Google no le hace caso a su canonical.' : '';
+          }
         }
       } else if (insp === undefined && aviso) {
         // Una API sin `google_inspeccion` (anterior a la decision 189): lo que
-        // dicen los avisos de la inspeccion, que solo salen si algo no cuadra.
+        // dicen los avisos de la inspeccion, que solo salen si algo no cuadra
+        // y ya van con la ventana del censo. «Ya la sigue» solo si las dos URL
+        // son identicas: con una copia de `misma_url` en JS acabarian
+        // discrepando, y en la duda se dice «puede cambiar».
         const d = aviso.details || {};
         g.inspeccion = { fecha: d.inspeccionada, visita: d.ultimo_rastreo_google, cobertura: d.cobertura };
         if (d.canonical_de_google) {
           g.canonical = d.canonical_de_google;
           g.canonicalFrase = aviso.issue_type === 'google_elige_otro_canonical'
             ? 'No es la que declara la página: Google no le hace caso a su canonical.'
-            : 'Google la eligió cuando la página declaraba otra canonical; hoy declara otra distinta: cambiará con la próxima visita de Google.';
+            : vistoOtra(d.canonical_visto_por_google, !!d.canonical_hoy && d.canonical_hoy === d.canonical_de_google);
         }
       } else if (insp === null) {
         g.canonicalFrase = 'Search Console aún no ha inspeccionado esta URL (inspecciona unas cuantas cada día): no se sabe qué canonical elige Google.';

@@ -246,8 +246,7 @@ def avisar(an) -> None:
                 an.job_id, total_clics, clics_en_censo, len(fuera))
 
 
-INSPECCION_ANTES_DIAS = 30
-INSPECCION_DESPUES_DIAS = 14
+from shared.gsc import INSPECCION_ANTES_DIAS, INSPECCION_DESPUES_DIAS  # noqa: E402,F401  (decision 189: la comparte la API)
 
 
 def _avisar_inspeccion(an, job, del_censo: dict, dia) -> dict | None:

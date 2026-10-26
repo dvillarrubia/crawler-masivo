@@ -167,6 +167,17 @@ días)» lee `gsc_clics`, `gsc_impresiones` y `gsc_posicion` de la URL (NULL no
 es 0: sin datos dice por qué) y la canonical de Google de `google_inspeccion`
 (decisión 189); contra una API anterior, de los avisos de la inspección.
 
+Corregido tras la revisión independiente de la 2.7: `fmt.detalles` traduce
+las claves que salían en crudo (`content_word_count`, `pct`, `reparto_por`,
+`image_url`, `tipo texto_vacio`; las listas dicen qué hay dentro: «ancla
+«saber más» en 3 páginas», «compite con /blog/… (22,2 %, posición 4,2)»); «Ver
+las N páginas» cuenta con `/urls?issue_type=` como la pestaña URLs (antes
+sumaba gravedades: 196 frente a 167); la tarjeta solo compara la canonical de
+Google con la del censo si la inspección cae en la ventana de la decisión 144,
+dice «ya es la que declara la página en este censo» cuando Google ya la
+sigue y «puede cambiar», no «cambiará», cuando no; y si Search Console no
+cubre los 90 días, la ventana empieza en `datos_desde` y lo avisa.
+
 ### Lo que salió por el camino (2026-10-14)
 
 Cosas que no estaban en la auditoría y aparecieron al hacerla:
