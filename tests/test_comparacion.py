@@ -728,6 +728,21 @@ def test_el_censo_de_referencia_se_reanaliza_si_lo_analizo_otro_codigo(tmp_path)
     s.close()
 
 
+def test_la_comparacion_sella_con_que_version_se_analizaron_los_dos(tmp_path):
+    """Decision 191: Problemas ensena la diferencia por tipo frente al
+    anterior, y tiene que poder saber si alguno de los dos censos se volvio a
+    analizar DESPUES de compararse (sus incidencias ya no serian las
+    comparadas). El sello es el de despues de poner al dia la referencia."""
+    import shared.comparacion as comp
+
+    s, _, nuevo = _dos_censos(tmp_path, "sello", "version-vieja", "version-nueva")
+    reanalizar, _ = _reanalizador(s, "version-nueva")
+    r = comp.comparar_con_el_anterior(s, nuevo, reanalizar=reanalizar)
+    assert r["analisis_version"] == "version-nueva"
+    assert r["analisis_version_anterior"] == "version-nueva"
+    s.close()
+
+
 def test_si_ya_estan_al_dia_no_se_reanaliza_nada(tmp_path):
     """El caso normal de dos rastreos seguidos sin despliegue en medio."""
     import shared.comparacion as comp

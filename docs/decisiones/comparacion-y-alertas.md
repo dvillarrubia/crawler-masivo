@@ -978,3 +978,36 @@
    y los vistos con su motivo y la API los devuelve; cambiar el nombre o
    reactivar no cierra nada; con perfil no se toca la serie del perfil; borrar
    la programación o el perfil cierra los suyos).
+
+<a id="d191"></a>
+191. **La comparación automática sella con qué versión del análisis estaban
+   los dos censos, y Problemas solo enseña la diferencia por tipo si los dos
+   siguen así** (revisión de UX del 25-oct, 2.10).
+
+   **Problema.** Problemas pasa a decir, por tipo, cuánto ha cambiado frente
+   al censo con el que se comparó al terminar («+12», «−5», «nuevo»,
+   «igual»), con las cifras que ya guarda `comparacion.incidencias`
+   (`nuevas`, `resueltas` y `siguen` por tipo; no se recalcula nada). Pero esas
+   cifras son las de las incidencias DE ESE MOMENTO: si después uno de los dos
+   censos se vuelve a analizar —el siguiente censo de la serie re-analiza a
+   este como referencia (93), o alguien lo re-analiza a mano—, sus incidencias
+   ya no son las comparadas y la diferencia se leería como del sitio.
+
+   **Decisión.** `comparar_con_el_anterior` guarda `analisis_version` (la del
+   censo nuevo) y `analisis_version_anterior` (la de la referencia, ya puesta al
+   día). La interfaz da la diferencia solo si la comparación es concluyente
+   (ni truncado, ni bloqueado, ni otro alcance: 67, 70), las incidencias se
+   compararon (91), el anterior estaba entero (hay `resueltas`) y las dos
+   versiones de hoy son las selladas. Para los censos anteriores a este sello
+   se exige que el anterior y este tengan hoy la misma versión (lo leído de
+   `GET /api/jobs/{anterior}`); si no se puede comprobar, no se afirma. En
+   cualquiera de esos casos dice por qué («versión del análisis distinta: no
+   comparable») y no pinta etiquetas.
+   - La etiqueta va en la primera fila de cada tipo: la comparación cuenta por
+     tipo con todas sus gravedades juntas.
+   - Son incidencias, no páginas, y lo dice el título; las que estaban en
+     páginas no visitadas esta vez (`sin_pagina_en_el_nuevo`) se nombran y no
+     se cuentan como resueltas. Los tipos que ya no aparecen se listan al final.
+   - Con una sección elegida no se enseña: la diferencia es del sitio entero.
+
+   Tests: `tests/test_comparacion.py::test_la_comparacion_sella_con_que_version_se_analizaron_los_dos`.

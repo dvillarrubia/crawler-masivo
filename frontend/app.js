@@ -168,6 +168,7 @@ const ISSUE_LABEL = {
   'low_word_count': 'Pocas palabras',
   'soft_404': 'Soft 404',
   'soft_404_candidato': 'Posible soft 404',
+  'soft_404_plantilla': 'Plantilla que responde 200 a URLs que no existen',
   'very_low_text_ratio': 'Ratio texto muy bajo',
   'low_text_ratio': 'Ratio texto bajo',
   'url_too_long': 'URL muy larga',
@@ -388,7 +389,14 @@ const fmt = {
       if (v == null || v === '' || k === 'otro_dominio_registrable' || k === 'paginas_del_host') continue;
       // Accesibilidad (decision 174): el impacto ya va en castellano y el enlace, en la ficha.
       if (k === 'impacto_axe' || k === 'url_ayuda') continue;
-      if (k === 'validation_issues' && Array.isArray(v)) {
+      if (k === 'plantillas' && Array.isArray(v) && v.length && v[0] && 'sonda' in v[0]) {
+        // soft_404_plantilla (decision 190): que plantillas responden 200.
+        const nombres = v.map(p => p.plantilla ? String(p.plantilla).replace(/ \(\d+n\)$/, '') : 'la raíz');
+        partes.push(fmt.num(v.length) + (v.length === 1 ? ' plantilla responde' : ' plantillas responden') + ' 200 a URLs que no existen: '
+          + nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? ` y ${nombres.length - 3} más` : ''));
+      } else if ((k === 'plantillas_afectadas' || k === 'raiz') && Array.isArray(d.plantillas)) {
+        continue;
+      } else if (k === 'validation_issues' && Array.isArray(v)) {
         partes.push(v[0] + (v.length > 1 ? ` (y ${v.length - 1} más)` : ''));
       } else if (k === 'duplicate_urls' && Array.isArray(v)) {
         if (d.duplicate_count == null) partes.push(`${fmt.num(v.length + 1)} páginas en el grupo`);
@@ -724,6 +732,10 @@ function app() {
     // Pestana Problemas
     issues: [], issuesPage: 1, issuesPages: 1, issuesTotal: 0,
     issuesResumen: null,      // una fila por tipo (/issues/resumen)
+    // Version del analisis del censo con el que se comparo (2.10): { jobId,
+    // version, error }. Hace falta para saber si la diferencia por tipo sigue
+    // siendo la de los dos censos tal como estan ahora.
+    versionAnterior: null,
     informe: null,            // GET /jobs/{id}/informe (decision 138)
     compartido: null,         // modo /c/<token> (decision 143): {token, cliente, censos, elegido}
     enlaces: null,            // enlaces de solo lectura del cliente (decision 143)
@@ -2242,6 +2254,7 @@ function app() {
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
+      this.versionAnterior = null;
       this.principales = null;
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
@@ -3286,15 +3299,166 @@ function app() {
 
     async loadIssuesResumen() {
       if (!this.job) return;
+      const jobId = this.job.id;
+      this.cargarVersionAnterior();
       try {
-        // El % por segmento (decision 125) va siempre: son tres consultas
-        // agrupadas. Con un segmento elegido, solo las paginas de ese segmento.
-        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: '8' });
+        // Los segmentos antes que el resumen: con segmentos de negocio
+        // (decision 125) el reparto de cada tipo se pide entero, para poder
+        // decir cuantas paginas caen fuera de toda seccion (revision de UX
+        // del 25-oct, 2.10). Sin ellos, los 8 con mas paginas, como antes.
+        if (!this.segmentosJob) await this.cargarSegmentos();
+        if (!this.job || this.job.id !== jobId) return;
+        const conNegocio = this.segmentosParaElegir().regla.length > 0;
+        const q = new URLSearchParams({ por_segmento: 'true', segmentos_max: conNegocio ? '200' : '8' });
         if (this.issuesSegmento) q.set('segmento', this.issuesSegmento);
         q.set('orden', this.issuesOrden);
-        if (!this.segmentosJob) this.cargarSegmentos();
-        this.issuesResumen = await api(`/jobs/${this.job.id}/issues/resumen?${q}`);
+        const filas = await api(`/jobs/${jobId}/issues/resumen?${q}`);
+        if (this.job && this.job.id === jobId) this.issuesResumen = filas;
       } catch (e) { this.error = e.message; this.issuesResumen = []; }
+    },
+
+    // ---- Diferencia frente al censo anterior, por tipo (2.10) ----
+    // La referencia es la de todo lo demas: `job.comparacion.comparado_con`,
+    // el censo con el que se comparo al terminar (2.3). Las cifras son las
+    // que ya guarda esa comparacion (`incidencias.nuevas/resueltas/siguen`,
+    // por tipo), no se recalcula nada.
+    async cargarVersionAnterior() {
+      const j = this.job, c = j && j.comparacion;
+      if (!c || !c.comparado_con) return;
+      if (this.versionAnterior && this.versionAnterior.jobId === j.id) return;
+      const jobId = j.id;
+      this.versionAnterior = { jobId, version: undefined };
+      try {
+        const ant = await api(`/jobs/${c.comparado_con}`);
+        if (this.job && this.job.id === jobId) this.versionAnterior = { jobId, version: ant.analisis_version || null };
+      } catch (e) {
+        // Lo que no se ha podido comprobar no se afirma (decisiones 67 y 91).
+        if (this.job && this.job.id === jobId) this.versionAnterior = { jobId, version: null, error: e.message };
+      }
+    },
+
+    // null si el censo no tiene comparacion; si no, { ok, ref, motivo, ... }.
+    // `ok: false` cuando la diferencia no se puede dar como del sitio: otro
+    // sitio u otro alcance, un censo truncado o bloqueado, o los dos censos
+    // analizados con versiones distintas, tambien si uno se volvio a analizar
+    // despues de compararse (decisiones 67, 70, 89, 91 y 191).
+    diffProblemas() {
+      const j = this.job, c = j && j.comparacion;
+      if (!c || !c.comparado_con) return null;
+      const dia = fmt.diaCorto(c.fecha_anterior);
+      const base = { ref: 'frente al ' + dia, dia, nombre: c.nombre_anterior || '', jobAnterior: c.comparado_con };
+      const no = motivo => ({ ...base, ok: false, motivo });
+      if (c.comparable === false) return no('no se puede comparar con el censo anterior' + (c.motivo ? ' (' + c.motivo + ')' : ''));
+      if (c.bloqueado) return no('uno de los dos censos se dio por bloqueado: no comparable');
+      if (c.concluyente === false) return no('uno de los dos censos está truncado o tiene otro alcance: no comparable');
+      const inc = c.incidencias;
+      if (!inc) return no('la comparación de incidencias no se llegó a hacer');
+      if (inc.comparable === false) return no('versión del análisis distinta: no comparable');
+      if (!inc.resueltas) return no('el censo anterior está truncado: lo que ya no aparece no se puede dar por resuelto');
+      if (c.analisis_version && j.analisis_version && c.analisis_version !== j.analisis_version) {
+        return no('este censo se volvió a analizar después de compararse (versión del análisis distinta): no comparable');
+      }
+      const va = this.versionAnterior;
+      if (!va || va.jobId !== j.id || va.version === undefined) return { ...base, ok: null };
+      if (va.error) return no('no se ha podido comprobar con qué versión del análisis está el censo anterior');
+      const esperada = c.analisis_version_anterior || j.analisis_version;
+      if (!va.version || va.version !== esperada) {
+        return no('el censo del ' + dia + ' se volvió a analizar después (versión del análisis distinta): no comparable');
+      }
+      const porTipo = {};
+      const sumar = (lista, campo) => {
+        for (const f of (lista || [])) {
+          const d = porTipo[f.tipo] || (porTipo[f.tipo] = { nuevas: 0, resueltas: 0, siguen: 0, en_url_existente: 0, severidad: f.severidad });
+          d[campo] += f.total || 0;
+        }
+      };
+      sumar((inc.nuevas || {}).por_tipo, 'nuevas');
+      sumar((inc.resueltas || {}).por_tipo, 'resueltas');
+      sumar((inc.siguen || {}).por_tipo, 'siguen');
+      sumar(((inc.nuevas || {}).en_url_existente || {}).por_tipo, 'en_url_existente');
+      const resueltosDelTodo = Object.entries(porTipo)
+        .filter(([, d]) => d.resueltas && !d.siguen && !d.nuevas)
+        .map(([tipo, d]) => ({ tipo, ...d }))
+        .sort((a, b) => b.resueltas - a.resueltas);
+      return {
+        ...base, ok: true, porTipo, resueltosDelTodo,
+        nuevas: (inc.nuevas || {}).total || 0, resueltas: (inc.resueltas || {}).total || 0,
+        sinPagina: inc.sin_pagina_en_el_nuevo || 0,
+        avisos: c.avisos || [],
+      };
+    },
+
+    // La etiqueta de un tipo: «+12», «−5», «+3 · −1», «nuevo» o «igual».
+    // Solo en la primera fila de su tipo: la comparacion cuenta por tipo con
+    // todas sus gravedades juntas, y repetirla en las dos filas sumaria doble.
+    cambioDeTipo(r, diff) {
+      if (!diff || diff.ok !== true || this.issuesSegmento) return null;
+      const filas = this.issuesResumen || [];
+      const primera = filas.find(x => x.issue_type === r.issue_type);
+      if (primera !== r) return null;
+      const d = diff.porTipo[r.issue_type];
+      if (!d) return null;
+      const varias = filas.filter(x => x.issue_type === r.issue_type).length > 1;
+      let texto, clase;
+      if (d.nuevas && !d.siguen && !d.resueltas) { texto = 'nuevo'; clase = 'cambio-peor'; }
+      else if (!d.nuevas && !d.resueltas) { texto = 'igual'; clase = 'cambio-igual'; }
+      else {
+        texto = [d.nuevas ? '+' + fmt.num(d.nuevas) : '', d.resueltas ? '−' + fmt.num(d.resueltas) : ''].filter(Boolean).join(' · ');
+        clase = d.nuevas > d.resueltas ? 'cambio-peor' : (d.nuevas < d.resueltas ? 'cambio-mejor' : 'cambio-igual');
+      }
+      const partes = [fmt.num(d.nuevas) + (d.nuevas === 1 ? ' nueva' : ' nuevas'),
+                      fmt.num(d.resueltas) + (d.resueltas === 1 ? ' resuelta' : ' resueltas'),
+                      fmt.num(d.siguen) + ' siguen'];
+      let title = 'Incidencias ' + diff.ref + ': ' + partes.join(', ') + '.';
+      if (d.nuevas && d.en_url_existente) title += ' De las nuevas, ' + fmt.num(d.en_url_existente) + ' en páginas que ya existían.';
+      if (varias) title += ' Cuenta todas sus gravedades juntas.';
+      return { texto, clase, title };
+    },
+
+    // Los tipos de la vista con su gravedad elegida que ya no aparecen.
+    resueltosDelTodo(diff) {
+      if (!diff || diff.ok !== true || this.issuesSegmento) return [];
+      const sev = this.issueFilters.severity;
+      const hoy = new Set((this.issuesResumen || []).map(r => r.issue_type));
+      return diff.resueltosDelTodo.filter(d => !hoy.has(d.tipo) && (!sev || d.severidad === sev));
+    },
+
+    // Lo que cuenta la fila de un tipo. De serie, paginas distintas; un
+    // hallazgo de servidor por host (`soft_404_plantilla`, decision 190)
+    // cuelga de UNA pagina de anclaje y «1 página» diria otra cosa: cuenta
+    // plantillas, las que el analisis apunto en `jobs.soft404.resumen`.
+    cuentaDeTipo(r) {
+      if (r.issue_type === 'soft_404_plantilla') {
+        const s4 = ((this.job && this.job.soft404) || {}).resumen || {};
+        const n = s4.plantillas_responden_200;
+        if (n) return { n, unidad: n === 1 ? 'plantilla' : 'plantillas', propia: true };
+      }
+      return { n: r.paginas, unidad: r.paginas === 1 ? 'página' : 'páginas', propia: false };
+    },
+
+    // ---- Secciones de negocio en Problemas (2.10) ----
+    // Con segmentos de regla (decision 125) son el primer nivel: una fila por
+    // seccion con sus URLs y cuantas tienen errores o avisos; las formas de
+    // ruta quedan en el desplegable. Sin reglas, nada de esto se pinta.
+    seccionesNegocio() {
+      const lista = (this.segmentosJob && this.segmentosJob.segmentos) || [];
+      const regla = lista.filter(x => x.de_regla);
+      if (!regla.length) return null;
+      const resto = lista.filter(x => !x.de_regla);
+      return {
+        secciones: regla,
+        sinSeccion: resto.reduce((n, x) => n + (x.urls || 0), 0),
+      };
+    },
+
+    // El reparto de un tipo con secciones de negocio: las secciones y, en una
+    // linea, lo que cae fuera de todas (suma de las formas de ruta).
+    repartoNegocio(r) {
+      const reparto = r.por_segmento || [];
+      const regla = new Set(((this.segmentosJob && this.segmentosJob.segmentos) || []).filter(x => x.de_regla).map(x => x.segmento));
+      const dentro = reparto.filter(p => regla.has(p.segmento));
+      const fuera = reparto.filter(p => !regla.has(p.segmento)).reduce((n, p) => n + p.paginas, 0);
+      return { dentro, fuera };
     },
 
     // «Qué arreglar primero» del Resumen: los mismos tipos y el mismo orden
@@ -5056,7 +5220,7 @@ const EXP_TABS = [
   // abierta.
   { key: 'a_wordpress', label: 'WordPress',    icon: 'layout-template', filter: { is_internal: true }, ambito: ['wp_publicado_no_rastreado','wp_adjunto_indexable','wp_taxonomia_anemica','wp_paginacion_sin_fin'],
     columns: ['url','status_code','indexable','inlinks_count','in_sitemap'] },
-  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','broken_resource'],
+  { key: 'a_contenido', label: 'Contenido',    icon: 'file-text',    filter: HTML_INTERNO, ambito: ['low_word_count','duplicate_content','near_duplicate_content','soft_404','soft_404_candidato','soft_404_plantilla','broken_resource'],
     columns: ['url','status_code','title','content_word_count','near_duplicate_count','closest_similarity','indexable'] },
   // Paridad movil/escritorio (decision 119): solo hay chips si el censo se
   // rastreo con `crawl_behavior.paridad_movil_muestra`.
@@ -5187,6 +5351,12 @@ function resumenSoft404(job) {
     indexables: r ? r.soft_404_indexables : null,
     candidatos: r ? r.candidatos : null,
     analizado: !!r,
+    // Sondas que responden 2xx a una URL que no existe (revision de UX del
+    // 25-oct, 2.11): con «0 paginas» en verde al lado se leia como «sin
+    // soft 404». En los censos analizados con la decision 190 van ademas como
+    // un aviso agrupado en Problemas (`soft_404_plantilla`).
+    plantillas_200: filas.filter(f => f.nivel === 'red').length,
+    aviso_en_problemas: !!(r && r.plantillas_responden_200),
   };
 }
 
