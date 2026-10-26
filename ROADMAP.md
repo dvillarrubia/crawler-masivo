@@ -1050,6 +1050,20 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   `soft_404_plantilla`, una fila por host con las plantillas que responden 200
   a una URL que no existe. El Resumen deja de decir «0 páginas» en verde junto a
   esas plantillas. Los censos ya analizados lo tendrán al re-analizarse.
+- **El perfil como única unidad** (revisión de UX del 25-oct, 2.2; decisión 193;
+  en local, sin desplegar): una programación nueva cuelga de un perfil
+  (`hereda_perfil`) y en cada disparo el worker lee el cliente y el perfil de
+  ese momento, en vez de la copia congelada del rastreo del que se creó. La
+  serie y los incidentes son los del perfil. Programados con cliente y perfil,
+  «Editar», «Nueva programación» y aviso de repetidas; cada perfil dice cuándo
+  se repite y se programa desde él. Las viejas siguen igual hasta pasar
+  `scripts/migrar_programaciones_a_perfiles.py --confirmar` (simulación por
+  defecto), que en Lopesan deja un perfil «Sitio completo» con las tres
+  programaciones y una sola serie. **Pendiente:** ejecutarlo en producción
+  tras desplegar (antes, la simulación) y pausar la programación que sobre.
+- **Alta de cliente guiada** (2.14; decisión 194; en local): nombre y dominio,
+  perfil «Sitio principal» creado solo y «Siguiente paso» con lanzar canario,
+  lanzar censo o programar cada semana.
 - **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y

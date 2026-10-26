@@ -126,6 +126,8 @@ Revisión del 25-oct (fase 2 del informe), hecho en la rama `ux2-cliente`:
 
 - [x] 2.1 Ficha del cliente con cuatro pestañas: Estado · Historial · Alertas · Configuración. Rutas `#/clientes/<id>[/historial|alertas|configuracion]`; `rastreos` sigue abriendo Historial. Migas «Clientes › cliente › pestaña». Un solo «Nuevo rastreo» en la ficha (V47).
 - [x] 2.3 «Frente al anterior» = `comparacion.comparado_con` en la tabla (antes, la fila de debajo) y con fecha en tabla y gráficas (V10). «Alertas» = alertas abiertas (incidentes vivos) en portada, Estado y pestaña; las de una comparación, «saltaron N» con su fecha; sin abiertas, la portada dice las que saltó el último censo.
+- [x] 2.2 El perfil como única unidad (V06, V07, V44; decisión 193; rama `ux2c-perfil`, en local): cada programación nueva cuelga de un perfil y hereda en cada disparo la configuración del momento. Programados con columnas Cliente y Perfil, «Editar», «Nueva programación» (cliente y perfil; día y hora en desplegables, hora de Madrid; el cron solo en «Otra») y aviso de repetidas (mismo perfil o mismas semillas, activas). En Configuración › Perfiles cada perfil dice cuándo se repite («Cada lunes a las 11:00», con Editar y Pausar) o «Programar cada semana…», y las de copia fija salen aparte como «Programaciones sin perfil». «Programar» desde un rastreo propone su perfil (o crear uno con sus semillas); la copia fija queda como segunda opción. Migración de las viejas: `scripts/migrar_programaciones_a_perfiles.py` (sin ejecutar en producción).
+- [x] 2.14 Alta de cliente guiada (V37; decisión 194, en local): nombre y dominio → perfil «Sitio principal» con la home → Estado con «Siguiente paso»: «Lanzar canario», «Lanzar censo» y «Programar cada semana».
 
 ### Fase 4 · Pulido — #123
 

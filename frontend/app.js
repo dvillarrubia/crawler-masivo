@@ -372,6 +372,10 @@ const fmt = {
     if (m.startsWith('el rastreo anterior')) return 'no se lanzó: el rastreo anterior de esta programación seguía sin terminar';
     if (m === 'todavia no toca') return 'todavía no le toca';
     if (m === 'sin proxima ejecucion calculada') return 'no se lanzó: no tenía calculada la próxima ejecución';
+    // Colgadas de un perfil (decision 193)
+    if (m === 'su perfil ya no existe') return 'no se lanzó: su perfil ya no existe';
+    if (m === 'el perfil esta desactivado') return 'no se lanzó: el perfil está desactivado';
+    if (m === 'el perfil no tiene semillas') return 'no se lanzó: el perfil no tiene semillas';
     return m;
   },
   // Una expresion cron en castellano. Solo los patrones que se usan de
@@ -691,6 +695,43 @@ async function api(path, opts = {}) {
 }
 
 
+// --- Cuando se repite una programacion, en lenguaje llano (revision de UX
+// del 25-oct, 2.2 y V44) ----------------------------------------------------
+// El formulario pide frecuencia, dia y hora; la expresion cron solo se ve en
+// «Otra frecuencia», para lo que no cabe en las cuatro de siempre.
+const DIAS_PROGRAMACION = [[1, 'lunes'], [2, 'martes'], [3, 'miércoles'], [4, 'jueves'],
+                     [5, 'viernes'], [6, 'sábado'], [0, 'domingo']];
+
+function _cuandoDesdeCron(cron) {
+  const c = (cron || '').trim();
+  const p = c.split(/\s+/);
+  const base = { frecuencia: 'avanzada', dia: 1, diaMes: 1, hora: '03:00', cron: c };
+  if (p.length !== 5 || !/^\d+$/.test(p[0]) || !/^\d+$/.test(p[1]) || p[3] !== '*') return base;
+  const hora = p[1].padStart(2, '0') + ':' + p[0].padStart(2, '0');
+  if (p[2] === '*' && p[4] === '*') return { ...base, frecuencia: 'diaria', hora };
+  if (p[2] === '*' && /^[0-7]$/.test(p[4])) return { ...base, frecuencia: 'semanal', dia: (+p[4]) % 7, hora };
+  if (p[2] === '1,15' && p[4] === '*') return { ...base, frecuencia: 'quincenal', hora };
+  if (/^\d+$/.test(p[2]) && +p[2] >= 1 && +p[2] <= 28 && p[4] === '*')
+    return { ...base, frecuencia: 'mensual', diaMes: +p[2], hora };
+  return base;
+}
+
+function _cronDesdeCuando(f) {
+  if (f.frecuencia === 'avanzada') return (f.cron || '').trim();
+  const [h, m] = (f.hora || '03:00').split(':').map(x => String(+x || 0));
+  if (f.frecuencia === 'diaria') return `${m} ${h} * * *`;
+  if (f.frecuencia === 'semanal') return `${m} ${h} * * ${f.dia}`;
+  if (f.frecuencia === 'quincenal') return `${m} ${h} 1,15 * *`;
+  return `${m} ${h} ${f.diaMes || 1} * *`;
+}
+
+function _mismasSemillas(a, b) {
+  const A = new Set((a || []).map(s => s.trim()).filter(Boolean));
+  const B = new Set((b || []).map(s => s.trim()).filter(Boolean));
+  return A.size > 0 && A.size === B.size && [...A].every(x => B.has(x));
+}
+
+
 /* ===== Main App ===== */
 function app() {
   return {
@@ -711,6 +752,19 @@ function app() {
     programarCron: '0 3 * * 1',
     programarZona: 'Europe/Madrid',
     programarError: '',
+    // Formulario de una programacion colgada de un perfil (revision de UX del
+    // 25-oct, 2.2): nueva o editada, desde Programados o desde el perfil.
+    progForm: null,
+    diasProgramacion: DIAS_PROGRAMACION,
+    // Las programaciones del cliente abierto, para enseñarlas en sus perfiles.
+    clienteProgramaciones: [],
+    // Alta guiada de cliente (2.14): nombre y dominio; al crearlo, su id
+    // queda en `altaReciente` para que Estado enseñe el siguiente paso.
+    altaForm: null,
+    altaReciente: null,
+    // «canario» o «censo» cuando el modal de lanzar se abre desde el
+    // siguiente paso: destaca el boton que toca.
+    createSugerencia: '',
     cadencias: [
       { etiqueta: 'Cada dia',      cron: '0 3 * * *' },
       { etiqueta: 'Cada lunes',    cron: '0 3 * * 1' },
@@ -1456,6 +1510,7 @@ function app() {
     async openCreate(preset = null) {
       this.createForm = _freshForm();
       this.createError = null;
+      this.createSugerencia = (preset && preset.sugerencia) || '';
       this.extraccionPrueba = { url: '', cargando: false, error: null, resultado: null };
       this.createPerfiles = [];
       this.showCreate = true;
@@ -1541,7 +1596,8 @@ function app() {
     async lanzarCanario() {
       const original = { name: this.createForm.name, max_urls: this.createForm.max_urls };
       const host = (this.createForm.seeds.split('\n')[0] || '').replace(/^https?:\/\//, '').split('/')[0];
-      this.createForm.name = 'CANARY - ' + (original.name || host);
+      // Sin repetir el prefijo si el nombre ya lo trae.
+      this.createForm.name = /^CANARY\b/i.test(original.name || '') ? original.name : 'CANARY - ' + (original.name || host);
       this.createForm.max_urls = 250;
       await this.submitCreate();
       if (this.showCreate) Object.assign(this.createForm, original);  // fallo: se deja como estaba
@@ -1627,7 +1683,8 @@ function app() {
       tab = CLIENTE_SLUG_TAB[tab] || 'estado';
       this.clienteTab = tab;
       this.clienteError = '';
-      if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; this.incidentesVer = 'vivos'; }
+      if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; this.incidentesVer = 'vivos'; this.clienteProgramaciones = []; }
+      this.altaForm = null;
       try {
         const [c, perfiles, jobs, serie] = await Promise.all([
           api(`/clients/${id}`),
@@ -1645,6 +1702,7 @@ function app() {
       // la que cuenta las alertas abiertas de la pestana Alertas).
       this.cargarAlertasAbiertas();
       this.cargarEstadoCliente();
+      this.cargarProgramacionesCliente();
       this._cargarTabCliente(tab);
       // Aparte: si la evolucion falla (o la tabla aun no existe), la ficha se
       // abre igual, sin graficas.
@@ -1985,9 +2043,49 @@ function app() {
       this.cliente = null;
       this.clientePerfiles = [];
       this.clienteJobs = [];
+      this.clienteProgramaciones = [];
       this.clienteForm = _formCliente(null);
       this.clienteTab = 'config';
       this.clienteError = '';
+      // Alta guiada (revision de UX del 25-oct, 2.14): solo nombre y dominio.
+      // Lo demas (configuracion, Search Console, Slack, reglas) se rellena
+      // despues en Configuracion, cuando ya hay algo que rastrear.
+      this.altaForm = { nombre: '', dominio: '', error: '', guardando: false };
+    },
+
+    altaHome() {
+      const d = ((this.altaForm && this.altaForm.dominio) || '').trim().toLowerCase()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split('/')[0].split(':')[0];
+      return d ? 'https://' + d + '/' : '';
+    },
+
+    async crearClienteGuiado() {
+      const f = this.altaForm;
+      if (!f) return;
+      f.error = '';
+      if (!f.nombre.trim()) { f.error = 'Falta el nombre del cliente.'; return; }
+      if (!this.altaHome()) { f.error = 'Falta el dominio principal (por ejemplo, www.cliente.com).'; return; }
+      f.guardando = true;
+      try {
+        const c = await api('/clients', { method: 'POST', body: JSON.stringify({
+          nombre: f.nombre.trim(), dominios: [f.dominio.trim()], zona_horaria: 'Europe/Madrid', perfil_principal: true }) });
+        this.clientes = await api('/clients');
+        this.altaReciente = c.id;
+        await this.abrirCliente(c.id, 'estado');
+      } catch (e) { f.error = e.message; f.guardando = false; }
+    },
+
+    // El perfil con el que seguir cuando el cliente aun no tiene censo: el
+    // «Sitio principal» del alta guiada o, si no, el primero que sea propio.
+    perfilSiguientePaso() {
+      const ps = (this.clientePerfiles || []).filter(p => p.activo && p.rol !== 'competidor');
+      return ps.find(p => p.nombre === 'Sitio principal') || ps[0] || null;
+    },
+
+    lanzarDesdeSiguientePaso(tipo) {
+      const p = this.perfilSiguientePaso();
+      if (!p) return;
+      this.openCreate({ cliente_id: this.cliente.id, profile_id: p.id, sugerencia: tipo });
     },
 
     // --- Search Console (decision 141) ---------------------------------
@@ -2305,7 +2403,7 @@ function app() {
 
     async borrarPerfil(p) {
       if (!await this.preguntar({ titulo: `Borrar el perfil «${p.nombre}»`,
-        mensaje: 'Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Borrar perfil', peligro: true })) return;
+        mensaje: 'Se quita también su programación, si la tiene. Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Borrar perfil', peligro: true })) return;
       try {
         await api(`/clients/${this.cliente.id}/profiles/${p.id}`, { method: 'DELETE' });
         await this.abrirCliente(this.cliente.id, 'config');
@@ -2585,12 +2683,179 @@ function app() {
         || (b.nuevas + b.resueltas) - (a.nuevas + a.resueltas));
     },
     // --- Rastreos programados ---
+    // Desde la ficha de un rastreo (revision de UX del 25-oct, 2.2): si tiene
+    // cliente, se propone programar su PERFIL (el suyo, o el del cliente con
+    // las mismas semillas), que hereda los cambios en cada disparo. La copia
+    // fija de antes queda como segunda opcion dentro del formulario, y es la
+    // unica para un rastreo sin cliente.
     abrirProgramar() {
+      if (this.job && this.job.cliente_id) {
+        this.abrirNuevaProgramacion({ cliente_id: this.job.cliente_id, profile_id: this.job.profile_id || '',
+                                      desdeJob: this.job });
+        return;
+      }
+      this.abrirCopiaFija();
+    },
+
+    abrirCopiaFija() {
       // El nombre por defecto quita la fecha del rastreo de origen: la
       // programacion le pone la suya a cada ejecucion.
+      this.progForm = null;
       this.programarNombre = (this.job.name || '').replace(/\s*[·-]\s*\d{4}-\d{2}-\d{2}.*$/, '');
       this.programarError = '';
       this.programarAbierto = true;
+    },
+
+    // Nueva programacion colgada de un perfil. `preset`: { cliente_id,
+    // profile_id, cron, desdeJob }.
+    async abrirNuevaProgramacion(preset = {}) {
+      this.progForm = {
+        id: null, hereda: true, cliente_id: preset.cliente_id || '', profile_id: preset.profile_id || '',
+        nombre: '', ..._cuandoDesdeCron(preset.cron || '0 3 * * 1'), zona: 'Europe/Madrid',
+        perfiles: [], existentes: [], error: '', guardando: false, creandoPerfil: false,
+        desdeJob: preset.desdeJob || null,
+      };
+      this.$nextTick(() => window.lucide && lucide.createIcons());
+      try { if (!this.clientes.length) this.clientes = await api('/clients'); } catch (_) { /* sin lista */ }
+      if (this.progForm && this.progForm.cliente_id) await this.progCambiarCliente(preset.profile_id || '');
+    },
+
+    editarProgramacion(p) {
+      this.progForm = {
+        id: p.id, hereda: !!p.hereda_perfil, cliente_id: p.cliente_id || '', profile_id: p.profile_id || '',
+        nombre: p.nombre, ..._cuandoDesdeCron(p.cron), zona: p.zona_horaria || 'Europe/Madrid',
+        perfiles: [], existentes: [], error: '', guardando: false, creandoPerfil: false, desdeJob: null,
+        perfilNombre: p.perfil_nombre, clienteNombre: p.cliente_nombre, n_semillas: p.n_semillas,
+      };
+      this.$nextTick(() => window.lucide && lucide.createIcons());
+    },
+
+    async progCambiarCliente(profileId = '') {
+      const f = this.progForm;
+      if (!f) return;
+      f.perfiles = []; f.existentes = []; f.profile_id = profileId; f.error = '';
+      if (!f.cliente_id) return;
+      const id = f.cliente_id;
+      try {
+        const [perfiles, existentes] = await Promise.all([
+          api(`/clients/${id}/profiles`), api(`/programaciones?cliente_id=${id}&resumen=true`)]);
+        if (this.progForm !== f || f.cliente_id !== id) return;
+        f.perfiles = perfiles;
+        f.existentes = existentes;
+      } catch (e) { f.error = e.message; return; }
+      if (!f.profile_id && f.desdeJob) {
+        const igual = f.perfiles.find(p => _mismasSemillas(p.seeds, f.desdeJob.seeds));
+        if (igual) f.profile_id = igual.id;
+      }
+      // Desde un rastreo no se elige un perfil que no tiene sus semillas:
+      // se ofrece crear uno (o la copia fija) en vez de programar otra cosa.
+      if (!f.profile_id && !f.desdeJob && f.perfiles.length === 1) f.profile_id = f.perfiles[0].id;
+    },
+
+    // Las horas del desplegable, de cuarto en cuarto; si la programacion
+    // tiene otro minuto (las 11:07), tambien esa, para no cambiarla al editar.
+    progHoras() {
+      const h = [];
+      for (let i = 0; i < 96; i++) h.push(String(Math.floor(i / 4)).padStart(2, '0') + ':' + String((i % 4) * 15).padStart(2, '0'));
+      const actual = this.progForm && this.progForm.hora;
+      if (actual && !h.includes(actual)) { h.push(actual); h.sort(); }
+      return h;
+    },
+
+    progPerfil() {
+      const f = this.progForm;
+      return f ? (f.perfiles.find(p => p.id === f.profile_id) || null) : null;
+    },
+
+    progCron() { return this.progForm ? _cronDesdeCuando(this.progForm) : ''; },
+
+    // Las activas del mismo perfil que ya hay: se avisa antes de guardar
+    // otra (V06: Lopesan tuvo dos semanales activas a la vez).
+    progYaProgramadas() {
+      const f = this.progForm;
+      if (!f || !f.profile_id) return [];
+      return (f.existentes || []).filter(p => p.activa && p.id !== f.id && p.profile_id === f.profile_id);
+    },
+
+    // Desde un rastreo cuyo cliente no tiene un perfil con sus semillas: se
+    // crea uno con ellas (y la configuracion del cliente) y se programa ese.
+    async progCrearPerfilDesdeJob() {
+      const f = this.progForm;
+      if (!f || !f.desdeJob) return;
+      f.creandoPerfil = true; f.error = '';
+      const usados = new Set(f.perfiles.map(p => p.nombre));
+      let nombre = 'Sitio completo', n = 2;
+      while (usados.has(nombre)) nombre = 'Sitio completo ' + (n++);
+      try {
+        const p = await api(`/clients/${f.cliente_id}/profiles`, { method: 'POST',
+          body: JSON.stringify({ nombre, seeds: f.desdeJob.seeds }) });
+        await this.progCambiarCliente(p.id);
+      } catch (e) { f.error = e.message; }
+      f.creandoPerfil = false;
+    },
+
+    async guardarProgForm() {
+      const f = this.progForm;
+      if (!f) return;
+      f.error = '';
+      const cron = this.progCron();
+      if (!cron) { f.error = 'Falta cuándo se repite.'; return; }
+      f.guardando = true;
+      try {
+        if (f.id) {
+          const cuerpo = { cron, zona_horaria: f.zona || 'Europe/Madrid' };
+          if (f.nombre && f.nombre.trim()) cuerpo.nombre = f.nombre.trim();
+          await api('/programaciones/' + f.id, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+        } else {
+          if (!f.profile_id) { f.error = 'Elige el perfil que se repite.'; f.guardando = false; return; }
+          const cuerpo = { profile_id: f.profile_id, cron, zona_horaria: f.zona || 'Europe/Madrid' };
+          if (f.nombre && f.nombre.trim()) cuerpo.nombre = f.nombre.trim();
+          await api('/programaciones', { method: 'POST', body: JSON.stringify(cuerpo) });
+        }
+        const cliente = f.cliente_id;
+        this.progForm = null;
+        this.showToast(f.id ? 'Programación guardada' : 'Programado: ' + fmt.cron(cron));
+        if (this.view === 'programados' || this.view === 'produccion') await this.cargarProgramaciones();
+        if (this.view === 'client' && this.cliente && this.cliente.id === cliente) await this.cargarProgramacionesCliente();
+      } catch (e) {
+        // El mensaje se queda EN el modal (como en la copia fija).
+        f.error = e.message;
+      }
+      if (this.progForm) this.progForm.guardando = false;
+    },
+
+    async cargarProgramacionesCliente() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      try {
+        const l = await api(`/programaciones?cliente_id=${id}&resumen=true`);
+        if (this.cliente && this.cliente.id === id) this.clienteProgramaciones = l;
+      } catch (_) { this.clienteProgramaciones = []; }
+    },
+
+    programacionesDePerfil(pid) {
+      return (this.clienteProgramaciones || []).filter(p => p.profile_id === pid);
+    },
+
+    // Las de copia fija del cliente que no cuelgan de ningun perfil: se
+    // enseñan aparte para que no queden escondidas (V06).
+    programacionesSinPerfil() {
+      return (this.clienteProgramaciones || []).filter(p => !p.profile_id);
+    },
+
+    // Grupos de programaciones activas que se repiten, para el aviso de
+    // Programados: cada pareja una sola vez.
+    gruposRepetidos() {
+      const vistos = new Set(), grupos = [];
+      for (const p of this.programaciones) {
+        if (!p.activa || !(p.repetida_con || []).length || vistos.has(p.id)) continue;
+        const ids = [p.id, ...p.repetida_con.map(r => r.id)];
+        ids.forEach(i => vistos.add(i));
+        grupos.push({ cliente: p.cliente_nombre || p.client_id || 'sin cliente', motivo: p.repetida_con[0].motivo,
+                      nombres: ids.map(i => (this.programaciones.find(x => x.id === i) || {}).nombre).filter(Boolean),
+                      cuando: ids.map(i => this.programaciones.find(x => x.id === i)).filter(Boolean).map(x => fmt.cron(x.cron)) });
+      }
+      return grupos;
     },
 
     async guardarProgramacion() {
@@ -2792,7 +3057,7 @@ function app() {
 
     async cargarProgramaciones() {
       try {
-        this.programaciones = await api('/programaciones');
+        this.programaciones = await api('/programaciones?resumen=true');
       } catch (e) {
         this.programaciones = [];
         this.error = 'No se pudieron cargar las programaciones: ' + e.message;
@@ -2806,7 +3071,8 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ activa: !p.activa }),
         });
-        await this.cargarProgramaciones();
+        if (this.view === 'client') await this.cargarProgramacionesCliente();
+        else await this.cargarProgramaciones();
       } catch (e) {
         this.error = 'No se pudo cambiar: ' + e.message;
       }
@@ -2820,7 +3086,8 @@ function app() {
         mensaje: 'Deja de lanzarse sola. Los rastreos que ya ha lanzado NO se borran.', aceptar: 'Quitar', peligro: true })) return;
       try {
         await api('/programaciones/' + p.id, { method: 'DELETE' });
-        await this.cargarProgramaciones();
+        if (this.view === 'client') await this.cargarProgramacionesCliente();
+        else await this.cargarProgramaciones();
       } catch (e) {
         this.error = 'No se pudo borrar: ' + e.message;
       }

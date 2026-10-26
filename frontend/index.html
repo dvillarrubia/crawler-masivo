@@ -111,9 +111,13 @@
           </div>
           <div class="modal-body">
             <p class="text-dim text-sm" style="margin-bottom:.8rem">
-              Se repetirá con las mismas semillas y la misma configuración que
+              Copia fija: se repetirá con las mismas semillas y la misma configuración que
               <strong x-text="job.name"></strong>, y cada vez se comparará con el
-              censo anterior del mismo sitio.
+              censo anterior del mismo sitio. Los cambios que hagas después en el cliente
+              no le llegarán.
+            </p>
+            <p class="text-sm" style="margin:-.3rem 0 .8rem" x-show="!job.cliente_id">
+              Para que herede los cambios, asigna antes este rastreo a un cliente (menú ⋯) y programa su perfil.
             </p>
 
             <label class="text-sm">Nombre</label>
@@ -145,6 +149,165 @@
           <div class="modal-footer">
             <button class="btn" @click="programarAbierto = false">Cancelar</button>
             <button class="btn btn-primary" @click="guardarProgramacion()">Programar</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== MODAL: PROGRAMAR UN PERFIL (revision de UX del 25-oct, 2.2) =====
+         Cada programacion cuelga de un perfil y en cada disparo hereda lo que
+         tengan ese dia el cliente y el perfil (decision 193). El cuando, en
+         lenguaje llano; la expresion cron solo en «Otra frecuencia». -->
+    <template x-if="progForm">
+      <div class="modal-backdrop" @click.self="progForm = null" @keydown.escape.window="progForm = null">
+        <div class="modal" style="max-width:36rem" role="dialog" aria-modal="true" aria-labelledby="titulo-prog" data-testid="modal-programacion">
+          <div class="modal-header">
+            <h2 id="titulo-prog" style="display:flex;align-items:center;gap:.4rem">
+              <i data-lucide="calendar-clock" style="width:18px;height:18px"></i>
+              <span x-text="progForm.id ? 'Editar programación' : 'Nueva programación'"></span>
+            </h2>
+            <button class="btn-icon" @click="progForm = null" aria-label="Cerrar" style="font-size:1.25rem">&times;</button>
+          </div>
+          <div class="modal-body">
+            <!-- Que se repite -->
+            <template x-if="!progForm.id">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="prog-cliente">Cliente</label>
+                  <select id="prog-cliente" x-model="progForm.cliente_id" @change="progCambiarCliente()">
+                    <option value="">Elige un cliente…</option>
+                    <template x-for="c in clientes" :key="c.id">
+                      <option :value="c.id" x-text="c.nombre" :selected="c.id === progForm.cliente_id"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="prog-perfil">Perfil</label>
+                  <select id="prog-perfil" x-model="progForm.profile_id" :disabled="!progForm.cliente_id">
+                    <option value="" x-text="progForm.cliente_id && !progForm.perfiles.length ? 'Este cliente no tiene perfiles' : 'Elige un perfil…'"></option>
+                    <template x-for="p in progForm.perfiles" :key="p.id">
+                      <option :value="p.id" x-text="p.nombre + (p.activo ? '' : ' (desactivado)')" :selected="p.id === progForm.profile_id"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+            </template>
+            <template x-if="progForm.id">
+              <p class="text-sm mb-1">
+                <strong x-text="progForm.clienteNombre || 'Sin cliente'"></strong> ·
+                <span x-text="progForm.perfilNombre ? 'perfil «' + progForm.perfilNombre + '»' : 'sin perfil'"></span>
+              </p>
+            </template>
+
+            <!-- Desde un rastreo: si ningun perfil tiene sus semillas -->
+            <template x-if="!progForm.id && progForm.desdeJob && progForm.cliente_id && !progForm.profile_id">
+              <div class="card mb-1 prog-nota">
+                <p class="text-sm" style="margin:0 0 .4rem">Ningún perfil de este cliente empieza por las mismas
+                  <span x-text="fmt.num((progForm.desdeJob.seeds || []).length)"></span> semillas que
+                  «<span x-text="progForm.desdeJob.name"></span>».</p>
+                <div class="flex gap-1" style="flex-wrap:wrap">
+                  <button class="btn btn-sm" @click="progCrearPerfilDesdeJob()" :disabled="progForm.creandoPerfil"
+                          data-tip="El perfil nuevo hereda la configuración del cliente; lo que este rastreo cambiara a mano se ajusta después en el perfil">Crear un perfil con esas semillas</button>
+                  <button class="btn btn-sm btn-link" @click="abrirCopiaFija()">o repetir este rastreo tal cual (copia fija)</button>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="progPerfil()">
+              <p class="text-dim text-sm prog-nota-perfil">
+                Empieza en <span class="prog-semillas" x-text="(progPerfil().seeds || []).slice(0, 2).join(', ') + ((progPerfil().seeds || []).length > 2 ? ' y ' + fmt.num(progPerfil().seeds.length - 2) + ' más' : '')"></span>.
+                En cada disparo usa las semillas y la configuración que tengan ese día el cliente y el
+                perfil: si cambias el perfil, el próximo censo ya sale con el cambio.
+              </p>
+            </template>
+            <template x-if="progForm.id && progForm.hereda">
+              <p class="text-dim text-sm prog-nota-perfil">En cada disparo usa las semillas y la configuración que tengan
+                ese día el cliente y el perfil: lo que cambies en el perfil llega al próximo censo.</p>
+            </template>
+            <template x-if="progForm.id && !progForm.hereda">
+              <p class="text-sm prog-aviso-fija">
+                Copia fija de un rastreo: lanza siempre las mismas <span x-text="fmt.num(progForm.n_semillas || 0)"></span>
+                semillas y la configuración de cuando se creó; los cambios del cliente no le llegan. Se pasa a un perfil
+                con la migración de programaciones.
+              </p>
+            </template>
+
+            <!-- Cuando -->
+            <fieldset class="prog-cuando">
+              <legend class="text-sm">Cuándo se repite</legend>
+              <div class="flex gap-1 prog-frecuencias" role="radiogroup" aria-label="Frecuencia">
+                <template x-for="o in [['semanal', 'Cada semana'], ['diaria', 'Cada día'], ['quincenal', 'Cada 15 días'], ['mensual', 'Cada mes'], ['avanzada', 'Otra']]" :key="o[0]">
+                  <button type="button" class="btn btn-sm" role="radio" :aria-checked="progForm.frecuencia === o[0]"
+                          :class="progForm.frecuencia === o[0] && 'btn-primary'" @click="progForm.frecuencia = o[0]" x-text="o[1]"></button>
+                </template>
+              </div>
+              <div class="form-row prog-dia-hora" x-show="progForm.frecuencia !== 'avanzada'">
+                <div class="form-group" x-show="progForm.frecuencia === 'semanal'">
+                  <label for="prog-dia">Día</label>
+                  <select id="prog-dia" x-model.number="progForm.dia">
+                    <template x-for="d in diasProgramacion" :key="d[0]">
+                      <option :value="d[0]" x-text="d[1]" :selected="d[0] === progForm.dia"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="form-group" x-show="progForm.frecuencia === 'mensual'">
+                  <label for="prog-diames">Día del mes</label>
+                  <select id="prog-diames" x-model.number="progForm.diaMes">
+                    <template x-for="d in 28" :key="d">
+                      <option :value="d" x-text="d" :selected="d === progForm.diaMes"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="prog-hora">Hora</label>
+                  <select id="prog-hora" x-model="progForm.hora">
+                    <template x-for="h in progHoras()" :key="h">
+                      <option :value="h" x-text="h" :selected="h === progForm.hora"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+              <div x-show="progForm.frecuencia === 'avanzada'" class="form-group">
+                <label for="prog-cron">Expresión cron (minuto hora día-del-mes mes día-de-semana)</label>
+                <input id="prog-cron" type="text" x-model="progForm.cron" style="font-family:monospace" placeholder="0 3 * * 1">
+              </div>
+              <p class="text-sm prog-resumen" data-testid="prog-resumen">
+                Se lanzará <strong x-text="fmt.cron(progCron()) !== progCron() ? fmt.cron(progCron()) : 'según la expresión ' + (progCron() || '—')"></strong>,
+                <span x-text="fmt.zona(progForm.zona)"></span>.
+              </p>
+              <details class="text-sm">
+                <summary style="cursor:pointer" class="text-dim">Otra zona horaria</summary>
+                <input type="text" x-model="progForm.zona" style="margin-top:.35rem" placeholder="Europe/Madrid" aria-label="Zona horaria">
+                <div class="form-hint">La hora se lee en esta zona, con su cambio de horario.</div>
+              </details>
+            </fieldset>
+
+            <div class="form-group" style="margin-top:.6rem">
+              <label for="prog-nombre">Nombre <span class="text-dim">(opcional)</span></label>
+              <input id="prog-nombre" type="text" x-model="progForm.nombre"
+                     :placeholder="progPerfil() ? progPerfil().nombre : 'el del perfil'">
+              <div class="form-hint">Cada rastreo que lance se llamará así, con su fecha.</div>
+            </div>
+
+            <!-- Repetida: mismo perfil ya programado (V06) -->
+            <template x-if="progYaProgramadas().length">
+              <div class="card prog-repetida" role="alert" data-testid="prog-ya-programada">
+                <strong>Este perfil ya se repite solo:</strong>
+                <span x-text="progYaProgramadas().map(p => fmt.cron(p.cron)).join(' y ')"></span>.
+                Otra programación rastrearía el mismo sitio dos veces y haría dos avisos de cada alerta.
+                Edita la que hay salvo que quieras las dos a propósito (por ejemplo, un canario diario y un censo semanal).
+              </div>
+            </template>
+
+            <div x-show="progForm.error" class="card" style="border-left:3px solid var(--red,#d32f2f);margin-top:.8rem">
+              <div class="text-sm" x-text="progForm.error"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" @click="progForm = null">Cancelar</button>
+            <button class="btn btn-primary" @click="guardarProgForm()" data-testid="prog-guardar"
+                    :disabled="progForm.guardando || (!progForm.id && !progForm.profile_id)"
+                    x-text="progForm.id ? 'Guardar' : 'Programar'"></button>
           </div>
         </div>
       </div>
@@ -315,7 +478,7 @@
                     <span class="text-dim text-sm" x-text="fmt.zona(p.zona_horaria) + ' · ' + fmt.dentroDe(p.proxima_ejecucion)"></span>
                   </span>
                   <span class="prod-nombre">
-                    <span x-text="p.nombre"></span>
+                    <span x-text="(p.cliente_nombre ? p.cliente_nombre + ' · ' : '') + (p.perfil_nombre || p.nombre)"></span>
                     <span class="text-dim text-sm" x-text="fmt.cron(p.cron) !== p.cron ? fmt.cron(p.cron) : 'calendario a medida'"></span>
                   </span>
                 </div>
@@ -336,21 +499,41 @@
       </div>
     </template>
 
-    <!-- ===== RASTREOS PROGRAMADOS ===== -->
+    <!-- ===== RASTREOS PROGRAMADOS =====
+         Revision de UX del 25-oct, 2.2 (V06, V07, V44): cada fila dice de que
+         cliente y de que perfil es, se crea y se edita desde aqui (dia y hora
+         en castellano, zona de Madrid) y se avisa de las repetidas. -->
     <template x-if="view === 'programados'">
       <div>
         <div class="flex items-center gap-1 mb-2" style="flex-wrap:wrap">
-          <span class="text-dim text-sm">Rastreos que se repiten solos. Los dispara el worker;
-            cada uno se compara con el censo anterior del mismo sitio al terminar.</span>
-          <span class="text-dim text-sm" style="margin-left:auto"
+          <span class="text-dim text-sm" style="flex:1 1 18rem">Rastreos que se repiten solos. Cada uno repite un perfil
+            de un cliente y, al terminar, se compara con el censo anterior de ese perfil.</span>
+          <span class="text-dim text-sm"
                 x-text="programaciones.length === 1 ? '1 programación' : fmt.num(programaciones.length) + ' programaciones'"></span>
+          <button class="btn btn-primary btn-sm" @click="abrirNuevaProgramacion()" data-testid="nueva-programacion"
+                  style="display:flex;align-items:center;gap:.35rem">
+            <i data-lucide="plus" style="width:14px;height:14px"></i> Nueva programación
+          </button>
         </div>
+
+        <!-- Repetidas: dos activas del mismo perfil o con las mismas semillas -->
+        <template x-for="g in gruposRepetidos()" :key="g.nombres.join('|') + g.cuando.join('|')">
+          <div class="card mb-2 aviso-repetidas" role="alert" data-testid="aviso-repetidas">
+            <i data-lucide="copy" style="width:16px;height:16px;flex-shrink:0;color:var(--orange)"></i>
+            <div>
+              <strong x-text="g.cliente + ': ' + g.nombres.length + ' programaciones activas rastrean lo mismo'"></strong>
+              <span class="text-sm" x-text="'(' + g.motivo + ': ' + g.cuando.join(' y ') + ').'"></span>
+              <div class="text-sm text-dim">Gastan producción dos veces y cada alerta llega repetida. Pausa la que sobre.</div>
+            </div>
+          </div>
+        </template>
 
         <template x-if="!programaciones.length">
           <div class="empty" style="padding:2.5rem 1.5rem">
             <h3 style="margin-bottom:.5rem;font-size:1.05rem">No hay ningún rastreo programado</h3>
             <p class="text-dim" style="max-width:420px;line-height:1.5">
               Mientras no los haya, de un cambio en un sitio te enteras cuando se te ocurre mirar.
+              Programa un perfil con «Nueva programación» o desde la configuración del cliente.
             </p>
           </div>
         </template>
@@ -363,19 +546,35 @@
           <div class="card">
             <table class="tabla-apilable tabla-programados" style="width:100%;font-size:.85rem">
               <thead><tr>
-                <th style="text-align:left">Nombre</th>
+                <th style="text-align:left">Cliente</th>
+                <th style="text-align:left">Perfil</th>
                 <th style="text-align:left">Cuándo</th>
                 <th style="text-align:left">Próximo</th>
                 <th style="text-align:left">Último</th>
-                <th style="width:7rem"><span class="sr-only">Acciones</span></th>
+                <th style="width:10rem"><span class="sr-only">Acciones</span></th>
               </tr></thead>
               <tbody>
                 <template x-for="p in programaciones" :key="p.id">
-                  <tr :class="!p.activa && 'fila-en-pausa'">
-                    <td data-etiqueta="Nombre">
-                      <div x-text="p.nombre"></div>
-                      <div class="text-dim truncate" style="font-size:.75rem;max-width:22rem"
-                           x-text="(p.seeds || []).join(', ')" :title="(p.seeds || []).join('\n')"></div>
+                  <tr :class="[!p.activa && 'fila-en-pausa', (p.repetida_con || []).length && 'fila-repetida']" data-testid="fila-programacion">
+                    <td data-etiqueta="Cliente">
+                      <template x-if="p.cliente_id">
+                        <a :href="'#/clientes/' + p.cliente_id" x-text="p.cliente_nombre || p.client_id"></a>
+                      </template>
+                      <span class="text-dim" x-show="!p.cliente_id" x-text="p.client_id || 'sin cliente'"></span>
+                      <div class="text-dim" style="font-size:.75rem" x-show="p.nombre !== p.perfil_nombre" x-text="p.nombre"></div>
+                    </td>
+                    <td data-etiqueta="Perfil">
+                      <template x-if="p.perfil_nombre">
+                        <a :href="'#/clientes/' + p.cliente_id + '/configuracion'" x-text="p.perfil_nombre"></a>
+                      </template>
+                      <template x-if="!p.hereda_perfil">
+                        <span class="badge badge-pending" data-tip="Lanza siempre las semillas y la configuración copiadas del rastreo del que se creó: los cambios del cliente no le llegan">copia fija</span>
+                      </template>
+                      <div class="text-dim truncate" style="font-size:.75rem;max-width:18rem"
+                           x-text="(p.seeds || []).join(', ') + (p.n_semillas > (p.seeds || []).length ? ' y ' + fmt.num(p.n_semillas - p.seeds.length) + ' más' : '')"></div>
+                      <template x-if="(p.repetida_con || []).length">
+                        <div class="text-orange" style="font-size:.75rem;white-space:normal;overflow-wrap:anywhere" x-text="'Repite a ' + p.repetida_con.map(r => '«' + r.nombre + '»').join(', ') + ' (' + p.repetida_con[0].motivo + ')'"></div>
+                      </template>
                     </td>
                     <td data-etiqueta="Cuándo" :title="'Expresión: ' + p.cron">
                       <div x-text="fmt.cron(p.cron) !== p.cron ? fmt.cron(p.cron) : 'calendario a medida'"></div>
@@ -403,10 +602,11 @@
                            x-text="fmt.motivo(p.ultimo_motivo)" :title="p.ultimo_motivo"></div>
                     </td>
                     <td class="celda-acciones" style="text-align:right;white-space:nowrap">
+                      <button class="btn btn-sm" @click="editarProgramacion(p)" :aria-label="'Editar la programación ' + p.nombre">Editar</button>
                       <button class="btn btn-sm" @click="alternarProgramacion(p)"
                               x-text="p.activa ? 'Pausar' : 'Reanudar'"></button>
                       <button class="btn btn-sm" @click="borrarProgramacion(p)" :aria-label="'Quitar la programación ' + p.nombre"
-                              data-tip="Quita el calendario. Los rastreos que ya lanzo NO se borran">&times;</button>
+                              data-tip="Quita el calendario. Los rastreos que ya lanzó NO se borran">&times;</button>
                     </td>
                   </tr>
                 </template>
@@ -597,8 +797,54 @@
               </a>
             </template>
 
+            <!-- Siguiente paso (revision de UX del 25-oct, 2.14): sin censo
+                 todavia y con un perfil, lo que toca es lanzar o programar.
+                 Es lo primero que se ve tras el alta guiada. -->
+            <template x-if="!ultimoCensoCliente() && !serieTruncadaCliente() && !rastreoEnCursoCliente() && perfilSiguientePaso()">
+              <div class="card siguiente-paso" data-testid="siguiente-paso">
+                <p class="text-sm siguiente-ok" x-show="altaReciente === cliente.id">
+                  <i data-lucide="check-circle" style="width:15px;height:15px"></i>
+                  <span x-text="'Cliente creado con el perfil «' + perfilSiguientePaso().nombre + '».'"></span>
+                </p>
+                <h3>Siguiente paso: el primer censo</h3>
+                <p class="text-dim text-sm">
+                  Perfil «<span x-text="perfilSiguientePaso().nombre"></span>», que empieza en
+                  <span class="siguiente-semilla" x-text="(perfilSiguientePaso().seeds || [])[0]"></span><span x-show="(perfilSiguientePaso().seeds || []).length > 1" x-text="' y ' + fmt.num(perfilSiguientePaso().seeds.length - 1) + ' más'"></span>.
+                  <a href="#" @click.prevent="editarPerfil(perfilSiguientePaso())">Cambiarlo</a>
+                </p>
+                <div class="siguiente-opciones">
+                  <div class="siguiente-opcion">
+                    <button class="btn btn-primary" @click="lanzarDesdeSiguientePaso('canario')" data-testid="siguiente-canario"
+                            style="display:flex;align-items:center;gap:.35rem">
+                      <i data-lucide="bird" style="width:14px;height:14px"></i> Lanzar canario</button>
+                    <span class="text-sm text-dim">Primero 250 páginas, en minutos: dice si el sitio bloquea o necesita render antes de rastrearlo entero.</span>
+                  </div>
+                  <div class="siguiente-opcion">
+                    <button class="btn" @click="lanzarDesdeSiguientePaso('censo')" data-testid="siguiente-censo"
+                            style="display:flex;align-items:center;gap:.35rem">
+                      <i data-lucide="rocket" style="width:14px;height:14px"></i> Lanzar censo</button>
+                    <span class="text-sm text-dim">El sitio entero. Según el tamaño, de minutos a horas.</span>
+                  </div>
+                  <div class="siguiente-opcion">
+                    <template x-if="!programacionesDePerfil(perfilSiguientePaso().id).length">
+                      <button class="btn" @click="abrirNuevaProgramacion({ cliente_id: cliente.id, profile_id: perfilSiguientePaso().id, cron: '0 3 * * 1' })"
+                              data-testid="siguiente-programar" style="display:flex;align-items:center;gap:.35rem">
+                        <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programar cada semana</button>
+                    </template>
+                    <template x-if="programacionesDePerfil(perfilSiguientePaso().id).length">
+                      <button class="btn" @click="editarProgramacion(programacionesDePerfil(perfilSiguientePaso().id)[0])"
+                              style="display:flex;align-items:center;gap:.35rem">
+                        <i data-lucide="calendar-check" style="width:14px;height:14px"></i>
+                        <span x-text="'Programado ' + fmt.cron(programacionesDePerfil(perfilSiguientePaso().id)[0].cron)"></span></button>
+                    </template>
+                    <span class="text-sm text-dim">Se repite solo y cada censo se compara con el anterior: así llegan las alertas.</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <!-- Sin censos todavia -->
-            <template x-if="!ultimoCensoCliente()">
+            <template x-if="!ultimoCensoCliente() && !(!serieTruncadaCliente() && !rastreoEnCursoCliente() && perfilSiguientePaso())">
               <div class="card empty" data-testid="estado-vacio">
                 <!-- /serie trae los 30 mas recientes: con 30 rastreos que no son
                      censo no se puede afirmar que no haya ninguno (revision 2.3). -->
@@ -987,7 +1233,7 @@
                       </template>
                       <!-- Cerrado sin rastreo (decision 188): se dice por que, y no que el fallo se fuera. -->
                       <template x-if="i.cerrado_en && i.motivo_cierre">
-                        <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en) + ({serie_pausada: ': se pausó su programación', serie_borrada: ': se borró su programación o su perfil'}[i.motivo_cierre] || '') + ' (no se comprobó si sigue)'"></span>
+                        <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en) + ({serie_pausada: ': se pausó su programación', serie_borrada: ': se borró su programación o su perfil', serie_unida: ': su programación pasó a su perfil, que ya tenía esta alerta abierta'}[i.motivo_cierre] || '') + ' (no se comprobó si sigue)'"></span>
                       </template>
                       <!-- Cerrado por un rastreo que luego se borro: se sabe la fecha y nada mas. -->
                       <template x-if="i.cerrado_en && !i.motivo_cierre && !i.cerrado_job_id">
@@ -1014,7 +1260,38 @@
              alertas (revision de UX del 25-oct, 2.1). Los perfiles venian
              primero en la ficha y el editor de reglas ocupaba la pestana
              Alertas; aqui estan juntos «que se rastrea» y «cuando avisar». -->
-        <template x-if="clienteTab === 'config' || !cliente">
+        <!-- Alta guiada (revision de UX del 25-oct, 2.14; decision 194): solo
+             nombre y dominio. Se crea solo un perfil «Sitio principal» con la
+             home y la ficha abre en Estado con el siguiente paso. -->
+        <template x-if="!cliente && altaForm">
+          <div class="card alta-cliente" data-testid="alta-cliente">
+            <h3>Dar de alta un cliente</h3>
+            <p class="text-dim text-sm">Con el nombre y el dominio basta para el primer rastreo. La configuración,
+              Search Console, Slack y las alertas se rellenan después en Configuración.</p>
+            <form @submit.prevent="crearClienteGuiado()">
+              <div class="form-group">
+                <label for="alta-nombre">Nombre del cliente</label>
+                <input id="alta-nombre" type="text" x-model="altaForm.nombre" placeholder="Ej.: Lopesan Hotels" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="alta-dominio">Dominio principal</label>
+                <input id="alta-dominio" type="text" x-model="altaForm.dominio" placeholder="www.cliente.com" autocomplete="off" inputmode="url">
+                <div class="form-hint" x-show="altaHome()">
+                  Se creará el perfil «Sitio principal», que empieza en <strong x-text="altaHome()"></strong>.
+                </div>
+              </div>
+              <template x-if="altaForm.error">
+                <div class="card mb-1" style="border-color:var(--red);color:var(--red);padding:.4rem .6rem;font-size:.85rem" x-text="altaForm.error"></div>
+              </template>
+              <div class="flex gap-1 items-center" style="flex-wrap:wrap">
+                <button type="submit" class="btn btn-primary" :disabled="altaForm.guardando" data-testid="alta-crear">Crear cliente</button>
+                <a href="#/clientes" class="btn">Cancelar</a>
+              </div>
+            </form>
+          </div>
+        </template>
+
+        <template x-if="cliente && clienteTab === 'config'">
           <div data-testid="cliente-config">
             <!-- La pestana es larga: un indice arriba para ir a lo que se busca. -->
             <div class="text-sm config-indice" x-show="cliente">
@@ -1031,47 +1308,85 @@
                   <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
                 </div>
                 <p class="text-dim text-sm mb-1">
-                  Qué se rastrea y cómo: el sitio principal, el blog, otro idioma o un competidor. Un
-                  rastreo lanzado desde un perfil hereda la configuración del cliente y la del perfil.
+                  Qué se rastrea, cómo y cada cuánto: el sitio principal, el blog, otro idioma o un competidor.
+                  Un rastreo lanzado o programado desde un perfil hereda la configuración del cliente y la del
+                  perfil del momento, y su evolución y sus alertas son las del perfil.
                 </p>
                 <template x-if="!clientePerfiles.length">
                   <div class="text-dim text-sm">Sin perfiles todavía.</div>
                 </template>
-                <template x-if="clientePerfiles.length">
-                  <div class="table-wrap">
-                  <table style="width:100%;font-size:.85rem">
-                    <thead><tr>
-                      <th style="text-align:left">perfil</th>
-                      <th style="text-align:left">semillas</th>
-                      <th style="text-align:left">último rastreo</th>
-                      <th style="width:13rem"></th>
-                    </tr></thead>
-                    <tbody>
-                      <template x-for="p in clientePerfiles" :key="p.id">
-                        <tr :style="p.activo ? '' : 'opacity:.5'">
-                          <td>
-                            <div x-text="p.nombre"></div>
-                            <span class="badge" :class="p.rol === 'competidor' ? 'badge-pending' : 'badge-completed'"
-                                  x-text="p.rol"></span>
-                          </td>
-                          <td class="text-dim" x-text="(p.seeds || []).join(', ').slice(0, 80)"></td>
-                          <td>
-                            <template x-if="p.last_job_id">
-                              <a href="#" @click.prevent="openJob(p.last_job_id)">abrir</a>
-                            </template>
-                            <span class="text-dim" x-show="!p.last_job_id">nunca</span>
-                          </td>
-                          <td style="text-align:right;white-space:nowrap">
-                            <button class="btn btn-sm btn-primary"
-                                    @click="openCreate({ cliente_id: cliente.id, profile_id: p.id })">Lanzar</button>
-                            <button class="btn btn-sm" @click="editarPerfil(p)">Editar</button>
-                            <button class="btn btn-sm" @click="borrarPerfil(p)"
-                                    data-tip="Borra el perfil. Sus rastreos NO se borran">&times;</button>
-                          </td>
-                        </tr>
+                <!-- Una tarjeta por perfil (revision de UX del 25-oct, 2.2): que
+                     rastrea, cuando se repite y sus acciones. Sin tabla: a 390 px
+                     cada perfil se lee entero sin desplazar de lado. -->
+                <template x-for="p in clientePerfiles" :key="p.id">
+                  <div class="perfil-fila" :class="!p.activo && 'perfil-inactivo'" data-testid="perfil-fila">
+                    <div class="perfil-que">
+                      <div class="perfil-nombre">
+                        <strong x-text="p.nombre"></strong>
+                        <span class="badge" :class="p.rol === 'competidor' ? 'badge-pending' : 'badge-completed'"
+                              x-text="p.rol === 'competidor' ? 'competidor' : 'propio'"></span>
+                        <span class="badge" x-show="!p.activo">desactivado</span>
+                      </div>
+                      <div class="text-dim text-sm perfil-semillas"
+                           x-text="(p.seeds || []).slice(0, 2).join(', ') + ((p.seeds || []).length > 2 ? ' y ' + fmt.num(p.seeds.length - 2) + ' más' : '')"></div>
+                      <div class="text-sm">
+                        <template x-if="p.last_job_id">
+                          <a :href="'#/rastreos/' + p.last_job_id">Último rastreo</a>
+                        </template>
+                        <span class="text-dim" x-show="!p.last_job_id">Nunca se ha lanzado</span>
+                      </div>
+                    </div>
+                    <div class="perfil-cuando" data-testid="perfil-programacion">
+                      <template x-for="g in programacionesDePerfil(p.id)" :key="g.id">
+                        <div class="perfil-prog" :class="!g.activa && 'fila-en-pausa'">
+                          <i data-lucide="calendar-clock" style="width:14px;height:14px;flex-shrink:0"></i>
+                          <span>
+                            <span x-text="(fmt.cron(g.cron) !== g.cron ? fmt.cron(g.cron).replace(/^./, c => c.toUpperCase()) : 'Calendario a medida')"></span><span class="text-dim" x-text="g.activa ? '' : ' · en pausa'"></span>
+                            <span class="badge badge-pending" x-show="!g.hereda_perfil" data-tip="Copia fija: no hereda los cambios del perfil ni del cliente">copia fija</span>
+                            <span class="text-dim text-sm" x-show="g.activa && g.proxima_ejecucion" x-text="'· próximo ' + fmt.enZona(g.proxima_ejecucion, g.zona_horaria)"></span>
+                            <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa del mismo perfil: pausa una'"></span>
+                          </span>
+                          <button class="btn btn-sm" @click="editarProgramacion(g)">Editar</button>
+                          <button class="btn btn-sm" @click="alternarProgramacion(g)" x-text="g.activa ? 'Pausar' : 'Reanudar'"></button>
+                        </div>
                       </template>
-                    </tbody>
-                  </table>
+                      <template x-if="!programacionesDePerfil(p.id).length">
+                        <button class="btn btn-sm" @click="abrirNuevaProgramacion({ cliente_id: cliente.id, profile_id: p.id, cron: '0 3 * * 1' })"
+                                data-testid="perfil-programar" style="display:flex;align-items:center;gap:.3rem">
+                          <i data-lucide="calendar-plus" style="width:13px;height:13px"></i> Programar cada semana…
+                        </button>
+                      </template>
+                    </div>
+                    <div class="perfil-acciones">
+                      <button class="btn btn-sm btn-primary"
+                              @click="openCreate({ cliente_id: cliente.id, profile_id: p.id })">Lanzar</button>
+                      <button class="btn btn-sm" @click="editarPerfil(p)">Editar</button>
+                      <button class="btn btn-sm" @click="borrarPerfil(p)" :aria-label="'Borrar el perfil ' + p.nombre"
+                              data-tip="Borra el perfil y su programación. Sus rastreos NO se borran">&times;</button>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- Programaciones viejas sin perfil (copia fija): visibles
+                     aqui para que no se queden escondidas (V06). -->
+                <template x-if="programacionesSinPerfil().length">
+                  <div class="perfil-sin" data-testid="programaciones-sin-perfil">
+                    <p class="text-sm" style="margin:0 0 .35rem"><strong>Programaciones sin perfil</strong>
+                      <span class="text-dim">— copias fijas de un rastreo: lanzan siempre las mismas semillas y la configuración
+                        de cuando se crearon, y su evolución va aparte. Pásalas a un perfil con la migración de programaciones.</span></p>
+                    <template x-for="g in programacionesSinPerfil()" :key="g.id">
+                      <div class="perfil-prog" :class="!g.activa && 'fila-en-pausa'">
+                        <i data-lucide="calendar-clock" style="width:14px;height:14px;flex-shrink:0"></i>
+                        <span>
+                          <strong x-text="g.nombre"></strong>
+                          <span x-text="' · ' + (fmt.cron(g.cron) !== g.cron ? fmt.cron(g.cron) : 'calendario a medida')"></span><span class="text-dim" x-text="g.activa ? '' : ' · en pausa'"></span>
+                          <span class="text-dim text-sm" x-text="'· ' + fmt.num(g.n_semillas) + ' semillas'"></span>
+                          <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa'"></span>
+                        </span>
+                        <button class="btn btn-sm" @click="editarProgramacion(g)">Editar</button>
+                        <button class="btn btn-sm" @click="alternarProgramacion(g)" x-text="g.activa ? 'Pausar' : 'Reanudar'"></button>
+                      </div>
+                    </template>
                   </div>
                 </template>
               </div>
@@ -6571,6 +6886,13 @@
         <template x-if="createError">
           <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="createError"></div>
         </template>
+        <!-- Desde el siguiente paso del alta (revision de UX del 25-oct, 2.14) -->
+        <template x-if="createSugerencia === 'canario'">
+          <div class="card mb-2 sugerencia-lanzar text-sm" data-testid="sugerencia-canario">
+            <strong>Canario:</strong> revisa lo de abajo y pulsa «Lanzar canario». Rastrea las primeras 250 páginas
+            con esta misma configuración y no cuenta en la evolución del cliente.
+          </div>
+        </template>
 
         <!-- El cliente se elige, no se escribe: con texto libre una errata
              creaba otro cliente (#36). Al elegirlo, el formulario se precarga
@@ -7168,12 +7490,12 @@
         <button class="btn" @click="showCreate = false">Cancelar</button>
         <!-- El canario antes que el censo: 250 URLs para ver si el sitio
              bloquea, si hace falta render y cuanto tarda (crawl-domains). -->
-        <button class="btn" @click="lanzarCanario()" :disabled="creating || !createForm.seeds"
+        <button class="btn" :class="createSugerencia === 'canario' && 'btn-primary'" @click="lanzarCanario()" :disabled="creating || !createForm.seeds"
                 data-tip="Lanza primero 250 URLs para comprobar bloqueos, render y ritmo antes del censo"
                 style="display:flex;align-items:center;gap:.4rem">
           <i data-lucide="bird" style="width:14px;height:14px"></i> Lanzar canario
         </button>
-        <button class="btn btn-primary" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds" style="display:flex;align-items:center;gap:.4rem">
+        <button class="btn" :class="createSugerencia !== 'canario' && 'btn-primary'" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds" style="display:flex;align-items:center;gap:.4rem">
           <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="rocket" style="width:14px;height:14px" x-show="!creating"></i>
           Iniciar rastreo
