@@ -204,11 +204,45 @@ const POSITION_LABEL = {
 // Pestanas de la ficha <-> tramo de la URL (#/rastreos/<id>/<tramo>)
 const TAB_SLUG = {
   overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'puntuacion',
-  semantic: 'semantico', diff: 'comparar', enriquecido: 'enriquecido', cleaning: 'limpieza',
+  semantic: 'semantico', diff: 'comparar', enriquecido: 'ia', cleaning: 'limpieza',
 };
 // `informe` era el tramo de la pestana Puntuacion antes de la revision de UX
-// del 25-oct: los enlaces guardados siguen abriendola.
-const SLUG_TAB = { ...Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k])), informe: 'insights' };
+// del 25-oct, y `enriquecido` el de la pestana IA (2.9): los enlaces
+// guardados siguen abriendolas.
+const SLUG_TAB = { ...Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k])),
+                   informe: 'insights', enriquecido: 'enriquecido' };
+
+// Que tipo de problema contesta cada pregunta de la IA (revision de UX del
+// 25-oct, 2.9): la linea «Revisado con IA» de Problemas. Solo las parejas en
+// las que la pregunta juzga justo ese problema: los pares de la canibalizacion
+// salen de los avisos `canibalizacion_por_consulta` (enriquecido_canibalizacion)
+// y el soft 404 pregunta a sus candidatos, aunque tambien a paginas con poco
+// texto que no estan en el aviso: por eso `porUrl` cruza URL a URL y cuenta
+// solo las paginas del problema. Lo que no esta aqui no se relaciona: seria
+// inventar que una respuesta habla de un problema que no pregunta.
+// Que pregunta cada modulo del analisis enriquecido y a que paginas, para el
+// lanzador (revision de UX del 25-oct, 2.9). Las claves son los nombres de
+// shared/enriquecido.py; tests/test_ia_frontend.py comprueba que estan todos.
+const EXPLICACION_MODULO_IA = {
+  pagina_legal: 'Si la página es un aviso legal, de privacidad, de cookies o de condiciones. Es una pregunta de prueba, para comprobar que todo funciona, no para decidir nada. Pregunta a todas las indexables.',
+  soft_404: 'Si la página dice que algo no existe (un error, un producto retirado, una búsqueda sin resultados, un «próximamente») aunque responda bien. Solo pregunta a las sospechosas: las que ya marcó el crawler y las de muy poco texto. Las respuestas son orientativas y no entran en ningún informe.',
+  pagina_de_utilidad: 'Si la página es un paso de un proceso que nadie busca en Google: acceso, registro, «gracias», confirmación, baja, carrito. Pregunta a las mismas sospechosas que el soft 404. Orientativo: no entra en ningún informe.',
+  canibalizacion: 'En las búsquedas para las que Search Console muestra varias páginas del sitio, compara esas páginas de dos en dos: si a quien busca le vale cualquiera y, si es así, qué hacer (unirlas, diferenciarlas, quedarse con una o dejarlas). Solo las búsquedas con más clics. Orientativo.',
+  intencion_pagina: 'Qué resuelve cada página (informarse, comparar, comprar, llegar a una marca o a un local) y en qué momento de la compra está quien llega (descubriendo, comparando, decidiendo o ya cliente). Pregunta a las páginas con título, encabezado o texto. Orientativo.',
+  intencion_busquedas: 'Qué buscaba la gente que llegó desde Google a cada página (sus búsquedas con más clics) y, junto con la anterior, si la página encaja con lo que buscan. Una búsqueda ya preguntada no se vuelve a pagar. Solo clientes con Search Console. Orientativo.',
+  tipo_pagina: 'Qué es cada plantilla: portada, listado, ficha de producto o servicio, página comercial, artículo, contacto, ayuda, legal… Pregunta por unas pocas páginas de cada plantilla y propone la respuesta para toda ella. Orientativo: no se aplica a nada.',
+  categoria_cliente: 'A cuál de las categorías de negocio del cliente pertenece cada plantilla, con unas pocas páginas de cada una. Si el cliente no tiene sus categorías en la configuración, no pregunta nada. Orientativo.',
+  title_contenido: 'Si el title dice de qué va la página, en cuatro niveles. No pregunta por lo que ya resuelve una regla (sin title, title de relleno o repetido) ni por las páginas con muy poco texto, y tiene un tope por plantilla. Orientativo.',
+  title_generico: 'Si el title, quitado el nombre de la marca, no dice qué página es («Detalle noticia», «SAT»). Solo pregunta por titles muy cortos, sin la portada ni los de relleno que ya detecta una regla, y con un tope por plantilla. Orientativo.',
+  schema_visible: 'Si lo que se ve en la página contradice el precio, la valoración, la fecha o la disponibilidad de sus datos estructurados. Solo páginas con algo visible con lo que comparar, con un tope por plantilla. Que un dato no se vea no cuenta como contradicción. Orientativo.',
+};
+
+const PROBLEMA_PREGUNTA_IA = {
+  canibalizacion_por_consulta: { pregunta: 'paginas_sustitutas', porUrl: false, unidad: ['par', 'pares'],
+                                 si: 'compiten por la misma búsqueda', no: 'no compiten' },
+  soft_404_candidato: { pregunta: 'es_soft_404', porUrl: true, unidad: ['página', 'páginas'],
+                        si: 'sí es soft 404', no: 'no lo es' },
+};
 
 // Pestanas de la ficha del cliente (revision de UX del 25-oct, 2.1): Estado
 // (la de entrada), Historial, Alertas y Configuracion. Los tramos viejos
@@ -506,24 +540,27 @@ const fmt = {
     return partes.join(' · ');
   },
   // Analisis enriquecido (#40)
-  usd: n => n == null ? '—' : (n === 0 ? '0 $' : (n < 0.01 ? Number(n).toFixed(5) : Number(n).toFixed(2)) + ' $'),
+  // Con coma decimal, como el resto de cifras (revision de UX del 25-oct, 2.9).
+  usd: n => n == null ? '—' : (n === 0 ? '0 $' : Number(n).toLocaleString('es-ES',
+    n < 0.01 ? { maximumSignificantDigits: 2 } : { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' }) + ' $'),
   duracion: s => s == null ? '—' : s < 60 ? s + ' s' : s < 3600 ? Math.ceil(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h',
   estadoEnriq: e => ({ pendiente: 'En cola', en_curso: 'En curso', cancelando: 'Cancelando…',
     completada: 'Completada', parcial: 'Parcial (presupuesto)', cancelada: 'Cancelada', fallida: 'Fallida' })[e] || e,
   colorEnriq: e => ({ completada: 'var(--green)', parcial: 'var(--orange)', fallida: 'var(--red)',
     cancelada: 'var(--text-dim)', cancelando: 'var(--orange)' })[e] || 'var(--accent)',
   motivoEnriq: m => ({ presupuesto_ejecucion: 'se agotó el presupuesto de la ejecución',
-    presupuesto_cliente: 'se agotó el tope mensual del cliente', presupuesto_global: 'se agotó el tope mensual de la instancia',
+    presupuesto_cliente: 'se agotó el tope mensual del cliente', presupuesto_global: 'se agotó el tope mensual de todos los clientes',
     presupuesto_sin_contador: 'sin contador de gasto no se puede garantizar el tope', max_llamadas: 'tope de llamadas',
     sin_credito: 'sin crédito en OpenRouter', clave_invalida: 'clave de OpenRouter inválida',
     desactivado: 'capa desactivada en el worker', cancelada: 'cancelada a mano' })[m] || m,
+  // Sin recorte, cada modulo pregunta a SUS candidatas (el soft 404, a las
+  // sospechosas); «todas las indexables» decia 3.216 para 17 URLs (V32).
   alcanceEnriq: a => {
-    if (!a) return 'todas las indexables';
     const partes = [];
-    if (a.carpeta) partes.push('carpeta ' + a.carpeta);
-    if (a.muestra) partes.push('muestra de ' + a.max_urls);
-    else if (a.max_urls) partes.push('máx. ' + a.max_urls + ' URLs');
-    return partes.join(', ') || 'todas las indexables';
+    if (a && a.carpeta) partes.push('carpeta ' + a.carpeta);
+    if (a && a.muestra) partes.push('muestra de ' + fmt.num(a.max_urls));
+    else if (a && a.max_urls) partes.push('máx. ' + fmt.num(a.max_urls) + ' URLs');
+    return partes.join(', ') || 'las candidatas de cada módulo';
   },
   respuestaEnriq: r => r === 'true' ? 'sí' : r === 'false' ? 'no' : (RESPUESTA_ENRIQ[r] || r),
   estadoPlantillaEnriq: e => ({ propagable: 'propagable', orientativa: 'orientativa',
@@ -2313,6 +2350,7 @@ function app() {
       this.cleaningMessage = null;
       this._pararEnriq();
       this.enriqRuns = []; this.enriqRun = null; this.enriqDecisiones = null; this.enriqPlantillas = null; this.enriqIntencion = null;
+      this.iaProblemas = null; this.iaUrl = null; this._decisionesIA = {};
       this.urls = []; this.issues = []; this.links = [];
       this.issueFilters = { severity: '', issue_type: '' };
       this.issuesResumen = null; this.issuesVista = 'tipos'; this.grupoAbierto = {};
@@ -3339,6 +3377,7 @@ function app() {
         this.urlProblemas = this._agruparProblemasUrl(d.issues, d.url);
         this.cargarPaginasPorTipo(this.urlProblemas.map(g => g.tipo));
         this.urlDetail = d;
+        this.cargarIAUrl();
       } catch (e) { this.error = e.message; }
       this.urlDetailLoading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4013,6 +4052,14 @@ function app() {
     enriqPlantillas: null,
     enriqTimer: null,
     enriqIntencion: null,
+    // Pestana IA (revision de UX del 25-oct, 2.9): llamadas, cache, tokens,
+    // presupuesto y tope de todos los clientes, plegados en el lanzador.
+    enriqAvanzado: false,
+    // La linea «Revisado con IA» de cada tipo de problema y las respuestas de
+    // la IA sobre la URL abierta. Solo lecturas de lo ya pagado.
+    iaProblemas: null,
+    iaUrl: null,
+    _decisionesIA: {},
 
     _alcanceEnriq() {
       const f = this.enriqForm;
@@ -4022,16 +4069,26 @@ function app() {
       return {};
     },
 
-    async abrirEnriquecido() {
-      if (!this.job || this.job.status !== 'completed') return;
-      this.enriqError = null;
-      this.enriqEstimacion = null;
-      try { this.enriqToken = sessionStorage.getItem('enrichment-token') || ''; } catch { this.enriqToken = ''; }
+    // El catalogo de modulos: el lanzador lo necesita y la pestana IA lo usa
+    // para nombrar los modulos del historial y ver si ya se pregunto lo mismo.
+    async cargarCatalogoEnriq() {
+      if (this.enriqCatalogo.length) return true;
       try {
         const cat = await api('/enrichment/modulos');
         this.enriqCatalogo = cat.modulos;
         this.enriqLanzable = cat.lanzamiento_activado;
-      } catch (e) { this.enriqError = e.message; return; }
+        return true;
+      } catch (e) { this.enriqError = e.message; return false; }
+    },
+
+    async abrirEnriquecido() {
+      if (!this.job || this.job.status !== 'completed') return;
+      this.enriqError = null;
+      this.enriqEstimacion = null;
+      this.enriqAvanzado = false;
+      try { this.enriqToken = sessionStorage.getItem('enrichment-token') || ''; } catch { this.enriqToken = ''; }
+      this.enriqCatalogo = [];
+      if (!(await this.cargarCatalogoEnriq())) { this.showToast(this.enriqError, 'error'); return; }
       // Sin nada marcado: que el coste aparezca solo cuando alguien elige.
       // Con un unico modulo se marca para que la estimacion salga de entrada.
       if (!this.enriqForm.modulos.length && this.enriqCatalogo.length === 1) {
@@ -4085,13 +4142,13 @@ function app() {
         });
         try { sessionStorage.setItem('enrichment-token', token); } catch {}
         this.enriqAbierto = false;
-        this.showToast('Análisis enriquecido en cola', 'info');
-        this.detailTab = 'enriquecido';
+        this.showToast('Consulta a la IA en cola', 'info');
+        this.switchTab('enriquecido');
         await this.cargarEjecuciones(run.id);
       } catch (e) {
         // Un token rechazado no se guarda: que la proxima vez se pida otra vez.
         if (/token/i.test(e.message)) { try { sessionStorage.removeItem('enrichment-token'); } catch {} }
-        this.enriqError = e.message;
+        this.enriqError = this.textoErrorEnriq(e.message);
       }
       this.enriqLanzando = false;
     },
@@ -4101,6 +4158,9 @@ function app() {
       try {
         this.enriqRuns = await api(`/jobs/${this.job.id}/enrichment`);
       } catch { this.enriqRuns = []; return; }
+      if (this.detailTab === 'enriquecido') this.cargarCatalogoEnriq();
+      this.cargarIAProblemas();
+      if (this.view === 'url-detail') this.cargarIAUrl();
       const id = elegir || (this.enriqRun && this.enriqRun.id) || (this.enriqRuns[0] && this.enriqRuns[0].id);
       if (id && this.detailTab === 'enriquecido') await this.verEjecucion(id);
     },
@@ -4182,8 +4242,11 @@ function app() {
     // Las descripciones de los modulos (shared/enriquecido.py) hablan de
     // «Sin evaluar (#8)» y «salen inciertas»: en pantalla, en llano.
     descripcionEnriq(t) {
+      // Y sin las referencias internas («(decision 105)», «(#39, decision
+      // 176)», «de #7»), que no le dicen nada a quien lanza (2.9).
       return String(t || '').replace(/Sin evaluar \(#8\)/g, 'Sin calibrar').replace(/Sin umbral \(#8[^)]*\)/g, 'Sin calibrar')
-        .replace(/salen inciertas/g, 'son orientativas').replace(/todo incierto/g, 'todo orientativo');
+        .replace(/salen inciertas/g, 'son orientativas').replace(/todo incierto/g, 'todo orientativo')
+        .replace(/\s*\((?:aviso de la )?(?:#\d+[^)]*|decisi[oó]n \d+[^)]*)\)/g, '').replace(/ de #\d+/g, '').replace(/Sin umbral\b/g, 'Sin calibrar');
     },
 
     // Una respuesta suelta: su estado en palabras.
@@ -4244,6 +4307,208 @@ function app() {
         const q = new URLSearchParams({ pregunta });
         this.enriqPlantillas = await api(`/jobs/${this.job.id}/enrichment/${this.enriqRun.id}/plantillas?${q}`);
       } catch (e) { this.error = e.message; }
+    },
+
+    // Los mensajes de la API hablan de «token» y de ENRICHMENT_TOKEN: en
+    // pantalla es la clave de autorizacion (revision de UX del 25-oct, 2.9).
+    textoErrorEnriq(msg) {
+      const m = String(msg || '');
+      if (/incorrecto o ausente/i.test(m)) return 'La clave de autorización no es correcta. Pídesela a quien administra el crawler.';
+      if (/ENRICHMENT_TOKEN/.test(m)) return 'Este servidor no tiene configurada la clave de autorización: se puede ver el coste, pero no lanzar.';
+      return m.replace(/de la instancia/g, 'de todos los clientes');
+    },
+
+    // El nombre de cada modulo en castellano llano y con tildes: el catalogo
+    // (shared/enriquecido.py) dice «Pagina legal (ejemplo)» o «Canibalizacion
+    // por busqueda (juicio)». Uno nuevo sale con su titulo, sin el parentesis.
+    tituloModuloEnriq(nombre) {
+      const t = ({
+        pagina_legal: 'Página legal (de prueba)', soft_404: 'Soft 404', pagina_de_utilidad: 'Páginas de utilidad',
+        canibalizacion: 'Canibalización por búsqueda', intencion_pagina: 'Intención y embudo de la página',
+        intencion_busquedas: 'Intención de las búsquedas de Search Console', tipo_pagina: 'Tipo de página (por plantilla)',
+        categoria_cliente: 'Categoría del cliente (por plantilla)', title_contenido: 'Title frente al contenido',
+        title_generico: 'Title genérico', schema_visible: 'Datos estructurados frente a lo visible',
+      })[nombre];
+      if (t) return t;
+      const m = this.enriqCatalogo.find(x => x.nombre === nombre);
+      return m ? m.titulo.replace(/\s*\([^)]*\)\s*$/, '') : nombre;
+    },
+    // En el lanzador, el nombre a secas. Antes llevaba «· solo a las
+    // sospechosas» cuando el titulo del catalogo decia «candidatos», pero 10
+    // de los 11 modulos eligen sus paginas (filtrar_urls), no solo esos dos:
+    // a quien pregunta cada uno lo dice su explicacion (revision de UX del
+    // 25-oct, 2.9).
+    etiquetaModuloEnriq(m) {
+      return this.tituloModuloEnriq(m.nombre);
+    },
+    // Lo que pregunta cada modulo y a que paginas, en castellano llano: el
+    // catalogo (shared/enriquecido.py) lo dice sin tildes y con jerga
+    // («score de 4 niveles», «placeholders», «TOFU, MOFU, BOFU»). Sin cifras
+    // de topes, que viven en el modulo y cambiarian aqui sin avisar. Uno nuevo
+    // sale con la descripcion del catalogo, limpia de referencias
+    // (revision de UX del 25-oct, 2.9). Un test comprueba que no falta ninguno.
+    explicacionModuloEnriq(m) {
+      const t = EXPLICACION_MODULO_IA[m && m.nombre];
+      return t || this.descripcionEnriq(m && m.descripcion);
+    },
+    // A cuantas URLs (o pares) pregunto de verdad, segun su estimacion: sin
+    // recorte, «las candidatas» de un modulo pueden ser 17 de 3.216.
+    urlsPreguntadasEnriq(run) {
+      const pm = (run && run.estimacion && run.estimacion.por_modulo) || {};
+      const v = Object.values(pm);
+      if (!v.length) return null;
+      const urls = v.filter(x => x.unidad !== 'grupos').reduce((a, x) => Math.max(a, x.urls || 0), 0);
+      const grupos = v.filter(x => x.unidad === 'grupos').reduce((a, x) => a + (x.urls || 0), 0);
+      return [urls ? fmt.num(urls) + (urls === 1 ? ' URL' : ' URLs') : '', grupos ? fmt.num(grupos) + (grupos === 1 ? ' par' : ' pares') : '']
+        .filter(Boolean).join(' y ') || 'ninguna URL';
+    },
+
+    // Las preguntas que haria lo marcado en el lanzador, con las dependencias
+    // que la estimacion haya anadido.
+    _preguntasDeModulos(nombres) {
+      const ps = new Set();
+      for (const n of nombres || []) {
+        const m = this.enriqCatalogo.find(x => x.nombre === n);
+        (m ? m.preguntas : []).forEach(p => ps.add(p));
+      }
+      return ps;
+    },
+    // Antes de pagar otra vez (2.9): una ejecucion de este censo que ya hizo
+    // todas las preguntas marcadas, con el mismo alcance o con otro (se dice).
+    // Las fallidas y canceladas no cuentan: no dejaron respuestas completas.
+    ejecucionRepetidaEnriq() {
+      const marcadas = this._preguntasDeModulos((this.enriqEstimacion && this.enriqEstimacion.modulos) || this.enriqForm.modulos);
+      if (!marcadas.size) return null;
+      const alcance = JSON.stringify(this._normAlcanceEnriq(this._alcanceEnriq()));
+      const run = this.enriqRuns.find(r => ['completada', 'parcial', 'en_curso', 'pendiente'].includes(r.estado)
+        && [...marcadas].every(p => this._preguntasDeModulos(r.modulos).has(p)));
+      if (!run) return null;
+      return { run, mismoAlcance: JSON.stringify(this._normAlcanceEnriq(run.alcance)) === alcance };
+    },
+    _normAlcanceEnriq(a) {
+      a = a || {};
+      return { carpeta: a.carpeta || null, max_urls: a.max_urls || null, muestra: !!a.muestra };
+    },
+    verEjecucionDesdeLanzador(id) {
+      this.enriqAbierto = false;
+      this.switchTab('enriquecido');
+      this.verEjecucion(id);
+    },
+
+    // Las respuestas de una ejecucion, de 500 en 500 y hasta 2.000: alcanza
+    // para lo que se paga a mano. Mas alla `completo` es false y quien lo usa
+    // no afirma que una URL no se pregunto.
+    async _decisionesDeEjecucion(runId, pregunta = null) {
+      const clave = runId + '|' + (pregunta || '');
+      if (this._decisionesIA[clave]) return this._decisionesIA[clave];
+      const items = [];
+      let total = 0;
+      for (let page = 1; page <= 4; page++) {
+        const q = new URLSearchParams({ page, page_size: 500 });
+        if (pregunta) q.set('pregunta', pregunta);
+        const r = await api(`/jobs/${this.job.id}/enrichment/${runId}/decisions?${q}`);
+        total = r.total;
+        items.push(...r.items);
+        if (items.length >= total || !r.items.length) break;
+      }
+      return (this._decisionesIA[clave] = { items, completo: items.length >= total });
+    },
+
+    // La ejecucion mas reciente que contesto una pregunta, ya terminada.
+    _ultimaEjecucionCon(pregunta) {
+      return this.enriqRuns.find(r => ['completada', 'parcial'].includes(r.estado)
+        && this._preguntasDeModulos(r.modulos).has(pregunta));
+    },
+
+    // «Revisado con IA» por tipo de problema (2.9). Por pares: lo que dijo la
+    // IA de los pares de ese aviso. Por URL: solo las paginas que tienen el
+    // problema, cruzadas con las respuestas; si alguna de las dos listas no se
+    // ha podido leer entera, no se dice nada (no se afirma lo que no se sabe).
+    async cargarIAProblemas() {
+      if (!this.job) return;
+      const jobId = this.job.id;
+      const clave = jobId + '|' + this.enriqRuns.map(r => r.id + r.estado).join(',');
+      if (this.iaProblemas && this.iaProblemas.clave === clave) return;
+      this.iaProblemas = { jobId, clave, porTipo: {} };
+      if (!this.enriqRuns.length) return;
+      if (!(await this.cargarCatalogoEnriq())) return;
+      const porTipo = {};
+      for (const [tipo, cfg] of Object.entries(PROBLEMA_PREGUNTA_IA)) {
+        const run = this._ultimaEjecucionCon(cfg.pregunta);
+        if (!run) continue;
+        try {
+          let si = 0, no = 0, otras = 0, decididas = 0;
+          if (cfg.porUrl) {
+            const iss = await api(`/jobs/${jobId}/issues?issue_type=${tipo}&page=1&page_size=200`);
+            if (iss.total > iss.items.length) continue;
+            const dec = await this._decisionesDeEjecucion(run.id, cfg.pregunta);
+            if (!dec.completo) continue;
+            const delProblema = new Set(iss.items.map(i => i.url));
+            for (const d of dec.items) {
+              if (!delProblema.has(d.url)) continue;
+              if (d.respuesta === 'true') si++; else if (d.respuesta === 'false') no++; else otras++;
+              if (d.estado === 'decidido') decididas++;
+            }
+          } else {
+            const det = await api(`/jobs/${jobId}/enrichment/${run.id}`);
+            const r = (det.resultados || {})[cfg.pregunta];
+            if (!r) continue;
+            si = (r.por_respuesta || {}).true || 0;
+            no = (r.por_respuesta || {}).false || 0;
+            otras = Math.max(0, r.total - si - no);
+            decididas = (r.por_estado || {}).decidido || 0;
+          }
+          const n = si + no + otras;
+          if (!n) continue;
+          porTipo[tipo] = { run, pregunta: cfg.pregunta, si, no, otras, n, cfg,
+                            orientativo: decididas < n };
+        } catch { /* sin la linea: la fila del problema sale igual */ }
+      }
+      if (this.job && this.job.id === jobId) this.iaProblemas = { jobId, clave, porTipo };
+    },
+    // La linea de una fila de Problemas: solo en la primera fila del tipo
+    // (un tipo puede salir con dos gravedades).
+    lineaIAProblema(r) {
+      // Con un segmento elegido la fila cuenta solo sus paginas y la linea
+      // hablaria de todo el censo: no se mezcla.
+      const x = !this.issuesSegmento && this.iaProblemas && this.iaProblemas.porTipo[r.issue_type];
+      if (!x) return null;
+      const primera = (this.resumenIssues(this.issueFilters.severity).find(y => y.issue_type === r.issue_type) || {}).severity;
+      if (primera !== r.severity) return null;
+      const u = n => n === 1 ? x.cfg.unidad[0] : x.cfg.unidad[1];
+      const partes = [x.cfg.si + ' en ' + fmt.num(x.si), x.cfg.no + ' en ' + fmt.num(x.no)];
+      if (x.otras) partes.push('sin respuesta clara en ' + fmt.num(x.otras));
+      return {
+        texto: 'Revisado con IA el ' + fmt.dia(x.run.created_at) + (x.cfg.porUrl ? ', ' + fmt.num(x.n) + ' ' + u(x.n) + ' de este problema' : ', ' + fmt.num(x.n) + ' ' + u(x.n))
+          + ': ' + partes.join(', ') + (x.orientativo ? ' · orientativo' : ''),
+        run: x.run, pregunta: x.pregunta,
+      };
+    },
+    verResultadoIA(runId, pregunta) {
+      this.switchTab('enriquecido');
+      this.verEjecucion(runId).then(() => pregunta && this.cargarDecisionesEnriq(pregunta, null));
+    },
+
+    // Lo que contesto la IA sobre la URL abierta (2.9): las respuestas de las
+    // tres ultimas ejecuciones terminadas, solo las que son de la pagina (no
+    // las de un par o una busqueda, que solo cuelgan de ella).
+    async cargarIAUrl() {
+      this.iaUrl = null;
+      if (!this.job || !this.urlDetail || !this.enriqRuns.length) return;
+      const jobId = this.job.id, url = this.urlDetail.url;
+      const filas = [];
+      const vistas = new Set();
+      for (const run of this.enriqRuns.filter(r => ['completada', 'parcial'].includes(r.estado)).slice(0, 3)) {
+        try {
+          const dec = await this._decisionesDeEjecucion(run.id);
+          for (const d of dec.items) {
+            if (d.url !== url || d.busqueda || d.rutas || vistas.has(d.pregunta)) continue;
+            vistas.add(d.pregunta);
+            filas.push({ run, d });
+          }
+        } catch { /* sin respuestas que ensenar */ }
+      }
+      if (this.job && this.job.id === jobId && this.urlDetail && this.urlDetail.url === url) this.iaUrl = filas;
     },
 
     // ------- Importar backup -------

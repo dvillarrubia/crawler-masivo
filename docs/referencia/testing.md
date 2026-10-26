@@ -373,7 +373,11 @@ de version, y el relleno simulado que no deja nada), `test_evolucion_api.py`
 (los endpoints, el panel y el backup; trabajo de la API) y
 `test_evolucion_frontend.py` (graficas y tendencia en Chromium),
 `test_ficha_cliente_frontend.py` (rutas de las pestanas del cliente y la
-referencia de «frente al anterior», en Chromium).
+referencia de «frente al anterior», en Chromium) y `test_ia_frontend.py`
+(pestana IA, UX 2.9: el aviso de consulta repetida, la linea «Revisado con IA»
+de Problemas que cuenta solo las paginas del problema y calla sin listas
+completas, los textos de la clave; en Chromium con la API simulada, y las
+parejas pregunta-problema contra el catalogo y el analizador).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

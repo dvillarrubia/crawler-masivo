@@ -1050,6 +1050,17 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   `soft_404_plantilla`, una fila por host con las plantillas que responden 200
   a una URL que no existe. El Resumen deja de decir «0 páginas» en verde junto a
   esas plantillas. Los censos ya analizados lo tendrán al re-analizarse.
+- **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
+  enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
+  una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y
+  «Nueva consulta…». El lanzador avisa si ya se preguntó lo mismo en ese censo,
+  pregunta por defecto a las candidatas de cada módulo (explica en llano a
+  cuáles y dice a cuántas),
+  pide la «clave de autorización», habla del gasto del mes «en todos los
+  clientes» y pliega llamadas, memoria, tokens, presupuesto y tope global en
+  «Opciones avanzadas». Problemas enseña «Revisado con IA» en la canibalización
+  y en los candidatos a soft 404; la ficha de una URL, lo que dijo la IA de
+  ella. «Avanzado» pasa a «Más» con nombre fijo (V34). Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

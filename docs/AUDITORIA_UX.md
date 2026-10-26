@@ -177,6 +177,47 @@ Google con la del censo si la inspección cae en la ventana de la decisión 144,
 dice «ya es la que declara la página en este censo» cuando Google ya la
 sigue y «puede cambiar», no «cambiará», cuando no; y si Search Console no
 cubre los 90 días, la ventana empieza en `datos_desde` y lo avisa.
+### Revisión del 25-oct · 2.9 Pestaña IA (V32, V33, V34)
+
+- [x] Pestaña **IA** propia (`#/rastreos/<id>/ia`; el tramo viejo `enriquecido`
+  sigue abriéndola), entre Puntuación y «Más». Propia y no dentro del menú: es
+  lo único que se paga y nadie sabía si ya se había preguntado; con un nombre
+  de dos letras cabe en la fila de escritorio, y en móvil la fila queda en dos
+  líneas quitando los iconos; ahí «Más» cae a media fila, y su menú se abre a
+  lo ancho de la fila de pestañas para no salirse de la pantalla. Sin botón en
+  la cabecera del censo.
+- [x] Dentro: «Nueva consulta…», **Lo ya preguntado** (fecha, módulos con nombre
+  en castellano, sobre qué y a cuántas URLs, estado y gasto) y la respuesta de
+  la ejecución elegida. El progreso solo mientras corre.
+- [x] Lanzador: módulos con nombre llano y, solo de lo marcado, una explicación
+  propia en castellano llano de qué pregunta y a qué páginas (el catálogo la
+  da sin tildes y con jerga: «score de 4 niveles», «TOFU, MOFU, BOFU»); no se
+  dice «solo a las sospechosas» por el título del catálogo, porque 10 de los
+  11 módulos eligen sus páginas; por defecto **las candidatas de cada módulo**,
+  con cuántas páginas pregunta cada uno («17 de 3.216»). **Clave de
+  autorización** en lugar de ENRICHMENT_TOKEN (también en los errores de la
+  API). Llamadas, memoria, tokens, presupuesto y «gasto del mes en todos los
+  clientes, con tope de N $» en **Opciones avanzadas**; si lo que queda del tope
+  no alcanza, el aviso sale a la vista. El botón dice «Lanzar y pagar hasta
+  N $» y sigue pidiendo la clave.
+- [x] **Antes de pagar otra vez**: si una ejecución de este censo (no fallida ni
+  cancelada) ya hizo todas las preguntas marcadas, «Ya se preguntó lo mismo el
+  24 oct (…): ver resultado», diciendo si fue sobre las mismas páginas.
+- [x] **Problemas**: «Revisado con IA el 24 oct, N pares: compiten en a, no en b ·
+  orientativo · ver resultado» en la canibalización (los pares salen de esos
+  avisos) y, en los candidatos a soft 404, contando solo las páginas que
+  tienen el problema (el módulo pregunta también a páginas con poco texto que
+  no lo tienen). Si alguna lista no se lee entera, o hay un segmento elegido,
+  no se dice nada. Los demás tipos no se relacionan con ninguna pregunta: sería
+  inventarlo.
+- [x] **Ficha de URL**: tarjeta «Revisado con IA» con la respuesta, si es
+  orientativa, la confianza y la fecha. Sin respuestas no sale.
+- [x] «Avanzado» pasa a **«Más»** con nombre fijo y la opción activa marcada
+  dentro (V34; también 3.7).
+- Pendiente: en Lopesan (el único censo de producción con ejecuciones) no hay
+  avisos `soft_404_candidato` ni ejecución de canibalización, así que la línea
+  de Problemas solo se ha visto con datos simulados. Las demás preguntas
+  (title genérico, marcado frente a lo visible…) no se cruzan con Problemas.
 
 ### Lo que salió por el camino (2026-10-14)
 
