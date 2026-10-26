@@ -1069,8 +1069,9 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   las regex plegadas en «Avanzado» y el resultado del `GET /diff` de siempre
   (cuántas URLs viejas tienen pareja y cuáles no). Comparar queda para el
   seguimiento: sin la casilla, abre al instante con la comparación guardada y
-  calcula el detalle después (V21), y el desplegable va por tipo (V22). Solo
-  frontend.
+  calcula el detalle después (V21; las incidencias guardadas, solo si los dos
+  censos siguen con la versión del análisis con la que se compararon), y el
+  desplegable va por tipo (V22). Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

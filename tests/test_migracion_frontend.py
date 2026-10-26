@@ -79,6 +79,11 @@ CASOS = [
      "textoDe": ".", "textoA": "-", "final": "poner_barra"},
     {"dominio": True, "hostDe": "viejo.com", "hostA": "nuevo.com",
      "prefijo": True, "prefDe": "/es/", "prefA": "/"},
+    {"prefijo": True, "prefDe": "/es/", "prefA": "/", "final": "quitar_barra"},
+    {"texto": True, "textoDe": "/hoteles/", "textoA": "/", "final": "quitar_barra"},
+    {"prefijo": True, "prefDe": "/es/", "prefA": "/es-es/", "texto": True,
+     "textoDe": "/blog/", "textoA": "/", "final": "quitar_barra"},
+    {"texto": True, "textoDe": "gran-canaria.html", "textoA": "gc.html", "final": "quitar_ext"},
 ]
 
 
@@ -114,9 +119,47 @@ def test_dos_casos_a_la_vez_se_aplican_los_dos():
                                          final: 'quitar_ext_barra' });
       return reglasParaApi(reglas);
     }""")
-    assert len(r) == 3
+    # Carpeta y final, su borde (la ruta acaba en la carpeta), solo el final
+    # y solo la carpeta.
+    assert len(r) == 4
     salida = _servidor(["https://x.com/es/a.html", "https://x.com/es/b/", "https://x.com/c.html"], r, "")
     assert salida == ["https://x.com/a/", "https://x.com/b/", "https://x.com/c/"]
+
+
+BORDES = [
+    # La raiz de la carpeta o la URL que acaba en el trozo: estos se comen la
+    # barra o la extension, y aun asi cambian los dos (hallazgo de la revision
+    # de 2.13: /blog/ quedaba en /blog y no en /).
+    ({"prefijo": True, "prefDe": "/blog/", "prefA": "/", "final": "quitar_barra"},
+     {"https://www.lopesan.com/blog/": "https://www.lopesan.com/",
+      "https://www.lopesan.com/blog/?p=2": "https://www.lopesan.com/?p=2",
+      "https://www.lopesan.com/blog/a/": "https://www.lopesan.com/a",
+      "https://www.lopesan.com/hoteles/": "https://www.lopesan.com/hoteles"}),
+    ({"texto": True, "textoDe": "/hoteles/", "textoA": "/hotel/", "final": "quitar_barra"},
+     {"https://x.com/es/hoteles/": "https://x.com/es/hotel",
+      "https://x.com/es/hoteles/a/": "https://x.com/es/hotel/a"}),
+    ({"prefijo": True, "prefDe": "/es/", "prefA": "/", "final": "quitar_barra"},
+     {"https://x.com/es/": "https://x.com/", "https://x.com/es/a/": "https://x.com/a"}),
+    ({"prefijo": True, "prefDe": "/es/", "prefA": "/es-es/", "final": "quitar_barra"},
+     {"https://x.com/es/": "https://x.com/es-es"}),
+    ({"texto": True, "textoDe": "/hoteles/", "textoA": "/", "final": "quitar_barra"},
+     {"https://x.com/es/hoteles/": "https://x.com/es", "https://x.com/hoteles/": "https://x.com/"}),
+    ({"texto": True, "textoDe": "gran-canaria.html", "textoA": "gc.html", "final": "quitar_ext"},
+     {"https://x.com/es/gran-canaria.html": "https://x.com/es/gc"}),
+    ({"texto": True, "textoDe": "/hoteles", "textoA": "/hotel", "final": "poner_barra"},
+     {"https://x.com/es/hoteles": "https://x.com/es/hotel/"}),
+]
+
+
+@pytest.mark.parametrize("casos,esperado", BORDES, ids=[json.dumps(c) for c, _ in BORDES])
+def test_la_carpeta_o_el_trozo_al_final_tambien_cambian(casos, esperado):
+    urls = list(esperado)
+    r = _evaluar("""([casos, urls]) => {
+      const reglas = reglasDeMigracion({ ...migCasosVacios(), ...casos });
+      return { api: reglasParaApi(reglas), previa: urls.map(u => aplicarMigracion(u, reglas, {}).url) };
+    }""", [casos, urls])
+    assert r["previa"] == list(esperado.values())
+    assert _servidor(urls, r["api"], "") == list(esperado.values())
 
 
 def test_las_regex_a_mano_se_previsualizan_y_se_mandan_tal_cual():
@@ -217,3 +260,31 @@ def test_el_censo_abierto_reinicia_lo_elegido():
       return [a.migAntes, a.migPaso, a.migDiff, a.migCasos.prefijo];
     }""")
     assert r == ["", 1, None, False]
+
+
+def test_la_vista_previa_no_afirma_que_falte_sin_haberlo_visto_todo():
+    """La comprobacion busca por trozo: si trae mas de lo que cabe en la
+    pagina y la exacta no esta, no se dice que falte (hallazgo de la revision
+    de 2.13). Pide ordenado por URL, que pone la exacta delante."""
+    r = _evaluar("""async () => {
+      const a = app();
+      a.$nextTick = f => f && f();
+      a.migDespues = 'J1'; a.migPaso = 2;
+      a.migMuestra = ['https://x.com/a/', 'https://x.com/b/', 'https://x.com/c/'];
+      window.__pedidas = [];
+      window.api = async (ruta) => { window.__pedidas.push(ruta);
+        const q = new URLSearchParams(ruta.split('?')[1]), s = q.get('search');
+        if (s === 'https://x.com/a/') return {total: 900, items: [{url: 'https://x.com/a/1'}]};
+        if (s === 'https://x.com/b/') return {total: 1, items: [{url: 'https://x.com/b/1'}]};
+        return {total: 300, items: [{url: 'https://x.com/c/'}]}; };
+      await a.comprobarVistaPrevia();
+      const f = u => ({despues: u});
+      return {existe: a.migExiste, textos: ['a', 'b', 'c'].map(x => a.migTextoExiste(f('https://x.com/' + x + '/'))),
+              pedida: window.__pedidas[0]};
+    }""")
+    assert r["existe"] == {"https://x.com/a/": "sin_comprobar", "https://x.com/b/": False, "https://x.com/c/": True}
+    assert r["textos"][0].startswith("no se ha podido comprobar")
+    assert r["textos"][1].startswith("no aparece tal cual")
+    assert r["textos"][2] == "está en el censo de después"
+    q = parse_qs(urlsplit(r["pedida"]).query)
+    assert q["sort_by"] == ["url"] and q["page_size"] == ["200"]

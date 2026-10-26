@@ -2572,24 +2572,38 @@ function app() {
     // guardado de ella (`job.comparacion`: alertas, URLs, incidencias,
     // avisos), al instante. Lo que no se guarda (que cambio pagina a pagina,
     // la extraccion a medida, los ejemplos) llega con el diff, con un
-    // indicador de carga a la vista. Las incidencias guardadas no se ensenan
-    // si este censo se volvio a analizar despues de compararse: ya no son las
-    // que se compararon (decision 191).
+    // indicador de carga a la vista. Las incidencias guardadas solo se
+    // ensenan si se puede afirmar que siguen valiendo: los dos censos con la
+    // version del analisis con la que se compararon (decision 191). Si
+    // cualquiera de los dos se volvio a analizar, ya no son las que se
+    // compararon (`_incidenciasViejas`); si la comparacion es de antes de la
+    // 191 (sin sello) o aun no se sabe la version del anterior, se esperan al
+    // diff (`_incidenciasPendientes`; revision de UX del 25-oct, 2.13,
+    // hallazgo de la revision).
     diffVista() {
       if (this.diff && this.diff._para === this.diffOtro) return this.diff;
       const j = this.job, c = j && j.comparacion;
       if (!c || !this.diffOtro || c.comparado_con !== this.diffOtro) return null;
+      const va = this.versionAnterior && this.versionAnterior.jobId === j.id ? this.versionAnterior : null;
+      const firmaVa = va ? String(va.version) + '|' + (va.error ? 'e' : '') : '';
       // Fuera del estado de Alpine: escribir estado reactivo mientras se pinta
       // volveria a disparar el pintado.
-      if (_diffGuardadoCache.jobId === j.id && _diffGuardadoCache.c === c) return _diffGuardadoCache.valor;
-      const reanalizado = !!(c.analisis_version && j.analisis_version && c.analisis_version !== j.analisis_version);
+      if (_diffGuardadoCache.jobId === j.id && _diffGuardadoCache.c === c && _diffGuardadoCache.va === firmaVa) {
+        return _diffGuardadoCache.valor;
+      }
+      let viejas = null;
+      if (c.analisis_version && j.analisis_version && c.analisis_version !== j.analisis_version) viejas = 'este';
+      else if (c.analisis_version_anterior && va && va.version && va.version !== c.analisis_version_anterior) viejas = 'anterior';
+      const vigentes = !viejas && !!(c.analisis_version && c.analisis_version === j.analisis_version
+        && c.analisis_version_anterior && va && !va.error && va.version === c.analisis_version_anterior);
       const valor = {
-        ...c, _clave: 'g-' + j.id, _jobId: j.id, _guardada: true, _incidenciasViejas: reanalizado,
-        incidencias: reanalizado ? null : c.incidencias, cambios: null, extraido: null,
+        ...c, _clave: 'g-' + j.id, _jobId: j.id, _guardada: true, _incidenciasViejas: viejas,
+        _incidenciasPendientes: !viejas && !vigentes && !!c.incidencias,
+        incidencias: vigentes ? c.incidencias : null, cambios: null, extraido: null,
         antes: { fecha: c.fecha_anterior, nombre: c.nombre_anterior },
         ahora: { fecha: j.started_at || j.created_at, nombre: j.name },
       };
-      Object.assign(_diffGuardadoCache, { jobId: j.id, c, valor });
+      Object.assign(_diffGuardadoCache, { jobId: j.id, c, va: firmaVa, valor });
       return valor;
     },
 
@@ -2931,6 +2945,7 @@ function app() {
         // (UX-12): un desplegable vacio obligaba a saber con cual comparar.
         // Lo guardado se pinta ya (`diffVista`) y el detalle llega despues (V21).
         const auto = this.job && this.job.comparacion && this.job.comparacion.comparado_con;
+        if (auto) this.cargarVersionAnterior();
         if (auto && !this.diffOtro) { this.diffOtro = auto; this.cargarDiff(); }
       }
       if (tab === 'migracion') this.prepararMigracion();
@@ -6804,21 +6819,71 @@ function reglasDeMigracion(c) {
   if (c.final && c.final !== 'igual' && (!conExt || c.ext)) rasgos.push('final');
   const combinaciones = [];
   for (let m = (1 << rasgos.length) - 1; m > 0; m--) combinaciones.push(rasgos.filter((_, i) => m & (1 << i)));
-  // La mas completa primero; entre las del mismo tamano no hay empate posible:
-  // una URL que casa con dos de ellas tiene los rasgos de las dos, y la que
-  // los junta va antes.
+  // La mas completa primero. Una URL que casa con dos del mismo tamano tiene
+  // los rasgos de las dos, y la que los junta va antes. Salvo en un borde:
+  // cuando la ruta acaba JUSTO en la carpeta o el trozo, estos ya se comen la
+  // barra o la extension, la regla con el final no casa y ganaria la del
+  // final solo, sin cambiar la carpeta (/blog/ con «/blog/ → /» y «quitar la
+  // barra» quedaba en /blog y no en /). Para eso cada combinacion con final
+  // lleva antes su regla de borde: el final se aplica al texto que entra,
+  // como si los cambios se hicieran uno detras de otro (revision de UX del
+  // 25-oct, 2.13, hallazgo de la revision).
   combinaciones.sort((a, b) => b.length - a.length);
-  return combinaciones.map(s => _reglaDeCasos(c, s));
+  const reglas = [];
+  for (const s of combinaciones) {
+    for (const borde of _bordesDeCasos(c, s)) reglas.push(_reglaDeCasos(c, s, borde));
+    reglas.push(_reglaDeCasos(c, s));
+  }
+  return reglas;
 }
 
-function _reglaDeCasos(c, s) {
+// El final aplicado al texto que entra (lo que queda al final de la ruta
+// cuando esta acaba en la carpeta o el trozo).
+function _finalSobreTexto(c, t) {
+  if (c.final === 'quitar_ext') return t.endsWith(c.ext) ? t.slice(0, -c.ext.length) : t;
+  if (c.final === 'quitar_ext_barra') return t.endsWith(c.ext) ? t.slice(0, -c.ext.length) + '/' : t;
+  if (c.final === 'poner_barra') return t.endsWith('/') ? t : t + '/';
+  if (c.final === 'quitar_barra') return t.length > 1 && t.endsWith('/') ? t.slice(0, -1) : t;
+  return t;
+}
+
+// Las reglas de borde de una combinacion: [{t, mas}], donde `t` es lo que
+// sustituye a la carpeta o al trozo del final y `mas` pide algo delante del
+// trozo. Sin final, o sin texto que entre (vacio: el final caeria en lo de
+// delante, que no se conoce al escribir la regla), no hay borde.
+function _bordesDeCasos(c, s) {
+  if (!s.includes('final') || !(s.includes('prefijo') || s.includes('texto'))) return [];
+  const ultimo = s.includes('texto') ? 'texto' : 'prefijo';
+  const t = (ultimo === 'texto' ? c.textoA : c.prefA) || '';
+  if (!t) return [];
+  if (c.final === 'quitar_barra' && t === '/') {
+    // La portada «/» se queda como esta: la carpeta que pasa a la raiz
+    // (/blog/ → /) da la portada, no una ruta vacia.
+    if (ultimo === 'prefijo') return [{ t: '/' }];
+    // El trozo que pasa a «/» detras de algo pierde la barra; si no hay
+    // nada delante, es la portada.
+    if (s.includes('prefijo') && c.prefA) return [{ t: '' }];
+    return [{ t: '', mas: true }, { t: '/' }];
+  }
+  return [{ t: _finalSobreTexto(c, t) }];
+}
+
+function _reglaDeCasos(c, s, borde) {
   let patron = '^', g = 0;
   const partes = [];
   const grupo = expr => { patron += expr; g += 1; partes.push({ g }); };
-  if (s.includes('prefijo')) { patron += _escRx(c.prefDe); partes.push(c.prefA || ''); }
-  grupo('(.*?)');
-  if (s.includes('texto')) { patron += _escRx(c.textoDe); partes.push(c.textoA || ''); grupo('(.*?)'); }
-  if (s.includes('final')) {
+  const ultimo = s.includes('texto') ? 'texto' : 'prefijo';
+  if (s.includes('prefijo')) {
+    patron += _escRx(c.prefDe);
+    partes.push(borde && ultimo === 'prefijo' ? borde.t : (c.prefA || ''));
+  }
+  if (!(borde && ultimo === 'prefijo')) grupo(borde && borde.mas ? '(.+?)' : '(.*?)');
+  if (s.includes('texto')) {
+    patron += _escRx(c.textoDe);
+    partes.push(borde ? borde.t : (c.textoA || ''));
+    if (!borde) grupo('(.*?)');
+  }
+  if (s.includes('final') && !borde) {
     if (c.final === 'quitar_ext') patron += _escRx(c.ext);
     else if (c.final === 'quitar_ext_barra') { patron += _escRx(c.ext); partes.push('/'); }
     // Solo si no acaba ya en barra; la portada «/» se queda como esta.
@@ -6943,7 +7008,7 @@ const GRUPOS_DE_TIPO = [
 ];
 // La comparacion guardada de un censo puesta en la forma del diff (V21), una
 // vez por censo.
-const _diffGuardadoCache = { jobId: null, c: null, valor: null };
+const _diffGuardadoCache = { jobId: null, c: null, va: '', valor: null };
 
 function censosPorTipo(lista) {
   const grupos = GRUPOS_DE_TIPO.map(g => ({ ...g, items: [] }));
@@ -7176,7 +7241,11 @@ function migracionUI() {
 
     // ¿Existe la URL ya reescrita en el censo de después? Se busca y se mira
     // que este tal cual: la busqueda casa por trozo. Con un retardo, para no
-    // pedir nada mientras se escribe.
+    // pedir nada mientras se escribe. Ordenada por URL, la exacta va antes que
+    // las que empiezan por ella; aun asi, si la busqueda trae mas de lo que
+    // cabe en una pagina y la exacta no esta, no se afirma que falte: se dice
+    // que no se ha podido comprobar (lo que no se puede afirmar no se afirma;
+    // revision de UX del 25-oct, 2.13, hallazgo de la revision).
     migProgramarComprobacion() {
       clearTimeout(this._migTemporizador);
       this._migTemporizador = setTimeout(() => this.comprobarVistaPrevia(), 450);
@@ -7189,10 +7258,13 @@ function migracionUI() {
         if (f.error || !f.despues || this.migExiste[f.despues] !== undefined) continue;
         this.migExiste = { ...this.migExiste, [f.despues]: 'cargando' };
         try {
-          const q = new URLSearchParams({ page: 1, page_size: 50, ligero: 'true', search: f.despues });
+          const q = new URLSearchParams({ page: 1, page_size: 200, ligero: 'true', sort_by: 'url',
+                                          sort_dir: 'asc', search: f.despues });
           const d = await api(`/jobs/${desp}/urls?` + q);
           const sin = x => String(x).split('#')[0];
-          const esta = (d.items || []).some(x => sin(x.url) === sin(f.despues));
+          const items = d.items || [];
+          const esta = items.some(x => sin(x.url) === sin(f.despues))
+            || ((d.total || 0) > items.length ? 'sin_comprobar' : false);
           if (this.migDespues === desp) this.migExiste = { ...this.migExiste, [f.despues]: esta };
         } catch (e) {
           if (this.migDespues === desp) this.migExiste = { ...this.migExiste, [f.despues]: 'error' };
@@ -7203,6 +7275,7 @@ function migracionUI() {
       const v = this.migExiste[f.despues];
       if (v === undefined || v === 'cargando') return 'buscando en el censo de después…';
       if (v === 'error') return 'no se ha podido comprobar';
+      if (v === 'sin_comprobar') return 'no se ha podido comprobar (hay demasiadas URLs parecidas en el censo de después)';
       if (v) return 'está en el censo de después';
       const d = this.migJob(this.migDespues);
       // Lo que no se puede afirmar no se afirma: un censo incompleto puede no

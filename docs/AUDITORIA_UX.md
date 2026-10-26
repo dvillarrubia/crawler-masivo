@@ -245,6 +245,12 @@ cubre los 90 días, la ventana empieza en `datos_desde` y lo avisa.
   su propio scroll en móvil (desbordaban a 626 px).
 - El enlace guarda censos, paso y casos; uno viejo a Comparar con
   `map_host`/`map_rutas` abre el asistente con lo mismo.
+- Tras la revisión: la raíz de la carpeta (o la URL que acaba en el trozo) ya
+  cambia con el final marcado (/blog/ → / con «quitar la barra», antes quedaba
+  en /blog); la vista previa dice «no se ha podido comprobar» en vez de «no
+  aparece» cuando hay demasiadas URLs parecidas; y Comparar no da por buenas
+  las incidencias guardadas si el censo anterior se volvió a analizar o la
+  comparación no lleva sello de versión (espera al cálculo completo).
 - Lo abierto: Lopesan no ha migrado, así que el asistente se ha probado con un
   caso simulado («el blog pasa a la raíz») sobre sus censos reales. «Por qué
   se eligió el 14-oct y no el 19-oct» (1.8) sigue sin decirse.

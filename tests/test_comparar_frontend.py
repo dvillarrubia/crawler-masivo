@@ -87,8 +87,10 @@ def test_lo_guardado_sale_al_instante_mientras_llega_el_diff():
     r = _evaluar("async () => {" + MONTAR + """
       a.job = {id: 'J1', seeds: ['https://x.com/'], analisis_version: 'v2', name: 'hoy',
                comparacion: {comparado_con: 'J0', comparable: true, analisis_version: 'v2',
+                             analisis_version_anterior: 'v2',
                              alertas: [{regla: 'x'}], urls: {en_ambos: 5, nuevas: 1, desaparecidas: 0},
                              incidencias: {comparable: true, nuevas: {total: 3, por_tipo: []}}}};
+      a.versionAnterior = {jobId: 'J1', version: 'v2'};
       let soltar;
       window.api = (ruta) => new Promise(res => { soltar = () => res({comparable: true, cambios: {}, urls: {en_ambos: 6}}); });
       const p = a.cargarDiff();
@@ -117,7 +119,44 @@ def test_lo_guardado_no_ensena_incidencias_si_el_censo_se_reanalizo():
       const d = a.diffVista();
       return [d.incidencias, d._incidenciasViejas];
     }""")
-    assert r == [None, True]
+    assert r == [None, "este"]
+
+
+GUARDADA = """
+      a.job = {id: 'J1', seeds: ['https://x.com/'], analisis_version: 'v2',
+               comparacion: {comparado_con: 'J0', comparable: true, analisis_version: 'v2',
+                             analisis_version_anterior: 'v2',
+                             incidencias: {comparable: true, nuevas: {total: 3, por_tipo: []}}}};
+      window.api = () => new Promise(() => {});
+      a.cargarDiff();
+"""
+
+
+def test_lo_guardado_no_ensena_incidencias_si_se_reanalizo_el_anterior():
+    """Decision 191: volver a analizar el censo ANTERIOR deja igual de viejas
+    las incidencias guardadas (hallazgo de la revision de 2.13)."""
+    r = _evaluar("async () => {" + MONTAR + GUARDADA + """
+      a.versionAnterior = {jobId: 'J1', version: 'v3'};
+      const d = a.diffVista();
+      return [d.incidencias, d._incidenciasViejas, d._incidenciasPendientes];
+    }""")
+    assert r == [None, "anterior", False]
+
+
+def test_lo_guardado_espera_al_diff_si_no_se_puede_afirmar_que_valga():
+    """Sin saber aun la version del anterior, o con una comparacion de antes
+    de la 191 (sin sello), las incidencias guardadas no se dan por vigentes."""
+    r = _evaluar("async () => {" + MONTAR + GUARDADA + """
+      const sinSaber = a.diffVista();
+      a.versionAnterior = {jobId: 'J1', version: 'v2'};
+      const sabido = a.diffVista();
+      const c = {...a.job.comparacion}; delete c.analisis_version; delete c.analisis_version_anterior;
+      a.job = {...a.job, comparacion: c};
+      const sinSello = a.diffVista();
+      return [sinSaber.incidencias, sinSaber._incidenciasPendientes, sabido.incidencias.nuevas.total,
+              sabido._incidenciasPendientes, sinSello.incidencias, sinSello._incidenciasPendientes];
+    }""")
+    assert r == [None, True, 3, False, None, True]
 
 
 def test_el_desplegable_agrupa_por_tipo_y_no_por_tamano():

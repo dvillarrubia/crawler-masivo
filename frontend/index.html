@@ -3107,8 +3107,12 @@
                 </template>
 
                 <template x-if="d._incidenciasViejas">
+                  <div class="card mb-2 text-sm text-dim"
+                       x-text="(d._incidenciasViejas === 'anterior' ? 'El censo anterior' : 'Este censo') + ' se volvió a analizar después de compararse: las incidencias guardadas ya no son las de hoy y se están volviendo a calcular.'"></div>
+                </template>
+                <template x-if="d._incidenciasPendientes">
                   <div class="card mb-2 text-sm text-dim">
-                    Este censo se volvió a analizar después de compararse: las incidencias guardadas ya no son las de hoy y se están volviendo a calcular.
+                    Las incidencias llegan con la comparación completa: no se puede asegurar que las guardadas sigan valiendo.
                   </div>
                 </template>
 
