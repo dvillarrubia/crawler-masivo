@@ -80,14 +80,17 @@ def cliente(tmp_path):
                 is_html=True, is_internal=True, status_code=200)
         s.add(u)
         s.flush()
-        s.add(PageContent(url_id=u.id, content_markdown=md, content_text=md.replace("\n", " "),
+        # El markdown lleva la sintaxis (enlaces con su URL) que el texto no
+        # tiene: lo que se mide y se propone quitar es del texto.
+        s.add(PageContent(url_id=u.id, content_text=md,
+                          content_markdown="\n".join(f"* [{ln}](<https://x.com/{i}>)" for i, ln in enumerate(md.split("\n"))),
                           content_length=len(md)))
 
     # /blog: 6 paginas sin nada repetido. /es: 3 paginas con menu y pie.
     for i in range(6):
         pagina(f"/blog/post-{i}", f"Texto propio numero {i} " * 20)
     for i in range(3):
-        pagina(f"/es/hotel-{i}", f"{MENU}\nFicha del hotel {i}\n{PIE}")
+        pagina(f"/es/hotel-{i}", f"{MENU}\nFicha del hotel {i}: " + "habitaciones con vistas al mar, " * 4 + f"\n{PIE}")
     # /de: 2 paginas, por debajo del minimo: sin cifra, al final.
     for i in range(2):
         pagina(f"/de/x-{i}", f"{MENU}\nSeite {i}\n{PIE}")
@@ -114,9 +117,30 @@ def test_los_grupos_van_por_texto_repetido_y_no_por_paginas(cliente):
     grupos = r.json()
     assert [g["group_key"] for g in grupos] == ["/es/{s}", "/blog/{s}", "/de/{s}"]
     es, blog, de = grupos
-    assert es["repetido_muestra"] == 3 and es["repetido_parte"] > 0.5
+    assert es["repetido_muestra"] == 3 and es["repetido_parte"] > 0.3
     assert {x["texto"] for x in es["lineas_repetidas"]} == {MENU, PIE}
     assert blog["repetido_parte"] == 0 and blog["lineas_repetidas"] == []
     # Por debajo de 3 paginas no se mide: sin cifra, no «0 %».
     assert de["repetido_parte"] is None and de["repetido_muestra"] is None
     assert es["pages"] == 3 and es["cleaned_pages"] == 0
+
+
+def test_lo_que_propone_quitar_sale_del_texto_que_leen_los_analisis(cliente):
+    # Las lineas propuestas son del content_text (lo que leen duplicados,
+    # pocas palabras y semantico): aplicadas como reglas de linea exacta, la
+    # vista previa quita del texto lo que dice la cifra, no sintaxis del
+    # markdown (revision de UX del 25-oct, 3.6).
+    c, job_id = cliente
+    es = c.get(f"/api/jobs/{job_id}/cleaning/groups").json()[0]
+    reglas = [{"type": "line_exact", "value": x["texto"]} for x in es["lineas_repetidas"]]
+    r = c.post(f"/api/jobs/{job_id}/cleaning/preview",
+               json={"group_key": es["group_key"], "rules": reglas, "targets": "both", "sample_size": 3})
+    assert r.status_code == 200, r.text
+    muestras = r.json()["samples"]
+    assert len(muestras) == 3
+    for m in muestras:
+        assert MENU not in m["after_excerpt"] and PIE not in m["after_excerpt"]
+        assert m["after_excerpt"].startswith("Ficha del hotel")
+        # Lo quitado es del texto que se ensena (no se suma el markdown).
+        assert m["chars_removed"] == len(m["before_excerpt"]) - len(m["after_excerpt"])
+        assert 0 < m["removed_pct"] < 100

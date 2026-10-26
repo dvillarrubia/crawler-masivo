@@ -74,8 +74,9 @@ def test_sube_se_mantiene_y_caida_general():
     sube, igual, general, sin_antes = r
     assert sube[0].startswith("Los clics suben un 12 % frente a los 7 días anteriores")
     assert igual[0].startswith("Los clics se mantienen frente a")
-    assert general[1] == "La caída es de todo el sitio, no de unas páginas concretas."
-    assert "parece estacional" in general[2]
+    # La caida general y lo estacional los dice el servidor (`textos`): aqui
+    # solo la cifra, en naranja.
+    assert len(general) == 1
     assert sin_antes[0].startswith("Sin clics en el periodo anterior (del 6 al 12 oct): no hay porcentaje")
 
 
@@ -85,7 +86,7 @@ def test_esperando_a_los_datos_o_sin_comparacion_no_concluye():
     b = _bloque({"gsc_resumen": GSC, "comparacion": {"trafico": pendiente}})
     (c,) = b["conclusiones"]
     assert c["nivel"] == "dim" and c["texto"].startswith("Todavía no se puede decir si los clics suben o bajan")
-    assert "del 18 al 24 oct frente a del 11 al 17 oct" in c["texto"] and c["texto"].endswith("hasta el 24 oct.")
+    assert "la comparación de los clics del 18 al 24 oct con los del 11 al 17 oct espera" in c["texto"] and c["texto"].endswith("hasta el 24 oct.")
     assert b["textos"] == [] and b["paginas"] == []
     solo = _bloque({"gsc_resumen": GSC})
     assert solo["conclusiones"][0]["texto"].startswith("Sin comparación con el censo anterior")
@@ -167,3 +168,70 @@ def test_quitar_una_linea_rellena_el_hueco_y_no_repite():
     # Otro grupo: reglas de cero. El mismo otra vez: se cierra.
     assert r["otro"] == ["/b", 1, ""]
     assert r["cerrado"] is None
+
+
+def test_caida_general_y_estacional_una_sola_vez():
+    """Con las frases del servidor, «caída general» y «parece estacional» no
+    salen dos veces (conclusion del frontend + `textos`)."""
+    from shared.trafico_entre_censos import textos
+
+    t = {**TRAFICO, "variacion": -0.4, "clics_nuevo": 25466, "general": True,
+         "estacional": {"igual": True, "variacion_ano_anterior": -0.38},
+         "caidas": [{**g, "diferencia": -25} for g in TRAFICO["caidas"]],
+         "subidas": [{**g, "diferencia": 109} for g in TRAFICO["subidas"]]}
+    t["textos"] = textos(t)
+    b = _bloque({"comparacion": {"trafico": t}})
+    todo = [c["texto"] for c in b["conclusiones"]] + b["textos"]
+    assert sum("no de unas páginas concretas" in x for x in todo) == 1
+    assert sum("parece estacional" in x for x in todo) == 1
+    assert b["conclusiones"][0]["nivel"] == "orange"
+
+
+def test_nota_de_lo_que_quitan_las_lineas_propuestas():
+    r = _evaluar("""() => [
+      notaLineasLimpieza({lineas_repetidas: Array(40).fill({texto: 'x'}), lineas_repetidas_total: 48, repetido_parte_lineas: 0.203}),
+      notaLineasLimpieza({lineas_repetidas: [{texto: 'a'}, {texto: 'b'}], lineas_repetidas_total: 2, repetido_parte_lineas: 0.38}),
+      notaLineasLimpieza({lineas_repetidas: [{texto: 'a'}]}),
+      notaLineasLimpieza({lineas_repetidas: []})]""")
+    assert r[0] == "Hay 48 líneas repetidas; aquí van las 40 que más texto ocupan, que son el 20 % del texto."
+    assert r[1] == "Quitar estas 2 líneas deja el texto un 38 % más corto."
+    # Una API anterior sin la parte de las propuestas: no se dice nada.
+    assert r[2:] == ["", ""]
+
+
+def _buscar_ficha(servidor_nuevo: bool, total: int, exacta_en: int | None):
+    """`abrirFichaPorUrl` contra una API simulada: la nueva entiende
+    `url_exacta`; la anterior lo ignora y devuelve las que contienen la URL,
+    `total` filas ordenadas, con la exacta en la posicion `exacta_en`."""
+    return _evaluar("""async () => {
+      const NUEVO = %s, TOTAL = %d, EN = %s, URL = 'https://www.lopesan.com/es';
+      const pedidas = [];
+      window.api = async (ruta) => {
+        pedidas.push(ruta);
+        const q = new URLSearchParams(ruta.split('?')[1]);
+        const filas = NUEVO
+          ? (EN == null ? [] : [{ id: 296069, url: URL }])
+          : Array.from({ length: TOTAL }, (_, i) => i === EN ? { id: 296069, url: URL } : { id: i, url: URL + '/p' + i });
+        const tam = +q.get('page_size'), pag = +q.get('page');
+        return { items: filas.slice((pag - 1) * tam, pag * tam), total: filas.length };
+      };
+      const a = app(); a.job = { id: 'J' }; const avisos = []; let abierta = null;
+      a.showToast = (m) => avisos.push(m); a.openUrlDetail = (id) => { abierta = id; };
+      await a.abrirFichaPorUrl(URL);
+      return { abierta, avisos, pedidas: pedidas.length, exacta: pedidas[0].includes('url_exacta=') };
+    }""" % ("true" if servidor_nuevo else "false", total, "null" if exacta_en is None else exacta_en))
+
+
+def test_ficha_por_url_aunque_la_contengan_miles():
+    """/es casa con 1.272 URLs por «contiene»: antes solo se miraban 20 y se
+    decia que no estaba en el censo (revision independiente del 27-oct)."""
+    nuevo = _buscar_ficha(True, 0, 0)
+    assert nuevo == {"abierta": 296069, "avisos": [], "pedidas": 1, "exacta": True}
+    # API anterior: recorre las paginas hasta dar con ella.
+    viejo = _buscar_ficha(False, 1272, 700)
+    assert viejo["abierta"] == 296069 and viejo["pedidas"] == 4 and viejo["avisos"] == []
+    # Solo dice que no esta si lo ha mirado todo.
+    no_esta = _buscar_ficha(False, 450, None)
+    assert no_esta["abierta"] is None and no_esta["pedidas"] == 3
+    assert no_esta["avisos"] == ["Esa URL no está en este censo"]
+    assert _buscar_ficha(True, 0, None)["avisos"] == ["Esa URL no está en este censo"]

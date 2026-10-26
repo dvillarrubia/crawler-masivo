@@ -176,7 +176,9 @@ def make_excerpt(text: str | None, limit: int = 1200) -> str:
 # arriba lo que merece la pena limpiar, no lo que mas paginas tiene.
 REPETIDO_PARTE = 0.5
 REPETIDO_MIN_CHARS = 3   # el minimo de una regla de linea (validate_rules)
-REPETIDO_MAX_LINEAS = 8
+# Las que se proponen: con 8 un menu de 48 lineas cortas quedaba en un tercio
+# de lo que dice la cifra. 40 deja sitio a otras reglas (tope de 50).
+REPETIDO_MAX_LINEAS = 40
 
 
 def lineas_repetidas(
@@ -188,7 +190,8 @@ def lineas_repetidas(
     Devuelve None con menos de 2 paginas con texto: con una no hay nada que
     «se repita». Si no, ``{"muestra": n, "parte": 0-1 de los caracteres que
     son lineas repetidas, "chars_medio": por pagina, "lineas": [{"texto",
-    "paginas"}]}``, las lineas de mas caracteres repetidos primero. Una linea
+    "paginas"}], "lineas_total", "parte_lineas": lo que quitan las de
+    "lineas"}``, las lineas de mas caracteres repetidos primero. Una linea
     cuenta una vez por pagina aunque salga dos veces en ella.
     """
     paginas = [t for t in textos if t and t.strip()]
@@ -199,7 +202,9 @@ def lineas_repetidas(
     cuenta: dict[str, int] = {}
     por_pagina: list[list[str]] = []
     for t in paginas:
-        lineas = [ln.strip() for ln in t.split("\n")]
+        # Un texto de una sola linea cuenta en la muestra pero no aporta
+        # lineas: las reglas de linea no le hacen nada (`apply_rules`).
+        lineas = [ln.strip() for ln in t.split("\n")] if "\n" in t else []
         lineas = [ln for ln in lineas if len(ln) >= REPETIDO_MIN_CHARS]
         por_pagina.append(lineas)
         for ln in set(lineas):
@@ -208,9 +213,16 @@ def lineas_repetidas(
     total = sum(len(t) for t in paginas)
     rep = sum(len(ln) for lineas in por_pagina for ln in lineas if ln in repetidas)
     orden = sorted(repetidas.items(), key=lambda kv: (-len(kv[0]) * kv[1], kv[0]))
+    # Las lineas de mas de 300 caracteres no se proponen: recortadas, una
+    # regla de linea exacta ya no casaria.
+    propuestas = [(ln, c) for ln, c in orden if len(ln) <= 300][:REPETIDO_MAX_LINEAS]
+    elegidas = {ln for ln, _ in propuestas}
+    rep_prop = sum(len(ln) for lineas in por_pagina for ln in lineas if ln in elegidas)
     return {
         "muestra": n,
         "parte": round(rep / total, 3) if total else 0.0,
         "chars_medio": round(rep / n),
-        "lineas": [{"texto": ln[:300], "paginas": c} for ln, c in orden[:REPETIDO_MAX_LINEAS]],
+        "lineas": [{"texto": ln, "paginas": c} for ln, c in propuestas],
+        "lineas_total": len(repetidas),
+        "parte_lineas": round(rep_prop / total, 3) if total else 0.0,
     }

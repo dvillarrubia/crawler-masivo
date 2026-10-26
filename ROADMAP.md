@@ -1139,6 +1139,11 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   analizar; los grupos van por el texto que se repite en una muestra (lo que
   más gana la limpieza primero) y el editor se abre bajo su fila con «Quitar
   esta línea». Falta agrupar por plantilla y guardar las reglas en el cliente.
+  Tras la revisión del 27-oct, lo repetido se mide sobre el texto que leen los
+  análisis (antes, sobre el markdown, y las reglas no quitaban nada de él), se
+  proponen hasta 40 líneas con la parte del texto que quitan, y la ficha de
+  una página del bloque «Google» se busca por URL exacta (`?url_exacta=`):
+  /es decía «no está en este censo» porque la contienen 1.272 URLs.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

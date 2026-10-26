@@ -791,6 +791,13 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
     for clause in _filtros_a_medida(db, job_id, qp):
         q = q.filter(clause)
 
+    # Una URL exacta: la ficha de una pagina de la que solo se sabe la
+    # direccion (trafico entre censos). Con `search` («contiene») una URL corta
+    # como /es casa con miles y la exacta no salia entre las primeras
+    # (revision de UX del 25-oct, 3.3).
+    if qp.get("url_exacta"):
+        q = q.filter(Url.url == qp.get("url_exacta"))
+
     # Buscador de arriba: URL o titulo
     if search:
         pattern = f"%{search}%"

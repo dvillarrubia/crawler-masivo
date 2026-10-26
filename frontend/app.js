@@ -1011,6 +1011,7 @@ function app() {
     cleaningGroupsLoading: false,
     cleaningSelectedGroup: null,
     cleaningRules: [{ type: 'line_exact', value: '' }],
+    cleaningVerTodasLineas: false,
     cleaningTargets: 'both',
     cleaningUrlRegex: '',
     cleaningPreview: null,
@@ -4089,15 +4090,26 @@ function app() {
     },
 
     // La ficha de una URL de la que solo se sabe la direccion (las paginas del
-    // trafico entre censos; revision de UX del 25-oct, 3.3). Si no esta en
-    // este censo (una pagina que desaparecio), se dice y no se abre nada.
+    // trafico entre censos; revision de UX del 25-oct, 3.3). Se pide la URL
+    // exacta (`url_exacta`); una API que aun no lo entiende lo ignora y
+    // devuelve las que la contienen: entonces se recorren ordenadas hasta
+    // encontrarla. Con /es casaban 1.272 y la exacta no salia entre las 20
+    // primeras. Solo se dice que no esta si se ha mirado entera.
     async abrirFichaPorUrl(url) {
       if (!this.job || !url) return;
+      const base = `/jobs/${this.job.id}/urls?url_exacta=${encodeURIComponent(url)}&url_contains=${encodeURIComponent(url)}&sort_by=url&sort_dir=asc&page_size=200&ligero=true`;
       try {
-        const r = await api(`/jobs/${this.job.id}/urls?search=${encodeURIComponent(url)}&page_size=20&ligero=true`);
-        const fila = (r.items || []).find(u => u.url === url);
-        if (fila) { this.openUrlDetail(fila.id); return; }
-        this.showToast('Esa URL no está en este censo', 'info');
+        for (let pagina = 1; pagina <= 30; pagina++) {
+          const r = await api(`${base}&page=${pagina}`);
+          const items = r.items || [];
+          const fila = items.find(u => u.url === url);
+          if (fila) { this.openUrlDetail(fila.id); return; }
+          if (!items.length || pagina * 200 >= (r.total || 0)) {
+            this.showToast('Esa URL no está en este censo', 'info');
+            return;
+          }
+        }
+        this.showToast('No se encontró la URL entre las primeras 6.000 parecidas; búscala en la pestaña URLs', 'info');
       } catch (e) { this.showToast('No se pudo buscar la URL: ' + e.message, 'error'); }
     },
 
@@ -4755,7 +4767,7 @@ function app() {
     selectCleaningGroup(g) {
       const otro = this.cleaningSelectedGroup !== g.group_key;
       this.cleaningSelectedGroup = otro ? g.group_key : null;
-      if (otro) this.cleaningRules = [{ type: 'line_exact', value: '' }];
+      if (otro) { this.cleaningRules = [{ type: 'line_exact', value: '' }]; this.cleaningVerTodasLineas = false; }
       this.cleaningPreview = null;
       this.cleaningMessage = null;
       this.$nextTick(() => lucide.createIcons());
@@ -6956,6 +6968,16 @@ function textoRepetidoGrupo(g) {
   if (!g.repetido_parte) return 'nada';
   return (g.repetido_parte < 0.01 ? 'menos del 1 %' : pctEs(100 * g.repetido_parte, 0)) + ' · ' + fmt.num(g.repetido_chars_medio) + ' caracteres por página';
 }
+// Lo que quitan las lineas propuestas frente a la cifra del grupo: la cifra
+// es de todas las repetidas y las propuestas tienen tope (40). Se mide sobre
+// el texto que leen los analisis, no sobre el markdown.
+function notaLineasLimpieza(g) {
+  if (!g || !(g.lineas_repetidas || []).length || g.repetido_parte_lineas == null) return '';
+  const n = g.lineas_repetidas.length, total = g.lineas_repetidas_total || n;
+  const parte = g.repetido_parte_lineas < 0.01 ? 'menos del 1 %' : pctEs(100 * g.repetido_parte_lineas, 0);
+  if (total > n) return `Hay ${fmt.num(total)} líneas repetidas; aquí van las ${fmt.num(n)} que más texto ocupan, que son el ${parte} del texto.`;
+  return n > 1 ? `Quitar estas ${fmt.num(n)} líneas deja el texto un ${parte} más corto.` : `Quitar esta línea deja el texto un ${parte} más corto.`;
+}
 const limpiezaConRepetido = gs => (gs || []).some(g => g && g.repetido_parte != null);
 const limpiezaConLimpiadas = gs => (gs || []).some(g => g && g.cleaned_pages);
 // Como van ordenados, para que nadie lea «por profundidad». Una API anterior
@@ -7004,7 +7026,7 @@ function conclusionTrafico(t) {
   const va = t.ventana_anterior || [], vn = t.ventana_nueva || [];
   if (t.pendiente) {
     return [{ nivel: 'dim', texto: 'Todavía no se puede decir si los clics suben o bajan frente al censo anterior: '
-      + 'la comparación (' + rangoDias(vn[0], vn[1]) + ' frente a ' + rangoDias(va[0], va[1]) + ') espera a que Search Console tenga datos hasta el '
+      + 'la comparación de los clics ' + rangoDias(vn[0], vn[1]) + ' con los ' + rangoDias(va[0], va[1]) + ' espera a que Search Console tenga datos hasta el '
       + fmt.diaCorto(diaIso(vn[1])) + '.' }];
   }
   if (!t.comparable) return [{ texto: t.motivo || 'El tráfico no se pudo comparar con el censo anterior.', nivel: 'dim' }];
@@ -7020,8 +7042,9 @@ function conclusionTrafico(t) {
     salida.push({ nivel: t.general ? 'orange' : '',
       texto: verbo + dias + ': ' + fmt.num(t.clics_nuevo) + ' ' + rangoDias(vn[0], vn[1]) + ' frente a ' + ant + '.' });
   }
-  if (t.general) salida.push({ nivel: 'orange', texto: 'La caída es de todo el sitio, no de unas páginas concretas.' });
-  if (t.estacional && t.estacional.igual) salida.push({ nivel: '', texto: 'El mismo periodo del año anterior varió lo mismo: parece estacional.' });
+  // Que la caida es de todo el sitio o parece estacional lo dice la frase
+  // siguiente del servidor (`textos`, con la cifra del año anterior): dicho
+  // tambien aqui salia dos veces seguidas.
   return salida;
 }
 

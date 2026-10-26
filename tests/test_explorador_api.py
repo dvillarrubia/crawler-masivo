@@ -387,3 +387,13 @@ def test_vistas_guardadas_por_cliente(tmp_path):
     assert api.delete(f"{base}/{vid}").status_code == 204
     assert api.get(base).json() == []
     assert api.delete(f"{base}/{vid}").status_code == 404
+
+
+def test_url_exacta_aunque_contenga_otras(entorno):
+    # La raiz https://x.com/ esta contenida en todas: el buscador devuelve las
+    # cuatro y el filtro exacto solo la pedida (revision de UX del 25-oct, 3.3).
+    api, jid, ids = entorno
+    assert api.get(f"/api/jobs/{jid}/urls?search=https://x.com/").json()["total"] == 4
+    r = api.get(f"/api/jobs/{jid}/urls?url_exacta=https://x.com/a&ligero=true").json()
+    assert r["total"] == 1 and r["items"][0]["id"] == ids["a"]
+    assert api.get(f"/api/jobs/{jid}/urls?url_exacta=https://x.com/zzz").json()["total"] == 0

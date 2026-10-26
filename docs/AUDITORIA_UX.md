@@ -419,6 +419,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Probado sobre el censo de Lopesan con la API de esta rama simulada en
   lectura: las frases redactadas con `textos` y `/cleaning/groups` ejecutado
   sobre sus 3.772 páginas en un SQLite (sin escribir en producción).
+- Revisión independiente del 27-oct, corregido: la ficha de /es desde «Las
+  páginas que más cambian» (filtro de URL exacta, y con una API anterior se
+  recorre entera antes de decir que no está); la Limpieza mide sobre el texto
+  que leen los análisis y no sobre el markdown (23 % en `/blog/{s}/{s}`, no
+  46 %), propone hasta 40 líneas y dice qué parte quitan; la caída general y
+  lo estacional ya no salen dos veces; «frente a del» corregido. El naranja
+  con poco contraste lo arregla la rama de colores (`--orange` #a84d06).
 
 ### Cómo se probó
 

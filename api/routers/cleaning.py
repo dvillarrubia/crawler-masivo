@@ -147,21 +147,27 @@ def list_groups(job_id: uuid.UUID, db: Session = Depends(get_session)):
             repetido_chars_medio=rep["chars_medio"] if rep else None,
             repetido_muestra=rep["muestra"] if rep else None,
             lineas_repetidas=rep["lineas"] if rep else [],
+            lineas_repetidas_total=rep["lineas_total"] if rep else None,
+            repetido_parte_lineas=rep["parte_lineas"] if rep else None,
         ))
     return salida
 
 
 def _repetido(db: Session, url_ids: list[int]) -> dict | None:
-    """El texto repetido de una muestra: por el markdown, que conserva las
-    lineas (el texto plano suele ser una sola linea larga), y si no hay, el
-    texto. Best-effort: si falla, el grupo va sin cifra."""
+    """El texto repetido de una muestra, sobre `content_text`: es lo que leen
+    duplicados, pocas palabras, coherencia y semantico, y donde casan las
+    reglas de linea que propone la pestana. Antes se media sobre el markdown,
+    y sus lineas (enlaces con su URL, imagenes en data:) no existen en el
+    texto: «Quitar esta linea» no quitaba nada de el y la cifra salia
+    inflada por las URLs. Best-effort: si falla, el grupo va
+    sin cifra."""
     try:
         filas = (
-            db.query(PageContent.content_markdown, PageContent.content_text)
+            db.query(PageContent.content_text)
             .filter(PageContent.url_id.in_(url_ids))
             .all()
         )
-        return lineas_repetidas([md or tx for md, tx in filas])
+        return lineas_repetidas([tx for (tx,) in filas])
     except Exception:
         try:
             db.rollback()
@@ -196,22 +202,24 @@ def preview_cleaning(
 
         source_text = pc.content_text
         source_md = pc.content_markdown
-        removed = 0
+        removed_text = removed_md = 0
 
         if payload.targets in ("text", "both"):
-            cleaned_text, r, skip = clean_with_safety(source_text, rules)
-            removed += r
+            cleaned_text, removed_text, skip = clean_with_safety(source_text, rules)
             skipped += 1 if skip else 0
         else:
             cleaned_text = source_text
         if payload.targets in ("markdown", "both"):
-            cleaned_md, r, _ = clean_with_safety(source_md, rules)
-            removed += r
+            cleaned_md, removed_md, _ = clean_with_safety(source_md, rules)
         else:
             cleaned_md = source_md
 
         preview_before = source_md if payload.targets == "markdown" else source_text
         preview_after = cleaned_md if payload.targets == "markdown" else cleaned_text
+        # Lo quitado, del mismo texto que se ensena y sobre el que se calcula
+        # el porcentaje: con «Ambos» se sumaba lo del markdown y el extracto
+        # (el texto) podia no cambiar (revision de UX del 25-oct, 3.6).
+        removed = removed_md if payload.targets == "markdown" else removed_text
 
         samples.append(
             CleaningPreviewSample(

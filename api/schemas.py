@@ -1901,6 +1901,11 @@ class CleaningGroupInfo(BaseModel):
     repetido_chars_medio: int | None = None
     repetido_muestra: int | None = None
     lineas_repetidas: list[CleaningLineaRepetida] = []
+    # Cuantas lineas repetidas hay en total y que parte del texto quitan las
+    # de `lineas_repetidas` (las de mas peso, con tope): la cifra del grupo es
+    # de todas y «Quitar todas estas lineas» solo de las que se mandan.
+    lineas_repetidas_total: int | None = None
+    repetido_parte_lineas: float | None = None
 
 
 class CleaningPreviewRequest(BaseModel):

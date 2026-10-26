@@ -5413,8 +5413,9 @@
                                 <div>
                                   <div class="text-sm"><strong>Lo que más se repite</strong>
                                     <span class="text-dim" x-text="'en ' + fmt.num(g.repetido_muestra) + ' páginas de muestra'"></span></div>
+                                  <div class="text-sm text-dim" style="margin:.2rem 0 .3rem;white-space:normal" x-show="notaLineasLimpieza(g)" x-text="notaLineasLimpieza(g)"></div>
                                   <ul class="limpieza-repetidas">
-                                    <template x-for="l in g.lineas_repetidas" :key="l.texto">
+                                    <template x-for="l in (cleaningVerTodasLineas ? g.lineas_repetidas : g.lineas_repetidas.slice(0, 8))" :key="l.texto">
                                       <li>
                                         <span class="text-dim text-sm" style="white-space:nowrap" x-text="fmt.num(l.paginas) + ' de ' + fmt.num(g.repetido_muestra)"></span>
                                         <code x-text="l.texto"></code>
@@ -5422,8 +5423,13 @@
                                       </li>
                                     </template>
                                   </ul>
-                                  <button class="btn btn-sm" style="margin:-.4rem 0 .75rem" x-show="g.lineas_repetidas.length > 1"
-                                          @click.stop="g.lineas_repetidas.forEach(l => anadirLineaLimpieza(l.texto))">Quitar todas estas líneas</button>
+                                  <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:-.4rem 0 .75rem">
+                                    <button class="btn btn-sm" x-show="g.lineas_repetidas.length > 8" @click.stop="cleaningVerTodasLineas = !cleaningVerTodasLineas"
+                                            x-text="cleaningVerTodasLineas ? 'Ver solo las 8 primeras' : 'Ver las ' + fmt.num(g.lineas_repetidas.length)"></button>
+                                    <button class="btn btn-sm" x-show="g.lineas_repetidas.length > 1"
+                                            @click.stop="g.lineas_repetidas.forEach(l => anadirLineaLimpieza(l.texto))"
+                                            x-text="'Quitar las ' + fmt.num(g.lineas_repetidas.length) + ' líneas'"></button>
+                                  </div>
                                 </div>
                               </template>
                               <div class="text-sm" style="margin-bottom:.4rem"><strong>Reglas para este grupo</strong></div>
