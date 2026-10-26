@@ -1729,3 +1729,51 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
 .caso-cuerpo input[type="text"]{width:auto;flex:0 1 auto}
 .caso-cuerpo input.campo-corto{width:9rem}
 .caso-cuerpo input.campo-mono:not(.campo-corto){width:16rem;max-width:100%}
+
+/* Pestana Enlaces con filtros en el servidor (revision de UX del 25-oct, 2.8;
+   decision 195). La barra se reparte en columnas que caben y a 390 px queda en
+   dos; las tablas pasan a tarjetas en movil para no esconder el estado del
+   destino detras de un scroll lateral. */
+.enlaces-cabecera{display:flex;align-items:center;justify-content:space-between;gap:.5rem 1rem;flex-wrap:wrap;margin-bottom:.6rem}
+.enlaces-hacia{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.85rem;margin-bottom:.6rem;
+  padding:.45rem .7rem;border-left:3px solid var(--accent);background:var(--accent-subtle);border-radius:3px;min-width:0}
+.enlaces-hacia strong{min-width:0;max-width:100%;flex:1 1 12rem}
+.enlaces-filtros{display:grid;grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr));gap:.5rem .6rem;margin-bottom:.6rem}
+.enlaces-filtros .ef{display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.enlaces-filtros .ef > span{font-size:.72rem;font-weight:600;color:var(--text-dim)}
+.enlaces-filtros .ef-destino{grid-column:span 2}
+.enlaces-filtros .ef-par{display:flex;gap:.3rem;min-width:0}
+.enlaces-filtros .ef-par select{width:auto;flex:0 0 auto}
+.enlaces-filtros .ef-par input{flex:1 1 auto;min-width:0}
+.enlaces-filtros input:disabled,.enlaces-filtros select:disabled{opacity:.55}
+.enlaces-estados{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.75rem}
+.enlaces-estados .enlaces-quitar{margin-left:auto}
+.chip-estado-roto.chip-on{border-color:var(--red);background:var(--red-bg)}
+.chip-estado-redireccion.chip-on{border-color:var(--orange);background:var(--orange-bg)}
+.aviso-enlaces{border-left:3px solid var(--orange);font-size:.85rem;padding:.6rem .8rem}
+.aviso-enlaces-error{display:flex;align-items:center;justify-content:space-between;gap:.75rem;border-left-color:var(--red)}
+.enlaces-recargando{opacity:.55;transition:opacity .15s}
+.enlaces td.num,.enlaces th.num{text-align:right;font-variant-numeric:tabular-nums}
+.enlaces .td-url{max-width:340px}
+.enlaces .td-anclas{max-width:260px}
+.enlaces .td-accion{text-align:right}
+.enlaces .text-xs{font-size:.7rem}
+@media (max-width:640px){
+  .enlaces-filtros{grid-template-columns:1fr 1fr}
+  .enlaces-filtros .ef-destino{grid-column:1 / -1}
+  .enlaces-estados .enlaces-quitar{margin-left:0}
+  /* Tablas como tarjetas: cada fila un bloque con su etiqueta delante. */
+  .enlaces .table-wrap{border:none;box-shadow:none;overflow:visible}
+  .tabla-tarjetas thead{display:none}
+  .tabla-tarjetas,.tabla-tarjetas tbody{display:block;width:100%}
+  .tabla-tarjetas tr{display:block;border:1px solid var(--border);border-radius:var(--radius-lg);padding:.45rem .6rem;margin-bottom:.5rem;background:#fff}
+  .tabla-tarjetas tbody tr:nth-child(even) td,.tabla-tarjetas tr:hover td{background:transparent}
+  .tabla-tarjetas td{display:flex;align-items:baseline;gap:.5rem;max-width:none;border:none;padding:.15rem 0;white-space:normal}
+  .tabla-tarjetas td[data-label]::before{content:attr(data-label);flex:0 0 5.5rem;font-size:.7rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.03em}
+  .tabla-tarjetas td.td-url{flex-wrap:wrap}
+  .tabla-tarjetas td.td-url::before{flex-basis:100%}
+  .tabla-tarjetas td .truncate{min-width:0;flex:1 1 0;overflow-wrap:anywhere;white-space:normal}
+  .tabla-tarjetas td.num{text-align:left}
+  .tabla-tarjetas td.td-accion{justify-content:flex-start;padding-top:.35rem}
+  .enlaces .td-url,.enlaces .td-anclas{max-width:none}
+}

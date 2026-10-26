@@ -317,6 +317,43 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   zona de la programación y «toca» → «lanzado a su hora» (V44). En móvil la
   tabla se apila.
 
+### Revisión del 25-oct · 2.8 Enlaces con filtros en el servidor (V24, V25)
+
+- [x] **Filtros en el servidor** (decisión 195): destino que contiene o es
+  exactamente, página que enlaza, texto del enlace (o alt de su imagen),
+  interno/externo, follow, posición y código del destino, más los chips de
+  estado del destino con su cifra (Roto, Redirige, No concluyente, Sin
+  comprobar, Bien). Los de texto esperan a que se deje de escribir. Todo va en
+  la ruta (`#/rastreos/<id>/enlaces?vista=enlaces&estado=roto&tipo=externo…`)
+  para poder pasarlo con un enlace, y el botón atrás lo respeta.
+- [x] **Vista por destino**, la de entrada: cada URL de destino con las
+  páginas que la enlazan, las apariciones, sus anclas más usadas y su estado;
+  los rotos primero y luego los más enlazados. «Quién la enlaza» abre sus
+  enlaces, con la URL arriba y «Volver a los destinos». La ficha de una URL
+  lleva «Ver quién la enlaza» en la tarjeta de enlazado interno.
+- [x] **Orden útil** (V24): por defecto, los enlaces a destinos rotos primero,
+  no por hash. Columna «Estado del destino» con el código y, en externos, lo
+  que dijo la sonda (V25: la API lo calculaba y nadie lo enseñaba). Lo que
+  nadie comprobó dice «Sin comprobar», no «Bien».
+- [x] **«Externas 0»** (V25): sin URLs externas en el censo (no se rastrean),
+  la pestaña «Externas» del Explorador cuenta los destinos externos enlazados
+  y lleva a Enlaces › Externos. Con una API anterior sale sin cifra.
+- [x] Carga, error con «Reintentar», vacío que distingue «ningún enlace
+  cumple estos filtros» de «sin enlaces», paginación, y a 390 px las tablas
+  pasan a tarjetas (sin scroll lateral) y la barra a dos columnas. La cifra de
+  la pestaña Enlaces se quita: cambiaba con la vista y los filtros.
+- [x] Con la API de producción de hoy (sin la 195) la pestaña dice que el
+  servidor aún no filtra y enseña la lista de siempre: comprobado con
+  capturas contra producción.
+- [x] Revisión independiente, arreglado: el botón atrás vuelve de «Quién la
+  enlaza» a la lista de destinos (antes saltaba a lo de antes); con la API
+  anterior, «Externas» abre la pestaña de URLs externas de siempre y no una
+  lista de Enlaces sin filtrar bajo `tipo=externo`; «Es exactamente» encuentra
+  la URL con o sin la barra final; y en un rastreo en marcha las cifras van en
+  una pasada, se guardan 30 s y, si no caben en 20 s, se dice en vez de
+  insistir.
+- Lo abierto: el CSV de enlaces sale entero, sin los filtros de la vista.
+
 ### Revisión del 25-oct · 2.10 y 2.11 Problemas
 
 - [x] **Diferencia frente al anterior por tipo** («+12», «−5», «+3 · −1»,

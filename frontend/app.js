@@ -201,6 +201,29 @@ const POSITION_LABEL = {
   header: 'Cabecera', sidebar: 'Lateral',
 };
 
+// Pestana Enlaces (revision de UX del 25-oct, 2.8; decision 195): filtros
+// que entiende GET /links y /links/destinos, y como se dice el estado del
+// destino. `sin_dato` no es «bien»: nadie lo comprobo.
+const ENLACES_SIN_FILTROS = {
+  destino: '', exacto: false, destino_hash: '', origen: '', ancla: '',
+  tipo: '', follow: '', posicion: '', estado: '', codigo: '',
+};
+const ESTADO_DESTINO = {
+  roto:           { texto: 'Roto', clase: 'badge-failed', tip: 'El destino responde con error (4xx o 5xx) o, si es externo, la sonda lo dio por roto.' },
+  redireccion:    { texto: 'Redirige', clase: 'badge-cancelled', tip: 'El destino redirige a otra URL: el enlace debería apuntar a la final.' },
+  no_concluyente: { texto: 'No concluyente', clase: 'badge-pending', tip: 'Se pidió, pero la respuesta no permite afirmar nada: un 403 o un 429 de un cortafuegos, un error del servidor que puede ser pasajero, un tiempo agotado.' },
+  sin_dato:       { texto: 'Sin comprobar', clase: 'badge-pending', tip: 'Ni está en el censo ni se comprobó con la sonda de enlaces externos: fuera del alcance, excluida, bloqueada por robots.txt o con la sonda apagada.' },
+  ok:             { texto: 'Bien', clase: 'badge-completed', tip: 'El destino responde bien (2xx).' },
+};
+const ESTADOS_DESTINO = ['roto', 'redireccion', 'no_concluyente', 'sin_dato', 'ok'];
+// Lo que dijo la sonda de un enlace externo (shared/sondas.py, decision 123).
+const VEREDICTO_SONDA = {
+  ok: 'responde bien', roto: 'no existe (404 o 410)', redirige_a_error: 'redirige a una página de error',
+  error_servidor: 'error del servidor, puede ser pasajero', no_verificable: 'el servidor no deja comprobarlo (403, 429…)',
+  prohibido_por_robots: 'su robots.txt no deja comprobarlo', dominio_inexistente: 'el dominio no existe',
+  sin_conexion: 'no acepta conexiones', tiempo_agotado: 'no respondió a tiempo', tls_invalido: 'certificado no válido',
+};
+
 // Pestanas de la ficha <-> tramo de la URL (#/rastreos/<id>/<tramo>)
 const TAB_SLUG = {
   overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'puntuacion',
@@ -732,6 +755,7 @@ function app() {
     // (revision de UX del 25-oct, 2.6).
     _expUltimo: null,
     _aplicandoRuta: false,
+    _rutaNueva: false,
     loading: false,
     error: null,
 
@@ -852,10 +876,27 @@ function app() {
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
     ISSUE_INFO,
+    ESTADOS_DESTINO, POSITION_LABEL,
     issueFilters: { severity: '', issue_type: '' },
 
     // Pestana Enlaces
     links: [], linksPage: 1, linksPages: 1, linksTotal: 0,
+    // Filtros en el servidor y vista por destino (revision de UX del 25-oct,
+    // 2.8; decision 195). `linksFiltra`: null = aun no se sabe, false = la
+    // API no filtra (una anterior a la 195): se avisa y se ensena la lista.
+    linksVista: 'destinos',
+    linksFiltros: { ...ENLACES_SIN_FILTROS },
+    linksOrden: '',
+    linksPorEstado: null,
+    linksFiltra: null,
+    linksCargando: false,
+    linksError: '',
+    linksDestinoUrl: '',
+    _linksPet: 0,
+    _linksTecla: null,
+    // «Externas» del Explorador (V25): destinos externos enlazados, que el
+    // censo no rastrea. null = no se sabe (API anterior o aun cargando).
+    expExternasEnlazadas: null,
 
     // Pestana Semantico
     semanticResults: null,
@@ -949,11 +990,16 @@ function app() {
       // Si solo cambia lo que va despues del «?» (un filtro, el orden, la
       // pagina) se sustituye la entrada: cada tecla en un filtro no puede ser
       // un paso del boton atras.
+      // `_rutaNueva`: un cambio tras el «?» que SI es otra vista (de un destino
+      // a «quien la enlaza», revision de UX del 25-oct, 2.8) pide su propio
+      // paso, para que el boton atras vuelva a la lista de destinos.
       this.$watch('_ruta()', h => {
         if (this.view === 'explorer' && this.job) this._expUltimo = { job: this.job.id, qs: this._estadoExplorador() };
+        const nueva = this._rutaNueva;
+        this._rutaNueva = false;
         if (!h || location.hash === h) return;
         const mismaVista = location.hash.split('?')[0] === h.split('?')[0];
-        if (this._aplicandoRuta || mismaVista) history.replaceState(null, '', h);
+        if (this._aplicandoRuta || (mismaVista && !nueva)) history.replaceState(null, '', h);
         else history.pushState(null, '', h);
       });
 
@@ -1034,6 +1080,21 @@ function app() {
         if (this.issueFilters.issue_type) q.set('tipo', this.issueFilters.issue_type);
         if (this.issueFilters.severity) q.set('gravedad', this.issueFilters.severity);
         if (this.issuesVista === 'lista' && !this.issueFilters.issue_type) q.set('vista', 'lista');
+        if (q.toString()) h += '?' + q.toString();
+      }
+      if (t === 'links') {
+        // Los filtros de Enlaces en la URL: «mira esto» con un enlace (2.8).
+        const q = new URLSearchParams();
+        const f = this.linksFiltros;
+        if (this.linksVista === 'enlaces') q.set('vista', 'enlaces');
+        for (const k of ['destino', 'origen', 'ancla', 'tipo', 'follow', 'posicion', 'estado', 'codigo']) {
+          const v = (f[k] ?? '').toString().trim();
+          if (v) q.set(k, v);
+        }
+        if (f.destino && f.exacto) q.set('exacto', '1');
+        if (f.destino_hash && this.linksVista === 'enlaces') q.set('hacia', f.destino_hash);
+        if (this.linksOrden) q.set('orden', this.linksOrden);
+        if (this.linksPage > 1) q.set('pagina', this.linksPage);
         if (q.toString()) h += '?' + q.toString();
       }
       if (t === 'diff' && this.diffOtro && this.diffOtro !== (this.job.comparacion || {}).comparado_con) {
@@ -1130,6 +1191,22 @@ function app() {
                 this.issuesVista = vista;
                 this.issues = [];
                 this.issuesPage = 1;
+              }
+            }
+            if (tab === 'links') {
+              const f = { ...ENLACES_SIN_FILTROS };
+              for (const k of ['destino', 'origen', 'ancla', 'tipo', 'follow', 'posicion', 'estado', 'codigo']) f[k] = q.get(k) || '';
+              f.exacto = !!f.destino && q.get('exacto') === '1';
+              f.destino_hash = q.get('hacia') || '';
+              const vista = q.get('vista') === 'enlaces' || f.destino_hash ? 'enlaces' : 'destinos';
+              const orden = q.get('orden') || '';
+              const pagina = +(q.get('pagina') || 1);
+              if (JSON.stringify(f) !== JSON.stringify(this.linksFiltros) || vista !== this.linksVista
+                  || orden !== this.linksOrden || pagina !== this.linksPage) {
+                this.linksFiltros = f; this.linksVista = vista; this.linksOrden = orden; this.linksPage = pagina;
+                if (!f.destino_hash) this.linksDestinoUrl = '';
+                this.links = [];
+                if (this.detailTab === 'links' && this.view === 'detail') this.loadLinks();
               }
             }
             if (tab === 'diff' && q.get('con') && q.get('con') !== this.diffOtro) {
@@ -2383,6 +2460,7 @@ function app() {
       this.principales = null;
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
+      this._reiniciarEnlaces();
       this.diff = null; this.diffOtro = ''; this.diffCandidatos = []; this._diffPedido++;
       this._migReiniciar();
       this.veredicto = null;
@@ -2935,7 +3013,7 @@ function app() {
         if (!this.issuesResumen) this.loadIssuesResumen();
         if ((this.issueFilters.issue_type || this.issuesVista === 'lista') && this.issues.length === 0) this.loadIssues();
       }
-      if (tab === 'links' && this.links.length === 0) this.loadLinks();
+      if (tab === 'links' && this.links.length === 0 && !this.linksCargando) this.loadLinks();
       if (tab === 'insights' && !this.insights) this.loadInsights();
       if (tab === 'semantic') this.loadSemantic();
       if (tab === 'cleaning') this.loadCleaning();
@@ -3880,18 +3958,152 @@ function app() {
     setIssuesPage(p) { if (p >= 1 && p <= this.issuesPages) { this.issuesPage = p; this.loadIssues(); } },
 
     // ------- Enlaces -------
+    // Revision de UX del 25-oct, 2.8 (decision 195): la lista de ~926.000
+    // filas sin filtros pasa a filtrarse en el servidor, con una vista por
+    // destino («quien enlaza a X», «que externos estan rotos») y los destinos
+    // rotos primero. Con una API anterior (sin `filtros` en la respuesta, o
+    // sin /links/destinos) se ensena la lista de siempre y se dice por que.
+    _reiniciarEnlaces() {
+      this.links = []; this.linksPage = 1; this.linksPages = 1; this.linksTotal = 0;
+      this.linksVista = 'destinos'; this.linksFiltros = { ...ENLACES_SIN_FILTROS };
+      this.linksOrden = ''; this.linksPorEstado = null; this.linksFiltra = null;
+      this.linksError = ''; this.linksDestinoUrl = ''; this.expExternasEnlazadas = null;
+    },
+
+    _linksQuery() {
+      const q = new URLSearchParams();
+      const f = this.linksFiltros;
+      for (const k of ['destino', 'origen', 'ancla', 'tipo', 'follow', 'posicion', 'estado', 'codigo']) {
+        const v = (f[k] ?? '').toString().trim();
+        if (v) q.set(k, v);
+      }
+      if (f.destino && f.exacto) q.set('exacto', 'true');
+      if (f.destino_hash && this.linksVista === 'enlaces') q.set('destino_hash', f.destino_hash);
+      if (this.linksOrden) q.set('orden', this.linksOrden);
+      q.set('page', this.linksPage);
+      q.set('page_size', 50);
+      return q.toString();
+    },
+
+    linksHayFiltros() {
+      const f = this.linksFiltros;
+      return Object.keys(ENLACES_SIN_FILTROS).some(k => k !== 'exacto' && (f[k] ?? '').toString().trim() !== '');
+    },
+
     async loadLinks() {
-      this.loading = true;
+      if (!this.job) return;
+      const pet = ++this._linksPet;
+      const jobId = this.job.id;
+      const porDestino = this.linksVista === 'destinos' && this.linksFiltra !== false;
+      this.linksCargando = true;
+      this.linksError = '';
       try {
-        const data = await api(`/jobs/${this.job.id}/links?page=${this.linksPage}&page_size=50`);
-        this.links = data.items;
-        this.linksPages = data.pages;
-        this.linksTotal = data.total;
-      } catch (e) { this.error = e.message; }
-      this.loading = false;
+        const res = await fetch(`${API}/jobs/${jobId}/${porDestino ? 'links/destinos' : 'links'}?${this._linksQuery()}`,
+                                { headers: { 'Content-Type': 'application/json' } });
+        if (pet !== this._linksPet) return;
+        const texto = await res.text();
+        let data = null;
+        try { data = JSON.parse(texto); } catch (_) { data = null; }
+        // Una API sin /links/destinos contesta 404 «Not Found» (la ruta, no
+        // «Job not found») o, detras del servidor de produccion, la pagina de
+        // la aplicacion en HTML: en los dos casos, la lista de antes.
+        if (porDestino && (data === null || (res.status === 404 && data.detail === 'Not Found'))) {
+          this.linksFiltra = false; this.linksVista = 'enlaces';
+          return this.loadLinks();
+        }
+        if (!res.ok || data === null) throw new Error(data ? mensajeDeError(data) : (res.statusText || 'Respuesta no válida del servidor'));
+        if (pet !== this._linksPet || !this.job || this.job.id !== jobId) return;
+        this.linksFiltra = data.filtros !== undefined;
+        this.links = data.items || [];
+        this.linksPages = data.pages || 1;
+        this.linksTotal = data.total || 0;
+        this.linksPorEstado = data.por_estado || null;
+        // El destino de «quien la enlaza»: lo dice la primera fila.
+        if (this.linksFiltros.destino_hash && this.links.length) this.linksDestinoUrl = this.links[0].to_url;
+      } catch (e) {
+        if (pet !== this._linksPet) return;
+        this.links = []; this.linksTotal = 0;
+        this.linksError = e.message || 'No se han podido cargar los enlaces.';
+      }
+      this.linksCargando = false;
     },
 
     setLinksPage(p) { if (p >= 1 && p <= this.linksPages) { this.linksPage = p; this.loadLinks(); } },
+
+    // Un cambio de filtro vuelve a la pagina 1. Los de texto esperan a que se
+    // deje de escribir: cada tecla no puede ser una consulta.
+    aplicarFiltroEnlaces(campo, valor, { esperar = false } = {}) {
+      if (campo) this.linksFiltros[campo] = valor;
+      this.linksPage = 1;
+      clearTimeout(this._linksTecla);
+      if (esperar) this._linksTecla = setTimeout(() => this.loadLinks(), 450);
+      else this.loadLinks();
+    },
+
+    quitarFiltrosEnlaces() {
+      this.linksFiltros = { ...ENLACES_SIN_FILTROS };
+      this.linksDestinoUrl = '';
+      this.linksPage = 1;
+      this.loadLinks();
+    },
+
+    cambiarVistaEnlaces(v) {
+      if (this.linksVista === v) return;
+      this._rutaNueva = true;
+      this.linksVista = v;
+      this.linksOrden = '';
+      if (v === 'destinos') { this.linksFiltros.destino_hash = ''; this.linksDestinoUrl = ''; }
+      this.links = []; this.linksPage = 1;
+      this.loadLinks();
+    },
+
+    // Desde un destino: las paginas que lo enlazan.
+    quienEnlaza(d) {
+      this._rutaNueva = true;
+      this.linksFiltros.destino_hash = d.to_url_hash;
+      this.linksDestinoUrl = d.to_url;
+      this.linksVista = 'enlaces';
+      this.linksOrden = '';
+      this.links = []; this.linksPage = 1;
+      this.loadLinks();
+      window.scrollTo({ top: 0 });
+    },
+
+    // Llevar a la pestaña Enlaces con unos filtros (Explorador, ficha de URL).
+    irAEnlaces(filtros = {}, vista = 'destinos') {
+      this._reiniciarEnlaces();
+      Object.assign(this.linksFiltros, filtros);
+      this.linksVista = vista;
+      this.switchTab('links');
+    },
+
+    estadoDestino(e) { return ESTADO_DESTINO[e] || ESTADO_DESTINO.sin_dato; },
+
+    // «404 · Roto», «Redirige (301)», «No concluyente: 403»: el codigo, si lo
+    // hay, y en externos lo que dijo la sonda.
+    textoEstadoDestino(fila) {
+      const e = this.estadoDestino(fila.estado_destino);
+      return fila.status_destino ? fila.status_destino + ' · ' + e.texto : e.texto;
+    },
+
+    tipEstadoDestino(fila) {
+      const e = this.estadoDestino(fila.estado_destino);
+      const ver = fila.veredicto_sonda || fila.estado_externo;
+      return e.tip + (ver && VEREDICTO_SONDA[ver] ? ' Sonda: ' + VEREDICTO_SONDA[ver] + '.' : '');
+    },
+
+    textoAnclas(d) {
+      if (!d.anclas || !d.anclas.length) return '—';
+      return d.anclas.map(a => '«' + (a.texto || 'sin texto') + '» ' + fmt.num(a.veces)).join(' · ');
+    },
+
+    // Rotos, redirecciones... de la vista con los filtros de ahora (sin el de
+    // estado): las cifras de los chips.
+    cuentaEstadoEnlaces(g) {
+      if (!this.linksPorEstado) return null;
+      if (!g) return Object.values(this.linksPorEstado).reduce((a, b) => a + b, 0);
+      return this.linksPorEstado[g] ?? 0;
+    },
 
     // ------- Limpieza -------
     // Wrapper propio (en lugar de api()) para poder mostrar el detalle de los
@@ -4994,6 +5206,14 @@ function app() {
       // Internal / external
       b.internal = this.stats.internal_count || 0;
       b.external = this.stats.external_count || 0;
+      // «Externas 0» (V25): el censo no guarda URLs externas —no se
+      // rastrean—, pero sus enlaces si. Sin ninguna en el censo, la pestaña
+      // cuenta los destinos externos enlazados y lleva a Enlaces; con una API
+      // que no tiene /links/resumen, sin cifra (nunca un 0 que no es).
+      if (!b.external) {
+        b.external = this.expExternasEnlazadas;
+        if (this.expExternasEnlazadas == null) this.cargarExternasEnlazadas();
+      }
       // Status groups
       for (const sg of this.stats.urls_by_status_group || []) {
         b[sg.status_group] = sg.count;
@@ -5005,7 +5225,32 @@ function app() {
     // «4xx» a «3xx» con el mismo «Inlinks ≥ 1» obligaba a reescribirlo. Los
     // filtros de columnas que la pestaña nueva no muestra siguen aplicandose
     // y se ven en el contador «N filtros», que los quita de golpe.
+    async cargarExternasEnlazadas() {
+      const jobId = this.job && this.job.id;
+      if (!jobId) return;
+      try {
+        const r = await api(`/jobs/${jobId}/links/resumen`);
+        if (!this.job || this.job.id !== jobId) return;
+        this.expExternasEnlazadas = r.externos.destinos;
+        if (!(this.stats && this.stats.external_count)) this.expBadgeCounts = { ...this.expBadgeCounts, external: r.externos.destinos };
+      } catch (_) { /* API anterior: la pestaña sale sin cifra */ }
+    },
+
+    // Sin URLs externas en el censo, «Externas» son los enlaces a otros
+    // sitios: se ven en Enlaces, por destino (V25).
+    // Solo si la API tiene /links/resumen (expExternasEnlazadas no es null):
+    // con la API anterior, Enlaces no filtra por tipo y llevar alli con
+    // tipo=externo enseñaria todos los enlaces bajo un filtro que no se
+    // aplica. Entonces, la pestaña de URLs externas de siempre.
+    externasEnEnlaces() {
+      return !(this.stats && this.stats.external_count) && this.expExternasEnlazadas != null;
+    },
+
     setExplorerTab(tab) {
+      if (tab === 'external' && this.externasEnEnlaces()) {
+        this.irAEnlaces({ tipo: 'externo' });
+        return;
+      }
       const antes = EXP_TABS.find(t => t.key === this.expTab);
       this.expWp = false;
       this.expTab = tab;

@@ -46,6 +46,10 @@
 - **`links` solo guarda aristas del grafo**: lo que Google no puede seguir
   (`javascript:`, `onclick`, `<span href>`) va en `enlaces_no_rastreables`. 106.
 - **Un `noindex` o una pagina que no da 200 no reparten enlazado.** 38, 57.
+- **El estado del destino de un enlace se decide en `api/enlaces.py`**
+  (`grupo_interno`, `grupo_sonda`): lo que nadie comprobó es `sin_dato`, no
+  «bien», y un filtro nuevo de Enlaces va en las dos fuentes (`links` y
+  Parquet) con su caso en `tests/test_enlaces_filtros.py`. 195.
 - Lo de leer `links` (filtrar por job, `SUM(repeticiones)`, censos archivados)
   esta en `CLAUDE.md` porque lo rompe cualquier consulta.
 
